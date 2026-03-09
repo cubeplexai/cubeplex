@@ -19,10 +19,12 @@ from deepagents.backends.sandbox import BaseSandbox
 
 
 def _run_async_sync[T](coro: Coroutine[Any, Any, T]) -> T:
-    """Run async coroutine in sync context by creating a new event loop in a thread.
+    """Run async coroutine in sync context.
 
-    This is used when the backend is called from sync code but needs to run async operations.
-    It always creates a new thread with its own event loop to avoid conflicts.
+    This function handles two scenarios:
+    1. If called from an async context (event loop running), it schedules the coroutine
+       in a new thread with its own event loop to avoid conflicts.
+    2. If called from a sync context (no event loop), it runs the coroutine directly.
 
     Args:
         coro: Coroutine to run
@@ -30,23 +32,30 @@ def _run_async_sync[T](coro: Coroutine[Any, Any, T]) -> T:
     Returns:
         Result of the coroutine
     """
-    result: T | None = None
-    exception: Exception | None = None
+    try:
+        # Check if we're in an async context
+        asyncio.get_running_loop()
+        # We're in an async context, need to run in a separate thread
+        result: T | None = None
+        exception: Exception | None = None
 
-    def run_in_thread() -> None:
-        nonlocal result, exception
-        try:
-            result = asyncio.run(coro)
-        except Exception as e:
-            exception = e
+        def run_in_thread() -> None:
+            nonlocal result, exception
+            try:
+                result = asyncio.run(coro)
+            except Exception as e:
+                exception = e
 
-    thread = threading.Thread(target=run_in_thread)
-    thread.start()
-    thread.join()
+        thread = threading.Thread(target=run_in_thread)
+        thread.start()
+        thread.join()
 
-    if exception:
-        raise exception
-    return result  # type: ignore[return-value]
+        if exception:
+            raise exception
+        return result  # type: ignore[return-value]
+    except RuntimeError:
+        # No event loop running, we can run directly
+        return asyncio.run(coro)
 
 
 class OpenSandbox(BaseSandbox):
@@ -84,13 +93,16 @@ class OpenSandbox(BaseSandbox):
         """Return the OpenSandbox sandbox id."""
         return self._sandbox.id
 
-    async def execute_async(
+    async def aexecute(
         self,
         command: str,
         *,
         timeout: int | None = None,
     ) -> ExecuteResponse:
         """Execute a shell command inside the sandbox (async version).
+
+        This overrides the BaseSandbox.aexecute to use native async instead of
+        wrapping the sync execute() method with asyncio.to_thread.
 
         Args:
             command: Shell command string to execute
@@ -127,6 +139,15 @@ class OpenSandbox(BaseSandbox):
             truncated=False,
         )
 
+    async def execute_async(
+        self,
+        command: str,
+        *,
+        timeout: int | None = None,
+    ) -> ExecuteResponse:
+        """Alias for aexecute for backward compatibility."""
+        return await self.aexecute(command, timeout=timeout)
+
     def execute(
         self,
         command: str,
@@ -135,6 +156,9 @@ class OpenSandbox(BaseSandbox):
     ) -> ExecuteResponse:
         """Execute a shell command inside the sandbox (sync wrapper).
 
+        Note: This method should not be called directly when already in an async context.
+        The DeepAgents protocol will automatically use aexecute() instead.
+
         Args:
             command: Shell command string to execute
             timeout: Maximum time in seconds to wait for command completion (unused for now)
@@ -142,10 +166,13 @@ class OpenSandbox(BaseSandbox):
         Returns:
             ExecuteResponse with combined output, exit code, and truncation flag
         """
-        return _run_async_sync(self.execute_async(command, timeout=timeout))
+        # This should not be called from async context - DeepAgents uses aexecute() instead
+        return _run_async_sync(self.aexecute(command, timeout=timeout))
 
-    async def download_files_async(self, paths: list[str]) -> list[FileDownloadResponse]:
+    async def adownload_files(self, paths: list[str]) -> list[FileDownloadResponse]:
         """Download files from the sandbox (async version).
+
+        This overrides BaseSandbox.adownload_files to use native async.
 
         Args:
             paths: List of file paths to download
@@ -181,6 +208,10 @@ class OpenSandbox(BaseSandbox):
 
         return responses
 
+    async def download_files_async(self, paths: list[str]) -> list[FileDownloadResponse]:
+        """Alias for adownload_files for backward compatibility."""
+        return await self.adownload_files(paths)
+
     def download_files(self, paths: list[str]) -> list[FileDownloadResponse]:
         """Download files from the sandbox (sync wrapper).
 
@@ -190,10 +221,12 @@ class OpenSandbox(BaseSandbox):
         Returns:
             List of FileDownloadResponse objects, one per input path
         """
-        return _run_async_sync(self.download_files_async(paths))
+        return _run_async_sync(self.adownload_files(paths))
 
-    async def upload_files_async(self, files: list[tuple[str, bytes]]) -> list[FileUploadResponse]:
+    async def aupload_files(self, files: list[tuple[str, bytes]]) -> list[FileUploadResponse]:
         """Upload files into the sandbox (async version).
+
+        This overrides BaseSandbox.aupload_files to use native async.
 
         Args:
             files: List of (path, content) tuples to upload
@@ -223,6 +256,10 @@ class OpenSandbox(BaseSandbox):
 
         return responses
 
+    async def upload_files_async(self, files: list[tuple[str, bytes]]) -> list[FileUploadResponse]:
+        """Alias for aupload_files for backward compatibility."""
+        return await self.aupload_files(files)
+
     def upload_files(self, files: list[tuple[str, bytes]]) -> list[FileUploadResponse]:
         """Upload files into the sandbox (sync wrapper).
 
@@ -232,4 +269,43 @@ class OpenSandbox(BaseSandbox):
         Returns:
             List of FileUploadResponse objects, one per input file
         """
-        return _run_async_sync(self.upload_files_async(files))
+        return _run_async_sync(self.aupload_files(files))
+
+    # Override BaseSandbox methods to use native async instead of to_thread wrappers
+
+    async def aread(self, file_path: str, offset: int = 0, limit: int = -1) -> str:
+        """Read file content from sandbox (async, native implementation).
+
+        This overrides BaseSandbox.aread to avoid the asyncio.to_thread wrapper
+        that causes event loop conflicts.
+
+        Args:
+            file_path: Path to file in sandbox
+            offset: Starting byte offset (not used by opensandbox, for protocol compatibility)
+            limit: Maximum bytes to read (not used by opensandbox, for protocol compatibility)
+
+        Returns:
+            File content as string
+        """
+        # OpenSandbox doesn't support offset/limit, so we read the full file
+        # If offset/limit are needed, we'd need to implement slicing here
+        return await self._sandbox.files.read_file(file_path)
+
+    async def awrite(self, file_path: str, content: str) -> Any:
+        """Write content to file in sandbox (async, native implementation).
+
+        This overrides BaseSandbox.awrite to avoid the asyncio.to_thread wrapper
+        that causes event loop conflicts.
+
+        Args:
+            file_path: Path to file in sandbox
+            content: Content to write
+
+        Returns:
+            Write result from BaseSandbox protocol
+        """
+        # Import here to avoid circular dependency
+        from deepagents.backends.protocol import WriteResult
+
+        await self._sandbox.files.write_file(file_path, content)
+        return WriteResult(path=file_path)

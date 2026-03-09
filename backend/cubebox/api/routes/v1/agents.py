@@ -64,9 +64,12 @@ async def run_agent(request: ExecuteRequest) -> StreamingResponse:
             SSE formatted event strings
         """
         try:
-            # Create executor
+            # Create executor with optional sandbox configuration
             logger.debug("Creating DeepAgentExecutor")
-            executor = DeepAgentExecutor()
+            executor = DeepAgentExecutor(
+                sandbox_domain=request.sandbox_domain,
+                sandbox_image=request.sandbox_image,
+            )
 
             # Stream events from executor
             logger.debug("Starting agent stream")

@@ -7,3 +7,9 @@ development:
   
   api:
     reload: true
+  
+  # Sandbox Configuration for Development
+  sandbox:
+    enabled: true
+    domain: "localhost:8090"
+    image: "hub.sensedeal.vip/library/ubuntu:22.04"

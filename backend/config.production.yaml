@@ -9,3 +9,10 @@ production:
   api:
     reload: false
   
+  # Sandbox Configuration for Production
+  sandbox:
+    enabled: true
+    domain: "USE ENV"  # Set via SANDBOX_DOMAIN env var
+    image: "USE ENV"   # Set via SANDBOX_IMAGE env var
+    api_key: "USE ENV" # Set via SANDBOX_API_KEY env var
+  

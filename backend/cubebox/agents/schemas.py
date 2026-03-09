@@ -12,6 +12,13 @@ class ExecuteRequest(BaseModel):
     """Request model for agent execution"""
 
     input: str = Field(description="User input question or task")
+    sandbox_domain: str | None = Field(
+        default=None, description="OpenSandbox server domain (e.g., 'localhost:8090')"
+    )
+    sandbox_image: str | None = Field(
+        default=None,
+        description="Docker image for sandbox (e.g., 'ubuntu:22.04')",
+    )
 
 
 class AgentEvent(BaseModel):

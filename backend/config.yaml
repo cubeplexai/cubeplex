@@ -51,10 +51,12 @@ default:
   
   # Sandbox Configuration
   sandbox:
-    timeout: 30
-    memory_limit: 512
-    cpu_limit: 1.0
-    network_enabled: false
+    enabled: true
+    domain: "localhost:8090"
+    image: "hub.sensedeal.vip/library/ubuntu:22.04"
+    api_key: null
+    timeout: 600  # 10 minutes in seconds
+    request_timeout: 60  # Request timeout in seconds
   
   # Memory Configuration
   memory:
