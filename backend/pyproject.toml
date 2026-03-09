@@ -22,6 +22,7 @@ dependencies = [
     "langgraph>=1.0.10",
     "yarl>=1.23.0",
     "deepagents>=0.4.5",
+    "opensandbox>=0.1.5",
 ]
 
 [project.optional-dependencies]
