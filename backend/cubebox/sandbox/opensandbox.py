@@ -5,7 +5,6 @@ by implementing the BaseSandbox protocol with native async support.
 """
 
 import asyncio
-from typing import Any
 
 import opensandbox
 from deepagents.backends.protocol import (
@@ -214,42 +213,3 @@ class OpenSandbox(BaseSandbox):
             List of FileUploadResponse objects, one per input file
         """
         return asyncio.run(self.aupload_files(files))
-
-    # Override BaseSandbox methods to use native async instead of to_thread wrappers
-
-    async def aread(self, file_path: str, offset: int = 0, limit: int = -1) -> str:
-        """Read file content from sandbox (async, native implementation).
-
-        This overrides BaseSandbox.aread to avoid the asyncio.to_thread wrapper
-        that causes event loop conflicts.
-
-        Args:
-            file_path: Path to file in sandbox
-            offset: Starting byte offset (not used by opensandbox, for protocol compatibility)
-            limit: Maximum bytes to read (not used by opensandbox, for protocol compatibility)
-
-        Returns:
-            File content as string
-        """
-        # OpenSandbox doesn't support offset/limit, so we read the full file
-        # If offset/limit are needed, we'd need to implement slicing here
-        return await self._sandbox.files.read_file(file_path)
-
-    async def awrite(self, file_path: str, content: str) -> Any:
-        """Write content to file in sandbox (async, native implementation).
-
-        This overrides BaseSandbox.awrite to avoid the asyncio.to_thread wrapper
-        that causes event loop conflicts.
-
-        Args:
-            file_path: Path to file in sandbox
-            content: Content to write
-
-        Returns:
-            Write result from BaseSandbox protocol
-        """
-        # Import here to avoid circular dependency
-        from deepagents.backends.protocol import WriteResult
-
-        await self._sandbox.files.write_file(file_path, content)
-        return WriteResult(path=file_path)
