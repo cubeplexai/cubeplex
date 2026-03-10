@@ -22,6 +22,19 @@ default:
         extra_body: {}
         extra_headers: {}
         models:
+          - id: "qwen3.5-plus-thinking"
+            name: "Qwen3.5 Plus"
+            reasoning: false
+            input: ["text", "image"]
+            cost:
+              input: 0.8
+              output: 4.8
+              cache_read: 0.08
+              cache_write: 1
+            context_window: 991000
+            max_tokens: 64000
+            extra_body: {}
+            extra_headers: {}
           - id: "doubao-seed-1.8"
             name: "DouBao Seed 1.8"
             reasoning: false

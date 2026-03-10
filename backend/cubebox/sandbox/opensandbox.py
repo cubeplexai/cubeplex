@@ -1,12 +1,10 @@
 """OpenSandbox backend implementation for DeepAgents framework.
 
 This module provides integration between OpenSandbox and the DeepAgents framework
-by implementing the BaseSandbox protocol.
+by implementing the BaseSandbox protocol with native async support.
 """
 
 import asyncio
-import threading
-from collections.abc import Coroutine
 from typing import Any
 
 import opensandbox
@@ -18,52 +16,12 @@ from deepagents.backends.protocol import (
 from deepagents.backends.sandbox import BaseSandbox
 
 
-def _run_async_sync[T](coro: Coroutine[Any, Any, T]) -> T:
-    """Run async coroutine in sync context.
-
-    This function handles two scenarios:
-    1. If called from an async context (event loop running), it schedules the coroutine
-       in a new thread with its own event loop to avoid conflicts.
-    2. If called from a sync context (no event loop), it runs the coroutine directly.
-
-    Args:
-        coro: Coroutine to run
-
-    Returns:
-        Result of the coroutine
-    """
-    try:
-        # Check if we're in an async context
-        asyncio.get_running_loop()
-        # We're in an async context, need to run in a separate thread
-        result: T | None = None
-        exception: Exception | None = None
-
-        def run_in_thread() -> None:
-            nonlocal result, exception
-            try:
-                result = asyncio.run(coro)
-            except Exception as e:
-                exception = e
-
-        thread = threading.Thread(target=run_in_thread)
-        thread.start()
-        thread.join()
-
-        if exception:
-            raise exception
-        return result  # type: ignore[return-value]
-    except RuntimeError:
-        # No event loop running, we can run directly
-        return asyncio.run(coro)
-
-
 class OpenSandbox(BaseSandbox):
     """OpenSandbox implementation conforming to SandboxBackendProtocol.
 
     This implementation wraps an OpenSandbox instance and provides the standard
-    DeepAgents sandbox interface. It inherits file operation methods from BaseSandbox
-    and implements execute(), upload_files(), and download_files() using OpenSandbox's API.
+    DeepAgents sandbox interface with native async support. It overrides aexecute()
+    to use OpenSandbox's async API directly, avoiding event loop conflicts.
 
     Example:
         ```python
@@ -73,8 +31,12 @@ class OpenSandbox(BaseSandbox):
         # Wrap with DeepAgents backend
         backend = OpenSandbox(sandbox=sandbox)
 
-        # Use with DeepAgents tools
+        # Use with DeepAgents tools (sync)
         result = backend.execute("python --version")
+        print(result.output)
+
+        # Or use async version
+        result = await backend.aexecute("python --version")
         print(result.output)
         ```
     """
@@ -139,15 +101,6 @@ class OpenSandbox(BaseSandbox):
             truncated=False,
         )
 
-    async def execute_async(
-        self,
-        command: str,
-        *,
-        timeout: int | None = None,
-    ) -> ExecuteResponse:
-        """Alias for aexecute for backward compatibility."""
-        return await self.aexecute(command, timeout=timeout)
-
     def execute(
         self,
         command: str,
@@ -166,8 +119,7 @@ class OpenSandbox(BaseSandbox):
         Returns:
             ExecuteResponse with combined output, exit code, and truncation flag
         """
-        # This should not be called from async context - DeepAgents uses aexecute() instead
-        return _run_async_sync(self.aexecute(command, timeout=timeout))
+        return asyncio.run(self.aexecute(command, timeout=timeout))
 
     async def adownload_files(self, paths: list[str]) -> list[FileDownloadResponse]:
         """Download files from the sandbox (async version).
@@ -208,10 +160,6 @@ class OpenSandbox(BaseSandbox):
 
         return responses
 
-    async def download_files_async(self, paths: list[str]) -> list[FileDownloadResponse]:
-        """Alias for adownload_files for backward compatibility."""
-        return await self.adownload_files(paths)
-
     def download_files(self, paths: list[str]) -> list[FileDownloadResponse]:
         """Download files from the sandbox (sync wrapper).
 
@@ -221,7 +169,7 @@ class OpenSandbox(BaseSandbox):
         Returns:
             List of FileDownloadResponse objects, one per input path
         """
-        return _run_async_sync(self.adownload_files(paths))
+        return asyncio.run(self.adownload_files(paths))
 
     async def aupload_files(self, files: list[tuple[str, bytes]]) -> list[FileUploadResponse]:
         """Upload files into the sandbox (async version).
@@ -256,10 +204,6 @@ class OpenSandbox(BaseSandbox):
 
         return responses
 
-    async def upload_files_async(self, files: list[tuple[str, bytes]]) -> list[FileUploadResponse]:
-        """Alias for aupload_files for backward compatibility."""
-        return await self.aupload_files(files)
-
     def upload_files(self, files: list[tuple[str, bytes]]) -> list[FileUploadResponse]:
         """Upload files into the sandbox (sync wrapper).
 
@@ -269,7 +213,7 @@ class OpenSandbox(BaseSandbox):
         Returns:
             List of FileUploadResponse objects, one per input file
         """
-        return _run_async_sync(self.aupload_files(files))
+        return asyncio.run(self.aupload_files(files))
 
     # Override BaseSandbox methods to use native async instead of to_thread wrappers
 
