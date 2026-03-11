@@ -53,6 +53,20 @@ wheels = [
 ]
 
 [[package]]
+name = "asyncer"
+version = "0.0.17"
+source = { registry = "https://mirrors.bfsu.edu.cn/pypi/web/simple/" }
+dependencies = [
+    { name = "anyio" },
+    { name = "sniffio" },
+    { name = "typing-extensions", marker = "python_full_version < '3.15'" },
+]
+sdist = { url = "https://mirrors.bfsu.edu.cn/pypi/web/packages/d2/4c/62b6044679e08788322bbd0dee5b487a6f7f60bb4e2bd45617ff0d94d1e3/asyncer-0.0.17.tar.gz", hash = "sha256:8a41e185e7ec2ecd583c269d72907a0f9f832e744b6c7474aeb21e349c4becf4", size = 19516, upload-time = "2026-02-21T16:35:54.068Z" }
+wheels = [
+    { url = "https://mirrors.bfsu.edu.cn/pypi/web/packages/2a/c5/b72735a095b4b3170b34150e89314a40dd0450d0eb6746b331cb664479d1/asyncer-0.0.17-py3-none-any.whl", hash = "sha256:b0055950e094fb84fd8d21611c7e7b6f5715ddcb57c522c058f64c20badd1438", size = 9252, upload-time = "2026-02-21T16:35:55.022Z" },
+]
+
+[[package]]
 name = "attrs"
 version = "25.4.0"
 source = { registry = "https://mirrors.bfsu.edu.cn/pypi/web/simple/" }
@@ -365,6 +379,7 @@ name = "cubebox"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "asyncer" },
     { name = "deepagents" },
     { name = "dynaconf" },
     { name = "fastapi" },
@@ -373,6 +388,7 @@ dependencies = [
     { name = "langchain-openai" },
     { name = "langgraph" },
     { name = "loguru" },
+    { name = "nest-asyncio" },
     { name = "opensandbox" },
     { name = "pydantic" },
     { name = "pydantic-settings" },
@@ -395,6 +411,7 @@ test = [
 
 [package.metadata]
 requires-dist = [
+    { name = "asyncer", specifier = ">=0.0.17" },
     { name = "deepagents", specifier = ">=0.4.5" },
     { name = "dynaconf", specifier = ">=3.2.11" },
     { name = "fastapi", specifier = ">=0.110.0" },
@@ -404,6 +421,7 @@ requires-dist = [
     { name = "langgraph", specifier = ">=1.0.10" },
     { name = "loguru", specifier = ">=0.7.3" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.8.0" },
+    { name = "nest-asyncio", specifier = ">=1.6.0" },
     { name = "opensandbox", specifier = ">=0.1.5" },
     { name = "pre-commit", marker = "extra == 'dev'", specifier = ">=3.6.0" },
     { name = "pydantic", specifier = ">=2.5.0" },
@@ -1061,6 +1079,15 @@ source = { registry = "https://mirrors.bfsu.edu.cn/pypi/web/simple/" }
 sdist = { url = "https://mirrors.bfsu.edu.cn/pypi/web/packages/a2/6e/371856a3fb9d31ca8dac321cda606860fa4548858c0cc45d9d1d4ca2628b/mypy_extensions-1.1.0.tar.gz", hash = "sha256:52e68efc3284861e772bbcd66823fde5ae21fd2fdb51c62a211403730b916558", size = 6343, upload-time = "2025-04-22T14:54:24.164Z" }
 wheels = [
     { url = "https://mirrors.bfsu.edu.cn/pypi/web/packages/79/7b/2c79738432f5c924bef5071f933bcc9efd0473bac3b4aa584a6f7c1c8df8/mypy_extensions-1.1.0-py3-none-any.whl", hash = "sha256:1be4cccdb0f2482337c4743e60421de3a356cd97508abadd57d47403e94f5505", size = 4963, upload-time = "2025-04-22T14:54:22.983Z" },
+]
+
+[[package]]
+name = "nest-asyncio"
+version = "1.6.0"
+source = { registry = "https://mirrors.bfsu.edu.cn/pypi/web/simple/" }
+sdist = { url = "https://mirrors.bfsu.edu.cn/pypi/web/packages/83/f8/51569ac65d696c8ecbee95938f89d4abf00f47d58d48f6fbabfe8f0baefe/nest_asyncio-1.6.0.tar.gz", hash = "sha256:6f172d5449aca15afd6c646851f4e31e02c598d553a667e38cafa997cfec55fe" }
+wheels = [
+    { url = "https://mirrors.bfsu.edu.cn/pypi/web/packages/a0/c4/c2971a3ba4c6103a3d10c4b0f24f461ddc027f0f09763220cf35ca1401b3/nest_asyncio-1.6.0-py3-none-any.whl", hash = "sha256:87af6efd6b5e897c81050477ef65c62e2b2f35d51703cae01aff2905b1852e1c" },
 ]
 
 [[package]]

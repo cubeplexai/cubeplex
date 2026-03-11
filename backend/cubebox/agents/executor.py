@@ -158,11 +158,56 @@ class DeepAgentExecutor:
             # Wrap with DeepAgents backend
             backend = OpenSandbox(sandbox=sandbox)
             logger.info("OpenSandbox created successfully: {}", backend.id)
+
+            # Sync skills to sandbox
+            await self._sync_skills_to_sandbox(backend)
+
             return backend
 
         except Exception as e:
             logger.error("Failed to create sandbox: {}", str(e))
             raise
+
+    async def _sync_skills_to_sandbox(self, backend: Any) -> None:
+        """Sync builtin skills to the sandbox container.
+
+        Loads skills from the local filesystem and uploads them to the container's
+        /.skills directory. This is called automatically after sandbox creation.
+
+        Args:
+            backend: OpenSandbox backend instance
+        """
+        from pathlib import Path
+
+        from cubebox.config import config
+        from cubebox.sandbox.skills import SkillLoader
+
+        # Check if skills sync is enabled
+        skills_enabled = config.get("sandbox.skills.enabled", True)
+        if not skills_enabled:
+            logger.info("Skills sync disabled in config")
+            return
+
+        # Get skills directory from config or use default
+        skills_dir_str = config.get("sandbox.skills.builtin_dir", "skills/builtin")
+        backend_dir = Path(__file__).parent.parent.parent
+        skills_dir = backend_dir / skills_dir_str
+
+        if not skills_dir.exists():
+            logger.warning("Skills directory not found: {}", skills_dir)
+            return
+
+        # Load skills from filesystem
+        loader = SkillLoader(skills_dir)
+        files = loader.load_builtin()
+
+        if not files:
+            logger.info("No skill files to sync")
+            return
+
+        # Sync to sandbox
+        await backend.sync_skills(files)
+        logger.info("Synced {} skill files to sandbox", len(files))
 
     def _get_current_timestamp(self) -> str:
         """
@@ -285,7 +330,17 @@ class DeepAgentExecutor:
             # Create agent with optional sandbox backend
             if self._sandbox:
                 logger.info("Creating agent with sandbox backend: {}", self._sandbox.id)
-                agent = create_deep_agent(model=self.llm, tools=self.tools, backend=self._sandbox)
+                # Load skills configuration
+                from cubebox.config import config
+
+                skills_sources = config.get("sandbox.skills.sources", ["/.skills/builtin"])
+                logger.info("Creating agent with skills: {}", skills_sources)
+                agent = create_deep_agent(
+                    model=self.llm,
+                    tools=self.tools,
+                    backend=self._sandbox,
+                    skills=skills_sources,
+                )
             else:
                 logger.info("Creating agent without sandbox")
                 agent = create_deep_agent(model=self.llm, tools=self.tools)

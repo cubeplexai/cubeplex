@@ -70,6 +70,12 @@ default:
     api_key: null
     timeout: 600  # 10 minutes in seconds
     request_timeout: 60  # Request timeout in seconds
+    skills:
+      enabled: true
+      builtin_dir: "skills/builtin"  # Relative to backend/
+      container_path: "/.skills"  # Container root path for skills
+      sources:  # Skill source paths passed to DeepAgents
+        - "/.skills/builtin"
   
   # Memory Configuration
   memory:

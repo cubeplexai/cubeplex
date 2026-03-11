@@ -23,6 +23,8 @@ dependencies = [
     "yarl>=1.23.0",
     "deepagents>=0.4.5",
     "opensandbox>=0.1.5",
+    "nest-asyncio>=1.6.0",
+    "asyncer>=0.0.17",
 ]
 
 [project.optional-dependencies]
