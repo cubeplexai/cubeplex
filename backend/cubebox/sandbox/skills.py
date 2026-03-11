@@ -66,5 +66,7 @@ class SkillLoader:
                 except Exception as e:
                     logger.error("Failed to read skill file {}: {}", file_path, e)
 
-        logger.info("Loaded {} files from {} skills", len(files), len(list(self.skills_root.iterdir())))
+        logger.info(
+            "Loaded {} files from {} skills", len(files), len(list(self.skills_root.iterdir()))
+        )
         return files

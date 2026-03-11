@@ -4,12 +4,11 @@ This module provides integration between OpenSandbox and the DeepAgents framewor
 by implementing the BaseSandbox protocol with native async support.
 """
 
-import asyncio
-
 import opensandbox
 from deepagents.backends.protocol import (
     ExecuteResponse,
     FileDownloadResponse,
+    FileInfo,
     FileUploadResponse,
 )
 from deepagents.backends.sandbox import BaseSandbox
@@ -124,7 +123,7 @@ class OpenSandbox(BaseSandbox):
         sync_execute = syncify(self.aexecute, raise_sync_error=False)
         return sync_execute(command, timeout=timeout)
 
-    async def als_info(self, path: str) -> list[dict[str, any]]:
+    async def als_info(self, path: str) -> list[FileInfo]:
         """List all files in a directory with metadata (async version).
 
         Args:
@@ -134,25 +133,20 @@ class OpenSandbox(BaseSandbox):
             List of FileInfo dicts containing file metadata (only direct children)
         """
         try:
-            import stat
-
             from opensandbox.models.filesystem import SearchEntry
 
             # Use search to list directory contents
             search_entry = SearchEntry(
                 path=path,
-                pattern="*",  # Match all files
-                recursive=True,  # Need recursive to get all items
+                pattern="*",  # Match all files (recursive by default)
             )
             items = await self._sandbox.files.search(search_entry)
 
             # Filter to only direct children (one level deep)
-            # Direct children have exactly one more path separator than the parent
             path_normalized = path.rstrip("/")
-            parent_depth = path_normalized.count("/")
 
-            file_infos = []
-            seen_paths = set()
+            file_infos: list[FileInfo] = []
+            seen_paths: set[str] = set()
 
             for item in items:
                 # Skip the directory itself
@@ -165,7 +159,7 @@ class OpenSandbox(BaseSandbox):
                     continue
 
                 # Extract the direct child path
-                relative_path = item_path[len(path_normalized) + 1:]  # Remove parent path + "/"
+                relative_path = item_path[len(path_normalized) + 1 :]  # Remove parent path + "/"
                 first_component = relative_path.split("/")[0]
                 direct_child_path = f"{path_normalized}/{first_component}"
 
@@ -177,7 +171,7 @@ class OpenSandbox(BaseSandbox):
                 # Check if it's a directory by seeing if there are items under it
                 is_dir = "/" in relative_path  # If there's a slash, it's a directory
 
-                file_info = {
+                file_info: FileInfo = {
                     "path": direct_child_path,
                     "is_dir": is_dir,
                 }
@@ -194,7 +188,7 @@ class OpenSandbox(BaseSandbox):
             logger.warning("Failed to list directory {}: {}", path, e)
             return []
 
-    def ls_info(self, path: str) -> list[dict[str, any]]:
+    def ls_info(self, path: str) -> list[FileInfo]:
         """List all files in a directory with metadata (sync wrapper).
 
         Args:
