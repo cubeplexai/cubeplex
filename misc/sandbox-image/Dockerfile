@@ -27,6 +27,8 @@ RUN sed -i -r 's/(archive|security|ports).ubuntu.com/mirrors.cloud.aliyuncs.com/
         fonts-noto-cjk \
         fonts-wqy-zenhei \
         fonts-wqy-microhei \
+        nodejs \
+        npm \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
@@ -42,6 +44,18 @@ index-url = http://mirrors.cloud.aliyuncs.com/pypi/simple/\n\
 [install]\n\
 trusted-host = mirrors.cloud.aliyuncs.com\n' > /etc/pip.conf
 
+# Configure npm registry
+RUN npm config set registry https://registry.npmmirror.com
+
+# Install common frontend packages globally
+RUN npm install -g \
+    typescript \
+    ts-node \
+    vite \
+    create-react-app \
+    next \
+    pnpm
+
 # Configure vim
 RUN printf 'set ts=4\n\
 set encoding=utf-8\n\
@@ -49,7 +63,7 @@ set expandtab\n\
 set autoindent\n\
 set hlsearch\n\
 set termencoding=utf-8\n\
-set fileencodings=utf8\n' > /root/.vimrc
+set fileencodings=utf8\n' > /etc/vimrc
 
 # Create virtual environment and install common Python packages
 RUN python3 -m venv /opt/venv \
@@ -70,5 +84,6 @@ RUN python3 -m venv /opt/venv \
 
 # Create app directory
 RUN mkdir -p /workspace
+ENV HOME=/workspace
 
 WORKDIR /workspace
