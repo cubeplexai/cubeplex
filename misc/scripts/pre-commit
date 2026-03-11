@@ -1,0 +1,22 @@
+#!/bin/bash
+# Pre-commit hook to run make check
+
+set -e
+
+echo "Running pre-commit checks..."
+
+# Change to backend directory
+cd "$(git rev-parse --show-toplevel)/backend"
+
+# Run make check
+if ! make check; then
+    echo ""
+    echo "❌ Pre-commit check failed!"
+    echo "Please fix the issues above before committing."
+    echo ""
+    echo "To bypass this check (not recommended), use: git commit --no-verify"
+    exit 1
+fi
+
+echo "✅ All checks passed!"
+exit 0
