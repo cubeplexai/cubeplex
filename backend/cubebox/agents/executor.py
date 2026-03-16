@@ -323,8 +323,8 @@ class DeepAgentExecutor:
             # Import here to avoid circular imports
             from deepagents import create_deep_agent
 
-            # Create sandbox if configured and not already created
-            if self.sandbox_domain and self.sandbox_image and not self._sandbox:
+            # Create sandbox if configured (always create fresh to avoid event loop issues)
+            if self.sandbox_domain and self.sandbox_image:
                 self._sandbox = await self._create_sandbox()
 
             # Create agent with optional sandbox backend
