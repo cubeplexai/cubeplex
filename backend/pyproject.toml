@@ -45,6 +45,7 @@ testpaths = ["tests"]
 python_files = ["test_*.py"]
 addopts = "-v --cov=cubebox --cov-report=term-missing"
 filterwarnings = ["ignore::DeprecationWarning", "ignore::UserWarning"]
+asyncio_mode = "auto"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src"]
