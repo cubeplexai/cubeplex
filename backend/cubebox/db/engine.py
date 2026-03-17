@@ -1,5 +1,7 @@
 """Database engine and session factory."""
 
+from urllib.parse import quote_plus
+
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -18,7 +20,9 @@ def _build_database_url() -> str:
     user = config.get("database.user", "root")
     password = config.get("database.password", "")
     name = config.get("database.name", "cubebox")
-    return f"mysql+aiomysql://{user}:{password}@{host}:{port}/{name}"
+    # URL encode password to handle special characters
+    encoded_password = quote_plus(password)
+    return f"mysql+aiomysql://{user}:{encoded_password}@{host}:{port}/{name}"
 
 
 def get_engine() -> AsyncEngine:
