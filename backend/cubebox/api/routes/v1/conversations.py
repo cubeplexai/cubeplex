@@ -9,12 +9,14 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
 from loguru import logger
 from pydantic import BaseModel
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
+from sqlalchemy.pool import NullPool
 
 from cubebox.agents.executor import DeepAgentExecutor
 from cubebox.agents.schemas import DoneEvent
 from cubebox.api.exceptions import ExecutionError, InternalError, InvalidInputError
 from cubebox.db import get_session
+from cubebox.db.engine import _build_database_url
 from cubebox.repositories import ConversationRepository, MessageRepository
 
 router = APIRouter(prefix="/conversations", tags=["conversations"])
@@ -205,13 +207,7 @@ async def send_message(
             yield f"data: {done.model_dump_json()}\n\n"
 
         finally:
-            # Save assistant message using a new engine bound to current event loop
-            from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
-            from sqlalchemy.pool import NullPool
-
-            from cubebox.db.engine import _build_database_url
-
-            # Create a new engine in the current event loop to avoid cross-loop issues
+            # Create a new engine bound to the current event loop to avoid cross-loop issues
             save_engine = create_async_engine(_build_database_url(), poolclass=NullPool)
             try:
                 async with AsyncSession(save_engine, expire_on_commit=False) as save_session:
