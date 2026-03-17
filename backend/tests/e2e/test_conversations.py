@@ -3,10 +3,11 @@
 Tests CRUD operations and the message streaming endpoint.
 """
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 
-from tests.e2e.helpers import parse_sse_events
+from tests.e2e.helpers import parse_sse_stream
 
 
 @pytest.mark.e2e
@@ -116,17 +117,22 @@ class TestConversationsMessages:
 class TestSendMessage:
     """Message send (SSE streaming) tests — requires real LLM API access."""
 
-    def test_send_message_streams_events(self, client: TestClient) -> None:
+    @pytest.mark.asyncio
+    async def test_send_message_streams_events(self, async_client: httpx.AsyncClient) -> None:
         """Send a message and verify SSE event stream structure."""
-        create_resp = client.post("/api/v1/conversations", params={"title": "Stream Test"})
+        create_resp = await async_client.post(
+            "/api/v1/conversations", params={"title": "Stream Test"}
+        )
+        assert create_resp.status_code == 201
         conversation_id = create_resp.json()["id"]
 
-        response = client.post(
+        async with async_client.stream(
+            "POST",
             f"/api/v1/conversations/{conversation_id}/messages",
             json={"content": "Say 'hello' in one word."},
-        )
-        assert response.status_code == 200
-        events = parse_sse_events(response.text)
+        ) as response:
+            assert response.status_code == 200
+            events = await parse_sse_stream(response.aiter_bytes())
 
         event_types = [e.type for e in events]
         assert "chain_start" in event_types
@@ -135,17 +141,25 @@ class TestSendMessage:
         assert events[0].type == "chain_start"
         assert events[-1].type == "done"
 
-    def test_send_message_saves_to_db(self, client: TestClient) -> None:
+    @pytest.mark.asyncio
+    async def test_send_message_saves_to_db(self, async_client: httpx.AsyncClient) -> None:
         """After streaming, messages are persisted in the DB."""
-        create_resp = client.post("/api/v1/conversations", params={"title": "Persist Test"})
+        create_resp = await async_client.post(
+            "/api/v1/conversations", params={"title": "Persist Test"}
+        )
+        assert create_resp.status_code == 201
         conversation_id = create_resp.json()["id"]
 
-        client.post(
+        async with async_client.stream(
+            "POST",
             f"/api/v1/conversations/{conversation_id}/messages",
             json={"content": "What is 1+1?"},
-        )
+        ) as response:
+            assert response.status_code == 200
+            # Consume the stream
+            await parse_sse_stream(response.aiter_bytes())
 
-        msgs_resp = client.get(f"/api/v1/conversations/{conversation_id}/messages")
+        msgs_resp = await async_client.get(f"/api/v1/conversations/{conversation_id}/messages")
         assert msgs_resp.status_code == 200
         data = msgs_resp.json()
         assert data["total"] >= 2  # user + assistant
@@ -154,20 +168,27 @@ class TestSendMessage:
         assert "user" in roles
         assert "assistant" in roles
 
-    def test_send_message_empty_content(self, client: TestClient) -> None:
+    @pytest.mark.asyncio
+    async def test_send_message_empty_content(self, async_client: httpx.AsyncClient) -> None:
         """Empty message content returns 400."""
-        create_resp = client.post("/api/v1/conversations", params={"title": "Empty Content Test"})
+        create_resp = await async_client.post(
+            "/api/v1/conversations", params={"title": "Empty Content Test"}
+        )
+        assert create_resp.status_code == 201
         conversation_id = create_resp.json()["id"]
 
-        response = client.post(
+        response = await async_client.post(
             f"/api/v1/conversations/{conversation_id}/messages",
             json={"content": ""},
         )
         assert response.status_code == 400
 
-    def test_send_message_to_nonexistent_conversation(self, client: TestClient) -> None:
+    @pytest.mark.asyncio
+    async def test_send_message_to_nonexistent_conversation(
+        self, async_client: httpx.AsyncClient
+    ) -> None:
         """Sending to non-existent conversation returns 404."""
-        response = client.post(
+        response = await async_client.post(
             "/api/v1/conversations/nonexistent-id/messages",
             json={"content": "Hello"},
         )
