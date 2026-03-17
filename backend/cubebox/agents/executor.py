@@ -301,7 +301,9 @@ class DeepAgentExecutor:
             logger.error("Error converting node {} update: {}", node_name, str(e))
             return None
 
-    async def stream(self, input_text: str) -> AsyncIterator[AgentEvent]:
+    async def stream(
+        self, input_text: str, thread_id: str | None = None
+    ) -> AsyncIterator[AgentEvent]:
         """
         Stream agent execution with event conversion.
 
@@ -310,6 +312,7 @@ class DeepAgentExecutor:
 
         Args:
             input_text: User input question or task
+            thread_id: Optional thread ID for conversation persistence
 
         Yields:
             AgentEvent instances representing execution steps
@@ -354,9 +357,13 @@ class DeepAgentExecutor:
 
             # Stream events from agent
             event_count = 0
+            config_dict: dict[str, object] = (
+                {"configurable": {"thread_id": thread_id}} if thread_id else {}
+            )
             async for chunk in agent.astream(
                 {"messages": [{"role": "user", "content": input_text}]},
                 stream_mode="updates",
+                config=config_dict,  # type: ignore[arg-type]
             ):
                 event_count += 1
                 logger.debug("Received chunk from node: {}", list(chunk.keys()) if chunk else [])
