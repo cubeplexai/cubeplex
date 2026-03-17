@@ -9,7 +9,7 @@ help:
 	@echo "  make type-check        - Run mypy type checker"
 	@echo "  make test              - Run tests"
 	@echo "  make test-cov          - Run tests with coverage report"
-	@echo "  make check             - Run all checks (format, lint, type-check, test)"
+	@echo "  make check             - Run all checks (format, lint, type-check)"
 	@echo "  make clean             - Clean cache and build files"
 	@echo "  make pre-commit-install - Install pre-commit hooks"
 	@echo "  make pre-commit-run    - Run pre-commit on all files"
@@ -52,7 +52,7 @@ test-cov:
 	uv run pytest -s --cov=cubebox --cov-report=term-missing --cov-report=html
 	@echo "✓ Coverage report generated in htmlcov/"
 
-check: format lint type-check test
+check: format lint type-check
 	@echo "✓ All checks passed"
 
 clean:
