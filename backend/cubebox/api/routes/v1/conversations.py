@@ -1,12 +1,21 @@
 """Conversations API routes."""
 
+import json
+from collections.abc import AsyncIterator
+from datetime import UTC, datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.responses import StreamingResponse
+from loguru import logger
+from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from cubebox.agents.executor import DeepAgentExecutor
+from cubebox.agents.schemas import DoneEvent
+from cubebox.api.exceptions import ExecutionError, InternalError, InvalidInputError
 from cubebox.db import get_session
-from cubebox.repositories import ConversationRepository
+from cubebox.repositories import ConversationRepository, MessageRepository
 
 router = APIRouter(prefix="/conversations", tags=["conversations"])
 
@@ -108,3 +117,143 @@ async def delete_conversation(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Conversation {conversation_id} not found",
         )
+
+
+class SendMessageRequest(BaseModel):
+    """Request body for sending a message."""
+
+    content: str
+    sandbox_domain: str | None = None
+    sandbox_image: str | None = None
+
+
+@router.post("/{conversation_id}/messages", status_code=status.HTTP_200_OK)
+async def send_message(
+    conversation_id: str,
+    request: SendMessageRequest,
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> StreamingResponse:
+    """Send a user message to a conversation and stream assistant response via SSE."""
+    conv_repo = ConversationRepository(session)
+    conversation = await conv_repo.get_by_id(conversation_id)
+    if not conversation:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Conversation {conversation_id} not found",
+        )
+
+    if not request.content or not request.content.strip():
+        raise InvalidInputError(
+            message="Content field cannot be empty",
+            details="Please provide a non-empty content string",
+        )
+
+    # Save user message first
+    msg_repo = MessageRepository(session)
+    await msg_repo.create(
+        conversation_id=conversation_id,
+        role="user",
+        content=request.content,
+    )
+
+    async def event_generator() -> AsyncIterator[str]:
+        collected_events: list[dict[str, object]] = []
+
+        try:
+            executor = DeepAgentExecutor(
+                sandbox_domain=request.sandbox_domain,
+                sandbox_image=request.sandbox_image,
+            )
+
+            async for event in executor.stream(request.content, thread_id=conversation_id):
+                event_dict = event.model_dump()
+                collected_events.append(event_dict)
+                yield f"data: {json.dumps(event_dict)}\n\n"
+
+        except InvalidInputError as e:
+            logger.error("Invalid input error: {}", str(e))
+            error_event = e.to_error_event()
+            event_dict = error_event.model_dump()
+            collected_events.append(event_dict)
+            yield f"data: {json.dumps(event_dict)}\n\n"
+            done = DoneEvent(timestamp=datetime.now(UTC).isoformat())
+            yield f"data: {done.model_dump_json()}\n\n"
+
+        except ExecutionError as e:
+            logger.error("Execution error: {}", str(e))
+            error_event = e.to_error_event()
+            event_dict = error_event.model_dump()
+            collected_events.append(event_dict)
+            yield f"data: {json.dumps(event_dict)}\n\n"
+            done = DoneEvent(timestamp=datetime.now(UTC).isoformat())
+            yield f"data: {done.model_dump_json()}\n\n"
+
+        except Exception as e:  # noqa: BLE001
+            logger.error("Unexpected error: {}", str(e), exc_info=True)
+            error = InternalError(
+                message="An unexpected error occurred during execution",
+                details=str(e),
+            )
+            error_event = error.to_error_event()
+            event_dict = error_event.model_dump()
+            collected_events.append(event_dict)
+            yield f"data: {json.dumps(event_dict)}\n\n"
+            done = DoneEvent(timestamp=datetime.now(UTC).isoformat())
+            yield f"data: {done.model_dump_json()}\n\n"
+
+        finally:
+            # Save assistant message with all collected events
+            async with session.begin_nested():
+                await msg_repo.create(
+                    conversation_id=conversation_id,
+                    role="assistant",
+                    events=collected_events,
+                )
+                await conv_repo.update_timestamp(conversation_id)
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+@router.get("/{conversation_id}/messages")
+async def list_messages(
+    conversation_id: str,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    limit: int = 100,
+    offset: int = 0,
+) -> dict[str, object]:
+    """List messages in a conversation with pagination."""
+    conv_repo = ConversationRepository(session)
+    conversation = await conv_repo.get_by_id(conversation_id)
+    if not conversation:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Conversation {conversation_id} not found",
+        )
+
+    msg_repo = MessageRepository(session)
+    messages, total = await msg_repo.list_by_conversation(
+        conversation_id, limit=limit, offset=offset
+    )
+    return {
+        "messages": [
+            {
+                "id": m.id,
+                "conversation_id": m.conversation_id,
+                "role": m.role,
+                "content": m.content,
+                "events": m.events,
+                "created_at": m.created_at.isoformat(),
+            }
+            for m in messages
+        ],
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+    }
