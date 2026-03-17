@@ -28,7 +28,11 @@ class DeepAgentExecutor:
     """Executor for DeepAgent-based task execution with streaming support"""
 
     def __init__(
-        self, *, sandbox_domain: str | None = None, sandbox_image: str | None = None
+        self,
+        *,
+        sandbox_domain: str | None = None,
+        sandbox_image: str | None = None,
+        checkpointer: Any | None = None,
     ) -> None:
         """
         Initialize the DeepAgentExecutor.
@@ -40,12 +44,14 @@ class DeepAgentExecutor:
                           If None, reads from config.sandbox.domain
             sandbox_image: Docker image for sandbox (e.g., "ubuntu:22.04")
                          If None, reads from config.sandbox.image
+            checkpointer: Optional LangGraph checkpoint saver for conversation persistence
         """
         from cubebox.config import config
 
         logger.info("Initializing DeepAgentExecutor")
         self.llm = self._create_llm()
         self.tools = self._load_tools()
+        self.checkpointer = checkpointer
 
         # Use provided values or fall back to config
         # Only use config if sandbox is enabled
@@ -343,10 +349,13 @@ class DeepAgentExecutor:
                     tools=self.tools,
                     backend=self._sandbox,
                     skills=skills_sources,
+                    checkpointer=self.checkpointer,
                 )
             else:
                 logger.info("Creating agent without sandbox")
-                agent = create_deep_agent(model=self.llm, tools=self.tools)
+                agent = create_deep_agent(
+                    model=self.llm, tools=self.tools, checkpointer=self.checkpointer
+                )
             logger.debug("Agent created successfully")
 
             # Yield chain start event

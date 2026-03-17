@@ -160,9 +160,12 @@ async def send_message(
         collected_events: list[dict[str, object]] = []
 
         try:
+            from cubebox.agents.checkpointer import get_checkpointer
+
             executor = DeepAgentExecutor(
                 sandbox_domain=request.sandbox_domain,
                 sandbox_image=request.sandbox_image,
+                checkpointer=get_checkpointer(),
             )
 
             async for event in executor.stream(request.content, thread_id=conversation_id):
