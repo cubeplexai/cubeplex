@@ -90,3 +90,14 @@ default:
   langsmith:
     enabled: true
     key: "USE ENV"
+
+  # Database Configuration
+  database:
+    host: "localhost"
+    port: 3306
+    user: "root"
+    password: ""
+    name: "cubebox"
+    pool_size: 10
+    max_overflow: 20
+    echo: false
