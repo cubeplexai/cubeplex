@@ -64,30 +64,20 @@
 **Files:**
 - Modify: `backend/pyproject.toml`
 
-- [ ] **Step 1: 添加依赖到 pyproject.toml**
-
-在 `[project.dependencies]` 中添加：
-
-```toml
-sqlmodel = ">=0.0.21"
-alembic = ">=1.14.0"
-langgraph-checkpoint-mysql = {version = ">=2.0.0", extras = ["aiomysql"]}
-```
-
-- [ ] **Step 2: 安装依赖**
+- [ ] **Step 1: 使用 uv add 添加依赖（自动安装最新版本）**
 
 ```bash
 cd backend
-uv sync
+uv add sqlmodel alembic uuid-utils "langgraph-checkpoint-mysql[aiomysql]"
 ```
 
-Expected: 依赖安装成功
+Expected: 依赖安装成功，pyproject.toml 和 uv.lock 自动更新
 
-- [ ] **Step 3: 提交**
+- [ ] **Step 2: 提交**
 
 ```bash
 git add pyproject.toml uv.lock
-git commit -m "deps: add sqlmodel, alembic, langgraph-checkpoint-mysql"
+git commit -m "deps: add sqlmodel, alembic, uuid-utils, langgraph-checkpoint-mysql"
 ```
 
 ---
@@ -96,7 +86,8 @@ git commit -m "deps: add sqlmodel, alembic, langgraph-checkpoint-mysql"
 
 **Files:**
 - Modify: `backend/config.yaml`
-- Modify: `backend/cubebox/config.py`
+- Modify: `backend/.env.example`
+- Modify: `backend/.env`
 
 - [ ] **Step 1: 在 config.yaml 添加 database 配置**
 
@@ -104,41 +95,55 @@ git commit -m "deps: add sqlmodel, alembic, langgraph-checkpoint-mysql"
 
 ```yaml
 database:
-  url: "mysql+aiomysql://USER:PASS@HOST:PORT/cubebox"
+  host: "localhost"
+  port: 3306
+  user: "root"
+  password: ""
+  name: "cubebox"
   pool_size: 10
   max_overflow: 20
   echo: false
 ```
 
-- [ ] **Step 2: 验证配置可读取**
+- [ ] **Step 2: 在 .env.example 添加数据库环境变量**
+
+```
+# Database Configuration
+CUBEBOX_DATABASE__HOST=localhost
+CUBEBOX_DATABASE__PORT=3306
+CUBEBOX_DATABASE__USER=root
+CUBEBOX_DATABASE__PASSWORD=yourpassword
+CUBEBOX_DATABASE__NAME=cubebox
+```
+
+- [ ] **Step 3: 在 .env 添加测试环境实际值**
+
+```
+# Database Configuration
+CUBEBOX_DATABASE__HOST=192.168.1.211
+CUBEBOX_DATABASE__PORT=6603
+CUBEBOX_DATABASE__USER=root
+CUBEBOX_DATABASE__PASSWORD=Sdai@20219876dss
+CUBEBOX_DATABASE__NAME=cubebox
+```
+
+- [ ] **Step 4: 验证配置可读取**
 
 ```bash
 cd backend
-uv run python -c "from cubebox.config import config; print(config.get('database.url'))"
+uv run python -c "from cubebox.config import config; print(config.get('database.host'), config.get('database.port'))"
 ```
 
-Expected: 输出 `mysql+aiomysql://USER:PASS@HOST:PORT/cubebox`
-
-- [ ] **Step 3: 设置环境变量（测试环境）**
-
-```bash
-export CUBEBOX_DATABASE__URL="mysql+aiomysql://root:Sdai@20219876dss@192.168.1.211:6603/cubebox"
-```
-
-- [ ] **Step 4: 验证环境变量覆盖**
-
-```bash
-uv run python -c "from cubebox.config import config; print(config.get('database.url'))"
-```
-
-Expected: 输出测试环境的 URL
+Expected: 输出 `.env` 中配置的 host 和 port
 
 - [ ] **Step 5: 提交**
 
 ```bash
-git add config.yaml
+git add config.yaml .env.example
 git commit -m "config: add database connection settings"
 ```
+
+注意：`.env` 不提交（含密码），仅提交 `.env.example` 作为模板。
 
 ---
 
@@ -155,17 +160,25 @@ git commit -m "config: add database connection settings"
 ```python
 """Database engine and session factory."""
 
-from collections.abc import AsyncIterator
-
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlmodel import SQLModel
 
 from cubebox.config import config
 
 
+def _build_database_url() -> str:
+    """Build database URL from individual config fields."""
+    host = config.get("database.host", "localhost")
+    port = config.get("database.port", 3306)
+    user = config.get("database.user", "root")
+    password = config.get("database.password", "")
+    name = config.get("database.name", "cubebox")
+    return f"mysql+aiomysql://{user}:{password}@{host}:{port}/{name}"
+
+
 def get_engine():
     """Get async database engine."""
-    database_url = config.get("database.url")
+    database_url = _build_database_url()
     pool_size = config.get("database.pool_size", 10)
     max_overflow = config.get("database.max_overflow", 20)
     echo = config.get("database.echo", False)
@@ -280,9 +293,9 @@ git commit -m "feat(db): add FastAPI session dependency injection"
 """Conversation model."""
 
 from datetime import UTC, datetime
-from uuid import uuid4
 
 from sqlmodel import Field, SQLModel
+from uuid_utils import uuid7
 
 
 class Conversation(SQLModel, table=True):
@@ -290,7 +303,7 @@ class Conversation(SQLModel, table=True):
 
     __tablename__ = "conversations"
 
-    id: str = Field(default_factory=lambda: str(uuid4()), primary_key=True)
+    id: str = Field(default_factory=lambda: str(uuid7()), primary_key=True)
     title: str = Field(max_length=255)
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
@@ -337,10 +350,10 @@ git commit -m "feat(models): add Conversation model"
 
 from datetime import UTC, datetime
 from typing import Any
-from uuid import uuid4
 
 from sqlalchemy import JSON, Column, Text
 from sqlmodel import Field, SQLModel
+from uuid_utils import uuid7
 
 
 class Message(SQLModel, table=True):
@@ -348,7 +361,7 @@ class Message(SQLModel, table=True):
 
     __tablename__ = "messages"
 
-    id: str = Field(default_factory=lambda: str(uuid4()), primary_key=True)
+    id: str = Field(default_factory=lambda: str(uuid7()), primary_key=True)
     conversation_id: str = Field(foreign_key="conversations.id", index=True)
     role: str = Field(max_length=20)  # "user" | "assistant"
     content: str = Field(sa_column=Column(Text))
@@ -368,119 +381,6 @@ __all__ = ["Conversation", "Message"]
 ```
 
 - [ ] **Step 3: 验证导入**
-
-```bash
-cd backend
-uv run python -c "from cubebox.models import Message; print(Message.__tablename__)"
-```
-
-Expected: 输出 `messages`
-
-- [ ] **Step 4: 提交**
-
-```bash
-git add cubebox/models/
-git commit -m "feat(models): add Message model"
-```
-
----
-
-- Create: `backend/cubebox/models/conversation.py`
-
-- [ ] **Step 1: 创建 models/conversation.py**
-
-```python
-"""Conversation model."""
-
-from datetime import UTC, datetime
-from uuid import uuid4
-
-from sqlmodel import Field, SQLModel
-
-
-class Conversation(SQLModel, table=True):
-    """Conversation model for storing chat sessions."""
-
-    __tablename__ = "conversations"
-
-    id: str = Field(default_factory=lambda: str(uuid4()), primary_key=True)
-    title: str = Field(max_length=255)
-    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
-    updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
-```
-
-- [ ] **Step 2: 创建 models/__init__.py**
-
-```python
-"""Data models."""
-
-from cubebox.models.conversation import Conversation
-
-__all__ = ["Conversation"]
-```
-
-- [ ] **Step 3: 验证模型可导入**
-
-```bash
-cd backend
-uv run python -c "from cubebox.models import Conversation; print(Conversation.__tablename__)"
-```
-
-Expected: 输出 `conversations`
-
-- [ ] **Step 4: 提交**
-
-```bash
-git add cubebox/models/
-git commit -m "feat(models): add Conversation model"
-```
-
----
-
-### Task 6: 创建 Message 模型
-
-**Files:**
-- Create: `backend/cubebox/models/message.py`
-- Modify: `backend/cubebox/models/__init__.py`
-
-- [ ] **Step 1: 创建 models/message.py**
-
-```python
-"""Message model."""
-
-from datetime import UTC, datetime
-from typing import Any
-from uuid import uuid4
-
-from sqlalchemy import JSON, Column, Text
-from sqlmodel import Field, SQLModel
-
-
-class Message(SQLModel, table=True):
-    """Message model for storing conversation messages."""
-
-    __tablename__ = "messages"
-
-    id: str = Field(default_factory=lambda: str(uuid4()), primary_key=True)
-    conversation_id: str = Field(foreign_key="conversations.id", index=True)
-    role: str = Field(max_length=20)  # "user" | "assistant"
-    content: str = Field(sa_column=Column(Text))
-    events: list[dict[str, Any]] | None = Field(default=None, sa_column=Column(JSON))
-    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
-```
-
-- [ ] **Step 2: 更新 models/__init__.py**
-
-```python
-"""Data models."""
-
-from cubebox.models.conversation import Conversation
-from cubebox.models.message import Message
-
-__all__ = ["Conversation", "Message"]
-```
-
-- [ ] **Step 3: 验证模型可导入**
 
 ```bash
 cd backend
@@ -538,9 +438,14 @@ from sqlmodel import SQLModel
 # 使用 SQLModel metadata
 target_metadata = SQLModel.metadata
 
-# 从 app config 读取数据库 URL
+# 从 app config 各字段拼接数据库 URL（Alembic 用同步驱动 pymysql）
 def get_url():
-    return app_config.get("database.url").replace("+aiomysql", "+pymysql")
+    host = app_config.get("database.host", "localhost")
+    port = app_config.get("database.port", 3306)
+    user = app_config.get("database.user", "root")
+    password = app_config.get("database.password", "")
+    name = app_config.get("database.name", "cubebox")
+    return f"mysql+pymysql://{user}:{password}@{host}:{port}/{name}"
 
 config.set_main_option("sqlalchemy.url", get_url())
 ```
@@ -587,7 +492,7 @@ Expected: 包含 `op.create_table('conversations')` 和 `op.create_table('messag
 - [ ] **Step 3: 应用迁移到测试数据库**
 
 ```bash
-export CUBEBOX_DATABASE__URL="mysql+aiomysql://root:Sdai@20219876dss@192.168.1.211:6603/cubebox"
+# .env 中已配置数据库连接信息，直接执行即可
 uv run alembic upgrade head
 ```
 
@@ -1132,10 +1037,10 @@ async for chunk in agent.astream(
 
 ```bash
 cd backend
-uv run pytest -v
+make test
 ```
 
-Expected: 所有 27 个测试通过（不传 thread_id/checkpointer 时行为不变）
+Expected: 所有测试通过（不传 thread_id/checkpointer 时行为不变）
 
 - [ ] **Step 5: 提交**
 
@@ -1337,11 +1242,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # Initialize LangGraph checkpoint tables
     try:
         from langgraph.checkpoint.mysql.aio import AIOMySQLSaver
-        from cubebox.config import config
+        from cubebox.db.engine import _build_database_url
 
-        db_url = config.get("database.url")
-        # Convert SQLAlchemy URL to raw connection string for langgraph
-        # mysql+aiomysql://user:pass@host:port/db -> dict of connection params
+        db_url = _build_database_url()
         logger.info("Initializing LangGraph checkpoint tables")
         async with AIOMySQLSaver.from_conn_string(db_url) as saver:
             await saver.setup()
@@ -1366,7 +1269,7 @@ def create_app() -> FastAPI:
 
 ```bash
 cd backend
-uv run pytest -v
+make test
 ```
 
 Expected: 所有测试通过
@@ -1522,7 +1425,8 @@ Expected: 所有测试通过
 - [ ] **Step 3: 运行全部测试确保无回归**
 
 ```bash
-uv run pytest -v
+cd backend
+make test
 ```
 
 Expected: 所有测试通过
@@ -1538,23 +1442,39 @@ git commit -m "test: add E2E tests for conversations API"
 
 ## Chunk 9: 收尾
 
-### Task 17: 标记旧端点为废弃
+### Task 17: 删除旧的 agents/run 端点
 
 **Files:**
-- Modify: `backend/cubebox/api/routes/v1/agents.py`
+- Delete: `backend/cubebox/api/routes/v1/agents.py`
+- Modify: `backend/cubebox/api/routes/v1/__init__.py`
+- Modify: `backend/cubebox/api/app.py`
 
-- [ ] **Step 1: 在 /agents/run 端点添加 deprecated 标记**
-
-```python
-@router.post("/run", status_code=status.HTTP_200_OK, deprecated=True)
-async def run_agent(request: ExecuteRequest) -> StreamingResponse:
-```
-
-- [ ] **Step 2: 提交**
+- [ ] **Step 1: 删除 agents.py**
 
 ```bash
-git add cubebox/api/routes/v1/agents.py
-git commit -m "chore: mark /agents/run endpoint as deprecated"
+rm cubebox/api/routes/v1/agents.py
+```
+
+- [ ] **Step 2: 从 v1/__init__.py 移除 agents_router 导出**
+
+只保留 `conversations_router`。
+
+- [ ] **Step 3: 从 app.py 移除 agents_router 注册**
+
+只注册 `conversations_router`。
+
+- [ ] **Step 4: 运行测试确认无引用残留**
+
+```bash
+cd backend
+make test
+```
+
+- [ ] **Step 5: 提交**
+
+```bash
+git add -A
+git commit -m "chore: remove deprecated /agents/run endpoint"
 ```
 
 ---
@@ -1568,9 +1488,17 @@ cd backend
 make check
 ```
 
-Expected: format + lint + type-check + test 全部通过
+Expected: format + lint + type-check 全部通过
 
-- [ ] **Step 2: 最终提交（如有格式修复）**
+- [ ] **Step 2: 运行 make test**
+
+```bash
+make test
+```
+
+Expected: 所有测试通过
+
+- [ ] **Step 3: 最终提交（如有格式修复）**
 
 ```bash
 git add -A

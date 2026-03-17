@@ -33,13 +33,17 @@
 
 ## 3. 数据模型
 
+**主键策略**：使用 UUIDv7 作为主键。UUIDv7 前 48 bit 为毫秒级时间戳，天然时间有序，对 InnoDB 聚簇索引友好（无页分裂），同时保留全局唯一性。依赖 `uuid-utils` 包。
+
 ### 3.1 Conversation 表
 
 ```python
+from uuid_utils import uuid7
+
 class Conversation(SQLModel, table=True):
     __tablename__ = "conversations"
 
-    id: str = Field(default_factory=lambda: str(uuid4()), primary_key=True)
+    id: str = Field(default_factory=lambda: str(uuid7()), primary_key=True)
     title: str = Field(max_length=255)
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
@@ -48,10 +52,12 @@ class Conversation(SQLModel, table=True):
 ### 3.2 Message 表
 
 ```python
+from uuid_utils import uuid7
+
 class Message(SQLModel, table=True):
     __tablename__ = "messages"
 
-    id: str = Field(default_factory=lambda: str(uuid4()), primary_key=True)
+    id: str = Field(default_factory=lambda: str(uuid7()), primary_key=True)
     conversation_id: str = Field(foreign_key="conversations.id", index=True)
     role: str = Field(max_length=20)   # "user" | "assistant"
     content: str = Field(sa_column=Column(Text))
@@ -238,11 +244,10 @@ async def stream(
 
 **默认值行为**：
 - `thread_id=None` 且 `checkpointer=None`：agent 无状态运行（与现有行为完全一致），不持久化 checkpoint
-- 现有 `POST /api/v1/agents/run` 调用不传这两个参数，行为不变，向后兼容
 
 ### 6.2 `POST /api/v1/agents/run` 处理
 
-保留但标记为废弃（`deprecated=True`），不删除，避免破坏现有集成。
+直接删除旧端点及相关路由注册，功能已被 `POST /api/v1/conversations/{id}/messages` 完全替代。
 
 ---
 
@@ -252,15 +257,28 @@ async def stream(
 
 ```yaml
 database:
-  url: "mysql+aiomysql://USER:PASS@HOST:PORT/cubebox"
+  host: "localhost"
+  port: 3306
+  user: "root"
+  password: ""
+  name: "cubebox"
   pool_size: 10
   max_overflow: 20
   echo: false
 ```
 
-通过 `CUBEBOX_DATABASE__URL` 环境变量覆盖（开发环境示例）：
+`engine.py` 中拼接 URL：
+```python
+url = f"mysql+aiomysql://{user}:{password}@{host}:{port}/{name}"
 ```
-CUBEBOX_DATABASE__URL=mysql+aiomysql://root:yourpassword@192.168.1.211:6603/cubebox
+
+通过环境变量覆盖（写入 `.env` 和 `.env.example`）：
+```
+CUBEBOX_DATABASE__HOST=192.168.1.211
+CUBEBOX_DATABASE__PORT=6603
+CUBEBOX_DATABASE__USER=root
+CUBEBOX_DATABASE__PASSWORD=yourpassword
+CUBEBOX_DATABASE__NAME=cubebox
 ```
 
 ---
@@ -296,15 +314,14 @@ backend/
 
 ## 9. 依赖变更
 
-在 `pyproject.toml` 中新增：
+在 `pyproject.toml` 中新增（使用 `uv add` 安装最新版本）：
 
-```
-sqlmodel>=0.0.21
-langgraph-checkpoint-mysql[aiomysql]>=2.0.0
-alembic>=1.14.0
+```bash
+uv add sqlmodel alembic uuid-utils "langgraph-checkpoint-mysql[aiomysql]"
 ```
 
-`aiomysql` 由 `langgraph-checkpoint-mysql[aiomysql]` 间接引入。
+- `aiomysql` 由 `langgraph-checkpoint-mysql[aiomysql]` 间接引入。
+- `uuid-utils` 提供 UUIDv7 生成能力（C 扩展，性能优异）。
 
 ---
 
