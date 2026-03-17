@@ -69,6 +69,24 @@ class APIException(Exception):
         return response
 
 
+class ResourceNotFoundError(APIException):
+    """Exception for resource not found errors (404)"""
+
+    def __init__(self, resource: str, resource_id: str) -> None:
+        """Initialize ResourceNotFoundError
+
+        Args:
+            resource: Resource type (e.g., "Conversation", "Message")
+            resource_id: Resource identifier
+        """
+        super().__init__(
+            error_code="RESOURCE_NOT_FOUND",
+            message=f"{resource} not found",
+            status_code=status.HTTP_404_NOT_FOUND,
+            details=f"{resource} with id '{resource_id}' does not exist",
+        )
+
+
 class InvalidInputError(APIException):
     """Exception for invalid input/validation errors (400)"""
 
