@@ -78,9 +78,8 @@ def create_app() -> FastAPI:
     register_exception_handlers(app)
 
     # Register routers
-    from cubebox.api.routes.v1 import agents_router, conversations_router
+    from cubebox.api.routes.v1 import conversations_router
 
-    app.include_router(agents_router, prefix="/api/v1")
     app.include_router(conversations_router, prefix="/api/v1")
 
     return app
