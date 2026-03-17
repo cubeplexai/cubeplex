@@ -205,14 +205,26 @@ async def send_message(
             yield f"data: {done.model_dump_json()}\n\n"
 
         finally:
-            # Save assistant message with all collected events
-            async with session.begin_nested():
-                await msg_repo.create(
-                    conversation_id=conversation_id,
-                    role="assistant",
-                    events=collected_events,
-                )
-                await conv_repo.update_timestamp(conversation_id)
+            # Save assistant message using a new engine bound to current event loop
+            from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
+            from sqlalchemy.pool import NullPool
+
+            from cubebox.db.engine import _build_database_url
+
+            # Create a new engine in the current event loop to avoid cross-loop issues
+            save_engine = create_async_engine(_build_database_url(), poolclass=NullPool)
+            try:
+                async with AsyncSession(save_engine, expire_on_commit=False) as save_session:
+                    save_msg_repo = MessageRepository(save_session)
+                    await save_msg_repo.create(
+                        conversation_id=conversation_id,
+                        role="assistant",
+                        events=collected_events,
+                    )
+                    save_conv_repo = ConversationRepository(save_session)
+                    await save_conv_repo.update_timestamp(conversation_id)
+            finally:
+                await save_engine.dispose()
 
     return StreamingResponse(
         event_generator(),
