@@ -167,7 +167,7 @@ interface MessageStore {
 }
 ```
 
-`sendMessage` guarantees `isStreaming = false` on completion or error:
+`sendMessage` guarantees `isStreaming = false` on completion or error. Note: the `done` event is pushed into `streamingEvents` before the break — `ExecutionDetails` must filter out `type === 'done'` events when rendering.
 ```ts
 async sendMessage(conversationId, content) {
   set({ isStreaming: true, streamingEvents: [] })
@@ -265,7 +265,7 @@ Expanded view maps SSE events to rows:
 | `tool_end` | 「✓ 结果: {output}」 |
 | `chain_end` | 「完成」 |
 | `error` | 「✗ 错误: {message}」(destructive color) |
-| `done` | *(state machine termination signal — not displayed)* |
+| `done` | *(state machine termination signal — filtered out, not rendered)* |
 
 ---
 
@@ -275,7 +275,7 @@ The backend saves assistant messages with `content = null` and `events = [...]` 
 
 **During streaming:** `AssistantMessage` reads from `streamingEvents` in the store.
 
-**From history** (`fetchHistory`): `AssistantMessage` receives the stored `events` array and:
+**From history** (`fetchHistory`): The backend `GET /api/v1/conversations/{id}/messages` response includes the `events` field for each message (confirmed). `fetchHistory` stores the full `Message` objects including `events` in the store. `AssistantMessage` receives the stored `events` array and:
 1. Extracts the final text from `llm_end.data.output` (last `llm_end` event)
 2. Passes the full `events` array to `ExecutionDetails` for the collapsible panel
 3. `ExecutionDetails` defaults to collapsed for historical messages
