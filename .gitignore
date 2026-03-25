@@ -12,3 +12,6 @@ wheels/
 .coverage
 
 logs
+
+# Git worktrees
+.worktrees/
