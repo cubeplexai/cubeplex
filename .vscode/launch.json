@@ -2,49 +2,6 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Backend: Run API Server",
-            "type": "debugpy",
-            "request": "launch",
-            "module": "uvicorn",
-            "args": [
-                "cubebox.api.app:create_app",
-                "--host",
-                "0.0.0.0",
-                "--port",
-                "8000",
-                "--reload",
-                "--factory"
-            ],
-            "cwd": "${workspaceFolder}/backend",
-            "env": {
-                "ENV_FOR_DYNACONF": "development",
-                "CUBEBOX_DEBUG": "true"
-            },
-            "console": "integratedTerminal",
-            "justMyCode": false
-        },
-        {
-            "name": "Backend: Run API Server (Production)",
-            "type": "debugpy",
-            "request": "launch",
-            "module": "uvicorn",
-            "args": [
-                "cubebox.api.app:create_app",
-                "--host",
-                "0.0.0.0",
-                "--port",
-                "8000",
-                "--factory"
-            ],
-            "cwd": "${workspaceFolder}/backend",
-            "env": {
-                "ENV_FOR_DYNACONF": "production",
-                "CUBEBOX_DEBUG": "false"
-            },
-            "console": "integratedTerminal",
-            "justMyCode": false
-        },
-        {
             "name": "Backend: Run Script",
             "type": "debugpy",
             "request": "launch",
@@ -58,7 +15,7 @@
             "justMyCode": false
         },
         {
-            "name": "Backend: Run main.py",
+            "name": "Backend: Run API Server",
             "type": "debugpy",
             "request": "launch",
             "program": "${workspaceFolder}/backend/main.py",

@@ -25,6 +25,7 @@ pnpm-lock.yaml
 .agents/
 .superpowers/
 skills-lock.json
+settings.local.json
 
 # IDE
 .vscode/settings.json
