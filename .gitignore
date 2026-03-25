@@ -24,7 +24,6 @@ pnpm-lock.yaml
 # Claude Code
 .agents/
 .superpowers/
-skills-lock.json
 settings.local.json
 
 # IDE
