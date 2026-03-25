@@ -69,6 +69,33 @@
             },
             "console": "integratedTerminal",
             "justMyCode": false
+        },
+        {
+            "name": "Frontend: Dev Server",
+            "type": "node",
+            "request": "launch",
+            "runtimeExecutable": "pnpm",
+            "runtimeArgs": [
+                "-F",
+                "@cubebox/web",
+                "dev"
+            ],
+            "cwd": "${workspaceFolder}/frontend",
+            "console": "integratedTerminal",
+            "internalConsoleOptions": "neverOpen",
+            "env": {
+                "CUBEBOX_API_URL": "http://localhost:8000"
+            }
+        }
+    ],
+    "compounds": [
+        {
+            "name": "Full Stack: Frontend + Backend",
+            "configurations": [
+                "Backend: Run API Server",
+                "Frontend: Dev Server"
+            ],
+            "stopAll": true
         }
     ]
 }
