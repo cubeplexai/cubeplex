@@ -34,7 +34,7 @@
             "runtimeExecutable": "pnpm",
             "runtimeArgs": [
                 "-F",
-                "@cubebox/web",
+                "web",
                 "dev"
             ],
             "cwd": "${workspaceFolder}/frontend",
