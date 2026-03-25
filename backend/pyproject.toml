@@ -61,7 +61,7 @@ known-first-party = ["cubebox"]
 [tool.ruff]
 line-length = 100
 target-version = "py312"
-exclude = [".git", ".venv", "__pycache__", "build", "dist", "migrations"]
+exclude = [".git", ".venv", "__pycache__", "build", "dist", "migrations", "alembic/versions"]
 
 [tool.ruff.lint]
 select = [
