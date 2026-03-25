@@ -12,3 +12,20 @@ wheels/
 .coverage
 
 logs
+
+# Git worktrees
+.worktrees/
+
+# Node.js / Frontend
+node_modules/
+.next/
+pnpm-lock.yaml
+
+# Claude Code
+.agents/
+.superpowers/
+skills-lock.json
+
+# IDE
+.vscode/settings.json
+.vscode/extensions.json
