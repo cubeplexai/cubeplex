@@ -85,7 +85,7 @@ ignore = [
 [tool.mypy]
 python_version = "3.12"
 files = ["cubebox"]
-exclude = ["scripts/dev/", "tests/", ".venv/", "build/", "dist/"]
+exclude = ["scripts/dev/", "tests/", ".venv/", "build/", "dist/", "alembic/versions/"]
 warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = true
