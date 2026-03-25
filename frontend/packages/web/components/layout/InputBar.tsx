@@ -1,22 +1,37 @@
 'use client'
 
 import { useState } from 'react'
+import { useMessageStore, createApiClient } from '@cubebox/core'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
-import { ArrowUp } from 'lucide-react'
+import { ArrowUp, Loader2 } from 'lucide-react'
 
 interface InputBarProps {
-  onSubmit: (content: string) => void
+  conversationId?: string
+  onSubmit?: (content: string) => void
   isLoading?: boolean
 }
 
-export function InputBar({ onSubmit, isLoading = false }: InputBarProps) {
+export function InputBar({ conversationId, onSubmit, isLoading = false }: InputBarProps) {
   const [content, setContent] = useState('')
+  const { sendMessage } = useMessageStore()
+  const messageIsStreaming = useMessageStore((s) => s.isStreaming)
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     if (!content.trim()) return
-    onSubmit(content)
-    setContent('')
+    if (!conversationId) {
+      onSubmit?.(content)
+      setContent('')
+      return
+    }
+
+    const client = createApiClient('')
+    try {
+      setContent('')
+      await sendMessage(client, conversationId, content)
+    } catch (err) {
+      console.error('Failed to send message:', err)
+    }
   }
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -25,8 +40,10 @@ export function InputBar({ onSubmit, isLoading = false }: InputBarProps) {
     }
   }
 
+  const isSubmitting = isLoading || messageIsStreaming
+
   return (
-    <div className="w-full max-w-2xl mx-auto px-4 pb-8">
+    <div className="w-full max-w-2xl mx-auto px-4">
       <div className="bg-card border border-border rounded-lg p-4 space-y-3">
         <Textarea
           value={content}
@@ -34,15 +51,15 @@ export function InputBar({ onSubmit, isLoading = false }: InputBarProps) {
           onKeyDown={handleKeyDown}
           placeholder="有什么可以帮你的？"
           className="resize-none min-h-24"
-          disabled={isLoading}
+          disabled={isSubmitting}
         />
         <div className="flex justify-end">
           <Button
             onClick={handleSubmit}
-            disabled={!content.trim() || isLoading}
+            disabled={!content.trim() || isSubmitting}
             size="sm"
           >
-            <ArrowUp className="size-4" />
+            {isSubmitting ? <Loader2 className="size-4 animate-spin" /> : <ArrowUp className="size-4" />}
           </Button>
         </div>
       </div>
