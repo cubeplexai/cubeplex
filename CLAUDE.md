@@ -89,7 +89,7 @@ alembic upgrade head  # Apply pending migrations
 alembic revision -m "description"  # Create new migration
 ```
 
-After modifying SQLModel schemas, migrations must be manually created (auto-generation not yet implemented).
+After modifying SQLModel schemas, use auto-generation: `alembic revision --autogenerate -m "description"`
 
 ## Gotchas
 
