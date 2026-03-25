@@ -20,7 +20,7 @@ export function createApiClient(baseUrl: string): ApiClient {
 export async function toApiError(res: Response): Promise<Error> {
   const contentType = res.headers.get('content-type')
   if (contentType?.includes('application/json')) {
-    const data = await res.json()
+    const data = await res.json() as { message?: string }
     return new Error(data.message || `HTTP ${res.status}`)
   }
   return new Error(`HTTP ${res.status}: ${res.statusText}`)

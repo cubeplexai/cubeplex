@@ -1,20 +1,40 @@
 "use client"
 
-import { Collapsible as CollapsiblePrimitive } from "@base-ui/react/collapsible"
+import * as React from "react"
 
-function Collapsible({ ...props }: CollapsiblePrimitive.Root.Props) {
-  return <CollapsiblePrimitive.Root data-slot="collapsible" {...props} />
+interface CollapsibleProps extends React.ComponentProps<"div"> {
+  open?: boolean
+  onOpenChange?: (open: boolean) => void
+  defaultOpen?: boolean
 }
 
-function CollapsibleTrigger({ ...props }: CollapsiblePrimitive.Trigger.Props) {
+function Collapsible({ open, onOpenChange, defaultOpen, ...props }: CollapsibleProps) {
+  const [internalOpen, setInternalOpen] = React.useState(defaultOpen ?? false)
+  const isOpen = open !== undefined ? open : internalOpen
+
   return (
-    <CollapsiblePrimitive.Trigger data-slot="collapsible-trigger" {...props} />
+    <div
+      data-slot="collapsible"
+      data-state={isOpen ? "open" : "closed"}
+      {...props}
+    />
   )
 }
 
-function CollapsibleContent({ ...props }: CollapsiblePrimitive.Panel.Props) {
+function CollapsibleTrigger({ onClick, ...props }: React.ComponentProps<"button">) {
   return (
-    <CollapsiblePrimitive.Panel data-slot="collapsible-content" {...props} />
+    <button
+      data-slot="collapsible-trigger"
+      type="button"
+      onClick={onClick}
+      {...props}
+    />
+  )
+}
+
+function CollapsibleContent({ ...props }: React.ComponentProps<"div">) {
+  return (
+    <div data-slot="collapsible-content" {...props} />
   )
 }
 

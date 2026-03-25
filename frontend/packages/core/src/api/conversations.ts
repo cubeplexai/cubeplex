@@ -10,7 +10,7 @@ export async function createConversation(
     : '/api/v1/conversations'
   const res = await client.post(url, {})
   if (!res.ok) throw await toApiError(res)
-  return res.json()
+  return res.json() as Promise<Conversation>
 }
 
 export async function listConversations(
@@ -21,7 +21,7 @@ export async function listConversations(
   const url = `/api/v1/conversations?limit=${limit}&offset=${offset}`
   const res = await client.get(url)
   if (!res.ok) throw await toApiError(res)
-  const data = await res.json()
+  const data = await res.json() as { conversations?: Conversation[] }
   return data.conversations || []
 }
 
@@ -31,7 +31,7 @@ export async function getConversation(
 ): Promise<Conversation> {
   const res = await client.get(`/api/v1/conversations/${id}`)
   if (!res.ok) throw await toApiError(res)
-  return res.json()
+  return res.json() as Promise<Conversation>
 }
 
 export async function deleteConversation(
@@ -51,7 +51,7 @@ export async function renameConversation(
     title,
   })
   if (!res.ok) throw await toApiError(res)
-  return res.json()
+  return res.json() as Promise<Conversation>
 }
 
 export async function listMessages(
@@ -63,6 +63,6 @@ export async function listMessages(
   const url = `/api/v1/conversations/${conversationId}/messages?limit=${limit}&offset=${offset}`
   const res = await client.get(url)
   if (!res.ok) throw await toApiError(res)
-  const data = await res.json()
+  const data = await res.json() as { messages?: Message[] }
   return data.messages || []
 }
