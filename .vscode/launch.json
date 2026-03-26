@@ -29,17 +29,10 @@
         },
         {
             "name": "Frontend: Dev Server",
-            "type": "node",
+            "type": "node-terminal",
             "request": "launch",
-            "runtimeExecutable": "pnpm",
-            "runtimeArgs": [
-                "-F",
-                "web",
-                "dev"
-            ],
+            "command": "pnpm -F web dev",
             "cwd": "${workspaceFolder}/frontend",
-            "console": "integratedTerminal",
-            "internalConsoleOptions": "neverOpen",
             "env": {
                 "CUBEBOX_API_URL": "http://localhost:8000"
             }
