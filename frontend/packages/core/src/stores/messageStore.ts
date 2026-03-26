@@ -5,8 +5,8 @@ import { listMessages, streamMessages } from '../api'
 
 export interface MessageStore {
   messages: Record<string, Message[]>
-  streamingEvents: AgentEvent[]
-  isStreaming: boolean
+  streamingEvents: Record<string, AgentEvent[]>
+  streamingConversationId: string | null
   error: string | null
   fetchHistory(client: ApiClient, conversationId: string): Promise<void>
   sendMessage(
@@ -14,17 +14,23 @@ export interface MessageStore {
     conversationId: string,
     content: string
   ): Promise<void>
-  clearStreaming(): void
+  clearStreaming(conversationId: string): void
 }
 
 export const useMessageStore = create<MessageStore>((set) => ({
   messages: {},
-  streamingEvents: [],
-  isStreaming: false,
+  streamingEvents: {},
+  streamingConversationId: null,
   error: null,
 
   async fetchHistory(client: ApiClient, conversationId: string) {
     try {
+      // 如果正在流式传输当前会话，不要覆盖
+      const currentState = useMessageStore.getState()
+      if (currentState.streamingConversationId === conversationId) {
+        return
+      }
+
       const messages = await listMessages(client, conversationId)
       set((s) => ({
         messages: { ...s.messages, [conversationId]: messages },
@@ -50,8 +56,8 @@ export const useMessageStore = create<MessageStore>((set) => ({
         ...s.messages,
         [conversationId]: [...(s.messages[conversationId] || []), userMessage],
       },
-      streamingEvents: [],
-      isStreaming: true,
+      streamingEvents: { ...s.streamingEvents, [conversationId]: [] },
+      streamingConversationId: conversationId,
       error: null,
     }))
 
@@ -61,7 +67,12 @@ export const useMessageStore = create<MessageStore>((set) => ({
         conversationId,
         content
       )) {
-        set((s) => ({ streamingEvents: [...s.streamingEvents, event] }))
+        set((s) => ({
+          streamingEvents: {
+            ...s.streamingEvents,
+            [conversationId]: [...(s.streamingEvents[conversationId] || []), event],
+          },
+        }))
         if (event.type === 'done') break
       }
     } catch (err) {
@@ -72,16 +83,23 @@ export const useMessageStore = create<MessageStore>((set) => ({
         const messages = await listMessages(client, conversationId)
         set((s) => ({
           messages: { ...s.messages, [conversationId]: messages },
-          isStreaming: false,
-          streamingEvents: [],
+          streamingConversationId: null,
+          streamingEvents: { ...s.streamingEvents, [conversationId]: [] },
         }))
       } catch {
-        set({ isStreaming: false, streamingEvents: [] })
+        set((s) => ({
+          streamingConversationId: null,
+          streamingEvents: { ...s.streamingEvents, [conversationId]: [] },
+        }))
       }
     }
   },
 
-  clearStreaming() {
-    set({ streamingEvents: [], isStreaming: false })
+  clearStreaming(conversationId: string) {
+    set((s) => ({
+      streamingEvents: { ...s.streamingEvents, [conversationId]: [] },
+      streamingConversationId:
+        s.streamingConversationId === conversationId ? null : s.streamingConversationId,
+    }))
   },
 }))

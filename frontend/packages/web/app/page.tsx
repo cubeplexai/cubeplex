@@ -13,12 +13,18 @@ export default function WelcomePage() {
   const handleSubmit = async (content: string) => {
     const client = createApiClient('')
     try {
+      // 创建会话
       const convo = await createConversation(client, content.slice(0, 30))
       useConversationStore.setState({ activeId: convo.id })
-      // 立即跳转，不等待消息发送完成
+
+      // 立即跳转到对话页面
       router.push(`/conversations/${convo.id}`)
-      // 在后台发送消息（sendMessage 会乐观地添加用户消息）
-      sendMessage(client, convo.id, content)
+
+      // 在后台发送消息（sendMessage 会乐观地添加用户消息并开始流式传输）
+      // 不等待完成，让对话页面显示流式响应
+      sendMessage(client, convo.id, content).catch((err) => {
+        console.error('Failed to send message:', err)
+      })
     } catch (err) {
       console.error('Failed to create conversation:', err)
     }
