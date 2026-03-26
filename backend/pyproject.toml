@@ -46,6 +46,9 @@ python_files = ["test_*.py"]
 addopts = "-v --cov=cubebox --cov-report=term-missing"
 filterwarnings = ["ignore::DeprecationWarning", "ignore::UserWarning"]
 asyncio_mode = "auto"
+markers = [
+    "sandbox: tests that require a running OpenSandbox service (deselect with '-m \"not sandbox\"')",
+]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src"]
@@ -61,7 +64,15 @@ known-first-party = ["cubebox"]
 [tool.ruff]
 line-length = 100
 target-version = "py312"
-exclude = [".git", ".venv", "__pycache__", "build", "dist", "migrations", "alembic/versions"]
+exclude = [
+    ".git",
+    ".venv",
+    "__pycache__",
+    "build",
+    "dist",
+    "migrations",
+    "alembic/versions",
+]
 
 [tool.ruff.lint]
 select = [
@@ -85,7 +96,14 @@ ignore = [
 [tool.mypy]
 python_version = "3.12"
 files = ["cubebox"]
-exclude = ["scripts/dev/", "tests/", ".venv/", "build/", "dist/", "alembic/versions/"]
+exclude = [
+    "scripts/dev/",
+    "tests/",
+    ".venv/",
+    "build/",
+    "dist/",
+    "alembic/versions/",
+]
 warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = true

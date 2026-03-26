@@ -10,6 +10,8 @@ from deepagents.backends.protocol import (
     FileDownloadResponse,
     FileInfo,
     FileUploadResponse,
+    GrepMatch,
+    WriteResult,
 )
 from deepagents.backends.sandbox import BaseSandbox
 
@@ -75,17 +77,19 @@ class OpenSandbox(BaseSandbox):
         execution = await self._sandbox.commands.run(command)
 
         # Combine stdout and stderr into single output
+        # Note: Each msg.text is a separate line without trailing newline
         output_lines: list[str] = []
 
-        # Add stdout messages
+        # Add stdout messages (each is a line)
         for msg in execution.logs.stdout:
             output_lines.append(msg.text)
 
-        # Add stderr messages
+        # Add stderr messages (each is a line)
         for msg in execution.logs.stderr:
             output_lines.append(msg.text)
 
-        combined_output = "".join(output_lines)
+        # Join with newlines to preserve line structure
+        combined_output = "\n".join(output_lines) if output_lines else ""
 
         # Get exit code from command status
         exit_code: int | None = None
@@ -99,6 +103,217 @@ class OpenSandbox(BaseSandbox):
             truncated=False,
         )
 
+    async def aread(
+        self,
+        file_path: str,
+        offset: int = 0,
+        limit: int = 2000,
+    ) -> str:
+        """Read file content with line numbers (async version).
+
+        This overrides BackendProtocol.aread to avoid calling execute() via
+        asyncio.to_thread, which causes event loop conflicts.
+
+        Uses the same Python script template as BaseSandbox.
+
+        Args:
+            file_path: Path to the file to read
+            offset: Starting line number (0-indexed)
+            limit: Maximum number of lines to read
+
+        Returns:
+            File content with line numbers, or error message
+        """
+        import base64
+        import json
+
+        payload = json.dumps(
+            {
+                "path": file_path,
+                "offset": int(offset),
+                "limit": int(limit),
+            }
+        )
+        payload_b64 = base64.b64encode(payload.encode("utf-8")).decode("ascii")
+
+        # Use the same command template as BaseSandbox
+        cmd = f"""python3 -c "
+import os
+import sys
+import base64
+import json
+
+payload_b64 = sys.stdin.read().strip()
+if not payload_b64:
+    print('Error: No payload provided', file=sys.stderr)
+    sys.exit(1)
+
+try:
+    payload = json.loads(base64.b64decode(payload_b64).decode('utf-8'))
+    path = payload['path']
+    offset = payload.get('offset', 0)
+    limit = payload.get('limit', 2000)
+
+    if not os.path.exists(path):
+        print(f'Error: File not found')
+        sys.exit(1)
+
+    if os.path.isdir(path):
+        print(f'Error: Path is a directory')
+        sys.exit(1)
+
+    with open(path, 'r', encoding='utf-8', errors='replace') as f:
+        lines = f.readlines()
+        total_lines = len(lines)
+        start = offset
+        end = min(offset + limit, total_lines)
+
+        for i in range(start, end):
+            line_num = i + 1
+            line_content = lines[i].rstrip('\\n')
+            print(f'{{line_num:6d}} | {{line_content}}')
+
+except Exception as e:
+    print(f'Error: {{str(e)}}', file=sys.stderr)
+    sys.exit(1)
+" <<'__DEEPAGENTS_EOF__'
+{payload_b64}
+__DEEPAGENTS_EOF__"""
+
+        result = await self.aexecute(cmd)
+
+        output = result.output.rstrip()
+        exit_code = result.exit_code
+
+        if exit_code != 0 or "Error: File not found" in output:
+            return f"Error: File '{file_path}' not found"
+
+        return output
+
+    async def awrite(
+        self,
+        file_path: str,
+        content: str,
+    ) -> WriteResult:
+        """Create a new file (async version).
+
+        This overrides BackendProtocol.awrite to avoid calling execute() via
+        asyncio.to_thread.
+
+        Uses the same Python script template as BaseSandbox.
+
+        Args:
+            file_path: Path to the file to write
+            content: Content to write to the file
+
+        Returns:
+            WriteResult with path or error
+        """
+        import base64
+        import json
+
+        content_b64 = base64.b64encode(content.encode("utf-8")).decode("ascii")
+        payload = json.dumps({"path": file_path, "content": content_b64})
+        payload_b64 = base64.b64encode(payload.encode("utf-8")).decode("ascii")
+
+        # Use the same command template as BaseSandbox
+        cmd = f"""python3 -c "
+import os
+import sys
+import base64
+import json
+
+payload_b64 = sys.stdin.read().strip()
+if not payload_b64:
+    print('Error: No payload received for write operation', file=sys.stderr)
+    sys.exit(1)
+
+try:
+    payload = base64.b64decode(payload_b64).decode('utf-8')
+    data = json.loads(payload)
+    file_path = data['path']
+    content = base64.b64decode(data['content']).decode('utf-8')
+except Exception as e:
+    print(f'Error: Failed to decode write payload: {{e}}', file=sys.stderr)
+    sys.exit(1)
+
+# Create parent directory if needed (don't check if file exists for overwrite support)
+parent_dir = os.path.dirname(file_path) or '.'
+os.makedirs(parent_dir, exist_ok=True)
+
+with open(file_path, 'w') as f:
+    f.write(content)
+" <<'__DEEPAGENTS_EOF__'
+{payload_b64}
+__DEEPAGENTS_EOF__"""
+
+        result = await self.aexecute(cmd)
+
+        if result.exit_code != 0 or "Error:" in result.output:
+            error_msg = result.output.strip() or f"Failed to write file '{file_path}'"
+            return WriteResult(error=error_msg)
+
+        return WriteResult(path=file_path, files_update=None)
+
+    async def agrep_raw(
+        self,
+        pattern: str,
+        path: str | None = None,
+        glob: str | None = None,
+    ) -> list[GrepMatch] | str:
+        """Search for a pattern in files (async version).
+
+        This overrides BackendProtocol.agrep_raw to avoid calling execute() via
+        asyncio.to_thread.
+
+        Uses the same grep command as BaseSandbox.
+
+        Args:
+            pattern: Text pattern to search for (literal, not regex)
+            path: Directory path to search in (default: .)
+            glob: Glob pattern for files to search (default: all files)
+
+        Returns:
+            List of GrepMatch objects or error string
+        """
+        import shlex
+
+        search_path = shlex.quote(path or ".")
+
+        # Build grep command to get structured output
+        grep_opts = "-rHnF"  # recursive, with filename, with line number, fixed-strings (literal)
+
+        # Add glob pattern if specified
+        glob_pattern = ""
+        if glob:
+            glob_pattern = f"--include='{glob}'"
+
+        # Escape pattern for shell
+        pattern_escaped = shlex.quote(pattern)
+
+        cmd = f"grep {grep_opts} {glob_pattern} -e {pattern_escaped} {search_path} 2>/dev/null || true"
+        result = await self.aexecute(cmd)
+
+        output = result.output.rstrip()
+        if not output:
+            return []
+
+        # Parse grep output into GrepMatch objects
+        matches: list[GrepMatch] = []
+        for line in output.split("\n"):
+            # Format is: path:line_number:text
+            parts = line.split(":", 2)
+            if len(parts) >= 3:
+                matches.append(
+                    GrepMatch(
+                        path=parts[0],
+                        line=int(parts[1]),
+                        text=parts[2],
+                    )
+                )
+
+        return matches
+
     def execute(
         self,
         command: str,
@@ -107,8 +322,8 @@ class OpenSandbox(BaseSandbox):
     ) -> ExecuteResponse:
         """Execute a shell command inside the sandbox (sync wrapper).
 
-        Note: This method should not be called directly when already in an async context.
-        The DeepAgents protocol will automatically use aexecute() instead.
+        Note: This method should not be called when the opensandbox client is bound
+        to a different event loop. Use aexecute() instead in async contexts.
 
         Args:
             command: Shell command string to execute
@@ -116,12 +331,15 @@ class OpenSandbox(BaseSandbox):
 
         Returns:
             ExecuteResponse with combined output, exit code, and truncation flag
-        """
-        # Use asyncer.syncify to handle event loop properly
-        from asyncer import syncify
 
-        sync_execute = syncify(self.aexecute, raise_sync_error=False)
-        return sync_execute(command, timeout=timeout)
+        Raises:
+            RuntimeError: If called from a context where event loop conflicts exist
+        """
+        raise RuntimeError(
+            "Sync execute() cannot be used with OpenSandbox due to event loop conflicts. "
+            "The opensandbox httpx client is bound to the FastAPI event loop and cannot "
+            "be used from asyncio.to_thread(). Override async methods instead."
+        )
 
     async def als_info(self, path: str) -> list[FileInfo]:
         """List all files in a directory with metadata (async version).

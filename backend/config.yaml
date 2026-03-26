@@ -1,14 +1,14 @@
 # Base Configuration for cubebox
-default: 
+default:
   env: default
   debug: false
-  
+
   # API Configuration
   api:
     host: "0.0.0.0"
     port: 8000
     reload: true
-  
+
   # LLM Configuration
   # Note: For reasoning models, set reasoning config to enable reasoning output
   # Example: reasoning: {effort: "medium", summary: "auto"}
@@ -61,32 +61,32 @@ default:
             max_tokens: 32000
             extra_body: {}
             extra_headers: {}
-  
+
   # Sandbox Configuration
   sandbox:
     enabled: true
     domain: "localhost:8090"
-    image: "hub.sensedeal.vip/library/ubuntu:22.04"
+    image: "hub.sensedeal.vip/library/cubebox-sandbox:24.04-20260311"
     api_key: null
-    timeout: 600  # 10 minutes in seconds
-    request_timeout: 60  # Request timeout in seconds
+    timeout: 600 # 10 minutes in seconds
+    request_timeout: 60 # Request timeout in seconds
     skills:
       enabled: true
-      builtin_dir: "skills/builtin"  # Relative to backend/
-      container_path: "/.skills"  # Container root path for skills
-      sources:  # Skill source paths passed to DeepAgents
+      builtin_dir: "skills/builtin" # Relative to backend/
+      container_path: "/.skills" # Container root path for skills
+      sources: # Skill source paths passed to DeepAgents
         - "/.skills/builtin"
-  
+
   # Memory Configuration
   memory:
     short_term_enabled: true
     long_term_enabled: false
-  
+
   # MCP Configuration
   mcp:
     enabled: false
     servers: []
-  
+
   langsmith:
     enabled: true
     key: "USE ENV"

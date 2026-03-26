@@ -2,14 +2,14 @@
 dynaconf_merge: true
 development:
   env: development
-  
+
   debug: true
-  
+
   api:
     reload: true
-  
+
   # Sandbox Configuration for Development
   sandbox:
     enabled: true
     domain: "localhost:8090"
-    image: "hub.sensedeal.vip/library/ubuntu:22.04"
+    image: "hub.sensedeal.vip/library/cubebox-sandbox:24.04-20260311"

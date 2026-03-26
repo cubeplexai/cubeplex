@@ -4,17 +4,17 @@
 dynaconf_merge: true
 test:
   env: test
-  
+
   debug: true
-  
+
   # API Configuration
   api:
     host: "127.0.0.1"
     port: 8001
     reload: false
-  
+
   # Sandbox Configuration for Testing
   sandbox:
-    enabled: true  # Disable sandbox in tests by default
+    enabled: true
     domain: "localhost:8090"
-    image: "hub.sensedeal.vip/library/ubuntu:22.04"
+    image: "hub.sensedeal.vip/library/cubebox-sandbox:24.04-20260311"
