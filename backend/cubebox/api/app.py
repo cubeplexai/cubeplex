@@ -25,17 +25,14 @@ async def lifespan(_app: FastAPI):  # type: ignore
     log.init()
     logger.info("Application starting up")
 
-    # Initialize LangGraph checkpointer for conversation persistence
-    checkpointer_conn = None
+    # Initialize LangGraph checkpointer tables (one-time setup)
     try:
         import aiomysql
         from langgraph.checkpoint.mysql.aio import AIOMySQLSaver
 
-        from cubebox.agents.checkpointer import set_checkpointer
         from cubebox.config import config
 
-        # Build connection parameters directly to avoid URL encoding issues
-        # Note: AIOMySQLSaver.parse_conn_string has a bug - it doesn't unquote the password
+        # Build connection parameters
         conn_params = {
             "host": config.get("database.host", "localhost"),
             "port": config.get("database.port", 3306),
@@ -45,25 +42,20 @@ async def lifespan(_app: FastAPI):  # type: ignore
             "autocommit": True,
         }
 
-        # Create connection and checkpointer manually
-        checkpointer_conn = await aiomysql.connect(**conn_params)
-        checkpointer = AIOMySQLSaver(conn=checkpointer_conn)
-        await checkpointer.setup()
-        set_checkpointer(checkpointer)
-        logger.info("LangGraph checkpointer initialized")
+        # Create temporary connection to setup tables
+        setup_conn = await aiomysql.connect(**conn_params)
+        try:
+            checkpointer = AIOMySQLSaver(conn=setup_conn)
+            await checkpointer.setup()
+            logger.info("LangGraph checkpointer tables initialized")
+        finally:
+            setup_conn.close()
     except Exception as e:
-        logger.warning("Failed to initialize LangGraph checkpointer: {}", str(e))
+        logger.warning("Failed to initialize LangGraph checkpointer tables: {}", str(e))
 
     yield
 
     # ==================== Shutdown ====================
-    if checkpointer_conn is not None:
-        try:
-            checkpointer_conn.close()
-            logger.info("LangGraph checkpointer connection closed")
-        except Exception as e:
-            logger.warning("Error closing checkpointer connection: {}", str(e))
-
     logger.info("Application shutting down")
 
 

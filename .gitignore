@@ -26,6 +26,6 @@ pnpm-lock.yaml
 .superpowers/
 settings.local.json
 
-# IDE
-.vscode/settings.json
-.vscode/extensions.json
+
+# TEMP FILES
+tmp

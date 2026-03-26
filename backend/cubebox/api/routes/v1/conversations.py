@@ -160,14 +160,16 @@ async def send_message(
 
     async def event_generator() -> AsyncIterator[str]:
         collected_events: list[dict[str, object]] = []
+        checkpointer = None
 
         try:
-            from cubebox.agents.checkpointer import get_checkpointer
+            from cubebox.agents.checkpointer import create_checkpointer
 
+            checkpointer = await create_checkpointer()
             executor = DeepAgentExecutor(
                 sandbox_domain=request.sandbox_domain,
                 sandbox_image=request.sandbox_image,
-                checkpointer=get_checkpointer(),
+                checkpointer=checkpointer,
             )
 
             async for event in executor.stream(request.content, thread_id=conversation_id):
@@ -207,6 +209,16 @@ async def send_message(
             yield f"data: {done.model_dump_json()}\n\n"
 
         finally:
+            # Close checkpointer connection if created
+            if checkpointer is not None:
+                try:
+                    # Get the underlying connection and close it
+                    if hasattr(checkpointer, "conn"):
+                        checkpointer.conn.close()
+                        logger.debug("Closed checkpointer connection")
+                except Exception as e:
+                    logger.warning("Error closing checkpointer connection: {}", str(e))
+
             # Create a new engine bound to the current event loop to avoid cross-loop issues
             save_engine = create_async_engine(_build_database_url(), poolclass=NullPool)
             try:

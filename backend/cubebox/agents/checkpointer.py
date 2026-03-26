@@ -2,15 +2,40 @@
 
 from typing import Any
 
-_checkpointer: Any = None
+from loguru import logger
 
 
-def get_checkpointer() -> Any:
-    """Get the global LangGraph checkpointer instance."""
-    return _checkpointer
+async def create_checkpointer() -> Any:
+    """Create a new LangGraph checkpointer instance with its own connection.
 
+    This creates a fresh connection for each request to avoid issues with
+    connection sharing across event loops or processes.
 
-def set_checkpointer(checkpointer: Any) -> None:
-    """Set the global LangGraph checkpointer instance."""
-    global _checkpointer
-    _checkpointer = checkpointer
+    Returns:
+        AIOMySQLSaver instance or None if initialization fails
+    """
+    try:
+        import aiomysql
+        from langgraph.checkpoint.mysql.aio import AIOMySQLSaver
+
+        from cubebox.config import config
+
+        # Build connection parameters
+        conn_params = {
+            "host": config.get("database.host", "localhost"),
+            "port": config.get("database.port", 3306),
+            "user": config.get("database.user", "root"),
+            "password": config.get("database.password", ""),
+            "db": config.get("database.name", "cubebox"),
+            "autocommit": True,
+        }
+
+        # Create connection and checkpointer
+        conn = await aiomysql.connect(**conn_params)
+        checkpointer = AIOMySQLSaver(conn=conn)
+        logger.debug("Created new checkpointer instance")
+        return checkpointer
+
+    except Exception as e:
+        logger.warning("Failed to create checkpointer: {}", str(e))
+        return None
