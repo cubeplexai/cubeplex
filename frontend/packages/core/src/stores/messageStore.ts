@@ -35,7 +35,26 @@ export const useMessageStore = create<MessageStore>((set) => ({
   },
 
   async sendMessage(client: ApiClient, conversationId: string, content: string) {
-    set({ isStreaming: true, streamingEvents: [], error: null })
+    // 乐观地立即添加用户消息
+    const userMessage: Message = {
+      id: `temp-user-${Date.now()}`,
+      conversation_id: conversationId,
+      role: 'user',
+      content,
+      events: null,
+      created_at: new Date().toISOString(),
+    }
+
+    set((s) => ({
+      messages: {
+        ...s.messages,
+        [conversationId]: [...(s.messages[conversationId] || []), userMessage],
+      },
+      streamingEvents: [],
+      isStreaming: true,
+      error: null,
+    }))
+
     try {
       for await (const event of streamMessages(
         client.baseUrl,
@@ -48,7 +67,17 @@ export const useMessageStore = create<MessageStore>((set) => ({
     } catch (err) {
       set({ error: (err as Error).message })
     } finally {
-      set({ isStreaming: false })
+      // 刷新历史记录，获取正式保存的 assistant 消息
+      try {
+        const messages = await listMessages(client, conversationId)
+        set((s) => ({
+          messages: { ...s.messages, [conversationId]: messages },
+          isStreaming: false,
+          streamingEvents: [],
+        }))
+      } catch {
+        set({ isStreaming: false, streamingEvents: [] })
+      }
     }
   },
 
