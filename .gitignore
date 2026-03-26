@@ -29,3 +29,4 @@ settings.local.json
 
 # TEMP FILES
 tmp
+.playwright-cli

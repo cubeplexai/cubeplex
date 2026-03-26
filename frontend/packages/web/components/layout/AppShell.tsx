@@ -5,13 +5,21 @@ import { Sidebar } from './Sidebar'
 
 interface AppShellProps {
   children: ReactNode
+  headerTitle?: string
 }
 
-export function AppShell({ children }: AppShellProps) {
+export function AppShell({ children, headerTitle }: AppShellProps) {
   return (
     <div className="flex h-screen bg-background text-foreground">
       <Sidebar />
-      <main className="flex-1 flex flex-col overflow-hidden">{children}</main>
+      <div className="flex-1 flex flex-col overflow-hidden">
+        <header className="h-11 border-b border-border flex items-center px-4 shrink-0">
+          <span className="text-sm text-muted-foreground truncate">
+            {headerTitle || ''}
+          </span>
+        </header>
+        <main className="flex-1 flex flex-col overflow-hidden">{children}</main>
+      </div>
     </div>
   )
 }

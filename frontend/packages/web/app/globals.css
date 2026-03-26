@@ -1,45 +1,40 @@
 @import "tailwindcss";
 
-@layer base {
-  :root {
-    --background: 220 13% 9%;
-    --foreground: 220 9% 95%;
-    --card: 220 13% 11%;
-    --card-foreground: 220 9% 95%;
-    --primary: 210 100% 50%;
-    --primary-foreground: 0 0% 100%;
-    --secondary: 220 13% 13%;
-    --secondary-foreground: 220 9% 95%;
-    --muted: 220 13% 13%;
-    --muted-foreground: 220 9% 65%;
-    --accent: 220 13% 15%;
-    --accent-foreground: 220 9% 95%;
-    --border: 220 13% 15%;
-    --input: 220 13% 15%;
-    --ring: 210 100% 50%;
-    --radius: 0.5rem;
-  }
-
-  .light {
-    --background: 0 0% 100%;
-    --foreground: 240 10% 3.9%;
-    --card: 0 0% 100%;
-    --card-foreground: 240 10% 3.9%;
-    --primary: 210 100% 50%;
-    --primary-foreground: 0 0% 100%;
-    --secondary: 240 4.8% 95.9%;
-    --secondary-foreground: 240 5.9% 10%;
-    --muted: 240 4.8% 95.9%;
-    --muted-foreground: 240 3.8% 46.1%;
-    --accent: 240 4.8% 95.9%;
-    --accent-foreground: 240 10% 3.9%;
-    --border: 240 5.9% 90%;
-    --input: 240 5.9% 90%;
-    --ring: 210 100% 50%;
-  }
+@theme {
+  --color-background: hsl(222 20% 7%);
+  --color-foreground: hsl(215 20% 92%);
+  --color-card: hsl(222 18% 10%);
+  --color-card-foreground: hsl(215 20% 92%);
+  --color-primary: hsl(210 100% 50%);
+  --color-primary-foreground: hsl(0 0% 100%);
+  --color-secondary: hsl(222 18% 13%);
+  --color-secondary-foreground: hsl(215 20% 92%);
+  --color-muted: hsl(222 18% 13%);
+  --color-muted-foreground: hsl(215 14% 48%);
+  --color-accent: hsl(222 18% 14%);
+  --color-accent-foreground: hsl(215 20% 92%);
+  --color-border: hsl(222 16% 16%);
+  --color-input: hsl(222 16% 14%);
+  --color-ring: hsl(210 100% 50%);
+  --radius: 0.5rem;
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
+@layer base {
+  .light {
+    --color-background: hsl(0 0% 100%);
+    --color-foreground: hsl(240 10% 4%);
+    --color-card: hsl(0 0% 100%);
+    --color-card-foreground: hsl(240 10% 4%);
+    --color-primary: hsl(210 100% 50%);
+    --color-primary-foreground: hsl(0 0% 100%);
+    --color-secondary: hsl(240 5% 96%);
+    --color-secondary-foreground: hsl(240 6% 10%);
+    --color-muted: hsl(240 5% 96%);
+    --color-muted-foreground: hsl(240 4% 46%);
+    --color-accent: hsl(240 5% 96%);
+    --color-accent-foreground: hsl(240 10% 4%);
+    --color-border: hsl(240 6% 90%);
+    --color-input: hsl(240 6% 90%);
+    --color-ring: hsl(210 100% 50%);
+  }
 }
