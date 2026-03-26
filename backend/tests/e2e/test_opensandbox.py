@@ -12,10 +12,59 @@ import pytest_asyncio
 
 from cubebox.config import config
 
+# Module-level sandbox ID to share across all tests
+_shared_sandbox_id: str | None = None
+
+
+@pytest_asyncio.fixture(scope="module")
+async def shared_sandbox_id():
+    """Create a sandbox once for the entire module and return its ID."""
+    from datetime import timedelta
+
+    import opensandbox
+    from opensandbox.config import ConnectionConfig
+
+    global _shared_sandbox_id
+
+    if _shared_sandbox_id is not None:
+        yield _shared_sandbox_id
+        return
+
+    # Create sandbox once
+    try:
+        raw_sandbox = await opensandbox.Sandbox.create(
+            config.sandbox.image,
+            connection_config=ConnectionConfig(
+                domain=config.sandbox.domain,
+                request_timeout=timedelta(seconds=60),
+            ),
+        )
+        _shared_sandbox_id = raw_sandbox.id
+        print(f"\n[Module Setup] Created shared sandbox: {_shared_sandbox_id}")
+
+        yield _shared_sandbox_id
+
+        # Cleanup at module teardown
+        print(f"\n[Module Teardown] Killing shared sandbox: {_shared_sandbox_id}")
+        try:
+            await raw_sandbox.kill()
+        except Exception as e:
+            print(f"Warning: Failed to kill sandbox: {e}")
+
+        try:
+            await raw_sandbox.close()
+        except Exception as e:
+            print(f"Warning: Failed to close sandbox: {e}")
+
+        _shared_sandbox_id = None
+
+    except Exception as e:
+        pytest.skip(f"OpenSandbox service not available: {e}")
+
 
 @pytest_asyncio.fixture(scope="function")
-async def sandbox():
-    """Create and cleanup OpenSandbox instance for each test."""
+async def sandbox(shared_sandbox_id):
+    """Connect to the shared sandbox for each test (avoids event loop conflicts)."""
     from datetime import timedelta
 
     import opensandbox
@@ -23,28 +72,21 @@ async def sandbox():
 
     from cubebox.sandbox.opensandbox import OpenSandbox
 
-    # Create sandbox with correct config (use domain, not base_url)
-    try:
-        raw_sandbox = await opensandbox.Sandbox.create(
-            config.sandbox.image,  # Use image from config
-            connection_config=ConnectionConfig(
-                domain=config.sandbox.domain,
-                request_timeout=timedelta(seconds=60),
-            ),
-        )
-    except Exception as e:
-        pytest.skip(f"OpenSandbox service not available: {e}")
+    # Connect to existing sandbox (creates new httpx client for current event loop)
+    raw_sandbox = await opensandbox.Sandbox.connect(
+        shared_sandbox_id,
+        connection_config=ConnectionConfig(
+            domain=config.sandbox.domain,
+            request_timeout=timedelta(seconds=60),
+        ),
+        skip_health_check=True,  # Skip health check since sandbox is already ready
+    )
 
     backend = OpenSandbox(sandbox=raw_sandbox)
 
     yield backend
 
-    # Cleanup: kill first, then close
-    try:
-        await raw_sandbox.kill()
-    except Exception:
-        pass  # Ignore kill errors
-
+    # Close local resources (but don't kill the sandbox)
     try:
         await raw_sandbox.close()
     except Exception:
