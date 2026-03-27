@@ -1,40 +1,45 @@
 @import "tailwindcss";
 
+/* Default: light mode */
 @theme {
-  --color-background: hsl(222 20% 7%);
-  --color-foreground: hsl(215 20% 92%);
-  --color-card: hsl(222 18% 10%);
-  --color-card-foreground: hsl(215 20% 92%);
-  --color-primary: hsl(210 100% 50%);
+  --color-background: hsl(0 0% 100%);
+  --color-foreground: hsl(240 10% 4%);
+  --color-card: hsl(0 0% 100%);
+  --color-card-foreground: hsl(240 10% 4%);
+  /* hsl(210 100% 38%) ≈ #0061C2 — white text on this gives ~6.2:1, passes WCAG AA */
+  --color-primary: hsl(210 100% 38%);
   --color-primary-foreground: hsl(0 0% 100%);
-  --color-secondary: hsl(222 18% 13%);
-  --color-secondary-foreground: hsl(215 20% 92%);
-  --color-muted: hsl(222 18% 13%);
-  --color-muted-foreground: hsl(215 14% 48%);
-  --color-accent: hsl(222 18% 14%);
-  --color-accent-foreground: hsl(215 20% 92%);
-  --color-border: hsl(222 16% 16%);
-  --color-input: hsl(222 16% 14%);
-  --color-ring: hsl(210 100% 50%);
+  --color-secondary: hsl(240 5% 96%);
+  --color-secondary-foreground: hsl(240 6% 10%);
+  --color-muted: hsl(240 5% 96%);
+  /* hsl(240 5% 38%) ≈ #5c5c66 — on white gives ~5.9:1, passes WCAG AA */
+  --color-muted-foreground: hsl(240 5% 38%);
+  --color-accent: hsl(240 5% 96%);
+  --color-accent-foreground: hsl(240 10% 4%);
+  --color-border: hsl(240 6% 90%);
+  --color-input: hsl(240 6% 90%);
+  --color-ring: hsl(210 100% 38%);
   --radius: 0.5rem;
 }
 
 @layer base {
-  .light {
-    --color-background: hsl(0 0% 100%);
-    --color-foreground: hsl(240 10% 4%);
-    --color-card: hsl(0 0% 100%);
-    --color-card-foreground: hsl(240 10% 4%);
-    --color-primary: hsl(210 100% 50%);
-    --color-primary-foreground: hsl(0 0% 100%);
-    --color-secondary: hsl(240 5% 96%);
-    --color-secondary-foreground: hsl(240 6% 10%);
-    --color-muted: hsl(240 5% 96%);
-    --color-muted-foreground: hsl(240 4% 46%);
-    --color-accent: hsl(240 5% 96%);
-    --color-accent-foreground: hsl(240 10% 4%);
-    --color-border: hsl(240 6% 90%);
-    --color-input: hsl(240 6% 90%);
-    --color-ring: hsl(210 100% 50%);
+  .dark {
+    --color-background: hsl(222 20% 7%);
+    --color-foreground: hsl(215 20% 92%);
+    --color-card: hsl(222 18% 10%);
+    --color-card-foreground: hsl(215 20% 92%);
+    /* hsl(210 100% 62%) ≈ #3d9eff — on dark bg gives ~6.8:1, passes WCAG AA */
+    --color-primary: hsl(210 100% 62%);
+    --color-primary-foreground: hsl(222 20% 7%);
+    --color-secondary: hsl(222 18% 13%);
+    --color-secondary-foreground: hsl(215 20% 92%);
+    --color-muted: hsl(222 18% 13%);
+    /* hsl(215 14% 62%) — on dark bg gives ~5.8:1, passes WCAG AA */
+    --color-muted-foreground: hsl(215 14% 62%);
+    --color-accent: hsl(222 18% 14%);
+    --color-accent-foreground: hsl(215 20% 92%);
+    --color-border: hsl(222 16% 16%);
+    --color-input: hsl(222 16% 14%);
+    --color-ring: hsl(210 100% 62%);
   }
 }

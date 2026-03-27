@@ -144,10 +144,20 @@ class MCPManager:
                 all_tools.extend(tools)
 
             except Exception as e:
-                logger.warning(
-                    "MCP server '{}' failed to load tools: {}. Skipping.",
-                    server_name,
-                    str(e),
-                )
+                cause = e
+                if isinstance(e, BaseExceptionGroup):
+                    causes = "; ".join(str(sub) for sub in e.exceptions)
+                    logger.warning(
+                        "MCP server '{}' failed to load tools: {} (causes: {}). Skipping.",
+                        server_name,
+                        str(e),
+                        causes,
+                    )
+                else:
+                    logger.warning(
+                        "MCP server '{}' failed to load tools: {}. Skipping.",
+                        server_name,
+                        str(cause),
+                    )
 
         return all_tools
