@@ -1,62 +1,139 @@
 """MCP (Model Context Protocol) Client
 
 Manages connections to MCP servers and tool integration.
+Uses langchain-mcp-adapters MultiServerMCPClient to connect to servers
+and expose their tools as LangChain BaseTool instances.
 """
 
-from typing import Any
+from typing import Any, cast
+
+from langchain_core.tools import BaseTool
+from langchain_mcp_adapters.client import MultiServerMCPClient
+from langchain_mcp_adapters.sessions import Connection
+from loguru import logger
 
 
-class MCPClient:
-    """Client for MCP server communication"""
+def _build_connection_params(
+    server_name: str, server_config: dict[str, Any]
+) -> dict[str, Any] | None:
+    """
+    Build MultiServerMCPClient connection params for one server.
 
-    def __init__(self, config: dict[str, Any]):
-        """
-        Initialize MCP client.
+    Returns None if the transport is unsupported.
+    """
+    transport = server_config.get("transport")
 
-        Args:
-            config: MCP server configuration
-        """
-        self.config = config
-        self.client = None
+    if transport in ("streamable_http", "sse"):
+        params: dict[str, Any] = {
+            "url": server_config["url"],
+            "transport": transport,
+        }
+        key = server_config.get("key")
+        if key:
+            params["headers"] = {"Authorization": f"Bearer {key}"}
+        return params
 
-    async def connect(self) -> None:
-        """Connect to MCP server"""
-        # TODO: Implement MCP connection
-        pass
+    elif transport == "stdio":
+        params = {
+            "command": server_config["command"],
+            "args": server_config.get("args", []),
+            "transport": "stdio",
+        }
+        env = server_config.get("env")
+        if env:
+            params["env"] = env
+        return params
 
-    async def disconnect(self) -> None:
-        """Disconnect from MCP server"""
-        # TODO: Implement MCP disconnection
-        pass
-
-    async def list_tools(self) -> list[dict[str, Any]]:
-        """
-        List available tools from MCP server.
-
-        Returns:
-            List of tool definitions
-        """
-        # TODO: Implement tool listing
-        return []
-
-    async def call_tool(self, tool_name: str, arguments: dict[str, Any]) -> Any:
-        """
-        Call a tool on the MCP server.
-
-        Args:
-            tool_name: Name of the tool
-            arguments: Tool arguments
-
-        Returns:
-            Tool result
-        """
-        # TODO: Implement tool calling
-        raise NotImplementedError("MCP tool calling not yet implemented")
+    else:
+        logger.warning(
+            "MCP server '{}': unsupported transport '{}', skipping", server_name, transport
+        )
+        return None
 
 
 class MCPManager:
-    """Manager for multiple MCP servers"""
+    """
+    Manager for MCP server connections.
 
-    def __init__(self) -> None:
-        """Initialize MCP manager"""
-        self.clients: dict[str, MCPClient] = {}
+    Wraps MultiServerMCPClient to connect to configured MCP servers,
+    fetch their tools, and apply optional per-server tool filtering.
+    """
+
+    def __init__(self, servers: dict[str, Any] | None = None) -> None:
+        """
+        Initialize MCPManager.
+
+        Args:
+            servers: Dict of server configs keyed by server name.
+                     If None, loads from dynaconf config.
+        """
+        self._server_configs: dict[str, Any] = {}
+
+        if servers is not None:
+            self._load_from_dict(servers)
+        else:
+            self._load_from_config()
+
+    def _load_from_dict(self, servers: dict[str, Any]) -> None:
+        """Load server configs from a dict (used in tests)."""
+        for server_name, server_config in servers.items():
+            if not server_config.get("enabled", True):
+                logger.debug("MCP server '{}' is disabled, skipping", server_name)
+                continue
+            self._server_configs[server_name] = server_config
+
+    def _load_from_config(self) -> None:
+        """Load server configs from dynaconf config."""
+        from cubebox.config import config
+
+        servers = config.get("mcp.servers", {})
+        if not servers:
+            return
+        self._load_from_dict(servers)
+
+    async def load_tools(self) -> list[BaseTool]:
+        """
+        Connect to all enabled MCP servers and return their tools.
+
+        Per-server failures are caught and logged as warnings — the method
+        always returns whatever tools were successfully loaded.
+
+        Returns:
+            List of BaseTool instances from all reachable servers.
+        """
+        if not self._server_configs:
+            return []
+
+        all_tools: list[BaseTool] = []
+
+        for server_name, server_config in self._server_configs.items():
+            try:
+                params = _build_connection_params(server_name, server_config)
+                if params is None:
+                    continue
+
+                client = MultiServerMCPClient({server_name: cast(Connection, params)})
+                tools: list[BaseTool] = await client.get_tools()
+
+                # Filter to requested tool names if specified
+                allowed: list[str] | None = server_config.get("tools")
+                if allowed:
+                    allowed_set = set(allowed)
+                    tools = [t for t in tools if t.name in allowed_set]
+
+                logger.info(
+                    "MCP server '{}': loaded {} tool(s): {}",
+                    server_name,
+                    len(tools),
+                    [t.name for t in tools],
+                )
+                all_tools.extend(tools)
+
+            except Exception as e:
+                logger.warning(
+                    "MCP server '{}' failed to load tools: {}. Skipping.",
+                    server_name,
+                    str(e),
+                )
+
+        return all_tools
