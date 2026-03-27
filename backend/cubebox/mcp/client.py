@@ -96,7 +96,7 @@ class MCPManager:
         """Load server configs from dynaconf config."""
         from cubebox.config import config
 
-        if not config.get("mcp.enabled", True):
+        if not config.get("mcp.enabled", False):
             logger.debug("MCP is globally disabled, skipping all servers")
             return
 
