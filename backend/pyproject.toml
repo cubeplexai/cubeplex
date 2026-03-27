@@ -19,6 +19,7 @@ dependencies = [
     "langchain>=1.2.10",
     "langchain-core>=1.2.17",
     "langchain-openai>=1.1.10",
+    "langchain-mcp-adapters>=0.1.0",
     "langgraph>=1.0.10",
     "yarl>=1.23.0",
     "deepagents>=0.4.5",
