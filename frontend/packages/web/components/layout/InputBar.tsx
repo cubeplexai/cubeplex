@@ -38,7 +38,10 @@ export function InputBar({ conversationId, onSubmit, isLoading = false }: InputB
   }
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && e.ctrlKey) {
+    // Skip if IME is composing (e.g., selecting Chinese characters)
+    if (e.nativeEvent.isComposing) return
+
+    if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
       handleSubmit()
     }
@@ -79,7 +82,7 @@ export function InputBar({ conversationId, onSubmit, isLoading = false }: InputB
           }
         </button>
       </div>
-      <p className="text-center mt-1 text-[10px] text-muted-foreground/35">Ctrl+Enter 发送</p>
+      <p className="text-center mt-1 text-[10px] text-muted-foreground/35">Enter 发送 / Shift+Enter 换行</p>
     </div>
   )
 }
