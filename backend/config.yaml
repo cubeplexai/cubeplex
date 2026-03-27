@@ -91,7 +91,7 @@ default:
   # MCP Configuration
   mcp:
     enabled: false
-    servers: []
+    servers: {}
 
   langsmith:
     enabled: true

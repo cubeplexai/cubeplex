@@ -13,3 +13,15 @@ development:
     enabled: true
     domain: "localhost:8090"
     image: "hub.sensedeal.vip/library/cubebox-sandbox:24.04-20260311"
+
+  mcp:
+    enabled: true
+    servers:
+      webtools:
+        url: "http://localhost:8020/api/webtools"
+        transport: streamable_http
+        key: "Pu9bKu1h9yGd9slVf9c9ugxCYd7f3f0V=="
+        tools:
+          - web_search
+          - web_fetch
+        enabled: true
