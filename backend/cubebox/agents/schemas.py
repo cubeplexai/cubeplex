@@ -36,39 +36,46 @@ class ChainStartEvent(AgentEvent):
     data: dict[str, Any] = Field(description="Event data with input")
 
 
-class LLMStartEvent(AgentEvent):
-    """Event emitted when LLM call starts"""
+class TextDeltaEvent(AgentEvent):
+    """Token-level text delta for streaming output.
 
-    type: Literal["llm_start"] = "llm_start"
-    data: dict[str, Any] = Field(description="Event data with model and messages")
+    Emitted as LLM generates text tokens. Content is incremental.
+    """
 
-
-class LLMEndEvent(AgentEvent):
-    """Event emitted when LLM call ends"""
-
-    type: Literal["llm_end"] = "llm_end"
-    data: dict[str, Any] = Field(description="Event data with output and usage")
+    type: Literal["text_delta"] = "text_delta"
+    data: dict[str, Any] = Field(description="Event data with text delta and finish reason")
 
 
-class ToolStartEvent(AgentEvent):
-    """Event emitted when tool execution starts"""
+class ReasoningEvent(AgentEvent):
+    """Model reasoning/thinking process output.
 
-    type: Literal["tool_start"] = "tool_start"
-    data: dict[str, Any] = Field(description="Event data with tool name and input")
+    Emitted when model generates reasoning content (if supported).
+    """
 
-
-class ToolEndEvent(AgentEvent):
-    """Event emitted when tool execution ends"""
-
-    type: Literal["tool_end"] = "tool_end"
-    data: dict[str, Any] = Field(description="Event data with tool name and output")
+    type: Literal["reasoning"] = "reasoning"
+    data: dict[str, Any] = Field(description="Event data with reasoning content")
 
 
-class ChainEndEvent(AgentEvent):
-    """Event emitted when chain execution ends"""
+class ToolCallEvent(AgentEvent):
+    """Tool invocation start event.
 
-    type: Literal["chain_end"] = "chain_end"
-    data: dict[str, Any] = Field(description="Event data with output")
+    Emitted when model decides to call a tool.
+    """
+
+    type: Literal["tool_call"] = "tool_call"
+    data: dict[str, Any] = Field(
+        description="Event data with tool name, arguments, and tool call id"
+    )
+
+
+class ToolResultEvent(AgentEvent):
+    """Tool execution result event.
+
+    Emitted after a tool finishes execution.
+    """
+
+    type: Literal["tool_result"] = "tool_result"
+    data: dict[str, Any] = Field(description="Event data with tool name and result content")
 
 
 class ErrorEvent(AgentEvent):
