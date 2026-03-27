@@ -8,7 +8,7 @@ from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 from typing import Any
 
-from langchain_core.tools import StructuredTool
+from langchain_core.tools import BaseTool
 from loguru import logger
 
 from cubebox.agents.schemas import (
@@ -83,12 +83,12 @@ class DeepAgentExecutor:
             logger.error("Failed to create LLM: {}", str(e))
             raise
 
-    def _load_tools(self) -> list[StructuredTool]:
+    def _load_tools(self) -> list[BaseTool]:
         """
         Load tools from the tool registry.
 
         Returns:
-            List of StructuredTool instances
+            List of BaseTool instances
         """
         try:
             registry = get_registry()

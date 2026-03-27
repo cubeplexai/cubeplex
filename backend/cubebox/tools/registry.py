@@ -4,9 +4,7 @@ Manages registration and retrieval of tools for agents.
 Supports both built-in tools and MCP-provided tools.
 """
 
-from typing import Any
-
-from langchain_core.tools import StructuredTool
+from langchain_core.tools import BaseTool
 
 
 class ToolRegistry:
@@ -14,30 +12,18 @@ class ToolRegistry:
 
     def __init__(self) -> None:
         """Initialize the tool registry"""
-        self._tools: dict[str, StructuredTool] = {}
-        self._mcp_clients: dict[str, Any] = {}
+        self._tools: dict[str, BaseTool] = {}
 
-    def register_tool(self, tool: StructuredTool) -> None:
+    def register_tool(self, tool: BaseTool) -> None:
         """
-        Register a built-in tool.
+        Register a tool.
 
         Args:
-            tool: StructuredTool instance to register
+            tool: BaseTool instance to register
         """
         self._tools[tool.name] = tool
 
-    def register_mcp_server(self, server_name: str, config: dict[str, Any]) -> None:
-        """
-        Register an MCP server.
-
-        Args:
-            server_name: Name of the MCP server
-            config: MCP server configuration
-        """
-        # TODO: Implement MCP server registration
-        pass
-
-    def get_tool(self, name: str) -> StructuredTool | None:
+    def get_tool(self, name: str) -> BaseTool | None:
         """
         Get a tool by name.
 
@@ -45,16 +31,16 @@ class ToolRegistry:
             name: Tool name
 
         Returns:
-            StructuredTool instance or None if not found
+            BaseTool instance or None if not found
         """
         return self._tools.get(name)
 
-    def list_tools(self) -> list[StructuredTool]:
+    def list_tools(self) -> list[BaseTool]:
         """
         List all registered tools.
 
         Returns:
-            List of StructuredTool instances
+            List of BaseTool instances
         """
         return list(self._tools.values())
 
