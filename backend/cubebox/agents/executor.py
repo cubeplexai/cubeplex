@@ -122,7 +122,7 @@ class DeepAgentExecutor:
         - tool_result: Tool execution result
 
         Args:
-            chunk: A tuple of (run_id, message_dict) from stream_mode="messages"
+            chunk: A tuple of (message, metadata) from stream_mode="messages"
 
         Yields:
             AgentEvent instances
@@ -130,25 +130,34 @@ class DeepAgentExecutor:
         timestamp = self._get_current_timestamp()
         events: list[AgentEvent] = []
 
-        # stream_mode="messages" returns (run_id, message_dict)
+        # stream_mode="messages" returns (message, metadata_dict)
+        # message can be AIMessageChunk or ToolMessage
         if not isinstance(chunk, tuple) or len(chunk) < 2:
             return events
 
-        _, msg = chunk
-        if not isinstance(msg, dict):
-            return events
+        msg, metadata = chunk
 
-        # Extract common fields
-        content = msg.get("content", "")
-        additional_kwargs = msg.get("additional_kwargs", {})
-        response_metadata = msg.get("response_metadata", {})
-        tool_calls = msg.get("tool_calls", [])
+        # Get content and attributes from the message object
+        # Message can be a dict or an AIMessageChunk object
+        if isinstance(msg, dict):
+            content = msg.get("content", "")
+            additional_kwargs = msg.get("additional_kwargs", {})
+            response_metadata = msg.get("response_metadata", {})
+            tool_calls = msg.get("tool_calls", [])
+            usage_metadata = msg.get("usage_metadata", {})
+        else:
+            # It's an AIMessageChunk or similar object
+            content = getattr(msg, "content", "") or ""
+            additional_kwargs = getattr(msg, "additional_kwargs", {}) or {}
+            response_metadata = getattr(msg, "response_metadata", {}) or {}
+            tool_calls = getattr(msg, "tool_calls", []) or []
+            usage_metadata = getattr(msg, "usage_metadata", {}) or {}
+
         finish_reason = response_metadata.get("finish_reason")
-        chunk_position = msg.get("chunk_position")
-        usage_metadata = msg.get("usage_metadata", {})
+        chunk_position = metadata.get("chunk_position") if isinstance(metadata, dict) else None
 
         # Check for reasoning content (thinking process)
-        reasoning_content = additional_kwargs.get("reasoning_content", "")
+        reasoning_content = additional_kwargs.get("reasoning_content", "") if additional_kwargs else ""
         if reasoning_content:
             events.append(
                 ReasoningEvent(
@@ -175,7 +184,11 @@ class DeepAgentExecutor:
 
         # Check for tool result (tool execution completed)
         # Tool messages have 'name' field set to tool name
-        tool_name = msg.get("name")
+        if isinstance(msg, dict):
+            tool_name = msg.get("name")
+        else:
+            tool_name = getattr(msg, "name", None)
+
         if tool_name and content:
             events.append(
                 ToolResultEvent(
@@ -189,16 +202,16 @@ class DeepAgentExecutor:
             logger.debug("[STREAM] Tool result: {} ({} chars)", tool_name, len(str(content)))
 
         # Check for text content (final response tokens)
-        # Only emit if there's actual content and it's a meaningful chunk
-        if content and finish_reason == "stop":
+        # Emit for any chunk with actual content
+        if content:
             events.append(
                 TextDeltaEvent(
                     timestamp=timestamp,
                     data={
                         "content": content,
                         "usage": {
-                            "input_tokens": usage_metadata.get("input_tokens", 0),
-                            "output_tokens": usage_metadata.get("output_tokens", 0),
+                            "input_tokens": usage_metadata.get("input_tokens", 0) if usage_metadata else 0,
+                            "output_tokens": usage_metadata.get("output_tokens", 0) if usage_metadata else 0,
                         },
                     },
                 )
