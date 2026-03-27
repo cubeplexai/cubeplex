@@ -24,8 +24,12 @@ def _build_connection_params(
     transport = server_config.get("transport")
 
     if transport in ("streamable_http", "sse"):
+        url = server_config.get("url")
+        if not url:
+            logger.warning("MCP server '{}': missing required 'url' field, skipping", server_name)
+            return None
         params: dict[str, Any] = {
-            "url": server_config["url"],
+            "url": url,
             "transport": transport,
         }
         key = server_config.get("key")
@@ -34,8 +38,14 @@ def _build_connection_params(
         return params
 
     elif transport == "stdio":
+        command = server_config.get("command")
+        if not command:
+            logger.warning(
+                "MCP server '{}': missing required 'command' field, skipping", server_name
+            )
+            return None
         params = {
-            "command": server_config["command"],
+            "command": command,
             "args": server_config.get("args", []),
             "transport": "stdio",
         }
@@ -85,6 +95,10 @@ class MCPManager:
     def _load_from_config(self) -> None:
         """Load server configs from dynaconf config."""
         from cubebox.config import config
+
+        if not config.get("mcp.enabled", True):
+            logger.debug("MCP is globally disabled, skipping all servers")
+            return
 
         servers = config.get("mcp.servers", {})
         if not servers:

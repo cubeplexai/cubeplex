@@ -54,6 +54,7 @@ class TestMCPManager:
         mock_client.get_tools = AsyncMock(return_value=[tool_a, tool_b])
 
         import cubebox.mcp.client as mcp_module
+
         monkeypatch.setattr(mcp_module, "MultiServerMCPClient", lambda params: mock_client)
 
         manager = MCPManager(
@@ -84,6 +85,7 @@ class TestMCPManager:
         mock_client.get_tools = AsyncMock(return_value=[tool_a, tool_b])
 
         import cubebox.mcp.client as mcp_module
+
         monkeypatch.setattr(mcp_module, "MultiServerMCPClient", lambda params: mock_client)
 
         manager = MCPManager(
