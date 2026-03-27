@@ -30,43 +30,25 @@ class DeepAgentExecutor:
     def __init__(
         self,
         *,
-        sandbox_domain: str | None = None,
-        sandbox_image: str | None = None,
+        sandbox: Any | None = None,
         checkpointer: Any | None = None,
     ) -> None:
         """
         Initialize the DeepAgentExecutor.
 
-        Creates LLM instance, loads tools from registry, and optionally creates sandbox.
+        Creates LLM instance, loads tools from registry, and accepts an optional
+        sandbox backend managed externally by SandboxManager.
 
         Args:
-            sandbox_domain: OpenSandbox server domain (e.g., "localhost:8090")
-                          If None, reads from config.sandbox.domain
-            sandbox_image: Docker image for sandbox (e.g., "ubuntu:22.04")
-                         If None, reads from config.sandbox.image
+            sandbox: An OpenSandbox backend instance (managed by SandboxManager).
+                    If None, the agent runs without sandbox.
             checkpointer: Optional LangGraph checkpoint saver for conversation persistence
         """
-        from cubebox.config import config
-
         logger.info("Initializing DeepAgentExecutor")
         self.llm = self._create_llm()
         self.tools = self._load_tools()
         self.checkpointer = checkpointer
-
-        # Use provided values or fall back to config
-        # Only use config if sandbox is enabled
-        sandbox_enabled = config.get("sandbox.enabled", False)
-        if sandbox_enabled:
-            self.sandbox_domain = sandbox_domain or config.get("sandbox.domain")
-            self.sandbox_image = sandbox_image or config.get("sandbox.image")
-            self.sandbox_api_key = config.get("sandbox.api_key")
-        else:
-            # If sandbox not enabled in config, only use explicitly provided values
-            self.sandbox_domain = sandbox_domain
-            self.sandbox_image = sandbox_image
-            self.sandbox_api_key = None
-
-        self._sandbox: Any | None = None
+        self._sandbox = sandbox
         logger.info("DeepAgentExecutor initialized with {} tools", len(self.tools))
 
     def _create_llm(self) -> Any:
@@ -118,102 +100,6 @@ class DeepAgentExecutor:
         except Exception as e:
             logger.error("Failed to load tools: {}", str(e))
             raise
-
-    async def _create_sandbox(self) -> Any:
-        """
-        Create OpenSandbox instance if configured.
-
-        Returns:
-            OpenSandbox backend instance or None if not configured
-
-        Raises:
-            Exception: If sandbox creation fails
-        """
-        if not self.sandbox_domain or not self.sandbox_image:
-            logger.info("Sandbox not configured, skipping sandbox creation")
-            return None
-
-        try:
-            from datetime import timedelta
-
-            import opensandbox
-            from opensandbox.config import ConnectionConfig
-
-            from cubebox.sandbox.opensandbox import OpenSandbox
-
-            logger.info(
-                "Creating OpenSandbox with domain: {}, image: {}",
-                self.sandbox_domain,
-                self.sandbox_image,
-            )
-
-            # Create connection config
-            config = ConnectionConfig(
-                domain=self.sandbox_domain,
-                api_key=self.sandbox_api_key,
-                request_timeout=timedelta(seconds=60),
-            )
-
-            # Create sandbox instance
-            sandbox = await opensandbox.Sandbox.create(
-                self.sandbox_image,
-                connection_config=config,
-                timeout=timedelta(minutes=10),
-            )
-
-            # Wrap with DeepAgents backend
-            backend = OpenSandbox(sandbox=sandbox)
-            logger.info("OpenSandbox created successfully: {}", backend.id)
-
-            # Sync skills to sandbox
-            await self._sync_skills_to_sandbox(backend)
-
-            return backend
-
-        except Exception as e:
-            logger.error("Failed to create sandbox: {}", str(e))
-            raise
-
-    async def _sync_skills_to_sandbox(self, backend: Any) -> None:
-        """Sync builtin skills to the sandbox container.
-
-        Loads skills from the local filesystem and uploads them to the container's
-        /.skills directory. This is called automatically after sandbox creation.
-
-        Args:
-            backend: OpenSandbox backend instance
-        """
-        from pathlib import Path
-
-        from cubebox.config import config
-        from cubebox.sandbox.skills import SkillLoader
-
-        # Check if skills sync is enabled
-        skills_enabled = config.get("sandbox.skills.enabled", True)
-        if not skills_enabled:
-            logger.info("Skills sync disabled in config")
-            return
-
-        # Get skills directory from config or use default
-        skills_dir_str = config.get("sandbox.skills.builtin_dir", "skills/builtin")
-        backend_dir = Path(__file__).parent.parent.parent
-        skills_dir = backend_dir / skills_dir_str
-
-        if not skills_dir.exists():
-            logger.warning("Skills directory not found: {}", skills_dir)
-            return
-
-        # Load skills from filesystem
-        loader = SkillLoader(skills_dir)
-        files = loader.load_builtin()
-
-        if not files:
-            logger.info("No skill files to sync")
-            return
-
-        # Sync to sandbox
-        await backend.sync_skills(files)
-        logger.info("Synced {} skill files to sandbox", len(files))
 
     def _get_current_timestamp(self) -> str:
         """
@@ -332,10 +218,6 @@ class DeepAgentExecutor:
             # Import here to avoid circular imports
             from deepagents import create_deep_agent
 
-            # Create sandbox if configured (always create fresh to avoid event loop issues)
-            if self.sandbox_domain and self.sandbox_image:
-                self._sandbox = await self._create_sandbox()
-
             # Create agent with optional sandbox backend
             if self._sandbox:
                 logger.info("Creating agent with sandbox backend: {}", self._sandbox.id)
@@ -404,14 +286,3 @@ class DeepAgentExecutor:
             )
             # Yield done event even on error
             yield DoneEvent(timestamp=self._get_current_timestamp())
-        finally:
-            # Cleanup sandbox if created
-            if self._sandbox:
-                try:
-                    logger.info("Cleaning up sandbox: {}", self._sandbox.id)
-                    # Get the underlying opensandbox instance and kill it
-                    await self._sandbox._sandbox.kill()
-                    self._sandbox = None
-                    logger.info("Sandbox cleaned up successfully")
-                except Exception as e:
-                    logger.error("Failed to cleanup sandbox: {}", str(e))

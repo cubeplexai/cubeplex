@@ -9,7 +9,6 @@ class AppState:
 
     def __init__(self) -> None:
         self.llm_client: None = None
-        self.sandbox_client: None = None
         self.mcp_manager: None = None
 
 

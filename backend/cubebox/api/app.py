@@ -7,6 +7,7 @@ Creates and configures the FastAPI application with:
 - Error handling
 """
 
+import asyncio
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -53,10 +54,40 @@ async def lifespan(_app: FastAPI):  # type: ignore
     except Exception as e:
         logger.warning("Failed to initialize LangGraph checkpointer tables: {}", str(e))
 
+    # Initialize SandboxManager and start cleanup loop
+    cleanup_task = None
+    try:
+        from cubebox.config import config
+        from cubebox.db.engine import async_session_maker
+        from cubebox.sandbox.manager import init_sandbox_manager
+
+        sandbox_enabled = config.get("sandbox.enabled", False)
+        if sandbox_enabled:
+            manager = init_sandbox_manager(async_session_maker)
+            logger.info("SandboxManager initialized")
+
+            # Start background cleanup task
+            from cubebox.sandbox.cleanup import sandbox_cleanup_loop
+
+            cleanup_interval = config.get("sandbox.cleanup_interval", 60)
+            cleanup_task = asyncio.create_task(
+                sandbox_cleanup_loop(manager, interval=cleanup_interval)
+            )
+            logger.info("Sandbox cleanup loop started")
+    except Exception as e:
+        logger.warning("Failed to initialize SandboxManager: {}", str(e))
+
     yield
 
     # ==================== Shutdown ====================
     logger.info("Application shutting down")
+    if cleanup_task:
+        cleanup_task.cancel()
+        try:
+            await cleanup_task
+        except asyncio.CancelledError:
+            pass
+        logger.info("Sandbox cleanup loop stopped")
 
 
 def create_app() -> FastAPI:
@@ -72,6 +103,11 @@ def create_app() -> FastAPI:
         version="0.1.0",
         lifespan=lifespan,
     )
+
+    # Register middleware
+    from cubebox.middleware.user_identity import UserIdentityMiddleware
+
+    app.add_middleware(UserIdentityMiddleware)
 
     # Register exception handlers
     from cubebox.api.exceptions import register_exception_handlers

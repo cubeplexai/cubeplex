@@ -5,7 +5,7 @@ from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
 from loguru import logger
 from pydantic import BaseModel
@@ -125,14 +125,13 @@ class SendMessageRequest(BaseModel):
     """Request body for sending a message."""
 
     content: str
-    sandbox_domain: str | None = None
-    sandbox_image: str | None = None
 
 
 @router.post("/{conversation_id}/messages", status_code=status.HTTP_200_OK)
 async def send_message(
     conversation_id: str,
-    request: SendMessageRequest,
+    request_obj: SendMessageRequest,
+    raw_request: Request,
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> StreamingResponse:
     """Send a user message to a conversation and stream assistant response via SSE."""
@@ -144,7 +143,7 @@ async def send_message(
             detail=f"Conversation {conversation_id} not found",
         )
 
-    if not request.content or not request.content.strip():
+    if not request_obj.content or not request_obj.content.strip():
         raise InvalidInputError(
             message="Content field cannot be empty",
             details="Please provide a non-empty content string",
@@ -155,24 +154,44 @@ async def send_message(
     await msg_repo.create(
         conversation_id=conversation_id,
         role="user",
-        content=request.content,
+        content=request_obj.content,
     )
+
+    # Get user_id from middleware
+    user_id: str = getattr(raw_request.state, "user_id", "anonymous")
 
     async def event_generator() -> AsyncIterator[str]:
         collected_events: list[dict[str, object]] = []
         checkpointer = None
+        sandbox = None
+        sandbox_manager = None
 
         try:
             from cubebox.agents.checkpointer import create_checkpointer
 
             checkpointer = await create_checkpointer()
+
+            # Get or create sandbox for this user via SandboxManager
+            from cubebox.config import config
+
+            sandbox_enabled = config.get("sandbox.enabled", False)
+            if sandbox_enabled:
+                try:
+                    from cubebox.sandbox.manager import get_sandbox_manager
+
+                    sandbox_manager = get_sandbox_manager()
+                    sandbox = await sandbox_manager.get_or_create(user_id)
+                except Exception as e:
+                    logger.warning("Sandbox unavailable, proceeding without: {}", e)
+                    sandbox = None
+                    sandbox_manager = None
+
             executor = DeepAgentExecutor(
-                sandbox_domain=request.sandbox_domain,
-                sandbox_image=request.sandbox_image,
+                sandbox=sandbox,
                 checkpointer=checkpointer,
             )
 
-            async for event in executor.stream(request.content, thread_id=conversation_id):
+            async for event in executor.stream(request_obj.content, thread_id=conversation_id):
                 event_dict = event.model_dump()
                 collected_events.append(event_dict)
                 yield f"data: {json.dumps(event_dict)}\n\n"
@@ -209,6 +228,13 @@ async def send_message(
             yield f"data: {done.model_dump_json()}\n\n"
 
         finally:
+            # Release sandbox (update last activity, do NOT kill)
+            if sandbox_manager and sandbox:
+                try:
+                    await sandbox_manager.release(sandbox.id)
+                except Exception as e:
+                    logger.warning("Error releasing sandbox: {}", str(e))
+
             # Close checkpointer connection if created
             if checkpointer is not None:
                 try:
