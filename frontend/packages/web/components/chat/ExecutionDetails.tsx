@@ -15,11 +15,10 @@ type EventMeta = { label: string; muted: boolean }
 function getEventMeta(type: string, data?: Record<string, unknown>): EventMeta {
   switch (type) {
     case 'chain_start': return { label: '链启动', muted: true }
-    case 'chain_end':   return { label: '链完成', muted: true }
-    case 'llm_start':   return { label: 'LLM 推理', muted: false }
-    case 'llm_end':     return { label: 'LLM 完成', muted: false }
-    case 'tool_start':  return { label: `工具: ${data?.tool_name ?? '调用'}`, muted: false }
-    case 'tool_end':    return { label: '工具完成', muted: true }
+    case 'text_delta':  return { label: '文本生成', muted: false }
+    case 'reasoning':   return { label: '推理中', muted: false }
+    case 'tool_call':   return { label: `工具: ${data?.name ?? '调用'}`, muted: false }
+    case 'tool_result': return { label: '工具完成', muted: true }
     case 'error':       return { label: `错误`, muted: false }
     default:            return { label: type, muted: true }
   }
@@ -27,10 +26,10 @@ function getEventMeta(type: string, data?: Record<string, unknown>): EventMeta {
 
 function getEventDetail(event: AgentEvent): string | null {
   switch (event.type) {
-    case 'tool_start':
-      return event.data?.input ? JSON.stringify(event.data.input).slice(0, 80) : null
-    case 'tool_end':
-      return event.data?.output ? JSON.stringify(event.data.output).slice(0, 80) : null
+    case 'tool_call':
+      return event.data?.arguments ? JSON.stringify(event.data.arguments).slice(0, 80) : null
+    case 'tool_result':
+      return event.data?.content ? JSON.stringify(event.data.content).slice(0, 80) : null
     case 'error':
       return event.data?.message ?? null
     default:
@@ -39,7 +38,7 @@ function getEventDetail(event: AgentEvent): string | null {
 }
 
 function summarize(events: AgentEvent[]): { tools: number; durationMs: number } {
-  const tools = events.filter((e) => e.type === 'tool_start').length
+  const tools = events.filter((e) => e.type === 'tool_call').length
   const durationMs =
     events.length > 1
       ? new Date(events[events.length - 1].timestamp).getTime() -
