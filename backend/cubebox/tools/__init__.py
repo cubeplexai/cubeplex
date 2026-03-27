@@ -44,9 +44,7 @@ def _load_mcp_tools() -> None:
         logger.info("Loaded {} MCP tool(s) into registry", len(tools))
 
     except Exception as e:
-        logger.warning(
-            "Failed to load MCP tools: {}. Continuing without MCP tools.", str(e)
-        )
+        logger.warning("Failed to load MCP tools: {}. Continuing without MCP tools.", str(e))
 
 
 _load_mcp_tools()

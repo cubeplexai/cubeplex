@@ -68,7 +68,8 @@ Single test file: `uv run pytest tests/e2e/test_agents.py`
 **Key components:**
 - `DeepAgentExecutor` (`cubebox/agents/executor.py`) — creates LLM via `LLMFactory`, loads tools from `ToolRegistry`, runs LangGraph agent, yields typed `AgentEvent` subclasses
 - `LLMFactory` (`cubebox/llm/factory.py`) — reads `config.yaml` `llm.providers`, supports OpenAI and OpenAI-compatible endpoints
-- `ToolRegistry` (`cubebox/tools/registry.py`) — registers `StructuredTool` instances; MCP server support is a TODO
+- `ToolRegistry` (`cubebox/tools/registry.py`) — registers `BaseTool` instances (supports built-in `StructuredTool` and MCP tools)
+- `MCPManager` (`cubebox/mcp/client.py`) — connects to MCP servers via `langchain-mcp-adapters`, loads tools at startup
 - Config via dynaconf: `ENV_FOR_DYNACONF=development|production`, env var prefix `CUBEBOX_`, e.g. `CUBEBOX_LLM__PROVIDER`
 
 ## Environment Variables
