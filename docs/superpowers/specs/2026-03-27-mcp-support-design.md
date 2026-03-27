@@ -47,13 +47,14 @@ Each server entry supports:
 - For http transports: `url`, optionally `key` (added as `Authorization: Bearer`)
 - For stdio: `command`, `args`
 - `enabled`: skip server without removing config
+- `tools` (optional): list of tool names to load from this server; if omitted, all tools are loaded. Useful when a server exposes many tools but only a subset are needed.
 
 ### 3. `MCPManager` (`cubebox/mcp/client.py`)
 
 Replaces the existing stub. Responsibilities:
 - Read enabled servers from config
 - Build `MultiServerMCPClient` connection params (same structure as cubemanus `load_config_file()`)
-- `async load_tools() -> list[StructuredTool]`: connect and fetch tools from all servers; catch per-server exceptions and log warning, return whatever tools were successfully loaded
+- `async load_tools() -> list[StructuredTool]`: connect and fetch tools from all servers; if server config has `tools` list, filter to only those names; catch per-server exceptions and log warning, return whatever tools were successfully loaded
 
 ### 4. `cubebox/tools/__init__.py`
 
@@ -79,10 +80,13 @@ mcp:
       url: "http://localhost:8020/api/webtools"
       transport: streamable_http
       key: "Pu9bKu1h9yGd9slVf9c9ugxCYd7f3f0V=="
+      tools:
+        - web_search
+        - web_fetch
       enabled: true
 ```
 
-This provides `web_search` and `web_fetch` tools to the agent.
+`tools` is optional. When specified, only the listed tools are registered from that server. When omitted, all tools the server exposes are loaded.
 
 ## Files Changed
 
