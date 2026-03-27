@@ -1,4 +1,11 @@
-export type AgentEventType = 'chain_start' | 'llm_start' | 'llm_end' | 'tool_start' | 'tool_end' | 'chain_end' | 'error' | 'done'
+export type AgentEventType =
+  | 'chain_start'
+  | 'text_delta'
+  | 'reasoning'
+  | 'tool_call'
+  | 'tool_result'
+  | 'error'
+  | 'done'
 
 export interface AgentEvent {
   type: AgentEventType
@@ -11,32 +18,31 @@ export interface ChainStartEvent extends AgentEvent {
   data: { input: string }
 }
 
-export interface LlmStartEvent extends AgentEvent {
-  type: 'llm_start'
-  data: Record<string, any>
-}
-
-export interface LlmEndEvent extends AgentEvent {
-  type: 'llm_end'
+export interface TextDeltaEvent extends AgentEvent {
+  type: 'text_delta'
   data: {
-    output: string
+    content: string
     usage?: { input_tokens: number; output_tokens: number }
   }
 }
 
-export interface ToolStartEvent extends AgentEvent {
-  type: 'tool_start'
-  data: { tool_name: string; input: Record<string, any> }
+export interface ReasoningEvent extends AgentEvent {
+  type: 'reasoning'
+  data: { content: string }
 }
 
-export interface ToolEndEvent extends AgentEvent {
-  type: 'tool_end'
-  data: { tool_name: string; output: string }
+export interface ToolCallEvent extends AgentEvent {
+  type: 'tool_call'
+  data: {
+    tool_call_id: string
+    name: string
+    arguments: Record<string, any>
+  }
 }
 
-export interface ChainEndEvent extends AgentEvent {
-  type: 'chain_end'
-  data: Record<string, any>
+export interface ToolResultEvent extends AgentEvent {
+  type: 'tool_result'
+  data: { tool_name: string; content: string }
 }
 
 export interface ErrorEvent extends AgentEvent {
