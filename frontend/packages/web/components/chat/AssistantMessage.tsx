@@ -4,10 +4,18 @@ import type { Message, AgentEvent } from '@cubebox/core'
 import { ExecutionDetails } from './ExecutionDetails'
 import { Bot } from 'lucide-react'
 
-function extractFinalText(events: AgentEvent[] | null): string {
+function extractText(events: AgentEvent[] | null): string {
   if (!events) return ''
-  const lastTextDelta = [...events].reverse().find((e) => e.type === 'text_delta')
-  return lastTextDelta?.data?.content ?? ''
+  // text_delta events are incremental — concatenate all chunks
+  return events
+    .filter((e) => e.type === 'text_delta')
+    .map((e) => e.data?.content ?? '')
+    .join('')
+}
+
+function hasToolActivity(events: AgentEvent[] | null): boolean {
+  if (!events) return false
+  return events.some((e) => e.type === 'tool_call' || e.type === 'tool_result' || e.type === 'error')
 }
 
 interface AssistantMessageProps {
@@ -22,7 +30,8 @@ export function AssistantMessage({
   isStreaming = false,
 }: AssistantMessageProps) {
   const events = message?.events ?? streamingEvents
-  const finalText = extractFinalText(events)
+  const text = extractText(events)
+  const showExecutionPanel = hasToolActivity(events) || (isStreaming && !text)
 
   return (
     <div className="flex justify-start gap-2.5">
@@ -30,17 +39,17 @@ export function AssistantMessage({
         <Bot className="size-3.5 text-primary/70" />
       </div>
       <div className="flex-1 max-w-[75%] space-y-2">
-        {events && events.length > 0 && (
+        {showExecutionPanel && events && events.length > 0 && (
           <div className="bg-card border border-border rounded-xl px-3 py-2.5">
             <ExecutionDetails events={events} isStreaming={isStreaming} />
           </div>
         )}
-        {finalText && (
+        {text && (
           <div className="text-sm text-foreground leading-relaxed whitespace-pre-wrap">
-            {finalText}
+            {text}
           </div>
         )}
-        {isStreaming && !finalText && (
+        {isStreaming && !text && (
           <div className="flex items-center gap-1 pl-1">
             <span className="w-1.5 h-1.5 rounded-full bg-primary animate-bounce [animation-delay:0ms]" />
             <span className="w-1.5 h-1.5 rounded-full bg-primary animate-bounce [animation-delay:150ms]" />

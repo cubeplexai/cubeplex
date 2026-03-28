@@ -48,12 +48,16 @@ function summarize(events: AgentEvent[]): { tools: number; durationMs: number } 
 }
 
 export function ExecutionDetails({ events, isStreaming = false }: ExecutionDetailsProps) {
-  const [isOpen, setIsOpen] = useState(isStreaming)
-  const displayEvents = events.filter((e) => e.type !== 'done')
+  // Only show tool calls, tool results, and errors — filter out text/reasoning noise
+  const displayEvents = events.filter(
+    (e) => e.type === 'tool_call' || e.type === 'tool_result' || e.type === 'error'
+  )
+  const hasTools = displayEvents.some((e) => e.type === 'tool_call')
+  const [isOpen, setIsOpen] = useState(hasTools || isStreaming)
 
-  if (displayEvents.length === 0) return null
+  if (displayEvents.length === 0 && !isStreaming) return null
 
-  const { tools, durationMs } = summarize(displayEvents)
+  const { tools, durationMs } = summarize(events.filter((e) => e.type !== 'done'))
 
   return (
     <Collapsible open={isOpen} onOpenChange={setIsOpen}>
@@ -85,6 +89,9 @@ export function ExecutionDetails({ events, isStreaming = false }: ExecutionDetai
 
       <CollapsibleContent className="mt-2">
         <div className="space-y-1 pl-4 border-l border-border/60">
+          {displayEvents.length === 0 && isStreaming && (
+            <div className="text-[11px] text-muted-foreground/50 py-0.5">处理中...</div>
+          )}
           {displayEvents.map((event, idx) => {
             const meta = getEventMeta(event.type, event.data as Record<string, unknown> | undefined)
             const detail = getEventDetail(event)
