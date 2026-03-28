@@ -25,6 +25,15 @@ jobs:
       issues: read
       id-token: write
 
+    env:
+      ANTHROPIC_BASE_URL: ${{ secrets.ANTHROPIC_BASE_URL }}
+      ANTHROPIC_AUTH_TOKEN: ${{ secrets.MINIMAX_API_TOKEN }}
+      ANTHROPIC_MODEL: MiniMax-M2.7
+      ANTHROPIC_SMALL_FAST_MODEL: MiniMax-M2.7
+      ANTHROPIC_DEFAULT_SONNET_MODEL: MiniMax-M2.7
+      ANTHROPIC_DEFAULT_OPUS_MODEL: MiniMax-M2.7
+      ANTHROPIC_DEFAULT_HAIKU_MODEL: MiniMax-M2.7
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -35,7 +44,7 @@ jobs:
         id: claude-review
         uses: anthropics/claude-code-action@v1
         with:
-          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          anthropic_api_key: ${{ secrets.MINIMAX_API_TOKEN }}
           plugin_marketplaces: 'https://github.com/anthropics/claude-code.git'
           plugins: 'code-review@claude-code-plugins'
           prompt: '/code-review:code-review ${{ github.repository }}/pull/${{ github.event.pull_request.number }}'

@@ -24,6 +24,14 @@ jobs:
       issues: read
       id-token: write
       actions: read # Required for Claude to read CI results on PRs
+    env:
+      ANTHROPIC_BASE_URL: ${{ secrets.ANTHROPIC_BASE_URL }}
+      ANTHROPIC_AUTH_TOKEN: ${{ secrets.MINIMAX_API_TOKEN }}
+      ANTHROPIC_MODEL: MiniMax-M2.7
+      ANTHROPIC_SMALL_FAST_MODEL: MiniMax-M2.7
+      ANTHROPIC_DEFAULT_SONNET_MODEL: MiniMax-M2.7
+      ANTHROPIC_DEFAULT_OPUS_MODEL: MiniMax-M2.7
+      ANTHROPIC_DEFAULT_HAIKU_MODEL: MiniMax-M2.7
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -34,7 +42,7 @@ jobs:
         id: claude
         uses: anthropics/claude-code-action@v1
         with:
-          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          anthropic_api_key: ${{ secrets.MINIMAX_API_TOKEN }}
 
           # This is an optional setting that allows Claude to read CI results on PRs
           additional_permissions: |
