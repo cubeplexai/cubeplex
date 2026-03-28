@@ -16,9 +16,10 @@ from cubebox.agents.schemas import (
     ChainStartEvent,
     DoneEvent,
     ErrorEvent,
-    LLMEndEvent,
-    ToolEndEvent,
-    ToolStartEvent,
+    ReasoningEvent,
+    TextDeltaEvent,
+    ToolCallEvent,
+    ToolResultEvent,
 )
 from cubebox.llm.factory import LLMFactory
 from cubebox.tools import get_registry
@@ -110,88 +111,118 @@ class DeepAgentExecutor:
         """
         return datetime.now(UTC).isoformat()
 
-    def _convert_event(self, node_name: str, data: Any) -> AgentEvent | None:
+    def _handle_stream_chunk(self, chunk: Any) -> list[AgentEvent]:
         """
-        Convert DeepAgent node update to AgentEvent.
+        Handle a single chunk from stream_mode="messages".
+
+        Parses the chunk and yields appropriate events based on content type:
+        - text_delta: Token-level text content
+        - reasoning: Model reasoning/thinking
+        - tool_call: Tool invocation
+        - tool_result: Tool execution result
 
         Args:
-            node_name: DeepAgent node name (e.g., 'model', 'tools')
-            data: Node update data
+            chunk: A tuple of (message, metadata) from stream_mode="messages"
 
-        Returns:
-            AgentEvent instance or None if node type not relevant for streaming
+        Yields:
+            AgentEvent instances
         """
         timestamp = self._get_current_timestamp()
+        events: list[AgentEvent] = []
 
-        try:
-            # Handle model node (LLM calls)
-            if node_name == "model":
-                messages = data.get("messages", [])
-                if not messages:
-                    return None
+        # stream_mode="messages" returns (message, metadata_dict)
+        # message can be AIMessageChunk or ToolMessage
+        if not isinstance(chunk, tuple) or len(chunk) < 2:
+            return events
 
-                # Get the last message (most recent AI response)
-                last_msg = messages[-1]
+        msg, metadata = chunk
 
-                # Check if this is a tool call or final response
-                tool_calls = getattr(last_msg, "tool_calls", [])
-                content = getattr(last_msg, "content", "")
-                usage_metadata = getattr(last_msg, "usage_metadata", {})
+        # Get content and attributes from the message object
+        # Message can be a dict or an AIMessageChunk object
+        if isinstance(msg, dict):
+            content = msg.get("content", "")
+            additional_kwargs = msg.get("additional_kwargs", {})
+            response_metadata = msg.get("response_metadata", {})
+            tool_calls = msg.get("tool_calls", [])
+            usage_metadata = msg.get("usage_metadata", {})
+        else:
+            # It's an AIMessageChunk or similar object
+            content = getattr(msg, "content", "") or ""
+            additional_kwargs = getattr(msg, "additional_kwargs", {}) or {}
+            response_metadata = getattr(msg, "response_metadata", {}) or {}
+            tool_calls = getattr(msg, "tool_calls", []) or []
+            usage_metadata = getattr(msg, "usage_metadata", {}) or {}
 
-                if tool_calls:
-                    # This is a tool call - yield tool start events
-                    # We'll return the first tool call as an event
-                    # (multiple tool calls would need multiple events)
-                    tool_call = tool_calls[0]
-                    return ToolStartEvent(
+        finish_reason = response_metadata.get("finish_reason")
+        chunk_position = metadata.get("chunk_position") if isinstance(metadata, dict) else None
+
+        # Check for reasoning content (thinking process)
+        reasoning_content = additional_kwargs.get("reasoning_content", "") if additional_kwargs else ""
+        if reasoning_content:
+            events.append(
+                ReasoningEvent(
+                    timestamp=timestamp,
+                    data={"content": reasoning_content},
+                )
+            )
+            logger.debug("[STREAM] Reasoning: {} chars", len(reasoning_content))
+
+        # Check for tool call (model decided to call a tool)
+        if tool_calls and finish_reason == "tool_calls":
+            for tc in tool_calls:
+                events.append(
+                    ToolCallEvent(
                         timestamp=timestamp,
                         data={
-                            "tool_name": tool_call.get("name", "unknown"),
-                            "input": tool_call.get("args", {}),
+                            "tool_call_id": tc.get("id", ""),
+                            "name": tc.get("name", "unknown"),
+                            "arguments": tc.get("args", {}),
                         },
                     )
-                elif content:
-                    # This is a final response
-                    return LLMEndEvent(
-                        timestamp=timestamp,
-                        data={
-                            "output": content,
-                            "usage": {
-                                "input_tokens": usage_metadata.get("input_tokens", 0),
-                                "output_tokens": usage_metadata.get("output_tokens", 0),
-                            },
-                        },
-                    )
-                else:
-                    # No tool calls and no content - ignore this update
-                    return None
+                )
+                logger.debug("[STREAM] Tool call: {}", tc.get("name", "unknown"))
 
-            # Handle tools node (tool execution results)
-            elif node_name == "tools":
-                messages = data.get("messages", [])
-                if not messages:
-                    return None
+        # Check for tool result (tool execution completed)
+        # Tool messages have 'name' field set to tool name
+        if isinstance(msg, dict):
+            tool_name = msg.get("name")
+        else:
+            tool_name = getattr(msg, "name", None)
 
-                # Get the last tool message
-                last_msg = messages[-1]
-                tool_name = getattr(last_msg, "name", "unknown")
-                content = getattr(last_msg, "content", "")
-
-                return ToolEndEvent(
+        if tool_name and content:
+            events.append(
+                ToolResultEvent(
                     timestamp=timestamp,
                     data={
                         "tool_name": tool_name,
-                        "output": content,
+                        "content": content if isinstance(content, str) else str(content),
                     },
                 )
+            )
+            logger.debug("[STREAM] Tool result: {} ({} chars)", tool_name, len(str(content)))
 
-            # Ignore middleware nodes and other internal nodes
-            else:
-                return None
+        # Check for text content (final response tokens)
+        # Emit for any chunk with actual content
+        if content:
+            events.append(
+                TextDeltaEvent(
+                    timestamp=timestamp,
+                    data={
+                        "content": content,
+                        "usage": {
+                            "input_tokens": usage_metadata.get("input_tokens", 0) if usage_metadata else 0,
+                            "output_tokens": usage_metadata.get("output_tokens", 0) if usage_metadata else 0,
+                        },
+                    },
+                )
+            )
+            logger.debug("[STREAM] Text delta: {} chars", len(content))
 
-        except Exception as e:
-            logger.error("Error converting node {} update: {}", node_name, str(e))
-            return None
+        # Log chunk position for debugging
+        if chunk_position:
+            logger.debug("[STREAM] Chunk position: {}", chunk_position)
+
+        return events
 
     async def stream(
         self, input_text: str, thread_id: str | None = None
@@ -199,8 +230,11 @@ class DeepAgentExecutor:
         """
         Stream agent execution with event conversion.
 
-        Executes the agent with the given input and yields AgentEvent instances
-        for each step in the execution.
+        Uses stream_mode="messages" to get token-level streaming with:
+        - TextDeltaEvent: Token-level text content
+        - ReasoningEvent: Model reasoning/thinking
+        - ToolCallEvent: Tool invocation
+        - ToolResultEvent: Tool execution result
 
         Args:
             input_text: User input question or task
@@ -246,29 +280,26 @@ class DeepAgentExecutor:
                 data={"input": input_text},
             )
 
-            # Stream events from agent
-            event_count = 0
+            # Stream events using messages mode for token-level streaming
+            chunk_count = 0
             config_dict: dict[str, object] = (
                 {"configurable": {"thread_id": thread_id}} if thread_id else {}
             )
+
+            # Use stream_mode="messages" for token-level streaming
             async for chunk in agent.astream(
                 {"messages": [{"role": "user", "content": input_text}]},
-                stream_mode="updates",
+                stream_mode="messages",
                 config=config_dict,  # type: ignore[arg-type]
             ):
-                event_count += 1
-                logger.debug("Received chunk from node: {}", list(chunk.keys()) if chunk else [])
+                chunk_count += 1
+                logger.debug("[STREAM] Raw chunk #{}: {}", chunk_count, chunk)
 
-                # Convert and yield event
-                # Note: chunk is a dict with node_name -> data mapping
-                if isinstance(chunk, dict):
-                    for node_name, data in chunk.items():
-                        converted_event = self._convert_event(node_name, data)
-                        if converted_event:
-                            logger.debug("Yielding event: {}", converted_event.type)
-                            yield converted_event
+                # Handle the chunk and yield any events
+                for event in self._handle_stream_chunk(chunk):
+                    yield event
 
-            logger.info("Agent execution completed with {} chunks", event_count)
+            logger.info("Agent execution completed with {} chunks", chunk_count)
 
             # Yield done event
             yield DoneEvent(timestamp=self._get_current_timestamp())

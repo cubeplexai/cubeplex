@@ -6,8 +6,8 @@ import { Bot } from 'lucide-react'
 
 function extractFinalText(events: AgentEvent[] | null): string {
   if (!events) return ''
-  const lastLlmEnd = [...events].reverse().find((e) => e.type === 'llm_end')
-  return lastLlmEnd?.data?.output ?? ''
+  const lastTextDelta = [...events].reverse().find((e) => e.type === 'text_delta')
+  return lastTextDelta?.data?.content ?? ''
 }
 
 interface AssistantMessageProps {
