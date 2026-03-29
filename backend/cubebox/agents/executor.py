@@ -167,23 +167,31 @@ class DeepAgentExecutor:
             )
             logger.debug("[STREAM] Reasoning: {} chars", len(reasoning_content))
 
-        # Check for tool call (model decided to call a tool)
-        if tool_calls and finish_reason == "tool_calls":
+        # Check for tool call (model decided to call a tool).
+        # Use tool_calls presence directly — finish_reason may not be set in
+        # stream_mode="messages" for all model providers.
+        if tool_calls:
             for tc in tool_calls:
+                tc_name = tc.get("name") if isinstance(tc, dict) else getattr(tc, "name", "unknown")
+                tc_id = tc.get("id", "") if isinstance(tc, dict) else getattr(tc, "id", "")
+                tc_args = tc.get("args", {}) if isinstance(tc, dict) else getattr(tc, "args", {})
+                # Skip incomplete streaming chunks (name not yet resolved)
+                if not tc_name:
+                    continue
                 events.append(
                     ToolCallEvent(
                         timestamp=timestamp,
                         data={
-                            "tool_call_id": tc.get("id", ""),
-                            "name": tc.get("name", "unknown"),
-                            "arguments": tc.get("args", {}),
+                            "tool_call_id": tc_id,
+                            "name": tc_name,
+                            "arguments": tc_args,
                         },
                     )
                 )
-                logger.debug("[STREAM] Tool call: {}", tc.get("name", "unknown"))
+                logger.debug("[STREAM] Tool call: {}", tc_name)
 
-        # Check for tool result (tool execution completed)
-        # Tool messages have 'name' field set to tool name
+        # Check for tool result (tool execution completed).
+        # ToolMessage objects carry tool name in the 'name' field.
         if isinstance(msg, dict):
             tool_name = msg.get("name")
         else:
@@ -200,6 +208,8 @@ class DeepAgentExecutor:
                 )
             )
             logger.debug("[STREAM] Tool result: {} ({} chars)", tool_name, len(str(content)))
+            # Tool result content must NOT be re-emitted as text_delta — return early
+            return events
 
         # Check for text content (final response tokens)
         # Emit for any chunk with actual content

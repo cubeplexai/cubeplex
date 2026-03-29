@@ -26,10 +26,18 @@ function getEventMeta(type: string, data?: Record<string, unknown>): EventMeta {
 
 function getEventDetail(event: AgentEvent): string | null {
   switch (event.type) {
-    case 'tool_call':
-      return event.data?.arguments ? JSON.stringify(event.data.arguments).slice(0, 80) : null
-    case 'tool_result':
-      return event.data?.content ? JSON.stringify(event.data.content).slice(0, 80) : null
+    case 'tool_call': {
+      const args = event.data?.arguments
+      if (!args || (typeof args === 'object' && Object.keys(args).length === 0)) return null
+      const str = typeof args === 'string' ? args : JSON.stringify(args)
+      return str.length > 120 ? str.slice(0, 120) + '…' : str
+    }
+    case 'tool_result': {
+      const content = event.data?.content
+      if (!content) return null
+      const str = typeof content === 'string' ? content : JSON.stringify(content)
+      return str.length > 200 ? str.slice(0, 200) + '…' : str
+    }
     case 'error':
       return event.data?.message ?? null
     default:
