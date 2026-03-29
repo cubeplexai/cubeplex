@@ -153,11 +153,13 @@ class DeepAgentExecutor:
             tool_calls = getattr(msg, "tool_calls", []) or []
             usage_metadata = getattr(msg, "usage_metadata", {}) or {}
 
-        finish_reason = response_metadata.get("finish_reason")
+        response_metadata.get("finish_reason")
         chunk_position = metadata.get("chunk_position") if isinstance(metadata, dict) else None
 
         # Check for reasoning content (thinking process)
-        reasoning_content = additional_kwargs.get("reasoning_content", "") if additional_kwargs else ""
+        reasoning_content = (
+            additional_kwargs.get("reasoning_content", "") if additional_kwargs else ""
+        )
         if reasoning_content:
             events.append(
                 ReasoningEvent(
@@ -220,8 +222,12 @@ class DeepAgentExecutor:
                     data={
                         "content": content,
                         "usage": {
-                            "input_tokens": usage_metadata.get("input_tokens", 0) if usage_metadata else 0,
-                            "output_tokens": usage_metadata.get("output_tokens", 0) if usage_metadata else 0,
+                            "input_tokens": usage_metadata.get("input_tokens", 0)
+                            if usage_metadata
+                            else 0,
+                            "output_tokens": usage_metadata.get("output_tokens", 0)
+                            if usage_metadata
+                            else 0,
                         },
                     },
                 )
