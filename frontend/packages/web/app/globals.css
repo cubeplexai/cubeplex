@@ -1,4 +1,8 @@
 @import "tailwindcss";
+@plugin "@tailwindcss/typography";
+
+/* Use .dark class (not prefers-color-scheme) so dark: variants work with the theme toggle */
+@custom-variant dark (&:where(.dark, .dark *));
 
 /* Default: light mode */
 @theme {

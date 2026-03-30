@@ -19,7 +19,6 @@ logs
 # Node.js / Frontend
 node_modules/
 .next/
-pnpm-lock.yaml
 
 # Claude Code
 .agents/

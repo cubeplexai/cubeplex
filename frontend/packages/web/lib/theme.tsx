@@ -9,7 +9,7 @@ interface ThemeStore {
 }
 
 export const useThemeStore = create<ThemeStore>((set) => ({
-  theme: 'dark',
+  theme: 'light',
   toggle() {
     set((s) => {
       const newTheme = s.theme === 'dark' ? 'light' : 'dark'
@@ -28,7 +28,7 @@ export function useThemeInitializer() {
 
   useEffect(() => {
     const stored = localStorage.getItem('theme') as 'dark' | 'light' | null
-    const initial = stored || 'dark'
+    const initial = stored || 'light'
     if (initial !== theme) {
       toggle()
     }
