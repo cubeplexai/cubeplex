@@ -186,7 +186,12 @@ class ExecuteResult:
     exit_code: int | None = None
 
 class Sandbox(ABC):
-    """Async-first sandbox with execute-only interface."""
+    """Async-first sandbox base class.
+
+    Agent-facing: only `execute` is registered as a tool.
+    Infrastructure-facing: `upload`/`download` for binary file transfer
+    (used by API endpoints, SandboxManager, skills sync — NOT agent tools).
+    """
 
     @property
     @abstractmethod
@@ -196,10 +201,19 @@ class Sandbox(ABC):
     async def execute(self, command: str, *, timeout: int | None = None) -> ExecuteResult: ...
 
     @abstractmethod
+    async def upload(self, files: list[tuple[str, bytes]]) -> None: ...
+
+    @abstractmethod
+    async def download(self, paths: list[str]) -> list[tuple[str, bytes]]: ...
+
+    @abstractmethod
     async def close(self) -> None: ...
 ```
 
-No `read`/`write`/`grep`/`ls` — all handled via shell commands through `execute`.
+- `execute` — the only method exposed to agent as a tool
+- `upload`/`download` — binary file transfer, used by application layer (API endpoints, SandboxManager, skills sync), NOT registered as agent tools
+- No `read`/`write`/`grep`/`ls` — all handled via shell commands through `execute`
+- All sandbox implementations must implement all four methods
 
 #### OpenSandbox Adapter (`sandbox/opensandbox.py`)
 
