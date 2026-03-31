@@ -29,7 +29,7 @@ class AgentEvent(BaseModel):
     data: dict[str, Any] = Field(description="Event data")
     agent_id: str | None = Field(
         default=None,
-        description="None for main agent, 'task:xxx' for subagents",
+        description="None for main agent, 'subagent:<tool_call_id>' for subagents",
     )
     agent_name: str | None = Field(
         default=None,

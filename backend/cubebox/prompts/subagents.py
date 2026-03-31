@@ -2,7 +2,7 @@
 
 SUBAGENT_PROMPT = """## Delegating Tasks to Subagents
 
-You can delegate work to specialized subagents using the `task` tool. Each subagent runs independently and returns a result.
+You can delegate work to specialized subagents using the `subagent` tool. Each subagent runs independently and returns a result.
 
 **When to use subagents:**
 - Tasks that can be parallelized (e.g., researching multiple topics at once)
@@ -28,7 +28,8 @@ Bad: "Research Tesla and BYD" (too broad — split into angles first)
 - **Recursive Decomposition**: If a subagent returns "incomplete" or "needs more specificity," break the task further and redispatch
 
 **Usage:**
+- Give each subagent a short `name` (2-4 words) describing its role, e.g. "Tesla Revenue Research"
 - Provide a clear, self-contained `description` — the subagent has no access to your conversation history
 - Include relevant context (time ranges, source preferences, specific constraints) in the description
 - The subagent returns a single result when complete
-- You can dispatch multiple subagents in parallel by calling `task` multiple times"""
+- You can dispatch multiple subagents in parallel by calling `subagent` multiple times"""
