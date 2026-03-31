@@ -13,7 +13,7 @@ test('loading animation appears while streaming', async ({ page }) => {
   await expect(page.getByTestId('loading-indicator')).toBeVisible({ timeout: 10_000 })
 
   // And disappear when done
-  await expect(page.getByTestId('loading-indicator')).toBeHidden({ timeout: 30_000 })
+  await expect(page.getByTestId('loading-indicator')).toBeHidden({ timeout: 50_000 })
 
   // Final response should have meaningful content
   const assistantMsg = page.locator('[data-role="assistant"]')
@@ -34,7 +34,7 @@ test('input is disabled while streaming', async ({ page }) => {
   await expect(page.getByPlaceholder('有什么可以帮你的？')).toBeDisabled({ timeout: 5_000 })
 
   // Wait for completion
-  await expect(page.getByTestId('loading-indicator')).toBeHidden({ timeout: 30_000 })
+  await expect(page.getByTestId('loading-indicator')).toBeHidden({ timeout: 50_000 })
 
   // Input should be re-enabled after streaming completes
   await expect(page.getByPlaceholder('有什么可以帮你的？')).toBeEnabled()

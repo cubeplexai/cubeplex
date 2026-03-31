@@ -316,7 +316,10 @@ async def send_message(
 
                         yield _status("sandbox_creating")
                         sandbox_manager = get_sandbox_manager()
-                        sandbox = await sandbox_manager.get_or_create(user_id)
+                        sandbox = await asyncio.wait_for(
+                            sandbox_manager.get_or_create(user_id),
+                            timeout=60,
+                        )
                         yield _status("sandbox_ready")
                     except Exception as e:
                         logger.warning("Sandbox unavailable, continuing without: {}", e)

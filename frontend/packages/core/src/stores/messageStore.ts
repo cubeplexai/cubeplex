@@ -43,6 +43,9 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
     if (get().isStreaming) return
     try {
       const messages = await listMessages(client, conversationId)
+      // Re-check after await: if streaming started while we were fetching,
+      // discard the API response to preserve the optimistic user message.
+      if (get().isStreaming) return
       set((s) => ({
         messages: { ...s.messages, [conversationId]: messages },
         error: null,
