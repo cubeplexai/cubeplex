@@ -4,6 +4,7 @@ from langchain_core.tools import BaseTool
 from loguru import logger
 
 from cubebox.tools.builtin.calculator import create_calculator_tool
+from cubebox.tools.builtin.load_skill import create_load_skill_tool
 from cubebox.tools.registry import ToolRegistry
 
 # Create global tool registry instance
@@ -11,6 +12,7 @@ _registry = ToolRegistry()
 
 # Register built-in tools
 _registry.register_tool(create_calculator_tool())
+_registry.register_tool(create_load_skill_tool())
 
 
 async def init_mcp_tools() -> None:
