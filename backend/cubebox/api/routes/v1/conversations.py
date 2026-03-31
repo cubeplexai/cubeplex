@@ -1,5 +1,6 @@
 """Conversations API routes."""
 
+import asyncio
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 from typing import Annotated, Any
@@ -15,10 +16,25 @@ from sqlalchemy.pool import NullPool
 from cubebox.agents.schemas import AgentEvent, DoneEvent
 from cubebox.api.exceptions import InternalError, InvalidInputError
 from cubebox.db import get_session
-from cubebox.db.engine import _build_database_url
+from cubebox.db.engine import _build_database_url, async_session_maker
 from cubebox.repositories import ConversationRepository
 
 router = APIRouter(prefix="/conversations", tags=["conversations"])
+
+
+async def _update_conversation_timestamp(conversation_id: str) -> None:
+    """Update conversation timestamp using an isolated NullPool engine.
+
+    Designed to be called via asyncio.shield() so it completes
+    even if the parent task is cancelled.
+    """
+    save_engine = create_async_engine(_build_database_url(), poolclass=NullPool)
+    try:
+        async with AsyncSession(save_engine, expire_on_commit=False) as save_session:
+            save_conv_repo = ConversationRepository(save_session)
+            await save_conv_repo.update_timestamp(conversation_id)
+    finally:
+        await save_engine.dispose()
 
 
 @router.post("", status_code=status.HTTP_201_CREATED)
@@ -133,7 +149,11 @@ def _ns_to_agent_id(ns: tuple[Any, ...]) -> str | None:
     return ":".join(str(part) for part in ns)
 
 
-def _convert_stream_chunk(chunk: Any, ns: tuple[Any, ...] = ()) -> list[AgentEvent]:
+def _convert_stream_chunk(
+    chunk: Any,
+    ns: tuple[Any, ...] = (),
+    agent_id: str | None = None,
+) -> list[AgentEvent]:
     """Convert a LangGraph stream chunk to SSE events."""
     from cubebox.agents.schemas import (
         ReasoningEvent,
@@ -143,7 +163,8 @@ def _convert_stream_chunk(chunk: Any, ns: tuple[Any, ...] = ()) -> list[AgentEve
     )
 
     timestamp = datetime.now(UTC).isoformat()
-    agent_id = _ns_to_agent_id(ns)
+    if agent_id is None:
+        agent_id = _ns_to_agent_id(ns)
     events: list[AgentEvent] = []
 
     if not isinstance(chunk, tuple) or len(chunk) < 2:
@@ -230,11 +251,14 @@ async def send_message(
     conversation_id: str,
     request_obj: SendMessageRequest,
     raw_request: Request,
-    session: Annotated[AsyncSession, Depends(get_session)],
 ) -> StreamingResponse:
     """Send a user message and stream the assistant response via SSE."""
-    conv_repo = ConversationRepository(session)
-    conversation = await conv_repo.get_by_id(conversation_id)
+    # Use a short-lived session for the pre-check only.
+    # Do NOT use Depends(get_session) here — it would hold a pooled connection
+    # for the entire SSE stream duration, causing connection leaks on cancellation.
+    async with async_session_maker() as session:
+        conv_repo = ConversationRepository(session)
+        conversation = await conv_repo.get_by_id(conversation_id)
     if not conversation:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -250,9 +274,16 @@ async def send_message(
     user_id: str = getattr(raw_request.state, "user_id", "anonymous")
 
     async def event_generator() -> AsyncIterator[str]:
+        from cubebox.middleware.subagents import subagent_event_queue
+
         checkpointer = None
         sandbox = None
         sandbox_manager = None
+
+        # Unified event queue: both the main agent stream and subagent callbacks
+        # push events here so the SSE generator can multiplex them.
+        event_q: asyncio.Queue[tuple[str, Any, Any] | None] = asyncio.Queue()
+        cv_token = subagent_event_queue.set(event_q)
 
         try:
             # Get checkpointer — DI or production
@@ -308,22 +339,53 @@ async def send_message(
 
             config_dict = {"configurable": {"thread_id": conversation_id}}
 
-            async for event in agent.astream(  # type: ignore[call-arg]
-                {"messages": [HumanMessage(content=request_obj.content)]},
-                stream_mode="messages",
-                stream_subgraphs=True,
-                config=config_dict,  # type: ignore[arg-type]
-            ):
-                ns: tuple[Any, ...] = ()
-                chunk = event
-                if isinstance(event, tuple) and len(event) == 2:
-                    first, second = event
-                    if isinstance(first, tuple):
-                        ns = first
-                        chunk = second
+            async def _drain_main_stream() -> None:
+                """Push main agent stream events into the unified queue."""
+                try:
+                    async for event in agent.astream(  # type: ignore[call-arg]
+                        {"messages": [HumanMessage(content=request_obj.content)]},
+                        stream_mode="messages",
+                        stream_subgraphs=True,
+                        config=config_dict,  # type: ignore[arg-type]
+                    ):
+                        ns: tuple[Any, ...] = ()
+                        chunk = event
+                        if isinstance(event, tuple) and len(event) == 2:
+                            first, second = event
+                            if isinstance(first, tuple):
+                                ns = first
+                                chunk = second
+                        await event_q.put(("main", ns, chunk))
+                except Exception as exc:
+                    await event_q.put(("error", None, exc))
+                finally:
+                    await event_q.put(None)  # sentinel: main stream done
 
-                for sse_event in _convert_stream_chunk(chunk, ns=ns):
-                    yield f"data: {sse_event.model_dump_json()}\n\n"
+            stream_task = asyncio.create_task(_drain_main_stream())
+
+            while True:
+                item = await event_q.get()
+                if item is None:
+                    break
+
+                kind = item[0]
+
+                if kind == "main":
+                    ns, chunk = item[1], item[2]
+                    for sse_event in _convert_stream_chunk(chunk, ns=ns):
+                        yield f"data: {sse_event.model_dump_json()}\n\n"
+
+                elif kind == "subagent":
+                    sa_agent_id, chunk = item[1], item[2]
+                    for sse_event in _convert_stream_chunk(
+                        chunk, agent_id=sa_agent_id
+                    ):
+                        yield f"data: {sse_event.model_dump_json()}\n\n"
+
+                elif kind == "error":
+                    raise item[2]
+
+            await stream_task
 
         except Exception as e:
             logger.error("Streaming error: {}", str(e), exc_info=True)
@@ -335,6 +397,8 @@ async def send_message(
             yield f"data: {error_event.model_dump_json()}\n\n"
 
         finally:
+            subagent_event_queue.reset(cv_token)
+
             if sandbox_manager and sandbox:
                 try:
                     await sandbox_manager.release(sandbox.id)
@@ -347,14 +411,15 @@ async def send_message(
                 except Exception as e:
                     logger.warning("Error closing checkpointer: {}", e)
 
-            # Update conversation timestamp
-            save_engine = create_async_engine(_build_database_url(), poolclass=NullPool)
+            # Update conversation timestamp.
+            # Shield from cancellation so the connection isn't leaked
+            # if the client disconnects during cleanup.
             try:
-                async with AsyncSession(save_engine, expire_on_commit=False) as save_session:
-                    save_conv_repo = ConversationRepository(save_session)
-                    await save_conv_repo.update_timestamp(conversation_id)
-            finally:
-                await save_engine.dispose()
+                await asyncio.shield(_update_conversation_timestamp(conversation_id))
+            except asyncio.CancelledError:
+                pass
+            except Exception as e:
+                logger.warning("Error updating conversation timestamp: {}", e)
 
             done = DoneEvent(timestamp=datetime.now(UTC).isoformat())
             yield f"data: {done.model_dump_json()}\n\n"

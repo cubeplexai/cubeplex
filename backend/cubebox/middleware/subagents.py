@@ -1,6 +1,8 @@
 """SubAgentMiddleware — delegates tasks to ephemeral subagents."""
 
+import asyncio
 from collections.abc import Awaitable, Callable, Sequence
+from contextvars import ContextVar
 from typing import Any, TypedDict
 
 from langchain.agents import create_agent
@@ -17,6 +19,12 @@ from pydantic import BaseModel
 
 from cubebox.middleware._utils import append_to_system_message
 from cubebox.prompts.subagents import SUBAGENT_PROMPT
+
+# Queue for forwarding subagent streaming events to the SSE generator.
+# Set per-request in the SSE event_generator; read inside _run_task.
+subagent_event_queue: ContextVar[asyncio.Queue[Any] | None] = ContextVar(
+    "subagent_event_queue", default=None
+)
 
 
 class SubAgent(TypedDict, total=False):
@@ -71,14 +79,42 @@ def _create_task_tool(
             system_prompt=spec.get("system_prompt", ""),
             middleware=middleware,
         )
+
+        queue = subagent_event_queue.get(None)
+
         try:
-            result = await agent.ainvoke({"messages": [{"role": "user", "content": description}]})
-            messages = result.get("messages", [])
-            last = messages[-1] if messages else None
-            if last and hasattr(last, "content"):
-                content = last.content
-                return content if isinstance(content, str) else str(content)
-            return "[subagent produced no output]"
+            if queue is not None:
+                # Stream mode: forward tokens to SSE via queue, collect result
+                sa_agent_id = f"subagent:{subagent_type}"
+                last_ai_content: list[str] = []
+
+                async for chunk in agent.astream(
+                    {"messages": [{"role": "user", "content": description}]},
+                    stream_mode="messages",
+                ):
+                    await queue.put(("subagent", sa_agent_id, chunk))
+
+                    # Collect AI content for the tool return value
+                    if isinstance(chunk, tuple) and len(chunk) >= 2:
+                        msg = chunk[0]
+                        c = getattr(msg, "content", "") or ""
+                        name = getattr(msg, "name", None)
+                        # Skip tool messages (they have a name attribute)
+                        if c and not name:
+                            last_ai_content.append(c)
+
+                return "".join(last_ai_content) or "[subagent produced no output]"
+            else:
+                # No queue: use ainvoke (no streaming needed)
+                result = await agent.ainvoke(
+                    {"messages": [{"role": "user", "content": description}]},
+                )
+                messages = result.get("messages", [])
+                last = messages[-1] if messages else None
+                if last and hasattr(last, "content"):
+                    content = last.content
+                    return content if isinstance(content, str) else str(content)
+                return "[subagent produced no output]"
         except Exception as e:
             logger.error("Subagent '{}' failed: {}", subagent_type, e)
             return f"[error: {e}]"
