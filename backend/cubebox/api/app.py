@@ -105,8 +105,10 @@ def create_app() -> FastAPI:
     )
 
     # Register middleware
+    from cubebox.middleware.cancellation import CancellationMiddleware
     from cubebox.middleware.user_identity import UserIdentityMiddleware
 
+    app.add_middleware(CancellationMiddleware)
     app.add_middleware(UserIdentityMiddleware)
 
     # Register exception handlers

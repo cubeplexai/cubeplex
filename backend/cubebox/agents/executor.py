@@ -4,6 +4,7 @@ Core executor for running DeepAgent-based tasks with streaming support.
 Handles agent creation, tool loading, and event streaming.
 """
 
+from asyncio import sleep
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 from typing import Any
@@ -310,6 +311,7 @@ class DeepAgentExecutor:
             ):
                 chunk_count += 1
                 logger.debug("[STREAM] Raw chunk #{}: {}", chunk_count, chunk)
+                await sleep(0.1)
 
                 # Handle the chunk and yield any events
                 for event in self._handle_stream_chunk(chunk):

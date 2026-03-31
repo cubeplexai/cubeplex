@@ -37,6 +37,11 @@ def get_engine() -> AsyncEngine:
         pool_size=pool_size,
         max_overflow=max_overflow,
         echo=echo,
+        pool_pre_ping=True,  # 验证连接有效性
+        pool_recycle=3600,  # 1小时后回收连接
+        connect_args={
+            "connect_timeout": 10,  # 连接超时 10 秒
+        },
     )
 
 

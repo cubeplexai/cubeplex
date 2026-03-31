@@ -25,7 +25,12 @@ export async function* streamMessages(
 ): AsyncGenerator<AgentEvent> {
   const res = await fetch(`${baseUrl}/api/v1/conversations/${conversationId}/messages`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      'Accept': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+    },
+    cache: 'no-store',
     body: JSON.stringify({ content }),
   })
 

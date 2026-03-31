@@ -1,7 +1,9 @@
 """FastAPI dependency for database sessions."""
 
+import asyncio
 from collections.abc import AsyncIterator
 
+from loguru import logger
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cubebox.db.engine import async_session_maker
@@ -16,4 +18,14 @@ async def get_session() -> AsyncIterator[AsyncSession]:
             ...
     """
     async with async_session_maker() as session:
-        yield session
+        try:
+            yield session
+        except asyncio.CancelledError:
+            # 请求被取消（客户端断开连接等），优雅关闭会话
+            logger.debug("Database session cancelled, rolling back transaction")
+            await session.rollback()
+            raise
+        except Exception:
+            # 其他异常，回滚事务
+            await session.rollback()
+            raise
