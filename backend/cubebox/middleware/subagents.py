@@ -18,7 +18,7 @@ from loguru import logger
 from pydantic import BaseModel
 
 from cubebox.middleware._utils import append_to_system_message
-from cubebox.middleware.skills import SkillSpec, SkillsMiddleware
+from cubebox.middleware.skills import SkillsMiddleware, SkillSpec
 from cubebox.prompts.subagents import SUBAGENT_PROMPT
 
 # Queue for forwarding subagent streaming events to the SSE generator.
