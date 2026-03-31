@@ -1,4 +1,4 @@
-.PHONY: help install dev-install format lint type-check test test-cov clean pre-commit-install pre-commit-run
+.PHONY: help install dev-install format lint type-check test test-cov test-ui test-ui-unit test-ui-e2e test-all clean pre-commit-install pre-commit-run
 
 help:
 	@echo "Available commands:"
@@ -7,8 +7,12 @@ help:
 	@echo "  make format            - Format code with ruff"
 	@echo "  make lint              - Run ruff linter"
 	@echo "  make type-check        - Run mypy type checker"
-	@echo "  make test              - Run tests"
-	@echo "  make test-cov          - Run tests with coverage report"
+	@echo "  make test              - Run backend tests"
+	@echo "  make test-cov          - Run backend tests with coverage report"
+	@echo "  make test-ui           - Run all frontend tests (unit + e2e)"
+	@echo "  make test-ui-unit      - Run frontend unit tests (Vitest)"
+	@echo "  make test-ui-e2e       - Run frontend E2E tests (Playwright)"
+	@echo "  make test-all          - Run all tests (backend + frontend)"
 	@echo "  make check             - Run all checks (format, lint, type-check)"
 	@echo "  make clean             - Clean cache and build files"
 	@echo "  make pre-commit-install - Install pre-commit hooks"
@@ -51,6 +55,22 @@ test-cov:
 	@echo "Running tests with coverage..."
 	uv run pytest -s --cov=cubebox --cov-report=term-missing --cov-report=html
 	@echo "✓ Coverage report generated in htmlcov/"
+
+test-ui-unit:
+	@echo "Running frontend unit tests..."
+	cd ../frontend && pnpm test
+	@echo "✓ Frontend unit tests passed"
+
+test-ui-e2e:
+	@echo "Running frontend E2E tests..."
+	cd ../frontend && pnpm test:e2e
+	@echo "✓ Frontend E2E tests passed"
+
+test-ui: test-ui-unit test-ui-e2e
+	@echo "✓ All frontend tests passed"
+
+test-all: test test-ui
+	@echo "✓ All tests passed"
 
 check: format lint type-check
 	@echo "✓ All checks passed"
