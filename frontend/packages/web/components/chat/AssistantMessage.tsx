@@ -60,11 +60,12 @@ interface StreamingProps {
   message?: never
   stream: AgentStream
   isStreaming: true
+  statusPhase?: string | null
 }
 
 type AssistantMessageProps = HistoryProps | StreamingProps
 
-export function AssistantMessage({ message, stream, isStreaming }: AssistantMessageProps) {
+export function AssistantMessage({ message, stream, isStreaming, statusPhase }: AssistantMessageProps) {
   const text = isStreaming ? stream.text : (message.content ?? '')
   const reasoning = isStreaming ? stream.reasoning : (message.reasoning ?? '')
   const toolCalls = isStreaming
@@ -105,10 +106,18 @@ export function AssistantMessage({ message, stream, isStreaming }: AssistantMess
             <ReactMarkdown remarkPlugins={[remarkGfm]}>{text}</ReactMarkdown>
           </div>
         ) : isStreaming ? (
-          <div className="flex items-center gap-1 pl-1">
-            <span className="w-1.5 h-1.5 rounded-full bg-primary animate-bounce [animation-delay:0ms]" />
-            <span className="w-1.5 h-1.5 rounded-full bg-primary animate-bounce [animation-delay:150ms]" />
-            <span className="w-1.5 h-1.5 rounded-full bg-primary animate-bounce [animation-delay:300ms]" />
+          <div data-testid="loading-indicator" className="flex items-center gap-1 pl-1">
+            {statusPhase === 'sandbox_creating' ? (
+              <span className="text-xs text-muted-foreground animate-pulse">
+                正在准备沙箱环境...
+              </span>
+            ) : (
+              <>
+                <span className="w-1.5 h-1.5 rounded-full bg-primary animate-bounce [animation-delay:0ms]" />
+                <span className="w-1.5 h-1.5 rounded-full bg-primary animate-bounce [animation-delay:150ms]" />
+                <span className="w-1.5 h-1.5 rounded-full bg-primary animate-bounce [animation-delay:300ms]" />
+              </>
+            )}
           </div>
         ) : null}
       </div>

@@ -1,6 +1,7 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { act } from '@testing-library/react'
 import { useMessageStore } from '@cubebox/core/stores'
+
+const CONV_ID = 'conv-1'
 
 function mockSSEResponse(events: object[]) {
   const lines = events.map((e) => `data: ${JSON.stringify(e)}\n\n`).join('')
@@ -20,9 +21,10 @@ const mockClient = { baseUrl: '', get: vi.fn(), post: vi.fn() }
 
 beforeEach(() => {
   useMessageStore.setState({
-    messages: [],
+    messages: {},
     streamAgents: {},
     isStreaming: false,
+    statusPhase: null,
     error: null,
   })
 })
@@ -34,14 +36,14 @@ describe('messageStore.send', () => {
     ])))
 
     await act(async () => {
-      await useMessageStore.getState().send(mockClient as any, 'conv-1', 'hello')
+      await useMessageStore.getState().send(mockClient as any, CONV_ID, 'hello')
     })
 
-    const { messages } = useMessageStore.getState()
-    expect(messages.some((m) => m.role === 'user' && m.content === 'hello')).toBe(true)
+    const msgs = useMessageStore.getState().messages[CONV_ID] ?? []
+    expect(msgs.some((m) => m.role === 'user' && m.content === 'hello')).toBe(true)
   })
 
-  it('accumulates text_delta events into streamAgents', async () => {
+  it('accumulates text_delta events into assistant message', async () => {
     vi.stubGlobal('fetch', vi.fn(() => mockSSEResponse([
       { type: 'text_delta', data: { content: 'Hello' }, agent_id: null, agent_name: null, timestamp: '' },
       { type: 'text_delta', data: { content: ' world' }, agent_id: null, agent_name: null, timestamp: '' },
@@ -49,11 +51,11 @@ describe('messageStore.send', () => {
     ])))
 
     await act(async () => {
-      await useMessageStore.getState().send(mockClient as any, 'conv-1', 'hi')
+      await useMessageStore.getState().send(mockClient as any, CONV_ID, 'hi')
     })
 
-    const { messages } = useMessageStore.getState()
-    const assistantMsg = messages.find((m) => m.role === 'assistant')
+    const msgs = useMessageStore.getState().messages[CONV_ID] ?? []
+    const assistantMsg = msgs.find((m) => m.role === 'assistant')
     expect(assistantMsg?.content).toBe('Hello world')
   })
 
@@ -63,10 +65,25 @@ describe('messageStore.send', () => {
     ])))
 
     await act(async () => {
-      await useMessageStore.getState().send(mockClient as any, 'conv-1', 'hi')
+      await useMessageStore.getState().send(mockClient as any, CONV_ID, 'hi')
     })
 
     expect(useMessageStore.getState().error).toBe('Something failed')
+  })
+
+  it('updates statusPhase on status events', async () => {
+    vi.stubGlobal('fetch', vi.fn(() => mockSSEResponse([
+      { type: 'status', data: { phase: 'sandbox_creating' }, agent_id: null, agent_name: null, timestamp: '' },
+      { type: 'status', data: { phase: 'sandbox_ready' }, agent_id: null, agent_name: null, timestamp: '' },
+      { type: 'done', data: {}, agent_id: null, agent_name: null, timestamp: '' },
+    ])))
+
+    await act(async () => {
+      await useMessageStore.getState().send(mockClient as any, CONV_ID, 'hi')
+    })
+
+    // After done, statusPhase should be cleared
+    expect(useMessageStore.getState().statusPhase).toBeNull()
   })
 
   it('clears isStreaming after completion', async () => {
@@ -75,7 +92,7 @@ describe('messageStore.send', () => {
     ])))
 
     await act(async () => {
-      await useMessageStore.getState().send(mockClient as any, 'conv-1', 'hi')
+      await useMessageStore.getState().send(mockClient as any, CONV_ID, 'hi')
     })
 
     expect(useMessageStore.getState().isStreaming).toBe(false)

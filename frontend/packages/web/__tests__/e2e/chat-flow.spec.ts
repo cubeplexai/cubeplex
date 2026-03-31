@@ -13,8 +13,8 @@ test('can send a message and see a response', async ({ page }) => {
   // User message should be visible
   await expect(page.getByText('Say the word "hello" and nothing else.')).toBeVisible()
 
-  // Wait for streaming to complete (loading dots disappear)
-  await expect(page.locator('.animate-bounce').first()).toBeHidden({ timeout: 30_000 })
+  // Wait for streaming to complete (loading indicator disappears)
+  await expect(page.getByTestId('loading-indicator')).toBeHidden({ timeout: 30_000 })
 
   // Assistant response should appear
   const assistantMsg = page.locator('[data-role="assistant"]')
@@ -31,7 +31,7 @@ test('conversation history persists after page reload', async ({ page }) => {
   await input.press('Enter')
 
   await expect(page).toHaveURL(/\/conversations\//)
-  await expect(page.locator('.animate-bounce').first()).toBeHidden({ timeout: 30_000 })
+  await expect(page.getByTestId('loading-indicator')).toBeHidden({ timeout: 30_000 })
 
   // Reload the page
   await page.reload()

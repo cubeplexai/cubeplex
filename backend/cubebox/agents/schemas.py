@@ -91,3 +91,13 @@ class DoneEvent(AgentEvent):
 
     type: Literal["done"] = "done"
     data: dict[str, Any] = Field(default_factory=dict, description="Event data")
+
+
+class StatusEvent(AgentEvent):
+    """Initialization phase status event.
+
+    Emitted during setup (e.g., sandbox creation) before the LLM stream begins.
+    """
+
+    type: Literal["status"] = "status"
+    data: dict[str, Any] = Field(description="Event data with phase identifier")

@@ -13,7 +13,7 @@ from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.pool import NullPool
 
-from cubebox.agents.schemas import AgentEvent, DoneEvent
+from cubebox.agents.schemas import AgentEvent, DoneEvent, StatusEvent
 from cubebox.api.exceptions import InternalError, InvalidInputError
 from cubebox.db import get_session
 from cubebox.db.engine import _build_database_url, async_session_maker
@@ -285,6 +285,13 @@ async def send_message(
         event_q: asyncio.Queue[tuple[str, Any, Any] | None] = asyncio.Queue()
         cv_token = subagent_event_queue.set(event_q)
 
+        def _status(phase: str) -> str:
+            evt = StatusEvent(
+                timestamp=datetime.now(UTC).isoformat(),
+                data={"phase": phase},
+            )
+            return f"data: {evt.model_dump_json()}\n\n"
+
         try:
             # Get checkpointer — DI or production
             factory = getattr(raw_request.app.state, "checkpointer_factory", None)
@@ -307,8 +314,10 @@ async def send_message(
                     try:
                         from cubebox.sandbox.manager import get_sandbox_manager
 
+                        yield _status("sandbox_creating")
                         sandbox_manager = get_sandbox_manager()
                         sandbox = await sandbox_manager.get_or_create(user_id)
+                        yield _status("sandbox_ready")
                     except Exception as e:
                         logger.warning("Sandbox unavailable, continuing without: {}", e)
 

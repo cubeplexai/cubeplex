@@ -72,6 +72,7 @@ export function InputBar({ conversationId, onSubmit, isLoading = false }: InputB
           disabled={isSubmitting}
         />
         <button
+          data-testid="send-button"
           onClick={handleSubmit}
           disabled={!content.trim() || isSubmitting}
           className="shrink-0 w-7 h-7 flex items-center justify-center rounded-lg bg-primary text-white hover:bg-primary/80 disabled:opacity-25 disabled:cursor-not-allowed transition-all"

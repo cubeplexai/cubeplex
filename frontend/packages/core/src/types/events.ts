@@ -6,6 +6,7 @@ export type AgentEventType =
   | 'tool_result'
   | 'error'
   | 'done'
+  | 'status'
 
 export interface AgentEvent {
   type: AgentEventType
@@ -43,4 +44,11 @@ export interface ErrorEvent extends AgentEvent {
 export interface DoneEvent extends AgentEvent {
   type: 'done'
   data: Record<string, unknown>
+}
+
+export type StatusPhase = 'sandbox_creating' | 'sandbox_ready'
+
+export interface StatusEvent extends AgentEvent {
+  type: 'status'
+  data: { phase: StatusPhase }
 }

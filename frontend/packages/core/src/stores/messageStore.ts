@@ -18,6 +18,7 @@ export interface MessageStore {
   messages: Record<string, Message[]>
   streamAgents: Record<string, AgentStream>   // "main" or "task:xxx"
   isStreaming: boolean
+  statusPhase: string | null
   error: string | null
 
   loadMessages(client: ApiClient, conversationId: string): Promise<void>
@@ -35,6 +36,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
   messages: {},
   streamAgents: {},
   isStreaming: false,
+  statusPhase: null,
   error: null,
 
   async loadMessages(client: ApiClient, conversationId: string) {
@@ -66,6 +68,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
       },
       streamAgents: { [MAIN_AGENT_KEY]: emptyStream() },
       isStreaming: true,
+      statusPhase: null,
       error: null,
     }))
 
@@ -117,6 +120,8 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
               },
             },
           }))
+        } else if (event.type === 'status') {
+          set({ statusPhase: (event.data as { phase: string }).phase })
         } else if (event.type === 'done') {
           break
         } else if (event.type === 'error') {
@@ -152,15 +157,16 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
             ],
           },
           isStreaming: false,
+          statusPhase: null,
           streamAgents: {},
         }))
       } else {
-        set({ isStreaming: false, streamAgents: {} })
+        set({ isStreaming: false, statusPhase: null, streamAgents: {} })
       }
     }
   },
 
   clearStream() {
-    set({ streamAgents: {}, isStreaming: false })
+    set({ streamAgents: {}, isStreaming: false, statusPhase: null })
   },
 }))

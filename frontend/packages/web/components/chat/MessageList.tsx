@@ -13,7 +13,7 @@ interface MessageListProps {
 }
 
 export function MessageList({ conversationId }: MessageListProps) {
-  const { messages, isStreaming, mainStream, subAgentStreams } =
+  const { messages, isStreaming, statusPhase, mainStream, subAgentStreams } =
     useMessages(conversationId)
   const loadMessages = useMessageStore((s) => s.loadMessages)
 
@@ -42,7 +42,7 @@ export function MessageList({ conversationId }: MessageListProps) {
                 isRunning={isStreaming}
               />
             ))}
-            <AssistantMessage stream={mainStream} isStreaming />
+            <AssistantMessage stream={mainStream} isStreaming statusPhase={statusPhase} />
           </>
         )}
       </div>
