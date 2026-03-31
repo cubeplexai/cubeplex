@@ -1,48 +1,88 @@
-"""User identity middleware.
+"""Pure ASGI user identity middleware.
 
 Assigns an anonymous user_id to every request via:
 1. X-User-ID header (explicit, e.g. from API clients)
 2. cubebox_user_id cookie (implicit, for browser sessions)
 3. Auto-generated UUID7 (first visit)
 
-The user_id is stored in request.state.user_id and persisted as a cookie.
+The user_id is stored in scope["state"]["user_id"] (accessible as request.state.user_id)
+and persisted as a cookie.
+
+Uses pure ASGI instead of BaseHTTPMiddleware to avoid task-boundary
+cancellation issues that cause SQLAlchemy async connection pool leaks.
 """
 
-from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
-from starlette.requests import Request
-from starlette.responses import Response
+from http.cookies import SimpleCookie
+
+from starlette.datastructures import MutableHeaders
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
 from uuid_utils import uuid7
 
 COOKIE_NAME = "cubebox_user_id"
 COOKIE_MAX_AGE = 86400 * 365  # 1 year
 
 
-class UserIdentityMiddleware(BaseHTTPMiddleware):
+class UserIdentityMiddleware:
     """Middleware that ensures every request has a user_id."""
 
-    async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        # scope["headers"] is a list of (name, value) byte tuples
+        raw_headers: list[tuple[bytes, bytes]] = scope["headers"]
+
         # Priority: header > cookie > generate
-        user_id = request.headers.get("X-User-ID")
+        user_id = _get_header(raw_headers, b"x-user-id")
         if not user_id:
-            user_id = request.cookies.get(COOKIE_NAME)
+            user_id = _get_cookie(raw_headers, COOKIE_NAME)
 
         is_new = False
         if not user_id:
             user_id = str(uuid7())
             is_new = True
 
-        request.state.user_id = user_id
+        # Make user_id available as request.state.user_id
+        scope.setdefault("state", {})["user_id"] = user_id
 
-        response = await call_next(request)
+        if not is_new:
+            await self.app(scope, receive, send)
+            return
 
-        # Set cookie so the ID persists across browser sessions
-        if is_new:
-            response.set_cookie(
-                COOKIE_NAME,
-                user_id,
-                max_age=COOKIE_MAX_AGE,
-                httponly=True,
-                samesite="lax",
-            )
+        # Intercept the first response to inject the Set-Cookie header
+        async def send_with_cookie(message: Message) -> None:
+            if message["type"] == "http.response.start":
+                response_headers = MutableHeaders(scope=message)
+                cookie: SimpleCookie = SimpleCookie()
+                cookie[COOKIE_NAME] = user_id
+                cookie[COOKIE_NAME]["max-age"] = str(COOKIE_MAX_AGE)
+                cookie[COOKIE_NAME]["httponly"] = True
+                cookie[COOKIE_NAME]["samesite"] = "Lax"
+                cookie[COOKIE_NAME]["path"] = "/"
+                response_headers.append("set-cookie", cookie[COOKIE_NAME].OutputString())
+            await send(message)
 
-        return response
+        await self.app(scope, receive, send_with_cookie)
+
+
+def _get_header(headers: list[tuple[bytes, bytes]], name: bytes) -> str | None:
+    """Extract a header value from raw ASGI headers."""
+    for key, value in headers:
+        if key == name:
+            return value.decode("latin-1")
+    return None
+
+
+def _get_cookie(headers: list[tuple[bytes, bytes]], cookie_name: str) -> str | None:
+    """Extract a cookie value from raw ASGI headers."""
+    for key, value in headers:
+        if key == b"cookie":
+            cookie: SimpleCookie = SimpleCookie(value.decode("latin-1"))
+            morsel = cookie.get(cookie_name)
+            if morsel:
+                return morsel.value
+    return None
