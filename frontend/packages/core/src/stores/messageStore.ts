@@ -1,12 +1,15 @@
 // frontend/packages/core/src/stores/messageStore.ts
 import { create } from 'zustand'
-import type { Message, TextDeltaEvent, ToolCallEvent, ReasoningEvent } from '../types'
+import type {
+  Message, TextDeltaEvent, ToolCallEvent, ToolResultEvent, ReasoningEvent,
+} from '../types'
 import type { ApiClient } from '../api'
 import { listMessages, streamMessages } from '../api'
 
 export interface AgentStream {
   text: string
   toolCalls: ToolCallEvent[]
+  toolResults: ToolResultEvent[]
   reasoning: string
   name: string | null
 }
@@ -25,7 +28,7 @@ export interface MessageStore {
 const MAIN_AGENT_KEY = 'main'
 
 function emptyStream(name: string | null = null): AgentStream {
-  return { text: '', toolCalls: [], reasoning: '', name }
+  return { text: '', toolCalls: [], toolResults: [], reasoning: '', name }
 }
 
 export const useMessageStore = create<MessageStore>((set, get) => ({
@@ -94,6 +97,17 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
               [agentKey]: {
                 ...s.streamAgents[agentKey] ?? emptyStream(event.agent_name),
                 toolCalls: [...(s.streamAgents[agentKey]?.toolCalls ?? []), e],
+              },
+            },
+          }))
+        } else if (event.type === 'tool_result') {
+          const e = event as ToolResultEvent
+          set((s) => ({
+            streamAgents: {
+              ...s.streamAgents,
+              [agentKey]: {
+                ...s.streamAgents[agentKey] ?? emptyStream(event.agent_name),
+                toolResults: [...(s.streamAgents[agentKey]?.toolResults ?? []), e],
               },
             },
           }))

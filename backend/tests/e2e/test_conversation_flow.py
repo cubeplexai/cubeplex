@@ -1,4 +1,5 @@
 """E2E test: full conversation lifecycle with real LLM and MemorySaver."""
+
 import httpx
 import pytest
 

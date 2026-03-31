@@ -78,7 +78,9 @@ async def memory_client() -> AsyncIterator[httpx.AsyncClient]:
 
 
 async def collect_sse_events(
-    client: httpx.AsyncClient, url: str, json_data: dict  # type: ignore[type-arg]
+    client: httpx.AsyncClient,
+    url: str,
+    json_data: dict,  # type: ignore[type-arg]
 ) -> list[dict]:  # type: ignore[type-arg]
     """POST to an SSE endpoint and collect all parsed events."""
     events = []

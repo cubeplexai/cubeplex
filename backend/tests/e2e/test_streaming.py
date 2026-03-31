@@ -1,4 +1,5 @@
 """E2E test: SSE stream format validation."""
+
 import json
 
 import httpx

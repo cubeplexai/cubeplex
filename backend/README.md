@@ -1,50 +1,33 @@
 # cubebox - Agent System Backend
 
-AI Agent System Backend built on DeepAgents framework with LangChain and LangGraph.
+AI Agent System Backend built on native LangGraph with LangChain.
 
 ## Project Structure
 
 ```
 backend/
-├── src/
-│   ├── __init__.py
-│   ├── app.py                    # Application state management
-│   ├── config.py                 # Configuration management (dynaconf)
-│   ├── agents/
-│   │   ├── __init__.py
-│   │   └── config.py             # Agent configuration models
-│   ├── api/
-│   │   ├── __init__.py
-│   │   ├── app.py                # FastAPI application factory
-│   │   └── routes/
-│   │       ├── __init__.py
-│   │       └── health.py         # Health check endpoints
-│   ├── llm/
-│   │   ├── __init__.py
-│   │   ├── config.py             # LLM configuration models
-│   │   └── factory.py            # LLM factory for multiple providers
-│   ├── memory/
-│   │   ├── __init__.py
-│   │   └── manager.py            # Memory management (short/long-term)
-│   ├── mcp/
-│   │   ├── __init__.py
-│   │   └── client.py             # MCP protocol client
-│   ├── sandbox/
-│   │   ├── __init__.py
-│   │   ├── config.py             # Sandbox configuration
-│   │   └── executor.py           # Code execution in sandbox
-│   ├── tools/
-│   │   ├── __init__.py
-│   │   └── registry.py           # Tool registry and management
-│   └── utils/
-│       ├── __init__.py
-│       └── log.py                # Logging configuration
+├── cubebox/                      # Main source package
+│   ├── agents/                   # Agent graph factory, schemas, message conversion
+│   ├── api/                      # FastAPI app, routes, exceptions
+│   ├── llm/                      # LLM factory, config, OpenAI-compatible client
+│   ├── memory/                   # Memory manager (short/long-term)
+│   ├── mcp/                      # MCP protocol client
+│   ├── middleware/                # Agent middleware (sandbox, subagents, skills)
+│   ├── prompts/                  # System prompts (base, sandbox, subagents, skills)
+│   ├── sandbox/                  # Code execution sandbox (base ABC + implementations)
+│   ├── tools/                    # Tool registry + built-in tools
+│   ├── utils/                    # Logging
+│   └── config.py                 # Dynaconf-based config
+├── tests/
+│   ├── unit/                     # Unit tests
+│   └── e2e/                      # E2E tests
 ├── config.yaml                   # Base configuration
 ├── config.development.yaml       # Development overrides
 ├── config.production.yaml        # Production overrides
 ├── main.py                       # Application entry point
-├── pyproject.toml               # Project metadata and dependencies
-└── README.md                    # This file
+├── pyproject.toml                # Project metadata and dependencies
+├── Makefile                      # Dev commands
+└── README.md                     # This file
 ```
 
 ## Setup
@@ -56,20 +39,12 @@ backend/
 
 ### Installation
 
-1. Install dependencies:
-
 ```bash
 cd backend
-uv sync
+make dev-install   # or: uv sync --all-extras
 ```
 
-2. Create a `.env` file for local configuration:
-
-```bash
-cp .env.example .env
-```
-
-3. Set required environment variables:
+Set required environment variables:
 
 ```bash
 export OPENAI_API_KEY="your-api-key"
@@ -108,63 +83,38 @@ export CUBEBOX_DEBUG=true
 export CUBEBOX_LLM__PROVIDER=anthropic
 ```
 
-## API Endpoints
-
-### Health Check
-
-```bash
-GET /health
-```
-
-## Development
-
-### Code Style
-
-Format code with black and isort:
-
-```bash
-uv run black src/
-uv run isort src/
-```
-
-### Testing
-
-Run tests with pytest:
-
-```bash
-uv run pytest
-```
-
 ## Architecture Overview
 
 ### Core Components
 
-1. **Agent System** - DeepAgents-based agent framework
-2. **LLM Integration** - Multi-provider LLM support (OpenAI, Anthropic, Ollama)
-3. **Tool Registry** - Built-in and MCP tools management
-4. **Memory System** - Short-term and long-term memory
-5. **Sandbox Executor** - Isolated code execution (OpenSandbox)
-6. **MCP Client** - Model Context Protocol integration
+1. **Agent Graph Factory** - `create_cubebox_agent()` wires LLM, tools, and middleware into a
+   LangGraph CompiledStateGraph via `langchain.agents.create_agent()`
+2. **Middleware Stack** - SandboxMiddleware, SubAgentMiddleware, SkillsMiddleware
+3. **LLM Integration** - Multi-provider LLM support (OpenAI, OpenAI-compatible)
+4. **Tool Registry** - Built-in and MCP tools management
+5. **Memory System** - Short-term and long-term memory
+6. **Sandbox** - Isolated code execution (OpenSandbox + LocalSandbox for dev)
+7. **MCP Client** - Model Context Protocol integration
+8. **Message History** - LangGraph checkpointer thread state (no separate messages table)
 
 ### Key Features
 
-- Multi-agent coordination
-- Task planning and execution
+- Multi-agent coordination with subagent streaming
+- Modular prompt system injected via middleware
 - Code execution in isolated sandboxes
-- Long-term memory with vector search
+- SSE streaming API with typed events (text_delta, reasoning, tool_call, tool_result, error, done)
 - MCP protocol support for tool integration
-- Comprehensive logging with loguru
+- Dependency injection for testability (checkpointer_factory, sandbox_factory)
 
-## Next Steps
+## Development
 
-1. Implement database models and migrations
-2. Add agent execution engine
-3. Implement MCP server integration
-4. Add sandbox execution with OpenSandbox
-5. Implement memory persistence
-6. Add comprehensive API endpoints
-7. Add authentication and authorization
-8. Add monitoring and tracing
+```bash
+make format        # ruff format + import sort
+make lint          # ruff check
+make type-check    # mypy cubebox/
+make test          # pytest -s -v
+make check         # format + lint + type-check + test
+```
 
 ## Dependencies
 

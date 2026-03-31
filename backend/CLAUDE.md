@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-cubebox is an AI Agent System Backend built on the DeepAgents framework with LangChain and LangGraph. The backend exposes a streaming SSE API for executing agent tasks.
+cubebox is an AI Agent System Backend built on native LangGraph with LangChain. The backend exposes a streaming SSE API for executing agent tasks, using LangGraph checkpointer thread state as the single source of truth for message history.
 
 ## Repository Structure
 
@@ -12,12 +12,14 @@ cubebox is an AI Agent System Backend built on the DeepAgents framework with Lan
 cubebox/
 ├── backend/
 │   ├── cubebox/          # Main source package
-│   │   ├── agents/       # Agent executor, schemas, config
+│   │   ├── agents/       # Agent graph factory, schemas, message conversion
 │   │   ├── api/          # FastAPI app, routes, exceptions
 │   │   ├── llm/          # LLM factory, config, OpenAI-compatible client
 │   │   ├── memory/       # Memory manager (short/long-term)
 │   │   ├── mcp/          # MCP protocol client
-│   │   ├── sandbox/      # Code execution sandbox
+│   │   ├── middleware/    # Agent middleware (sandbox, subagents, skills)
+│   │   ├── prompts/      # System prompts (base, sandbox, subagents, skills)
+│   │   ├── sandbox/      # Code execution sandbox (base ABC + implementations)
 │   │   ├── tools/        # Tool registry + built-in tools
 │   │   ├── utils/        # Logging
 │   │   └── config.py     # Dynaconf-based config
@@ -63,13 +65,16 @@ Single test file: `uv run pytest tests/e2e/test_agents.py`
 
 ## Architecture
 
-**Request flow:** `POST /api/v1/agents/run` → `DeepAgentExecutor.stream()` → LangGraph agent → SSE stream of typed events (`chain_start`, `llm_start`, `llm_end`, `tool_start`, `tool_end`, `chain_end`, `error`, `done`)
+**Request flow:** `POST /api/v1/conversations/{id}/messages` → `create_cubebox_agent()` → LangGraph `astream(stream_mode="messages", stream_subgraphs=True)` → SSE stream of typed events (`text_delta`, `reasoning`, `tool_call`, `tool_result`, `error`, `done`)
 
 **Key components:**
-- `DeepAgentExecutor` (`cubebox/agents/executor.py`) — creates LLM via `LLMFactory`, loads tools from `ToolRegistry`, runs LangGraph agent, yields typed `AgentEvent` subclasses
+- `create_cubebox_agent` (`cubebox/agents/graph.py`) — factory that wires LLM, tools, and middleware (sandbox, subagents, skills) into a LangGraph CompiledStateGraph via `langchain.agents.create_agent()`
+- Middleware stack (`cubebox/middleware/`) — `SandboxMiddleware`, `SubAgentMiddleware`, `SkillsMiddleware` each implement `AgentMiddleware` with `tools` and `awrap_model_call()`
+- Prompts (`cubebox/prompts/`) — modular system prompts injected by middleware
 - `LLMFactory` (`cubebox/llm/factory.py`) — reads `config.yaml` `llm.providers`, supports OpenAI and OpenAI-compatible endpoints
 - `ToolRegistry` (`cubebox/tools/registry.py`) — registers `BaseTool` instances (supports built-in `StructuredTool` and MCP tools)
 - `MCPManager` (`cubebox/mcp/client.py`) — connects to MCP servers via `langchain-mcp-adapters`, loads tools at startup
+- Message history: stored in LangGraph checkpointer thread state (no messages table)
 - Config via dynaconf: `ENV_FOR_DYNACONF=development|production`, env var prefix `CUBEBOX_`, e.g. `CUBEBOX_LLM__PROVIDER`
 
 ## Environment Variables

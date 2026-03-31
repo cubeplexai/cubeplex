@@ -1,4 +1,5 @@
 """E2E test: multi-turn conversation state persistence."""
+
 import httpx
 import pytest
 
@@ -72,9 +73,5 @@ async def test_separate_conversations_have_independent_state(
         json_data={"content": "Do you know my secret word? Just say no if you don't."},
     )
 
-    text = "".join(
-        e["data"]["content"]
-        for e in events
-        if e["type"] == "text_delta"
-    )
+    text = "".join(e["data"]["content"] for e in events if e["type"] == "text_delta")
     assert "ALPHA" not in text
