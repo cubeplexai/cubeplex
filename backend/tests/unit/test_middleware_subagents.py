@@ -1,16 +1,16 @@
 from cubebox.middleware.subagents import SubAgent, SubAgentMiddleware
 
 
-def test_subagent_middleware_registers_task_tool():
+def test_subagent_middleware_registers_subagent_tool():
     mw = SubAgentMiddleware(subagents=[])
     tool_names = [t.name for t in mw.tools]
-    assert "task" in tool_names
+    assert "subagent" in tool_names
 
 
-def test_subagent_middleware_with_no_subagents_has_task_tool():
+def test_subagent_middleware_with_no_subagents_has_subagent_tool():
     mw = SubAgentMiddleware(subagents=[])
-    task_tool = mw.tools[0]
-    assert task_tool.name == "task"
+    subagent_tool = mw.tools[0]
+    assert subagent_tool.name == "subagent"
 
 
 def test_subagent_spec_type():
