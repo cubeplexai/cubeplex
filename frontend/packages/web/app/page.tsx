@@ -8,7 +8,7 @@ import { Box } from 'lucide-react'
 export default function WelcomePage() {
   const router = useRouter()
   const { create: createConversation } = useConversationStore()
-  const { send } = useMessageStore()
+  const send = useMessageStore((s) => s.send)
 
   const handleSubmit = async (content: string) => {
     const client = createApiClient('')

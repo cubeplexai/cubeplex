@@ -12,10 +12,10 @@ interface InputBarProps {
 
 export function InputBar({ conversationId, onSubmit, isLoading = false }: InputBarProps) {
   const [content, setContent] = useState('')
-  const { send } = useMessageStore()
+  const send = useMessageStore((s) => s.send)
   const messageIsStreaming = useMessageStore((s) =>
     conversationId ? s.isStreaming : false
-  )
+  ) ?? false
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
   const handleSubmit = async () => {

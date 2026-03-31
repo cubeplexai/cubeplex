@@ -24,7 +24,7 @@ export function MessageList({ conversationId }: MessageListProps) {
   return (
     <ScrollArea className="flex-1 p-4">
       <div className="space-y-4 max-w-2xl mx-auto">
-        {messages.map((msg) => (
+        {(messages ?? []).map((msg) => (
           <div key={msg.id}>
             {msg.role === 'user' && <UserMessage content={msg.content ?? ''} />}
             {msg.role === 'assistant' && <AssistantMessage message={msg} />}
