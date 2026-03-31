@@ -3,7 +3,7 @@
 import asyncio
 from collections.abc import Awaitable, Callable, Sequence
 from contextvars import ContextVar
-from typing import Any, TypedDict
+from typing import Annotated, Any, TypedDict
 
 from langchain.agents import create_agent
 from langchain.agents.middleware.types import (
@@ -13,7 +13,7 @@ from langchain.agents.middleware.types import (
 )
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage
-from langchain_core.tools import BaseTool, StructuredTool
+from langchain_core.tools import BaseTool, InjectedToolCallId, StructuredTool
 from loguru import logger
 from pydantic import BaseModel
 
@@ -42,7 +42,8 @@ class SubAgent(TypedDict, total=False):
     middleware: list[Any]
 
 
-class _TaskSchema(BaseModel):
+class _SubAgentSchema(BaseModel):
+    name: str
     description: str
     subagent_type: str = "general-purpose"
 
@@ -64,7 +65,12 @@ def _create_task_tool(
 
     available = ", ".join(f'"{k}"' for k in subagent_map)
 
-    async def _run_task(description: str, subagent_type: str = "general-purpose") -> str:
+    async def _run_task(
+        name: str,
+        description: str,
+        subagent_type: str = "general-purpose",
+        tool_call_id: Annotated[str, InjectedToolCallId] = "",
+    ) -> str:
         spec = subagent_map.get(subagent_type, subagent_map["general-purpose"])
         model = spec.get("model") or default_model
         if model is None:
@@ -85,7 +91,7 @@ def _create_task_tool(
         try:
             if queue is not None:
                 # Stream mode: forward tokens to SSE via queue, collect result
-                sa_agent_id = f"subagent:{subagent_type}"
+                sa_agent_id = f"subagent:{tool_call_id}"
                 last_ai_content: list[str] = []
 
                 async for chunk in agent.astream(
@@ -98,9 +104,9 @@ def _create_task_tool(
                     if isinstance(chunk, tuple) and len(chunk) >= 2:
                         msg = chunk[0]
                         c = getattr(msg, "content", "") or ""
-                        name = getattr(msg, "name", None)
+                        msg_name = getattr(msg, "name", None)
                         # Skip tool messages (they have a name attribute)
-                        if c and not name:
+                        if c and not msg_name:
                             last_ai_content.append(c)
 
                 return "".join(last_ai_content) or "[subagent produced no output]"
@@ -121,12 +127,13 @@ def _create_task_tool(
 
     return StructuredTool.from_function(
         coroutine=_run_task,
-        name="task",
+        name="subagent",
         description=(
             f"Delegate a task to a subagent. Available subagent types: {available}. "
-            "Provide a self-contained description — the subagent has no conversation context."
+            "Provide a name (short label for display) and a self-contained description "
+            "— the subagent has no conversation context."
         ),
-        args_schema=_TaskSchema,
+        args_schema=_SubAgentSchema,
     )
 
 
