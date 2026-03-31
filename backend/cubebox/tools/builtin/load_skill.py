@@ -33,13 +33,15 @@ def load_skill_from_file(skill_name: str, skills_root: str | None = None) -> Loa
     Args:
         skill_name: Name of the skill directory (e.g., 'deep-research')
         skills_root: Root directory containing skill subdirectories.
-                    Defaults to /.skills/builtin (container path).
+                    Defaults to backend/skills/builtin (local path).
 
     Returns:
         LoadSkillOutput with skill content or error message
     """
     if skills_root is None:
-        skills_root = "/.skills/builtin"
+        # Use local backend/skills/builtin directory
+        backend_dir = Path(__file__).parent.parent.parent.parent
+        skills_root = str(backend_dir / "skills" / "builtin")
 
     skill_path = Path(skills_root) / skill_name / "SKILL.md"
 
