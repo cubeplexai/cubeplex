@@ -21,7 +21,7 @@ from cubebox.middleware._utils import append_to_system_message
 from cubebox.prompts.subagents import SUBAGENT_PROMPT
 
 # Queue for forwarding subagent streaming events to the SSE generator.
-# Set per-request in the SSE event_generator; read inside _run_task.
+# Set per-request in the SSE event_generator; read inside _run_subagent.
 subagent_event_queue: ContextVar[asyncio.Queue[Any] | None] = ContextVar(
     "subagent_event_queue", default=None
 )
@@ -48,11 +48,11 @@ class _SubAgentSchema(BaseModel):
     subagent_type: str = "general-purpose"
 
 
-def _create_task_tool(
+def _create_subagent_tool(
     subagents: list[SubAgent],
     default_model: BaseChatModel | None = None,
 ) -> BaseTool:
-    """Build the `task` tool that spawns subagent runs."""
+    """Build the `subagent` tool that spawns subagent runs."""
 
     subagent_map: dict[str, SubAgent] = {s["name"]: s for s in subagents}
     # Always register general-purpose if not present
@@ -65,7 +65,7 @@ def _create_task_tool(
 
     available = ", ".join(f'"{k}"' for k in subagent_map)
 
-    async def _run_task(
+    async def _run_subagent(
         name: str,
         description: str,
         subagent_type: str = "general-purpose",
@@ -126,7 +126,7 @@ def _create_task_tool(
             return f"[error: {e}]"
 
     return StructuredTool.from_function(
-        coroutine=_run_task,
+        coroutine=_run_subagent,
         name="subagent",
         description=(
             f"Delegate a task to a subagent. Available subagent types: {available}. "
@@ -138,7 +138,7 @@ def _create_task_tool(
 
 
 class SubAgentMiddleware(AgentMiddleware[Any, Any, Any]):
-    """Registers the task tool that spawns ephemeral subagents."""
+    """Registers the subagent tool that spawns ephemeral subagents."""
 
     def __init__(
         self,
@@ -148,7 +148,7 @@ class SubAgentMiddleware(AgentMiddleware[Any, Any, Any]):
     ) -> None:
         self._subagents = subagents
         self._default_model = default_model
-        self.tools: Sequence[BaseTool] = [_create_task_tool(subagents, default_model)]
+        self.tools: Sequence[BaseTool] = [_create_subagent_tool(subagents, default_model)]
 
     async def awrap_model_call(
         self,
