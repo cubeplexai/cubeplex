@@ -77,6 +77,11 @@ class ProviderConfig(BaseModel):
 class LLMConfig(BaseModel):
     """Root LLM configuration matching config.yaml structure"""
 
+    default_model: str | None = Field(
+        default=None,
+        description="Default model in 'provider/model-id' format",
+        alias="default_model",
+    )
     providers: dict[str, ProviderConfig] = Field(
         default_factory=dict, description="LLM providers configuration"
     )

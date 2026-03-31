@@ -18,6 +18,7 @@ from loguru import logger
 from pydantic import BaseModel
 
 from cubebox.middleware._utils import append_to_system_message
+from cubebox.middleware.skills import SkillSpec, SkillsMiddleware
 from cubebox.prompts.subagents import SUBAGENT_PROMPT
 
 # Queue for forwarding subagent streaming events to the SSE generator.
@@ -51,6 +52,8 @@ class _SubAgentSchema(BaseModel):
 def _create_subagent_tool(
     subagents: list[SubAgent],
     default_model: BaseChatModel | None = None,
+    shared_tools: list[BaseTool] | None = None,
+    shared_skills: list[SkillSpec] | None = None,
 ) -> BaseTool:
     """Build the `subagent` tool that spawns subagent runs."""
 
@@ -62,6 +65,10 @@ def _create_subagent_tool(
             description="A general-purpose AI assistant",
             system_prompt="You are a helpful AI assistant.",
         )
+
+    # Shared tools excluding the subagent tool itself (no recursive spawning).
+    _shared_tools = [t for t in (shared_tools or []) if t.name != "subagent"]
+    _shared_skills = shared_skills or []
 
     available = ", ".join(f'"{k}"' for k in subagent_map)
 
@@ -76,8 +83,10 @@ def _create_subagent_tool(
         if model is None:
             return f"[error: no model available for subagent '{subagent_type}']"
 
-        tools: list[BaseTool] = list(spec.get("tools", []))
+        tools: list[BaseTool] = _shared_tools + list(spec.get("tools", []))
         middleware = list(spec.get("middleware", []))
+        if _shared_skills:
+            middleware.append(SkillsMiddleware(skills=_shared_skills))
 
         agent = create_agent(
             model=model,
@@ -145,10 +154,16 @@ class SubAgentMiddleware(AgentMiddleware[Any, Any, Any]):
         *,
         subagents: list[SubAgent],
         default_model: BaseChatModel | None = None,
+        shared_tools: list[BaseTool] | None = None,
+        shared_skills: list[SkillSpec] | None = None,
     ) -> None:
         self._subagents = subagents
         self._default_model = default_model
-        self.tools: Sequence[BaseTool] = [_create_subagent_tool(subagents, default_model)]
+        self.tools: Sequence[BaseTool] = [
+            _create_subagent_tool(
+                subagents, default_model, shared_tools=shared_tools, shared_skills=shared_skills
+            )
+        ]
 
     async def awrap_model_call(
         self,

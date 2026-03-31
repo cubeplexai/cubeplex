@@ -31,6 +31,41 @@ class LLMFactory:
             llm_config = LLMConfig(**config.llm)
         self.llm_config = llm_config
 
+    def get_default_model(self) -> tuple[str, str]:
+        """
+        Parse the default_model config value ("provider/model-id").
+
+        Returns:
+            Tuple of (provider_name, model_id)
+
+        Raises:
+            ValueError: If default_model is not set or has invalid format
+        """
+        default_model = self.llm_config.default_model
+        if not default_model:
+            raise ValueError("No default_model configured in llm config")
+
+        parts = default_model.split("/", 1)
+        if len(parts) != 2 or not parts[0] or not parts[1]:
+            raise ValueError(
+                f"Invalid default_model format: '{default_model}'. Expected 'provider/model-id'"
+            )
+
+        return parts[0], parts[1]
+
+    def create_default(self, **kwargs: Any) -> Any:
+        """
+        Create an LLM instance using the configured default_model.
+
+        Args:
+            **kwargs: Additional kwargs passed to create()
+
+        Returns:
+            LLM instance
+        """
+        provider_name, model_id = self.get_default_model()
+        return self.create(model_id=model_id, provider_name=provider_name, **kwargs)
+
     def _find_model(
         self, model_id: str, provider_name: str | None = None
     ) -> tuple[str, ProviderConfig, ModelConfig]:

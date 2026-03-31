@@ -45,8 +45,16 @@ def create_cubebox_agent(
         middleware.append(SandboxMiddleware(sandbox=sandbox))
         logger.debug("SandboxMiddleware added (sandbox id={})", sandbox.id)
 
-    middleware.append(SkillsMiddleware(skills=skills or []))
-    middleware.append(SubAgentMiddleware(subagents=subagents or [], default_model=llm))
+    _skills = skills or []
+    middleware.append(SkillsMiddleware(skills=_skills))
+    middleware.append(
+        SubAgentMiddleware(
+            subagents=subagents or [],
+            default_model=llm,
+            shared_tools=tools,
+            shared_skills=_skills,
+        )
+    )
 
     logger.info(
         "Creating cubebox agent: {} tools, {} middleware",

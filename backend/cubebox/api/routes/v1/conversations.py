@@ -328,11 +328,7 @@ async def send_message(
             from cubebox.llm.factory import LLMFactory
 
             factory_llm = LLMFactory()
-            providers = factory_llm.list_providers()
-            llm = factory_llm.create(
-                model_id=factory_llm.list_models(providers[0])[0],
-                provider_name=providers[0],
-            )
+            llm = factory_llm.create_default()
 
             # Get tools from registry
             from cubebox.tools import get_registry
