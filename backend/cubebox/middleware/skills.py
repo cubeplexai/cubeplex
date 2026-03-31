@@ -17,6 +17,7 @@ from loguru import logger
 
 from cubebox.middleware._utils import append_to_system_message
 from cubebox.prompts.skills import SKILLS_PROMPT_TEMPLATE
+from cubebox.sandbox.skills import CONTAINER_SKILLS_ROOT
 
 
 @dataclass
@@ -63,7 +64,7 @@ def load_builtin_skills(builtin_dir: Path) -> list["SkillSpec"]:
                     SkillSpec(
                         name=name_match.group(1).strip(),
                         description=desc_match.group(1).strip(),
-                        path=str(skill_md),
+                        path=f"{CONTAINER_SKILLS_ROOT}/{skill_dir.name}/SKILL.md",
                     )
                 )
         except Exception as exc:
@@ -83,7 +84,11 @@ class SkillsMiddleware(AgentMiddleware[Any, Any, Any]):
     def _build_prompt(self) -> str:
         if not self._skills:
             return ""
-        skills_list = "\n".join(f"- **{s.name}**: {s.description}" for s in self._skills)
+        skills_list = "\n".join(
+            f"- **{s.name}** (`{s.path}`): {s.description}" if s.path
+            else f"- **{s.name}**: {s.description}"
+            for s in self._skills
+        )
         return SKILLS_PROMPT_TEMPLATE.format(skills_list=skills_list)
 
     async def awrap_model_call(

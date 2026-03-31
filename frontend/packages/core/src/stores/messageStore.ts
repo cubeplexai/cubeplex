@@ -1,6 +1,7 @@
 // frontend/packages/core/src/stores/messageStore.ts
 import { create } from 'zustand'
 import type {
+  ContentBlock,
   Message, TextDeltaEvent, ToolCallEvent, ToolResultEvent, ReasoningEvent,
 } from '../types'
 import type { ApiClient } from '../api'
@@ -11,6 +12,7 @@ export interface AgentStream {
   toolCalls: ToolCallEvent[]
   toolResults: ToolResultEvent[]
   reasoning: string
+  blocks: ContentBlock[]
   name: string | null
 }
 
@@ -29,7 +31,46 @@ export interface MessageStore {
 const MAIN_AGENT_KEY = 'main'
 
 function emptyStream(name: string | null = null): AgentStream {
-  return { text: '', toolCalls: [], toolResults: [], reasoning: '', name }
+  return { text: '', toolCalls: [], toolResults: [], reasoning: '', blocks: [], name }
+}
+
+/** Finalize the last reasoning block's duration if switching to a different block type */
+function finalizeLastReasoning(blocks: ContentBlock[]): ContentBlock[] {
+  const last = blocks[blocks.length - 1]
+  if (last?.type === 'reasoning' && last.started_at && !last.duration_ms) {
+    const updated = [...blocks]
+    updated[updated.length - 1] = { ...last, duration_ms: Date.now() - last.started_at }
+    return updated
+  }
+  return blocks
+}
+
+/** Append content to blocks, merging with the last block if same type, or creating new block */
+function appendBlock(
+  blocks: ContentBlock[], type: 'reasoning' | 'text', content: string,
+): ContentBlock[] {
+  const last = blocks[blocks.length - 1]
+  if (last && last.type === type) {
+    const updated = [...blocks]
+    updated[updated.length - 1] = { ...last, content: last.content + content }
+    return updated
+  }
+  // Switching type — finalize any pending reasoning block
+  const finalized = finalizeLastReasoning(blocks)
+  if (type === 'reasoning') {
+    return [...finalized, { type, content, started_at: Date.now() }]
+  }
+  return [...finalized, { type, content }]
+}
+
+function appendToolCallBlock(
+  blocks: ContentBlock[],
+  name: string,
+  args: Record<string, unknown>,
+  toolCallId: string,
+): ContentBlock[] {
+  const finalized = finalizeLastReasoning(blocks)
+  return [...finalized, { type: 'tool_call', name, arguments: args, tool_call_id: toolCallId }]
 }
 
 export const useMessageStore = create<MessageStore>((set, get) => ({
@@ -81,37 +122,51 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
 
         if (event.type === 'text_delta') {
           const e = event as TextDeltaEvent
-          set((s) => ({
-            streamAgents: {
-              ...s.streamAgents,
-              [agentKey]: {
-                ...s.streamAgents[agentKey] ?? emptyStream(event.agent_name),
-                text: (s.streamAgents[agentKey]?.text ?? '') + e.data.content,
+          set((s) => {
+            const prev = s.streamAgents[agentKey] ?? emptyStream(event.agent_name)
+            return {
+              streamAgents: {
+                ...s.streamAgents,
+                [agentKey]: {
+                  ...prev,
+                  text: prev.text + e.data.content,
+                  blocks: appendBlock(prev.blocks, 'text', e.data.content),
+                },
               },
-            },
-          }))
+            }
+          })
         } else if (event.type === 'reasoning') {
           const e = event as ReasoningEvent
-          set((s) => ({
-            streamAgents: {
-              ...s.streamAgents,
-              [agentKey]: {
-                ...s.streamAgents[agentKey] ?? emptyStream(event.agent_name),
-                reasoning: (s.streamAgents[agentKey]?.reasoning ?? '') + e.data.content,
+          set((s) => {
+            const prev = s.streamAgents[agentKey] ?? emptyStream(event.agent_name)
+            return {
+              streamAgents: {
+                ...s.streamAgents,
+                [agentKey]: {
+                  ...prev,
+                  reasoning: prev.reasoning + e.data.content,
+                  blocks: appendBlock(prev.blocks, 'reasoning', e.data.content),
+                },
               },
-            },
-          }))
+            }
+          })
         } else if (event.type === 'tool_call') {
           const e = event as ToolCallEvent
-          set((s) => ({
-            streamAgents: {
-              ...s.streamAgents,
-              [agentKey]: {
-                ...s.streamAgents[agentKey] ?? emptyStream(event.agent_name),
-                toolCalls: [...(s.streamAgents[agentKey]?.toolCalls ?? []), e],
+          set((s) => {
+            const prev = s.streamAgents[agentKey] ?? emptyStream(event.agent_name)
+            return {
+              streamAgents: {
+                ...s.streamAgents,
+                [agentKey]: {
+                  ...prev,
+                  toolCalls: [...prev.toolCalls, e],
+                  blocks: appendToolCallBlock(
+                    prev.blocks, e.data.name, e.data.arguments, e.data.tool_call_id,
+                  ),
+                },
               },
-            },
-          }))
+            }
+          })
         } else if (event.type === 'tool_result') {
           const e = event as ToolResultEvent
           set((s) => ({
@@ -138,6 +193,14 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
       // Build final assistant message from accumulated main agent stream
       const mainStream = get().streamAgents[MAIN_AGENT_KEY]
       if (mainStream) {
+        // Finalize any pending reasoning block and strip internal started_at field
+        const finalBlocks = finalizeLastReasoning(mainStream.blocks).map((b) => {
+          if (b.type === 'reasoning') {
+            const { started_at: _, ...rest } = b
+            return rest
+          }
+          return b
+        })
         const assistantMessage: Message = {
           id: `assistant-${Date.now()}`,
           role: 'assistant',
@@ -149,6 +212,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
               }))
             : null,
           reasoning: mainStream.reasoning || null,
+          blocks: finalBlocks.length > 0 ? finalBlocks : null,
           created_at: new Date().toISOString(),
         }
         set((s) => ({

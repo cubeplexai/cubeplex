@@ -1,4 +1,9 @@
 // frontend/packages/core/src/types/events.ts
+export type ContentBlock =
+  | { type: 'reasoning'; content: string; started_at?: number; duration_ms?: number }
+  | { type: 'text'; content: string }
+  | { type: 'tool_call'; name: string; arguments: Record<string, unknown>; tool_call_id: string }
+
 export type AgentEventType =
   | 'text_delta'
   | 'reasoning'

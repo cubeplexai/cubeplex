@@ -7,6 +7,12 @@ from pathlib import Path
 
 from loguru import logger
 
+from cubebox.config import config
+
+# Read container skills root from config, default: /.skills
+_container_path: str = config.get("sandbox.skills.container_path", "/.skills")
+CONTAINER_SKILLS_ROOT = f"{_container_path}/builtin"
+
 
 class SkillLoader:
     """Load skills from local filesystem for syncing to sandbox."""
@@ -56,7 +62,7 @@ class SkillLoader:
                 rel_path = file_path.relative_to(skill_dir)
 
                 # Build container path: /.skills/builtin/{skill_name}/{rel_path}
-                container_path = f"/.skills/builtin/{skill_name}/{rel_path}"
+                container_path = f"{CONTAINER_SKILLS_ROOT}/{skill_name}/{rel_path}"
 
                 # Read file content as bytes
                 try:
