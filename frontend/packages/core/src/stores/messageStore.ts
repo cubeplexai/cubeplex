@@ -15,7 +15,7 @@ export interface AgentStream {
 }
 
 export interface MessageStore {
-  messages: Message[]
+  messages: Record<string, Message[]>
   streamAgents: Record<string, AgentStream>   // "main" or "task:xxx"
   isStreaming: boolean
   error: string | null
@@ -32,7 +32,7 @@ function emptyStream(name: string | null = null): AgentStream {
 }
 
 export const useMessageStore = create<MessageStore>((set, get) => ({
-  messages: [],
+  messages: {},
   streamAgents: {},
   isStreaming: false,
   error: null,
@@ -41,14 +41,17 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
     if (get().isStreaming) return
     try {
       const messages = await listMessages(client, conversationId)
-      set({ messages, error: null })
+      set((s) => ({
+        messages: { ...s.messages, [conversationId]: messages },
+        error: null,
+      }))
     } catch (err) {
       set({ error: (err as Error).message })
     }
   },
 
   async send(client: ApiClient, conversationId: string, content: string) {
-    // Optimistic: add user message immediately
+    // Optimistic: add user message immediately to the correct conversation
     const userMessage: Message = {
       id: `temp-${Date.now()}`,
       role: 'user',
@@ -57,7 +60,10 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
     }
 
     set((s) => ({
-      messages: [...s.messages, userMessage],
+      messages: {
+        ...s.messages,
+        [conversationId]: [...(s.messages[conversationId] ?? []), userMessage],
+      },
       streamAgents: { [MAIN_AGENT_KEY]: emptyStream() },
       isStreaming: true,
       error: null,
@@ -138,7 +144,13 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
           created_at: new Date().toISOString(),
         }
         set((s) => ({
-          messages: [...s.messages, assistantMessage],
+          messages: {
+            ...s.messages,
+            [conversationId]: [
+              ...(s.messages[conversationId] ?? []),
+              assistantMessage,
+            ],
+          },
           isStreaming: false,
           streamAgents: {},
         }))

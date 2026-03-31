@@ -13,7 +13,8 @@ interface MessageListProps {
 }
 
 export function MessageList({ conversationId }: MessageListProps) {
-  const { messages, isStreaming, mainStream, subAgentStreams } = useMessages()
+  const { messages, isStreaming, mainStream, subAgentStreams } =
+    useMessages(conversationId)
   const loadMessages = useMessageStore((s) => s.loadMessages)
 
   useEffect(() => {

@@ -3,8 +3,9 @@
 import { useMessageStore } from '@cubebox/core'
 import type { AgentStream } from '@cubebox/core'
 
-export function useMessages() {
-  const messages = useMessageStore((s) => s.messages) ?? []
+export function useMessages(conversationId: string) {
+  const messagesMap = useMessageStore((s) => s.messages) ?? {}
+  const messages = messagesMap[conversationId] ?? []
   const isStreaming = useMessageStore((s) => s.isStreaming) ?? false
   const streamAgents = useMessageStore((s) => s.streamAgents)
 
