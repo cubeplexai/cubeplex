@@ -1,198 +1,246 @@
 ---
 name: deep-research
-description: Use this skill instead of WebSearch for ANY question requiring web research. Trigger on queries like "what is X", "explain X", "compare X and Y", "research X", or before content generation tasks. Provides systematic multi-angle research methodology instead of single superficial searches. Use this proactively when the user's question needs online information.
+description: Conduct comprehensive deep research using multi-agent orchestration. Use when questions require web research, multi-angle investigation, or content generation based on real-world information. Provides supervisor-subagent architecture for parallel research tasks.
+version: 2.0.0
+keywords:
+  - research
+  - multi-agent
+  - subagent-orchestration
+  - swarm-intelligence
+  - deep-investigation
+  - report-generation
 ---
 
-# Deep Research Skill
+# Deep Research Skill (v2)
 
 ## Overview
 
-This skill provides a systematic methodology for conducting thorough web research. **Load this skill BEFORE starting any content generation task** to ensure you gather sufficient information from multiple angles, depths, and sources.
+This skill provides a **supervisor-based multi-agent orchestration** methodology for conducting thorough research. The main agent acts as **Chief Research Strategist**, delegating atomic research tasks to specialized subagents via the `task` tool, then synthesizing results into comprehensive reports.
+
+**Core Principle**: Never generate content from general knowledge alone. Research quality determines output quality.
+
+---
+
+## Architecture: Supervisor-Subagent Pattern
+
+```
+User Query
+    │
+    ▼
+┌─────────────────────────────────────────────────────────┐
+│  MAIN AGENT (Chief Research Strategist / Supervisor)    │
+│  • Decomposes research into atomic verification points  │
+│  • Assigns tasks to subagents via `task` tool          │
+│  • Synthesizes findings from all subagents             │
+│  • Validates completeness before reporting             │
+└─────────────────────────────────────────────────────────┘
+    │  task tool calls (parallel when independent)
+    ▼
+┌──────────┐  ┌──────────┐  ┌──────────┐
+│ Subagent │  │ Subagent │  │ Subagent │
+│ Research │  │ Research │  │ Research │
+│ Angle A  │  │ Angle B  │  │ Angle C  │
+└──────────┘  └──────────┘  └──────────┘
+    │  results
+    ▼
+┌─────────────────────────────────────────────────────────┐
+│  SYNTHESIS                                              │
+│  • Merge findings from all subagents                   │
+│  • Resolve conflicts (prioritize authoritative sources) │
+│  • Fill gaps with additional targeted research          │
+│  • Generate comprehensive report                        │
+└─────────────────────────────────────────────────────────┘
+```
+
+---
 
 ## When to Use This Skill
 
-**Always load this skill when:**
+**Load this skill when:**
+- User asks "research X", "investigate X", "explain X in depth"
+- Questions require current, comprehensive information from multiple sources
+- A single search would be insufficient
+- Creating reports, articles, or content requiring real-world data
+- Complex comparisons or competitive analysis
 
-### Research Questions
-- User asks "what is X", "explain X", "research X", "investigate X"
-- User wants to understand a concept, technology, or topic in depth
-- The question requires current, comprehensive information from multiple sources
-- A single web search would be insufficient to answer properly
+---
 
-### Content Generation (Pre-research)
-- Creating presentations (PPT/slides)
-- Creating frontend designs or UI mockups
-- Writing articles, reports, or documentation
-- Producing videos or multimedia content
-- Any content that requires real-world information, examples, or current data
+## Phase 1: Research Decomposition
 
-## Core Principle
+### Step 1A: Intent Classification
 
-**Never generate content based solely on general knowledge.** The quality of your output directly depends on the quality and quantity of research conducted beforehand. A single search query is NEVER enough.
+Before starting, classify the research type:
 
-## Research Methodology
+| Type | Characteristics | Approach |
+|------|----------------|----------|
+| **Quick Fact** | Single data point, clear answer | Direct search, skip to Phase 4 |
+| **Verification** | User provides claim, needs confirmation | Red-team style, search counter-evidence |
+| **Comprehensive** | Multi-dimensional topic | Full orchestration with subagents |
+| **Temporal** | Time-sensitive (prices, events, news) | Priority on T1 sources, timezone awareness |
 
-### Phase 1: Broad Exploration
+### Step 1B: Atomic Decomposition
 
-Start with broad searches to understand the landscape:
+Break the research into **irreducible verification points** — each subagent task should be a single, focused question.
 
-1. **Initial Survey**: Search for the main topic to understand the overall context
-2. **Identify Dimensions**: From initial results, identify key subtopics, themes, angles, or aspects that need deeper exploration
-3. **Map the Territory**: Note different perspectives, stakeholders, or viewpoints that exist
-
-Example:
+**Good decomposition:**
 ```
-Topic: "AI in healthcare"
-Initial searches:
-- "AI healthcare applications 2024"
-- "artificial intelligence medical diagnosis"
-- "healthcare AI market trends"
-
-Identified dimensions:
-- Diagnostic AI (radiology, pathology)
-- Treatment recommendation systems
-- Administrative automation
-- Patient monitoring
-- Regulatory landscape
-- Ethical considerations
+Topic: "Tesla competitive position vs BYD"
+├── Angle 1: Market share data (2024-2026)
+├── Angle 2: Technology comparison (battery, autopilot)
+├── Angle 3: Financial performance (revenue, margins)
+├── Angle 4: Production capacity and growth
+└── Angle 5: Regulatory environment per market
 ```
 
-### Phase 2: Deep Dive
+**Bad decomposition:**
+- "Research Tesla and BYD" (too broad, single subagent would be overwhelmed)
+- "Compare everything" (interleaves multiple angles)
 
-For each important dimension identified, conduct targeted research:
+### Step 1C: Source Hierarchy Planning
 
-1. **Specific Queries**: Search with precise keywords for each subtopic
-2. **Multiple Phrasings**: Try different keyword combinations and phrasings
-3. **Fetch Full Content**: Use `web_fetch` to read important sources in full, not just snippets
-4. **Follow References**: When sources mention other important resources, search for those too
+For each angle, plan which source tier to prioritize:
 
-Example:
+| Tier | Source | Priority | Use Case |
+|------|--------|----------|----------|
+| **T0** | User-uploaded files | Highest | Check first — user provided this |
+| **T1** | Official/authoritative | High | Facts, data, official statements |
+| **T2** | Established media/analyst reports | Medium | Context, trends, expert opinions |
+| **T3** | Community/forums/blogs | Low | Leads, hints (verify before trusting) |
+
+---
+
+## Phase 2: Subagent Orchestration
+
+### Parallel Task Dispatch
+
+Dispatch **independent** research angles in parallel using multiple `task` calls:
+
 ```
-Dimension: "Diagnostic AI in radiology"
-Targeted searches:
-- "AI radiology FDA approved systems"
-- "chest X-ray AI detection accuracy"
-- "radiology AI clinical trials results"
-
-Then fetch and read:
-- Key research papers or summaries
-- Industry reports
-- Real-world case studies
+Subagent 1 (Angle 1): "Search for Tesla market share data 2024-2026"
+Subagent 2 (Angle 2): "Research Tesla vs BYD battery technology comparisons"
+Subagent 3 (Angle 3): "Find Tesla and BYD financial performance metrics 2024"
 ```
 
-### Phase 3: Diversity & Validation
+**Rule**: Always dispatch independent angles in parallel. Research time scales inversely with parallelism.
 
-Ensure comprehensive coverage by seeking diverse information types:
+### The `task` Tool
 
-| Information Type | Purpose | Example Searches |
-|-----------------|---------|------------------|
-| **Facts & Data** | Concrete evidence | "statistics", "data", "numbers", "market size" |
-| **Examples & Cases** | Real-world applications | "case study", "example", "implementation" |
-| **Expert Opinions** | Authority perspectives | "expert analysis", "interview", "commentary" |
-| **Trends & Predictions** | Future direction | "trends 2024", "forecast", "future of" |
-| **Comparisons** | Context and alternatives | "vs", "comparison", "alternatives" |
-| **Challenges & Criticisms** | Balanced view | "challenges", "limitations", "criticism" |
+```python
+task(
+    description="Your research question — be specific and self-contained",
+    subagent_type="general-purpose"  # Use for web research tasks
+)
+```
 
-### Phase 4: Synthesis Check
+**Writing effective task descriptions:**
+- Include time range: "2024-2025 revenue data" not just "revenue"
+- Specify source tier if known: "Search official company filings"
+- Include verification requirement: "Verify with at least 2 authoritative sources"
+- State the goal: "Extract specific numbers, not just trends"
 
-Before proceeding to content generation, verify:
+### Track System for Each Task
 
-- [ ] Have I searched from at least 3-5 different angles?
-- [ ] Have I fetched and read the most important sources in full?
-- [ ] Do I have concrete data, examples, and expert perspectives?
-- [ ] Have I explored both positive aspects and challenges/limitations?
-- [ ] Is my information current and from authoritative sources?
+Based on cubemanus supervisor methodology:
+
+| Track | Trigger | Strategy |
+|-------|---------|----------|
+| **Track A (Fast)** | Gap_Retry_Count=0, clear facts | T0→T1 direct search, methodology first if unfamiliar domain |
+| **Track B (Lateral)** | 0 < Gap_Retry_Count < 3 | Red-teaming + proxy search when direct fails |
+| **Track C (Circuit)** | Gap_Retry_Count ≥ 3 | Mark `[不可得]`, rotate to next angle |
+
+### Source Selection Priority
+
+Per cubemanus methodology:
+
+1. **Methodology First** (for unfamiliar domains): Search "industry analysis framework" before raw data
+2. **Draft-Driven**: Only search to fill specific gaps, never blind searching
+3. **Red Teaming**: Assume conclusions are wrong, search counter-evidence
+4. **Proxy Logic** (when direct unavailable):
+   - Can't find company data → search components/events (suppliers, lawsuits, IPO)
+   - Can't find official site → search regulatory filings, court records
+
+---
+
+## Phase 3: Result Synthesis
+
+### Merging Strategy
+
+1. **Conflict Resolution**: When subagents report conflicting data:
+   - Prioritize T0 > T1 > T2 > T3
+   - Look for root cause (different time periods, definitions, regions)
+   - If unresolvable, present both with `[Conflict: Source A vs Source B]`
+
+2. **Completeness Check**:
+   - Did each atomic verification point get answered?
+   - Any gaps remain? Dispatch targeted subagent for gaps
+   - Is evidence sufficient to support conclusions?
+
+3. **Confidence标记**:
+   - `[Confirmed]` — Multiple authoritative sources agree
+   - `[Partial]` — Some evidence but incomplete
+   - `[Unverified]` — Single source or unverified claim
+   - `[Unavailable]` — After Track C exhaustion
+
+### Red Team Validation
+
+Before finalizing, consider:
+- What would **disprove** my conclusions?
+- Search for counter-evidence (negative reports, regulatory issues)
+- If red team finds nothing, confidence increases
+- If red team finds something, update conclusions accordingly
+
+---
+
+## Phase 4: Report Generation
+
+Output should include:
+
+1. **Executive Summary** (2-3 sentences)
+2. **Key Findings** (specific data points, not vague statements)
+3. **Analysis by Angle** (corresponding to atomic decomposition)
+4. **Source Attribution** (for credibility)
+5. **Confidence & Limitations** (honest assessment)
+6. **Outstanding Gaps** (what couldn't be verified)
+
+**Quality Bar**: A reader should be able to answer "So what?" and "How do you know?" from your report.
+
+---
+
+## Quality Checklist
+
+Before completing research:
+
+- [ ] Have I covered at least 3-5 different research angles?
+- [ ] Have I fetched full content from authoritative sources, not just snippets?
+- [ ] Do I have specific data points, not just vague trends?
+- [ ] Have I searched counter-evidence (red team)?
+- [ ] Have I addressed conflicts between sources?
+- [ ] Is my information current? (check timestamps)
+- [ ] Have I marked confidence levels honestly?
 
 **If any answer is NO, continue researching before generating content.**
 
-## Search Strategy Tips
-
-### Effective Query Patterns
-
-```
-# Be specific with context
-❌ "AI trends"
-✅ "enterprise AI adoption trends 2024"
-
-# Include authoritative source hints
-"[topic] research paper"
-"[topic] McKinsey report"
-"[topic] industry analysis"
-
-# Search for specific content types
-"[topic] case study"
-"[topic] statistics"
-"[topic] expert interview"
-
-# Use temporal qualifiers — always use the ACTUAL current year from <current_date>
-"[topic] 2026"   # ← replace with real current year, never hardcode a past year
-"[topic] latest"
-"[topic] recent developments"
-```
-
-### Temporal Awareness
-
-**Always check `<current_date>` in your context before forming ANY search query.**
-
-`<current_date>` gives you the full date: year, month, day, and weekday (e.g. `2026-02-28, Saturday`). Use the right level of precision depending on what the user is asking:
-
-| User intent | Temporal precision needed | Example query |
-|---|---|---|
-| "today / this morning / just released" | **Month + Day** | `"tech news February 28 2026"` |
-| "this week" | **Week range** | `"technology releases week of Feb 24 2026"` |
-| "recently / latest / new" | **Month** | `"AI breakthroughs February 2026"` |
-| "this year / trends" | **Year** | `"software trends 2026"` |
-
-**Rules:**
-- When the user asks about "today" or "just released", use **month + day + year** in your search queries to get same-day results
-- Never drop to year-only when day-level precision is needed — `"tech news 2026"` will NOT surface today's news
-- Try multiple phrasings: numeric form (`2026-02-28`), written form (`February 28 2026`), and relative terms (`today`, `this week`) across different queries
-
-❌ User asks "what's new in tech today" → searching `"new technology 2026"` → misses today's news
-✅ User asks "what's new in tech today" → searching `"new technology February 28 2026"` + `"tech news today Feb 28"` → gets today's results
-
-### When to Use web_fetch
-
-Use `web_fetch` to read full content when:
-- A search result looks highly relevant and authoritative
-- You need detailed information beyond the snippet
-- The source contains data, case studies, or expert analysis
-- You want to understand the full context of a finding
-
-### Iterative Refinement
-
-Research is iterative. After initial searches:
-1. Review what you've learned
-2. Identify gaps in your understanding
-3. Formulate new, more targeted queries
-4. Repeat until you have comprehensive coverage
-
-## Quality Bar
-
-Your research is sufficient when you can confidently answer:
-- What are the key facts and data points?
-- What are 2-3 concrete real-world examples?
-- What do experts say about this topic?
-- What are the current trends and future directions?
-- What are the challenges or limitations?
-- What makes this topic relevant or important now?
+---
 
 ## Common Mistakes to Avoid
 
-- ❌ Stopping after 1-2 searches
-- ❌ Relying on search snippets without reading full sources
-- ❌ Searching only one aspect of a multi-faceted topic
-- ❌ Ignoring contradicting viewpoints or challenges
+- ❌ Stopping after 1-2 searches (insufficient for "deep" research)
+- ❌ Relying on snippets without reading full sources
+- ❌ Searching only one angle of a multi-faceted topic
+- ❌ Ignoring contradicting evidence (red team failure)
 - ❌ Using outdated information when current data exists
 - ❌ Starting content generation before research is complete
+- ❌ Dispatching dependent tasks in parallel (waste of subagents)
+
+---
 
 ## Output
 
 After completing research, you should have:
-1. A comprehensive understanding of the topic from multiple angles
-2. Specific facts, data points, and statistics
+1. Comprehensive coverage of all atomic verification points
+2. Specific facts, data points, and statistics with source attribution
 3. Real-world examples and case studies
 4. Expert perspectives and authoritative sources
-5. Current trends and relevant context
+5. Honest confidence assessment and known gaps
 
-**Only then proceed to content generation**, using the gathered information to create high-quality, well-informed content.
+**Only then proceed to content generation.**
