@@ -39,7 +39,7 @@ function getEventDetail(event: AgentEvent): string | null {
       return str.length > 200 ? str.slice(0, 200) + '…' : str
     }
     case 'error':
-      return event.data?.message ?? null
+      return (event.data?.message as string) ?? null
     default:
       return null
   }

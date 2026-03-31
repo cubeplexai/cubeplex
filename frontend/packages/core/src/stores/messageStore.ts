@@ -1,6 +1,6 @@
 // frontend/packages/core/src/stores/messageStore.ts
 import { create } from 'zustand'
-import type { AgentEvent, Message, TextDeltaEvent, ToolCallEvent, ReasoningEvent } from '../types'
+import type { Message, TextDeltaEvent, ToolCallEvent, ReasoningEvent } from '../types'
 import type { ApiClient } from '../api'
 import { listMessages, streamMessages } from '../api'
 
