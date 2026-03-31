@@ -35,6 +35,8 @@ export async function* streamMessages(
       type: 'error',
       timestamp: new Date().toISOString(),
       data: { message: error.message },
+      agent_id: null,
+      agent_name: null,
     } as AgentEvent
     return
   }
@@ -55,6 +57,8 @@ export async function* streamMessages(
       type: 'error',
       timestamp: new Date().toISOString(),
       data: { message: 'Connection lost' },
+      agent_id: null,
+      agent_name: null,
     } as AgentEvent
   }
 }
