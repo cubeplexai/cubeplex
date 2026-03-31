@@ -28,6 +28,22 @@ async def lifespan(_app: FastAPI):  # type: ignore
     log.init()
     logger.info("Application starting up")
 
+    # Load MCP tools into the global registry
+    from cubebox.tools import init_mcp_tools
+
+    await init_mcp_tools()
+
+    # Load builtin skills and store on app state
+    from cubebox.config import backend_dir, config
+    from cubebox.middleware.skills import load_builtin_skills
+
+    if config.get("sandbox.skills.enabled", True):
+        skills_dir = backend_dir / config.get("sandbox.skills.builtin_dir", "skills/builtin")
+        _app.state.skills = load_builtin_skills(skills_dir)
+        logger.info("Loaded {} builtin skill(s)", len(_app.state.skills))
+    else:
+        _app.state.skills = []
+
     # Initialize LangGraph checkpointer tables (one-time setup)
     try:
         import aiomysql

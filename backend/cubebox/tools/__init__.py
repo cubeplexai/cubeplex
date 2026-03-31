@@ -1,7 +1,5 @@
 """Tool system module"""
 
-import asyncio
-
 from langchain_core.tools import BaseTool
 from loguru import logger
 
@@ -15,11 +13,11 @@ _registry = ToolRegistry()
 _registry.register_tool(create_calculator_tool())
 
 
-def _load_mcp_tools() -> None:
+async def init_mcp_tools() -> None:
     """
-    Load MCP tools into the registry at module init.
+    Load MCP tools into the registry asynchronously.
 
-    Runs the async MCP manager in a new event loop.
+    Must be called from an async context (e.g., app lifespan startup).
     Any failure is caught and logged as a warning — MCP errors never
     prevent the system from starting.
     """
@@ -32,11 +30,8 @@ def _load_mcp_tools() -> None:
 
         from cubebox.mcp.client import MCPManager
 
-        async def _load() -> list[BaseTool]:
-            manager = MCPManager()
-            return await manager.load_tools()
-
-        tools: list[BaseTool] = asyncio.run(_load())
+        manager = MCPManager()
+        tools: list[BaseTool] = await manager.load_tools()
 
         for tool in tools:
             _registry.register_tool(tool)
@@ -45,9 +40,6 @@ def _load_mcp_tools() -> None:
 
     except Exception as e:
         logger.warning("Failed to load MCP tools: {}. Continuing without MCP tools.", str(e))
-
-
-_load_mcp_tools()
 
 
 def get_registry() -> ToolRegistry:
@@ -60,4 +52,4 @@ def get_registry() -> ToolRegistry:
     return _registry
 
 
-__all__ = ["ToolRegistry", "get_registry"]
+__all__ = ["ToolRegistry", "get_registry", "init_mcp_tools"]

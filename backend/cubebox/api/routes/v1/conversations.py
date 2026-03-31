@@ -334,6 +334,7 @@ async def send_message(
                 llm=llm,
                 tools=tools,
                 sandbox=sandbox,
+                skills=raw_request.app.state.skills,
                 checkpointer=checkpointer,
             )
 
@@ -377,9 +378,7 @@ async def send_message(
 
                 elif kind == "subagent":
                     sa_agent_id, chunk = item[1], item[2]
-                    for sse_event in _convert_stream_chunk(
-                        chunk, agent_id=sa_agent_id
-                    ):
+                    for sse_event in _convert_stream_chunk(chunk, agent_id=sa_agent_id):
                         yield f"data: {sse_event.model_dump_json()}\n\n"
 
                 elif kind == "error":
