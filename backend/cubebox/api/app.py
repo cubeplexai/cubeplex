@@ -118,8 +118,8 @@ def create_app(
     app.state.sandbox_factory = sandbox_factory
 
     # Register middleware
-    from cubebox.middleware.cancellation import CancellationMiddleware
-    from cubebox.middleware.user_identity import UserIdentityMiddleware
+    from cubebox.api.middleware.cancellation import CancellationMiddleware
+    from cubebox.api.middleware.user_identity import UserIdentityMiddleware
 
     app.add_middleware(CancellationMiddleware)
     app.add_middleware(UserIdentityMiddleware)

@@ -1521,8 +1521,8 @@ from loguru import logger
 
 from cubebox.api.exceptions import register_exception_handlers
 from cubebox.api.routes.v1 import conversations as conversations_router_module
-from cubebox.middleware.cancellation import CancellationMiddleware
-from cubebox.middleware.user_identity import UserIdentityMiddleware
+from cubebox.api.middleware.cancellation import CancellationMiddleware
+from cubebox.api.middleware.user_identity import UserIdentityMiddleware
 
 
 @asynccontextmanager
