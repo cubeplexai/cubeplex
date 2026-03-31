@@ -1,11 +1,15 @@
 'use client'
 
 import { useMessageStore } from '@cubebox/core'
+import type { AgentStream } from '@cubebox/core'
 
-export function useMessages(conversationId: string) {
-  const messages = useMessageStore((s) => s.messages[conversationId] ?? [])
-  const streamingEvents = useMessageStore((s) => s.streamingEvents[conversationId] ?? [])
-  const isStreaming = useMessageStore((s) => s.streamingConversationId === conversationId)
+export function useMessages() {
+  const messages = useMessageStore((s) => s.messages)
+  const isStreaming = useMessageStore((s) => s.isStreaming)
+  const streamAgents = useMessageStore((s) => s.streamAgents)
 
-  return { messages, streamingEvents, isStreaming }
+  const mainStream = streamAgents['main'] ?? null
+  const subAgentStreams = Object.entries(streamAgents).filter(([key]) => key !== 'main')
+
+  return { messages, isStreaming, mainStream, subAgentStreams }
 }

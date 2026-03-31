@@ -4,6 +4,7 @@ import { useEffect } from 'react'
 import { useMessageStore, createApiClient } from '@cubebox/core'
 import { UserMessage } from './UserMessage'
 import { AssistantMessage } from './AssistantMessage'
+import { SubAgentCard } from './SubAgentCard'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { useMessages } from '@/hooks/useMessages'
 
@@ -12,13 +13,13 @@ interface MessageListProps {
 }
 
 export function MessageList({ conversationId }: MessageListProps) {
-  const { messages, streamingEvents, isStreaming } = useMessages(conversationId)
-  const { fetchHistory } = useMessageStore()
+  const { messages, isStreaming, mainStream, subAgentStreams } = useMessages()
+  const loadMessages = useMessageStore((s) => s.loadMessages)
 
   useEffect(() => {
     const client = createApiClient('')
-    fetchHistory(client, conversationId)
-  }, [conversationId, fetchHistory])
+    loadMessages(client, conversationId)
+  }, [conversationId, loadMessages])
 
   return (
     <ScrollArea className="flex-1 p-4">
@@ -29,8 +30,19 @@ export function MessageList({ conversationId }: MessageListProps) {
             {msg.role === 'assistant' && <AssistantMessage message={msg} />}
           </div>
         ))}
-        {isStreaming && (
-          <AssistantMessage streamingEvents={streamingEvents} isStreaming={true} />
+
+        {isStreaming && mainStream && (
+          <>
+            {subAgentStreams.map(([agentId, stream]) => (
+              <SubAgentCard
+                key={agentId}
+                agentId={agentId}
+                stream={stream}
+                isRunning={isStreaming}
+              />
+            ))}
+            <AssistantMessage stream={mainStream} isStreaming />
+          </>
         )}
       </div>
     </ScrollArea>

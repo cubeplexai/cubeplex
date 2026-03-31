@@ -8,7 +8,9 @@ Creates and configures the FastAPI application with:
 """
 
 import asyncio
+from collections.abc import Callable
 from contextlib import asynccontextmanager
+from typing import Any
 
 from fastapi import FastAPI
 from loguru import logger
@@ -90,19 +92,30 @@ async def lifespan(_app: FastAPI):  # type: ignore
         logger.info("Sandbox cleanup loop stopped")
 
 
-def create_app() -> FastAPI:
+def create_app(
+    checkpointer_factory: Callable[[], Any] | None = None,
+    sandbox_factory: Callable[[], Any] | None = None,
+) -> FastAPI:
     """
     Create and configure the FastAPI application.
+
+    Args:
+        checkpointer_factory: Optional factory for dependency injection (testing).
+        sandbox_factory: Optional factory for dependency injection (testing).
 
     Returns:
         Configured FastAPI application instance
     """
     app = FastAPI(
         title="cubebox API",
-        description="AI Agent System Backend with DeepAgents Framework",
+        description="AI Agent System Backend",
         version="0.1.0",
         lifespan=lifespan,
     )
+
+    # Store DI factories for route handlers
+    app.state.checkpointer_factory = checkpointer_factory
+    app.state.sandbox_factory = sandbox_factory
 
     # Register middleware
     from cubebox.middleware.cancellation import CancellationMiddleware

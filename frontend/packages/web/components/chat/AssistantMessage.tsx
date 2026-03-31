@@ -3,33 +3,10 @@
 import { useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import type { Message, AgentEvent } from '@cubebox/core'
-import { ExecutionDetails } from './ExecutionDetails'
+import type { Message } from '@cubebox/core'
+import type { AgentStream } from '@cubebox/core'
 import { Bot, ChevronDown, ChevronRight, Brain } from 'lucide-react'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
-
-function extractText(events: AgentEvent[] | null): string {
-  if (!events) return ''
-  // text_delta events are incremental — concatenate all chunks
-  return events
-    .filter((e) => e.type === 'text_delta')
-    .map((e) => e.data?.content ?? '')
-    .join('')
-}
-
-function extractReasoning(events: AgentEvent[] | null): string {
-  if (!events) return ''
-  // reasoning events are incremental — concatenate all chunks
-  return events
-    .filter((e) => e.type === 'reasoning')
-    .map((e) => e.data?.content ?? '')
-    .join('')
-}
-
-function hasToolActivity(events: AgentEvent[] | null): boolean {
-  if (!events) return false
-  return events.some((e) => e.type === 'tool_call' || e.type === 'tool_result' || e.type === 'error')
-}
 
 interface ReasoningBlockProps {
   reasoning: string
@@ -59,39 +36,58 @@ function ReasoningBlock({ reasoning, isStreaming }: ReasoningBlockProps) {
   )
 }
 
-interface AssistantMessageProps {
-  message?: Message
-  streamingEvents?: AgentEvent[]
-  isStreaming?: boolean
+function ToolCallList({ toolCalls }: { toolCalls: { name: string; arguments: Record<string, unknown> }[] }) {
+  return (
+    <div className="space-y-1">
+      {toolCalls.map((tc, i) => (
+        <div key={i} className="text-xs font-mono px-2 py-1 rounded bg-muted/40 text-muted-foreground">
+          <span className="text-foreground/70">{tc.name}</span>
+          {' '}
+          <span className="opacity-60">{JSON.stringify(tc.arguments).slice(0, 100)}</span>
+        </div>
+      ))}
+    </div>
+  )
 }
 
-export function AssistantMessage({
-  message,
-  streamingEvents = [],
-  isStreaming = false,
-}: AssistantMessageProps) {
-  const events = message?.events ?? streamingEvents
-  const text = extractText(events)
-  const reasoning = extractReasoning(events)
-  const showExecutionPanel = hasToolActivity(events) || (isStreaming && !text && !reasoning)
+interface HistoryProps {
+  message: Message
+  stream?: never
+  isStreaming?: never
+}
+
+interface StreamingProps {
+  message?: never
+  stream: AgentStream
+  isStreaming: true
+}
+
+type AssistantMessageProps = HistoryProps | StreamingProps
+
+export function AssistantMessage({ message, stream, isStreaming }: AssistantMessageProps) {
+  const text = isStreaming ? stream.text : (message.content ?? '')
+  const reasoning = isStreaming ? stream.reasoning : (message.reasoning ?? '')
+  const toolCalls = isStreaming
+    ? stream.toolCalls.map((tc) => ({ name: tc.data.name, arguments: tc.data.arguments }))
+    : (message.tool_calls ?? [])
 
   return (
-    <div className="flex justify-start gap-2.5">
+    <div data-role="assistant" className="flex justify-start gap-2.5">
       <div className="shrink-0 w-6 h-6 rounded-md border border-border bg-card flex items-center justify-center mt-0.5">
         <Bot className="size-3.5 text-primary/70" />
       </div>
       <div className="flex-1 max-w-[75%] space-y-2">
-        {showExecutionPanel && events && events.length > 0 && (
+        {toolCalls.length > 0 && (
           <div className="bg-card border border-border rounded-xl px-3 py-2.5">
-            <ExecutionDetails events={events} isStreaming={isStreaming} />
+            <ToolCallList toolCalls={toolCalls} />
           </div>
         )}
         {reasoning && (
           <div className="bg-card border border-border rounded-xl px-3 py-2.5">
-            <ReasoningBlock reasoning={reasoning} isStreaming={isStreaming && !text} />
+            <ReasoningBlock reasoning={reasoning} isStreaming={isStreaming === true && !text} />
           </div>
         )}
-        {text && (
+        {text ? (
           <div className="prose prose-sm dark:prose-invert max-w-none
             prose-p:leading-relaxed prose-p:my-1
             prose-headings:font-semibold prose-headings:mt-3 prose-headings:mb-1
@@ -108,14 +104,13 @@ export function AssistantMessage({
             prose-table:text-foreground prose-th:text-foreground prose-td:text-foreground">
             <ReactMarkdown remarkPlugins={[remarkGfm]}>{text}</ReactMarkdown>
           </div>
-        )}
-        {isStreaming && !text && !reasoning && (
+        ) : isStreaming ? (
           <div className="flex items-center gap-1 pl-1">
             <span className="w-1.5 h-1.5 rounded-full bg-primary animate-bounce [animation-delay:0ms]" />
             <span className="w-1.5 h-1.5 rounded-full bg-primary animate-bounce [animation-delay:150ms]" />
             <span className="w-1.5 h-1.5 rounded-full bg-primary animate-bounce [animation-delay:300ms]" />
           </div>
-        )}
+        ) : null}
       </div>
     </div>
   )

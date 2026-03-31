@@ -1,105 +1,154 @@
+// frontend/packages/core/src/stores/messageStore.ts
 import { create } from 'zustand'
-import type { Message, AgentEvent } from '../types'
+import type {
+  Message, TextDeltaEvent, ToolCallEvent, ToolResultEvent, ReasoningEvent,
+} from '../types'
 import type { ApiClient } from '../api'
 import { listMessages, streamMessages } from '../api'
 
-export interface MessageStore {
-  messages: Record<string, Message[]>
-  streamingEvents: Record<string, AgentEvent[]>
-  streamingConversationId: string | null
-  error: string | null
-  fetchHistory(client: ApiClient, conversationId: string): Promise<void>
-  sendMessage(
-    client: ApiClient,
-    conversationId: string,
-    content: string
-  ): Promise<void>
-  clearStreaming(conversationId: string): void
+export interface AgentStream {
+  text: string
+  toolCalls: ToolCallEvent[]
+  toolResults: ToolResultEvent[]
+  reasoning: string
+  name: string | null
 }
 
-export const useMessageStore = create<MessageStore>((set) => ({
-  messages: {},
-  streamingEvents: {},
-  streamingConversationId: null,
+export interface MessageStore {
+  messages: Message[]
+  streamAgents: Record<string, AgentStream>   // "main" or "task:xxx"
+  isStreaming: boolean
+  error: string | null
+
+  loadMessages(client: ApiClient, conversationId: string): Promise<void>
+  send(client: ApiClient, conversationId: string, content: string): Promise<void>
+  clearStream(): void
+}
+
+const MAIN_AGENT_KEY = 'main'
+
+function emptyStream(name: string | null = null): AgentStream {
+  return { text: '', toolCalls: [], toolResults: [], reasoning: '', name }
+}
+
+export const useMessageStore = create<MessageStore>((set, get) => ({
+  messages: [],
+  streamAgents: {},
+  isStreaming: false,
   error: null,
 
-  async fetchHistory(client: ApiClient, conversationId: string) {
+  async loadMessages(client: ApiClient, conversationId: string) {
+    if (get().isStreaming) return
     try {
-      // 如果正在流式传输当前会话，不要覆盖
-      const currentState = useMessageStore.getState()
-      if (currentState.streamingConversationId === conversationId) {
-        return
-      }
-
       const messages = await listMessages(client, conversationId)
-      set((s) => ({
-        messages: { ...s.messages, [conversationId]: messages },
-      }))
+      set({ messages, error: null })
     } catch (err) {
       set({ error: (err as Error).message })
     }
   },
 
-  async sendMessage(client: ApiClient, conversationId: string, content: string) {
-    // 乐观地立即添加用户消息
+  async send(client: ApiClient, conversationId: string, content: string) {
+    // Optimistic: add user message immediately
     const userMessage: Message = {
-      id: `temp-user-${Date.now()}`,
-      conversation_id: conversationId,
+      id: `temp-${Date.now()}`,
       role: 'user',
       content,
-      events: null,
       created_at: new Date().toISOString(),
     }
 
     set((s) => ({
-      messages: {
-        ...s.messages,
-        [conversationId]: [...(s.messages[conversationId] || []), userMessage],
-      },
-      streamingEvents: { ...s.streamingEvents, [conversationId]: [] },
-      streamingConversationId: conversationId,
+      messages: [...s.messages, userMessage],
+      streamAgents: { [MAIN_AGENT_KEY]: emptyStream() },
+      isStreaming: true,
       error: null,
     }))
 
     try {
-      for await (const event of streamMessages(
-        client.baseUrl,
-        conversationId,
-        content
-      )) {
-        set((s) => ({
-          streamingEvents: {
-            ...s.streamingEvents,
-            [conversationId]: [...(s.streamingEvents[conversationId] || []), event],
-          },
-        }))
-        if (event.type === 'done') break
+      for await (const event of streamMessages(client.baseUrl, conversationId, content)) {
+        const agentKey = event.agent_id ?? MAIN_AGENT_KEY
+
+        if (event.type === 'text_delta') {
+          const e = event as TextDeltaEvent
+          set((s) => ({
+            streamAgents: {
+              ...s.streamAgents,
+              [agentKey]: {
+                ...s.streamAgents[agentKey] ?? emptyStream(event.agent_name),
+                text: (s.streamAgents[agentKey]?.text ?? '') + e.data.content,
+              },
+            },
+          }))
+        } else if (event.type === 'reasoning') {
+          const e = event as ReasoningEvent
+          set((s) => ({
+            streamAgents: {
+              ...s.streamAgents,
+              [agentKey]: {
+                ...s.streamAgents[agentKey] ?? emptyStream(event.agent_name),
+                reasoning: (s.streamAgents[agentKey]?.reasoning ?? '') + e.data.content,
+              },
+            },
+          }))
+        } else if (event.type === 'tool_call') {
+          const e = event as ToolCallEvent
+          set((s) => ({
+            streamAgents: {
+              ...s.streamAgents,
+              [agentKey]: {
+                ...s.streamAgents[agentKey] ?? emptyStream(event.agent_name),
+                toolCalls: [...(s.streamAgents[agentKey]?.toolCalls ?? []), e],
+              },
+            },
+          }))
+        } else if (event.type === 'tool_result') {
+          const e = event as ToolResultEvent
+          set((s) => ({
+            streamAgents: {
+              ...s.streamAgents,
+              [agentKey]: {
+                ...s.streamAgents[agentKey] ?? emptyStream(event.agent_name),
+                toolResults: [...(s.streamAgents[agentKey]?.toolResults ?? []), e],
+              },
+            },
+          }))
+        } else if (event.type === 'done') {
+          break
+        } else if (event.type === 'error') {
+          set({ error: (event.data as { message: string }).message })
+          break
+        }
       }
     } catch (err) {
       set({ error: (err as Error).message })
     } finally {
-      // 刷新历史记录，获取正式保存的 assistant 消息
-      try {
-        const messages = await listMessages(client, conversationId)
+      // Build final assistant message from accumulated main agent stream
+      const mainStream = get().streamAgents[MAIN_AGENT_KEY]
+      if (mainStream) {
+        const assistantMessage: Message = {
+          id: `assistant-${Date.now()}`,
+          role: 'assistant',
+          content: mainStream.text || null,
+          tool_calls: mainStream.toolCalls.length > 0
+            ? mainStream.toolCalls.map((tc) => ({
+                name: tc.data.name,
+                arguments: tc.data.arguments,
+              }))
+            : null,
+          reasoning: mainStream.reasoning || null,
+          created_at: new Date().toISOString(),
+        }
         set((s) => ({
-          messages: { ...s.messages, [conversationId]: messages },
-          streamingConversationId: null,
-          streamingEvents: { ...s.streamingEvents, [conversationId]: [] },
+          messages: [...s.messages, assistantMessage],
+          isStreaming: false,
+          streamAgents: {},
         }))
-      } catch {
-        set((s) => ({
-          streamingConversationId: null,
-          streamingEvents: { ...s.streamingEvents, [conversationId]: [] },
-        }))
+      } else {
+        set({ isStreaming: false, streamAgents: {} })
       }
     }
   },
 
-  clearStreaming(conversationId: string) {
-    set((s) => ({
-      streamingEvents: { ...s.streamingEvents, [conversationId]: [] },
-      streamingConversationId:
-        s.streamingConversationId === conversationId ? null : s.streamingConversationId,
-    }))
+  clearStream() {
+    set({ streamAgents: {}, isStreaming: false })
   },
 }))

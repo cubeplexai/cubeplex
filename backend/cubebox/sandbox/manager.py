@@ -20,6 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from cubebox.config import config
 from cubebox.repositories.user_sandbox import UserSandboxRepository
+from cubebox.sandbox.base import Sandbox
 from cubebox.sandbox.opensandbox import OpenSandbox
 
 
@@ -61,7 +62,7 @@ class SandboxManager:
             readOnly=False,
         )
 
-    async def get_or_create(self, user_id: str) -> OpenSandbox:
+    async def get_or_create(self, user_id: str) -> Sandbox:
         """Get the user's active sandbox, or create a new one.
 
         Flow:
@@ -192,14 +193,14 @@ class SandboxManager:
 
                 await repo.mark_terminated(record.id)
 
-    async def _sync_skills(self, backend: OpenSandbox) -> None:
+    async def _sync_skills(self, backend: Sandbox) -> None:
         """Sync builtin skills to the sandbox container.
 
         Loads skills from the local filesystem and uploads them to the
         container's /.skills directory.
 
         Args:
-            backend: OpenSandbox backend instance
+            backend: Sandbox backend instance
         """
         from cubebox.sandbox.skills import SkillLoader
 
@@ -223,7 +224,17 @@ class SandboxManager:
             logger.info("No skill files to sync")
             return
 
-        await backend.sync_skills(files)
+        # Create parent directories
+        dirs = set()
+        for path, _ in files:
+            parent = path.rsplit("/", 1)[0]
+            if parent:
+                dirs.add(parent)
+        if dirs:
+            mkdir_cmd = "mkdir -p " + " ".join(f'"{d}"' for d in dirs)
+            await backend.execute(mkdir_cmd)
+
+        await backend.upload(files)
         logger.info("Synced {} skill files to sandbox", len(files))
 
 

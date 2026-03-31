@@ -6,9 +6,11 @@
   "scripts": {
     "dev": "pnpm -r run dev",
     "build": "pnpm -r run build",
-    "type-check": "pnpm -r run type-check"
+    "type-check": "pnpm -r run type-check",
+    "test:e2e": "playwright test"
   },
   "devDependencies": {
+    "@playwright/test": "^1.58.2",
     "typescript": "^5.3.3"
   }
 }

@@ -12,9 +12,9 @@ interface InputBarProps {
 
 export function InputBar({ conversationId, onSubmit, isLoading = false }: InputBarProps) {
   const [content, setContent] = useState('')
-  const { sendMessage } = useMessageStore()
+  const { send } = useMessageStore()
   const messageIsStreaming = useMessageStore((s) =>
-    conversationId ? s.streamingConversationId === conversationId : false
+    conversationId ? s.isStreaming : false
   )
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
@@ -31,7 +31,7 @@ export function InputBar({ conversationId, onSubmit, isLoading = false }: InputB
       if (textareaRef.current) {
         textareaRef.current.style.height = 'auto'
       }
-      await sendMessage(client, conversationId, content)
+      await send(client, conversationId, content)
     } catch (err) {
       console.error('Failed to send message:', err)
     }

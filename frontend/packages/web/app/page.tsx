@@ -8,7 +8,7 @@ import { Box } from 'lucide-react'
 export default function WelcomePage() {
   const router = useRouter()
   const { create: createConversation } = useConversationStore()
-  const { sendMessage } = useMessageStore()
+  const { send } = useMessageStore()
 
   const handleSubmit = async (content: string) => {
     const client = createApiClient('')
@@ -20,9 +20,9 @@ export default function WelcomePage() {
       // 立即跳转到对话页面
       router.push(`/conversations/${convo.id}`)
 
-      // 在后台发送消息（sendMessage 会乐观地添加用户消息并开始流式传输）
+      // 在后台发送消息（send 会乐观地添加用户消息并开始流式传输）
       // 不等待完成，让对话页面显示流式响应
-      sendMessage(client, convo.id, content).catch((err) => {
+      send(client, convo.id, content).catch((err) => {
         console.error('Failed to send message:', err)
       })
     } catch (err) {

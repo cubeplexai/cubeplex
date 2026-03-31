@@ -1,10 +1,10 @@
-import type { AgentEvent } from './events'
-
+// frontend/packages/core/src/types/message.ts
 export interface Message {
   id: string
-  conversation_id: string
-  role: 'user' | 'assistant'
+  role: 'user' | 'assistant' | 'tool'
   content: string | null
-  events: AgentEvent[] | null
-  created_at: string
+  tool_calls?: { name: string; arguments: Record<string, unknown> }[] | null
+  reasoning?: string | null
+  name?: string | null  // for tool messages
+  created_at?: string
 }
