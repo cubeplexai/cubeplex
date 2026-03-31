@@ -1,10 +1,18 @@
 # LangGraph Migration Design
 
-Replace `deepagents` with native LangGraph, simplify sandbox to execute-only, use thread state as single source of truth for messages, and simplify frontend state management.
+Replace `deepagents` dependency with `langchain.agents.create_agent()` + custom middleware, simplify sandbox to execute-only, use thread state as single source of truth for messages, and simplify frontend state management.
+
+## Key Insight
+
+`langchain.agents.create_agent()` is a thin wrapper around LangGraph's `StateGraph`. It internally builds a state graph, compiles middleware as graph nodes, and returns a `CompiledStateGraph`. This means:
+
+- We get LangGraph-native behavior (`.astream()`, checkpointer, etc.)
+- We get a structured middleware system for composing agent capabilities
+- We can vendor and adapt deepagents middleware without depending on the package
 
 ## Motivation
 
-- `deepagents` has too many abstractions (filesystem middleware, subagents, skills) that don't align with our needs
+- `deepagents` package couples too many concerns and limits customization
 - Sandbox exposes too many methods (read, write, grep, ls) when `execute` alone is sufficient — shell commands support pipes, parallelism, and composability
 - Messages are stored in both LangGraph checkpointer AND a `messages` table — redundant
 - Frontend manually manages optimistic updates, streaming event accumulation, and post-stream re-fetch — unnecessary complexity
@@ -14,7 +22,8 @@ Replace `deepagents` with native LangGraph, simplify sandbox to execute-only, us
 
 ### In Scope
 
-- Replace `deepagents` with native LangGraph `StateGraph`
+- Replace `deepagents` with `langchain.agents.create_agent()` + custom middleware
+- Vendor and adapt middleware from deepagents: SandboxMiddleware (from FilesystemMiddleware), SubAgentMiddleware, SkillsMiddleware
 - Simplify `Sandbox` to async-first base class with `execute` only
 - Implement `OpenSandbox` adapter and `LocalSandbox` for dev
 - Delete `messages` table; read messages from checkpointer thread state
@@ -26,9 +35,8 @@ Replace `deepagents` with native LangGraph, simplify sandbox to execute-only, us
 ### Out of Scope
 
 - `useStream` SDK integration (custom API is better for auth/billing)
-- Human-in-the-loop / interrupt support (future)
-- Memory / skills middleware (future)
-- Subagent spawning (future)
+- Human-in-the-loop / interrupt support (future, but middleware system supports it)
+- Memory middleware (future)
 - User management / auth / billing (future)
 
 ## Architecture
@@ -38,22 +46,26 @@ Replace `deepagents` with native LangGraph, simplify sandbox to execute-only, us
 ```
 cubebox/
 ├── agents/
-│   ├── graph.py              # NEW: native LangGraph agent builder
-│   ├── state.py              # NEW: AgentState definition
+│   ├── graph.py              # NEW: agent factory using create_agent() + middleware
 │   ├── schemas.py            # KEEP: SSE event types (remove ChainStartEvent)
-│   ├── checkpointer.py       # KEEP
+│   ├── convert.py            # NEW: LangChain Message → API format conversion
+│   └── checkpointer.py       # KEEP
 │   └── executor.py           # DELETE
+├── middleware/               # NEW: vendored & adapted from deepagents
+│   ├── sandbox.py            # Adapted from FilesystemMiddleware — execute tool + sandbox context
+│   ├── subagents.py          # Adapted from SubAgentMiddleware — task delegation
+│   └── skills.py             # Adapted from SkillsMiddleware — progressive skill disclosure
 ├── prompts/                  # NEW
 │   ├── system.py             # Base system prompt
-│   └── execution.py          # Execute tool documentation prompt
+│   ├── sandbox.py            # Sandbox/execution tool documentation
+│   ├── subagents.py          # Subagent usage guidance
+│   └── skills.py             # Skills system guidance
 ├── sandbox/
 │   ├── base.py               # NEW: async-first Sandbox ABC
 │   ├── opensandbox.py        # MODIFY: inherit new base, execute-only
 │   ├── local.py              # NEW: subprocess-based for dev/debug
 │   └── manager.py            # MODIFY: use new Sandbox base class
-├── tools/
-│   ├── sandbox_tool.py       # NEW: wrap Sandbox.execute as BaseTool
-│   └── ...                   # KEEP: registry, builtin, MCP
+├── tools/                    # KEEP: registry, builtin, MCP
 ├── api/routes/v1/
 │   └── conversations.py      # MODIFY: read messages from checkpointer
 ├── models/
@@ -67,56 +79,98 @@ cubebox/
 
 ### Agent Core
 
-#### State (`agents/state.py`)
+#### Graph Factory (`agents/graph.py`)
+
+Uses `langchain.agents.create_agent()` which internally builds a LangGraph `StateGraph` and returns `CompiledStateGraph`.
 
 ```python
-from langgraph.graph import MessagesState
+from langchain.agents import create_agent
+from langchain_core.language_models import BaseChatModel
+from langchain_core.tools import BaseTool
+from langgraph.graph.state import CompiledStateGraph
+from langgraph.types import Checkpointer
 
-class AgentState(MessagesState):
-    """Inherits messages: Annotated[list, add_messages] from MessagesState."""
-    pass
-```
+from cubebox.middleware.sandbox import SandboxMiddleware
+from cubebox.middleware.subagents import SubAgentMiddleware
+from cubebox.middleware.skills import SkillsMiddleware
+from cubebox.prompts.system import BASE_SYSTEM_PROMPT
+from cubebox.sandbox.base import Sandbox
 
-Simple inheritance. Extensible for future custom fields.
-
-#### Graph (`agents/graph.py`)
-
-```python
-from langgraph.graph import StateGraph, END
-from langgraph.prebuilt import ToolNode
-
-def create_agent(
+def create_cubebox_agent(
     llm: BaseChatModel,
     tools: list[BaseTool],
+    *,
+    sandbox: Sandbox | None = None,
     checkpointer: Checkpointer | None = None,
-    system_prompt: str | None = None,
 ) -> CompiledStateGraph:
-    llm_with_tools = llm.bind_tools(tools)
+    """Build agent with middleware stack."""
+    middleware = []
 
-    async def agent_node(state: AgentState) -> dict:
-        messages = state["messages"]
-        if system_prompt:
-            messages = [SystemMessage(content=system_prompt)] + messages
-        response = await llm_with_tools.ainvoke(messages)
-        return {"messages": [response]}
+    if sandbox:
+        middleware.append(SandboxMiddleware(sandbox=sandbox))
 
-    def should_continue(state: AgentState) -> str:
-        last = state["messages"][-1]
-        if last.tool_calls:
-            return "tools"
-        return END
+    # Skills and subagents always available
+    middleware.append(SkillsMiddleware(...))
+    middleware.append(SubAgentMiddleware(...))
 
-    graph = StateGraph(AgentState)
-    graph.add_node("agent", agent_node)
-    graph.add_node("tools", ToolNode(tools))
-    graph.set_entry_point("agent")
-    graph.add_conditional_edges("agent", should_continue, {"tools": "tools", END: END})
-    graph.add_edge("tools", "agent")
-    return graph.compile(checkpointer=checkpointer)
+    return create_agent(
+        model=llm,
+        tools=tools,
+        system_prompt=BASE_SYSTEM_PROMPT,
+        middleware=middleware,
+        checkpointer=checkpointer,
+    )
 ```
 
-Standard ReAct loop: agent -> check tool_calls -> execute tools -> back to agent.
-Agent node is async (`ainvoke`) for FastAPI compatibility.
+`create_agent()` handles:
+- Binding tools to the LLM (including tools from middleware)
+- Building the ReAct loop (agent → tool_calls check → execute tools → back to agent)
+- Compiling middleware hooks as graph nodes
+- Merging middleware state schemas
+
+The returned `CompiledStateGraph` supports `.astream()`, checkpointer persistence, etc.
+
+### Middleware
+
+Vendored from deepagents and adapted. Each middleware extends `langchain.agents.middleware.AgentMiddleware`.
+
+#### SandboxMiddleware (`middleware/sandbox.py`)
+
+Adapted from deepagents `FilesystemMiddleware`. Key changes:
+
+- **Only registers `execute` tool** (no read, write, grep, ls, glob, edit tools)
+- **Injects sandbox context into system prompt** via `before_model()` hook — sandbox ID, environment info, working directory
+- **Async-first**: tool coroutine calls `sandbox.execute()` directly
+
+```python
+class SandboxMiddleware(AgentMiddleware):
+    def __init__(self, sandbox: Sandbox):
+        self.sandbox = sandbox
+        self.tools = [create_execute_tool(sandbox)]
+
+    async def abefore_model(self, request: ModelRequest, ...) -> ModelRequest:
+        # Inject sandbox context (env info, cwd) into system message
+        sandbox_prompt = build_sandbox_prompt(self.sandbox)
+        return request.override(system_message=request.system_message + sandbox_prompt)
+```
+
+Prompt in `prompts/sandbox.py` — documents execute tool usage, sandbox environment details.
+
+#### SubAgentMiddleware (`middleware/subagents.py`)
+
+Adapted from deepagents. Registers a `task` tool that spawns ephemeral subagents.
+
+```python
+class SubAgentMiddleware(AgentMiddleware):
+    def __init__(self, subagents: list[SubAgent], ...):
+        self.tools = [create_task_tool(subagents)]
+```
+
+Each subagent is compiled as a separate `create_agent()` call with its own middleware stack. Prompt in `prompts/subagents.py`.
+
+#### SkillsMiddleware (`middleware/skills.py`)
+
+Adapted from deepagents. Progressively discloses available skills via system prompt updates in `before_model()` hook. Prompt in `prompts/skills.py`.
 
 ### Sandbox
 
@@ -158,11 +212,9 @@ Delete all other methods (aread, awrite, agrep_raw, als_info, sync wrappers, syn
 `asyncio.create_subprocess_shell` implementation. For dev/debug only.
 Configurable working directory and timeout.
 
-#### Tool Registration (`tools/sandbox_tool.py`)
+#### Tool Registration (in SandboxMiddleware)
 
 ```python
-from langchain_core.tools import tool
-
 def create_execute_tool(sandbox: Sandbox) -> BaseTool:
     @tool
     async def execute(command: str) -> str:
@@ -177,52 +229,16 @@ def create_execute_tool(sandbox: Sandbox) -> BaseTool:
 
 ### Prompts
 
-#### `prompts/system.py`
+All prompts in `cubebox/prompts/`, one file per concern:
 
-Base system prompt adapted from deepagents `BASE_AGENT_PROMPT`:
+| File | Content |
+|---|---|
+| `system.py` | `BASE_SYSTEM_PROMPT` — core agent behavior (adapted from deepagents) |
+| `sandbox.py` | `SANDBOX_PROMPT` — execute tool docs, sandbox environment context |
+| `subagents.py` | `SUBAGENT_PROMPT` — when/how to delegate to subagents |
+| `skills.py` | `SKILLS_PROMPT` — skill discovery and invocation |
 
-```python
-BASE_SYSTEM_PROMPT = """You are an AI assistant that helps users accomplish tasks using tools.
-
-## Core Behavior
-
-- Be concise and direct. No unnecessary preamble.
-- Don't say "I'll now do X" — just do it.
-- If the request is ambiguous, ask before acting.
-
-## Doing Tasks
-
-1. Understand first — read relevant context, check existing patterns.
-2. Act — implement the solution.
-3. Verify — check your work against what was asked.
-
-Keep working until the task is fully complete. Only yield back when done or genuinely blocked.
-
-If something fails repeatedly, stop and analyze why — don't retry the same approach."""
-```
-
-#### `prompts/execution.py`
-
-```python
-EXECUTION_PROMPT = """## Shell Execution
-
-You have access to the `execute` tool to run shell commands in a sandbox environment.
-
-- Use standard shell commands for file operations (cat, ls, grep, sed, etc.)
-- Use pipes and command chaining for complex operations
-- Commands run in an isolated sandbox — safe to experiment
-- Check exit codes in output for error detection"""
-```
-
-#### Prompt Assembly
-
-```python
-def build_system_prompt(has_sandbox: bool = False) -> str:
-    parts = [BASE_SYSTEM_PROMPT]
-    if has_sandbox:
-        parts.append(EXECUTION_PROMPT)
-    return "\n\n".join(parts)
-```
+Prompts are composed by middleware — each middleware appends its prompt section to the system message via `before_model()` hook. No central assembly function needed.
 
 ### Message State — Thread as Single Source of Truth
 
@@ -444,11 +460,14 @@ No external dependencies (no LLM API key, no MySQL).
 
 | Test File | What It Tests |
 |---|---|
-| `test_graph.py` | Agent builds correctly, tools bind, ReAct loop works with mock LLM + MemorySaver |
+| `test_graph.py` | Agent builds correctly with middleware, tools bind, ReAct loop works with mock LLM + MemorySaver |
 | `test_sandbox_local.py` | LocalSandbox execute, timeout, exit codes |
 | `test_sandbox_base.py` | Sandbox ABC contract |
+| `test_middleware_sandbox.py` | SandboxMiddleware registers execute tool, injects sandbox context into prompt |
+| `test_middleware_subagents.py` | SubAgentMiddleware registers task tool, subagent compilation |
+| `test_middleware_skills.py` | SkillsMiddleware progressive disclosure |
 | `test_convert_messages.py` | LangChain Message -> API format conversion |
-| `test_prompts.py` | Prompt assembly logic |
+| `test_prompts.py` | All prompts load correctly, no syntax issues |
 
 ### Backend E2E Tests (`tests/e2e/`)
 
@@ -525,17 +544,36 @@ pnpm test:e2e                             # Playwright E2E (needs running backen
 
 ## Migration Steps (High Level)
 
-1. Backend: Create `sandbox/base.py`, `sandbox/local.py`, update `sandbox/opensandbox.py`
-2. Backend: Create `prompts/` with system and execution prompts
-3. Backend: Create `agents/state.py`, `agents/graph.py`, `agents/convert.py`
-4. Backend: Create `tools/sandbox_tool.py`
-5. Backend: Update `create_app` with dependency injection
-6. Backend: Update `conversations.py` — new `send_message` and `list_messages`
-7. Backend: Delete `executor.py`, `models/message.py`, `repositories/message.py`
-8. Backend: Remove `deepagents` from dependencies
-9. Backend: Alembic migration to drop `messages` table
-10. Backend: Write unit tests and E2E tests
-11. Frontend: Update types (`Message`, remove events-based types)
-12. Frontend: Rewrite `messageStore.ts`
-13. Frontend: Simplify `AssistantMessage.tsx`, `useMessages.ts`
-14. Frontend: Add vitest + playwright, write tests
+### Phase 1: Backend Foundation
+
+1. Create `sandbox/base.py`, `sandbox/local.py`, update `sandbox/opensandbox.py`
+2. Create `prompts/` with all prompt files (system, sandbox, subagents, skills)
+3. Create `middleware/` — vendor and adapt SandboxMiddleware, SubAgentMiddleware, SkillsMiddleware from deepagents
+4. Create `agents/graph.py` (create_cubebox_agent using create_agent + middleware)
+5. Create `agents/convert.py` (LangChain Message → API format)
+6. Update `create_app` with dependency injection (checkpointer_factory, sandbox_factory)
+
+### Phase 2: Backend API Migration
+
+7. Update `conversations.py` — new `send_message` (stream via create_cubebox_agent) and `list_messages` (read from checkpointer)
+8. Delete `executor.py`, `models/message.py`, `repositories/message.py`
+9. Remove `deepagents` from dependencies, remove `nest-asyncio`, `asyncer`
+10. Alembic migration to drop `messages` table
+
+### Phase 3: Backend Testing
+
+11. Write unit tests (graph, sandbox, convert, prompts)
+12. Write E2E tests (conversation flow, streaming, thread state)
+
+### Phase 4: Frontend
+
+13. Update types (`Message` with tool role, tool_calls, reasoning fields)
+14. Rewrite `messageStore.ts` (flat state, store-level accumulation)
+15. Simplify `AssistantMessage.tsx`, `useMessages.ts`
+16. Update `stream.ts` and API client
+
+### Phase 5: Frontend Testing
+
+17. Add vitest + playwright setup
+18. Write hook unit tests (mock SSE)
+19. Write Playwright E2E tests (chat flow, streaming)
