@@ -11,7 +11,7 @@ from langgraph.types import Checkpointer
 from loguru import logger
 
 from cubebox.middleware.sandbox import SandboxMiddleware
-from cubebox.middleware.skills import SkillSpec, SkillsMiddleware
+from cubebox.middleware.skills import SkillsMiddleware, SkillSpec
 from cubebox.middleware.subagents import SubAgent, SubAgentMiddleware
 from cubebox.prompts.system import BASE_SYSTEM_PROMPT
 from cubebox.sandbox.base import Sandbox

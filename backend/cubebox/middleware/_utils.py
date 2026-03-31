@@ -16,6 +16,8 @@ def append_to_system_message(
         return SystemMessage(content=f"{existing}\n\n{text}" if existing else text)
 
     # Content is a list of blocks
-    new_content = list(existing) if isinstance(existing, list) else [{"type": "text", "text": existing}]
+    new_content = (
+        list(existing) if isinstance(existing, list) else [{"type": "text", "text": existing}]
+    )
     new_content.append({"type": "text", "text": f"\n\n{text}"})
     return SystemMessage(content=new_content)

@@ -1,4 +1,5 @@
 import pytest
+
 from cubebox.middleware.sandbox import SandboxMiddleware
 from cubebox.sandbox.local import LocalSandbox
 

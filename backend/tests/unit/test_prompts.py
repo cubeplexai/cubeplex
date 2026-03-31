@@ -1,7 +1,7 @@
-from cubebox.prompts.system import BASE_SYSTEM_PROMPT
 from cubebox.prompts.sandbox import SANDBOX_PROMPT
-from cubebox.prompts.subagents import SUBAGENT_PROMPT
 from cubebox.prompts.skills import SKILLS_PROMPT_TEMPLATE
+from cubebox.prompts.subagents import SUBAGENT_PROMPT
+from cubebox.prompts.system import BASE_SYSTEM_PROMPT
 
 
 def test_all_prompts_are_non_empty_strings():

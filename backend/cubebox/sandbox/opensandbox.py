@@ -16,9 +16,7 @@ class OpenSandbox(Sandbox):
     def id(self) -> str:
         return self._sandbox.id
 
-    async def execute(
-        self, command: str, *, timeout: int | None = None
-    ) -> ExecuteResult:
+    async def execute(self, command: str, *, timeout: int | None = None) -> ExecuteResult:
         execution = await self._sandbox.commands.run(command)
 
         output_lines: list[str] = []

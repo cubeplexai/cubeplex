@@ -2,7 +2,6 @@
 
 import asyncio
 
-import nest_asyncio
 from langchain_core.tools import BaseTool
 from loguru import logger
 
@@ -20,7 +19,7 @@ def _load_mcp_tools() -> None:
     """
     Load MCP tools into the registry at module init.
 
-    Uses nest_asyncio to allow running async code synchronously.
+    Runs the async MCP manager in a new event loop.
     Any failure is caught and logged as a warning — MCP errors never
     prevent the system from starting.
     """
@@ -33,10 +32,11 @@ def _load_mcp_tools() -> None:
 
         from cubebox.mcp.client import MCPManager
 
-        nest_asyncio.apply()
-        manager = MCPManager()
-        loop = asyncio.get_event_loop()
-        tools: list[BaseTool] = loop.run_until_complete(manager.load_tools())
+        async def _load() -> list[BaseTool]:
+            manager = MCPManager()
+            return await manager.load_tools()
+
+        tools: list[BaseTool] = asyncio.run(_load())
 
         for tool in tools:
             _registry.register_tool(tool)

@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "cubebox"
 version = "0.1.0"
-description = "cubebox - AI Agent System Backend with DeepAgents Framework"
+description = "cubebox - AI Agent System Backend with LangGraph"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
@@ -22,10 +22,7 @@ dependencies = [
     "langchain-mcp-adapters>=0.1.0",
     "langgraph>=1.0.10",
     "yarl>=1.23.0",
-    "deepagents>=0.4.5",
     "opensandbox>=0.1.5",
-    "nest-asyncio>=1.6.0",
-    "asyncer>=0.0.17",
     "sqlmodel>=0.0.37",
     "alembic>=1.18.4",
     "uuid-utils>=0.14.1",

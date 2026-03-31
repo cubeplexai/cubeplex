@@ -168,11 +168,13 @@ def _convert_stream_chunk(chunk: Any, ns: tuple[Any, ...] = ()) -> list[AgentEve
     # Reasoning content
     reasoning_content = (additional_kwargs or {}).get("reasoning_content", "")
     if reasoning_content:
-        events.append(ReasoningEvent(
-            timestamp=timestamp,
-            data={"content": reasoning_content},
-            agent_id=agent_id,
-        ))
+        events.append(
+            ReasoningEvent(
+                timestamp=timestamp,
+                data={"content": reasoning_content},
+                agent_id=agent_id,
+            )
+        )
 
     # Tool calls
     if tool_calls:
@@ -182,37 +184,43 @@ def _convert_stream_chunk(chunk: Any, ns: tuple[Any, ...] = ()) -> list[AgentEve
             tc_args = tc.get("args", {}) if isinstance(tc, dict) else getattr(tc, "args", {})
             if not tc_name:
                 continue
-            events.append(ToolCallEvent(
-                timestamp=timestamp,
-                data={"tool_call_id": tc_id, "name": tc_name, "arguments": tc_args},
-                agent_id=agent_id,
-            ))
+            events.append(
+                ToolCallEvent(
+                    timestamp=timestamp,
+                    data={"tool_call_id": tc_id, "name": tc_name, "arguments": tc_args},
+                    agent_id=agent_id,
+                )
+            )
 
     # Tool result (ToolMessage: has name and content)
     if tool_name and content:
-        events.append(ToolResultEvent(
-            timestamp=timestamp,
-            data={
-                "tool_name": tool_name,
-                "content": content if isinstance(content, str) else str(content),
-            },
-            agent_id=agent_id,
-        ))
+        events.append(
+            ToolResultEvent(
+                timestamp=timestamp,
+                data={
+                    "tool_name": tool_name,
+                    "content": content if isinstance(content, str) else str(content),
+                },
+                agent_id=agent_id,
+            )
+        )
         return events
 
     # Text content
     if content:
-        events.append(TextDeltaEvent(
-            timestamp=timestamp,
-            data={
-                "content": content,
-                "usage": {
-                    "input_tokens": (usage_metadata or {}).get("input_tokens", 0),
-                    "output_tokens": (usage_metadata or {}).get("output_tokens", 0),
+        events.append(
+            TextDeltaEvent(
+                timestamp=timestamp,
+                data={
+                    "content": content,
+                    "usage": {
+                        "input_tokens": (usage_metadata or {}).get("input_tokens", 0),
+                        "output_tokens": (usage_metadata or {}).get("output_tokens", 0),
+                    },
                 },
-            },
-            agent_id=agent_id,
-        ))
+                agent_id=agent_id,
+            )
+        )
 
     return events
 
