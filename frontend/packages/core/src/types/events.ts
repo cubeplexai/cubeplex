@@ -17,7 +17,7 @@ export interface AgentEvent {
   type: AgentEventType
   timestamp: string
   data: Record<string, unknown>
-  agent_id: string | null    // null = main agent, "task:xxx" = subagent
+  agent_id: string | null    // null = main agent, "subagent:<tool_call_id>" = subagent
   agent_name: string | null  // subagent description
 }
 
