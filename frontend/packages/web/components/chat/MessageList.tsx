@@ -4,7 +4,6 @@ import { useEffect } from 'react'
 import { useMessageStore, createApiClient } from '@cubebox/core'
 import { UserMessage } from './UserMessage'
 import { AssistantMessage } from './AssistantMessage'
-import { SubAgentCard } from './SubAgentCard'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { useMessages } from '@/hooks/useMessages'
 
@@ -33,17 +32,12 @@ export function MessageList({ conversationId }: MessageListProps) {
         ))}
 
         {isStreaming && mainStream && (
-          <>
-            {subAgentStreams.map(([agentId, stream]) => (
-              <SubAgentCard
-                key={agentId}
-                agentId={agentId}
-                stream={stream}
-                isRunning={isStreaming}
-              />
-            ))}
-            <AssistantMessage stream={mainStream} isStreaming statusPhase={statusPhase} />
-          </>
+          <AssistantMessage
+            stream={mainStream}
+            isStreaming
+            statusPhase={statusPhase}
+            subAgentStreams={Object.fromEntries(subAgentStreams)}
+          />
         )}
       </div>
     </ScrollArea>

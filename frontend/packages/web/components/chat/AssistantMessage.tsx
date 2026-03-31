@@ -7,6 +7,7 @@ import type { Message, ContentBlock } from '@cubebox/core'
 import type { AgentStream } from '@cubebox/core'
 import { Bot, ChevronDown, ChevronRight, Brain } from 'lucide-react'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
+import { SubAgentCard } from './SubAgentCard'
 
 interface ReasoningBlockProps {
   reasoning: string
@@ -103,6 +104,7 @@ interface HistoryProps {
   stream?: never
   isStreaming?: never
   statusPhase?: never
+  subAgentStreams?: never
 }
 
 interface StreamingProps {
@@ -110,6 +112,7 @@ interface StreamingProps {
   stream: AgentStream
   isStreaming: true
   statusPhase?: string | null
+  subAgentStreams?: Record<string, AgentStream>
 }
 
 type AssistantMessageProps = HistoryProps | StreamingProps
@@ -143,8 +146,9 @@ function blocksFromMessage(msg: Message): ContentBlock[] {
 }
 
 function ContentBlockRenderer(
-  { block, index, isLast, isStreaming }: {
+  { block, index, isLast, isStreaming, subAgentStreams }: {
     block: ContentBlock; index: number; isLast: boolean; isStreaming: boolean
+    subAgentStreams?: Record<string, AgentStream>
   },
 ) {
   if (block.type === 'reasoning') {
@@ -157,6 +161,19 @@ function ContentBlockRenderer(
           durationMs={block.duration_ms}
         />
       </div>
+    )
+  }
+  if (block.type === 'tool_call' && block.name === 'subagent') {
+    const agentKey = `subagent:${block.tool_call_id}`
+    const stream = subAgentStreams?.[agentKey]
+    const displayName =
+      (block.arguments as { name?: string }).name ?? 'Subagent'
+    return (
+      <SubAgentCard
+        name={displayName}
+        stream={stream}
+        isRunning={isStreaming && !!stream}
+      />
     )
   }
   if (block.type === 'tool_call') {
@@ -174,13 +191,14 @@ function ContentBlockRenderer(
   )
 }
 
-/** Group consecutive tool_call blocks for compact rendering */
+/** Group consecutive tool_call blocks for compact rendering (subagent calls render individually) */
 function groupBlocks(blocks: ContentBlock[]): (ContentBlock | ContentBlock[])[] {
   const result: (ContentBlock | ContentBlock[])[] = []
   for (const block of blocks) {
-    if (block.type === 'tool_call') {
+    if (block.type === 'tool_call' && block.name !== 'subagent') {
       const last = result[result.length - 1]
-      if (Array.isArray(last) && last[0].type === 'tool_call') {
+      if (Array.isArray(last) && last[0].type === 'tool_call'
+        && (last[0] as ContentBlock & { name: string }).name !== 'subagent') {
         last.push(block)
       } else {
         result.push([block])
@@ -193,7 +211,7 @@ function groupBlocks(blocks: ContentBlock[]): (ContentBlock | ContentBlock[])[] 
 }
 
 export function AssistantMessage(
-  { message, stream, isStreaming, statusPhase }: AssistantMessageProps,
+  { message, stream, isStreaming, statusPhase, subAgentStreams }: AssistantMessageProps,
 ) {
   const blocks: ContentBlock[] = isStreaming
     ? stream.blocks
@@ -229,6 +247,7 @@ export function AssistantMessage(
               index={i}
               isLast={i === grouped.length - 1}
               isStreaming={isStreaming === true}
+              subAgentStreams={subAgentStreams}
             />
           )
         })}
