@@ -13,7 +13,6 @@ from loguru import logger
 
 from cubebox.agents.schemas import (
     AgentEvent,
-    ChainStartEvent,
     DoneEvent,
     ErrorEvent,
     ReasoningEvent,
@@ -291,7 +290,8 @@ class DeepAgentExecutor:
             logger.debug("Agent created successfully")
 
             # Yield chain start event
-            yield ChainStartEvent(
+            yield AgentEvent(
+                type="chain_start",
                 timestamp=self._get_current_timestamp(),
                 data={"input": input_text},
             )

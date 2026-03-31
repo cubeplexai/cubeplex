@@ -22,18 +22,19 @@ class ExecuteRequest(BaseModel):
 
 
 class AgentEvent(BaseModel):
-    """Base model for agent events"""
+    """Base model for agent streaming events."""
 
     type: str = Field(description="Event type")
     timestamp: str = Field(description="ISO 8601 timestamp")
     data: dict[str, Any] = Field(description="Event data")
-
-
-class ChainStartEvent(AgentEvent):
-    """Event emitted when chain execution starts"""
-
-    type: Literal["chain_start"] = "chain_start"
-    data: dict[str, Any] = Field(description="Event data with input")
+    agent_id: str | None = Field(
+        default=None,
+        description="None for main agent, 'task:xxx' for subagents",
+    )
+    agent_name: str | None = Field(
+        default=None,
+        description="Human-readable subagent description",
+    )
 
 
 class TextDeltaEvent(AgentEvent):
