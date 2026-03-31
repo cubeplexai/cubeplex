@@ -4,10 +4,22 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./dist/index.js",
-    "./api": "./dist/api/index.js",
-    "./stores": "./dist/stores/index.js",
-    "./types": "./dist/types/index.js"
+    ".": {
+      "source": "./src/index.ts",
+      "default": "./dist/index.js"
+    },
+    "./api": {
+      "source": "./src/api/index.ts",
+      "default": "./dist/api/index.js"
+    },
+    "./stores": {
+      "source": "./src/stores/index.ts",
+      "default": "./dist/stores/index.js"
+    },
+    "./types": {
+      "source": "./src/types/index.ts",
+      "default": "./dist/types/index.js"
+    }
   },
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
