@@ -323,7 +323,20 @@ async def send_message(conversation_id: str, body: SendMessageRequest, ...):
 
 ### Streaming (SSE)
 
-Retain custom SSE format. Use `stream_mode=["messages", "updates"]` with v2 format.
+Retain custom SSE format. Enable `stream_subgraphs=True` for subagent event streaming.
+
+#### Event Schema
+
+All events now carry optional `agent_id` and `agent_name` for subagent identification:
+
+```python
+class AgentEvent(BaseModel):
+    type: str
+    timestamp: str
+    data: dict[str, Any]
+    agent_id: str | None = None    # None = main agent, "task:xxx" = subagent
+    agent_name: str | None = None  # Human-readable subagent description
+```
 
 #### Event Types (keep)
 
@@ -338,19 +351,29 @@ Retain custom SSE format. Use `stream_mode=["messages", "updates"]` with v2 form
 
 - `chain_start` — not needed by frontend
 
+#### Subagent Streaming
+
+Use `stream_subgraphs=True` to receive events from subagent execution. LangGraph's v2 format includes a `ns` (namespace) tuple that identifies which graph/subgraph emitted the event:
+
+- `ns=()` → main agent
+- `ns=("task:abc123",)` → subagent with ID "task:abc123"
+
+The stream processor maps `ns` to `agent_id`/`agent_name` on each SSE event.
+
 #### Stream Processing
 
 ```python
 async def event_generator():
-    agent = create_agent(llm, tools, checkpointer, system_prompt)
+    agent = create_cubebox_agent(llm, tools, sandbox=sandbox, checkpointer=checkpointer)
     config = {"configurable": {"thread_id": conversation_id}}
 
     async for chunk in agent.astream(
         {"messages": [HumanMessage(content=content)]},
         stream_mode="messages",
+        stream_subgraphs=True,   # Enable subagent events
         config=config,
     ):
-        # chunk is (message_chunk, metadata) tuple
+        # chunk includes ns field for subgraph identification
         events = convert_stream_chunk(chunk)
         for event in events:
             yield f"data: {event.model_dump_json()}\n\n"
@@ -358,7 +381,20 @@ async def event_generator():
     yield f"data: {DoneEvent(...).model_dump_json()}\n\n"
 ```
 
-`convert_stream_chunk()` extracts from the chunk the same way as current `_handle_stream_chunk()`, but as a standalone function (not a method on an executor class).
+`convert_stream_chunk()` extracts events the same way as current `_handle_stream_chunk()`, plus maps `ns` tuple to `agent_id`/`agent_name` fields. Standalone function (not a method on an executor class).
+
+#### Example SSE Stream with Subagent
+
+```
+data: {"type":"tool_call","agent_id":null,"data":{"name":"task","arguments":{"description":"Search for files"}}}
+data: {"type":"text_delta","agent_id":"task:abc123","agent_name":"Search for files","data":{"content":"Looking"}}
+data: {"type":"tool_call","agent_id":"task:abc123","agent_name":"Search for files","data":{"name":"execute","arguments":{"command":"find . -name '*.py'"}}}
+data: {"type":"tool_result","agent_id":"task:abc123","agent_name":"Search for files","data":{"content":"./main.py\n./app.py"}}
+data: {"type":"text_delta","agent_id":"task:abc123","agent_name":"Search for files","data":{"content":"Found 2 files"}}
+data: {"type":"tool_result","agent_id":null,"data":{"content":"Found 2 Python files: main.py, app.py"}}
+data: {"type":"text_delta","agent_id":null,"data":{"content":"I found the files..."}}
+data: {"type":"done","data":{}}
+```
 
 ### App Factory — Dependency Injection
 
@@ -379,11 +415,17 @@ def create_app(
 #### `packages/core/src/stores/messageStore.ts` — Rewrite
 
 ```typescript
+// Per-agent streaming state (main agent or subagent)
+interface AgentStream {
+  text: string
+  toolCalls: ToolCallEvent[]
+  reasoning: string
+  name: string | null           // subagent description, null for main
+}
+
 interface MessageStore {
-  messages: Message[]           // from thread state
-  streamText: string            // real-time accumulated text
-  streamToolCalls: ToolCallEvent[]
-  streamReasoning: string
+  messages: Message[]            // from thread state
+  streamAgents: Record<string, AgentStream>  // key = agent_id ("main" or "task:xxx")
   isStreaming: boolean
   error: string | null
 
@@ -395,9 +437,12 @@ interface MessageStore {
 
 Changes from current:
 - Flat `messages: Message[]` instead of `Record<string, Message[]>`
-- Store-level text accumulation (`streamText`) instead of component-level extraction
+- `streamAgents` groups streaming state by agent_id — supports main agent + multiple concurrent subagents
+- Store-level text accumulation instead of component-level extraction
 - No post-stream re-fetch — construct assistant message locally from accumulated stream data
 - `loadMessages` calls backend which reads from checkpointer
+
+When an SSE event arrives, the store routes it to the correct `AgentStream` by `agent_id` (defaulting to `"main"` if null).
 
 #### `packages/core/src/types/message.ts` — Update
 
@@ -415,15 +460,48 @@ interface Message {
 
 Add `tool` role, `tool_calls`, `reasoning`, `name` fields to match new backend format.
 
+#### `packages/core/src/types/events.ts` — Update
+
+```typescript
+interface AgentEvent {
+  type: AgentEventType
+  timestamp: string
+  data: Record<string, any>
+  agent_id: string | null    // null = main agent, "task:xxx" = subagent
+  agent_name: string | null  // subagent description
+}
+```
+
+Add `agent_id` and `agent_name` fields for subagent event routing.
+
 #### `packages/core/src/api/stream.ts` — Simplify
 
 Keep `readLines()` and `streamMessages()` async generators. Simplify error handling.
 
 #### `packages/web/components/chat/AssistantMessage.tsx` — Simplify
 
-- For streaming: read `streamText`, `streamToolCalls`, `streamReasoning` from store
+- For streaming: read from `streamAgents` store — main agent renders inline, subagents render as separate cards
 - For history: read `content`, `tool_calls`, `reasoning` directly from `Message` object
 - Remove `extractText()`, `extractReasoning()`, `hasToolActivity()` functions
+
+#### `packages/web/components/chat/SubAgentCard.tsx` — New
+
+Renders a subagent's execution as a collapsible card:
+- Header: agent name/description + status indicator (running/done)
+- Body: streaming text, tool calls, reasoning (same layout as AssistantMessage but nested)
+- Auto-collapses when subagent finishes
+
+```tsx
+function SubAgentCard({ agentId, stream }: { agentId: string; stream: AgentStream }) {
+  return (
+    <div className="border rounded-lg p-3 my-2 bg-muted/30">
+      <div className="text-sm text-muted-foreground">{stream.name}</div>
+      {stream.toolCalls.map(tc => <ToolCallBadge key={tc.id} call={tc} />)}
+      {stream.text && <MarkdownContent content={stream.text} />}
+    </div>
+  )
+}
+```
 
 #### `packages/web/hooks/useMessages.ts` — Simplify
 
@@ -431,14 +509,13 @@ Keep `readLines()` and `streamMessages()` async generators. Simplify error handl
 export function useMessages() {
   const messages = useMessageStore((s) => s.messages)
   const isStreaming = useMessageStore((s) => s.isStreaming)
-  const streamText = useMessageStore((s) => s.streamText)
-  const streamToolCalls = useMessageStore((s) => s.streamToolCalls)
-  const streamReasoning = useMessageStore((s) => s.streamReasoning)
-  return { messages, isStreaming, streamText, streamToolCalls, streamReasoning }
+  const streamAgents = useMessageStore((s) => s.streamAgents)
+  return { messages, isStreaming, streamAgents }
 }
 ```
 
 No `conversationId` parameter — store tracks one conversation at a time.
+Components access `streamAgents["main"]` for main agent, iterate other keys for subagent cards.
 
 ## Dependency Changes
 
