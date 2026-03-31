@@ -85,7 +85,8 @@ class SkillsMiddleware(AgentMiddleware[Any, Any, Any]):
         if not self._skills:
             return ""
         skills_list = "\n".join(
-            f"- **{s.name}** (`{s.path}`): {s.description}" if s.path
+            f"- **{s.name}** (`{s.path}`): {s.description}"
+            if s.path
             else f"- **{s.name}**: {s.description}"
             for s in self._skills
         )
