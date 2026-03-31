@@ -38,6 +38,11 @@ pnpm install
 pnpm dev      # Starts Next.js dev server on http://localhost:3000
 ```
 
+首次运行 E2E 测试前需要安装 Playwright 浏览器：
+```bash
+npx playwright install
+```
+
 ## Commands
 
 All commands run from root `frontend/` directory:
@@ -47,6 +52,7 @@ pnpm dev           # Start development server (web package)
 pnpm build         # Build web app for production
 pnpm start         # Start production server
 pnpm type-check    # Run TypeScript type checking for all packages
+pnpm test:e2e      # Run Playwright E2E tests
 ```
 
 Single package commands:
