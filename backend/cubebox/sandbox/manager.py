@@ -10,7 +10,6 @@ Core responsibilities:
 
 from datetime import timedelta
 from pathlib import Path
-from typing import Any
 
 import opensandbox
 from loguru import logger
@@ -113,20 +112,16 @@ class SandboxManager:
                 await repo.mark_terminated(record.id)
 
             # Create a new sandbox
+            # NOTE: PVC volume binding is temporarily disabled — backend
+            # does not yet support it.  The volume config/helpers are kept
+            # so we can re-enable later.
             logger.info("Creating new sandbox for user {}", user_id)
-            volumes: list[Volume] = []
-            volumes_config: dict[str, Any] | None = None
-            if self._volume_enabled:
-                vol = self._build_user_volume(user_id)
-                volumes = [vol]
-                volumes_config = vol.model_dump(by_alias=True)
 
             raw_sandbox = await opensandbox.Sandbox.create(
                 self._image,
                 connection_config=conn_config,
                 timeout=timedelta(seconds=self._timeout),
                 ready_timeout=timedelta(seconds=60),
-                volumes=volumes if volumes else None,
             )
 
             backend = OpenSandbox(sandbox=raw_sandbox)
@@ -140,7 +135,6 @@ class SandboxManager:
                 user_id=user_id,
                 sandbox_id=raw_sandbox.id,
                 image=self._image,
-                volumes_config=volumes_config,
                 ttl_seconds=self._ttl,
             )
 
