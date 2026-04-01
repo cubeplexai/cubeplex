@@ -7,6 +7,38 @@ from typing import Any
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
 
 
+def _consolidate_subagent_events(
+    events: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Aggregate raw per-token subagent events into a consolidated summary.
+
+    Returns:
+        {"text": str, "tool_calls": list[dict], "reasoning": str}
+    """
+    text_parts: list[str] = []
+    reasoning_parts: list[str] = []
+    tool_calls: list[dict[str, Any]] = []
+
+    for evt in events:
+        evt_type = evt.get("type")
+        data = evt.get("data", {})
+        if evt_type == "text_delta":
+            text_parts.append(data.get("content", ""))
+        elif evt_type == "reasoning":
+            reasoning_parts.append(data.get("content", ""))
+        elif evt_type == "tool_call":
+            tool_calls.append({
+                "name": data.get("name", ""),
+                "arguments": data.get("arguments", {}),
+            })
+
+    return {
+        "text": "".join(text_parts),
+        "tool_calls": tool_calls,
+        "reasoning": "".join(reasoning_parts),
+    }
+
+
 def convert_to_api_messages(lc_messages: list[BaseMessage]) -> list[dict[str, Any]]:
     """Convert a list of LangChain messages to the API response format.
 
@@ -47,7 +79,12 @@ def convert_to_api_messages(lc_messages: list[BaseMessage]) -> list[dict[str, An
             tool_calls = None
             if msg.tool_calls:
                 tool_calls = [
-                    {"name": tc["name"], "arguments": tc["args"]} for tc in msg.tool_calls
+                    {
+                        "name": tc["name"],
+                        "arguments": tc["args"],
+                        "tool_call_id": tc.get("id", ""),
+                    }
+                    for tc in msg.tool_calls
                 ] or None
 
             reasoning = (msg.additional_kwargs or {}).get("reasoning_content")
@@ -65,15 +102,21 @@ def convert_to_api_messages(lc_messages: list[BaseMessage]) -> list[dict[str, An
             )
 
         elif isinstance(msg, ToolMessage):
-            subagent_events = (msg.additional_kwargs or {}).get("subagent_events") or None
+            raw_events = (msg.additional_kwargs or {}).get("subagent_events")
+            subagent_events = (
+                _consolidate_subagent_events(raw_events) if raw_events else None
+            )
             result.append(
                 {
                     "id": getattr(msg, "id", None) or str(uuid.uuid4()),
                     "role": "tool",
-                    "content": msg.content if isinstance(msg.content, str) else str(msg.content),
+                    "content": (
+                        msg.content if isinstance(msg.content, str) else str(msg.content)
+                    ),
                     "tool_calls": None,
                     "reasoning": None,
                     "name": msg.name,
+                    "tool_call_id": getattr(msg, "tool_call_id", None),
                     "subagent_events": subagent_events,
                     "created_at": _get_timestamp(msg),
                 }

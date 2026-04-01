@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import type { Message, ContentBlock } from '@cubebox/core'
+import type { Message, ContentBlock, SubagentSummary } from '@cubebox/core'
 import type { AgentStream } from '@cubebox/core'
 import { Bot, ChevronDown, ChevronRight, Brain } from 'lucide-react'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
@@ -101,6 +101,7 @@ function ToolCallList({ toolCalls }: { toolCalls: { name: string; arguments: Rec
 
 interface HistoryProps {
   message: Message
+  subagentDataMap?: Record<string, SubagentSummary>
   stream?: never
   isStreaming?: never
   statusPhase?: never
@@ -109,6 +110,7 @@ interface HistoryProps {
 
 interface StreamingProps {
   message?: never
+  subagentDataMap?: never
   stream: AgentStream
   isStreaming: true
   statusPhase?: string | null
@@ -138,17 +140,41 @@ function blocksFromMessage(msg: Message): ContentBlock[] {
   if (msg.reasoning) result.push({ type: 'reasoning', content: msg.reasoning })
   if (msg.tool_calls) {
     for (const tc of msg.tool_calls) {
-      result.push({ type: 'tool_call', name: tc.name, arguments: tc.arguments, tool_call_id: '' })
+      result.push({
+        type: 'tool_call',
+        name: tc.name,
+        arguments: tc.arguments,
+        tool_call_id: tc.tool_call_id ?? '',
+      })
     }
   }
   if (msg.content) result.push({ type: 'text', content: msg.content })
   return result
 }
 
+/** Convert a consolidated SubagentSummary to an AgentStream for SubAgentCard */
+function subagentSummaryToStream(summary: SubagentSummary): AgentStream {
+  return {
+    text: summary.text,
+    toolCalls: summary.tool_calls.map((tc, i) => ({
+      type: 'tool_call' as const,
+      timestamp: '',
+      data: { tool_call_id: `hist-${i}`, name: tc.name, arguments: tc.arguments },
+      agent_id: null,
+      agent_name: null,
+    })),
+    toolResults: [],
+    reasoning: summary.reasoning,
+    blocks: [],
+    name: null,
+  }
+}
+
 function ContentBlockRenderer(
-  { block, index, isLast, isStreaming, subAgentStreams }: {
+  { block, index, isLast, isStreaming, subAgentStreams, subagentDataMap }: {
     block: ContentBlock; index: number; isLast: boolean; isStreaming: boolean
     subAgentStreams?: Record<string, AgentStream>
+    subagentDataMap?: Record<string, SubagentSummary>
   },
 ) {
   if (block.type === 'reasoning') {
@@ -166,12 +192,16 @@ function ContentBlockRenderer(
   if (block.type === 'tool_call' && block.name === 'subagent') {
     const agentKey = `subagent:${block.tool_call_id}`
     const stream = subAgentStreams?.[agentKey]
+    // For historical messages, construct stream from consolidated data
+    const historicalStream = !stream && subagentDataMap?.[agentKey]
+      ? subagentSummaryToStream(subagentDataMap[agentKey])
+      : undefined
     const displayName =
       (block.arguments as { name?: string }).name ?? 'Subagent'
     return (
       <SubAgentCard
         name={displayName}
-        stream={stream}
+        stream={stream ?? historicalStream}
         isRunning={isStreaming && !!stream}
       />
     )
@@ -211,7 +241,8 @@ function groupBlocks(blocks: ContentBlock[]): (ContentBlock | ContentBlock[])[] 
 }
 
 export function AssistantMessage(
-  { message, stream, isStreaming, statusPhase, subAgentStreams }: AssistantMessageProps,
+  { message, stream, isStreaming, statusPhase, subAgentStreams, subagentDataMap }:
+  AssistantMessageProps,
 ) {
   const blocks: ContentBlock[] = isStreaming
     ? stream.blocks
@@ -248,6 +279,7 @@ export function AssistantMessage(
               isLast={i === grouped.length - 1}
               isStreaming={isStreaming === true}
               subAgentStreams={subAgentStreams}
+              subagentDataMap={subagentDataMap}
             />
           )
         })}
