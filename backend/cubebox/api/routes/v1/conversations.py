@@ -248,10 +248,13 @@ async def send_message(
         event_q: asyncio.Queue[tuple[str, Any, Any] | None] = asyncio.Queue()
         cv_token = subagent_event_queue.set(event_q)
 
-        def _status(phase: str) -> str:
+        def _status(phase: str, detail: str | None = None) -> str:
+            data: dict[str, str] = {"phase": phase}
+            if detail:
+                data["detail"] = detail
             evt = StatusEvent(
                 timestamp=datetime.now(UTC).isoformat(),
-                data={"phase": phase},
+                data=data,
             )
             return f"data: {evt.model_dump_json()}\n\n"
 
@@ -279,13 +282,22 @@ async def send_message(
 
                         yield _status("sandbox_creating")
                         sandbox_manager = get_sandbox_manager()
-                        sandbox = await asyncio.wait_for(
-                            sandbox_manager.get_or_create(user_id),
-                            timeout=60,
+                        create_task = asyncio.ensure_future(
+                            sandbox_manager.get_or_create(user_id)
                         )
+                        # Send heartbeat comments every 10s to keep proxies alive
+                        while not create_task.done():
+                            try:
+                                await asyncio.wait_for(
+                                    asyncio.shield(create_task), timeout=10
+                                )
+                            except TimeoutError:
+                                yield ": heartbeat\n\n"
+                        sandbox = create_task.result()
                         yield _status("sandbox_ready")
                     except Exception as e:
                         logger.warning("Sandbox unavailable, continuing without: {}", e)
+                        yield _status("sandbox_failed", detail=str(e))
 
             # Create LLM
             from cubebox.llm.factory import LLMFactory

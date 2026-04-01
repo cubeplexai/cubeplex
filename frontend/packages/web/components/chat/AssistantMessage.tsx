@@ -257,6 +257,10 @@ export function AssistantMessage(
               <span className="text-xs text-muted-foreground animate-pulse">
                 正在准备沙箱环境...
               </span>
+            ) : statusPhase === 'sandbox_failed' ? (
+              <span className="text-xs text-destructive">
+                沙箱环境创建失败，将在无沙箱模式下继续
+              </span>
             ) : (
               <>
                 <span className="w-1.5 h-1.5 rounded-full bg-primary
