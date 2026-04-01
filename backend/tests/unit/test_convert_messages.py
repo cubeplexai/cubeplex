@@ -68,7 +68,11 @@ def test_convert_tool_message_with_subagent_events():
         {
             "type": "tool_call",
             "timestamp": "2026-04-01T12:00:01+00:00",
-            "data": {"tool_call_id": "tc2", "name": "read_file", "arguments": {"path": "/tmp/test.txt"}},
+            "data": {
+                "tool_call_id": "tc2",
+                "name": "read_file",
+                "arguments": {"path": "/tmp/test.txt"},
+            },
             "agent_id": "subagent:tc1",
         },
     ]

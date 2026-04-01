@@ -125,6 +125,7 @@ class SandboxManager:
                 self._image,
                 connection_config=conn_config,
                 timeout=timedelta(seconds=self._timeout),
+                ready_timeout=timedelta(seconds=60),
                 volumes=volumes if volumes else None,
             )
 

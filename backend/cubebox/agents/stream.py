@@ -87,7 +87,11 @@ def convert_chunk_to_events(
 
     # Text content
     if content:
-        usage_metadata = getattr(msg, "usage_metadata", {}) if not isinstance(msg, dict) else msg.get("usage_metadata", {})
+        usage_metadata = (
+            getattr(msg, "usage_metadata", {})
+            if not isinstance(msg, dict)
+            else msg.get("usage_metadata", {})
+        )
         events.append(
             {
                 "type": "text_delta",
