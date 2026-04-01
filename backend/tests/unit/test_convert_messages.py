@@ -55,3 +55,42 @@ def test_convert_mixed_messages():
     assert len(result) == 2
     assert result[0]["role"] == "user"
     assert result[1]["role"] == "assistant"
+
+
+def test_convert_tool_message_with_subagent_events():
+    events = [
+        {
+            "type": "text_delta",
+            "timestamp": "2026-04-01T12:00:00+00:00",
+            "data": {"content": "processing...", "usage": {"input_tokens": 10, "output_tokens": 5}},
+            "agent_id": "subagent:tc1",
+        },
+        {
+            "type": "tool_call",
+            "timestamp": "2026-04-01T12:00:01+00:00",
+            "data": {"tool_call_id": "tc2", "name": "read_file", "arguments": {"path": "/tmp/test.txt"}},
+            "agent_id": "subagent:tc1",
+        },
+    ]
+    msg = ToolMessage(
+        content="final result",
+        tool_call_id="tc1",
+        name="subagent",
+        additional_kwargs={"subagent_events": events},
+    )
+    result = convert_to_api_messages([msg])
+    assert result[0]["role"] == "tool"
+    assert result[0]["name"] == "subagent"
+    assert result[0]["content"] == "final result"
+    assert result[0]["subagent_events"] == events
+
+
+def test_convert_tool_message_without_subagent_events():
+    msg = ToolMessage(
+        content="result",
+        tool_call_id="tc1",
+        name="other_tool",
+    )
+    result = convert_to_api_messages([msg])
+    assert result[0]["role"] == "tool"
+    assert result[0]["subagent_events"] is None

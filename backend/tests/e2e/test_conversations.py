@@ -135,10 +135,9 @@ class TestSendMessage:
             events = await parse_sse_stream(response.aiter_bytes())
 
         event_types = [e.type for e in events]
-        assert "chain_start" in event_types
+        assert "text_delta" in event_types
         assert "done" in event_types
         assert "error" not in event_types
-        assert events[0].type == "chain_start"
         assert events[-1].type == "done"
 
     @pytest.mark.asyncio

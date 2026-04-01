@@ -12,7 +12,7 @@ from langchain.agents.middleware.types import (
     ModelResponse,
 )
 from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import AIMessage
+from langchain_core.messages import AIMessage, ToolMessage
 from langchain_core.tools import BaseTool, InjectedToolCallId, StructuredTool
 from loguru import logger
 from pydantic import BaseModel
@@ -77,7 +77,7 @@ def _create_subagent_tool(
         description: str,
         subagent_type: str = "general-purpose",
         tool_call_id: Annotated[str, InjectedToolCallId] = "",
-    ) -> str:
+    ) -> str | ToolMessage:
         spec = subagent_map.get(subagent_type, subagent_map["general-purpose"])
         model = spec.get("model") or default_model
         if model is None:
@@ -98,18 +98,24 @@ def _create_subagent_tool(
         queue = subagent_event_queue.get(None)
 
         try:
+            from cubebox.agents.stream import convert_chunk_to_events
+
+            sa_agent_id = f"subagent:{tool_call_id}"
+            last_ai_content: list[str] = []
+            subagent_events: list[dict[str, Any]] = []
+
             if queue is not None:
                 # Stream mode: forward tokens to SSE via queue, collect result
-                sa_agent_id = f"subagent:{tool_call_id}"
-                last_ai_content: list[str] = []
-
                 async for chunk in agent.astream(
                     {"messages": [{"role": "user", "content": description}]},
                     stream_mode="messages",
                 ):
                     await queue.put(("subagent", sa_agent_id, chunk))
 
-                    # Collect AI content for the tool return value
+                    # Collect events and AI content
+                    events = convert_chunk_to_events(chunk, agent_id=sa_agent_id)
+                    subagent_events.extend(events)
+
                     if isinstance(chunk, tuple) and len(chunk) >= 2:
                         msg = chunk[0]
                         c = getattr(msg, "content", "") or ""
@@ -117,8 +123,6 @@ def _create_subagent_tool(
                         # Skip tool messages (they have a name attribute)
                         if c and not msg_name:
                             last_ai_content.append(c)
-
-                return "".join(last_ai_content) or "[subagent produced no output]"
             else:
                 # No queue: use ainvoke (no streaming needed)
                 result = await agent.ainvoke(
@@ -128,8 +132,17 @@ def _create_subagent_tool(
                 last = messages[-1] if messages else None
                 if last and hasattr(last, "content"):
                     content = last.content
-                    return content if isinstance(content, str) else str(content)
-                return "[subagent produced no output]"
+                    last_ai_content.append(content if isinstance(content, str) else str(content))
+
+            final_content = "".join(last_ai_content) or "[subagent produced no output]"
+
+            # Return ToolMessage with events in additional_kwargs
+            return ToolMessage(
+                content=final_content,
+                tool_call_id=tool_call_id,
+                name="subagent",
+                additional_kwargs={"subagent_events": subagent_events},
+            )
         except Exception as e:
             logger.error("Subagent '{}' failed: {}", subagent_type, e)
             return f"[error: {e}]"

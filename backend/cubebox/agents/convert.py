@@ -65,6 +65,7 @@ def convert_to_api_messages(lc_messages: list[BaseMessage]) -> list[dict[str, An
             )
 
         elif isinstance(msg, ToolMessage):
+            subagent_events = (msg.additional_kwargs or {}).get("subagent_events") or None
             result.append(
                 {
                     "id": getattr(msg, "id", None) or str(uuid.uuid4()),
@@ -73,6 +74,7 @@ def convert_to_api_messages(lc_messages: list[BaseMessage]) -> list[dict[str, An
                     "tool_calls": None,
                     "reasoning": None,
                     "name": msg.name,
+                    "subagent_events": subagent_events,
                     "created_at": _get_timestamp(msg),
                 }
             )

@@ -161,87 +161,50 @@ def _convert_stream_chunk(
         ToolCallEvent,
         ToolResultEvent,
     )
+    from cubebox.agents.stream import convert_chunk_to_events
 
-    timestamp = datetime.now(UTC).isoformat()
     if agent_id is None:
         agent_id = _ns_to_agent_id(ns)
+
+    # Get raw event dicts from shared helper
+    event_dicts = convert_chunk_to_events(chunk, agent_id=agent_id)
+
+    # Wrap in typed AgentEvent objects for SSE
     events: list[AgentEvent] = []
-
-    if not isinstance(chunk, tuple) or len(chunk) < 2:
-        return events
-
-    msg, metadata = chunk
-
-    # Handle both dict and message object
-    if isinstance(msg, dict):
-        content = msg.get("content", "")
-        additional_kwargs = msg.get("additional_kwargs", {})
-        tool_calls = msg.get("tool_calls", [])
-        usage_metadata = msg.get("usage_metadata", {})
-        tool_name = msg.get("name")
-    else:
-        content = getattr(msg, "content", "") or ""
-        additional_kwargs = getattr(msg, "additional_kwargs", {}) or {}
-        tool_calls = getattr(msg, "tool_calls", []) or []
-        usage_metadata = getattr(msg, "usage_metadata", {}) or {}
-        tool_name = getattr(msg, "name", None)
-
-    # Reasoning content
-    reasoning_content = (additional_kwargs or {}).get("reasoning_content", "")
-    if reasoning_content:
-        events.append(
-            ReasoningEvent(
-                timestamp=timestamp,
-                data={"content": reasoning_content},
-                agent_id=agent_id,
-            )
-        )
-
-    # Tool calls
-    if tool_calls:
-        for tc in tool_calls:
-            tc_name = tc.get("name") if isinstance(tc, dict) else getattr(tc, "name", "")
-            tc_id = tc.get("id", "") if isinstance(tc, dict) else getattr(tc, "id", "")
-            tc_args = tc.get("args", {}) if isinstance(tc, dict) else getattr(tc, "args", {})
-            if not tc_name:
-                continue
+    for evt_dict in event_dicts:
+        evt_type = evt_dict.get("type")
+        if evt_type == "reasoning":
             events.append(
-                ToolCallEvent(
-                    timestamp=timestamp,
-                    data={"tool_call_id": tc_id, "name": tc_name, "arguments": tc_args},
-                    agent_id=agent_id,
+                ReasoningEvent(
+                    timestamp=evt_dict["timestamp"],
+                    data=evt_dict["data"],
+                    agent_id=evt_dict.get("agent_id"),
                 )
             )
-
-    # Tool result (ToolMessage: has name and content)
-    if tool_name and content:
-        events.append(
-            ToolResultEvent(
-                timestamp=timestamp,
-                data={
-                    "tool_name": tool_name,
-                    "content": content if isinstance(content, str) else str(content),
-                },
-                agent_id=agent_id,
+        elif evt_type == "tool_call":
+            events.append(
+                ToolCallEvent(
+                    timestamp=evt_dict["timestamp"],
+                    data=evt_dict["data"],
+                    agent_id=evt_dict.get("agent_id"),
+                )
             )
-        )
-        return events
-
-    # Text content
-    if content:
-        events.append(
-            TextDeltaEvent(
-                timestamp=timestamp,
-                data={
-                    "content": content,
-                    "usage": {
-                        "input_tokens": (usage_metadata or {}).get("input_tokens", 0),
-                        "output_tokens": (usage_metadata or {}).get("output_tokens", 0),
-                    },
-                },
-                agent_id=agent_id,
+        elif evt_type == "tool_result":
+            events.append(
+                ToolResultEvent(
+                    timestamp=evt_dict["timestamp"],
+                    data=evt_dict["data"],
+                    agent_id=evt_dict.get("agent_id"),
+                )
             )
-        )
+        elif evt_type == "text_delta":
+            events.append(
+                TextDeltaEvent(
+                    timestamp=evt_dict["timestamp"],
+                    data=evt_dict["data"],
+                    agent_id=evt_dict.get("agent_id"),
+                )
+            )
 
     return events
 

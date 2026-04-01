@@ -1,7 +1,7 @@
 """Test OpenSandbox backend integration.
 
 These tests verify that the OpenSandbox backend properly handles
-async operations without event loop conflicts.
+the Sandbox API (execute, upload, download, close).
 
 Note: These tests require a running OpenSandbox service.
 Run with: pytest -m sandbox
@@ -95,80 +95,94 @@ async def sandbox(shared_sandbox_id):
 
 @pytest.mark.sandbox
 @pytest.mark.asyncio
-async def test_opensandbox_aexecute(sandbox):
+async def test_opensandbox_execute(sandbox) -> None:
     """Test basic command execution."""
-    result = await sandbox.aexecute("echo 'Hello from sandbox'")
+    result = await sandbox.execute("echo 'Hello from sandbox'")
 
     assert result.exit_code == 0
     assert "Hello from sandbox" in result.output
-    assert result.truncated is False
 
 
 @pytest.mark.sandbox
 @pytest.mark.asyncio
-async def test_opensandbox_awrite_and_aread(sandbox):
-    """Test file write and read operations."""
-    # Write a file with unique name to avoid conflicts
-    write_result = await sandbox.awrite("/tmp/test_write_read.txt", "Hello World\nLine 2\n")
+async def test_opensandbox_upload_and_download(sandbox) -> None:
+    """Test file upload and download operations."""
+    content = b"Hello World\nLine 2\n"
+    path = "/tmp/test_upload_download.txt"
 
-    assert write_result.error is None
-    assert write_result.path == "/tmp/test_write_read.txt"
+    # Upload a file
+    await sandbox.upload([(path, content)])
 
-    # Read the file back
-    content = await sandbox.aread("/tmp/test_write_read.txt")
+    # Download the file back
+    results = await sandbox.download([path])
 
-    assert "Hello World" in content
-    assert "Line 2" in content
-    assert "Error:" not in content
-
-
-@pytest.mark.sandbox
-@pytest.mark.asyncio
-async def test_opensandbox_aread_nonexistent_file(sandbox):
-    """Test reading a file that doesn't exist."""
-    content = await sandbox.aread("/tmp/nonexistent_file_12345.txt")
-
-    assert "Error: File '/tmp/nonexistent_file_12345.txt' not found" in content
+    assert len(results) == 1
+    downloaded_path, downloaded_content = results[0]
+    assert downloaded_path == path
+    assert b"Hello World" in downloaded_content
+    assert b"Line 2" in downloaded_content
 
 
 @pytest.mark.sandbox
 @pytest.mark.asyncio
-async def test_opensandbox_agrep_raw(sandbox):
-    """Test grep functionality."""
-    # Create test files with unique names
-    await sandbox.awrite("/tmp/grep_test1.txt", "Hello World\n")
-    await sandbox.awrite("/tmp/grep_test2.txt", "Goodbye World\n")
-
-    # Search for pattern with glob to limit to our test files
-    matches = await sandbox.agrep_raw("World", path="/tmp", glob="grep_test*.txt")
-
-    assert isinstance(matches, list)
-    assert len(matches) >= 2
-
-    # Check match structure
-    for match in matches:
-        assert "path" in match
-        assert "line" in match
-        assert "text" in match
-        assert "World" in match["text"]
+async def test_opensandbox_download_nonexistent_file(sandbox) -> None:
+    """Test downloading a file that doesn't exist raises an exception."""
+    with pytest.raises(FileNotFoundError):
+        await sandbox.download(["/tmp/nonexistent_file_12345.txt"])
 
 
 @pytest.mark.sandbox
 @pytest.mark.asyncio
-async def test_opensandbox_awrite_with_parent_dirs(sandbox):
-    """Test writing file with automatic parent directory creation."""
-    write_result = await sandbox.awrite("/tmp/nested_test/deep/test.txt", "Content in nested dir\n")
+async def test_opensandbox_grep_via_execute(sandbox) -> None:
+    """Test grep functionality using execute."""
+    # Create test files via upload
+    await sandbox.upload(
+        [
+            ("/tmp/grep_test1.txt", b"Hello World\n"),
+            ("/tmp/grep_test2.txt", b"Goodbye World\n"),
+        ]
+    )
 
-    assert write_result.error is None
+    # Search for pattern using grep
+    result = await sandbox.execute("grep -r 'World' /tmp/grep_test*.txt")
 
-    # Verify file was created
-    content = await sandbox.aread("/tmp/nested_test/deep/test.txt")
-    assert "Content in nested dir" in content
+    assert result.exit_code == 0
+    assert "grep_test1.txt" in result.output
+    assert "grep_test2.txt" in result.output
+    assert "World" in result.output
 
 
 @pytest.mark.sandbox
 @pytest.mark.asyncio
-async def test_opensandbox_execute_raises_error(sandbox):
-    """Test that sync execute() raises RuntimeError."""
-    with pytest.raises(RuntimeError, match="event loop conflicts"):
-        sandbox.execute("echo test")
+async def test_opensandbox_upload_with_parent_dirs(sandbox) -> None:
+    """Test uploading a file to a nested path and verifying with download."""
+    content = b"Content in nested dir\n"
+    path = "/tmp/nested_test/deep/test.txt"
+
+    await sandbox.upload([(path, content)])
+
+    # Verify file was created via download
+    results = await sandbox.download([path])
+
+    assert len(results) == 1
+    _, downloaded_content = results[0]
+    assert b"Content in nested dir" in downloaded_content
+
+
+@pytest.mark.sandbox
+@pytest.mark.asyncio
+async def test_opensandbox_execute_with_timeout(sandbox) -> None:
+    """Test command execution with a timeout parameter."""
+    result = await sandbox.execute("echo 'quick'", timeout=30)
+
+    assert result.exit_code == 0
+    assert "quick" in result.output
+
+
+@pytest.mark.sandbox
+@pytest.mark.asyncio
+async def test_opensandbox_execute_failing_command(sandbox) -> None:
+    """Test that a failing command returns a non-zero exit code."""
+    result = await sandbox.execute("ls /nonexistent_path_12345")
+
+    assert result.exit_code != 0

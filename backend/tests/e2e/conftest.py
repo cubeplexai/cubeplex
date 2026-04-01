@@ -1,5 +1,6 @@
 import json as json_lib
 from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 
 import httpx
 import pytest
@@ -11,9 +12,20 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from sqlalchemy.pool import NullPool
 
 from cubebox.api.app import create_app
-from cubebox.db.engine import _build_database_url
+from cubebox.db.engine import _build_database_url, engine
 from cubebox.db.session import get_session
 from cubebox.sandbox.local import LocalSandbox
+
+
+@asynccontextmanager
+async def _lifespan_context(app: FastAPI) -> AsyncIterator[None]:
+    """Manually invoke FastAPI lifespan startup and shutdown.
+
+    This is needed because httpx.ASGITransport doesn't automatically
+    manage the ASGI lifespan protocol.
+    """
+    async with app.router.lifespan_context(app):  # type: ignore[attr-defined]
+        yield
 
 
 def _make_test_app() -> FastAPI:
@@ -64,17 +76,23 @@ def client() -> TestClient:
 @pytest_asyncio.fixture
 async def async_client() -> AsyncIterator[httpx.AsyncClient]:
     """Create async HTTP client for testing streaming endpoints."""
-    transport = httpx.ASGITransport(app=_make_test_app())
-    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
-        yield client
+    app = _make_test_app()
+    async with _lifespan_context(app):
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            yield client
+    await engine.dispose()
 
 
 @pytest_asyncio.fixture
 async def memory_client() -> AsyncIterator[httpx.AsyncClient]:
     """Async client using MemorySaver + LocalSandbox (for agent streaming tests)."""
-    transport = httpx.ASGITransport(app=_make_memory_test_app())
-    async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
-        yield c
+    app = _make_memory_test_app()
+    async with _lifespan_context(app):
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
+            yield c
+    await engine.dispose()
 
 
 async def collect_sse_events(
