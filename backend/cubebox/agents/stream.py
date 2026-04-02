@@ -72,13 +72,19 @@ def convert_chunk_to_events(
 
     # Tool result (ToolMessage: has name and content)
     if tool_name and content:
+        tool_call_id = (
+            msg.get("tool_call_id", "")
+            if isinstance(msg, dict)
+            else getattr(msg, "tool_call_id", "")
+        )
         events.append(
             {
                 "type": "tool_result",
                 "timestamp": timestamp,
                 "data": {
                     "tool_name": tool_name,
-                    "content": content if isinstance(content, str) else str(content),
+                    "tool_call_id": tool_call_id,
+                    "content": (content if isinstance(content, str) else str(content)),
                 },
                 "agent_id": agent_id,
             }
