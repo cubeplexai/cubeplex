@@ -3,6 +3,7 @@
 from typing import Any
 
 from langchain.agents import create_agent
+from langchain.agents.middleware.todo import TodoListMiddleware
 from langchain.agents.middleware.types import AgentMiddleware
 from langchain_core.language_models import BaseChatModel
 from langchain_core.tools import BaseTool
@@ -47,6 +48,7 @@ def create_cubebox_agent(
 
     _skills = skills or []
     middleware.append(SkillsMiddleware(skills=_skills))
+    middleware.append(TodoListMiddleware())
     middleware.append(
         SubAgentMiddleware(
             subagents=subagents or [],
