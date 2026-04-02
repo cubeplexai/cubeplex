@@ -7,6 +7,23 @@ from typing import Any
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
 
 
+def _unwrap_mcp_content(content: Any) -> str:
+    """Extract text from MCP content blocks format.
+
+    MCP tools return content as list[{"type": "text", "text": "..."}].
+    This extracts and concatenates the text values.
+    """
+    if isinstance(content, str):
+        return content
+    if not isinstance(content, list):
+        return str(content)
+    texts: list[str] = []
+    for block in content:
+        if isinstance(block, dict) and block.get("type") == "text":
+            texts.append(str(block.get("text", "")))
+    return "\n".join(texts) if texts else str(content)
+
+
 def _consolidate_subagent_events(
     events: list[dict[str, Any]],
 ) -> dict[str, Any]:
@@ -126,11 +143,13 @@ def convert_to_api_messages(lc_messages: list[BaseMessage]) -> list[dict[str, An
             raw_events = (msg.additional_kwargs or {}).get("subagent_events")
             subagent_events = _consolidate_subagent_events(raw_events) if raw_events else None
             ts = _get_timestamp(msg)
+            # Unwrap MCP content blocks: list[{"type": "text", "text": "..."}] -> text
+            tool_content = _unwrap_mcp_content(msg.content)
             result.append(
                 {
                     "id": getattr(msg, "id", None) or str(uuid.uuid4()),
                     "role": "tool",
-                    "content": (msg.content if isinstance(msg.content, str) else str(msg.content)),
+                    "content": tool_content,
                     "tool_calls": None,
                     "reasoning": None,
                     "name": msg.name,
