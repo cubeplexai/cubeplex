@@ -99,9 +99,7 @@ class ChatOpenAICompatible(ChatOpenAI):
         **kwargs: Any,
     ) -> AsyncIterator[ChatGenerationChunk]:
         self._reset_stream_state()
-        async for chunk in super()._astream(
-            messages, stop=stop, run_manager=run_manager, **kwargs
-        ):
+        async for chunk in super()._astream(messages, stop=stop, run_manager=run_manager, **kwargs):
             yield chunk
 
     def _convert_chunk_to_generation_chunk(
@@ -137,17 +135,17 @@ class ChatOpenAICompatible(ChatOpenAI):
 
         # --- Extract reasoning_content into additional_kwargs ---
         if has_reasoning and isinstance(generation_chunk.message, AIMessageChunk):
-            generation_chunk.message.additional_kwargs["reasoning_content"] = (
-                delta["reasoning_content"]
-            )
+            generation_chunk.message.additional_kwargs["reasoning_content"] = delta[
+                "reasoning_content"
+            ]
 
         # --- On finish: stamp created_at + reasoning_duration_ms ---
         # Only on the last chunk to avoid LangChain merge_dicts garbling strings.
         if finish_reason is not None and not self._stream_metadata_emitted:
             if isinstance(generation_chunk.message, AIMessageChunk):
-                generation_chunk.message.response_metadata["created_at"] = (
-                    datetime.now(UTC).isoformat()
-                )
+                generation_chunk.message.response_metadata["created_at"] = datetime.now(
+                    UTC
+                ).isoformat()
                 if self._reasoning_start is not None:
                     end = self._reasoning_end or time.monotonic()
                     duration_ms = int((end - self._reasoning_start) * 1000)
