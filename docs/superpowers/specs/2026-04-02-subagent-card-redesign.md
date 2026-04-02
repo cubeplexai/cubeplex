@@ -65,7 +65,7 @@ Renders above the subagent card group when 2+ subagents are active:
 │  │  ● read_file "report.csv"              │ │
 │  │  ··· (gradient mask)                   │ │
 │  └────────────────────────────────────────┘ │
-│                           3/5 完成 · 8s     │
+│  ●● ●●● ◉          running indicator · 8s   │
 └─────────────────────────────────────────────┘
 ```
 
@@ -81,9 +81,13 @@ Renders above the subagent card group when 2+ subagents are active:
 - **Completed:** Collapses to summary line: "完成 · 5 个工具调用 · 12s". Click to expand full content.
 - Agent text output is NOT shown by default (collapsed like reasoning).
 
-**Progress indicator:**
-- Footer area: `completedToolCalls / totalToolCalls 完成 · elapsed time`
-- Mini text, right-aligned
+**Activity dots (footer area):**
+Tool calls are generated incrementally — total count is unknown at runtime. Instead of a progress bar, use dot indicators:
+- Each completed tool call → small green filled dot (●)
+- Currently running tool call → pulsing/blinking dot (◉)
+- Overall running state → a subtle pulse animation + elapsed time on the right
+- When agent is outputting text (not in a tool call), the running indicator still pulses to show activity
+- **Completed state:** dots remain as a summary row: "●●●●● · 12s"
 
 **Step type icons in ToolCallItem:**
 Map tool names to semantic icons:
