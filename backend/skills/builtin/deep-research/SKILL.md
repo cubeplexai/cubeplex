@@ -1,7 +1,7 @@
 ---
 name: deep-research
 description: Conduct comprehensive deep research using multi-agent orchestration. Use when questions require web research, multi-angle investigation, or content generation based on real-world information. Provides supervisor-subagent architecture for parallel research tasks.
-version: 2.0.0
+version: 3.0.0
 keywords:
   - research
   - multi-agent
@@ -11,17 +11,17 @@ keywords:
   - report-generation
 ---
 
-# Deep Research Skill (v2)
+# Deep Research Skill (v3)
 
 ## Overview
 
-This skill provides a **supervisor-based multi-agent orchestration** methodology for conducting thorough research. The main agent acts as **Chief Research Strategist**, delegating atomic research tasks to specialized subagents via the `subagent` tool, then synthesizing results into comprehensive reports.
+This skill provides a **supervisor-based multi-agent orchestration** methodology for conducting thorough research. The main agent acts as **Chief Research Strategist**, delegating atomic research tasks to specialized subagents via the `subagent` tool, reviewing their findings, and iterating until research is complete.
 
 **Core Principle**: Never generate content from general knowledge alone. Research quality determines output quality.
 
 ---
 
-## Architecture: Supervisor-Subagent Pattern
+## Architecture: Iterative Supervisor-Subagent Loop
 
 ```
 User Query
@@ -31,26 +31,35 @@ User Query
 │  MAIN AGENT (Chief Research Strategist / Supervisor)    │
 │  • Decomposes research into atomic verification points  │
 │  • Assigns tasks to subagents via `subagent` tool       │
-│  • Synthesizes findings from all subagents             │
-│  • Validates completeness before reporting             │
 └─────────────────────────────────────────────────────────┘
     │  subagent tool calls (parallel when independent)
     ▼
 ┌──────────┐  ┌──────────┐  ┌──────────┐
 │ Subagent │  │ Subagent │  │ Subagent │
-│ Research │  │ Research │  │ Research │
-│ Angle A  │  │ Angle B  │  │ Angle C  │
+│ Extract  │  │ Extract  │  │ Extract  │
+│ Facts A  │  │ Facts B  │  │ Facts C  │
 └──────────┘  └──────────┘  └──────────┘
-    │  results
+    │  key facts returned
     ▼
 ┌─────────────────────────────────────────────────────────┐
-│  SYNTHESIS                                              │
-│  • Merge findings from all subagents                   │
-│  • Resolve conflicts (prioritize authoritative sources) │
-│  • Fill gaps with additional targeted research          │
-│  • Generate comprehensive report                        │
+│  REVIEW (Main Agent)                                    │
+│  • Are the facts clear and specific?                    │
+│  • Are there gaps or unanswered questions?              │
+│  • Do any findings conflict or need verification?       │
+│  • Is any angle insufficiently covered?                 │
 └─────────────────────────────────────────────────────────┘
+    │                           │
+    │ Gaps found                │ Research sufficient
+    │ ▼                         │ ▼
+    │ Loop back: spawn new      │ ┌──────────────────────┐
+    │ subagents for gaps        │ │  SYNTHESIS            │
+    │ (return to dispatch)      │ │  • Merge all facts    │
+    └───────────────────────────│ │  • Resolve conflicts  │
+                                │ │  • Generate report    │
+                                │ └──────────────────────┘
 ```
+
+**Key difference from v2**: This is a **loop**, not a pipeline. The supervisor reviews results after each round and spawns additional subagents for gaps, follow-ups, or verification — repeating until coverage is sufficient.
 
 ---
 
@@ -76,7 +85,7 @@ Before starting, classify the research type:
 | **Quick Fact** | Single data point, clear answer | Direct search, skip to Phase 4 |
 | **Verification** | User provides claim, needs confirmation | Red-team style, search counter-evidence |
 | **Comprehensive** | Multi-dimensional topic | Full orchestration with subagents |
-| **Temporal** | Time-sensitive (prices, events, news) | Priority on T1 sources, timezone awareness |
+| **Temporal** | Time-sensitive (prices, events, news) | Priority on official/authoritative sources |
 
 ### Step 1B: Atomic Decomposition
 
@@ -95,17 +104,6 @@ Topic: "Tesla competitive position vs BYD"
 **Bad decomposition:**
 - "Research Tesla and BYD" (too broad, single subagent would be overwhelmed)
 - "Compare everything" (interleaves multiple angles)
-
-### Step 1C: Source Hierarchy Planning
-
-For each angle, plan which source tier to prioritize:
-
-| Tier | Source | Priority | Use Case |
-|------|--------|----------|----------|
-| **T0** | User-uploaded files | Highest | Check first — user provided this |
-| **T1** | Official/authoritative | High | Facts, data, official statements |
-| **T2** | Established media/analyst reports | Medium | Context, trends, expert opinions |
-| **T3** | Community/forums/blogs | Low | Leads, hints (verify before trusting) |
 
 ---
 
@@ -150,78 +148,96 @@ subagent(
 )
 ```
 
-**Writing effective prompts:**
+### Subagent Goal: Extract Key Facts, Not Write Reports
+
+Subagents are **fact extractors**, not report writers. Their prompt should instruct them to return:
+
+1. **Atomic facts** — specific, verifiable statements with concrete data points
+   - Good: "Tesla 2024 Q3 revenue was $25.2B, up 8% YoY"
+   - Bad: "Tesla had strong revenue growth" (vague, no numbers)
+
+2. **Structured output** — facts organized by dimension/topic, not free-form prose
+
+3. **Limitations** — what they searched for but couldn't find, or conflicting data they encountered
+
+**Key principles for subagent fact extraction:**
+- **Zero hallucination**: Only report what was found in sources. If a data point wasn't found, say so explicitly.
+- **Numeric integrity**: Preserve original numbers and units exactly as found. No unit conversions or rounding.
+- **Atomic statements**: Each fact should be one specific claim: `[Subject] + [Time] + [Metric] + [Value]`
+- **Conflict marking**: When sources disagree, report both values rather than picking one.
+
+### Writing Effective Prompts
+
 - Frame the request in the agent's domain language — brief them like a specialist
 - Include time range: "2024-2025 revenue data" not just "revenue"
-- Specify source tier if known: "Focus on official company filings and analyst reports"
-- Include verification requirement: "Verify with at least 2 authoritative sources"
-- State deliverables: "Present findings in a structured comparison table with specific numbers"
+- State deliverables: "Return a list of specific data points with numbers, not general trends"
+- Instruct fact extraction: "For each finding, provide the specific number, time period, and where you found it"
 - Bad: "Search for Tesla revenue" (too generic, doesn't leverage agent expertise)
-- Good: "As a financial analyst, evaluate Tesla's Q1-Q4 2024 revenue across regions. Focus on YoY growth, identify strongest-performing region, and flag anomalies."
-
-### Track System for Each Task
-
-Based on cubemanus supervisor methodology:
-
-| Track | Trigger | Strategy |
-|-------|---------|----------|
-| **Track A (Fast)** | Gap_Retry_Count=0, clear facts | T0→T1 direct search, methodology first if unfamiliar domain |
-| **Track B (Lateral)** | 0 < Gap_Retry_Count < 3 | Red-teaming + proxy search when direct fails |
-| **Track C (Circuit)** | Gap_Retry_Count ≥ 3 | Mark `[不可得]`, rotate to next angle |
-
-### Source Selection Priority
-
-Per cubemanus methodology:
-
-1. **Methodology First** (for unfamiliar domains): Search "industry analysis framework" before raw data
-2. **Draft-Driven**: Only search to fill specific gaps, never blind searching
-3. **Red Teaming**: Assume conclusions are wrong, search counter-evidence
-4. **Proxy Logic** (when direct unavailable):
-   - Can't find company data → search components/events (suppliers, lawsuits, IPO)
-   - Can't find official site → search regulatory filings, court records
+- Good: "As a financial analyst, find Tesla's Q1-Q4 2024 revenue broken down by region. Return specific numbers for each region and quarter. Note any data you searched for but couldn't find."
 
 ---
 
-## Phase 3: Result Synthesis
+## Phase 3: Review Loop
+
+**This is the critical phase that distinguishes deep research from shallow search.**
+
+After subagents return their findings, the supervisor must review before proceeding:
+
+### Review Checklist
+
+For each subagent's results, ask:
+
+1. **Fact clarity**: Are the facts specific with concrete numbers/dates? Or vague and hand-wavy?
+2. **Completeness**: Did the subagent cover all aspects of its assigned angle?
+3. **Gaps**: What questions remain unanswered? What data was "not found"?
+4. **Conflicts**: Do any findings contradict other subagents' results?
+5. **Follow-ups**: Did any finding reveal a new angle worth investigating?
+
+### Decision: Loop or Proceed
+
+| Situation | Action |
+|-----------|--------|
+| Major gaps in core angles | Spawn new subagents targeting specific gaps |
+| Conflicting data between subagents | Spawn a verification subagent to resolve |
+| A finding reveals an important new angle | Spawn a subagent for the new angle |
+| Vague results without specific data | Re-dispatch with more specific prompt |
+| All angles well-covered with concrete facts | Proceed to synthesis |
+
+### Loop Discipline
+
+- **Max 3 rounds** of iteration to avoid infinite loops
+- Each round should have a **narrower, more specific** focus than the previous
+- If data is genuinely unavailable after 2 attempts, mark it as a gap and move on
+- Track what's been tried to avoid repeating the same searches
+
+---
+
+## Phase 4: Synthesis & Report
+
+Once the review loop determines research is sufficient:
 
 ### Merging Strategy
 
 1. **Conflict Resolution**: When subagents report conflicting data:
-   - Prioritize T0 > T1 > T2 > T3
    - Look for root cause (different time periods, definitions, regions)
-   - If unresolvable, present both with `[Conflict: Source A vs Source B]`
+   - If unresolvable, present both values with context
 
 2. **Completeness Check**:
    - Did each atomic verification point get answered?
-   - Any gaps remain? Dispatch targeted subagent for gaps
    - Is evidence sufficient to support conclusions?
 
-3. **Confidence标记**:
-   - `[Confirmed]` — Multiple authoritative sources agree
-   - `[Partial]` — Some evidence but incomplete
-   - `[Unverified]` — Single source or unverified claim
-   - `[Unavailable]` — After Track C exhaustion
+3. **Confidence Assessment**:
+   - Mark well-supported findings vs. findings with limited data
+   - Be honest about what couldn't be verified
 
-### Red Team Validation
-
-Before finalizing, consider:
-- What would **disprove** my conclusions?
-- Search for counter-evidence (negative reports, regulatory issues)
-- If red team finds nothing, confidence increases
-- If red team finds something, update conclusions accordingly
-
----
-
-## Phase 4: Report Generation
+### Report Structure
 
 Output should include:
 
 1. **Executive Summary** (2-3 sentences)
 2. **Key Findings** (specific data points, not vague statements)
 3. **Analysis by Angle** (corresponding to atomic decomposition)
-4. **Source Attribution** (for credibility)
-5. **Confidence & Limitations** (honest assessment)
-6. **Outstanding Gaps** (what couldn't be verified)
+4. **Confidence & Limitations** (honest assessment of gaps)
 
 **Quality Bar**: A reader should be able to answer "So what?" and "How do you know?" from your report.
 
@@ -232,12 +248,11 @@ Output should include:
 Before completing research:
 
 - [ ] Have I covered at least 3-5 different research angles?
-- [ ] Have I fetched full content from authoritative sources, not just snippets?
-- [ ] Do I have specific data points, not just vague trends?
-- [ ] Have I searched counter-evidence (red team)?
-- [ ] Have I addressed conflicts between sources?
-- [ ] Is my information current? (check timestamps)
-- [ ] Have I marked confidence levels honestly?
+- [ ] Do I have specific data points (numbers, dates), not just vague trends?
+- [ ] Have I reviewed subagent results and followed up on gaps?
+- [ ] Have I addressed conflicts between findings?
+- [ ] Is my information current? (check time periods)
+- [ ] Have I honestly marked what couldn't be found?
 
 **If any answer is NO, continue researching before generating content.**
 
@@ -245,13 +260,14 @@ Before completing research:
 
 ## Common Mistakes to Avoid
 
-- ❌ Stopping after 1-2 searches (insufficient for "deep" research)
-- ❌ Relying on snippets without reading full sources
-- ❌ Searching only one angle of a multi-faceted topic
-- ❌ Ignoring contradicting evidence (red team failure)
-- ❌ Using outdated information when current data exists
-- ❌ Starting content generation before research is complete
-- ❌ Dispatching dependent tasks in parallel (waste of subagents)
+- Stopping after 1 round of subagents without reviewing results
+- Accepting vague subagent output ("Tesla did well") without demanding specifics
+- Searching only one angle of a multi-faceted topic
+- Ignoring contradicting evidence
+- Using outdated information when current data exists
+- Starting report generation before research is complete
+- Dispatching dependent tasks in parallel (waste of subagents)
+- Letting the review loop run endlessly — cap at 3 rounds
 
 ---
 
@@ -259,9 +275,8 @@ Before completing research:
 
 After completing research, you should have:
 1. Comprehensive coverage of all atomic verification points
-2. Specific facts, data points, and statistics with source attribution
-3. Real-world examples and case studies
-4. Expert perspectives and authoritative sources
-5. Honest confidence assessment and known gaps
+2. Specific facts, data points, and statistics from subagent extractions
+3. Honest confidence assessment and known gaps
+4. Conflicts identified and (where possible) resolved
 
-**Only then proceed to content generation.**
+**Only then proceed to report generation.**
