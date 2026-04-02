@@ -197,17 +197,15 @@ export function ToolCallItem({
                     {previewText}
                   </pre>
                 </div>
-                {showTruncated && (
-                  <button
-                    onClick={handleViewInPanel}
-                    className="flex items-center gap-1
-                      text-xs text-primary
-                      hover:underline cursor-pointer"
-                  >
-                    <PanelRight className="size-3" />
-                    View in panel
-                  </button>
-                )}
+                <button
+                  onClick={handleViewInPanel}
+                  className="flex items-center gap-1
+                    text-xs text-primary
+                    hover:underline cursor-pointer"
+                >
+                  <PanelRight className="size-3" />
+                  View in panel
+                </button>
               </>
             )}
             {!toolResult && isPending && (
