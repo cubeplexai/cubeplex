@@ -15,6 +15,7 @@ export interface Message {
     name: string; arguments: Record<string, unknown>; tool_call_id?: string
   }[] | null
   reasoning?: string | null
+  reasoning_duration_ms?: number | null  // from backend: estimated reasoning duration
   blocks?: ContentBlock[] | null  // ordered content blocks preserving temporal order
   name?: string | null  // for tool messages
   tool_call_id?: string | null  // for tool messages: which tool_call this responds to

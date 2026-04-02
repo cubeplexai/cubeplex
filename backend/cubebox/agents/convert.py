@@ -50,9 +50,11 @@ def convert_to_api_messages(lc_messages: list[BaseMessage]) -> list[dict[str, An
       ToolMessage   -> "tool"
     """
     result: list[dict[str, Any]] = []
+    prev_timestamp: str | None = None
 
     for msg in lc_messages:
         if isinstance(msg, HumanMessage):
+            ts = _get_timestamp(msg)
             result.append(
                 {
                     "id": getattr(msg, "id", None) or str(uuid.uuid4()),
@@ -61,9 +63,10 @@ def convert_to_api_messages(lc_messages: list[BaseMessage]) -> list[dict[str, An
                     "tool_calls": None,
                     "reasoning": None,
                     "name": None,
-                    "created_at": _get_timestamp(msg),
+                    "created_at": ts,
                 }
             )
+            prev_timestamp = ts
 
         elif isinstance(msg, AIMessage):
             raw_content = msg.content
@@ -91,6 +94,20 @@ def convert_to_api_messages(lc_messages: list[BaseMessage]) -> list[dict[str, An
 
             reasoning = (msg.additional_kwargs or {}).get("reasoning_content")
 
+            ts = _get_timestamp(msg)
+
+            # Estimate reasoning duration from gap between previous message and this one
+            reasoning_duration_ms: int | None = None
+            if reasoning and prev_timestamp:
+                try:
+                    prev_dt = datetime.fromisoformat(prev_timestamp)
+                    curr_dt = datetime.fromisoformat(ts)
+                    delta_ms = int((curr_dt - prev_dt).total_seconds() * 1000)
+                    if delta_ms > 0:
+                        reasoning_duration_ms = delta_ms
+                except (ValueError, TypeError):
+                    pass
+
             result.append(
                 {
                     "id": getattr(msg, "id", None) or str(uuid.uuid4()),
@@ -98,14 +115,17 @@ def convert_to_api_messages(lc_messages: list[BaseMessage]) -> list[dict[str, An
                     "content": text_content,
                     "tool_calls": tool_calls,
                     "reasoning": reasoning or None,
+                    "reasoning_duration_ms": reasoning_duration_ms,
                     "name": None,
-                    "created_at": _get_timestamp(msg),
+                    "created_at": ts,
                 }
             )
+            prev_timestamp = ts
 
         elif isinstance(msg, ToolMessage):
             raw_events = (msg.additional_kwargs or {}).get("subagent_events")
             subagent_events = _consolidate_subagent_events(raw_events) if raw_events else None
+            ts = _get_timestamp(msg)
             result.append(
                 {
                     "id": getattr(msg, "id", None) or str(uuid.uuid4()),
@@ -116,9 +136,10 @@ def convert_to_api_messages(lc_messages: list[BaseMessage]) -> list[dict[str, An
                     "name": msg.name,
                     "tool_call_id": getattr(msg, "tool_call_id", None),
                     "subagent_events": subagent_events,
-                    "created_at": _get_timestamp(msg),
+                    "created_at": ts,
                 }
             )
+            prev_timestamp = ts
 
     return result
 

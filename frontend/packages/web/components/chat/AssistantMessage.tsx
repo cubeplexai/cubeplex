@@ -6,7 +6,6 @@ import remarkGfm from 'remark-gfm'
 import type { Message, ContentBlock, SubagentSummary } from '@cubebox/core'
 import type { AgentStream } from '@cubebox/core'
 import { Bot, ChevronDown, ChevronRight, Brain } from 'lucide-react'
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
 import { SubAgentCard } from './SubAgentCard'
 import { ToolCallGroup } from './ToolCallGroup'
 
@@ -26,25 +25,18 @@ function formatDuration(ms: number): string {
 }
 
 function ReasoningBlock({ reasoning, isStreaming, startedAt, durationMs }: ReasoningBlockProps) {
-  const [isOpen, setIsOpen] = useState(false)
+  const [isExpanded, setIsExpanded] = useState(false)
   const [elapsed, setElapsed] = useState(0)
+  const scrollRef = useRef<HTMLDivElement>(null)
   const prevStreamingRef = useRef(isStreaming)
 
-  // Sync open state with isStreaming transitions
+  // Auto-collapse when streaming ends
   useEffect(() => {
-    if (isStreaming && !prevStreamingRef.current) {
-      setIsOpen(true)
-    } else if (!isStreaming && prevStreamingRef.current) {
-      setIsOpen(false)
+    if (!isStreaming && prevStreamingRef.current) {
+      setIsExpanded(false)
     }
     prevStreamingRef.current = isStreaming
   }, [isStreaming])
-
-  // Open on first render if streaming
-  useEffect(() => {
-    if (isStreaming) setIsOpen(true)
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
 
   // Live elapsed timer while streaming
   useEffect(() => {
@@ -55,34 +47,79 @@ function ReasoningBlock({ reasoning, isStreaming, startedAt, durationMs }: Reaso
     return () => clearInterval(interval)
   }, [isStreaming, startedAt])
 
-  // Duration: finalized > live elapsed > nothing
+  // Auto-scroll to bottom during streaming
+  useEffect(() => {
+    if (isStreaming && scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight
+    }
+  }, [reasoning, isStreaming])
+
   const displayTime = durationMs ?? (isStreaming && startedAt ? elapsed : null)
 
+  // Streaming: always show 3-line scroller; Completed: collapsed or fully expanded
   return (
-    <Collapsible open={isOpen} onOpenChange={setIsOpen}>
-      <CollapsibleTrigger className="flex items-center gap-1.5 text-xs text-muted-foreground
-        hover:text-foreground transition-colors group">
+    <div>
+      {/* Header - clickable when not streaming */}
+      <button
+        type="button"
+        onClick={() => { if (!isStreaming) setIsExpanded(prev => !prev) }}
+        className={`flex items-center gap-1.5 text-xs text-muted-foreground
+          transition-colors group w-full text-left
+          ${isStreaming ? 'cursor-default' : 'hover:text-foreground cursor-pointer'}`}
+      >
         <span className="text-muted-foreground/60 group-hover:text-muted-foreground
           transition-colors">
-          {isOpen ? <ChevronDown className="size-3" /> : <ChevronRight className="size-3" />}
+          {isStreaming ? (
+            <Brain className="size-3 text-primary/70 animate-pulse" />
+          ) : isExpanded ? (
+            <ChevronDown className="size-3" />
+          ) : (
+            <ChevronRight className="size-3" />
+          )}
         </span>
-        <Brain className="size-3 text-muted-foreground/70" />
+        {!isStreaming && <Brain className="size-3 text-muted-foreground/70" />}
         <span>{isStreaming ? '思考中...' : '思考过程'}</span>
         {displayTime != null && displayTime >= 1000 && (
           <span className="text-muted-foreground/50 ml-0.5">
             {formatDuration(displayTime)}
           </span>
         )}
-      </CollapsibleTrigger>
-      <CollapsibleContent className="mt-1.5">
-        <div className="pl-4 border-l-2 border-border/50">
+      </button>
+
+      {/* Streaming: 3-line scrolling viewport with gradient mask */}
+      {isStreaming && (
+        <div className="mt-1.5 relative">
+          <div
+            ref={scrollRef}
+            className="overflow-hidden text-xs leading-[1.625] whitespace-pre-wrap italic
+              pl-4 border-l-2 border-primary/30"
+            style={{
+              maxHeight: 'calc(1.625em * 3)',
+              maskImage:
+                'linear-gradient(to bottom, transparent 0%, rgba(0,0,0,0.45) 15%,'
+                + ' rgba(0,0,0,1) 33%, rgba(0,0,0,1) 66%,'
+                + ' rgba(0,0,0,0.45) 85%, transparent 100%)',
+              WebkitMaskImage:
+                'linear-gradient(to bottom, transparent 0%, rgba(0,0,0,0.45) 15%,'
+                + ' rgba(0,0,0,1) 33%, rgba(0,0,0,1) 66%,'
+                + ' rgba(0,0,0,0.45) 85%, transparent 100%)',
+            }}
+          >
+            <span className="text-muted-foreground/70">{reasoning}</span>
+          </div>
+        </div>
+      )}
+
+      {/* Completed & expanded: full content */}
+      {!isStreaming && isExpanded && (
+        <div className="mt-1.5 pl-4 border-l-2 border-border/50 max-h-64 overflow-y-auto">
           <p className="text-xs text-muted-foreground/70 leading-relaxed whitespace-pre-wrap
             italic">
             {reasoning}
           </p>
         </div>
-      </CollapsibleContent>
-    </Collapsible>
+      )}
+    </div>
   )
 }
 
@@ -114,7 +151,13 @@ import { proseClasses } from '@/lib/utils'
 /** Build ordered blocks from legacy flat Message fields (for messages without blocks) */
 function blocksFromMessage(msg: Message): ContentBlock[] {
   const result: ContentBlock[] = []
-  if (msg.reasoning) result.push({ type: 'reasoning', content: msg.reasoning })
+  if (msg.reasoning) {
+    result.push({
+      type: 'reasoning',
+      content: msg.reasoning,
+      duration_ms: msg.reasoning_duration_ms ?? undefined,
+    })
+  }
   if (msg.tool_calls) {
     for (const tc of msg.tool_calls) {
       result.push({
@@ -148,11 +191,13 @@ function subagentSummaryToStream(summary: SubagentSummary): AgentStream {
 }
 
 function ContentBlockRenderer(
-  { block, index, isLast, isStreaming, subAgentStreams, subagentDataMap, toolResultMap }: {
+  { block, index, isLast, isStreaming, subAgentStreams, subagentDataMap, toolResultMap,
+    messageCreatedAt }: {
     block: ContentBlock; index: number; isLast: boolean; isStreaming: boolean
     subAgentStreams?: Record<string, AgentStream>
     subagentDataMap?: Record<string, SubagentSummary>
     toolResultMap: Record<string, { content: string; receivedAt: number }>
+    messageCreatedAt?: string
   },
 ) {
   if (block.type === 'reasoning') {
@@ -191,6 +236,7 @@ function ContentBlockRenderer(
         blocks={[block as ContentBlock & { type: 'tool_call' }]}
         toolResultMap={toolResultMap}
         isStreaming={isStreaming}
+        messageCreatedAt={messageCreatedAt}
       />
     )
   }
@@ -238,6 +284,8 @@ export function AssistantMessage(
     ? stream.blocks
     : (message.blocks ?? blocksFromMessage(message))
 
+  const msgCreatedAt = !isStreaming ? message.created_at : undefined
+
   const hasContent = blocks.length > 0
   const grouped = groupBlocks(blocks)
 
@@ -258,6 +306,7 @@ export function AssistantMessage(
                 blocks={tcBlocks}
                 toolResultMap={toolResultMap}
                 isStreaming={isStreaming === true}
+                messageCreatedAt={msgCreatedAt}
               />
             )
           }
@@ -271,6 +320,7 @@ export function AssistantMessage(
               subAgentStreams={subAgentStreams}
               subagentDataMap={subagentDataMap}
               toolResultMap={toolResultMap}
+              messageCreatedAt={msgCreatedAt}
             />
           )
         })}

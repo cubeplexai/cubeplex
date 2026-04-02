@@ -10,12 +10,15 @@ interface ToolCallGroupProps {
     { content: string; receivedAt: number }
   >
   isStreaming: boolean
+  /** ISO timestamp of the parent assistant message (used to compute tool call duration) */
+  messageCreatedAt?: string
 }
 
 export function ToolCallGroup({
   blocks,
   toolResultMap,
   isStreaming,
+  messageCreatedAt,
 }: ToolCallGroupProps) {
   return (
     <div
@@ -34,6 +37,7 @@ export function ToolCallGroup({
             arguments={block.arguments}
             toolCallId={block.tool_call_id}
             toolResult={result}
+            timestamp={messageCreatedAt}
             isPending={isPending}
             showDivider={i > 0}
           />
