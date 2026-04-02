@@ -1,8 +1,9 @@
 // frontend/packages/core/src/stores/messageStore.ts
 import { create } from 'zustand'
 import type {
-  ContentBlock,
-  Message, TextDeltaEvent, ToolCallEvent, ToolResultEvent, ReasoningEvent,
+  ContentBlock, TodoItem,
+  Message, TextDeltaEvent, ToolCallEvent,
+  ToolResultEvent, ReasoningEvent,
 } from '../types'
 import type { ApiClient } from '../api'
 import { listMessages, streamMessages } from '../api'
@@ -22,6 +23,11 @@ export interface MessageStore {
   isStreaming: boolean
   statusPhase: string | null
   error: string | null
+  todos: TodoItem[]
+  toolResultMap: Record<
+    string,
+    { content: string; receivedAt: number }
+  >
 
   loadMessages(client: ApiClient, conversationId: string): Promise<void>
   send(client: ApiClient, conversationId: string, content: string): Promise<void>
@@ -79,6 +85,8 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
   isStreaming: false,
   statusPhase: null,
   error: null,
+  todos: [],
+  toolResultMap: {},
 
   async loadMessages(client: ApiClient, conversationId: string) {
     if (get().isStreaming) return
@@ -114,6 +122,8 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
       isStreaming: true,
       statusPhase: null,
       error: null,
+      todos: [],
+      toolResultMap: {},
     }))
 
     try {
@@ -153,15 +163,49 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
         } else if (event.type === 'tool_call') {
           const e = event as ToolCallEvent
           set((s) => {
-            const prev = s.streamAgents[agentKey] ?? emptyStream(event.agent_name)
+            const prev =
+              s.streamAgents[agentKey]
+              ?? emptyStream(event.agent_name)
+
+            // Upsert write_todos into todos list
+            let nextTodos = s.todos
+            if (e.data.name === 'write_todos') {
+              const args = e.data.arguments as {
+                description?: string
+                status?: string
+              }
+              const desc = String(args.description ?? '')
+              const status = (args.status ?? 'pending') as
+                TodoItem['status']
+              const idx = s.todos.findIndex(
+                (t) => t.description === desc,
+              )
+              if (idx >= 0) {
+                nextTodos = [...s.todos]
+                nextTodos[idx] = {
+                  ...nextTodos[idx],
+                  status,
+                }
+              } else {
+                nextTodos = [
+                  ...s.todos,
+                  { id: null, description: desc, status },
+                ]
+              }
+            }
+
             return {
+              todos: nextTodos,
               streamAgents: {
                 ...s.streamAgents,
                 [agentKey]: {
                   ...prev,
                   toolCalls: [...prev.toolCalls, e],
                   blocks: appendToolCallBlock(
-                    prev.blocks, e.data.name, e.data.arguments, e.data.tool_call_id,
+                    prev.blocks,
+                    e.data.name,
+                    e.data.arguments,
+                    e.data.tool_call_id,
                   ),
                 },
               },
@@ -169,15 +213,59 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
           })
         } else if (event.type === 'tool_result') {
           const e = event as ToolResultEvent
-          set((s) => ({
-            streamAgents: {
-              ...s.streamAgents,
-              [agentKey]: {
-                ...s.streamAgents[agentKey] ?? emptyStream(event.agent_name),
-                toolResults: [...(s.streamAgents[agentKey]?.toolResults ?? []), e],
+          const tcId = e.data.tool_call_id ?? ''
+          set((s) => {
+            const newMap = { ...s.toolResultMap }
+            if (tcId) {
+              newMap[tcId] = {
+                content: e.data.content,
+                receivedAt: Date.now(),
+              }
+            }
+
+            // Update todo id from write_todos result
+            let nextTodos = s.todos
+            if (
+              e.data.tool_name === 'write_todos' && tcId
+            ) {
+              try {
+                const parsed = JSON.parse(e.data.content)
+                const taskId =
+                  parsed.task_id as string | undefined
+                if (taskId) {
+                  const idx = s.todos.findIndex(
+                    (t) => t.id === null,
+                  )
+                  if (idx >= 0) {
+                    nextTodos = [...s.todos]
+                    nextTodos[idx] = {
+                      ...nextTodos[idx],
+                      id: taskId,
+                    }
+                  }
+                }
+              } catch {
+                // Ignore parse errors
+              }
+            }
+
+            return {
+              todos: nextTodos,
+              toolResultMap: newMap,
+              streamAgents: {
+                ...s.streamAgents,
+                [agentKey]: {
+                  ...(s.streamAgents[agentKey]
+                    ?? emptyStream(event.agent_name)),
+                  toolResults: [
+                    ...(s.streamAgents[agentKey]
+                      ?.toolResults ?? []),
+                    e,
+                  ],
+                },
               },
-            },
-          }))
+            }
+          })
         } else if (event.type === 'status') {
           set({ statusPhase: (event.data as { phase: string }).phase })
         } else if (event.type === 'done') {
@@ -234,6 +322,12 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
   },
 
   clearStream() {
-    set({ streamAgents: {}, isStreaming: false, statusPhase: null })
+    set({
+      streamAgents: {},
+      isStreaming: false,
+      statusPhase: null,
+      todos: [],
+      toolResultMap: {},
+    })
   },
 }))
