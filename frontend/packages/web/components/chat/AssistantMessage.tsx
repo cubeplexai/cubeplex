@@ -8,6 +8,7 @@ import type { AgentStream } from '@cubebox/core'
 import { Bot, ChevronDown, ChevronRight, Brain } from 'lucide-react'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
 import { SubAgentCard } from './SubAgentCard'
+import { ToolCallGroup } from './ToolCallGroup'
 
 interface ReasoningBlockProps {
   reasoning: string
@@ -85,23 +86,11 @@ function ReasoningBlock({ reasoning, isStreaming, startedAt, durationMs }: Reaso
   )
 }
 
-function ToolCallList({ toolCalls }: { toolCalls: { name: string; arguments: Record<string, unknown> }[] }) {
-  return (
-    <div className="space-y-1">
-      {toolCalls.map((tc, i) => (
-        <div key={i} className="text-xs font-mono px-2 py-1 rounded bg-muted/40 text-muted-foreground">
-          <span className="text-foreground/70">{tc.name}</span>
-          {' '}
-          <span className="opacity-60">{JSON.stringify(tc.arguments).slice(0, 100)}</span>
-        </div>
-      ))}
-    </div>
-  )
-}
 
 interface HistoryProps {
   message: Message
   subagentDataMap?: Record<string, SubagentSummary>
+  toolResultMap: Record<string, { content: string; receivedAt: number }>
   stream?: never
   isStreaming?: never
   statusPhase?: never
@@ -111,6 +100,7 @@ interface HistoryProps {
 interface StreamingProps {
   message?: never
   subagentDataMap?: never
+  toolResultMap: Record<string, { content: string; receivedAt: number }>
   stream: AgentStream
   isStreaming: true
   statusPhase?: string | null
@@ -171,10 +161,11 @@ function subagentSummaryToStream(summary: SubagentSummary): AgentStream {
 }
 
 function ContentBlockRenderer(
-  { block, index, isLast, isStreaming, subAgentStreams, subagentDataMap }: {
+  { block, index, isLast, isStreaming, subAgentStreams, subagentDataMap, toolResultMap }: {
     block: ContentBlock; index: number; isLast: boolean; isStreaming: boolean
     subAgentStreams?: Record<string, AgentStream>
     subagentDataMap?: Record<string, SubagentSummary>
+    toolResultMap: Record<string, { content: string; receivedAt: number }>
   },
 ) {
   if (block.type === 'reasoning') {
@@ -203,14 +194,17 @@ function ContentBlockRenderer(
         name={displayName}
         stream={stream ?? historicalStream}
         isRunning={isStreaming && !!stream}
+        toolResultMap={toolResultMap}
       />
     )
   }
   if (block.type === 'tool_call') {
     return (
-      <div className="bg-card border border-border rounded-xl px-3 py-2.5">
-        <ToolCallList toolCalls={[{ name: block.name, arguments: block.arguments }]} />
-      </div>
+      <ToolCallGroup
+        blocks={[block as ContentBlock & { type: 'tool_call' }]}
+        toolResultMap={toolResultMap}
+        isStreaming={isStreaming}
+      />
     )
   }
   // text block
@@ -225,7 +219,11 @@ function ContentBlockRenderer(
 function groupBlocks(blocks: ContentBlock[]): (ContentBlock | ContentBlock[])[] {
   const result: (ContentBlock | ContentBlock[])[] = []
   for (const block of blocks) {
-    if (block.type === 'tool_call' && block.name !== 'subagent') {
+    if (
+      block.type === 'tool_call' &&
+      block.name !== 'subagent' &&
+      block.name !== 'write_todos'
+    ) {
       const last = result[result.length - 1]
       if (Array.isArray(last) && last[0].type === 'tool_call'
         && (last[0] as ContentBlock & { name: string }).name !== 'subagent') {
@@ -233,6 +231,11 @@ function groupBlocks(blocks: ContentBlock[]): (ContentBlock | ContentBlock[])[] 
       } else {
         result.push([block])
       }
+    } else if (
+      block.type === 'tool_call' &&
+      block.name === 'write_todos'
+    ) {
+      continue
     } else {
       result.push(block)
     }
@@ -241,7 +244,7 @@ function groupBlocks(blocks: ContentBlock[]): (ContentBlock | ContentBlock[])[] 
 }
 
 export function AssistantMessage(
-  { message, stream, isStreaming, statusPhase, subAgentStreams, subagentDataMap }:
+  { message, stream, isStreaming, statusPhase, subAgentStreams, subagentDataMap, toolResultMap }:
   AssistantMessageProps,
 ) {
   const blocks: ContentBlock[] = isStreaming
@@ -261,14 +264,14 @@ export function AssistantMessage(
         {grouped.map((item, i) => {
           if (Array.isArray(item)) {
             // grouped tool_call blocks
-            const toolCalls = item.map((b) => {
-              const tc = b as ContentBlock & { type: 'tool_call' }
-              return { name: tc.name, arguments: tc.arguments }
-            })
+            const tcBlocks = item as (ContentBlock & { type: 'tool_call' })[]
             return (
-              <div key={i} className="bg-card border border-border rounded-xl px-3 py-2.5">
-                <ToolCallList toolCalls={toolCalls} />
-              </div>
+              <ToolCallGroup
+                key={i}
+                blocks={tcBlocks}
+                toolResultMap={toolResultMap}
+                isStreaming={isStreaming === true}
+              />
             )
           }
           return (
@@ -280,6 +283,7 @@ export function AssistantMessage(
               isStreaming={isStreaming === true}
               subAgentStreams={subAgentStreams}
               subagentDataMap={subagentDataMap}
+              toolResultMap={toolResultMap}
             />
           )
         })}

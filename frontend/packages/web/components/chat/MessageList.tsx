@@ -34,7 +34,7 @@ function buildSubagentDataMap(
 }
 
 export function MessageList({ conversationId }: MessageListProps) {
-  const { messages, isStreaming, statusPhase, mainStream, subAgentStreams } =
+  const { messages, isStreaming, statusPhase, mainStream, subAgentStreams, toolResultMap } =
     useMessages(conversationId)
   const loadMessages = useMessageStore((s) => s.loadMessages)
 
@@ -55,7 +55,11 @@ export function MessageList({ conversationId }: MessageListProps) {
           <div key={msg.id}>
             {msg.role === 'user' && <UserMessage content={msg.content ?? ''} />}
             {msg.role === 'assistant' && (
-              <AssistantMessage message={msg} subagentDataMap={subagentDataMap} />
+              <AssistantMessage
+                message={msg}
+                subagentDataMap={subagentDataMap}
+                toolResultMap={toolResultMap}
+              />
             )}
           </div>
         ))}
@@ -66,6 +70,7 @@ export function MessageList({ conversationId }: MessageListProps) {
             isStreaming
             statusPhase={statusPhase}
             subAgentStreams={Object.fromEntries(subAgentStreams)}
+            toolResultMap={toolResultMap}
           />
         )}
       </div>
