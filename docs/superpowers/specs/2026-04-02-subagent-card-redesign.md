@@ -15,7 +15,7 @@ class _SubAgentSchema(BaseModel):
     name: str          # Personified name matching the role (e.g., "Dr. Chen", "Scout")
     role: str          # Professional role (e.g., "经济分析师", "信息检索专家")
     task: str          # Short task summary for display (e.g., "分析特斯拉2024年财务数据")
-    description: str   # Full task prompt sent to the subagent (not displayed in UI)
+    prompt: str        # Full prompt crafted for the subagent's expertise and goal (not displayed in UI)
     subagent_type: str = "general-purpose"
 ```
 
@@ -25,7 +25,7 @@ Update the subagent delegation prompt to instruct the main model:
 - `name`: a professional, personified name that fits the role (not a task description). Examples: "Dr. Chen" for an economist, "Scout" for a search specialist, "Aria" for a data analyst. Must feel credible — no mismatched casual names for serious roles.
 - `role`: a concise professional title describing what this agent specializes in.
 - `task`: a one-line summary of the specific task being delegated.
-- `description`: the full, self-contained task description (existing behavior).
+- `prompt`: the full prompt crafted for the subagent — should be tailored to the agent's expertise and goal, not just a task description. The main agent should write this as a professional brief that helps the subagent perform at its best.
 
 ### Subagent event consolidation (agents/convert.py)
 

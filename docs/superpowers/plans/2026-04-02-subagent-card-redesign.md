@@ -4,7 +4,7 @@
 
 **Goal:** Redesign SubAgentCard with richer agent identity (personified name, role, DiceBear avatar), task context, activity dots, and collapsed-by-default output — inspired by Kimi's agent card UI.
 
-**Architecture:** Backend adds `role` and `task` fields to the subagent tool schema and updates the prompt to guide name/role generation. Frontend installs DiceBear bottts, redesigns SubAgentCard with avatar/role/task header, collapsed streaming output area, activity dot indicators, and adds a SubAgentCluster overview bar.
+**Architecture:** Backend adds `role`, `task` fields and renames `description` → `prompt` in the subagent tool schema, updates the delegation prompt to guide name/role/prompt generation. Frontend installs DiceBear bottts, redesigns SubAgentCard with avatar/role/task header, collapsed streaming output area, activity dot indicators, and adds a SubAgentCluster overview bar.
 
 **Tech Stack:** Python/Pydantic (backend schema), Next.js/React/Tailwind CSS (frontend), @dicebear/core + @dicebear/collection (avatars)
 
@@ -13,7 +13,7 @@
 ## File Structure
 
 **Backend (3 files):**
-- Modify: `backend/cubebox/middleware/subagents.py` — add `role`, `task` to `_SubAgentSchema`
+- Modify: `backend/cubebox/middleware/subagents.py` — add `role`, `task` and rename `description` → `prompt` in `_SubAgentSchema`
 - Modify: `backend/cubebox/prompts/subagents.py` — update prompt with field guidelines
 - Modify: `backend/cubebox/agents/convert.py` — include `role`, `task` in subagent summary
 
@@ -28,10 +28,10 @@
 
 ---
 
-### Task 1: Backend — Add `role` and `task` to subagent schema
+### Task 1: Backend — Update subagent schema (add `role`, `task`; rename `description` → `prompt`)
 
 **Files:**
-- Modify: `backend/cubebox/middleware/subagents.py:46-49`
+- Modify: `backend/cubebox/middleware/subagents.py:46-49, 75-80, 109-110`
 
 - [ ] **Step 1: Update `_SubAgentSchema`**
 
@@ -42,8 +42,50 @@ class _SubAgentSchema(BaseModel):
     name: str
     role: str
     task: str
-    description: str
+    prompt: str
     subagent_type: str = "general-purpose"
+```
+
+- [ ] **Step 1b: Update `_run_subagent` function signature and usage**
+
+The `_run_subagent` function currently takes `description: str` as a parameter and uses it as the user message sent to the subagent. Update the parameter name from `description` to `prompt`:
+
+In the function signature (around line 75-80), change:
+
+```python
+    async def _run_subagent(
+        name: str,
+        description: str,
+        subagent_type: str = "general-purpose",
+        tool_call_id: Annotated[str, InjectedToolCallId] = "",
+    ) -> str | ToolMessage:
+```
+
+to:
+
+```python
+    async def _run_subagent(
+        name: str,
+        role: str,
+        task: str,
+        prompt: str,
+        subagent_type: str = "general-purpose",
+        tool_call_id: Annotated[str, InjectedToolCallId] = "",
+    ) -> str | ToolMessage:
+```
+
+Then update the two places where `description` is used as the subagent's input message:
+
+Line ~110 (stream mode):
+```python
+                async for chunk in agent.astream(
+                    {"messages": [{"role": "user", "content": prompt}]},
+```
+
+Line ~129 (invoke mode):
+```python
+                result = await agent.ainvoke(
+                    {"messages": [{"role": "user", "content": prompt}]},
 ```
 
 - [ ] **Step 2: Run backend checks**
@@ -55,7 +97,7 @@ Expected: All checks pass (format, lint, type-check, test)
 
 ```bash
 git add backend/cubebox/middleware/subagents.py
-git commit -m "feat(backend): add role and task fields to subagent schema"
+git commit -m "feat(backend): add role, task and rename description to prompt in subagent schema"
 ```
 
 ---
@@ -107,7 +149,9 @@ Bad: "Research Tesla and BYD" (too broad — split into angles first)
   - Engineering/Code roles: "Forge", "Bolt", "Coder"
 - `role`: A concise professional title (2-5 words) describing what this agent specializes in. Examples: "经济分析师", "信息检索专家", "数据可视化工程师", "Financial Analyst"
 - `task`: A one-line summary of the specific task being delegated (shown in UI). Examples: "分析特斯拉2024年各区域营收", "Search for BYD battery specs"
-- `description`: The full, self-contained task description — the subagent has no access to your conversation history. Include relevant context (time ranges, source preferences, specific constraints).
+- `prompt`: The full prompt crafted for this subagent — write it as a professional brief tailored to the agent's role and goal. The subagent has no access to your conversation history. Include relevant context, constraints, and expected deliverables. Think of it as briefing a specialist: frame the request in their domain language.
+  - Good: "As a financial analyst, evaluate Tesla's 2024 Q1-Q4 revenue performance across North America, Europe, and Asia-Pacific regions. Focus on YoY growth rates, identify the strongest-performing region, and flag any anomalies. Present findings in a structured comparison table."
+  - Bad: "Search for Tesla 2024 revenue by region" (too generic — doesn't leverage the agent's expertise)
 - The subagent returns a single result when complete
 - You can dispatch multiple subagents in parallel by calling `subagent` multiple times"""
 ```
