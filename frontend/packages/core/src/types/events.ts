@@ -76,6 +76,7 @@ export interface ToolResultEvent extends AgentEvent {
     tool_name: string
     tool_call_id: string
     content: string
+    content_type?: string
   }
 }
 

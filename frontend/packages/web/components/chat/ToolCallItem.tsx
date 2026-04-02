@@ -1,19 +1,11 @@
 'use client'
 
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, memo } from 'react'
 import {
-  ChevronRight,
-  ChevronDown,
-  Clock,
   CheckCircle2,
   Circle,
   PanelRight,
 } from 'lucide-react'
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from '@/components/ui/collapsible'
 import { getToolIcon, getParamSummary } from '@/lib/toolIcons'
 import { useToolDetailStore } from '@cubebox/core'
 
@@ -24,6 +16,7 @@ interface ToolCallItemProps {
   toolResult?: {
     content: string
     receivedAt: number
+    contentType?: string
   } | null
   timestamp?: string
   /** True while this tool is still executing */
@@ -41,7 +34,7 @@ function formatDuration(ms: number): string {
   return s > 0 ? `${m}m${s}s` : `${m}m`
 }
 
-export function ToolCallItem({
+export const ToolCallItem = memo(function ToolCallItem({
   name,
   arguments: args,
   toolCallId,
@@ -50,7 +43,6 @@ export function ToolCallItem({
   isPending,
   showDivider,
 }: ToolCallItemProps) {
-  const [isOpen, setIsOpen] = useState(false)
   const [elapsed, setElapsed] = useState(0)
   const startedAt = useRef(Date.now())
   const openPanel = useToolDetailStore((s) => s.open)
@@ -79,16 +71,8 @@ export function ToolCallItem({
   const summary = getParamSummary(name, args)
 
   const handleViewInPanel = () => {
-    openPanel(name, args, toolResult?.content ?? null)
+    openPanel(name, args, toolResult?.content ?? null, toolResult?.contentType)
   }
-
-  // Truncate result for inline preview
-  const resultLines =
-    toolResult?.content.split('\n') ?? []
-  const showTruncated = resultLines.length > 10
-  const previewText = showTruncated
-    ? resultLines.slice(0, 6).join('\n') + '\n...'
-    : (toolResult?.content ?? '')
 
   return (
     <div
@@ -96,129 +80,74 @@ export function ToolCallItem({
         showDivider ? 'border-t border-border' : ''
       }
     >
-      <Collapsible open={isOpen} onOpenChange={setIsOpen}>
-        <CollapsibleTrigger
-          className="flex w-full items-center gap-2 px-3
-            py-2 text-sm hover:bg-muted/50
-            transition-colors cursor-pointer"
+      <button
+        type="button"
+        onClick={toolResult ? handleViewInPanel : undefined}
+        className={`flex w-full items-center gap-2 px-3
+          py-2 text-sm transition-colors
+          ${toolResult ? 'hover:bg-muted/50 cursor-pointer' : ''}`}
+      >
+        <Icon
+          className="size-3.5 text-muted-foreground
+            shrink-0"
+        />
+        <span
+          className="font-medium text-foreground
+            shrink-0"
         >
-          <Icon
-            className="size-3.5 text-muted-foreground
-              shrink-0"
-          />
-          <span
-            className="font-medium text-foreground
-              shrink-0"
-          >
-            {name}
-          </span>
-          {summary && (
+          {name}
+        </span>
+        {summary && (
+          <>
+            <span
+              className="text-muted-foreground/40
+                shrink-0"
+            >
+              |
+            </span>
+            <span
+              className="text-xs text-muted-foreground
+                truncate"
+            >
+              {summary}
+            </span>
+          </>
+        )}
+        <span
+          className="ml-auto flex items-center gap-1.5
+            shrink-0"
+        >
+          {isPending ? (
             <>
+              <Circle
+                className="size-2.5 text-blue-500
+                  animate-pulse"
+              />
               <span
-                className="text-muted-foreground/40
-                  shrink-0"
+                className="text-xs
+                  text-muted-foreground"
               >
-                |
-              </span>
-              <span
-                className="text-xs text-muted-foreground
-                  truncate"
-              >
-                {summary}
+                {formatDuration(elapsed)}
               </span>
             </>
-          )}
-          <span
-            className="ml-auto flex items-center gap-1.5
-              shrink-0"
-          >
-            {isPending ? (
-              <>
-                <Circle
-                  className="size-2.5 text-blue-500
-                    animate-pulse"
-                />
-                <span
-                  className="text-xs
-                    text-muted-foreground"
-                >
-                  {formatDuration(elapsed)}
-                </span>
-              </>
-            ) : toolResult ? (
-              <>
-                <CheckCircle2
-                  className="size-3 text-emerald-500"
-                />
-                <span
-                  className="text-xs
-                    text-muted-foreground"
-                >
-                  {formatDuration(duration)}
-                </span>
-              </>
-            ) : null}
-            {isOpen ? (
-              <ChevronDown
-                className="size-3.5
-                  text-muted-foreground"
+          ) : toolResult ? (
+            <>
+              <CheckCircle2
+                className="size-3 text-emerald-500"
               />
-            ) : (
-              <ChevronRight
-                className="size-3.5
-                  text-muted-foreground"
-              />
-            )}
-          </span>
-        </CollapsibleTrigger>
-
-        <CollapsibleContent>
-          <div className="px-3 pb-3 space-y-2">
-            {toolResult && (
-              <>
-                <div
-                  className="flex items-center gap-1.5
-                    text-xs text-muted-foreground"
-                >
-                  <Clock className="size-3" />
-                  <span>
-                    {formatDuration(duration)}
-                  </span>
-                </div>
-                <div
-                  className="bg-muted rounded-md p-2
-                    max-h-48 overflow-auto"
-                >
-                  <pre
-                    className="font-mono text-xs
-                      text-foreground whitespace-pre-wrap
-                      break-all"
-                  >
-                    {previewText}
-                  </pre>
-                </div>
-                <button
-                  onClick={handleViewInPanel}
-                  className="flex items-center gap-1
-                    text-xs text-primary
-                    hover:underline cursor-pointer"
-                >
-                  <PanelRight className="size-3" />
-                  View in panel
-                </button>
-              </>
-            )}
-            {!toolResult && isPending && (
               <span
-                className="text-xs text-muted-foreground
-                  animate-pulse"
+                className="text-xs
+                  text-muted-foreground"
               >
-                Executing...
+                {formatDuration(duration)}
               </span>
-            )}
-          </div>
-        </CollapsibleContent>
-      </Collapsible>
+              <PanelRight
+                className="size-3 text-muted-foreground"
+              />
+            </>
+          ) : null}
+        </span>
+      </button>
     </div>
   )
-}
+})

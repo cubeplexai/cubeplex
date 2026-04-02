@@ -2,7 +2,7 @@
 
 import { useParams } from 'next/navigation'
 import { useEffect } from 'react'
-import { useConversationStore, createApiClient } from '@cubebox/core'
+import { useConversationStore, useToolDetailStore, createApiClient } from '@cubebox/core'
 import { AppShell } from '@/components/layout/AppShell'
 import { MessageList } from '@/components/chat/MessageList'
 import { InputBar } from '@/components/layout/InputBar'
@@ -16,6 +16,7 @@ export default function ChatPage() {
   const { todos } = useMessages(conversationId)
 
   useEffect(() => {
+    useToolDetailStore.getState().close()
     setActive(conversationId)
     const client = createApiClient('')
     fetchList(client)

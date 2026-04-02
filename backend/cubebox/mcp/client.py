@@ -129,11 +129,26 @@ class MCPManager:
                 client = MultiServerMCPClient({server_name: cast(Connection, params)})
                 tools: list[BaseTool] = await client.get_tools()
 
-                # Filter to requested tool names if specified
-                allowed: list[str] | None = server_config.get("tools")
-                if allowed:
-                    allowed_set = set(allowed)
-                    tools = [t for t in tools if t.name in allowed_set]
+                # Filter to requested tool names and apply per-tool config
+                tool_defs: list[str | dict[str, Any]] | None = server_config.get("tools")
+                if tool_defs:
+                    # Build lookup: tool_name -> {content_type, ...}
+                    tool_config_map: dict[str, dict[str, Any]] = {}
+                    for td in tool_defs:
+                        if isinstance(td, str):
+                            tool_config_map[td] = {}
+                        elif isinstance(td, dict) and "name" in td:
+                            tool_config_map[str(td["name"])] = td
+                    tools = [t for t in tools if t.name in tool_config_map]
+
+                    # Merge per-tool config into tool metadata
+                    for tool in tools:
+                        tc = tool_config_map.get(tool.name, {})
+                        content_type = tc.get("content_type")
+                        if content_type:
+                            if tool.metadata is None:
+                                tool.metadata = {}
+                            tool.metadata["content_type"] = str(content_type)
 
                 logger.info(
                     "MCP server '{}': loaded {} tool(s): {}",

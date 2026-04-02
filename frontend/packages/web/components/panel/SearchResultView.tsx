@@ -1,64 +1,87 @@
-interface SearchItem {
+import { Globe, ExternalLink, Search } from 'lucide-react'
+
+interface SearchResult {
   title: string
   url: string
-  snippet: string
+  description: string
+  content?: string
+  date?: string
+}
+
+interface SearchData {
+  query: string
+  results: SearchResult[]
 }
 
 interface SearchResultViewProps {
   result: string | null
+  args?: Record<string, unknown>
 }
 
-function parseSearchResults(
+function parseSearchData(
   raw: string,
-): SearchItem[] {
+  args?: Record<string, unknown>,
+): SearchData | null {
   try {
     const parsed = JSON.parse(raw)
-    if (Array.isArray(parsed)) {
-      return parsed.map(
-        (item: Record<string, unknown>) => ({
-          title: String(item.title ?? ''),
-          url: String(item.url ?? item.link ?? ''),
-          snippet: String(
-            item.snippet ?? item.description ?? '',
-          ),
-        }),
-      )
+    // Direct format: { query, results: [...] }
+    if (parsed.query && Array.isArray(parsed.results)) {
+      return parsed as SearchData
     }
-    if (
-      parsed.results &&
-      Array.isArray(parsed.results)
-    ) {
-      return parseSearchResults(
-        JSON.stringify(parsed.results),
-      )
+    // Array of results
+    if (Array.isArray(parsed)) {
+      return {
+        query:
+          String(args?.query ?? '') || 'Search',
+        results: parsed,
+      }
     }
   } catch {
-    // Not JSON — fall through
+    // Not JSON
   }
-  return []
+  return null
 }
 
 function getDomain(url: string): string {
   try {
-    return new URL(url).hostname
+    return new URL(url).hostname.replace(
+      /^www\./,
+      '',
+    )
   } catch {
     return url
   }
 }
 
+function getFaviconUrl(url: string): string {
+  try {
+    const origin = new URL(url).origin
+    return `${origin}/favicon.ico`
+  } catch {
+    return ''
+  }
+}
+
 export function SearchResultView({
   result,
+  args,
 }: SearchResultViewProps) {
-  const items = result
-    ? parseSearchResults(result)
-    : []
+  if (!result) {
+    return (
+      <div className="p-6 text-sm text-muted-foreground">
+        No results
+      </div>
+    )
+  }
 
-  if (items.length === 0 && result) {
+  const data = parseSearchData(result, args)
+
+  if (!data) {
     return (
       <div className="p-4">
         <pre
           className="font-mono text-sm text-foreground
-            whitespace-pre-wrap"
+            whitespace-pre-wrap break-all"
         >
           {result}
         </pre>
@@ -67,43 +90,101 @@ export function SearchResultView({
   }
 
   return (
-    <div className="p-4 space-y-3">
-      <div className="text-sm text-muted-foreground">
-        {items.length} results
+    <div className="flex flex-col h-full">
+      {/* Query header */}
+      <div
+        className="px-4 py-3 border-b border-border
+          bg-muted/20"
+      >
+        <div className="flex items-center gap-2 text-sm">
+          <Search className="size-3.5 text-muted-foreground shrink-0" />
+          <span className="font-medium text-foreground">
+            {data.query}
+          </span>
+          <span className="text-muted-foreground ml-auto shrink-0">
+            {data.results.length} results
+          </span>
+        </div>
       </div>
-      {items.map((item, i) => (
-        <a
-          key={i}
-          href={item.url}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="block bg-muted/30 rounded-lg p-3
-            hover:bg-muted/50 transition-colors"
-        >
-          <div
-            className="font-medium text-sm
-              text-foreground"
+
+      {/* Results list */}
+      <div className="p-3 space-y-1.5">
+        {data.results.map((item, i) => (
+          <a
+            key={i}
+            href={item.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="group flex gap-3 rounded-lg px-3 py-2.5
+              hover:bg-muted/40 transition-colors"
           >
-            {item.title}
-          </div>
-          {item.url && (
-            <div
-              className="text-xs text-muted-foreground
-                mt-0.5"
+            {/* Number */}
+            <span
+              className="text-xs text-muted-foreground/50
+                font-mono mt-0.5 shrink-0 w-4 text-right"
             >
-              {getDomain(item.url)}
+              {i + 1}
+            </span>
+
+            {/* Content */}
+            <div className="flex-1 min-w-0">
+              {/* Domain line */}
+              <div className="flex items-center gap-1.5 mb-0.5">
+                <img
+                  src={getFaviconUrl(item.url)}
+                  alt=""
+                  className="size-3.5 rounded-sm"
+                  onError={(e) => {
+                    e.currentTarget.style.display =
+                      'none'
+                    const next =
+                      e.currentTarget
+                        .nextElementSibling as HTMLElement | null
+                    if (next) next.style.display = ''
+                  }}
+                />
+                <Globe
+                  className="size-3.5
+                    text-muted-foreground hidden"
+                />
+                <span
+                  className="text-xs
+                    text-muted-foreground truncate"
+                >
+                  {getDomain(item.url)}
+                </span>
+              </div>
+
+              {/* Title */}
+              <div
+                className="text-sm font-medium
+                  text-foreground
+                  group-hover:text-primary
+                  transition-colors line-clamp-1"
+              >
+                {item.title}
+              </div>
+
+              {/* Description */}
+              {item.description && (
+                <div
+                  className="text-xs text-muted-foreground
+                    mt-0.5 line-clamp-2 leading-relaxed"
+                >
+                  {item.description}
+                </div>
+              )}
             </div>
-          )}
-          {item.snippet && (
-            <div
-              className="text-sm text-foreground/80
-                mt-1 line-clamp-2"
-            >
-              {item.snippet}
-            </div>
-          )}
-        </a>
-      ))}
+
+            {/* External link icon */}
+            <ExternalLink
+              className="size-3 text-muted-foreground/30
+                group-hover:text-muted-foreground
+                transition-colors shrink-0 mt-1"
+            />
+          </a>
+        ))}
+      </div>
     </div>
   )
 }

@@ -22,6 +22,8 @@ development:
         transport: streamable_http
         key: "Pu9bKu1h9yGd9slVf9c9ugxCYd7f3f0V=="
         tools:
-          - web_search
-          - web_fetch
+          - name: web_search
+            content_type: json
+          - name: web_fetch
+            content_type: text
         enabled: true

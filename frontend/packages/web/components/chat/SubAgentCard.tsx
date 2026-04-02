@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, memo } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import {
@@ -29,7 +29,7 @@ interface Props {
 
 import { proseClasses } from '@/lib/utils'
 
-export function SubAgentCard({
+export const SubAgentCard = memo(function SubAgentCard({
   name,
   stream,
   isRunning,
@@ -129,4 +129,4 @@ export function SubAgentCard({
       </Collapsible>
     </div>
   )
-}
+})

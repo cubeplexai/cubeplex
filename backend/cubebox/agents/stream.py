@@ -4,6 +4,21 @@ from datetime import UTC, datetime
 from typing import Any
 
 
+def _unwrap_mcp_content(content: Any) -> str:
+    """Extract text from MCP content blocks format.
+
+    MCP tools return content as list[{"type": "text", "text": "..."}].
+    This extracts and concatenates the text values.
+    """
+    if not isinstance(content, list):
+        return str(content)
+    texts: list[str] = []
+    for block in content:
+        if isinstance(block, dict) and block.get("type") == "text":
+            texts.append(str(block.get("text", "")))
+    return "\n".join(texts) if texts else str(content)
+
+
 def convert_chunk_to_events(
     chunk: Any,
     agent_id: str | None = None,
@@ -77,15 +92,34 @@ def convert_chunk_to_events(
             if isinstance(msg, dict)
             else getattr(msg, "tool_call_id", "")
         )
+
+        # Look up declared content_type from registry
+        from cubebox.tools import get_registry
+
+        registry = get_registry()
+        content_type = registry.get_content_type(tool_name)
+
+        # Unwrap MCP content blocks (list of {"type": "text", "text": "..."})
+        if content_type and isinstance(content, list):
+            result_str = _unwrap_mcp_content(content)
+        elif isinstance(content, str):
+            result_str = content
+        else:
+            result_str = str(content)
+
+        data: dict[str, Any] = {
+            "tool_name": tool_name,
+            "tool_call_id": tool_call_id,
+            "content": result_str,
+        }
+        if content_type:
+            data["content_type"] = content_type
+
         events.append(
             {
                 "type": "tool_result",
                 "timestamp": timestamp,
-                "data": {
-                    "tool_name": tool_name,
-                    "tool_call_id": tool_call_id,
-                    "content": (content if isinstance(content, str) else str(content)),
-                },
+                "data": data,
                 "agent_id": agent_id,
             }
         )

@@ -64,10 +64,18 @@ def create_cubebox_agent(
         len(middleware),
     )
 
-    return create_agent(
+    agent = create_agent(
         model=llm,
         tools=tools,
         system_prompt=BASE_SYSTEM_PROMPT,
         middleware=middleware,
         checkpointer=checkpointer,
     )
+
+    # Enable graceful tool error handling: return error messages to the LLM
+    # instead of crashing the entire agent stream on a single tool failure.
+    tools_pregel = agent.nodes.get("tools")
+    if tools_pregel and hasattr(tools_pregel.bound, "_handle_tool_errors"):
+        tools_pregel.bound._handle_tool_errors = True
+
+    return agent

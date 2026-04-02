@@ -33,7 +33,10 @@ export function ToolDetailPanel() {
           />
         )}
         {contentType === 'search' && (
-          <SearchResultView result={toolResult} />
+          <SearchResultView
+            result={toolResult}
+            args={toolArgs}
+          />
         )}
         {contentType === 'web_fetch' && (
           <WebFetchView

@@ -26,7 +26,7 @@ export interface MessageStore {
   todos: TodoItem[]
   toolResultMap: Record<
     string,
-    { content: string; receivedAt: number }
+    { content: string; receivedAt: number; contentType?: string }
   >
 
   loadMessages(client: ApiClient, conversationId: string): Promise<void>
@@ -79,6 +79,35 @@ function appendToolCallBlock(
   return [...finalized, { type: 'tool_call', name, arguments: args, tool_call_id: toolCallId }]
 }
 
+/**
+ * Batched state updater: collects multiple set() calls within a single microtask
+ * and flushes them as one Zustand update. This prevents N SSE events arriving in
+ * one chunk from causing N separate re-renders.
+ */
+function createBatcher(set: (updater: (s: MessageStore) => Partial<MessageStore>) => void) {
+  let pending: Array<(s: MessageStore) => Partial<MessageStore>> = []
+  let scheduled = false
+
+  return (updater: (s: MessageStore) => Partial<MessageStore>) => {
+    pending.push(updater)
+    if (!scheduled) {
+      scheduled = true
+      queueMicrotask(() => {
+        const batch = pending
+        pending = []
+        scheduled = false
+        set((state) => {
+          let merged = state
+          for (const fn of batch) {
+            merged = { ...merged, ...fn(merged) }
+          }
+          return merged
+        })
+      })
+    }
+  }
+}
+
 export const useMessageStore = create<MessageStore>((set, get) => ({
   messages: {},
   streamAgents: {},
@@ -126,13 +155,15 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
       toolResultMap: {},
     }))
 
+    const batchedSet = createBatcher(set)
+
     try {
       for await (const event of streamMessages(client.baseUrl, conversationId, content)) {
         const agentKey = event.agent_id ?? MAIN_AGENT_KEY
 
         if (event.type === 'text_delta') {
           const e = event as TextDeltaEvent
-          set((s) => {
+          batchedSet((s) => {
             const prev = s.streamAgents[agentKey] ?? emptyStream(event.agent_name)
             return {
               streamAgents: {
@@ -147,7 +178,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
           })
         } else if (event.type === 'reasoning') {
           const e = event as ReasoningEvent
-          set((s) => {
+          batchedSet((s) => {
             const prev = s.streamAgents[agentKey] ?? emptyStream(event.agent_name)
             return {
               streamAgents: {
@@ -162,7 +193,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
           })
         } else if (event.type === 'tool_call') {
           const e = event as ToolCallEvent
-          set((s) => {
+          batchedSet((s) => {
             const prev =
               s.streamAgents[agentKey]
               ?? emptyStream(event.agent_name)
@@ -214,12 +245,13 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
         } else if (event.type === 'tool_result') {
           const e = event as ToolResultEvent
           const tcId = e.data.tool_call_id ?? ''
-          set((s) => {
+          batchedSet((s) => {
             const newMap = { ...s.toolResultMap }
             if (tcId) {
               newMap[tcId] = {
                 content: e.data.content,
                 receivedAt: Date.now(),
+                contentType: e.data.content_type,
               }
             }
 
@@ -267,11 +299,12 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
             }
           })
         } else if (event.type === 'status') {
-          set({ statusPhase: (event.data as { phase: string }).phase })
+          batchedSet(() => ({ statusPhase: (event.data as { phase: string }).phase }))
         } else if (event.type === 'done') {
           break
         } else if (event.type === 'error') {
-          set({ error: (event.data as { message: string }).message })
+          const errData = event.data as { message: string; details?: string }
+          set({ error: errData.details || errData.message })
           break
         }
       }

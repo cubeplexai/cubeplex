@@ -3,6 +3,7 @@
 import { useEffect, useMemo } from 'react'
 import { useMessageStore, createApiClient } from '@cubebox/core'
 import type { Message, SubagentSummary } from '@cubebox/core'
+import { AlertCircle } from 'lucide-react'
 import { UserMessage } from './UserMessage'
 import { AssistantMessage } from './AssistantMessage'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -33,8 +34,24 @@ function buildSubagentDataMap(
   return map
 }
 
+/** Build toolResultMap from historical tool messages so panel works after refresh. */
+function buildHistoricalToolResultMap(
+  messages: Message[],
+): Record<string, { content: string; receivedAt: number; contentType?: string }> {
+  const map: Record<string, { content: string; receivedAt: number; contentType?: string }> = {}
+  for (const msg of messages) {
+    if (msg.role === 'tool' && msg.tool_call_id && msg.content) {
+      map[msg.tool_call_id] = {
+        content: msg.content,
+        receivedAt: new Date(msg.created_at ?? 0).getTime(),
+      }
+    }
+  }
+  return map
+}
+
 export function MessageList({ conversationId }: MessageListProps) {
-  const { messages, isStreaming, statusPhase, mainStream, subAgentStreams, toolResultMap } =
+  const { messages, isStreaming, statusPhase, mainStream, subAgentStreams, error, toolResultMap } =
     useMessages(conversationId)
   const loadMessages = useMessageStore((s) => s.loadMessages)
 
@@ -48,6 +65,17 @@ export function MessageList({ conversationId }: MessageListProps) {
     [messages],
   )
 
+  const historicalToolResults = useMemo(
+    () => buildHistoricalToolResultMap(messages ?? []),
+    [messages],
+  )
+
+  // Merge: streaming results take precedence over historical
+  const mergedToolResultMap = useMemo(
+    () => ({ ...historicalToolResults, ...toolResultMap }),
+    [historicalToolResults, toolResultMap],
+  )
+
   return (
     <ScrollArea className="flex-1 p-4">
       <div className="space-y-4 max-w-2xl mx-auto">
@@ -58,7 +86,7 @@ export function MessageList({ conversationId }: MessageListProps) {
               <AssistantMessage
                 message={msg}
                 subagentDataMap={subagentDataMap}
-                toolResultMap={toolResultMap}
+                toolResultMap={mergedToolResultMap}
               />
             )}
           </div>
@@ -69,9 +97,17 @@ export function MessageList({ conversationId }: MessageListProps) {
             stream={mainStream}
             isStreaming
             statusPhase={statusPhase}
-            subAgentStreams={Object.fromEntries(subAgentStreams)}
-            toolResultMap={toolResultMap}
+            subAgentStreams={subAgentStreams}
+            toolResultMap={mergedToolResultMap}
           />
+        )}
+
+        {error && (
+          <div className="flex items-start gap-2 px-3 py-2.5 rounded-lg
+            bg-destructive/10 border border-destructive/20 text-destructive text-sm">
+            <AlertCircle className="size-4 shrink-0 mt-0.5" />
+            <span>{error}</span>
+          </div>
         )}
       </div>
     </ScrollArea>
