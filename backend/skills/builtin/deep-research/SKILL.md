@@ -15,7 +15,7 @@ keywords:
 
 ## Overview
 
-This skill provides a **supervisor-based multi-agent orchestration** methodology for conducting thorough research. The main agent acts as **Chief Research Strategist**, delegating atomic research tasks to specialized subagents via the `task` tool, then synthesizing results into comprehensive reports.
+This skill provides a **supervisor-based multi-agent orchestration** methodology for conducting thorough research. The main agent acts as **Chief Research Strategist**, delegating atomic research tasks to specialized subagents via the `subagent` tool, then synthesizing results into comprehensive reports.
 
 **Core Principle**: Never generate content from general knowledge alone. Research quality determines output quality.
 
@@ -30,11 +30,11 @@ User Query
 ┌─────────────────────────────────────────────────────────┐
 │  MAIN AGENT (Chief Research Strategist / Supervisor)    │
 │  • Decomposes research into atomic verification points  │
-│  • Assigns tasks to subagents via `task` tool          │
+│  • Assigns tasks to subagents via `subagent` tool       │
 │  • Synthesizes findings from all subagents             │
 │  • Validates completeness before reporting             │
 └─────────────────────────────────────────────────────────┘
-    │  task tool calls (parallel when independent)
+    │  subagent tool calls (parallel when independent)
     ▼
 ┌──────────┐  ┌──────────┐  ┌──────────┐
 │ Subagent │  │ Subagent │  │ Subagent │
@@ -113,30 +113,51 @@ For each angle, plan which source tier to prioritize:
 
 ### Parallel Task Dispatch
 
-Dispatch **independent** research angles in parallel using multiple `task` calls:
+Dispatch **independent** research angles in parallel using multiple `subagent` calls:
 
 ```
-Subagent 1 (Angle 1): "Search for Tesla market share data 2024-2026"
-Subagent 2 (Angle 2): "Research Tesla vs BYD battery technology comparisons"
-Subagent 3 (Angle 3): "Find Tesla and BYD financial performance metrics 2024"
+subagent(
+    name="Dr. Chen",
+    role="汽车行业市场分析师",
+    task="调研特斯拉与比亚迪2024-2026年市场份额数据",
+    prompt="作为汽车行业市场分析师，请调研并对比特斯拉与比亚迪在2024-2026年的全球市场份额...",
+)
+subagent(
+    name="Forge",
+    role="电池技术研究员",
+    task="对比特斯拉与比亚迪电池技术路线",
+    prompt="作为电池技术研究员，请深入对比特斯拉与比亚迪的电池技术策略...",
+)
+subagent(
+    name="Prof. Li",
+    role="财务绩效分析师",
+    task="分析特斯拉与比亚迪2024年财务表现",
+    prompt="作为财务绩效分析师，请查找并分析特斯拉与比亚迪2024年的关键财务指标...",
+)
 ```
 
 **Rule**: Always dispatch independent angles in parallel. Research time scales inversely with parallelism.
 
-### The `task` Tool
+### The `subagent` Tool
 
 ```python
-task(
-    description="Your research question — be specific and self-contained",
-    subagent_type="general-purpose"  # Use for web research tasks
+subagent(
+    name="Dr. Chen",           # Personified name matching the role
+    role="经济分析师",           # Professional title (2-5 words)
+    task="分析特斯拉2024年营收", # One-line task summary (shown in UI)
+    prompt="...",              # Full professional brief for the subagent
+    subagent_type="general-purpose"
 )
 ```
 
-**Writing effective task descriptions:**
+**Writing effective prompts:**
+- Frame the request in the agent's domain language — brief them like a specialist
 - Include time range: "2024-2025 revenue data" not just "revenue"
-- Specify source tier if known: "Search official company filings"
+- Specify source tier if known: "Focus on official company filings and analyst reports"
 - Include verification requirement: "Verify with at least 2 authoritative sources"
-- State the goal: "Extract specific numbers, not just trends"
+- State deliverables: "Present findings in a structured comparison table with specific numbers"
+- Bad: "Search for Tesla revenue" (too generic, doesn't leverage agent expertise)
+- Good: "As a financial analyst, evaluate Tesla's Q1-Q4 2024 revenue across regions. Focus on YoY growth, identify strongest-performing region, and flag anomalies."
 
 ### Track System for Each Task
 
