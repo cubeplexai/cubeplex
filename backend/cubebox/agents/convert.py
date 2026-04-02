@@ -113,17 +113,22 @@ def convert_to_api_messages(lc_messages: list[BaseMessage]) -> list[dict[str, An
 
             ts = _get_timestamp(msg)
 
-            # Estimate reasoning duration from gap between previous message and this one
+            # Prefer precise reasoning_duration_ms from LLM streaming metadata,
+            # fall back to estimating from message timestamp gap.
             reasoning_duration_ms: int | None = None
-            if reasoning and prev_timestamp:
-                try:
-                    prev_dt = datetime.fromisoformat(prev_timestamp)
-                    curr_dt = datetime.fromisoformat(ts)
-                    delta_ms = int((curr_dt - prev_dt).total_seconds() * 1000)
-                    if delta_ms > 0:
-                        reasoning_duration_ms = delta_ms
-                except (ValueError, TypeError):
-                    pass
+            if reasoning:
+                precise = (msg.response_metadata or {}).get("reasoning_duration_ms")
+                if isinstance(precise, int) and precise > 0:
+                    reasoning_duration_ms = precise
+                elif prev_timestamp:
+                    try:
+                        prev_dt = datetime.fromisoformat(prev_timestamp)
+                        curr_dt = datetime.fromisoformat(ts)
+                        delta_ms = int((curr_dt - prev_dt).total_seconds() * 1000)
+                        if delta_ms > 0:
+                            reasoning_duration_ms = delta_ms
+                    except (ValueError, TypeError):
+                        pass
 
             result.append(
                 {

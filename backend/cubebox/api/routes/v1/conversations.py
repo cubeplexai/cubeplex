@@ -322,8 +322,14 @@ async def send_message(
             async def _drain_main_stream() -> None:
                 """Push main agent stream events into the unified queue."""
                 try:
+                    human_msg = HumanMessage(
+                        content=request_obj.content,
+                        response_metadata={
+                            "created_at": datetime.now(UTC).isoformat(),
+                        },
+                    )
                     async for event in agent.astream(  # type: ignore[call-arg]
-                        {"messages": [HumanMessage(content=request_obj.content)]},
+                        {"messages": [human_msg]},
                         stream_mode="messages",
                         stream_subgraphs=True,
                         config=config_dict,  # type: ignore[arg-type]

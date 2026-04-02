@@ -16,6 +16,7 @@ interface ToolCallItemProps {
   toolResult?: {
     content: string
     receivedAt: number
+    startedAt?: number
     contentType?: string
   } | null
   timestamp?: string
@@ -44,7 +45,7 @@ export const ToolCallItem = memo(function ToolCallItem({
   showDivider,
 }: ToolCallItemProps) {
   const [elapsed, setElapsed] = useState(0)
-  const startedAt = useRef(Date.now())
+  const startedAt = useRef(timestamp ? new Date(timestamp).getTime() : Date.now())
   const openPanel = useToolDetailStore((s) => s.open)
 
   useEffect(() => {
@@ -64,7 +65,7 @@ export const ToolCallItem = memo(function ToolCallItem({
   }, [isPending])
 
   const duration = toolResult
-    ? toolResult.receivedAt - startedAt.current
+    ? toolResult.receivedAt - (toolResult.startedAt ?? startedAt.current)
     : elapsed
 
   const Icon = getToolIcon(name)

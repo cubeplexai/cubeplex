@@ -37,13 +37,26 @@ function buildSubagentDataMap(
 /** Build toolResultMap from historical tool messages so panel works after refresh. */
 function buildHistoricalToolResultMap(
   messages: Message[],
-): Record<string, { content: string; receivedAt: number; contentType?: string }> {
-  const map: Record<string, { content: string; receivedAt: number; contentType?: string }> = {}
+): Record<string, { content: string; receivedAt: number; startedAt?: number; contentType?: string }> {
+  const map: Record<string, {
+    content: string; receivedAt: number; startedAt?: number; contentType?: string
+  }> = {}
+  // Build a map of tool_call_id → assistant message created_at (= tool call start time)
+  const toolCallStartMap: Record<string, number> = {}
+  for (const msg of messages) {
+    if (msg.role === 'assistant' && msg.tool_calls && msg.created_at) {
+      const ts = new Date(msg.created_at).getTime()
+      for (const tc of msg.tool_calls) {
+        if (tc.tool_call_id) toolCallStartMap[tc.tool_call_id] = ts
+      }
+    }
+  }
   for (const msg of messages) {
     if (msg.role === 'tool' && msg.tool_call_id && msg.content) {
       map[msg.tool_call_id] = {
         content: msg.content,
         receivedAt: new Date(msg.created_at ?? 0).getTime(),
+        startedAt: toolCallStartMap[msg.tool_call_id],
       }
     }
   }

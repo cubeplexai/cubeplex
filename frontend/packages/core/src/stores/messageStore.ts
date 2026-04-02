@@ -24,9 +24,10 @@ export interface MessageStore {
   statusPhase: string | null
   error: string | null
   todos: TodoItem[]
+  toolStartedMap: Record<string, number>
   toolResultMap: Record<
     string,
-    { content: string; receivedAt: number; contentType?: string }
+    { content: string; receivedAt: number; startedAt?: number; contentType?: string }
   >
 
   loadMessages(client: ApiClient, conversationId: string): Promise<void>
@@ -115,6 +116,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
   statusPhase: null,
   error: null,
   todos: [],
+  toolStartedMap: {},
   toolResultMap: {},
 
   async loadMessages(client: ApiClient, conversationId: string) {
@@ -152,6 +154,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
       statusPhase: null,
       error: null,
       todos: [],
+      toolStartedMap: {},
       toolResultMap: {},
     }))
 
@@ -227,6 +230,10 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
 
             return {
               todos: nextTodos,
+              toolStartedMap: {
+                ...s.toolStartedMap,
+                [e.data.tool_call_id]: Date.now(),
+              },
               streamAgents: {
                 ...s.streamAgents,
                 [agentKey]: {
@@ -251,6 +258,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
               newMap[tcId] = {
                 content: e.data.content,
                 receivedAt: Date.now(),
+                startedAt: s.toolStartedMap[tcId],
                 contentType: e.data.content_type,
               }
             }
@@ -360,6 +368,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
       isStreaming: false,
       statusPhase: null,
       todos: [],
+      toolStartedMap: {},
       toolResultMap: {},
     })
   },

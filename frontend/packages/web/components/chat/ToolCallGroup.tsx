@@ -7,7 +7,7 @@ interface ToolCallGroupProps {
   blocks: (ContentBlock & { type: 'tool_call' })[]
   toolResultMap: Record<
     string,
-    { content: string; receivedAt: number }
+    { content: string; receivedAt: number; startedAt?: number }
   >
   isStreaming: boolean
   /** ISO timestamp of the parent assistant message (used to compute tool call duration) */
