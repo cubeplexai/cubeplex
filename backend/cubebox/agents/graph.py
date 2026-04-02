@@ -1,13 +1,11 @@
 """Agent graph factory — builds the cubebox agent using create_agent() + middleware."""
 
-from datetime import UTC, datetime
 from typing import Any
 
 from langchain.agents import create_agent
 from langchain.agents.middleware.todo import TodoListMiddleware
 from langchain.agents.middleware.types import AgentMiddleware
 from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import ToolMessage
 from langchain_core.tools import BaseTool
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.types import Checkpointer
@@ -16,21 +14,9 @@ from loguru import logger
 from cubebox.middleware.sandbox import SandboxMiddleware
 from cubebox.middleware.skills import SkillsMiddleware, SkillSpec
 from cubebox.middleware.subagents import SubAgent, SubAgentMiddleware
+from cubebox.middleware.timestamps import TimestampMiddleware
 from cubebox.prompts.system import BASE_SYSTEM_PROMPT
 from cubebox.sandbox.base import Sandbox
-
-
-def _stamp_tool_messages(result: dict[str, Any]) -> dict[str, Any]:
-    """Add created_at timestamp to ToolMessages returned by the tools node."""
-    messages = result.get("messages")
-    if messages:
-        ts = datetime.now(UTC).isoformat()
-        for msg in messages:
-            if isinstance(msg, ToolMessage):
-                if not msg.response_metadata:
-                    msg.response_metadata = {}
-                msg.response_metadata.setdefault("created_at", ts)
-    return result
 
 
 def create_cubebox_agent(
@@ -56,6 +42,8 @@ def create_cubebox_agent(
         checkpointer: LangGraph checkpointer for conversation persistence.
     """
     middleware: list[AgentMiddleware[Any, Any]] = []
+
+    middleware.append(TimestampMiddleware())
 
     if sandbox is not None:
         middleware.append(SandboxMiddleware(sandbox=sandbox))
@@ -92,17 +80,5 @@ def create_cubebox_agent(
     tools_pregel = agent.nodes.get("tools")
     if tools_pregel and hasattr(tools_pregel.bound, "_handle_tool_errors"):
         tools_pregel.bound._handle_tool_errors = True
-
-    # Wrap the tools node to add created_at timestamps to ToolMessages
-    if tools_pregel:
-        original_ainvoke = tools_pregel.bound.ainvoke
-
-        async def _timestamped_ainvoke(
-            input_: Any, config: Any = None, **kwargs: Any
-        ) -> dict[str, Any]:
-            result = await original_ainvoke(input_, config, **kwargs)
-            return _stamp_tool_messages(result)
-
-        tools_pregel.bound.ainvoke = _timestamped_ainvoke  # type: ignore[assignment]
 
     return agent

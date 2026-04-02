@@ -7,6 +7,7 @@ import { TerminalView } from './TerminalView'
 import { SearchResultView } from './SearchResultView'
 import { WebFetchView } from './WebFetchView'
 import { GenericToolView } from './GenericToolView'
+import { SkillView } from './SkillView'
 
 export function ToolDetailPanel() {
   const {
@@ -40,6 +41,12 @@ export function ToolDetailPanel() {
         )}
         {contentType === 'web_fetch' && (
           <WebFetchView
+            args={toolArgs}
+            result={toolResult}
+          />
+        )}
+        {contentType === 'skill' && (
+          <SkillView
             args={toolArgs}
             result={toolResult}
           />

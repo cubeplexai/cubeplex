@@ -27,6 +27,7 @@ export type PanelContentType =
   | 'terminal'
   | 'generic'
   | 'artifact'
+  | 'skill'
 
 export type AgentEventType =
   | 'text_delta'

@@ -17,11 +17,12 @@ interface ReasoningBlockProps {
 }
 
 function formatDuration(ms: number): string {
+  if (ms < 0) return '0s'
   const seconds = Math.round(ms / 1000)
-  if (seconds < 60) return `${seconds}秒`
-  const minutes = Math.floor(seconds / 60)
-  const remainSeconds = seconds % 60
-  return remainSeconds > 0 ? `${minutes}分${remainSeconds}秒` : `${minutes}分`
+  if (seconds < 60) return `${seconds}s`
+  const m = Math.floor(seconds / 60)
+  const s = seconds % 60
+  return s > 0 ? `${m}m${s}s` : `${m}m`
 }
 
 function ReasoningBlock({ reasoning, isStreaming, startedAt, durationMs }: ReasoningBlockProps) {

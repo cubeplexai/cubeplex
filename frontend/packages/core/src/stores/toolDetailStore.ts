@@ -24,6 +24,7 @@ function mapContentType(
   backendContentType?: string,
 ): PanelContentType {
   // Built-in tools: detect from tool name
+  if (toolName === 'load_skill') return 'skill'
   if (toolName === 'execute') return 'terminal'
   if (
     toolName === 'code_execute' || toolName === 'python'

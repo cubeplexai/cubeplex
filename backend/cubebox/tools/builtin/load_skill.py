@@ -26,6 +26,9 @@ class LoadSkillOutput(BaseModel):
     loaded: bool
     error: str | None = None
 
+    def __str__(self) -> str:
+        return self.model_dump_json()
+
 
 def load_skill_from_file(skill_name: str, skills_root: str | None = None) -> LoadSkillOutput:
     """Load a skill's SKILL.md content from the filesystem.

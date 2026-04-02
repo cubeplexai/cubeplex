@@ -6,7 +6,6 @@ This is useful for OpenAI-compatible endpoints that return reasoning in the resp
 
 import time
 from collections.abc import AsyncIterator, Iterator
-from datetime import UTC, datetime
 from typing import Any
 
 from langchain_core.callbacks import (
@@ -67,13 +66,11 @@ class ChatOpenAICompatible(ChatOpenAI):
         """Create ChatResult from API response, extracting reasoning_content."""
         result = super()._create_chat_result(response, generation_info)
 
-        created_at = datetime.now(UTC).isoformat()
-
+        # Extract reasoning_content if available (only for non-dict responses)
         if not isinstance(response, dict) and hasattr(response, "choices"):
             for i, res in enumerate(response.choices):
                 message = result.generations[i].message if i < len(result.generations) else None
                 if isinstance(message, AIMessage):
-                    message.response_metadata["created_at"] = created_at
                     if hasattr(res.message, "reasoning_content") and res.message.reasoning_content:
                         message.additional_kwargs["reasoning_content"] = (
                             res.message.reasoning_content
@@ -99,7 +96,9 @@ class ChatOpenAICompatible(ChatOpenAI):
         **kwargs: Any,
     ) -> AsyncIterator[ChatGenerationChunk]:
         self._reset_stream_state()
-        async for chunk in super()._astream(messages, stop=stop, run_manager=run_manager, **kwargs):
+        async for chunk in super()._astream(
+            messages, stop=stop, run_manager=run_manager, **kwargs
+        ):
             yield chunk
 
     def _convert_chunk_to_generation_chunk(
@@ -139,14 +138,12 @@ class ChatOpenAICompatible(ChatOpenAI):
                 "reasoning_content"
             ]
 
-        # --- On finish: stamp created_at + reasoning_duration_ms ---
-        # Only on the last chunk to avoid LangChain merge_dicts garbling strings.
+        # --- On finish: stamp reasoning_duration_ms ---
+        # Only on the last chunk to avoid LangChain merge_dicts garbling.
+        # created_at is handled by TimestampMiddleware at the agent level.
         if finish_reason is not None and not self._stream_metadata_emitted:
-            if isinstance(generation_chunk.message, AIMessageChunk):
-                generation_chunk.message.response_metadata["created_at"] = datetime.now(
-                    UTC
-                ).isoformat()
-                if self._reasoning_start is not None:
+            if self._reasoning_start is not None:
+                if isinstance(generation_chunk.message, AIMessageChunk):
                     end = self._reasoning_end or time.monotonic()
                     duration_ms = int((end - self._reasoning_start) * 1000)
                     generation_chunk.message.response_metadata["reasoning_duration_ms"] = (

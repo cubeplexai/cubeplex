@@ -4,6 +4,7 @@ import {
   Globe,
   Code,
   Bot,
+  BookOpen,
   Wrench,
   type LucideIcon,
 } from 'lucide-react'
@@ -17,6 +18,7 @@ const iconMap: Record<string, LucideIcon> = {
   code_execute: Code,
   python: Code,
   subagent: Bot,
+  load_skill: BookOpen,
 }
 
 export function getToolIcon(
@@ -45,6 +47,8 @@ export function getParamSummary(
     toolName === 'web_fetch' || toolName === 'fetch'
   ) {
     value = String(args.url ?? '')
+  } else if (toolName === 'load_skill') {
+    value = String(args.skill_name ?? '')
   } else {
     const firstVal = Object.values(args).find(
       (v) => typeof v === 'string',
