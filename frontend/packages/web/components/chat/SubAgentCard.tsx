@@ -56,12 +56,15 @@ export const SubAgentCard = memo(function SubAgentCard({
     return () => clearInterval(interval)
   }, [isRunning])
 
-  // Auto-scroll streaming content
+  // Auto-scroll streaming content — track all content changes like ReasoningBlock
+  const toolCallCount = stream?.toolCalls.length ?? 0
+  const toolResultCount = stream?.toolResults.length ?? 0
+  const streamText = stream?.text ?? ''
   useEffect(() => {
     if (isRunning && scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight
     }
-  }, [stream?.toolCalls.length, stream?.text, isRunning])
+  }, [toolCallCount, toolResultCount, streamText, isRunning])
 
   const toolCalls = stream?.toolCalls ?? []
   const completedCount = toolCalls.filter(
