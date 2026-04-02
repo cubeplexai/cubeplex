@@ -1,21 +1,21 @@
 "use client"
 
 import { GripVertical } from "lucide-react"
-import * as ResizablePrimitive from "react-resizable-panels"
+import {
+  Group,
+  Panel,
+  Separator,
+} from "react-resizable-panels"
 import { cn } from "@/lib/utils"
 
 function ResizablePanelGroup({
   className,
   ...props
-}: React.ComponentProps<typeof ResizablePrimitive.PanelGroup>) {
+}: React.ComponentProps<typeof Group>) {
   return (
-    <ResizablePrimitive.PanelGroup
+    <Group
       data-slot="resizable-panel-group"
-      className={cn(
-        "flex h-full w-full",
-        "data-[panel-group-direction=vertical]:flex-col",
-        className,
-      )}
+      className={cn("flex h-full w-full", className)}
       {...props}
     />
   )
@@ -23,9 +23,9 @@ function ResizablePanelGroup({
 
 function ResizablePanel({
   ...props
-}: React.ComponentProps<typeof ResizablePrimitive.Panel>) {
+}: React.ComponentProps<typeof Panel>) {
   return (
-    <ResizablePrimitive.Panel
+    <Panel
       data-slot="resizable-panel"
       {...props}
     />
@@ -36,11 +36,11 @@ function ResizableHandle({
   withHandle,
   className,
   ...props
-}: React.ComponentProps<typeof ResizablePrimitive.PanelResizeHandle> & {
+}: React.ComponentProps<typeof Separator> & {
   withHandle?: boolean
 }) {
   return (
-    <ResizablePrimitive.PanelResizeHandle
+    <Separator
       data-slot="resizable-handle"
       className={cn(
         "bg-border focus-visible:ring-ring relative",
@@ -63,12 +63,20 @@ function ResizableHandle({
       {...props}
     >
       {withHandle && (
-        <div className="bg-border z-10 flex h-4 w-3 items-center justify-center rounded-xs border">
+        <div
+          className="bg-border z-10 flex h-4 w-3
+            items-center justify-center rounded-xs
+            border"
+        >
           <GripVertical className="size-2.5" />
         </div>
       )}
-    </ResizablePrimitive.PanelResizeHandle>
+    </Separator>
   )
 }
 
-export { ResizablePanelGroup, ResizablePanel, ResizableHandle }
+export {
+  ResizablePanelGroup,
+  ResizablePanel,
+  ResizableHandle,
+}

@@ -22,7 +22,7 @@ export function AppShell({ children, headerTitle }: AppShellProps) {
   return (
     <div className="flex h-screen bg-background text-foreground">
       <Sidebar />
-      <ResizablePanelGroup direction="horizontal">
+      <ResizablePanelGroup orientation="horizontal">
         <ResizablePanel defaultSize={isOpen ? 50 : 100} minSize={30}>
           <div className="flex flex-col h-full overflow-hidden">
             <header className="h-11 border-b border-border flex items-center px-4 shrink-0">
