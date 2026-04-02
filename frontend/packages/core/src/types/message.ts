@@ -5,6 +5,8 @@ export interface SubagentSummary {
   text: string
   tool_calls: { name: string; arguments: Record<string, unknown> }[]
   reasoning: string
+  role?: string
+  task?: string
 }
 
 export interface Message {
