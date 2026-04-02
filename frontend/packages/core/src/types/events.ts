@@ -1,8 +1,32 @@
 // frontend/packages/core/src/types/events.ts
 export type ContentBlock =
-  | { type: 'reasoning'; content: string; started_at?: number; duration_ms?: number }
+  | {
+      type: 'reasoning'
+      content: string
+      started_at?: number
+      duration_ms?: number
+    }
   | { type: 'text'; content: string }
-  | { type: 'tool_call'; name: string; arguments: Record<string, unknown>; tool_call_id: string }
+  | {
+      type: 'tool_call'
+      name: string
+      arguments: Record<string, unknown>
+      tool_call_id: string
+    }
+
+export interface TodoItem {
+  id: string | null
+  description: string
+  status: 'pending' | 'in_progress' | 'completed'
+}
+
+export type PanelContentType =
+  | 'search'
+  | 'code_execute'
+  | 'web_fetch'
+  | 'terminal'
+  | 'generic'
+  | 'artifact'
 
 export type AgentEventType =
   | 'text_delta'
@@ -17,13 +41,19 @@ export interface AgentEvent {
   type: AgentEventType
   timestamp: string
   data: Record<string, unknown>
-  agent_id: string | null    // null = main agent, "subagent:<tool_call_id>" = subagent
-  agent_name: string | null  // subagent description
+  agent_id: string | null
+  agent_name: string | null
 }
 
 export interface TextDeltaEvent extends AgentEvent {
   type: 'text_delta'
-  data: { content: string; usage?: { input_tokens: number; output_tokens: number } }
+  data: {
+    content: string
+    usage?: {
+      input_tokens: number
+      output_tokens: number
+    }
+  }
 }
 
 export interface ReasoningEvent extends AgentEvent {
@@ -33,17 +63,29 @@ export interface ReasoningEvent extends AgentEvent {
 
 export interface ToolCallEvent extends AgentEvent {
   type: 'tool_call'
-  data: { tool_call_id: string; name: string; arguments: Record<string, unknown> }
+  data: {
+    tool_call_id: string
+    name: string
+    arguments: Record<string, unknown>
+  }
 }
 
 export interface ToolResultEvent extends AgentEvent {
   type: 'tool_result'
-  data: { tool_name: string; content: string }
+  data: {
+    tool_name: string
+    tool_call_id: string
+    content: string
+  }
 }
 
 export interface ErrorEvent extends AgentEvent {
   type: 'error'
-  data: { error_code: string; message: string; details?: string }
+  data: {
+    error_code: string
+    message: string
+    details?: string
+  }
 }
 
 export interface DoneEvent extends AgentEvent {
@@ -51,7 +93,10 @@ export interface DoneEvent extends AgentEvent {
   data: Record<string, unknown>
 }
 
-export type StatusPhase = 'sandbox_creating' | 'sandbox_ready' | 'sandbox_failed'
+export type StatusPhase =
+  | 'sandbox_creating'
+  | 'sandbox_ready'
+  | 'sandbox_failed'
 
 export interface StatusEvent extends AgentEvent {
   type: 'status'
