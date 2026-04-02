@@ -45,7 +45,9 @@ class SubAgent(TypedDict, total=False):
 
 class _SubAgentSchema(BaseModel):
     name: str
-    description: str
+    role: str
+    task: str
+    prompt: str
     subagent_type: str = "general-purpose"
 
 
@@ -74,7 +76,9 @@ def _create_subagent_tool(
 
     async def _run_subagent(
         name: str,
-        description: str,
+        role: str,
+        task: str,
+        prompt: str,
         subagent_type: str = "general-purpose",
         tool_call_id: Annotated[str, InjectedToolCallId] = "",
     ) -> str | ToolMessage:
@@ -107,7 +111,7 @@ def _create_subagent_tool(
             if queue is not None:
                 # Stream mode: forward tokens to SSE via queue, collect result
                 async for chunk in agent.astream(
-                    {"messages": [{"role": "user", "content": description}]},
+                    {"messages": [{"role": "user", "content": prompt}]},
                     stream_mode="messages",
                 ):
                     await queue.put(("subagent", sa_agent_id, chunk))
@@ -126,7 +130,7 @@ def _create_subagent_tool(
             else:
                 # No queue: use ainvoke (no streaming needed)
                 result = await agent.ainvoke(
-                    {"messages": [{"role": "user", "content": description}]},
+                    {"messages": [{"role": "user", "content": prompt}]},
                 )
                 messages = result.get("messages", [])
                 last = messages[-1] if messages else None
@@ -152,8 +156,8 @@ def _create_subagent_tool(
         name="subagent",
         description=(
             f"Delegate a task to a subagent. Available subagent types: {available}. "
-            "Provide a name (short label for display) and a self-contained description "
-            "— the subagent has no conversation context."
+            "Provide a name (short label), role (subagent's expertise), task (what to do), "
+            "and a self-contained prompt — the subagent has no conversation context."
         ),
         args_schema=_SubAgentSchema,
     )
