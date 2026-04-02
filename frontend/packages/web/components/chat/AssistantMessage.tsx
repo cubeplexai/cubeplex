@@ -7,6 +7,7 @@ import type { Message, ContentBlock, SubagentSummary } from '@cubebox/core'
 import type { AgentStream } from '@cubebox/core'
 import { Bot, ChevronDown, ChevronRight, Brain } from 'lucide-react'
 import { SubAgentCard } from './SubAgentCard'
+import { SubAgentCluster } from './SubAgentCluster'
 import { ToolCallGroup } from './ToolCallGroup'
 
 interface ReasoningBlockProps {
@@ -193,12 +194,13 @@ function subagentSummaryToStream(summary: SubagentSummary): AgentStream {
 
 function ContentBlockRenderer(
   { block, index, isLast, isStreaming, subAgentStreams, subagentDataMap, toolResultMap,
-    messageCreatedAt }: {
+    messageCreatedAt, subagentIndex }: {
     block: ContentBlock; index: number; isLast: boolean; isStreaming: boolean
     subAgentStreams?: Record<string, AgentStream>
     subagentDataMap?: Record<string, SubagentSummary>
     toolResultMap: Record<string, { content: string; receivedAt: number }>
     messageCreatedAt?: string
+    subagentIndex?: number
   },
 ) {
   if (block.type === 'reasoning') {
@@ -216,15 +218,18 @@ function ContentBlockRenderer(
   if (block.type === 'tool_call' && block.name === 'subagent') {
     const agentKey = `subagent:${block.tool_call_id}`
     const stream = subAgentStreams?.[agentKey]
-    // For historical messages, construct stream from consolidated data
     const historicalStream = !stream && subagentDataMap?.[agentKey]
       ? subagentSummaryToStream(subagentDataMap[agentKey])
       : undefined
-    const displayName =
-      (block.arguments as { name?: string }).name ?? 'Subagent'
+    const args = block.arguments as {
+      name?: string; role?: string; task?: string
+    }
     return (
       <SubAgentCard
-        name={displayName}
+        name={args.name ?? 'Subagent'}
+        role={args.role ?? ''}
+        task={args.task ?? ''}
+        index={subagentIndex ?? 1}
         stream={stream ?? historicalStream}
         isRunning={isStreaming && !!stream}
         toolResultMap={toolResultMap}
@@ -290,6 +295,23 @@ export function AssistantMessage(
   const hasContent = blocks.length > 0
   const grouped = groupBlocks(blocks)
 
+  // Count subagent blocks for index assignment and cluster display
+  let subagentCounter = 0
+  const subagentIndexMap = new Map<number, number>()
+  for (let i = 0; i < grouped.length; i++) {
+    const item = grouped[i]
+    if (!Array.isArray(item) && item.type === 'tool_call' && item.name === 'subagent') {
+      subagentCounter++
+      subagentIndexMap.set(i, subagentCounter)
+    }
+  }
+  const totalSubagents = subagentCounter
+
+  // Count active subagents (streaming)
+  const activeSubagentCount = subAgentStreams
+    ? Object.keys(subAgentStreams).length
+    : 0
+
   return (
     <div data-role="assistant" className="flex justify-start gap-2.5">
       <div className="shrink-0 w-6 h-6 rounded-md border border-border bg-card
@@ -297,6 +319,12 @@ export function AssistantMessage(
         <Bot className="size-3.5 text-primary/70" />
       </div>
       <div className="flex-1 max-w-[75%] space-y-2">
+        {totalSubagents >= 2 && (
+          <SubAgentCluster
+            activeCount={isStreaming === true ? activeSubagentCount : 0}
+            totalCount={totalSubagents}
+          />
+        )}
         {grouped.map((item, i) => {
           if (Array.isArray(item)) {
             // grouped tool_call blocks
@@ -322,6 +350,7 @@ export function AssistantMessage(
               subagentDataMap={subagentDataMap}
               toolResultMap={toolResultMap}
               messageCreatedAt={msgCreatedAt}
+              subagentIndex={subagentIndexMap.get(i)}
             />
           )
         })}
