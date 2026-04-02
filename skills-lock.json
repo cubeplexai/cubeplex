@@ -20,6 +20,16 @@
       "source": "bilalmk/todo_correct",
       "sourceType": "github",
       "computedHash": "1c1522cc9d347eb8dc6aeff240da1f2ba613f0a73e376c5a0922d770e5ce7ebf"
+    },
+    "ui-ux-pro-max": {
+      "source": "nextlevelbuilder/ui-ux-pro-max-skill",
+      "sourceType": "github",
+      "computedHash": "0a413bf988d06481f69bb81df2070741c3ba12dd9f1be2706d57f259c905992d"
+    },
+    "web-design-guidelines": {
+      "source": "vercel-labs/agent-skills",
+      "sourceType": "github",
+      "computedHash": "a6a44d5498f7e8f68289902f3dedfc6f38ae0cee1e96527c80724cf27f727c2a"
     }
   }
 }

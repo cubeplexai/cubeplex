@@ -282,15 +282,11 @@ async def send_message(
 
                         yield _status("sandbox_creating")
                         sandbox_manager = get_sandbox_manager()
-                        create_task = asyncio.ensure_future(
-                            sandbox_manager.get_or_create(user_id)
-                        )
+                        create_task = asyncio.ensure_future(sandbox_manager.get_or_create(user_id))
                         # Send heartbeat comments every 10s to keep proxies alive
                         while not create_task.done():
                             try:
-                                await asyncio.wait_for(
-                                    asyncio.shield(create_task), timeout=10
-                                )
+                                await asyncio.wait_for(asyncio.shield(create_task), timeout=10)
                             except TimeoutError:
                                 yield ": heartbeat\n\n"
                         sandbox = create_task.result()

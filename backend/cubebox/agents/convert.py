@@ -27,10 +27,12 @@ def _consolidate_subagent_events(
         elif evt_type == "reasoning":
             reasoning_parts.append(data.get("content", ""))
         elif evt_type == "tool_call":
-            tool_calls.append({
-                "name": data.get("name", ""),
-                "arguments": data.get("arguments", {}),
-            })
+            tool_calls.append(
+                {
+                    "name": data.get("name", ""),
+                    "arguments": data.get("arguments", {}),
+                }
+            )
 
     return {
         "text": "".join(text_parts),
@@ -103,16 +105,12 @@ def convert_to_api_messages(lc_messages: list[BaseMessage]) -> list[dict[str, An
 
         elif isinstance(msg, ToolMessage):
             raw_events = (msg.additional_kwargs or {}).get("subagent_events")
-            subagent_events = (
-                _consolidate_subagent_events(raw_events) if raw_events else None
-            )
+            subagent_events = _consolidate_subagent_events(raw_events) if raw_events else None
             result.append(
                 {
                     "id": getattr(msg, "id", None) or str(uuid.uuid4()),
                     "role": "tool",
-                    "content": (
-                        msg.content if isinstance(msg.content, str) else str(msg.content)
-                    ),
+                    "content": (msg.content if isinstance(msg.content, str) else str(msg.content)),
                     "tool_calls": None,
                     "reasoning": None,
                     "name": msg.name,
