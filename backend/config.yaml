@@ -80,14 +80,24 @@ default:
             extra_headers: {}
 
   # Sandbox Configuration
+  # Note: Sandbox lifecycle is managed by cubebox's SandboxManager (cleanup_expired task).
+  # opensandbox timeout is set to None (disabled) — cubebox controls termination via TTL.
   sandbox:
     enabled: true
     domain: "localhost:8090"
     image: "hub.sensedeal.vip/library/cubebox-sandbox:24.04-20260311"
     api_key: null
-    timeout: 600 # 10 minutes in seconds
-    request_timeout: 60 # Request timeout in seconds
-    ttl: 3600 # Sandbox idle timeout in seconds (1 hour)
+    # ready_timeout: Maximum time to wait for sandbox to become ready after creation
+    #   Used only during sandbox initialization. If the sandbox doesn't respond to
+    #   health checks within this time, creation fails.
+    ready_timeout: 60 # 60 seconds
+    # request_timeout: HTTP request timeout for sandbox API calls
+    #   Timeout for individual commands (execute, upload, download, etc.)
+    request_timeout: 60 # 60 seconds
+    # ttl: Sandbox idle timeout (time since last activity before cleanup)
+    #   SandboxManager's background cleanup task periodically checks for sandboxes
+    #   that have been inactive (no commands) for this duration and terminates them.
+    ttl: 600 # 10 minutes in seconds
     cleanup_interval: 60 # Cleanup task interval in seconds
     volume:
       enabled: false # Temporarily disabled — backend not yet ready

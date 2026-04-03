@@ -34,8 +34,8 @@ class SandboxManager:
         self._image: str = config.get("sandbox.image", "ubuntu:22.04")
         self._api_key: str | None = config.get("sandbox.api_key", None)
         self._request_timeout: int = config.get("sandbox.request_timeout", 60)
-        self._ttl: int = config.get("sandbox.ttl", 3600)
-        self._timeout: int = config.get("sandbox.timeout", 600)
+        self._ttl: int = config.get("sandbox.ttl", 600)
+        self._ready_timeout: int = config.get("sandbox.ready_timeout", 60)
 
         # Volume config
         self._volume_enabled: bool = config.get("sandbox.volume.enabled", False)
@@ -120,8 +120,8 @@ class SandboxManager:
             raw_sandbox = await opensandbox.Sandbox.create(
                 self._image,
                 connection_config=conn_config,
-                timeout=timedelta(seconds=self._timeout),
-                ready_timeout=timedelta(seconds=60),
+                timeout=None,
+                ready_timeout=timedelta(seconds=self._ready_timeout),
             )
 
             backend = OpenSandbox(sandbox=raw_sandbox)

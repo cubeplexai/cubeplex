@@ -324,11 +324,11 @@ async def send_message(
                             "created_at": datetime.now(UTC).isoformat(),
                         },
                     )
-                    async for event in agent.astream(  # type: ignore[call-arg]
+                    async for event in agent.astream(  # type: ignore[call-overload]
                         {"messages": [human_msg]},
                         stream_mode=["messages", "updates"],
                         stream_subgraphs=True,
-                        config=config_dict,  # type: ignore[arg-type]
+                        config=config_dict,
                     ):
                         ns: tuple[Any, ...] = ()
                         payload = event
