@@ -77,8 +77,7 @@ class ChatOpenAICompatible(ChatOpenAI):
                         )
                     # MiniMax: reasoning_details is [{text: "..."}]
                     elif (
-                        hasattr(res.message, "reasoning_details")
-                        and res.message.reasoning_details
+                        hasattr(res.message, "reasoning_details") and res.message.reasoning_details
                     ):
                         texts = [
                             d["text"]

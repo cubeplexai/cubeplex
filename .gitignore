@@ -35,3 +35,6 @@ tmp
 test-results/
 
 research
+
+# Local files
+*.local.yaml
