@@ -231,7 +231,7 @@ function ContentBlockRenderer(
         task={args.task ?? ''}
         index={subagentIndex ?? 1}
         stream={stream ?? historicalStream}
-        isRunning={isStreaming && !!stream}
+        isRunning={isStreaming && !!stream && !toolResultMap[block.tool_call_id]}
         toolResultMap={toolResultMap}
       />
     )

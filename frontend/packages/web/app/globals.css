@@ -1,6 +1,15 @@
 @import "tailwindcss";
 @plugin "@tailwindcss/typography";
 
+/* Hide scrollbar but keep scrollable */
+@utility scrollbar-none {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}
+
 /* Use .dark class (not prefers-color-scheme) so dark: variants work with the theme toggle */
 @custom-variant dark (&:where(.dark, .dark *));
 

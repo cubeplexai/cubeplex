@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo } from 'react'
+import { useEffect, useRef, useCallback, useMemo } from 'react'
 import { useMessageStore, createApiClient } from '@cubebox/core'
 import type { Message, SubagentSummary } from '@cubebox/core'
 import { AlertCircle } from 'lucide-react'
@@ -100,9 +100,48 @@ export function MessageList({ conversationId }: MessageListProps) {
     return null
   }, [messages, mainStream])
 
+  // --- Auto-scroll: keep chat pinned to bottom during streaming ---
+  const scrollRef = useRef<HTMLDivElement>(null)
+  const contentRef = useRef<HTMLDivElement>(null)
+  const stickToBottom = useRef(true)
+
+  // Detect whether user has scrolled away from bottom
+  const handleScroll = useCallback(() => {
+    const el = scrollRef.current
+    if (!el) return
+    const threshold = 80
+    stickToBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < threshold
+  }, [])
+
+  // Use ResizeObserver on inner content — fires whenever content height changes
+  // regardless of the cause (new messages, subagent cards appearing, text growing).
+  useEffect(() => {
+    const content = contentRef.current
+    const scroller = scrollRef.current
+    if (!content || !scroller) return
+
+    const ro = new ResizeObserver(() => {
+      if (stickToBottom.current) {
+        scroller.scrollTop = scroller.scrollHeight
+      }
+    })
+    ro.observe(content)
+    return () => ro.disconnect()
+  }, [])
+
+  // When a new streaming turn starts, force stick to bottom and scroll immediately
+  useEffect(() => {
+    if (isStreaming) {
+      stickToBottom.current = true
+      if (scrollRef.current) {
+        scrollRef.current.scrollTop = scrollRef.current.scrollHeight
+      }
+    }
+  }, [isStreaming])
+
   return (
-    <ScrollArea className="flex-1 p-4">
-      <div className="space-y-4 max-w-2xl mx-auto">
+    <ScrollArea ref={scrollRef} className="flex-1 p-4" onScroll={handleScroll}>
+      <div ref={contentRef} className="space-y-4 max-w-2xl mx-auto">
         {(messages ?? []).map((msg) => (
           <div key={msg.id}>
             {msg.role === 'user' && <UserMessage content={msg.content ?? ''} />}

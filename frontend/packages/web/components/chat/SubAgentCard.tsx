@@ -61,7 +61,7 @@ export const SubAgentCard = memo(function SubAgentCard({
   const toolResultCount = stream?.toolResults.length ?? 0
   const streamText = stream?.text ?? ''
   useEffect(() => {
-    if (isRunning && scrollRef.current) {
+    if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight
     }
   }, [toolCallCount, toolResultCount, streamText, isRunning])
@@ -102,15 +102,13 @@ export const SubAgentCard = memo(function SubAgentCard({
           {!expanded && (
             <div
               ref={scrollRef}
-              className="overflow-hidden"
+              className="overflow-y-auto scrollbar-none"
               style={{
                 maxHeight: 'calc(2.5rem * 3)',
-                maskImage: isRunning
-                  ? 'linear-gradient(to bottom, transparent 0%, black 20%, black 80%, transparent 100%)'
-                  : 'linear-gradient(to bottom, black 0%, black 80%, transparent 100%)',
-                WebkitMaskImage: isRunning
-                  ? 'linear-gradient(to bottom, transparent 0%, black 20%, black 80%, transparent 100%)'
-                  : 'linear-gradient(to bottom, black 0%, black 80%, transparent 100%)',
+                maskImage:
+                  'linear-gradient(to bottom, transparent 0%, black 15%, black 80%, transparent 100%)',
+                WebkitMaskImage:
+                  'linear-gradient(to bottom, transparent 0%, black 15%, black 80%, transparent 100%)',
               }}
             >
               {toolCalls.map((tc, i) => {
@@ -127,6 +125,11 @@ export const SubAgentCard = memo(function SubAgentCard({
                   />
                 )
               })}
+              {!isRunning && stream?.text && (
+                <div className={`px-3 py-2 text-xs text-muted-foreground line-clamp-3`}>
+                  {stream.text.slice(-200)}
+                </div>
+              )}
             </div>
           )}
 

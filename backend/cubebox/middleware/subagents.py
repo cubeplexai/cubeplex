@@ -182,9 +182,7 @@ class SubAgentMiddleware(AgentMiddleware[Any, Any, Any]):
         self._subagents = subagents
         self._default_model = default_model
         self.tools: Sequence[BaseTool] = [
-            _create_subagent_tool(
-                subagents, default_model, shared_tools=shared_tools
-            )
+            _create_subagent_tool(subagents, default_model, shared_tools=shared_tools)
         ]
 
     async def awrap_model_call(
