@@ -141,7 +141,7 @@ interface StreamingProps {
   subagentDataMap?: never
   toolResultMap: Record<string, { content: string; receivedAt: number }>
   stream: AgentStream
-  isStreaming: true
+  isStreaming: boolean
   statusPhase?: string | null
   subAgentStreams?: Record<string, AgentStream>
 }
@@ -286,11 +286,11 @@ export function AssistantMessage(
   { message, stream, isStreaming, statusPhase, subAgentStreams, subagentDataMap, toolResultMap }:
   AssistantMessageProps,
 ) {
-  const blocks: ContentBlock[] = isStreaming
+  const blocks: ContentBlock[] = stream
     ? stream.blocks
-    : (message.blocks ?? blocksFromMessage(message))
+    : (message!.blocks ?? blocksFromMessage(message!))
 
-  const msgCreatedAt = !isStreaming ? message.created_at : undefined
+  const msgCreatedAt = message?.created_at
 
   const hasContent = blocks.length > 0
   const grouped = groupBlocks(blocks)

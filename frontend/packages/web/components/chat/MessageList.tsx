@@ -89,13 +89,24 @@ export function MessageList({ conversationId }: MessageListProps) {
     [historicalToolResults, toolResultMap],
   )
 
+  // When a completed/streaming mainStream is showing, skip the last assistant
+  // message in the history loop to avoid rendering the same response twice.
+  const lastAssistantId = useMemo(() => {
+    if (!mainStream) return null
+    const msgs = messages ?? []
+    for (let i = msgs.length - 1; i >= 0; i--) {
+      if (msgs[i].role === 'assistant') return msgs[i].id
+    }
+    return null
+  }, [messages, mainStream])
+
   return (
     <ScrollArea className="flex-1 p-4">
       <div className="space-y-4 max-w-2xl mx-auto">
         {(messages ?? []).map((msg) => (
           <div key={msg.id}>
             {msg.role === 'user' && <UserMessage content={msg.content ?? ''} />}
-            {msg.role === 'assistant' && (
+            {msg.role === 'assistant' && msg.id !== lastAssistantId && (
               <AssistantMessage
                 message={msg}
                 subagentDataMap={subagentDataMap}
@@ -105,10 +116,10 @@ export function MessageList({ conversationId }: MessageListProps) {
           </div>
         ))}
 
-        {isStreaming && mainStream && (
+        {mainStream && (
           <AssistantMessage
             stream={mainStream}
-            isStreaming
+            isStreaming={isStreaming}
             statusPhase={statusPhase}
             subAgentStreams={subAgentStreams}
             toolResultMap={mergedToolResultMap}

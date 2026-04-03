@@ -89,24 +89,29 @@ function createBatcher(set: (updater: (s: MessageStore) => Partial<MessageStore>
   let pending: Array<(s: MessageStore) => Partial<MessageStore>> = []
   let scheduled = false
 
-  return (updater: (s: MessageStore) => Partial<MessageStore>) => {
+  const flush = () => {
+    if (pending.length === 0) return
+    const batch = pending
+    pending = []
+    scheduled = false
+    set((state) => {
+      let merged = state
+      for (const fn of batch) {
+        merged = { ...merged, ...fn(merged) }
+      }
+      return merged
+    })
+  }
+
+  const batchedSet = (updater: (s: MessageStore) => Partial<MessageStore>) => {
     pending.push(updater)
     if (!scheduled) {
       scheduled = true
-      queueMicrotask(() => {
-        const batch = pending
-        pending = []
-        scheduled = false
-        set((state) => {
-          let merged = state
-          for (const fn of batch) {
-            merged = { ...merged, ...fn(merged) }
-          }
-          return merged
-        })
-      })
+      queueMicrotask(flush)
     }
   }
+
+  return { batchedSet, flush }
 }
 
 export const useMessageStore = create<MessageStore>((set, get) => ({
@@ -129,6 +134,9 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
       set((s) => ({
         messages: { ...s.messages, [conversationId]: messages },
         error: null,
+        // Clear completed stream state — history messages are now source of truth
+        streamAgents: {},
+        toolResultMap: {},
       }))
     } catch (err) {
       set({ error: (err as Error).message })
@@ -158,7 +166,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
       toolResultMap: {},
     }))
 
-    const batchedSet = createBatcher(set)
+    const { batchedSet, flush } = createBatcher(set)
 
     try {
       for await (const event of streamMessages(client.baseUrl, conversationId, content)) {
@@ -319,6 +327,9 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
     } catch (err) {
       set({ error: (err as Error).message })
     } finally {
+      // Flush any pending batched updates so streamAgents is fully up-to-date
+      flush()
+
       // Build final assistant message from accumulated main agent stream
       const agents = get().streamAgents
       const mainStream = agents[MAIN_AGENT_KEY]
@@ -393,10 +404,12 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
           },
           isStreaming: false,
           statusPhase: null,
-          streamAgents: {},
+          // Keep streamAgents intact — the same AssistantMessage component stays
+          // mounted and transitions smoothly from streaming to completed state.
+          // Cleared on next send() or loadMessages().
         }))
       } else {
-        set({ isStreaming: false, statusPhase: null, streamAgents: {} })
+        set({ isStreaming: false, statusPhase: null })
       }
     }
   },
