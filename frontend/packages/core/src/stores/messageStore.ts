@@ -320,7 +320,8 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
       set({ error: (err as Error).message })
     } finally {
       // Build final assistant message from accumulated main agent stream
-      const mainStream = get().streamAgents[MAIN_AGENT_KEY]
+      const agents = get().streamAgents
+      const mainStream = agents[MAIN_AGENT_KEY]
       if (mainStream) {
         // Finalize any pending reasoning block and strip internal started_at field
         const finalBlocks = finalizeLastReasoning(mainStream.blocks).map((b) => {
@@ -338,18 +339,56 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
             ? mainStream.toolCalls.map((tc) => ({
                 name: tc.data.name,
                 arguments: tc.data.arguments,
+                tool_call_id: tc.data.tool_call_id,
               }))
             : null,
           reasoning: mainStream.reasoning || null,
           blocks: finalBlocks.length > 0 ? finalBlocks : null,
           created_at: new Date().toISOString(),
         }
+
+        // Build tool messages for subagent streams so cards render after streaming ends
+        const toolMessages: Message[] = []
+        // Extract role/task from main stream's subagent tool_call blocks
+        const subagentArgs: Record<string, { role?: string; task?: string }> = {}
+        for (const block of finalBlocks) {
+          if (block.type === 'tool_call' && block.name === 'subagent') {
+            const args = block.arguments as { role?: string; task?: string }
+            subagentArgs[`subagent:${block.tool_call_id}`] = args
+          }
+        }
+        for (const [key, agentStream] of Object.entries(agents)) {
+          if (key === MAIN_AGENT_KEY) continue
+          // key is like "subagent:<tool_call_id>"
+          const toolCallId = key.startsWith('subagent:') ? key.slice(9) : key
+          const args = subagentArgs[key]
+          toolMessages.push({
+            id: `tool-${toolCallId}-${Date.now()}`,
+            role: 'tool',
+            content: agentStream.text || null,
+            name: 'subagent',
+            tool_call_id: toolCallId,
+            subagent_events: {
+              text: agentStream.text,
+              tool_calls: agentStream.toolCalls.map((tc) => ({
+                name: tc.data.name,
+                arguments: tc.data.arguments,
+              })),
+              reasoning: agentStream.reasoning,
+              role: args?.role,
+              task: args?.task,
+            },
+            created_at: new Date().toISOString(),
+          })
+        }
+
         set((s) => ({
           messages: {
             ...s.messages,
             [conversationId]: [
               ...(s.messages[conversationId] ?? []),
               assistantMessage,
+              ...toolMessages,
             ],
           },
           isStreaming: false,
