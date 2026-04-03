@@ -90,7 +90,7 @@ default:
     ttl: 3600 # Sandbox idle timeout in seconds (1 hour)
     cleanup_interval: 60 # Cleanup task interval in seconds
     volume:
-      enabled: false  # Temporarily disabled — backend not yet ready
+      enabled: false # Temporarily disabled — backend not yet ready
       mount_path: "/workspace"
       pvc_prefix: "cubebox-user" # PVC naming: cubebox-user-{user_id[:8]}
     skills:

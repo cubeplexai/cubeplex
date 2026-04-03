@@ -35,7 +35,10 @@ class ModelConfig(BaseModel):
     input: list[str] = Field(
         default=["text"], description="Supported input types (text, image, etc.)"
     )
-    cost: ModelCost = Field(description="Cost configuration")
+    cost: ModelCost = Field(
+        default_factory=lambda: ModelCost(input=0, output=0),
+        description="Cost configuration",
+    )
     context_window: int = Field(description="Context window size in tokens", alias="contextWindow")
     max_tokens: int = Field(description="Maximum output tokens", alias="maxTokens")
     extra_body: dict[str, Any] = Field(

@@ -55,7 +55,5 @@ class TimestampMiddleware(AgentMiddleware[Any, Any, Any]):
         if isinstance(result, ToolMessage):
             if not result.response_metadata:
                 result.response_metadata = {}
-            result.response_metadata.setdefault(
-                "created_at", datetime.now(UTC).isoformat()
-            )
+            result.response_metadata.setdefault("created_at", datetime.now(UTC).isoformat())
         return result

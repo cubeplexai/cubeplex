@@ -149,27 +149,15 @@ def _ns_to_agent_id(ns: tuple[Any, ...]) -> str | None:
     return ":".join(str(part) for part in ns)
 
 
-def _convert_stream_chunk(
-    chunk: Any,
-    ns: tuple[Any, ...] = (),
-    agent_id: str | None = None,
-) -> list[AgentEvent]:
-    """Convert a LangGraph stream chunk to SSE events."""
+def _dicts_to_sse_events(event_dicts: list[dict[str, Any]]) -> list[AgentEvent]:
+    """Wrap raw event dicts from stream helpers into typed AgentEvent objects."""
     from cubebox.agents.schemas import (
         ReasoningEvent,
         TextDeltaEvent,
         ToolCallEvent,
         ToolResultEvent,
     )
-    from cubebox.agents.stream import convert_chunk_to_events
 
-    if agent_id is None:
-        agent_id = _ns_to_agent_id(ns)
-
-    # Get raw event dicts from shared helper
-    event_dicts = convert_chunk_to_events(chunk, agent_id=agent_id)
-
-    # Wrap in typed AgentEvent objects for SSE
     events: list[AgentEvent] = []
     for evt_dict in event_dicts:
         evt_type = evt_dict.get("type")
@@ -320,7 +308,15 @@ async def send_message(
             config_dict = {"configurable": {"thread_id": conversation_id}}
 
             async def _drain_main_stream() -> None:
-                """Push main agent stream events into the unified queue."""
+                """Push main agent stream events into the unified queue.
+
+                Uses ``stream_mode=["messages", "updates"]``:
+                - ``messages``: real-time token chunks (text, reasoning)
+                - ``updates``:  complete node outputs (tool_call, tool_result)
+
+                With ``stream_subgraphs=True`` each event is wrapped as
+                ``(namespace_tuple, (mode, data))``.
+                """
                 try:
                     human_msg = HumanMessage(
                         content=request_obj.content,
@@ -330,22 +326,28 @@ async def send_message(
                     )
                     async for event in agent.astream(  # type: ignore[call-arg]
                         {"messages": [human_msg]},
-                        stream_mode="messages",
+                        stream_mode=["messages", "updates"],
                         stream_subgraphs=True,
                         config=config_dict,  # type: ignore[arg-type]
                     ):
                         ns: tuple[Any, ...] = ()
-                        chunk = event
+                        payload = event
+                        # stream_subgraphs wraps as (ns_tuple, payload)
                         if isinstance(event, tuple) and len(event) == 2:
                             first, second = event
                             if isinstance(first, tuple):
                                 ns = first
-                                chunk = second
-                        await event_q.put(("main", ns, chunk))
+                                payload = second
+                        await event_q.put(("main", ns, payload))
                 except Exception as exc:
                     await event_q.put(("error", None, exc))
                 finally:
                     await event_q.put(None)  # sentinel: main stream done
+
+            from cubebox.agents.stream import (
+                convert_messages_chunk,
+                convert_updates_chunk,
+            )
 
             stream_task = asyncio.create_task(_drain_main_stream())
 
@@ -357,14 +359,33 @@ async def send_message(
                 kind = item[0]
 
                 if kind == "main":
-                    ns, chunk = item[1], item[2]
-                    for sse_event in _convert_stream_chunk(chunk, ns=ns):
-                        yield f"data: {sse_event.model_dump_json()}\n\n"
+                    ns, payload = item[1], item[2]
+                    agent_id = _ns_to_agent_id(ns)
+                    # Dual stream mode yields (mode, data) tuples
+                    if isinstance(payload, tuple) and len(payload) == 2:
+                        mode, data = payload
+                        if mode == "messages":
+                            evts = convert_messages_chunk(data, agent_id=agent_id)
+                        elif mode == "updates":
+                            evts = convert_updates_chunk(data, agent_id=agent_id)
+                        else:
+                            evts = []
+                        for sse_event in _dicts_to_sse_events(evts):
+                            yield f"data: {sse_event.model_dump_json()}\n\n"
 
                 elif kind == "subagent":
-                    sa_agent_id, chunk = item[1], item[2]
-                    for sse_event in _convert_stream_chunk(chunk, agent_id=sa_agent_id):
-                        yield f"data: {sse_event.model_dump_json()}\n\n"
+                    sa_agent_id, payload = item[1], item[2]
+                    # Subagent also uses dual stream mode
+                    if isinstance(payload, tuple) and len(payload) == 2:
+                        mode, data = payload
+                        if mode == "messages":
+                            evts = convert_messages_chunk(data, agent_id=sa_agent_id)
+                        elif mode == "updates":
+                            evts = convert_updates_chunk(data, agent_id=sa_agent_id)
+                        else:
+                            evts = []
+                        for sse_event in _dicts_to_sse_events(evts):
+                            yield f"data: {sse_event.model_dump_json()}\n\n"
 
                 elif kind == "error":
                     raise item[2]

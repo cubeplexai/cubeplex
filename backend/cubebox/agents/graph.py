@@ -57,7 +57,6 @@ def create_cubebox_agent(
             subagents=subagents or [],
             default_model=llm,
             shared_tools=tools,
-            shared_skills=_skills,
         )
     )
 

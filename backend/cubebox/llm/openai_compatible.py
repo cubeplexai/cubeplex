@@ -75,6 +75,18 @@ class ChatOpenAICompatible(ChatOpenAI):
                         message.additional_kwargs["reasoning_content"] = (
                             res.message.reasoning_content
                         )
+                    # MiniMax: reasoning_details is [{text: "..."}]
+                    elif (
+                        hasattr(res.message, "reasoning_details")
+                        and res.message.reasoning_details
+                    ):
+                        texts = [
+                            d["text"]
+                            for d in res.message.reasoning_details
+                            if isinstance(d, dict) and "text" in d
+                        ]
+                        if texts:
+                            message.additional_kwargs["reasoning_content"] = "".join(texts)
 
         return result
 
@@ -96,9 +108,7 @@ class ChatOpenAICompatible(ChatOpenAI):
         **kwargs: Any,
     ) -> AsyncIterator[ChatGenerationChunk]:
         self._reset_stream_state()
-        async for chunk in super()._astream(
-            messages, stop=stop, run_manager=run_manager, **kwargs
-        ):
+        async for chunk in super()._astream(messages, stop=stop, run_manager=run_manager, **kwargs):
             yield chunk
 
     def _convert_chunk_to_generation_chunk(
@@ -123,20 +133,30 @@ class ChatOpenAICompatible(ChatOpenAI):
         delta = choice.get("delta") or {}
         finish_reason = choice.get("finish_reason")
 
+        # --- Extract reasoning_content (or reasoning_details for MiniMax) ---
+        reasoning_delta: str | None = None
+        if delta.get("reasoning_content"):
+            reasoning_delta = delta["reasoning_content"]
+        elif delta.get("reasoning_details"):
+            # MiniMax: reasoning_details is [{text: "delta_text"}]
+            # Each chunk contains only the new incremental text
+            for detail in delta["reasoning_details"]:
+                if isinstance(detail, dict) and "text" in detail:
+                    text = detail["text"]
+                    if text:
+                        reasoning_delta = (reasoning_delta or "") + text
+
         # --- Track reasoning chunk timing (monotonic clock) ---
-        has_reasoning = bool(delta.get("reasoning_content"))
+        has_reasoning = bool(reasoning_delta)
         if has_reasoning:
             now = time.monotonic()
             if self._reasoning_start is None:
                 self._reasoning_start = now
-            # Keep updating end so it reflects the last reasoning chunk
             self._reasoning_end = now
 
-        # --- Extract reasoning_content into additional_kwargs ---
+        # --- Put reasoning into additional_kwargs ---
         if has_reasoning and isinstance(generation_chunk.message, AIMessageChunk):
-            generation_chunk.message.additional_kwargs["reasoning_content"] = delta[
-                "reasoning_content"
-            ]
+            generation_chunk.message.additional_kwargs["reasoning_content"] = reasoning_delta
 
         # --- On finish: stamp reasoning_duration_ms ---
         # Only on the last chunk to avoid LangChain merge_dicts garbling.

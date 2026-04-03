@@ -102,31 +102,39 @@ def _create_subagent_tool(
         queue = subagent_event_queue.get(None)
 
         try:
-            from cubebox.agents.stream import convert_chunk_to_events
+            from cubebox.agents.stream import (
+                convert_messages_chunk,
+                convert_updates_chunk,
+            )
 
             sa_agent_id = f"subagent:{tool_call_id}"
             last_ai_content: list[str] = []
             subagent_events: list[dict[str, Any]] = []
 
             if queue is not None:
-                # Stream mode: forward tokens to SSE via queue, collect result
-                async for chunk in agent.astream(
+                # Dual stream mode: forward events to SSE via queue, collect result
+                async for event in agent.astream(
                     {"messages": [{"role": "user", "content": prompt}]},
-                    stream_mode="messages",
+                    stream_mode=["messages", "updates"],
                 ):
-                    await queue.put(("subagent", sa_agent_id, chunk))
+                    await queue.put(("subagent", sa_agent_id, event))
 
                     # Collect events and AI content
-                    events = convert_chunk_to_events(chunk, agent_id=sa_agent_id)
-                    subagent_events.extend(events)
-
-                    if isinstance(chunk, tuple) and len(chunk) >= 2:
-                        msg = chunk[0]
-                        c = getattr(msg, "content", "") or ""
-                        msg_name = getattr(msg, "name", None)
-                        # Skip tool messages (they have a name attribute)
-                        if c and not msg_name:
-                            last_ai_content.append(c)
+                    if isinstance(event, tuple) and len(event) == 2:
+                        mode, data = event
+                        if mode == "messages":
+                            evts = convert_messages_chunk(data, agent_id=sa_agent_id)
+                            subagent_events.extend(evts)
+                            # Collect AI text content from messages chunks
+                            if isinstance(data, tuple) and len(data) >= 2:
+                                msg = data[0]
+                                c = getattr(msg, "content", "") or ""
+                                msg_name = getattr(msg, "name", None)
+                                if c and not msg_name:
+                                    last_ai_content.append(c)
+                        elif mode == "updates":
+                            evts = convert_updates_chunk(data, agent_id=sa_agent_id)
+                            subagent_events.extend(evts)
             else:
                 # No queue: use ainvoke (no streaming needed)
                 result = await agent.ainvoke(
