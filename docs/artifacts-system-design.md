@@ -1,0 +1,310 @@
+# cubebox Artifacts 系统设计方案
+
+## Context
+
+cubebox 是一个 AI Agent 平台（FastAPI 后端 + Next.js 前端）。用户希望设计一套类似 Kimi OK Computer 风格的 Artifacts 系统 — "自主交付型"：Agent 在沙箱中自主生成完整交付物（文档、网站、代码、数据可视化等），前端以一等公民方式展示、预览、下载这些产物。
+
+**核心设计原则**: Agent 通过已有的 `execute` 工具在沙箱中自由写文件，然后调用新的 `save_artifact` 工具注册为 Artifact。前端接收 SSE 事件后展示 ArtifactCard。
+
+**关键决策**:
+- 存储方案: **新建数据库表** (SQLModel + Alembic migration)，支持跨对话查询和统计
+- MVP 范围: Phase 1 只做 **卡片 + 下载**，预览面板放到 Phase 2
+
+---
+
+## 架构总览
+
+```
+User: "帮我做一个作品集网站"
+  ↓
+Agent: execute("mkdir -p /workspace/site && cat > /workspace/site/index.html << 'EOF' ...")
+Agent: execute("cat > /workspace/site/style.css << 'EOF' ...")
+Agent: save_artifact(name="Portfolio Website", type="website", path="/workspace/site", entry_file="index.html")
+  ↓
+Backend: 校验路径存在 → 生成 artifact_id → 通过 SSE 发送 artifact 事件
+  ↓
+Frontend: 收到 artifact 事件 → 在聊天中渲染 ArtifactCard → 用户点击打开 ArtifactPanel 预览
+  ↓
+User: "加一个暗色模式切换"
+  ↓
+Agent: execute("...修改文件...") → save_artifact(artifact_id="<existing>", ...)
+Backend: 发送 artifact_updated 事件 → Frontend 刷新预览
+```
+
+---
+
+## 一、后端设计
+
+### 1.1 数据模型
+
+新建 `/backend/cubebox/models/artifact.py` (SQLModel，与 Conversation 同层):
+
+```python
+class Artifact(SQLModel, table=True):
+    """Artifact model for agent-generated deliverables."""
+
+    __tablename__ = "artifacts"
+
+    id: str = Field(default_factory=lambda: str(uuid7()), primary_key=True)
+    conversation_id: str = Field(foreign_key="conversations.id", index=True)
+    name: str = Field(max_length=255)                    # "Portfolio Website"
+    artifact_type: str = Field(max_length=50)            # file|website|code|document|image|data
+    path: str = Field(max_length=1024)                   # 沙箱内绝对路径
+    entry_file: str | None = Field(default=None, max_length=255)  # 入口文件
+    mime_type: str | None = Field(default=None, max_length=128)
+    description: str | None = Field(default=None, max_length=1024)
+    version: int = Field(default=1)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+```
+
+**存储策略**: 新建 `artifacts` 数据库表，通过 Alembic migration 管理。支持跨对话查询、统计等高级场景。
+
+需要创建 Alembic migration: `alembic revision --autogenerate -m "create_artifacts_table"`
+
+### 1.2 save_artifact 工具
+
+在 `SandboxMiddleware` 中与 `execute` 一起注册:
+
+- **参数**: name, artifact_type, path, entry_file?, description?, artifact_id?(更新已有 artifact)
+- **流程**:
+  1. 通过 `sandbox.execute("test -e <path>")` 校验路径存在
+  2. 根据文件扩展名自动推断 mime_type
+  3. 创建或更新 Artifact 记录到数据库
+  4. 返回 `{"artifact": {...}, "action": "created"|"updated"}`
+
+### 1.3 SSE 事件
+
+在 `schemas.py` 新增 `ArtifactEvent`:
+
+```python
+class ArtifactEvent(AgentEvent):
+    type: Literal["artifact"] = "artifact"
+    data: dict[str, Any]  # { "action": "created"|"updated", "artifact": {...} }
+```
+
+在 `stream.py` 的 `_extract_tool_events` 中，检测 `tool_name == "save_artifact"` 时，额外发送一个 `artifact` 事件（除了标准的 `tool_result`）。
+
+### 1.4 API 端点
+
+新建 `/backend/cubebox/api/routes/v1/artifacts.py`:
+
+| 端点 | 说明 |
+|------|------|
+| `GET /api/v1/conversations/{id}/artifacts` | 列出对话的所有 artifacts |
+| `GET /api/v1/conversations/{id}/artifacts/{artifact_id}/download` | 下载 artifact 文件 |
+| `GET /api/v1/conversations/{id}/artifacts/{artifact_id}/preview/{file_path:path}` | 为 iframe 预览提供文件服务 |
+
+下载流程: 查找 artifact 元数据 → 获取用户 sandbox → `sandbox.download([path])` → 返回文件流（目录则先 tar 打包）。
+
+### 1.5 Prompt 注入
+
+扩展 sandbox prompt，指导 Agent 使用 save_artifact:
+
+```
+## Artifacts
+当你创建交付物（文档、网站、应用、可视化等）时，用 save_artifact 注册以便用户预览和下载。
+**工作流**: 1. 用 execute 写文件  2. 调用 save_artifact 注册
+**artifact_type**: website | document | image | code | data | file
+**更新**: 传入已有 artifact_id 进行更新
+```
+
+---
+
+## 二、前端设计
+
+### 2.1 类型定义
+
+新建 `/frontend/packages/core/src/types/artifact.ts`:
+
+```typescript
+export interface Artifact {
+  id: string
+  name: string
+  artifact_type: 'file' | 'website' | 'code' | 'document' | 'image' | 'data'
+  path: string
+  entry_file?: string | null
+  mime_type?: string | null
+  description?: string | null
+  created_at: string
+  updated_at: string
+  version: number
+}
+```
+
+### 2.2 Artifact Store (Zustand)
+
+新建 `/frontend/packages/core/src/stores/artifactStore.ts`:
+
+```typescript
+export interface ArtifactStore {
+  artifacts: Record<string, Record<string, Artifact>>  // conversationId -> artifactId -> Artifact
+  previewArtifactId: string | null
+  previewConversationId: string | null
+  addOrUpdate(conversationId: string, artifact: Artifact): void
+  openPreview(conversationId: string, artifactId: string): void
+  closePreview(): void
+  getArtifacts(conversationId: string): Artifact[]
+}
+```
+
+### 2.3 消息流处理
+
+在 `messageStore.ts` 的 SSE 事件处理中新增:
+
+```typescript
+} else if (event.type === 'artifact') {
+  useArtifactStore.getState().addOrUpdate(conversationId, event.data.artifact)
+}
+```
+
+### 2.4 组件层级
+
+```
+components/artifact/
+  ArtifactCard.tsx          # 聊天中的内联卡片 (名称、类型、图标、预览/下载按钮)
+  ArtifactPanel.tsx         # 右侧预览面板 (根据类型分发到不同预览器)
+  ArtifactGallery.tsx       # 对话内所有 artifacts 的画廊视图 (Phase 2)
+  previews/
+    HtmlPreview.tsx         # iframe 加载 website (指向 preview API)
+    ImagePreview.tsx        # <img> 加载图片
+    CodePreview.tsx         # 语法高亮代码查看器
+    DocumentPreview.tsx     # Markdown/文本渲染
+    DataPreview.tsx         # CSV/JSON 表格视图
+    FallbackPreview.tsx     # 通用文件信息 + 下载按钮
+```
+
+### 2.5 聊天集成
+
+`AssistantMessage.tsx` 中，当渲染 `tool_call` block 且 `name === 'save_artifact'` 时，用 `ArtifactCard` 替代通用的 ToolCallItem。
+
+### 2.6 面板集成
+
+`AppShell.tsx` 右侧面板根据状态切换:
+
+```typescript
+{previewArtifactId ? <ArtifactPanel /> : <ToolDetailPanel />}
+```
+
+---
+
+## 三、关键设计决策
+
+| 决策 | 选择 | 理由 |
+|------|------|------|
+| 文件创建方式 | Agent 用 `execute` 写文件，`save_artifact` 只注册元数据 | 不限制 Agent 能力，Kimi 也是这个模式 |
+| 元数据存储 | 新建 `artifacts` 数据库表 (SQLModel + Alembic) | 支持跨对话查询、统计，与已有 Conversation 模型风格一致 |
+| 文件服务 | 后端代理（从 sandbox 下载再转发） | 浏览器不能直接访问 sandbox 容器 |
+| 预览面板 | 独立 ArtifactPanel 而非扩展 ToolDetailPanel | 预览 UX（iframe、图片查看器）与工具结果检查完全不同 |
+| 自动检测 vs 显式注册 | Agent 显式调用 save_artifact | 自动检测哪些文件是"交付物"不可靠 |
+
+---
+
+## 四、实施阶段
+
+### Phase 1: MVP — 核心闭环 (~1 周)
+
+**目标**: Agent 能创建 artifacts，聊天中显示卡片，用户可下载文件
+
+**后端** (按实施顺序):
+1. `models/artifact.py` — Artifact SQLModel + Alembic migration
+2. `models/__init__.py` — 导出 Artifact
+3. `middleware/sandbox.py` — 注册 `save_artifact` 工具（校验路径、写 DB、返回元数据）
+4. `agents/schemas.py` — 新增 `ArtifactEvent`
+5. `agents/stream.py` — `save_artifact` 工具结果触发 artifact SSE 事件
+6. `api/routes/v1/artifacts.py` — 下载端点 + 列表端点
+7. `api/app.py` — 注册 artifacts 路由
+8. `prompts/sandbox.py` — 注入 artifact 使用指导
+
+**前端** (按实施顺序):
+1. `core/types/artifact.ts` — Artifact 类型定义
+2. `core/stores/artifactStore.ts` — Zustand store
+3. `core/types/events.ts` — 扩展 AgentEventType 加 `'artifact'`
+4. `core/stores/messageStore.ts` — 处理 artifact 事件
+5. `web/components/artifact/ArtifactCard.tsx` — 聊天内联卡片（名称、类型图标、下载按钮）
+6. `web/components/chat/AssistantMessage.tsx` — save_artifact tool_call 渲染为 ArtifactCard
+
+### Phase 2: 预览面板 (~1 周)
+
+**目标**: 用户可在右侧面板预览 artifacts
+
+1. `api/routes/v1/artifacts.py` — preview 文件服务端点
+2. `ArtifactPanel.tsx` — 面板包装器 + 类型分发
+3. `HtmlPreview.tsx` — iframe 网站预览
+4. `ImagePreview.tsx` — 图片预览
+5. `CodePreview.tsx` — 语法高亮代码
+6. `FallbackPreview.tsx` — 通用下载
+7. `AppShell.tsx` — 面板切换集成
+
+### Phase 3: 丰富预览 + 画廊 (~1 周)
+
+1. `DocumentPreview.tsx` — Markdown 渲染
+2. `DataPreview.tsx` — CSV/JSON 表格
+3. `ArtifactGallery.tsx` — 对话 artifact 列表
+4. artifacts 列表 API 端点
+5. Artifact 版本更新时自动刷新预览
+
+---
+
+## 五、需要修改的关键文件
+
+**后端 (修改)**:
+- `/backend/cubebox/agents/schemas.py` — 新增 ArtifactEvent
+- `/backend/cubebox/agents/stream.py` — 发送 artifact SSE 事件
+- `/backend/cubebox/middleware/sandbox.py` — 注册 save_artifact 工具
+- `/backend/cubebox/prompts/sandbox.py` — 追加 artifact 提示
+- `/backend/cubebox/api/app.py` — 注册 artifacts 路由
+- `/backend/cubebox/api/routes/v1/__init__.py` — 导出 artifacts_router
+- `/backend/cubebox/models/__init__.py` — 导出 Artifact
+
+**后端 (新建)**:
+- `/backend/cubebox/models/artifact.py` — Artifact SQLModel
+- `/backend/alembic/versions/xxx_create_artifacts_table.py` — Alembic migration
+- `/backend/cubebox/api/routes/v1/artifacts.py` — 下载 + 列表 API
+
+**前端 (修改)**:
+- `/frontend/packages/core/src/types/events.ts` — 新增 artifact 事件类型
+- `/frontend/packages/core/src/stores/messageStore.ts` — 处理 artifact 事件
+- `/frontend/packages/web/components/chat/AssistantMessage.tsx` — 渲染 ArtifactCard
+- `/frontend/packages/web/components/layout/AppShell.tsx` — 面板切换
+
+**前端 (新建)**:
+- `/frontend/packages/core/src/types/artifact.ts`
+- `/frontend/packages/core/src/stores/artifactStore.ts`
+- `/frontend/packages/web/components/artifact/ArtifactCard.tsx`
+- `/frontend/packages/web/components/artifact/ArtifactPanel.tsx`
+- `/frontend/packages/web/components/artifact/previews/*.tsx` (6 个预览组件)
+
+---
+
+## 六、风险与应对
+
+| 风险 | 应对 |
+|------|------|
+| 大文件下载导致内存溢出 | MVP 设置 50MB 上限，后续加流式传输 |
+| iframe 安全风险 | 使用 `sandbox` 属性限制，从不同路径服务预览内容 |
+| Sandbox TTL 过期后 artifact 不可访问 | MVP 接受此限制，Phase 3 持久化到对象存储 |
+| Agent 忘记调用 save_artifact | 强化 prompt + few-shot 示例 |
+| 多文件 artifact 的相对路径解析 | preview 端点做路径遍历保护 + 相对路径解析 |
+
+---
+
+## 七、验证方式
+
+1. **后端**: `make check` 确保类型检查和 lint 通过
+2. **Alembic**: `alembic upgrade head` 验证 migration 正确执行
+3. **E2E 测试**: 发送消息 → Agent 创建文件 → 调用 save_artifact → 验证 SSE 流中包含 artifact 事件 → 下载端点返回文件
+4. **前端手动测试**: 发送 "创建一个HTML页面" → 聊天中出现 ArtifactCard → 点击下载获取文件
+
+---
+
+## 八、调研背景
+
+本设计方案基于对以下产品 Artifacts 功能的调研:
+
+- **Claude Artifacts**: 侧边栏内联渲染 (React/HTML/Markdown/SVG)，沙箱 iframe，前端只读，适合原型展示
+- **Manus AI**: 全自主 Agent + 云端 VM，生成可部署的网站/应用/文件，交付"成品"而非"代码片段"
+- **Kimi OK Computer**: Agent 拥有虚拟机 (浏览器+终端+文件系统)，38+ 工具，生成独立可下载/部署资产 (DOCX/XLSX/WebApp)
+- **Perplexity Computer**: 19 模型编排，400+ 应用集成，生成报告/仪表板/代码
+
+cubebox 的 Artifacts 系统采用 **Kimi 风格** — Agent 在沙箱中自主工作，生成完整交付物，而非 Claude 风格的内联代码预览。这更适合 cubebox 已有的沙箱基础设施。
