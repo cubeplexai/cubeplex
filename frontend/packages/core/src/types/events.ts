@@ -34,6 +34,7 @@ export type AgentEventType =
   | 'reasoning'
   | 'tool_call'
   | 'tool_result'
+  | 'artifact'
   | 'error'
   | 'done'
   | 'status'
@@ -79,6 +80,28 @@ export interface ToolResultEvent extends AgentEvent {
     content: string
     content_type?: string
   }
+}
+
+export interface ArtifactEventData {
+  action: 'created' | 'updated'
+  artifact: {
+    id: string
+    conversation_id: string
+    name: string
+    artifact_type: 'file' | 'website' | 'code' | 'document' | 'image' | 'data'
+    path: string
+    entry_file?: string | null
+    mime_type?: string | null
+    description?: string | null
+    created_at: string
+    updated_at: string
+    version: number
+  }
+}
+
+export interface ArtifactEvent extends AgentEvent {
+  type: 'artifact'
+  data: ArtifactEventData & Record<string, unknown>
 }
 
 export interface ErrorEvent extends AgentEvent {

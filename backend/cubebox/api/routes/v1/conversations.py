@@ -152,6 +152,7 @@ def _ns_to_agent_id(ns: tuple[Any, ...]) -> str | None:
 def _dicts_to_sse_events(event_dicts: list[dict[str, Any]]) -> list[AgentEvent]:
     """Wrap raw event dicts from stream helpers into typed AgentEvent objects."""
     from cubebox.agents.schemas import (
+        ArtifactEvent,
         ReasoningEvent,
         TextDeltaEvent,
         ToolCallEvent,
@@ -188,6 +189,14 @@ def _dicts_to_sse_events(event_dicts: list[dict[str, Any]]) -> list[AgentEvent]:
         elif evt_type == "text_delta":
             events.append(
                 TextDeltaEvent(
+                    timestamp=evt_dict["timestamp"],
+                    data=evt_dict["data"],
+                    agent_id=evt_dict.get("agent_id"),
+                )
+            )
+        elif evt_type == "artifact":
+            events.append(
+                ArtifactEvent(
                     timestamp=evt_dict["timestamp"],
                     data=evt_dict["data"],
                     agent_id=evt_dict.get("agent_id"),
@@ -301,6 +310,7 @@ async def send_message(
                 llm=llm,
                 tools=tools,
                 sandbox=sandbox,
+                conversation_id=conversation_id,
                 skills=raw_request.app.state.skills,
                 checkpointer=checkpointer,
             )

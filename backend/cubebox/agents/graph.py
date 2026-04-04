@@ -11,6 +11,7 @@ from langgraph.graph.state import CompiledStateGraph
 from langgraph.types import Checkpointer
 from loguru import logger
 
+from cubebox.middleware.artifacts import ArtifactMiddleware
 from cubebox.middleware.sandbox import SandboxMiddleware
 from cubebox.middleware.skills import SkillsMiddleware, SkillSpec
 from cubebox.middleware.subagents import SubAgent, SubAgentMiddleware
@@ -24,6 +25,7 @@ def create_cubebox_agent(
     tools: list[BaseTool],
     *,
     sandbox: Sandbox | None = None,
+    conversation_id: str | None = None,
     skills: list[SkillSpec] | None = None,
     subagents: list[SubAgent] | None = None,
     checkpointer: Checkpointer | None = None,
@@ -37,6 +39,7 @@ def create_cubebox_agent(
         llm: The language model to use.
         tools: Additional tools beyond what middleware provides.
         sandbox: If provided, SandboxMiddleware is added (registers execute tool).
+        conversation_id: Required when sandbox is provided; used by ArtifactMiddleware.
         skills: If provided, SkillsMiddleware is added.
         subagents: If provided, SubAgentMiddleware is added.
         checkpointer: LangGraph checkpointer for conversation persistence.
@@ -47,7 +50,9 @@ def create_cubebox_agent(
 
     if sandbox is not None:
         middleware.append(SandboxMiddleware(sandbox=sandbox))
-        logger.debug("SandboxMiddleware added (sandbox id={})", sandbox.id)
+        if conversation_id:
+            middleware.append(ArtifactMiddleware(sandbox=sandbox, conversation_id=conversation_id))
+        logger.debug("SandboxMiddleware + ArtifactMiddleware added (sandbox id={})", sandbox.id)
 
     _skills = skills or []
     middleware.append(SkillsMiddleware(skills=_skills))

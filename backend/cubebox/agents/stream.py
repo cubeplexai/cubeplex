@@ -5,6 +5,7 @@ Uses dual stream_mode=["messages", "updates"]:
 - "updates" chunks: complete tool_call and tool_result events (no accumulation needed)
 """
 
+import json
 from datetime import UTC, datetime
 from typing import Any
 
@@ -178,3 +179,22 @@ def _extract_tool_events(
                 "agent_id": agent_id,
             }
         )
+
+        # Emit additional artifact event for save_artifact tool results
+        if tool_name == "save_artifact":
+            try:
+                parsed = json.loads(result_str)
+                if "artifact" in parsed:
+                    events.append(
+                        {
+                            "type": "artifact",
+                            "timestamp": timestamp,
+                            "data": {
+                                "action": parsed.get("action", "created"),
+                                "artifact": parsed["artifact"],
+                            },
+                            "agent_id": agent_id,
+                        }
+                    )
+            except (json.JSONDecodeError, KeyError):
+                pass

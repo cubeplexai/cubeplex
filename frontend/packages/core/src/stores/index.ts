@@ -1,4 +1,8 @@
 export {
+  useArtifactStore,
+  type ArtifactStore,
+} from './artifactStore'
+export {
   useConversationStore,
   type ConversationStore,
 } from './conversationStore'

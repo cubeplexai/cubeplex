@@ -1,0 +1,141 @@
+"""ArtifactMiddleware — registers the save_artifact tool and injects artifact prompt."""
+
+import json
+import mimetypes
+import shlex
+from collections.abc import Awaitable, Callable, Sequence
+from typing import Any
+
+from langchain.agents.middleware.types import (
+    AgentMiddleware,
+    ModelRequest,
+    ModelResponse,
+)
+from langchain_core.messages import AIMessage
+from langchain_core.tools import BaseTool, StructuredTool
+from loguru import logger
+from pydantic import BaseModel, Field
+
+from cubebox.middleware._utils import append_to_system_message
+from cubebox.prompts.artifacts import ARTIFACT_PROMPT
+from cubebox.sandbox.base import Sandbox
+from cubebox.tools import get_registry
+
+
+class _SaveArtifactArgs(BaseModel):
+    name: str = Field(description="Human-readable artifact name")
+    artifact_type: str = Field(
+        description="Type of artifact: file, website, code, document, image, or data"
+    )
+    path: str = Field(description="Absolute path in sandbox (file or directory)")
+    entry_file: str | None = Field(
+        default=None,
+        description="For directories: the main file to open (e.g. 'index.html')",
+    )
+    description: str | None = Field(default=None, description="Brief description")
+    artifact_id: str | None = Field(
+        default=None,
+        description="Existing artifact ID to update (omit for new artifact)",
+    )
+
+
+def _guess_mime_type(path: str, entry_file: str | None) -> str | None:
+    """Guess MIME type from file extension."""
+    target = entry_file if entry_file else path
+    mime, _ = mimetypes.guess_type(target)
+    return mime
+
+
+def _create_save_artifact_tool(
+    sandbox: Sandbox,
+    conversation_id: str,
+) -> BaseTool:
+    """Build the save_artifact tool backed by sandbox + DB."""
+
+    async def _save_artifact(
+        name: str,
+        artifact_type: str,
+        path: str,
+        entry_file: str | None = None,
+        description: str | None = None,
+        artifact_id: str | None = None,
+    ) -> str:
+        # 1. Validate path exists in sandbox
+        result = await sandbox.execute(f"test -e {shlex.quote(path)}")
+        if result.exit_code is not None and result.exit_code != 0:
+            return json.dumps({"error": f"Path not found in sandbox: {path}"})
+
+        # 2. Guess MIME type
+        mime_type = _guess_mime_type(path, entry_file)
+
+        # 3. Write to DB using independent session
+        from cubebox.db.engine import async_session_maker
+        from cubebox.repositories import ArtifactRepository
+
+        async with async_session_maker() as session:
+            repo = ArtifactRepository(session)
+
+            if artifact_id:
+                artifact = await repo.update(
+                    artifact_id,
+                    name=name,
+                    artifact_type=artifact_type,
+                    path=path,
+                    entry_file=entry_file,
+                    mime_type=mime_type,
+                    description=description,
+                )
+                if not artifact:
+                    return json.dumps({"error": f"Artifact not found: {artifact_id}"})
+                action = "updated"
+            else:
+                artifact = await repo.create(
+                    conversation_id=conversation_id,
+                    name=name,
+                    artifact_type=artifact_type,
+                    path=path,
+                    entry_file=entry_file,
+                    mime_type=mime_type,
+                    description=description,
+                )
+                action = "created"
+
+        logger.info(
+            "Artifact {}: id={}, name={}, type={}",
+            action,
+            artifact.id,
+            artifact.name,
+            artifact.artifact_type,
+        )
+
+        return json.dumps({"action": action, "artifact": artifact.to_dict()})
+
+    return StructuredTool.from_function(
+        coroutine=_save_artifact,
+        name="save_artifact",
+        description=(
+            "Register a file or directory created in the sandbox as an artifact "
+            "so the user can preview and download it. "
+            "First create the files with the execute tool, then call this."
+        ),
+        args_schema=_SaveArtifactArgs,
+    )
+
+
+class ArtifactMiddleware(AgentMiddleware[Any, Any, Any]):
+    """Registers save_artifact tool and injects artifact prompt into system message."""
+
+    def __init__(self, *, sandbox: Sandbox, conversation_id: str) -> None:
+        self.sandbox = sandbox
+        self.conversation_id = conversation_id
+        self.tools: Sequence[BaseTool] = [_create_save_artifact_tool(sandbox, conversation_id)]
+        # Register content_type so stream.py can label tool results
+        get_registry().register_content_type("save_artifact", "artifact")
+
+    async def awrap_model_call(
+        self,
+        request: ModelRequest[Any],
+        handler: Callable[[ModelRequest[Any]], Awaitable[ModelResponse[Any] | AIMessage]],
+    ) -> ModelResponse[Any] | AIMessage:
+        new_system = append_to_system_message(request.system_message, ARTIFACT_PROMPT)
+        return await handler(request.override(system_message=new_system))

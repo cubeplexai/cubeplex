@@ -3,6 +3,7 @@
 Exports all v1 API routers.
 """
 
+from cubebox.api.routes.v1.artifacts import router as artifacts_router
 from cubebox.api.routes.v1.conversations import router as conversations_router
 
-__all__ = ["conversations_router"]
+__all__ = ["artifacts_router", "conversations_router"]
