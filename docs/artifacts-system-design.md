@@ -62,20 +62,85 @@ class Artifact(SQLModel, table=True):
 
 需要创建 Alembic migration: `alembic revision --autogenerate -m "create_artifacts_table"`
 
-### 1.2 save_artifact 工具
+### 1.2 ArtifactMiddleware (新建中间件)
 
-在 `SandboxMiddleware` 中与 `execute` 一起注册:
+新建 `/backend/cubebox/middleware/artifacts.py`，遵循已有中间件模式（与 SandboxMiddleware、SubAgentMiddleware 同级）。
 
-- **参数**: name, artifact_type, path, entry_file?, description?, artifact_id?(更新已有 artifact)
-- **流程**:
-  1. 通过 `sandbox.execute("test -e <path>")` 校验路径存在
-  2. 根据文件扩展名自动推断 mime_type
-  3. 创建或更新 Artifact 记录到数据库
-  4. 返回 `{"artifact": {...}, "action": "created"|"updated"}`
+**为什么不放在 SandboxMiddleware 中**:
+- SandboxMiddleware 职责单一（只管 `execute` 工具），不应膨胀
+- `save_artifact` 需要 DB 写入（SandboxMiddleware 无 DB 访问）
+- `save_artifact` 需要 `conversation_id`（SandboxMiddleware 不知道）
+- 遵循已有模式：每个中间件一个职责（sandbox→execute, subagents→subagent, skills→load_skill）
 
-### 1.3 SSE 事件
+```python
+class ArtifactMiddleware(AgentMiddleware[Any, Any, Any]):
+    """Registers save_artifact tool and injects artifact prompt."""
 
-在 `schemas.py` 新增 `ArtifactEvent`:
+    def __init__(self, *, sandbox: Sandbox) -> None:
+        self.sandbox = sandbox
+        self.tools: Sequence[BaseTool] = [_create_save_artifact_tool(sandbox)]
+        # 在全局 registry 注册 content_type，供 stream.py 查找
+        get_registry().register_content_type("save_artifact", "artifact")
+
+    async def awrap_model_call(self, request, handler):
+        new_system = append_to_system_message(request.system_message, ARTIFACT_PROMPT)
+        return await handler(request.override(system_message=new_system))
+```
+
+### 1.3 save_artifact 工具
+
+**参数**: name, artifact_type, path, entry_file?, description?, artifact_id?(更新已有 artifact)
+
+**关键实现细节**:
+
+1. **conversation_id 获取**: 通过 LangGraph 的 `RunnableConfig` 注入机制。工具函数声明 `config: RunnableConfig` 参数，LangGraph 自动注入，从中提取 `config["configurable"]["thread_id"]`
+
+2. **DB 会话**: 使用 `async_session_maker()` 创建独立短生命周期 session（与 SSE 端点中 `_update_conversation_timestamp` 的模式一致，避免连接池泄漏）
+
+3. **路径校验**: 通过闭包持有的 `sandbox` 实例调用 `sandbox.execute("test -e <path>")`
+
+```python
+def _create_save_artifact_tool(sandbox: Sandbox) -> BaseTool:
+
+    async def _save_artifact(
+        name: str,
+        artifact_type: str,
+        path: str,
+        entry_file: str | None = None,
+        description: str | None = None,
+        artifact_id: str | None = None,
+        *,
+        config: RunnableConfig,  # LangGraph 自动注入
+    ) -> str:
+        conversation_id = config["configurable"]["thread_id"]
+
+        # 1. 校验路径
+        result = await sandbox.execute(f"test -e {shlex.quote(path)}")
+        if result.exit_code != 0:
+            return json.dumps({"error": f"Path not found: {path}"})
+
+        # 2. 推断 mime_type
+        mime_type = _guess_mime_type(path, entry_file)
+
+        # 3. 写入 DB (独立 session，不依赖请求级 session)
+        async with async_session_maker() as session:
+            repo = ArtifactRepository(session)
+            if artifact_id:
+                artifact = await repo.update(artifact_id, ...)
+                action = "updated"
+            else:
+                artifact = await repo.create(conversation_id=conversation_id, ...)
+                action = "created"
+
+        # 4. 返回 JSON (stream.py 解析后发送 artifact SSE 事件)
+        return json.dumps({"action": action, "artifact": artifact.to_dict()})
+
+    return StructuredTool.from_function(coroutine=_save_artifact, ...)
+```
+
+### 1.4 SSE 事件
+
+#### schemas.py 新增 ArtifactEvent
 
 ```python
 class ArtifactEvent(AgentEvent):
@@ -83,23 +148,87 @@ class ArtifactEvent(AgentEvent):
     data: dict[str, Any]  # { "action": "created"|"updated", "artifact": {...} }
 ```
 
-在 `stream.py` 的 `_extract_tool_events` 中，检测 `tool_name == "save_artifact"` 时，额外发送一个 `artifact` 事件（除了标准的 `tool_result`）。
+#### stream.py: `_extract_tool_events` 增加 artifact 事件发送
 
-### 1.4 API 端点
+当 `tool_name == "save_artifact"` 时，解析工具返回的 JSON，额外发送一个 `artifact` 事件:
+
+```python
+# 在 _extract_tool_events 中，tool_result 事件发送之后:
+if tool_name == "save_artifact":
+    try:
+        parsed = json.loads(result_str)
+        if "artifact" in parsed:
+            events.append({
+                "type": "artifact",
+                "timestamp": timestamp,
+                "data": {"action": parsed["action"], "artifact": parsed["artifact"]},
+                "agent_id": agent_id,
+            })
+    except json.JSONDecodeError:
+        pass
+```
+
+#### conversations.py: `_dicts_to_sse_events` 增加 artifact 事件映射
+
+```python
+elif evt_type == "artifact":
+    events.append(ArtifactEvent(
+        timestamp=evt_dict["timestamp"],
+        data=evt_dict["data"],
+        agent_id=evt_dict.get("agent_id"),
+    ))
+```
+
+### 1.5 Agent Graph 工厂
+
+`create_cubebox_agent()` 增加 ArtifactMiddleware 接入:
+
+```python
+# graph.py — 在 SandboxMiddleware 之后添加
+if sandbox is not None:
+    middleware.append(SandboxMiddleware(sandbox=sandbox))
+    middleware.append(ArtifactMiddleware(sandbox=sandbox))  # 新增
+```
+
+### 1.6 API 端点
 
 新建 `/backend/cubebox/api/routes/v1/artifacts.py`:
 
 | 端点 | 说明 |
 |------|------|
-| `GET /api/v1/conversations/{id}/artifacts` | 列出对话的所有 artifacts |
-| `GET /api/v1/conversations/{id}/artifacts/{artifact_id}/download` | 下载 artifact 文件 |
-| `GET /api/v1/conversations/{id}/artifacts/{artifact_id}/preview/{file_path:path}` | 为 iframe 预览提供文件服务 |
+| `GET /api/v1/conversations/{id}/artifacts` | 列出对话的所有 artifacts（DB 查询） |
+| `GET /api/v1/conversations/{id}/artifacts/{artifact_id}/download` | 下载文件 |
+| `GET .../artifacts/{artifact_id}/preview/{file_path:path}` | 为 iframe 预览提供文件服务 (Phase 2) |
 
-下载流程: 查找 artifact 元数据 → 获取用户 sandbox → `sandbox.download([path])` → 返回文件流（目录则先 tar 打包）。
+**下载流程**: DB 查 artifact 元数据 → `SandboxManager.get_or_create(user_id)` 获取 sandbox → `sandbox.download([path])` → 返回文件流。若 sandbox 已过期返回 410 Gone。
 
-### 1.5 Prompt 注入
+**列表端点**: 直接 DB 查询 `SELECT * FROM artifacts WHERE conversation_id = ?`。
 
-扩展 sandbox prompt，指导 Agent 使用 save_artifact:
+### 1.7 ArtifactRepository
+
+新建 `/backend/cubebox/repositories/artifact.py`，遵循 ConversationRepository 模式:
+
+```python
+class ArtifactRepository:
+    def __init__(self, session: AsyncSession) -> None: ...
+    async def create(self, *, conversation_id, name, artifact_type, path, ...) -> Artifact: ...
+    async def update(self, artifact_id, ...) -> Artifact | None: ...
+    async def get_by_id(self, artifact_id) -> Artifact | None: ...
+    async def list_by_conversation(self, conversation_id, limit, offset) -> list[Artifact]: ...
+```
+
+### 1.8 ToolRegistry 扩展
+
+`ToolRegistry` 新增 `register_content_type()` 方法，允许中间件注入的工具也能声明 content_type:
+
+```python
+def register_content_type(self, tool_name: str, content_type: str) -> None:
+    self._content_types[tool_name] = content_type
+```
+
+### 1.9 Prompt 注入
+
+新建 `/backend/cubebox/prompts/artifacts.py`，由 ArtifactMiddleware 通过 `awrap_model_call` 注入:
 
 ```
 ## Artifacts
@@ -202,6 +331,10 @@ components/
 |------|------|------|
 | 文件创建方式 | Agent 用 `execute` 写文件，`save_artifact` 只注册元数据 | 不限制 Agent 能力，Kimi 也是这个模式 |
 | 元数据存储 | 新建 `artifacts` 数据库表 (SQLModel + Alembic) | 支持跨对话查询、统计，与已有 Conversation 模型风格一致 |
+| 工具归属 | 独立 `ArtifactMiddleware` 而非扩展 SandboxMiddleware | save_artifact 需 DB 写入 + conversation_id，SandboxMiddleware 无此能力；遵循一中间件一职责 |
+| conversation_id | 通过 LangGraph `RunnableConfig` 注入 (`thread_id`) | LangGraph 原生机制，工具声明 config 参数即可自动注入 |
+| DB 会话 | 工具内 `async_session_maker()` 独立 session | SSE 端点不使用 Depends(get_session)，与 `_update_conversation_timestamp` 模式一致 |
+| content_type | `ToolRegistry.register_content_type()` 新方法 | 中间件工具不在全局 registry，需显式注册 content_type 供 stream.py 查找 |
 | 文件服务 | 后端代理（从 sandbox 下载再转发） | 浏览器不能直接访问 sandbox 容器 |
 | 预览面板 | 融入 ToolDetailPanel (`contentType === 'artifact'`) | 遵循现有 panel/ 目录模式，不新建目录，复用面板框架 |
 | 自动检测 vs 显式注册 | Agent 显式调用 save_artifact | 自动检测哪些文件是"交付物"不可靠 |
@@ -215,14 +348,19 @@ components/
 **目标**: Agent 能创建 artifacts，聊天中显示卡片，用户可下载文件
 
 **后端** (按实施顺序):
-1. `models/artifact.py` — Artifact SQLModel + Alembic migration
-2. `models/__init__.py` — 导出 Artifact
-3. `middleware/sandbox.py` — 注册 `save_artifact` 工具（校验路径、写 DB、返回元数据）
-4. `agents/schemas.py` — 新增 `ArtifactEvent`
-5. `agents/stream.py` — `save_artifact` 工具结果触发 artifact SSE 事件
-6. `api/routes/v1/artifacts.py` — 下载端点 + 列表端点
-7. `api/app.py` — 注册 artifacts 路由
-8. `prompts/sandbox.py` — 注入 artifact 使用指导
+1. `models/artifact.py` — Artifact SQLModel 模型
+2. `alembic revision --autogenerate` — 创建 migration
+3. `models/__init__.py` — 导出 Artifact
+4. `repositories/artifact.py` — ArtifactRepository (CRUD)
+5. `tools/registry.py` — 新增 `register_content_type()` 方法
+6. `prompts/artifacts.py` — Artifact 使用指导 prompt
+7. `middleware/artifacts.py` — ArtifactMiddleware (注册 save_artifact 工具 + prompt 注入)
+8. `agents/graph.py` — 在中间件栈中接入 ArtifactMiddleware
+9. `agents/schemas.py` — 新增 `ArtifactEvent`
+10. `agents/stream.py` — save_artifact 结果触发 artifact SSE 事件
+11. `api/routes/v1/conversations.py` — `_dicts_to_sse_events` 增加 artifact 映射
+12. `api/routes/v1/artifacts.py` — 下载 + 列表端点
+13. `api/app.py` — 注册 artifacts 路由
 
 **前端** (按实施顺序):
 1. `core/types/artifact.ts` — Artifact 类型定义
@@ -256,16 +394,21 @@ components/
 
 **后端 (修改)**:
 - `/backend/cubebox/agents/schemas.py` — 新增 ArtifactEvent
-- `/backend/cubebox/agents/stream.py` — 发送 artifact SSE 事件
-- `/backend/cubebox/middleware/sandbox.py` — 注册 save_artifact 工具
-- `/backend/cubebox/prompts/sandbox.py` — 追加 artifact 提示
+- `/backend/cubebox/agents/stream.py` — `_extract_tool_events` 增加 artifact 事件发送
+- `/backend/cubebox/agents/graph.py` — 中间件栈接入 ArtifactMiddleware
+- `/backend/cubebox/api/routes/v1/conversations.py` — `_dicts_to_sse_events` 增加 artifact 映射
 - `/backend/cubebox/api/app.py` — 注册 artifacts 路由
 - `/backend/cubebox/api/routes/v1/__init__.py` — 导出 artifacts_router
 - `/backend/cubebox/models/__init__.py` — 导出 Artifact
+- `/backend/cubebox/tools/registry.py` — 新增 `register_content_type()` 方法
+- `/backend/cubebox/repositories/__init__.py` — 导出 ArtifactRepository
 
 **后端 (新建)**:
 - `/backend/cubebox/models/artifact.py` — Artifact SQLModel
 - `/backend/alembic/versions/xxx_create_artifacts_table.py` — Alembic migration
+- `/backend/cubebox/repositories/artifact.py` — ArtifactRepository (CRUD)
+- `/backend/cubebox/middleware/artifacts.py` — ArtifactMiddleware (save_artifact 工具 + prompt)
+- `/backend/cubebox/prompts/artifacts.py` — Artifact prompt
 - `/backend/cubebox/api/routes/v1/artifacts.py` — 下载 + 列表 API
 
 **前端 (修改)**:
