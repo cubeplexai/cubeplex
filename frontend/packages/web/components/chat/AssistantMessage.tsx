@@ -249,14 +249,18 @@ function ContentBlockRenderer(
         if (parsed.artifact) artifact = parsed.artifact
       } catch { /* ignore */ }
     }
-    // Fallback: try to find by name in the artifact store
-    if (!artifact && args.name) {
+    // Fallback: try to find by id or name in the artifact store
+    if (!artifact && (args.artifact_id || args.name)) {
       const allArtifacts = useArtifactStore.getState().artifacts
       for (const convArtifacts of Object.values(allArtifacts)) {
-        for (const a of Object.values(convArtifacts)) {
-          if (a.name === args.name) { artifact = a; break }
+        if (args.artifact_id && convArtifacts[args.artifact_id]) {
+          artifact = convArtifacts[args.artifact_id]
+          break
         }
-        if (artifact) break
+        if (args.name) {
+          const match = Object.values(convArtifacts).find(a => a.name === args.name)
+          if (match) { artifact = match; break }
+        }
       }
     }
     if (artifact) {
