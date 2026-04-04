@@ -1,6 +1,6 @@
 'use client'
 
-import { memo } from 'react'
+import { memo, useCallback } from 'react'
 import {
   FileText,
   Globe,
@@ -10,8 +10,10 @@ import {
   File,
   Download,
   Package,
+  Eye,
 } from 'lucide-react'
 import type { Artifact } from '@cubebox/core'
+import { useArtifactStore } from '@cubebox/core'
 
 interface ArtifactCardProps {
   artifact: Artifact
@@ -42,12 +44,21 @@ export const ArtifactCard = memo(function ArtifactCard({
 }: ArtifactCardProps) {
   const Icon = typeIcons[artifact.artifact_type] ?? File
   const label = typeLabels[artifact.artifact_type] ?? 'File'
+  const openPreview = useArtifactStore(s => s.openPreview)
 
   const downloadUrl =
     `${baseUrl}/api/v1/conversations/${artifact.conversation_id}/artifacts/${artifact.id}/download`
 
+  const handlePreview = useCallback(() => {
+    openPreview(artifact.conversation_id, artifact.id)
+  }, [openPreview, artifact.conversation_id, artifact.id])
+
   return (
-    <div className="my-2 rounded-lg border border-border bg-card p-3">
+    <div
+      className="my-2 rounded-lg border border-border bg-card p-3 cursor-pointer
+        transition-colors hover:border-primary/30 hover:bg-card/80"
+      onClick={handlePreview}
+    >
       <div className="flex items-center gap-3">
         <div className="flex size-9 shrink-0 items-center justify-center rounded-md bg-primary/10">
           <Icon className="size-4 text-primary" />
@@ -58,7 +69,8 @@ export const ArtifactCard = memo(function ArtifactCard({
               {artifact.name}
             </span>
             {artifact.version > 1 && (
-              <span className="shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
+              <span className="shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-[10px]
+                text-muted-foreground">
                 v{artifact.version}
               </span>
             )}
@@ -74,16 +86,25 @@ export const ArtifactCard = memo(function ArtifactCard({
             )}
           </div>
         </div>
-        {downloadUrl && (
+        <div className="flex items-center gap-1 shrink-0">
+          <button
+            onClick={(e) => { e.stopPropagation(); handlePreview() }}
+            className="flex size-8 items-center justify-center rounded-md
+              text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            title="Preview"
+          >
+            <Eye className="size-4" />
+          </button>
           <a
             href={downloadUrl}
-            className="flex size-8 shrink-0 items-center justify-center rounded-md
+            onClick={(e) => e.stopPropagation()}
+            className="flex size-8 items-center justify-center rounded-md
               text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
             title="Download"
           >
             <Download className="size-4" />
           </a>
-        )}
+        </div>
       </div>
     </div>
   )

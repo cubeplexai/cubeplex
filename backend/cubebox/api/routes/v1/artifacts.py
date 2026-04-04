@@ -1,5 +1,6 @@
 """Artifacts API routes."""
 
+import mimetypes
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -125,4 +126,84 @@ async def download_artifact(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to download artifact",
+        ) from None
+
+
+@router.get("/{artifact_id}/preview/{file_path:path}")
+async def preview_artifact_file(
+    conversation_id: str,
+    artifact_id: str,
+    file_path: str,
+    raw_request: Request,
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> Response:
+    """Serve a single file from an artifact for iframe preview."""
+    repo = ArtifactRepository(session)
+    artifact = await repo.get_by_id(artifact_id)
+    if not artifact or artifact.conversation_id != conversation_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Artifact {artifact_id} not found",
+        )
+
+    # Prevent path traversal
+    if ".." in file_path or file_path.startswith("/"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid file path",
+        )
+
+    # Build absolute path: artifact.path / file_path
+    full_path = f"{artifact.path.rstrip('/')}/{file_path}"
+
+    user_id: str = getattr(raw_request.state, "user_id", "anonymous")
+    try:
+        from cubebox.sandbox.manager import get_sandbox_manager
+
+        sandbox_manager = get_sandbox_manager()
+        sandbox = await sandbox_manager.get_or_create(user_id)
+    except Exception as e:
+        logger.warning("Cannot access sandbox for preview: {}", e)
+        raise HTTPException(
+            status_code=status.HTTP_410_GONE,
+            detail="Sandbox is not available.",
+        ) from None
+
+    try:
+        # Verify file exists
+        check = await sandbox.execute(f"test -f {full_path!r}")
+        if check.exit_code != 0:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"File not found: {file_path}",
+            )
+
+        files = await sandbox.download([full_path])
+        if not files:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"File not found: {file_path}",
+            )
+        _, content = files[0]
+        await sandbox_manager.release(sandbox.id)
+
+        mime, _ = mimetypes.guess_type(file_path)
+        media_type = mime or "application/octet-stream"
+
+        return Response(
+            content=content,
+            media_type=media_type,
+            headers={
+                "Cache-Control": "no-cache",
+                "X-Content-Type-Options": "nosniff",
+            },
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Error serving preview file: {}", e)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to serve preview file",
         ) from None

@@ -9,7 +9,9 @@ import {
   ResizableHandle,
 } from '@/components/ui/resizable'
 import { ToolDetailPanel } from '@/components/panel/ToolDetailPanel'
+import { ArtifactPanel } from '@/components/panel/artifact/ArtifactPanel'
 import { useToolDetail } from '@/hooks/useToolDetail'
+import { useArtifactStore } from '@cubebox/core'
 
 interface AppShellProps {
   children: ReactNode
@@ -17,13 +19,17 @@ interface AppShellProps {
 }
 
 export function AppShell({ children, headerTitle }: AppShellProps) {
-  const { isOpen } = useToolDetail()
+  const { isOpen: toolPanelOpen } = useToolDetail()
+  const artifactPreviewOpen = useArtifactStore(
+    s => s.previewArtifactId !== null,
+  )
+  const panelOpen = toolPanelOpen || artifactPreviewOpen
 
   return (
     <div className="flex h-screen bg-background text-foreground">
       <Sidebar />
       <ResizablePanelGroup orientation="horizontal">
-        <ResizablePanel defaultSize={isOpen ? 50 : 100} minSize={30}>
+        <ResizablePanel defaultSize={panelOpen ? 50 : 100} minSize={30}>
           <div className="flex flex-col h-full overflow-hidden">
             <header className="h-11 border-b border-border flex items-center px-4 shrink-0">
               <span className="text-sm text-muted-foreground truncate flex-1">
@@ -35,11 +41,11 @@ export function AppShell({ children, headerTitle }: AppShellProps) {
           </div>
         </ResizablePanel>
 
-        {isOpen && (
+        {panelOpen && (
           <>
             <ResizableHandle withHandle />
             <ResizablePanel defaultSize={50} minSize={25}>
-              <ToolDetailPanel />
+              {artifactPreviewOpen ? <ArtifactPanel /> : <ToolDetailPanel />}
             </ResizablePanel>
           </>
         )}
