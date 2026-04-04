@@ -3,7 +3,7 @@ import { create } from 'zustand'
 import type {
   ContentBlock, TodoItem,
   Message, TextDeltaEvent, ToolCallEvent,
-  ToolResultEvent, ReasoningEvent,
+  ToolResultEvent, ReasoningEvent, ArtifactEventData,
 } from '../types'
 import type { ApiClient } from '../api'
 import { listMessages, streamMessages } from '../api'
@@ -314,6 +314,15 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
               },
             }
           })
+        } else if (event.type === 'artifact') {
+          const artifactData = event.data as unknown as ArtifactEventData
+          if (artifactData.artifact) {
+            const { useArtifactStore } = await import('./artifactStore')
+            useArtifactStore.getState().addOrUpdate(
+              conversationId,
+              artifactData.artifact,
+            )
+          }
         } else if (event.type === 'status') {
           batchedSet(() => ({ statusPhase: (event.data as { phase: string }).phase }))
         } else if (event.type === 'done') {

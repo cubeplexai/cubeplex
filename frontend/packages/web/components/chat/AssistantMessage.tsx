@@ -5,7 +5,9 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import type { Message, ContentBlock, SubagentSummary } from '@cubebox/core'
 import type { AgentStream } from '@cubebox/core'
+import { useArtifactStore } from '@cubebox/core'
 import { Bot, ChevronDown, ChevronRight, Brain } from 'lucide-react'
+import { ArtifactCard } from './ArtifactCard'
 import { SubAgentCard } from './SubAgentCard'
 import { SubAgentCluster } from './SubAgentCluster'
 import { ToolCallGroup } from './ToolCallGroup'
@@ -236,6 +238,40 @@ function ContentBlockRenderer(
       />
     )
   }
+  if (block.type === 'tool_call' && block.name === 'save_artifact') {
+    const args = block.arguments as { name?: string; artifact_id?: string }
+    // Look up artifact from store by parsing the tool result
+    const toolResult = toolResultMap[block.tool_call_id]
+    let artifact = null
+    if (toolResult?.content) {
+      try {
+        const parsed = JSON.parse(toolResult.content)
+        if (parsed.artifact) artifact = parsed.artifact
+      } catch { /* ignore */ }
+    }
+    // Fallback: try to find by name in the artifact store
+    if (!artifact && args.name) {
+      const allArtifacts = useArtifactStore.getState().artifacts
+      for (const convArtifacts of Object.values(allArtifacts)) {
+        for (const a of Object.values(convArtifacts)) {
+          if (a.name === args.name) { artifact = a; break }
+        }
+        if (artifact) break
+      }
+    }
+    if (artifact) {
+      return <ArtifactCard artifact={artifact} />
+    }
+    // Fallback to regular tool call rendering
+    return (
+      <ToolCallGroup
+        blocks={[block as ContentBlock & { type: 'tool_call' }]}
+        toolResultMap={toolResultMap}
+        isStreaming={isStreaming}
+        messageCreatedAt={messageCreatedAt}
+      />
+    )
+  }
   if (block.type === 'tool_call') {
     return (
       <ToolCallGroup
@@ -261,6 +297,7 @@ function groupBlocks(blocks: ContentBlock[]): (ContentBlock | ContentBlock[])[] 
     if (
       block.type === 'tool_call' &&
       block.name !== 'subagent' &&
+      block.name !== 'save_artifact' &&
       block.name !== 'write_todos'
     ) {
       const last = result[result.length - 1]

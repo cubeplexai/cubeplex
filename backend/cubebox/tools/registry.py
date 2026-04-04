@@ -28,6 +28,14 @@ class ToolRegistry:
         if ct:
             self._content_types[tool.name] = str(ct)
 
+    def register_content_type(self, tool_name: str, content_type: str) -> None:
+        """Register a content_type for a tool name.
+
+        Useful for middleware-injected tools that are not in the global registry
+        but still need content_type metadata for stream rendering.
+        """
+        self._content_types[tool_name] = content_type
+
     def get_content_type(self, name: str) -> str | None:
         """Get the declared content_type for a tool, or None."""
         return self._content_types.get(name)

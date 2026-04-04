@@ -7,7 +7,7 @@ from alembic import context
 
 # Import models and config
 from cubebox.config import config as app_config
-from cubebox.models import Conversation  # noqa: F401
+from cubebox.models import Artifact, Conversation  # noqa: F401
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.

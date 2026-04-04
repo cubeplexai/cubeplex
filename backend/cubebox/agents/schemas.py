@@ -79,6 +79,18 @@ class ToolResultEvent(AgentEvent):
     data: dict[str, Any] = Field(description="Event data with tool name and result content")
 
 
+class ArtifactEvent(AgentEvent):
+    """Artifact lifecycle event.
+
+    Emitted when the agent creates or updates an artifact via save_artifact tool.
+    """
+
+    type: Literal["artifact"] = "artifact"
+    data: dict[str, Any] = Field(
+        description="Artifact metadata: action (created|updated) and artifact object"
+    )
+
+
 class ErrorEvent(AgentEvent):
     """Event emitted when an error occurs"""
 

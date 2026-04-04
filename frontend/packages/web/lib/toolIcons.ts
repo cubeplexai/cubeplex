@@ -5,6 +5,7 @@ import {
   Code,
   Bot,
   BookOpen,
+  Package,
   Wrench,
   type LucideIcon,
 } from 'lucide-react'
@@ -19,6 +20,7 @@ const iconMap: Record<string, LucideIcon> = {
   python: Code,
   subagent: Bot,
   load_skill: BookOpen,
+  save_artifact: Package,
 }
 
 export function getToolIcon(

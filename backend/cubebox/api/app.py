@@ -146,8 +146,9 @@ def create_app(
     register_exception_handlers(app)
 
     # Register routers
-    from cubebox.api.routes.v1 import conversations_router
+    from cubebox.api.routes.v1 import artifacts_router, conversations_router
 
     app.include_router(conversations_router, prefix="/api/v1")
+    app.include_router(artifacts_router, prefix="/api/v1")
 
     return app
