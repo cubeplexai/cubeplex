@@ -38,14 +38,13 @@ const typeLabels: Record<string, string> = {
 
 export const ArtifactCard = memo(function ArtifactCard({
   artifact,
-  baseUrl,
+  baseUrl = '',
 }: ArtifactCardProps) {
   const Icon = typeIcons[artifact.artifact_type] ?? File
   const label = typeLabels[artifact.artifact_type] ?? 'File'
 
-  const downloadUrl = baseUrl
-    ? `${baseUrl}/api/v1/conversations/${artifact.conversation_id}/artifacts/${artifact.id}/download`
-    : null
+  const downloadUrl =
+    `${baseUrl}/api/v1/conversations/${artifact.conversation_id}/artifacts/${artifact.id}/download`
 
   return (
     <div className="my-2 rounded-lg border border-border bg-card p-3">
