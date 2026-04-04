@@ -158,20 +158,25 @@ export interface ArtifactStore {
 }
 ```
 
-### 2.4 组件层级
+### 2.4 组件布局
+
+**设计原则**: 不新建目录，融入现有的 `chat/` 和 `panel/` 目录，遵循已有的分层模式:
+- `chat/` — 消息流中的内容（ToolCallItem, SubAgentCard, ...）
+- `panel/` — 右侧面板中的详情视图（TerminalView, SearchResultView, ...）
 
 ```
-components/artifact/
-  ArtifactCard.tsx          # 聊天中的内联卡片 (名称、类型、图标、预览/下载按钮)
-  ArtifactPanel.tsx         # 右侧预览面板 (根据类型分发到不同预览器)
-  ArtifactGallery.tsx       # 对话内所有 artifacts 的画廊视图 (Phase 2)
-  previews/
-    HtmlPreview.tsx         # iframe 加载 website (指向 preview API)
-    ImagePreview.tsx        # <img> 加载图片
-    CodePreview.tsx         # 语法高亮代码查看器
-    DocumentPreview.tsx     # Markdown/文本渲染
-    DataPreview.tsx         # CSV/JSON 表格视图
-    FallbackPreview.tsx     # 通用文件信息 + 下载按钮
+components/
+  chat/
+    ArtifactCard.tsx          # [新增] 聊天内联卡片 (与 ToolCallItem, SubAgentCard 同级)
+    ...existing...
+  panel/
+    ArtifactPreview.tsx       # [新增] Artifact 预览分发器 (根据类型选择子视图)
+    HtmlPreview.tsx           # [新增] iframe 网站预览
+    ImagePreview.tsx          # [新增] 图片预览
+    CodePreview.tsx           # [新增] 语法高亮代码查看器
+    DocumentPreview.tsx       # [新增] Markdown/文本渲染 (Phase 3)
+    DataPreview.tsx           # [新增] CSV/JSON 表格视图 (Phase 3)
+    ...existing...
 ```
 
 ### 2.5 聊天集成
@@ -180,10 +185,13 @@ components/artifact/
 
 ### 2.6 面板集成
 
-`AppShell.tsx` 右侧面板根据状态切换:
+`ArtifactPreview` 作为 `ToolDetailPanel` 中 `contentType === 'artifact'` 的新分支接入（当前已有该 case，fallback 到 GenericToolView），无需独立面板切换:
 
 ```typescript
-{previewArtifactId ? <ArtifactPanel /> : <ToolDetailPanel />}
+// ToolDetailPanel.tsx — 替换现有的 artifact fallback
+{contentType === 'artifact' && (
+  <ArtifactPreview artifact={artifact} />
+)}
 ```
 
 ---
@@ -195,7 +203,7 @@ components/artifact/
 | 文件创建方式 | Agent 用 `execute` 写文件，`save_artifact` 只注册元数据 | 不限制 Agent 能力，Kimi 也是这个模式 |
 | 元数据存储 | 新建 `artifacts` 数据库表 (SQLModel + Alembic) | 支持跨对话查询、统计，与已有 Conversation 模型风格一致 |
 | 文件服务 | 后端代理（从 sandbox 下载再转发） | 浏览器不能直接访问 sandbox 容器 |
-| 预览面板 | 独立 ArtifactPanel 而非扩展 ToolDetailPanel | 预览 UX（iframe、图片查看器）与工具结果检查完全不同 |
+| 预览面板 | 融入 ToolDetailPanel (`contentType === 'artifact'`) | 遵循现有 panel/ 目录模式，不新建目录，复用面板框架 |
 | 自动检测 vs 显式注册 | Agent 显式调用 save_artifact | 自动检测哪些文件是"交付物"不可靠 |
 
 ---
@@ -221,7 +229,7 @@ components/artifact/
 2. `core/stores/artifactStore.ts` — Zustand store
 3. `core/types/events.ts` — 扩展 AgentEventType 加 `'artifact'`
 4. `core/stores/messageStore.ts` — 处理 artifact 事件
-5. `web/components/artifact/ArtifactCard.tsx` — 聊天内联卡片（名称、类型图标、下载按钮）
+5. `web/components/chat/ArtifactCard.tsx` — 聊天内联卡片（名称、类型图标、下载按钮）
 6. `web/components/chat/AssistantMessage.tsx` — save_artifact tool_call 渲染为 ArtifactCard
 
 ### Phase 2: 预览面板 (~1 周)
@@ -229,20 +237,18 @@ components/artifact/
 **目标**: 用户可在右侧面板预览 artifacts
 
 1. `api/routes/v1/artifacts.py` — preview 文件服务端点
-2. `ArtifactPanel.tsx` — 面板包装器 + 类型分发
-3. `HtmlPreview.tsx` — iframe 网站预览
-4. `ImagePreview.tsx` — 图片预览
-5. `CodePreview.tsx` — 语法高亮代码
-6. `FallbackPreview.tsx` — 通用下载
-7. `AppShell.tsx` — 面板切换集成
+2. `web/components/panel/ArtifactPreview.tsx` — 预览分发器（根据 artifact_type 选择子视图）
+3. `web/components/panel/HtmlPreview.tsx` — iframe 网站预览
+4. `web/components/panel/ImagePreview.tsx` — 图片预览
+5. `web/components/panel/CodePreview.tsx` — 语法高亮代码
+6. `web/components/panel/ToolDetailPanel.tsx` — `contentType === 'artifact'` 分支接入 ArtifactPreview
 
 ### Phase 3: 丰富预览 + 画廊 (~1 周)
 
-1. `DocumentPreview.tsx` — Markdown 渲染
-2. `DataPreview.tsx` — CSV/JSON 表格
-3. `ArtifactGallery.tsx` — 对话 artifact 列表
-4. artifacts 列表 API 端点
-5. Artifact 版本更新时自动刷新预览
+1. `web/components/panel/DocumentPreview.tsx` — Markdown 渲染
+2. `web/components/panel/DataPreview.tsx` — CSV/JSON 表格
+3. Artifact 版本更新时自动刷新预览
+4. 对话 artifact 列表/画廊视图
 
 ---
 
@@ -266,14 +272,18 @@ components/artifact/
 - `/frontend/packages/core/src/types/events.ts` — 新增 artifact 事件类型
 - `/frontend/packages/core/src/stores/messageStore.ts` — 处理 artifact 事件
 - `/frontend/packages/web/components/chat/AssistantMessage.tsx` — 渲染 ArtifactCard
-- `/frontend/packages/web/components/layout/AppShell.tsx` — 面板切换
+- `/frontend/packages/web/components/panel/ToolDetailPanel.tsx` — artifact 分支接入 ArtifactPreview
 
 **前端 (新建)**:
 - `/frontend/packages/core/src/types/artifact.ts`
 - `/frontend/packages/core/src/stores/artifactStore.ts`
-- `/frontend/packages/web/components/artifact/ArtifactCard.tsx`
-- `/frontend/packages/web/components/artifact/ArtifactPanel.tsx`
-- `/frontend/packages/web/components/artifact/previews/*.tsx` (6 个预览组件)
+- `/frontend/packages/web/components/chat/ArtifactCard.tsx` — 聊天内联卡片 (chat/ 目录)
+- `/frontend/packages/web/components/panel/ArtifactPreview.tsx` — 预览分发器 (panel/ 目录)
+- `/frontend/packages/web/components/panel/HtmlPreview.tsx` — 网站预览
+- `/frontend/packages/web/components/panel/ImagePreview.tsx` — 图片预览
+- `/frontend/packages/web/components/panel/CodePreview.tsx` — 代码预览
+- `/frontend/packages/web/components/panel/DocumentPreview.tsx` — 文档预览 (Phase 3)
+- `/frontend/packages/web/components/panel/DataPreview.tsx` — 数据表格预览 (Phase 3)
 
 ---
 
