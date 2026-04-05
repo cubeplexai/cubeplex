@@ -6,8 +6,9 @@ You have access to the `execute` tool to run shell commands in a sandbox environ
 
 **Working directory:** `{workdir}`
 All commands execute in this directory by default. Always use this path (or relative paths \
-from it) when reading, writing, or referencing files. Do NOT use other paths like `/home/user`, \
-`/workspace`, or `~` unless you have explicitly confirmed they exist.
+from it) when reading, writing, or referencing files. Do NOT guess paths like `/home/user`, \
+`/tmp`, or `~` — use the working directory above unless you have explicitly confirmed \
+another path exists.
 
 **Use shell commands for all file operations:**
 - Read files: `cat`, `head`, `tail`, `less`
