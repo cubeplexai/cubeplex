@@ -12,9 +12,15 @@ class OpenSandbox(Sandbox):
     def __init__(self, *, sandbox: opensandbox.Sandbox) -> None:
         self._sandbox = sandbox
 
+    _DEFAULT_WORKDIR = "/root"
+
     @property
     def id(self) -> str:
         return self._sandbox.id
+
+    @property
+    def workdir(self) -> str:
+        return self._DEFAULT_WORKDIR
 
     async def execute(self, command: str, *, timeout: int | None = None) -> ExecuteResult:
         execution = await self._sandbox.commands.run(command)
