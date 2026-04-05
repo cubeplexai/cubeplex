@@ -22,6 +22,10 @@ class LocalSandbox(Sandbox):
     def id(self) -> str:
         return self._id
 
+    @property
+    def workdir(self) -> str:
+        return self._workdir
+
     async def execute(self, command: str, *, timeout: int | None = None) -> ExecuteResult:
         proc = await asyncio.create_subprocess_shell(
             command,

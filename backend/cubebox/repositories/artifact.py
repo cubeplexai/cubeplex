@@ -89,7 +89,7 @@ class ArtifactRepository:
         stmt = (
             select(Artifact)
             .where(Artifact.conversation_id == conversation_id)  # type: ignore[arg-type]
-            .order_by(Artifact.created_at)
+            .order_by(Artifact.created_at)  # type: ignore[arg-type]
         )
         result = await self.session.execute(stmt)
         return list(result.scalars().all())

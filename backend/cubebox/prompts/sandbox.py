@@ -1,8 +1,13 @@
 """Sandbox execution prompt — injected when a sandbox is available."""
 
-SANDBOX_PROMPT = """## Shell Execution
+SANDBOX_PROMPT_TEMPLATE = """## Shell Execution
 
 You have access to the `execute` tool to run shell commands in a sandbox environment.
+
+**Working directory:** `{workdir}`
+All commands execute in this directory by default. Always use this path (or relative paths \
+from it) when reading, writing, or referencing files. Do NOT use other paths like `/home/user`, \
+`/workspace`, or `~` unless you have explicitly confirmed they exist.
 
 **Use shell commands for all file operations:**
 - Read files: `cat`, `head`, `tail`, `less`
