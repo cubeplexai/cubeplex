@@ -12,7 +12,7 @@ class OpenSandbox(Sandbox):
     def __init__(self, *, sandbox: opensandbox.Sandbox) -> None:
         self._sandbox = sandbox
 
-    _DEFAULT_WORKDIR = "/root"
+    _DEFAULT_WORKDIR = "/workspace"
 
     @property
     def id(self) -> str:
