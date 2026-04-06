@@ -37,6 +37,9 @@ class SandboxManager:
         self._ttl: int = config.get("sandbox.ttl", 600)
         self._ready_timeout: int = config.get("sandbox.ready_timeout", 60)
 
+        # Sandbox workdir
+        self._workdir: str = config.get("sandbox.workdir", "/workspace")
+
         # Volume config
         self._volume_enabled: bool = config.get("sandbox.volume.enabled", False)
         self._volume_mount_path: str = config.get("sandbox.volume.mount_path", "/workspace")
@@ -96,7 +99,7 @@ class SandboxManager:
                     if await raw_sandbox.is_healthy():
                         await repo.update_activity(record.id)
                         logger.info("Reusing healthy sandbox {}", record.sandbox_id)
-                        return OpenSandbox(sandbox=raw_sandbox)
+                        return OpenSandbox(sandbox=raw_sandbox, workdir=self._workdir)
                     else:
                         logger.warning(
                             "Sandbox {} is not healthy, will recreate",

@@ -99,6 +99,7 @@ default:
     #   that have been inactive (no commands) for this duration and terminates them.
     ttl: 600 # 10 minutes in seconds
     cleanup_interval: 60 # Cleanup task interval in seconds
+    workdir: "/workspace" # Default working directory for command execution
     volume:
       enabled: false # Temporarily disabled — backend not yet ready
       mount_path: "/workspace"

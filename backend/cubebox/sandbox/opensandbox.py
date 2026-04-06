@@ -9,10 +9,9 @@ from cubebox.sandbox.base import ExecuteResult, Sandbox
 class OpenSandbox(Sandbox):
     """Sandbox backed by a remote OpenSandbox container."""
 
-    def __init__(self, *, sandbox: opensandbox.Sandbox) -> None:
+    def __init__(self, *, sandbox: opensandbox.Sandbox, workdir: str = "/workspace") -> None:
         self._sandbox = sandbox
-
-    _DEFAULT_WORKDIR = "/workspace"
+        self._workdir = workdir
 
     @property
     def id(self) -> str:
@@ -20,7 +19,7 @@ class OpenSandbox(Sandbox):
 
     @property
     def workdir(self) -> str:
-        return self._DEFAULT_WORKDIR
+        return self._workdir
 
     async def execute(self, command: str, *, timeout: int | None = None) -> ExecuteResult:
         execution = await self._sandbox.commands.run(command)
