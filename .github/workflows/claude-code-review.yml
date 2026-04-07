@@ -21,8 +21,8 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      pull-requests: read
-      issues: read
+      pull-requests: write
+      issues: write
       id-token: write
 
     env:
@@ -34,6 +34,9 @@ jobs:
       ANTHROPIC_DEFAULT_SONNET_MODEL: MiniMax-M2.7
       ANTHROPIC_DEFAULT_OPUS_MODEL: MiniMax-M2.7
       ANTHROPIC_DEFAULT_HAIKU_MODEL: MiniMax-M2.7
+      # Enable debug logging
+      ACTIONS_STEP_DEBUG: true
+      CLAUDE_CODE_DEBUG: 1
 
     steps:
       - name: Checkout repository
@@ -49,6 +52,7 @@ jobs:
           plugin_marketplaces: 'https://github.com/anthropics/claude-code.git'
           plugins: 'code-review@claude-code-plugins'
           prompt: '/code-review:code-review ${{ github.repository }}/pull/${{ github.event.pull_request.number }}'
+          claude_args: '--verbose'
           # See https://github.com/anthropics/claude-code-action/blob/main/docs/usage.md
           # or https://code.claude.com/docs/en/cli-reference for available options
 
