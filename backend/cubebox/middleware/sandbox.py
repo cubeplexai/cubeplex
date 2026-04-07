@@ -13,7 +13,7 @@ from langchain_core.tools import BaseTool, StructuredTool
 from pydantic import BaseModel
 
 from cubebox.middleware._utils import append_to_system_message
-from cubebox.prompts.sandbox import SANDBOX_PROMPT
+from cubebox.prompts.sandbox import SANDBOX_PROMPT_TEMPLATE
 from cubebox.sandbox.base import Sandbox
 
 
@@ -51,5 +51,6 @@ class SandboxMiddleware(AgentMiddleware[Any, Any, Any]):
         request: ModelRequest[Any],
         handler: Callable[[ModelRequest[Any]], Awaitable[ModelResponse[Any] | AIMessage]],
     ) -> ModelResponse[Any] | AIMessage:
-        new_system = append_to_system_message(request.system_message, SANDBOX_PROMPT)
+        prompt = SANDBOX_PROMPT_TEMPLATE.format(workdir=self.sandbox.workdir)
+        new_system = append_to_system_message(request.system_message, prompt)
         return await handler(request.override(system_message=new_system))

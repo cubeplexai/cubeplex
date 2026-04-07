@@ -26,6 +26,12 @@ class Sandbox(ABC):
         """Unique identifier for this sandbox instance."""
         ...
 
+    @property
+    @abstractmethod
+    def workdir(self) -> str:
+        """Working directory for command execution."""
+        ...
+
     @abstractmethod
     async def execute(self, command: str, *, timeout: int | None = None) -> ExecuteResult:
         """Execute a shell command. Returns combined stdout+stderr and exit code."""
