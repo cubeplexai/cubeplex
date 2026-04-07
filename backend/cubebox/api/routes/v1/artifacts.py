@@ -153,9 +153,6 @@ async def preview_artifact_file(
             detail="Invalid file path",
         )
 
-    # Build absolute path: artifact.path / file_path
-    full_path = f"{artifact.path.rstrip('/')}/{file_path}"
-
     user_id: str = getattr(raw_request.state, "user_id", "anonymous")
     try:
         from cubebox.sandbox.manager import get_sandbox_manager
@@ -170,6 +167,13 @@ async def preview_artifact_file(
         ) from None
 
     try:
+        # If artifact.path is a file (not a directory), serve it directly
+        is_dir = await sandbox.execute(f"test -d {artifact.path!r}")
+        if is_dir.exit_code == 0:
+            full_path = f"{artifact.path.rstrip('/')}/{file_path}"
+        else:
+            full_path = artifact.path
+
         # Verify file exists
         check = await sandbox.execute(f"test -f {full_path!r}")
         if check.exit_code != 0:
@@ -187,7 +191,7 @@ async def preview_artifact_file(
         _, content = files[0]
         await sandbox_manager.release(sandbox.id)
 
-        mime, _ = mimetypes.guess_type(file_path)
+        mime, _ = mimetypes.guess_type(full_path)
         media_type = mime or "application/octet-stream"
 
         return Response(
