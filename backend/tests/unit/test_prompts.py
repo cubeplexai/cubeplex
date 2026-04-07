@@ -1,20 +1,30 @@
-from cubebox.prompts.sandbox import SANDBOX_PROMPT
+from cubebox.prompts.sandbox import SANDBOX_PROMPT_TEMPLATE
 from cubebox.prompts.skills import SKILLS_PROMPT_TEMPLATE
 from cubebox.prompts.subagents import SUBAGENT_PROMPT
 from cubebox.prompts.system import BASE_SYSTEM_PROMPT
 
 
 def test_all_prompts_are_non_empty_strings():
-    for prompt in [BASE_SYSTEM_PROMPT, SANDBOX_PROMPT, SUBAGENT_PROMPT, SKILLS_PROMPT_TEMPLATE]:
+    for prompt in [
+        BASE_SYSTEM_PROMPT,
+        SANDBOX_PROMPT_TEMPLATE,
+        SUBAGENT_PROMPT,
+        SKILLS_PROMPT_TEMPLATE,
+    ]:
         assert isinstance(prompt, str)
         assert len(prompt.strip()) > 50
 
 
-def test_prompts_have_no_format_placeholders():
+def test_template_prompts_have_expected_placeholders():
+    """Template prompts must contain their expected placeholders."""
+    assert "{workdir}" in SANDBOX_PROMPT_TEMPLATE
+    assert "{skills_list}" in SKILLS_PROMPT_TEMPLATE
+
+
+def test_non_template_prompts_have_no_placeholders():
     """Prompts used directly (not as templates) must have no unformatted {} placeholders."""
-    for prompt in [BASE_SYSTEM_PROMPT, SANDBOX_PROMPT, SUBAGENT_PROMPT]:
-        # Skills prompt is a template — skip it
-        assert "{" not in prompt or prompt.count("{") == prompt.count("}")
+    for prompt in [BASE_SYSTEM_PROMPT, SUBAGENT_PROMPT]:
+        assert "{" not in prompt
 
 
 def test_system_prompt_mentions_tools():
@@ -22,4 +32,10 @@ def test_system_prompt_mentions_tools():
 
 
 def test_sandbox_prompt_mentions_execute():
-    assert "execute" in SANDBOX_PROMPT.lower()
+    rendered = SANDBOX_PROMPT_TEMPLATE.format(workdir="/root")
+    assert "execute" in rendered.lower()
+
+
+def test_sandbox_prompt_includes_workdir():
+    rendered = SANDBOX_PROMPT_TEMPLATE.format(workdir="/my/workdir")
+    assert "/my/workdir" in rendered
