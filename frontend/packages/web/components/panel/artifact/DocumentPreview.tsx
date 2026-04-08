@@ -5,6 +5,7 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import type { Artifact } from '@cubebox/core'
 import { proseClasses } from '@/lib/utils'
+import { PreviewLoading } from './PreviewLoading'
 
 interface DocumentPreviewProps {
   artifact: Artifact
@@ -37,11 +38,7 @@ export function DocumentPreview({ artifact }: DocumentPreviewProps) {
   }
 
   if (content === null) {
-    return (
-      <div className="p-4 text-sm text-muted-foreground animate-pulse">
-        Loading...
-      </div>
-    )
+    return <PreviewLoading />
   }
 
   const isMarkdown = /\.(md|markdown|mdx)$/i.test(filename)

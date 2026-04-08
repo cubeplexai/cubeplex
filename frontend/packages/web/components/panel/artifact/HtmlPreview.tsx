@@ -1,8 +1,8 @@
 'use client'
 
 import { useState } from 'react'
-import { Loader2 } from 'lucide-react'
 import type { Artifact } from '@cubebox/core'
+import { PreviewLoading } from './PreviewLoading'
 
 interface HtmlPreviewProps {
   artifact: Artifact
@@ -17,8 +17,8 @@ export function HtmlPreview({ artifact }: HtmlPreviewProps) {
   return (
     <div className="relative w-full h-full">
       {loading && (
-        <div className="absolute inset-0 flex items-center justify-center bg-background">
-          <Loader2 className="size-5 animate-spin text-muted-foreground" />
+        <div className="absolute inset-0 bg-background">
+          <PreviewLoading />
         </div>
       )}
       <iframe
