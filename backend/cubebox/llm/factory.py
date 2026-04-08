@@ -31,6 +31,25 @@ class LLMFactory:
             llm_config = LLMConfig(**config.llm)
         self.llm_config = llm_config
 
+    @staticmethod
+    def _parse_model_ref(model_ref: str) -> tuple[str, str]:
+        """
+        Parse a model reference in "provider/model-id" format.
+
+        Args:
+            model_ref: Model reference string
+
+        Returns:
+            Tuple of (provider_name, model_id)
+
+        Raises:
+            ValueError: If format is invalid
+        """
+        parts = model_ref.split("/", 1)
+        if len(parts) != 2 or not parts[0] or not parts[1]:
+            raise ValueError(f"Invalid model format: '{model_ref}'. Expected 'provider/model-id'")
+        return parts[0], parts[1]
+
     def get_default_model(self) -> tuple[str, str]:
         """
         Parse the default_model config value ("provider/model-id").
@@ -44,27 +63,44 @@ class LLMFactory:
         default_model = self.llm_config.default_model
         if not default_model:
             raise ValueError("No default_model configured in llm config")
-
-        parts = default_model.split("/", 1)
-        if len(parts) != 2 or not parts[0] or not parts[1]:
-            raise ValueError(
-                f"Invalid default_model format: '{default_model}'. Expected 'provider/model-id'"
-            )
-
-        return parts[0], parts[1]
+        return self._parse_model_ref(default_model)
 
     def create_default(self, **kwargs: Any) -> Any:
         """
-        Create an LLM instance using the configured default_model.
+        Create an LLM instance using the configured default_model,
+        with fallback models chained via with_fallbacks() if configured.
 
         Args:
             **kwargs: Additional kwargs passed to create()
 
         Returns:
-            LLM instance
+            LLM instance (with fallbacks if configured)
         """
         provider_name, model_id = self.get_default_model()
-        return self.create(model_id=model_id, provider_name=provider_name, **kwargs)
+        llm = self.create(model_id=model_id, provider_name=provider_name, **kwargs)
+
+        if not self.llm_config.fallback_models:
+            return llm
+
+        fallbacks = []
+        for model_ref in self.llm_config.fallback_models:
+            try:
+                fb_provider, fb_model_id = self._parse_model_ref(model_ref)
+                fallbacks.append(
+                    self.create(model_id=fb_model_id, provider_name=fb_provider, **kwargs)
+                )
+            except ValueError:
+                logger.warning("Skipping invalid fallback model: '%s'", model_ref)
+
+        if not fallbacks:
+            return llm
+
+        logger.info(
+            "LLM fallback chain: %s -> %s",
+            self.llm_config.default_model,
+            list(self.llm_config.fallback_models),
+        )
+        return llm.with_fallbacks(fallbacks)
 
     def _find_model(
         self, model_id: str, provider_name: str | None = None

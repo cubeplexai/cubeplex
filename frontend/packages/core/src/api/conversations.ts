@@ -1,4 +1,4 @@
-import type { Conversation, Message } from '../types'
+import type { Artifact, Conversation, Message } from '../types'
 import { toApiError, type ApiClient } from './client'
 
 export async function createConversation(
@@ -65,4 +65,15 @@ export async function listMessages(
   if (!res.ok) throw await toApiError(res)
   const data = await res.json() as { messages?: Message[] }
   return data.messages || []
+}
+
+export async function listArtifacts(
+  client: ApiClient,
+  conversationId: string,
+): Promise<Artifact[]> {
+  const url = `/api/v1/conversations/${conversationId}/artifacts`
+  const res = await client.get(url)
+  if (!res.ok) throw await toApiError(res)
+  const data = await res.json() as { artifacts?: Artifact[] }
+  return data.artifacts || []
 }

@@ -3,7 +3,7 @@
 import { useParams } from 'next/navigation'
 import { useEffect } from 'react'
 import {
-  useConversationStore, useToolDetailStore, useArtifactStore, createApiClient,
+  useConversationStore, usePanelStore, useArtifactStore, createApiClient,
 } from '@cubebox/core'
 import { AppShell } from '@/components/layout/AppShell'
 import { MessageList } from '@/components/chat/MessageList'
@@ -18,13 +18,15 @@ export default function ChatPage() {
   const { setActive, fetchList, conversations } = useConversationStore()
   const { todos } = useMessages(conversationId)
 
+  const loadArtifacts = useArtifactStore((s) => s.loadArtifacts)
+
   useEffect(() => {
-    useToolDetailStore.getState().close()
-    useArtifactStore.getState().closePreview()
+    usePanelStore.getState().close()
     setActive(conversationId)
     const client = createApiClient('')
     fetchList(client)
-  }, [conversationId, setActive, fetchList])
+    loadArtifacts(client, conversationId)
+  }, [conversationId, setActive, fetchList, loadArtifacts])
 
   const currentConvo = conversations.find((c) => c.id === conversationId)
 
