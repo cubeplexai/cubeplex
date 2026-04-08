@@ -317,8 +317,7 @@ export function PdfPreview({ artifact }: PdfPreviewProps) {
                     if (el) pageRefs.current.set(page, el)
                     else pageRefs.current.delete(page)
                   }}
-                  className="bg-white rounded shadow-md ring-1 ring-black/5 overflow-hidden"
-                  style={{ aspectRatio: '210 / 297' }}
+                  className="bg-white rounded shadow-md ring-1 ring-black/5"
                 >
                   <Page
                     pageNumber={page}
@@ -326,10 +325,7 @@ export function PdfPreview({ artifact }: PdfPreviewProps) {
                     loading={
                       <div
                         className="flex items-center justify-center bg-white"
-                        style={{
-                          width: pageWidth ?? 'auto',
-                          aspectRatio: '210 / 297',
-                        }}
+                        style={{ width: pageWidth ?? 'auto', minHeight: 200 }}
                       >
                         <Loader2 className="size-5 animate-spin text-muted-foreground" />
                       </div>
