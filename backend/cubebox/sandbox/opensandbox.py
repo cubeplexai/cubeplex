@@ -48,8 +48,8 @@ class OpenSandbox(Sandbox):
     async def download(self, paths: list[str]) -> list[tuple[str, bytes]]:
         result = []
         for path in paths:
-            content_str = await self._sandbox.files.read_file(path)
-            result.append((path, content_str.encode("utf-8")))
+            content = await self._sandbox.files.read_bytes(path)
+            result.append((path, content))
         return result
 
     async def close(self) -> None:
