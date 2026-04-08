@@ -295,10 +295,11 @@ export function PdfPreview({ artifact }: PdfPreviewProps) {
         )}
 
         {/* PDF pages — continuous scroll */}
-        <div ref={scrollRef} className="flex-1 overflow-auto bg-muted/40">
+        <div ref={scrollRef} className="flex-1 overflow-auto bg-muted/40 flex flex-col min-h-0">
           <Document
             file={fileUrl}
             onLoadSuccess={onDocumentLoadSuccess}
+            className="flex-1 flex flex-col"
             loading={<PreviewLoading />}
             error={
               <div className="p-4 text-sm text-destructive text-center">
