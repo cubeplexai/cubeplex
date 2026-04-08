@@ -1,6 +1,5 @@
 "use client"
 
-import { GripVertical } from "lucide-react"
 import {
   Group,
   Panel,
@@ -43,7 +42,7 @@ function ResizableHandle({
     <Separator
       data-slot="resizable-handle"
       className={cn(
-        "bg-border focus-visible:ring-ring relative",
+        "group bg-border focus-visible:ring-ring relative",
         "flex w-px items-center justify-center",
         "after:absolute after:inset-y-0",
         "after:-left-2 after:-right-2",
@@ -64,12 +63,12 @@ function ResizableHandle({
     >
       {withHandle && (
         <div
-          className="bg-border z-10 flex h-4 w-3
-            items-center justify-center rounded-xs
-            border"
-        >
-          <GripVertical className="size-2.5" />
-        </div>
+          className="z-10 flex h-8 w-1 items-center justify-center
+            rounded-full bg-border transition-all duration-150
+            group-hover:h-12 group-hover:w-1.5
+            group-hover:bg-muted-foreground/40
+            group-active:h-16 group-active:bg-primary/50"
+        />
       )}
     </Separator>
   )
