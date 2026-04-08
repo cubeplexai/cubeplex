@@ -1,49 +1,22 @@
 'use client'
 
 import { memo, useCallback } from 'react'
-import {
-  FileText,
-  Globe,
-  Code,
-  Image,
-  Database,
-  File,
-  Download,
-  Package,
-  Eye,
-} from 'lucide-react'
+import { Download, Package, Eye } from 'lucide-react'
 import type { Artifact } from '@cubebox/core'
 import { usePanelStore } from '@cubebox/core'
+import { getArtifactIcon, getArtifactLabel } from '@/components/panel/artifact/artifactIcons'
 
 interface ArtifactCardProps {
   artifact: Artifact
   baseUrl?: string
 }
 
-const typeIcons: Record<string, typeof File> = {
-  website: Globe,
-  document: FileText,
-  code: Code,
-  image: Image,
-  data: Database,
-  file: File,
-}
-
-const typeLabels: Record<string, string> = {
-  website: 'Website',
-  document: 'Document',
-  code: 'Code',
-  image: 'Image',
-  data: 'Data',
-  file: 'File',
-}
-
 export const ArtifactCard = memo(function ArtifactCard({
   artifact,
   baseUrl = '',
 }: ArtifactCardProps) {
-  const Icon = typeIcons[artifact.artifact_type] ?? File
-  const label = typeLabels[artifact.artifact_type] ?? 'File'
+  const Icon = getArtifactIcon(artifact)
+  const label = getArtifactLabel(artifact)
   const openPreview = usePanelStore(s => s.openArtifact)
 
   const downloadUrl =

@@ -2,27 +2,24 @@
 
 import { useArtifactStore, usePanelStore } from '@cubebox/core'
 import type { Artifact } from '@cubebox/core'
-import {
-  X, Download, Globe, FileText, Code, Image, Database, File,
-} from 'lucide-react'
+import { X, Download } from 'lucide-react'
+import { getArtifactIcon } from './artifactIcons'
 import { HtmlPreview } from './HtmlPreview'
 import { ImagePreview } from './ImagePreview'
 import { CodePreview } from './CodePreview'
+import { PdfPreview } from './PdfPreview'
 import { DocumentPreview } from './DocumentPreview'
 import { DataPreview } from './DataPreview'
 import { FallbackPreview } from './FallbackPreview'
 
-const typeIcons: Record<string, typeof File> = {
-  website: Globe,
-  document: FileText,
-  code: Code,
-  image: Image,
-  data: Database,
-  file: File,
+function isPdf(artifact: Artifact): boolean {
+  if (artifact.mime_type === 'application/pdf') return true
+  const filename = artifact.entry_file || artifact.path.split('/').pop() || ''
+  return /\.pdf$/i.test(filename)
 }
 
 function ArtifactPanelHeader({ artifact, onClose }: { artifact: Artifact; onClose: () => void }) {
-  const Icon = typeIcons[artifact.artifact_type] ?? File
+  const Icon = getArtifactIcon(artifact)
   const downloadUrl =
     `/api/v1/conversations/${artifact.conversation_id}/artifacts/${artifact.id}/download`
 
@@ -59,6 +56,11 @@ function ArtifactPanelHeader({ artifact, onClose }: { artifact: Artifact; onClos
 }
 
 function PreviewContent({ artifact }: { artifact: Artifact }) {
+  // Route PDFs to PdfPreview regardless of artifact_type
+  if (isPdf(artifact)) {
+    return <PdfPreview artifact={artifact} />
+  }
+
   switch (artifact.artifact_type) {
     case 'website':
       return <HtmlPreview artifact={artifact} />
