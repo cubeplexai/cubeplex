@@ -3,9 +3,9 @@
 import { useState } from 'react'
 import {
   Package, ChevronDown, ChevronRight, Globe, FileText, Code, Image, Database, File, Eye,
-  Download,
+  Download, Loader2,
 } from 'lucide-react'
-import { useArtifactStore } from '@cubebox/core'
+import { useArtifactStore, usePanelStore } from '@cubebox/core'
 import type { Artifact } from '@cubebox/core'
 
 const typeIcons: Record<string, typeof File> = {
@@ -24,9 +24,10 @@ interface ArtifactGalleryProps {
 export function ArtifactGallery({ conversationId }: ArtifactGalleryProps) {
   const [isExpanded, setIsExpanded] = useState(false)
   const artifacts = useArtifactStore(s => s.getArtifacts(conversationId))
-  const openPreview = useArtifactStore(s => s.openPreview)
+  const isLoading = useArtifactStore(s => s.isLoading(conversationId))
+  const openPreview = usePanelStore(s => s.openArtifact)
 
-  if (artifacts.length === 0) return null
+  if (!isLoading && artifacts.length === 0) return null
 
   return (
     <div className="border-b border-border bg-card/50">
@@ -42,21 +43,38 @@ export function ArtifactGallery({ conversationId }: ArtifactGalleryProps) {
         )}
         <Package className="size-3" />
         <span>Artifacts</span>
-        <span className="rounded-full bg-muted px-1.5 py-0.5 text-[10px]
-          text-muted-foreground/70">
-          {artifacts.length}
-        </span>
+        {isLoading ? (
+          <Loader2 className="size-3 animate-spin text-muted-foreground/70" />
+        ) : (
+          <span className="rounded-full bg-muted px-1.5 py-0.5 text-[10px]
+            text-muted-foreground/70">
+            {artifacts.length}
+          </span>
+        )}
       </button>
 
       {isExpanded && (
         <div className="px-4 pb-3 grid gap-1.5">
-          {artifacts.map(artifact => (
-            <ArtifactGalleryItem
-              key={artifact.id}
-              artifact={artifact}
-              onPreview={() => openPreview(conversationId, artifact.id)}
-            />
-          ))}
+          {isLoading && artifacts.length === 0 ? (
+            Array.from({ length: 2 }).map((_, i) => (
+              <div
+                key={i}
+                className="flex items-center gap-2.5 px-2.5 py-1.5 rounded-md bg-background
+                  border border-border/50"
+              >
+                <div className="size-3.5 rounded bg-muted animate-pulse shrink-0" />
+                <div className="h-3 rounded bg-muted animate-pulse flex-1" />
+              </div>
+            ))
+          ) : (
+            artifacts.map(artifact => (
+              <ArtifactGalleryItem
+                key={artifact.id}
+                artifact={artifact}
+                onPreview={() => openPreview(conversationId, artifact.id)}
+              />
+            ))
+          )}
         </div>
       )}
     </div>
