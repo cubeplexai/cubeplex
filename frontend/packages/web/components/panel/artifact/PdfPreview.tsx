@@ -149,6 +149,7 @@ interface PdfPreviewProps {
 }
 
 export function PdfPreview({ artifact }: PdfPreviewProps) {
+  const [loading, setLoading] = useState(true)
   const [numPages, setNumPages] = useState(0)
   const [currentPage, setCurrentPage] = useState(1)
   const [scale, setScale] = useState(1.0)
@@ -199,6 +200,7 @@ export function PdfPreview({ artifact }: PdfPreviewProps) {
   const onDocumentLoadSuccess = useCallback(async (pdf: PdfProxy) => {
     setNumPages(pdf.numPages)
     setCurrentPage(1)
+    setLoading(false)
 
     // Extract outline (TOC)
     const outline = await pdf.getOutline()
@@ -282,7 +284,14 @@ export function PdfPreview({ artifact }: PdfPreviewProps) {
       </div>
 
       {/* Body: optional TOC sidebar + PDF pages */}
-      <div className="flex flex-1 overflow-hidden">
+      <div className="relative flex flex-1 overflow-hidden">
+        {/* Loading overlay */}
+        {loading && (
+          <div className="absolute inset-0 z-10 bg-background">
+            <PreviewLoading />
+          </div>
+        )}
+
         {/* TOC sidebar */}
         {tocOpen && hasToc && (
           <div className="w-[220px] shrink-0 border-r border-border bg-card overflow-hidden">
@@ -295,12 +304,10 @@ export function PdfPreview({ artifact }: PdfPreviewProps) {
         )}
 
         {/* PDF pages — continuous scroll */}
-        <div ref={scrollRef} className="flex-1 overflow-auto bg-muted/40 flex flex-col min-h-0">
+        <div ref={scrollRef} className="flex-1 overflow-auto bg-muted/40">
           <Document
             file={fileUrl}
             onLoadSuccess={onDocumentLoadSuccess}
-            className="flex-1 flex flex-col"
-            loading={<PreviewLoading />}
             error={
               <div className="p-4 text-sm text-destructive text-center">
                 Failed to load PDF
