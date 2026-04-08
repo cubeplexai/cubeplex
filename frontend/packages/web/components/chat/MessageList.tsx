@@ -52,9 +52,9 @@ function buildHistoricalToolResultMap(
     }
   }
   for (const msg of messages) {
-    if (msg.role === 'tool' && msg.tool_call_id && msg.content) {
+    if (msg.role === 'tool' && msg.tool_call_id) {
       map[msg.tool_call_id] = {
-        content: msg.content,
+        content: msg.content ?? '',
         receivedAt: new Date(msg.created_at ?? 0).getTime(),
         startedAt: toolCallStartMap[msg.tool_call_id],
       }
