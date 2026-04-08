@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import type { Artifact } from '@cubebox/core'
+import { PreviewLoading } from './PreviewLoading'
 
 interface CodePreviewProps {
   artifact: Artifact
@@ -34,11 +35,7 @@ export function CodePreview({ artifact }: CodePreviewProps) {
   }
 
   if (code === null) {
-    return (
-      <div className="p-4 text-sm text-muted-foreground animate-pulse">
-        Loading...
-      </div>
-    )
+    return <PreviewLoading />
   }
 
   return (

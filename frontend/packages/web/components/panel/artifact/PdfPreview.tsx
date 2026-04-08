@@ -3,9 +3,10 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { Document, Page, pdfjs } from 'react-pdf'
 import {
-  Loader2, ChevronLeft, ChevronRight, ZoomIn, ZoomOut, List, ChevronRight as Chevron,
+  ChevronLeft, ChevronRight, ZoomIn, ZoomOut, List, ChevronRight as Chevron,
 } from 'lucide-react'
 import type { Artifact } from '@cubebox/core'
+import { PreviewLoading } from './PreviewLoading'
 
 import 'react-pdf/dist/Page/AnnotationLayer.css'
 import 'react-pdf/dist/Page/TextLayer.css'
@@ -298,11 +299,7 @@ export function PdfPreview({ artifact }: PdfPreviewProps) {
           <Document
             file={fileUrl}
             onLoadSuccess={onDocumentLoadSuccess}
-            loading={
-              <div className="flex items-center justify-center py-20">
-                <Loader2 className="size-5 animate-spin text-muted-foreground" />
-              </div>
-            }
+            loading={<PreviewLoading />}
             error={
               <div className="p-4 text-sm text-destructive text-center">
                 Failed to load PDF
@@ -327,7 +324,7 @@ export function PdfPreview({ artifact }: PdfPreviewProps) {
                         className="flex items-center justify-center bg-white"
                         style={{ width: pageWidth ?? 'auto', minHeight: 200 }}
                       >
-                        <Loader2 className="size-5 animate-spin text-muted-foreground" />
+                        <PreviewLoading />
                       </div>
                     }
                   />

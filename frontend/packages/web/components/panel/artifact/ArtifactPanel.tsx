@@ -3,8 +3,9 @@
 import dynamic from 'next/dynamic'
 import { useArtifactStore, usePanelStore } from '@cubebox/core'
 import type { Artifact } from '@cubebox/core'
-import { X, Download, Loader2 } from 'lucide-react'
+import { X, Download } from 'lucide-react'
 import { getArtifactIcon } from './artifactIcons'
+import { PreviewLoading } from './PreviewLoading'
 import { HtmlPreview } from './HtmlPreview'
 import { ImagePreview } from './ImagePreview'
 import { CodePreview } from './CodePreview'
@@ -16,11 +17,7 @@ const PdfPreview = dynamic(
   () => import('./PdfPreview').then(m => m.PdfPreview),
   {
     ssr: false,
-    loading: () => (
-      <div className="flex items-center justify-center h-full">
-        <Loader2 className="size-5 animate-spin text-muted-foreground" />
-      </div>
-    ),
+    loading: () => <PreviewLoading />,
   },
 )
 

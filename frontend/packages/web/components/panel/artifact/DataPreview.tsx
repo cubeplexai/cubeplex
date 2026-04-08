@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useMemo } from 'react'
 import type { Artifact } from '@cubebox/core'
+import { PreviewLoading } from './PreviewLoading'
 
 interface DataPreviewProps {
   artifact: Artifact
@@ -86,7 +87,7 @@ export function DataPreview({ artifact }: DataPreviewProps) {
   }
 
   if (!parsed) {
-    return <div className="p-4 text-sm text-muted-foreground animate-pulse">Loading...</div>
+    return <PreviewLoading />
   }
 
   if (parsed.type === 'csv') {

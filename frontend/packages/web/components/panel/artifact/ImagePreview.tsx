@@ -1,8 +1,8 @@
 'use client'
 
 import { useState } from 'react'
-import { Loader2 } from 'lucide-react'
 import type { Artifact } from '@cubebox/core'
+import { PreviewLoading } from './PreviewLoading'
 
 interface ImagePreviewProps {
   artifact: Artifact
@@ -17,7 +17,9 @@ export function ImagePreview({ artifact }: ImagePreviewProps) {
   return (
     <div className="flex items-center justify-center h-full p-4 bg-muted/20">
       {loading && (
-        <Loader2 className="absolute size-5 animate-spin text-muted-foreground" />
+        <div className="absolute inset-0">
+          <PreviewLoading />
+        </div>
       )}
       <img
         src={previewUrl}
