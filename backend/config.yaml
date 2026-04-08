@@ -16,6 +16,10 @@ default:
     # Default model in "provider/model-id" format
     default_model: "cubebox/doubao-seed-1.8-thinking"
 
+    # Fallback models tried in order when default_model fails (timeout/error)
+    fallback_models:
+      - "cubebox/qwen3.5-plus-thinking"
+
     # Model Providers Configuration
     providers:
       cubebox:

@@ -85,6 +85,11 @@ class LLMConfig(BaseModel):
         description="Default model in 'provider/model-id' format",
         alias="default_model",
     )
+    fallback_models: list[str] = Field(
+        default_factory=list,
+        description="Fallback models in 'provider/model-id' format, tried in order",
+        alias="fallback_models",
+    )
     providers: dict[str, ProviderConfig] = Field(
         default_factory=dict, description="LLM providers configuration"
     )
