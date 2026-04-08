@@ -115,19 +115,27 @@ class SandboxManager:
                 await repo.mark_terminated(record.id)
 
             # Create a new sandbox
-            # NOTE: PVC volume binding is temporarily disabled — backend
-            # does not yet support it.  The volume config/helpers are kept
-            # so we can re-enable later.
-            logger.info("Creating new sandbox for user {}", user_id)
+            volumes: list[Volume] | None = None
+            if self._volume_enabled:
+                volume = self._build_user_volume(user_id)
+                volumes = [volume]
+                logger.info(
+                    "Creating new sandbox for user {} with PVC {}",
+                    user_id,
+                    volume.pvc.claim_name,  # type: ignore[union-attr]
+                )
+            else:
+                logger.info("Creating new sandbox for user {}", user_id)
 
             raw_sandbox = await opensandbox.Sandbox.create(
                 self._image,
                 connection_config=conn_config,
                 timeout=None,
                 ready_timeout=timedelta(seconds=self._ready_timeout),
+                volumes=volumes,
             )
 
-            backend = OpenSandbox(sandbox=raw_sandbox)
+            backend = OpenSandbox(sandbox=raw_sandbox, workdir=self._workdir)
             logger.info("Sandbox created: {}", backend.id)
 
             # Sync skills
