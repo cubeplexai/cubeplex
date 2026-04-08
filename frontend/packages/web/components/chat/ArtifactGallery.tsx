@@ -2,20 +2,11 @@
 
 import { useState } from 'react'
 import {
-  Package, ChevronDown, ChevronRight, Globe, FileText, Code, Image, Database, File, Eye,
-  Download, Loader2,
+  Package, ChevronDown, ChevronRight, Eye, Download, Loader2,
 } from 'lucide-react'
 import { useArtifactStore, usePanelStore } from '@cubebox/core'
 import type { Artifact } from '@cubebox/core'
-
-const typeIcons: Record<string, typeof File> = {
-  website: Globe,
-  document: FileText,
-  code: Code,
-  image: Image,
-  data: Database,
-  file: File,
-}
+import { getArtifactIcon } from '@/components/panel/artifact/artifactIcons'
 
 interface ArtifactGalleryProps {
   conversationId: string
@@ -84,7 +75,7 @@ export function ArtifactGallery({ conversationId }: ArtifactGalleryProps) {
 function ArtifactGalleryItem(
   { artifact, onPreview }: { artifact: Artifact; onPreview: () => void },
 ) {
-  const Icon = typeIcons[artifact.artifact_type] ?? File
+  const Icon = getArtifactIcon(artifact)
   const downloadUrl =
     `/api/v1/conversations/${artifact.conversation_id}/artifacts/${artifact.id}/download`
 
