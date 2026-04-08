@@ -362,7 +362,13 @@ async def send_message(
             stream_task = asyncio.create_task(_drain_main_stream())
 
             while True:
-                item = await event_q.get()
+                try:
+                    item = await asyncio.wait_for(event_q.get(), timeout=15)
+                except TimeoutError:
+                    # Send SSE comment as heartbeat to keep connection alive
+                    # during long LLM calls
+                    yield ": heartbeat\n\n"
+                    continue
                 if item is None:
                     break
 
