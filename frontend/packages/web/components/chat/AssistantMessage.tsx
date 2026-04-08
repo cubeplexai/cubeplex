@@ -395,8 +395,8 @@ export function AssistantMessage(
             />
           )
         })}
-        {!hasContent && isStreaming && (
-          <div data-testid="loading-indicator" className="flex items-center gap-1 pl-1">
+        {isStreaming && (
+          <div data-testid="loading-indicator" className="flex items-center gap-1 pl-1 h-6">
             {statusPhase === 'sandbox_creating' ? (
               <span className="text-xs text-muted-foreground animate-pulse">
                 正在准备沙箱环境...
