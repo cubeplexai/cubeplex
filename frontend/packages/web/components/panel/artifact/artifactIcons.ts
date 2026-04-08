@@ -1,70 +1,72 @@
 import type { Artifact } from '@cubebox/core'
-import type { LucideIcon } from 'lucide-react'
+import type { IconType } from 'react-icons'
 import {
-  File, FileText, FileCode, FileJson, FileSpreadsheet,
-  FileImage, FileVideo, FileAudio, FileArchive, FileType,
-  Globe, Code, Image, Database, Presentation,
-} from 'lucide-react'
+  FaFile, FaFileLines, FaFileCode, FaFileCsv, FaFileExcel,
+  FaFileImage, FaFileVideo, FaFileAudio, FaFileZipper, FaFilePdf,
+  FaFileWord, FaFilePowerpoint, FaCode, FaGlobe, FaImage, FaDatabase,
+} from 'react-icons/fa6'
 
 // ── Filename extension → icon ──────────────────────────────────────────────
 
-const extIcons: Record<string, LucideIcon> = {
+const extIcons: Record<string, IconType> = {
   // PDF
-  pdf: FileType,
+  pdf: FaFilePdf,
   // Documents
-  doc: FileText, docx: FileText, odt: FileText, rtf: FileText,
+  doc: FaFileWord, docx: FaFileWord, odt: FaFileLines, rtf: FaFileLines,
   // Markdown / text
-  md: FileText, markdown: FileText, mdx: FileText, txt: FileText,
+  md: FaFileLines, markdown: FaFileLines, mdx: FaFileLines, txt: FaFileLines,
   // Presentations
-  ppt: Presentation, pptx: Presentation, odp: Presentation, key: Presentation,
+  ppt: FaFilePowerpoint, pptx: FaFilePowerpoint, odp: FaFilePowerpoint, key: FaFilePowerpoint,
   // Spreadsheets
-  xls: FileSpreadsheet, xlsx: FileSpreadsheet, ods: FileSpreadsheet, csv: FileSpreadsheet,
+  xls: FaFileExcel, xlsx: FaFileExcel, ods: FaFileExcel,
+  csv: FaFileCsv,
   // Code
-  js: FileCode, ts: FileCode, jsx: FileCode, tsx: FileCode,
-  py: FileCode, rb: FileCode, go: FileCode, rs: FileCode,
-  java: FileCode, kt: FileCode, c: FileCode, cpp: FileCode, h: FileCode,
-  cs: FileCode, swift: FileCode, sh: FileCode, bash: FileCode,
-  html: FileCode, css: FileCode, scss: FileCode, less: FileCode,
-  sql: FileCode, yaml: FileCode, yml: FileCode, toml: FileCode,
-  xml: FileCode, vue: FileCode, svelte: FileCode,
+  js: FaFileCode, ts: FaFileCode, jsx: FaFileCode, tsx: FaFileCode,
+  py: FaFileCode, rb: FaFileCode, go: FaFileCode, rs: FaFileCode,
+  java: FaFileCode, kt: FaFileCode, c: FaFileCode, cpp: FaFileCode, h: FaFileCode,
+  cs: FaFileCode, swift: FaFileCode, sh: FaFileCode, bash: FaFileCode,
+  html: FaFileCode, css: FaFileCode, scss: FaFileCode, less: FaFileCode,
+  sql: FaFileCode, yaml: FaFileCode, yml: FaFileCode, toml: FaFileCode,
+  xml: FaFileCode, vue: FaFileCode, svelte: FaFileCode,
   // Data
-  json: FileJson, jsonl: FileJson,
+  json: FaFileCode, jsonl: FaFileCode,
   // Images
-  png: FileImage, jpg: FileImage, jpeg: FileImage, gif: FileImage,
-  svg: FileImage, webp: FileImage, bmp: FileImage, ico: FileImage,
+  png: FaFileImage, jpg: FaFileImage, jpeg: FaFileImage, gif: FaFileImage,
+  svg: FaFileImage, webp: FaFileImage, bmp: FaFileImage, ico: FaFileImage,
   // Video
-  mp4: FileVideo, webm: FileVideo, mov: FileVideo, avi: FileVideo, mkv: FileVideo,
+  mp4: FaFileVideo, webm: FaFileVideo, mov: FaFileVideo, avi: FaFileVideo, mkv: FaFileVideo,
   // Audio
-  mp3: FileAudio, wav: FileAudio, ogg: FileAudio, flac: FileAudio, aac: FileAudio,
+  mp3: FaFileAudio, wav: FaFileAudio, ogg: FaFileAudio, flac: FaFileAudio, aac: FaFileAudio,
   // Archives
-  zip: FileArchive, tar: FileArchive, gz: FileArchive, rar: FileArchive, '7z': FileArchive,
+  zip: FaFileZipper, tar: FaFileZipper, gz: FaFileZipper,
+  rar: FaFileZipper, '7z': FaFileZipper,
 }
 
-// ── Mime type prefix → icon ────────────────────────────────────────────────
+// ── Mime type → icon ──────────────────────────────────────────────────────
 
-const mimeIcons: Record<string, LucideIcon> = {
-  'application/pdf': FileType,
-  'text/markdown': FileText,
-  'text/csv': FileSpreadsheet,
-  'application/json': FileJson,
+const mimeIcons: Record<string, IconType> = {
+  'application/pdf': FaFilePdf,
+  'text/markdown': FaFileLines,
+  'text/csv': FaFileCsv,
+  'application/json': FaFileCode,
 }
 
-const mimePrefixIcons: [string, LucideIcon][] = [
-  ['image/', FileImage],
-  ['video/', FileVideo],
-  ['audio/', FileAudio],
-  ['text/', FileText],
+const mimePrefixIcons: [string, IconType][] = [
+  ['image/', FaFileImage],
+  ['video/', FaFileVideo],
+  ['audio/', FaFileAudio],
+  ['text/', FaFileLines],
 ]
 
 // ── Artifact type → fallback icon ──────────────────────────────────────────
 
-const typeIcons: Record<string, LucideIcon> = {
-  website: Globe,
-  document: FileText,
-  code: Code,
-  image: Image,
-  data: Database,
-  file: File,
+const typeIcons: Record<string, IconType> = {
+  website: FaGlobe,
+  document: FaFileLines,
+  code: FaCode,
+  image: FaImage,
+  data: FaDatabase,
+  file: FaFile,
 }
 
 // ── Label mapping ──────────────────────────────────────────────────────────
@@ -73,7 +75,8 @@ const extLabels: Record<string, string> = {
   pdf: 'PDF',
   doc: 'Word', docx: 'Word', odt: 'Document', rtf: 'Document',
   ppt: 'Slides', pptx: 'Slides', odp: 'Slides', key: 'Slides',
-  xls: 'Spreadsheet', xlsx: 'Spreadsheet', ods: 'Spreadsheet', csv: 'CSV',
+  xls: 'Excel', xlsx: 'Excel', ods: 'Spreadsheet',
+  csv: 'CSV',
   json: 'JSON', jsonl: 'JSON Lines',
   md: 'Markdown', markdown: 'Markdown', mdx: 'MDX',
   zip: 'Archive', tar: 'Archive', gz: 'Archive', rar: 'Archive', '7z': 'Archive',
@@ -99,7 +102,7 @@ function getExt(artifact: Artifact): string {
 }
 
 /** Return the best icon for a given artifact, considering extension and mime. */
-export function getArtifactIcon(artifact: Artifact): LucideIcon {
+export function getArtifactIcon(artifact: Artifact): IconType {
   // 1. Try extension
   const ext = getExt(artifact)
   if (ext && extIcons[ext]) return extIcons[ext]
@@ -116,7 +119,7 @@ export function getArtifactIcon(artifact: Artifact): LucideIcon {
   }
 
   // 4. Fallback to artifact_type
-  return typeIcons[artifact.artifact_type] ?? File
+  return typeIcons[artifact.artifact_type] ?? FaFile
 }
 
 /** Return a human-readable label for the artifact's file type. */
