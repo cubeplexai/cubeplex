@@ -1,9 +1,9 @@
 'use client'
 
-import { useArtifactStore } from '@cubebox/core'
+import { useArtifactStore, usePanelStore } from '@cubebox/core'
 import type { Artifact } from '@cubebox/core'
 import {
-  X, Download, Globe, FileText, Code, Image, Database, File, Package, RefreshCw,
+  X, Download, Globe, FileText, Code, Image, Database, File,
 } from 'lucide-react'
 import { HtmlPreview } from './HtmlPreview'
 import { ImagePreview } from './ImagePreview'
@@ -76,19 +76,18 @@ function PreviewContent({ artifact }: { artifact: Artifact }) {
 }
 
 export function ArtifactPanel() {
-  const previewArtifactId = useArtifactStore(s => s.previewArtifactId)
-  const previewConversationId = useArtifactStore(s => s.previewConversationId)
+  const view = usePanelStore(s => s.view)
+  const close = usePanelStore(s => s.close)
   const artifacts = useArtifactStore(s => s.artifacts)
-  const closePreview = useArtifactStore(s => s.closePreview)
 
-  if (!previewArtifactId || !previewConversationId) return null
+  if (view.type !== 'artifact') return null
 
-  const artifact = artifacts[previewConversationId]?.[previewArtifactId]
+  const artifact = artifacts[view.conversationId]?.[view.artifactId]
   if (!artifact) return null
 
   return (
     <div className="flex flex-col h-full bg-background">
-      <ArtifactPanelHeader artifact={artifact} onClose={closePreview} />
+      <ArtifactPanelHeader artifact={artifact} onClose={close} />
       <div className="flex-1 overflow-hidden">
         <PreviewContent artifact={artifact} />
       </div>

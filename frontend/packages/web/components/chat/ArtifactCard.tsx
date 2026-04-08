@@ -13,7 +13,7 @@ import {
   Eye,
 } from 'lucide-react'
 import type { Artifact } from '@cubebox/core'
-import { useArtifactStore } from '@cubebox/core'
+import { usePanelStore } from '@cubebox/core'
 
 interface ArtifactCardProps {
   artifact: Artifact
@@ -44,7 +44,7 @@ export const ArtifactCard = memo(function ArtifactCard({
 }: ArtifactCardProps) {
   const Icon = typeIcons[artifact.artifact_type] ?? File
   const label = typeLabels[artifact.artifact_type] ?? 'File'
-  const openPreview = useArtifactStore(s => s.openPreview)
+  const openPreview = usePanelStore(s => s.openArtifact)
 
   const downloadUrl =
     `${baseUrl}/api/v1/conversations/${artifact.conversation_id}/artifacts/${artifact.id}/download`

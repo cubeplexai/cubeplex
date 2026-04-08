@@ -12,6 +12,11 @@ export {
   type AgentStream,
 } from './messageStore'
 export {
+  usePanelStore,
+  type PanelStore,
+  type PanelView,
+} from './panelStore'
+export {
   useToolDetailStore,
   type ToolDetailStore,
 } from './toolDetailStore'

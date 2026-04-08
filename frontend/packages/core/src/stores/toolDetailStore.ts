@@ -1,5 +1,6 @@
 // frontend/packages/core/src/stores/toolDetailStore.ts
-import { create } from 'zustand'
+// Thin compatibility layer — delegates to the unified panelStore.
+import { usePanelStore } from './panelStore'
 import type { PanelContentType } from '../types'
 
 export interface ToolDetailStore {
@@ -18,61 +19,57 @@ export interface ToolDetailStore {
   close: () => void
 }
 
-/** Map tool name + optional backend content_type to a PanelContentType. */
-function mapContentType(
-  toolName: string,
-  backendContentType?: string,
-): PanelContentType {
-  // Built-in tools: detect from tool name
-  if (toolName === 'load_skill') return 'skill'
-  if (toolName === 'execute') return 'terminal'
-  if (
-    toolName === 'code_execute' || toolName === 'python'
-  ) {
-    return 'code_execute'
-  }
-
-  // MCP tools: use backend-declared content_type to pick panel
-  if (backendContentType === 'json') {
-    // JSON content: use tool-name-specific panels
-    if (toolName === 'web_search' || toolName === 'search') {
-      return 'search'
-    }
-    return 'generic'
-  }
-  if (backendContentType === 'text') {
-    if (toolName === 'web_fetch' || toolName === 'fetch') {
-      return 'web_fetch'
-    }
-    return 'generic'
-  }
-
-  // Fallback: guess from tool name
-  if (toolName === 'web_search' || toolName === 'search') {
-    return 'search'
-  }
-  if (toolName === 'web_fetch' || toolName === 'fetch') {
-    return 'web_fetch'
-  }
-  return 'generic'
-}
-
-export const useToolDetailStore =
-  create<ToolDetailStore>((set) => ({
-    isOpen: false,
-    toolName: '',
-    toolArgs: {},
-    toolResult: null,
-    contentType: 'generic',
-
-    open: (toolName, toolArgs, toolResult, contentType) =>
-      set({
-        isOpen: true,
-        toolName,
-        toolArgs,
-        toolResult,
-        contentType: mapContentType(toolName, contentType),
-      }),
-
-    close: () => set({ isOpen: false }),
-  }))
+export const useToolDetailStore = Object.assign(
+  function useToolDetailStoreHook<T>(selector: (s: ToolDetailStore) => T): T {
+    return usePanelStore((panel) => {
+      const v = panel.view
+      const facade: ToolDetailStore =
+        v.type === 'tool'
+          ? {
+              isOpen: true,
+              toolName: v.toolName,
+              toolArgs: v.toolArgs,
+              toolResult: v.toolResult,
+              contentType: v.contentType,
+              open: panel.openTool,
+              close: panel.close,
+            }
+          : {
+              isOpen: false,
+              toolName: '',
+              toolArgs: {},
+              toolResult: null,
+              contentType: 'generic',
+              open: panel.openTool,
+              close: panel.close,
+            }
+      return selector(facade)
+    })
+  },
+  {
+    getState(): ToolDetailStore {
+      const panel = usePanelStore.getState()
+      const v = panel.view
+      if (v.type === 'tool') {
+        return {
+          isOpen: true,
+          toolName: v.toolName,
+          toolArgs: v.toolArgs,
+          toolResult: v.toolResult,
+          contentType: v.contentType,
+          open: panel.openTool,
+          close: panel.close,
+        }
+      }
+      return {
+        isOpen: false,
+        toolName: '',
+        toolArgs: {},
+        toolResult: null,
+        contentType: 'generic',
+        open: panel.openTool,
+        close: panel.close,
+      }
+    },
+  },
+)
