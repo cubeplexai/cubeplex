@@ -1,9 +1,11 @@
 'use client'
 
+import { useState, useEffect } from 'react'
 import dynamic from 'next/dynamic'
-import { useArtifactStore, usePanelStore } from '@cubebox/core'
-import type { Artifact } from '@cubebox/core'
-import { X, Download } from 'lucide-react'
+import { useArtifactStore, usePanelStore, createApiClient } from '@cubebox/core'
+import type { Artifact, ArtifactVersion } from '@cubebox/core'
+import { X, Download, ChevronDown } from 'lucide-react'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { getArtifactIcon } from './artifactIcons'
 import { PreviewLoading } from './PreviewLoading'
 import { HtmlPreview } from './HtmlPreview'
@@ -27,10 +29,97 @@ function isPdf(artifact: Artifact): boolean {
   return /\.pdf$/i.test(filename)
 }
 
-function ArtifactPanelHeader({ artifact, onClose }: { artifact: Artifact; onClose: () => void }) {
+function formatRelativeTime(dateStr: string): string {
+  const date = new Date(dateStr)
+  const now = new Date()
+  const diffMs = now.getTime() - date.getTime()
+  const diffMin = Math.floor(diffMs / 60000)
+  if (diffMin < 1) return 'just now'
+  if (diffMin < 60) return `${diffMin}m ago`
+  const diffHr = Math.floor(diffMin / 60)
+  if (diffHr < 24) return `${diffHr}h ago`
+  const diffDay = Math.floor(diffHr / 24)
+  return `${diffDay}d ago`
+}
+
+function VersionPopover({
+  artifact,
+  versions,
+  selectedVersion,
+  onSelectVersion,
+}: {
+  artifact: Artifact
+  versions: ArtifactVersion[]
+  selectedVersion: number | null
+  onSelectVersion: (version: number | null) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const currentVersion = selectedVersion ?? artifact.version
+
+  if (artifact.version <= 1) {
+    return null
+  }
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger
+        className="shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-[10px]
+          text-muted-foreground hover:bg-muted/80 transition-colors flex items-center gap-0.5"
+      >
+        v{currentVersion}
+        <ChevronDown className="size-2.5" />
+      </PopoverTrigger>
+      <PopoverContent className="w-56 p-1" align="end">
+        <div className="max-h-48 overflow-y-auto">
+          {versions.map((v) => (
+            <button
+              key={v.id}
+              onClick={() => {
+                onSelectVersion(v.version === artifact.version ? null : v.version)
+                setOpen(false)
+              }}
+              className={`w-full text-left px-2 py-1.5 rounded text-xs flex items-center
+                justify-between hover:bg-muted/50 transition-colors
+                ${v.version === currentVersion ? 'bg-muted' : ''}`}
+            >
+              <span className="flex items-center gap-1.5">
+                <span className="font-medium">v{v.version}</span>
+                {v.name !== artifact.name && (
+                  <span className="text-muted-foreground truncate max-w-[100px]">
+                    {v.name}
+                  </span>
+                )}
+              </span>
+              <span className="text-muted-foreground text-[10px]">
+                {formatRelativeTime(v.created_at)}
+              </span>
+            </button>
+          ))}
+        </div>
+      </PopoverContent>
+    </Popover>
+  )
+}
+
+function ArtifactPanelHeader({
+  artifact,
+  versions,
+  selectedVersion,
+  onSelectVersion,
+  onClose,
+}: {
+  artifact: Artifact
+  versions: ArtifactVersion[]
+  selectedVersion: number | null
+  onSelectVersion: (version: number | null) => void
+  onClose: () => void
+}) {
   const Icon = getArtifactIcon(artifact)
-  const downloadUrl =
+  const baseDownloadUrl =
     `/api/v1/conversations/${artifact.conversation_id}/artifacts/${artifact.id}/download`
+  const downloadUrl = selectedVersion != null
+    ? `${baseDownloadUrl}?version=${selectedVersion}`
+    : baseDownloadUrl
 
   return (
     <header className="h-11 border-b border-border flex items-center gap-2 px-4 shrink-0 bg-card">
@@ -38,12 +127,12 @@ function ArtifactPanelHeader({ artifact, onClose }: { artifact: Artifact; onClos
       <span className="text-sm font-medium text-foreground truncate flex-1">
         {artifact.name}
       </span>
-      {artifact.version > 1 && (
-        <span className="shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-[10px]
-          text-muted-foreground">
-          v{artifact.version}
-        </span>
-      )}
+      <VersionPopover
+        artifact={artifact}
+        versions={versions}
+        selectedVersion={selectedVersion}
+        onSelectVersion={onSelectVersion}
+      />
       <span className="flex items-center gap-1">
         <a
           href={downloadUrl}
@@ -64,7 +153,15 @@ function ArtifactPanelHeader({ artifact, onClose }: { artifact: Artifact; onClos
   )
 }
 
-function PreviewContent({ artifact }: { artifact: Artifact }) {
+function PreviewContent({
+  artifact,
+  version: _version,
+}: {
+  artifact: Artifact
+  version: number | null
+}) {
+  // TODO: pass version to preview components once they accept the prop (Task 11)
+
   // Route PDFs to PdfPreview regardless of artifact_type
   if (isPdf(artifact)) {
     return <PdfPreview artifact={artifact} />
@@ -90,17 +187,39 @@ export function ArtifactPanel() {
   const view = usePanelStore(s => s.view)
   const close = usePanelStore(s => s.close)
   const artifacts = useArtifactStore(s => s.artifacts)
+  const versions = useArtifactStore(s => s.versions)
+  const selectedVersion = useArtifactStore(s => s.selectedVersion)
+  const loadVersions = useArtifactStore(s => s.loadVersions)
+  const selectVersion = useArtifactStore(s => s.selectVersion)
 
-  if (view.type !== 'artifact') return null
+  const artifactId = view.type === 'artifact' ? view.artifactId : null
+  const conversationId = view.type === 'artifact' ? view.conversationId : null
+  const artifact = conversationId && artifactId
+    ? artifacts[conversationId]?.[artifactId]
+    : null
 
-  const artifact = artifacts[view.conversationId]?.[view.artifactId]
-  if (!artifact) return null
+  useEffect(() => {
+    if (!artifact || artifact.version <= 1 || !conversationId || !artifactId) return
+    const client = createApiClient('')
+    loadVersions(client, conversationId, artifactId)
+  }, [artifact, conversationId, artifactId, loadVersions])
+
+  if (view.type !== 'artifact' || !artifact) return null
+
+  const artifactVersions = versions[artifact.id] ?? []
+  const currentSelectedVersion = selectedVersion[artifact.id] ?? null
 
   return (
     <div className="flex flex-col h-full bg-background">
-      <ArtifactPanelHeader artifact={artifact} onClose={close} />
+      <ArtifactPanelHeader
+        artifact={artifact}
+        versions={artifactVersions}
+        selectedVersion={currentSelectedVersion}
+        onSelectVersion={(v) => selectVersion(artifact.id, v)}
+        onClose={close}
+      />
       <div className="flex-1 overflow-hidden">
-        <PreviewContent artifact={artifact} />
+        <PreviewContent artifact={artifact} version={currentSelectedVersion} />
       </div>
     </div>
   )
