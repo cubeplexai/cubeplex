@@ -114,7 +114,7 @@ async def download_artifact(
         with tarfile.open(fileobj=buf, mode="w") as tar:
             for key in keys:
                 data, _ = await store.download_file(key)
-                rel_name = key[len(prefix):]
+                rel_name = key[len(prefix) :]
                 info = tarfile.TarInfo(name=rel_name)
                 info.size = len(data)
                 tar.addfile(info, io.BytesIO(data))
