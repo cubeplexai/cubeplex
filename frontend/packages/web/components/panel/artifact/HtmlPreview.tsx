@@ -3,16 +3,17 @@
 import { useState } from 'react'
 import type { Artifact } from '@cubebox/core'
 import { PreviewLoading } from './PreviewLoading'
+import { buildPreviewUrl } from './previewUtils'
 
 interface HtmlPreviewProps {
   artifact: Artifact
+  version: number | null
 }
 
-export function HtmlPreview({ artifact }: HtmlPreviewProps) {
+export function HtmlPreview({ artifact, version }: HtmlPreviewProps) {
   const [loading, setLoading] = useState(true)
   const entryFile = artifact.entry_file || 'index.html'
-  const previewUrl =
-    `/api/v1/conversations/${artifact.conversation_id}/artifacts/${artifact.id}/preview/${entryFile}`
+  const previewUrl = buildPreviewUrl(artifact, entryFile, version)
 
   return (
     <div className="relative w-full h-full">
@@ -22,6 +23,7 @@ export function HtmlPreview({ artifact }: HtmlPreviewProps) {
         </div>
       )}
       <iframe
+        key={`${artifact.id}-${version}`}
         src={previewUrl}
         className="w-full h-full border-0"
         sandbox="allow-scripts allow-same-origin"

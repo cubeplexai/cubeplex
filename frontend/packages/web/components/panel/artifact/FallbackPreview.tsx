@@ -5,11 +5,13 @@ import type { Artifact } from '@cubebox/core'
 
 interface FallbackPreviewProps {
   artifact: Artifact
+  version: number | null
 }
 
-export function FallbackPreview({ artifact }: FallbackPreviewProps) {
+export function FallbackPreview({ artifact, version }: FallbackPreviewProps) {
+  const versionParam = version != null ? `?version=${version}` : ''
   const downloadUrl =
-    `/api/v1/conversations/${artifact.conversation_id}/artifacts/${artifact.id}/download`
+    `/api/v1/conversations/${artifact.conversation_id}/artifacts/${artifact.id}/download${versionParam}`
 
   return (
     <div className="flex flex-col items-center justify-center h-full gap-4 p-8 text-center">

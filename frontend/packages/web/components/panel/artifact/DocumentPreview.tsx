@@ -6,18 +6,19 @@ import remarkGfm from 'remark-gfm'
 import type { Artifact } from '@cubebox/core'
 import { proseClasses } from '@/lib/utils'
 import { PreviewLoading } from './PreviewLoading'
+import { buildPreviewUrl } from './previewUtils'
 
 interface DocumentPreviewProps {
   artifact: Artifact
+  version: number | null
 }
 
-export function DocumentPreview({ artifact }: DocumentPreviewProps) {
+export function DocumentPreview({ artifact, version }: DocumentPreviewProps) {
   const [content, setContent] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   const filename = artifact.entry_file || artifact.path.split('/').pop() || 'file'
-  const previewUrl =
-    `/api/v1/conversations/${artifact.conversation_id}/artifacts/${artifact.id}/preview/${filename}`
+  const previewUrl = buildPreviewUrl(artifact, filename, version)
 
   useEffect(() => {
     fetch(previewUrl)

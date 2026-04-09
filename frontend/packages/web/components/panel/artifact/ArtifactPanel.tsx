@@ -155,31 +155,29 @@ function ArtifactPanelHeader({
 
 function PreviewContent({
   artifact,
-  version: _version,
+  version,
 }: {
   artifact: Artifact
   version: number | null
 }) {
-  // TODO: pass version to preview components once they accept the prop (Task 11)
-
   // Route PDFs to PdfPreview regardless of artifact_type
   if (isPdf(artifact)) {
-    return <PdfPreview artifact={artifact} />
+    return <PdfPreview artifact={artifact} version={version} />
   }
 
   switch (artifact.artifact_type) {
     case 'website':
-      return <HtmlPreview artifact={artifact} />
+      return <HtmlPreview artifact={artifact} version={version} />
     case 'image':
-      return <ImagePreview artifact={artifact} />
+      return <ImagePreview artifact={artifact} version={version} />
     case 'code':
-      return <CodePreview artifact={artifact} />
+      return <CodePreview artifact={artifact} version={version} />
     case 'document':
-      return <DocumentPreview artifact={artifact} />
+      return <DocumentPreview artifact={artifact} version={version} />
     case 'data':
-      return <DataPreview artifact={artifact} />
+      return <DataPreview artifact={artifact} version={version} />
     default:
-      return <FallbackPreview artifact={artifact} />
+      return <FallbackPreview artifact={artifact} version={version} />
   }
 }
 
