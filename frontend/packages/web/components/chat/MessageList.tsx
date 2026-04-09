@@ -89,16 +89,20 @@ export function MessageList({ conversationId }: MessageListProps) {
     [historicalToolResults, toolResultMap],
   )
 
-  // When a completed/streaming mainStream is showing, skip the last assistant
-  // message in the history loop to avoid rendering the same response twice.
+  // After streaming completes, the assistant message is appended to history
+  // while streamAgents is kept intact for smooth transition. Skip the last
+  // history assistant message to avoid rendering the same response twice.
+  // During active streaming (isStreaming=true), the current turn's assistant
+  // message is NOT yet in history, so no dedup is needed — skipping here
+  // would incorrectly hide the *previous* turn's response.
   const lastAssistantId = useMemo(() => {
-    if (!mainStream) return null
+    if (!mainStream || isStreaming) return null
     const msgs = messages ?? []
     for (let i = msgs.length - 1; i >= 0; i--) {
       if (msgs[i].role === 'assistant') return msgs[i].id
     }
     return null
-  }, [messages, mainStream])
+  }, [messages, mainStream, isStreaming])
 
   // --- Auto-scroll: keep chat pinned to bottom during streaming ---
   const scrollRef = useRef<HTMLDivElement>(null)
