@@ -15,7 +15,9 @@ import { useMessages } from '@/hooks/useMessages'
 export default function ChatPage() {
   const params = useParams()
   const conversationId = params.id as string
-  const { setActive, fetchList, conversations } = useConversationStore()
+  const setActive = useConversationStore((s) => s.setActive)
+  const fetchList = useConversationStore((s) => s.fetchList)
+  const conversations = useConversationStore((s) => s.conversations)
   const { todos } = useMessages(conversationId)
 
   const loadArtifacts = useArtifactStore((s) => s.loadArtifacts)

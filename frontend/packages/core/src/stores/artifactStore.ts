@@ -68,6 +68,7 @@ export const useArtifactStore = create<ArtifactStore>((set, get) => ({
     }),
 
   async loadArtifacts(client, conversationId) {
+    if (get().loading[conversationId]) return
     set((s) => ({ loading: { ...s.loading, [conversationId]: true } }))
     try {
       const artifacts = await listArtifacts(client, conversationId)
