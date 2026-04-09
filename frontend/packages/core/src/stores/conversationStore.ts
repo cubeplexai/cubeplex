@@ -12,6 +12,7 @@ export interface ConversationStore {
   conversations: Conversation[]
   activeId: string | null
   isLoading: boolean
+  isFetchingList: boolean
   error: string | null
   fetchList(client: ApiClient): Promise<void>
   create(client: ApiClient, title?: string): Promise<Conversation>
@@ -24,18 +25,19 @@ export const useConversationStore = create<ConversationStore>((set, get) => ({
   conversations: [],
   activeId: null,
   isLoading: false,
+  isFetchingList: false,
   error: null,
 
   async fetchList(client: ApiClient) {
-    if (get().isLoading) return
-    set({ isLoading: true, error: null })
+    if (get().isFetchingList) return
+    set({ isFetchingList: true, error: null })
     try {
       const conversations = await listConversations(client)
       set({ conversations })
     } catch (err) {
       set({ error: (err as Error).message })
     } finally {
-      set({ isLoading: false })
+      set({ isFetchingList: false })
     }
   },
 
