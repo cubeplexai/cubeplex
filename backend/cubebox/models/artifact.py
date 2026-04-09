@@ -5,6 +5,8 @@ from datetime import UTC, datetime
 from sqlmodel import Field, SQLModel
 from uuid_utils import uuid7
 
+from cubebox.utils.time import utc_isoformat
+
 
 class Artifact(SQLModel, table=True):
     """Artifact model for agent-generated deliverables."""
@@ -35,6 +37,6 @@ class Artifact(SQLModel, table=True):
             "mime_type": self.mime_type,
             "description": self.description,
             "version": self.version,
-            "created_at": self.created_at.isoformat(),
-            "updated_at": self.updated_at.isoformat(),
+            "created_at": utc_isoformat(self.created_at),
+            "updated_at": utc_isoformat(self.updated_at),
         }

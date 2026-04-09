@@ -5,6 +5,8 @@ from datetime import UTC, datetime
 from sqlmodel import Field, SQLModel
 from uuid_utils import uuid7
 
+from cubebox.utils.time import utc_isoformat
+
 
 class ArtifactVersion(SQLModel, table=True):
     """Snapshot of artifact metadata at a specific version."""
@@ -32,5 +34,5 @@ class ArtifactVersion(SQLModel, table=True):
             "path": self.path,
             "entry_file": self.entry_file,
             "mime_type": self.mime_type,
-            "created_at": self.created_at.isoformat(),
+            "created_at": utc_isoformat(self.created_at),
         }

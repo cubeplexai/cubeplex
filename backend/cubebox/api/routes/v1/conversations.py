@@ -18,6 +18,7 @@ from cubebox.api.exceptions import InternalError, InvalidInputError
 from cubebox.db import get_session
 from cubebox.db.engine import _build_database_url, async_session_maker
 from cubebox.repositories import ConversationRepository
+from cubebox.utils.time import utc_isoformat
 
 router = APIRouter(prefix="/conversations", tags=["conversations"])
 
@@ -48,8 +49,8 @@ async def create_conversation(
     return {
         "id": conversation.id,
         "title": conversation.title,
-        "created_at": conversation.created_at.isoformat(),
-        "updated_at": conversation.updated_at.isoformat(),
+        "created_at": utc_isoformat(conversation.created_at),
+        "updated_at": utc_isoformat(conversation.updated_at),
     }
 
 
@@ -69,8 +70,8 @@ async def get_conversation(
     return {
         "id": conversation.id,
         "title": conversation.title,
-        "created_at": conversation.created_at.isoformat(),
-        "updated_at": conversation.updated_at.isoformat(),
+        "created_at": utc_isoformat(conversation.created_at),
+        "updated_at": utc_isoformat(conversation.updated_at),
     }
 
 
@@ -88,8 +89,8 @@ async def list_conversations(
             {
                 "id": c.id,
                 "title": c.title,
-                "created_at": c.created_at.isoformat(),
-                "updated_at": c.updated_at.isoformat(),
+                "created_at": utc_isoformat(c.created_at),
+                "updated_at": utc_isoformat(c.updated_at),
             }
             for c in conversations
         ],
@@ -116,8 +117,8 @@ async def update_conversation(
     return {
         "id": conversation.id,
         "title": conversation.title,
-        "created_at": conversation.created_at.isoformat(),
-        "updated_at": conversation.updated_at.isoformat(),
+        "created_at": utc_isoformat(conversation.created_at),
+        "updated_at": utc_isoformat(conversation.updated_at),
     }
 
 
