@@ -82,6 +82,19 @@ class ArtifactRepository:
         await self.session.refresh(artifact)
         return artifact
 
+    async def find_by_path(
+        self,
+        conversation_id: str,
+        path: str,
+    ) -> Artifact | None:
+        """Find an existing artifact in a conversation by its sandbox path."""
+        stmt = select(Artifact).where(
+            Artifact.conversation_id == conversation_id,  # type: ignore[arg-type]
+            Artifact.path == path,  # type: ignore[arg-type]
+        )
+        result = await self.session.execute(stmt)
+        return result.scalar_one_or_none()
+
     async def list_by_conversation(
         self,
         conversation_id: str,

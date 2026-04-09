@@ -17,5 +17,13 @@ register it using the `save_artifact` tool so the user can preview and download 
 - "data" — CSV, JSON, Excel data files
 - "file" — Anything else
 
-**For updates:** Pass the existing artifact_id to update rather than create a new artifact.
+**Updating artifacts (IMPORTANT):**
+- When you modify, improve, or recreate something that serves the same purpose as an \
+existing artifact, you MUST pass the existing `artifact_id` to create a new version \
+instead of a new artifact.
+- This applies even if the file path or filename changes (e.g. rewriting `snake.html` \
+as `snake-v2.html` is still the same artifact).
+- Check the existing artifacts list below to find the matching artifact_id.
+- Only create a new artifact (omit artifact_id) when the deliverable is genuinely new \
+and unrelated to any existing artifact.
 """
