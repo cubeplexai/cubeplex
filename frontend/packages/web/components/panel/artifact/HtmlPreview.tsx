@@ -12,7 +12,7 @@ interface HtmlPreviewProps {
 
 export function HtmlPreview({ artifact, version }: HtmlPreviewProps) {
   const [loading, setLoading] = useState(true)
-  const entryFile = artifact.entry_file || 'index.html'
+  const entryFile = artifact.entry_file || artifact.path.split('/').pop() || 'index.html'
   const previewUrl = buildPreviewUrl(artifact, entryFile, version)
 
   return (

@@ -76,6 +76,18 @@ def _create_save_artifact_tool(
             repo = ArtifactRepository(session)
             version_repo = ArtifactVersionRepository(session)
 
+            # Auto-match: if no artifact_id given, look for an existing
+            # artifact at the same path so we update instead of duplicating.
+            if not artifact_id:
+                existing = await repo.find_by_path(conversation_id, path)
+                if existing:
+                    artifact_id = existing.id
+                    logger.info(
+                        "Auto-matched artifact by path: id={}, path={}",
+                        artifact_id,
+                        path,
+                    )
+
             if artifact_id:
                 artifact = await repo.update(
                     artifact_id,
@@ -158,10 +170,31 @@ class ArtifactMiddleware(AgentMiddleware[Any, Any, Any]):
         # Register content_type so stream.py can label tool results
         get_registry().register_content_type("save_artifact", "artifact")
 
+    async def _build_artifact_list(self) -> str:
+        """Query DB for existing artifacts and format as a prompt section."""
+        from cubebox.db.engine import async_session_maker
+        from cubebox.repositories import ArtifactRepository
+
+        async with async_session_maker() as session:
+            repo = ArtifactRepository(session)
+            artifacts = await repo.list_by_conversation(self.conversation_id)
+
+        if not artifacts:
+            return "\n**Existing artifacts:** None yet.\n"
+
+        lines = ["\n**Existing artifacts:**"]
+        for a in artifacts:
+            lines.append(
+                f'- id=`{a.id}` name="{a.name}" type={a.artifact_type} path=`{a.path}` v{a.version}'
+            )
+        return "\n".join(lines) + "\n"
+
     async def awrap_model_call(
         self,
         request: ModelRequest[Any],
         handler: Callable[[ModelRequest[Any]], Awaitable[ModelResponse[Any] | AIMessage]],
     ) -> ModelResponse[Any] | AIMessage:
-        new_system = append_to_system_message(request.system_message, ARTIFACT_PROMPT)
+        artifact_list = await self._build_artifact_list()
+        prompt = ARTIFACT_PROMPT + artifact_list
+        new_system = append_to_system_message(request.system_message, prompt)
         return await handler(request.override(system_message=new_system))
