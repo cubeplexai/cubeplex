@@ -24,6 +24,27 @@ if config.config_file_name is not None:
 # target_metadata = mymodel.Base.metadata
 target_metadata = SQLModel.metadata
 
+# Tables managed by langgraph-checkpoint-mysql — exclude from autogenerate
+_CHECKPOINT_TABLES = {
+    "checkpoint_migrations",
+    "checkpoints",
+    "checkpoint_blobs",
+    "checkpoint_writes",
+}
+
+
+def include_object(
+    object: object,  # noqa: A002
+    name: str | None,
+    type_: str,
+    reflected: bool,
+    compare_to: object,
+) -> bool:
+    """Exclude checkpoint tables from autogenerate."""
+    if type_ == "table" and name in _CHECKPOINT_TABLES:
+        return False
+    return True
+
 
 # 从 app config 各字段拼接数据库 URL（Alembic 用同步驱动 pymysql）
 def get_url() -> str:
@@ -67,6 +88,7 @@ def run_migrations_offline() -> None:
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
+        include_object=include_object,
     )
 
     with context.begin_transaction():
@@ -87,7 +109,11 @@ def run_migrations_online() -> None:
     )
 
     with connectable.connect() as connection:
-        context.configure(connection=connection, target_metadata=target_metadata)
+        context.configure(
+            connection=connection,
+            target_metadata=target_metadata,
+            include_object=include_object,
+        )
 
         with context.begin_transaction():
             context.run_migrations()
