@@ -1,6 +1,12 @@
 @import "tailwindcss";
 @plugin "@tailwindcss/typography";
 
+/* Prevent layout shift: react-resizable-panels SSR renders panels with only
+   flex-basis (no flex-grow), causing them to collapse before hydration. */
+[data-slot="resizable-panel"] {
+  flex-grow: 1;
+}
+
 /* Hide scrollbar but keep scrollable */
 @utility scrollbar-none {
   -ms-overflow-style: none;
