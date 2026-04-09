@@ -112,15 +112,11 @@ class ObjectStoreClient:
         uploaded object keys.
         """
         # Determine whether the path is a file or directory.
-        result = await sandbox.execute(
-            f'test -d "{sandbox_path}" && echo DIR || echo FILE'
-        )
+        result = await sandbox.execute(f'test -d "{sandbox_path}" && echo DIR || echo FILE')
         is_dir = result.output.strip() == "DIR"
 
         if is_dir:
-            find_result = await sandbox.execute(
-                f'find "{sandbox_path}" -type f'
-            )
+            find_result = await sandbox.execute(f'find "{sandbox_path}" -type f')
             if find_result.exit_code and find_result.exit_code != 0:
                 logger.warning(
                     "find failed in sandbox (exit={}): {}",
@@ -129,9 +125,7 @@ class ObjectStoreClient:
                 )
                 return []
 
-            file_paths = [
-                p for p in find_result.output.strip().splitlines() if p
-            ]
+            file_paths = [p for p in find_result.output.strip().splitlines() if p]
         else:
             file_paths = [sandbox_path]
 

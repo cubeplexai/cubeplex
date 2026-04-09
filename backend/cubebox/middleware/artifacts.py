@@ -117,9 +117,7 @@ def _create_save_artifact_tool(
             from cubebox.objectstore import get_objectstore_client
 
             store = get_objectstore_client()
-            key_prefix = (
-                f"artifacts/{conversation_id}/{artifact.id}/v{artifact.version}/"
-            )
+            key_prefix = f"artifacts/{conversation_id}/{artifact.id}/v{artifact.version}/"
             await store.upload_from_sandbox(sandbox, path, key_prefix)
         except Exception:
             logger.exception(
