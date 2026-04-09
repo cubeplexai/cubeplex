@@ -48,7 +48,12 @@ class OpenSandbox(Sandbox):
     async def download(self, paths: list[str]) -> list[tuple[str, bytes]]:
         result = []
         for path in paths:
-            content = await self._sandbox.files.read_bytes(path)
+            try:
+                content = await self._sandbox.files.read_bytes(path)
+            except Exception as exc:
+                if "404" in str(exc):
+                    raise FileNotFoundError(path) from exc
+                raise
             result.append((path, content))
         return result
 
