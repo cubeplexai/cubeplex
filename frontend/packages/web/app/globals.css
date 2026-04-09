@@ -38,6 +38,11 @@
 }
 
 @layer base {
+  :root {
+    --color-popover: hsl(0 0% 100%);
+    --color-popover-foreground: hsl(240 10% 4%);
+  }
+
   .dark {
     --color-background: hsl(222 20% 7%);
     --color-foreground: hsl(215 20% 92%);
