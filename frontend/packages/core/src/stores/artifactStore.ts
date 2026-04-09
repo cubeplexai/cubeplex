@@ -1,8 +1,8 @@
 // frontend/packages/core/src/stores/artifactStore.ts
 import { create } from 'zustand'
 import type { ApiClient } from '../api/client'
-import { listArtifacts } from '../api/conversations'
-import type { Artifact } from '../types'
+import { listArtifacts, listArtifactVersions } from '../api/conversations'
+import type { Artifact, ArtifactVersion } from '../types'
 
 export interface ArtifactStore {
   /** Artifacts indexed by conversationId, then by artifactId */
@@ -25,11 +25,28 @@ export interface ArtifactStore {
 
   /** Clear artifacts for a conversation */
   clearConversation: (conversationId: string) => void
+
+  /** Cached version lists per artifactId */
+  versions: Record<string, ArtifactVersion[]>
+
+  /** Selected version per artifactId (null = latest) */
+  selectedVersion: Record<string, number | null>
+
+  /** Load versions for an artifact */
+  loadVersions: (client: ApiClient, conversationId: string, artifactId: string) => Promise<void>
+
+  /** Select a specific version for an artifact */
+  selectVersion: (artifactId: string, version: number | null) => void
+
+  /** Get the selected version for an artifact */
+  getSelectedVersion: (artifactId: string) => number | null
 }
 
 export const useArtifactStore = create<ArtifactStore>((set, get) => ({
   artifacts: {},
   loading: {},
+  versions: {},
+  selectedVersion: {},
 
   addOrUpdate: (conversationId, artifact) =>
     set((state) => ({
@@ -76,4 +93,23 @@ export const useArtifactStore = create<ArtifactStore>((set, get) => ({
       const { [conversationId]: _, ...rest } = state.artifacts
       return { artifacts: rest }
     }),
+
+  async loadVersions(client, conversationId, artifactId) {
+    if (get().versions[artifactId]) return
+    try {
+      const versions = await listArtifactVersions(client, conversationId, artifactId)
+      set((state) => ({
+        versions: { ...state.versions, [artifactId]: versions },
+      }))
+    } catch {
+      // Versions are non-critical; silently ignore load failures
+    }
+  },
+
+  selectVersion: (artifactId, version) =>
+    set((state) => ({
+      selectedVersion: { ...state.selectedVersion, [artifactId]: version },
+    })),
+
+  getSelectedVersion: (artifactId) => get().selectedVersion[artifactId] ?? null,
 }))

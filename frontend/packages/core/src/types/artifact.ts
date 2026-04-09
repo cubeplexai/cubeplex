@@ -12,3 +12,15 @@ export interface Artifact {
   updated_at: string
   version: number
 }
+
+export interface ArtifactVersion {
+  id: string
+  artifact_id: string
+  version: number
+  name: string
+  description?: string | null
+  path: string
+  entry_file?: string | null
+  mime_type?: string | null
+  created_at: string
+}
