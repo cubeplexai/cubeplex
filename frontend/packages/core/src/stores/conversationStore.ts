@@ -20,13 +20,14 @@ export interface ConversationStore {
   setActive(id: string | null): void
 }
 
-export const useConversationStore = create<ConversationStore>((set) => ({
+export const useConversationStore = create<ConversationStore>((set, get) => ({
   conversations: [],
   activeId: null,
   isLoading: false,
   error: null,
 
   async fetchList(client: ApiClient) {
+    if (get().isLoading) return
     set({ isLoading: true, error: null })
     try {
       const conversations = await listConversations(client)
