@@ -29,6 +29,8 @@
   --color-muted-foreground: hsl(240 5% 38%);
   --color-accent: hsl(240 5% 96%);
   --color-accent-foreground: hsl(240 10% 4%);
+  --color-popover: hsl(0 0% 100%);
+  --color-popover-foreground: hsl(240 10% 4%);
   --color-border: hsl(240 6% 90%);
   --color-input: hsl(240 6% 90%);
   --color-ring: hsl(210 100% 38%);
@@ -51,6 +53,8 @@
     --color-muted-foreground: hsl(215 14% 62%);
     --color-accent: hsl(222 18% 14%);
     --color-accent-foreground: hsl(215 20% 92%);
+    --color-popover: hsl(222 18% 12%);
+    --color-popover-foreground: hsl(215 20% 92%);
     --color-border: hsl(222 16% 16%);
     --color-input: hsl(222 16% 14%);
     --color-ring: hsl(210 100% 62%);
