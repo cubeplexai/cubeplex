@@ -31,9 +31,12 @@ class ObjectStoreClient:
         self._access_secret: str = config.get("objectstore.access_secret", "")
         self._session: aioboto3.Session = aioboto3.Session()
 
-        # OSS requires path-style addressing; S3 uses the default (virtual).
+        # OSS does not support aws-chunked transfer encoding.
         if provider == "oss":
-            self._boto_config = BotoConfig(s3={"addressing_style": "path"})
+            self._boto_config = BotoConfig(
+                s3={"payload_signing_enabled": True},
+                request_checksum_calculation="when_required",
+            )
         else:
             self._boto_config = BotoConfig()
 
