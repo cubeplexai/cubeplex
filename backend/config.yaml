@@ -129,6 +129,15 @@ default:
     enabled: true
     key: "USE ENV"
 
+  # Object Storage Configuration (S3-compatible)
+  objectstore:
+    provider: "oss"  # "oss" or "s3"
+    endpoint: "https://oss-cn-zhangjiakou.aliyuncs.com"
+    bucket: "cubebox-dev"
+    region: "cn-zhangjiakou"
+    access_key: ""
+    access_secret: ""
+
   # Database Configuration
   database:
     host: "localhost"
