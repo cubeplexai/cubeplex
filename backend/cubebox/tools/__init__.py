@@ -4,6 +4,7 @@ from langchain_core.tools import BaseTool
 from loguru import logger
 
 from cubebox.tools.builtin.calculator import create_calculator_tool
+from cubebox.tools.builtin.datetime_tool import create_datetime_tool
 from cubebox.tools.builtin.load_skill import create_load_skill_tool
 from cubebox.tools.registry import ToolRegistry
 
@@ -12,6 +13,7 @@ _registry = ToolRegistry()
 
 # Register built-in tools
 _registry.register_tool(create_calculator_tool())
+_registry.register_tool(create_datetime_tool())
 _registry.register_tool(create_load_skill_tool())
 
 
