@@ -70,10 +70,11 @@ def _create_save_artifact_tool(
 
         # 3. Write to DB using independent session
         from cubebox.db.engine import async_session_maker
-        from cubebox.repositories import ArtifactRepository
+        from cubebox.repositories import ArtifactRepository, ArtifactVersionRepository
 
         async with async_session_maker() as session:
             repo = ArtifactRepository(session)
+            version_repo = ArtifactVersionRepository(session)
 
             if artifact_id:
                 artifact = await repo.update(
@@ -100,12 +101,39 @@ def _create_save_artifact_tool(
                 )
                 action = "created"
 
+            # Create version snapshot
+            await version_repo.create(
+                artifact_id=artifact.id,
+                version=artifact.version,
+                name=name,
+                description=description,
+                path=path,
+                entry_file=entry_file,
+                mime_type=mime_type,
+            )
+
+        # Upload to object storage (non-fatal on failure)
+        try:
+            from cubebox.objectstore import get_objectstore_client
+
+            store = get_objectstore_client()
+            key_prefix = (
+                f"artifacts/{conversation_id}/{artifact.id}/v{artifact.version}/"
+            )
+            await store.upload_from_sandbox(sandbox, path, key_prefix)
+        except Exception:
+            logger.exception(
+                "Failed to upload artifact {} to object storage (non-fatal)",
+                artifact.id,
+            )
+
         logger.info(
-            "Artifact {}: id={}, name={}, type={}",
+            "Artifact {}: id={}, name={}, type={}, version={}",
             action,
             artifact.id,
             artifact.name,
             artifact.artifact_type,
+            artifact.version,
         )
 
         return json.dumps({"action": action, "artifact": artifact.to_dict()})
