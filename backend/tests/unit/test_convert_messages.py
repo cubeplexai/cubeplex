@@ -26,7 +26,9 @@ def test_convert_ai_message_with_tool_calls():
     result = convert_to_api_messages([msg])
     assert result[0]["role"] == "assistant"
     assert result[0]["content"] is None
-    assert result[0]["tool_calls"] == [{"name": "execute", "arguments": {"command": "ls"}}]
+    assert result[0]["tool_calls"] == [
+        {"name": "execute", "arguments": {"command": "ls"}, "tool_call_id": "1"}
+    ]
 
 
 def test_convert_tool_message():
@@ -86,7 +88,11 @@ def test_convert_tool_message_with_subagent_events():
     assert result[0]["role"] == "tool"
     assert result[0]["name"] == "subagent"
     assert result[0]["content"] == "final result"
-    assert result[0]["subagent_events"] == events
+    assert result[0]["subagent_events"] == {
+        "text": "processing...",
+        "tool_calls": [{"name": "read_file", "arguments": {"path": "/tmp/test.txt"}}],
+        "reasoning": "",
+    }
 
 
 def test_convert_tool_message_without_subagent_events():
