@@ -49,15 +49,23 @@ export const useArtifactStore = create<ArtifactStore>((set, get) => ({
   selectedVersion: {},
 
   addOrUpdate: (conversationId, artifact) =>
-    set((state) => ({
-      artifacts: {
-        ...state.artifacts,
-        [conversationId]: {
-          ...state.artifacts[conversationId],
-          [artifact.id]: artifact,
+    set((state) => {
+      const prev = state.artifacts[conversationId]?.[artifact.id]
+      const versionChanged = prev && prev.version !== artifact.version
+      return {
+        artifacts: {
+          ...state.artifacts,
+          [conversationId]: {
+            ...state.artifacts[conversationId],
+            [artifact.id]: artifact,
+          },
         },
-      },
-    })),
+        // Invalidate cached version list when version bumps
+        ...(versionChanged
+          ? { versions: { ...state.versions, [artifact.id]: undefined as never } }
+          : {}),
+      }
+    }),
 
   async loadArtifacts(client, conversationId) {
     set((s) => ({ loading: { ...s.loading, [conversationId]: true } }))

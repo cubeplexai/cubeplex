@@ -24,7 +24,7 @@ export function FallbackPreview({ artifact, version }: FallbackPreviewProps) {
           <p className="mt-1 text-xs text-muted-foreground">{artifact.description}</p>
         )}
         <p className="mt-1 text-xs text-muted-foreground/60">
-          {artifact.mime_type || 'Unknown type'} &middot; v{artifact.version}
+          {artifact.mime_type || 'Unknown type'} &middot; v{version ?? artifact.version}
         </p>
         <p className="mt-2 text-xs text-muted-foreground">
           This file type does not support preview. Please download to view.
