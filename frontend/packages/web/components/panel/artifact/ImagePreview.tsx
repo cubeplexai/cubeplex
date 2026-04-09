@@ -3,16 +3,17 @@
 import { useState } from 'react'
 import type { Artifact } from '@cubebox/core'
 import { PreviewLoading } from './PreviewLoading'
+import { buildPreviewUrl } from './previewUtils'
 
 interface ImagePreviewProps {
   artifact: Artifact
+  version: number | null
 }
 
-export function ImagePreview({ artifact }: ImagePreviewProps) {
+export function ImagePreview({ artifact, version }: ImagePreviewProps) {
   const [loading, setLoading] = useState(true)
   const filename = artifact.path.split('/').pop() || 'image'
-  const previewUrl =
-    `/api/v1/conversations/${artifact.conversation_id}/artifacts/${artifact.id}/preview/${filename}`
+  const previewUrl = buildPreviewUrl(artifact, filename, version)
 
   return (
     <div className="flex items-center justify-center h-full p-4 bg-muted/20">
@@ -22,6 +23,7 @@ export function ImagePreview({ artifact }: ImagePreviewProps) {
         </div>
       )}
       <img
+        key={`${artifact.id}-${version}`}
         src={previewUrl}
         alt={artifact.name}
         className="max-w-full max-h-full object-contain rounded-md"

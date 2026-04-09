@@ -3,9 +3,11 @@
 import { useState, useEffect, useMemo } from 'react'
 import type { Artifact } from '@cubebox/core'
 import { PreviewLoading } from './PreviewLoading'
+import { buildPreviewUrl } from './previewUtils'
 
 interface DataPreviewProps {
   artifact: Artifact
+  version: number | null
 }
 
 function parseCsv(text: string): { headers: string[]; rows: string[][] } {
@@ -52,13 +54,12 @@ function JsonTable({ data }: { data: unknown }) {
   )
 }
 
-export function DataPreview({ artifact }: DataPreviewProps) {
+export function DataPreview({ artifact, version }: DataPreviewProps) {
   const [content, setContent] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   const filename = artifact.entry_file || artifact.path.split('/').pop() || 'file'
-  const previewUrl =
-    `/api/v1/conversations/${artifact.conversation_id}/artifacts/${artifact.id}/preview/${filename}`
+  const previewUrl = buildPreviewUrl(artifact, filename, version)
 
   useEffect(() => {
     fetch(previewUrl)

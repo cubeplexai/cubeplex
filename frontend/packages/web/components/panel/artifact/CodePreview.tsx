@@ -3,18 +3,19 @@
 import { useState, useEffect } from 'react'
 import type { Artifact } from '@cubebox/core'
 import { PreviewLoading } from './PreviewLoading'
+import { buildPreviewUrl } from './previewUtils'
 
 interface CodePreviewProps {
   artifact: Artifact
+  version: number | null
 }
 
-export function CodePreview({ artifact }: CodePreviewProps) {
+export function CodePreview({ artifact, version }: CodePreviewProps) {
   const [code, setCode] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   const filename = artifact.entry_file || artifact.path.split('/').pop() || 'file'
-  const previewUrl =
-    `/api/v1/conversations/${artifact.conversation_id}/artifacts/${artifact.id}/preview/${filename}`
+  const previewUrl = buildPreviewUrl(artifact, filename, version)
 
   useEffect(() => {
     fetch(previewUrl)

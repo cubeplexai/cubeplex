@@ -7,6 +7,7 @@ import {
 } from 'lucide-react'
 import type { Artifact } from '@cubebox/core'
 import { PreviewLoading } from './PreviewLoading'
+import { buildPreviewUrl } from './previewUtils'
 
 import 'react-pdf/dist/Page/AnnotationLayer.css'
 import 'react-pdf/dist/Page/TextLayer.css'
@@ -146,9 +147,10 @@ function TocItem({
 
 interface PdfPreviewProps {
   artifact: Artifact
+  version: number | null
 }
 
-export function PdfPreview({ artifact }: PdfPreviewProps) {
+export function PdfPreview({ artifact, version }: PdfPreviewProps) {
   const [loading, setLoading] = useState(true)
   const [numPages, setNumPages] = useState(0)
   const [currentPage, setCurrentPage] = useState(1)
@@ -161,8 +163,7 @@ export function PdfPreview({ artifact }: PdfPreviewProps) {
   const pageRefs = useRef<Map<number, HTMLDivElement>>(new Map())
 
   const filename = artifact.entry_file || artifact.path.split('/').pop() || 'file.pdf'
-  const fileUrl =
-    `/api/v1/conversations/${artifact.conversation_id}/artifacts/${artifact.id}/preview/${filename}`
+  const fileUrl = buildPreviewUrl(artifact, filename, version)
 
   // Track container width for responsive page sizing
   useEffect(() => {
