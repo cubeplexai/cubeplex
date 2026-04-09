@@ -38,7 +38,7 @@ def get_engine() -> AsyncEngine:
         max_overflow=max_overflow,
         echo=echo,
         pool_pre_ping=True,  # 验证连接有效性
-        pool_recycle=3600,  # 1小时后回收连接
+        pool_recycle=280,  # 需小于 MySQL wait_timeout(600s)，提前回收避免服务端断连
         connect_args={
             "connect_timeout": 10,  # 连接超时 10 秒
         },
