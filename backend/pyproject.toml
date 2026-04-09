@@ -27,6 +27,7 @@ dependencies = [
     "alembic>=1.18.4",
     "uuid-utils>=0.14.1",
     "langgraph-checkpoint-mysql[aiomysql]>=3.0.0",
+    "aioboto3>=15.5.0",
 ]
 
 [project.optional-dependencies]
