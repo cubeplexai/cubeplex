@@ -13,6 +13,13 @@ export type ContentBlock =
       arguments: Record<string, unknown>
       tool_call_id: string
     }
+  | {
+      type: 'tool_call_streaming'
+      name: string
+      args_text: string
+      tool_call_id: string | null
+      index: number
+    }
 
 export interface TodoItem {
   id: string | null
@@ -33,6 +40,7 @@ export type AgentEventType =
   | 'text_delta'
   | 'reasoning'
   | 'tool_call'
+  | 'tool_call_delta'
   | 'tool_result'
   | 'artifact'
   | 'error'
@@ -69,6 +77,16 @@ export interface ToolCallEvent extends AgentEvent {
     tool_call_id: string
     name: string
     arguments: Record<string, unknown>
+  }
+}
+
+export interface ToolCallDeltaEvent extends AgentEvent {
+  type: 'tool_call_delta'
+  data: {
+    tool_call_id: string | null
+    name: string | null
+    args_delta: string
+    index: number | null
   }
 }
 
