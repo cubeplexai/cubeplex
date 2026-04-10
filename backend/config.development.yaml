@@ -24,6 +24,23 @@ development:
         tools:
           - name: web_search
             content_type: json
+            citation:
+              source_type: web
+              content_field: "results"
+              mapping:
+                url: "link"
+                title: "title"
+                domain: "domain"
+                snippet: "snippet"
+                published_at: "date"
           - name: web_fetch
             content_type: text
+            citation:
+              source_type: web
+              content_field: null
+              mapping:
+                url: "url"
+                title: "title"
+                snippet: "content"
+
         enabled: true

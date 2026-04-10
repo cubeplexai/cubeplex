@@ -18,7 +18,9 @@ repos:
     hooks:
       - id: ruff
         args: ['--fix', '--exit-non-zero-on-fix']
+        exclude: ^skills/
       - id: ruff-format
+        exclude: ^skills/
 
   - repo: https://github.com/pre-commit/mirrors-mypy
     rev: v1.8.0
@@ -28,4 +30,4 @@ repos:
           - types-requests
           - types-PyYAML
         args: ['--strict', '--ignore-missing-imports']
-        exclude: ^(tests/|scripts/dev/)
+        exclude: ^(tests/|scripts/dev/|skills/)
