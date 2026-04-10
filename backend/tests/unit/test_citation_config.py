@@ -1,5 +1,3 @@
-import pytest
-
 from cubebox.middleware.citations.config import CitationConfig, load_citation_configs
 
 
