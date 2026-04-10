@@ -1,11 +1,12 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { Copy, Check } from 'lucide-react'
 
 interface GenericToolViewProps {
   args: Record<string, unknown>
   result: string | null
+  highlightText?: string | null
 }
 
 function CopyButton({ text }: { text: string }) {
@@ -46,7 +47,25 @@ function formatContent(raw: string): string {
 export function GenericToolView({
   args,
   result,
+  highlightText,
 }: GenericToolViewProps) {
+  const responseRef = useRef<HTMLPreElement>(null)
+
+  useEffect(() => {
+    if (!highlightText || !responseRef.current) return
+    const text = responseRef.current.textContent ?? ''
+    const searchText = highlightText.slice(0, 50)
+    if (text.includes(searchText)) {
+      responseRef.current.classList.add('ring-2', 'ring-yellow-400/50', 'bg-yellow-50/10')
+      responseRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      setTimeout(() => {
+        responseRef.current?.classList.remove(
+          'ring-2', 'ring-yellow-400/50', 'bg-yellow-50/10',
+        )
+      }, 2000)
+    }
+  }, [highlightText])
+
   const requestText = JSON.stringify(args, null, 2)
   const responseText = result
     ? formatContent(result)
@@ -94,6 +113,7 @@ export function GenericToolView({
           </div>
           <div className="bg-muted rounded-lg p-3">
             <pre
+              ref={responseRef}
               className="font-mono text-sm
                 text-foreground whitespace-pre-wrap
                 break-all"
