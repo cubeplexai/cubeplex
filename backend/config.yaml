@@ -124,6 +124,32 @@ default:
   mcp:
     enabled: false
     servers: {}
+    # Example with citation support:
+    # servers:
+    #   web-tools:
+    #     transport: streamable_http
+    #     url: "http://localhost:3001/mcp"
+    #     tools:
+    #       - name: web_search
+    #         content_type: text
+    #         citation:
+    #           source_type: web
+    #           content_field: "results"
+    #           mapping:
+    #             url: "link"
+    #             title: "title"
+    #             domain: "domain"
+    #             snippet: "snippet"
+    #             published_at: "date"
+    #       - name: web_fetch
+    #         content_type: text
+    #         citation:
+    #           source_type: web
+    #           content_field: null
+    #           mapping:
+    #             url: "url"
+    #             title: "title"
+    #             snippet: "content"
 
   langsmith:
     enabled: true

@@ -11,6 +11,7 @@ from langgraph.types import Checkpointer
 from loguru import logger
 
 from cubebox.middleware.artifacts import ArtifactMiddleware
+from cubebox.middleware.citations import CitationConfig
 from cubebox.middleware.sandbox import SandboxMiddleware
 from cubebox.middleware.skills import SkillsMiddleware, SkillSpec
 from cubebox.middleware.subagents import SubAgent, SubAgentMiddleware
@@ -29,6 +30,7 @@ def create_cubebox_agent(
     skills: list[SkillSpec] | None = None,
     subagents: list[SubAgent] | None = None,
     checkpointer: Checkpointer | None = None,
+    citation_configs: dict[str, CitationConfig] | None = None,
 ) -> CompiledStateGraph[Any, Any, Any, Any]:
     """Build the cubebox agent with the configured middleware stack.
 
