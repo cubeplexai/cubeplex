@@ -157,6 +157,7 @@ def _dicts_to_sse_events(event_dicts: list[dict[str, Any]]) -> list[AgentEvent]:
         ArtifactEvent,
         ReasoningEvent,
         TextDeltaEvent,
+        ToolCallDeltaEvent,
         ToolCallEvent,
         ToolResultEvent,
     )
@@ -191,6 +192,14 @@ def _dicts_to_sse_events(event_dicts: list[dict[str, Any]]) -> list[AgentEvent]:
         elif evt_type == "text_delta":
             events.append(
                 TextDeltaEvent(
+                    timestamp=evt_dict["timestamp"],
+                    data=evt_dict["data"],
+                    agent_id=evt_dict.get("agent_id"),
+                )
+            )
+        elif evt_type == "tool_call_delta":
+            events.append(
+                ToolCallDeltaEvent(
                     timestamp=evt_dict["timestamp"],
                     data=evt_dict["data"],
                     agent_id=evt_dict.get("agent_id"),
