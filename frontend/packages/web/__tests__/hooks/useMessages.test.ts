@@ -26,6 +26,9 @@ beforeEach(() => {
     isStreaming: false,
     statusPhase: null,
     error: null,
+    todos: [],
+    toolStartedMap: {},
+    toolResultMap: {},
   })
 })
 
@@ -96,5 +99,99 @@ describe('messageStore.send', () => {
     })
 
     expect(useMessageStore.getState().isStreaming).toBe(false)
+  })
+
+  it('renders todos from write_todos batch payload', async () => {
+    vi.stubGlobal('fetch', vi.fn(() => mockSSEResponse([
+      {
+        type: 'tool_call',
+        data: {
+          tool_call_id: 'todo-1',
+          name: 'write_todos',
+          arguments: {
+            todos: [
+              { content: 'Inspect frontend todo parsing', status: 'in_progress' },
+              { content: 'Verify backend payload shape', status: 'pending' },
+            ],
+          },
+        },
+        agent_id: null,
+        agent_name: null,
+        timestamp: '',
+      },
+      { type: 'done', data: {}, agent_id: null, agent_name: null, timestamp: '' },
+    ])))
+
+    await act(async () => {
+      await useMessageStore.getState().send(mockClient as any, CONV_ID, 'fix todos')
+    })
+
+    expect(useMessageStore.getState().todos).toEqual([
+      {
+        id: null,
+        description: 'Inspect frontend todo parsing',
+        status: 'in_progress',
+      },
+      {
+        id: null,
+        description: 'Verify backend payload shape',
+        status: 'pending',
+      },
+    ])
+  })
+
+  it('replaces todos on subsequent write_todos updates', async () => {
+    vi.stubGlobal('fetch', vi.fn(() => mockSSEResponse([
+      {
+        type: 'tool_call',
+        data: {
+          tool_call_id: 'todo-1',
+          name: 'write_todos',
+          arguments: {
+            todos: [
+              { content: 'Inspect frontend todo parsing', status: 'in_progress' },
+              { content: 'Verify backend payload shape', status: 'pending' },
+            ],
+          },
+        },
+        agent_id: null,
+        agent_name: null,
+        timestamp: '',
+      },
+      {
+        type: 'tool_call',
+        data: {
+          tool_call_id: 'todo-2',
+          name: 'write_todos',
+          arguments: {
+            todos: [
+              { content: 'Inspect frontend todo parsing', status: 'completed' },
+              { content: 'Patch store parsing', status: 'in_progress' },
+            ],
+          },
+        },
+        agent_id: null,
+        agent_name: null,
+        timestamp: '',
+      },
+      { type: 'done', data: {}, agent_id: null, agent_name: null, timestamp: '' },
+    ])))
+
+    await act(async () => {
+      await useMessageStore.getState().send(mockClient as any, CONV_ID, 'fix todos')
+    })
+
+    expect(useMessageStore.getState().todos).toEqual([
+      {
+        id: null,
+        description: 'Inspect frontend todo parsing',
+        status: 'completed',
+      },
+      {
+        id: null,
+        description: 'Patch store parsing',
+        status: 'in_progress',
+      },
+    ])
   })
 })

@@ -80,6 +80,31 @@ function appendToolCallBlock(
   return [...finalized, { type: 'tool_call', name, arguments: args, tool_call_id: toolCallId }]
 }
 
+function normalizeTodoStatus(status: unknown): TodoItem['status'] {
+  return status === 'in_progress' || status === 'completed' ? status : 'pending'
+}
+
+function parseTodosFromToolCall(
+  args: Record<string, unknown>,
+): TodoItem[] {
+  const rawTodos = Array.isArray(args.todos) ? args.todos : []
+  const todos: TodoItem[] = []
+
+  for (const todo of rawTodos) {
+    if (!todo || typeof todo !== 'object') continue
+    const raw = todo as { content?: unknown; status?: unknown }
+    const description = typeof raw.content === 'string' ? raw.content.trim() : ''
+    if (!description) continue
+    todos.push({
+      id: null,
+      description,
+      status: normalizeTodoStatus(raw.status),
+    })
+  }
+
+  return todos
+}
+
 /**
  * Batched state updater: collects multiple set() calls within a single microtask
  * and flushes them as one Zustand update. This prevents N SSE events arriving in
@@ -209,31 +234,9 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
               s.streamAgents[agentKey]
               ?? emptyStream(event.agent_name)
 
-            // Upsert write_todos into todos list
             let nextTodos = s.todos
             if (e.data.name === 'write_todos') {
-              const args = e.data.arguments as {
-                description?: string
-                status?: string
-              }
-              const desc = String(args.description ?? '')
-              const status = (args.status ?? 'pending') as
-                TodoItem['status']
-              const idx = s.todos.findIndex(
-                (t) => t.description === desc,
-              )
-              if (idx >= 0) {
-                nextTodos = [...s.todos]
-                nextTodos[idx] = {
-                  ...nextTodos[idx],
-                  status,
-                }
-              } else {
-                nextTodos = [
-                  ...s.todos,
-                  { id: null, description: desc, status },
-                ]
-              }
+              nextTodos = parseTodosFromToolCall(e.data.arguments)
             }
 
             return {
@@ -271,34 +274,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
               }
             }
 
-            // Update todo id from write_todos result
-            let nextTodos = s.todos
-            if (
-              e.data.tool_name === 'write_todos' && tcId
-            ) {
-              try {
-                const parsed = JSON.parse(e.data.content)
-                const taskId =
-                  parsed.task_id as string | undefined
-                if (taskId) {
-                  const idx = s.todos.findIndex(
-                    (t) => t.id === null,
-                  )
-                  if (idx >= 0) {
-                    nextTodos = [...s.todos]
-                    nextTodos[idx] = {
-                      ...nextTodos[idx],
-                      id: taskId,
-                    }
-                  }
-                }
-              } catch {
-                // Ignore parse errors
-              }
-            }
-
             return {
-              todos: nextTodos,
               toolResultMap: newMap,
               streamAgents: {
                 ...s.streamAgents,
