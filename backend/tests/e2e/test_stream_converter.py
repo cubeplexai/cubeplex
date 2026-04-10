@@ -1,7 +1,6 @@
 """Tests for stream converter tool_call_delta extraction."""
 
-from langchain_core.messages import AIMessage
-from langchain_core.messages import AIMessageChunk
+from langchain_core.messages import AIMessage, AIMessageChunk
 
 from cubebox.agents.stream import convert_messages_chunk, convert_updates_chunk
 
