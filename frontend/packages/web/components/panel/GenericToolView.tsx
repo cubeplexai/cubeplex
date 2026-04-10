@@ -7,6 +7,7 @@ interface GenericToolViewProps {
   args: Record<string, unknown>
   result: string | null
   highlightText?: string | null
+  highlightKey?: number
 }
 
 function CopyButton({ text }: { text: string }) {
@@ -48,6 +49,7 @@ export function GenericToolView({
   args,
   result,
   highlightText,
+  highlightKey,
 }: GenericToolViewProps) {
   const responseRef = useRef<HTMLPreElement>(null)
 
@@ -55,16 +57,18 @@ export function GenericToolView({
     if (!highlightText || !responseRef.current) return
     const text = responseRef.current.textContent ?? ''
     const searchText = highlightText.slice(0, 50)
+    let timer: ReturnType<typeof setTimeout> | undefined
     if (text.includes(searchText)) {
       responseRef.current.classList.add('ring-2', 'ring-yellow-400/50', 'bg-yellow-50/10')
       responseRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' })
-      setTimeout(() => {
+      timer = setTimeout(() => {
         responseRef.current?.classList.remove(
           'ring-2', 'ring-yellow-400/50', 'bg-yellow-50/10',
         )
       }, 2000)
     }
-  }, [highlightText])
+    return () => { if (timer) clearTimeout(timer) }
+  }, [highlightText, highlightKey])
 
   const requestText = JSON.stringify(args, null, 2)
   const responseText = result

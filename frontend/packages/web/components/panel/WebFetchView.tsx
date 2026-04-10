@@ -8,12 +8,14 @@ interface WebFetchViewProps {
   args: Record<string, unknown>
   result: string | null
   highlightText?: string | null
+  highlightKey?: number
 }
 
 export function WebFetchView({
   args,
   result,
   highlightText,
+  highlightKey,
 }: WebFetchViewProps) {
   const contentRef = useRef<HTMLDivElement>(null)
 
@@ -23,6 +25,7 @@ export function WebFetchView({
       contentRef.current, NodeFilter.SHOW_TEXT,
     )
     const searchText = highlightText.slice(0, 50)
+    let timer: ReturnType<typeof setTimeout> | undefined
     while (walker.nextNode()) {
       const node = walker.currentNode
       if (node.textContent?.includes(searchText)) {
@@ -30,14 +33,15 @@ export function WebFetchView({
         if (parent) {
           parent.classList.add('ring-2', 'ring-yellow-400/50', 'bg-yellow-50/10')
           parent.scrollIntoView({ behavior: 'smooth', block: 'center' })
-          setTimeout(() => {
+          timer = setTimeout(() => {
             parent.classList.remove('ring-2', 'ring-yellow-400/50', 'bg-yellow-50/10')
           }, 2000)
         }
         break
       }
     }
-  }, [highlightText])
+    return () => { if (timer) clearTimeout(timer) }
+  }, [highlightText, highlightKey])
 
   const url = String(args.url ?? '')
 

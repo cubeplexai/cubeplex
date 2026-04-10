@@ -18,6 +18,7 @@ interface SearchResultViewProps {
   result: string | null
   args?: Record<string, unknown>
   highlightText?: string | null
+  highlightKey?: number
 }
 
 function parseSearchData(
@@ -68,23 +69,26 @@ export function SearchResultView({
   result,
   args,
   highlightText,
+  highlightKey,
 }: SearchResultViewProps) {
   const containerRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     if (!highlightText || !containerRef.current) return
     const items = containerRef.current.querySelectorAll('[data-result-item]')
+    let timer: ReturnType<typeof setTimeout> | undefined
     for (const item of items) {
       if (item.textContent?.includes(highlightText.slice(0, 50))) {
         item.classList.add('ring-2', 'ring-yellow-400/50', 'bg-yellow-50/10')
         item.scrollIntoView({ behavior: 'smooth', block: 'center' })
-        setTimeout(() => {
+        timer = setTimeout(() => {
           item.classList.remove('ring-2', 'ring-yellow-400/50', 'bg-yellow-50/10')
         }, 2000)
         break
       }
     }
-  }, [highlightText])
+    return () => { if (timer) clearTimeout(timer) }
+  }, [highlightText, highlightKey])
 
   if (!result) {
     return (

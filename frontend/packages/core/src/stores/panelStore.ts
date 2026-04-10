@@ -36,6 +36,7 @@ export type PanelView =
       contentType: PanelContentType
       toolRef: ToolCallRef | null
       highlightText: string | null
+      highlightKey: number
     }
   | {
       type: 'artifact'
@@ -60,6 +61,8 @@ export interface PanelStore {
   close: () => void
 }
 
+let highlightCounter = 0
+
 export const usePanelStore = create<PanelStore>((set) => ({
   view: { type: 'closed' },
 
@@ -73,6 +76,7 @@ export const usePanelStore = create<PanelStore>((set) => ({
         contentType: mapContentType(toolName, contentType),
         toolRef: toolRef ?? null,
         highlightText: highlightText ?? null,
+        highlightKey: ++highlightCounter,
       },
     }),
 

@@ -352,6 +352,14 @@ function ContentBlockRenderer(
             td: ({ children }) => (
               <td>{renderWithCitations(children, conversationId, CitationMarker)}</td>
             ),
+            th: ({ children }) => (
+              <th>{renderWithCitations(children, conversationId, CitationMarker)}</th>
+            ),
+            blockquote: ({ children }) => (
+              <blockquote>
+                {renderWithCitations(children, conversationId, CitationMarker)}
+              </blockquote>
+            ),
           }}
         >
           {block.content}

@@ -11,6 +11,7 @@ export interface ToolDetailStore {
   contentType: PanelContentType
   toolRef: ToolCallRef | null
   highlightText: string | null
+  highlightKey: number
 
   open: (
     toolName: string,
@@ -37,6 +38,7 @@ export const useToolDetailStore = Object.assign(
               contentType: v.contentType,
               toolRef: v.toolRef,
               highlightText: v.highlightText,
+              highlightKey: v.highlightKey,
               open: panel.openTool,
               close: panel.close,
             }
@@ -48,6 +50,7 @@ export const useToolDetailStore = Object.assign(
               contentType: 'generic',
               toolRef: null,
               highlightText: null,
+              highlightKey: 0,
               open: panel.openTool,
               close: panel.close,
             }
@@ -67,6 +70,7 @@ export const useToolDetailStore = Object.assign(
           contentType: v.contentType,
           toolRef: v.toolRef,
           highlightText: v.highlightText,
+          highlightKey: v.highlightKey,
           open: panel.openTool,
           close: panel.close,
         }
@@ -79,6 +83,7 @@ export const useToolDetailStore = Object.assign(
         contentType: 'generic',
         toolRef: null,
         highlightText: null,
+        highlightKey: 0,
         open: panel.openTool,
         close: panel.close,
       }

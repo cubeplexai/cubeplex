@@ -115,18 +115,33 @@ export function CitationMarker({
   const handleOpenPanel = useCallback(() => {
     if (!citation) return
     const chunk = citation.chunks.find((c) => c.chunk_index === chunkIndex)
-    const toolResultMap = useMessageStore.getState().toolResultMap
-    const result = toolResultMap[citation.tool_call_id]
+    const state = useMessageStore.getState()
 
-    if (result) {
-      openTool(
-        'web_search',
-        {},
-        result.content,
-        result.contentType,
-        undefined,
-        chunk?.content,
-      )
+    // Try streaming toolResultMap first, then fall back to history messages
+    let toolName = 'web_search'
+    let content: string | null = null
+    let contentType: string | undefined
+
+    const streamResult = state.toolResultMap[citation.tool_call_id]
+    if (streamResult) {
+      content = streamResult.content
+      contentType = streamResult.contentType
+    } else {
+      // Find tool result from history messages
+      for (const msgs of Object.values(state.messages)) {
+        const toolMsg = msgs.find(
+          (m) => m.role === 'tool' && m.tool_call_id === citation.tool_call_id,
+        )
+        if (toolMsg) {
+          toolName = toolMsg.name ?? 'web_search'
+          content = toolMsg.content
+          break
+        }
+      }
+    }
+
+    if (content) {
+      openTool(toolName, {}, content, contentType, undefined, chunk?.content)
     }
   }, [citation, chunkIndex, openTool])
 
@@ -134,7 +149,7 @@ export function CitationMarker({
   if (!citation) {
     return (
       <span className="text-muted-foreground/50 text-xs">
-        {citationId}-{chunkIndex}
+        【{citationId}-{chunkIndex}】
       </span>
     )
   }
