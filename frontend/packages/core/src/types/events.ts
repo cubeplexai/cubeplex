@@ -1,4 +1,5 @@
 // frontend/packages/core/src/types/events.ts
+import type { CitationData } from './citation'
 export type ContentBlock =
   | {
       type: 'reasoning'
@@ -52,6 +53,7 @@ export type AgentEventType =
   | 'artifact'
   | 'error'
   | 'done'
+  | 'citation'
   | 'status'
 
 export interface AgentEvent {
@@ -129,6 +131,11 @@ export interface ArtifactEventData {
 export interface ArtifactEvent extends AgentEvent {
   type: 'artifact'
   data: ArtifactEventData & Record<string, unknown>
+}
+
+export interface CitationEvent extends AgentEvent {
+  type: 'citation'
+  data: CitationData & Record<string, unknown>
 }
 
 export interface ErrorEvent extends AgentEvent {
