@@ -2,7 +2,7 @@
 import { create } from 'zustand'
 import type {
   ContentBlock, TodoItem,
-  Message, TextDeltaEvent, ToolCallEvent,
+  Message, TextDeltaEvent, ToolCallEvent, ToolCallDeltaEvent,
   ToolResultEvent, ReasoningEvent, ArtifactEventData,
 } from '../types'
 import type { ApiClient } from '../api'
@@ -271,6 +271,51 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
                     e.data.tool_call_id,
                   ),
                 },
+              },
+            }
+          })
+        } else if (event.type === 'tool_call_delta') {
+          const e = event as ToolCallDeltaEvent
+          batchedSet((s) => {
+            const prev = s.streamAgents[agentKey] ?? emptyStream(event.agent_name)
+            const idx = e.data.index ?? 0
+            const blocks = [...prev.blocks]
+
+            // Find existing streaming block for this index
+            const existingIdx = blocks.findIndex(
+              (b) => b.type === 'tool_call_streaming' && b.index === idx,
+            )
+
+            if (existingIdx >= 0) {
+              const existing = blocks[existingIdx] as Extract<
+                ContentBlock, { type: 'tool_call_streaming' }
+              >
+              blocks[existingIdx] = {
+                ...existing,
+                args_text: existing.args_text + (e.data.args_delta || ''),
+                tool_call_id: e.data.tool_call_id ?? existing.tool_call_id,
+              }
+              return {
+                streamAgents: {
+                  ...s.streamAgents,
+                  [agentKey]: { ...prev, blocks },
+                },
+              }
+            }
+
+            // Create new streaming block
+            const finalized = finalizeLastReasoning(blocks)
+            finalized.push({
+              type: 'tool_call_streaming',
+              name: e.data.name ?? '',
+              args_text: e.data.args_delta || '',
+              tool_call_id: e.data.tool_call_id ?? null,
+              index: idx,
+            })
+            return {
+              streamAgents: {
+                ...s.streamAgents,
+                [agentKey]: { ...prev, blocks: finalized },
               },
             }
           })
