@@ -87,6 +87,32 @@ def convert_messages_chunk(
             }
         )
 
+    # Tool call argument deltas (streaming tool input)
+    tool_call_chunks = getattr(msg, "tool_call_chunks", []) or []
+    for tc_chunk in tool_call_chunks:
+        chunk_name = tc_chunk.get("name") if isinstance(tc_chunk, dict) else None
+        chunk_args = tc_chunk.get("args") if isinstance(tc_chunk, dict) else None
+        chunk_id = tc_chunk.get("id") if isinstance(tc_chunk, dict) else None
+        chunk_index = tc_chunk.get("index") if isinstance(tc_chunk, dict) else None
+
+        # Skip chunks with no useful data
+        if not chunk_name and not chunk_args:
+            continue
+
+        events.append(
+            {
+                "type": "tool_call_delta",
+                "timestamp": timestamp,
+                "data": {
+                    "tool_call_id": chunk_id,
+                    "name": chunk_name,
+                    "args_delta": chunk_args or "",
+                    "index": chunk_index,
+                },
+                "agent_id": agent_id,
+            }
+        )
+
     return events
 
 
