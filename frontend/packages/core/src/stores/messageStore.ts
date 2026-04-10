@@ -156,8 +156,22 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
       // Re-check after await: if streaming started while we were fetching,
       // discard the API response to preserve the optimistic user message.
       if (get().isStreaming) return
+
+      // Restore todos from the last write_todos tool call in history
+      let restoredTodos: TodoItem[] = []
+      for (let i = messages.length - 1; i >= 0; i--) {
+        const msg = messages[i]
+        if (msg.role !== 'assistant' || !msg.tool_calls) continue
+        const tc = msg.tool_calls.find((t) => t.name === 'write_todos')
+        if (tc) {
+          restoredTodos = parseTodosFromToolCall(tc.arguments)
+          break
+        }
+      }
+
       set((s) => ({
         messages: { ...s.messages, [conversationId]: messages },
+        todos: restoredTodos,
         error: null,
         // Clear completed stream state — history messages are now source of truth
         streamAgents: {},
