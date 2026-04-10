@@ -35,6 +35,7 @@ export type PanelView =
       toolResult: string | null
       contentType: PanelContentType
       toolRef: ToolCallRef | null
+      highlightText: string | null
     }
   | {
       type: 'artifact'
@@ -51,6 +52,7 @@ export interface PanelStore {
     toolResult: string | null,
     contentType?: string,
     toolRef?: ToolCallRef,
+    highlightText?: string,
   ) => void
 
   openArtifact: (conversationId: string, artifactId: string) => void
@@ -61,7 +63,7 @@ export interface PanelStore {
 export const usePanelStore = create<PanelStore>((set) => ({
   view: { type: 'closed' },
 
-  openTool: (toolName, toolArgs, toolResult, contentType, toolRef) =>
+  openTool: (toolName, toolArgs, toolResult, contentType, toolRef, highlightText) =>
     set({
       view: {
         type: 'tool',
@@ -70,6 +72,7 @@ export const usePanelStore = create<PanelStore>((set) => ({
         toolResult,
         contentType: mapContentType(toolName, contentType),
         toolRef: toolRef ?? null,
+        highlightText: highlightText ?? null,
       },
     }),
 
