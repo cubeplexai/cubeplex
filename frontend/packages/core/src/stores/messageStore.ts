@@ -185,6 +185,14 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
         }
       }
 
+      // Restore citations from tool messages in history
+      const { useCitationStore } = await import('./citationStore')
+      for (const msg of messages) {
+        if (msg.role === 'tool' && msg.citations?.length) {
+          useCitationStore.getState().loadCitations(conversationId, msg.citations)
+        }
+      }
+
       set((s) => ({
         messages: { ...s.messages, [conversationId]: messages },
         todos: restoredTodos,
@@ -386,6 +394,10 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
               artifactData.artifact,
             )
           }
+        } else if (event.type === 'citation') {
+          const { useCitationStore } = await import('./citationStore')
+          const citationData = event.data as unknown as import('../types').CitationData
+          useCitationStore.getState().addCitation(conversationId, citationData)
         } else if (event.type === 'status') {
           batchedSet(() => ({ statusPhase: (event.data as { phase: string }).phase }))
         } else if (event.type === 'done') {
