@@ -114,13 +114,21 @@ export function CitationMarker({
 
   const handleOpenPanel = useCallback(() => {
     if (!citation) return
+    const chunk = citation.chunks.find((c) => c.chunk_index === chunkIndex)
     const toolResultMap = useMessageStore.getState().toolResultMap
     const result = toolResultMap[citation.tool_call_id]
 
     if (result) {
-      openTool('web_search', {}, result.content, result.contentType)
+      openTool(
+        'web_search',
+        {},
+        result.content,
+        result.contentType,
+        undefined,
+        chunk?.content,
+      )
     }
-  }, [citation, openTool])
+  }, [citation, chunkIndex, openTool])
 
   // No citation data available — render marker as plain text
   if (!citation) {
