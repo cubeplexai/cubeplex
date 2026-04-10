@@ -302,6 +302,16 @@ async def send_message(
         event_q: asyncio.Queue[tuple[str, Any, Any] | None] = asyncio.Queue()
         cv_token = subagent_event_queue.set(event_q)
 
+        from cubebox.middleware.citations.counter import (
+            CitationCounter,
+            citation_counter_var,
+            citation_event_queue,
+        )
+
+        citation_counter = CitationCounter(start=1)
+        cc_token = citation_counter_var.set(citation_counter)
+        ce_token = citation_event_queue.set(event_q)
+
         def _status(phase: str, detail: str | None = None) -> str:
             data: dict[str, str] = {"phase": phase}
             if detail:
@@ -364,6 +374,21 @@ async def send_message(
 
             tools = get_registry().list_tools()
 
+            # Load citation configs from MCP tool definitions
+            from cubebox.middleware.citations import CitationConfig, load_citation_configs
+
+            all_citation_configs: dict[str, CitationConfig] = {}
+            try:
+                from cubebox.config import config as app_config
+
+                mcp_servers = app_config.get("mcp.servers", {})
+                for _server_name, server_cfg in (mcp_servers or {}).items():
+                    tool_defs = server_cfg.get("tools", [])
+                    if tool_defs:
+                        all_citation_configs.update(load_citation_configs(tool_defs))
+            except Exception as e:
+                logger.debug("Failed to load citation configs: {}", e)
+
             # Create agent
             from cubebox.agents.graph import create_cubebox_agent
 
@@ -374,9 +399,39 @@ async def send_message(
                 conversation_id=conversation_id,
                 skills=raw_request.app.state.skills,
                 checkpointer=checkpointer,
+                citation_configs=all_citation_configs,
             )
 
             config_dict = {"configurable": {"thread_id": conversation_id}}
+
+            # Recover citation counter from conversation history
+            import re as _re
+
+            try:
+                from langchain_core.runnables import RunnableConfig
+
+                state = await agent.aget_state(
+                    RunnableConfig(configurable={"thread_id": conversation_id})
+                )
+                if state and state.values:
+                    history_messages = state.values.get("messages", [])
+                    max_citation_id = 0
+                    _citation_pattern = _re.compile(r"【(\d+)-\d+】")
+                    for msg in history_messages:
+                        msg_content = getattr(msg, "content", "") or ""
+                        if isinstance(msg_content, str):
+                            for match in _citation_pattern.finditer(msg_content):
+                                cid = int(match.group(1))
+                                if cid > max_citation_id:
+                                    max_citation_id = cid
+                    if max_citation_id > 0:
+                        citation_counter._next = max_citation_id + 1
+                        logger.debug(
+                            "Recovered citation counter: next_id={}",
+                            max_citation_id + 1,
+                        )
+            except Exception as e:
+                logger.debug("Could not recover citation counter: {}", e)
 
             async def _drain_main_stream() -> None:
                 """Push main agent stream events into the unified queue.
@@ -426,6 +481,8 @@ async def send_message(
             stream_task = asyncio.create_task(_drain_main_stream())
             tool_delta_context: dict[tuple[str | None, int], dict[str, Any]] = {}
 
+            _citation_buffer = ""
+
             while True:
                 try:
                     item = await asyncio.wait_for(event_q.get(), timeout=15)
@@ -452,7 +509,35 @@ async def send_message(
                         else:
                             evts = []
                         for sse_event in _dicts_to_sse_events(evts, tool_delta_context):
-                            yield f"data: {sse_event.model_dump_json()}\n\n"
+                            if sse_event.type == "text_delta":
+                                content = sse_event.data.get("content", "")
+                                content = _citation_buffer + content
+                                _citation_buffer = ""
+                                last_open = content.rfind("【")
+                                if last_open != -1 and "】" not in content[last_open:]:
+                                    _citation_buffer = content[last_open:]
+                                    content = content[:last_open]
+                                if content:
+                                    sse_event.data["content"] = content
+                                    yield f"data: {sse_event.model_dump_json()}\n\n"
+                            else:
+                                if _citation_buffer:
+                                    from cubebox.agents.schemas import TextDeltaEvent
+
+                                    flush_evt = TextDeltaEvent(
+                                        timestamp=datetime.now(UTC).isoformat(),
+                                        data={
+                                            "content": _citation_buffer,
+                                            "usage": {
+                                                "input_tokens": 0,
+                                                "output_tokens": 0,
+                                            },
+                                        },
+                                        agent_id=sse_event.agent_id,
+                                    )
+                                    _citation_buffer = ""
+                                    yield f"data: {flush_evt.model_dump_json()}\n\n"
+                                yield f"data: {sse_event.model_dump_json()}\n\n"
 
                 elif kind == "subagent":
                     sa_agent_id, payload = item[1], item[2]
@@ -466,10 +551,62 @@ async def send_message(
                         else:
                             evts = []
                         for sse_event in _dicts_to_sse_events(evts, tool_delta_context):
-                            yield f"data: {sse_event.model_dump_json()}\n\n"
+                            if sse_event.type == "text_delta":
+                                content = sse_event.data.get("content", "")
+                                content = _citation_buffer + content
+                                _citation_buffer = ""
+                                last_open = content.rfind("【")
+                                if last_open != -1 and "】" not in content[last_open:]:
+                                    _citation_buffer = content[last_open:]
+                                    content = content[:last_open]
+                                if content:
+                                    sse_event.data["content"] = content
+                                    yield f"data: {sse_event.model_dump_json()}\n\n"
+                            else:
+                                if _citation_buffer:
+                                    from cubebox.agents.schemas import TextDeltaEvent
+
+                                    flush_evt = TextDeltaEvent(
+                                        timestamp=datetime.now(UTC).isoformat(),
+                                        data={
+                                            "content": _citation_buffer,
+                                            "usage": {
+                                                "input_tokens": 0,
+                                                "output_tokens": 0,
+                                            },
+                                        },
+                                        agent_id=sse_event.agent_id,
+                                    )
+                                    _citation_buffer = ""
+                                    yield f"data: {flush_evt.model_dump_json()}\n\n"
+                                yield f"data: {sse_event.model_dump_json()}\n\n"
+
+                elif kind == "citation":
+                    from cubebox.agents.schemas import CitationEvent
+
+                    citation_data = item[2]
+                    citation_agent_id = item[1]
+                    citation_event = CitationEvent(
+                        timestamp=datetime.now(UTC).isoformat(),
+                        data=citation_data,
+                        agent_id=citation_agent_id,
+                    )
+                    yield f"data: {citation_event.model_dump_json()}\n\n"
 
                 elif kind == "error":
                     raise item[2]
+
+            if _citation_buffer:
+                from cubebox.agents.schemas import TextDeltaEvent
+
+                flush_evt = TextDeltaEvent(
+                    timestamp=datetime.now(UTC).isoformat(),
+                    data={
+                        "content": _citation_buffer,
+                        "usage": {"input_tokens": 0, "output_tokens": 0},
+                    },
+                )
+                yield f"data: {flush_evt.model_dump_json()}\n\n"
 
             await stream_task
 
@@ -503,6 +640,14 @@ async def send_message(
                 # Async generator cancellation may resume cleanup in a different
                 # task/context; fall back to clearing the per-request queue.
                 subagent_event_queue.set(None)
+            try:
+                citation_counter_var.reset(cc_token)
+            except ValueError:
+                citation_counter_var.set(None)
+            try:
+                citation_event_queue.reset(ce_token)
+            except ValueError:
+                citation_event_queue.set(None)
 
             if sandbox_manager and sandbox:
                 try:
