@@ -38,3 +38,5 @@ research
 
 # Local files
 *.local.yaml
+
+.codex
