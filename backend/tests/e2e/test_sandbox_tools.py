@@ -43,3 +43,18 @@ async def test_edit_file_replaces_content(tmp_path) -> None:
     )
     assert "greet.txt" in result
     assert target.read_text() == "goodbye world"
+
+
+@pytest.mark.asyncio
+async def test_edit_file_returns_error_for_missing_file(tmp_path) -> None:
+    sandbox = LocalSandbox(workdir=str(tmp_path))
+    mw = SandboxMiddleware(sandbox=sandbox)
+    edit_tool = next(t for t in mw.tools if t.name == "edit_file")
+    result = await edit_tool.ainvoke(
+        {
+            "file_path": str(tmp_path / "nonexistent.txt"),
+            "old_string": "hello",
+            "new_string": "goodbye",
+        }
+    )
+    assert "Error" in result or "error" in result.lower()

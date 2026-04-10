@@ -71,7 +71,12 @@ def _create_edit_file_tool(sandbox: Sandbox) -> BaseTool:
     async def _edit_file(file_path: str, old_string: str, new_string: str) -> str:
         if old_string == new_string:
             return "Error: old_string and new_string must differ."
-        files = await sandbox.download([file_path])
+        try:
+            files = await sandbox.download([file_path])
+        except FileNotFoundError:
+            return f"Error: file not found — {file_path}"
+        except Exception as exc:
+            return f"Error reading {file_path}: {exc}"
         current = files[0][1].decode()
         count = current.count(old_string)
         if count == 0:
