@@ -190,3 +190,101 @@ async def test_client_disconnect_cancels_stream_before_closing_checkpointer(
             events.append(json.loads(payload))
 
     assert events[-1]["type"] == "done"
+
+
+@pytest.mark.asyncio
+async def test_tool_call_delta_events_in_sse_stream(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """tool_call_delta events should appear in SSE stream for tool_call_chunks."""
+    from langchain_core.messages import AIMessageChunk
+
+    class _DummySessionContext:
+        async def __aenter__(self) -> object:
+            return object()
+
+        async def __aexit__(self, exc_type, exc, tb) -> bool:
+            return False
+
+    class _FakeConn:
+        def close(self) -> None:
+            pass
+
+    class _FakeCheckpointer:
+        def __init__(self) -> None:
+            self.conn = _FakeConn()
+
+    class _FakeToolCallAgent:
+        async def astream(self, *_args, **_kwargs):
+            # First chunk: tool name + start of args
+            chunk1 = AIMessageChunk(
+                content="",
+                tool_call_chunks=[
+                    {
+                        "name": "write_file",
+                        "args": '{"file_path": "/app/main.py", "content": "import ',
+                        "id": "tc_1",
+                        "index": 0,
+                    }
+                ],
+            )
+            yield ("messages", (chunk1, {}))
+
+            # Second chunk: continuation
+            chunk2 = AIMessageChunk(
+                content="",
+                tool_call_chunks=[
+                    {"name": None, "args": 'os\\nimport sys"}', "id": None, "index": 0}
+                ],
+            )
+            yield ("messages", (chunk2, {}))
+
+    def _fake_session_maker() -> _DummySessionContext:
+        return _DummySessionContext()
+
+    async def _fake_get_by_id(self, conversation_id: str):
+        return SimpleNamespace(id=conversation_id, title=conversation_id)
+
+    async def _noop_update_timestamp(_conversation_id: str) -> None:
+        return None
+
+    monkeypatch.setattr(conversations_route, "async_session_maker", _fake_session_maker)
+    monkeypatch.setattr(
+        conversations_route, "_update_conversation_timestamp", _noop_update_timestamp
+    )
+    monkeypatch.setattr(
+        conversations_route.ConversationRepository, "get_by_id", _fake_get_by_id
+    )
+    monkeypatch.setattr(
+        "cubebox.agents.graph.create_cubebox_agent",
+        lambda **_kwargs: _FakeToolCallAgent(),
+    )
+
+    raw_request = SimpleNamespace(
+        app=SimpleNamespace(
+            state=SimpleNamespace(
+                checkpointer_factory=_FakeCheckpointer,
+                sandbox_factory=lambda: None,
+                skills=[],
+            )
+        ),
+        state=SimpleNamespace(user_id="test-user"),
+    )
+
+    response = await conversations_route.send_message(
+        "test-conv",
+        conversations_route.SendMessageRequest(content="write a file"),
+        raw_request,
+    )
+
+    events = []
+    async for chunk in response.body_iterator:
+        payload = chunk.removeprefix("data: ").strip()
+        if payload:
+            events.append(json.loads(payload))
+
+    delta_events = [e for e in events if e["type"] == "tool_call_delta"]
+    assert len(delta_events) == 2, f"Expected 2 tool_call_delta events, got {len(delta_events)}"
+    assert delta_events[0]["data"]["name"] == "write_file"
+    assert delta_events[0]["data"]["tool_call_id"] == "tc_1"
+    assert delta_events[1]["data"]["args_delta"] == 'os\\nimport sys"}'

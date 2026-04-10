@@ -69,6 +69,18 @@ class ToolCallEvent(AgentEvent):
     )
 
 
+class ToolCallDeltaEvent(AgentEvent):
+    """Streaming tool call argument delta.
+
+    Emitted as the LLM generates tool call arguments token-by-token.
+    """
+
+    type: Literal["tool_call_delta"] = "tool_call_delta"
+    data: dict[str, Any] = Field(
+        description="Event data with tool_call_id, name, args_delta, and index"
+    )
+
+
 class ToolResultEvent(AgentEvent):
     """Tool execution result event.
 
