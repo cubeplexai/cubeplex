@@ -16,6 +16,8 @@ export function useToolDetail() {
     useToolDetailStore((s) => s.toolRef)
   const highlightText =
     useToolDetailStore((s) => s.highlightText)
+  const highlightKey =
+    useToolDetailStore((s) => s.highlightKey)
   const open = useToolDetailStore((s) => s.open)
   const close = useToolDetailStore((s) => s.close)
 
@@ -27,6 +29,7 @@ export function useToolDetail() {
     contentType,
     toolRef,
     highlightText,
+    highlightKey,
     open,
     close,
   }
