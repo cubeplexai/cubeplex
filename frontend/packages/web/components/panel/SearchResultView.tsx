@@ -1,3 +1,4 @@
+import { useEffect, useRef } from 'react'
 import { Globe, ExternalLink, Search } from 'lucide-react'
 
 interface SearchResult {
@@ -16,6 +17,7 @@ interface SearchData {
 interface SearchResultViewProps {
   result: string | null
   args?: Record<string, unknown>
+  highlightText?: string | null
 }
 
 function parseSearchData(
@@ -65,7 +67,25 @@ function getFaviconUrl(url: string): string {
 export function SearchResultView({
   result,
   args,
+  highlightText,
 }: SearchResultViewProps) {
+  const containerRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!highlightText || !containerRef.current) return
+    const items = containerRef.current.querySelectorAll('[data-result-item]')
+    for (const item of items) {
+      if (item.textContent?.includes(highlightText.slice(0, 50))) {
+        item.classList.add('ring-2', 'ring-yellow-400/50', 'bg-yellow-50/10')
+        item.scrollIntoView({ behavior: 'smooth', block: 'center' })
+        setTimeout(() => {
+          item.classList.remove('ring-2', 'ring-yellow-400/50', 'bg-yellow-50/10')
+        }, 2000)
+        break
+      }
+    }
+  }, [highlightText])
+
   if (!result) {
     return (
       <div className="p-6 text-sm text-muted-foreground">
@@ -108,13 +128,14 @@ export function SearchResultView({
       </div>
 
       {/* Results list */}
-      <div className="p-3 space-y-1.5">
+      <div ref={containerRef} className="p-3 space-y-1.5">
         {data.results.map((item, i) => (
           <a
             key={i}
             href={item.url}
             target="_blank"
             rel="noopener noreferrer"
+            data-result-item
             className="group flex gap-3 rounded-lg px-3 py-2.5
               hover:bg-muted/40 transition-colors"
           >

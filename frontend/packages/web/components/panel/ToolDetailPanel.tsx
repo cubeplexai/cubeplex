@@ -17,6 +17,7 @@ export function ToolDetailPanel() {
     toolResult,
     contentType,
     toolRef,
+    highlightText,
     close,
   } = useToolDetail()
 
@@ -39,12 +40,14 @@ export function ToolDetailPanel() {
           <SearchResultView
             result={toolResult}
             args={toolArgs}
+            highlightText={highlightText}
           />
         )}
         {contentType === 'web_fetch' && (
           <WebFetchView
             args={toolArgs}
             result={toolResult}
+            highlightText={highlightText}
           />
         )}
         {contentType === 'skill' && (
@@ -66,6 +69,7 @@ export function ToolDetailPanel() {
           <GenericToolView
             args={toolArgs}
             result={toolResult}
+            highlightText={highlightText}
           />
         )}
       </ScrollArea>
