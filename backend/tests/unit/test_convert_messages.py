@@ -22,21 +22,35 @@ def test_convert_ai_message_with_tool_calls():
     msg = AIMessage(
         content="",
         tool_calls=[{"id": "1", "name": "execute", "args": {"command": "ls"}, "type": "tool_call"}],
+        response_metadata={"tool_call_started_at_by_index": {"0": "2026-04-10T10:00:00+00:00"}},
     )
     result = convert_to_api_messages([msg])
     assert result[0]["role"] == "assistant"
     assert result[0]["content"] is None
     assert result[0]["tool_calls"] == [
-        {"name": "execute", "arguments": {"command": "ls"}, "tool_call_id": "1"}
+        {
+            "name": "execute",
+            "arguments": {"command": "ls"},
+            "tool_call_id": "1",
+            "started_at": "2026-04-10T10:00:00+00:00",
+        }
     ]
 
 
 def test_convert_tool_message():
-    msgs = [ToolMessage(content="file.txt\nother.txt", name="execute", tool_call_id="1")]
+    msgs = [
+        ToolMessage(
+            content="file.txt\nother.txt",
+            name="execute",
+            tool_call_id="1",
+            response_metadata={"tool_started_at": "2026-04-10T10:00:01+00:00"},
+        )
+    ]
     result = convert_to_api_messages(msgs)
     assert result[0]["role"] == "tool"
     assert result[0]["name"] == "execute"
     assert result[0]["content"] == "file.txt\nother.txt"
+    assert result[0]["started_at"] == "2026-04-10T10:00:01+00:00"
 
 
 def test_convert_ai_message_with_reasoning():

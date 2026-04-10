@@ -27,11 +27,18 @@ export interface TodoItem {
   status: 'pending' | 'in_progress' | 'completed'
 }
 
+export interface ToolCallRef {
+  agent_id: string | null
+  tool_call_id: string | null
+  index: number | null
+}
+
 export type PanelContentType =
   | 'search'
   | 'code_execute'
   | 'web_fetch'
   | 'terminal'
+  | 'write_file'
   | 'generic'
   | 'artifact'
   | 'skill'
@@ -77,6 +84,7 @@ export interface ToolCallEvent extends AgentEvent {
     tool_call_id: string
     name: string
     arguments: Record<string, unknown>
+    started_at?: string
   }
 }
 
@@ -96,6 +104,7 @@ export interface ToolResultEvent extends AgentEvent {
     tool_name: string
     tool_call_id: string
     content: string
+    started_at?: string
     content_type?: string
   }
 }

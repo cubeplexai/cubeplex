@@ -4,20 +4,27 @@ import { useState, useEffect, useRef, memo } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { CheckCircle2, ChevronDown, ChevronRight } from 'lucide-react'
-import type { AgentStream } from '@cubebox/core'
+import type { AgentStream, ContentBlock, ToolCallRef } from '@cubebox/core'
 import { ToolCallItem } from './ToolCallItem'
 import { AgentAvatar } from './AgentAvatar'
 import { proseClasses } from '@/lib/utils'
+import { getWriteFileSummary } from '@/lib/writeFilePreview'
 
 interface Props {
   name: string
   role: string
   task: string
   index: number
+  agentId?: string
   stream?: AgentStream
   isRunning: boolean
   toolResultMap: Record<string, { content: string; receivedAt: number }>
 }
+
+type ToolDisplayBlock = Extract<
+  ContentBlock,
+  { type: 'tool_call' | 'tool_call_streaming' }
+>
 
 function formatDuration(ms: number): string {
   if (ms < 0) return '0s'
@@ -33,6 +40,7 @@ export const SubAgentCard = memo(function SubAgentCard({
   role,
   task,
   index,
+  agentId,
   stream,
   isRunning,
   toolResultMap,
@@ -67,14 +75,76 @@ export const SubAgentCard = memo(function SubAgentCard({
   }, [toolCallCount, toolResultCount, streamText, isRunning])
 
   const toolCalls = stream?.toolCalls ?? []
+  const toolBlocks = (stream?.blocks ?? []).filter(
+    (block): block is ToolDisplayBlock =>
+      block.type === 'tool_call' || block.type === 'tool_call_streaming',
+  )
+  const visibleToolBlocks: ToolDisplayBlock[] = toolBlocks.length > 0
+    ? toolBlocks
+    : toolCalls.map((tc) => ({
+        type: 'tool_call' as const,
+        name: tc.data.name,
+        arguments: tc.data.arguments,
+        tool_call_id: tc.data.tool_call_id,
+      }))
   const completedCount = toolCalls.filter(
     (tc) => toolResultMap[tc.data.tool_call_id],
   ).length
   const pendingTc = toolCalls.find(
     (tc) => !toolResultMap[tc.data.tool_call_id],
   )
-  const hasContent = stream && (toolCalls.length > 0 || stream.text)
+  const hasContent = stream && (toolBlocks.length > 0 || toolCalls.length > 0 || stream.text)
   const displayTime = isRunning ? elapsed : (hasContent ? elapsed : 0)
+
+  const renderToolBlock = (block: ToolDisplayBlock, i: number, showDivider = false) => {
+    if (block.type === 'tool_call_streaming') {
+      const supportsPreview = block.name === 'write_file'
+      return (
+        <ToolCallItem
+          key={block.tool_call_id ?? `streaming-${i}`}
+          name={block.name || 'tool'}
+          arguments={{}}
+          toolCallId={block.tool_call_id ?? `streaming-${i}`}
+          summaryOverride={supportsPreview
+            ? getWriteFileSummary({}, block.args_text)
+            : (block.args_text.trim() || undefined)}
+          contentTypeOverride={supportsPreview ? 'write_file' : undefined}
+          toolRef={supportsPreview
+            ? {
+                agent_id: agentId ?? null,
+                tool_call_id: block.tool_call_id,
+                index: block.index,
+              } satisfies ToolCallRef
+            : undefined}
+          isPending={true}
+          allowOpenWhenPending={supportsPreview}
+          showDivider={showDivider}
+        />
+      )
+    }
+
+    const result = toolResultMap[block.tool_call_id] ?? null
+    return (
+      <ToolCallItem
+        key={block.tool_call_id || i}
+        name={block.name}
+        arguments={block.arguments}
+        toolCallId={block.tool_call_id}
+        contentTypeOverride={block.name === 'write_file' ? 'write_file' : undefined}
+        toolRef={block.name === 'write_file'
+          ? {
+              agent_id: agentId ?? null,
+              tool_call_id: block.tool_call_id,
+              index: null,
+            } satisfies ToolCallRef
+          : undefined}
+        toolResult={result}
+        isPending={isRunning && !result}
+        allowOpenWhenPending={block.name === 'write_file'}
+        showDivider={showDivider}
+      />
+    )
+  }
 
   return (
     <div className="border border-border rounded-xl overflow-hidden bg-muted/10 border-l-2
@@ -111,20 +181,7 @@ export const SubAgentCard = memo(function SubAgentCard({
                   'linear-gradient(to bottom, transparent 0%, black 15%, black 80%, transparent 100%)',
               }}
             >
-              {toolCalls.map((tc, i) => {
-                const result = toolResultMap[tc.data.tool_call_id] ?? null
-                return (
-                  <ToolCallItem
-                    key={tc.data.tool_call_id || i}
-                    name={tc.data.name}
-                    arguments={tc.data.arguments}
-                    toolCallId={tc.data.tool_call_id}
-                    toolResult={result}
-                    timestamp={tc.timestamp}
-                    isPending={isRunning && !result}
-                  />
-                )
-              })}
+              {visibleToolBlocks.map((block, i) => renderToolBlock(block, i))}
               {!isRunning && stream?.text && (
                 <div className={`px-3 py-2 text-xs text-muted-foreground line-clamp-3`}>
                   {stream.text.slice(-200)}
@@ -136,21 +193,7 @@ export const SubAgentCard = memo(function SubAgentCard({
           {/* Expanded full content */}
           {expanded && (
             <div className="max-h-80 overflow-y-auto">
-              {toolCalls.map((tc, i) => {
-                const result = toolResultMap[tc.data.tool_call_id] ?? null
-                return (
-                  <ToolCallItem
-                    key={tc.data.tool_call_id || i}
-                    name={tc.data.name}
-                    arguments={tc.data.arguments}
-                    toolCallId={tc.data.tool_call_id}
-                    toolResult={result}
-                    timestamp={tc.timestamp}
-                    isPending={isRunning && !result}
-                    showDivider={i > 0}
-                  />
-                )
-              })}
+              {visibleToolBlocks.map((block, i) => renderToolBlock(block, i, i > 0))}
               {stream?.text && (
                 <div className={`px-3 py-2 border-t border-border ${proseClasses}`}>
                   <ReactMarkdown remarkPlugins={[remarkGfm]}>{stream.text}</ReactMarkdown>

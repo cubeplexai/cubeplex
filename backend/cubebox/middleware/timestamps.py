@@ -51,9 +51,11 @@ class TimestampMiddleware(AgentMiddleware[Any, Any, Any]):
         request: ToolCallRequest,
         handler: Callable[[ToolCallRequest], Awaitable[ToolMessage | Command[Any]]],
     ) -> ToolMessage | Command[Any]:
+        started_at = datetime.now(UTC).isoformat()
         result = await handler(request)
         if isinstance(result, ToolMessage):
             if not result.response_metadata:
                 result.response_metadata = {}
+            result.response_metadata.setdefault("tool_started_at", started_at)
             result.response_metadata.setdefault("created_at", datetime.now(UTC).isoformat())
         return result

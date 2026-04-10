@@ -8,6 +8,7 @@ import { SearchResultView } from './SearchResultView'
 import { WebFetchView } from './WebFetchView'
 import { GenericToolView } from './GenericToolView'
 import { SkillView } from './SkillView'
+import { WriteFilePreviewView } from './WriteFilePreviewView'
 
 export function ToolDetailPanel() {
   const {
@@ -15,6 +16,7 @@ export function ToolDetailPanel() {
     toolArgs,
     toolResult,
     contentType,
+    toolRef,
     close,
   } = useToolDetail()
 
@@ -49,6 +51,13 @@ export function ToolDetailPanel() {
           <SkillView
             args={toolArgs}
             result={toolResult}
+          />
+        )}
+        {contentType === 'write_file' && (
+          <WriteFilePreviewView
+            args={toolArgs}
+            result={toolResult}
+            toolRef={toolRef}
           />
         )}
         {(contentType === 'generic' ||

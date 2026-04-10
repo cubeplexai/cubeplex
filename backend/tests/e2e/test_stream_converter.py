@@ -1,8 +1,9 @@
 """Tests for stream converter tool_call_delta extraction."""
 
+from langchain_core.messages import AIMessage
 from langchain_core.messages import AIMessageChunk
 
-from cubebox.agents.stream import convert_messages_chunk
+from cubebox.agents.stream import convert_messages_chunk, convert_updates_chunk
 
 
 def test_tool_call_chunk_emits_delta_event() -> None:
@@ -26,9 +27,7 @@ def test_tool_call_chunk_continuation_no_name() -> None:
     """Continuation chunks have name=None and id=None."""
     msg = AIMessageChunk(
         content="",
-        tool_call_chunks=[
-            {"name": None, "args": "hello world", "id": None, "index": 0}
-        ],
+        tool_call_chunks=[{"name": None, "args": "hello world", "id": None, "index": 0}],
     )
     events = convert_messages_chunk((msg, {}))
     deltas = [e for e in events if e["type"] == "tool_call_delta"]
@@ -76,3 +75,22 @@ def test_name_only_chunk_emits_event() -> None:
     deltas = [e for e in events if e["type"] == "tool_call_delta"]
     assert len(deltas) == 1
     assert deltas[0]["data"]["name"] == "write_file"
+
+
+def test_convert_updates_chunk_includes_tool_call_started_at() -> None:
+    msg = AIMessage(
+        content="",
+        tool_calls=[
+            {
+                "id": "tc_1",
+                "name": "write_file",
+                "args": {"file_path": "/app/main.py", "content": "print('hi')"},
+                "type": "tool_call",
+            }
+        ],
+        response_metadata={"tool_call_started_at_by_index": {"0": "2026-04-10T10:00:00+00:00"}},
+    )
+    events = convert_updates_chunk({"model": {"messages": [msg]}})
+    tool_calls = [e for e in events if e["type"] == "tool_call"]
+    assert len(tool_calls) == 1
+    assert tool_calls[0]["data"]["started_at"] == "2026-04-10T10:00:00+00:00"

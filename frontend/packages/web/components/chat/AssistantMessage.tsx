@@ -11,6 +11,8 @@ import { ArtifactCard } from './ArtifactCard'
 import { SubAgentCard } from './SubAgentCard'
 import { SubAgentCluster } from './SubAgentCluster'
 import { ToolCallGroup } from './ToolCallGroup'
+import { ToolCallItem } from './ToolCallItem'
+import { getWriteFileSummary } from '@/lib/writeFilePreview'
 
 interface ReasoningBlockProps {
   reasoning: string
@@ -196,13 +198,14 @@ function subagentSummaryToStream(summary: SubagentSummary): AgentStream {
 
 function ContentBlockRenderer(
   { block, index, isLast, isStreaming, subAgentStreams, subagentDataMap, toolResultMap,
-    messageCreatedAt, subagentIndex }: {
+    messageCreatedAt, subagentIndex, agentId }: {
     block: ContentBlock; index: number; isLast: boolean; isStreaming: boolean
     subAgentStreams?: Record<string, AgentStream>
     subagentDataMap?: Record<string, SubagentSummary>
     toolResultMap: Record<string, { content: string; receivedAt: number }>
     messageCreatedAt?: string
     subagentIndex?: number
+    agentId?: string | null
   },
 ) {
   if (block.type === 'reasoning') {
@@ -232,6 +235,7 @@ function ContentBlockRenderer(
         role={args.role ?? ''}
         task={args.task ?? ''}
         index={subagentIndex ?? 1}
+        agentId={agentKey}
         stream={stream ?? historicalStream}
         isRunning={isStreaming && !!stream && !toolResultMap[block.tool_call_id]}
         toolResultMap={toolResultMap}
@@ -266,6 +270,9 @@ function ContentBlockRenderer(
     if (artifact) {
       return <ArtifactCard artifact={artifact} />
     }
+    if (isStreaming || !toolResult) {
+      return null
+    }
     // Fallback to regular tool call rendering
     return (
       <ToolCallGroup
@@ -273,6 +280,7 @@ function ContentBlockRenderer(
         toolResultMap={toolResultMap}
         isStreaming={isStreaming}
         messageCreatedAt={messageCreatedAt}
+        agentId={agentId}
       />
     )
   }
@@ -283,15 +291,50 @@ function ContentBlockRenderer(
         toolResultMap={toolResultMap}
         isStreaming={isStreaming}
         messageCreatedAt={messageCreatedAt}
+        agentId={agentId}
       />
     )
   }
-  // text block
-  return (
-    <div className={proseClasses}>
-      <ReactMarkdown remarkPlugins={[remarkGfm]}>{block.content}</ReactMarkdown>
-    </div>
-  )
+  if (block.type === 'tool_call_streaming') {
+    const supportsPreview = block.name === 'write_file'
+    return (
+      <div
+        className="bg-card border border-border rounded-xl
+          overflow-hidden border-l-2
+          border-l-muted-foreground/20"
+      >
+        <ToolCallItem
+          name={block.name || 'tool'}
+          arguments={{}}
+          toolCallId={block.tool_call_id ?? `streaming-${index}`}
+          summaryOverride={supportsPreview
+            ? getWriteFileSummary({}, block.args_text)
+            : (block.args_text.trim() || undefined)}
+          contentTypeOverride={supportsPreview ? 'write_file' : undefined}
+          toolRef={supportsPreview
+            ? {
+                agent_id: agentId ?? null,
+                tool_call_id: block.tool_call_id,
+                index: block.index,
+              }
+            : undefined}
+          timestamp={messageCreatedAt}
+          isPending={true}
+          allowOpenWhenPending={supportsPreview}
+        />
+      </div>
+    )
+  }
+  if (block.type === 'text') {
+    return (
+      <div className={proseClasses}>
+        <ReactMarkdown remarkPlugins={[remarkGfm]}>{block.content}</ReactMarkdown>
+      </div>
+    )
+  }
+
+  const _exhaustive: never = block
+  return _exhaustive
 }
 
 /** Group consecutive tool_call blocks for compact rendering (subagent calls render individually) */
@@ -327,6 +370,7 @@ export function AssistantMessage(
   { message, stream, isStreaming, statusPhase, subAgentStreams, subagentDataMap, toolResultMap }:
   AssistantMessageProps,
 ) {
+  const streamAgentId = stream ? 'main' : undefined
   const blocks: ContentBlock[] = stream
     ? stream.blocks
     : (message!.blocks ?? blocksFromMessage(message!))
@@ -377,6 +421,7 @@ export function AssistantMessage(
                 toolResultMap={toolResultMap}
                 isStreaming={isStreaming === true}
                 messageCreatedAt={msgCreatedAt}
+                agentId={streamAgentId}
               />
             )
           }
@@ -392,6 +437,7 @@ export function AssistantMessage(
               toolResultMap={toolResultMap}
               messageCreatedAt={msgCreatedAt}
               subagentIndex={subagentIndexMap.get(i)}
+              agentId={streamAgentId}
             />
           )
         })}

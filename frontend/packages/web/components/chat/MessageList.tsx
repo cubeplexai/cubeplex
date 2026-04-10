@@ -41,22 +41,27 @@ function buildHistoricalToolResultMap(
   const map: Record<string, {
     content: string; receivedAt: number; startedAt?: number; contentType?: string
   }> = {}
-  // Build a map of tool_call_id → assistant message created_at (= tool call start time)
+  // Build a map of tool_call_id → authoritative tool start time from history.
   const toolCallStartMap: Record<string, number> = {}
   for (const msg of messages) {
-    if (msg.role === 'assistant' && msg.tool_calls && msg.created_at) {
-      const ts = new Date(msg.created_at).getTime()
+    if (msg.role === 'assistant' && msg.tool_calls) {
       for (const tc of msg.tool_calls) {
-        if (tc.tool_call_id) toolCallStartMap[tc.tool_call_id] = ts
+        if (!tc.tool_call_id) continue
+        const rawStart = tc.started_at ?? msg.created_at
+        if (!rawStart) continue
+        toolCallStartMap[tc.tool_call_id] = new Date(rawStart).getTime()
       }
     }
   }
   for (const msg of messages) {
     if (msg.role === 'tool' && msg.tool_call_id) {
+      const fallbackStartedAt = msg.started_at
+        ? new Date(msg.started_at).getTime()
+        : undefined
       map[msg.tool_call_id] = {
         content: msg.content ?? '',
         receivedAt: new Date(msg.created_at ?? 0).getTime(),
-        startedAt: toolCallStartMap[msg.tool_call_id],
+        startedAt: toolCallStartMap[msg.tool_call_id] ?? fallbackStartedAt,
       }
     }
   }

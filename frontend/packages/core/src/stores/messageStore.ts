@@ -77,7 +77,23 @@ function appendToolCallBlock(
   toolCallId: string,
 ): ContentBlock[] {
   const finalized = finalizeLastReasoning(blocks)
-  return [...finalized, { type: 'tool_call', name, arguments: args, tool_call_id: toolCallId }]
+  const exactMatchIndex = finalized.findIndex(
+    (block) => block.type === 'tool_call_streaming' && block.tool_call_id === toolCallId,
+  )
+  let fallbackMatchIndex = -1
+  for (let i = finalized.length - 1; i >= 0; i--) {
+    const block = finalized[i]
+    if (block.type === 'tool_call_streaming' && block.tool_call_id === null && block.name === name) {
+      fallbackMatchIndex = i
+      break
+    }
+  }
+  const matchIndex = exactMatchIndex >= 0 ? exactMatchIndex : fallbackMatchIndex
+  const nextBlocks = matchIndex >= 0
+    ? finalized.filter((_, index) => index !== matchIndex)
+    : finalized
+
+  return [...nextBlocks, { type: 'tool_call', name, arguments: args, tool_call_id: toolCallId }]
 }
 
 function normalizeTodoStatus(status: unknown): TodoItem['status'] {
@@ -247,6 +263,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
             const prev =
               s.streamAgents[agentKey]
               ?? emptyStream(event.agent_name)
+            const existingStartedAt = s.toolStartedMap[e.data.tool_call_id]
 
             let nextTodos = s.todos
             if (e.data.name === 'write_todos') {
@@ -257,7 +274,8 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
               todos: nextTodos,
               toolStartedMap: {
                 ...s.toolStartedMap,
-                [e.data.tool_call_id]: Date.now(),
+                [e.data.tool_call_id]: existingStartedAt
+                  ?? (e.data.started_at ? new Date(e.data.started_at).getTime() : Date.now()),
               },
               streamAgents: {
                 ...s.streamAgents,
@@ -280,6 +298,13 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
             const prev = s.streamAgents[agentKey] ?? emptyStream(event.agent_name)
             const idx = e.data.index ?? 0
             const blocks = [...prev.blocks]
+            const startedAt = e.timestamp ? new Date(e.timestamp).getTime() : Date.now()
+            const nextToolStartedMap = e.data.tool_call_id && !s.toolStartedMap[e.data.tool_call_id]
+              ? {
+                  ...s.toolStartedMap,
+                  [e.data.tool_call_id]: startedAt,
+                }
+              : s.toolStartedMap
 
             // Find existing streaming block for this index
             const existingIdx = blocks.findIndex(
@@ -296,6 +321,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
                 tool_call_id: e.data.tool_call_id ?? existing.tool_call_id,
               }
               return {
+                toolStartedMap: nextToolStartedMap,
                 streamAgents: {
                   ...s.streamAgents,
                   [agentKey]: { ...prev, blocks },
@@ -313,6 +339,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
               index: idx,
             })
             return {
+              toolStartedMap: nextToolStartedMap,
               streamAgents: {
                 ...s.streamAgents,
                 [agentKey]: { ...prev, blocks: finalized },
@@ -328,7 +355,8 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
               newMap[tcId] = {
                 content: e.data.content,
                 receivedAt: Date.now(),
-                startedAt: s.toolStartedMap[tcId],
+                startedAt: s.toolStartedMap[tcId]
+                  ?? (e.data.started_at ? new Date(e.data.started_at).getTime() : undefined),
                 contentType: e.data.content_type,
               }
             }
@@ -379,7 +407,9 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
       const mainStream = agents[MAIN_AGENT_KEY]
       if (mainStream) {
         // Finalize any pending reasoning block and strip internal started_at field
-        const finalBlocks = finalizeLastReasoning(mainStream.blocks).map((b) => {
+        const finalBlocks = finalizeLastReasoning(mainStream.blocks)
+          .filter((b) => b.type !== 'tool_call_streaming')
+          .map((b) => {
           if (b.type === 'reasoning') {
             const { started_at: _, ...rest } = b
             return rest
@@ -395,6 +425,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
                 name: tc.data.name,
                 arguments: tc.data.arguments,
                 tool_call_id: tc.data.tool_call_id,
+                started_at: tc.data.started_at ?? null,
               }))
             : null,
           reasoning: mainStream.reasoning || null,

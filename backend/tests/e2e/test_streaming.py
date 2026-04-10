@@ -57,6 +57,64 @@ async def test_stream_always_ends_with_done(memory_client: httpx.AsyncClient) ->
     assert events[-1]["type"] == "done"
 
 
+def test_tool_call_delta_identity_is_backfilled_per_agent() -> None:
+    context: dict[tuple[str | None, int], dict[str, object]] = {}
+    events = conversations_route._dicts_to_sse_events(
+        [
+            {
+                "type": "tool_call_delta",
+                "timestamp": "",
+                "data": {
+                    "tool_call_id": "tc-a",
+                    "name": "write_file",
+                    "args_delta": '{"file_path":"a.py"',
+                    "index": 0,
+                },
+                "agent_id": "subagent:a",
+            },
+            {
+                "type": "tool_call_delta",
+                "timestamp": "",
+                "data": {
+                    "tool_call_id": "tc-b",
+                    "name": "write_file",
+                    "args_delta": '{"file_path":"b.py"',
+                    "index": 0,
+                },
+                "agent_id": "subagent:b",
+            },
+            {
+                "type": "tool_call_delta",
+                "timestamp": "",
+                "data": {
+                    "tool_call_id": None,
+                    "name": None,
+                    "args_delta": ',"content":"print(1)"}',
+                    "index": 0,
+                },
+                "agent_id": "subagent:a",
+            },
+            {
+                "type": "tool_call_delta",
+                "timestamp": "",
+                "data": {
+                    "tool_call_id": None,
+                    "name": None,
+                    "args_delta": ',"content":"print(2)"}',
+                    "index": 0,
+                },
+                "agent_id": "subagent:b",
+            },
+        ],
+        context,
+    )
+
+    assert events[2].data["tool_call_id"] == "tc-a"
+    assert events[2].data["name"] == "write_file"
+    assert events[3].data["tool_call_id"] == "tc-b"
+    assert events[3].data["name"] == "write_file"
+
+
 @pytest.mark.asyncio
 async def test_agent_id_is_null_for_main_agent(memory_client: httpx.AsyncClient) -> None:
     resp = await memory_client.post("/api/v1/conversations", params={"title": "test"})
@@ -252,9 +310,7 @@ async def test_tool_call_delta_events_in_sse_stream(
     monkeypatch.setattr(
         conversations_route, "_update_conversation_timestamp", _noop_update_timestamp
     )
-    monkeypatch.setattr(
-        conversations_route.ConversationRepository, "get_by_id", _fake_get_by_id
-    )
+    monkeypatch.setattr(conversations_route.ConversationRepository, "get_by_id", _fake_get_by_id)
     monkeypatch.setattr(
         "cubebox.agents.graph.create_cubebox_agent",
         lambda **_kwargs: _FakeToolCallAgent(),
@@ -287,4 +343,6 @@ async def test_tool_call_delta_events_in_sse_stream(
     assert len(delta_events) == 2, f"Expected 2 tool_call_delta events, got {len(delta_events)}"
     assert delta_events[0]["data"]["name"] == "write_file"
     assert delta_events[0]["data"]["tool_call_id"] == "tc_1"
+    assert delta_events[1]["data"]["name"] == "write_file"
+    assert delta_events[1]["data"]["tool_call_id"] == "tc_1"
     assert delta_events[1]["data"]["args_delta"] == 'os\\nimport sys"}'

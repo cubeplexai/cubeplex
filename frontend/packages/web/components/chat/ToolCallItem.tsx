@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useRef, memo } from 'react'
+import type { ToolCallRef } from '@cubebox/core'
 import {
   CheckCircle2,
   Circle,
@@ -13,6 +14,9 @@ interface ToolCallItemProps {
   name: string
   arguments: Record<string, unknown>
   toolCallId: string
+  summaryOverride?: string
+  contentTypeOverride?: string
+  toolRef?: ToolCallRef
   toolResult?: {
     content: string
     receivedAt: number
@@ -22,6 +26,7 @@ interface ToolCallItemProps {
   timestamp?: string
   /** True while this tool is still executing */
   isPending: boolean
+  allowOpenWhenPending?: boolean
   /** Show border-top separator (not first in group) */
   showDivider?: boolean
 }
@@ -39,9 +44,13 @@ export const ToolCallItem = memo(function ToolCallItem({
   name,
   arguments: args,
   toolCallId,
+  summaryOverride,
+  contentTypeOverride,
+  toolRef,
   toolResult,
   timestamp,
   isPending,
+  allowOpenWhenPending,
   showDivider,
 }: ToolCallItemProps) {
   const [elapsed, setElapsed] = useState(0)
@@ -69,10 +78,17 @@ export const ToolCallItem = memo(function ToolCallItem({
     : elapsed
 
   const Icon = getToolIcon(name)
-  const summary = getParamSummary(name, args)
+  const summary = summaryOverride ?? getParamSummary(name, args)
+  const canOpen = Boolean(toolResult) || allowOpenWhenPending
 
   const handleViewInPanel = () => {
-    openPanel(name, args, toolResult?.content ?? null, toolResult?.contentType)
+    openPanel(
+      name,
+      args,
+      toolResult?.content ?? null,
+      contentTypeOverride ?? toolResult?.contentType,
+      toolRef,
+    )
   }
 
   return (
@@ -83,10 +99,10 @@ export const ToolCallItem = memo(function ToolCallItem({
     >
       <button
         type="button"
-        onClick={toolResult ? handleViewInPanel : undefined}
+        onClick={canOpen ? handleViewInPanel : undefined}
         className={`flex w-full items-center gap-2 px-3
           py-2 text-sm transition-colors
-          ${toolResult ? 'hover:bg-muted/50 cursor-pointer' : ''}`}
+          ${canOpen ? 'hover:bg-muted/50 cursor-pointer' : ''}`}
       >
         <Icon
           className="size-3.5 text-muted-foreground
@@ -146,6 +162,10 @@ export const ToolCallItem = memo(function ToolCallItem({
                 className="size-3 text-muted-foreground"
               />
             </>
+          ) : canOpen ? (
+            <PanelRight
+              className="size-3 text-muted-foreground"
+            />
           ) : null}
         </span>
       </button>
