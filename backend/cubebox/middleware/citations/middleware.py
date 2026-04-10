@@ -87,9 +87,7 @@ class CitationMiddleware(AgentMiddleware[Any, Any, Any]):
 
             citation_data: dict[str, Any] = {
                 "citation_id": citation_id,
-                "chunks": [
-                    {"chunk_index": i, "content": c} for i, c in enumerate(chunks)
-                ],
+                "chunks": [{"chunk_index": i, "content": c} for i, c in enumerate(chunks)],
                 "metadata": metadata,
                 "tool_call_id": tool_call_id,
             }
