@@ -173,12 +173,14 @@ def _extract_tool_events(
         tool_name = msg.get("name")
         tool_call_id = msg.get("tool_call_id", "")
         response_metadata = msg.get("response_metadata", {})
+        additional_kwargs = msg.get("additional_kwargs", {})
     else:
         tool_calls = getattr(msg, "tool_calls", []) or []
         content = getattr(msg, "content", "") or ""
         tool_name = getattr(msg, "name", None)
         tool_call_id = getattr(msg, "tool_call_id", "")
         response_metadata = getattr(msg, "response_metadata", {}) or {}
+        additional_kwargs = getattr(msg, "additional_kwargs", {}) or {}
 
     # Tool calls (from AIMessage)
     for index, tc in enumerate(tool_calls):
@@ -219,10 +221,14 @@ def _extract_tool_events(
         else:
             result_str = str(content)
 
+        # Use original content for frontend display if CitationMiddleware rewrote it
+        original_content = (additional_kwargs or {}).get("original_content")
+        display_content = original_content if original_content else result_str
+
         tool_result_data: dict[str, Any] = {
             "tool_name": tool_name,
             "tool_call_id": tool_call_id,
-            "content": result_str,
+            "content": display_content,
         }
         tool_started_at = (response_metadata or {}).get("tool_started_at")
         if isinstance(tool_started_at, str):
