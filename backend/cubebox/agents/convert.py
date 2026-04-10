@@ -58,6 +58,26 @@ def _consolidate_subagent_events(
     }
 
 
+def _get_tool_call_started_at(
+    response_metadata: dict[str, Any] | None,
+    *,
+    index: int,
+    tool_call_id: str | None,
+) -> str | None:
+    timestamps = (response_metadata or {}).get("tool_call_started_at_by_index")
+    if isinstance(timestamps, dict):
+        raw = timestamps.get(str(index), timestamps.get(index))
+        if isinstance(raw, str):
+            return raw
+    if tool_call_id:
+        timestamps_by_id = (response_metadata or {}).get("tool_call_started_at_by_id")
+        if isinstance(timestamps_by_id, dict):
+            raw = timestamps_by_id.get(tool_call_id)
+            if isinstance(raw, str):
+                return raw
+    return None
+
+
 def convert_to_api_messages(lc_messages: list[BaseMessage]) -> list[dict[str, Any]]:
     """Convert a list of LangChain messages to the API response format.
 
@@ -105,8 +125,13 @@ def convert_to_api_messages(lc_messages: list[BaseMessage]) -> list[dict[str, An
                         "name": tc["name"],
                         "arguments": tc["args"],
                         "tool_call_id": tc.get("id", ""),
+                        "started_at": _get_tool_call_started_at(
+                            msg.response_metadata,
+                            index=i,
+                            tool_call_id=tc.get("id"),
+                        ),
                     }
-                    for tc in msg.tool_calls
+                    for i, tc in enumerate(msg.tool_calls)
                 ] or None
 
             reasoning = (msg.additional_kwargs or {}).get("reasoning_content")
@@ -159,6 +184,7 @@ def convert_to_api_messages(lc_messages: list[BaseMessage]) -> list[dict[str, An
                     "reasoning": None,
                     "name": msg.name,
                     "tool_call_id": getattr(msg, "tool_call_id", None),
+                    "started_at": (msg.response_metadata or {}).get("tool_started_at"),
                     "subagent_events": subagent_events,
                     "created_at": ts,
                 }

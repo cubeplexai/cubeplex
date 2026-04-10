@@ -6,6 +6,7 @@ This is useful for OpenAI-compatible endpoints that return reasoning in the resp
 
 import time
 from collections.abc import AsyncIterator, Iterator
+from datetime import UTC, datetime
 from typing import Any
 
 from langchain_core.callbacks import (
@@ -52,11 +53,13 @@ class ChatOpenAICompatible(ChatOpenAI):
     _stream_metadata_emitted: bool = False
     _reasoning_start: float | None = None  # monotonic
     _reasoning_end: float | None = None  # monotonic
+    _tool_call_started_at_by_index: dict[int, str] | None = None
 
     def _reset_stream_state(self) -> None:
         self._stream_metadata_emitted = False
         self._reasoning_start = None
         self._reasoning_end = None
+        self._tool_call_started_at_by_index = {}
 
     def _create_chat_result(
         self,
@@ -157,17 +160,37 @@ class ChatOpenAICompatible(ChatOpenAI):
         if has_reasoning and isinstance(generation_chunk.message, AIMessageChunk):
             generation_chunk.message.additional_kwargs["reasoning_content"] = reasoning_delta
 
+        tool_call_chunks = getattr(generation_chunk.message, "tool_call_chunks", []) or []
+        if tool_call_chunks:
+            for tool_call_chunk in tool_call_chunks:
+                if not isinstance(tool_call_chunk, dict):
+                    continue
+                index = tool_call_chunk.get("index")
+                if not isinstance(index, int):
+                    continue
+                if self._tool_call_started_at_by_index is None:
+                    self._tool_call_started_at_by_index = {}
+                self._tool_call_started_at_by_index.setdefault(
+                    index,
+                    datetime.now(UTC).isoformat(),
+                )
+
         # --- On finish: stamp reasoning_duration_ms ---
         # Only on the last chunk to avoid LangChain merge_dicts garbling.
         # created_at is handled by TimestampMiddleware at the agent level.
         if finish_reason is not None and not self._stream_metadata_emitted:
-            if self._reasoning_start is not None:
-                if isinstance(generation_chunk.message, AIMessageChunk):
+            if isinstance(generation_chunk.message, AIMessageChunk):
+                if self._reasoning_start is not None:
                     end = self._reasoning_end or time.monotonic()
                     duration_ms = int((end - self._reasoning_start) * 1000)
                     generation_chunk.message.response_metadata["reasoning_duration_ms"] = (
                         duration_ms
                     )
+                if self._tool_call_started_at_by_index:
+                    generation_chunk.message.response_metadata["tool_call_started_at_by_index"] = {
+                        str(index): started_at
+                        for index, started_at in self._tool_call_started_at_by_index.items()
+                    }
             self._stream_metadata_emitted = True
 
         return generation_chunk

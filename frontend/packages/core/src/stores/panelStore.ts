@@ -1,6 +1,6 @@
 // frontend/packages/core/src/stores/panelStore.ts
 import { create } from 'zustand'
-import type { PanelContentType } from '../types'
+import type { PanelContentType, ToolCallRef } from '../types'
 
 /** Map tool name + optional backend content_type to a PanelContentType. */
 function mapContentType(
@@ -9,6 +9,7 @@ function mapContentType(
 ): PanelContentType {
   if (toolName === 'load_skill') return 'skill'
   if (toolName === 'execute') return 'terminal'
+  if (toolName === 'write_file') return 'write_file'
   if (toolName === 'code_execute' || toolName === 'python') return 'code_execute'
 
   if (backendContentType === 'json') {
@@ -33,6 +34,7 @@ export type PanelView =
       toolArgs: Record<string, unknown>
       toolResult: string | null
       contentType: PanelContentType
+      toolRef: ToolCallRef | null
     }
   | {
       type: 'artifact'
@@ -48,6 +50,7 @@ export interface PanelStore {
     toolArgs: Record<string, unknown>,
     toolResult: string | null,
     contentType?: string,
+    toolRef?: ToolCallRef,
   ) => void
 
   openArtifact: (conversationId: string, artifactId: string) => void
@@ -58,7 +61,7 @@ export interface PanelStore {
 export const usePanelStore = create<PanelStore>((set) => ({
   view: { type: 'closed' },
 
-  openTool: (toolName, toolArgs, toolResult, contentType) =>
+  openTool: (toolName, toolArgs, toolResult, contentType, toolRef) =>
     set({
       view: {
         type: 'tool',
@@ -66,6 +69,7 @@ export const usePanelStore = create<PanelStore>((set) => ({
         toolArgs,
         toolResult,
         contentType: mapContentType(toolName, contentType),
+        toolRef: toolRef ?? null,
       },
     }),
 

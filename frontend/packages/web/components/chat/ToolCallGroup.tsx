@@ -1,6 +1,6 @@
 'use client'
 
-import type { ContentBlock } from '@cubebox/core'
+import type { ContentBlock, ToolCallRef } from '@cubebox/core'
 import { ToolCallItem } from './ToolCallItem'
 
 interface ToolCallGroupProps {
@@ -12,6 +12,7 @@ interface ToolCallGroupProps {
   isStreaming: boolean
   /** ISO timestamp of the parent assistant message (used to compute tool call duration) */
   messageCreatedAt?: string
+  agentId?: string | null
 }
 
 export function ToolCallGroup({
@@ -19,6 +20,7 @@ export function ToolCallGroup({
   toolResultMap,
   isStreaming,
   messageCreatedAt,
+  agentId,
 }: ToolCallGroupProps) {
   return (
     <div
@@ -36,9 +38,18 @@ export function ToolCallGroup({
             name={block.name}
             arguments={block.arguments}
             toolCallId={block.tool_call_id}
+            contentTypeOverride={block.name === 'write_file' ? 'write_file' : undefined}
+            toolRef={block.name === 'write_file'
+              ? {
+                  agent_id: agentId ?? null,
+                  tool_call_id: block.tool_call_id,
+                  index: null,
+                } satisfies ToolCallRef
+              : undefined}
             toolResult={result}
             timestamp={messageCreatedAt}
             isPending={isPending}
+            allowOpenWhenPending={block.name === 'write_file'}
             showDivider={i > 0}
           />
         )

@@ -20,6 +20,7 @@ function mockSSEResponse(events: object[]) {
 const mockClient = { baseUrl: '', get: vi.fn(), post: vi.fn() }
 
 beforeEach(() => {
+  vi.useRealTimers()
   useMessageStore.setState({
     messages: {},
     streamAgents: {},
@@ -193,5 +194,136 @@ describe('messageStore.send', () => {
         status: 'in_progress',
       },
     ])
+  })
+
+  it('replaces streamed tool-call placeholders with the finalized tool call', async () => {
+    vi.stubGlobal('fetch', vi.fn(() => mockSSEResponse([
+      {
+        type: 'tool_call_delta',
+        data: {
+          tool_call_id: 'call-1',
+          name: 'execute',
+          args_delta: '{"cmd":"echo',
+          index: 0,
+        },
+        agent_id: null,
+        agent_name: null,
+        timestamp: '',
+      },
+      {
+        type: 'tool_call',
+        data: {
+          tool_call_id: 'call-1',
+          name: 'execute',
+          arguments: { cmd: 'echo hello' },
+        },
+        agent_id: null,
+        agent_name: null,
+        timestamp: '',
+      },
+      { type: 'done', data: {}, agent_id: null, agent_name: null, timestamp: '' },
+    ])))
+
+    await act(async () => {
+      await useMessageStore.getState().send(mockClient as any, CONV_ID, 'run it')
+    })
+
+    const msgs = useMessageStore.getState().messages[CONV_ID] ?? []
+    const assistantMsg = msgs.find((m) => m.role === 'assistant')
+    expect(assistantMsg?.blocks).toEqual([
+      {
+        type: 'tool_call',
+        name: 'execute',
+        arguments: { cmd: 'echo hello' },
+        tool_call_id: 'call-1',
+      },
+    ])
+  })
+
+  it('does not persist unfinished streaming tool-call placeholders', async () => {
+    vi.stubGlobal('fetch', vi.fn(() => mockSSEResponse([
+      {
+        type: 'tool_call_delta',
+        data: {
+          tool_call_id: null,
+          name: 'search',
+          args_delta: '{"query":"partial',
+          index: 0,
+        },
+        agent_id: null,
+        agent_name: null,
+        timestamp: '',
+      },
+      { type: 'done', data: {}, agent_id: null, agent_name: null, timestamp: '' },
+    ])))
+
+    await act(async () => {
+      await useMessageStore.getState().send(mockClient as any, CONV_ID, 'search')
+    })
+
+    const msgs = useMessageStore.getState().messages[CONV_ID] ?? []
+    const assistantMsg = msgs.find((m) => m.role === 'assistant')
+    expect(assistantMsg?.blocks).toBeNull()
+  })
+
+  it('preserves tool timing from the first tool_call_delta through completion', async () => {
+    vi.stubGlobal('fetch', vi.fn(() => mockSSEResponse([
+      {
+        type: 'tool_call_delta',
+        data: {
+          tool_call_id: 'write-1',
+          name: 'write_file',
+          args_delta: '{"file_path":"/tmp/demo.txt","content":"hello"}',
+          index: 0,
+        },
+        agent_id: null,
+        agent_name: null,
+        timestamp: '',
+      },
+      {
+        type: 'tool_call',
+        data: {
+          tool_call_id: 'write-1',
+          name: 'write_file',
+          arguments: {
+            file_path: '/tmp/demo.txt',
+            content: 'hello',
+          },
+        },
+        agent_id: null,
+        agent_name: null,
+        timestamp: '',
+      },
+      {
+        type: 'tool_result',
+        data: {
+          tool_name: 'write_file',
+          tool_call_id: 'write-1',
+          content: 'Successfully wrote /tmp/demo.txt',
+        },
+        agent_id: null,
+        agent_name: null,
+        timestamp: '',
+      },
+      { type: 'done', data: {}, agent_id: null, agent_name: null, timestamp: '' },
+    ])))
+
+    const nowSpy = vi.spyOn(Date, 'now')
+    nowSpy
+      .mockImplementationOnce(() => 100)
+      .mockImplementationOnce(() => 1_000)
+      .mockImplementationOnce(() => 4_000)
+      .mockImplementationOnce(() => 5_000)
+
+    await act(async () => {
+      await useMessageStore.getState().send(mockClient as any, CONV_ID, 'write file')
+    })
+
+    expect(useMessageStore.getState().toolResultMap['write-1']).toMatchObject({
+      startedAt: 1_000,
+      receivedAt: 4_000,
+    })
+
+    nowSpy.mockRestore()
   })
 })

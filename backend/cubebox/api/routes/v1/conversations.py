@@ -151,7 +151,42 @@ def _ns_to_agent_id(ns: tuple[Any, ...]) -> str | None:
     return ":".join(str(part) for part in ns)
 
 
-def _dicts_to_sse_events(event_dicts: list[dict[str, Any]]) -> list[AgentEvent]:
+def _backfill_tool_call_delta_identity(
+    evt_dict: dict[str, Any],
+    delta_context: dict[tuple[str | None, int], dict[str, Any]],
+) -> dict[str, Any]:
+    """Fill missing tool_call_delta identity fields from prior chunks in the same stream."""
+    if evt_dict.get("type") != "tool_call_delta":
+        return evt_dict
+
+    data = evt_dict.get("data")
+    if not isinstance(data, dict):
+        return evt_dict
+
+    index = data.get("index")
+    if not isinstance(index, int):
+        return evt_dict
+
+    key = (evt_dict.get("agent_id"), index)
+    cached = delta_context.get(key, {})
+    normalized_data = dict(data)
+
+    if normalized_data.get("tool_call_id") is None and cached.get("tool_call_id") is not None:
+        normalized_data["tool_call_id"] = cached["tool_call_id"]
+    if normalized_data.get("name") is None and cached.get("name") is not None:
+        normalized_data["name"] = cached["name"]
+
+    delta_context[key] = {
+        "tool_call_id": normalized_data.get("tool_call_id"),
+        "name": normalized_data.get("name"),
+    }
+    return {**evt_dict, "data": normalized_data}
+
+
+def _dicts_to_sse_events(
+    event_dicts: list[dict[str, Any]],
+    delta_context: dict[tuple[str | None, int], dict[str, Any]] | None = None,
+) -> list[AgentEvent]:
     """Wrap raw event dicts from stream helpers into typed AgentEvent objects."""
     from cubebox.agents.schemas import (
         ArtifactEvent,
@@ -164,6 +199,8 @@ def _dicts_to_sse_events(event_dicts: list[dict[str, Any]]) -> list[AgentEvent]:
 
     events: list[AgentEvent] = []
     for evt_dict in event_dicts:
+        if delta_context is not None:
+            evt_dict = _backfill_tool_call_delta_identity(evt_dict, delta_context)
         evt_type = evt_dict.get("type")
         if evt_type == "reasoning":
             events.append(
@@ -171,6 +208,7 @@ def _dicts_to_sse_events(event_dicts: list[dict[str, Any]]) -> list[AgentEvent]:
                     timestamp=evt_dict["timestamp"],
                     data=evt_dict["data"],
                     agent_id=evt_dict.get("agent_id"),
+                    agent_name=evt_dict.get("agent_name"),
                 )
             )
         elif evt_type == "tool_call":
@@ -179,6 +217,7 @@ def _dicts_to_sse_events(event_dicts: list[dict[str, Any]]) -> list[AgentEvent]:
                     timestamp=evt_dict["timestamp"],
                     data=evt_dict["data"],
                     agent_id=evt_dict.get("agent_id"),
+                    agent_name=evt_dict.get("agent_name"),
                 )
             )
         elif evt_type == "tool_result":
@@ -187,6 +226,7 @@ def _dicts_to_sse_events(event_dicts: list[dict[str, Any]]) -> list[AgentEvent]:
                     timestamp=evt_dict["timestamp"],
                     data=evt_dict["data"],
                     agent_id=evt_dict.get("agent_id"),
+                    agent_name=evt_dict.get("agent_name"),
                 )
             )
         elif evt_type == "text_delta":
@@ -195,6 +235,7 @@ def _dicts_to_sse_events(event_dicts: list[dict[str, Any]]) -> list[AgentEvent]:
                     timestamp=evt_dict["timestamp"],
                     data=evt_dict["data"],
                     agent_id=evt_dict.get("agent_id"),
+                    agent_name=evt_dict.get("agent_name"),
                 )
             )
         elif evt_type == "tool_call_delta":
@@ -203,6 +244,7 @@ def _dicts_to_sse_events(event_dicts: list[dict[str, Any]]) -> list[AgentEvent]:
                     timestamp=evt_dict["timestamp"],
                     data=evt_dict["data"],
                     agent_id=evt_dict.get("agent_id"),
+                    agent_name=evt_dict.get("agent_name"),
                 )
             )
         elif evt_type == "artifact":
@@ -211,6 +253,7 @@ def _dicts_to_sse_events(event_dicts: list[dict[str, Any]]) -> list[AgentEvent]:
                     timestamp=evt_dict["timestamp"],
                     data=evt_dict["data"],
                     agent_id=evt_dict.get("agent_id"),
+                    agent_name=evt_dict.get("agent_name"),
                 )
             )
 
@@ -381,6 +424,7 @@ async def send_message(
             )
 
             stream_task = asyncio.create_task(_drain_main_stream())
+            tool_delta_context: dict[tuple[str | None, int], dict[str, Any]] = {}
 
             while True:
                 try:
@@ -407,7 +451,7 @@ async def send_message(
                             evts = convert_updates_chunk(data, agent_id=agent_id)
                         else:
                             evts = []
-                        for sse_event in _dicts_to_sse_events(evts):
+                        for sse_event in _dicts_to_sse_events(evts, tool_delta_context):
                             yield f"data: {sse_event.model_dump_json()}\n\n"
 
                 elif kind == "subagent":
@@ -421,7 +465,7 @@ async def send_message(
                             evts = convert_updates_chunk(data, agent_id=sa_agent_id)
                         else:
                             evts = []
-                        for sse_event in _dicts_to_sse_events(evts):
+                        for sse_event in _dicts_to_sse_events(evts, tool_delta_context):
                             yield f"data: {sse_event.model_dump_json()}\n\n"
 
                 elif kind == "error":

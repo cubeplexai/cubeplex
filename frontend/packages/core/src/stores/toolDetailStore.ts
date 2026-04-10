@@ -1,7 +1,7 @@
 // frontend/packages/core/src/stores/toolDetailStore.ts
 // Thin compatibility layer — delegates to the unified panelStore.
 import { usePanelStore } from './panelStore'
-import type { PanelContentType } from '../types'
+import type { PanelContentType, ToolCallRef } from '../types'
 
 export interface ToolDetailStore {
   isOpen: boolean
@@ -9,12 +9,14 @@ export interface ToolDetailStore {
   toolArgs: Record<string, unknown>
   toolResult: string | null
   contentType: PanelContentType
+  toolRef: ToolCallRef | null
 
   open: (
     toolName: string,
     toolArgs: Record<string, unknown>,
     toolResult: string | null,
     contentType?: string,
+    toolRef?: ToolCallRef,
   ) => void
   close: () => void
 }
@@ -31,6 +33,7 @@ export const useToolDetailStore = Object.assign(
               toolArgs: v.toolArgs,
               toolResult: v.toolResult,
               contentType: v.contentType,
+              toolRef: v.toolRef,
               open: panel.openTool,
               close: panel.close,
             }
@@ -40,6 +43,7 @@ export const useToolDetailStore = Object.assign(
               toolArgs: {},
               toolResult: null,
               contentType: 'generic',
+              toolRef: null,
               open: panel.openTool,
               close: panel.close,
             }
@@ -57,6 +61,7 @@ export const useToolDetailStore = Object.assign(
           toolArgs: v.toolArgs,
           toolResult: v.toolResult,
           contentType: v.contentType,
+          toolRef: v.toolRef,
           open: panel.openTool,
           close: panel.close,
         }
@@ -67,6 +72,7 @@ export const useToolDetailStore = Object.assign(
         toolArgs: {},
         toolResult: null,
         contentType: 'generic',
+        toolRef: null,
         open: panel.openTool,
         close: panel.close,
       }

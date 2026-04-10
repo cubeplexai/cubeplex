@@ -25,6 +25,26 @@ def _unwrap_mcp_content(content: Any) -> str:
     return "\n".join(texts) if texts else str(content)
 
 
+def _get_tool_call_started_at(
+    response_metadata: dict[str, Any] | None,
+    *,
+    index: int,
+    tool_call_id: str | None,
+) -> str | None:
+    timestamps = (response_metadata or {}).get("tool_call_started_at_by_index")
+    if isinstance(timestamps, dict):
+        raw = timestamps.get(str(index), timestamps.get(index))
+        if isinstance(raw, str):
+            return raw
+    if tool_call_id:
+        timestamps_by_id = (response_metadata or {}).get("tool_call_started_at_by_id")
+        if isinstance(timestamps_by_id, dict):
+            raw = timestamps_by_id.get(tool_call_id)
+            if isinstance(raw, str):
+                return raw
+    return None
+
+
 def convert_messages_chunk(
     chunk: Any,
     agent_id: str | None = None,
@@ -152,24 +172,34 @@ def _extract_tool_events(
         content = msg.get("content", "")
         tool_name = msg.get("name")
         tool_call_id = msg.get("tool_call_id", "")
+        response_metadata = msg.get("response_metadata", {})
     else:
         tool_calls = getattr(msg, "tool_calls", []) or []
         content = getattr(msg, "content", "") or ""
         tool_name = getattr(msg, "name", None)
         tool_call_id = getattr(msg, "tool_call_id", "")
+        response_metadata = getattr(msg, "response_metadata", {}) or {}
 
     # Tool calls (from AIMessage)
-    for tc in tool_calls:
+    for index, tc in enumerate(tool_calls):
         tc_name = tc.get("name") if isinstance(tc, dict) else getattr(tc, "name", "")
         tc_id = tc.get("id", "") if isinstance(tc, dict) else getattr(tc, "id", "")
         tc_args = tc.get("args", {}) if isinstance(tc, dict) else getattr(tc, "args", {})
         if not tc_name:
             continue
+        data: dict[str, Any] = {"tool_call_id": tc_id, "name": tc_name, "arguments": tc_args}
+        started_at = _get_tool_call_started_at(
+            response_metadata,
+            index=index,
+            tool_call_id=tc_id or None,
+        )
+        if started_at:
+            data["started_at"] = started_at
         events.append(
             {
                 "type": "tool_call",
                 "timestamp": timestamp,
-                "data": {"tool_call_id": tc_id, "name": tc_name, "arguments": tc_args},
+                "data": data,
                 "agent_id": agent_id,
             }
         )
@@ -189,19 +219,22 @@ def _extract_tool_events(
         else:
             result_str = str(content)
 
-        data: dict[str, Any] = {
+        tool_result_data: dict[str, Any] = {
             "tool_name": tool_name,
             "tool_call_id": tool_call_id,
             "content": result_str,
         }
+        tool_started_at = (response_metadata or {}).get("tool_started_at")
+        if isinstance(tool_started_at, str):
+            tool_result_data["started_at"] = tool_started_at
         if content_type:
-            data["content_type"] = content_type
+            tool_result_data["content_type"] = content_type
 
         events.append(
             {
                 "type": "tool_result",
                 "timestamp": timestamp,
-                "data": data,
+                "data": tool_result_data,
                 "agent_id": agent_id,
             }
         )

@@ -12,6 +12,8 @@ import {
 
 const iconMap: Record<string, LucideIcon> = {
   execute: Terminal,
+  write_file: Code,
+  edit_file: Code,
   web_search: Search,
   search: Search,
   web_fetch: Globe,
@@ -41,6 +43,10 @@ export function getParamSummary(
   let value = ''
   if (toolName === 'execute') {
     value = String(args.command ?? args.cmd ?? '')
+  } else if (
+    toolName === 'write_file' || toolName === 'edit_file'
+  ) {
+    value = String(args.file_path ?? args.file_name ?? '')
   } else if (
     toolName === 'web_search' || toolName === 'search'
   ) {
