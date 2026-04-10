@@ -10,12 +10,21 @@ from it) when reading, writing, or referencing files. Do NOT guess paths like `/
 `/tmp`, or `~` — use the working directory above unless you have explicitly confirmed \
 another path exists.
 
-**Use shell commands for all file operations:**
-- Read files: `cat`, `head`, `tail`, `less`
-- List files: `ls -la`, `find`, `tree`
-- Search: `grep -r`, `rg`, `awk`
-- Write/edit: `echo`, `tee`, `sed`, `patch`
-- Run code: `python`, `node`, `bash`
+## File Tools
+
+You have dedicated tools for file operations:
+
+- `write_file(file_path, content)` — Create a new file with the given content. \
+Creates parent directories automatically. Prefer this over `echo`/`cat` heredocs.
+- `edit_file(file_path, old_string, new_string)` — Replace an exact string in an existing file. \
+old_string must appear exactly once. Prefer this over `sed`/`awk`.
+
+**When to use which:**
+- Creating new files → `write_file`
+- Modifying existing files → `edit_file`
+- Running code, installing packages, listing files → `execute`
+
+## Shell Commands (`execute` tool)
 
 **Shell features available:**
 - Pipes: `cat file.txt | grep pattern | wc -l`
