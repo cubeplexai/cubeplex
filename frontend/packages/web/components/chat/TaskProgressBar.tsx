@@ -17,10 +17,10 @@ interface TaskProgressBarProps {
 export function TaskProgressBar({
   todos,
 }: TaskProgressBarProps) {
-  const [isExpanded, setIsExpanded] = useState(false)
-  const prevCount = useRef(0)
+  const [isExpanded, setIsExpanded] = useState(todos.length > 0)
 
-  // Auto-expand on first todo arrival
+  // Auto-expand when todos first become non-empty
+  const prevCount = useRef(todos.length)
   useEffect(() => {
     if (prevCount.current === 0 && todos.length > 0) {
       setIsExpanded(true)
