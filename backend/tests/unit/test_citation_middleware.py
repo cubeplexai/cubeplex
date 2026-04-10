@@ -90,11 +90,13 @@ class TestCitationMiddlewareToolCall:
     async def test_configured_tool_rewrites_content(
         self, web_search_config, _setup_counter_and_queue
     ):
-        tool_output = json.dumps({
-            "results": [
-                {"link": "https://a.com", "title": "A", "snippet": "Content about A."},
-            ]
-        })
+        tool_output = json.dumps(
+            {
+                "results": [
+                    {"link": "https://a.com", "title": "A", "snippet": "Content about A."},
+                ]
+            }
+        )
         original = ToolMessage(content=tool_output, tool_call_id="call_1", name="web_search")
         handler = AsyncMock(return_value=original)
         request = _make_tool_call_request("web_search")
@@ -105,14 +107,14 @@ class TestCitationMiddlewareToolCall:
         assert "【1-0】" in result.content
         assert "Content about A." in result.content
 
-    async def test_original_content_preserved(
-        self, web_search_config, _setup_counter_and_queue
-    ):
-        tool_output = json.dumps({
-            "results": [
-                {"link": "https://a.com", "title": "A", "snippet": "Content."},
-            ]
-        })
+    async def test_original_content_preserved(self, web_search_config, _setup_counter_and_queue):
+        tool_output = json.dumps(
+            {
+                "results": [
+                    {"link": "https://a.com", "title": "A", "snippet": "Content."},
+                ]
+            }
+        )
         original = ToolMessage(content=tool_output, tool_call_id="call_1", name="web_search")
         handler = AsyncMock(return_value=original)
         request = _make_tool_call_request("web_search")
@@ -126,11 +128,13 @@ class TestCitationMiddlewareToolCall:
         self, web_search_config, _setup_counter_and_queue
     ):
         queue = _setup_counter_and_queue
-        tool_output = json.dumps({
-            "results": [
-                {"link": "https://a.com", "title": "A", "snippet": "Some content."},
-            ]
-        })
+        tool_output = json.dumps(
+            {
+                "results": [
+                    {"link": "https://a.com", "title": "A", "snippet": "Some content."},
+                ]
+            }
+        )
         original = ToolMessage(content=tool_output, tool_call_id="call_1", name="web_search")
         handler = AsyncMock(return_value=original)
         request = _make_tool_call_request("web_search", tool_call_id="call_1")
@@ -151,12 +155,14 @@ class TestCitationMiddlewareToolCall:
         self, web_search_config, _setup_counter_and_queue
     ):
         queue = _setup_counter_and_queue
-        tool_output = json.dumps({
-            "results": [
-                {"link": "https://a.com", "title": "A", "snippet": "Content A."},
-                {"link": "https://b.com", "title": "B", "snippet": "Content B."},
-            ]
-        })
+        tool_output = json.dumps(
+            {
+                "results": [
+                    {"link": "https://a.com", "title": "A", "snippet": "Content A."},
+                    {"link": "https://b.com", "title": "B", "snippet": "Content B."},
+                ]
+            }
+        )
         original = ToolMessage(content=tool_output, tool_call_id="call_1", name="web_search")
         handler = AsyncMock(return_value=original)
         request = _make_tool_call_request("web_search")
@@ -176,14 +182,14 @@ class TestCitationMiddlewareToolCall:
         queue = _setup_counter_and_queue
         mw = CitationMiddleware(citation_configs=web_search_config)
         for i in range(2):
-            tool_output = json.dumps({
-                "results": [
-                    {"link": f"https://{i}.com", "title": f"T{i}", "snippet": f"Content {i}."},
-                ]
-            })
-            original = ToolMessage(
-                content=tool_output, tool_call_id=f"call_{i}", name="web_search"
+            tool_output = json.dumps(
+                {
+                    "results": [
+                        {"link": f"https://{i}.com", "title": f"T{i}", "snippet": f"Content {i}."},
+                    ]
+                }
             )
+            original = ToolMessage(content=tool_output, tool_call_id=f"call_{i}", name="web_search")
             handler = AsyncMock(return_value=original)
             request = _make_tool_call_request("web_search", tool_call_id=f"call_{i}")
             await mw.awrap_tool_call(request, handler)
