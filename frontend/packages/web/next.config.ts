@@ -12,12 +12,19 @@ const nextConfig: NextConfig = {
     proxyTimeout: null,
   },
   async rewrites() {
-    return [
-      {
-        source: '/api/:path*',
-        destination: `${process.env.CUBEBOX_API_URL ?? 'http://localhost:8000'}/api/:path*`,
-      },
-    ]
+    return {
+      beforeFiles: [],
+      afterFiles: [],
+      // fallback: checked AFTER all filesystem routes (including dynamic route
+      // handlers like app/api/v1/conversations/[id]/messages/route.ts).
+      // This ensures our SSE streaming route handler takes precedence.
+      fallback: [
+        {
+          source: '/api/:path*',
+          destination: `${process.env.CUBEBOX_API_URL ?? 'http://localhost:8000'}/api/:path*`,
+        },
+      ],
+    }
   },
 }
 
