@@ -71,6 +71,7 @@ exclude = [
     "dist",
     "migrations",
     "alembic/versions",
+    "skills",
 ]
 
 [tool.ruff.lint]
@@ -102,6 +103,7 @@ exclude = [
     "build/",
     "dist/",
     "alembic/versions/",
+    "skills/",
 ]
 warn_return_any = true
 warn_unused_configs = true
