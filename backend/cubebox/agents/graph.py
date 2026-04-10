@@ -3,7 +3,6 @@
 from typing import Any
 
 from langchain.agents import create_agent
-from langchain.agents.middleware.todo import TodoListMiddleware
 from langchain.agents.middleware.types import AgentMiddleware
 from langchain_core.language_models import BaseChatModel
 from langchain_core.tools import BaseTool
@@ -16,6 +15,7 @@ from cubebox.middleware.sandbox import SandboxMiddleware
 from cubebox.middleware.skills import SkillsMiddleware, SkillSpec
 from cubebox.middleware.subagents import SubAgent, SubAgentMiddleware
 from cubebox.middleware.timestamps import TimestampMiddleware
+from cubebox.middleware.todo import TodoListMiddleware
 from cubebox.prompts.system import BASE_SYSTEM_PROMPT
 from cubebox.sandbox.base import Sandbox
 
