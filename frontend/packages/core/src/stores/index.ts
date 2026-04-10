@@ -1,4 +1,8 @@
 export {
+  useCitationStore,
+  type CitationStore,
+} from './citationStore'
+export {
   useArtifactStore,
   type ArtifactStore,
 } from './artifactStore'
