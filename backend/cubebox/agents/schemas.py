@@ -125,3 +125,20 @@ class StatusEvent(AgentEvent):
 
     type: Literal["status"] = "status"
     data: dict[str, Any] = Field(description="Event data with phase identifier")
+
+
+class CitationEvent(AgentEvent):
+    """Citation reference event.
+
+    Emitted when CitationMiddleware processes a tool result that has
+    citation configuration. Contains source metadata and text chunks
+    for frontend rendering of inline 【N-M】 references.
+    """
+
+    type: Literal["citation"] = "citation"
+    data: dict[str, Any] = Field(
+        description=(
+            "Citation data: citation_id, chunks [{chunk_index, content}], "
+            "metadata {source_type, url, title, ...}, tool_call_id"
+        )
+    )
