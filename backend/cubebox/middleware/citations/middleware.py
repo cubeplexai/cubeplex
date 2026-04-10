@@ -75,6 +75,7 @@ class CitationMiddleware(AgentMiddleware[Any, Any, Any]):
             return result
 
         chunks_for_llm: list[str] = []
+        all_citations: list[dict[str, Any]] = []
 
         for item in items:
             citation_id = await counter.next()
@@ -94,12 +95,14 @@ class CitationMiddleware(AgentMiddleware[Any, Any, Any]):
 
             if queue is not None:
                 await queue.put(("citation", None, citation_data))
+            all_citations.append(citation_data)
 
             for i, c in enumerate(chunks):
                 chunks_for_llm.append(f"【{citation_id}-{i}】 {c}")
 
         if chunks_for_llm:
             result.additional_kwargs["original_content"] = raw_content
+            result.additional_kwargs["citations"] = all_citations
             result.content = "\n\n".join(chunks_for_llm)
 
         return result

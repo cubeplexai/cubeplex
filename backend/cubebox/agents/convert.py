@@ -172,6 +172,7 @@ def convert_to_api_messages(lc_messages: list[BaseMessage]) -> list[dict[str, An
         elif isinstance(msg, ToolMessage):
             raw_events = (msg.additional_kwargs or {}).get("subagent_events")
             subagent_events = _consolidate_subagent_events(raw_events) if raw_events else None
+            citations = (msg.additional_kwargs or {}).get("citations")
             ts = _get_timestamp(msg)
             # Unwrap MCP content blocks: list[{"type": "text", "text": "..."}] -> text
             tool_content = _unwrap_mcp_content(msg.content)
@@ -186,6 +187,7 @@ def convert_to_api_messages(lc_messages: list[BaseMessage]) -> list[dict[str, An
                     "tool_call_id": getattr(msg, "tool_call_id", None),
                     "started_at": (msg.response_metadata or {}).get("tool_started_at"),
                     "subagent_events": subagent_events,
+                    "citations": citations,
                     "created_at": ts,
                 }
             )
