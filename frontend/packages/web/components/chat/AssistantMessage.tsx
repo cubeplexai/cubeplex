@@ -13,6 +13,9 @@ import { SubAgentCluster } from './SubAgentCluster'
 import { ToolCallGroup } from './ToolCallGroup'
 import { ToolCallItem } from './ToolCallItem'
 import { getWriteFileSummary } from '@/lib/writeFilePreview'
+import { renderWithCitations } from '@/lib/citations'
+import { CitationMarker } from './CitationMarker'
+import { useConversationStore } from '@cubebox/core'
 
 interface ReasoningBlockProps {
   reasoning: string
@@ -198,7 +201,7 @@ function subagentSummaryToStream(summary: SubagentSummary): AgentStream {
 
 function ContentBlockRenderer(
   { block, index, isLast, isStreaming, subAgentStreams, subagentDataMap, toolResultMap,
-    messageCreatedAt, subagentIndex, agentId }: {
+    messageCreatedAt, subagentIndex, agentId, conversationId }: {
     block: ContentBlock; index: number; isLast: boolean; isStreaming: boolean
     subAgentStreams?: Record<string, AgentStream>
     subagentDataMap?: Record<string, SubagentSummary>
@@ -206,6 +209,7 @@ function ContentBlockRenderer(
     messageCreatedAt?: string
     subagentIndex?: number
     agentId?: string | null
+    conversationId: string
   },
 ) {
   if (block.type === 'reasoning') {
@@ -326,9 +330,32 @@ function ContentBlockRenderer(
     )
   }
   if (block.type === 'text') {
+    const hasCitations = /【\d+-\d+】/.test(block.content)
+    if (!hasCitations) {
+      return (
+        <div className={proseClasses}>
+          <ReactMarkdown remarkPlugins={[remarkGfm]}>{block.content}</ReactMarkdown>
+        </div>
+      )
+    }
     return (
       <div className={proseClasses}>
-        <ReactMarkdown remarkPlugins={[remarkGfm]}>{block.content}</ReactMarkdown>
+        <ReactMarkdown
+          remarkPlugins={[remarkGfm]}
+          components={{
+            p: ({ children }) => (
+              <p>{renderWithCitations(children, conversationId, CitationMarker)}</p>
+            ),
+            li: ({ children }) => (
+              <li>{renderWithCitations(children, conversationId, CitationMarker)}</li>
+            ),
+            td: ({ children }) => (
+              <td>{renderWithCitations(children, conversationId, CitationMarker)}</td>
+            ),
+          }}
+        >
+          {block.content}
+        </ReactMarkdown>
       </div>
     )
   }
@@ -370,6 +397,7 @@ export function AssistantMessage(
   { message, stream, isStreaming, statusPhase, subAgentStreams, subagentDataMap, toolResultMap }:
   AssistantMessageProps,
 ) {
+  const activeConversationId = useConversationStore((s) => s.activeId) ?? ''
   const streamAgentId = stream ? 'main' : undefined
   const blocks: ContentBlock[] = stream
     ? stream.blocks
@@ -438,6 +466,7 @@ export function AssistantMessage(
               messageCreatedAt={msgCreatedAt}
               subagentIndex={subagentIndexMap.get(i)}
               agentId={streamAgentId}
+              conversationId={activeConversationId}
             />
           )
         })}
