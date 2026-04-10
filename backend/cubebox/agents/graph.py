@@ -11,7 +11,7 @@ from langgraph.types import Checkpointer
 from loguru import logger
 
 from cubebox.middleware.artifacts import ArtifactMiddleware
-from cubebox.middleware.citations import CitationConfig
+from cubebox.middleware.citations import CitationConfig, CitationMiddleware
 from cubebox.middleware.sandbox import SandboxMiddleware
 from cubebox.middleware.skills import SkillsMiddleware, SkillSpec
 from cubebox.middleware.subagents import SubAgent, SubAgentMiddleware
@@ -49,6 +49,11 @@ def create_cubebox_agent(
     middleware: list[AgentMiddleware[Any, Any]] = []
 
     middleware.append(TimestampMiddleware())
+
+    # Citation middleware — chunks tool results and assigns citation IDs
+    _citation_configs = citation_configs or {}
+    if _citation_configs:
+        middleware.append(CitationMiddleware(citation_configs=_citation_configs))
 
     if sandbox is not None:
         middleware.append(SandboxMiddleware(sandbox=sandbox))
