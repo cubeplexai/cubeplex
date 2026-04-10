@@ -1,7 +1,7 @@
 import type { NextConfig } from 'next'
 
 const nextConfig: NextConfig = {
-  allowedDevOrigins: ['192.168.1.111'],
+  allowedDevOrigins: ['localhost', '127.0.0.1', '[::1]', '192.168.1.111'],
   compress: false,
   turbopack: {},
   async rewrites() {

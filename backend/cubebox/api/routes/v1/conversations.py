@@ -2,6 +2,7 @@
 
 import asyncio
 from collections.abc import AsyncIterator
+from contextlib import suppress
 from datetime import UTC, datetime
 from typing import Annotated, Any
 
@@ -26,8 +27,8 @@ router = APIRouter(prefix="/conversations", tags=["conversations"])
 async def _update_conversation_timestamp(conversation_id: str) -> None:
     """Update conversation timestamp using an isolated NullPool engine.
 
-    Designed to be called via asyncio.shield() so it completes
-    even if the parent task is cancelled.
+    Uses a dedicated connection so post-stream persistence does not
+    depend on the request-scoped pool state.
     """
     save_engine = create_async_engine(_build_database_url(), poolclass=NullPool)
     try:
@@ -240,6 +241,9 @@ async def send_message(
         checkpointer = None
         sandbox = None
         sandbox_manager = None
+        sandbox_create_task: asyncio.Task[Any] | None = None
+        stream_task: asyncio.Task[None] | None = None
+        request_cancelled = False
 
         # Unified event queue: both the main agent stream and subagent callbacks
         # push events here so the SSE generator can multiplex them.
@@ -280,14 +284,18 @@ async def send_message(
 
                         yield _status("sandbox_creating")
                         sandbox_manager = get_sandbox_manager()
-                        create_task = asyncio.ensure_future(sandbox_manager.get_or_create(user_id))
+                        sandbox_create_task = asyncio.create_task(
+                            sandbox_manager.get_or_create(user_id)
+                        )
                         # Send heartbeat comments every 10s to keep proxies alive
-                        while not create_task.done():
+                        while not sandbox_create_task.done():
                             try:
-                                await asyncio.wait_for(asyncio.shield(create_task), timeout=10)
+                                await asyncio.wait_for(
+                                    asyncio.shield(sandbox_create_task), timeout=10
+                                )
                             except TimeoutError:
                                 yield ": heartbeat\n\n"
-                        sandbox = create_task.result()
+                        sandbox = sandbox_create_task.result()
                         yield _status("sandbox_ready")
                     except Exception as e:
                         logger.warning("Sandbox unavailable, continuing without: {}", e)
@@ -350,10 +358,13 @@ async def send_message(
                                 ns = first
                                 payload = second
                         await event_q.put(("main", ns, payload))
+                except asyncio.CancelledError:
+                    raise
                 except Exception as exc:
                     await event_q.put(("error", None, exc))
                 finally:
-                    await event_q.put(None)  # sentinel: main stream done
+                    with suppress(Exception):
+                        await event_q.put(None)  # sentinel: main stream done
 
             from cubebox.agents.stream import (
                 convert_messages_chunk,
@@ -409,6 +420,10 @@ async def send_message(
 
             await stream_task
 
+        except asyncio.CancelledError:
+            request_cancelled = True
+            logger.debug("SSE stream cancelled for conversation {}", conversation_id)
+            raise
         except Exception as e:
             logger.error("Streaming error: {}", str(e), exc_info=True)
             error = InternalError(
@@ -419,7 +434,22 @@ async def send_message(
             yield f"data: {error_event.model_dump_json()}\n\n"
 
         finally:
-            subagent_event_queue.reset(cv_token)
+            if stream_task is not None and not stream_task.done():
+                stream_task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await stream_task
+
+            if sandbox_create_task is not None and not sandbox_create_task.done():
+                sandbox_create_task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await sandbox_create_task
+
+            try:
+                subagent_event_queue.reset(cv_token)
+            except ValueError:
+                # Async generator cancellation may resume cleanup in a different
+                # task/context; fall back to clearing the per-request queue.
+                subagent_event_queue.set(None)
 
             if sandbox_manager and sandbox:
                 try:
@@ -433,18 +463,15 @@ async def send_message(
                 except Exception as e:
                     logger.warning("Error closing checkpointer: {}", e)
 
-            # Update conversation timestamp.
-            # Shield from cancellation so the connection isn't leaked
-            # if the client disconnects during cleanup.
-            try:
-                await asyncio.shield(_update_conversation_timestamp(conversation_id))
-            except asyncio.CancelledError:
-                pass
-            except Exception as e:
-                logger.warning("Error updating conversation timestamp: {}", e)
+            # Only emit terminal persistence/done events for completed streams.
+            if not request_cancelled:
+                try:
+                    await _update_conversation_timestamp(conversation_id)
+                except Exception as e:
+                    logger.warning("Error updating conversation timestamp: {}", e)
 
-            done = DoneEvent(timestamp=datetime.now(UTC).isoformat())
-            yield f"data: {done.model_dump_json()}\n\n"
+                done = DoneEvent(timestamp=datetime.now(UTC).isoformat())
+                yield f"data: {done.model_dump_json()}\n\n"
 
     return StreamingResponse(
         event_generator(),
