@@ -28,10 +28,9 @@ development:
               source_type: web
               content_field: "results"
               mapping:
-                url: "link"
+                url: "url"
                 title: "title"
-                domain: "domain"
-                snippet: "snippet"
+                snippet: "description"
                 published_at: "date"
           - name: web_fetch
             content_type: text
@@ -39,8 +38,6 @@ development:
               source_type: web
               content_field: null
               mapping:
-                url: "url"
-                title: "title"
-                snippet: "content"
+                snippet: "text"
 
         enabled: true

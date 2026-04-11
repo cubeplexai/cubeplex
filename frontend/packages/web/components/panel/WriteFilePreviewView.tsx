@@ -1,11 +1,10 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useRef } from 'react'
-import ReactMarkdown from 'react-markdown'
-import remarkGfm from 'remark-gfm'
 import { useMessageStore } from '@cubebox/core'
 import type { ToolCallRef } from '@cubebox/core'
 import { proseClasses } from '@/lib/utils'
+import { MarkdownWithCitations } from '@/components/shared/MarkdownWithCitations'
 import {
   parseWriteFileArgs,
   resolveLiveWriteFile,
@@ -254,9 +253,9 @@ export function WriteFilePreviewView({ args, result, toolRef }: WriteFilePreview
         </div>
 
         {mode === 'markdown' ? (
-          <div className={`p-4 ${proseClasses}`}>
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
-          </div>
+          <MarkdownWithCitations className={`p-4 ${proseClasses}`}>
+            {content}
+          </MarkdownWithCitations>
         ) : mode === 'code' ? (
           <CodePreview code={content} language={language} />
         ) : (
