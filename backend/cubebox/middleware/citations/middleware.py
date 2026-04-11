@@ -105,9 +105,7 @@ class CitationMiddleware(AgentMiddleware[Any, Any, Any]):
                 # Non-JSON output with no content_field — treat raw text as a single item
                 items = [{"text": raw_content}]
             else:
-                logger.warning(
-                    "CitationMiddleware: failed to parse JSON for tool '{}'", tool_name
-                )
+                logger.warning("CitationMiddleware: failed to parse JSON for tool '{}'", tool_name)
                 return result
 
         chunks_for_llm: list[str] = []
