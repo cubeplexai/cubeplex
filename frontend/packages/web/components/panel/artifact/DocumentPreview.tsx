@@ -1,10 +1,9 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import ReactMarkdown from 'react-markdown'
-import remarkGfm from 'remark-gfm'
 import type { Artifact } from '@cubebox/core'
 import { proseClasses } from '@/lib/utils'
+import { MarkdownWithCitations } from '@/components/shared/MarkdownWithCitations'
 import { PreviewLoading } from './PreviewLoading'
 import { buildPreviewUrl } from './previewUtils'
 
@@ -46,9 +45,9 @@ export function DocumentPreview({ artifact, version }: DocumentPreviewProps) {
 
   if (isMarkdown) {
     return (
-      <div className={`p-4 ${proseClasses}`}>
-        <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
-      </div>
+      <MarkdownWithCitations className={`p-4 ${proseClasses}`}>
+        {content}
+      </MarkdownWithCitations>
     )
   }
 

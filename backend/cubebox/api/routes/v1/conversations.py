@@ -400,6 +400,7 @@ async def send_message(
                 skills=raw_request.app.state.skills,
                 checkpointer=checkpointer,
                 citation_configs=all_citation_configs,
+                event_queue=event_q,
             )
 
             config_dict = {"configurable": {"thread_id": conversation_id}}

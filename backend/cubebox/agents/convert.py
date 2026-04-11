@@ -175,7 +175,11 @@ def convert_to_api_messages(lc_messages: list[BaseMessage]) -> list[dict[str, An
             citations = (msg.additional_kwargs or {}).get("citations")
             ts = _get_timestamp(msg)
             # Unwrap MCP content blocks: list[{"type": "text", "text": "..."}] -> text
-            tool_content = _unwrap_mcp_content(msg.content)
+            # Prefer original_content if CitationMiddleware rewrote the content
+            original_content = (msg.additional_kwargs or {}).get("original_content")
+            tool_content = original_content if original_content else _unwrap_mcp_content(
+                msg.content
+            )
             result.append(
                 {
                     "id": getattr(msg, "id", None) or str(uuid.uuid4()),

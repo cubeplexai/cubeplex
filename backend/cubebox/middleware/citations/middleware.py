@@ -1,5 +1,6 @@
 """CitationMiddleware — chunks tool results and assigns citation IDs."""
 
+import asyncio
 import json
 from collections.abc import Awaitable, Callable, Sequence
 from typing import Any
@@ -22,6 +23,29 @@ from cubebox.middleware.citations.counter import citation_counter_var, citation_
 from cubebox.prompts.citations import CITATION_PROMPT
 
 
+def _extract_text_content(content: Any) -> str:
+    """Extract text from ToolMessage content, handling both str and content-block formats.
+
+    MCP tools via langchain-mcp-adapters return content as a list of content blocks
+    like [{"type": "text", "text": "..."}]. Using str() on such a list produces Python
+    repr with single quotes, which is not valid JSON. This helper extracts the actual
+    text payload.
+    """
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        # Content blocks: [{"type": "text", "text": "..."}, ...]
+        texts = []
+        for block in content:
+            if isinstance(block, dict) and block.get("type") == "text":
+                texts.append(block.get("text", ""))
+            elif isinstance(block, str):
+                texts.append(block)
+        if texts:
+            return "\n".join(texts)
+    return str(content)
+
+
 class CitationMiddleware(AgentMiddleware[Any, Any, Any]):
     """Intercepts tool results to chunk text and assign citation IDs.
 
@@ -38,8 +62,14 @@ class CitationMiddleware(AgentMiddleware[Any, Any, Any]):
 
     tools: Sequence[BaseTool] = []
 
-    def __init__(self, *, citation_configs: dict[str, CitationConfig]) -> None:
+    def __init__(
+        self,
+        *,
+        citation_configs: dict[str, CitationConfig],
+        event_queue: asyncio.Queue[Any] | None = None,
+    ) -> None:
         self._configs = citation_configs
+        self._event_queue = event_queue
 
     async def awrap_tool_call(
         self,
@@ -61,18 +91,24 @@ class CitationMiddleware(AgentMiddleware[Any, Any, Any]):
             logger.warning("CitationMiddleware: no CitationCounter in context, skipping")
             return result
 
-        queue = citation_event_queue.get()
+        # Prefer direct queue reference; fall back to ContextVar
+        queue = self._event_queue or citation_event_queue.get()
         tool_call_id = request.tool_call.get("id", "")
 
+        raw_content = _extract_text_content(result.content)
+
         try:
-            raw_content = result.content if isinstance(result.content, str) else str(result.content)
             parsed = json.loads(raw_content)
             items = config.extract_items(parsed)
-        except (json.JSONDecodeError, TypeError) as e:
-            logger.warning(
-                "CitationMiddleware: failed to parse output for tool '{}': {}", tool_name, e
-            )
-            return result
+        except (json.JSONDecodeError, TypeError):
+            if config.content_field is None and raw_content.strip():
+                # Non-JSON output with no content_field — treat raw text as a single item
+                items = [{"text": raw_content}]
+            else:
+                logger.warning(
+                    "CitationMiddleware: failed to parse JSON for tool '{}'", tool_name
+                )
+                return result
 
         chunks_for_llm: list[str] = []
         all_citations: list[dict[str, Any]] = []
@@ -95,6 +131,11 @@ class CitationMiddleware(AgentMiddleware[Any, Any, Any]):
 
             if queue is not None:
                 await queue.put(("citation", None, citation_data))
+            else:
+                logger.warning(
+                    "CitationMiddleware: no event queue available for citation_id={}",
+                    citation_id,
+                )
             all_citations.append(citation_data)
 
             for i, c in enumerate(chunks):
@@ -104,6 +145,12 @@ class CitationMiddleware(AgentMiddleware[Any, Any, Any]):
             result.additional_kwargs["original_content"] = raw_content
             result.additional_kwargs["citations"] = all_citations
             result.content = "\n\n".join(chunks_for_llm)
+            logger.info(
+                "CitationMiddleware: tool='{}' emitted {} citations, {} chunks",
+                tool_name,
+                len(all_citations),
+                len(chunks_for_llm),
+            )
 
         return result
 
