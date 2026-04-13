@@ -11,6 +11,16 @@ import { CitationMarker } from '@/components/chat/CitationMarker'
 
 const CITATION_RE = /【\d+-\d+】/
 
+/**
+ * Move CJK quotes outside bold/italic markers so CommonMark flanking rules
+ * recognise them correctly.  e.g. **\u201cfoo\u201d** → \u201c**foo**\u201d
+ */
+function fixCjkBoldQuotes(text: string): string {
+  return text
+    .replace(/\*\*\s*(["\u201c\u300c])/g, '$1**')
+    .replace(/(["\u201d\u300d])\s*\*\*/g, '**$1')
+}
+
 interface MarkdownWithCitationsProps {
   children: string
   className?: string
@@ -23,12 +33,13 @@ interface MarkdownWithCitationsProps {
  */
 export function MarkdownWithCitations({ children, className }: MarkdownWithCitationsProps) {
   const conversationId = useConversationStore((s) => s.activeId) ?? ''
-  const hasCitations = CITATION_RE.test(children)
+  const md = fixCjkBoldQuotes(children)
+  const hasCitations = CITATION_RE.test(md)
 
   if (!hasCitations) {
     return (
       <div className={className}>
-        <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex]}>{children}</ReactMarkdown>
+        <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex]}>{md}</ReactMarkdown>
       </div>
     )
   }
@@ -75,7 +86,7 @@ export function MarkdownWithCitations({ children, className }: MarkdownWithCitat
           ),
         }}
       >
-        {children}
+        {md}
       </ReactMarkdown>
     </div>
   )
