@@ -208,11 +208,17 @@ def _unfinished_todos(todos: list[Todo] | None) -> list[Todo]:
 
 
 def _submitted_write_todos_calls(last_ai_msg: AIMessage) -> list[dict[str, Any]]:
-    return [tc for tc in (last_ai_msg.tool_calls or []) if tc["name"] == "write_todos"]
+    return cast(
+        "list[dict[str, Any]]",
+        [tc for tc in (last_ai_msg.tool_calls or []) if tc["name"] == "write_todos"],
+    )
 
 
 def _non_todo_tool_calls(last_ai_msg: AIMessage) -> list[dict[str, Any]]:
-    return [tc for tc in (last_ai_msg.tool_calls or []) if tc["name"] != "write_todos"]
+    return cast(
+        "list[dict[str, Any]]",
+        [tc for tc in (last_ai_msg.tool_calls or []) if tc["name"] != "write_todos"],
+    )
 
 
 def _guard_retry_update(
@@ -301,6 +307,7 @@ def _todo_validation_errors(
     todos, payload_error = _validated_write_todos_payload(tool_call)
     if payload_error is not None:
         return [_build_todo_error_message(tool_call.get("id"), payload_error)]
+    assert todos is not None
 
     empty_payload_error = _write_todos_empty_payload_error(todos, prior_todos)
     if empty_payload_error is not None:
@@ -514,8 +521,6 @@ class TodoListMiddleware(AgentMiddleware[PlanningState[ResponseT], ContextT, Res
         del runtime
         return self._after_model_impl(state)
 
-    after_model.__can_jump_to__ = ["model", "end"]
-
     @override
     async def aafter_model(
         self,
@@ -525,4 +530,9 @@ class TodoListMiddleware(AgentMiddleware[PlanningState[ResponseT], ContextT, Res
         del runtime
         return self._after_model_impl(state)
 
-    aafter_model.__can_jump_to__ = ["model", "end"]
+
+TodoListMiddleware.after_model.__can_jump_to__ = ["model", "end"]  # type: ignore[attr-defined]
+TodoListMiddleware.aafter_model.__can_jump_to__ = [  # type: ignore[attr-defined]
+    "model",
+    "end",
+]
