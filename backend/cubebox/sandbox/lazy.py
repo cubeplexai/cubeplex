@@ -1,0 +1,139 @@
+"""LazySandbox — defers sandbox creation until first actual use.
+
+Tools are registered immediately so the LLM knows they exist,
+but the sandbox container is only created/connected when a tool
+is actually invoked (execute, write_file, edit_file, save_artifact).
+
+If the underlying sandbox becomes unhealthy, the next call will
+transparently create a new one.
+"""
+
+from __future__ import annotations
+
+import asyncio
+from typing import TYPE_CHECKING
+
+from loguru import logger
+
+from cubebox.sandbox.base import ExecuteResult, Sandbox
+
+if TYPE_CHECKING:
+    from cubebox.sandbox.manager import SandboxManager
+
+
+class LazySandbox(Sandbox):
+    """Sandbox proxy that defers creation until first use.
+
+    Args:
+        manager: SandboxManager instance for get_or_create / release.
+        user_id: The user to create the sandbox for.
+        workdir: Working directory (used for prompt injection before sandbox exists).
+    """
+
+    def __init__(
+        self,
+        *,
+        manager: SandboxManager,
+        user_id: str,
+        workdir: str = "/workspace",
+    ) -> None:
+        self._manager = manager
+        self._user_id = user_id
+        self._workdir = workdir
+        self._sandbox: Sandbox | None = None
+        self._lock = asyncio.Lock()
+
+    # ------------------------------------------------------------------
+    # Properties
+    # ------------------------------------------------------------------
+
+    @property
+    def id(self) -> str:
+        if self._sandbox is None:
+            return "<not-created>"
+        return self._sandbox.id
+
+    @property
+    def workdir(self) -> str:
+        return self._workdir
+
+    @property
+    def initialized(self) -> bool:
+        """Whether the underlying sandbox has been created."""
+        return self._sandbox is not None
+
+    # ------------------------------------------------------------------
+    # Internal: ensure a live sandbox exists
+    # ------------------------------------------------------------------
+
+    async def _ensure(self) -> Sandbox:
+        """Return the underlying sandbox, creating it on first call."""
+        if self._sandbox is not None:
+            return self._sandbox
+
+        async with self._lock:
+            # Double-check after acquiring the lock
+            if self._sandbox is not None:
+                return self._sandbox
+
+            logger.info("Lazy sandbox: creating sandbox for user {}", self._user_id)
+            self._sandbox = await self._manager.get_or_create(self._user_id)
+            logger.info("Lazy sandbox: ready (id={})", self._sandbox.id)
+            return self._sandbox
+
+    async def _ensure_with_retry(self) -> Sandbox:
+        """Ensure sandbox, retrying once if the existing one is broken."""
+        try:
+            sandbox = await self._ensure()
+            return sandbox
+        except Exception:
+            # First attempt failed — reset and try creating a fresh one
+            async with self._lock:
+                self._sandbox = None
+            logger.warning(
+                "Lazy sandbox: first attempt failed for user {}, retrying",
+                self._user_id,
+            )
+            return await self._ensure()
+
+    # ------------------------------------------------------------------
+    # Sandbox interface
+    # ------------------------------------------------------------------
+
+    async def execute(self, command: str, *, timeout: int | None = None) -> ExecuteResult:
+        sandbox = await self._ensure_with_retry()
+        try:
+            return await sandbox.execute(command, timeout=timeout)
+        except Exception:
+            # Sandbox may have died — invalidate and retry once
+            async with self._lock:
+                self._sandbox = None
+            logger.warning("Lazy sandbox: execute failed, recreating sandbox")
+            sandbox = await self._ensure()
+            return await sandbox.execute(command, timeout=timeout)
+
+    async def upload(self, files: list[tuple[str, bytes]]) -> None:
+        sandbox = await self._ensure_with_retry()
+        try:
+            await sandbox.upload(files)
+        except Exception:
+            async with self._lock:
+                self._sandbox = None
+            logger.warning("Lazy sandbox: upload failed, recreating sandbox")
+            sandbox = await self._ensure()
+            await sandbox.upload(files)
+
+    async def download(self, paths: list[str]) -> list[tuple[str, bytes]]:
+        sandbox = await self._ensure_with_retry()
+        try:
+            return await sandbox.download(paths)
+        except Exception:
+            async with self._lock:
+                self._sandbox = None
+            logger.warning("Lazy sandbox: download failed, recreating sandbox")
+            sandbox = await self._ensure()
+            return await sandbox.download(paths)
+
+    async def close(self) -> None:
+        if self._sandbox is not None:
+            await self._sandbox.close()

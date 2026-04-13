@@ -332,7 +332,7 @@ async def send_message(
 
                 checkpointer = await create_checkpointer()
 
-            # Get sandbox — DI or production
+            # Get sandbox — DI or production (lazy: created on first tool use)
             sandbox_factory = getattr(raw_request.app.state, "sandbox_factory", None)
             if sandbox_factory:
                 sandbox = sandbox_factory()
@@ -342,23 +342,15 @@ async def send_message(
                 sandbox_enabled = config.get("sandbox.enabled", False)
                 if sandbox_enabled:
                     try:
+                        from cubebox.sandbox.lazy import LazySandbox
                         from cubebox.sandbox.manager import get_sandbox_manager
 
-                        yield _status("sandbox_creating")
                         sandbox_manager = get_sandbox_manager()
-                        sandbox_create_task = asyncio.create_task(
-                            sandbox_manager.get_or_create(user_id)
+                        sandbox = LazySandbox(
+                            manager=sandbox_manager,
+                            user_id=user_id,
+                            workdir=config.get("sandbox.workdir", "/workspace"),
                         )
-                        # Send heartbeat comments every 10s to keep proxies alive
-                        while not sandbox_create_task.done():
-                            try:
-                                await asyncio.wait_for(
-                                    asyncio.shield(sandbox_create_task), timeout=10
-                                )
-                            except TimeoutError:
-                                yield ": heartbeat\n\n"
-                        sandbox = sandbox_create_task.result()
-                        yield _status("sandbox_ready")
                     except Exception as e:
                         logger.warning("Sandbox unavailable, continuing without: {}", e)
                         yield _status("sandbox_failed", detail=str(e))
@@ -650,11 +642,19 @@ async def send_message(
             except ValueError:
                 citation_event_queue.set(None)
 
-            if sandbox_manager and sandbox:
-                try:
-                    await sandbox_manager.release(sandbox.id)
-                except Exception as e:
-                    logger.warning("Error releasing sandbox: {}", e)
+            if sandbox:
+                from cubebox.sandbox.lazy import LazySandbox
+
+                if isinstance(sandbox, LazySandbox) and sandbox.initialized:
+                    try:
+                        await sandbox._manager.release(sandbox.id)
+                    except Exception as e:
+                        logger.warning("Error releasing sandbox: {}", e)
+                elif sandbox_manager and not isinstance(sandbox, LazySandbox):
+                    try:
+                        await sandbox_manager.release(sandbox.id)
+                    except Exception as e:
+                        logger.warning("Error releasing sandbox: {}", e)
 
             if checkpointer is not None and hasattr(checkpointer, "conn"):
                 try:
