@@ -2,6 +2,9 @@
 
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import remarkMath from 'remark-math'
+import rehypeKatex from 'rehype-katex'
+import 'katex/dist/katex.min.css'
 import { useConversationStore } from '@cubebox/core'
 import { renderWithCitations } from '@/lib/citations'
 import { CitationMarker } from '@/components/chat/CitationMarker'
@@ -25,7 +28,7 @@ export function MarkdownWithCitations({ children, className }: MarkdownWithCitat
   if (!hasCitations) {
     return (
       <div className={className}>
-        <ReactMarkdown remarkPlugins={[remarkGfm]}>{children}</ReactMarkdown>
+        <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex]}>{children}</ReactMarkdown>
       </div>
     )
   }
@@ -33,7 +36,7 @@ export function MarkdownWithCitations({ children, className }: MarkdownWithCitat
   return (
     <div className={className}>
       <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
+        remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex]}
         components={{
           p: ({ children: c }) => (
             <p>{renderWithCitations(c, conversationId, CitationMarker)}</p>
