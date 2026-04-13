@@ -78,6 +78,9 @@ class ChatOpenAICompatible(ChatOpenAI):
                         message.additional_kwargs["reasoning_content"] = (
                             res.message.reasoning_content
                         )
+                    # vLLM uses "reasoning" instead of "reasoning_content"
+                    elif hasattr(res.message, "reasoning") and res.message.reasoning:
+                        message.additional_kwargs["reasoning_content"] = res.message.reasoning
                     # MiniMax: reasoning_details is [{text: "..."}]
                     elif (
                         hasattr(res.message, "reasoning_details") and res.message.reasoning_details
@@ -135,10 +138,13 @@ class ChatOpenAICompatible(ChatOpenAI):
         delta = choice.get("delta") or {}
         finish_reason = choice.get("finish_reason")
 
-        # --- Extract reasoning_content (or reasoning_details for MiniMax) ---
+        # --- Extract reasoning_content (or reasoning/reasoning_details variants) ---
         reasoning_delta: str | None = None
         if delta.get("reasoning_content"):
             reasoning_delta = delta["reasoning_content"]
+        elif delta.get("reasoning"):
+            # vLLM uses "reasoning" instead of "reasoning_content"
+            reasoning_delta = delta["reasoning"]
         elif delta.get("reasoning_details"):
             # MiniMax: reasoning_details is [{text: "delta_text"}]
             # Each chunk contains only the new incremental text
