@@ -51,7 +51,7 @@ It is important to skip using this tool when:
 
 1. **Task States**: Use these states to track progress:
    - pending: Task not yet started
-   - in_progress: Currently working on (you can have multiple tasks in_progress at a time if they are not related to each other and can be run in parallel)
+   - in_progress: Currently working on (unless all tasks are completed, only one task should be in_progress)
    - completed: Task finished successfully
 
 2. **Task Management**:
@@ -59,8 +59,8 @@ It is important to skip using this tool when:
    - Mark tasks complete IMMEDIATELY after finishing (don't batch completions)
    - Complete current tasks before starting new ones
    - Remove tasks that are no longer relevant from the list entirely
-   - IMPORTANT: When you write this todo list, you should mark your first task (or tasks) as in_progress immediately!.
-   - IMPORTANT: Unless all tasks are completed, you should always have at least one task in_progress to show the user that you are working on something.
+   - IMPORTANT: When you write this todo list, you should mark your first task as in_progress immediately!.
+   - IMPORTANT: Unless all tasks are completed, only one task should be in_progress.
 
 3. **Task Completion Requirements**:
    - ONLY mark a task as completed when you have FULLY accomplished it
@@ -90,6 +90,7 @@ This tool is very helpful for planning complex objectives, and for breaking down
 It is critical that you mark todos as completed as soon as you are done with a step. Do not batch up multiple steps before marking them as completed.
 For simple objectives that only require a few steps, it is better to just complete the objective directly and NOT use this tool.
 Writing todos takes time and tokens, use it when it is helpful for managing complex many-step problems! But not for simple few-step requests.
+- Unless all tasks are completed, only one task should be in_progress.
 
 ## Important To-Do List Usage Notes to Remember
 - The `write_todos` tool should never be called multiple times in parallel.
@@ -103,10 +104,23 @@ class Todo(TypedDict):
     status: Literal["pending", "in_progress", "completed"]
 
 
+type TodoGuardType = Literal["stale", "finalization"]
+
+
+class TodoGuardBlocked(TypedDict):
+    """A guard escalation payload carried across the forced end turn."""
+
+    guard_type: TodoGuardType
+    message: str
+
+
 class PlanningState(AgentState[ResponseT]):
     """State schema for todo tracking."""
 
     todos: Annotated[NotRequired[list[Todo]], OmitFromInput]
+    todo_guard_retries: Annotated[NotRequired[dict[TodoGuardType, int]], OmitFromInput]
+    todo_guard_blocked: Annotated[NotRequired[TodoGuardBlocked | None], OmitFromInput]
+    todo_guard_suppressed: Annotated[NotRequired[bool], OmitFromInput]
 
 
 class WriteTodosInput(BaseModel):
@@ -119,10 +133,184 @@ def _build_todo_tool_message(
     tool_call_id: str | None,
     todos: list[Todo],
 ) -> ToolMessage:
+    payload: dict[str, Any] = {"todos": todos}
+    if len(todos) >= 3 and all(todo["status"] == "completed" for todo in todos):
+        payload["reminder"] = (
+            "All todo items are complete. Do a quick final check before responding."
+        )
+
     return ToolMessage(
-        content=json.dumps({"todos": todos}, ensure_ascii=False),
+        content=json.dumps(payload, ensure_ascii=False),
         tool_call_id=tool_call_id,
     )
+
+
+def _build_todo_error_message(tool_call_id: str | None, error: str) -> ToolMessage:
+    return ToolMessage(content=error, tool_call_id=tool_call_id, status="error")
+
+
+def _write_todos_payload_error(todos: list[Todo]) -> str | None:
+    if any(not todo["content"].strip() for todo in todos):
+        return "Error: Todo content cannot be empty."
+
+    in_progress_count = sum(1 for todo in todos if todo["status"] == "in_progress")
+    if in_progress_count == 0 and any(todo["status"] != "completed" for todo in todos):
+        return "Error: Unless all tasks are completed, exactly one todo must be in_progress."
+    if in_progress_count > 1:
+        return "Error: Unless all tasks are completed, exactly one todo must be in_progress."
+
+    return None
+
+
+def _write_todos_empty_payload_error(
+    todos: list[Todo],
+    prior_todos: list[Todo] | None,
+) -> str | None:
+    if todos:
+        return None
+    if any(todo["status"] != "completed" for todo in (prior_todos or [])):
+        return (
+            "Error: Cannot replace unfinished todos with an empty list. "
+            "Update the active items first."
+        )
+    return None
+
+
+def _last_ai_message(messages: list[Any]) -> AIMessage | None:
+    return next((msg for msg in reversed(messages) if isinstance(msg, AIMessage)), None)
+
+
+def _message_has_text_content(content: Any) -> bool:
+    if isinstance(content, str):
+        return bool(content.strip())
+    if not isinstance(content, list):
+        return False
+
+    for block in content:
+        if isinstance(block, str) and block.strip():
+            return True
+        if (
+            isinstance(block, dict)
+            and block.get("type") == "text"
+            and str(block.get("text", "")).strip()
+        ):
+            return True
+
+    return False
+
+
+def _pure_text_ai_response(last_ai_msg: AIMessage) -> bool:
+    return _message_has_text_content(last_ai_msg.content) and not last_ai_msg.tool_calls
+
+
+def _unfinished_todos(todos: list[Todo] | None) -> list[Todo]:
+    return [todo for todo in (todos or []) if todo["status"] != "completed"]
+
+
+def _submitted_write_todos_calls(last_ai_msg: AIMessage) -> list[dict[str, Any]]:
+    return [tc for tc in (last_ai_msg.tool_calls or []) if tc["name"] == "write_todos"]
+
+
+def _non_todo_tool_calls(last_ai_msg: AIMessage) -> list[dict[str, Any]]:
+    return [tc for tc in (last_ai_msg.tool_calls or []) if tc["name"] != "write_todos"]
+
+
+def _guard_retry_update(
+    state: PlanningState[ResponseT],
+    guard_type: TodoGuardType,
+) -> tuple[int, dict[TodoGuardType, int]]:
+    retries = dict(state.get("todo_guard_retries", {}))
+    retries[guard_type] = retries.get(guard_type, 0) + 1
+    return retries[guard_type], retries
+
+
+def _guard_error_message(guard_type: TodoGuardType) -> str:
+    if guard_type == "stale":
+        return (
+            "Error: work progressed on an active plan but the todo list was not "
+            "updated. Call write_todos before continuing."
+        )
+    return (
+        "Error: cannot finalize response while todo list still contains unfinished "
+        "items. Update the list first."
+    )
+
+
+def _reset_guard_retries() -> dict[TodoGuardType, int]:
+    return {}
+
+
+def _blocked_todo_guard_message(blocked: TodoGuardBlocked) -> str:
+    return (
+        "Todo synchronization is already blocked. Do not call any tools. "
+        "Respond to the user with a plain-text explanation that the run could "
+        f"not continue safely because: {blocked['message']}"
+    )
+
+
+def _validated_write_todos_payload(
+    tool_call: dict[str, Any],
+) -> tuple[list[Todo] | None, str | None]:
+    args = tool_call.get("args")
+    if not isinstance(args, dict):
+        return (
+            None,
+            "Error: Received invalid `write_todos` payload. "
+            "Call the tool again with a `todos` list.",
+        )
+
+    todos = args.get("todos")
+    if not isinstance(todos, list):
+        return (
+            None,
+            "Error: Received invalid `write_todos` payload. "
+            "Call the tool again with a `todos` list.",
+        )
+
+    for todo in todos:
+        if not isinstance(todo, dict):
+            return None, (
+                "Error: Received invalid `write_todos` payload. Each todo must include "
+                "`content` and `status` fields."
+            )
+        if not isinstance(todo.get("content"), str) or not isinstance(todo.get("status"), str):
+            return None, (
+                "Error: Received invalid `write_todos` payload. Each todo must include "
+                "`content` and `status` fields."
+            )
+        if todo["status"] not in {"pending", "in_progress", "completed"}:
+            return None, (
+                "Error: Received invalid `write_todos` payload. Todo status must be one of "
+                "`pending`, `in_progress`, or `completed`."
+            )
+
+    return cast("list[Todo]", todos), None
+
+
+def _todo_validation_errors(
+    last_ai_msg: AIMessage,
+    prior_todos: list[Todo] | None,
+) -> list[ToolMessage]:
+    write_todos_calls = _submitted_write_todos_calls(last_ai_msg)
+    # Zero calls means there is nothing to validate. More than one call is handled
+    # by the upstream parallel-write_todos check in _after_model_impl().
+    if len(write_todos_calls) != 1:
+        return []
+
+    tool_call = write_todos_calls[0]
+    todos, payload_error = _validated_write_todos_payload(tool_call)
+    if payload_error is not None:
+        return [_build_todo_error_message(tool_call.get("id"), payload_error)]
+
+    empty_payload_error = _write_todos_empty_payload_error(todos, prior_todos)
+    if empty_payload_error is not None:
+        return [_build_todo_error_message(tool_call["id"], empty_payload_error)]
+
+    error = _write_todos_payload_error(todos)
+    if error is None:
+        return []
+
+    return [_build_todo_error_message(tool_call["id"], error)]
 
 
 def _write_todos(
@@ -171,6 +359,63 @@ class TodoListMiddleware(AgentMiddleware[PlanningState[ResponseT], ContextT, Res
             )
         ]
 
+    def _guard_response(
+        self,
+        state: PlanningState[ResponseT],
+        guard_type: TodoGuardType,
+    ) -> dict[str, Any]:
+        retry_count, retries = _guard_retry_update(state, guard_type)
+        message = _guard_error_message(guard_type)
+
+        if retry_count >= 3:
+            return {
+                "jump_to": "model",
+                "todo_guard_retries": retries,
+                "todo_guard_blocked": {"guard_type": guard_type, "message": message},
+                "messages": [
+                    SystemMessage(
+                        content=(
+                            "Todo synchronization failed repeatedly. Do not call any tools. "
+                            "Respond to the user with a plain-text explanation that the run "
+                            f"could not continue safely because: {message}"
+                        )
+                    )
+                ],
+            }
+
+        return {
+            "jump_to": "model",
+            "todo_guard_retries": retries,
+            "messages": [SystemMessage(content=message)],
+        }
+
+    def _parallel_write_todos_error(
+        self,
+        state: PlanningState[ResponseT],
+    ) -> dict[str, Any] | None:
+        messages = state["messages"]
+        last_ai_msg = _last_ai_message(messages)
+        if last_ai_msg is None:
+            return None
+
+        write_todos_calls = _submitted_write_todos_calls(last_ai_msg)
+        if len(write_todos_calls) <= 1:
+            return None
+
+        return {
+            "messages": [
+                _build_todo_error_message(
+                    tc["id"],
+                    (
+                        "Error: The `write_todos` tool should never be called multiple times "
+                        "in parallel. Please call it only once per model invocation to update "
+                        "the todo list."
+                    ),
+                )
+                for tc in write_todos_calls
+            ]
+        }
+
     def wrap_model_call(
         self,
         request: ModelRequest[ContextT],
@@ -205,7 +450,7 @@ class TodoListMiddleware(AgentMiddleware[PlanningState[ResponseT], ContextT, Res
         )
         return await handler(request.override(system_message=new_system_message))
 
-    def _parallel_write_todos_error(
+    def _after_model_impl(
         self,
         state: PlanningState[ResponseT],
     ) -> dict[str, Any] | None:
@@ -213,28 +458,52 @@ class TodoListMiddleware(AgentMiddleware[PlanningState[ResponseT], ContextT, Res
         if not messages:
             return None
 
-        last_ai_msg = next((msg for msg in reversed(messages) if isinstance(msg, AIMessage)), None)
-        if not last_ai_msg or not last_ai_msg.tool_calls:
+        last_ai_msg = _last_ai_message(messages)
+        if last_ai_msg is None:
             return None
 
-        write_todos_calls = [tc for tc in last_ai_msg.tool_calls if tc["name"] == "write_todos"]
-        if len(write_todos_calls) <= 1:
-            return None
+        blocked_guard = state.get("todo_guard_blocked")
+        if blocked_guard:
+            if _pure_text_ai_response(last_ai_msg):
+                return {
+                    "jump_to": "end",
+                    "todo_guard_blocked": None,
+                    "todo_guard_retries": _reset_guard_retries(),
+                    "todo_guard_suppressed": True,
+                }
 
-        return {
-            "messages": [
-                ToolMessage(
-                    content=(
-                        "Error: The `write_todos` tool should never be called multiple times "
-                        "in parallel. Please call it only once per model invocation to update "
-                        "the todo list."
-                    ),
-                    tool_call_id=tc["id"],
-                    status="error",
-                )
-                for tc in write_todos_calls
-            ]
-        }
+            return {
+                "jump_to": "model",
+                "todo_guard_blocked": blocked_guard,
+                "todo_guard_retries": dict(state.get("todo_guard_retries", {})),
+                "messages": [SystemMessage(content=_blocked_todo_guard_message(blocked_guard))],
+            }
+
+        if state.get("todo_guard_suppressed") and not _submitted_write_todos_calls(last_ai_msg):
+            return {
+                "todo_guard_retries": _reset_guard_retries(),
+                "todo_guard_suppressed": True,
+            }
+
+        parallel_error = self._parallel_write_todos_error(state)
+        if parallel_error is not None:
+            return parallel_error
+
+        validation_errors = _todo_validation_errors(last_ai_msg, state.get("todos"))
+        if validation_errors:
+            return {"messages": validation_errors}
+
+        unfinished = _unfinished_todos(state.get("todos"))
+        if unfinished:
+            if _non_todo_tool_calls(last_ai_msg) and not _submitted_write_todos_calls(last_ai_msg):
+                return self._guard_response(state, "stale")
+            if _pure_text_ai_response(last_ai_msg):
+                return self._guard_response(state, "finalization")
+
+        result: dict[str, Any] = {"todo_guard_retries": _reset_guard_retries()}
+        if state.get("todo_guard_suppressed"):
+            result["todo_guard_suppressed"] = None
+        return result
 
     @override
     def after_model(
@@ -243,7 +512,9 @@ class TodoListMiddleware(AgentMiddleware[PlanningState[ResponseT], ContextT, Res
         runtime: Runtime[ContextT],
     ) -> dict[str, Any] | None:
         del runtime
-        return self._parallel_write_todos_error(state)
+        return self._after_model_impl(state)
+
+    after_model.__can_jump_to__ = ["model", "end"]
 
     @override
     async def aafter_model(
@@ -252,4 +523,6 @@ class TodoListMiddleware(AgentMiddleware[PlanningState[ResponseT], ContextT, Res
         runtime: Runtime[ContextT],
     ) -> dict[str, Any] | None:
         del runtime
-        return self._parallel_write_todos_error(state)
+        return self._after_model_impl(state)
+
+    aafter_model.__can_jump_to__ = ["model", "end"]
