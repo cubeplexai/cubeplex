@@ -849,9 +849,7 @@ def test_todo_middleware_keeps_correction_flag_while_write_todos_is_in_flight():
                     {
                         "id": "tc-1",
                         "name": "write_todos",
-                        "args": {
-                            "todos": [{"content": "Patch middleware", "status": "completed"}]
-                        },
+                        "args": {"todos": [{"content": "Patch middleware", "status": "completed"}]},
                         "type": "tool_call",
                     }
                 ],
