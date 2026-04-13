@@ -45,14 +45,16 @@ export function DocumentPreview({ artifact, version }: DocumentPreviewProps) {
 
   if (isMarkdown) {
     return (
-      <MarkdownWithCitations className={`p-4 ${proseClasses}`}>
-        {content}
-      </MarkdownWithCitations>
+      <div className="h-full overflow-auto">
+        <MarkdownWithCitations className={`p-4 ${proseClasses}`}>
+          {content}
+        </MarkdownWithCitations>
+      </div>
     )
   }
 
   return (
-    <div className="p-4">
+    <div className="h-full overflow-auto p-4">
       <pre className="text-sm leading-relaxed whitespace-pre-wrap break-words text-foreground">
         {content}
       </pre>

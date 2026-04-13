@@ -58,7 +58,7 @@ class ProviderConfig(BaseModel):
     """Configuration for an LLM provider"""
 
     base_url: str = Field(description="Base URL for API", alias="base_url")
-    api_key: str = Field(description="API key", alias="api_key")
+    api_key: str | None = Field(default=None, description="API key", alias="api_key")
     api: str = Field(
         default="openai-completions",
         description="API type (openai-completions, anthropic, etc.)",

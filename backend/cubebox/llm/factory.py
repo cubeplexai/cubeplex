@@ -194,12 +194,13 @@ class LLMFactory:
         provider_name, provider_config, model_config = self._find_model(model_id, provider_name)
 
         # Build kwargs for LLM initialization
-        llm_kwargs = {
+        llm_kwargs: dict[str, Any] = {
             "model": model_config.id,
-            "api_key": provider_config.api_key,
             "base_url": provider_config.base_url,
             "temperature": temperature,
         }
+        if provider_config.api_key is not None:
+            llm_kwargs["api_key"] = provider_config.api_key
 
         # Use provided max_tokens if set, otherwise use model's max_tokens
         final_max_tokens = max_tokens or model_config.max_tokens
@@ -235,11 +236,11 @@ class LLMFactory:
                 elif use_responses_api:
                     llm_kwargs["use_responses_api"] = True
 
-                return ChatOpenAI(**llm_kwargs)  # type: ignore
+                return ChatOpenAI(**llm_kwargs)
 
             # Custom OpenAI-compatible endpoint - use ChatOpenAICompatible
             # This supports reasoning_content extraction from Chat Completions API
-            return ChatOpenAICompatible(**llm_kwargs)  # type: ignore
+            return ChatOpenAICompatible(**llm_kwargs)
 
         if provider_config.api == "anthropic":
             # TODO: Implement Anthropic support
