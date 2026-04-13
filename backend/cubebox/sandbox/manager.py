@@ -8,6 +8,8 @@ Core responsibilities:
 - Clean up expired sandboxes in the background
 """
 
+import hashlib
+import re
 from datetime import timedelta
 from pathlib import Path
 
@@ -55,8 +57,15 @@ class SandboxManager:
 
     def _build_user_volume(self, user_id: str) -> Volume:
         """Build a PVC Volume for the given user."""
-        # Use first 8 chars of user_id to keep PVC name short and DNS-safe
-        pvc_name = f"{self._volume_pvc_prefix}-{user_id[:8]}"
+        sanitized = re.sub(r"[^a-z0-9-]+", "-", user_id.lower()).strip("-")
+        if not sanitized:
+            sanitized = hashlib.sha256(user_id.encode("utf-8")).hexdigest()[:16]
+
+        max_suffix_len = 63 - len(self._volume_pvc_prefix) - 1
+        if len(sanitized) > max_suffix_len:
+            sanitized = hashlib.sha256(user_id.encode("utf-8")).hexdigest()[:16]
+
+        pvc_name = f"{self._volume_pvc_prefix}-{sanitized}"
         return Volume(
             name="user-workspace",
             pvc=PVC(claimName=pvc_name),
