@@ -4,7 +4,12 @@ from types import SimpleNamespace
 import pytest
 from langchain_core.messages import AIMessage, SystemMessage, ToolMessage
 
-from cubebox.middleware.todo import TodoListMiddleware, _write_todos
+from cubebox.middleware.todo import (
+    STALE_REMINDER_INTERVAL,
+    STALE_REMINDER_THRESHOLD,
+    TodoListMiddleware,
+    _write_todos,
+)
 
 
 def test_todo_middleware_registers_write_todos_tool():
@@ -238,7 +243,7 @@ def test_todo_middleware_all_completed_list_is_valid():
 
     result = mw.after_model(state, runtime=SimpleNamespace())
 
-    assert result == {"todo_guard_retries": {}}
+    assert result == {"todo_guard_retries": {}, "todo_stale_iterations": 0}
 
 
 def test_todo_middleware_allows_empty_write_todos_after_completed_prior_state():
@@ -260,7 +265,10 @@ def test_todo_middleware_allows_empty_write_todos_after_completed_prior_state():
         ],
     }
 
-    assert mw.after_model(state, runtime=SimpleNamespace()) == {"todo_guard_retries": {}}
+    assert mw.after_model(state, runtime=SimpleNamespace()) == {
+        "todo_guard_retries": {},
+        "todo_stale_iterations": 0,
+    }
 
 
 def test_todo_middleware_accepts_single_in_progress_in_unfinished_list():
@@ -288,7 +296,7 @@ def test_todo_middleware_accepts_single_in_progress_in_unfinished_list():
 
     result = mw.after_model(state, runtime=SimpleNamespace())
 
-    assert result == {"todo_guard_retries": {}}
+    assert result == {"todo_guard_retries": {}, "todo_stale_iterations": 0}
 
 
 def test_todo_middleware_accepts_completed_in_progress_pending_transition():
@@ -317,7 +325,7 @@ def test_todo_middleware_accepts_completed_in_progress_pending_transition():
 
     result = mw.after_model(state, runtime=SimpleNamespace())
 
-    assert result == {"todo_guard_retries": {}}
+    assert result == {"todo_guard_retries": {}, "todo_stale_iterations": 0}
 
 
 def test_todo_middleware_rejects_empty_write_todos_when_prior_state_is_unfinished():
@@ -436,18 +444,103 @@ def test_todo_middleware_rejects_parallel_write_todos_before_stale_guard():
     )
 
 
-def test_todo_middleware_emits_stale_todo_error_after_tool_iteration_without_write():
+def _tool_only_ai_message() -> AIMessage:
+    return AIMessage(
+        content="",
+        tool_calls=[
+            {
+                "id": "tc-1",
+                "name": "execute",
+                "args": {"command": "pytest -v"},
+                "type": "tool_call",
+            }
+        ],
+    )
+
+
+def test_todo_middleware_increments_stale_counter_without_reminder_below_threshold():
     mw = TodoListMiddleware()
     state = {
         "todos": [{"content": "Patch middleware", "status": "in_progress"}],
+        "messages": [_tool_only_ai_message()],
+    }
+
+    result = mw.after_model(state, runtime=SimpleNamespace())
+
+    assert result is not None
+    assert "jump_to" not in result
+    assert "messages" not in result
+    assert result["todo_stale_iterations"] == 1
+
+
+def test_todo_middleware_emits_stale_reminder_at_threshold():
+    mw = TodoListMiddleware()
+    state = {
+        "todos": [{"content": "Patch middleware", "status": "in_progress"}],
+        "todo_stale_iterations": STALE_REMINDER_THRESHOLD - 1,
+        "messages": [_tool_only_ai_message()],
+    }
+
+    result = mw.after_model(state, runtime=SimpleNamespace())
+
+    assert result is not None
+    assert "jump_to" not in result  # soft reminder, not a hard block
+    assert result["todo_stale_iterations"] == STALE_REMINDER_THRESHOLD
+    assert len(result["messages"]) == 1
+    assert isinstance(result["messages"][0], SystemMessage)
+    assert "todo list has not been updated" in result["messages"][0].content
+
+
+def test_todo_middleware_skips_stale_reminder_between_intervals():
+    mw = TodoListMiddleware()
+    state = {
+        "todos": [{"content": "Patch middleware", "status": "in_progress"}],
+        "todo_stale_iterations": STALE_REMINDER_THRESHOLD,
+        "messages": [_tool_only_ai_message()],
+    }
+
+    result = mw.after_model(state, runtime=SimpleNamespace())
+
+    assert result is not None
+    assert "messages" not in result
+    assert result["todo_stale_iterations"] == STALE_REMINDER_THRESHOLD + 1
+
+
+def test_todo_middleware_emits_stale_reminder_again_at_next_interval():
+    mw = TodoListMiddleware()
+    next_reminder = STALE_REMINDER_THRESHOLD + STALE_REMINDER_INTERVAL
+    state = {
+        "todos": [{"content": "Patch middleware", "status": "in_progress"}],
+        "todo_stale_iterations": next_reminder - 1,
+        "messages": [_tool_only_ai_message()],
+    }
+
+    result = mw.after_model(state, runtime=SimpleNamespace())
+
+    assert result is not None
+    assert result["todo_stale_iterations"] == next_reminder
+    assert len(result["messages"]) == 1
+    assert isinstance(result["messages"][0], SystemMessage)
+
+
+def test_todo_middleware_resets_stale_counter_on_write_todos():
+    mw = TodoListMiddleware()
+    state = {
+        "todos": [{"content": "Patch middleware", "status": "in_progress"}],
+        "todo_stale_iterations": 4,
         "messages": [
             AIMessage(
                 content="",
                 tool_calls=[
                     {
                         "id": "tc-1",
-                        "name": "execute",
-                        "args": {"command": "pytest tests/unit/test_middleware_todo.py -v"},
+                        "name": "write_todos",
+                        "args": {
+                            "todos": [
+                                {"content": "Patch middleware", "status": "completed"},
+                                {"content": "Review", "status": "in_progress"},
+                            ]
+                        },
                         "type": "tool_call",
                     }
                 ],
@@ -458,31 +551,18 @@ def test_todo_middleware_emits_stale_todo_error_after_tool_iteration_without_wri
     result = mw.after_model(state, runtime=SimpleNamespace())
 
     assert result is not None
-    assert len(result["messages"]) == 1
-    assert isinstance(result["messages"][0], SystemMessage)
-    assert result["jump_to"] == "model"
-    assert "todo list was not updated" in result["messages"][0].content
+    assert result["todo_stale_iterations"] == 0
 
 
-def test_todo_middleware_does_not_emit_stale_guard_without_prior_todos():
+def test_todo_middleware_does_not_emit_stale_reminder_without_prior_todos():
     mw = TodoListMiddleware()
     state = {
-        "messages": [
-            AIMessage(
-                content="",
-                tool_calls=[
-                    {
-                        "id": "tc-1",
-                        "name": "execute",
-                        "args": {"command": "pytest tests/unit/test_middleware_todo.py -v"},
-                        "type": "tool_call",
-                    }
-                ],
-            )
-        ]
+        "messages": [_tool_only_ai_message()],
     }
 
-    assert mw.after_model(state, runtime=SimpleNamespace()) == {"todo_guard_retries": {}}
+    result = mw.after_model(state, runtime=SimpleNamespace())
+
+    assert result == {"todo_guard_retries": {}}
 
 
 def test_todo_middleware_blocks_pure_text_finalization_with_unfinished_todos():
@@ -498,7 +578,9 @@ def test_todo_middleware_blocks_pure_text_finalization_with_unfinished_todos():
     assert len(result["messages"]) == 1
     assert isinstance(result["messages"][0], SystemMessage)
     assert result["jump_to"] == "model"
-    assert "cannot finalize response" in result["messages"][0].content
+    assert result["todo_finalization_correction"] is True
+    assert "unfinished items" in result["messages"][0].content
+    assert "Error" not in result["messages"][0].content
 
 
 def test_todo_middleware_blocks_list_block_finalization_with_unfinished_todos():
@@ -518,7 +600,7 @@ def test_todo_middleware_blocks_list_block_finalization_with_unfinished_todos():
     assert len(result["messages"]) == 1
     assert isinstance(result["messages"][0], SystemMessage)
     assert result["jump_to"] == "model"
-    assert "cannot finalize response" in result["messages"][0].content
+    assert "unfinished items" in result["messages"][0].content
 
 
 def test_todo_middleware_does_not_block_finalization_when_all_todos_are_completed():
@@ -528,7 +610,10 @@ def test_todo_middleware_does_not_block_finalization_when_all_todos_are_complete
         "messages": [AIMessage(content="Implemented the change and everything is done.")],
     }
 
-    assert mw.after_model(state, runtime=SimpleNamespace()) == {"todo_guard_retries": {}}
+    assert mw.after_model(state, runtime=SimpleNamespace()) == {
+        "todo_guard_retries": {},
+        "todo_stale_iterations": 0,
+    }
 
 
 def test_todo_middleware_skips_stale_guard_when_write_todos_occurs_in_same_iteration():
@@ -563,27 +648,15 @@ def test_todo_middleware_skips_stale_guard_when_write_todos_occurs_in_same_itera
 
     result = mw.after_model(state, runtime=SimpleNamespace())
 
-    assert result == {"todo_guard_retries": {}}
+    assert result == {"todo_guard_retries": {}, "todo_stale_iterations": 0}
 
 
-def test_todo_middleware_escalates_after_repeated_stale_failures():
+def test_todo_middleware_escalates_after_repeated_finalization_failures():
     mw = TodoListMiddleware()
     state = {
         "todos": [{"content": "Patch middleware", "status": "in_progress"}],
-        "todo_guard_retries": {"stale": 2},
-        "messages": [
-            AIMessage(
-                content="",
-                tool_calls=[
-                    {
-                        "id": "tc-1",
-                        "name": "execute",
-                        "args": {"command": "pytest tests/unit/test_middleware_todo.py -v"},
-                        "type": "tool_call",
-                    }
-                ],
-            )
-        ],
+        "todo_guard_retries": {"finalization": 2},
+        "messages": [AIMessage(content="Implemented the change and everything is done.")],
     }
 
     result = mw.after_model(state, runtime=SimpleNamespace())
@@ -592,64 +665,21 @@ def test_todo_middleware_escalates_after_repeated_stale_failures():
     assert len(result["messages"]) == 1
     assert isinstance(result["messages"][0], SystemMessage)
     assert result["jump_to"] == "model"
-    assert result["todo_guard_blocked"]["guard_type"] == "stale"
-    assert "todo list was not updated" in result["todo_guard_blocked"]["message"]
-    assert result["todo_guard_retries"] == {"stale": 3}
-
-
-def test_todo_middleware_preserves_other_guard_retries_when_stale_increments():
-    mw = TodoListMiddleware()
-    state = {
-        "todos": [{"content": "Patch middleware", "status": "in_progress"}],
-        "todo_guard_retries": {"stale": 1, "finalization": 2},
-        "messages": [
-            AIMessage(
-                content="",
-                tool_calls=[
-                    {
-                        "id": "tc-1",
-                        "name": "execute",
-                        "args": {"command": "pytest tests/unit/test_middleware_todo.py -v"},
-                        "type": "tool_call",
-                    }
-                ],
-            )
-        ],
-    }
-
-    result = mw.after_model(state, runtime=SimpleNamespace())
-
-    assert result is not None
-    assert result["jump_to"] == "model"
-    assert result["todo_guard_retries"] == {"stale": 2, "finalization": 2}
-
-
-def test_todo_middleware_preserves_other_guard_retries_when_finalization_escalates():
-    mw = TodoListMiddleware()
-    state = {
-        "todos": [{"content": "Patch middleware", "status": "in_progress"}],
-        "todo_guard_retries": {"stale": 1, "finalization": 2},
-        "messages": [AIMessage(content="Implemented the change and everything is done.")],
-    }
-
-    result = mw.after_model(state, runtime=SimpleNamespace())
-
-    assert result is not None
-    assert result["jump_to"] == "model"
     assert result["todo_guard_blocked"]["guard_type"] == "finalization"
-    assert result["todo_guard_retries"] == {"stale": 1, "finalization": 3}
+    assert "unfinished items" in result["todo_guard_blocked"]["message"]
+    assert result["todo_guard_retries"] == {"finalization": 3}
 
 
 def test_todo_middleware_allows_one_blocked_pure_text_explanation_to_end():
     mw = TodoListMiddleware()
     state = {
         "todos": [{"content": "Patch middleware", "status": "in_progress"}],
-        "todo_guard_retries": {"stale": 3},
+        "todo_guard_retries": {"finalization": 3},
         "todo_guard_blocked": {
-            "guard_type": "stale",
+            "guard_type": "finalization",
             "message": (
-                "Error: work progressed on an active plan but the todo list was not "
-                "updated. Call write_todos before continuing."
+                "Error: cannot finalize response while todo list still contains "
+                "unfinished items. Update the list first."
             ),
         },
         "messages": [
@@ -669,6 +699,8 @@ def test_todo_middleware_allows_one_blocked_pure_text_explanation_to_end():
         "todo_guard_blocked": None,
         "todo_guard_retries": {},
         "todo_guard_suppressed": True,
+        "todo_stale_iterations": 0,
+        "todo_finalization_correction": None,
     }
 
 
@@ -677,12 +709,12 @@ def test_todo_middleware_preserves_terminal_blocked_todos_for_next_turn():
     blocked_exit = mw.after_model(
         {
             "todos": [{"content": "Patch middleware", "status": "in_progress"}],
-            "todo_guard_retries": {"stale": 3},
+            "todo_guard_retries": {"finalization": 3},
             "todo_guard_blocked": {
-                "guard_type": "stale",
+                "guard_type": "finalization",
                 "message": (
-                    "Error: work progressed on an active plan but the todo list was not "
-                    "updated. Call write_todos before continuing."
+                    "Error: cannot finalize response while todo list still contains "
+                    "unfinished items. Update the list first."
                 ),
             },
             "messages": [
@@ -708,6 +740,8 @@ def test_todo_middleware_preserves_terminal_blocked_todos_for_next_turn():
     assert mw.after_model(next_turn_state, runtime=SimpleNamespace()) == {
         "todo_guard_retries": {},
         "todo_guard_suppressed": True,
+        "todo_stale_iterations": 0,
+        "todo_finalization_correction": None,
     }
 
 
@@ -739,6 +773,7 @@ def test_todo_middleware_clears_suppression_after_new_write_todos_submission():
     assert mw.after_model(state, runtime=SimpleNamespace()) == {
         "todo_guard_retries": {},
         "todo_guard_suppressed": None,
+        "todo_stale_iterations": 0,
     }
 
 
@@ -746,12 +781,12 @@ def test_todo_middleware_keeps_blocked_mode_when_model_tries_tools_after_escalat
     mw = TodoListMiddleware()
     state = {
         "todos": [{"content": "Patch middleware", "status": "in_progress"}],
-        "todo_guard_retries": {"stale": 3},
+        "todo_guard_retries": {"finalization": 3},
         "todo_guard_blocked": {
-            "guard_type": "stale",
+            "guard_type": "finalization",
             "message": (
-                "Error: work progressed on an active plan but the todo list was not "
-                "updated. Call write_todos before continuing."
+                "Error: cannot finalize response while todo list still contains "
+                "unfinished items. Update the list first."
             ),
         },
         "messages": [
@@ -775,10 +810,78 @@ def test_todo_middleware_keeps_blocked_mode_when_model_tries_tools_after_escalat
     assert result["jump_to"] == "model"
     assert result["todo_guard_blocked"] == state["todo_guard_blocked"]
     assert result["todo_guard_retries"] == state["todo_guard_retries"]
+    assert result["todo_finalization_correction"] is None
     assert len(result["messages"]) == 1
     assert isinstance(result["messages"][0], SystemMessage)
     assert "Do not call any tools" in result["messages"][0].content
     assert "plain-text explanation" in result["messages"][0].content
+
+
+def test_todo_middleware_allows_brief_closing_after_finalization_correction():
+    """After the finalization guard fires and the model correctly updates todos,
+    the model's brief closing response passes through normally (no jump to END).
+    The guard message instructed the model to keep it short."""
+    mw = TodoListMiddleware()
+    state = {
+        "todos": [{"content": "Patch middleware", "status": "completed"}],
+        "todo_finalization_correction": True,
+        "messages": [AIMessage(content="All tasks completed.")],
+    }
+
+    result = mw.after_model(state, runtime=SimpleNamespace())
+
+    assert result is not None
+    assert "jump_to" not in result
+    assert result["todo_finalization_correction"] is None
+
+
+def test_todo_middleware_keeps_correction_flag_while_write_todos_is_in_flight():
+    """While the model is actively executing the correction (calling write_todos),
+    the flag should survive so it's available after the tool executes."""
+    mw = TodoListMiddleware()
+    state = {
+        "todos": [{"content": "Patch middleware", "status": "in_progress"}],
+        "todo_finalization_correction": True,
+        "messages": [
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "id": "tc-1",
+                        "name": "write_todos",
+                        "args": {
+                            "todos": [{"content": "Patch middleware", "status": "completed"}]
+                        },
+                        "type": "tool_call",
+                    }
+                ],
+            )
+        ],
+    }
+
+    result = mw.after_model(state, runtime=SimpleNamespace())
+
+    assert result is not None
+    assert "todo_finalization_correction" not in result  # flag stays in state unchanged
+
+
+def test_todo_middleware_clears_correction_flag_when_model_ignores_instruction():
+    """If the model doesn't call write_todos after a finalization correction
+    and todos are still unfinished, the flag is cleared and the finalization
+    guard fires again."""
+    mw = TodoListMiddleware()
+    state = {
+        "todos": [{"content": "Patch middleware", "status": "in_progress"}],
+        "todo_finalization_correction": True,
+        "messages": [AIMessage(content="I decided not to update the todos.")],
+    }
+
+    result = mw.after_model(state, runtime=SimpleNamespace())
+
+    # Flag was cleared, then finalization guard fires again (sets it back)
+    assert result is not None
+    assert result["jump_to"] == "model"
+    assert result["todo_finalization_correction"] is True
 
 
 @pytest.mark.asyncio

@@ -67,11 +67,9 @@ def convert_messages_chunk(
     if isinstance(msg, dict):
         content = msg.get("content", "")
         additional_kwargs = msg.get("additional_kwargs", {})
-        tool_name = msg.get("name")
     else:
         content = getattr(msg, "content", "") or ""
         additional_kwargs = getattr(msg, "additional_kwargs", {}) or {}
-        tool_name = getattr(msg, "name", None)
 
     # Reasoning content
     reasoning_content = (additional_kwargs or {}).get("reasoning_content", "")
@@ -85,8 +83,16 @@ def convert_messages_chunk(
             }
         )
 
-    # Text content (skip ToolMessages — they have a name attribute)
-    if content and not tool_name:
+    # Determine message type so we only emit text from AI responses.
+    # SystemMessages injected by middleware (e.g. guard corrections) and
+    # other non-AI messages must not reach the user as text_delta events.
+    if isinstance(msg, dict):
+        msg_type = msg.get("type", "")
+    else:
+        msg_type = getattr(msg, "type", "")
+
+    # Text content (only AI messages — skip system/tool/human)
+    if content and msg_type in ("ai", "AIMessageChunk"):
         usage_metadata = (
             getattr(msg, "usage_metadata", {})
             if not isinstance(msg, dict)
