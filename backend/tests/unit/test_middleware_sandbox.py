@@ -9,7 +9,9 @@ def test_sandbox_middleware_registers_execute_tool():
     mw = SandboxMiddleware(sandbox=sandbox)
     tool_names = [t.name for t in mw.tools]
     assert "execute" in tool_names
-    assert len(mw.tools) == 1  # only execute, nothing else
+    assert "write_file" in tool_names
+    assert "edit_file" in tool_names
+    assert len(mw.tools) == 3
 
 
 @pytest.mark.asyncio
