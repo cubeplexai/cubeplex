@@ -55,6 +55,24 @@ export function MarkdownWithCitations({ children, className }: MarkdownWithCitat
               {renderWithCitations(c, conversationId, CitationMarker)}
             </blockquote>
           ),
+          h1: ({ children: c }) => (
+            <h1>{renderWithCitations(c, conversationId, CitationMarker)}</h1>
+          ),
+          h2: ({ children: c }) => (
+            <h2>{renderWithCitations(c, conversationId, CitationMarker)}</h2>
+          ),
+          h3: ({ children: c }) => (
+            <h3>{renderWithCitations(c, conversationId, CitationMarker)}</h3>
+          ),
+          h4: ({ children: c }) => (
+            <h4>{renderWithCitations(c, conversationId, CitationMarker)}</h4>
+          ),
+          h5: ({ children: c }) => (
+            <h5>{renderWithCitations(c, conversationId, CitationMarker)}</h5>
+          ),
+          h6: ({ children: c }) => (
+            <h6>{renderWithCitations(c, conversationId, CitationMarker)}</h6>
+          ),
         }}
       >
         {children}
