@@ -104,7 +104,16 @@ class Todo(TypedDict):
     status: Literal["pending", "in_progress", "completed"]
 
 
-type TodoGuardType = Literal["stale", "finalization"]
+type TodoGuardType = Literal["finalization"]
+
+# Number of consecutive tool-call iterations (without write_todos) before
+# injecting a soft stale-todo reminder.  The model is free to ignore the
+# reminder; it is never a hard block.
+STALE_REMINDER_THRESHOLD = 5
+
+# Minimum iterations between successive stale reminders so the model is not
+# nagged on every single turn.
+STALE_REMINDER_INTERVAL = 5
 
 
 class TodoGuardBlocked(TypedDict):
@@ -121,6 +130,8 @@ class PlanningState(AgentState[ResponseT]):
     todo_guard_retries: Annotated[NotRequired[dict[TodoGuardType, int]], OmitFromInput]
     todo_guard_blocked: Annotated[NotRequired[TodoGuardBlocked | None], OmitFromInput]
     todo_guard_suppressed: Annotated[NotRequired[bool], OmitFromInput]
+    todo_stale_iterations: Annotated[NotRequired[int], OmitFromInput]
+    todo_finalization_correction: Annotated[NotRequired[bool], OmitFromInput]
 
 
 class WriteTodosInput(BaseModel):
@@ -230,15 +241,20 @@ def _guard_retry_update(
     return retries[guard_type], retries
 
 
+_STALE_REMINDER_TEXT = (
+    "The todo list has not been updated for several iterations. "
+    "If you have completed the current task or started a new one, "
+    "consider calling write_todos to keep the checklist in sync. "
+    "Ignore this if the current work is still part of the active task."
+)
+
+
 def _guard_error_message(guard_type: TodoGuardType) -> str:
-    if guard_type == "stale":
-        return (
-            "Error: work progressed on an active plan but the todo list was not "
-            "updated. Call write_todos before continuing."
-        )
     return (
-        "Error: cannot finalize response while todo list still contains unfinished "
-        "items. Update the list first."
+        "The todo list still has unfinished items. Call write_todos to update the "
+        "remaining items. Your detailed response was already delivered to the user — "
+        "after updating the list, give only a brief one-sentence closing. "
+        "Do not repeat or re-summarize your earlier response."
     )
 
 
@@ -393,6 +409,7 @@ class TodoListMiddleware(AgentMiddleware[PlanningState[ResponseT], ContextT, Res
         return {
             "jump_to": "model",
             "todo_guard_retries": retries,
+            "todo_finalization_correction": True,
             "messages": [SystemMessage(content=message)],
         }
 
@@ -469,6 +486,7 @@ class TodoListMiddleware(AgentMiddleware[PlanningState[ResponseT], ContextT, Res
         if last_ai_msg is None:
             return None
 
+        # --- blocked-guard state machine (finalization escalation) -----------
         blocked_guard = state.get("todo_guard_blocked")
         if blocked_guard:
             if _pure_text_ai_response(last_ai_msg):
@@ -477,21 +495,28 @@ class TodoListMiddleware(AgentMiddleware[PlanningState[ResponseT], ContextT, Res
                     "todo_guard_blocked": None,
                     "todo_guard_retries": _reset_guard_retries(),
                     "todo_guard_suppressed": True,
+                    "todo_stale_iterations": 0,
+                    "todo_finalization_correction": None,
                 }
 
             return {
                 "jump_to": "model",
                 "todo_guard_blocked": blocked_guard,
                 "todo_guard_retries": dict(state.get("todo_guard_retries", {})),
+                "todo_finalization_correction": None,
                 "messages": [SystemMessage(content=_blocked_todo_guard_message(blocked_guard))],
             }
 
+        # --- suppression after escalation ------------------------------------
         if state.get("todo_guard_suppressed") and not _submitted_write_todos_calls(last_ai_msg):
             return {
                 "todo_guard_retries": _reset_guard_retries(),
                 "todo_guard_suppressed": True,
+                "todo_stale_iterations": 0,
+                "todo_finalization_correction": None,
             }
 
+        # --- payload validation (parallel calls, schema, invariants) ---------
         parallel_error = self._parallel_write_todos_error(state)
         if parallel_error is not None:
             return parallel_error
@@ -500,16 +525,42 @@ class TodoListMiddleware(AgentMiddleware[PlanningState[ResponseT], ContextT, Res
         if validation_errors:
             return {"messages": validation_errors}
 
+        # --- stale-todo soft reminder ----------------------------------------
         unfinished = _unfinished_todos(state.get("todos"))
-        if unfinished:
-            if _non_todo_tool_calls(last_ai_msg) and not _submitted_write_todos_calls(last_ai_msg):
-                return self._guard_response(state, "stale")
-            if _pure_text_ai_response(last_ai_msg):
-                return self._guard_response(state, "finalization")
+        has_write_todos = bool(_submitted_write_todos_calls(last_ai_msg))
+        has_non_todo_tools = bool(_non_todo_tool_calls(last_ai_msg))
 
         result: dict[str, Any] = {"todo_guard_retries": _reset_guard_retries()}
         if state.get("todo_guard_suppressed"):
             result["todo_guard_suppressed"] = None
+
+        if unfinished and has_non_todo_tools and not has_write_todos:
+            stale_count = state.get("todo_stale_iterations", 0) + 1
+            result["todo_stale_iterations"] = stale_count
+            if stale_count >= STALE_REMINDER_THRESHOLD and (
+                (stale_count - STALE_REMINDER_THRESHOLD) % STALE_REMINDER_INTERVAL == 0
+            ):
+                result["messages"] = [SystemMessage(content=_STALE_REMINDER_TEXT)]
+        else:
+            # Any write_todos call or non-tool turn resets the counter.
+            if has_write_todos or not has_non_todo_tools:
+                result["todo_stale_iterations"] = 0
+
+        # --- post-finalization-correction ------------------------------------
+        # After the finalization guard fired and the model called write_todos,
+        # the correction flag stays alive until the tool phase completes.
+        # Once all todos are done the flag is cleared and the model's brief
+        # closing response passes through normally (the guard message already
+        # instructed it to keep the closing short and not repeat the earlier
+        # detailed response).
+        if state.get("todo_finalization_correction"):
+            if not unfinished or not has_write_todos:
+                result["todo_finalization_correction"] = None
+
+        # --- finalization hard guard -----------------------------------------
+        if unfinished and _pure_text_ai_response(last_ai_msg):
+            return self._guard_response(state, "finalization")
+
         return result
 
     @override

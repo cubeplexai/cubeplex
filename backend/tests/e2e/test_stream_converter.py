@@ -1,6 +1,6 @@
 """Tests for stream converter tool_call_delta extraction."""
 
-from langchain_core.messages import AIMessage, AIMessageChunk
+from langchain_core.messages import AIMessage, AIMessageChunk, SystemMessage
 
 from cubebox.agents.stream import convert_messages_chunk, convert_updates_chunk
 
@@ -74,6 +74,14 @@ def test_name_only_chunk_emits_event() -> None:
     deltas = [e for e in events if e["type"] == "tool_call_delta"]
     assert len(deltas) == 1
     assert deltas[0]["data"]["name"] == "write_file"
+
+
+def test_system_message_not_emitted_as_text_delta() -> None:
+    """SystemMessages injected by middleware must not reach the user as text_delta."""
+    msg = SystemMessage(content="Update the todo list before continuing.")
+    events = convert_messages_chunk((msg, {}))
+    text_events = [e for e in events if e["type"] == "text_delta"]
+    assert len(text_events) == 0
 
 
 def test_convert_updates_chunk_includes_tool_call_started_at() -> None:
