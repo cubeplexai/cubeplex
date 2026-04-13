@@ -18,7 +18,7 @@ export function ArtifactGallery({ conversationId }: ArtifactGalleryProps) {
   const isLoading = useArtifactStore(s => s.isLoading(conversationId))
   const openPreview = usePanelStore(s => s.openArtifact)
 
-  if (!isLoading && artifacts.length === 0) return null
+  if (artifacts.length === 0) return null
 
   return (
     <div className="border-b border-border bg-card/50">
