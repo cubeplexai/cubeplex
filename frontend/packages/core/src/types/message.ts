@@ -2,9 +2,17 @@
 import type { CitationData } from './citation'
 import type { ContentBlock } from './events'
 
+export interface SubagentToolResult {
+  tool_name: string
+  tool_call_id: string
+  content: string
+  content_type?: string | null
+}
+
 export interface SubagentSummary {
   text: string
-  tool_calls: { name: string; arguments: Record<string, unknown> }[]
+  tool_calls: { name: string; arguments: Record<string, unknown>; tool_call_id?: string }[]
+  tool_results?: SubagentToolResult[]
   reasoning: string
   role?: string
   task?: string

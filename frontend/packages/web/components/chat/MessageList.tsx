@@ -64,6 +64,19 @@ function buildHistoricalToolResultMap(
         receivedAt: new Date(msg.created_at ?? 0).getTime(),
         startedAt: toolCallStartMap[msg.tool_call_id] ?? fallbackStartedAt,
       }
+      // Also index subagent inner tool results so their previews/citations work
+      if (msg.name === 'subagent' && msg.subagent_events?.tool_results) {
+        const ts = new Date(msg.created_at ?? 0).getTime()
+        for (const tr of msg.subagent_events.tool_results) {
+          if (tr.tool_call_id) {
+            map[tr.tool_call_id] = {
+              content: tr.content,
+              receivedAt: ts,
+              contentType: tr.content_type ?? undefined,
+            }
+          }
+        }
+      }
     }
   }
   return map

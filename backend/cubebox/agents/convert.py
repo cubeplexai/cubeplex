@@ -30,11 +30,12 @@ def _consolidate_subagent_events(
     """Aggregate raw per-token subagent events into a consolidated summary.
 
     Returns:
-        {"text": str, "tool_calls": list[dict], "reasoning": str}
+        {"text": str, "tool_calls": list[dict], "tool_results": list[dict], "reasoning": str}
     """
     text_parts: list[str] = []
     reasoning_parts: list[str] = []
     tool_calls: list[dict[str, Any]] = []
+    tool_results: list[dict[str, Any]] = []
 
     for evt in events:
         evt_type = evt.get("type")
@@ -48,12 +49,23 @@ def _consolidate_subagent_events(
                 {
                     "name": data.get("name", ""),
                     "arguments": data.get("arguments", {}),
+                    "tool_call_id": data.get("tool_call_id", ""),
+                }
+            )
+        elif evt_type == "tool_result":
+            tool_results.append(
+                {
+                    "tool_name": data.get("tool_name", ""),
+                    "tool_call_id": data.get("tool_call_id", ""),
+                    "content": data.get("content", ""),
+                    "content_type": data.get("content_type"),
                 }
             )
 
     return {
         "text": "".join(text_parts),
         "tool_calls": tool_calls,
+        "tool_results": tool_results,
         "reasoning": "".join(reasoning_parts),
     }
 

@@ -465,6 +465,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
           // key is like "subagent:<tool_call_id>"
           const toolCallId = key.startsWith('subagent:') ? key.slice(9) : key
           const args = subagentArgs[key]
+          const currentToolResultMap = get().toolResultMap
           toolMessages.push({
             id: `tool-${toolCallId}-${Date.now()}`,
             role: 'tool',
@@ -476,7 +477,22 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
               tool_calls: agentStream.toolCalls.map((tc) => ({
                 name: tc.data.name,
                 arguments: tc.data.arguments,
+                tool_call_id: tc.data.tool_call_id,
               })),
+              tool_results: agentStream.toolResults.map((tr) => ({
+                tool_name: tr.data.tool_name ?? '',
+                tool_call_id: tr.data.tool_call_id ?? '',
+                content: tr.data.content ?? '',
+                content_type: tr.data.content_type ?? null,
+              })).filter((tr) => {
+                // Only include results that have meaningful content
+                // Fall back to toolResultMap if streaming event lacked content_type
+                const mapEntry = currentToolResultMap[tr.tool_call_id]
+                if (mapEntry?.contentType && !tr.content_type) {
+                  tr.content_type = mapEntry.contentType
+                }
+                return tr.tool_call_id
+              }),
               reasoning: agentStream.reasoning,
               role: args?.role,
               task: args?.task,

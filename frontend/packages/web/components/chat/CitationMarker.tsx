@@ -127,15 +127,26 @@ export function CitationMarker({
       content = streamResult.content
       contentType = streamResult.contentType
     } else {
-      // Find tool result from history messages
-      for (const msgs of Object.values(state.messages)) {
-        const toolMsg = msgs.find(
-          (m) => m.role === 'tool' && m.tool_call_id === citation.tool_call_id,
-        )
-        if (toolMsg) {
-          toolName = toolMsg.name ?? 'web_search'
-          content = toolMsg.content
-          break
+      // Find tool result from history messages (top-level or inside subagent_events)
+      outer: for (const msgs of Object.values(state.messages)) {
+        for (const m of msgs) {
+          if (m.role === 'tool' && m.tool_call_id === citation.tool_call_id) {
+            toolName = m.name ?? 'web_search'
+            content = m.content
+            break outer
+          }
+          // Search subagent inner tool results
+          if (m.role === 'tool' && m.name === 'subagent' && m.subagent_events?.tool_results) {
+            const inner = m.subagent_events.tool_results.find(
+              (tr) => tr.tool_call_id === citation.tool_call_id,
+            )
+            if (inner) {
+              toolName = inner.tool_name || 'web_search'
+              content = inner.content
+              contentType = inner.content_type ?? undefined
+              break outer
+            }
+          }
         }
       }
     }

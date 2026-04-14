@@ -187,7 +187,11 @@ function subagentSummaryToStream(summary: SubagentSummary): AgentStream {
     toolCalls: summary.tool_calls.map((tc, i) => ({
       type: 'tool_call' as const,
       timestamp: '',
-      data: { tool_call_id: `hist-${i}`, name: tc.name, arguments: tc.arguments },
+      data: {
+        tool_call_id: tc.tool_call_id ?? `hist-${i}`,
+        name: tc.name,
+        arguments: tc.arguments,
+      },
       agent_id: null,
       agent_name: null,
     })),

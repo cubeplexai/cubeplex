@@ -163,9 +163,7 @@ def _create_subagent_tool(
                 )
                 messages = result.get("messages", [])
                 for m in messages:
-                    citations = (getattr(m, "additional_kwargs", None) or {}).get(
-                        "citations"
-                    )
+                    citations = (getattr(m, "additional_kwargs", None) or {}).get("citations")
                     if citations:
                         collected_citations.extend(citations)
                 last = messages[-1] if messages else None
