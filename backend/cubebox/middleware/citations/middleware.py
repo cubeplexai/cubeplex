@@ -136,8 +136,19 @@ class CitationMiddleware(AgentMiddleware[Any, Any, Any]):
                 )
             all_citations.append(citation_data)
 
+            # Build a metadata header so the LLM can see url/title/etc.
+            meta_parts: list[str] = []
+            for key, value in metadata.items():
+                if key == "source_type":
+                    continue
+                meta_parts.append(f"{key}: {value}")
+            meta_header = " | ".join(meta_parts) if meta_parts else ""
+
             for i, c in enumerate(chunks):
-                chunks_for_llm.append(f"【{citation_id}-{i}】 {c}")
+                if i == 0 and meta_header:
+                    chunks_for_llm.append(f"【{citation_id}-{i}】 [{meta_header}] {c}")
+                else:
+                    chunks_for_llm.append(f"【{citation_id}-{i}】 {c}")
 
         if chunks_for_llm:
             result.additional_kwargs["original_content"] = raw_content

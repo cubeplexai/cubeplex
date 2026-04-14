@@ -14,4 +14,6 @@ When your response uses information from tool results that contain citation mark
 
 5. **No citation needed**: For your own reasoning, general knowledge, or conversation context, do NOT add citations. Only cite tool results that contain 【N-M】 markers.
 
-6. **No separate references section**: Do NOT add a "References" or "Sources" list at the end. Citations are inline only."""  # noqa: E501
+6. **No separate references section**: Do NOT add a "References" or "Sources" list at the end. Citations are inline only.
+
+7. **Subagent citations**: When a subagent's output contains 【N-M】 citation markers, copy them through verbatim into your response. The system has already registered the citation sources — you do not need the original data to use them. Treat subagent citation markers the same as those from your own tool results."""  # noqa: E501

@@ -546,12 +546,14 @@ async def send_message(
                         for sse_event in _dicts_to_sse_events(evts, tool_delta_context):
                             if sse_event.type == "text_delta":
                                 for chunk in _process_text_delta(
-                                    sse_event, agent_id,
+                                    sse_event,
+                                    agent_id,
                                 ):
                                     yield chunk
                             else:
                                 for chunk in _flush_citation_buffer(
-                                    agent_id, sse_event.agent_id,
+                                    agent_id,
+                                    sse_event.agent_id,
                                 ):
                                     yield chunk
                                 yield f"data: {sse_event.model_dump_json()}\n\n"
@@ -570,12 +572,14 @@ async def send_message(
                         for sse_event in _dicts_to_sse_events(evts, tool_delta_context):
                             if sse_event.type == "text_delta":
                                 for chunk in _process_text_delta(
-                                    sse_event, sa_agent_id,
+                                    sse_event,
+                                    sa_agent_id,
                                 ):
                                     yield chunk
                             else:
                                 for chunk in _flush_citation_buffer(
-                                    sa_agent_id, sse_event.agent_id,
+                                    sa_agent_id,
+                                    sse_event.agent_id,
                                 ):
                                     yield chunk
                                 yield f"data: {sse_event.model_dump_json()}\n\n"
