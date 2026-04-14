@@ -7,11 +7,18 @@ export interface SubagentToolResult {
   tool_call_id: string
   content: string
   content_type?: string | null
+  started_at?: string | null
+  completed_at?: string | null
 }
 
 export interface SubagentSummary {
   text: string
-  tool_calls: { name: string; arguments: Record<string, unknown>; tool_call_id?: string }[]
+  tool_calls: {
+    name: string
+    arguments: Record<string, unknown>
+    tool_call_id?: string
+    started_at?: string | null
+  }[]
   tool_results?: SubagentToolResult[]
   reasoning: string
   role?: string

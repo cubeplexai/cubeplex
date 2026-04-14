@@ -45,22 +45,26 @@ def _consolidate_subagent_events(
         elif evt_type == "reasoning":
             reasoning_parts.append(data.get("content", ""))
         elif evt_type == "tool_call":
-            tool_calls.append(
-                {
-                    "name": data.get("name", ""),
-                    "arguments": data.get("arguments", {}),
-                    "tool_call_id": data.get("tool_call_id", ""),
-                }
-            )
+            tc_entry: dict[str, Any] = {
+                "name": data.get("name", ""),
+                "arguments": data.get("arguments", {}),
+                "tool_call_id": data.get("tool_call_id", ""),
+            }
+            if data.get("started_at"):
+                tc_entry["started_at"] = data["started_at"]
+            elif evt.get("timestamp"):
+                tc_entry["started_at"] = evt["timestamp"]
+            tool_calls.append(tc_entry)
         elif evt_type == "tool_result":
-            tool_results.append(
-                {
-                    "tool_name": data.get("tool_name", ""),
-                    "tool_call_id": data.get("tool_call_id", ""),
-                    "content": data.get("content", ""),
-                    "content_type": data.get("content_type"),
-                }
-            )
+            tr_entry: dict[str, Any] = {
+                "tool_name": data.get("tool_name", ""),
+                "tool_call_id": data.get("tool_call_id", ""),
+                "content": data.get("content", ""),
+                "content_type": data.get("content_type"),
+                "started_at": data.get("started_at"),
+                "completed_at": evt.get("timestamp"),
+            }
+            tool_results.append(tr_entry)
 
     return {
         "text": "".join(text_parts),
