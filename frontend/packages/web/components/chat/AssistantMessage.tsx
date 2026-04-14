@@ -1,13 +1,14 @@
 'use client'
 
 import { useState, useEffect, useRef } from 'react'
-import type { Message, ContentBlock, SubagentSummary } from '@cubebox/core'
+import type { Message, ContentBlock, SubagentSummary, TodoItem } from '@cubebox/core'
 import type { AgentStream } from '@cubebox/core'
 import { useArtifactStore } from '@cubebox/core'
 import { Bot, ChevronDown, ChevronRight, Brain } from 'lucide-react'
 import { ArtifactCard } from './ArtifactCard'
 import { SubAgentCard } from './SubAgentCard'
 import { SubAgentCluster } from './SubAgentCluster'
+import { TaskProgressCard } from './TaskProgressCard'
 import { ToolCallGroup } from './ToolCallGroup'
 import { ToolCallItem } from './ToolCallItem'
 import { getWriteFileSummary } from '@/lib/writeFilePreview'
@@ -137,6 +138,7 @@ interface HistoryProps {
   isStreaming?: never
   statusPhase?: never
   subAgentStreams?: never
+  todos?: never
 }
 
 interface StreamingProps {
@@ -147,6 +149,7 @@ interface StreamingProps {
   isStreaming: boolean
   statusPhase?: string | null
   subAgentStreams?: Record<string, AgentStream>
+  todos?: TodoItem[]
 }
 
 type AssistantMessageProps = HistoryProps | StreamingProps
@@ -366,7 +369,8 @@ function groupBlocks(blocks: ContentBlock[]): (ContentBlock | ContentBlock[])[] 
 }
 
 export function AssistantMessage(
-  { message, stream, isStreaming, statusPhase, subAgentStreams, subagentDataMap, toolResultMap }:
+  { message, stream, isStreaming, statusPhase, subAgentStreams, subagentDataMap, toolResultMap,
+    todos }:
   AssistantMessageProps,
 ) {
   const streamAgentId = stream ? 'main' : undefined
@@ -440,6 +444,9 @@ export function AssistantMessage(
             />
           )
         })}
+        {isStreaming && todos && todos.length > 0 && (
+          <TaskProgressCard todos={todos} isStreaming={true} />
+        )}
         {isStreaming && (
           <div data-testid="loading-indicator" className="flex items-center gap-1 pl-1 h-6">
             {statusPhase === 'sandbox_creating' ? (

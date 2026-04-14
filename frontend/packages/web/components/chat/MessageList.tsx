@@ -6,6 +6,7 @@ import type { Message, SubagentSummary } from '@cubebox/core'
 import { AlertCircle } from 'lucide-react'
 import { UserMessage } from './UserMessage'
 import { AssistantMessage } from './AssistantMessage'
+import { TaskProgressCard } from './TaskProgressCard'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { useMessages } from '@/hooks/useMessages'
 
@@ -69,8 +70,9 @@ function buildHistoricalToolResultMap(
 }
 
 export function MessageList({ conversationId }: MessageListProps) {
-  const { messages, isStreaming, statusPhase, mainStream, subAgentStreams, error, toolResultMap } =
-    useMessages(conversationId)
+  const {
+    messages, isStreaming, statusPhase, mainStream, subAgentStreams, todos, error, toolResultMap,
+  } = useMessages(conversationId)
   const loadMessages = useMessageStore((s) => s.loadMessages)
 
   useEffect(() => {
@@ -171,7 +173,17 @@ export function MessageList({ conversationId }: MessageListProps) {
             statusPhase={statusPhase}
             subAgentStreams={subAgentStreams}
             toolResultMap={mergedToolResultMap}
+            todos={todos}
           />
+        )}
+
+        {!isStreaming && todos.length > 0 && (
+          <div className="flex justify-start gap-2.5">
+            <div className="shrink-0 w-6 h-6" />
+            <div className="flex-1 max-w-[75%]">
+              <TaskProgressCard todos={todos} isStreaming={false} />
+            </div>
+          </div>
         )}
 
         {error && (

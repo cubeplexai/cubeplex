@@ -43,7 +43,7 @@ export function useMessages(conversationId: string) {
       : null,
   )
   const todos = useMessageStore(
-    (s) => s.streamingConversationId === conversationId ? s.todos : [],
+    (s) => s.todos,
   )
   const error = useMessageStore((s) => s.error)
   const toolResultMap = useMessageStore(
