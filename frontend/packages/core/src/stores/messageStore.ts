@@ -22,6 +22,7 @@ export interface MessageStore {
   messages: Record<string, Message[]>
   streamAgents: Record<string, AgentStream>   // "main" or "task:xxx"
   isStreaming: boolean
+  streamingConversationId: string | null
   statusPhase: string | null
   error: string | null
   todos: TodoItem[]
@@ -160,6 +161,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
   messages: {},
   streamAgents: {},
   isStreaming: false,
+  streamingConversationId: null,
   statusPhase: null,
   error: null,
   todos: [],
@@ -167,12 +169,15 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
   toolResultMap: {},
 
   async loadMessages(client: ApiClient, conversationId: string) {
-    if (get().isStreaming) return
+    // Only skip if this conversation is currently streaming
+    const state = get()
+    if (state.isStreaming && state.streamingConversationId === conversationId) return
     try {
       const messages = await listMessages(client, conversationId)
-      // Re-check after await: if streaming started while we were fetching,
-      // discard the API response to preserve the optimistic user message.
-      if (get().isStreaming) return
+      // Re-check after await: if streaming started for this conversation while
+      // we were fetching, discard the API response to preserve the optimistic user message.
+      const current = get()
+      if (current.isStreaming && current.streamingConversationId === conversationId) return
 
       // Restore todos from the last write_todos tool call in history
       let restoredTodos: TodoItem[] = []
@@ -222,6 +227,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
       },
       streamAgents: { [MAIN_AGENT_KEY]: emptyStream() },
       isStreaming: true,
+      streamingConversationId: conversationId,
       statusPhase: null,
       error: null,
       todos: [],
@@ -489,13 +495,14 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
             ],
           },
           isStreaming: false,
+          streamingConversationId: null,
           statusPhase: null,
           // Keep streamAgents intact — the same AssistantMessage component stays
           // mounted and transitions smoothly from streaming to completed state.
           // Cleared on next send() or loadMessages().
         }))
       } else {
-        set({ isStreaming: false, statusPhase: null })
+        set({ isStreaming: false, streamingConversationId: null, statusPhase: null })
       }
     }
   },
@@ -504,6 +511,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
     set({
       streamAgents: {},
       isStreaming: false,
+      streamingConversationId: null,
       statusPhase: null,
       todos: [],
       toolStartedMap: {},

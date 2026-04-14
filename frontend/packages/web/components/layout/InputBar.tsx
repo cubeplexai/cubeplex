@@ -14,7 +14,7 @@ export function InputBar({ conversationId, onSubmit, isLoading = false }: InputB
   const [content, setContent] = useState('')
   const send = useMessageStore((s) => s.send)
   const messageIsStreaming = useMessageStore((s) =>
-    conversationId ? s.isStreaming : false
+    conversationId ? s.isStreaming && s.streamingConversationId === conversationId : false
   ) ?? false
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 

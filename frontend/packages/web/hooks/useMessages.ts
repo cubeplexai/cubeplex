@@ -30,21 +30,29 @@ export function useMessages(conversationId: string) {
   const messages = useMessageStore(
     (s) => s.messages[conversationId] ?? [],
   )
-  const isStreaming =
-    useMessageStore((s) => s.isStreaming) ?? false
-  const statusPhase =
-    useMessageStore((s) => s.statusPhase)
-  const mainStream = useMessageStore(
-    (s) => s.streamAgents['main'] ?? null,
+  // Only expose streaming state when this conversation is the one streaming
+  const isStreamingThis = useMessageStore(
+    (s) => s.isStreaming && s.streamingConversationId === conversationId,
   )
-  const todos = useMessageStore((s) => s.todos)
+  const statusPhase = useMessageStore(
+    (s) => s.streamingConversationId === conversationId ? s.statusPhase : null,
+  )
+  const mainStream = useMessageStore(
+    (s) => s.streamingConversationId === conversationId
+      ? (s.streamAgents['main'] ?? null)
+      : null,
+  )
+  const todos = useMessageStore(
+    (s) => s.streamingConversationId === conversationId ? s.todos : [],
+  )
   const error = useMessageStore((s) => s.error)
   const toolResultMap = useMessageStore(
-    (s) => s.toolResultMap,
+    (s) => s.streamingConversationId === conversationId ? s.toolResultMap : {},
   )
 
-  // Derive subagent streams with stable reference
+  // Derive subagent streams with stable reference — only for the streaming conversation
   const rawSubAgents = useMessageStore((s) => {
+    if (s.streamingConversationId !== conversationId) return {}
     const agents = s.streamAgents
     const sub: Record<string, AgentStream> = {}
     for (const key in agents) {
@@ -56,7 +64,7 @@ export function useMessages(conversationId: string) {
 
   return {
     messages,
-    isStreaming,
+    isStreaming: isStreamingThis,
     statusPhase,
     mainStream,
     subAgentStreams,
