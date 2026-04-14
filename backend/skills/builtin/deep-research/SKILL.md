@@ -1,7 +1,7 @@
 ---
 name: deep-research
 description: Use when a question needs current multi-source research, multi-angle investigation, or iterative verification before producing a report or detailed answer
-version: 3.1.0
+version: 3.2.0
 keywords:
   - research
   - multi-agent
@@ -127,20 +127,42 @@ Do not use this full workflow for:
 
 ## Phase 0: Ground the Request Before Planning
 
+**This phase is mandatory. Do NOT skip it. Do NOT call `write_todos` or `subagent` until Phase 0 is complete.**
+
 Before writing todos or dispatching subagents, do a **lightweight reconnaissance pass** to understand what the user is actually asking.
 
-Use the smallest useful tool action first, for example:
+### Step 0a: Temporal Grounding (check FIRST)
+
+Scan the user's request for **any** time reference — explicit or implied:
+
+- Explicit: dates, years, quarters, "2024", "Q1", "last month", "recent"
+- Implicit: "current status", "latest", "now", "market share" (implies recency), "trend", "forecast", news events, pricing, rankings, competitive landscape
+
+**If the request contains ANY time signal (explicit or implicit):**
+
+1. Call the `datetime` tool immediately — before any other action.
+2. Use the result to anchor all subsequent planning: determine the correct year, quarter, and date range.
+3. Include the anchored time context in every subagent prompt you later dispatch (e.g., "Today is 2026-04-14. Research data from 2025-2026.").
+
+**If the request is purely conceptual** (e.g., "explain how transformers work", "compare REST vs GraphQL architectures") — no temporal grounding is needed.
+
+When in doubt, call `datetime`. The cost is one lightweight tool call; the cost of getting the time wrong propagates to every subagent and corrupts the entire research.
+
+### Step 0b: Topic Reconnaissance
+
+Use the smallest useful tool action to understand the research landscape:
 
 - a simple web search to identify the topic, likely source landscape, or whether the question is temporal
-- a date/time tool to anchor "today", "this year", quarter references, or deadline-sensitive requests
 - a quick direct tool lookup when the request names a specific entity, event, metric, or date range
 
 The goal of this pass is not to complete the research. The goal is to reduce ambiguity before planning.
 
+### Step 0c: Scope Assessment
+
 During this pass, determine:
 
 - what the actual research object is
-- whether the request is time-sensitive
+- whether the request is time-sensitive (if you haven't called `datetime` yet, reconsider)
 - whether the user is asking for explanation, verification, comparison, or report generation
 - what obvious ambiguities or missing constraints exist
 
@@ -192,27 +214,42 @@ Bad decomposition:
 
 Before dispatching substantial research, the main agent should call `write_todos`.
 
-Use todos to track **workflow stages**, not individual subagents and not individual research angles.
+Use todos to track **workflow stages** — they describe what phase of the research process you are in, not what topics you are researching. The angle decomposition happens inside the active todo when you dispatch subagents; it does not appear in the todo list itself.
+
+**The litmus test:** if a todo item reads like a research question or topic heading, it belongs in a subagent prompt, not in the todo list. Todos should answer "what step of the process am I on?" not "what do I need to find out?"
 
 Good todo list:
 
 ```json
 {
   "todos": [
-    {"content": "Clarify scope, success criteria, and research angles", "status": "completed"},
-    {"content": "Run current research round across required angles", "status": "in_progress"},
-    {"content": "Resolve conflicts and fill critical gaps", "status": "pending"},
-    {"content": "Synthesize findings into final report", "status": "pending"}
+    {"content": "Ground the request: clarify scope, time range, and success criteria", "status": "completed"},
+    {"content": "Round 1: broad research across all identified angles", "status": "in_progress"},
+    {"content": "Review round 1, resolve conflicts and fill critical gaps", "status": "pending"},
+    {"content": "Write and save final report as artifact", "status": "pending"}
   ]
 }
 ```
 
-Bad todo list:
+Bad todo list (DO NOT do this — these are research topics disguised as todos):
 
-- one todo per subagent if several would need to be `in_progress`
-- one todo per research angle if that forces serial execution
-- vague items like "Research topic"
-- mixing execution detail and reporting in the same step
+```json
+{
+  "todos": [
+    {"content": "Research Tesla market share data", "status": "in_progress"},
+    {"content": "Research BYD market share data", "status": "in_progress"},
+    {"content": "Compare battery technology", "status": "pending"},
+    {"content": "Analyze financial performance", "status": "pending"},
+    {"content": "Check regulatory environment", "status": "pending"}
+  ]
+}
+```
+
+Why this is wrong:
+- Each item is a research angle, not a workflow stage
+- Multiple items would need to be `in_progress` simultaneously
+- It forces serial execution of things that should run in parallel as subagents
+- The todo list becomes a table of contents for the report, not a process tracker
 
 ### Todo Rules
 
@@ -229,68 +266,164 @@ Bad todo list:
 
 Once one research phase is `in_progress`, the main agent may dispatch multiple subagents inside that phase.
 
-Example:
+**Time context in subagent prompts:** If Phase 0 established a temporal anchor, you MUST include it at the start of every subagent prompt. Subagents have no conversation context — if you don't tell them the date, they will guess from training data and return stale results. Format: `"Today is YYYY-MM-DD. [rest of prompt]"`
+
+### Subagent Prompt Template
+
+Every subagent prompt must include **all five sections** below. A vague one-liner prompt produces vague output. The prompt is the only contract between the supervisor and the subagent — everything you need from the subagent must be spelled out in it.
+
+```
+1. CONTEXT    — date anchor, background the subagent needs, why this matters
+2. TASK       — the specific, narrow research question (one question per subagent)
+3. METHOD     — what to search for, what sources to prefer, what to avoid
+4. OUTPUT     — required structure for the response (see below)
+5. BOUNDARIES — what NOT to do (no report writing, no speculation, no planning)
+```
+
+### Required Output Structure
+
+Instruct every subagent to return findings in this exact structure:
+
+```
+## Facts
+- [Subject] [Time] [Metric]: [Value] (Source: [name/url])
+- ...
+
+## Gaps
+- What could not be confirmed and why
+
+## Conflicts
+- Where sources disagree and what the disagreement is
+
+## Limitations
+- Source quality issues, paywalled data, methodology concerns
+```
+
+Every fact must include a **source name or URL**. Subagent results carry citation metadata — the source information you include in the prompt output requirements is what enables citations in the final report.
+
+### Full Example
 
 ```python
 subagent(
     name="Dr. Chen",
     role="Auto Market Analyst",
     task="Find global EV market share data for 2024-2026",
-    prompt="As an auto market analyst, find global EV market share data for Tesla and BYD for 2024-2026. Return concrete numbers, dates, source names, and note any gaps."
+    prompt="""Today is 2026-04-14.
+
+CONTEXT:
+We are researching the competitive position of Tesla vs BYD in the global EV market.
+Your focus is global market share data. Other subagents are covering China-specific data
+and battery technology separately — do not duplicate their scope.
+
+TASK:
+Find global BEV (battery electric vehicle) market share figures for Tesla and BYD
+for calendar years 2024 and 2025, plus any available 2026 partial-year data.
+
+METHOD:
+- Search for industry reports from CleanTechnica, EV-Volumes, Counterpoint, SNE Research
+- Prefer quarterly or annual share percentages over unit sales alone
+- Cross-reference at least two independent sources per data point
+- If a figure appears in only one source, flag it in Limitations
+
+OUTPUT:
+Return your findings in this structure:
+
+## Facts
+- [Company] [Period] [Metric]: [Value] (Source: [name/url])
+  Example: Tesla Q3 2025 global BEV share: 14.2% (Source: Counterpoint Research)
+
+## Gaps
+- List what you could not find (e.g., "2026 Q1 data not yet published by any source")
+
+## Conflicts
+- Where two sources give different numbers for the same metric
+
+## Limitations
+- Source quality or methodology issues
+
+BOUNDARIES:
+- Do NOT write a summary, analysis, or report
+- Do NOT speculate on reasons behind the numbers
+- Do NOT plan further research steps
+- Say "not found" explicitly when evidence is missing — do not fill gaps with general knowledge
+"""
 )
 subagent(
     name="Atlas",
     role="China Market Researcher",
-    task="Find China market share evidence for Tesla and BYD",
-    prompt="As a China auto market researcher, find 2024-2026 China EV market share data for Tesla and BYD. Return only specific figures and source-backed statements."
-)
-subagent(
-    name="Scout",
-    role="Industry Report Verifier",
-    task="Check third-party industry reports for market share methodology",
-    prompt="As an industry report verifier, identify how major reports define market share for Tesla and BYD, and note any methodology differences that could create conflicting numbers."
+    task="Find China-specific EV market share for Tesla and BYD",
+    prompt="""Today is 2026-04-14.
+
+CONTEXT:
+We are comparing Tesla vs BYD competitive position. Your scope is China domestic market only.
+Another subagent covers global data — focus exclusively on China registrations and market share.
+
+TASK:
+Find China domestic BEV/PHEV market share and unit sales for Tesla and BYD for 2024-2025,
+plus any 2026 partial data. Include both BEV-only and total NEV (BEV+PHEV) if available,
+since BYD's PHEV share significantly affects the comparison.
+
+METHOD:
+- Search CPCA (China Passenger Car Association) monthly reports
+- Check CAAM (China Association of Automobile Manufacturers) data
+- Cross-reference with local media (CnEVPost, Gasgoo, 36kr)
+- Distinguish between wholesale and retail figures
+
+OUTPUT:
+## Facts
+- [Company] [Period] [Market: China] [Metric]: [Value] (Source: [name/url])
+
+## Gaps
+- What could not be confirmed
+
+## Conflicts
+- Where sources disagree (e.g., wholesale vs retail discrepancies)
+
+## Limitations
+- Methodology notes (BEV-only vs NEV, wholesale vs retail)
+
+BOUNDARIES:
+- Do NOT write analysis or draw conclusions
+- Do NOT cover markets outside China
+- Say "not found" when evidence is missing
+"""
 )
 ```
 
-All three subagents may belong to the same todo:
-
-- `Run current research round across required angles`
-
-This is the core coordination rule:
+All subagents dispatched in one round belong to the same active todo (e.g., `Round 1: broad research across all identified angles`). This is the core coordination rule:
 
 > One active todo can contain many parallel subagent runs. The todo tracks the research phase. The subagents are the execution units inside it.
 
-## Phase 4: Require Structured Subagent Output
+## Phase 4: Subagent Output Review and Citation Integrity
 
-Prompt subagents to return structured findings.
-At minimum, ask for:
+When subagent results come back, the main agent must check both **content quality** and **citation integrity** before proceeding.
 
-1. **Facts**: atomic, source-backed statements with numbers and dates
-2. **Gaps**: what they could not confirm
-3. **Conflicts**: where sources disagree
-4. **Limitations**: any source quality or scope issues
+### Content quality check
 
-Preferred fact format:
+For each subagent result, verify:
 
-```text
-[Subject] + [Time] + [Metric] + [Value] + [Source]
-```
+1. **Specificity**: are there concrete facts with numbers/dates, or vague summaries?
+2. **Source attribution**: does every fact include a source name or URL?
+3. **Coverage**: did the subagent answer the assigned question?
+4. **Gaps**: what remains unanswered?
+5. **Conflicts**: do results disagree across subagents?
 
-Good:
+### Citation integrity
 
-- "Tesla global BEV share in 2024 was X% according to source Y."
+Subagent results carry citation metadata (URLs, titles) from their search and browsing tools. When the main agent synthesizes the final report:
+
+- **Preserve source URLs** from subagent findings — do not strip or summarize away the source references
+- **Cite inline** in the report body: link facts to their sources so the reader can verify
+- **Do not fabricate sources** — if a subagent reported a fact without a source, mark it as unverified rather than inventing a citation
 
 Bad:
 
-- "Tesla performed well."
+- "Tesla performed well." (no specifics, no source)
+- "According to industry reports, BYD leads in China." (which reports?)
 
-### Prompt Rules for Subagents
+Good:
 
-- give a specialist role
-- include a clear time range
-- ask for specific numbers, dates, and source context
-- instruct the subagent to say "not found" when evidence is missing
-- tell the subagent not to write a polished report
+- "Tesla global BEV share in 2024 was 17.1% (Source: Counterpoint Research Q4 2024 report)."
 
 ## Phase 5: Supervisor Review Loop
 
@@ -352,18 +485,36 @@ Usually this means:
 - known gaps are clearly marked
 - the final report todo is the only active step
 
-The final output should include:
+### Output Format
 
-1. Executive summary
-2. Key findings
-3. Analysis by research angle
-4. Conflicts and uncertainty
-5. Confidence and limitations
+**Default behavior: save the report as an artifact file** using the `save_artifact` tool (or write to a file if `save_artifact` is unavailable). Only output the report directly in the chat if the user explicitly asks for inline output.
 
-The reader should be able to answer both:
+When saving as artifact:
+- Use a descriptive filename (e.g., `tesla-vs-byd-competitive-analysis.md`)
+- After saving, reply to the user with a brief summary (3-5 sentences) of the key conclusions and mention that the full report has been saved
+
+### Report Structure
+
+The report should include:
+
+1. **Executive summary** — key conclusions in 3-5 sentences
+2. **Key findings** — the most important facts, each with inline source citations
+3. **Analysis by research angle** — detailed findings organized by the angles researched, with source links
+4. **Conflicts and uncertainty** — where sources disagreed and how conflicts were resolved (or not)
+5. **Confidence and limitations** — what could not be verified, source quality issues
+
+### Citation Requirements in the Report
+
+Every factual claim in the report must trace back to a source from the subagent research. Use inline citations:
+
+- Link to source URLs where available: `[Counterpoint Research](url)`
+- Name the source when URL is unavailable: `(Source: CPCA monthly report, March 2026)`
+- Mark unverified claims explicitly: `(unverified — single source only)`
+
+Do NOT strip source information during synthesis. The reader should be able to answer both:
 
 - "What did you conclude?"
-- "What evidence supports that?"
+- "What evidence supports that, and where can I verify it?"
 
 ## Quality Checklist
 
@@ -376,15 +527,24 @@ Before finalizing:
 - [ ] Did I handle conflicts or explicitly document them?
 - [ ] Did I mark what could not be verified?
 - [ ] Did I avoid writing the final report before research completion?
+- [ ] Does every fact in the report include an inline source citation?
+- [ ] Did I save the report as an artifact (not just output inline)?
+- [ ] Are my todos tracking workflow stages, not research topics?
 
 If any answer is no, continue the loop or mark the limitation explicitly.
 
 ## Common Mistakes
 
+- **Skipping Phase 0 temporal grounding** — dispatching subagents without calling `datetime` first on time-sensitive topics, causing all subagents to operate with wrong time assumptions
+- **Omitting date context from subagent prompts** — even if you called `datetime`, subagents have no memory of it; you must include "Today is YYYY-MM-DD" in each prompt
+- **Writing research topics as todos** — todos like "Research market share" or "Analyze battery tech" are research angles, not workflow stages; they belong in subagent prompts, not in the todo list
+- **One-liner subagent prompts** — a prompt like "Find Tesla market share data" is too vague; subagent prompts must include all five sections (Context, Task, Method, Output, Boundaries)
+- **Stripping citations during synthesis** — subagent results carry source URLs and names; the final report must preserve them as inline citations, not summarize them away
+- **Outputting report inline instead of saving** — unless the user asks for inline output, always save the report as an artifact file
 - Treating each subagent as its own active todo
 - Letting multiple todos appear active at once
 - Never calling `write_todos` after the research plan changes
-- Accepting vague subagent output
+- Accepting vague subagent output without source attribution
 - Dispatching dependent tasks in parallel
 - Starting synthesis after one shallow round
 - Hiding unresolved conflicts
