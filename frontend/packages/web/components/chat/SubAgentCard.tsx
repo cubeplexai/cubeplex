@@ -1,8 +1,7 @@
 'use client'
 
 import { useState, useEffect, useRef, memo } from 'react'
-import ReactMarkdown from 'react-markdown'
-import remarkGfm from 'remark-gfm'
+import { MarkdownWithCitations } from '@/components/shared/MarkdownWithCitations'
 import { CheckCircle2, ChevronDown, ChevronRight } from 'lucide-react'
 import type { AgentStream, ContentBlock, ToolCallRef } from '@cubebox/core'
 import { ToolCallItem } from './ToolCallItem'
@@ -196,7 +195,7 @@ export const SubAgentCard = memo(function SubAgentCard({
               {visibleToolBlocks.map((block, i) => renderToolBlock(block, i, i > 0))}
               {stream?.text && (
                 <div className={`px-3 py-2 border-t border-border ${proseClasses}`}>
-                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{stream.text}</ReactMarkdown>
+                  <MarkdownWithCitations>{stream.text}</MarkdownWithCitations>
                 </div>
               )}
             </div>

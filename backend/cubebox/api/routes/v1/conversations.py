@@ -474,7 +474,49 @@ async def send_message(
             stream_task = asyncio.create_task(_drain_main_stream())
             tool_delta_context: dict[tuple[str | None, int], dict[str, Any]] = {}
 
-            _citation_buffer = ""
+            _citation_buffers: dict[str | None, str] = {}
+
+            def _process_text_delta(
+                sse_event: Any,
+                agent_key: str | None,
+            ) -> list[str]:
+                results: list[str] = []
+                content = sse_event.data.get("content", "")
+                buf = _citation_buffers.get(agent_key, "")
+                content = buf + content
+                _citation_buffers[agent_key] = ""
+                last_open = content.rfind("【")
+                if last_open != -1 and "】" not in content[last_open:]:
+                    _citation_buffers[agent_key] = content[last_open:]
+                    content = content[:last_open]
+                if content:
+                    sse_event.data["content"] = content
+                    results.append(f"data: {sse_event.model_dump_json()}\n\n")
+                return results
+
+            def _flush_citation_buffer(
+                agent_key: str | None,
+                fallback_agent_id: str | None,
+            ) -> list[str]:
+                results: list[str] = []
+                buf = _citation_buffers.get(agent_key, "")
+                if buf:
+                    from cubebox.agents.schemas import TextDeltaEvent
+
+                    flush_evt = TextDeltaEvent(
+                        timestamp=datetime.now(UTC).isoformat(),
+                        data={
+                            "content": buf,
+                            "usage": {
+                                "input_tokens": 0,
+                                "output_tokens": 0,
+                            },
+                        },
+                        agent_id=fallback_agent_id,
+                    )
+                    _citation_buffers[agent_key] = ""
+                    results.append(f"data: {flush_evt.model_dump_json()}\n\n")
+                return results
 
             while True:
                 try:
@@ -503,33 +545,15 @@ async def send_message(
                             evts = []
                         for sse_event in _dicts_to_sse_events(evts, tool_delta_context):
                             if sse_event.type == "text_delta":
-                                content = sse_event.data.get("content", "")
-                                content = _citation_buffer + content
-                                _citation_buffer = ""
-                                last_open = content.rfind("【")
-                                if last_open != -1 and "】" not in content[last_open:]:
-                                    _citation_buffer = content[last_open:]
-                                    content = content[:last_open]
-                                if content:
-                                    sse_event.data["content"] = content
-                                    yield f"data: {sse_event.model_dump_json()}\n\n"
+                                for chunk in _process_text_delta(
+                                    sse_event, agent_id,
+                                ):
+                                    yield chunk
                             else:
-                                if _citation_buffer:
-                                    from cubebox.agents.schemas import TextDeltaEvent
-
-                                    flush_evt = TextDeltaEvent(
-                                        timestamp=datetime.now(UTC).isoformat(),
-                                        data={
-                                            "content": _citation_buffer,
-                                            "usage": {
-                                                "input_tokens": 0,
-                                                "output_tokens": 0,
-                                            },
-                                        },
-                                        agent_id=sse_event.agent_id,
-                                    )
-                                    _citation_buffer = ""
-                                    yield f"data: {flush_evt.model_dump_json()}\n\n"
+                                for chunk in _flush_citation_buffer(
+                                    agent_id, sse_event.agent_id,
+                                ):
+                                    yield chunk
                                 yield f"data: {sse_event.model_dump_json()}\n\n"
 
                 elif kind == "subagent":
@@ -545,33 +569,15 @@ async def send_message(
                             evts = []
                         for sse_event in _dicts_to_sse_events(evts, tool_delta_context):
                             if sse_event.type == "text_delta":
-                                content = sse_event.data.get("content", "")
-                                content = _citation_buffer + content
-                                _citation_buffer = ""
-                                last_open = content.rfind("【")
-                                if last_open != -1 and "】" not in content[last_open:]:
-                                    _citation_buffer = content[last_open:]
-                                    content = content[:last_open]
-                                if content:
-                                    sse_event.data["content"] = content
-                                    yield f"data: {sse_event.model_dump_json()}\n\n"
+                                for chunk in _process_text_delta(
+                                    sse_event, sa_agent_id,
+                                ):
+                                    yield chunk
                             else:
-                                if _citation_buffer:
-                                    from cubebox.agents.schemas import TextDeltaEvent
-
-                                    flush_evt = TextDeltaEvent(
-                                        timestamp=datetime.now(UTC).isoformat(),
-                                        data={
-                                            "content": _citation_buffer,
-                                            "usage": {
-                                                "input_tokens": 0,
-                                                "output_tokens": 0,
-                                            },
-                                        },
-                                        agent_id=sse_event.agent_id,
-                                    )
-                                    _citation_buffer = ""
-                                    yield f"data: {flush_evt.model_dump_json()}\n\n"
+                                for chunk in _flush_citation_buffer(
+                                    sa_agent_id, sse_event.agent_id,
+                                ):
+                                    yield chunk
                                 yield f"data: {sse_event.model_dump_json()}\n\n"
 
                 elif kind == "citation":
@@ -589,17 +595,9 @@ async def send_message(
                 elif kind == "error":
                     raise item[2]
 
-            if _citation_buffer:
-                from cubebox.agents.schemas import TextDeltaEvent
-
-                flush_evt = TextDeltaEvent(
-                    timestamp=datetime.now(UTC).isoformat(),
-                    data={
-                        "content": _citation_buffer,
-                        "usage": {"input_tokens": 0, "output_tokens": 0},
-                    },
-                )
-                yield f"data: {flush_evt.model_dump_json()}\n\n"
+            for agent_key in list(_citation_buffers):
+                for chunk in _flush_citation_buffer(agent_key, agent_key):
+                    yield chunk
 
             await stream_task
 
