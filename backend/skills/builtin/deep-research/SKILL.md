@@ -1,282 +1,401 @@
 ---
 name: deep-research
-description: Conduct comprehensive deep research using multi-agent orchestration. Use when questions require web research, multi-angle investigation, or content generation based on real-world information. Provides supervisor-subagent architecture for parallel research tasks.
-version: 3.0.0
+description: Use when a question needs current multi-source research, multi-angle investigation, or iterative verification before producing a report or detailed answer
+version: 3.1.0
 keywords:
   - research
   - multi-agent
   - subagent-orchestration
-  - swarm-intelligence
   - deep-investigation
   - report-generation
+  - verification
 ---
 
-# Deep Research Skill (v3)
+# Deep Research
 
 ## Overview
 
-This skill provides a **supervisor-based multi-agent orchestration** methodology for conducting thorough research. The main agent acts as **Chief Research Strategist**, delegating atomic research tasks to specialized subagents via the `subagent` tool, reviewing their findings, and iterating until research is complete.
+Use a **supervisor-subagent loop** for serious research.
+The main agent first grounds the request, then owns planning, todo state, review, and final synthesis.
+Subagents do not manage the plan. They only execute narrowly scoped research tasks and return facts.
 
-**Core Principle**: Never generate content from general knowledge alone. Research quality determines output quality.
+**Core principle:** never write the final answer from general knowledge when the task requires real research. Research coverage determines answer quality.
 
----
+## Architecture
 
-## Architecture: Iterative Supervisor-Subagent Loop
-
-```
+```text
 User Query
     │
     ▼
-┌─────────────────────────────────────────────────────────┐
-│  MAIN AGENT (Chief Research Strategist / Supervisor)    │
-│  • Decomposes research into atomic verification points  │
-│  • Assigns tasks to subagents via `subagent` tool       │
-└─────────────────────────────────────────────────────────┘
-    │  subagent tool calls (parallel when independent)
+┌──────────────────────────────────────────────────────────────┐
+│ MAIN AGENT (Supervisor)                                     │
+│ • Do lightweight reconnaissance first                       │
+│ • Clarify the request if needed                             │
+│ • Classify the task                                         │
+│ • Decompose into verification points                        │
+│ • Create/update workflow-stage todos via `write_todos`      │
+└──────────────────────────────────────────────────────────────┘
+    │
+    │ one active todo = one active research phase
     ▼
-┌──────────┐  ┌──────────┐  ┌──────────┐
-│ Subagent │  │ Subagent │  │ Subagent │
-│ Extract  │  │ Extract  │  │ Extract  │
-│ Facts A  │  │ Facts B  │  │ Facts C  │
-└──────────┘  └──────────┘  └──────────┘
-    │  key facts returned
+┌──────────────────────────────────────────────────────────────┐
+│ ACTIVE TODO / RESEARCH PHASE                                │
+│ Example: "Run current research round across required angles"│
+└──────────────────────────────────────────────────────────────┘
+    │
+    │ supervisor chooses the angle decomposition for this phase
+    │ and fan-outs parallel `subagent` calls inside this one todo
     ▼
-┌─────────────────────────────────────────────────────────┐
-│  REVIEW (Main Agent)                                    │
-│  • Are the facts clear and specific?                    │
-│  • Are there gaps or unanswered questions?              │
-│  • Do any findings conflict or need verification?       │
-│  • Is any angle insufficiently covered?                 │
-└─────────────────────────────────────────────────────────┘
-    │                           │
-    │ Gaps found                │ Research sufficient
-    │ ▼                         │ ▼
-    │ Loop back: spawn new      │ ┌──────────────────────┐
-    │ subagents for gaps        │ │  SYNTHESIS            │
-    │ (return to dispatch)      │ │  • Merge all facts    │
-    └───────────────────────────│ │  • Resolve conflicts  │
-                                │ │  • Generate report    │
-                                │ └──────────────────────┘
+┌─────────────┐  ┌─────────────┐  ┌─────────────┐
+│ Subagent A  │  │ Subagent B  │  │ Subagent C  │
+│ facts       │  │ facts       │  │ facts       │
+│ gaps        │  │ gaps        │  │ conflicts   │
+└─────────────┘  └─────────────┘  └─────────────┘
+    │
+    ▼
+┌──────────────────────────────────────────────────────────────┐
+│ MAIN AGENT REVIEW                                            │
+│ • Are findings specific and source-backed?                   │
+│ • Are there gaps or conflicts?                               │
+│ • Is another round needed?                                   │
+└──────────────────────────────────────────────────────────────┘
+    │                              │
+    │ more research needed         │ research sufficient
+    ▼                              ▼
+update current todo / add new      mark research todos complete
+todos / dispatch more subagents    move report todo to in_progress
+    │                              │
+    └─────────────── loop ─────────┘
+                   ▼
+            Final synthesis/report
 ```
 
-**Key difference from v2**: This is a **loop**, not a pipeline. The supervisor reviews results after each round and spawns additional subagents for gaps, follow-ups, or verification — repeating until coverage is sufficient.
+## Core Model
 
----
+Treat the workflow as two separate layers:
 
-## When to Use This Skill
+- **Todo layer**: the main agent's deep-research workflow stages
+- **Subagent layer**: angle decomposition and parallel execution inside the active stage
 
-**Load this skill when:**
-- User asks "research X", "investigate X", "explain X in depth"
-- Questions require current, comprehensive information from multiple sources
-- A single search would be insufficient
-- Creating reports, articles, or content requiring real-world data
-- Complex comparisons or competitive analysis
+The key rule is:
 
----
+> A single `in_progress` todo represents one active **research phase**, not one research angle and not one subagent. That phase may dispatch multiple subagents in parallel.
 
-## Phase 1: Research Decomposition
+Do **not** create one todo per subagent or one todo per angle if that would leave multiple simultaneous active todos or force the model into artificial serial execution.
 
-### Step 1A: Intent Classification
+## Main Agent Responsibilities
 
-Before starting, classify the research type:
+The main agent must:
+
+1. Run a lightweight grounding step before planning.
+2. Clarify the user request when scope, time frame, or success criteria are ambiguous.
+3. Classify the research task.
+4. Decompose the topic into atomic verification points.
+5. Use `write_todos` to create and maintain the workflow-stage plan.
+6. Dispatch parallel `subagent` calls for the current phase.
+7. Review subagent results for gaps, conflicts, and follow-ups.
+8. Update the todo list after each review round.
+9. Generate the final report only after research todos are complete.
+
+## Subagent Responsibilities
+
+Subagents must:
+
+- work on one narrow, self-contained question
+- search, extract, and return concrete facts
+- report gaps, conflicts, and missing data explicitly
+- avoid writing the final report
+- avoid planning or updating todos
+
+Subagents are **fact extractors**, not project managers.
+
+## When to Use
+
+Use this skill when:
+
+- the user asks to research, investigate, verify, compare, or explain something in depth
+- the answer needs current information from multiple sources
+- one search is unlikely to be enough
+- the task requires follow-up rounds after initial findings
+- the output needs evidence-backed analysis or a report
+
+Do not use this full workflow for:
+
+- a single quick fact with one clear authoritative source
+- purely conversational questions
+- tasks that do not require external evidence
+
+## Phase 0: Ground the Request Before Planning
+
+Before writing todos or dispatching subagents, do a **lightweight reconnaissance pass** to understand what the user is actually asking.
+
+Use the smallest useful tool action first, for example:
+
+- a simple web search to identify the topic, likely source landscape, or whether the question is temporal
+- a date/time tool to anchor "today", "this year", quarter references, or deadline-sensitive requests
+- a quick direct tool lookup when the request names a specific entity, event, metric, or date range
+
+The goal of this pass is not to complete the research. The goal is to reduce ambiguity before planning.
+
+During this pass, determine:
+
+- what the actual research object is
+- whether the request is time-sensitive
+- whether the user is asking for explanation, verification, comparison, or report generation
+- what obvious ambiguities or missing constraints exist
+
+### Clarification Rule
+
+If the user's request is still ambiguous after lightweight reconnaissance, ask a clarifying question before creating todos or spawning subagents.
+
+Examples:
+
+- unclear scope
+- unclear time range
+- unclear comparison target
+- unclear output format
+- unclear standard for success
+
+Do **not** jump straight from the raw user message into `write_todos` if you do not yet understand the request well enough to plan intelligently.
+
+## Phase 1: Classify and Decompose
+
+Before researching, classify the request:
 
 | Type | Characteristics | Approach |
 |------|----------------|----------|
-| **Quick Fact** | Single data point, clear answer | Direct search, skip to Phase 4 |
-| **Verification** | User provides claim, needs confirmation | Red-team style, search counter-evidence |
-| **Comprehensive** | Multi-dimensional topic | Full orchestration with subagents |
-| **Temporal** | Time-sensitive (prices, events, news) | Priority on official/authoritative sources |
+| **Quick Fact** | One specific answer | Search directly, skip heavy orchestration |
+| **Verification** | A claim needs confirmation or challenge | Search for evidence and counter-evidence |
+| **Comprehensive** | Multi-dimensional topic | Full supervisor + todo + subagent loop |
+| **Temporal** | News, prices, events, recent changes | Prefer official and up-to-date sources |
 
-### Step 1B: Atomic Decomposition
+Then break the topic into **atomic verification points**.
+Each point should represent one dimension that can be researched independently.
 
-Break the research into **irreducible verification points** — each subagent task should be a single, focused question.
+Good decomposition:
 
-**Good decomposition:**
-```
-Topic: "Tesla competitive position vs BYD"
-├── Angle 1: Market share data (2024-2026)
-├── Angle 2: Technology comparison (battery, autopilot)
-├── Angle 3: Financial performance (revenue, margins)
-├── Angle 4: Production capacity and growth
-└── Angle 5: Regulatory environment per market
-```
-
-**Bad decomposition:**
-- "Research Tesla and BYD" (too broad, single subagent would be overwhelmed)
-- "Compare everything" (interleaves multiple angles)
-
----
-
-## Phase 2: Subagent Orchestration
-
-### Parallel Task Dispatch
-
-Dispatch **independent** research angles in parallel using multiple `subagent` calls:
-
-```
-subagent(
-    name="Dr. Chen",
-    role="汽车行业市场分析师",
-    task="调研特斯拉与比亚迪2024-2026年市场份额数据",
-    prompt="作为汽车行业市场分析师，请调研并对比特斯拉与比亚迪在2024-2026年的全球市场份额...",
-)
-subagent(
-    name="Forge",
-    role="电池技术研究员",
-    task="对比特斯拉与比亚迪电池技术路线",
-    prompt="作为电池技术研究员，请深入对比特斯拉与比亚迪的电池技术策略...",
-)
-subagent(
-    name="Prof. Li",
-    role="财务绩效分析师",
-    task="分析特斯拉与比亚迪2024年财务表现",
-    prompt="作为财务绩效分析师，请查找并分析特斯拉与比亚迪2024年的关键财务指标...",
-)
+```text
+Topic: Tesla vs BYD competitive position
+- Market share, 2024-2026
+- Battery technology differences
+- Financial performance
+- Production capacity
+- Regulatory environment
 ```
 
-**Rule**: Always dispatch independent angles in parallel. Research time scales inversely with parallelism.
+Bad decomposition:
 
-### The `subagent` Tool
+- "Research Tesla and BYD"
+- "Compare everything"
+
+## Phase 2: Create the Todo Plan
+
+Before dispatching substantial research, the main agent should call `write_todos`.
+
+Use todos to track **workflow stages**, not individual subagents and not individual research angles.
+
+Good todo list:
+
+```json
+{
+  "todos": [
+    {"content": "Clarify scope, success criteria, and research angles", "status": "completed"},
+    {"content": "Run current research round across required angles", "status": "in_progress"},
+    {"content": "Resolve conflicts and fill critical gaps", "status": "pending"},
+    {"content": "Synthesize findings into final report", "status": "pending"}
+  ]
+}
+```
+
+Bad todo list:
+
+- one todo per subagent if several would need to be `in_progress`
+- one todo per research angle if that forces serial execution
+- vague items like "Research topic"
+- mixing execution detail and reporting in the same step
+
+### Todo Rules
+
+- The main agent owns all `write_todos` calls.
+- Unless everything is done, there must be exactly one `in_progress` todo.
+- A todo may be revised, split, expanded, or replaced after review.
+- If new gaps appear, add or rewrite future todos.
+- The todo list should describe the deep-research flow, not the full internal decomposition of angles.
+- The supervisor should decide angle decomposition separately from todo writing.
+- If the current phase narrows after one round, keep it `in_progress` and rewrite it more specifically.
+- Final report generation should usually be its own todo.
+
+## Phase 3: Fan Out Subagents Inside the Active Todo
+
+Once one research phase is `in_progress`, the main agent may dispatch multiple subagents inside that phase.
+
+Example:
 
 ```python
 subagent(
-    name="Dr. Chen",           # Personified name matching the role
-    role="经济分析师",           # Professional title (2-5 words)
-    task="分析特斯拉2024年营收", # One-line task summary (shown in UI)
-    prompt="...",              # Full professional brief for the subagent
-    subagent_type="general-purpose"
+    name="Dr. Chen",
+    role="Auto Market Analyst",
+    task="Find global EV market share data for 2024-2026",
+    prompt="As an auto market analyst, find global EV market share data for Tesla and BYD for 2024-2026. Return concrete numbers, dates, source names, and note any gaps."
+)
+subagent(
+    name="Atlas",
+    role="China Market Researcher",
+    task="Find China market share evidence for Tesla and BYD",
+    prompt="As a China auto market researcher, find 2024-2026 China EV market share data for Tesla and BYD. Return only specific figures and source-backed statements."
+)
+subagent(
+    name="Scout",
+    role="Industry Report Verifier",
+    task="Check third-party industry reports for market share methodology",
+    prompt="As an industry report verifier, identify how major reports define market share for Tesla and BYD, and note any methodology differences that could create conflicting numbers."
 )
 ```
 
-### Subagent Goal: Extract Key Facts, Not Write Reports
+All three subagents may belong to the same todo:
 
-Subagents are **fact extractors**, not report writers. Their prompt should instruct them to return:
+- `Run current research round across required angles`
 
-1. **Atomic facts** — specific, verifiable statements with concrete data points
-   - Good: "Tesla 2024 Q3 revenue was $25.2B, up 8% YoY"
-   - Bad: "Tesla had strong revenue growth" (vague, no numbers)
+This is the core coordination rule:
 
-2. **Structured output** — facts organized by dimension/topic, not free-form prose
+> One active todo can contain many parallel subagent runs. The todo tracks the research phase. The subagents are the execution units inside it.
 
-3. **Limitations** — what they searched for but couldn't find, or conflicting data they encountered
+## Phase 4: Require Structured Subagent Output
 
-**Key principles for subagent fact extraction:**
-- **Zero hallucination**: Only report what was found in sources. If a data point wasn't found, say so explicitly.
-- **Numeric integrity**: Preserve original numbers and units exactly as found. No unit conversions or rounding.
-- **Atomic statements**: Each fact should be one specific claim: `[Subject] + [Time] + [Metric] + [Value]`
-- **Conflict marking**: When sources disagree, report both values rather than picking one.
+Prompt subagents to return structured findings.
+At minimum, ask for:
 
-### Writing Effective Prompts
+1. **Facts**: atomic, source-backed statements with numbers and dates
+2. **Gaps**: what they could not confirm
+3. **Conflicts**: where sources disagree
+4. **Limitations**: any source quality or scope issues
 
-- Frame the request in the agent's domain language — brief them like a specialist
-- Include time range: "2024-2025 revenue data" not just "revenue"
-- State deliverables: "Return a list of specific data points with numbers, not general trends"
-- Instruct fact extraction: "For each finding, provide the specific number, time period, and where you found it"
-- Bad: "Search for Tesla revenue" (too generic, doesn't leverage agent expertise)
-- Good: "As a financial analyst, find Tesla's Q1-Q4 2024 revenue broken down by region. Return specific numbers for each region and quarter. Note any data you searched for but couldn't find."
+Preferred fact format:
 
----
+```text
+[Subject] + [Time] + [Metric] + [Value] + [Source]
+```
 
-## Phase 3: Review Loop
+Good:
 
-**This is the critical phase that distinguishes deep research from shallow search.**
+- "Tesla global BEV share in 2024 was X% according to source Y."
 
-After subagents return their findings, the supervisor must review before proceeding:
+Bad:
 
-### Review Checklist
+- "Tesla performed well."
 
-For each subagent's results, ask:
+### Prompt Rules for Subagents
 
-1. **Fact clarity**: Are the facts specific with concrete numbers/dates? Or vague and hand-wavy?
-2. **Completeness**: Did the subagent cover all aspects of its assigned angle?
-3. **Gaps**: What questions remain unanswered? What data was "not found"?
-4. **Conflicts**: Do any findings contradict other subagents' results?
-5. **Follow-ups**: Did any finding reveal a new angle worth investigating?
+- give a specialist role
+- include a clear time range
+- ask for specific numbers, dates, and source context
+- instruct the subagent to say "not found" when evidence is missing
+- tell the subagent not to write a polished report
 
-### Decision: Loop or Proceed
+## Phase 5: Supervisor Review Loop
 
-| Situation | Action |
-|-----------|--------|
-| Major gaps in core angles | Spawn new subagents targeting specific gaps |
-| Conflicting data between subagents | Spawn a verification subagent to resolve |
-| A finding reveals an important new angle | Spawn a subagent for the new angle |
-| Vague results without specific data | Re-dispatch with more specific prompt |
-| All angles well-covered with concrete facts | Proceed to synthesis |
+After subagents return, the main agent must review before continuing.
 
-### Loop Discipline
+Review each result for:
 
-- **Max 3 rounds** of iteration to avoid infinite loops
-- Each round should have a **narrower, more specific** focus than the previous
-- If data is genuinely unavailable after 2 attempts, mark it as a gap and move on
-- Track what's been tried to avoid repeating the same searches
+1. **Specificity**: are there concrete facts or vague summaries?
+2. **Coverage**: did the subagent answer the assigned question?
+3. **Gaps**: what remains unanswered?
+4. **Conflicts**: do results disagree?
+5. **Follow-ups**: what new questions emerged?
 
----
+### Review Outcomes
 
-## Phase 4: Synthesis & Report
+| Situation | Main agent action |
+|-----------|-------------------|
+| Results are strong and complete | Mark current todo `completed`, move next todo to `in_progress` |
+| Current phase needs another pass | Keep current todo `in_progress`, rewrite it more narrowly |
+| New gaps appear | Add new pending todos |
+| Sources conflict | Update todos first, usually by moving `Resolve conflicts and fill critical gaps` to `in_progress`, then dispatch verifier subagents |
+| The final report is now justified | Move report todo to `in_progress` |
 
-Once the review loop determines research is sufficient:
+### Required Todo Update After Review
 
-### Merging Strategy
+After a meaningful review round, the main agent should update the todo list to reflect the new state.
 
-1. **Conflict Resolution**: When subagents report conflicting data:
-   - Look for root cause (different time periods, definitions, regions)
-   - If unresolvable, present both values with context
+Typical update patterns:
 
-2. **Completeness Check**:
-   - Did each atomic verification point get answered?
-   - Is evidence sufficient to support conclusions?
+- current todo becomes `completed`, next todo becomes `in_progress`
+- current todo stays `in_progress` but is rewritten to a narrower question
+- one or more new pending todos are added for gaps or conflict resolution
 
-3. **Confidence Assessment**:
-   - Mark well-supported findings vs. findings with limited data
-   - Be honest about what couldn't be verified
+If review reveals **material conflicts** or **missing evidence that blocks synthesis**, update `write_todos` before dispatching the next round.
+In most cases this means:
 
-### Report Structure
+- mark the current research-round todo `completed` or narrow it explicitly
+- set `Resolve conflicts and fill critical gaps` to `in_progress`
+- keep `Synthesize findings into final report` as `pending`
 
-Output should include:
+Do not continue into another subagent round for conflict resolution while the todo list still implies you are in the previous phase.
 
-1. **Executive Summary** (2-3 sentences)
-2. **Key Findings** (specific data points, not vague statements)
-3. **Analysis by Angle** (corresponding to atomic decomposition)
-4. **Confidence & Limitations** (honest assessment of gaps)
+Do not leave the todo list stale while continuing research rounds.
 
-**Quality Bar**: A reader should be able to answer "So what?" and "How do you know?" from your report.
+## Loop Discipline
 
----
+- Cap the deep research loop at **3 rounds** unless the task clearly justifies more.
+- Each round should become narrower and more targeted.
+- If data is genuinely unavailable after repeated attempts, mark that as a limitation and move on.
+- Avoid redispatching the same vague prompt.
+
+## Phase 6: Synthesis and Report
+
+Only synthesize after the research plan is complete enough.
+Usually this means:
+
+- core research todos are `completed`
+- open conflicts are resolved or explicitly documented
+- known gaps are clearly marked
+- the final report todo is the only active step
+
+The final output should include:
+
+1. Executive summary
+2. Key findings
+3. Analysis by research angle
+4. Conflicts and uncertainty
+5. Confidence and limitations
+
+The reader should be able to answer both:
+
+- "What did you conclude?"
+- "What evidence supports that?"
 
 ## Quality Checklist
 
-Before completing research:
+Before finalizing:
 
-- [ ] Have I covered at least 3-5 different research angles?
-- [ ] Do I have specific data points (numbers, dates), not just vague trends?
-- [ ] Have I reviewed subagent results and followed up on gaps?
-- [ ] Have I addressed conflicts between findings?
-- [ ] Is my information current? (check time periods)
-- [ ] Have I honestly marked what couldn't be found?
+- [ ] Did I cover the key research angles?
+- [ ] Do I have specific numbers, dates, or source-backed facts where appropriate?
+- [ ] Did I review subagent findings instead of accepting them blindly?
+- [ ] Did I update the todo plan as the research evolved?
+- [ ] Did I handle conflicts or explicitly document them?
+- [ ] Did I mark what could not be verified?
+- [ ] Did I avoid writing the final report before research completion?
 
-**If any answer is NO, continue researching before generating content.**
+If any answer is no, continue the loop or mark the limitation explicitly.
 
----
+## Common Mistakes
 
-## Common Mistakes to Avoid
+- Treating each subagent as its own active todo
+- Letting multiple todos appear active at once
+- Never calling `write_todos` after the research plan changes
+- Accepting vague subagent output
+- Dispatching dependent tasks in parallel
+- Starting synthesis after one shallow round
+- Hiding unresolved conflicts
+- Using outdated information on temporal questions
 
-- Stopping after 1 round of subagents without reviewing results
-- Accepting vague subagent output ("Tesla did well") without demanding specifics
-- Searching only one angle of a multi-faceted topic
-- Ignoring contradicting evidence
-- Using outdated information when current data exists
-- Starting report generation before research is complete
-- Dispatching dependent tasks in parallel (waste of subagents)
-- Letting the review loop run endlessly — cap at 3 rounds
+## Output Standard
 
----
+A successful deep research run should produce:
 
-## Output
-
-After completing research, you should have:
-1. Comprehensive coverage of all atomic verification points
-2. Specific facts, data points, and statistics from subagent extractions
-3. Honest confidence assessment and known gaps
-4. Conflicts identified and (where possible) resolved
-
-**Only then proceed to report generation.**
+1. Coverage of the main verification points
+2. Concrete facts gathered by specialized subagents
+3. Explicit gaps and limitations
+4. Conflict handling or conflict disclosure
+5. A final synthesis produced only after the research work packages are complete

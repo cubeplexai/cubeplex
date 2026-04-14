@@ -49,21 +49,24 @@ def create_cubebox_agent(
         checkpointer: LangGraph checkpointer for conversation persistence.
     """
     middleware: list[AgentMiddleware[Any, Any]] = []
+    inherited_subagent_middleware: list[AgentMiddleware[Any, Any]] = []
 
     middleware.append(TimestampMiddleware())
 
     # Citation middleware — chunks tool results and assigns citation IDs
     _citation_configs = citation_configs or {}
     if _citation_configs:
-        middleware.append(
-            CitationMiddleware(
-                citation_configs=_citation_configs,
-                event_queue=event_queue,
-            )
+        citation_middleware = CitationMiddleware(
+            citation_configs=_citation_configs,
+            event_queue=event_queue,
         )
+        middleware.append(citation_middleware)
+        inherited_subagent_middleware.append(citation_middleware)
 
     if sandbox is not None:
-        middleware.append(SandboxMiddleware(sandbox=sandbox))
+        sandbox_middleware = SandboxMiddleware(sandbox=sandbox)
+        middleware.append(sandbox_middleware)
+        inherited_subagent_middleware.append(sandbox_middleware)
         if conversation_id:
             middleware.append(ArtifactMiddleware(sandbox=sandbox, conversation_id=conversation_id))
         logger.debug("SandboxMiddleware + ArtifactMiddleware added (sandbox id={})", sandbox.id)
@@ -76,6 +79,7 @@ def create_cubebox_agent(
             subagents=subagents or [],
             default_model=llm,
             shared_tools=tools,
+            inherited_middleware=inherited_subagent_middleware,
         )
     )
 

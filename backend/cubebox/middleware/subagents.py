@@ -55,6 +55,7 @@ def _create_subagent_tool(
     subagents: list[SubAgent],
     default_model: BaseChatModel | None = None,
     shared_tools: list[BaseTool] | None = None,
+    inherited_middleware: list[Any] | None = None,
 ) -> BaseTool:
     """Build the `subagent` tool that spawns subagent runs."""
 
@@ -87,7 +88,7 @@ def _create_subagent_tool(
             return f"[error: no model available for subagent '{subagent_type}']"
 
         tools: list[BaseTool] = _shared_tools + list(spec.get("tools", []))
-        middleware = list(spec.get("middleware", []))
+        middleware = list(inherited_middleware or []) + list(spec.get("middleware", []))
 
         agent = create_agent(
             model=model,
@@ -178,11 +179,17 @@ class SubAgentMiddleware(AgentMiddleware[Any, Any, Any]):
         default_model: BaseChatModel | None = None,
         shared_tools: list[BaseTool] | None = None,
         shared_skills: list[SkillSpec] | None = None,
+        inherited_middleware: list[Any] | None = None,
     ) -> None:
         self._subagents = subagents
         self._default_model = default_model
         self.tools: Sequence[BaseTool] = [
-            _create_subagent_tool(subagents, default_model, shared_tools=shared_tools)
+            _create_subagent_tool(
+                subagents,
+                default_model,
+                shared_tools=shared_tools,
+                inherited_middleware=inherited_middleware,
+            )
         ]
 
     async def awrap_model_call(

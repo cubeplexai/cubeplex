@@ -6,6 +6,7 @@ from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langgraph.checkpoint.memory import MemorySaver
 
 from cubebox.agents.graph import create_cubebox_agent
+from cubebox.middleware.citations import CitationConfig
 from cubebox.sandbox.local import LocalSandbox
 
 
@@ -126,3 +127,53 @@ async def test_agent_persists_todos_in_checkpointer_state():
 
     state = await agent.aget_state(config)
     assert state.values["todos"] == expected_todos
+
+
+def test_create_agent_passes_inherited_middleware_to_subagents(monkeypatch, tmp_path):
+    captured: dict[str, object] = {}
+
+    class _FakeSubAgentMiddleware:
+        def __init__(
+            self,
+            *,
+            subagents,
+            default_model=None,
+            shared_tools=None,
+            shared_skills=None,
+            inherited_middleware=None,
+        ) -> None:
+            captured["subagents"] = subagents
+            captured["default_model"] = default_model
+            captured["shared_tools"] = shared_tools
+            captured["inherited_middleware"] = inherited_middleware
+            self.tools = []
+
+    class _FakeAgent:
+        nodes: dict[str, object] = {}
+
+    monkeypatch.setattr("cubebox.agents.graph.SubAgentMiddleware", _FakeSubAgentMiddleware)
+    monkeypatch.setattr("cubebox.agents.graph.create_agent", lambda **kwargs: _FakeAgent())
+
+    llm = _make_mock_llm()
+    sandbox = LocalSandbox(workdir=str(tmp_path))
+    citation_configs = {
+        "web_search": CitationConfig(
+            source_type="web",
+            content_field="results",
+            mapping={"url": "link", "title": "title", "snippet": "snippet"},
+        )
+    }
+
+    agent = create_cubebox_agent(
+        llm=llm,
+        tools=[],
+        sandbox=sandbox,
+        citation_configs=citation_configs,
+    )
+
+    assert agent is not None
+    inherited = captured["inherited_middleware"]
+    assert inherited is not None
+    assert len(inherited) == 2
+    assert inherited[0].__class__.__name__ == "CitationMiddleware"
+    assert inherited[1].__class__.__name__ == "SandboxMiddleware"
