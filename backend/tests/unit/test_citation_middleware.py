@@ -201,6 +201,55 @@ class TestCitationMiddlewareToolCall:
         assert ids == [1, 2]
 
 
+    async def test_web_fetch_plain_text_gets_url_from_args(self, _setup_counter_and_queue):
+        """web_fetch returns plain text; URL should come from tool call args via args_mapping."""
+        queue = _setup_counter_and_queue
+        configs = {
+            "web_fetch": CitationConfig(
+                source_type="web",
+                content_field=None,
+                mapping={"snippet": "text"},
+                args_mapping={"url": "url", "title": "title"},
+            ),
+        }
+        mw = CitationMiddleware(citation_configs=configs)
+        original = ToolMessage(
+            content="This is the fetched page content about AI.",
+            tool_call_id="call_fetch",
+            name="web_fetch",
+        )
+        handler = AsyncMock(return_value=original)
+
+        runtime = SimpleNamespace(
+            state={},
+            context=None,
+            config={"configurable": {}},
+            stream_writer=None,
+            tool_call_id="call_fetch",
+            store=None,
+        )
+        request = ToolCallRequest(
+            tool_call={
+                "name": "web_fetch",
+                "args": {"url": "https://example.com/page", "title": "Example Page"},
+                "id": "call_fetch",
+            },
+            tool=None,
+            state={"messages": []},
+            runtime=runtime,
+        )
+
+        result = await mw.awrap_tool_call(request, handler)
+
+        assert "【1-0】" in result.content
+        assert not queue.empty()
+        item = queue.get_nowait()
+        citation_data = item[2]
+        assert citation_data["metadata"]["url"] == "https://example.com/page"
+        assert citation_data["metadata"]["title"] == "Example Page"
+        assert citation_data["metadata"]["source_type"] == "web"
+
+
 class TestCitationMiddlewareModelCall:
     async def test_injects_prompt_when_configs_exist(self, web_search_config):
         mw = CitationMiddleware(citation_configs=web_search_config)

@@ -107,3 +107,67 @@ class TestLoadCitationConfigs:
     def test_load_empty_returns_empty(self):
         assert load_citation_configs([]) == {}
         assert load_citation_configs(None) == {}
+
+    def test_load_with_args_mapping(self):
+        tool_defs = [
+            {
+                "name": "web_fetch",
+                "citation": {
+                    "source_type": "web",
+                    "content_field": None,
+                    "mapping": {"snippet": "text"},
+                    "args_mapping": {"url": "url", "title": "title"},
+                },
+            },
+        ]
+        configs = load_citation_configs(tool_defs)
+        assert configs["web_fetch"].args_mapping == {"url": "url", "title": "title"}
+
+
+class TestArgsMapping:
+    def test_args_mapping_fills_missing_metadata(self):
+        cfg = CitationConfig(
+            source_type="web",
+            content_field=None,
+            mapping={"snippet": "text"},
+            args_mapping={"url": "url", "title": "title"},
+        )
+        item = {"text": "Page content here"}
+        tool_args = {"url": "https://example.com", "title": "Example Page"}
+        metadata = cfg.extract_metadata(item, tool_args=tool_args)
+        assert metadata["source_type"] == "web"
+        assert metadata["url"] == "https://example.com"
+        assert metadata["title"] == "Example Page"
+
+    def test_result_metadata_takes_precedence_over_args(self):
+        cfg = CitationConfig(
+            source_type="web",
+            content_field=None,
+            mapping={"url": "link", "snippet": "text"},
+            args_mapping={"url": "url"},
+        )
+        item = {"link": "https://from-result.com", "text": "content"}
+        tool_args = {"url": "https://from-args.com"}
+        metadata = cfg.extract_metadata(item, tool_args=tool_args)
+        assert metadata["url"] == "https://from-result.com"
+
+    def test_no_args_mapping_works(self):
+        cfg = CitationConfig(
+            source_type="web",
+            content_field=None,
+            mapping={"snippet": "text"},
+        )
+        item = {"text": "content"}
+        metadata = cfg.extract_metadata(item, tool_args={"url": "https://example.com"})
+        assert "url" not in metadata
+
+    def test_args_mapping_with_no_tool_args(self):
+        cfg = CitationConfig(
+            source_type="web",
+            content_field=None,
+            mapping={"snippet": "text"},
+            args_mapping={"url": "url"},
+        )
+        item = {"text": "content"}
+        metadata = cfg.extract_metadata(item)
+        assert "url" not in metadata

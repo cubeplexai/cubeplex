@@ -20,14 +20,25 @@ class CitationConfig(BaseModel):
                        None means the entire output is a single result.
         mapping: Maps citation metadata field names to tool output field names.
                  The special key "snippet" identifies the text field to chunk.
+        args_mapping: Maps citation metadata field names to tool call argument names.
+                      Used as fallback when metadata fields are missing from the result
+                      (e.g., web_fetch returns plain text but the URL is in the args).
     """
 
     source_type: str
     content_field: str | None
     mapping: dict[str, str]
+    args_mapping: dict[str, str] | None = None
 
-    def extract_metadata(self, item: dict[str, Any]) -> dict[str, Any]:
-        """Extract citation metadata from a single result item."""
+    def extract_metadata(
+        self,
+        item: dict[str, Any],
+        tool_args: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Extract citation metadata from a single result item.
+
+        Falls back to tool_args via args_mapping for fields not found in item.
+        """
         metadata: dict[str, Any] = {"source_type": self.source_type}
         for meta_key, item_key in self.mapping.items():
             if meta_key == _SNIPPET_KEY:
@@ -35,6 +46,13 @@ class CitationConfig(BaseModel):
             value = item.get(item_key)
             if value is not None:
                 metadata[meta_key] = value
+        # Fill missing metadata from tool call arguments
+        if tool_args and self.args_mapping:
+            for meta_key, arg_key in self.args_mapping.items():
+                if meta_key not in metadata:
+                    value = tool_args.get(arg_key)
+                    if value is not None:
+                        metadata[meta_key] = value
         return metadata
 
     def extract_text(self, item: dict[str, Any]) -> str:

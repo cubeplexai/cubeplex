@@ -39,5 +39,8 @@ development:
               content_field: null
               mapping:
                 snippet: "text"
+              args_mapping:
+                url: "url"
+                title: "title"
 
         enabled: true

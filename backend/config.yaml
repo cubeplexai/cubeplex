@@ -147,9 +147,10 @@ default:
     #           source_type: web
     #           content_field: null
     #           mapping:
+    #             snippet: "content"
+    #           args_mapping:
     #             url: "url"
     #             title: "title"
-    #             snippet: "content"
 
   langsmith:
     enabled: true

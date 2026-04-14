@@ -152,6 +152,7 @@ export function CitationMarker({
 
     // Try streaming toolResultMap first, then fall back to history messages
     let toolName = 'web_search'
+    let toolArgs: Record<string, unknown> = {}
     let content: string | null = null
     let contentType: string | undefined
 
@@ -184,8 +185,51 @@ export function CitationMarker({
       }
     }
 
+    // Find tool call arguments (url, etc.) from assistant messages or streaming blocks
+    outer2: for (const msgs of Object.values(state.messages)) {
+      for (const m of msgs) {
+        // Check assistant tool_calls
+        if (m.role === 'assistant' && m.tool_calls) {
+          const tc = m.tool_calls.find((t) => t.tool_call_id === citation.tool_call_id)
+          if (tc) {
+            toolName = tc.name
+            toolArgs = tc.arguments
+            break outer2
+          }
+        }
+        // Check subagent inner tool calls
+        if (m.role === 'tool' && m.name === 'subagent' && m.subagent_events?.tool_calls) {
+          const tc = m.subagent_events.tool_calls.find(
+            (t) => t.tool_call_id === citation.tool_call_id,
+          )
+          if (tc) {
+            toolName = tc.name
+            toolArgs = tc.arguments
+            break outer2
+          }
+        }
+      }
+    }
+    // Also check streaming blocks for tool call args
+    if (Object.keys(toolArgs).length === 0) {
+      for (const agent of Object.values(state.streamAgents)) {
+        for (const block of agent.blocks) {
+          if (block.type === 'tool_call' && block.tool_call_id === citation.tool_call_id) {
+            toolName = block.name
+            toolArgs = block.arguments
+            break
+          }
+        }
+      }
+    }
+
+    // Fall back to citation metadata for URL if args are still empty
+    if (Object.keys(toolArgs).length === 0 && citation.metadata.url) {
+      toolArgs = { url: citation.metadata.url }
+    }
+
     if (content) {
-      openTool(toolName, {}, content, contentType, undefined, chunk?.content)
+      openTool(toolName, toolArgs, content, contentType, undefined, chunk?.content)
     }
   }, [citation, chunkIndex, openTool])
 

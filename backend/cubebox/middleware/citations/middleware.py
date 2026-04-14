@@ -96,6 +96,7 @@ class CitationMiddleware(AgentMiddleware[Any, Any, Any]):
         tool_call_id = request.tool_call.get("id", "")
 
         raw_content = _extract_text_content(result.content)
+        tool_args = request.tool_call.get("args", {})
 
         try:
             parsed = json.loads(raw_content)
@@ -113,7 +114,7 @@ class CitationMiddleware(AgentMiddleware[Any, Any, Any]):
 
         for item in items:
             citation_id = await counter.next()
-            metadata = config.extract_metadata(item)
+            metadata = config.extract_metadata(item, tool_args=tool_args)
             text = config.extract_text(item)
             chunks = chunk_text(text)
 
