@@ -16,8 +16,12 @@ interface CitationMarkerProps {
   conversationId: string
 }
 
-function getFaviconUrl(domain: string): string {
-  return `https://${domain}/favicon.ico`
+function getFaviconUrl(url: string): string {
+  try {
+    return `${new URL(url).origin}/favicon.ico`
+  } catch {
+    return ''
+  }
 }
 
 function CitationHoverContent({
@@ -61,9 +65,9 @@ function CitationHoverContent({
 
       {/* Source: favicon + URL + date + badge */}
       <div className="flex items-center gap-1.5">
-        {isWeb && metadata.domain && !faviconError ? (
+        {isWeb && metadata.url && !faviconError ? (
           <img
-            src={getFaviconUrl(metadata.domain)}
+            src={getFaviconUrl(metadata.url)}
             alt=""
             className="size-3.5 rounded-sm shrink-0"
             onError={() => setFaviconError(true)}
