@@ -51,6 +51,26 @@ class _SubAgentSchema(BaseModel):
     subagent_type: str = "general-purpose"
 
 
+def _collect_citations_from_update(
+    update: Any,
+    out: list[dict[str, Any]],
+) -> None:
+    """Extract citation data from ToolMessages in an updates stream chunk."""
+    if not isinstance(update, dict):
+        return
+    for _node_name, state_update in update.items():
+        messages = state_update.get("messages", []) if isinstance(state_update, dict) else []
+        for msg in messages:
+            additional_kwargs = (
+                msg.get("additional_kwargs", {})
+                if isinstance(msg, dict)
+                else getattr(msg, "additional_kwargs", {}) or {}
+            )
+            citations = additional_kwargs.get("citations")
+            if citations:
+                out.extend(citations)
+
+
 def _create_subagent_tool(
     subagents: list[SubAgent],
     default_model: BaseChatModel | None = None,
@@ -108,6 +128,7 @@ def _create_subagent_tool(
             sa_agent_id = f"subagent:{tool_call_id}"
             last_ai_content: list[str] = []
             subagent_events: list[dict[str, Any]] = []
+            collected_citations: list[dict[str, Any]] = []
 
             if queue is not None:
                 # Dual stream mode: forward events to SSE via queue, collect result
@@ -133,12 +154,20 @@ def _create_subagent_tool(
                         elif mode == "updates":
                             evts = convert_updates_chunk(data, agent_id=sa_agent_id)
                             subagent_events.extend(evts)
+                            # Collect citations from inner ToolMessages
+                            _collect_citations_from_update(data, collected_citations)
             else:
                 # No queue: use ainvoke (no streaming needed)
                 result = await agent.ainvoke(
                     {"messages": [{"role": "user", "content": prompt}]},
                 )
                 messages = result.get("messages", [])
+                for m in messages:
+                    citations = (getattr(m, "additional_kwargs", None) or {}).get(
+                        "citations"
+                    )
+                    if citations:
+                        collected_citations.extend(citations)
                 last = messages[-1] if messages else None
                 if last and hasattr(last, "content"):
                     content = last.content
@@ -147,11 +176,14 @@ def _create_subagent_tool(
             final_content = "".join(last_ai_content) or "[subagent produced no output]"
 
             # Return ToolMessage with events in additional_kwargs
+            kwargs: dict[str, Any] = {"subagent_events": subagent_events}
+            if collected_citations:
+                kwargs["citations"] = collected_citations
             return ToolMessage(
                 content=final_content,
                 tool_call_id=tool_call_id,
                 name="subagent",
-                additional_kwargs={"subagent_events": subagent_events},
+                additional_kwargs=kwargs,
             )
         except Exception as e:
             logger.error("Subagent '{}' failed: {}", subagent_type, e)
