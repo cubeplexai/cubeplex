@@ -76,18 +76,16 @@ export function SearchResultView({
   useEffect(() => {
     if (!highlightText || !containerRef.current) return
     const items = containerRef.current.querySelectorAll('[data-result-item]')
-    let timer: ReturnType<typeof setTimeout> | undefined
+    let matched: Element | undefined
     for (const item of items) {
       if (item.textContent?.includes(highlightText.slice(0, 50))) {
-        item.classList.add('ring-2', 'ring-yellow-400/50', 'bg-yellow-50/10')
+        item.classList.add('ring-2', 'ring-primary/50', 'bg-primary/10')
         item.scrollIntoView({ behavior: 'smooth', block: 'center' })
-        timer = setTimeout(() => {
-          item.classList.remove('ring-2', 'ring-yellow-400/50', 'bg-yellow-50/10')
-        }, 2000)
+        matched = item
         break
       }
     }
-    return () => { if (timer) clearTimeout(timer) }
+    return () => { matched?.classList.remove('ring-2', 'ring-primary/50', 'bg-primary/10') }
   }, [highlightText, highlightKey])
 
   if (!result) {

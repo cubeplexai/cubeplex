@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useRef, useEffect } from 'react'
 import { Globe, ExternalLink, Calendar } from 'lucide-react'
 import { useCitationStore, usePanelStore, useMessageStore } from '@cubebox/core'
 import type { CitationData } from '@cubebox/core'
@@ -30,74 +30,103 @@ function CitationHoverContent({
   onOpenPanel: () => void
 }) {
   const { metadata, chunks } = citation
-  const chunk = chunks.find((c) => c.chunk_index === chunkIndex)
+  const sortedChunks = [...chunks].sort((a, b) => a.chunk_index - b.chunk_index)
   const [faviconError, setFaviconError] = useState(false)
   const isWeb = metadata.source_type === 'web'
+  const activeRef = useRef<HTMLDivElement>(null)
+  const scrollRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (activeRef.current && scrollRef.current) {
+      const container = scrollRef.current
+      const el = activeRef.current
+      const top = el.offsetTop - container.offsetTop
+      container.scrollTop = top - 8
+    }
+  }, [])
 
   return (
     <div className="flex flex-col gap-2">
-      {/* Header: favicon + domain + source type */}
-      <div className="flex items-center gap-1.5">
-        {isWeb && metadata.domain && !faviconError ? (
-          <img
-            src={getFaviconUrl(metadata.domain)}
-            alt=""
-            className="size-4 rounded-sm shrink-0"
-            onError={() => setFaviconError(true)}
-          />
-        ) : (
-          <Globe className="size-4 text-muted-foreground shrink-0" />
-        )}
-        <span className="text-xs text-muted-foreground truncate">
-          {metadata.domain || metadata.source_type}
-        </span>
-        <span
-          className="ml-auto text-[10px] font-medium text-muted-foreground/60
-          bg-muted px-1.5 py-0.5 rounded shrink-0"
-        >
-          {metadata.source_type}
-        </span>
-      </div>
-
       {/* Title */}
       {metadata.title && (
         <button
           type="button"
           onClick={onOpenPanel}
-          className="text-sm font-medium text-foreground hover:text-primary
+          className="text-sm font-semibold text-foreground hover:text-primary
             transition-colors text-left line-clamp-2 cursor-pointer"
         >
           {metadata.title}
         </button>
       )}
 
-      {/* Chunk snippet */}
-      {chunk && (
-        <p className="text-xs text-muted-foreground leading-relaxed line-clamp-3">
-          {chunk.content}
-        </p>
-      )}
-
-      {/* Footer: date + URL */}
-      <div className="flex items-center gap-2 text-[10px] text-muted-foreground/60">
-        {metadata.published_at && (
-          <span className="flex items-center gap-1">
-            <Calendar className="size-2.5" />
-            {metadata.published_at}
-          </span>
+      {/* Source: favicon + URL + date + badge */}
+      <div className="flex items-center gap-1.5">
+        {isWeb && metadata.domain && !faviconError ? (
+          <img
+            src={getFaviconUrl(metadata.domain)}
+            alt=""
+            className="size-3.5 rounded-sm shrink-0"
+            onError={() => setFaviconError(true)}
+          />
+        ) : (
+          <Globe className="size-3.5 text-muted-foreground shrink-0" />
         )}
-        {isWeb && metadata.url && (
+        {isWeb && metadata.url ? (
           <a
             href={metadata.url}
             target="_blank"
             rel="noopener noreferrer"
-            className="flex items-center gap-1 text-primary hover:underline truncate ml-auto"
+            className="text-[11px] text-muted-foreground hover:text-primary
+              truncate transition-colors"
           >
-            <ExternalLink className="size-2.5 shrink-0" />
-            <span className="truncate">{metadata.url}</span>
+            {metadata.domain || metadata.url}
           </a>
+        ) : (
+          <span className="text-[11px] text-muted-foreground truncate">
+            {metadata.domain || metadata.source_type}
+          </span>
         )}
+        {metadata.published_at && (
+          <>
+            <span className="text-muted-foreground/30">·</span>
+            <span className="flex items-center gap-0.5 text-[10px] text-muted-foreground/60
+              shrink-0">
+              <Calendar className="size-2.5" />
+              {metadata.published_at}
+            </span>
+          </>
+        )}
+        <span
+          className="ml-auto text-[10px] font-medium text-muted-foreground/60
+            bg-muted px-1.5 py-0.5 rounded shrink-0"
+        >
+          {metadata.source_type}
+        </span>
       </div>
+
+      {/* Chunk list with active highlight */}
+      {sortedChunks.length > 0 && (
+        <div ref={scrollRef} className="max-h-40 overflow-y-auto -mx-1 px-1">
+          <div className="flex flex-col gap-0.5">
+            {sortedChunks.map((c) => {
+              const isActive = c.chunk_index === chunkIndex
+              return (
+                <div
+                  key={c.chunk_index}
+                  ref={isActive ? activeRef : undefined}
+                  className={`text-xs leading-relaxed rounded px-2 py-1 ${
+                    isActive
+                      ? 'bg-primary/8 text-foreground border-l-2 border-primary'
+                      : 'text-muted-foreground/50'
+                  }`}
+                >
+                  <span className={isActive ? '' : 'line-clamp-2'}>{c.content}</span>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
     </div>
   )
 }

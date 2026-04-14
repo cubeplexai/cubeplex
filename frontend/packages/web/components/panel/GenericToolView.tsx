@@ -55,19 +55,14 @@ export function GenericToolView({
 
   useEffect(() => {
     if (!highlightText || !responseRef.current) return
-    const text = responseRef.current.textContent ?? ''
+    const el = responseRef.current
+    const text = el.textContent ?? ''
     const searchText = highlightText.slice(0, 50)
-    let timer: ReturnType<typeof setTimeout> | undefined
     if (text.includes(searchText)) {
-      responseRef.current.classList.add('ring-2', 'ring-yellow-400/50', 'bg-yellow-50/10')
-      responseRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' })
-      timer = setTimeout(() => {
-        responseRef.current?.classList.remove(
-          'ring-2', 'ring-yellow-400/50', 'bg-yellow-50/10',
-        )
-      }, 2000)
+      el.classList.add('ring-2', 'ring-primary/50', 'bg-primary/10')
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' })
     }
-    return () => { if (timer) clearTimeout(timer) }
+    return () => { el.classList.remove('ring-2', 'ring-primary/50', 'bg-primary/10') }
   }, [highlightText, highlightKey])
 
   const requestText = JSON.stringify(args, null, 2)

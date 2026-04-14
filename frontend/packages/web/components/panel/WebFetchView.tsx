@@ -25,22 +25,20 @@ export function WebFetchView({
       contentRef.current, NodeFilter.SHOW_TEXT,
     )
     const searchText = highlightText.slice(0, 50)
-    let timer: ReturnType<typeof setTimeout> | undefined
+    let matched: HTMLElement | undefined
     while (walker.nextNode()) {
       const node = walker.currentNode
       if (node.textContent?.includes(searchText)) {
         const parent = node.parentElement
         if (parent) {
-          parent.classList.add('ring-2', 'ring-yellow-400/50', 'bg-yellow-50/10')
+          parent.classList.add('ring-2', 'ring-primary/50', 'bg-primary/10')
           parent.scrollIntoView({ behavior: 'smooth', block: 'center' })
-          timer = setTimeout(() => {
-            parent.classList.remove('ring-2', 'ring-yellow-400/50', 'bg-yellow-50/10')
-          }, 2000)
+          matched = parent
         }
         break
       }
     }
-    return () => { if (timer) clearTimeout(timer) }
+    return () => { matched?.classList.remove('ring-2', 'ring-primary/50', 'bg-primary/10') }
   }, [highlightText, highlightKey])
 
   const url = String(args.url ?? '')
