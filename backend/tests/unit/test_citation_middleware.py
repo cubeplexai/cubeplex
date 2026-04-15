@@ -200,7 +200,6 @@ class TestCitationMiddlewareToolCall:
             ids.append(item[2]["citation_id"])
         assert ids == [1, 2]
 
-
     async def test_web_fetch_plain_text_gets_url_from_args(self, _setup_counter_and_queue):
         """web_fetch returns plain text; URL should come from tool call args via args_mapping."""
         queue = _setup_counter_and_queue
