@@ -100,13 +100,37 @@ export function WebFetchView({
   useEffect(() => {
     if (!highlightText || !contentRef.current) return
 
-    const blocks = findChunkBlocks(contentRef.current, highlightText)
-    if (blocks.length === 0) return
+    let cancelled = false
+    let highlighted: HTMLElement[] = []
 
-    for (const b of blocks) b.classList.add(...HIGHLIGHT_CLS)
-    blocks[0].scrollIntoView({ behavior: 'smooth', block: 'center' })
+    // ReactMarkdown renders asynchronously — defer highlight search until the
+    // DOM content has been committed.  We retry a few times via rAF to handle
+    // the first-open case where the markdown hasn't mounted yet.
+    let attempts = 0
+    const maxAttempts = 5
 
-    return () => { for (const b of blocks) b.classList.remove(...HIGHLIGHT_CLS) }
+    function tryHighlight() {
+      if (cancelled || !contentRef.current) return
+
+      const blocks = findChunkBlocks(contentRef.current, highlightText!)
+      if (blocks.length === 0 && ++attempts < maxAttempts) {
+        requestAnimationFrame(tryHighlight)
+        return
+      }
+
+      highlighted = blocks
+      for (const b of blocks) b.classList.add(...HIGHLIGHT_CLS)
+      if (blocks.length > 0) {
+        blocks[0].scrollIntoView({ behavior: 'smooth', block: 'center' })
+      }
+    }
+
+    requestAnimationFrame(tryHighlight)
+
+    return () => {
+      cancelled = true
+      for (const b of highlighted) b.classList.remove(...HIGHLIGHT_CLS)
+    }
   }, [highlightText, highlightKey])
 
   const url = String(args.url ?? '')
