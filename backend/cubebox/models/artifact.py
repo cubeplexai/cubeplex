@@ -2,16 +2,19 @@
 
 from datetime import UTC, datetime
 
+from sqlalchemy import Index
 from sqlmodel import Field, SQLModel
 from uuid_utils import uuid7
 
+from cubebox.models.mixins import OrgScopedMixin
 from cubebox.utils.time import utc_isoformat
 
 
-class Artifact(SQLModel, table=True):
+class Artifact(SQLModel, OrgScopedMixin, table=True):
     """Artifact model for agent-generated deliverables."""
 
     __tablename__ = "artifacts"
+    __table_args__ = (Index("ix_artifacts_org_ws", "org_id", "workspace_id"),)
 
     id: str = Field(default_factory=lambda: str(uuid7()), primary_key=True)
     conversation_id: str = Field(foreign_key="conversations.id", index=True)
