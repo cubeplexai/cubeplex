@@ -54,3 +54,33 @@ async def test_scoped_repo_get_by_id_enforces_scope(session):
 
     assert (await repo_in_scope.get("i1")) is not None
     assert (await repo_wrong_ws.get("i1")) is None
+
+
+async def test_scoped_repo_add_force_sets_scope(session):
+    s = session
+    repo = _ItemRepo(s, org_id="o1", workspace_id="w1")
+    # Caller tries to sneak a different scope onto the object
+    item = _Item(id="i1", org_id="o-evil", workspace_id="w-evil", name="a")
+    await repo.add(item)
+
+    # Repo must have overwritten the scope to its own
+    assert item.org_id == "o1"
+    assert item.workspace_id == "w1"
+
+    # And only the in-scope repo can read it back
+    assert (await repo.get("i1")) is not None
+    wrong = _ItemRepo(s, org_id="o-evil", workspace_id="w-evil")
+    assert (await wrong.get("i1")) is None
+
+
+async def test_scoped_repo_delete_respects_scope(session):
+    s = session
+    s.add(_Item(id="i1", org_id="o1", workspace_id="w1", name="a"))
+    await s.commit()
+
+    repo_wrong = _ItemRepo(s, org_id="o1", workspace_id="w2")
+    assert (await repo_wrong.delete("i1")) is False
+
+    repo_right = _ItemRepo(s, org_id="o1", workspace_id="w1")
+    assert (await repo_right.delete("i1")) is True
+    assert (await repo_right.get("i1")) is None
