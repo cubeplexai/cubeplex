@@ -8,6 +8,19 @@ import httpx
 import pytest
 
 from cubebox.api.routes.v1 import conversations as conversations_route
+from cubebox.auth.context import RequestContext
+from cubebox.models import Role
+
+
+def _make_fake_ctx() -> RequestContext:
+    """Build a RequestContext for unit-style direct route invocation."""
+    fake_user = SimpleNamespace(id="test-user", email="test@example.com")
+    return RequestContext(
+        user=fake_user,  # type: ignore[arg-type]
+        org_id="default-org",
+        workspace_id="default-ws",
+        role=Role.ADMIN,
+    )
 
 
 @pytest.mark.asyncio
@@ -159,6 +172,10 @@ async def test_client_disconnect_cancels_stream_before_closing_checkpointer(
             self.conn = _FakeConn()
 
     class _FakeMessage:
+        # type="ai" so convert_messages_chunk emits text_delta
+        # (post 131dabf, non-AI messages are filtered out).
+        type = "ai"
+
         def __init__(self, content: str) -> None:
             self.content = content
             self.additional_kwargs: dict[str, object] = {}
@@ -183,7 +200,9 @@ async def test_client_disconnect_cancels_stream_before_closing_checkpointer(
     async def _fake_get_by_id(self, conversation_id: str):
         return SimpleNamespace(id=conversation_id, title=conversation_id)
 
-    async def _noop_update_timestamp(_conversation_id: str) -> None:
+    async def _noop_update_timestamp(
+        _conversation_id: str, *, org_id: str, workspace_id: str
+    ) -> None:
         return None
 
     def _fake_create_cubebox_agent(*, conversation_id: str, **_kwargs):
@@ -220,6 +239,7 @@ async def test_client_disconnect_cancels_stream_before_closing_checkpointer(
         "slow",
         conversations_route.SendMessageRequest(content="slow request"),
         raw_request,
+        _make_fake_ctx(),
     )
     slow_iter = slow_response.body_iterator.__aiter__()
 
@@ -240,6 +260,7 @@ async def test_client_disconnect_cancels_stream_before_closing_checkpointer(
         "fast",
         conversations_route.SendMessageRequest(content="fast request"),
         raw_request,
+        _make_fake_ctx(),
     )
     events = []
     async for chunk in fast_response.body_iterator:
@@ -303,7 +324,9 @@ async def test_tool_call_delta_events_in_sse_stream(
     async def _fake_get_by_id(self, conversation_id: str):
         return SimpleNamespace(id=conversation_id, title=conversation_id)
 
-    async def _noop_update_timestamp(_conversation_id: str) -> None:
+    async def _noop_update_timestamp(
+        _conversation_id: str, *, org_id: str, workspace_id: str
+    ) -> None:
         return None
 
     monkeypatch.setattr(conversations_route, "async_session_maker", _fake_session_maker)
@@ -331,6 +354,7 @@ async def test_tool_call_delta_events_in_sse_stream(
         "test-conv",
         conversations_route.SendMessageRequest(content="write a file"),
         raw_request,
+        _make_fake_ctx(),
     )
 
     events = []
