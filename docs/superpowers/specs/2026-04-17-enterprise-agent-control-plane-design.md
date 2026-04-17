@@ -310,95 +310,46 @@ class ScopedRepository[T]:
 
 **不使用 mixin 的表**（它们本身就是层级）：`User, Organization, Workspace, Membership`
 
-### 5.3 M1 新增表（MySQL 8 语法）
+### 5.3 M1 新增表（SQLModel 定义 + alembic autogenerate）
 
-```sql
--- Identity
-CREATE TABLE users (
-    id VARCHAR(32) PRIMARY KEY,
-    email VARCHAR(255) UNIQUE NOT NULL,
-    password_hash VARCHAR(255) NOT NULL,
-    created_at DATETIME NOT NULL
-);
+**所有 schema 变更通过 SQLModel 类定义 + `alembic revision --autogenerate -m "..."` 产出 migration 文件**，不手写 CREATE TABLE。本节仅描述模型字段和约束，DDL 由 alembic 生成。
 
-CREATE TABLE organizations (
-    id VARCHAR(32) PRIMARY KEY,
-    name VARCHAR(255) NOT NULL,
-    created_at DATETIME NOT NULL
-);
+| 模型 | 主要字段 | 约束 |
+|---|---|---|
+| `User` | `id, email, hashed_password, created_at`（fastapi-users 默认字段 + 自定义） | `email` UNIQUE |
+| `Organization` | `id, name, created_at` | — |
+| `Workspace` | `id, org_id, name, created_at` | `org_id` 索引 |
+| `Membership` | `user_id, workspace_id, role, created_at` | 复合主键 `(user_id, workspace_id)`；`role ∈ {admin, member}` |
+| `AgentConfig` | `id, org_id, workspace_id, system_prompt, model_id, skill_ids: JSON, mcp_server_ids: JSON, updated_at` | `workspace_id` UNIQUE（1:1 强制）；复合索引 `(org_id, workspace_id)` |
+| `Credential` | `id, org_id, workspace_id, name, encrypted_value: bytes, nonce: bytes, created_by, created_at, updated_at` | `(workspace_id, name)` UNIQUE；复合索引 `(org_id, workspace_id)`；`encrypted_value` AES-256-GCM 密文 |
+| `InviteToken` | `token, workspace_id, role, created_by, expires_at, used_at` | `token` 主键；`expires_at` 索引；`used_at` 用于 single-use enforcement |
 
-CREATE TABLE workspaces (
-    id VARCHAR(32) PRIMARY KEY,
-    org_id VARCHAR(32) NOT NULL,
-    name VARCHAR(255) NOT NULL,
-    created_at DATETIME NOT NULL,
-    INDEX idx_org (org_id)
-);
+**MySQL 8 类型选择**（在 SQLModel 字段上通过 `sa_column=Column(...)` 显式声明，避免 autogenerate 推断歧义）：
+- ID 列：`VARCHAR(32)`
+- 加密字段：`VARBINARY(2048)`（`encrypted_value`），`VARBINARY(12)`（`nonce`）
+- JSON 字段：MySQL 8 原生 `JSON`
+- 时间戳：`DATETIME`（与现有表保持一致）
 
-CREATE TABLE memberships (
-    user_id VARCHAR(32) NOT NULL,
-    workspace_id VARCHAR(32) NOT NULL,
-    role VARCHAR(32) NOT NULL,        -- 'admin' | 'member'
-    created_at DATETIME NOT NULL,
-    PRIMARY KEY (user_id, workspace_id)
-);
+**M1 不建** `cost_records` 表。Token usage（`input_tokens / output_tokens / model_id`）作为 `agent.run.completed` audit 事件的 `metadata` 字段外发；M2 管理端从 audit 流聚合 dashboard。
 
--- Agent config (1:1 with Workspace in M1)
-CREATE TABLE agent_configs (
-    id VARCHAR(32) PRIMARY KEY,
-    org_id VARCHAR(32) NOT NULL,
-    workspace_id VARCHAR(32) NOT NULL,
-    system_prompt TEXT,
-    model_id VARCHAR(128) NOT NULL,
-    skill_ids JSON,                   -- MySQL 8 JSON
-    mcp_server_ids JSON,
-    updated_at DATETIME NOT NULL,
-    UNIQUE KEY uk_ws (workspace_id),  -- 1:1 enforcement
-    INDEX idx_org_ws (org_id, workspace_id)
-);
-
--- Credentials (local store only, no central management in M1)
-CREATE TABLE credentials (
-    id VARCHAR(32) PRIMARY KEY,
-    org_id VARCHAR(32) NOT NULL,
-    workspace_id VARCHAR(32) NOT NULL,
-    name VARCHAR(128) NOT NULL,
-    encrypted_value VARBINARY(2048) NOT NULL,   -- AES-256-GCM
-    nonce VARBINARY(12) NOT NULL,
-    created_by VARCHAR(32) NOT NULL,
-    created_at DATETIME NOT NULL,
-    updated_at DATETIME NOT NULL,
-    UNIQUE KEY uk_ws_name (workspace_id, name),
-    INDEX idx_org_ws (org_id, workspace_id)
-);
-
--- Invite tokens
-CREATE TABLE invite_tokens (
-    token VARCHAR(64) PRIMARY KEY,
-    workspace_id VARCHAR(32) NOT NULL,
-    role VARCHAR(32) NOT NULL,
-    created_by VARCHAR(32) NOT NULL,
-    expires_at DATETIME NOT NULL,
-    used_at DATETIME NULL,
-    INDEX idx_expires (expires_at)
-);
-
--- NO cost_records table in M1
--- Token usage (input_tokens, output_tokens, model_id) rides on audit events
--- in 'agent.run.completed' metadata. M2 admin console aggregates to dashboard.
-```
+**现有表（`conversations / artifacts / artifact_versions / user_sandboxes`）改造**：在 SQLModel 类上加 `OrgScopedMixin`，autogenerate 会生成 ADD COLUMN + 索引的 migration。
 
 ### 5.4 迁移策略
 
-- 单个 migration 文件完成所有 M1 schema 变更
-- 步骤：
-  1. 创建新表（orgs, workspaces, users, memberships, agent_configs, credentials, invite_tokens）
-  2. 给现有表加 `org_id / workspace_id` 列（nullable）
-  3. 插入一个默认 org（`default-org`）和默认 workspace（`default-ws`）
-  4. 回填所有现有 `conversations / artifacts / user_sandboxes` 到默认 workspace
-  5. 将列改为 `NOT NULL`
-- Alembic 的 `env.py` 排除 LangGraph checkpoint 表（现已排除）
-- **Rollback path 必须 W1 测过**
+- **W1 单次 alembic 操作流程**：
+  1. 在 `cubebox/models/` 下定义所有新 SQLModel 类（含 `OrgScopedMixin`）
+  2. 在现有 SQLModel 上加 `OrgScopedMixin`
+  3. `alembic revision --autogenerate -m "m1_identity_and_scoping"` 生成 migration
+  4. **手工 review 生成的 migration 文件**：autogenerate 不能正确处理的部分手动补（默认 org/workspace 插入、历史数据回填、NULLABLE → NOT NULL 两阶段）
+  5. 测试 upgrade + downgrade 都跑通
+- 数据迁移步骤（在 autogenerate 出的 migration `upgrade()` 内手工编排）：
+  1. 创建新表（autogenerate 产出）
+  2. 给现有表加 `org_id / workspace_id` 列为 nullable（autogenerate 产出）
+  3. 插入默认 `default-org` + `default-ws`（手工 op.execute）
+  4. 回填 `conversations / artifacts / user_sandboxes` 到默认 workspace（手工 op.execute）
+  5. ALTER 列为 NOT NULL（手工 op.alter_column）
+- Alembic `env.py` 已排除 LangGraph checkpoint 表，沿用现有配置
+- **Rollback path 必须 W1 测过**（`alembic downgrade -1` 后状态可恢复）
 
 ## 6. Credential Management（M1 Interim）
 
