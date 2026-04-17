@@ -12,9 +12,7 @@ class InviteTokenRepository:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
 
-    async def issue(
-        self, *, workspace_id: str, role: str, created_by: str
-    ) -> InviteToken:
+    async def issue(self, *, workspace_id: str, role: str, created_by: str) -> InviteToken:
         tok = InviteToken(workspace_id=workspace_id, role=role, created_by=created_by)
         self.session.add(tok)
         await self.session.commit()
@@ -23,7 +21,7 @@ class InviteTokenRepository:
 
     async def consume(self, token: str) -> InviteToken | None:
         """Atomically mark token as used. Returns the token if successful, None if expired/used/missing."""
-        stmt = select(InviteToken).where(InviteToken.token == token)  # type: ignore[arg-type]
+        stmt = select(InviteToken).where(InviteToken.token == token).with_for_update()  # type: ignore[arg-type]
         tok = (await self.session.execute(stmt)).scalar_one_or_none()
         if tok is None:
             return None
