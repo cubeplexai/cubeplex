@@ -6,6 +6,7 @@ the `X-CSRF-Token` header. Skip enforcement if there is no auth cookie present (
 unauthenticated routes still work).
 """
 
+import json
 import secrets
 from http.cookies import SimpleCookie
 
@@ -23,6 +24,7 @@ class CSRFMiddleware:
     def __init__(self, app: ASGIApp) -> None:
         self.app = app
         self.auth_cookie = config.get("auth.cookie_name", "cubebox_auth")
+        self.cookie_secure = config.get("auth.cookie_secure", False)
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] != "http":
@@ -51,6 +53,8 @@ class CSRFMiddleware:
                     cookie[CSRF_COOKIE]["path"] = "/"
                     cookie[CSRF_COOKIE]["samesite"] = "Lax"
                     cookie[CSRF_COOKIE]["max-age"] = "86400"
+                    if self.cookie_secure:
+                        cookie[CSRF_COOKIE]["secure"] = True
                     headers.append("set-cookie", cookie[CSRF_COOKIE].OutputString())
                 await send(message)
 
@@ -78,7 +82,7 @@ def _get_header(headers: list[tuple[bytes, bytes]], name: bytes) -> str | None:
 
 
 async def _send_403(send: Send, message: str) -> None:
-    body = f'{{"error_code":"CSRF_FORBIDDEN","message":"{message}"}}'.encode()
+    body = json.dumps({"error_code": "CSRF_FORBIDDEN", "message": message}).encode()
     await send(
         {
             "type": "http.response.start",
