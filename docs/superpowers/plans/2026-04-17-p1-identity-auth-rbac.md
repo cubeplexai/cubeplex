@@ -358,36 +358,36 @@ class Workspace(SQLModel, table=True):
 
 - [ ] **Step 3: 写 User 模型（fastapi-users 兼容）**
 
+**注意**：`fastapi_users.db.SQLAlchemyBaseUserTable` 使用 SQLAlchemy 2.0 `Mapped[...]` 标注，SQLModel/Pydantic 无法在 class-body 解析时生成 schema，会抛 `PydanticSchemaGenerationError`。所以这里**不继承** `SQLAlchemyBaseUserTable`，而是把它期望的列名直接在 SQLModel 上声明。`SQLAlchemyUserDatabase` 按列名查找（`id`, `email`, `hashed_password`, `is_active`, `is_superuser`, `is_verified`），所以 Task 11 里依然可以用它。
+
 `backend/cubebox/models/user.py`:
 
 ```python
-"""User model — global identity (one row per email)."""
+"""User model — global identity (one row per email).
+
+fastapi-users' ``SQLAlchemyBaseUserTable`` uses SQLAlchemy 2.0 ``Mapped[...]``
+annotations which SQLModel/Pydantic cannot resolve, so we define the expected
+columns directly on a SQLModel and let ``SQLAlchemyUserDatabase`` discover them
+by name (``id``, ``email``, ``hashed_password``, ``is_active``, ``is_superuser``,
+``is_verified``).
+"""
 
 from datetime import UTC, datetime
 
-from fastapi_users.db import SQLAlchemyBaseUserTable
-from sqlalchemy import Column, DateTime, String
 from sqlmodel import Field, SQLModel
 from uuid_utils import uuid7
 
 
-class User(SQLModel, SQLAlchemyBaseUserTable[str], table=True):
-    """User identity. Inherits fastapi-users base columns:
-    email, hashed_password, is_active, is_superuser, is_verified.
-    We override id to use uuid7 string, and add created_at.
-    """
-
+class User(SQLModel, table=True):
     __tablename__ = "users"
 
-    id: str = Field(
-        default_factory=lambda: str(uuid7()),
-        primary_key=True,
-        sa_column=Column(String(32), primary_key=True),
-    )
-    created_at: datetime = Field(
-        default_factory=lambda: datetime.now(UTC),
-        sa_column=Column(DateTime, nullable=False),
-    )
+    id: str = Field(default_factory=lambda: str(uuid7()), primary_key=True, max_length=32)
+    email: str = Field(max_length=320, unique=True, index=True)
+    hashed_password: str = Field(max_length=1024)
+    is_active: bool = Field(default=True)
+    is_superuser: bool = Field(default=False)
+    is_verified: bool = Field(default=False)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 ```
 
 - [ ] **Step 4: 写 Membership 模型**
