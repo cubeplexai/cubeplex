@@ -28,6 +28,8 @@ def create_cubebox_agent(
     *,
     sandbox: Sandbox | None = None,
     conversation_id: str | None = None,
+    org_id: str | None = None,
+    workspace_id: str | None = None,
     skills: list[SkillSpec] | None = None,
     subagents: list[SubAgent] | None = None,
     checkpointer: Checkpointer | None = None,
@@ -44,6 +46,10 @@ def create_cubebox_agent(
         tools: Additional tools beyond what middleware provides.
         sandbox: If provided, SandboxMiddleware is added (registers execute tool).
         conversation_id: Required when sandbox is provided; used by ArtifactMiddleware.
+        org_id: Required when both sandbox and conversation_id are provided
+            (needed by ArtifactMiddleware for scoped DB access).
+        workspace_id: Required when both sandbox and conversation_id are provided
+            (needed by ArtifactMiddleware for scoped DB access).
         skills: If provided, SkillsMiddleware is added.
         subagents: If provided, SubAgentMiddleware is added.
         checkpointer: LangGraph checkpointer for conversation persistence.
@@ -68,7 +74,19 @@ def create_cubebox_agent(
         middleware.append(sandbox_middleware)
         inherited_subagent_middleware.append(sandbox_middleware)
         if conversation_id:
-            middleware.append(ArtifactMiddleware(sandbox=sandbox, conversation_id=conversation_id))
+            if org_id is None or workspace_id is None:
+                raise ValueError(
+                    "org_id and workspace_id are required when sandbox + conversation_id "
+                    "are provided (needed by ArtifactMiddleware)"
+                )
+            middleware.append(
+                ArtifactMiddleware(
+                    sandbox=sandbox,
+                    conversation_id=conversation_id,
+                    org_id=org_id,
+                    workspace_id=workspace_id,
+                )
+            )
         logger.debug("SandboxMiddleware + ArtifactMiddleware added (sandbox id={})", sandbox.id)
 
     _skills = skills or []

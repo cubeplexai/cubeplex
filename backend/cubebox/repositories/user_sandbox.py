@@ -3,7 +3,8 @@
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import text
+from sqlalchemy import select, text
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from cubebox.models.user_sandbox import UserSandbox
 from cubebox.repositories.base import ScopedRepository
@@ -80,4 +81,18 @@ class UserSandboxRepository(ScopedRepository[UserSandbox]):
             .where(text("TIMESTAMPADD(SECOND, ttl_seconds, last_activity_at) < UTC_TIMESTAMP()"))
         )
         result = await self.session.execute(stmt)
+        return list(result.scalars().all())
+
+    @classmethod
+    async def list_expired_system(cls, session: AsyncSession) -> list[UserSandbox]:
+        """System-scope query: find expired sandboxes across all workspaces.
+
+        Only for background reapers — never expose to user-facing code.
+        """
+        stmt = (
+            select(UserSandbox)
+            .where(UserSandbox.status == "running")  # type: ignore[arg-type]
+            .where(text("TIMESTAMPADD(SECOND, ttl_seconds, last_activity_at) < UTC_TIMESTAMP()"))
+        )
+        result = await session.execute(stmt)
         return list(result.scalars().all())
