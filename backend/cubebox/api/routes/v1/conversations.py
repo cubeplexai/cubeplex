@@ -33,7 +33,7 @@ async def _update_conversation_timestamp(conversation_id: str) -> None:
     save_engine = create_async_engine(_build_database_url(), poolclass=NullPool)
     try:
         async with AsyncSession(save_engine, expire_on_commit=False) as save_session:
-            save_conv_repo = ConversationRepository(save_session)
+            save_conv_repo = ConversationRepository(save_session)  # type: ignore[call-arg]
             await save_conv_repo.update_timestamp(conversation_id)
     finally:
         await save_engine.dispose()
@@ -45,7 +45,7 @@ async def create_conversation(
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> dict[str, object]:
     """Create a new conversation."""
-    repo = ConversationRepository(session)
+    repo = ConversationRepository(session)  # type: ignore[call-arg]
     conversation = await repo.create(title=title)
     return {
         "id": conversation.id,
@@ -61,7 +61,7 @@ async def get_conversation(
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> dict[str, object]:
     """Get a conversation by ID."""
-    repo = ConversationRepository(session)
+    repo = ConversationRepository(session)  # type: ignore[call-arg]
     conversation = await repo.get_by_id(conversation_id)
     if not conversation:
         raise HTTPException(
@@ -83,7 +83,7 @@ async def list_conversations(
     offset: int = 0,
 ) -> dict[str, object]:
     """List conversations with pagination."""
-    repo = ConversationRepository(session)
+    repo = ConversationRepository(session)  # type: ignore[call-arg]
     conversations, total = await repo.list_all(limit=limit, offset=offset)
     return {
         "conversations": [
@@ -108,7 +108,7 @@ async def update_conversation(
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> dict[str, object]:
     """Update conversation title."""
-    repo = ConversationRepository(session)
+    repo = ConversationRepository(session)  # type: ignore[call-arg]
     conversation = await repo.update_title(conversation_id, title)
     if not conversation:
         raise HTTPException(
@@ -129,7 +129,7 @@ async def delete_conversation(
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> None:
     """Delete a conversation."""
-    repo = ConversationRepository(session)
+    repo = ConversationRepository(session)  # type: ignore[call-arg]
     deleted = await repo.delete(conversation_id)
     if not deleted:
         raise HTTPException(
@@ -271,7 +271,7 @@ async def send_message(
     # Do NOT use Depends(get_session) here — it would hold a pooled connection
     # for the entire SSE stream duration, causing connection leaks on cancellation.
     async with async_session_maker() as session:
-        conv_repo = ConversationRepository(session)
+        conv_repo = ConversationRepository(session)  # type: ignore[call-arg]
         conversation = await conv_repo.get_by_id(conversation_id)
     if not conversation:
         raise HTTPException(
@@ -688,7 +688,7 @@ async def list_messages(
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> dict[str, object]:
     """List messages in a conversation, read from LangGraph thread state."""
-    conv_repo = ConversationRepository(session)
+    conv_repo = ConversationRepository(session)  # type: ignore[call-arg]
     conversation = await conv_repo.get_by_id(conversation_id)
     if not conversation:
         raise HTTPException(

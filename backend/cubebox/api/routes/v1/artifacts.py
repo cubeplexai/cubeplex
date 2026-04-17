@@ -24,7 +24,7 @@ async def list_artifacts(
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> dict[str, object]:
     """List all artifacts for a conversation."""
-    repo = ArtifactRepository(session)
+    repo = ArtifactRepository(session)  # type: ignore[call-arg]
     artifacts = await repo.list_by_conversation(conversation_id)
     return {
         "artifacts": [a.to_dict() for a in artifacts],
@@ -39,7 +39,7 @@ async def get_artifact(
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> dict[str, object]:
     """Get a single artifact by ID."""
-    repo = ArtifactRepository(session)
+    repo = ArtifactRepository(session)  # type: ignore[call-arg]
     artifact = await repo.get_by_id(artifact_id)
     if not artifact or artifact.conversation_id != conversation_id:
         raise HTTPException(
@@ -56,7 +56,7 @@ async def list_artifact_versions(
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> dict[str, object]:
     """List all versions of an artifact."""
-    repo = ArtifactRepository(session)
+    repo = ArtifactRepository(session)  # type: ignore[call-arg]
     artifact = await repo.get_by_id(artifact_id)
     if not artifact or artifact.conversation_id != conversation_id:
         raise HTTPException(
@@ -64,7 +64,7 @@ async def list_artifact_versions(
             detail=f"Artifact {artifact_id} not found",
         )
 
-    version_repo = ArtifactVersionRepository(session)
+    version_repo = ArtifactVersionRepository(session)  # type: ignore[call-arg]
     versions = await version_repo.list_by_artifact(artifact_id)
     return {"versions": [v.to_dict() for v in versions], "total": len(versions)}
 
@@ -77,7 +77,7 @@ async def download_artifact(
     version: int | None = Query(default=None),
 ) -> Response:
     """Download an artifact from object storage."""
-    repo = ArtifactRepository(session)
+    repo = ArtifactRepository(session)  # type: ignore[call-arg]
     artifact = await repo.get_by_id(artifact_id)
     if not artifact or artifact.conversation_id != conversation_id:
         raise HTTPException(
@@ -146,7 +146,7 @@ async def preview_artifact_file(
     version: int | None = Query(default=None),
 ) -> Response:
     """Serve a single file from an artifact for iframe preview."""
-    repo = ArtifactRepository(session)
+    repo = ArtifactRepository(session)  # type: ignore[call-arg]
     artifact = await repo.get_by_id(artifact_id)
     if not artifact or artifact.conversation_id != conversation_id:
         raise HTTPException(
