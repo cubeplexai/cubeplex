@@ -1,9 +1,10 @@
 import json as json_lib
 import secrets
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Iterator
 from contextlib import asynccontextmanager
 
 import httpx
+import pytest
 import pytest_asyncio
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -14,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from sqlalchemy.pool import NullPool
 
 from cubebox.api.app import create_app
+from cubebox.api.middleware.rate_limit import limiter
 from cubebox.auth.users import UserManager
 from cubebox.db.engine import _build_database_url, engine
 from cubebox.db.session import get_session
@@ -24,6 +26,19 @@ from cubebox.repositories import (
     WorkspaceRepository,
 )
 from cubebox.sandbox.local import LocalSandbox
+
+
+@pytest.fixture(autouse=True)
+def _reset_rate_limiter_between_tests() -> Iterator[None]:
+    """Reset the shared slowapi limiter between tests.
+
+    Every fixture client logs in at setup, so register/login limits
+    (3/min, 5/min) otherwise accumulate across tests — all requests share the
+    same ASGI-transport remote address and trip 429 after a few tests.
+    """
+    limiter.reset()
+    yield
+    limiter.reset()
 
 DEFAULT_ORG_ID = "default-org"
 DEFAULT_WS_ID = "default-ws"
