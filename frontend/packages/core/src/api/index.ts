@@ -1,3 +1,4 @@
-export { createApiClient, type ApiClient } from './client'
+export { createApiClient, toApiError, type ApiClient } from './client'
+export * from './auth'
 export * from './conversations'
 export * from './stream'
