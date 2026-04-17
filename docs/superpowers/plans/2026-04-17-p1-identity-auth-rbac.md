@@ -1938,29 +1938,230 @@ git commit -m "refactor(api): conversations + artifacts use RequestContext + sco
 
 ---
 
-## Task 17: 测试 fixtures（authenticated_client / admin_client / member_client）
+## Task 17: 测试 fixtures — 保持现有测试可用 + 新 RBAC fixtures
+
+**目标**：现有 `client` / `memory_client` / `async_client` fixture 在 P1 之后**无需改写**仍能通过默认用户 + 默认 workspace 访问受保护路由；同时提供 `authenticated_client` / `admin_client` / `member_client` 给 auth/RBAC 专项测试使用。
 
 **Files:**
 - Modify: `backend/tests/e2e/conftest.py`
 
-- [ ] **Step 1: 加 fixtures**
+- [ ] **Step 1: 加 helper + 改造 fixture 让现有 client 自动登录**
 
-Append to `backend/tests/e2e/conftest.py`:
+完全替换 `backend/tests/e2e/conftest.py` 的内容：
 
 ```python
+import json as json_lib
 import secrets
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 
+import httpx
+import pytest
 import pytest_asyncio
-from sqlalchemy.ext.asyncio import AsyncSession
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+from fastapi_users.schemas import BaseUserCreate
+from langgraph.checkpoint.memory import MemorySaver
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.pool import NullPool
 
-from cubebox.models import Organization, Role, User, Workspace
-from cubebox.repositories import MembershipRepository, OrganizationRepository, WorkspaceRepository
+from cubebox.api.app import create_app
+from cubebox.auth.db import SQLAlchemyUserDatabase
+from cubebox.auth.users import UserManager
+from cubebox.db.engine import _build_database_url, engine
+from cubebox.db.session import get_session
+from cubebox.models import Role, User
+from cubebox.repositories import (
+    MembershipRepository,
+    OrganizationRepository,
+    WorkspaceRepository,
+)
+from cubebox.sandbox.local import LocalSandbox
+
+DEFAULT_ORG_ID = "default-org"
+DEFAULT_WS_ID = "default-ws"
+DEFAULT_TEST_EMAIL = "test-default@example.com"
+DEFAULT_TEST_PASSWORD = "test-default-password-12345"
+
+
+@asynccontextmanager
+async def _lifespan_context(app: FastAPI) -> AsyncIterator[None]:
+    async with app.router.lifespan_context(app):  # type: ignore[attr-defined]
+        yield
+
+
+def _make_test_app() -> FastAPI:
+    url = _build_database_url()
+    test_engine = create_async_engine(url, poolclass=NullPool)
+    test_session_maker = async_sessionmaker(
+        test_engine, class_=AsyncSession, expire_on_commit=False
+    )
+
+    async def override_get_session() -> AsyncIterator[AsyncSession]:
+        async with test_session_maker() as session:
+            yield session
+
+    app = create_app()
+    app.dependency_overrides[get_session] = override_get_session
+    return app
+
+
+def _make_memory_test_app() -> FastAPI:
+    url = _build_database_url()
+    test_engine = create_async_engine(url, poolclass=NullPool)
+    test_session_maker = async_sessionmaker(
+        test_engine, class_=AsyncSession, expire_on_commit=False
+    )
+
+    async def override_get_session() -> AsyncIterator[AsyncSession]:
+        async with test_session_maker() as session:
+            yield session
+
+    memory_saver = MemorySaver()
+    app = create_app(
+        checkpointer_factory=lambda: memory_saver,
+        sandbox_factory=LocalSandbox,
+    )
+    app.dependency_overrides[get_session] = override_get_session
+    return app
+
+
+async def _ensure_default_user_and_membership() -> None:
+    """Idempotently ensure a DEFAULT_TEST_EMAIL user exists as admin of default-ws.
+
+    Called once per fixture setup. If the user already exists, skip.
+    default-org + default-ws are created by the alembic migration.
+    """
+    test_engine = create_async_engine(_build_database_url(), poolclass=NullPool)
+    test_session_maker = async_sessionmaker(
+        test_engine, class_=AsyncSession, expire_on_commit=False
+    )
+    try:
+        async with test_session_maker() as session:
+            user_db = SQLAlchemyUserDatabase(session, User)
+            existing = await user_db.get_by_email(DEFAULT_TEST_EMAIL)
+            if existing is None:
+                manager = UserManager(user_db)
+                user = await manager.create(
+                    BaseUserCreate(
+                        email=DEFAULT_TEST_EMAIL, password=DEFAULT_TEST_PASSWORD
+                    ),
+                    safe=False,
+                )
+            else:
+                user = existing
+
+            mem_repo = MembershipRepository(session)
+            role = await mem_repo.get_role(user_id=user.id, workspace_id=DEFAULT_WS_ID)
+            if role is None:
+                await mem_repo.grant(
+                    user_id=user.id, workspace_id=DEFAULT_WS_ID, role=Role.ADMIN
+                )
+    finally:
+        await test_engine.dispose()
+
+
+async def _login_and_attach(
+    client: httpx.AsyncClient, email: str, password: str, workspace_id: str
+) -> None:
+    """Log in and set default X-Workspace-Id on the client."""
+    # 1) Issue a GET to obtain a CSRF cookie (CSRFMiddleware sets it on safe methods)
+    await client.get("/api/v1/auth/me")
+    csrf = client.cookies.get("cubebox_csrf") or ""
+
+    # 2) Login (sets cubebox_auth cookie)
+    r = await client.post(
+        "/api/v1/auth/login",
+        data={"username": email, "password": password},
+        headers={"X-CSRF-Token": csrf},
+    )
+    assert r.status_code in (200, 204), f"login failed: {r.status_code} {r.text}"
+
+    # 3) Attach workspace + CSRF to every subsequent request
+    client.headers["X-Workspace-Id"] = workspace_id
+    client.headers["X-CSRF-Token"] = client.cookies.get("cubebox_csrf") or csrf
+
+
+# -------------------- Legacy fixtures (backward compatible) --------------------
+# These auto-login as DEFAULT_TEST_EMAIL in default-ws so existing tests hitting
+# /api/v1/conversations etc. keep working without rewrite.
+
+
+@pytest_asyncio.fixture
+async def client() -> AsyncIterator[TestClient]:
+    """Sync test client, auto-logged-in as default user in default-ws.
+
+    NOTE: TestClient is synchronous; we do the user setup in an async
+    helper before handing it off.
+    """
+    await _ensure_default_user_and_membership()
+    app = _make_test_app()
+    sync_client = TestClient(app)
+
+    # Issue safe GET to get CSRF cookie
+    sync_client.get("/api/v1/auth/me")
+    csrf = sync_client.cookies.get("cubebox_csrf") or ""
+
+    r = sync_client.post(
+        "/api/v1/auth/login",
+        data={"username": DEFAULT_TEST_EMAIL, "password": DEFAULT_TEST_PASSWORD},
+        headers={"X-CSRF-Token": csrf},
+    )
+    assert r.status_code in (200, 204), f"login failed: {r.status_code} {r.text}"
+    sync_client.headers["X-Workspace-Id"] = DEFAULT_WS_ID
+    sync_client.headers["X-CSRF-Token"] = sync_client.cookies.get("cubebox_csrf") or csrf
+    yield sync_client
+
+
+@pytest_asyncio.fixture
+async def async_client() -> AsyncIterator[httpx.AsyncClient]:
+    """Async HTTP client, auto-logged-in as default user in default-ws."""
+    await _ensure_default_user_and_membership()
+    app = _make_test_app()
+    async with _lifespan_context(app):
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
+            await _login_and_attach(
+                c, DEFAULT_TEST_EMAIL, DEFAULT_TEST_PASSWORD, DEFAULT_WS_ID
+            )
+            yield c
+    await engine.dispose()
+
+
+@pytest_asyncio.fixture
+async def memory_client() -> AsyncIterator[httpx.AsyncClient]:
+    """Async MemorySaver+LocalSandbox client, auto-logged-in as default user."""
+    await _ensure_default_user_and_membership()
+    app = _make_memory_test_app()
+    async with _lifespan_context(app):
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
+            await _login_and_attach(
+                c, DEFAULT_TEST_EMAIL, DEFAULT_TEST_PASSWORD, DEFAULT_WS_ID
+            )
+            yield c
+    await engine.dispose()
+
+
+@pytest_asyncio.fixture
+async def unauthenticated_memory_client() -> AsyncIterator[httpx.AsyncClient]:
+    """Memory-backed client with NO login — for auth-negative tests."""
+    await _ensure_default_user_and_membership()
+    app = _make_memory_test_app()
+    async with _lifespan_context(app):
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
+            yield c
+    await engine.dispose()
+
+
+# -------------------- Per-test isolated fixtures for RBAC/scoping --------------------
 
 
 async def _ensure_test_user_membership(
     session: AsyncSession, *, email: str, role: Role
-) -> tuple[User, Workspace, str]:
-    """Create a user + org + workspace + membership; return (user, workspace, password)."""
+) -> tuple[User, str, str]:
+    """Create a user + org + workspace + membership; return (user, workspace_id, password)."""
     org_repo = OrganizationRepository(session)
     ws_repo = WorkspaceRepository(session)
     mem_repo = MembershipRepository(session)
@@ -1968,80 +2169,81 @@ async def _ensure_test_user_membership(
     org = await org_repo.create(name=f"Org {email}")
     ws = await ws_repo.create(org_id=org.id, name=f"WS {email}")
 
-    # Use fastapi-users to create user with proper hashed password
-    from cubebox.auth.db import SQLAlchemyUserDatabase
-    from cubebox.auth.users import UserManager
-
     password = secrets.token_urlsafe(16)
     user_db = SQLAlchemyUserDatabase(session, User)
     manager = UserManager(user_db)
-    from fastapi_users.schemas import BaseUserCreate
-
     user = await manager.create(
         BaseUserCreate(email=email, password=password), safe=False
     )
     await mem_repo.grant(user_id=user.id, workspace_id=ws.id, role=role)
-    return user, ws, password
+    return user, ws.id, password
 
 
-@pytest_asyncio.fixture
-async def authenticated_client(memory_client) -> tuple[httpx.AsyncClient, dict[str, str]]:
-    """Return (client, headers) — client is logged in as admin of a fresh workspace."""
-    # First, get a session to create user + workspace
+async def _make_isolated_async_client(role: Role) -> tuple[httpx.AsyncClient, dict[str, str], AsyncIterator[None]]:
+    """Helper: build a fresh async client logged in as a brand-new user with given role."""
     test_engine = create_async_engine(_build_database_url(), poolclass=NullPool)
     test_session_maker = async_sessionmaker(
         test_engine, class_=AsyncSession, expire_on_commit=False
     )
     async with test_session_maker() as session:
-        email = f"test-{secrets.token_hex(4)}@example.com"
-        user, workspace, password = await _ensure_test_user_membership(
-            session, email=email, role=Role.ADMIN
+        email = f"{role.value}-{secrets.token_hex(4)}@example.com"
+        _, workspace_id, password = await _ensure_test_user_membership(
+            session, email=email, role=role
         )
-
-    # Login via API to set the cookie on the client
-    resp = await memory_client.post(
-        "/api/v1/auth/login",
-        data={"username": email, "password": password},
-    )
-    assert resp.status_code == 204, resp.text
-    headers = {"X-Workspace-Id": workspace.id}
-    yield memory_client, headers
     await test_engine.dispose()
+
+    app = _make_memory_test_app()
+    return app, email, password, workspace_id
+
+
+@pytest_asyncio.fixture
+async def authenticated_client() -> AsyncIterator[tuple[httpx.AsyncClient, dict[str, str]]]:
+    """Fresh client logged in as a brand-new admin of a brand-new workspace."""
+    app, email, password, workspace_id = await _make_isolated_async_client(Role.ADMIN)
+    async with _lifespan_context(app):
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
+            await _login_and_attach(c, email, password, workspace_id)
+            yield c, {"X-Workspace-Id": workspace_id}
 
 
 @pytest_asyncio.fixture
 async def admin_client(authenticated_client):
-    """Alias for authenticated_client (which is admin by default)."""
+    """Alias — authenticated_client is already admin."""
     return authenticated_client
 
 
 @pytest_asyncio.fixture
-async def member_client(memory_client) -> tuple[httpx.AsyncClient, dict[str, str]]:
-    """Logged-in client with role=member."""
-    test_engine = create_async_engine(_build_database_url(), poolclass=NullPool)
-    test_session_maker = async_sessionmaker(
-        test_engine, class_=AsyncSession, expire_on_commit=False
-    )
-    async with test_session_maker() as session:
-        email = f"member-{secrets.token_hex(4)}@example.com"
-        user, workspace, password = await _ensure_test_user_membership(
-            session, email=email, role=Role.MEMBER
-        )
+async def member_client() -> AsyncIterator[tuple[httpx.AsyncClient, dict[str, str]]]:
+    """Fresh client logged in as a brand-new member (not admin) of a brand-new workspace."""
+    app, email, password, workspace_id = await _make_isolated_async_client(Role.MEMBER)
+    async with _lifespan_context(app):
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
+            await _login_and_attach(c, email, password, workspace_id)
+            yield c, {"X-Workspace-Id": workspace_id}
 
-    resp = await memory_client.post(
-        "/api/v1/auth/login", data={"username": email, "password": password}
-    )
-    assert resp.status_code == 204, resp.text
-    headers = {"X-Workspace-Id": workspace.id}
-    yield memory_client, headers
-    await test_engine.dispose()
+
+async def collect_sse_events(
+    client: httpx.AsyncClient,
+    url: str,
+    json_data: dict,  # type: ignore[type-arg]
+) -> list[dict]:  # type: ignore[type-arg]
+    """POST to an SSE endpoint and collect all parsed events."""
+    events = []
+    async with client.stream("POST", url, json=json_data) as response:
+        assert response.status_code == 200, response.text
+        async for line in response.aiter_lines():
+            if line.startswith("data: "):
+                events.append(json_lib.loads(line[6:]))
+    return events
 ```
 
-- [ ] **Step 2: smoke 检查 fixture import**
+- [ ] **Step 2: smoke 检查 import**
 
 ```bash
 cd backend
-uv run python -c "from tests.e2e.conftest import _ensure_test_user_membership; print('ok')"
+uv run python -c "from tests.e2e.conftest import _ensure_test_user_membership, _login_and_attach; print('ok')"
 ```
 
 Expected: `ok`.
@@ -2050,7 +2252,7 @@ Expected: `ok`.
 
 ```bash
 git add tests/e2e/conftest.py
-git commit -m "test(e2e): add authenticated_client/admin_client/member_client fixtures"
+git commit -m "test(e2e): auto-login default user on legacy client fixtures; add admin_client/member_client for RBAC tests"
 ```
 
 ---
@@ -2320,56 +2522,94 @@ git commit -m "test(e2e): cross-workspace data isolation via ScopedRepository"
 
 ---
 
-## Task 21: 修复现有 conversations / artifacts E2E 测试
+## Task 21: 现有测试逐文件验证
+
+**目标**：因为 Task 17 把 `client` / `memory_client` / `async_client` 改造成了**自动登录默认用户**，理论上所有现有测试**零代码改动**就能通过。本 task 逐文件验证并处理任何 regression。
+
+**预期受影响的测试文件**（调用了 `/api/v1/conversations` 或 `/api/v1/artifacts`）：
+1. `tests/e2e/test_conversations.py` — 同步 `client` fixture，11 个 test，POST/GET/PATCH/DELETE 全覆盖
+2. `tests/e2e/test_conversation_flow.py` — 异步 `memory_client`，5 个 test，含 SSE stream
+3. `tests/e2e/test_streaming.py` — 异步 `memory_client`，6 个 test（1 个是纯函数测试，无需登录）
+4. `tests/e2e/test_thread_state.py` — 异步 `memory_client`，3 个 test
+
+**不受影响的测试文件**（不走 HTTP 或走的路由不要求 auth）：
+- `tests/e2e/test_mcp.py` — MCPManager 单元测试
+- `tests/e2e/test_opensandbox.py` — sandbox 直连测试
+- `tests/e2e/test_sandbox_tools.py` — 工具直连测试
+- `tests/e2e/test_skills_sync.py` — skills 加载测试
+- `tests/e2e/test_stream_converter.py` — 纯函数测试
+- `tests/test_logger.py`, `tests/test_tools.py` — 单元测试
 
 **Files:**
-- Modify: `backend/tests/e2e/test_conversations.py`
-- Modify: `backend/tests/e2e/test_conversation_flow.py`
-- Modify: `backend/tests/e2e/test_streaming.py`
-- Modify: any other e2e test that hits `/api/v1/conversations` or `/api/v1/artifacts`
+- Verify (no edit expected): `backend/tests/e2e/test_conversations.py`
+- Verify (no edit expected): `backend/tests/e2e/test_conversation_flow.py`
+- Verify (no edit expected): `backend/tests/e2e/test_streaming.py`
+- Verify (no edit expected): `backend/tests/e2e/test_thread_state.py`
 
-- [ ] **Step 1: 跑现有 e2e 看哪些挂了**
-
-```bash
-cd backend
-ENV_FOR_DYNACONF=test uv run pytest tests/e2e/ -v --ignore=tests/e2e/test_auth.py --ignore=tests/e2e/test_rbac.py --ignore=tests/e2e/test_scoping.py --ignore=tests/e2e/test_migration.py 2>&1 | tail -40
-```
-
-Expected: failures with `400 X-Workspace-Id required` or `401 Unauthorized`.
-
-- [ ] **Step 2: 替换裸 `memory_client` 调用为 `authenticated_client`**
-
-For each failing test, change:
-
-```python
-async def test_xxx(memory_client):
-    r = await memory_client.post("/api/v1/conversations?title=X")
-```
-
-to:
-
-```python
-async def test_xxx(authenticated_client):
-    client, headers = authenticated_client
-    r = await client.post("/api/v1/conversations?title=X", headers=headers)
-```
-
-Pass `headers=headers` (or merge with existing headers) on every call.
-
-- [ ] **Step 3: 跑全部 e2e**
+- [ ] **Step 1: 先跑预期受影响的 4 个文件**
 
 ```bash
 cd backend
-ENV_FOR_DYNACONF=test uv run pytest tests/e2e/ -v
+ENV_FOR_DYNACONF=test uv run pytest \
+    tests/e2e/test_conversations.py \
+    tests/e2e/test_conversation_flow.py \
+    tests/e2e/test_streaming.py \
+    tests/e2e/test_thread_state.py \
+    -v 2>&1 | tail -60
 ```
 
-Expected: all green.
+Expected: **全部绿**，因为 `client` / `memory_client` 已经自动登录到 `default-ws`。
 
-- [ ] **Step 4: Commit**
+- [ ] **Step 2: 若有失败，按以下决策树处理**
+
+**决策 A：失败信号是 `401 Unauthorized` 或 `400 X-Workspace-Id required`**
+  - 说明 Task 17 的 fixture 没把 cookie / header 透传进来；检查是否绕过了 `_login_and_attach`（例如测试里手动构造了 `AsyncClient`）。
+  - 修复：让该测试用 fixture 提供的 client，而非自建。
+
+**决策 B：失败信号是 `403 CSRF_FORBIDDEN`**
+  - 说明测试发了 POST/PUT/DELETE 但没带 `X-CSRF-Token` header。Task 17 已经把 CSRF token 加到 `client.headers` 默认值，但若测试直接覆盖了 `headers=`，会洗掉。
+  - 修复：测试里 `headers=` 参数改为合并而非覆盖：
+    ```python
+    r = await client.post(url, json=payload, headers={**client.headers, "Custom": "x"})
+    ```
+  - 或只传自己要加的 header：
+    ```python
+    r = await client.post(url, json=payload, headers={"Custom": "x"})  # default headers preserved
+    ```
+
+**决策 C：失败信号是 `403 Forbidden`（非 CSRF）**
+  - 说明路由挂了 `require_admin` 但默认用户在 default-ws 里应该是 admin。检查 `_ensure_default_user_and_membership` 是否把默认用户 grant 成了 `Role.ADMIN`（Task 17 Step 1 中写的是 ADMIN，正确）。
+  - 若仍挂：用 `authenticated_client` 重写，该 fixture 每次都 fresh。
+
+**决策 D：失败信号是 `ResourceNotFoundError` on conversation**
+  - 说明 `ScopedRepository` 按 `(org_id, workspace_id)` 过滤时，conversation 是在不同 workspace 创建的。检查是否 SSE stream endpoint 拿错了 scope（Task 16 要确认 `_update_conversation_timestamp` helper 也接了 org/ws 参数）。
+  - 修复：在 Task 16 里给 helper 加参数；本 task 不改测试。
+
+- [ ] **Step 3: 跑全量 e2e + unit 测试**
+
+```bash
+cd backend
+ENV_FOR_DYNACONF=test uv run pytest tests/ -v 2>&1 | tail -30
+```
+
+Expected: **全部绿**，包括：
+- 新增的 `test_auth.py` / `test_rbac.py` / `test_scoping.py` / `test_migration.py`
+- 单元测试 `test_scoped_repository.py`
+- 所有原有测试
+
+- [ ] **Step 4: 记录任何本 task 做的 test-side 改动**
+
+若 Step 2 决策树导致修改了现有测试文件，commit 时说明原因。若零改动：
+
+```bash
+git status  # 应该是 clean
+```
+
+否则：
 
 ```bash
 git add tests/e2e/
-git commit -m "test(e2e): adapt existing tests to authenticated_client + workspace header"
+git commit -m "test(e2e): adjust existing tests for auth-wrapped client fixtures"
 ```
 
 ---
@@ -2379,14 +2619,29 @@ git commit -m "test(e2e): adapt existing tests to authenticated_client + workspa
 **Files:**
 - Modify: `backend/CLAUDE.md` — 加一句 auth 简介
 
-- [ ] **Step 1: 跑全量 check**
+- [ ] **Step 1: 跑全量 check（Hard Gate — 不得跳过任何失败）**
 
 ```bash
 cd backend
 make check
 ```
 
-Expected: 全部绿。
+Expected: **100% 绿**。包括但不限于：
+
+- `ruff format --check` 全绿
+- `ruff check` 全绿
+- `mypy cubebox/` 全绿
+- `pytest -s -v` **全部 test 通过**，尤其是：
+  - `tests/e2e/test_conversations.py`（Task 21 已验证）
+  - `tests/e2e/test_conversation_flow.py`（Task 21 已验证）
+  - `tests/e2e/test_streaming.py`（Task 21 已验证）
+  - `tests/e2e/test_thread_state.py`（Task 21 已验证）
+  - 以及 Task 18-20 新增的 auth / RBAC / scoping 测试
+
+**硬性规定**：
+- **任何现有测试 regression 都是 P1 的 blocker**，必须先修复再合入 P1。
+- **不得通过 skip、xfail、注释掉断言等方式绕过失败**。若某个现有测试真的应该在 P1 场景下行为改变，在 Task 21 里明确记录并修改测试代码（同时在 commit message 里 explain why）。
+- 若 `make check` 失败，回到 Task 21 的决策树重新定位根因；90% 的失败应通过修 `conftest.py` 或 `request_context` 解决，**不应**通过改业务测试解决。
 
 - [ ] **Step 2: 在 backend/CLAUDE.md "Architecture" 段末加一段**
 
