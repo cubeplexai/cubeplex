@@ -25,13 +25,18 @@
   "types": "dist/index.d.ts",
   "scripts": {
     "build": "tsc",
-    "type-check": "tsc --noEmit"
+    "type-check": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "zustand": "^4.4.2"
   },
   "devDependencies": {
     "@types/node": "^20.10.6",
-    "typescript": "^5.3.3"
+    "@vitest/ui": "^4.1.2",
+    "jsdom": "^29.0.1",
+    "typescript": "^5.3.3",
+    "vitest": "^4.1.2"
   }
 }
