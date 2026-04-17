@@ -135,10 +135,20 @@ def create_app(
 
     # Register middleware
     from cubebox.api.middleware.cancellation import CancellationMiddleware
+    from cubebox.api.middleware.csrf import CSRFMiddleware
+    from cubebox.api.middleware.rate_limit import limiter
     from cubebox.api.middleware.user_identity import UserIdentityMiddleware
 
     app.add_middleware(CancellationMiddleware)
     app.add_middleware(UserIdentityMiddleware)
+    app.add_middleware(CSRFMiddleware)
+
+    # Wire slowapi limiter into app state + exception handler
+    from slowapi import _rate_limit_exceeded_handler
+    from slowapi.errors import RateLimitExceeded
+
+    app.state.limiter = limiter
+    app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)  # type: ignore[arg-type]
 
     # Register exception handlers
     from cubebox.api.exceptions import register_exception_handlers
@@ -146,8 +156,9 @@ def create_app(
     register_exception_handlers(app)
 
     # Register routers
-    from cubebox.api.routes.v1 import artifacts_router, conversations_router
+    from cubebox.api.routes.v1 import artifacts_router, auth_router, conversations_router
 
+    app.include_router(auth_router, prefix="/api/v1")
     app.include_router(conversations_router, prefix="/api/v1")
     app.include_router(artifacts_router, prefix="/api/v1")
 
