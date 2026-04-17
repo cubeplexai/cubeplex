@@ -42,9 +42,7 @@ async def test_unaffiliated_workspace_returns_404_or_403(admin_client):
     # Clear default then send a bogus workspace id
     if "X-Workspace-Id" in client.headers:
         del client.headers["X-Workspace-Id"]
-    r = await client.get(
-        "/api/v1/conversations", headers={"X-Workspace-Id": "ws-does-not-exist"}
-    )
+    r = await client.get("/api/v1/conversations", headers={"X-Workspace-Id": "ws-does-not-exist"})
     # Per request_context dependency, workspace-not-found yields 404 before
     # role/membership check (which would yield 403).
     assert r.status_code == 404, r.text
