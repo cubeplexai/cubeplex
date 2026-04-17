@@ -55,6 +55,10 @@ async def create_workspace(
     user: Annotated[User, Depends(current_active_user)],
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> dict[str, str]:
+    # TODO(P2-auth): `org_id` comes from the client with no server-side membership
+    # check because P1 has no org-level Membership concept (only workspace-level).
+    # Any authenticated user can plant a workspace under any org id. Acceptable for
+    # M1's single-tenant internal deployment; must be locked down before multi-org.
     ws_repo = WorkspaceRepository(session)
     mem_repo = MembershipRepository(session)
     ws = await ws_repo.create(org_id=body.org_id, name=body.name)
@@ -79,9 +83,7 @@ async def create_invite(
             status_code=status.HTTP_400_BAD_REQUEST, detail="role must be admin or member"
         )
     inv_repo = InviteTokenRepository(session)
-    tok = await inv_repo.issue(
-        workspace_id=workspace_id, role=body.role, created_by=ctx.user.id
-    )
+    tok = await inv_repo.issue(workspace_id=workspace_id, role=body.role, created_by=ctx.user.id)
     return {"token": tok.token, "expires_at": utc_isoformat(tok.expires_at)}
 
 
@@ -101,7 +103,5 @@ async def accept_invite(
     mem_repo = MembershipRepository(session)
     existing = await mem_repo.get_role(user_id=user.id, workspace_id=tok.workspace_id)
     if existing is None:
-        await mem_repo.grant(
-            user_id=user.id, workspace_id=tok.workspace_id, role=Role(tok.role)
-        )
+        await mem_repo.grant(user_id=user.id, workspace_id=tok.workspace_id, role=Role(tok.role))
     return {"workspace_id": tok.workspace_id, "role": tok.role}
