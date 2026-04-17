@@ -44,7 +44,12 @@ async def register(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={"code": "REGISTER_INVALID_PASSWORD", "reason": exc.reason},
         ) from None
-    return {"id": user.id, "email": user.email}
+    default_ws = getattr(user, "_default_workspace_id", None)
+    return {
+        "id": user.id,
+        "email": user.email,
+        "default_workspace_id": default_ws or "",
+    }
 
 
 @router.post("/login")

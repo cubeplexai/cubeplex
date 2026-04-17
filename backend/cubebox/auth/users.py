@@ -24,6 +24,44 @@ class UserManager(BaseUserManager[User, str]):
 
     async def on_after_register(self, user: User, request: Request | None = None) -> None:
         logger.info("User registered: {}", user.email)
+        session = self.user_db.session  # type: ignore[attr-defined]
+        from cubebox.models import Role
+        from cubebox.repositories import (
+            MembershipRepository,
+            OrganizationRepository,
+            WorkspaceRepository,
+        )
+
+        try:
+            local_part = user.email.split("@", 1)[0]
+            org = await OrganizationRepository(session).create(name=f"{local_part}'s Org")
+            ws = await WorkspaceRepository(session).create(org_id=org.id, name="Personal")
+            await MembershipRepository(session).grant(
+                user_id=user.id, workspace_id=ws.id, role=Role.ADMIN
+            )
+        except Exception as exc:
+            # Repo create/grant methods commit internally, so org/ws rows may already
+            # be persisted when bootstrap fails mid-flight. Best-effort DELETE of the
+            # user row here — and translate to a 500 so clients see an HTTP error
+            # instead of an opaque 500 from the framework's default handler.
+            from fastapi import HTTPException, status
+            from sqlalchemy import delete
+
+            from cubebox.models import User as UserModel
+
+            try:
+                await session.execute(
+                    delete(UserModel).where(UserModel.id == user.id)  # type: ignore[arg-type]
+                )
+                await session.commit()
+            except Exception:
+                await session.rollback()
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="REGISTER_BOOTSTRAP_FAILED",
+            ) from exc
+
+        user._default_workspace_id = ws.id
 
 
 async def get_user_manager(
