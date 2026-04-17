@@ -91,7 +91,7 @@ class SandboxManager:
         conn_config = self._build_connection_config()
 
         async with self._session_factory() as session:
-            repo = UserSandboxRepository(session)
+            repo = UserSandboxRepository(session)  # type: ignore[call-arg]
             record = await repo.get_active_by_user(user_id)
 
             if record:
@@ -169,7 +169,7 @@ class SandboxManager:
             sandbox_id: The OpenSandbox sandbox ID
         """
         async with self._session_factory() as session:
-            repo = UserSandboxRepository(session)
+            repo = UserSandboxRepository(session)  # type: ignore[call-arg]
             await repo.update_activity_by_sandbox_id(sandbox_id)
             logger.debug("Released sandbox {}", sandbox_id)
 
@@ -181,7 +181,7 @@ class SandboxManager:
         conn_config = self._build_connection_config()
 
         async with self._session_factory() as session:
-            repo = UserSandboxRepository(session)
+            repo = UserSandboxRepository(session)  # type: ignore[call-arg]
             expired = await repo.list_expired()
 
             if not expired:

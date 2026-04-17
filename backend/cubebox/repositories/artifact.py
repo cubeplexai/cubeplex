@@ -2,18 +2,15 @@
 
 from datetime import UTC, datetime
 
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from cubebox.models import Artifact
 from cubebox.models.artifact_version import ArtifactVersion
+from cubebox.repositories.base import ScopedRepository
 
 
-class ArtifactRepository:
+class ArtifactRepository(ScopedRepository[Artifact]):
     """Repository for Artifact CRUD operations."""
 
-    def __init__(self, session: AsyncSession) -> None:
-        self.session = session
+    model = Artifact
 
     async def create(
         self,
@@ -36,16 +33,11 @@ class ArtifactRepository:
             mime_type=mime_type,
             description=description,
         )
-        self.session.add(artifact)
-        await self.session.commit()
-        await self.session.refresh(artifact)
-        return artifact
+        return await self.add(artifact)
 
     async def get_by_id(self, artifact_id: str) -> Artifact | None:
         """Get artifact by ID."""
-        stmt = select(Artifact).where(Artifact.id == artifact_id)  # type: ignore[arg-type]
-        result = await self.session.execute(stmt)
-        return result.scalar_one_or_none()
+        return await self.get(artifact_id)
 
     async def update(
         self,
@@ -88,9 +80,9 @@ class ArtifactRepository:
         path: str,
     ) -> Artifact | None:
         """Find an existing artifact in a conversation by its sandbox path."""
-        stmt = select(Artifact).where(
-            Artifact.conversation_id == conversation_id,  # type: ignore[arg-type]
-            Artifact.path == path,  # type: ignore[arg-type]
+        stmt = self._scoped_select().where(
+            Artifact.conversation_id == conversation_id,
+            Artifact.path == path,
         )
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
@@ -101,19 +93,18 @@ class ArtifactRepository:
     ) -> list[Artifact]:
         """List all artifacts for a conversation."""
         stmt = (
-            select(Artifact)
-            .where(Artifact.conversation_id == conversation_id)  # type: ignore[arg-type]
-            .order_by(Artifact.created_at)  # type: ignore[arg-type]
+            self._scoped_select()
+            .where(Artifact.conversation_id == conversation_id)
+            .order_by(Artifact.created_at)
         )
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
 
 
-class ArtifactVersionRepository:
+class ArtifactVersionRepository(ScopedRepository[ArtifactVersion]):
     """Repository for ArtifactVersion read/write operations."""
 
-    def __init__(self, session: AsyncSession) -> None:
-        self.session = session
+    model = ArtifactVersion
 
     async def create(
         self,
@@ -136,16 +127,13 @@ class ArtifactVersionRepository:
             entry_file=entry_file,
             mime_type=mime_type,
         )
-        self.session.add(av)
-        await self.session.commit()
-        await self.session.refresh(av)
-        return av
+        return await self.add(av)
 
     async def list_by_artifact(self, artifact_id: str) -> list[ArtifactVersion]:
         """List all versions for an artifact, newest first."""
         stmt = (
-            select(ArtifactVersion)
-            .where(ArtifactVersion.artifact_id == artifact_id)  # type: ignore[arg-type]
+            self._scoped_select()
+            .where(ArtifactVersion.artifact_id == artifact_id)
             .order_by(ArtifactVersion.version.desc())  # type: ignore[attr-defined]
         )
         result = await self.session.execute(stmt)
@@ -153,9 +141,9 @@ class ArtifactVersionRepository:
 
     async def get_version(self, artifact_id: str, version: int) -> ArtifactVersion | None:
         """Get a specific version of an artifact."""
-        stmt = select(ArtifactVersion).where(
-            ArtifactVersion.artifact_id == artifact_id,  # type: ignore[arg-type]
-            ArtifactVersion.version == version,  # type: ignore[arg-type]
+        stmt = self._scoped_select().where(
+            ArtifactVersion.artifact_id == artifact_id,
+            ArtifactVersion.version == version,
         )
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()

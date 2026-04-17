@@ -73,8 +73,8 @@ def _create_save_artifact_tool(
         from cubebox.repositories import ArtifactRepository, ArtifactVersionRepository
 
         async with async_session_maker() as session:
-            repo = ArtifactRepository(session)
-            version_repo = ArtifactVersionRepository(session)
+            repo = ArtifactRepository(session)  # type: ignore[call-arg]
+            version_repo = ArtifactVersionRepository(session)  # type: ignore[call-arg]
 
             # Auto-match: if no artifact_id given, look for an existing
             # artifact at the same path so we update instead of duplicating.
@@ -176,7 +176,7 @@ class ArtifactMiddleware(AgentMiddleware[Any, Any, Any]):
         from cubebox.repositories import ArtifactRepository
 
         async with async_session_maker() as session:
-            repo = ArtifactRepository(session)
+            repo = ArtifactRepository(session)  # type: ignore[call-arg]
             artifacts = await repo.list_by_conversation(self.conversation_id)
 
         if not artifacts:
