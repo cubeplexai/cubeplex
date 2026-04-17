@@ -11,8 +11,8 @@ class OrgScopedMixin:
     each concrete table via __table_args__ — see e.g. Conversation.
     """
 
-    org_id: str = Field(max_length=32, index=True)
-    workspace_id: str = Field(max_length=32, index=True)
+    org_id: str = Field(max_length=36, index=True)
+    workspace_id: str = Field(max_length=36, index=True)
 
 
 def org_scope_index(table_name: str) -> Index:

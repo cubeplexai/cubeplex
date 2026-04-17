@@ -16,7 +16,7 @@ from uuid_utils import uuid7
 class User(SQLModel, table=True):
     __tablename__ = "users"
 
-    id: str = Field(default_factory=lambda: str(uuid7()), primary_key=True, max_length=32)
+    id: str = Field(default_factory=lambda: str(uuid7()), primary_key=True, max_length=36)
     email: str = Field(max_length=320, unique=True, index=True)
     hashed_password: str = Field(max_length=1024)
     is_active: bool = Field(default=True)

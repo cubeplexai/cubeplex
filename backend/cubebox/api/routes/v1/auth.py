@@ -5,7 +5,7 @@ from typing import Annotated
 from fastapi import APIRouter, Body, Depends, HTTPException, Request, Response, status
 from fastapi.security import OAuth2PasswordRequestForm
 from fastapi_users.authentication import Strategy
-from fastapi_users.exceptions import UserNotExists
+from fastapi_users.exceptions import InvalidPasswordException, UserAlreadyExists, UserNotExists
 from fastapi_users.schemas import BaseUser, BaseUserCreate
 
 from cubebox.api.middleware.rate_limit import LOGIN_LIMIT, REGISTER_LIMIT, limiter
@@ -33,7 +33,17 @@ async def register(
     body: Annotated[UserCreate, Body()],
     user_manager: Annotated[UserManager, Depends(get_user_manager)],
 ) -> dict[str, str]:
-    user = await user_manager.create(body, safe=True, request=request)
+    try:
+        user = await user_manager.create(body, safe=True, request=request)
+    except UserAlreadyExists:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="REGISTER_USER_ALREADY_EXISTS"
+        ) from None
+    except InvalidPasswordException as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"code": "REGISTER_INVALID_PASSWORD", "reason": exc.reason},
+        ) from None
     return {"id": user.id, "email": user.email}
 
 
