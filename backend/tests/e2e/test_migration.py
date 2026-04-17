@@ -22,9 +22,7 @@ async def test_default_org_and_workspace_exist_after_migration() -> None:
     try:
         async with engine.connect() as conn:
             org_row = (
-                await conn.execute(
-                    text("SELECT id FROM organizations WHERE id = 'default-org'")
-                )
+                await conn.execute(text("SELECT id FROM organizations WHERE id = 'default-org'"))
             ).first()
             assert org_row is not None, "default-org missing — run alembic upgrade head"
             assert org_row[0] == "default-org"
