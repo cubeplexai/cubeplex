@@ -22,7 +22,7 @@ class AgentConfig(SQLModel, OrgScopedMixin, table=True):
         Index("ix_agent_configs_org_ws", "org_id", "workspace_id"),
     )
 
-    id: str = Field(default_factory=lambda: str(uuid7()), primary_key=True, max_length=32)
+    id: str = Field(default_factory=lambda: str(uuid7()), primary_key=True, max_length=36)
     system_prompt: str = Field(default="", sa_column=Column(Text, nullable=False))
     model_id: str = Field(max_length=128)
     skill_ids: list[str] | None = Field(default=None, sa_column=Column(JSON))

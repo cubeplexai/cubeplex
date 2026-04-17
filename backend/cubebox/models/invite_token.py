@@ -16,8 +16,8 @@ class InviteToken(SQLModel, table=True):
     __table_args__ = (Index("ix_invite_tokens_expires", "expires_at"),)
 
     token: str = Field(default_factory=lambda: str(uuid7()), primary_key=True, max_length=64)
-    workspace_id: str = Field(max_length=32)
+    workspace_id: str = Field(max_length=36)
     role: str = Field(max_length=32)
-    created_by: str = Field(max_length=32)
+    created_by: str = Field(max_length=36)
     expires_at: datetime = Field(default_factory=_default_expiry)
     used_at: datetime | None = Field(default=None)
