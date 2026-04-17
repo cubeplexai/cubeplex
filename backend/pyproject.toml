@@ -28,6 +28,9 @@ dependencies = [
     "uuid-utils>=0.14.1",
     "langgraph-checkpoint-mysql[aiomysql]>=3.0.0",
     "aioboto3>=15.5.0",
+    "fastapi-users[sqlalchemy]>=14.0",
+    "slowapi>=0.1.9",
+    "cryptography>=42.0",
 ]
 
 [project.optional-dependencies]
