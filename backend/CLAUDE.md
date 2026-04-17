@@ -77,6 +77,27 @@ Single test file: `uv run pytest tests/e2e/test_agents.py`
 - Message history: stored in LangGraph checkpointer thread state (no messages table)
 - Config via dynaconf: `ENV_FOR_DYNACONF=development|production`, env var prefix `CUBEBOX_`, e.g. `CUBEBOX_LLM__PROVIDER`
 
+## Auth & RBAC
+
+Identity model: `Organization` → `Workspace` → `Membership` → `User`. One user can belong to many workspaces via memberships; each membership carries a `Role` (`admin` | `member`). All business tables carry `(org_id, workspace_id)` via `OrgScopedMixin`.
+
+**Auth:** fastapi-users with JWT cookie strategy. Auth cookie name is `cubebox_auth`. Register/login endpoints are rate-limited via slowapi.
+
+**CSRF:** double-submit cookie pattern. A `cubebox_csrf` cookie is set on login; mutating requests (POST/PUT/PATCH/DELETE) must echo it in the `X-CSRF-Token` header whenever the `cubebox_auth` cookie is present.
+
+**Workspace scoping:** every business request requires an `X-Workspace-Id` header. The `request_context` dependency resolves it into a `RequestContext` (user + org_id + workspace_id + role). Missing header → 400; workspace not found → 404; not a member → 403.
+
+**Repository layer:** `OrgScopedMixin` + `ScopedRepository[T]` (`cubebox/repositories/base.py`) automatically filter every query by `(org_id, workspace_id)` — structural isolation, not an ACL check bolted on top. New business repositories should subclass `ScopedRepository`.
+
+**Endpoints:**
+- `POST /api/v1/auth/register`, `POST /api/v1/auth/login`, `POST /api/v1/auth/logout`, `GET /api/v1/auth/me`
+- `GET/POST /api/v1/workspaces`
+- `POST /api/v1/workspaces/{ws}/invites` (admin only), `POST /api/v1/workspaces/invites/accept`
+
+**Known P1 gaps (flagged `TODO(P2-auth)`):**
+- `create_workspace` accepts a client-supplied `org_id` with no org-membership check (P1 has no org-level membership concept yet).
+- `request_context` returns 404 before the role check, so an unauthorized workspace id returns 404 rather than 403. Intentional (avoids enumeration of workspace ids) but worth knowing.
+
 ## Environment Variables
 
 Required:
