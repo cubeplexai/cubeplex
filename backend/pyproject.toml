@@ -139,3 +139,8 @@ exclude_lines = [
     "if TYPE_CHECKING:",
     "@abstractmethod",
 ]
+
+[dependency-groups]
+dev = [
+    "aiosqlite>=0.20",
+]
