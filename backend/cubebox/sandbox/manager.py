@@ -73,17 +73,25 @@ class SandboxManager:
             readOnly=False,
         )
 
-    async def get_or_create(self, user_id: str) -> Sandbox:
-        """Get the user's active sandbox, or create a new one.
+    async def get_or_create(
+        self,
+        user_id: str,
+        *,
+        org_id: str,
+        workspace_id: str,
+    ) -> Sandbox:
+        """Get the user's active sandbox for this workspace, or create a new one.
 
         Flow:
-        1. Query DB for an existing RUNNING sandbox for this user
+        1. Query DB for an existing RUNNING sandbox for this user in this workspace
         2. If found, try to connect and health-check it
         3. If healthy, return it; otherwise mark terminated and create new
         4. Sync skills to newly created sandboxes
 
         Args:
             user_id: The user identifier
+            org_id: The active org scope
+            workspace_id: The active workspace scope
 
         Returns:
             An OpenSandbox backend instance ready for use
@@ -91,7 +99,7 @@ class SandboxManager:
         conn_config = self._build_connection_config()
 
         async with self._session_factory() as session:
-            repo = UserSandboxRepository(session)  # type: ignore[call-arg]
+            repo = UserSandboxRepository(session, org_id=org_id, workspace_id=workspace_id)
             record = await repo.get_active_by_user(user_id)
 
             if record:
@@ -160,16 +168,24 @@ class SandboxManager:
 
             return backend
 
-    async def release(self, sandbox_id: str) -> None:
+    async def release(
+        self,
+        sandbox_id: str,
+        *,
+        org_id: str,
+        workspace_id: str,
+    ) -> None:
         """Mark a sandbox as idle (update last activity time).
 
         Called after a request finishes. Does NOT kill the sandbox.
 
         Args:
             sandbox_id: The OpenSandbox sandbox ID
+            org_id: The active org scope
+            workspace_id: The active workspace scope
         """
         async with self._session_factory() as session:
-            repo = UserSandboxRepository(session)  # type: ignore[call-arg]
+            repo = UserSandboxRepository(session, org_id=org_id, workspace_id=workspace_id)
             await repo.update_activity_by_sandbox_id(sandbox_id)
             logger.debug("Released sandbox {}", sandbox_id)
 
@@ -177,12 +193,14 @@ class SandboxManager:
         """Find and terminate sandboxes that exceeded their TTL.
 
         This is meant to be called periodically by a background task.
+        Runs in system scope (across all workspaces) via the unscoped
+        `list_expired_system` classmethod, then re-instantiates a scoped
+        repo per record to mark it terminated.
         """
         conn_config = self._build_connection_config()
 
         async with self._session_factory() as session:
-            repo = UserSandboxRepository(session)  # type: ignore[call-arg]
-            expired = await repo.list_expired()
+            expired = await UserSandboxRepository.list_expired_system(session)
 
             if not expired:
                 return
@@ -206,7 +224,12 @@ class SandboxManager:
                         e,
                     )
 
-                await repo.mark_terminated(record.id)
+                scoped_repo = UserSandboxRepository(
+                    session,
+                    org_id=record.org_id,
+                    workspace_id=record.workspace_id,
+                )
+                await scoped_repo.mark_terminated(record.id)
 
     async def _sync_skills(self, backend: Sandbox) -> None:
         """Sync builtin skills to the sandbox container.

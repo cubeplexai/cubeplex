@@ -16,6 +16,8 @@ from sqlalchemy.pool import NullPool
 
 from cubebox.agents.schemas import AgentEvent, DoneEvent, StatusEvent
 from cubebox.api.exceptions import InternalError, InvalidInputError
+from cubebox.auth.context import RequestContext
+from cubebox.auth.dependencies import require_member
 from cubebox.db import get_session
 from cubebox.db.engine import _build_database_url, async_session_maker
 from cubebox.repositories import ConversationRepository
@@ -24,7 +26,12 @@ from cubebox.utils.time import utc_isoformat
 router = APIRouter(prefix="/conversations", tags=["conversations"])
 
 
-async def _update_conversation_timestamp(conversation_id: str) -> None:
+async def _update_conversation_timestamp(
+    conversation_id: str,
+    *,
+    org_id: str,
+    workspace_id: str,
+) -> None:
     """Update conversation timestamp using an isolated NullPool engine.
 
     Uses a dedicated connection so post-stream persistence does not
@@ -33,7 +40,9 @@ async def _update_conversation_timestamp(conversation_id: str) -> None:
     save_engine = create_async_engine(_build_database_url(), poolclass=NullPool)
     try:
         async with AsyncSession(save_engine, expire_on_commit=False) as save_session:
-            save_conv_repo = ConversationRepository(save_session)  # type: ignore[call-arg]
+            save_conv_repo = ConversationRepository(
+                save_session, org_id=org_id, workspace_id=workspace_id
+            )
             await save_conv_repo.update_timestamp(conversation_id)
     finally:
         await save_engine.dispose()
@@ -43,9 +52,10 @@ async def _update_conversation_timestamp(conversation_id: str) -> None:
 async def create_conversation(
     title: str,
     session: Annotated[AsyncSession, Depends(get_session)],
+    ctx: Annotated[RequestContext, Depends(require_member)],
 ) -> dict[str, object]:
     """Create a new conversation."""
-    repo = ConversationRepository(session)  # type: ignore[call-arg]
+    repo = ConversationRepository(session, org_id=ctx.org_id, workspace_id=ctx.workspace_id)
     conversation = await repo.create(title=title)
     return {
         "id": conversation.id,
@@ -59,9 +69,10 @@ async def create_conversation(
 async def get_conversation(
     conversation_id: str,
     session: Annotated[AsyncSession, Depends(get_session)],
+    ctx: Annotated[RequestContext, Depends(require_member)],
 ) -> dict[str, object]:
     """Get a conversation by ID."""
-    repo = ConversationRepository(session)  # type: ignore[call-arg]
+    repo = ConversationRepository(session, org_id=ctx.org_id, workspace_id=ctx.workspace_id)
     conversation = await repo.get_by_id(conversation_id)
     if not conversation:
         raise HTTPException(
@@ -79,11 +90,12 @@ async def get_conversation(
 @router.get("")
 async def list_conversations(
     session: Annotated[AsyncSession, Depends(get_session)],
+    ctx: Annotated[RequestContext, Depends(require_member)],
     limit: int = 20,
     offset: int = 0,
 ) -> dict[str, object]:
     """List conversations with pagination."""
-    repo = ConversationRepository(session)  # type: ignore[call-arg]
+    repo = ConversationRepository(session, org_id=ctx.org_id, workspace_id=ctx.workspace_id)
     conversations, total = await repo.list_all(limit=limit, offset=offset)
     return {
         "conversations": [
@@ -106,9 +118,10 @@ async def update_conversation(
     conversation_id: str,
     title: str,
     session: Annotated[AsyncSession, Depends(get_session)],
+    ctx: Annotated[RequestContext, Depends(require_member)],
 ) -> dict[str, object]:
     """Update conversation title."""
-    repo = ConversationRepository(session)  # type: ignore[call-arg]
+    repo = ConversationRepository(session, org_id=ctx.org_id, workspace_id=ctx.workspace_id)
     conversation = await repo.update_title(conversation_id, title)
     if not conversation:
         raise HTTPException(
@@ -127,9 +140,10 @@ async def update_conversation(
 async def delete_conversation(
     conversation_id: str,
     session: Annotated[AsyncSession, Depends(get_session)],
+    ctx: Annotated[RequestContext, Depends(require_member)],
 ) -> None:
     """Delete a conversation."""
-    repo = ConversationRepository(session)  # type: ignore[call-arg]
+    repo = ConversationRepository(session, org_id=ctx.org_id, workspace_id=ctx.workspace_id)
     deleted = await repo.delete(conversation_id)
     if not deleted:
         raise HTTPException(
@@ -265,13 +279,16 @@ async def send_message(
     conversation_id: str,
     request_obj: SendMessageRequest,
     raw_request: Request,
+    ctx: Annotated[RequestContext, Depends(require_member)],
 ) -> StreamingResponse:
     """Send a user message and stream the assistant response via SSE."""
     # Use a short-lived session for the pre-check only.
     # Do NOT use Depends(get_session) here — it would hold a pooled connection
     # for the entire SSE stream duration, causing connection leaks on cancellation.
     async with async_session_maker() as session:
-        conv_repo = ConversationRepository(session)  # type: ignore[call-arg]
+        conv_repo = ConversationRepository(
+            session, org_id=ctx.org_id, workspace_id=ctx.workspace_id
+        )
         conversation = await conv_repo.get_by_id(conversation_id)
     if not conversation:
         raise HTTPException(
@@ -285,7 +302,9 @@ async def send_message(
             details="Please provide a non-empty content string",
         )
 
-    user_id: str = getattr(raw_request.state, "user_id", "anonymous")
+    user_id: str = ctx.user.id
+    org_id: str = ctx.org_id
+    workspace_id: str = ctx.workspace_id
 
     async def event_generator() -> AsyncIterator[str]:
         from cubebox.middleware.subagents import subagent_event_queue
@@ -349,6 +368,8 @@ async def send_message(
                         sandbox = LazySandbox(
                             manager=sandbox_manager,
                             user_id=user_id,
+                            org_id=org_id,
+                            workspace_id=workspace_id,
                             workdir=config.get("sandbox.workdir", "/workspace"),
                         )
                     except Exception as e:
@@ -389,6 +410,8 @@ async def send_message(
                 tools=tools,
                 sandbox=sandbox,
                 conversation_id=conversation_id,
+                org_id=org_id,
+                workspace_id=workspace_id,
                 skills=raw_request.app.state.skills,
                 checkpointer=checkpointer,
                 citation_configs=all_citation_configs,
@@ -649,12 +672,16 @@ async def send_message(
 
                 if isinstance(sandbox, LazySandbox) and sandbox.initialized:
                     try:
-                        await sandbox._manager.release(sandbox.id)
+                        await sandbox._manager.release(
+                            sandbox.id, org_id=org_id, workspace_id=workspace_id
+                        )
                     except Exception as e:
                         logger.warning("Error releasing sandbox: {}", e)
                 elif sandbox_manager and not isinstance(sandbox, LazySandbox):
                     try:
-                        await sandbox_manager.release(sandbox.id)
+                        await sandbox_manager.release(
+                            sandbox.id, org_id=org_id, workspace_id=workspace_id
+                        )
                     except Exception as e:
                         logger.warning("Error releasing sandbox: {}", e)
 
@@ -667,7 +694,9 @@ async def send_message(
             # Only emit terminal persistence/done events for completed streams.
             if not request_cancelled:
                 try:
-                    await _update_conversation_timestamp(conversation_id)
+                    await _update_conversation_timestamp(
+                        conversation_id, org_id=org_id, workspace_id=workspace_id
+                    )
                 except Exception as e:
                     logger.warning("Error updating conversation timestamp: {}", e)
 
@@ -686,9 +715,10 @@ async def list_messages(
     conversation_id: str,
     raw_request: Request,
     session: Annotated[AsyncSession, Depends(get_session)],
+    ctx: Annotated[RequestContext, Depends(require_member)],
 ) -> dict[str, object]:
     """List messages in a conversation, read from LangGraph thread state."""
-    conv_repo = ConversationRepository(session)  # type: ignore[call-arg]
+    conv_repo = ConversationRepository(session, org_id=ctx.org_id, workspace_id=ctx.workspace_id)
     conversation = await conv_repo.get_by_id(conversation_id)
     if not conversation:
         raise HTTPException(

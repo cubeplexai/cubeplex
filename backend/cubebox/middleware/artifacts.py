@@ -49,6 +49,8 @@ def _guess_mime_type(path: str, entry_file: str | None) -> str | None:
 def _create_save_artifact_tool(
     sandbox: Sandbox,
     conversation_id: str,
+    org_id: str,
+    workspace_id: str,
 ) -> BaseTool:
     """Build the save_artifact tool backed by sandbox + DB."""
 
@@ -73,8 +75,10 @@ def _create_save_artifact_tool(
         from cubebox.repositories import ArtifactRepository, ArtifactVersionRepository
 
         async with async_session_maker() as session:
-            repo = ArtifactRepository(session)  # type: ignore[call-arg]
-            version_repo = ArtifactVersionRepository(session)  # type: ignore[call-arg]
+            repo = ArtifactRepository(session, org_id=org_id, workspace_id=workspace_id)
+            version_repo = ArtifactVersionRepository(
+                session, org_id=org_id, workspace_id=workspace_id
+            )
 
             # Auto-match: if no artifact_id given, look for an existing
             # artifact at the same path so we update instead of duplicating.
@@ -163,10 +167,21 @@ def _create_save_artifact_tool(
 class ArtifactMiddleware(AgentMiddleware[Any, Any, Any]):
     """Registers save_artifact tool and injects artifact prompt into system message."""
 
-    def __init__(self, *, sandbox: Sandbox, conversation_id: str) -> None:
+    def __init__(
+        self,
+        *,
+        sandbox: Sandbox,
+        conversation_id: str,
+        org_id: str,
+        workspace_id: str,
+    ) -> None:
         self.sandbox = sandbox
         self.conversation_id = conversation_id
-        self.tools: Sequence[BaseTool] = [_create_save_artifact_tool(sandbox, conversation_id)]
+        self.org_id = org_id
+        self.workspace_id = workspace_id
+        self.tools: Sequence[BaseTool] = [
+            _create_save_artifact_tool(sandbox, conversation_id, org_id, workspace_id)
+        ]
         # Register content_type so stream.py can label tool results
         get_registry().register_content_type("save_artifact", "artifact")
 
@@ -176,7 +191,7 @@ class ArtifactMiddleware(AgentMiddleware[Any, Any, Any]):
         from cubebox.repositories import ArtifactRepository
 
         async with async_session_maker() as session:
-            repo = ArtifactRepository(session)  # type: ignore[call-arg]
+            repo = ArtifactRepository(session, org_id=self.org_id, workspace_id=self.workspace_id)
             artifacts = await repo.list_by_conversation(self.conversation_id)
 
         if not artifacts:

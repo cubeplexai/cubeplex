@@ -11,6 +11,8 @@ from fastapi.responses import Response
 from loguru import logger
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from cubebox.auth.context import RequestContext
+from cubebox.auth.dependencies import require_member
 from cubebox.db import get_session
 from cubebox.objectstore import get_objectstore_client
 from cubebox.repositories import ArtifactRepository, ArtifactVersionRepository
@@ -22,9 +24,10 @@ router = APIRouter(prefix="/conversations/{conversation_id}/artifacts", tags=["a
 async def list_artifacts(
     conversation_id: str,
     session: Annotated[AsyncSession, Depends(get_session)],
+    ctx: Annotated[RequestContext, Depends(require_member)],
 ) -> dict[str, object]:
     """List all artifacts for a conversation."""
-    repo = ArtifactRepository(session)  # type: ignore[call-arg]
+    repo = ArtifactRepository(session, org_id=ctx.org_id, workspace_id=ctx.workspace_id)
     artifacts = await repo.list_by_conversation(conversation_id)
     return {
         "artifacts": [a.to_dict() for a in artifacts],
@@ -37,9 +40,10 @@ async def get_artifact(
     conversation_id: str,
     artifact_id: str,
     session: Annotated[AsyncSession, Depends(get_session)],
+    ctx: Annotated[RequestContext, Depends(require_member)],
 ) -> dict[str, object]:
     """Get a single artifact by ID."""
-    repo = ArtifactRepository(session)  # type: ignore[call-arg]
+    repo = ArtifactRepository(session, org_id=ctx.org_id, workspace_id=ctx.workspace_id)
     artifact = await repo.get_by_id(artifact_id)
     if not artifact or artifact.conversation_id != conversation_id:
         raise HTTPException(
@@ -54,9 +58,10 @@ async def list_artifact_versions(
     conversation_id: str,
     artifact_id: str,
     session: Annotated[AsyncSession, Depends(get_session)],
+    ctx: Annotated[RequestContext, Depends(require_member)],
 ) -> dict[str, object]:
     """List all versions of an artifact."""
-    repo = ArtifactRepository(session)  # type: ignore[call-arg]
+    repo = ArtifactRepository(session, org_id=ctx.org_id, workspace_id=ctx.workspace_id)
     artifact = await repo.get_by_id(artifact_id)
     if not artifact or artifact.conversation_id != conversation_id:
         raise HTTPException(
@@ -64,7 +69,9 @@ async def list_artifact_versions(
             detail=f"Artifact {artifact_id} not found",
         )
 
-    version_repo = ArtifactVersionRepository(session)  # type: ignore[call-arg]
+    version_repo = ArtifactVersionRepository(
+        session, org_id=ctx.org_id, workspace_id=ctx.workspace_id
+    )
     versions = await version_repo.list_by_artifact(artifact_id)
     return {"versions": [v.to_dict() for v in versions], "total": len(versions)}
 
@@ -74,10 +81,11 @@ async def download_artifact(
     conversation_id: str,
     artifact_id: str,
     session: Annotated[AsyncSession, Depends(get_session)],
+    ctx: Annotated[RequestContext, Depends(require_member)],
     version: int | None = Query(default=None),
 ) -> Response:
     """Download an artifact from object storage."""
-    repo = ArtifactRepository(session)  # type: ignore[call-arg]
+    repo = ArtifactRepository(session, org_id=ctx.org_id, workspace_id=ctx.workspace_id)
     artifact = await repo.get_by_id(artifact_id)
     if not artifact or artifact.conversation_id != conversation_id:
         raise HTTPException(
@@ -143,10 +151,11 @@ async def preview_artifact_file(
     artifact_id: str,
     file_path: str,
     session: Annotated[AsyncSession, Depends(get_session)],
+    ctx: Annotated[RequestContext, Depends(require_member)],
     version: int | None = Query(default=None),
 ) -> Response:
     """Serve a single file from an artifact for iframe preview."""
-    repo = ArtifactRepository(session)  # type: ignore[call-arg]
+    repo = ArtifactRepository(session, org_id=ctx.org_id, workspace_id=ctx.workspace_id)
     artifact = await repo.get_by_id(artifact_id)
     if not artifact or artifact.conversation_id != conversation_id:
         raise HTTPException(

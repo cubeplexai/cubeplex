@@ -27,6 +27,8 @@ class LazySandbox(Sandbox):
     Args:
         manager: SandboxManager instance for get_or_create / release.
         user_id: The user to create the sandbox for.
+        org_id: Active org scope for sandbox persistence.
+        workspace_id: Active workspace scope for sandbox persistence.
         workdir: Working directory (used for prompt injection before sandbox exists).
     """
 
@@ -35,10 +37,14 @@ class LazySandbox(Sandbox):
         *,
         manager: SandboxManager,
         user_id: str,
+        org_id: str,
+        workspace_id: str,
         workdir: str = "/workspace",
     ) -> None:
         self._manager = manager
         self._user_id = user_id
+        self._org_id = org_id
+        self._workspace_id = workspace_id
         self._workdir = workdir
         self._sandbox: Sandbox | None = None
         self._lock = asyncio.Lock()
@@ -77,7 +83,11 @@ class LazySandbox(Sandbox):
                 return self._sandbox
 
             logger.info("Lazy sandbox: creating sandbox for user {}", self._user_id)
-            self._sandbox = await self._manager.get_or_create(self._user_id)
+            self._sandbox = await self._manager.get_or_create(
+                self._user_id,
+                org_id=self._org_id,
+                workspace_id=self._workspace_id,
+            )
             logger.info("Lazy sandbox: ready (id={})", self._sandbox.id)
             return self._sandbox
 
