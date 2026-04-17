@@ -28,7 +28,9 @@ async def _seed_csrf(client) -> str:
     in the `X-CSRF-Token` header on subsequent mutating requests.
     """
     await client.get("/api/v1/auth/me")
-    return client.cookies.get("cubebox_csrf") or ""
+    csrf = client.cookies.get("cubebox_csrf")
+    assert csrf, "cubebox_csrf cookie not set after GET /api/v1/auth/me"
+    return csrf
 
 
 @pytest.mark.asyncio
@@ -73,9 +75,25 @@ async def test_conversation_invisible_to_other_workspace(unauthenticated_memory_
     assert r.status_code == 201, r.text
     conv_id = r.json()["id"]
 
+    # Positive control: A must be able to GET their own conversation in ws_a.
+    # Without this, a silent bug (e.g. creation landing in the wrong workspace,
+    # or the endpoint returning a stub id without persisting) would make B's
+    # 404 pass for the wrong reason.
+    r = await client.get(
+        f"/api/v1/conversations/{conv_id}",
+        headers={"X-Workspace-Id": ws_a},
+    )
+    assert r.status_code == 200, f"A must see their own conversation: {r.text}"
+
     # A logs out.
     r = await client.post("/api/v1/auth/logout", headers={"X-CSRF-Token": csrf_a})
     assert r.status_code == 204, r.text
+
+    # Clear the cookie jar so B starts from a clean slate. Logout clears the
+    # auth cookie but not necessarily the CSRF cookie; if the server doesn't
+    # rotate CSRF on B's login, _seed_csrf could otherwise return A's stale
+    # token and mask a CSRF-rotation bug.
+    client.cookies.clear()
 
     # --- User B: login, create workspace W_B, try to read A's conversation ---
     r = await client.post("/api/v1/auth/login", data={"username": b_email, "password": pw})
@@ -92,6 +110,8 @@ async def test_conversation_invisible_to_other_workspace(unauthenticated_memory_
     headers_b = {"X-CSRF-Token": csrf_b, "X-Workspace-Id": ws_b}
 
     # Direct read must 404 — structurally invisible, not a 403 auth error.
+    # 404 because ScopedRepository filters by (org_id, workspace_id) at the
+    # query layer — the row is invisible, not merely forbidden.
     r = await client.get(f"/api/v1/conversations/{conv_id}", headers=headers_b)
     assert r.status_code == 404, r.text
 
