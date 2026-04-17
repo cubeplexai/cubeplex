@@ -25,3 +25,4 @@ export {
   type ToolDetailStore,
 } from './toolDetailStore'
 export { useAuthStore, type AuthStore } from './authStore'
+export { useWorkspaceStore, type WorkspaceStore } from './workspaceStore'
