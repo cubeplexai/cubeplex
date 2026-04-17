@@ -52,23 +52,22 @@ cubebox 的定位是 **Agent 基础设施层**，三个硬差异化点：
 ```
 ┌─────────────── cubebox (OSS) ───────────────┐       ┌────── cubebox-admin (企业版) ──────┐
 │  Agent 执行 (LangGraph + 中间件)             │       │  多租户 tenant model               │
-│  Workspace / Auth / 2-role RBAC             │       │  Tracing ingestion (OTLP → ES)    │
-│  Multi-model + Skills + MCP                 │──OTLP─▶│  Audit log 收集 + 查询             │
-│  本地 Credential Store                       │──HTTP─▶│  中央 Credential 管理 + push      │
-│  AdminClient (feature-flag 可关闭每项集成)   │◀─HTTP─│  Workspace 聚合视图 (跨 ws)        │
-│     - admin.tracing.enabled                 │       │  cubetrace viewer                 │
+│  Workspace / Auth / 2-role RBAC             │──OTLP─▶│  Tracing ingestion (OTLP → ES)    │
+│  Multi-model + Skills + MCP                 │       │  Audit log 收集 + 查询             │
+│  本地 Credential Store (唯一权威源)          │──HTTP─▶│  Workspace 聚合视图 (跨 ws)        │
+│  AdminClient (feature-flag 可关闭每项集成)   │       │  cubetrace viewer                 │
+│     - admin.tracing.enabled                 │       │  (仅观察者角色, 不回推)            │
 │     - admin.audit.enabled                   │       │                                   │
-│     - admin.credential_sync.enabled         │       │                                   │
 │                                             │       │                                   │
-│  Postgres + Redis (轻量)                    │       │  Postgres + Redis + ES            │
+│  MySQL + Redis (轻量)                       │       │  MySQL + Redis + ES               │
 └─────────────────────────────────────────────┘       └────────────────────────────────────┘
 ```
 
 ### 2.3 核心原则
 
-1. **用户端 runtime 不依赖管理端**：所有核心功能（agent 运行、credential 使用）在管理端离线时正常工作。
-2. **管理端是同步源，不是服务提供者**：credential 在管理端编辑 → push 到用户端，不是每次运行时拉取。
-3. **事件单向流动**：audit / tracing 从用户端 → 管理端，方向永远是流出，不涉及反向查询。
+1. **用户端 runtime 不依赖管理端**：所有核心功能（agent 运行、credential 创建/使用/rotate）在管理端离线时正常工作。
+2. **事件单向流动**：audit / tracing 从用户端 → 管理端，方向永远是流出。管理端是**观察者**，不回推任何数据到用户端 runtime 路径。
+3. **用户端是所有 runtime 数据的权威源**：credential、agent 配置、session、cost 数据都在用户端产生和存储。M1 管理端通过 audit 间接观察，不持有副本。
 4. **Lockstep release**：两仓同版本号发布，不承诺跨版本兼容（M1 简化，M2+ 再引入版本策略）。
 
 ## 3. M1 Scope
@@ -112,21 +111,21 @@ cubebox 的定位是 **Agent 基础设施层**，三个硬差异化点：
 24. 引用解析：agent 加载时 framework 按 ref 查本地 store
 25. 解析失败即 agent 启动失败（fail-fast）
 26. 每次解析写 audit 事件
-27. CRUD API + 本地 UI
+27. CRUD API + 本地 UI（创建 / rotate / delete）
 
-**Cost tracking**：
-28. `CostRecord` 表 `(session_id, model_id, input_tokens, output_tokens, cost_usd, ts)`
-29. SSE 流里聚合 `usage_metadata`（代码位点已存在：`stream.py:96-109`）
-30. Session 详情 UI 显示 cost
+**Token usage 数据采集（无独立 cost 表）**：
+28. 现有 `stream.py:96-109` 已提取 `usage_metadata`（input/output tokens）
+29. 将 token 数和 model_id 塞进 `agent.run.completed` audit 事件的 `metadata` 字段
+30. M1 不做 cost 计算和 UI；M2 管理端从 audit 聚合 dashboard
 
 **AdminClient 集成层**：
-31. 统一的 `AdminClient` 抽象，封装所有到管理端的调用
-32. 三个独立 feature flag：`admin.tracing.enabled` / `admin.audit.enabled` / `admin.credential_sync.enabled`
+31. 统一的 `AdminClient` 抽象，封装所有到管理端的 outbound 调用
+32. 两个独立 feature flag：`admin.tracing.enabled` / `admin.audit.enabled`
 33. 未配置管理端 endpoint → 相关集成全部 no-op（不降级到本地备份）
-34. 被动接收管理端的 credential push（可关闭）
+34. 用户端只产生 outbound 流量，**不接受任何管理端 inbound 调用**
 
 **On-prem 打包**：
-35. `docker-compose.yml`：backend + frontend + Postgres + Redis
+35. `docker-compose.yml`：backend + frontend + MySQL + Redis
 36. `.env.example` + setup 脚本
 37. README：10 分钟部署到 VPC
 
@@ -148,24 +147,21 @@ cubebox 的定位是 **Agent 基础设施层**，三个硬差异化点：
 9. `POST /api/v1/audit/events` 接收用户端推送
 10. 简单列表 UI：按 workspace / user / action / 时间过滤
 
-**Credential 中央管理**：
-11. 中央 credential 管理表（跨 tenant 可见）
-12. 管理 UI：CRUD、rotation、revoke
-13. Push sync：编辑 credential → POST 到注册的用户端 deployment
-14. 用户端注册 / heartbeat 机制
-15. Push 失败处理：simple exponential backoff（1s/2s/4s 三次），失败记录到管理端"sync failures"列表
-
-**Workspace 聚合视图**：
-16. 跨 workspace 列表：所有 org、所有 workspace、所有用户
-17. Workspace 详情：成员、agent 配置、近期 session、近期 cost
-18. 基本的用量统计（按 workspace / 模型 / 天）
+**Workspace 聚合视图**（基于 audit + tracing 数据）：
+11. 跨 workspace 列表：所有 org、所有 workspace、所有用户（从 audit 事件聚合）
+12. Workspace 详情：成员活动、近期 session、近期 token usage（从 audit `metadata` 聚合）
+13. Credential 审计视图：按 `name` 列出哪些 credential 被创建/使用/rotate/delete（**只看事件，不见 value**）
+14. **不做**：credential 中央管理、rotation、revoke、push sync、deployment 注册/heartbeat（全部 M2+）
 
 **On-prem 打包**：
-19. `docker-compose.yml`：backend + frontend + Postgres + Redis + ES（单节点精简配置）
-20. README：10-15 分钟部署
+15. `docker-compose.yml`：backend + frontend + MySQL + Redis + ES（单节点精简配置）
+16. README：10-15 分钟部署
 
 ### 3.3 明确不做（M1 Out-of-Scope）
 
+- ❌ **管理端中央 credential 管理 + push sync**（→ M2）
+- ❌ **Cost dashboard + CostRecord 聚合表**（→ M2，M1 数据埋在 audit metadata 里）
+- ❌ Deployment 注册 / heartbeat（→ M2，有 central mgmt 时再做）
 - ❌ PDF 报告导出（→ M3）
 - ❌ Knowledge base / RAG（→ M2）
 - ❌ Approval workflow（→ M2）
@@ -200,20 +196,36 @@ admin:
     enabled: true
   audit:
     enabled: true
-  credential_sync:
-    enabled: true
 ```
 
-管理端用 `tenant_key` 识别用户端归属的 tenant 并 scope 所有请求。
+管理端用 `tenant_key` 识别用户端归属的 tenant 并 scope 所有请求。**没有反向认证**（管理端不发起 inbound 到用户端）。
 
 ### 4.3 Tracing 契约
 
-- 协议：**OpenTelemetry OTLP/HTTP**（标准）
-- Endpoint: `POST {admin_endpoint}/v1/traces`（OTLP 标准路径）
-- Span association properties（注入到每个 span）：
-  - `org_id` / `workspace_id` / `user_id` / `session_id`
-  - `credential_id_hash`（若涉及）——**仅 hash，永不明文**
-- 失败降级：SDK 的标准 drop-on-full-queue 行为，不阻塞 agent 执行
+**用户端只使用标准开源 SDK**，无任何 cubebox 私有 tracing 代码：
+- `opentelemetry-python`（OTel 官方 OSS）
+- `traceloop-sdk`（TraceLoop 官方 OSS）
+
+用户端代码模式：
+```python
+from traceloop.sdk import Traceloop
+Traceloop.init(api_endpoint=config.admin.endpoint + "/v1/traces")
+Traceloop.set_association_properties({
+    "org_id": ctx.org_id,
+    "workspace_id": ctx.ws_id,
+    "user_id": ctx.user.id,
+    "session_id": ctx.session_id,
+    "tenant_key_hash": hash(config.admin.tenant_key),
+})
+```
+
+**协议**：OpenTelemetry OTLP/HTTP（标准）
+**Endpoint**：`POST {admin_endpoint}/v1/traces`（OTLP 标准路径，带 `X-Tenant-Key` header）
+**`credential_id_hash`**：若涉及 credential 解析，在 span attribute 里仅存 hash（M1 interim 方案下 credential 明文短暂进程内存，但永不进 span）
+**失败降级**：SDK 标准 drop-on-full-queue 行为，不阻塞 agent
+**副作用**：因为用了标准 OTLP，客户可以把 endpoint 指向任意 OTel 后端（Jaeger / Datadog / Honeycomb / 自建 Grafana Tempo），**这是差异化卖点**，不是 workaround
+
+**管理端 ingestion**（私有）：OTLP receiver + span transformer + ES ingest + cubetrace viewer。移植自 `~/cubemanus/src/tracing`，是 cubebox-admin 的核心 IP 之一。
 
 ### 4.4 Audit 事件契约
 
@@ -245,50 +257,17 @@ Content-Type: application/json
 - **队列上限 10k 条**，溢出时丢弃最旧事件并 WARN 日志。M2 升级为本地持久化日志以避免丢失
 - 用户端本身不留 audit 表（决定 1）；`admin.audit.enabled=false` 时 `AuditEmitter` 成为 no-op
 
-### 4.5 Credential Sync 契约（Push 方向）
+### 4.5 ~~Credential Sync 契约~~（M1 不做，→ M2）
 
-```
-POST {user_app_endpoint}/admin/v1/credentials/sync
-X-Admin-Key: <admin_push_key>   # 用户端启动时生成，注册给管理端
-Content-Type: application/json
+M1 credentials 完全由用户端本地管理，管理端不做 credential push。  
+管理端仅通过 audit 事件观察 credential 生命周期（create / resolved / rotate / delete，不见 value）。  
+参见 Section 14 M2 预览中的"管理端中央 credential 管理"。
 
-{
-  "operation": "upsert" | "delete",
-  "credential": {
-    "id": "cred_...",
-    "workspace_id": "ws_...",
-    "name": "openai_api_key",
-    "value": "...",             // 明文 value（仅在 TLS 通道内传输）
-    "updated_at": "..."
-  }
-}
-```
+### 4.6 ~~用户端注册 / Heartbeat 契约~~（M1 不做，→ M2）
 
-**传输安全**：
-- **依赖 TLS（HTTPS）作为传输加密**——这是 M1 的取舍
-- 用户端收到后立即用本地 master key (`CUBEBOX_CREDENTIAL_MASTER_KEY`) 加密落库（`credentials.encrypted_value`）
-- 明文仅在以下时刻存在：管理端 DB → 管理端服务进程 → HTTPS → 用户端服务进程 → 本地加密落库
-- **管理端必须强制 HTTPS**（M1 部署文档里明确要求）
-- M2 升级：用户端注册时上交公钥，管理端用公钥加密后再传（消除对 TLS 的纯信任）
-
-### 4.6 用户端注册 / Heartbeat 契约
-
-```
-POST {admin_endpoint}/api/v1/deployments/register
-X-Tenant-Key: <tenant_key>
-{
-  "deployment_id": "dep_...",
-  "user_app_endpoint": "https://cubebox.acme-internal.com",
-  "admin_push_key": "...",      // 管理端使用此 key push credential
-  "version": "0.1.0"
-}
-
-POST {admin_endpoint}/api/v1/deployments/heartbeat
-X-Tenant-Key: <tenant_key>
-{ "deployment_id": "...", "ts": "...", "stats": {...} }
-```
-
-Heartbeat 每 30 秒一次，管理端据此判断 deployment 是否在线。
+因 M1 管理端不回推任何数据到用户端，也无需精确知道 deployment 在线状态。  
+管理端通过第一次收到的 audit 事件或 trace span 隐式"发现"一个 tenant 的活动 deployment。  
+正式注册 / heartbeat 机制在 M2 加入 central credential 管理时再设计。
 
 ## 5. Data Model
 
@@ -327,40 +306,93 @@ class ScopedRepository[T]:
     def _base_query(self, ctx: RequestContext) -> Select[T]: ...
 ```
 
-**使用 mixin 的表**：`Conversation, Artifact, ArtifactVersion, UserSandbox, AgentConfig, Credential, CostRecord`
+**使用 mixin 的表**：`Conversation, Artifact, ArtifactVersion, UserSandbox, AgentConfig, Credential`
 
 **不使用 mixin 的表**（它们本身就是层级）：`User, Organization, Workspace, Membership`
 
-### 5.3 M1 新增表
+### 5.3 M1 新增表（MySQL 8 语法）
 
 ```sql
 -- Identity
-users (id, email, password_hash, created_at)
-organizations (id, name, created_at)
-workspaces (id, org_id, name, created_at)
-memberships (user_id, workspace_id, role, created_at)
+CREATE TABLE users (
+    id VARCHAR(32) PRIMARY KEY,
+    email VARCHAR(255) UNIQUE NOT NULL,
+    password_hash VARCHAR(255) NOT NULL,
+    created_at DATETIME NOT NULL
+);
 
--- Agent
-agent_configs (id, org_id, workspace_id, system_prompt, model_id,
-               skill_ids_json, mcp_server_ids_json, updated_at)
+CREATE TABLE organizations (
+    id VARCHAR(32) PRIMARY KEY,
+    name VARCHAR(255) NOT NULL,
+    created_at DATETIME NOT NULL
+);
 
--- Credentials
-credentials (id, org_id, workspace_id, name, encrypted_value,
-             created_by, created_at, updated_at, UNIQUE(workspace_id, name))
+CREATE TABLE workspaces (
+    id VARCHAR(32) PRIMARY KEY,
+    org_id VARCHAR(32) NOT NULL,
+    name VARCHAR(255) NOT NULL,
+    created_at DATETIME NOT NULL,
+    INDEX idx_org (org_id)
+);
 
--- Cost
-cost_records (id, org_id, workspace_id, session_id, model_id,
-              input_tokens, output_tokens, cost_usd, ts)
+CREATE TABLE memberships (
+    user_id VARCHAR(32) NOT NULL,
+    workspace_id VARCHAR(32) NOT NULL,
+    role VARCHAR(32) NOT NULL,        -- 'admin' | 'member'
+    created_at DATETIME NOT NULL,
+    PRIMARY KEY (user_id, workspace_id)
+);
+
+-- Agent config (1:1 with Workspace in M1)
+CREATE TABLE agent_configs (
+    id VARCHAR(32) PRIMARY KEY,
+    org_id VARCHAR(32) NOT NULL,
+    workspace_id VARCHAR(32) NOT NULL,
+    system_prompt TEXT,
+    model_id VARCHAR(128) NOT NULL,
+    skill_ids JSON,                   -- MySQL 8 JSON
+    mcp_server_ids JSON,
+    updated_at DATETIME NOT NULL,
+    UNIQUE KEY uk_ws (workspace_id),  -- 1:1 enforcement
+    INDEX idx_org_ws (org_id, workspace_id)
+);
+
+-- Credentials (local store only, no central management in M1)
+CREATE TABLE credentials (
+    id VARCHAR(32) PRIMARY KEY,
+    org_id VARCHAR(32) NOT NULL,
+    workspace_id VARCHAR(32) NOT NULL,
+    name VARCHAR(128) NOT NULL,
+    encrypted_value VARBINARY(2048) NOT NULL,   -- AES-256-GCM
+    nonce VARBINARY(12) NOT NULL,
+    created_by VARCHAR(32) NOT NULL,
+    created_at DATETIME NOT NULL,
+    updated_at DATETIME NOT NULL,
+    UNIQUE KEY uk_ws_name (workspace_id, name),
+    INDEX idx_org_ws (org_id, workspace_id)
+);
 
 -- Invite tokens
-invite_tokens (token, workspace_id, role, created_by, expires_at, used_at)
+CREATE TABLE invite_tokens (
+    token VARCHAR(64) PRIMARY KEY,
+    workspace_id VARCHAR(32) NOT NULL,
+    role VARCHAR(32) NOT NULL,
+    created_by VARCHAR(32) NOT NULL,
+    expires_at DATETIME NOT NULL,
+    used_at DATETIME NULL,
+    INDEX idx_expires (expires_at)
+);
+
+-- NO cost_records table in M1
+-- Token usage (input_tokens, output_tokens, model_id) rides on audit events
+-- in 'agent.run.completed' metadata. M2 admin console aggregates to dashboard.
 ```
 
 ### 5.4 迁移策略
 
 - 单个 migration 文件完成所有 M1 schema 变更
 - 步骤：
-  1. 创建新表（orgs, workspaces, users, memberships, agent_configs, credentials, cost_records, invite_tokens）
+  1. 创建新表（orgs, workspaces, users, memberships, agent_configs, credentials, invite_tokens）
   2. 给现有表加 `org_id / workspace_id` 列（nullable）
   3. 插入一个默认 org（`default-org`）和默认 workspace（`default-ws`）
   4. 回填所有现有 `conversations / artifacts / user_sandboxes` 到默认 workspace
@@ -373,19 +405,27 @@ invite_tokens (token, workspace_id, role, created_by, expires_at, used_at)
 ### 6.1 架构
 
 ```
-┌─────────────── 用户端 ───────────────┐         ┌──── 管理端 ────┐
-│  credentials 表（workspace 级）      │◀────────│ push sync      │
-│  ENV master key 加密                 │         │ (可关闭)        │
-│                                      │         │                │
-│  CredentialResolver                  │         │ 中央 UI CRUD   │
-│     ├─ agent 加载时按 ref 解析明文   │         │                │
-│     ├─ 写 audit 事件                 │         └────────────────┘
-│     └─ 失败 fail-fast (不 fallback)  │
-│                                      │
-│  Tool/MCP config 示例:               │
-│   { "auth": {"credential_ref":       │
-│       "openai_key"} }                │
-└──────────────────────────────────────┘
+┌─────────────── 用户端（唯一权威源） ───────────────┐
+│  credentials 表（workspace 级）                    │
+│  ENV master key 加密 (AES-256-GCM)                 │
+│                                                    │
+│  本地 UI: CRUD / rotate / delete                   │
+│                                                    │
+│  CredentialResolver                                │
+│     ├─ agent 加载时按 ref 解析明文                 │
+│     ├─ 写 audit 事件 → 管理端观察                  │
+│     └─ 失败 fail-fast (不 fallback)                │
+│                                                    │
+│  Tool/MCP config 示例:                             │
+│   { "auth": {"credential_ref": "openai_key"} }     │
+└────────────────────────────────────────────────────┘
+                    │ audit 事件（create/resolved/rotate/delete，不含 value）
+                    ▼
+       ┌──── 管理端（观察者） ────┐
+       │  仅 audit 视图            │
+       │  看不到 value             │
+       │  M1 不做中央管理           │
+       └───────────────────────────┘
 ```
 
 ### 6.2 Ref 解析时机
@@ -400,19 +440,17 @@ invite_tokens (token, workspace_id, role, created_by, expires_at, used_at)
 - 加密算法：AES-256-GCM（每个 credential 一个 random nonce）
 - Rotation：M2 设计（M1 不支持 rotation，密钥丢失 = credential 丢失）
 
-### 6.4 管理端 push 机制
+### 6.4 ~~管理端 push 机制~~（M1 不做，→ M2）
 
-- 管理端编辑 credential → 推送到所有注册的 deployment
-- Retry：simple exponential backoff（1s / 2s / 4s），失败后记录到管理端 `sync_failures` 列表
-- Admin UI 显示失败列表，手工触发重试
-- 用户端本地 store 是 source of truth for runtime；管理端是 source of truth for management
+M1 credentials 完全由用户端本地管理。管理端仅通过 audit 事件观察 credential 生命周期（create / resolved / rotate / delete，不见 value）。中央管理、push sync、retry、failure list 全部推迟至 M2，详见 Section 14。
 
-### 6.5 M2 升级路径（Egress 透明替换）
+### 6.5 M2 升级路径
 
-参见 Section 14（M2+ TODO），这里记录架构兼容性：
-- M1 的 `credential_ref` 机制 M2 继续使用（外部接口不变）
-- M2 在 sandbox egress 层拦截 tool 出站 HTTP，占位符 `{{cred:name}}` 处替换
-- 明文不再进入 agent 进程内存（credential 从管理员编辑 → 推送到用户端本地 store → egress 代理进程读取 → 注入 HTTP 请求；agent 进程只见 ref 字符串）
+M1 的 `credential_ref` 机制作为 M2 所有升级的兼容基础，外部接口（tool / MCP 配置中的 ref 字段）不变：
+
+- **中央管理**：管理端新增 credential CRUD UI + push sync → 用户端本地 store
+- **Egress 透明替换**（依赖第三方 sandbox 组件 PR）：sandbox egress 层拦截 tool 出站 HTTP，占位符 `{{cred:name}}` 处替换。明文不再进入 agent 进程内存
+- **Rotation API** + 双密钥过渡窗口
 
 ## 7. Security Stack
 
@@ -480,12 +518,13 @@ class WorkspaceMCPCache:
 - 上层加自定义 RBAC dependency（admin/member check）
 - 避免手写 auth 的 5-7 天工期
 
-### 8.6 Cost tracking 近零成本采集
+### 8.6 Cost tracking 近零成本采集（M1 埋数据，M2 可视化）
 
-- 现有代码 `stream.py:96-109` 已提取 `usage_metadata`
-- 新增：累加到 `CostRecord` 表
-- 乘以 `config.yaml` 里的 `ModelCost` 表
-- UI 仅在 session 详情页显示（M1 不做 dashboard）
+- 现有代码 `stream.py:96-109` 已提取 `usage_metadata`（input_tokens / output_tokens）
+- M1 仅将 `input_tokens / output_tokens / model_id` 作为 `agent.run.completed` audit 事件的 `metadata` 字段外发给管理端
+- **不建 `cost_records` 表、不做 SSE 聚合、不做 UI**
+- M2 管理端从 audit 事件流中按需聚合 → dashboard（包含 per-user / per-workspace / per-model 维度 + 按 `config.yaml` `ModelCost` 表做单价换算）
+- 取舍：单价变化不回溯旧 audit；M2 设计时记录"快照价"或聚合时现算
 
 ## 9. Multi-Model Support
 
@@ -517,7 +556,7 @@ Anthropic 和 OpenAI 的 tool calling 协议不完全一致。LangChain 的 `cre
 services:
   backend:     # FastAPI + LangGraph
   frontend:    # Next.js
-  postgres:
+  mysql:       # MySQL 8
   redis:       # 用于 MCP cache / rate limiting
 ```
 
@@ -531,7 +570,7 @@ services:
   backend:
   frontend:
   cubetrace:       # 独立 trace viewer
-  postgres:
+  mysql:           # MySQL 8
   redis:
   elasticsearch:   # 单节点, 2GB heap
 ```
@@ -542,8 +581,8 @@ services:
 ### 10.3 部署关系
 
 - 两个 compose 独立部署，通过 `.env` 的 `ADMIN_ENDPOINT` + `TENANT_KEY` 串起来
-- 用户端启动时自动向管理端 register
-- 管理端 UI 可见所有注册的 deployment
+- 用户端启动后首次向管理端发送 audit / trace 事件时，管理端按 tenant_key hash 隐式登记 deployment
+- 管理端 UI 可见所有"有活动事件"的 deployment（不做 heartbeat，M2 再做）
 
 ## 11. Test Infrastructure
 
@@ -568,13 +607,13 @@ async def member_client(authenticated_client):
 - `tests/e2e/test_auth.py`：注册、登录、限流、过期 token、重复邮箱
 - `tests/e2e/test_rbac.py`：admin vs member、跨 workspace 隔离
 - `tests/e2e/test_governance.py`：audit 事件覆盖面
-- `tests/e2e/test_credentials.py`：CRUD、加密、ref 解析、audit
-- `tests/e2e/test_cost.py`：token 统计、cost 计算
-- `tests/e2e/test_admin_sync.py`：模拟管理端 push、feature flag 关闭时 no-op
+- `tests/e2e/test_credentials.py`：CRUD、加密、ref 解析、audit 事件覆盖
+- `tests/e2e/test_token_usage.py`：`agent.run.completed` audit 事件 metadata 里 input/output tokens 正确
+- `tests/e2e/test_admin_integration.py`：`admin.tracing.enabled` / `admin.audit.enabled` 两个 flag 开关行为；未配置 endpoint 时 AdminClient no-op
 
 ### 11.3 Migration 验证
 
-- 单独 pytest 启动一个临时 Postgres
+- 单独 pytest 启动一个临时 MySQL 8 容器
 - 跑迁移 → 验证默认 org + workspace 存在 → 验证历史数据回填成功
 - 跑 rollback → 验证状态恢复
 
@@ -583,25 +622,25 @@ async def member_client(authenticated_client):
 | 周 | cubebox (用户端) | cubebox-admin (管理端) |
 |---|---|---|
 | **W1** | 数据模型迁移（Org/Workspace/Membership + 现有表回填）、Auth（fastapi-users）、API path rewrite、2-role RBAC middleware、`OrgScopedMixin` + `ScopedRepository` 基类、`authenticated_client` fixture | repo bootstrap, Tenant 数据模型 scaffolding |
-| **W2** | `AdminClient` 抽象 + 三个 feature flag、audit 事件发射点埋入、OTLP tracing 集成（发射侧）、sandbox identity 修复（user_id + ws_id）、agent config 参数化 | 移植 cubemanus/tracing 的 ingestion 端、OTLP receiver、ES exporter、cubetrace 部署、audit 事件收集 API |
-| **W3** | 本地 `credentials` 表 + 加密 + CRUD API + 前端 UI、`credential_ref` 解析逻辑、cost tracking (CostRecord + SSE 聚合) | 中央 credential 管理 UI、push sync 机制、retry + failure list、用户端注册/heartbeat API |
-| **W4** | Anthropic SDK 原生支持、前端模型切换器、Workspace UI（选择器、邀请、成员列表）、跨 3 模型 E2E 验证 | Workspace 聚合视图、用量统计基础版 |
-| **W5** | on-prem docker-compose + 部署文档、两边集成 e2e（admin disabled/enabled 都验）、demo 彩排 | on-prem docker-compose（含 ES）、部署文档、demo 彩排 |
+| **W2** | `AdminClient` 抽象 + 两个 feature flag（tracing / audit）、audit 事件发射点埋入（含 token usage metadata）、OTLP tracing 集成（标准 `traceloop-sdk` + `opentelemetry-python`）、sandbox identity 修复（user_id + ws_id）、agent config 参数化 | 移植 cubemanus/tracing 的 ingestion 端、OTLP receiver、ES exporter、cubetrace 部署、audit 事件收集 API |
+| **W3** | 本地 `credentials` 表 + AES-256-GCM 加密 + CRUD API + 本地 UI、`credential_ref` 解析逻辑、credential 生命周期 audit 事件 | Audit 事件查询 UI（按 user / workspace / action / 时间过滤）、credential 审计视图（只看事件，不见 value） |
+| **W4** | Anthropic SDK 原生支持、前端模型切换器、Workspace UI（选择器、邀请、成员列表）、跨 3 模型 E2E 验证 | Workspace 聚合视图（跨 ws 列表、详情、token usage 从 audit metadata 聚合） |
+| **W5** | on-prem docker-compose（MySQL + Redis）+ 部署文档、两边集成 e2e（admin 两个 flag on/off 组合都验）、demo 彩排 | on-prem docker-compose（含 ES）、部署文档、demo 彩排 |
 
-**里程碑**：W2 结束 API 契约冻结，W3 两边并行开发（一边消费契约，一边实现契约）靠这个对齐。
+**里程碑**：W2 结束 API 契约冻结（OTLP 标准 + audit POST 契约），W3 两边并行开发（一边消费契约，一边实现契约）靠这个对齐。
 
-**风险缓冲**：无专门 buffer 周。如超时，砍这些（按优先级）：
+**风险缓冲**：无专门 buffer 周。因 M1 砍掉了中央 credential 管理、push sync、heartbeat、cost 表/UI，W3 压力显著减小。如仍超时，按优先级砍：
 1. 前端 workspace UI 简化（邀请用 copy-link 替代邮件，成员列表最简）
 2. 跨 3 模型验证改为 2 模型（Claude + GPT，OSS 推 M2）
-3. 管理端用量统计推 M2
+3. 管理端 workspace 聚合视图推 M2，W4 只保证 audit 原始事件查询可用
 4. Anthropic SDK 超时则推 M2，W4 只做 OpenAI-compatible 多家
 
 ## 13. Demo Script（给 design partner 的 5 分钟）
 
 1. **Standalone OSS 演示**：`docker-compose up` 起一个用户端，3 个团队成员登录进 workspace，切换模型（Claude → GPT-4o）跑同一个 research task。**全程无管理端**。
-2. **加装治理只要改 3 行配置**：编辑 `.env`，填 `ADMIN_ENDPOINT` + `TENANT_KEY` + `admin.*=true`，重启用户端。
-3. **从管理端看到的**：打开 cubetrace，每个 LLM 调用、每个 tool call、每次 credential 解析、完整时间线可回放。打开 audit log，按 user / workspace / action 过滤。
-4. **Credential 演示**：管理员在管理端编辑一个 API key → 秒级 push 到用户端 → 用户端下一次 agent run 就用新值；管理端 revoke → 用户端下次 agent 启动即失败。
+2. **加装治理只要改 3 行配置**：编辑 `.env`，填 `ADMIN_ENDPOINT` + `TENANT_KEY` + `admin.tracing.enabled=true` + `admin.audit.enabled=true`，重启用户端。
+3. **从管理端看到的**：打开 cubetrace，每个 LLM 调用、每个 tool call、每次 credential 解析、完整时间线可回放。打开 audit log，按 user / workspace / action / credential name 过滤。
+4. **Credential 生命周期审计**：在用户端本地 rotate 一个 API key（旧 key 标记失效 → 新 key 上线），切到管理端 audit 视图立刻看到 `credential.rotated` 事件（只见 name + who + when，不见 value）。强调"value 从不离开用户端；审计面完整。"
 5. **SaaS 模式预览**（如果客户对 SaaS 有兴趣）：给他看我们的托管 demo 环境，同样界面。
 
 **Hero moment**：步骤 3 打开 audit log 时，如果客户开始问"能导出吗？能筛选吗？能 stream 到我们 SIEM 吗？"——他已经在买。
@@ -609,7 +648,10 @@ async def member_client(authenticated_client):
 ## 14. M2+ 预览
 
 ### M2（4-6 周）
+- **管理端中央 credential 管理 + push sync**（UI CRUD、retry + failure list、用户端注册 API）
 - **Sandbox Egress credential 透明替换**（依赖第三方 sandbox 组件 PR）
+- **Cost dashboard**：管理端从 audit 事件流聚合 per-user / per-workspace / per-model token 用量和成本
+- **Deployment 注册 / heartbeat**（central credential push 的前置）
 - Knowledge base / RAG 管道
 - Approval workflow（人工审批门）
 - 细粒度 RBAC（admin / editor / viewer / auditor）
@@ -643,13 +685,16 @@ async def member_client(authenticated_client):
 3. **无 license key 校验**：双 repo 是法律边界，M1 不做技术 enforcement。M2 加。
 4. **无 credential rotation**：master key 丢失 = credential 全丢。M2 设计 rotation。
 5. **无 API 版本号**：lockstep release 规避。M2 有跨版本需求时再引入。
-6. **无管理端 push 持久化**：内存 retry 三次失败即进失败列表。M2 加队列。
+6. **无管理端 push 到用户端 runtime**：M1 管理端是纯观察者，credential / config 在用户端本地管理。M2 加中央 credential 管理时再设计持久化 push 队列。
 7. **Tracing 不做端到端**：cubemanus 原始 README 里说 trace 上下文传播有已知问题，M1 用 `session_id` 做 correlation 足够，M2 修复传播。
 
 **TODO list（Section 15 是权威出处）**：
 
+- [ ] **[M2]** 管理端中央 credential 管理（UI CRUD + push sync + retry/failure list）
 - [ ] **[M2]** Sandbox Egress 层 credential 透明替换 — 依赖第三方 PR（user 做 upstream）
-- [ ] **[M2]** 管理端 push 持久化队列（Redis Streams / Postgres queue）
+- [ ] **[M2]** Cost dashboard：管理端从 audit metadata 聚合 token 用量，换算成本（参考 `config.yaml` `ModelCost` 或快照价）
+- [ ] **[M2]** Deployment 注册 / heartbeat API（central credential push 的前置）
+- [ ] **[M2]** 管理端 push 持久化队列（Redis Streams / MySQL queue）
 - [ ] **[M2]** Credential sync 改为公钥加密（消除对 TLS 的纯信任）
 - [ ] **[M2]** Audit 事件本地持久化日志（队列溢出不丢事件）
 - [ ] **[M2]** Credential rotation API + 双密钥过渡窗口
@@ -680,12 +725,12 @@ async def member_client(authenticated_client):
 4. 邀请第二个成员，登录，看到同一 workspace
 5. 发送 message → 看到 SSE 流、tool call、cost
 6. `git clone cubebox-admin && docker-compose up`
-7. 在用户端 `.env` 配置管理端 endpoint + tenant key，重启
-8. 管理端注册 deployment 自动完成，出现在 deployments 列表
-9. 管理端编辑 credential → 用户端下次 agent run 使用新值
-10. 管理端 audit log 看到所有步骤记录
-11. 管理端 cubetrace 看到完整 trace 时间线
-12. 关闭管理端 → 用户端继续正常运行
+7. 在用户端 `.env` 配置管理端 endpoint + tenant key + `admin.tracing.enabled=true` + `admin.audit.enabled=true`，重启
+8. 用户端首次发送 audit / trace 事件 → 管理端 deployments 列表自动出现该 deployment
+9. 用户端本地 rotate credential → 管理端 audit 视图立刻看到 `credential.rotated` 事件（只见 name / who / when，不见 value）
+10. 管理端 audit log 看到所有步骤记录（含 `agent.run.completed` 事件 metadata 中的 token usage）
+11. 管理端 cubetrace 看到完整 trace 时间线（LLM 调用、tool call、credential 解析）
+12. 关闭管理端 → 用户端继续正常运行（所有 core 功能，包括 credential rotate，无退化）
 
 ### 北极星指标（M1 完成后 4 周）
 
