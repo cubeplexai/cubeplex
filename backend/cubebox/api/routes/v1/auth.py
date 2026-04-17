@@ -50,9 +50,7 @@ async def login(
     except UserNotExists:
         user = None
     if user is None or not user.is_active:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail="LOGIN_BAD_CREDENTIALS"
-        )
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="LOGIN_BAD_CREDENTIALS")
     return await auth_backend.login(strategy, user)
 
 
@@ -61,5 +59,9 @@ async def me(user: Annotated[User, Depends(current_active_user)]) -> dict[str, s
     return {"id": user.id, "email": user.email}
 
 
-# Include fastapi-users built-in /logout (login is shadowed by our rate-limited one above).
+# Include fastapi-users built-in auth routes for /logout. Must stay BELOW our
+# custom /login above — FastAPI matches the first-registered route, so our
+# rate-limited /login takes precedence and fastapi-users' /login is shadowed.
+# If you ever move this include_router above the custom routes, rate limiting
+# on login silently disappears.
 router.include_router(fastapi_users.get_auth_router(auth_backend))
