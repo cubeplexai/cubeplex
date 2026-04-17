@@ -14,6 +14,10 @@ development:
     domain: "localhost:8090"
     image: "hub.sensedeal.vip/library/cubebox-sandbox:24.04-20260311"
 
+  # Auth (development overrides)
+  auth:
+    cookie_secure: false
+
   mcp:
     enabled: true
     servers:

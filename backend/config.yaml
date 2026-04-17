@@ -175,3 +175,15 @@ default:
     pool_size: 10
     max_overflow: 20
     echo: false
+
+  # Auth Configuration (P1)
+  auth:
+    jwt_secret: "CHANGE_ME_IN_PRODUCTION"   # ENV: CUBEBOX_AUTH__JWT_SECRET
+    jwt_lifetime_seconds: 86400              # 24h
+    cookie_name: "cubebox_auth"
+    cookie_secure: false                     # production: true
+    cookie_samesite: "lax"
+    csrf_secret: "CHANGE_ME_IN_PRODUCTION"   # ENV: CUBEBOX_AUTH__CSRF_SECRET
+    rate_limit:
+      login_per_minute: 5
+      register_per_minute: 3
