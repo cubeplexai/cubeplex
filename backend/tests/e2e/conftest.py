@@ -40,6 +40,7 @@ def _reset_rate_limiter_between_tests() -> Iterator[None]:
     yield
     limiter.reset()
 
+
 DEFAULT_ORG_ID = "default-org"
 DEFAULT_WS_ID = "default-ws"
 DEFAULT_TEST_EMAIL = "test-default@example.com"
