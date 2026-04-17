@@ -238,7 +238,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
     const { batchedSet, flush } = createBatcher(set)
 
     try {
-      for await (const event of streamMessages(client.baseUrl, conversationId, content)) {
+      for await (const event of streamMessages(client, conversationId, content)) {
         const agentKey = event.agent_id ?? MAIN_AGENT_KEY
 
         if (event.type === 'text_delta') {
