@@ -100,7 +100,7 @@ pnpm --filter @cubebox/core type-check
 
 **Route structure:** `(auth)/{login,register}` for unauthenticated pages; `(app)/{workspaces, w/[wsId]/...}` for authenticated pages. `/` is a server redirect: logged-in → first workspace, else `/login`.
 
-**Middleware (`middleware.ts`):** checks for the `cubebox_auth` cookie. Unauthenticated hits to `/w/*` or `/workspaces` redirect to `/login?next=<path>`. Logged-in hits to `/login` or `/register` redirect to `/`.
+**Proxy (`proxy.ts`):** checks for the `cubebox_auth` cookie. Unauthenticated hits to `/w/*` or `/workspaces` redirect to `/login?next=<path>`. Logged-in hits to `/login` or `/register` redirect to `/`.
 
 **Active workspace:** the URL segment `[wsId]` is the single source of truth. `useWorkspaceContext()` (in `(app)` tree) reads it. The `ApiClient` instance each page creates via `createApiClient('')` calls `client.setWorkspaceId(wsId)`, which triggers automatic `X-Workspace-Id` injection on workspace-scoped calls.
 
