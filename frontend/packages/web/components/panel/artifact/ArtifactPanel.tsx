@@ -6,6 +6,7 @@ import { useArtifactStore, usePanelStore, createApiClient } from '@cubebox/core'
 import type { Artifact, ArtifactVersion } from '@cubebox/core'
 import { X, Download, ChevronDown } from 'lucide-react'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import { useWorkspaceContext } from '@/hooks/useWorkspaceContext'
 import { getArtifactIcon } from './artifactIcons'
 import { PreviewLoading } from './PreviewLoading'
 import { HtmlPreview } from './HtmlPreview'
@@ -196,11 +197,14 @@ export function ArtifactPanel() {
     ? artifacts[conversationId]?.[artifactId]
     : null
 
+  const { workspaceId } = useWorkspaceContext()
+
   useEffect(() => {
     if (!artifact || artifact.version <= 1 || !conversationId || !artifactId) return
     const client = createApiClient('')
+    if (workspaceId) client.setWorkspaceId(workspaceId)
     loadVersions(client, conversationId, artifactId)
-  }, [artifact, conversationId, artifactId, loadVersions])
+  }, [artifact, conversationId, artifactId, loadVersions, workspaceId])
 
   if (view.type !== 'artifact' || !artifact) return null
 

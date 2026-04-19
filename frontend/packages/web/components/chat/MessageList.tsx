@@ -9,6 +9,7 @@ import { AssistantMessage } from './AssistantMessage'
 import { TaskProgressCard } from './TaskProgressCard'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { useMessages } from '@/hooks/useMessages'
+import { useWorkspaceContext } from '@/hooks/useWorkspaceContext'
 
 interface MessageListProps {
   conversationId: string
@@ -100,11 +101,13 @@ export function MessageList({ conversationId }: MessageListProps) {
     messages, isStreaming, statusPhase, mainStream, subAgentStreams, todos, error, toolResultMap,
   } = useMessages(conversationId)
   const loadMessages = useMessageStore((s) => s.loadMessages)
+  const { workspaceId } = useWorkspaceContext()
 
   useEffect(() => {
     const client = createApiClient('')
+    if (workspaceId) client.setWorkspaceId(workspaceId)
     loadMessages(client, conversationId)
-  }, [conversationId, loadMessages])
+  }, [conversationId, loadMessages, workspaceId])
 
   const subagentDataMap = useMemo(
     () => buildSubagentDataMap(messages ?? []),
