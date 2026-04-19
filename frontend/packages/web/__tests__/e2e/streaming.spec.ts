@@ -1,41 +1,45 @@
-import { test, expect } from '@playwright/test'
+import { test, expect, type Page } from '@playwright/test'
+
+const PASSWORD = 'correcthorsebatterystaple'
+
+async function registerAndLand(page: Page): Promise<void> {
+  const email = `u-${Date.now()}-${Math.random().toString(16).slice(2, 6)}@example.com`
+  await page.goto('/register')
+  await page.getByLabel('Email').fill(email)
+  await page.getByLabel('Password').fill(PASSWORD)
+  await page.getByRole('button', { name: /create account/i }).click()
+  await expect(page).toHaveURL(/\/w\/[^/]+$/, { timeout: 10_000 })
+}
 
 test('loading animation appears while streaming', async ({ page }) => {
-  await page.goto('/')
+  await registerAndLand(page)
 
   const input = page.getByPlaceholder('有什么可以帮你的？')
   await input.fill('Write a haiku about coding.')
   await input.press('Enter')
 
-  await expect(page).toHaveURL(/\/conversations\//)
+  await expect(page).toHaveURL(/\/w\/[^/]+\/conversations\//)
 
-  // Loading indicator should appear
   await expect(page.getByTestId('loading-indicator')).toBeVisible({ timeout: 10_000 })
-
-  // And disappear when done
   await expect(page.getByTestId('loading-indicator')).toBeHidden({ timeout: 50_000 })
 
-  // Final response should have meaningful content
   const assistantMsg = page.locator('[data-role="assistant"]')
   const text = await assistantMsg.textContent()
   expect(text!.length).toBeGreaterThan(20)
 })
 
 test('input is disabled while streaming', async ({ page }) => {
-  await page.goto('/')
+  await registerAndLand(page)
 
   const input = page.getByPlaceholder('有什么可以帮你的？')
   await input.fill('Write a short poem.')
   await input.press('Enter')
 
-  await expect(page).toHaveURL(/\/conversations\//)
+  await expect(page).toHaveURL(/\/w\/[^/]+\/conversations\//)
 
-  // Input should be disabled while streaming
   await expect(page.getByPlaceholder('有什么可以帮你的？')).toBeDisabled({ timeout: 5_000 })
 
-  // Wait for completion
   await expect(page.getByTestId('loading-indicator')).toBeHidden({ timeout: 50_000 })
 
-  // Input should be re-enabled after streaming completes
   await expect(page.getByPlaceholder('有什么可以帮你的？')).toBeEnabled()
 })
