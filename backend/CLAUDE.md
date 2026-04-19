@@ -94,6 +94,8 @@ Identity model: `Organization` → `Workspace` → `Membership` → `User`. One 
 - `GET/POST /api/v1/workspaces`
 - `POST /api/v1/workspaces/{ws}/invites` (admin only), `POST /api/v1/workspaces/invites/accept`
 
+**Register bootstrap:** `UserManager.on_after_register` auto-creates a personal Organization (`"<email-local-part>'s Org"`), a Workspace (`"Personal"`), and an Admin Membership for the new user in the same session. If any of these fails, the User row is best-effort deleted before the exception propagates so registration appears atomic to the client. The register response returns `{id, email, default_workspace_id}`.
+
 **Known P1 gaps (flagged `TODO(P2-auth)`):**
 - `create_workspace` accepts a client-supplied `org_id` with no org-membership check (P1 has no org-level membership concept yet).
 - `request_context` returns 404 before the role check, so an unauthorized workspace id returns 404 rather than 403. Intentional (avoids enumeration of workspace ids) but worth knowing.

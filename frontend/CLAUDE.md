@@ -96,6 +96,24 @@ pnpm --filter @cubebox/core type-check
 - Line length: 100 chars
 - Type annotations required (strict TypeScript)
 
+## Auth & Workspace Model
+
+**Route structure:** `(auth)/{login,register}` for unauthenticated pages; `(app)/{workspaces, w/[wsId]/...}` for authenticated pages. `/` is a server redirect: logged-in → first workspace, else `/login`.
+
+**Middleware (`middleware.ts`):** checks for the `cubebox_auth` cookie. Unauthenticated hits to `/w/*` or `/workspaces` redirect to `/login?next=<path>`. Logged-in hits to `/login` or `/register` redirect to `/`.
+
+**Active workspace:** the URL segment `[wsId]` is the single source of truth. `useWorkspaceContext()` (in `(app)` tree) reads it. The `ApiClient` instance each page creates via `createApiClient('')` calls `client.setWorkspaceId(wsId)`, which triggers automatic `X-Workspace-Id` injection on workspace-scoped calls.
+
+**CSRF:** double-submit pattern. `ApiClient` reads `cubebox_csrf` from `document.cookie` and adds `X-CSRF-Token` on every non-GET. The backend seeds the cookie on login.
+
+**Stores:**
+- `authStore` — `{id, email}` of the current user, or `null`. Populated by `loadMe` on `(app)` mount.
+- `workspaceStore` — list of the user's workspaces + `create(client, name)` (reuses the first workspace's `org_id`, M1 assumption: one user = one org).
+
+**SSE proxy:** the Next.js route handler at `app/api/v1/conversations/[id]/messages/route.ts` forwards `cookie`, `X-Workspace-Id`, `X-CSRF-Token`, and `x-user-id` to the backend so streaming requests carry auth + scoping.
+
+**Known one-user-one-org assumption:** `workspaceStore.create` reads `workspaces[0].org_id`. When multi-org-per-user ships (P2), this must take an explicit org id.
+
 ## Common Gotchas
 
 - **pnpm workspace**: Always use `pnpm` not `npm`. Use `pnpm -w` for root, `pnpm --filter <pkg>` for single package.
