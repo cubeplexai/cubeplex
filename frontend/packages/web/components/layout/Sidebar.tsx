@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import Link from 'next/link'
 import { Plus, Trash2, Box } from 'lucide-react'
+import { useWorkspaceContext } from '@/hooks/useWorkspaceContext'
 
 function formatRelativeTime(dateStr: string): string {
   const date = new Date(dateStr)
@@ -22,10 +23,13 @@ function formatRelativeTime(dateStr: string): string {
 
 export function Sidebar() {
   const { conversations, activeId, remove, setActive } = useConversationStore()
+  const { workspaceId } = useWorkspaceContext()
+  const homeHref = workspaceId ? `/w/${workspaceId}` : '/'
 
   const handleDeleteClick = async (e: React.MouseEvent, id: string) => {
     e.preventDefault()
     const client = createApiClient('')
+    if (workspaceId) client.setWorkspaceId(workspaceId)
     try {
       await remove(client, id)
     } catch (err) {
@@ -43,7 +47,7 @@ export function Sidebar() {
           </div>
           <span className="text-sm font-semibold tracking-tight">cubebox</span>
         </div>
-        <Link href="/">
+        <Link href={homeHref}>
           <Button variant="outline" size="sm" className="w-full h-7 text-xs gap-1.5">
             <Plus className="size-3" />
             新建对话
@@ -60,7 +64,7 @@ export function Sidebar() {
           {conversations.map((convo) => (
             <Link
               key={convo.id}
-              href={`/conversations/${convo.id}`}
+              href={workspaceId ? `/w/${workspaceId}/conversations/${convo.id}` : `/conversations/${convo.id}`}
               onClick={() => setActive(convo.id)}
               className={`group relative flex items-center gap-2 px-2 py-2 rounded-md transition-colors ${
                 activeId === convo.id
