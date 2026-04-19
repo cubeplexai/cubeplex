@@ -3,6 +3,7 @@
 import { useState, useRef } from 'react'
 import { useMessageStore, createApiClient } from '@cubebox/core'
 import { ArrowUp, Loader2 } from 'lucide-react'
+import { useWorkspaceContext } from '@/hooks/useWorkspaceContext'
 
 interface InputBarProps {
   conversationId?: string
@@ -13,6 +14,7 @@ interface InputBarProps {
 export function InputBar({ conversationId, onSubmit, isLoading = false }: InputBarProps) {
   const [content, setContent] = useState('')
   const send = useMessageStore((s) => s.send)
+  const { workspaceId } = useWorkspaceContext()
   const messageIsStreaming = useMessageStore((s) =>
     conversationId ? s.isStreaming && s.streamingConversationId === conversationId : false
   ) ?? false
@@ -26,6 +28,7 @@ export function InputBar({ conversationId, onSubmit, isLoading = false }: InputB
       return
     }
     const client = createApiClient('')
+    if (workspaceId) client.setWorkspaceId(workspaceId)
     try {
       setContent('')
       if (textareaRef.current) {
