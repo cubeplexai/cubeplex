@@ -15,12 +15,20 @@ function buildProxyHeaders(request: NextRequest, accept: string): HeadersInit {
   const headers: Record<string, string> = { Accept: accept }
   const cookie = request.headers.get('cookie')
   const userId = request.headers.get('x-user-id')
+  const wsId = request.headers.get('x-workspace-id')
+  const csrf = request.headers.get('x-csrf-token')
 
   if (cookie) {
     headers.cookie = cookie
   }
   if (userId) {
     headers['x-user-id'] = userId
+  }
+  if (wsId) {
+    headers['X-Workspace-Id'] = wsId
+  }
+  if (csrf) {
+    headers['X-CSRF-Token'] = csrf
   }
 
   return headers
