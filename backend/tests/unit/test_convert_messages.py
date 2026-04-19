@@ -104,7 +104,15 @@ def test_convert_tool_message_with_subagent_events():
     assert result[0]["content"] == "final result"
     assert result[0]["subagent_events"] == {
         "text": "processing...",
-        "tool_calls": [{"name": "read_file", "arguments": {"path": "/tmp/test.txt"}}],
+        "tool_calls": [
+            {
+                "name": "read_file",
+                "arguments": {"path": "/tmp/test.txt"},
+                "tool_call_id": "tc2",
+                "started_at": "2026-04-01T12:00:01+00:00",
+            }
+        ],
+        "tool_results": [],
         "reasoning": "",
     }
 
