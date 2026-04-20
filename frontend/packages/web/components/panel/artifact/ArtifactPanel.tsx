@@ -15,6 +15,7 @@ import { CodePreview } from './CodePreview'
 import { DocumentPreview } from './DocumentPreview'
 import { DataPreview } from './DataPreview'
 import { FallbackPreview } from './FallbackPreview'
+import { buildDownloadUrl } from './previewUtils'
 
 const PdfPreview = dynamic(
   () => import('./PdfPreview').then(m => m.PdfPreview),
@@ -108,19 +109,17 @@ function ArtifactPanelHeader({
   selectedVersion,
   onSelectVersion,
   onClose,
+  workspaceId,
 }: {
   artifact: Artifact
   versions: ArtifactVersion[]
   selectedVersion: number | null
   onSelectVersion: (version: number | null) => void
   onClose: () => void
+  workspaceId: string
 }) {
   const Icon = getArtifactIcon(artifact)
-  const baseDownloadUrl =
-    `/api/v1/conversations/${artifact.conversation_id}/artifacts/${artifact.id}/download`
-  const downloadUrl = selectedVersion != null
-    ? `${baseDownloadUrl}?version=${selectedVersion}`
-    : baseDownloadUrl
+  const downloadUrl = buildDownloadUrl(artifact, workspaceId, selectedVersion)
 
   return (
     <header className="h-11 border-b border-border flex items-center gap-2 px-4 shrink-0 bg-card">
@@ -157,28 +156,29 @@ function ArtifactPanelHeader({
 function PreviewContent({
   artifact,
   version,
+  workspaceId,
 }: {
   artifact: Artifact
   version: number | null
+  workspaceId: string
 }) {
-  // Route PDFs to PdfPreview regardless of artifact_type
   if (isPdf(artifact)) {
-    return <PdfPreview artifact={artifact} version={version} />
+    return <PdfPreview artifact={artifact} version={version} workspaceId={workspaceId} />
   }
 
   switch (artifact.artifact_type) {
     case 'website':
-      return <HtmlPreview artifact={artifact} version={version} />
+      return <HtmlPreview artifact={artifact} version={version} workspaceId={workspaceId} />
     case 'image':
-      return <ImagePreview artifact={artifact} version={version} />
+      return <ImagePreview artifact={artifact} version={version} workspaceId={workspaceId} />
     case 'code':
-      return <CodePreview artifact={artifact} version={version} />
+      return <CodePreview artifact={artifact} version={version} workspaceId={workspaceId} />
     case 'document':
-      return <DocumentPreview artifact={artifact} version={version} />
+      return <DocumentPreview artifact={artifact} version={version} workspaceId={workspaceId} />
     case 'data':
-      return <DataPreview artifact={artifact} version={version} />
+      return <DataPreview artifact={artifact} version={version} workspaceId={workspaceId} />
     default:
-      return <FallbackPreview artifact={artifact} version={version} />
+      return <FallbackPreview artifact={artifact} version={version} workspaceId={workspaceId} />
   }
 }
 
@@ -206,7 +206,7 @@ export function ArtifactPanel() {
     loadVersions(client, conversationId, artifactId)
   }, [artifact, conversationId, artifactId, loadVersions, workspaceId])
 
-  if (view.type !== 'artifact' || !artifact) return null
+  if (view.type !== 'artifact' || !artifact || !workspaceId) return null
 
   const artifactVersions = versions[artifact.id] ?? []
   const currentSelectedVersion = selectedVersion[artifact.id] ?? null
@@ -219,9 +219,14 @@ export function ArtifactPanel() {
         selectedVersion={currentSelectedVersion}
         onSelectVersion={(v) => selectVersion(artifact.id, v)}
         onClose={close}
+        workspaceId={workspaceId}
       />
       <div className="flex-1 overflow-hidden">
-        <PreviewContent artifact={artifact} version={currentSelectedVersion} />
+        <PreviewContent
+          artifact={artifact}
+          version={currentSelectedVersion}
+          workspaceId={workspaceId}
+        />
       </div>
     </div>
   )

@@ -3,7 +3,7 @@
 from collections.abc import Awaitable, Callable
 from typing import Annotated
 
-from fastapi import Depends, Header, HTTPException, status
+from fastapi import Depends, HTTPException, Path, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cubebox.auth.context import RequestContext
@@ -16,27 +16,27 @@ current_active_user = fastapi_users.current_user(active=True)
 
 
 async def request_context(
+    workspace_id: Annotated[str, Path()],
     user: Annotated[User, Depends(current_active_user)],
     session: Annotated[AsyncSession, Depends(get_session)],
-    x_workspace_id: Annotated[str | None, Header(alias="X-Workspace-Id")] = None,
 ) -> RequestContext:
-    """Resolve the active workspace + role from header + membership lookup."""
-    if not x_workspace_id:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="X-Workspace-Id header is required",
-        )
+    """Resolve the active workspace + role from URL path + membership lookup.
 
+    Workspace scoping is encoded in the URL (`/api/v1/ws/{workspace_id}/...`);
+    every business endpoint declares `workspace_id` as a path parameter and
+    depends on this function. There is no header fallback — the path is the
+    single source of truth.
+    """
     ws_repo = WorkspaceRepository(session)
-    workspace = await ws_repo.get(x_workspace_id)
+    workspace = await ws_repo.get(workspace_id)
     if workspace is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Workspace '{x_workspace_id}' not found",
+            detail=f"Workspace '{workspace_id}' not found",
         )
 
     mem_repo = MembershipRepository(session)
-    role = await mem_repo.get_role(user_id=user.id, workspace_id=x_workspace_id)
+    role = await mem_repo.get_role(user_id=user.id, workspace_id=workspace_id)
     if role is None:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -44,7 +44,7 @@ async def request_context(
         )
 
     return RequestContext(
-        user=user, org_id=workspace.org_id, workspace_id=x_workspace_id, role=role
+        user=user, org_id=workspace.org_id, workspace_id=workspace_id, role=role
     )
 
 

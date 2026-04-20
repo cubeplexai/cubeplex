@@ -2,16 +2,16 @@
 
 import { File, Download } from 'lucide-react'
 import type { Artifact } from '@cubebox/core'
+import { buildDownloadUrl } from './previewUtils'
 
 interface FallbackPreviewProps {
   artifact: Artifact
   version: number | null
+  workspaceId: string
 }
 
-export function FallbackPreview({ artifact, version }: FallbackPreviewProps) {
-  const versionParam = version != null ? `?version=${version}` : ''
-  const downloadUrl =
-    `/api/v1/conversations/${artifact.conversation_id}/artifacts/${artifact.id}/download${versionParam}`
+export function FallbackPreview({ artifact, version, workspaceId }: FallbackPreviewProps) {
+  const downloadUrl = buildDownloadUrl(artifact, workspaceId, version)
 
   return (
     <div className="flex flex-col items-center justify-center h-full gap-4 p-8 text-center">

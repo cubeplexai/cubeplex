@@ -1,11 +1,13 @@
 /**
- * ApiClient — wraps fetch with credentials, workspace/CSRF header injection,
- * and a 401 observable.
+ * ApiClient — wraps fetch with credentials, workspace-path prefixing,
+ * CSRF header injection, and a 401 observable.
  *
  * Path-based rules:
  *   - credentials: 'include' on every call (so cookies flow).
- *   - X-Workspace-Id is injected on paths NOT starting with /api/v1/auth/ or
- *     /api/v1/workspaces (those are workspace-neutral).
+ *   - When workspaceId is set, paths are rewritten:
+ *       /api/v1/<scoped>...  ->  /api/v1/ws/<wsId>/<scoped>...
+ *     Paths starting with /api/v1/auth/ or /api/v1/workspaces are left alone
+ *     (workspace-neutral).
  *   - X-CSRF-Token is injected on non-GET methods, read from document.cookie
  *     (cubebox_csrf).
  *
@@ -17,6 +19,8 @@ export interface ApiClient {
   baseUrl: string
   workspaceId: string | null
   setWorkspaceId(id: string | null): void
+  /** Rewrite a path by injecting the workspace segment when applicable. */
+  resolvePath(path: string): string
   get(path: string): Promise<Response>
   post(path: string, body: unknown): Promise<Response>
   postForm(path: string, form: Record<string, string>): Promise<Response>
@@ -26,11 +30,18 @@ export interface ApiClient {
 }
 
 const WS_NEUTRAL_PREFIXES = ['/api/v1/auth/', '/api/v1/workspaces']
+const SCOPED_ROOT = '/api/v1/'
 
-function needsWorkspaceHeader(path: string): boolean {
-  return !WS_NEUTRAL_PREFIXES.some(
+function isWorkspaceNeutral(path: string): boolean {
+  return WS_NEUTRAL_PREFIXES.some(
     (p) => path === p || path.startsWith(p + '/') || path.startsWith(p + '?') || path.startsWith(p)
   )
+}
+
+function injectWorkspace(path: string, wsId: string): string {
+  if (!path.startsWith(SCOPED_ROOT) || isWorkspaceNeutral(path)) return path
+  if (path.startsWith(`${SCOPED_ROOT}ws/`)) return path
+  return `${SCOPED_ROOT}ws/${wsId}/${path.slice(SCOPED_ROOT.length)}`
 }
 
 function readCookie(name: string): string {
@@ -43,11 +54,11 @@ export function createApiClient(baseUrl: string): ApiClient {
   let workspaceId: string | null = null
   const unauthorizedHandlers = new Set<() => void>()
 
-  const buildHeaders = (path: string, method: string, base: Record<string, string>) => {
+  const resolvePath = (path: string): string =>
+    workspaceId ? injectWorkspace(path, workspaceId) : path
+
+  const buildHeaders = (method: string, base: Record<string, string>) => {
     const headers: Record<string, string> = { ...base }
-    if (workspaceId && needsWorkspaceHeader(path)) {
-      headers['X-Workspace-Id'] = workspaceId
-    }
     if (method !== 'GET') {
       const csrf = readCookie('cubebox_csrf')
       if (csrf) headers['X-CSRF-Token'] = csrf
@@ -56,7 +67,7 @@ export function createApiClient(baseUrl: string): ApiClient {
   }
 
   const doFetch = async (path: string, init: RequestInit): Promise<Response> => {
-    const res = await fetch(`${baseUrl}${path}`, {
+    const res = await fetch(`${baseUrl}${resolvePath(path)}`, {
       ...init,
       credentials: 'include',
     })
@@ -76,16 +87,17 @@ export function createApiClient(baseUrl: string): ApiClient {
     setWorkspaceId(id) {
       workspaceId = id
     },
+    resolvePath,
     get(path) {
       return doFetch(path, {
         method: 'GET',
-        headers: buildHeaders(path, 'GET', {}),
+        headers: buildHeaders('GET', {}),
       })
     },
     post(path, body) {
       return doFetch(path, {
         method: 'POST',
-        headers: buildHeaders(path, 'POST', { 'Content-Type': 'application/json' }),
+        headers: buildHeaders('POST', { 'Content-Type': 'application/json' }),
         body: JSON.stringify(body),
       })
     },
@@ -93,7 +105,7 @@ export function createApiClient(baseUrl: string): ApiClient {
       const body = new URLSearchParams(form).toString()
       return doFetch(path, {
         method: 'POST',
-        headers: buildHeaders(path, 'POST', {
+        headers: buildHeaders('POST', {
           'Content-Type': 'application/x-www-form-urlencoded',
         }),
         body,
@@ -102,14 +114,14 @@ export function createApiClient(baseUrl: string): ApiClient {
     patch(path, body) {
       return doFetch(path, {
         method: 'PATCH',
-        headers: buildHeaders(path, 'PATCH', { 'Content-Type': 'application/json' }),
+        headers: buildHeaders('PATCH', { 'Content-Type': 'application/json' }),
         body: JSON.stringify(body),
       })
     },
     del(path) {
       return doFetch(path, {
         method: 'DELETE',
-        headers: buildHeaders(path, 'DELETE', {}),
+        headers: buildHeaders('DELETE', {}),
       })
     },
     onUnauthorized(handler) {

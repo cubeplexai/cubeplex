@@ -25,12 +25,12 @@ def _make_fake_ctx() -> RequestContext:
 
 @pytest.mark.asyncio
 async def test_sse_response_content_type(memory_client: httpx.AsyncClient) -> None:
-    resp = await memory_client.post("/api/v1/conversations", params={"title": "test"})
+    resp = await memory_client.post("/api/v1/ws/default-ws/conversations", params={"title": "test"})
     conv_id = resp.json()["id"]
 
     async with memory_client.stream(
         "POST",
-        f"/api/v1/conversations/{conv_id}/messages",
+        f"/api/v1/ws/default-ws/conversations/{conv_id}/messages",
         json={"content": "Say hi."},
     ) as response:
         assert "text/event-stream" in response.headers["content-type"]
@@ -38,12 +38,12 @@ async def test_sse_response_content_type(memory_client: httpx.AsyncClient) -> No
 
 @pytest.mark.asyncio
 async def test_every_event_is_valid_json(memory_client: httpx.AsyncClient) -> None:
-    resp = await memory_client.post("/api/v1/conversations", params={"title": "test"})
+    resp = await memory_client.post("/api/v1/ws/default-ws/conversations", params={"title": "test"})
     conv_id = resp.json()["id"]
 
     async with memory_client.stream(
         "POST",
-        f"/api/v1/conversations/{conv_id}/messages",
+        f"/api/v1/ws/default-ws/conversations/{conv_id}/messages",
         json={"content": "Say hi."},
     ) as response:
         async for line in response.aiter_lines():
@@ -55,13 +55,13 @@ async def test_every_event_is_valid_json(memory_client: httpx.AsyncClient) -> No
 
 @pytest.mark.asyncio
 async def test_stream_always_ends_with_done(memory_client: httpx.AsyncClient) -> None:
-    resp = await memory_client.post("/api/v1/conversations", params={"title": "test"})
+    resp = await memory_client.post("/api/v1/ws/default-ws/conversations", params={"title": "test"})
     conv_id = resp.json()["id"]
 
     events = []
     async with memory_client.stream(
         "POST",
-        f"/api/v1/conversations/{conv_id}/messages",
+        f"/api/v1/ws/default-ws/conversations/{conv_id}/messages",
         json={"content": "Say hi."},
     ) as response:
         async for line in response.aiter_lines():
@@ -130,13 +130,13 @@ def test_tool_call_delta_identity_is_backfilled_per_agent() -> None:
 
 @pytest.mark.asyncio
 async def test_agent_id_is_null_for_main_agent(memory_client: httpx.AsyncClient) -> None:
-    resp = await memory_client.post("/api/v1/conversations", params={"title": "test"})
+    resp = await memory_client.post("/api/v1/ws/default-ws/conversations", params={"title": "test"})
     conv_id = resp.json()["id"]
 
     events = []
     async with memory_client.stream(
         "POST",
-        f"/api/v1/conversations/{conv_id}/messages",
+        f"/api/v1/ws/default-ws/conversations/{conv_id}/messages",
         json={"content": "Say hi."},
     ) as response:
         async for line in response.aiter_lines():

@@ -121,9 +121,9 @@ async def _ensure_default_user_and_membership() -> None:
 
 
 async def _login_and_attach(
-    client: httpx.AsyncClient, email: str, password: str, workspace_id: str
+    client: httpx.AsyncClient, email: str, password: str
 ) -> None:
-    """Log in and set default X-Workspace-Id on the client."""
+    """Log in and set the CSRF header on the client."""
     await client.get("/api/v1/auth/me")  # obtain CSRF cookie (401 but sets cookie)
     csrf = client.cookies.get("cubebox_csrf") or ""
     r = await client.post(
@@ -132,13 +132,15 @@ async def _login_and_attach(
         headers={"X-CSRF-Token": csrf},
     )
     assert r.status_code in (200, 204), f"login failed: {r.status_code} {r.text}"
-    client.headers["X-Workspace-Id"] = workspace_id
     client.headers["X-CSRF-Token"] = client.cookies.get("cubebox_csrf") or csrf
 
 
 @pytest_asyncio.fixture
 async def client() -> AsyncIterator[TestClient]:
-    """Sync test client, auto-logged-in as default user in default-ws."""
+    """Sync test client, auto-logged-in as default user in default-ws.
+
+    Business-scoped calls should be prefixed with `/api/v1/ws/{DEFAULT_WS_ID}/...`.
+    """
     await _ensure_default_user_and_membership()
     app = _make_test_app()
     sync_client = TestClient(app)
@@ -150,20 +152,22 @@ async def client() -> AsyncIterator[TestClient]:
         headers={"X-CSRF-Token": csrf},
     )
     assert r.status_code in (200, 204), f"login failed: {r.status_code} {r.text}"
-    sync_client.headers["X-Workspace-Id"] = DEFAULT_WS_ID
     sync_client.headers["X-CSRF-Token"] = sync_client.cookies.get("cubebox_csrf") or csrf
     yield sync_client
 
 
 @pytest_asyncio.fixture
 async def async_client() -> AsyncIterator[httpx.AsyncClient]:
-    """Async HTTP client, auto-logged-in as default user in default-ws."""
+    """Async HTTP client, auto-logged-in as default user in default-ws.
+
+    Business-scoped calls should be prefixed with `/api/v1/ws/{DEFAULT_WS_ID}/...`.
+    """
     await _ensure_default_user_and_membership()
     app = _make_test_app()
     async with _lifespan_context(app):
         transport = httpx.ASGITransport(app=app)
         async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
-            await _login_and_attach(c, DEFAULT_TEST_EMAIL, DEFAULT_TEST_PASSWORD, DEFAULT_WS_ID)
+            await _login_and_attach(c, DEFAULT_TEST_EMAIL, DEFAULT_TEST_PASSWORD)
             yield c
     await engine.dispose()
 
@@ -176,7 +180,7 @@ async def memory_client() -> AsyncIterator[httpx.AsyncClient]:
     async with _lifespan_context(app):
         transport = httpx.ASGITransport(app=app)
         async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
-            await _login_and_attach(c, DEFAULT_TEST_EMAIL, DEFAULT_TEST_PASSWORD, DEFAULT_WS_ID)
+            await _login_and_attach(c, DEFAULT_TEST_EMAIL, DEFAULT_TEST_PASSWORD)
             yield c
     await engine.dispose()
 
@@ -235,33 +239,37 @@ async def _make_isolated_user(role: Role) -> tuple[FastAPI, str, str, str]:
 
 
 @pytest_asyncio.fixture
-async def authenticated_client() -> AsyncIterator[tuple[httpx.AsyncClient, dict[str, str]]]:
-    """Fresh client logged in as a brand-new admin of a brand-new workspace."""
+async def authenticated_client() -> AsyncIterator[tuple[httpx.AsyncClient, str]]:
+    """Fresh client logged in as a brand-new admin of a brand-new workspace.
+
+    Yields ``(client, workspace_id)``. Callers prepend ``/api/v1/ws/{workspace_id}``
+    to business-scoped paths.
+    """
     app, email, password, workspace_id = await _make_isolated_user(Role.ADMIN)
     async with _lifespan_context(app):
         transport = httpx.ASGITransport(app=app)
         async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
-            await _login_and_attach(c, email, password, workspace_id)
-            yield c, {"X-Workspace-Id": workspace_id}
+            await _login_and_attach(c, email, password)
+            yield c, workspace_id
 
 
 @pytest_asyncio.fixture
 async def admin_client(
-    authenticated_client: tuple[httpx.AsyncClient, dict[str, str]],
-) -> tuple[httpx.AsyncClient, dict[str, str]]:
+    authenticated_client: tuple[httpx.AsyncClient, str],
+) -> tuple[httpx.AsyncClient, str]:
     """Alias — authenticated_client is already admin."""
     return authenticated_client
 
 
 @pytest_asyncio.fixture
-async def member_client() -> AsyncIterator[tuple[httpx.AsyncClient, dict[str, str]]]:
+async def member_client() -> AsyncIterator[tuple[httpx.AsyncClient, str]]:
     """Fresh client logged in as a brand-new member (not admin) of a brand-new workspace."""
     app, email, password, workspace_id = await _make_isolated_user(Role.MEMBER)
     async with _lifespan_context(app):
         transport = httpx.ASGITransport(app=app)
         async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
-            await _login_and_attach(c, email, password, workspace_id)
-            yield c, {"X-Workspace-Id": workspace_id}
+            await _login_and_attach(c, email, password)
+            yield c, workspace_id
 
 
 async def collect_sse_events(

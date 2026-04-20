@@ -17,7 +17,12 @@ function mockSSEResponse(events: object[]) {
   })
 }
 
-const mockClient = { baseUrl: '', get: vi.fn(), post: vi.fn() }
+const mockClient = {
+  baseUrl: '',
+  get: vi.fn(),
+  post: vi.fn(),
+  resolvePath: (p: string) => p,
+}
 
 beforeEach(() => {
   vi.useRealTimers()

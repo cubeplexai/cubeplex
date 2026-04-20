@@ -102,7 +102,7 @@ pnpm --filter @cubebox/core type-check
 
 **Proxy (`proxy.ts`):** checks for the `cubebox_auth` cookie. Unauthenticated hits to `/w/*` or `/workspaces` redirect to `/login?next=<path>`. Logged-in hits to `/login` or `/register` redirect to `/`.
 
-**Active workspace:** the URL segment `[wsId]` is the single source of truth. `useWorkspaceContext()` (in `(app)` tree) reads it. The `ApiClient` instance each page creates via `createApiClient('')` calls `client.setWorkspaceId(wsId)`, which triggers automatic `X-Workspace-Id` injection on workspace-scoped calls.
+**Active workspace:** the URL segment `[wsId]` is the single source of truth. `useWorkspaceContext()` (in `(app)` tree) reads it. The `ApiClient` instance each page creates via `createApiClient('')` calls `client.setWorkspaceId(wsId)`, which automatically rewrites scoped paths — `/api/v1/conversations/...` becomes `/api/v1/ws/{wsId}/conversations/...`. Paths under `/api/v1/auth/` and `/api/v1/workspaces` are workspace-neutral and not rewritten. For browser-direct loads (`<img>`, `<iframe>`, `<a href>`, pdf.js) use the URL builders in `components/panel/artifact/previewUtils.ts` (`buildPreviewUrl`, `buildDownloadUrl`) or call `client.resolvePath(...)`.
 
 **CSRF:** double-submit pattern. `ApiClient` reads `cubebox_csrf` from `document.cookie` and adds `X-CSRF-Token` on every non-GET. The backend seeds the cookie on login.
 
@@ -110,7 +110,7 @@ pnpm --filter @cubebox/core type-check
 - `authStore` — `{id, email}` of the current user, or `null`. Populated by `loadMe` on `(app)` mount.
 - `workspaceStore` — list of the user's workspaces + `create(client, name)` (reuses the first workspace's `org_id`, M1 assumption: one user = one org).
 
-**SSE proxy:** the Next.js route handler at `app/api/v1/conversations/[id]/messages/route.ts` forwards `cookie`, `X-Workspace-Id`, `X-CSRF-Token`, and `x-user-id` to the backend so streaming requests carry auth + scoping.
+**SSE proxy:** the Next.js route handler at `app/api/v1/ws/[wsId]/conversations/[id]/messages/route.ts` forwards `cookie`, `X-CSRF-Token`, and `x-user-id` to the backend. Workspace scoping rides in the URL path, not a header.
 
 **Known one-user-one-org assumption:** `workspaceStore.create` reads `workspaces[0].org_id`. When multi-org-per-user ships (P2), this must take an explicit org id.
 

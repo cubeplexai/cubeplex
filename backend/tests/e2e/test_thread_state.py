@@ -9,18 +9,18 @@ from tests.e2e.conftest import collect_sse_events
 @pytest.mark.asyncio
 async def test_multi_turn_context_is_retained(memory_client: httpx.AsyncClient) -> None:
     """Agent should remember context from previous turns."""
-    resp = await memory_client.post("/api/v1/conversations", params={"title": "test"})
+    resp = await memory_client.post("/api/v1/ws/default-ws/conversations", params={"title": "test"})
     conv_id = resp.json()["id"]
 
     await collect_sse_events(
         memory_client,
-        f"/api/v1/conversations/{conv_id}/messages",
+        f"/api/v1/ws/default-ws/conversations/{conv_id}/messages",
         json_data={"content": "My name is TestUser. Just acknowledge this."},
     )
 
     events = await collect_sse_events(
         memory_client,
-        f"/api/v1/conversations/{conv_id}/messages",
+        f"/api/v1/ws/default-ws/conversations/{conv_id}/messages",
         json_data={"content": "What is my name? Reply with just the name."},
     )
 
@@ -31,21 +31,21 @@ async def test_multi_turn_context_is_retained(memory_client: httpx.AsyncClient) 
 
 @pytest.mark.asyncio
 async def test_message_count_after_two_turns(memory_client: httpx.AsyncClient) -> None:
-    resp = await memory_client.post("/api/v1/conversations", params={"title": "test"})
+    resp = await memory_client.post("/api/v1/ws/default-ws/conversations", params={"title": "test"})
     conv_id = resp.json()["id"]
 
     await collect_sse_events(
         memory_client,
-        f"/api/v1/conversations/{conv_id}/messages",
+        f"/api/v1/ws/default-ws/conversations/{conv_id}/messages",
         json_data={"content": "First message."},
     )
     await collect_sse_events(
         memory_client,
-        f"/api/v1/conversations/{conv_id}/messages",
+        f"/api/v1/ws/default-ws/conversations/{conv_id}/messages",
         json_data={"content": "Second message."},
     )
 
-    resp = await memory_client.get(f"/api/v1/conversations/{conv_id}/messages")
+    resp = await memory_client.get(f"/api/v1/ws/default-ws/conversations/{conv_id}/messages")
     messages = resp.json()["messages"]
     assert len(messages) >= 4
     user_msgs = [m for m in messages if m["role"] == "user"]
@@ -56,20 +56,20 @@ async def test_message_count_after_two_turns(memory_client: httpx.AsyncClient) -
 async def test_separate_conversations_have_independent_state(
     memory_client: httpx.AsyncClient,
 ) -> None:
-    resp1 = await memory_client.post("/api/v1/conversations", params={"title": "conv1"})
-    resp2 = await memory_client.post("/api/v1/conversations", params={"title": "conv2"})
+    resp1 = await memory_client.post("/api/v1/ws/default-ws/conversations", params={"title": "conv1"})
+    resp2 = await memory_client.post("/api/v1/ws/default-ws/conversations", params={"title": "conv2"})
     conv1_id = resp1.json()["id"]
     conv2_id = resp2.json()["id"]
 
     await collect_sse_events(
         memory_client,
-        f"/api/v1/conversations/{conv1_id}/messages",
+        f"/api/v1/ws/default-ws/conversations/{conv1_id}/messages",
         json_data={"content": "My secret word is ALPHA."},
     )
 
     events = await collect_sse_events(
         memory_client,
-        f"/api/v1/conversations/{conv2_id}/messages",
+        f"/api/v1/ws/default-ws/conversations/{conv2_id}/messages",
         json_data={"content": "Do you know my secret word? Just say no if you don't."},
     )
 

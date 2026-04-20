@@ -73,11 +73,6 @@ async def create_invite(
     ctx: Annotated[RequestContext, Depends(require_admin)],
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> dict[str, str]:
-    if ctx.workspace_id != workspace_id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="X-Workspace-Id header must match workspace_id in path",
-        )
     if body.role not in ("admin", "member"):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail="role must be admin or member"

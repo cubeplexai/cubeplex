@@ -35,12 +35,12 @@ export async function* streamMessages(
     Accept: 'text/event-stream',
     'Cache-Control': 'no-cache',
   }
-  if (client.workspaceId) headers['X-Workspace-Id'] = client.workspaceId
   const csrf = readCookie('cubebox_csrf')
   if (csrf) headers['X-CSRF-Token'] = csrf
 
+  const path = client.resolvePath(`/api/v1/conversations/${conversationId}/messages`)
   const res = await fetch(
-    `${client.baseUrl}/api/v1/conversations/${conversationId}/messages`,
+    `${client.baseUrl}${path}`,
     {
       method: 'POST',
       credentials: 'include',
