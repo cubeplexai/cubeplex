@@ -15,7 +15,6 @@ function buildProxyHeaders(request: NextRequest, accept: string): HeadersInit {
   const headers: Record<string, string> = { Accept: accept }
   const cookie = request.headers.get('cookie')
   const userId = request.headers.get('x-user-id')
-  const wsId = request.headers.get('x-workspace-id')
   const csrf = request.headers.get('x-csrf-token')
 
   if (cookie) {
@@ -23,9 +22,6 @@ function buildProxyHeaders(request: NextRequest, accept: string): HeadersInit {
   }
   if (userId) {
     headers['x-user-id'] = userId
-  }
-  if (wsId) {
-    headers['X-Workspace-Id'] = wsId
   }
   if (csrf) {
     headers['X-CSRF-Token'] = csrf
@@ -51,13 +47,13 @@ function appendSetCookie(target: Headers, source: Headers): void {
 
 export async function POST(
   request: NextRequest,
-  { params }: { params: Promise<{ id: string }> },
+  { params }: { params: Promise<{ wsId: string; id: string }> },
 ) {
-  const { id } = await params
+  const { wsId, id } = await params
   const body = await request.text()
 
   const backendRes = await fetch(
-    `${BACKEND_URL}/api/v1/conversations/${id}/messages`,
+    `${BACKEND_URL}/api/v1/ws/${wsId}/conversations/${id}/messages`,
     {
       method: 'POST',
       headers: {
@@ -93,14 +89,14 @@ export async function POST(
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: Promise<{ id: string }> },
+  { params }: { params: Promise<{ wsId: string; id: string }> },
 ) {
-  const { id } = await params
+  const { wsId, id } = await params
   const url = new URL(request.url)
   const qs = url.search
 
   const backendRes = await fetch(
-    `${BACKEND_URL}/api/v1/conversations/${id}/messages${qs}`,
+    `${BACKEND_URL}/api/v1/ws/${wsId}/conversations/${id}/messages${qs}`,
     {
       headers: buildProxyHeaders(request, 'application/json'),
     },

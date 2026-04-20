@@ -10,14 +10,15 @@ import { buildPreviewUrl } from './previewUtils'
 interface DocumentPreviewProps {
   artifact: Artifact
   version: number | null
+  workspaceId: string
 }
 
-export function DocumentPreview({ artifact, version }: DocumentPreviewProps) {
+export function DocumentPreview({ artifact, version, workspaceId }: DocumentPreviewProps) {
   const [content, setContent] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   const filename = artifact.entry_file || artifact.path.split('/').pop() || 'file'
-  const previewUrl = buildPreviewUrl(artifact, filename, version)
+  const previewUrl = buildPreviewUrl(artifact, filename, version, workspaceId)
 
   useEffect(() => {
     fetch(previewUrl)

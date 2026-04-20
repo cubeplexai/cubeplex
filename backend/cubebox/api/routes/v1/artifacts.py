@@ -17,7 +17,10 @@ from cubebox.db import get_session
 from cubebox.objectstore import get_objectstore_client
 from cubebox.repositories import ArtifactRepository, ArtifactVersionRepository
 
-router = APIRouter(prefix="/conversations/{conversation_id}/artifacts", tags=["artifacts"])
+router = APIRouter(
+    prefix="/ws/{workspace_id}/conversations/{conversation_id}/artifacts",
+    tags=["artifacts"],
+)
 
 
 @router.get("")

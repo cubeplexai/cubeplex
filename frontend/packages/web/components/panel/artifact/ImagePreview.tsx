@@ -8,12 +8,13 @@ import { buildPreviewUrl } from './previewUtils'
 interface ImagePreviewProps {
   artifact: Artifact
   version: number | null
+  workspaceId: string
 }
 
-export function ImagePreview({ artifact, version }: ImagePreviewProps) {
+export function ImagePreview({ artifact, version, workspaceId }: ImagePreviewProps) {
   const [loading, setLoading] = useState(true)
   const filename = artifact.path.split('/').pop() || 'image'
-  const previewUrl = buildPreviewUrl(artifact, filename, version)
+  const previewUrl = buildPreviewUrl(artifact, filename, version, workspaceId)
 
   return (
     <div className="flex items-center justify-center h-full p-4 bg-muted/20">

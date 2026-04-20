@@ -148,9 +148,10 @@ function TocItem({
 interface PdfPreviewProps {
   artifact: Artifact
   version: number | null
+  workspaceId: string
 }
 
-export function PdfPreview({ artifact, version }: PdfPreviewProps) {
+export function PdfPreview({ artifact, version, workspaceId }: PdfPreviewProps) {
   const [loading, setLoading] = useState(true)
   const [numPages, setNumPages] = useState(0)
   const [currentPage, setCurrentPage] = useState(1)
@@ -163,7 +164,7 @@ export function PdfPreview({ artifact, version }: PdfPreviewProps) {
   const pageRefs = useRef<Map<number, HTMLDivElement>>(new Map())
 
   const filename = artifact.entry_file || artifact.path.split('/').pop() || 'file.pdf'
-  const fileUrl = buildPreviewUrl(artifact, filename, version)
+  const fileUrl = buildPreviewUrl(artifact, filename, version, workspaceId)
 
   // Track container width for responsive page sizing
   useEffect(() => {

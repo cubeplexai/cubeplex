@@ -8,12 +8,13 @@ import { buildPreviewUrl } from './previewUtils'
 interface HtmlPreviewProps {
   artifact: Artifact
   version: number | null
+  workspaceId: string
 }
 
-export function HtmlPreview({ artifact, version }: HtmlPreviewProps) {
+export function HtmlPreview({ artifact, version, workspaceId }: HtmlPreviewProps) {
   const [loading, setLoading] = useState(true)
   const entryFile = artifact.entry_file || artifact.path.split('/').pop() || 'index.html'
-  const previewUrl = buildPreviewUrl(artifact, entryFile, version)
+  const previewUrl = buildPreviewUrl(artifact, entryFile, version, workspaceId)
 
   return (
     <div className="relative w-full h-full">

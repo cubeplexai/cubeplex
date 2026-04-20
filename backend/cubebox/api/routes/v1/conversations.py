@@ -23,7 +23,7 @@ from cubebox.db.engine import _build_database_url, async_session_maker
 from cubebox.repositories import ConversationRepository
 from cubebox.utils.time import utc_isoformat
 
-router = APIRouter(prefix="/conversations", tags=["conversations"])
+router = APIRouter(prefix="/ws/{workspace_id}/conversations", tags=["conversations"])
 
 
 async def _update_conversation_timestamp(

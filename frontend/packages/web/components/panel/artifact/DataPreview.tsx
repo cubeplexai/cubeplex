@@ -8,6 +8,7 @@ import { buildPreviewUrl } from './previewUtils'
 interface DataPreviewProps {
   artifact: Artifact
   version: number | null
+  workspaceId: string
 }
 
 function parseCsv(text: string): { headers: string[]; rows: string[][] } {
@@ -54,12 +55,12 @@ function JsonTable({ data }: { data: unknown }) {
   )
 }
 
-export function DataPreview({ artifact, version }: DataPreviewProps) {
+export function DataPreview({ artifact, version, workspaceId }: DataPreviewProps) {
   const [content, setContent] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   const filename = artifact.entry_file || artifact.path.split('/').pop() || 'file'
-  const previewUrl = buildPreviewUrl(artifact, filename, version)
+  const previewUrl = buildPreviewUrl(artifact, filename, version, workspaceId)
 
   useEffect(() => {
     fetch(previewUrl)

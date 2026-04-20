@@ -5,22 +5,22 @@ import { Download, Package, Eye } from 'lucide-react'
 import type { Artifact } from '@cubebox/core'
 import { usePanelStore } from '@cubebox/core'
 import { getArtifactIcon, getArtifactLabel } from '@/components/panel/artifact/artifactIcons'
+import { buildDownloadUrl } from '@/components/panel/artifact/previewUtils'
+import { useWorkspaceContext } from '@/hooks/useWorkspaceContext'
 
 interface ArtifactCardProps {
   artifact: Artifact
-  baseUrl?: string
 }
 
 export const ArtifactCard = memo(function ArtifactCard({
   artifact,
-  baseUrl = '',
 }: ArtifactCardProps) {
   const Icon = getArtifactIcon(artifact)
   const label = getArtifactLabel(artifact)
   const openPreview = usePanelStore(s => s.openArtifact)
+  const { workspaceId } = useWorkspaceContext()
 
-  const downloadUrl =
-    `${baseUrl}/api/v1/conversations/${artifact.conversation_id}/artifacts/${artifact.id}/download`
+  const downloadUrl = workspaceId ? buildDownloadUrl(artifact, workspaceId) : '#'
 
   const handlePreview = useCallback(() => {
     openPreview(artifact.conversation_id, artifact.id)

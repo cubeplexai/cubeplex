@@ -7,6 +7,8 @@ import {
 import { useArtifactStore, usePanelStore } from '@cubebox/core'
 import type { Artifact } from '@cubebox/core'
 import { getArtifactIcon } from '@/components/panel/artifact/artifactIcons'
+import { buildDownloadUrl } from '@/components/panel/artifact/previewUtils'
+import { useWorkspaceContext } from '@/hooks/useWorkspaceContext'
 
 interface ArtifactGalleryProps {
   conversationId: string
@@ -76,8 +78,8 @@ function ArtifactGalleryItem(
   { artifact, onPreview }: { artifact: Artifact; onPreview: () => void },
 ) {
   const Icon = getArtifactIcon(artifact)
-  const downloadUrl =
-    `/api/v1/conversations/${artifact.conversation_id}/artifacts/${artifact.id}/download`
+  const { workspaceId } = useWorkspaceContext()
+  const downloadUrl = workspaceId ? buildDownloadUrl(artifact, workspaceId) : '#'
 
   return (
     <div

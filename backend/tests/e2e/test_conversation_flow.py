@@ -9,13 +9,13 @@ from tests.e2e.conftest import collect_sse_events
 @pytest.mark.asyncio
 async def test_send_message_returns_sse_stream(memory_client: httpx.AsyncClient) -> None:
     # Create conversation first
-    resp = await memory_client.post("/api/v1/conversations", params={"title": "test"})
+    resp = await memory_client.post("/api/v1/ws/default-ws/conversations", params={"title": "test"})
     assert resp.status_code == 201
     conv_id = resp.json()["id"]
 
     events = await collect_sse_events(
         memory_client,
-        f"/api/v1/conversations/{conv_id}/messages",
+        f"/api/v1/ws/default-ws/conversations/{conv_id}/messages",
         json_data={"content": "Say the word 'hello' and nothing else."},
     )
     assert len(events) > 0
@@ -24,12 +24,12 @@ async def test_send_message_returns_sse_stream(memory_client: httpx.AsyncClient)
 
 @pytest.mark.asyncio
 async def test_stream_contains_text_delta(memory_client: httpx.AsyncClient) -> None:
-    resp = await memory_client.post("/api/v1/conversations", params={"title": "test"})
+    resp = await memory_client.post("/api/v1/ws/default-ws/conversations", params={"title": "test"})
     conv_id = resp.json()["id"]
 
     events = await collect_sse_events(
         memory_client,
-        f"/api/v1/conversations/{conv_id}/messages",
+        f"/api/v1/ws/default-ws/conversations/{conv_id}/messages",
         json_data={"content": "Say the word 'hello' and nothing else."},
     )
     text_events = [e for e in events if e["type"] == "text_delta"]
@@ -40,16 +40,16 @@ async def test_stream_contains_text_delta(memory_client: httpx.AsyncClient) -> N
 
 @pytest.mark.asyncio
 async def test_list_messages_returns_history_after_send(memory_client: httpx.AsyncClient) -> None:
-    resp = await memory_client.post("/api/v1/conversations", params={"title": "test"})
+    resp = await memory_client.post("/api/v1/ws/default-ws/conversations", params={"title": "test"})
     conv_id = resp.json()["id"]
 
     await collect_sse_events(
         memory_client,
-        f"/api/v1/conversations/{conv_id}/messages",
+        f"/api/v1/ws/default-ws/conversations/{conv_id}/messages",
         json_data={"content": "Say the word 'hello' and nothing else."},
     )
 
-    resp = await memory_client.get(f"/api/v1/conversations/{conv_id}/messages")
+    resp = await memory_client.get(f"/api/v1/ws/default-ws/conversations/{conv_id}/messages")
     assert resp.status_code == 200
     messages = resp.json()["messages"]
     assert len(messages) >= 2
@@ -62,7 +62,7 @@ async def test_send_to_nonexistent_conversation_returns_404(
     memory_client: httpx.AsyncClient,
 ) -> None:
     resp = await memory_client.post(
-        "/api/v1/conversations/nonexistent-id/messages",
+        "/api/v1/ws/default-ws/conversations/nonexistent-id/messages",
         json={"content": "hello"},
     )
     assert resp.status_code == 404
@@ -70,11 +70,11 @@ async def test_send_to_nonexistent_conversation_returns_404(
 
 @pytest.mark.asyncio
 async def test_send_empty_content_returns_400(memory_client: httpx.AsyncClient) -> None:
-    resp = await memory_client.post("/api/v1/conversations", params={"title": "test"})
+    resp = await memory_client.post("/api/v1/ws/default-ws/conversations", params={"title": "test"})
     conv_id = resp.json()["id"]
 
     resp = await memory_client.post(
-        f"/api/v1/conversations/{conv_id}/messages",
+        f"/api/v1/ws/default-ws/conversations/{conv_id}/messages",
         json={"content": ""},
     )
     assert resp.status_code == 400

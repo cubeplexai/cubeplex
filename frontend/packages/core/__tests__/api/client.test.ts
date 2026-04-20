@@ -7,7 +7,6 @@ describe('ApiClient', () => {
   beforeEach(() => {
     fetchMock = vi.fn(async () => new Response('{}', { status: 200 }))
     globalThis.fetch = fetchMock as unknown as typeof fetch
-    // jsdom: fake cookie
     Object.defineProperty(document, 'cookie', {
       writable: true,
       value: 'cubebox_csrf=csrf-abc; other=x',
@@ -25,26 +24,49 @@ describe('ApiClient', () => {
     )
   })
 
-  it('injects X-Workspace-Id on scoped paths when workspaceId is set', async () => {
+  it('injects /ws/<id>/ into scoped paths when workspaceId is set', async () => {
     const client = createApiClient('')
     client.setWorkspaceId('ws-123')
     await client.get('/api/v1/conversations')
-    const [, init] = fetchMock.mock.calls[0]
-    expect((init as RequestInit).headers).toMatchObject({ 'X-Workspace-Id': 'ws-123' })
+    const [url] = fetchMock.mock.calls[0]
+    expect(url).toBe('/api/v1/ws/ws-123/conversations')
   })
 
-  it('does NOT inject X-Workspace-Id on /api/v1/auth/* paths', async () => {
+  it('does NOT rewrite /api/v1/auth/* paths', async () => {
     const client = createApiClient('')
     client.setWorkspaceId('ws-123')
     await client.post('/api/v1/auth/login', { a: 1 })
-    const [, init] = fetchMock.mock.calls[0]
-    expect((init as RequestInit).headers).not.toHaveProperty('X-Workspace-Id')
+    const [url] = fetchMock.mock.calls[0]
+    expect(url).toBe('/api/v1/auth/login')
   })
 
-  it('does NOT inject X-Workspace-Id on /api/v1/workspaces paths', async () => {
+  it('does NOT rewrite /api/v1/workspaces paths', async () => {
     const client = createApiClient('')
     client.setWorkspaceId('ws-123')
     await client.get('/api/v1/workspaces')
+    const [url] = fetchMock.mock.calls[0]
+    expect(url).toBe('/api/v1/workspaces')
+  })
+
+  it('does NOT double-inject /ws/ if path already scoped', async () => {
+    const client = createApiClient('')
+    client.setWorkspaceId('ws-123')
+    await client.get('/api/v1/ws/ws-123/conversations')
+    const [url] = fetchMock.mock.calls[0]
+    expect(url).toBe('/api/v1/ws/ws-123/conversations')
+  })
+
+  it('resolvePath mirrors the rewrite (for direct fetch callers)', () => {
+    const client = createApiClient('')
+    client.setWorkspaceId('ws-123')
+    expect(client.resolvePath('/api/v1/conversations/abc/messages'))
+      .toBe('/api/v1/ws/ws-123/conversations/abc/messages')
+  })
+
+  it('never sends X-Workspace-Id header (legacy behavior removed)', async () => {
+    const client = createApiClient('')
+    client.setWorkspaceId('ws-123')
+    await client.get('/api/v1/conversations')
     const [, init] = fetchMock.mock.calls[0]
     expect((init as RequestInit).headers).not.toHaveProperty('X-Workspace-Id')
   })

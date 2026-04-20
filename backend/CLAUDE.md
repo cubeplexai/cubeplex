@@ -65,7 +65,7 @@ Single test file: `uv run pytest tests/e2e/test_agents.py`
 
 ## Architecture
 
-**Request flow:** `POST /api/v1/conversations/{id}/messages` → `create_cubebox_agent()` → LangGraph `astream(stream_mode="messages", stream_subgraphs=True)` → SSE stream of typed events (`text_delta`, `reasoning`, `tool_call`, `tool_result`, `error`, `done`)
+**Request flow:** `POST /api/v1/ws/{workspace_id}/conversations/{id}/messages` → `create_cubebox_agent()` → LangGraph `astream(stream_mode="messages", stream_subgraphs=True)` → SSE stream of typed events (`text_delta`, `reasoning`, `tool_call`, `tool_result`, `error`, `done`)
 
 **Key components:**
 - `create_cubebox_agent` (`cubebox/agents/graph.py`) — factory that wires LLM, tools, and middleware (sandbox, subagents, skills) into a LangGraph CompiledStateGraph via `langchain.agents.create_agent()`
@@ -85,7 +85,7 @@ Identity model: `Organization` → `Workspace` → `Membership` → `User`. One 
 
 **CSRF:** double-submit cookie pattern. A `cubebox_csrf` cookie is set on login; mutating requests (POST/PUT/PATCH/DELETE) must echo it in the `X-CSRF-Token` header whenever the `cubebox_auth` cookie is present.
 
-**Workspace scoping:** every business request requires an `X-Workspace-Id` header. The `request_context` dependency resolves it into a `RequestContext` (user + org_id + workspace_id + role). Missing header → 400; workspace not found → 404; not a member → 403.
+**Workspace scoping:** every business route lives under `/api/v1/ws/{workspace_id}/...` — the workspace id is a path parameter, not a header. The `request_context` dependency extracts it via FastAPI `Path`, validates membership, and produces a `RequestContext` (user + org_id + workspace_id + role). Workspace not found → 404; not a member → 403. Path-based scoping lets browser-direct loads (`<img>`, `<iframe>`, `<a href>`) work without custom headers.
 
 **Repository layer:** `OrgScopedMixin` + `ScopedRepository[T]` (`cubebox/repositories/base.py`) automatically filter every query by `(org_id, workspace_id)` — structural isolation, not an ACL check bolted on top. New business repositories should subclass `ScopedRepository`.
 
@@ -93,6 +93,7 @@ Identity model: `Organization` → `Workspace` → `Membership` → `User`. One 
 - `POST /api/v1/auth/register`, `POST /api/v1/auth/login`, `POST /api/v1/auth/logout`, `GET /api/v1/auth/me`
 - `GET/POST /api/v1/workspaces`
 - `POST /api/v1/workspaces/{ws}/invites` (admin only), `POST /api/v1/workspaces/invites/accept`
+- `/api/v1/ws/{workspace_id}/conversations/...` and `/api/v1/ws/{workspace_id}/conversations/{cid}/artifacts/...` — all scoped business endpoints
 
 **Register bootstrap:** `UserManager.on_after_register` auto-creates a personal Organization (`"<email-local-part>'s Org"`), a Workspace (`"Personal"`), and an Admin Membership for the new user in the same session. If any of these fails, the User row is best-effort deleted before the exception propagates so registration appears atomic to the client. The register response returns `{id, email, default_workspace_id}`.
 

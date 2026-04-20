@@ -68,9 +68,9 @@ async def test_conversation_invisible_to_other_workspace(unauthenticated_memory_
     ws_a = r.json()["id"]
 
     r = await client.post(
-        "/api/v1/conversations",
+        f"/api/v1/ws/{ws_a}/conversations",
         params={"title": "Secret"},
-        headers={"X-CSRF-Token": csrf_a, "X-Workspace-Id": ws_a},
+        headers={"X-CSRF-Token": csrf_a},
     )
     assert r.status_code == 201, r.text
     conv_id = r.json()["id"]
@@ -79,10 +79,7 @@ async def test_conversation_invisible_to_other_workspace(unauthenticated_memory_
     # Without this, a silent bug (e.g. creation landing in the wrong workspace,
     # or the endpoint returning a stub id without persisting) would make B's
     # 404 pass for the wrong reason.
-    r = await client.get(
-        f"/api/v1/conversations/{conv_id}",
-        headers={"X-Workspace-Id": ws_a},
-    )
+    r = await client.get(f"/api/v1/ws/{ws_a}/conversations/{conv_id}")
     assert r.status_code == 200, f"A must see their own conversation: {r.text}"
 
     # A logs out.
@@ -107,16 +104,15 @@ async def test_conversation_invisible_to_other_workspace(unauthenticated_memory_
     )
     assert r.status_code == 201, r.text
     ws_b = r.json()["id"]
-    headers_b = {"X-CSRF-Token": csrf_b, "X-Workspace-Id": ws_b}
 
     # Direct read must 404 — structurally invisible, not a 403 auth error.
     # 404 because ScopedRepository filters by (org_id, workspace_id) at the
     # query layer — the row is invisible, not merely forbidden.
-    r = await client.get(f"/api/v1/conversations/{conv_id}", headers=headers_b)
+    r = await client.get(f"/api/v1/ws/{ws_b}/conversations/{conv_id}")
     assert r.status_code == 404, r.text
 
     # List must be empty — the scoped WHERE clause hides A's row entirely.
-    r = await client.get("/api/v1/conversations", headers=headers_b)
+    r = await client.get(f"/api/v1/ws/{ws_b}/conversations")
     assert r.status_code == 200, r.text
     body = r.json()
     assert body["total"] == 0
