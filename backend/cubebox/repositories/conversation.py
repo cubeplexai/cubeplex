@@ -1,8 +1,15 @@
-"""Conversation repository — scoped by (org_id, workspace_id)."""
+"""Conversation repository — scoped by (workspace_id, creator_user_id).
+
+Conversations are per-user: only the creator can see/mutate their rows.
+Org + workspace columns are still persisted via ``OrgScopedMixin`` but
+the primary access check is ``creator_user_id``.
+"""
 
 from datetime import UTC, datetime
+from typing import Any
 
 from sqlalchemy import desc, func, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from cubebox.models import Conversation
 from cubebox.repositories.base import ScopedRepository
@@ -11,11 +18,32 @@ from cubebox.repositories.base import ScopedRepository
 class ConversationRepository(ScopedRepository[Conversation]):
     model = Conversation
 
+    def __init__(
+        self,
+        session: AsyncSession,
+        *,
+        org_id: str,
+        workspace_id: str,
+        user_id: str,
+    ) -> None:
+        super().__init__(session, org_id=org_id, workspace_id=workspace_id)
+        self.user_id = user_id
+
+    def _scoped_select(self) -> Any:
+        return (
+            super()
+            ._scoped_select()
+            .where(
+                Conversation.creator_user_id == self.user_id,
+            )
+        )
+
     async def create(self, title: str) -> Conversation:
         conv = Conversation(
             title=title,
             org_id=self.org_id,
             workspace_id=self.workspace_id,
+            creator_user_id=self.user_id,
         )
         return await self.add(conv)
 
@@ -36,8 +64,8 @@ class ConversationRepository(ScopedRepository[Conversation]):
             select(func.count())
             .select_from(Conversation)
             .where(
-                Conversation.org_id == self.org_id,  # type: ignore[arg-type]
                 Conversation.workspace_id == self.workspace_id,  # type: ignore[arg-type]
+                Conversation.creator_user_id == self.user_id,  # type: ignore[arg-type]
             )
         )
         total = (await self.session.execute(count_stmt)).scalar_one()
