@@ -31,6 +31,7 @@ async def _update_conversation_timestamp(
     *,
     org_id: str,
     workspace_id: str,
+    user_id: str,
 ) -> None:
     """Update conversation timestamp using an isolated NullPool engine.
 
@@ -41,7 +42,10 @@ async def _update_conversation_timestamp(
     try:
         async with AsyncSession(save_engine, expire_on_commit=False) as save_session:
             save_conv_repo = ConversationRepository(
-                save_session, org_id=org_id, workspace_id=workspace_id
+                save_session,
+                org_id=org_id,
+                workspace_id=workspace_id,
+                user_id=user_id,
             )
             await save_conv_repo.update_timestamp(conversation_id)
     finally:
@@ -55,7 +59,12 @@ async def create_conversation(
     ctx: Annotated[RequestContext, Depends(require_member)],
 ) -> dict[str, object]:
     """Create a new conversation."""
-    repo = ConversationRepository(session, org_id=ctx.org_id, workspace_id=ctx.workspace_id)
+    repo = ConversationRepository(
+        session,
+        org_id=ctx.org_id,
+        workspace_id=ctx.workspace_id,
+        user_id=ctx.user.id,
+    )
     conversation = await repo.create(title=title)
     return {
         "id": conversation.id,
@@ -72,7 +81,12 @@ async def get_conversation(
     ctx: Annotated[RequestContext, Depends(require_member)],
 ) -> dict[str, object]:
     """Get a conversation by ID."""
-    repo = ConversationRepository(session, org_id=ctx.org_id, workspace_id=ctx.workspace_id)
+    repo = ConversationRepository(
+        session,
+        org_id=ctx.org_id,
+        workspace_id=ctx.workspace_id,
+        user_id=ctx.user.id,
+    )
     conversation = await repo.get_by_id(conversation_id)
     if not conversation:
         raise HTTPException(
@@ -95,7 +109,12 @@ async def list_conversations(
     offset: int = 0,
 ) -> dict[str, object]:
     """List conversations with pagination."""
-    repo = ConversationRepository(session, org_id=ctx.org_id, workspace_id=ctx.workspace_id)
+    repo = ConversationRepository(
+        session,
+        org_id=ctx.org_id,
+        workspace_id=ctx.workspace_id,
+        user_id=ctx.user.id,
+    )
     conversations, total = await repo.list_all(limit=limit, offset=offset)
     return {
         "conversations": [
@@ -121,7 +140,12 @@ async def update_conversation(
     ctx: Annotated[RequestContext, Depends(require_member)],
 ) -> dict[str, object]:
     """Update conversation title."""
-    repo = ConversationRepository(session, org_id=ctx.org_id, workspace_id=ctx.workspace_id)
+    repo = ConversationRepository(
+        session,
+        org_id=ctx.org_id,
+        workspace_id=ctx.workspace_id,
+        user_id=ctx.user.id,
+    )
     conversation = await repo.update_title(conversation_id, title)
     if not conversation:
         raise HTTPException(
@@ -143,7 +167,12 @@ async def delete_conversation(
     ctx: Annotated[RequestContext, Depends(require_member)],
 ) -> None:
     """Delete a conversation."""
-    repo = ConversationRepository(session, org_id=ctx.org_id, workspace_id=ctx.workspace_id)
+    repo = ConversationRepository(
+        session,
+        org_id=ctx.org_id,
+        workspace_id=ctx.workspace_id,
+        user_id=ctx.user.id,
+    )
     deleted = await repo.delete(conversation_id)
     if not deleted:
         raise HTTPException(
@@ -287,7 +316,10 @@ async def send_message(
     # for the entire SSE stream duration, causing connection leaks on cancellation.
     async with async_session_maker() as session:
         conv_repo = ConversationRepository(
-            session, org_id=ctx.org_id, workspace_id=ctx.workspace_id
+            session,
+            org_id=ctx.org_id,
+            workspace_id=ctx.workspace_id,
+            user_id=ctx.user.id,
         )
         conversation = await conv_repo.get_by_id(conversation_id)
     if not conversation:
@@ -695,7 +727,10 @@ async def send_message(
             if not request_cancelled:
                 try:
                     await _update_conversation_timestamp(
-                        conversation_id, org_id=org_id, workspace_id=workspace_id
+                        conversation_id,
+                        org_id=org_id,
+                        workspace_id=workspace_id,
+                        user_id=user_id,
                     )
                 except Exception as e:
                     logger.warning("Error updating conversation timestamp: {}", e)
@@ -718,7 +753,12 @@ async def list_messages(
     ctx: Annotated[RequestContext, Depends(require_member)],
 ) -> dict[str, object]:
     """List messages in a conversation, read from LangGraph thread state."""
-    conv_repo = ConversationRepository(session, org_id=ctx.org_id, workspace_id=ctx.workspace_id)
+    conv_repo = ConversationRepository(
+        session,
+        org_id=ctx.org_id,
+        workspace_id=ctx.workspace_id,
+        user_id=ctx.user.id,
+    )
     conversation = await conv_repo.get_by_id(conversation_id)
     if not conversation:
         raise HTTPException(
