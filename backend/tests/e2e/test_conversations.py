@@ -16,7 +16,9 @@ class TestConversationsCRUD:
 
     def test_create_conversation(self, client: TestClient) -> None:
         """Create a conversation and verify the response."""
-        response = client.post("/api/v1/ws/default-ws/conversations", params={"title": "Test Conversation"})
+        response = client.post(
+            "/api/v1/ws/default-ws/conversations", params={"title": "Test Conversation"}
+        )
         assert response.status_code == 201
         data = response.json()
         assert data["title"] == "Test Conversation"
@@ -26,7 +28,9 @@ class TestConversationsCRUD:
 
     def test_get_conversation(self, client: TestClient) -> None:
         """Create then retrieve a conversation."""
-        create_resp = client.post("/api/v1/ws/default-ws/conversations", params={"title": "Get Test"})
+        create_resp = client.post(
+            "/api/v1/ws/default-ws/conversations", params={"title": "Get Test"}
+        )
         conversation_id = create_resp.json()["id"]
 
         get_resp = client.get(f"/api/v1/ws/default-ws/conversations/{conversation_id}")
@@ -46,7 +50,9 @@ class TestConversationsCRUD:
         client.post("/api/v1/ws/default-ws/conversations", params={"title": "List Test 1"})
         client.post("/api/v1/ws/default-ws/conversations", params={"title": "List Test 2"})
 
-        response = client.get("/api/v1/ws/default-ws/conversations", params={"limit": 10, "offset": 0})
+        response = client.get(
+            "/api/v1/ws/default-ws/conversations", params={"limit": 10, "offset": 0}
+        )
         assert response.status_code == 200
         data = response.json()
         assert "conversations" in data
@@ -56,7 +62,9 @@ class TestConversationsCRUD:
 
     def test_update_conversation_title(self, client: TestClient) -> None:
         """Update conversation title."""
-        create_resp = client.post("/api/v1/ws/default-ws/conversations", params={"title": "Original Title"})
+        create_resp = client.post(
+            "/api/v1/ws/default-ws/conversations", params={"title": "Original Title"}
+        )
         conversation_id = create_resp.json()["id"]
 
         update_resp = client.patch(
@@ -76,7 +84,9 @@ class TestConversationsCRUD:
 
     def test_delete_conversation(self, client: TestClient) -> None:
         """Delete a conversation and verify it's gone."""
-        create_resp = client.post("/api/v1/ws/default-ws/conversations", params={"title": "To Delete"})
+        create_resp = client.post(
+            "/api/v1/ws/default-ws/conversations", params={"title": "To Delete"}
+        )
         conversation_id = create_resp.json()["id"]
 
         delete_resp = client.delete(f"/api/v1/ws/default-ws/conversations/{conversation_id}")
@@ -97,7 +107,9 @@ class TestConversationsMessages:
 
     def test_list_messages_empty(self, client: TestClient) -> None:
         """List messages for a new conversation returns empty list."""
-        create_resp = client.post("/api/v1/ws/default-ws/conversations", params={"title": "Messages Test"})
+        create_resp = client.post(
+            "/api/v1/ws/default-ws/conversations", params={"title": "Messages Test"}
+        )
         conversation_id = create_resp.json()["id"]
 
         response = client.get(f"/api/v1/ws/default-ws/conversations/{conversation_id}/messages")
@@ -158,7 +170,9 @@ class TestSendMessage:
             # Consume the stream
             await parse_sse_stream(response.aiter_bytes())
 
-        msgs_resp = await async_client.get(f"/api/v1/ws/default-ws/conversations/{conversation_id}/messages")
+        msgs_resp = await async_client.get(
+            f"/api/v1/ws/default-ws/conversations/{conversation_id}/messages"
+        )
         assert msgs_resp.status_code == 200
         data = msgs_resp.json()
         assert data["total"] >= 2  # user + assistant

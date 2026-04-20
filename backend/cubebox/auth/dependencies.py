@@ -43,9 +43,7 @@ async def request_context(
             detail="You are not a member of this workspace",
         )
 
-    return RequestContext(
-        user=user, org_id=workspace.org_id, workspace_id=workspace_id, role=role
-    )
+    return RequestContext(user=user, org_id=workspace.org_id, workspace_id=workspace_id, role=role)
 
 
 def require_role(

@@ -120,9 +120,7 @@ async def _ensure_default_user_and_membership() -> None:
         await test_engine.dispose()
 
 
-async def _login_and_attach(
-    client: httpx.AsyncClient, email: str, password: str
-) -> None:
+async def _login_and_attach(client: httpx.AsyncClient, email: str, password: str) -> None:
     """Log in and set the CSRF header on the client."""
     await client.get("/api/v1/auth/me")  # obtain CSRF cookie (401 but sets cookie)
     csrf = client.cookies.get("cubebox_csrf") or ""
