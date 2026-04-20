@@ -56,8 +56,12 @@ async def test_message_count_after_two_turns(memory_client: httpx.AsyncClient) -
 async def test_separate_conversations_have_independent_state(
     memory_client: httpx.AsyncClient,
 ) -> None:
-    resp1 = await memory_client.post("/api/v1/ws/default-ws/conversations", params={"title": "conv1"})
-    resp2 = await memory_client.post("/api/v1/ws/default-ws/conversations", params={"title": "conv2"})
+    resp1 = await memory_client.post(
+        "/api/v1/ws/default-ws/conversations", params={"title": "conv1"}
+    )
+    resp2 = await memory_client.post(
+        "/api/v1/ws/default-ws/conversations", params={"title": "conv2"}
+    )
     conv1_id = resp1.json()["id"]
     conv2_id = resp2.json()["id"]
 
