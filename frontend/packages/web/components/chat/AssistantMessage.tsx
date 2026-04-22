@@ -68,13 +68,17 @@ function ReasoningBlock({ reasoning, isStreaming, startedAt, durationMs }: Reaso
       {/* Header - clickable when not streaming */}
       <button
         type="button"
-        onClick={() => { if (!isStreaming) setIsExpanded(prev => !prev) }}
+        onClick={() => {
+          if (!isStreaming) setIsExpanded((prev) => !prev)
+        }}
         className={`flex items-center gap-1.5 text-xs text-muted-foreground
           transition-colors group w-full text-left
           ${isStreaming ? 'cursor-default' : 'hover:text-foreground cursor-pointer'}`}
       >
-        <span className="text-muted-foreground/60 group-hover:text-muted-foreground
-          transition-colors">
+        <span
+          className="text-muted-foreground/60 group-hover:text-muted-foreground
+          transition-colors"
+        >
           {isStreaming ? (
             <Brain className="size-3 text-primary/70 animate-pulse" />
           ) : isExpanded ? (
@@ -86,9 +90,7 @@ function ReasoningBlock({ reasoning, isStreaming, startedAt, durationMs }: Reaso
         {!isStreaming && <Brain className="size-3 text-muted-foreground/70" />}
         <span>{isStreaming ? '思考中...' : '思考过程'}</span>
         {displayTime != null && displayTime >= 1000 && (
-          <span className="text-muted-foreground/50 ml-0.5">
-            {formatDuration(displayTime)}
-          </span>
+          <span className="text-muted-foreground/50 ml-0.5">{formatDuration(displayTime)}</span>
         )}
       </button>
 
@@ -102,13 +104,13 @@ function ReasoningBlock({ reasoning, isStreaming, startedAt, durationMs }: Reaso
             style={{
               maxHeight: 'calc(1.625em * 3)',
               maskImage:
-                'linear-gradient(to bottom, transparent 0%, rgba(0,0,0,0.45) 15%,'
-                + ' rgba(0,0,0,1) 33%, rgba(0,0,0,1) 66%,'
-                + ' rgba(0,0,0,0.45) 85%, transparent 100%)',
+                'linear-gradient(to bottom, transparent 0%, rgba(0,0,0,0.45) 15%,' +
+                ' rgba(0,0,0,1) 33%, rgba(0,0,0,1) 66%,' +
+                ' rgba(0,0,0,0.45) 85%, transparent 100%)',
               WebkitMaskImage:
-                'linear-gradient(to bottom, transparent 0%, rgba(0,0,0,0.45) 15%,'
-                + ' rgba(0,0,0,1) 33%, rgba(0,0,0,1) 66%,'
-                + ' rgba(0,0,0,0.45) 85%, transparent 100%)',
+                'linear-gradient(to bottom, transparent 0%, rgba(0,0,0,0.45) 15%,' +
+                ' rgba(0,0,0,1) 33%, rgba(0,0,0,1) 66%,' +
+                ' rgba(0,0,0,0.45) 85%, transparent 100%)',
             }}
           >
             <span className="text-muted-foreground/70">{reasoning}</span>
@@ -119,8 +121,10 @@ function ReasoningBlock({ reasoning, isStreaming, startedAt, durationMs }: Reaso
       {/* Completed & expanded: full content */}
       {!isStreaming && isExpanded && (
         <div className="mt-1.5 pl-4 border-l-2 border-border/50 max-h-64 overflow-y-auto">
-          <p className="text-xs text-muted-foreground/70 leading-relaxed whitespace-pre-wrap
-            italic">
+          <p
+            className="text-xs text-muted-foreground/70 leading-relaxed whitespace-pre-wrap
+            italic"
+          >
             {reasoning}
           </p>
         </div>
@@ -128,7 +132,6 @@ function ReasoningBlock({ reasoning, isStreaming, startedAt, durationMs }: Reaso
     </div>
   )
 }
-
 
 interface HistoryProps {
   message: Message
@@ -202,18 +205,29 @@ function subagentSummaryToStream(summary: SubagentSummary): AgentStream {
   }
 }
 
-function ContentBlockRenderer(
-  { block, index, isLast, isStreaming, subAgentStreams, subagentDataMap, toolResultMap,
-    messageCreatedAt, subagentIndex, agentId }: {
-    block: ContentBlock; index: number; isLast: boolean; isStreaming: boolean
-    subAgentStreams?: Record<string, AgentStream>
-    subagentDataMap?: Record<string, SubagentSummary>
-    toolResultMap: Record<string, { content: string; receivedAt: number }>
-    messageCreatedAt?: string
-    subagentIndex?: number
-    agentId?: string | null
-  },
-) {
+function ContentBlockRenderer({
+  block,
+  index,
+  isLast,
+  isStreaming,
+  subAgentStreams,
+  subagentDataMap,
+  toolResultMap,
+  messageCreatedAt,
+  subagentIndex,
+  agentId,
+}: {
+  block: ContentBlock
+  index: number
+  isLast: boolean
+  isStreaming: boolean
+  subAgentStreams?: Record<string, AgentStream>
+  subagentDataMap?: Record<string, SubagentSummary>
+  toolResultMap: Record<string, { content: string; receivedAt: number }>
+  messageCreatedAt?: string
+  subagentIndex?: number
+  agentId?: string | null
+}) {
   if (block.type === 'reasoning') {
     return (
       <div className="bg-card border border-border rounded-xl px-3 py-2.5">
@@ -229,11 +243,14 @@ function ContentBlockRenderer(
   if (block.type === 'tool_call' && block.name === 'subagent') {
     const agentKey = `subagent:${block.tool_call_id}`
     const stream = subAgentStreams?.[agentKey]
-    const historicalStream = !stream && subagentDataMap?.[agentKey]
-      ? subagentSummaryToStream(subagentDataMap[agentKey])
-      : undefined
+    const historicalStream =
+      !stream && subagentDataMap?.[agentKey]
+        ? subagentSummaryToStream(subagentDataMap[agentKey])
+        : undefined
     const args = block.arguments as {
-      name?: string; role?: string; task?: string
+      name?: string
+      role?: string
+      task?: string
     }
     return (
       <SubAgentCard
@@ -257,7 +274,9 @@ function ContentBlockRenderer(
       try {
         const parsed = JSON.parse(toolResult.content)
         if (parsed.artifact) artifact = parsed.artifact
-      } catch { /* ignore */ }
+      } catch {
+        /* ignore */
+      }
     }
     // Fallback: try to find by id or name in the artifact store
     if (!artifact && (args.artifact_id || args.name)) {
@@ -268,8 +287,11 @@ function ContentBlockRenderer(
           break
         }
         if (args.name) {
-          const match = Object.values(convArtifacts).find(a => a.name === args.name)
-          if (match) { artifact = match; break }
+          const match = Object.values(convArtifacts).find((a) => a.name === args.name)
+          if (match) {
+            artifact = match
+            break
+          }
         }
       }
     }
@@ -313,17 +335,21 @@ function ContentBlockRenderer(
           name={block.name || 'tool'}
           arguments={{}}
           toolCallId={block.tool_call_id ?? `streaming-${index}`}
-          summaryOverride={supportsPreview
-            ? getWriteFileSummary({}, block.args_text)
-            : (block.args_text.trim() || undefined)}
+          summaryOverride={
+            supportsPreview
+              ? getWriteFileSummary({}, block.args_text)
+              : block.args_text.trim() || undefined
+          }
           contentTypeOverride={supportsPreview ? 'write_file' : undefined}
-          toolRef={supportsPreview
-            ? {
-                agent_id: agentId ?? null,
-                tool_call_id: block.tool_call_id,
-                index: block.index,
-              }
-            : undefined}
+          toolRef={
+            supportsPreview
+              ? {
+                  agent_id: agentId ?? null,
+                  tool_call_id: block.tool_call_id,
+                  index: block.index,
+                }
+              : undefined
+          }
           timestamp={messageCreatedAt}
           isPending={true}
           allowOpenWhenPending={supportsPreview}
@@ -332,11 +358,7 @@ function ContentBlockRenderer(
     )
   }
   if (block.type === 'text') {
-    return (
-      <MarkdownWithCitations className={proseClasses}>
-        {block.content}
-      </MarkdownWithCitations>
-    )
+    return <MarkdownWithCitations className={proseClasses}>{block.content}</MarkdownWithCitations>
   }
 
   const _exhaustive: never = block
@@ -354,16 +376,16 @@ function groupBlocks(blocks: ContentBlock[]): (ContentBlock | ContentBlock[])[] 
       block.name !== 'write_todos'
     ) {
       const last = result[result.length - 1]
-      if (Array.isArray(last) && last[0].type === 'tool_call'
-        && (last[0] as ContentBlock & { name: string }).name !== 'subagent') {
+      if (
+        Array.isArray(last) &&
+        last[0].type === 'tool_call' &&
+        (last[0] as ContentBlock & { name: string }).name !== 'subagent'
+      ) {
         last.push(block)
       } else {
         result.push([block])
       }
-    } else if (
-      block.type === 'tool_call' &&
-      block.name === 'write_todos'
-    ) {
+    } else if (block.type === 'tool_call' && block.name === 'write_todos') {
       continue
     } else {
       result.push(block)
@@ -372,11 +394,16 @@ function groupBlocks(blocks: ContentBlock[]): (ContentBlock | ContentBlock[])[] 
   return result
 }
 
-export function AssistantMessage(
-  { message, stream, isStreaming, statusPhase, subAgentStreams, subagentDataMap, toolResultMap,
-    todos }:
-  AssistantMessageProps,
-) {
+export function AssistantMessage({
+  message,
+  stream,
+  isStreaming,
+  statusPhase,
+  subAgentStreams,
+  subagentDataMap,
+  toolResultMap,
+  todos,
+}: AssistantMessageProps) {
   const streamAgentId = stream ? 'main' : undefined
   const blocks: ContentBlock[] = stream
     ? stream.blocks
@@ -384,7 +411,7 @@ export function AssistantMessage(
 
   const msgCreatedAt = message?.created_at
 
-  const hasContent = blocks.length > 0
+  const _hasContent = blocks.length > 0
   const grouped = groupBlocks(blocks)
 
   // Count subagent blocks for index assignment and cluster display
@@ -400,14 +427,14 @@ export function AssistantMessage(
   const totalSubagents = subagentCounter
 
   // Count active subagents (streaming)
-  const activeSubagentCount = subAgentStreams
-    ? Object.keys(subAgentStreams).length
-    : 0
+  const activeSubagentCount = subAgentStreams ? Object.keys(subAgentStreams).length : 0
 
   return (
     <div data-role="assistant" className="flex justify-start gap-2.5">
-      <div className="shrink-0 w-6 h-6 rounded-md border border-border bg-card
-        flex items-center justify-center mt-0.5">
+      <div
+        className="shrink-0 w-6 h-6 rounded-md border border-border bg-card
+        flex items-center justify-center mt-0.5"
+      >
         <Bot className="size-3.5 text-primary/70" />
       </div>
       <div className="flex-1 max-w-[75%] space-y-2">
@@ -463,12 +490,18 @@ export function AssistantMessage(
               </span>
             ) : (
               <>
-                <span className="w-1.5 h-1.5 rounded-full bg-primary
-                  animate-bounce [animation-delay:0ms]" />
-                <span className="w-1.5 h-1.5 rounded-full bg-primary
-                  animate-bounce [animation-delay:150ms]" />
-                <span className="w-1.5 h-1.5 rounded-full bg-primary
-                  animate-bounce [animation-delay:300ms]" />
+                <span
+                  className="w-1.5 h-1.5 rounded-full bg-primary
+                  animate-bounce [animation-delay:0ms]"
+                />
+                <span
+                  className="w-1.5 h-1.5 rounded-full bg-primary
+                  animate-bounce [animation-delay:150ms]"
+                />
+                <span
+                  className="w-1.5 h-1.5 rounded-full bg-primary
+                  animate-bounce [animation-delay:300ms]"
+                />
               </>
             )}
           </div>

@@ -1,0 +1,8 @@
+node_modules/
+**/dist/
+**/.next/
+**/coverage/
+pnpm-lock.yaml
+**/*.min.js
+**/test-results/
+**/playwright-report/

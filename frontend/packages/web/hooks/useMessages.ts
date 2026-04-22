@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useRef } from 'react'
+import { useRef } from 'react'
 import { useMessageStore } from '@cubebox/core'
 import type { AgentStream } from '@cubebox/core'
 
@@ -8,18 +8,11 @@ import type { AgentStream } from '@cubebox/core'
  * Shallow-compare two Record<string, T> by keys and reference-equal values.
  * Returns the previous reference if nothing changed, avoiding unnecessary re-renders.
  */
-function useStableRecord<T>(
-  record: Record<string, T>,
-): Record<string, T> {
+function useStableRecord<T>(record: Record<string, T>): Record<string, T> {
   const prev = useRef(record)
   const prevKeys = Object.keys(prev.current)
   const nextKeys = Object.keys(record)
-  if (
-    prevKeys.length === nextKeys.length &&
-    nextKeys.every(
-      (k) => prev.current[k] === record[k],
-    )
-  ) {
+  if (prevKeys.length === nextKeys.length && nextKeys.every((k) => prev.current[k] === record[k])) {
     return prev.current
   }
   prev.current = record
@@ -27,27 +20,21 @@ function useStableRecord<T>(
 }
 
 export function useMessages(conversationId: string) {
-  const messages = useMessageStore(
-    (s) => s.messages[conversationId] ?? [],
-  )
+  const messages = useMessageStore((s) => s.messages[conversationId] ?? [])
   // Only expose streaming state when this conversation is the one streaming
   const isStreamingThis = useMessageStore(
     (s) => s.isStreaming && s.streamingConversationId === conversationId,
   )
-  const statusPhase = useMessageStore(
-    (s) => s.streamingConversationId === conversationId ? s.statusPhase : null,
+  const statusPhase = useMessageStore((s) =>
+    s.streamingConversationId === conversationId ? s.statusPhase : null,
   )
-  const mainStream = useMessageStore(
-    (s) => s.streamingConversationId === conversationId
-      ? (s.streamAgents['main'] ?? null)
-      : null,
+  const mainStream = useMessageStore((s) =>
+    s.streamingConversationId === conversationId ? (s.streamAgents['main'] ?? null) : null,
   )
-  const todos = useMessageStore(
-    (s) => s.todos,
-  )
+  const todos = useMessageStore((s) => s.todos)
   const error = useMessageStore((s) => s.error)
-  const toolResultMap = useMessageStore(
-    (s) => s.streamingConversationId === conversationId ? s.toolResultMap : {},
+  const toolResultMap = useMessageStore((s) =>
+    s.streamingConversationId === conversationId ? s.toolResultMap : {},
   )
 
   // Derive subagent streams with stable reference — only for the streaming conversation

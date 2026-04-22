@@ -7,10 +7,19 @@
     "dev": "pnpm -r run dev",
     "build": "pnpm -r run build",
     "type-check": "pnpm -r run type-check",
+    "lint": "pnpm -r run lint",
+    "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md,yaml,yml,css,scss}\"",
+    "format:check": "prettier --check \"**/*.{ts,tsx,js,jsx,json,md,yaml,yml,css,scss}\"",
     "test:e2e": "playwright test"
   },
   "devDependencies": {
+    "@eslint/eslintrc": "^3.2.0",
     "@playwright/test": "^1.58.2",
+    "@typescript-eslint/eslint-plugin": "^8.14.0",
+    "@typescript-eslint/parser": "^8.14.0",
+    "eslint": "^9.15.0",
+    "eslint-config-next": "16.2.1",
+    "prettier": "^3.3.3",
     "typescript": "^5.3.3"
   }
 }

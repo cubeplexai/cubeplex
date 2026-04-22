@@ -1,14 +1,10 @@
 'use client'
 
 import { useState, useCallback, useRef, useEffect } from 'react'
-import { Globe, ExternalLink, Calendar } from 'lucide-react'
+import { Globe, Calendar } from 'lucide-react'
 import { useCitationStore, usePanelStore, useMessageStore } from '@cubebox/core'
 import type { CitationData } from '@cubebox/core'
-import {
-  Popover,
-  PopoverTrigger,
-  PopoverContent,
-} from '@/components/ui/popover'
+import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover'
 
 interface CitationMarkerProps {
   citationId: number
@@ -93,8 +89,10 @@ function CitationHoverContent({
         {metadata.published_at && (
           <>
             <span className="text-muted-foreground/30">·</span>
-            <span className="flex items-center gap-0.5 text-[10px] text-muted-foreground/60
-              shrink-0">
+            <span
+              className="flex items-center gap-0.5 text-[10px] text-muted-foreground/60
+              shrink-0"
+            >
               <Calendar className="size-2.5" />
               {metadata.published_at}
             </span>
@@ -135,14 +133,8 @@ function CitationHoverContent({
   )
 }
 
-export function CitationMarker({
-  citationId,
-  chunkIndex,
-  conversationId,
-}: CitationMarkerProps) {
-  const citation = useCitationStore(
-    (s) => s.citations[conversationId]?.[citationId],
-  )
+export function CitationMarker({ citationId, chunkIndex, conversationId }: CitationMarkerProps) {
+  const citation = useCitationStore((s) => s.citations[conversationId]?.[citationId])
   const openTool = usePanelStore((s) => s.openTool)
 
   const handleOpenPanel = useCallback(() => {
