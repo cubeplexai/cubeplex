@@ -4,5 +4,6 @@ node_modules/
 **/coverage/
 pnpm-lock.yaml
 **/*.min.js
+**/*.min.mjs
 **/test-results/
 **/playwright-report/

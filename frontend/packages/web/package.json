@@ -8,7 +8,7 @@
     "start": "next start",
     "type-check": "tsc --noEmit",
     "lint": "eslint .",
-    "format:check": "prettier --check \"{app,components,hooks,lib}/**/*.{ts,tsx,json,css}\"",
+    "format:check": "prettier --check \"**/*.{ts,tsx,js,mjs,cjs,json,css}\" --ignore-path ../../.prettierignore",
     "test": "vitest run",
     "test:watch": "vitest"
   },
