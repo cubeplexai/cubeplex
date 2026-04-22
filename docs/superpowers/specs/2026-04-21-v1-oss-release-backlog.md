@@ -121,7 +121,7 @@
 **做什么**: skills 是 agent 能力扩展主入口，必须有市场才有生态。
 **Scope (v1)**:
 - 市场 UI：浏览、搜索、按 tag 过滤
-- 发布：上传 skill 包（Openclaw 格式，见 M5）
+- 发布：上传 skill 包（Openclaw 格式）；frontmatter 解析器扩展（原 M5 范围）随此 spec 一起定义
 - 版本：**只能传新版本，不能改旧版本**；展示版本列表 + changelog
 - 安装：装到组织级 → 控制台开关到具体 workspace
 - `skill-creator` skill：用户通过 agent 引导创建 skill 并一键发布到市场
@@ -129,8 +129,8 @@
 **关键决定**:
 - 首版是**简易**市场，无评分 / 评论 / 下载量排行；留给开源后迭代
 - 市场后端放 CE；企业私有 registry 留给 EE
-**不做**: skill 依赖自动解析；跨组织签名/审核流程
-**依赖**: M5（Openclaw 格式）
+**不做**: skill 依赖自动解析；跨组织签名/审核流程；运行时 `requires` 校验与 `install[]` 执行（见 M5 说明）
+**依赖**: —（原依赖 M5 已并入本 spec）
 **Spec**: `2026-04-XX-skills-marketplace-design.md`
 
 ---
@@ -169,21 +169,20 @@
 
 ---
 
-## M5 · Openclaw Skill 格式兼容 · P0
+## M5 · Openclaw Skill 格式兼容 · 已并入 M3（2026-04-22 修订）
 
-**做什么**: skill 打包格式统一到 Openclaw 规范，保证生态兼容。
-**参考**: https://docs.openclaw.ai/tools/skills
-**Scope (v1)**:
-- `SKILL.md`：YAML frontmatter + Markdown 正文
-- Frontmatter 包含 `metadata.openclaw.requires.{bins, env, config}`
-- `install[]` 安装步骤（支持 `brew` / `node` / `go` / `uv` / `download`）
-- 加载器：解析 frontmatter → 校验依赖（bins / env）→ 执行 install 步骤（沙盒内）
-- 不满足依赖的 skill 走降级提示，不阻塞其他 skill
-**关键决定**:
-- 完整按 Openclaw 规范，**不自造格式**，利于跨生态流通
-**不做**: 扩展自有字段（保持纯 Openclaw 子集）
-**依赖**: 沙盒镜像可执行 install 步骤
-**Spec**: `2026-04-XX-openclaw-skill-format-design.md`
+**演进**: brainstorming 过程中发现 M5 可实际落地的工作量过小，无需独立 spec。
+
+**合并路径**:
+- **frontmatter 解析器扩展**（`SkillSpec` dataclass 扩字段 + `yaml.safe_load` 替换正则解析 + `metadata.openclaw` / `clawdbot` / `clawdis` alias 合并 + `raw_metadata` 保留未知字段）→ 随 **M3 skills 市场** spec 定义并实现（市场 UI 直接消费这些字段，天然同处一个 spec）
+- **`requires.env` / `requires.bins` 校验**（判断 skill 当前是否可用）→ 留给未来 **sandbox egress / env 代理** spec
+- **`install[]` 执行** → 不计划做（Openclaw 自己的 lazy-install 模型是"agent 遇错再装"，LLM 驱动而非 loader 驱动，不是 cubebox 的独立设计问题）
+
+**兼容承诺**: 用户上传 Openclaw 包，系统能加载、使用；特有字段保留下来供市场 UI 展示。向下兼容 Claude Code / Codex 的 Agent Skills 基底（他们无 `requires`/`install`，是 Openclaw 的子集）。
+
+**参考**:
+- Openclaw spec: https://docs.openclaw.ai/tools/skills
+- Agent Skills 基底（Claude Code + Codex 共同基底）: https://agentskills.io
 
 ---
 
@@ -315,7 +314,7 @@
 | Batch | 周 | 模块 | 目标产物 |
 |---|---|---|---|
 | 0 | W1 前置 | **M-CI** | CI 流水线建立（所有后续模块在其上运行） |
-| 1 | W1-W2 | M0, M5, M6, M2（骨架） | 插件接口冻结、skill 格式可加载、file_read 可用、管理员控制台 shell 就位 |
+| 1 | W1-W2 | M0, M6, M2（骨架） | 插件接口冻结、file_read 可用、管理员控制台 shell 就位（原 M5 已并入 M3，见 M5 说明） |
 | 2 | W2-W3 | M1-E1, M1-E2, M4, M4a, M9, M7 | 成本看板 + Trace + workspace/首页双入口 + 文件上传 + 单租户 UX |
 | 3 | W3-W4 | M1-E3, M1-E4, M1-E5, M3, M8, M12 | 企业五件套齐 + skills 市场上线 + 会话分享 + 工程基建 |
 | 4 | W4 | M10, M11 | Hero 场景跑通、demo 视频 + README 定稿 |
@@ -324,7 +323,6 @@
 - **M-CI 最先**，后续所有模块必须在 CI 绿灯基础上开发
 - M0 接口定义先于 M1-E5（AuditSink）、M2（AdminPanelExtension）
 - M2 骨架先于 M1-E1（成本看板挂靠）
-- M5 先于 M3（市场依赖格式）
 - M1-E2 需要 cubemanus tracing 代码迁移准备，可并行启动但晚于 M-CI
 - M11 最后（需要 M10 + M1-E2 的产物）
 
@@ -334,7 +332,7 @@
 
 - [ ] 最终仓库名：`cubebox` / `cubeplex` / 其他
 - [ ] 预装 skills 清单（实现 M3 时结合社区内容确定）
-- [ ] sandbox 默认镜像选型（实现 M2 / M5 时定）
+- [ ] sandbox 默认镜像选型（实现 M2 时定）
 - [ ] `cubebox-ee` 仓的首个真实 EE 功能（发布后迭代选 1-2 项）
 - [ ] M9 单租户 UX 的具体交互细节（进 spec 阶段确认）
 - [ ] cubemanus tracing 代码迁移许可与边界（M1-E2 开工前确认）
