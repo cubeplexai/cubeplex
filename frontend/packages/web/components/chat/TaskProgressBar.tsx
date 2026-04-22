@@ -1,22 +1,14 @@
 'use client'
 
 import { useState, useEffect, useRef } from 'react'
-import {
-  ListChecks,
-  CheckCircle2,
-  Circle,
-  ChevronUp,
-  ChevronDown,
-} from 'lucide-react'
+import { ListChecks, CheckCircle2, Circle, ChevronUp, ChevronDown } from 'lucide-react'
 import type { TodoItem } from '@cubebox/core'
 
 interface TaskProgressBarProps {
   todos: TodoItem[]
 }
 
-export function TaskProgressBar({
-  todos,
-}: TaskProgressBarProps) {
+export function TaskProgressBar({ todos }: TaskProgressBarProps) {
   const [isExpanded, setIsExpanded] = useState(todos.length > 0)
 
   // Auto-expand when todos first become non-empty
@@ -30,12 +22,8 @@ export function TaskProgressBar({
 
   if (todos.length === 0) return null
 
-  const completed = todos.filter(
-    (t) => t.status === 'completed',
-  ).length
-  const inProgress = todos.find(
-    (t) => t.status === 'in_progress',
-  )
+  const completed = todos.filter((t) => t.status === 'completed').length
+  const inProgress = todos.find((t) => t.status === 'in_progress')
 
   return (
     <div className="bg-card border-t border-border">
@@ -105,9 +93,7 @@ export function TaskProgressBar({
               )}
               <span
                 className={
-                  todo.status === 'completed'
-                    ? 'text-muted-foreground'
-                    : 'text-foreground'
+                  todo.status === 'completed' ? 'text-muted-foreground' : 'text-foreground'
                 }
               >
                 {todo.description}

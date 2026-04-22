@@ -2,11 +2,7 @@
   "compilerOptions": {
     "target": "ES2020",
     "useDefineForClassFields": true,
-    "lib": [
-      "ES2020",
-      "DOM",
-      "DOM.Iterable"
-    ],
+    "lib": ["ES2020", "DOM", "DOM.Iterable"],
     "module": "ESNext",
     "skipLibCheck": true,
     "declaration": true,
@@ -25,7 +21,5 @@
     "outDir": "./dist",
     "rootDir": "./src"
   },
-  "include": [
-    "src"
-  ]
+  "include": ["src"]
 }

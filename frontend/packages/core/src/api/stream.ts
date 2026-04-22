@@ -1,9 +1,7 @@
 import type { AgentEvent } from '../types'
 import type { ApiClient } from './client'
 
-async function* readLines(
-  reader: ReadableStreamDefaultReader<Uint8Array>
-): AsyncGenerator<string> {
+async function* readLines(reader: ReadableStreamDefaultReader<Uint8Array>): AsyncGenerator<string> {
   let buffer = ''
   const decoder = new TextDecoder()
   while (true) {
@@ -28,7 +26,7 @@ function readCookie(name: string): string {
 export async function* streamMessages(
   client: ApiClient,
   conversationId: string,
-  content: string
+  content: string,
 ): AsyncGenerator<AgentEvent> {
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
@@ -39,16 +37,13 @@ export async function* streamMessages(
   if (csrf) headers['X-CSRF-Token'] = csrf
 
   const path = client.resolvePath(`/api/v1/conversations/${conversationId}/messages`)
-  const res = await fetch(
-    `${client.baseUrl}${path}`,
-    {
-      method: 'POST',
-      credentials: 'include',
-      headers,
-      cache: 'no-store',
-      body: JSON.stringify({ content }),
-    }
-  )
+  const res = await fetch(`${client.baseUrl}${path}`, {
+    method: 'POST',
+    credentials: 'include',
+    headers,
+    cache: 'no-store',
+    body: JSON.stringify({ content }),
+  })
 
   if (!res.ok) {
     yield {

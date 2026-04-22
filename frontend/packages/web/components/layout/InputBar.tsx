@@ -15,9 +15,10 @@ export function InputBar({ conversationId, onSubmit, isLoading = false }: InputB
   const [content, setContent] = useState('')
   const send = useMessageStore((s) => s.send)
   const { workspaceId } = useWorkspaceContext()
-  const messageIsStreaming = useMessageStore((s) =>
-    conversationId ? s.isStreaming && s.streamingConversationId === conversationId : false
-  ) ?? false
+  const messageIsStreaming =
+    useMessageStore((s) =>
+      conversationId ? s.isStreaming && s.streamingConversationId === conversationId : false,
+    ) ?? false
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
   const handleSubmit = async () => {
@@ -80,13 +81,16 @@ export function InputBar({ conversationId, onSubmit, isLoading = false }: InputB
           disabled={!content.trim() || isSubmitting}
           className="shrink-0 w-7 h-7 flex items-center justify-center rounded-lg bg-primary text-white hover:bg-primary/80 disabled:opacity-25 disabled:cursor-not-allowed transition-all"
         >
-          {isSubmitting
-            ? <Loader2 className="size-3.5 animate-spin" />
-            : <ArrowUp className="size-3.5" />
-          }
+          {isSubmitting ? (
+            <Loader2 className="size-3.5 animate-spin" />
+          ) : (
+            <ArrowUp className="size-3.5" />
+          )}
         </button>
       </div>
-      <p className="text-center mt-1 text-[10px] text-muted-foreground/35">Enter 发送 / Shift+Enter 换行</p>
+      <p className="text-center mt-1 text-[10px] text-muted-foreground/35">
+        Enter 发送 / Shift+Enter 换行
+      </p>
     </div>
   )
 }

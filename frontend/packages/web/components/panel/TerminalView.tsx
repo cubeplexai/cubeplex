@@ -3,22 +3,13 @@ interface TerminalViewProps {
   result: string | null
 }
 
-export function TerminalView({
-  args,
-  result,
-}: TerminalViewProps) {
-  const command = String(
-    args.command ?? args.cmd ?? '',
-  )
+export function TerminalView({ args, result }: TerminalViewProps) {
+  const command = String(args.command ?? args.cmd ?? '')
 
   // Parse exit code from result if present
-  const exitMatch = result?.match(
-    /\[exit:\s*(\d+)\]\s*$/,
-  )
+  const exitMatch = result?.match(/\[exit:\s*(\d+)\]\s*$/)
   const exitCode = exitMatch ? exitMatch[1] : null
-  const output = exitMatch
-    ? result!.slice(0, exitMatch.index).trimEnd()
-    : result
+  const output = exitMatch ? result!.slice(0, exitMatch.index).trimEnd() : result
 
   return (
     <div className="p-4 space-y-3">

@@ -64,7 +64,11 @@ export function Sidebar() {
           {conversations.map((convo) => (
             <Link
               key={convo.id}
-              href={workspaceId ? `/w/${workspaceId}/conversations/${convo.id}` : `/conversations/${convo.id}`}
+              href={
+                workspaceId
+                  ? `/w/${workspaceId}/conversations/${convo.id}`
+                  : `/conversations/${convo.id}`
+              }
               onClick={() => setActive(convo.id)}
               className={`group relative flex items-center gap-2 px-2 py-2 rounded-md transition-colors ${
                 activeId === convo.id

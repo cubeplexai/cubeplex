@@ -17,13 +17,10 @@ import { DataPreview } from './DataPreview'
 import { FallbackPreview } from './FallbackPreview'
 import { buildDownloadUrl } from './previewUtils'
 
-const PdfPreview = dynamic(
-  () => import('./PdfPreview').then(m => m.PdfPreview),
-  {
-    ssr: false,
-    loading: () => <PreviewLoading />,
-  },
-)
+const PdfPreview = dynamic(() => import('./PdfPreview').then((m) => m.PdfPreview), {
+  ssr: false,
+  loading: () => <PreviewLoading />,
+})
 
 function isPdf(artifact: Artifact): boolean {
   if (artifact.mime_type === 'application/pdf') return true
@@ -87,9 +84,7 @@ function VersionPopover({
               <span className="flex items-center gap-1.5">
                 <span className="font-medium">v{v.version}</span>
                 {v.name !== artifact.name && (
-                  <span className="text-muted-foreground truncate max-w-[100px]">
-                    {v.name}
-                  </span>
+                  <span className="text-muted-foreground truncate max-w-[100px]">{v.name}</span>
                 )}
               </span>
               <span className="text-muted-foreground text-[10px]">
@@ -124,9 +119,7 @@ function ArtifactPanelHeader({
   return (
     <header className="h-11 border-b border-border flex items-center gap-2 px-4 shrink-0 bg-card">
       <Icon className="size-3.5 text-primary shrink-0" />
-      <span className="text-sm font-medium text-foreground truncate flex-1">
-        {artifact.name}
-      </span>
+      <span className="text-sm font-medium text-foreground truncate flex-1">{artifact.name}</span>
       <VersionPopover
         artifact={artifact}
         versions={versions}
@@ -183,19 +176,17 @@ function PreviewContent({
 }
 
 export function ArtifactPanel() {
-  const view = usePanelStore(s => s.view)
-  const close = usePanelStore(s => s.close)
-  const artifacts = useArtifactStore(s => s.artifacts)
-  const versions = useArtifactStore(s => s.versions)
-  const selectedVersion = useArtifactStore(s => s.selectedVersion)
-  const loadVersions = useArtifactStore(s => s.loadVersions)
-  const selectVersion = useArtifactStore(s => s.selectVersion)
+  const view = usePanelStore((s) => s.view)
+  const close = usePanelStore((s) => s.close)
+  const artifacts = useArtifactStore((s) => s.artifacts)
+  const versions = useArtifactStore((s) => s.versions)
+  const selectedVersion = useArtifactStore((s) => s.selectedVersion)
+  const loadVersions = useArtifactStore((s) => s.loadVersions)
+  const selectVersion = useArtifactStore((s) => s.selectVersion)
 
   const artifactId = view.type === 'artifact' ? view.artifactId : null
   const conversationId = view.type === 'artifact' ? view.conversationId : null
-  const artifact = conversationId && artifactId
-    ? artifacts[conversationId]?.[artifactId]
-    : null
+  const artifact = conversationId && artifactId ? artifacts[conversationId]?.[artifactId] : null
 
   const { workspaceId } = useWorkspaceContext()
 

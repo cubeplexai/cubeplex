@@ -20,10 +20,7 @@ interface Props {
   toolResultMap: Record<string, { content: string; receivedAt: number }>
 }
 
-type ToolDisplayBlock = Extract<
-  ContentBlock,
-  { type: 'tool_call' | 'tool_call_streaming' }
->
+type ToolDisplayBlock = Extract<ContentBlock, { type: 'tool_call' | 'tool_call_streaming' }>
 
 function formatDuration(ms: number): string {
   if (ms < 0) return '0s'
@@ -78,22 +75,19 @@ export const SubAgentCard = memo(function SubAgentCard({
     (block): block is ToolDisplayBlock =>
       block.type === 'tool_call' || block.type === 'tool_call_streaming',
   )
-  const visibleToolBlocks: ToolDisplayBlock[] = toolBlocks.length > 0
-    ? toolBlocks
-    : toolCalls.map((tc) => ({
-        type: 'tool_call' as const,
-        name: tc.data.name,
-        arguments: tc.data.arguments,
-        tool_call_id: tc.data.tool_call_id,
-      }))
-  const completedCount = toolCalls.filter(
-    (tc) => toolResultMap[tc.data.tool_call_id],
-  ).length
-  const pendingTc = toolCalls.find(
-    (tc) => !toolResultMap[tc.data.tool_call_id],
-  )
+  const visibleToolBlocks: ToolDisplayBlock[] =
+    toolBlocks.length > 0
+      ? toolBlocks
+      : toolCalls.map((tc) => ({
+          type: 'tool_call' as const,
+          name: tc.data.name,
+          arguments: tc.data.arguments,
+          tool_call_id: tc.data.tool_call_id,
+        }))
+  const completedCount = toolCalls.filter((tc) => toolResultMap[tc.data.tool_call_id]).length
+  const pendingTc = toolCalls.find((tc) => !toolResultMap[tc.data.tool_call_id])
   const hasContent = stream && (toolBlocks.length > 0 || toolCalls.length > 0 || stream.text)
-  const displayTime = isRunning ? elapsed : (hasContent ? elapsed : 0)
+  const displayTime = isRunning ? elapsed : hasContent ? elapsed : 0
 
   const renderToolBlock = (block: ToolDisplayBlock, i: number, showDivider = false) => {
     if (block.type === 'tool_call_streaming') {
@@ -104,17 +98,21 @@ export const SubAgentCard = memo(function SubAgentCard({
           name={block.name || 'tool'}
           arguments={{}}
           toolCallId={block.tool_call_id ?? `streaming-${i}`}
-          summaryOverride={supportsPreview
-            ? getWriteFileSummary({}, block.args_text)
-            : (block.args_text.trim() || undefined)}
+          summaryOverride={
+            supportsPreview
+              ? getWriteFileSummary({}, block.args_text)
+              : block.args_text.trim() || undefined
+          }
           contentTypeOverride={supportsPreview ? 'write_file' : undefined}
-          toolRef={supportsPreview
-            ? {
-                agent_id: agentId ?? null,
-                tool_call_id: block.tool_call_id,
-                index: block.index,
-              } satisfies ToolCallRef
-            : undefined}
+          toolRef={
+            supportsPreview
+              ? ({
+                  agent_id: agentId ?? null,
+                  tool_call_id: block.tool_call_id,
+                  index: block.index,
+                } satisfies ToolCallRef)
+              : undefined
+          }
           isPending={true}
           allowOpenWhenPending={supportsPreview}
           showDivider={showDivider}
@@ -130,13 +128,15 @@ export const SubAgentCard = memo(function SubAgentCard({
         arguments={block.arguments}
         toolCallId={block.tool_call_id}
         contentTypeOverride={block.name === 'write_file' ? 'write_file' : undefined}
-        toolRef={block.name === 'write_file'
-          ? {
-              agent_id: agentId ?? null,
-              tool_call_id: block.tool_call_id,
-              index: null,
-            } satisfies ToolCallRef
-          : undefined}
+        toolRef={
+          block.name === 'write_file'
+            ? ({
+                agent_id: agentId ?? null,
+                tool_call_id: block.tool_call_id,
+                index: null,
+              } satisfies ToolCallRef)
+            : undefined
+        }
         toolResult={result}
         isPending={isRunning && !result}
         allowOpenWhenPending={block.name === 'write_file'}
@@ -146,16 +146,22 @@ export const SubAgentCard = memo(function SubAgentCard({
   }
 
   return (
-    <div className="border border-border rounded-xl overflow-hidden bg-muted/10 border-l-2
-      border-l-primary/40">
+    <div
+      className="border border-border rounded-xl overflow-hidden bg-muted/10 border-l-2
+      border-l-primary/40"
+    >
       {/* Header */}
       <div className="flex items-start gap-2.5 px-3 py-2.5">
         <AgentAvatar seed={name} size={32} className="rounded-md shrink-0 mt-0.5" />
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
             <span className="font-medium text-sm text-foreground">{name}</span>
-            <span className="text-xs text-muted-foreground bg-muted/50 px-1.5 py-0.5
-              rounded-md">{role}</span>
+            <span
+              className="text-xs text-muted-foreground bg-muted/50 px-1.5 py-0.5
+              rounded-md"
+            >
+              {role}
+            </span>
             <span className="ml-auto text-xs text-muted-foreground/50 font-mono tabular-nums">
               {String(index).padStart(2, '0')}
             </span>

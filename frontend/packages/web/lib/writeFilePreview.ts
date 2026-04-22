@@ -87,8 +87,8 @@ export function parseWriteFileArgs(
 
   const raw = rawArgsText ?? ''
   return {
-    filePath: extractJsonStringPrefix(raw, 'file_path')
-      || extractJsonStringPrefix(raw, 'file_name'),
+    filePath:
+      extractJsonStringPrefix(raw, 'file_path') || extractJsonStringPrefix(raw, 'file_name'),
     content: extractJsonStringPrefix(raw, 'content'),
     status: 'streaming_args',
   }

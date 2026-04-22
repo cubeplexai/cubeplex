@@ -17,8 +17,8 @@ describe('workspaces API', () => {
           { id: 'w1', name: 'Personal', org_id: 'o1', role: 'admin' },
           { id: 'w2', name: 'Team', org_id: 'o1', role: 'member' },
         ]),
-        { status: 200 }
-      )
+        { status: 200 },
+      ),
     )
     const client = createApiClient('')
     const list = await listWorkspaces(client)
@@ -28,7 +28,7 @@ describe('workspaces API', () => {
 
   it('createWorkspace POSTs { name, org_id } and returns the new ws', async () => {
     fetchMock.mockResolvedValueOnce(
-      new Response(JSON.stringify({ id: 'w3', name: 'Ops', org_id: 'o1' }), { status: 201 })
+      new Response(JSON.stringify({ id: 'w3', name: 'Ops', org_id: 'o1' }), { status: 201 }),
     )
     const client = createApiClient('')
     const ws = await createWorkspace(client, { name: 'Ops', orgId: 'o1' })

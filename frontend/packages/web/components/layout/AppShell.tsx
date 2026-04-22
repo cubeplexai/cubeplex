@@ -3,11 +3,7 @@
 import { ReactNode } from 'react'
 import { Sidebar } from './Sidebar'
 import { ThemeToggle } from '@/components/ui/theme-toggle'
-import {
-  ResizablePanelGroup,
-  ResizablePanel,
-  ResizableHandle,
-} from '@/components/ui/resizable'
+import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from '@/components/ui/resizable'
 import { ToolDetailPanel } from '@/components/panel/ToolDetailPanel'
 import { ArtifactPanel } from '@/components/panel/artifact/ArtifactPanel'
 import { usePanelStore } from '@cubebox/core'

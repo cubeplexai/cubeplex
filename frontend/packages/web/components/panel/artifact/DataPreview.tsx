@@ -14,10 +14,10 @@ interface DataPreviewProps {
 function parseCsv(text: string): { headers: string[]; rows: string[][] } {
   const lines = text.trim().split('\n')
   if (lines.length === 0) return { headers: [], rows: [] }
-  const headers = lines[0].split(',').map(h => h.trim().replace(/^"|"$/g, ''))
-  const rows = lines.slice(1).map(line =>
-    line.split(',').map(cell => cell.trim().replace(/^"|"$/g, ''))
-  )
+  const headers = lines[0].split(',').map((h) => h.trim().replace(/^"|"$/g, ''))
+  const rows = lines
+    .slice(1)
+    .map((line) => line.split(',').map((cell) => cell.trim().replace(/^"|"$/g, '')))
   return { headers, rows }
 }
 
@@ -28,15 +28,17 @@ function JsonTable({ data }: { data: unknown }) {
       <table className="w-full text-xs border-collapse">
         <thead>
           <tr className="border-b border-border bg-muted/50">
-            {headers.map(h => (
-              <th key={h} className="text-left p-2 font-medium text-muted-foreground">{h}</th>
+            {headers.map((h) => (
+              <th key={h} className="text-left p-2 font-medium text-muted-foreground">
+                {h}
+              </th>
             ))}
           </tr>
         </thead>
         <tbody>
           {data.map((row, i) => (
             <tr key={i} className="border-b border-border/50 hover:bg-muted/30">
-              {headers.map(h => (
+              {headers.map((h) => (
                 <td key={h} className="p-2 text-foreground">
                   {String((row as Record<string, unknown>)[h] ?? '')}
                 </td>
@@ -64,12 +66,12 @@ export function DataPreview({ artifact, version, workspaceId }: DataPreviewProps
 
   useEffect(() => {
     fetch(previewUrl)
-      .then(res => {
+      .then((res) => {
         if (!res.ok) throw new Error(`${res.status} ${res.statusText}`)
         return res.text()
       })
       .then(setContent)
-      .catch(e => setError(e.message))
+      .catch((e) => setError(e.message))
   }, [previewUrl])
 
   const isCsv = /\.csv$/i.test(filename)
@@ -99,8 +101,10 @@ export function DataPreview({ artifact, version, workspaceId }: DataPreviewProps
         <table className="w-full text-xs border-collapse">
           <thead>
             <tr className="border-b border-border bg-muted/50 sticky top-0">
-              {headers.map(h => (
-                <th key={h} className="text-left p-2 font-medium text-muted-foreground">{h}</th>
+              {headers.map((h) => (
+                <th key={h} className="text-left p-2 font-medium text-muted-foreground">
+                  {h}
+                </th>
               ))}
             </tr>
           </thead>
@@ -108,7 +112,9 @@ export function DataPreview({ artifact, version, workspaceId }: DataPreviewProps
             {rows.map((row, i) => (
               <tr key={i} className="border-b border-border/50 hover:bg-muted/30">
                 {row.map((cell, j) => (
-                  <td key={j} className="p-2 text-foreground">{cell}</td>
+                  <td key={j} className="p-2 text-foreground">
+                    {cell}
+                  </td>
                 ))}
               </tr>
             ))}

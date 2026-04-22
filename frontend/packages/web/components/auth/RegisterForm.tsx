@@ -3,12 +3,7 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-import {
-  createApiClient,
-  registerUser,
-  loginUser,
-  useAuthStore,
-} from '@cubebox/core'
+import { createApiClient, registerUser, loginUser, useAuthStore } from '@cubebox/core'
 
 export function RegisterForm() {
   const router = useRouter()

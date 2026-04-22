@@ -13,7 +13,7 @@ describe('authStore', () => {
 
   it('loadMe populates user on 200', async () => {
     fetchMock.mockResolvedValueOnce(
-      new Response(JSON.stringify({ id: 'u1', email: 'a@b.c' }), { status: 200 })
+      new Response(JSON.stringify({ id: 'u1', email: 'a@b.c' }), { status: 200 }),
     )
     const client = createApiClient('')
     await useAuthStore.getState().loadMe(client)

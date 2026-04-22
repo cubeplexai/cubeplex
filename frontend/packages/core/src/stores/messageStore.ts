@@ -1,9 +1,15 @@
 // frontend/packages/core/src/stores/messageStore.ts
 import { create } from 'zustand'
 import type {
-  ContentBlock, TodoItem,
-  Message, TextDeltaEvent, ToolCallEvent, ToolCallDeltaEvent,
-  ToolResultEvent, ReasoningEvent, ArtifactEventData,
+  ContentBlock,
+  TodoItem,
+  Message,
+  TextDeltaEvent,
+  ToolCallEvent,
+  ToolCallDeltaEvent,
+  ToolResultEvent,
+  ReasoningEvent,
+  ArtifactEventData,
 } from '../types'
 import type { ApiClient } from '../api'
 import { listMessages, streamMessages } from '../api'
@@ -20,7 +26,7 @@ export interface AgentStream {
 
 export interface MessageStore {
   messages: Record<string, Message[]>
-  streamAgents: Record<string, AgentStream>   // "main" or "task:xxx"
+  streamAgents: Record<string, AgentStream> // "main" or "task:xxx"
   isStreaming: boolean
   streamingConversationId: string | null
   statusPhase: string | null
@@ -56,7 +62,9 @@ function finalizeLastReasoning(blocks: ContentBlock[]): ContentBlock[] {
 
 /** Append content to blocks, merging with the last block if same type, or creating new block */
 function appendBlock(
-  blocks: ContentBlock[], type: 'reasoning' | 'text', content: string,
+  blocks: ContentBlock[],
+  type: 'reasoning' | 'text',
+  content: string,
 ): ContentBlock[] {
   const last = blocks[blocks.length - 1]
   if (last && last.type === type) {
@@ -85,15 +93,18 @@ function appendToolCallBlock(
   let fallbackMatchIndex = -1
   for (let i = finalized.length - 1; i >= 0; i--) {
     const block = finalized[i]
-    if (block.type === 'tool_call_streaming' && block.tool_call_id === null && block.name === name) {
+    if (
+      block.type === 'tool_call_streaming' &&
+      block.tool_call_id === null &&
+      block.name === name
+    ) {
       fallbackMatchIndex = i
       break
     }
   }
   const matchIndex = exactMatchIndex >= 0 ? exactMatchIndex : fallbackMatchIndex
-  const nextBlocks = matchIndex >= 0
-    ? finalized.filter((_, index) => index !== matchIndex)
-    : finalized
+  const nextBlocks =
+    matchIndex >= 0 ? finalized.filter((_, index) => index !== matchIndex) : finalized
 
   return [...nextBlocks, { type: 'tool_call', name, arguments: args, tool_call_id: toolCallId }]
 }
@@ -102,9 +113,7 @@ function normalizeTodoStatus(status: unknown): TodoItem['status'] {
   return status === 'in_progress' || status === 'completed' ? status : 'pending'
 }
 
-function parseTodosFromToolCall(
-  args: Record<string, unknown>,
-): TodoItem[] {
+function parseTodosFromToolCall(args: Record<string, unknown>): TodoItem[] {
   const rawTodos = Array.isArray(args.todos) ? args.todos : []
   const todos: TodoItem[] = []
 
@@ -274,9 +283,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
         } else if (event.type === 'tool_call') {
           const e = event as ToolCallEvent
           batchedSet((s) => {
-            const prev =
-              s.streamAgents[agentKey]
-              ?? emptyStream(event.agent_name)
+            const prev = s.streamAgents[agentKey] ?? emptyStream(event.agent_name)
             const existingStartedAt = s.toolStartedMap[e.data.tool_call_id]
 
             let nextTodos = s.todos
@@ -288,8 +295,9 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
               todos: nextTodos,
               toolStartedMap: {
                 ...s.toolStartedMap,
-                [e.data.tool_call_id]: existingStartedAt
-                  ?? (e.data.started_at ? new Date(e.data.started_at).getTime() : Date.now()),
+                [e.data.tool_call_id]:
+                  existingStartedAt ??
+                  (e.data.started_at ? new Date(e.data.started_at).getTime() : Date.now()),
               },
               streamAgents: {
                 ...s.streamAgents,
@@ -313,12 +321,13 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
             const idx = e.data.index ?? 0
             const blocks = [...prev.blocks]
             const startedAt = e.timestamp ? new Date(e.timestamp).getTime() : Date.now()
-            const nextToolStartedMap = e.data.tool_call_id && !s.toolStartedMap[e.data.tool_call_id]
-              ? {
-                  ...s.toolStartedMap,
-                  [e.data.tool_call_id]: startedAt,
-                }
-              : s.toolStartedMap
+            const nextToolStartedMap =
+              e.data.tool_call_id && !s.toolStartedMap[e.data.tool_call_id]
+                ? {
+                    ...s.toolStartedMap,
+                    [e.data.tool_call_id]: startedAt,
+                  }
+                : s.toolStartedMap
 
             // Find existing streaming block for this index
             const existingIdx = blocks.findIndex(
@@ -327,7 +336,8 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
 
             if (existingIdx >= 0) {
               const existing = blocks[existingIdx] as Extract<
-                ContentBlock, { type: 'tool_call_streaming' }
+                ContentBlock,
+                { type: 'tool_call_streaming' }
               >
               blocks[existingIdx] = {
                 ...existing,
@@ -369,8 +379,9 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
               newMap[tcId] = {
                 content: e.data.content,
                 receivedAt: Date.now(),
-                startedAt: s.toolStartedMap[tcId]
-                  ?? (e.data.started_at ? new Date(e.data.started_at).getTime() : undefined),
+                startedAt:
+                  s.toolStartedMap[tcId] ??
+                  (e.data.started_at ? new Date(e.data.started_at).getTime() : undefined),
                 contentType: e.data.content_type,
               }
             }
@@ -380,13 +391,8 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
               streamAgents: {
                 ...s.streamAgents,
                 [agentKey]: {
-                  ...(s.streamAgents[agentKey]
-                    ?? emptyStream(event.agent_name)),
-                  toolResults: [
-                    ...(s.streamAgents[agentKey]
-                      ?.toolResults ?? []),
-                    e,
-                  ],
+                  ...(s.streamAgents[agentKey] ?? emptyStream(event.agent_name)),
+                  toolResults: [...(s.streamAgents[agentKey]?.toolResults ?? []), e],
                 },
               },
             }
@@ -395,10 +401,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
           const artifactData = event.data as unknown as ArtifactEventData
           if (artifactData.artifact) {
             const { useArtifactStore } = await import('./artifactStore')
-            useArtifactStore.getState().addOrUpdate(
-              conversationId,
-              artifactData.artifact,
-            )
+            useArtifactStore.getState().addOrUpdate(conversationId, artifactData.artifact)
           }
         } else if (event.type === 'citation') {
           const citationData = event.data as unknown as import('../types').CitationData
@@ -427,24 +430,25 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
         const finalBlocks = finalizeLastReasoning(mainStream.blocks)
           .filter((b) => b.type !== 'tool_call_streaming')
           .map((b) => {
-          if (b.type === 'reasoning') {
-            const { started_at: _, ...rest } = b
-            return rest
-          }
-          return b
-        })
+            if (b.type === 'reasoning') {
+              const { started_at: _, ...rest } = b
+              return rest
+            }
+            return b
+          })
         const assistantMessage: Message = {
           id: `assistant-${Date.now()}`,
           role: 'assistant',
           content: mainStream.text || null,
-          tool_calls: mainStream.toolCalls.length > 0
-            ? mainStream.toolCalls.map((tc) => ({
-                name: tc.data.name,
-                arguments: tc.data.arguments,
-                tool_call_id: tc.data.tool_call_id,
-                started_at: tc.data.started_at ?? null,
-              }))
-            : null,
+          tool_calls:
+            mainStream.toolCalls.length > 0
+              ? mainStream.toolCalls.map((tc) => ({
+                  name: tc.data.name,
+                  arguments: tc.data.arguments,
+                  tool_call_id: tc.data.tool_call_id,
+                  started_at: tc.data.started_at ?? null,
+                }))
+              : null,
           reasoning: mainStream.reasoning || null,
           blocks: finalBlocks.length > 0 ? finalBlocks : null,
           created_at: new Date().toISOString(),
@@ -480,17 +484,19 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
                 tool_call_id: tc.data.tool_call_id,
                 started_at: tc.data.started_at ?? (tc.timestamp || null),
               })),
-              tool_results: agentStream.toolResults.map((tr) => {
-                const mapEntry = currentToolResultMap[tr.data.tool_call_id ?? '']
-                return {
-                  tool_name: tr.data.tool_name ?? '',
-                  tool_call_id: tr.data.tool_call_id ?? '',
-                  content: tr.data.content ?? '',
-                  content_type: tr.data.content_type ?? mapEntry?.contentType ?? null,
-                  started_at: tr.data.started_at ?? null,
-                  completed_at: tr.timestamp || null,
-                }
-              }).filter((tr) => tr.tool_call_id),
+              tool_results: agentStream.toolResults
+                .map((tr) => {
+                  const mapEntry = currentToolResultMap[tr.data.tool_call_id ?? '']
+                  return {
+                    tool_name: tr.data.tool_name ?? '',
+                    tool_call_id: tr.data.tool_call_id ?? '',
+                    content: tr.data.content ?? '',
+                    content_type: tr.data.content_type ?? mapEntry?.contentType ?? null,
+                    started_at: tr.data.started_at ?? null,
+                    completed_at: tr.timestamp || null,
+                  }
+                })
+                .filter((tr) => tr.tool_call_id),
               reasoning: agentStream.reasoning,
               role: args?.role,
               task: args?.task,

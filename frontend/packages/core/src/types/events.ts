@@ -152,10 +152,7 @@ export interface DoneEvent extends AgentEvent {
   data: Record<string, unknown>
 }
 
-export type StatusPhase =
-  | 'sandbox_creating'
-  | 'sandbox_ready'
-  | 'sandbox_failed'
+export type StatusPhase = 'sandbox_creating' | 'sandbox_ready' | 'sandbox_failed'
 
 export interface StatusEvent extends AgentEvent {
   type: 'status'

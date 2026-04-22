@@ -22,20 +22,16 @@ export function DocumentPreview({ artifact, version, workspaceId }: DocumentPrev
 
   useEffect(() => {
     fetch(previewUrl)
-      .then(res => {
+      .then((res) => {
         if (!res.ok) throw new Error(`${res.status} ${res.statusText}`)
         return res.text()
       })
       .then(setContent)
-      .catch(e => setError(e.message))
+      .catch((e) => setError(e.message))
   }, [previewUrl])
 
   if (error) {
-    return (
-      <div className="p-4 text-sm text-destructive">
-        Failed to load document: {error}
-      </div>
-    )
+    return <div className="p-4 text-sm text-destructive">Failed to load document: {error}</div>
   }
 
   if (content === null) {
@@ -47,9 +43,7 @@ export function DocumentPreview({ artifact, version, workspaceId }: DocumentPrev
   if (isMarkdown) {
     return (
       <div className="h-full overflow-auto">
-        <MarkdownWithCitations className={`p-4 ${proseClasses}`}>
-          {content}
-        </MarkdownWithCitations>
+        <MarkdownWithCitations className={`p-4 ${proseClasses}`}>{content}</MarkdownWithCitations>
       </div>
     )
   }

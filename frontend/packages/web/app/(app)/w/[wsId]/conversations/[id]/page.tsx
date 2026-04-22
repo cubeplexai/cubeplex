@@ -13,11 +13,7 @@ import { ArtifactGallery } from '@/components/chat/ArtifactGallery'
 import { InputBar } from '@/components/layout/InputBar'
 import { ErrorState } from '@/components/shared/ErrorState'
 
-export default function ChatPage({
-  params,
-}: {
-  params: Promise<{ wsId: string; id: string }>
-}) {
+export default function ChatPage({ params }: { params: Promise<{ wsId: string; id: string }> }) {
   const { wsId, id: conversationId } = use(params)
   const setActive = useConversationStore((s) => s.setActive)
   const fetchList = useConversationStore((s) => s.fetchList)

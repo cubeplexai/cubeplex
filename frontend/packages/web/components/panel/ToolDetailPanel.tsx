@@ -31,38 +31,26 @@ export function ToolDetailPanel() {
         onClose={close}
       />
       <ScrollArea className="flex-1">
-        {contentType === 'terminal' && (
-          <TerminalView
-            args={toolArgs}
-            result={toolResult}
-          />
-        )}
+        {contentType === 'terminal' && <TerminalView args={toolArgs} result={toolResult} />}
         {contentType === 'search' && (
           <SearchResultView
             result={toolResult}
             args={toolArgs}
-            highlightText={highlightText} highlightKey={highlightKey}
+            highlightText={highlightText}
+            highlightKey={highlightKey}
           />
         )}
         {contentType === 'web_fetch' && (
           <WebFetchView
             args={toolArgs}
             result={toolResult}
-            highlightText={highlightText} highlightKey={highlightKey}
+            highlightText={highlightText}
+            highlightKey={highlightKey}
           />
         )}
-        {contentType === 'skill' && (
-          <SkillView
-            args={toolArgs}
-            result={toolResult}
-          />
-        )}
+        {contentType === 'skill' && <SkillView args={toolArgs} result={toolResult} />}
         {contentType === 'write_file' && (
-          <WriteFilePreviewView
-            args={toolArgs}
-            result={toolResult}
-            toolRef={toolRef}
-          />
+          <WriteFilePreviewView args={toolArgs} result={toolResult} toolRef={toolRef} />
         )}
         {(contentType === 'generic' ||
           contentType === 'code_execute' ||
@@ -70,7 +58,8 @@ export function ToolDetailPanel() {
           <GenericToolView
             args={toolArgs}
             result={toolResult}
-            highlightText={highlightText} highlightKey={highlightKey}
+            highlightText={highlightText}
+            highlightKey={highlightKey}
           />
         )}
       </ScrollArea>

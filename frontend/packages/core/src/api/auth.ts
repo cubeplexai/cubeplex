@@ -21,11 +21,7 @@ export async function registerUser(
   return (await res.json()) as RegisterResult
 }
 
-export async function loginUser(
-  client: ApiClient,
-  email: string,
-  password: string,
-): Promise<void> {
+export async function loginUser(client: ApiClient, email: string, password: string): Promise<void> {
   const res = await client.postForm('/api/v1/auth/login', {
     username: email,
     password,

@@ -1,10 +1,6 @@
 import { create } from 'zustand'
 import type { ApiClient } from '../api/client'
-import {
-  listWorkspaces,
-  createWorkspace,
-  type Workspace,
-} from '../api/workspaces'
+import { listWorkspaces, createWorkspace, type Workspace } from '../api/workspaces'
 
 export interface WorkspaceStore {
   workspaces: Workspace[]

@@ -12,7 +12,10 @@ function extractTokens(text: string): string[] {
   return (text.match(/[\p{L}\p{N}]+/gu) ?? []).filter((w) => w.length > 1)
 }
 
-interface TextEntry { node: Text; start: number }
+interface TextEntry {
+  node: Text
+  start: number
+}
 
 /**
  * Search the container's concatenated visible text for a token sequence
@@ -22,10 +25,7 @@ interface TextEntry { node: Text; start: number }
  * This works across element boundaries (table cells, li + p, etc.)
  * because we search one continuous string, not per-block.
  */
-function findChunkBlocks(
-  container: HTMLElement,
-  chunkText: string,
-): HTMLElement[] {
+function findChunkBlocks(container: HTMLElement, chunkText: string): HTMLElement[] {
   // 1. Collect text nodes → build concatenated DOM text + offset map
   const entries: TextEntry[] = []
   const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT)
@@ -89,12 +89,7 @@ interface WebFetchViewProps {
   highlightKey?: number
 }
 
-export function WebFetchView({
-  args,
-  result,
-  highlightText,
-  highlightKey,
-}: WebFetchViewProps) {
+export function WebFetchView({ args, result, highlightText, highlightKey }: WebFetchViewProps) {
   const contentRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -150,9 +145,7 @@ export function WebFetchView({
       )}
       {result && (
         <div ref={contentRef} className={proseClasses}>
-          <ReactMarkdown remarkPlugins={[remarkGfm]}>
-            {result}
-          </ReactMarkdown>
+          <ReactMarkdown remarkPlugins={[remarkGfm]}>{result}</ReactMarkdown>
         </div>
       )}
     </div>

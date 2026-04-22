@@ -13,10 +13,9 @@ describe('auth API', () => {
 
   it('registerUser POSTs JSON and returns id+email+default_workspace_id', async () => {
     fetchMock.mockResolvedValueOnce(
-      new Response(
-        JSON.stringify({ id: 'u1', email: 'a@b.c', default_workspace_id: 'ws-1' }),
-        { status: 201 }
-      )
+      new Response(JSON.stringify({ id: 'u1', email: 'a@b.c', default_workspace_id: 'ws-1' }), {
+        status: 201,
+      }),
     )
     const client = createApiClient('')
     const result = await registerUser(client, 'a@b.c', 'pw')
@@ -42,7 +41,7 @@ describe('auth API', () => {
       new Response(JSON.stringify({ detail: 'LOGIN_BAD_CREDENTIALS' }), {
         status: 400,
         headers: { 'content-type': 'application/json' },
-      })
+      }),
     )
     const client = createApiClient('')
     await expect(loginUser(client, 'a@b.c', 'pw')).rejects.toThrow('LOGIN_BAD_CREDENTIALS')
@@ -59,7 +58,7 @@ describe('auth API', () => {
 
   it('getMe returns { id, email } on 200', async () => {
     fetchMock.mockResolvedValueOnce(
-      new Response(JSON.stringify({ id: 'u1', email: 'a@b.c' }), { status: 200 })
+      new Response(JSON.stringify({ id: 'u1', email: 'a@b.c' }), { status: 200 }),
     )
     const client = createApiClient('')
     const me = await getMe(client)

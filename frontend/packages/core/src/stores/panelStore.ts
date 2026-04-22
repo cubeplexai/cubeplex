@@ -3,10 +3,7 @@ import { create } from 'zustand'
 import type { PanelContentType, ToolCallRef } from '../types'
 
 /** Map tool name + optional backend content_type to a PanelContentType. */
-function mapContentType(
-  toolName: string,
-  backendContentType?: string,
-): PanelContentType {
+function mapContentType(toolName: string, backendContentType?: string): PanelContentType {
   if (toolName === 'load_skill') return 'skill'
   if (toolName === 'execute') return 'terminal'
   if (toolName === 'write_file') return 'write_file'

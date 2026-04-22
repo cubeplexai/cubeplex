@@ -68,7 +68,7 @@ export interface CitationChunk {
 }
 
 export interface CitationMetadata {
-  source_type: string   // "web", "file", "api"
+  source_type: string // "web", "file", "api"
   url?: string
   title?: string
   domain?: string
@@ -95,7 +95,7 @@ export interface CitationEvent extends AgentEvent {
 ```ts
 export interface Message {
   // ... existing fields
-  citations?: CitationData[] | null  // for tool messages: citation data from this tool result
+  citations?: CitationData[] | null // for tool messages: citation data from this tool result
 }
 ```
 
@@ -239,7 +239,7 @@ export type PanelView =
       toolResult: string | null
       contentType: PanelContentType
       toolRef: ToolCallRef | null
-      highlightText?: string | null  // NEW: text to highlight and scroll to
+      highlightText?: string | null // NEW: text to highlight and scroll to
     }
   | { type: 'artifact'; conversationId: string; artifactId: string }
 ```
@@ -261,28 +261,28 @@ export type PanelView =
 
 ## File Changes Summary
 
-| File | Change |
-|------|--------|
-| **Core types** | |
-| `core/src/types/events.ts` | Add `CitationChunk`, `CitationMetadata`, `CitationData`, `CitationEvent`; extend `AgentEventType` |
-| `core/src/types/message.ts` | Add `citations?: CitationData[]` to `Message` |
-| `core/src/index.ts` | Export new types and store |
-| **Core stores** | |
-| `core/src/stores/citationStore.ts` | New — citation store |
-| `core/src/stores/messageStore.ts` | Handle `citation` SSE event; populate citationStore on history load |
-| **Web components** | |
-| `web/components/chat/AssistantMessage.tsx` | Parse `【N-M】` in text blocks, render `CitationMarker` |
-| `web/components/chat/CitationMarker.tsx` | New — inline pill component |
-| `web/components/chat/CitationHoverCard.tsx` | New — hover popover card |
-| **Panel** | |
-| `core/src/stores/panelStore.ts` | Add `highlightText` to tool view |
-| `web/components/panel/ToolDetailPanel.tsx` | Pass `highlightText` to view components |
-| `web/components/panel/SearchResultView.tsx` | Accept `highlightText`, scroll + highlight |
-| `web/components/panel/WebFetchView.tsx` | Accept `highlightText`, scroll + highlight |
-| `web/components/panel/GenericToolView.tsx` | Accept `highlightText`, scroll + highlight |
-| **Backend (small)** | |
-| `backend/cubebox/middleware/citations/middleware.py` | Store `citations` in `additional_kwargs` |
-| `backend/cubebox/agents/convert.py` | Extract `citations` from ToolMessage for API response |
+| File                                                 | Change                                                                                            |
+| ---------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| **Core types**                                       |                                                                                                   |
+| `core/src/types/events.ts`                           | Add `CitationChunk`, `CitationMetadata`, `CitationData`, `CitationEvent`; extend `AgentEventType` |
+| `core/src/types/message.ts`                          | Add `citations?: CitationData[]` to `Message`                                                     |
+| `core/src/index.ts`                                  | Export new types and store                                                                        |
+| **Core stores**                                      |                                                                                                   |
+| `core/src/stores/citationStore.ts`                   | New — citation store                                                                              |
+| `core/src/stores/messageStore.ts`                    | Handle `citation` SSE event; populate citationStore on history load                               |
+| **Web components**                                   |                                                                                                   |
+| `web/components/chat/AssistantMessage.tsx`           | Parse `【N-M】` in text blocks, render `CitationMarker`                                           |
+| `web/components/chat/CitationMarker.tsx`             | New — inline pill component                                                                       |
+| `web/components/chat/CitationHoverCard.tsx`          | New — hover popover card                                                                          |
+| **Panel**                                            |                                                                                                   |
+| `core/src/stores/panelStore.ts`                      | Add `highlightText` to tool view                                                                  |
+| `web/components/panel/ToolDetailPanel.tsx`           | Pass `highlightText` to view components                                                           |
+| `web/components/panel/SearchResultView.tsx`          | Accept `highlightText`, scroll + highlight                                                        |
+| `web/components/panel/WebFetchView.tsx`              | Accept `highlightText`, scroll + highlight                                                        |
+| `web/components/panel/GenericToolView.tsx`           | Accept `highlightText`, scroll + highlight                                                        |
+| **Backend (small)**                                  |                                                                                                   |
+| `backend/cubebox/middleware/citations/middleware.py` | Store `citations` in `additional_kwargs`                                                          |
+| `backend/cubebox/agents/convert.py`                  | Extract `citations` from ToolMessage for API response                                             |
 
 ---
 

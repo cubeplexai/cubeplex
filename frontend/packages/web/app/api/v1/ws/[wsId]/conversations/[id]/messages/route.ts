@@ -52,17 +52,14 @@ export async function POST(
   const { wsId, id } = await params
   const body = await request.text()
 
-  const backendRes = await fetch(
-    `${BACKEND_URL}/api/v1/ws/${wsId}/conversations/${id}/messages`,
-    {
-      method: 'POST',
-      headers: {
-        ...buildProxyHeaders(request, 'text/event-stream'),
-        'Content-Type': 'application/json',
-      },
-      body,
+  const backendRes = await fetch(`${BACKEND_URL}/api/v1/ws/${wsId}/conversations/${id}/messages`, {
+    method: 'POST',
+    headers: {
+      ...buildProxyHeaders(request, 'text/event-stream'),
+      'Content-Type': 'application/json',
     },
-  )
+    body,
+  })
 
   if (!backendRes.ok || !backendRes.body) {
     const headers = new Headers({ 'Content-Type': 'application/json' })
@@ -77,7 +74,7 @@ export async function POST(
   const headers = new Headers({
     'Content-Type': 'text/event-stream',
     'Cache-Control': 'no-cache, no-transform',
-    'Connection': 'keep-alive',
+    Connection: 'keep-alive',
     'X-Accel-Buffering': 'no',
   })
   appendSetCookie(headers, backendRes.headers)

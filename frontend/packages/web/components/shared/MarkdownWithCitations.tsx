@@ -39,7 +39,9 @@ export function MarkdownWithCitations({ children, className }: MarkdownWithCitat
   if (!hasCitations) {
     return (
       <div className={className}>
-        <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex]}>{md}</ReactMarkdown>
+        <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex]}>
+          {md}
+        </ReactMarkdown>
       </div>
     )
   }
@@ -47,11 +49,10 @@ export function MarkdownWithCitations({ children, className }: MarkdownWithCitat
   return (
     <div className={className}>
       <ReactMarkdown
-        remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex]}
+        remarkPlugins={[remarkGfm, remarkMath]}
+        rehypePlugins={[rehypeKatex]}
         components={{
-          p: ({ children: c }) => (
-            <p>{renderWithCitations(c, conversationId, CitationMarker)}</p>
-          ),
+          p: ({ children: c }) => <p>{renderWithCitations(c, conversationId, CitationMarker)}</p>,
           li: ({ children: c }) => (
             <li>{renderWithCitations(c, conversationId, CitationMarker)}</li>
           ),
@@ -62,9 +63,7 @@ export function MarkdownWithCitations({ children, className }: MarkdownWithCitat
             <th>{renderWithCitations(c, conversationId, CitationMarker)}</th>
           ),
           blockquote: ({ children: c }) => (
-            <blockquote>
-              {renderWithCitations(c, conversationId, CitationMarker)}
-            </blockquote>
+            <blockquote>{renderWithCitations(c, conversationId, CitationMarker)}</blockquote>
           ),
           h1: ({ children: c }) => (
             <h1>{renderWithCitations(c, conversationId, CitationMarker)}</h1>

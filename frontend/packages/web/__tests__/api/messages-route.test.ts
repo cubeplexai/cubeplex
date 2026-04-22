@@ -26,8 +26,8 @@ describe('conversation messages route proxy', () => {
     expect(url).toContain('/api/v1/ws/ws-42/conversations/conv-1/messages')
     expect(init.headers).toMatchObject({
       'Content-Type': 'application/json',
-      'Accept': 'text/event-stream',
-      'cookie': 'cubebox_user_id=user-cookie',
+      Accept: 'text/event-stream',
+      cookie: 'cubebox_user_id=user-cookie',
       'x-user-id': 'header-user',
     })
     expect(init.headers).not.toHaveProperty('X-Workspace-Id')
@@ -40,13 +40,16 @@ describe('conversation messages route proxy', () => {
         controller.close()
       },
     })
-    const backendFetch = vi.fn(async () => new Response(stream, {
-      status: 200,
-      headers: {
-        'content-type': 'text/event-stream',
-        'set-cookie': 'cubebox_user_id=user-cookie; Path=/; HttpOnly',
-      },
-    }))
+    const backendFetch = vi.fn(
+      async () =>
+        new Response(stream, {
+          status: 200,
+          headers: {
+            'content-type': 'text/event-stream',
+            'set-cookie': 'cubebox_user_id=user-cookie; Path=/; HttpOnly',
+          },
+        }),
+    )
     vi.stubGlobal('fetch', backendFetch)
 
     const request = {
@@ -81,7 +84,7 @@ describe('conversation messages route proxy', () => {
     const [url, init] = backendFetch.mock.calls[0] as [string, RequestInit]
     expect(url).toContain('/api/v1/ws/ws-42/conversations/conv-1/messages?limit=10')
     expect(init?.headers).toMatchObject({
-      'cookie': 'cubebox_user_id=user-cookie',
+      cookie: 'cubebox_user_id=user-cookie',
       'x-user-id': 'header-user',
     })
   })

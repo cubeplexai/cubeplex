@@ -1,9 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import {
-  Package, ChevronDown, ChevronRight, Eye, Download, Loader2,
-} from 'lucide-react'
+import { Package, ChevronDown, ChevronRight, Eye, Download, Loader2 } from 'lucide-react'
 import { useArtifactStore, usePanelStore } from '@cubebox/core'
 import type { Artifact } from '@cubebox/core'
 import { getArtifactIcon } from '@/components/panel/artifact/artifactIcons'
@@ -16,31 +14,29 @@ interface ArtifactGalleryProps {
 
 export function ArtifactGallery({ conversationId }: ArtifactGalleryProps) {
   const [isExpanded, setIsExpanded] = useState(false)
-  const artifacts = useArtifactStore(s => s.getArtifacts(conversationId))
-  const isLoading = useArtifactStore(s => s.isLoading(conversationId))
-  const openPreview = usePanelStore(s => s.openArtifact)
+  const artifacts = useArtifactStore((s) => s.getArtifacts(conversationId))
+  const isLoading = useArtifactStore((s) => s.isLoading(conversationId))
+  const openPreview = usePanelStore((s) => s.openArtifact)
 
   if (artifacts.length === 0) return null
 
   return (
     <div className="border-b border-border bg-card/50">
       <button
-        onClick={() => setIsExpanded(prev => !prev)}
+        onClick={() => setIsExpanded((prev) => !prev)}
         className="w-full flex items-center gap-2 px-4 py-2 text-xs text-muted-foreground
           hover:text-foreground transition-colors"
       >
-        {isExpanded ? (
-          <ChevronDown className="size-3" />
-        ) : (
-          <ChevronRight className="size-3" />
-        )}
+        {isExpanded ? <ChevronDown className="size-3" /> : <ChevronRight className="size-3" />}
         <Package className="size-3" />
         <span>Artifacts</span>
         {isLoading ? (
           <Loader2 className="size-3 animate-spin text-muted-foreground/70" />
         ) : (
-          <span className="rounded-full bg-muted px-1.5 py-0.5 text-[10px]
-            text-muted-foreground/70">
+          <span
+            className="rounded-full bg-muted px-1.5 py-0.5 text-[10px]
+            text-muted-foreground/70"
+          >
             {artifacts.length}
           </span>
         )}
@@ -48,35 +44,37 @@ export function ArtifactGallery({ conversationId }: ArtifactGalleryProps) {
 
       {isExpanded && (
         <div className="px-4 pb-3 grid gap-1.5">
-          {isLoading && artifacts.length === 0 ? (
-            Array.from({ length: 2 }).map((_, i) => (
-              <div
-                key={i}
-                className="flex items-center gap-2.5 px-2.5 py-1.5 rounded-md bg-background
+          {isLoading && artifacts.length === 0
+            ? Array.from({ length: 2 }).map((_, i) => (
+                <div
+                  key={i}
+                  className="flex items-center gap-2.5 px-2.5 py-1.5 rounded-md bg-background
                   border border-border/50"
-              >
-                <div className="size-3.5 rounded bg-muted animate-pulse shrink-0" />
-                <div className="h-3 rounded bg-muted animate-pulse flex-1" />
-              </div>
-            ))
-          ) : (
-            artifacts.map(artifact => (
-              <ArtifactGalleryItem
-                key={artifact.id}
-                artifact={artifact}
-                onPreview={() => openPreview(conversationId, artifact.id)}
-              />
-            ))
-          )}
+                >
+                  <div className="size-3.5 rounded bg-muted animate-pulse shrink-0" />
+                  <div className="h-3 rounded bg-muted animate-pulse flex-1" />
+                </div>
+              ))
+            : artifacts.map((artifact) => (
+                <ArtifactGalleryItem
+                  key={artifact.id}
+                  artifact={artifact}
+                  onPreview={() => openPreview(conversationId, artifact.id)}
+                />
+              ))}
         </div>
       )}
     </div>
   )
 }
 
-function ArtifactGalleryItem(
-  { artifact, onPreview }: { artifact: Artifact; onPreview: () => void },
-) {
+function ArtifactGalleryItem({
+  artifact,
+  onPreview,
+}: {
+  artifact: Artifact
+  onPreview: () => void
+}) {
   const Icon = getArtifactIcon(artifact)
   const { workspaceId } = useWorkspaceContext()
   const downloadUrl = workspaceId ? buildDownloadUrl(artifact, workspaceId) : '#'
@@ -88,15 +86,16 @@ function ArtifactGalleryItem(
       onClick={onPreview}
     >
       <Icon className="size-3.5 text-primary/70 shrink-0" />
-      <span className="text-xs font-medium text-foreground truncate flex-1">
-        {artifact.name}
-      </span>
+      <span className="text-xs font-medium text-foreground truncate flex-1">{artifact.name}</span>
       {artifact.version > 1 && (
         <span className="text-[10px] text-muted-foreground/60">v{artifact.version}</span>
       )}
       <div className="flex items-center gap-0.5 shrink-0">
         <button
-          onClick={(e) => { e.stopPropagation(); onPreview() }}
+          onClick={(e) => {
+            e.stopPropagation()
+            onPreview()
+          }}
           className="p-1 rounded hover:bg-muted transition-colors"
           title="Preview"
         >

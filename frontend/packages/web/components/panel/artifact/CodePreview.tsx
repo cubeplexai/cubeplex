@@ -20,20 +20,16 @@ export function CodePreview({ artifact, version, workspaceId }: CodePreviewProps
 
   useEffect(() => {
     fetch(previewUrl)
-      .then(res => {
+      .then((res) => {
         if (!res.ok) throw new Error(`${res.status} ${res.statusText}`)
         return res.text()
       })
       .then(setCode)
-      .catch(e => setError(e.message))
+      .catch((e) => setError(e.message))
   }, [previewUrl])
 
   if (error) {
-    return (
-      <div className="p-4 text-sm text-destructive">
-        Failed to load file: {error}
-      </div>
-    )
+    return <div className="p-4 text-sm text-destructive">Failed to load file: {error}</div>
   }
 
   if (code === null) {
@@ -42,8 +38,10 @@ export function CodePreview({ artifact, version, workspaceId }: CodePreviewProps
 
   return (
     <div className="h-full overflow-auto">
-      <pre className="p-4 text-xs leading-relaxed font-mono text-foreground whitespace-pre-wrap
-        break-words">
+      <pre
+        className="p-4 text-xs leading-relaxed font-mono text-foreground whitespace-pre-wrap
+        break-words"
+      >
         {code}
       </pre>
     </div>
