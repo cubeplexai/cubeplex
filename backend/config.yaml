@@ -89,9 +89,9 @@ default:
   sandbox:
     enabled: true
     # domain: "localhost:8090"
-    domain: 39.99.248.80:18080
-    image: "hub.sensedeal.vip/library/cubebox-sandbox:24.04-20260311"
-    api_key: null
+    domain: "@format {env[CUBEBOX_SANDBOX__DOMAIN]}"
+    image: "@format {env[CUBEBOX_SANDBOX__IMAGE]}"
+    api_key: "@format {env[CUBEBOX_SANDBOX__API_KEY]}"
     # use_server_proxy: Use sandbox server as proxy for execd/endpoint requests
     #   Set to true when SDK cannot directly reach sandbox network/ports
     #   (e.g., Docker bridge deployments, network isolation)
@@ -166,7 +166,7 @@ default:
 
   langsmith:
     enabled: true
-    key: "USE ENV"
+    key: "@format {env[CUBEBOX_LANGSMITH__KEY]}"
 
   # Object Storage Configuration (S3-compatible)
   objectstore:
