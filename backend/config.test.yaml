@@ -61,3 +61,9 @@ test:
     region: "us-east-1"
     access_key: "rustfsadmin"
     access_secret: "rustfsadmin"
+
+  # Auth: relax rate limits so playwright e2e (multiple registrations from 127.0.0.1) don't hit 429
+  auth:
+    rate_limit:
+      login_per_minute: 1000
+      register_per_minute: 1000
