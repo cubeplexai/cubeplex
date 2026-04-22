@@ -102,7 +102,6 @@ class TestConversationsCRUD:
         assert response.status_code == 404
 
 
-@pytest.mark.e2e
 class TestConversationsMessages:
     """Conversation message listing tests."""
 
@@ -125,7 +124,6 @@ class TestConversationsMessages:
         assert response.status_code == 404
 
 
-@pytest.mark.e2e
 @pytest.mark.slow
 class TestSendMessage:
     """Message send (SSE streaming) tests — requires real LLM API access."""

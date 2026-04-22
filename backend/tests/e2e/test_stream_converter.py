@@ -5,7 +5,7 @@ from langchain_core.messages import AIMessage, AIMessageChunk, SystemMessage
 
 from cubebox.agents.stream import convert_messages_chunk, convert_updates_chunk
 
-pytestmark = pytest.mark.e2e
+pytestmark = pytest.mark.unit
 
 
 def test_tool_call_chunk_emits_delta_event() -> None:
