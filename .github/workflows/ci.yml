@@ -1,0 +1,103 @@
+name: CI
+
+on:
+  pull_request:
+    paths-ignore:
+      - 'docs/**'
+      - '**.md'
+      - '.gitignore'
+      - 'LICENSE'
+  push:
+    branches: [main]
+    paths-ignore:
+      - 'docs/**'
+      - '**.md'
+      - '.gitignore'
+      - 'LICENSE'
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend-check:
+    name: Backend Check (ruff + mypy + pytest unit)
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+          enable-cache: true
+      - name: Install backend
+        working-directory: backend
+        run: uv sync --all-extras
+      - name: Ruff check
+        working-directory: backend
+        run: uv run ruff check cubebox/ scripts/ tests/
+      - name: Ruff format check
+        working-directory: backend
+        run: uv run ruff format --check cubebox/ scripts/ tests/
+      - name: Mypy (strict)
+        working-directory: backend
+        run: uv run mypy cubebox/
+      - name: Pytest unit
+        working-directory: backend
+        env:
+          # Dummy env vars required because tests/conftest.py forces ENV_FOR_DYNACONF=test
+          # which loads config.test.yaml, and that file uses @format {env[...]} for secrets.
+          # Without these, dynaconf raises DynaconfFormatError during test collection.
+          # Real e2e job (Task 9) overrides these with GitHub Secrets.
+          CUBEBOX_E2E_LLM_BASE_URL: http://dummy
+          CUBEBOX_E2E_LLM_API_KEY: dummy
+          CUBEBOX_E2E_LLM_MODEL_ID: dummy
+          CUBEBOX_SANDBOX__DOMAIN: dummy:9000
+          CUBEBOX_SANDBOX__IMAGE: dummy:image
+          CUBEBOX_SANDBOX__API_KEY: dummy
+        run: uv run pytest -m "not sandbox and not e2e" --cov-report=xml
+      - name: Upload coverage
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: backend-coverage
+          path: backend/coverage.xml
+
+  frontend-check:
+    name: Frontend Check (eslint + prettier + type-check + vitest + build)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - name: Install frontend
+        working-directory: frontend
+        run: pnpm install --frozen-lockfile
+      - name: ESLint
+        working-directory: frontend
+        run: pnpm -r lint
+      - name: Prettier check
+        working-directory: frontend
+        run: pnpm format:check
+      - name: Type check
+        working-directory: frontend
+        run: pnpm -r type-check
+      - name: Vitest
+        working-directory: frontend
+        run: pnpm -r test
+      - name: Next build
+        working-directory: frontend
+        run: pnpm build
+
+  test-ee-compat:
+    name: EE Compat (placeholder)
+    runs-on: ubuntu-latest
+    timeout-minutes: 1
+    steps:
+      - run: echo "EE compat placeholder — will be wired after M0 lands."
