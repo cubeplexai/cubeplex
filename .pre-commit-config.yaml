@@ -1,0 +1,74 @@
+# Two-stage hooks:
+#   pre-commit (≤10s): staged-file checks, file hygiene + ruff check + format check + eslint/prettier --check
+#   pre-push   (≤3min): CI-equivalent backend-check + frontend-check
+#
+# Policy: ZERO auto-fix. All hooks are check-only. Developers run `make format`
+# or `pnpm format` manually before committing.
+
+default_stages: [pre-commit]
+
+repos:
+  # 通用文件卫生
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-added-large-files
+        args: ['--maxkb=500']
+      - id: check-yaml
+      - id: check-json
+      - id: check-toml
+      - id: check-merge-conflict
+      - id: detect-private-key
+      - id: debug-statements
+
+  # Backend: ruff check + format check (NO --fix, NO --write)
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.14.5
+    hooks:
+      - id: ruff
+        name: ruff check (no-fix)
+        args: ['--no-fix']
+        files: ^backend/.*\.py$
+      - id: ruff-format
+        name: ruff format --check
+        args: ['--check']
+        files: ^backend/.*\.py$
+
+  # Frontend: ESLint + Prettier check（全 workspace 跑；触发条件 = 任一 frontend 文件改）
+  # pass_filenames: false 规避“路径在 repo 根 vs cd frontend 后相对路径”的问题
+  - repo: local
+    hooks:
+      - id: eslint
+        name: eslint --max-warnings=0 (frontend)
+        entry: bash -c 'cd frontend && pnpm -r lint'
+        language: system
+        files: ^frontend/.*\.(ts|tsx|js|jsx)$
+        exclude: ^frontend/(node_modules|.*/dist|.*/\.next|test-results|playwright-report)/
+        pass_filenames: false
+      - id: prettier-check
+        name: prettier --check (frontend)
+        entry: bash -c 'cd frontend && pnpm format:check'
+        language: system
+        files: ^frontend/.*\.(ts|tsx|js|jsx|json|md|yaml|yml|css|scss)$
+        exclude: ^frontend/(node_modules|.*/dist|.*/\.next|pnpm-lock\.yaml|test-results|playwright-report)/
+        pass_filenames: false
+
+  # Pre-push: 跑 CI 等价检查
+  - repo: local
+    hooks:
+      - id: backend-check-ci
+        name: backend check-ci (ruff + mypy + pytest unit)
+        entry: bash -c 'cd backend && make check-ci'
+        language: system
+        stages: [pre-push]
+        pass_filenames: false
+        always_run: true
+      - id: frontend-check-ci
+        name: frontend check-ci (type-check + lint + format + vitest)
+        entry: bash -c 'cd frontend && pnpm -r type-check && pnpm -r lint && pnpm -r format:check && pnpm -r test'
+        language: system
+        stages: [pre-push]
+        pass_filenames: false
+        always_run: true
