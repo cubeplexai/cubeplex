@@ -81,6 +81,9 @@ jobs:
       - name: Install frontend
         working-directory: frontend
         run: pnpm install --frozen-lockfile
+      - name: Build core
+        working-directory: frontend
+        run: pnpm --filter @cubebox/core build
       - name: ESLint
         working-directory: frontend
         run: pnpm -r lint
