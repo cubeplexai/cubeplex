@@ -26,6 +26,8 @@
   "scripts": {
     "build": "tsc",
     "type-check": "tsc --noEmit",
+    "lint": "ESLINT_USE_FLAT_CONFIG=false eslint src --max-warnings=0",
+    "format:check": "prettier --check \"src/**/*.{ts,tsx,json}\"",
     "test": "vitest run",
     "test:watch": "vitest"
   },

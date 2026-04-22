@@ -6,6 +6,9 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
+    "type-check": "tsc --noEmit",
+    "lint": "eslint .",
+    "format:check": "prettier --check \"{app,components,hooks,lib}/**/*.{ts,tsx,json,css}\"",
     "test": "vitest run",
     "test:watch": "vitest"
   },

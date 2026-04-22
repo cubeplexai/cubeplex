@@ -2,11 +2,7 @@
 
 import { useState, useEffect, useRef, memo } from 'react'
 import type { ToolCallRef } from '@cubebox/core'
-import {
-  CheckCircle2,
-  Circle,
-  PanelRight,
-} from 'lucide-react'
+import { CheckCircle2, Circle, PanelRight } from 'lucide-react'
 import { getToolIcon, getParamSummary } from '@/lib/toolIcons'
 import { useToolDetailStore } from '@cubebox/core'
 
@@ -43,7 +39,7 @@ function formatDuration(ms: number): string {
 export const ToolCallItem = memo(function ToolCallItem({
   name,
   arguments: args,
-  toolCallId,
+  toolCallId: _toolCallId,
   summaryOverride,
   contentTypeOverride,
   toolRef,
@@ -66,8 +62,7 @@ export const ToolCallItem = memo(function ToolCallItem({
   // Live timer while pending
   useEffect(() => {
     if (!isPending) return
-    const tick = () =>
-      setElapsed(Date.now() - startedAt.current)
+    const tick = () => setElapsed(Date.now() - startedAt.current)
     tick()
     const interval = setInterval(tick, 1000)
     return () => clearInterval(interval)
@@ -92,11 +87,7 @@ export const ToolCallItem = memo(function ToolCallItem({
   }
 
   return (
-    <div
-      className={
-        showDivider ? 'border-t border-border' : ''
-      }
-    >
+    <div className={showDivider ? 'border-t border-border' : ''}>
       <button
         type="button"
         onClick={canOpen ? handleViewInPanel : undefined}
@@ -149,23 +140,17 @@ export const ToolCallItem = memo(function ToolCallItem({
             </>
           ) : toolResult ? (
             <>
-              <CheckCircle2
-                className="size-3 text-emerald-500"
-              />
+              <CheckCircle2 className="size-3 text-emerald-500" />
               <span
                 className="text-xs
                   text-muted-foreground"
               >
                 {formatDuration(duration)}
               </span>
-              <PanelRight
-                className="size-3 text-muted-foreground"
-              />
+              <PanelRight className="size-3 text-muted-foreground" />
             </>
           ) : canOpen ? (
-            <PanelRight
-              className="size-3 text-muted-foreground"
-            />
+            <PanelRight className="size-3 text-muted-foreground" />
           ) : null}
         </span>
       </button>
