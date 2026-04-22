@@ -8,12 +8,10 @@
 default_stages: [pre-commit]
 
 repos:
-  # 通用文件卫生
+  # 通用文件卫生 — 仅 check-only；trailing-whitespace / end-of-file-fixer 会改文件，不引入
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v5.0.0
     hooks:
-      - id: trailing-whitespace
-      - id: end-of-file-fixer
       - id: check-added-large-files
         args: ['--maxkb=500']
       - id: check-yaml
