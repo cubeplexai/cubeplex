@@ -48,27 +48,44 @@
 | D6 | Coverage 起步阈值 **待基线确定**（预期 40%），月度递增到 70% | 不卡 / 高阈值一步到位 | 现实主义：先立门，再收紧 |
 | D7 | Frontend 加 ESLint + Prettier | 推迟 | 既然 CI 要求 lint 必过，现在加成本最低 |
 | D8 | 锁定 py3.12 + node20 单栈 | 版本矩阵 | 减少构建时间；依赖本身要求 py>=3.12 |
+| D9 | Job 合并到 4 个 | 10 个细粒度 job | 省去重复 setup 成本；`e2e` 合并后 services / secrets 只暴露 1 次 |
+| D10 | `paths-ignore` + `concurrency.cancel-in-progress` | 全量触发 | 纯文档改动不跑；新 push 自动取消旧 run |
+| D11 | pre-commit / pre-push 钩子 **零自动修复**，check-only | 保留 `--fix` | 解决"修复完没 add 就 commit"的反模式 |
+| D12 | 本地钩子分两档：pre-commit（≤10s 轻）+ pre-push（≤3min ≈ CI 两个 check） | 全部塞 pre-commit | 不阻塞细碎 commit；push 前做最后防线 |
 
 ---
 
-## 3. Job 矩阵
+## 3. Job 矩阵（4 job + 1 占位）
 
 所有 Job 在 PR 与 push main 时触发；`workflow_dispatch` 手动触发。**全部 required**（branch protection 配置）。
 
-| Job | 类型 | 依赖服务 | 外部 Secrets | 预计时长 |
+| Job | 合并内容 | 依赖服务 | 外部 Secrets | 预计时长 |
 |---|---|---|---|---|
-| `backend-lint` | ruff check + ruff format --check | — | — | ~30s |
-| `backend-type-check` | mypy --strict | — | — | ~1 min |
-| `backend-unit` | pytest `-m "not sandbox and not e2e"` | — | — | ~1 min |
-| `backend-e2e` | pytest 全量 | MySQL、Redis、RustFS | LLM + Sandbox | ~10 min |
-| `frontend-lint` | ESLint + Prettier check | — | — | ~30s |
-| `frontend-type-check` | pnpm type-check | — | — | ~1 min |
-| `frontend-unit` | vitest run | — | — | ~1 min |
-| `frontend-build` | next build | — | — | ~2 min |
-| `frontend-e2e` | playwright（连本 job 启动的 backend） | MySQL、Redis、RustFS、Playwright browsers | LLM + Sandbox | ~8 min |
+| `backend-check` | ruff check + ruff format --check + mypy --strict + pytest unit（`-m "not sandbox and not e2e"`） | — | — | ~3 min |
+| `frontend-check` | ESLint + Prettier --check + pnpm type-check + vitest + next build | — | — | ~5 min |
+| `e2e` | alembic migrate → pytest e2e（TestClient） → DB 重置 → uvicorn 后台启动 → playwright | MySQL、Redis、RustFS、Playwright browsers | LLM + Sandbox | ~15 min |
 | `test-ee-compat` | **初版 no-op 占位**；echo 通过 | — | — | <10s |
 
-**并行化**：backend 与 frontend 的 lint / type-check / unit 完全并行；e2e 两个 job 各自起服务独立跑。
+**并行化**：`backend-check` / `frontend-check` / `e2e` 三个 job 完全并行。`test-ee-compat` 独立。
+**wallclock**：PR 反馈约 15 min（`e2e` 为最长路径）。
+
+### 3.1 Triggers、paths-ignore、concurrency
+
+```yaml
+on:
+  pull_request:
+    paths-ignore: ['docs/**', '**.md', '.gitignore', 'LICENSE']
+  push:
+    branches: [main]
+    paths-ignore: ['docs/**', '**.md', '.gitignore', 'LICENSE']
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+```
+
+纯文档 / md 改动不跑 CI。同一 PR 新 push 自动取消旧 run，省算力。
 
 ---
 
@@ -192,53 +209,65 @@ test:
 
 位置：`.github/workflows/ci.yml`
 
-### 7.1 触发
+### 7.1 触发 + paths-ignore + concurrency（见 3.1）
 
-```yaml
-on:
-  pull_request:
-  push:
-    branches: [main]
-  workflow_dispatch:
-```
-
-### 7.2 Job 骨架示意（真实内容见实施时的 PR）
+### 7.2 Job 骨架（合并到 4 个）
 
 ```yaml
 jobs:
-  backend-lint:
+  backend-check:
     runs-on: ubuntu-latest
+    timeout-minutes: 8
     steps:
       - uses: actions/checkout@v5
       - uses: astral-sh/setup-uv@v6
         with:
           python-version: "3.12"
           enable-cache: true
-      - run: cd backend && uv sync --all-extras
-      - run: cd backend && uv run ruff check cubebox/ scripts/ tests/
-      - run: cd backend && uv run ruff format --check cubebox/ scripts/ tests/
-
-  backend-type-check:
-    runs-on: ubuntu-latest
-    # 同上 setup + uv sync
-    steps:
-      - run: cd backend && uv run mypy cubebox/
-
-  backend-unit:
-    runs-on: ubuntu-latest
-    # 同上 setup
-    steps:
-      - run: cd backend && uv run pytest -m "not sandbox and not e2e" --cov-report=xml
-      - uses: actions/upload-artifact@v4
+      - name: Install backend
+        run: cd backend && uv sync --all-extras
+      - name: Ruff check
+        run: cd backend && uv run ruff check cubebox/ scripts/ tests/
+      - name: Ruff format check
+        run: cd backend && uv run ruff format --check cubebox/ scripts/ tests/
+      - name: Mypy (strict)
+        run: cd backend && uv run mypy cubebox/
+      - name: Pytest unit
+        run: cd backend && uv run pytest -m "not sandbox and not e2e" --cov-report=xml
+      - name: Upload coverage
+        uses: actions/upload-artifact@v4
         with:
           name: backend-coverage
           path: backend/coverage.xml
 
-  backend-e2e:
+  frontend-check:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - run: cd frontend && pnpm install --frozen-lockfile
+      - name: ESLint
+        run: cd frontend && pnpm lint         # 无 --fix
+      - name: Prettier check
+        run: cd frontend && pnpm format:check # 无 --write
+      - name: Type check
+        run: cd frontend && pnpm type-check
+      - name: Vitest
+        run: cd frontend && pnpm -r test
+      - name: Next build
+        run: cd frontend && pnpm build
+
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
     env:
       ENV_FOR_DYNACONF: test
-      # LLM & Sandbox from secrets
       CUBEBOX_E2E_LLM_BASE_URL: ${{ secrets.CUBEBOX_E2E_LLM_BASE_URL }}
       CUBEBOX_E2E_LLM_API_KEY: ${{ secrets.CUBEBOX_E2E_LLM_API_KEY }}
       CUBEBOX_E2E_LLM_MODEL_ID: ${{ secrets.CUBEBOX_E2E_LLM_MODEL_ID }}
@@ -263,13 +292,22 @@ jobs:
         options: >-
           --health-cmd="redis-cli ping"
           --health-interval=10s
-      # RustFS 需要 chown data/logs，run step 预处理后再起
     steps:
       - uses: actions/checkout@v5
       - uses: astral-sh/setup-uv@v6
         with:
           python-version: "3.12"
           enable-cache: true
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - name: Install backend
+        run: cd backend && uv sync --all-extras
+      - name: Install frontend
+        run: cd frontend && pnpm install --frozen-lockfile
       - name: Prepare RustFS data dirs
         run: |
           mkdir -p /tmp/rustfs/data /tmp/rustfs/logs
@@ -281,62 +319,27 @@ jobs:
             -v /tmp/rustfs/data:/data \
             -v /tmp/rustfs/logs:/logs \
             rustfs/rustfs:1.0.0-alpha.97
-          # TCP-level readiness probe — S3 endpoint answers 403/400 when up, which counts as "up"
           for i in {1..30}; do
             curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:9000/ | grep -qE '^(2|3|4)' && break || sleep 2
           done
-      - name: Install backend
-        run: cd backend && uv sync --all-extras
-      - name: Run alembic migrations
+      - name: Alembic migrate (pre-pytest)
         run: cd backend && uv run alembic upgrade head
-      - name: Run e2e tests
+      - name: Pytest e2e (in-process TestClient)
         run: cd backend && uv run pytest tests/e2e/ -v
-
-  frontend-lint:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v5
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-          cache: pnpm
-          cache-dependency-path: frontend/pnpm-lock.yaml
-      - run: cd frontend && pnpm install --frozen-lockfile
-      - run: cd frontend && pnpm lint
-      - run: cd frontend && pnpm format:check
-
-  frontend-type-check:
-    # 同上 setup
-    steps:
-      - run: cd frontend && pnpm type-check
-
-  frontend-unit:
-    # 同上 setup
-    steps:
-      - run: cd frontend && pnpm -r test
-
-  frontend-build:
-    # 同上 setup
-    steps:
-      - run: cd frontend && pnpm build
-
-  frontend-e2e:
-    runs-on: ubuntu-latest
-    # 同 backend-e2e 的 env / services（需要启动 backend）
-    steps:
-      - # ... setup ...
-      - name: Run alembic migrations
-        run: cd backend && uv run alembic upgrade head
+      - name: Reset DB state for playwright
+        # pytest 可能留下数据；drop + recreate + migrate 保证 playwright 起点干净
+        run: |
+          mysql -h 127.0.0.1 -P 3306 -uroot -ptestpass \
+            -e "DROP DATABASE cubebox_test; CREATE DATABASE cubebox_test;"
+          cd backend && uv run alembic upgrade head
       - name: Start backend in background
         run: cd backend && uv run python main.py > /tmp/backend.log 2>&1 &
       - name: Wait for backend ready
-        # uses test API port 8001 (config.test.yaml). Probe root OpenAPI doc; any 2xx/4xx means app is up.
         run: |
           timeout 60 bash -c 'until curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8001/docs | grep -qE "^(2|3|4)"; do sleep 2; done'
       - name: Install playwright browsers
         run: cd frontend && pnpm exec playwright install --with-deps chromium
-      - name: Run playwright
+      - name: Playwright e2e
         run: cd frontend && pnpm test:e2e
       - name: Upload backend log on failure
         if: failure()
@@ -344,6 +347,12 @@ jobs:
         with:
           name: backend-log
           path: /tmp/backend.log
+      - name: Upload playwright traces on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-traces
+          path: frontend/test-results/
 
   test-ee-compat:
     runs-on: ubuntu-latest
@@ -382,19 +391,141 @@ jobs:
 
 ---
 
-## 9. Branch Protection 建议配置
+## 9. 本地钩子：pre-commit + pre-push
+
+### 9.1 设计原则
+
+- **零自动修复（check-only）**：所有 hook 都是"检查 → 失败退出"，不在用户磁盘上动代码。
+  - 理由：当 hook 修改文件后，修改结果并不会自动加入本次 commit。开发者常见错误路径 = `git commit` → hook fix → 看到绿灯以为已提交 → 其实 working tree 有 unstaged fix → 下次 commit 才带上，甚至被 `git stash` / 切分支冲掉。
+  - Ruff 必须去掉 `--fix`；Prettier 必须用 `--check` 不用 `--write`；ESLint 必须用 `--max-warnings=0` 不用 `--fix`。
+- **本地规则必须与 CI 规则 1:1 对齐**：避免"本地过但 CI 挂"或反之。
+- **分两档执行**：
+  - `pre-commit`：只检查 **staged files**，≤10s，保护高频 commit；
+  - `pre-push`：跑接近 CI 的检查，≤3 min，作为 push 前最后防线。
+
+### 9.2 两阶段对照表
+
+| 阶段 | 触发时机 | 目标耗时 | 执行内容 |
+|---|---|---|---|
+| `pre-commit` | `git commit` | ≤10s | 文件卫生（trailing whitespace、末尾换行、大文件检测、yaml/json 解析）· ruff check（staged .py）· ruff format --check（staged .py）· eslint（staged .ts/.tsx/.js/.jsx）· prettier --check（staged .md/.yaml/.json/.css 等） |
+| `pre-push` | `git push` | ≤3 min | `cd backend && make check-ci`（= ruff check + ruff format --check + mypy + pytest unit）· `cd frontend && pnpm -r type-check && pnpm -r lint && pnpm -r format:check && pnpm -r test` |
+
+说明：
+- `pre-push` 的内容 = CI 里 `backend-check` + `frontend-check` 的合集，但跳过 `next build`（太慢；留给 CI）
+- `pre-push` 跑的是**全仓检查**，不是 staged files；因为 push 的是一批 commit，必须整体干净
+
+### 9.3 `.pre-commit-config.yaml` 配置
+
+```yaml
+default_stages: [pre-commit]
+
+repos:
+  # 通用文件卫生
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-added-large-files
+        args: ['--maxkb=500']
+      - id: check-yaml
+      - id: check-json
+      - id: check-merge-conflict
+      - id: detect-private-key
+
+  # Backend: ruff check + format check (NO --fix, NO --write)
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.14.5
+    hooks:
+      - id: ruff
+        # 纯检查，不自动修复
+        args: ['--no-fix']
+        files: ^backend/
+      - id: ruff-format
+        args: ['--check']
+        files: ^backend/
+
+  # Frontend: ESLint + Prettier check (local hooks, 用项目 node_modules)
+  - repo: local
+    hooks:
+      - id: eslint
+        name: eslint (staged)
+        entry: bash -c 'cd frontend && pnpm exec eslint --max-warnings=0'
+        language: system
+        types_or: [ts, tsx, javascript, jsx]
+        files: ^frontend/
+        pass_filenames: true
+      - id: prettier-check
+        name: prettier --check (staged)
+        entry: bash -c 'cd frontend && pnpm exec prettier --check'
+        language: system
+        files: ^frontend/.*\.(ts|tsx|js|jsx|json|md|yaml|yml|css|scss)$
+        pass_filenames: true
+
+  # Pre-push: 跑 CI 等价检查
+  - repo: local
+    hooks:
+      - id: backend-check
+        name: backend check (ruff + mypy + pytest unit)
+        entry: bash -c 'cd backend && make check-ci'
+        language: system
+        stages: [pre-push]
+        pass_filenames: false
+        always_run: true
+      - id: frontend-check
+        name: frontend check (type-check + lint + format + vitest)
+        entry: bash -c 'cd frontend && pnpm -r type-check && pnpm -r lint && pnpm -r format:check && pnpm -r test'
+        language: system
+        stages: [pre-push]
+        pass_filenames: false
+        always_run: true
+```
+
+### 9.4 Makefile 变更
+
+`backend/Makefile` 新增 / 调整：
+
+```makefile
+# 新增：CI 等价检查（供 pre-push 与 workflow 复用）
+check-ci:
+	uv run ruff check cubebox/ scripts/ tests/
+	uv run ruff format --check cubebox/ scripts/ tests/
+	uv run mypy cubebox/
+	uv run pytest -m "not sandbox and not e2e"
+
+# 新增：一键装 pre-commit + pre-push 钩子
+pre-commit-install-all:
+	uv run pre-commit install
+	uv run pre-commit install --hook-type pre-push
+```
+
+原 `lint-fix`、`format` 目标保留（开发者可主动触发，但 hook 不会自动跑）。
+
+### 9.5 安装方式
+
+新人 clone 仓库后的一次性步骤（写入 `CONTRIBUTING.md`）：
+
+```bash
+cd backend
+make dev-install
+make pre-commit-install-all
+```
+
+---
+
+## 10. Branch Protection 建议配置
 
 提交 PR 前手动在 GitHub Settings → Branches 配置 `main`：
 - Require pull request reviews: 1
 - Require status checks to pass:
-  - 上述 10 个 job 全部勾选为 required
+  - 上述 4 个 job（`backend-check`、`frontend-check`、`e2e`、`test-ee-compat`）全部勾选为 required
 - Require branches to be up to date before merging
 - Include administrators（发布前）
 - Do not allow bypassing
 
 ---
 
-## 10. 开源干净度前置检查（⚠️ 非 M-CI 范围但必须记录）
+## 11. 开源干净度前置检查（⚠️ 非 M-CI 范围但必须记录）
 
 实施 M-CI 期间会注意到，但**清理归属 M12 工程基建**：
 
@@ -410,22 +541,24 @@ jobs:
 
 ---
 
-## 11. 实施步骤（后续 writing-plans 会细化）
+## 12. 实施步骤（后续 writing-plans 会细化）
 
-1. 新增 `backend/config.test.yaml` 全量（覆盖现版本）
+1. 新增 `backend/config.test.yaml` 全量（覆盖现版本，见第 5 节）
 2. 新增 `frontend/.eslintrc.json` + `frontend/.prettierrc` + root `format:check` / `lint` script
-3. 新增 `frontend/packages/web` 与 `@cubebox/core` 的 `lint` script
+3. 在 `frontend/packages/web` 与 `@cubebox/core` 添加 `lint` / `format:check` script
 4. 在 backend `pyproject.toml` 的 pytest markers 中加 `e2e` marker，区分 unit / e2e
 5. 给现有 e2e 测试打 `@pytest.mark.e2e` 标记
-6. 新增 `.github/workflows/ci.yml`（本 spec 第 7 节）
-7. 在 GitHub 仓库配置 Secrets（第 6.1 节 6 项）
-8. 配置 branch protection（第 9 节）
-9. 首次 PR 观察：时间、coverage、flakiness；回填附录 A 基线
-10. 升级 `.pre-commit-config.yaml` 使其与 CI lint 规则一致（避免"本地过 CI 挂"）
+6. 重写 `backend/.pre-commit-config.yaml`（第 9.3 节，check-only、pre-commit + pre-push 双阶段）
+7. 更新 `backend/Makefile`：新增 `check-ci` 与 `pre-commit-install-all` 目标（第 9.4 节）
+8. 新增 `.github/workflows/ci.yml`（本 spec 第 7 节）
+9. 在 GitHub 仓库配置 Secrets（第 6.1 节 6 项）
+10. 配置 branch protection（第 10 节）
+11. 在 `CONTRIBUTING.md` 记录钩子安装步骤（第 9.5 节）
+12. 首次 PR 观察：时间、coverage、flakiness；回填附录 A 基线
 
 ---
 
-## 12. 风险与缓解
+## 13. 风险与缓解
 
 | 风险 | 概率 | 影响 | 缓解 |
 |---|---|---|---|
@@ -437,7 +570,7 @@ jobs:
 
 ---
 
-## 13. 附录 A · Coverage 基线（实施时回填）
+## 14. 附录 A · Coverage 基线（实施时回填）
 
 - Backend unit: _TBD_
 - Backend unit + e2e: _TBD_
@@ -445,7 +578,7 @@ jobs:
 
 ---
 
-## 14. Open Questions
+## 15. Open Questions
 
 - 是否需要在 CI 里加一个轻量 `docs-lint`（markdown 链接检查）？→ 暂不做，开源前再评估
 - 是否需要 `release.yml` workflow？→ 归 M12，本 spec 不含
