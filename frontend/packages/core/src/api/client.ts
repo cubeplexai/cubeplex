@@ -34,7 +34,7 @@ const SCOPED_ROOT = '/api/v1/'
 
 function isWorkspaceNeutral(path: string): boolean {
   return WS_NEUTRAL_PREFIXES.some(
-    (p) => path === p || path.startsWith(p + '/') || path.startsWith(p + '?') || path.startsWith(p)
+    (p) => path === p || path.startsWith(p + '/') || path.startsWith(p + '?') || path.startsWith(p),
   )
 }
 

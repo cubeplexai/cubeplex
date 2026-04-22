@@ -40,9 +40,14 @@ beforeEach(() => {
 
 describe('messageStore.send', () => {
   it('adds user message optimistically', async () => {
-    vi.stubGlobal('fetch', vi.fn(() => mockSSEResponse([
-      { type: 'done', data: {}, agent_id: null, agent_name: null, timestamp: '' }
-    ])))
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() =>
+        mockSSEResponse([
+          { type: 'done', data: {}, agent_id: null, agent_name: null, timestamp: '' },
+        ]),
+      ),
+    )
 
     await act(async () => {
       await useMessageStore.getState().send(mockClient as any, CONV_ID, 'hello')
@@ -53,11 +58,28 @@ describe('messageStore.send', () => {
   })
 
   it('accumulates text_delta events into assistant message', async () => {
-    vi.stubGlobal('fetch', vi.fn(() => mockSSEResponse([
-      { type: 'text_delta', data: { content: 'Hello' }, agent_id: null, agent_name: null, timestamp: '' },
-      { type: 'text_delta', data: { content: ' world' }, agent_id: null, agent_name: null, timestamp: '' },
-      { type: 'done', data: {}, agent_id: null, agent_name: null, timestamp: '' },
-    ])))
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() =>
+        mockSSEResponse([
+          {
+            type: 'text_delta',
+            data: { content: 'Hello' },
+            agent_id: null,
+            agent_name: null,
+            timestamp: '',
+          },
+          {
+            type: 'text_delta',
+            data: { content: ' world' },
+            agent_id: null,
+            agent_name: null,
+            timestamp: '',
+          },
+          { type: 'done', data: {}, agent_id: null, agent_name: null, timestamp: '' },
+        ]),
+      ),
+    )
 
     await act(async () => {
       await useMessageStore.getState().send(mockClient as any, CONV_ID, 'hi')
@@ -69,9 +91,20 @@ describe('messageStore.send', () => {
   })
 
   it('sets error on error event', async () => {
-    vi.stubGlobal('fetch', vi.fn(() => mockSSEResponse([
-      { type: 'error', data: { error_code: 'ERR', message: 'Something failed' }, agent_id: null, agent_name: null, timestamp: '' },
-    ])))
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() =>
+        mockSSEResponse([
+          {
+            type: 'error',
+            data: { error_code: 'ERR', message: 'Something failed' },
+            agent_id: null,
+            agent_name: null,
+            timestamp: '',
+          },
+        ]),
+      ),
+    )
 
     await act(async () => {
       await useMessageStore.getState().send(mockClient as any, CONV_ID, 'hi')
@@ -81,11 +114,28 @@ describe('messageStore.send', () => {
   })
 
   it('updates statusPhase on status events', async () => {
-    vi.stubGlobal('fetch', vi.fn(() => mockSSEResponse([
-      { type: 'status', data: { phase: 'sandbox_creating' }, agent_id: null, agent_name: null, timestamp: '' },
-      { type: 'status', data: { phase: 'sandbox_ready' }, agent_id: null, agent_name: null, timestamp: '' },
-      { type: 'done', data: {}, agent_id: null, agent_name: null, timestamp: '' },
-    ])))
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() =>
+        mockSSEResponse([
+          {
+            type: 'status',
+            data: { phase: 'sandbox_creating' },
+            agent_id: null,
+            agent_name: null,
+            timestamp: '',
+          },
+          {
+            type: 'status',
+            data: { phase: 'sandbox_ready' },
+            agent_id: null,
+            agent_name: null,
+            timestamp: '',
+          },
+          { type: 'done', data: {}, agent_id: null, agent_name: null, timestamp: '' },
+        ]),
+      ),
+    )
 
     await act(async () => {
       await useMessageStore.getState().send(mockClient as any, CONV_ID, 'hi')
@@ -96,9 +146,14 @@ describe('messageStore.send', () => {
   })
 
   it('clears isStreaming after completion', async () => {
-    vi.stubGlobal('fetch', vi.fn(() => mockSSEResponse([
-      { type: 'done', data: {}, agent_id: null, agent_name: null, timestamp: '' },
-    ])))
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() =>
+        mockSSEResponse([
+          { type: 'done', data: {}, agent_id: null, agent_name: null, timestamp: '' },
+        ]),
+      ),
+    )
 
     await act(async () => {
       await useMessageStore.getState().send(mockClient as any, CONV_ID, 'hi')
@@ -108,25 +163,30 @@ describe('messageStore.send', () => {
   })
 
   it('renders todos from write_todos batch payload', async () => {
-    vi.stubGlobal('fetch', vi.fn(() => mockSSEResponse([
-      {
-        type: 'tool_call',
-        data: {
-          tool_call_id: 'todo-1',
-          name: 'write_todos',
-          arguments: {
-            todos: [
-              { content: 'Inspect frontend todo parsing', status: 'in_progress' },
-              { content: 'Verify backend payload shape', status: 'pending' },
-            ],
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() =>
+        mockSSEResponse([
+          {
+            type: 'tool_call',
+            data: {
+              tool_call_id: 'todo-1',
+              name: 'write_todos',
+              arguments: {
+                todos: [
+                  { content: 'Inspect frontend todo parsing', status: 'in_progress' },
+                  { content: 'Verify backend payload shape', status: 'pending' },
+                ],
+              },
+            },
+            agent_id: null,
+            agent_name: null,
+            timestamp: '',
           },
-        },
-        agent_id: null,
-        agent_name: null,
-        timestamp: '',
-      },
-      { type: 'done', data: {}, agent_id: null, agent_name: null, timestamp: '' },
-    ])))
+          { type: 'done', data: {}, agent_id: null, agent_name: null, timestamp: '' },
+        ]),
+      ),
+    )
 
     await act(async () => {
       await useMessageStore.getState().send(mockClient as any, CONV_ID, 'fix todos')
@@ -147,41 +207,46 @@ describe('messageStore.send', () => {
   })
 
   it('replaces todos on subsequent write_todos updates', async () => {
-    vi.stubGlobal('fetch', vi.fn(() => mockSSEResponse([
-      {
-        type: 'tool_call',
-        data: {
-          tool_call_id: 'todo-1',
-          name: 'write_todos',
-          arguments: {
-            todos: [
-              { content: 'Inspect frontend todo parsing', status: 'in_progress' },
-              { content: 'Verify backend payload shape', status: 'pending' },
-            ],
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() =>
+        mockSSEResponse([
+          {
+            type: 'tool_call',
+            data: {
+              tool_call_id: 'todo-1',
+              name: 'write_todos',
+              arguments: {
+                todos: [
+                  { content: 'Inspect frontend todo parsing', status: 'in_progress' },
+                  { content: 'Verify backend payload shape', status: 'pending' },
+                ],
+              },
+            },
+            agent_id: null,
+            agent_name: null,
+            timestamp: '',
           },
-        },
-        agent_id: null,
-        agent_name: null,
-        timestamp: '',
-      },
-      {
-        type: 'tool_call',
-        data: {
-          tool_call_id: 'todo-2',
-          name: 'write_todos',
-          arguments: {
-            todos: [
-              { content: 'Inspect frontend todo parsing', status: 'completed' },
-              { content: 'Patch store parsing', status: 'in_progress' },
-            ],
+          {
+            type: 'tool_call',
+            data: {
+              tool_call_id: 'todo-2',
+              name: 'write_todos',
+              arguments: {
+                todos: [
+                  { content: 'Inspect frontend todo parsing', status: 'completed' },
+                  { content: 'Patch store parsing', status: 'in_progress' },
+                ],
+              },
+            },
+            agent_id: null,
+            agent_name: null,
+            timestamp: '',
           },
-        },
-        agent_id: null,
-        agent_name: null,
-        timestamp: '',
-      },
-      { type: 'done', data: {}, agent_id: null, agent_name: null, timestamp: '' },
-    ])))
+          { type: 'done', data: {}, agent_id: null, agent_name: null, timestamp: '' },
+        ]),
+      ),
+    )
 
     await act(async () => {
       await useMessageStore.getState().send(mockClient as any, CONV_ID, 'fix todos')
@@ -202,32 +267,37 @@ describe('messageStore.send', () => {
   })
 
   it('replaces streamed tool-call placeholders with the finalized tool call', async () => {
-    vi.stubGlobal('fetch', vi.fn(() => mockSSEResponse([
-      {
-        type: 'tool_call_delta',
-        data: {
-          tool_call_id: 'call-1',
-          name: 'execute',
-          args_delta: '{"cmd":"echo',
-          index: 0,
-        },
-        agent_id: null,
-        agent_name: null,
-        timestamp: '',
-      },
-      {
-        type: 'tool_call',
-        data: {
-          tool_call_id: 'call-1',
-          name: 'execute',
-          arguments: { cmd: 'echo hello' },
-        },
-        agent_id: null,
-        agent_name: null,
-        timestamp: '',
-      },
-      { type: 'done', data: {}, agent_id: null, agent_name: null, timestamp: '' },
-    ])))
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() =>
+        mockSSEResponse([
+          {
+            type: 'tool_call_delta',
+            data: {
+              tool_call_id: 'call-1',
+              name: 'execute',
+              args_delta: '{"cmd":"echo',
+              index: 0,
+            },
+            agent_id: null,
+            agent_name: null,
+            timestamp: '',
+          },
+          {
+            type: 'tool_call',
+            data: {
+              tool_call_id: 'call-1',
+              name: 'execute',
+              arguments: { cmd: 'echo hello' },
+            },
+            agent_id: null,
+            agent_name: null,
+            timestamp: '',
+          },
+          { type: 'done', data: {}, agent_id: null, agent_name: null, timestamp: '' },
+        ]),
+      ),
+    )
 
     await act(async () => {
       await useMessageStore.getState().send(mockClient as any, CONV_ID, 'run it')
@@ -246,21 +316,26 @@ describe('messageStore.send', () => {
   })
 
   it('does not persist unfinished streaming tool-call placeholders', async () => {
-    vi.stubGlobal('fetch', vi.fn(() => mockSSEResponse([
-      {
-        type: 'tool_call_delta',
-        data: {
-          tool_call_id: null,
-          name: 'search',
-          args_delta: '{"query":"partial',
-          index: 0,
-        },
-        agent_id: null,
-        agent_name: null,
-        timestamp: '',
-      },
-      { type: 'done', data: {}, agent_id: null, agent_name: null, timestamp: '' },
-    ])))
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() =>
+        mockSSEResponse([
+          {
+            type: 'tool_call_delta',
+            data: {
+              tool_call_id: null,
+              name: 'search',
+              args_delta: '{"query":"partial',
+              index: 0,
+            },
+            agent_id: null,
+            agent_name: null,
+            timestamp: '',
+          },
+          { type: 'done', data: {}, agent_id: null, agent_name: null, timestamp: '' },
+        ]),
+      ),
+    )
 
     await act(async () => {
       await useMessageStore.getState().send(mockClient as any, CONV_ID, 'search')
@@ -272,46 +347,51 @@ describe('messageStore.send', () => {
   })
 
   it('preserves tool timing from the first tool_call_delta through completion', async () => {
-    vi.stubGlobal('fetch', vi.fn(() => mockSSEResponse([
-      {
-        type: 'tool_call_delta',
-        data: {
-          tool_call_id: 'write-1',
-          name: 'write_file',
-          args_delta: '{"file_path":"/tmp/demo.txt","content":"hello"}',
-          index: 0,
-        },
-        agent_id: null,
-        agent_name: null,
-        timestamp: '',
-      },
-      {
-        type: 'tool_call',
-        data: {
-          tool_call_id: 'write-1',
-          name: 'write_file',
-          arguments: {
-            file_path: '/tmp/demo.txt',
-            content: 'hello',
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() =>
+        mockSSEResponse([
+          {
+            type: 'tool_call_delta',
+            data: {
+              tool_call_id: 'write-1',
+              name: 'write_file',
+              args_delta: '{"file_path":"/tmp/demo.txt","content":"hello"}',
+              index: 0,
+            },
+            agent_id: null,
+            agent_name: null,
+            timestamp: '',
           },
-        },
-        agent_id: null,
-        agent_name: null,
-        timestamp: '',
-      },
-      {
-        type: 'tool_result',
-        data: {
-          tool_name: 'write_file',
-          tool_call_id: 'write-1',
-          content: 'Successfully wrote /tmp/demo.txt',
-        },
-        agent_id: null,
-        agent_name: null,
-        timestamp: '',
-      },
-      { type: 'done', data: {}, agent_id: null, agent_name: null, timestamp: '' },
-    ])))
+          {
+            type: 'tool_call',
+            data: {
+              tool_call_id: 'write-1',
+              name: 'write_file',
+              arguments: {
+                file_path: '/tmp/demo.txt',
+                content: 'hello',
+              },
+            },
+            agent_id: null,
+            agent_name: null,
+            timestamp: '',
+          },
+          {
+            type: 'tool_result',
+            data: {
+              tool_name: 'write_file',
+              tool_call_id: 'write-1',
+              content: 'Successfully wrote /tmp/demo.txt',
+            },
+            agent_id: null,
+            agent_name: null,
+            timestamp: '',
+          },
+          { type: 'done', data: {}, agent_id: null, agent_name: null, timestamp: '' },
+        ]),
+      ),
+    )
 
     const nowSpy = vi.spyOn(Date, 'now')
     nowSpy

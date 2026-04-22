@@ -4,15 +4,16 @@ import { ArtifactGallery } from '../../components/chat/ArtifactGallery'
 const CONVERSATION_ID = 'conv-1'
 
 let artifactState: {
-  getArtifacts: (conversationId: string) => typeof artifact[]
+  getArtifacts: (conversationId: string) => (typeof artifact)[]
   isLoading: (conversationId: string) => boolean
 }
 
 const openArtifact = vi.fn()
 
 vi.mock('@cubebox/core', () => ({
-  useArtifactStore: (selector: typeof artifactState extends infer T ? (state: T) => unknown : never) =>
-    selector(artifactState),
+  useArtifactStore: (
+    selector: typeof artifactState extends infer T ? (state: T) => unknown : never,
+  ) => selector(artifactState),
   usePanelStore: (selector: (state: { openArtifact: typeof openArtifact }) => unknown) =>
     selector({ openArtifact }),
 }))

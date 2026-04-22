@@ -12,9 +12,7 @@ export interface CitationRef {
  * Parse a string for 【N-M】 markers and return an array of alternating
  * text strings and CitationRef objects.
  */
-export function parseCitationMarkers(
-  text: string,
-): (string | CitationRef)[] {
+export function parseCitationMarkers(text: string): (string | CitationRef)[] {
   const parts: (string | CitationRef)[] = []
   let lastIndex = 0
 

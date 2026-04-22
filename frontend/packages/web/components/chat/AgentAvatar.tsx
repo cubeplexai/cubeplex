@@ -19,13 +19,5 @@ export function AgentAvatar({ seed, size = 32, className }: AgentAvatarProps) {
     return avatar.toDataUri()
   }, [seed, size])
 
-  return (
-    <img
-      src={svgDataUri}
-      alt=""
-      width={size}
-      height={size}
-      className={className}
-    />
-  )
+  return <img src={svgDataUri} alt="" width={size} height={size} className={className} />
 }

@@ -29,9 +29,7 @@ function CopyButton({ text }: { text: string }) {
       {copied ? (
         <Check className="size-3 text-emerald-500" />
       ) : (
-        <Copy
-          className="size-3 text-muted-foreground"
-        />
+        <Copy className="size-3 text-muted-foreground" />
       )}
     </button>
   )
@@ -62,13 +60,13 @@ export function GenericToolView({
       el.classList.add('ring-2', 'ring-primary/50', 'bg-primary/10')
       el.scrollIntoView({ behavior: 'smooth', block: 'center' })
     }
-    return () => { el.classList.remove('ring-2', 'ring-primary/50', 'bg-primary/10') }
+    return () => {
+      el.classList.remove('ring-2', 'ring-primary/50', 'bg-primary/10')
+    }
   }, [highlightText, highlightKey])
 
   const requestText = JSON.stringify(args, null, 2)
-  const responseText = result
-    ? formatContent(result)
-    : null
+  const responseText = result ? formatContent(result) : null
 
   return (
     <div className="p-4 space-y-4">

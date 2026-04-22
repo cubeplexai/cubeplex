@@ -6,11 +6,7 @@ import { createApiClient, useConversationStore, useMessageStore } from '@cubebox
 import { InputBar } from '@/components/layout/InputBar'
 import { Box } from 'lucide-react'
 
-export default function WorkspaceHomePage({
-  params,
-}: {
-  params: Promise<{ wsId: string }>
-}) {
+export default function WorkspaceHomePage({ params }: { params: Promise<{ wsId: string }> }) {
   const { wsId } = use(params)
   const router = useRouter()
   const { create: createConversation } = useConversationStore()

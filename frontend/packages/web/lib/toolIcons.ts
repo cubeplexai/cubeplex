@@ -25,9 +25,7 @@ const iconMap: Record<string, LucideIcon> = {
   save_artifact: Package,
 }
 
-export function getToolIcon(
-  toolName: string,
-): LucideIcon {
+export function getToolIcon(toolName: string): LucideIcon {
   return iconMap[toolName] ?? Wrench
 }
 
@@ -43,24 +41,16 @@ export function getParamSummary(
   let value = ''
   if (toolName === 'execute') {
     value = String(args.command ?? args.cmd ?? '')
-  } else if (
-    toolName === 'write_file' || toolName === 'edit_file'
-  ) {
+  } else if (toolName === 'write_file' || toolName === 'edit_file') {
     value = String(args.file_path ?? args.file_name ?? '')
-  } else if (
-    toolName === 'web_search' || toolName === 'search'
-  ) {
+  } else if (toolName === 'web_search' || toolName === 'search') {
     value = String(args.query ?? args.q ?? '')
-  } else if (
-    toolName === 'web_fetch' || toolName === 'fetch'
-  ) {
+  } else if (toolName === 'web_fetch' || toolName === 'fetch') {
     value = String(args.url ?? '')
   } else if (toolName === 'load_skill') {
     value = String(args.skill_name ?? '')
   } else {
-    const firstVal = Object.values(args).find(
-      (v) => typeof v === 'string',
-    )
+    const firstVal = Object.values(args).find((v) => typeof v === 'string')
     value = firstVal ? String(firstVal) : ''
   }
   if (value.length > maxLen) {

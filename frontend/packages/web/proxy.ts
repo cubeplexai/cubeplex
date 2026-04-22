@@ -4,9 +4,7 @@ const PUBLIC_PATHS = ['/login', '/register']
 const PROTECTED_PREFIXES = ['/w/', '/workspaces']
 
 function isProtected(pathname: string): boolean {
-  return PROTECTED_PREFIXES.some(
-    (p) => pathname === p.replace(/\/$/, '') || pathname.startsWith(p)
-  )
+  return PROTECTED_PREFIXES.some((p) => pathname === p.replace(/\/$/, '') || pathname.startsWith(p))
 }
 
 export function proxy(request: NextRequest) {

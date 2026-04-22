@@ -20,7 +20,7 @@ describe('ApiClient', () => {
     await client.get('/api/v1/anything')
     expect(fetchMock).toHaveBeenCalledWith(
       '/api/v1/anything',
-      expect.objectContaining({ credentials: 'include' })
+      expect.objectContaining({ credentials: 'include' }),
     )
   })
 
@@ -59,8 +59,9 @@ describe('ApiClient', () => {
   it('resolvePath mirrors the rewrite (for direct fetch callers)', () => {
     const client = createApiClient('')
     client.setWorkspaceId('ws-123')
-    expect(client.resolvePath('/api/v1/conversations/abc/messages'))
-      .toBe('/api/v1/ws/ws-123/conversations/abc/messages')
+    expect(client.resolvePath('/api/v1/conversations/abc/messages')).toBe(
+      '/api/v1/ws/ws-123/conversations/abc/messages',
+    )
   })
 
   it('never sends X-Workspace-Id header (legacy behavior removed)', async () => {

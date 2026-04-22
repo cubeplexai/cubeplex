@@ -5,10 +5,7 @@ import { ToolCallItem } from './ToolCallItem'
 
 interface ToolCallGroupProps {
   blocks: (ContentBlock & { type: 'tool_call' })[]
-  toolResultMap: Record<
-    string,
-    { content: string; receivedAt: number; startedAt?: number }
-  >
+  toolResultMap: Record<string, { content: string; receivedAt: number; startedAt?: number }>
   isStreaming: boolean
   /** ISO timestamp of the parent assistant message (used to compute tool call duration) */
   messageCreatedAt?: string
@@ -29,8 +26,7 @@ export function ToolCallGroup({
         border-l-muted-foreground/20"
     >
       {blocks.map((block, i) => {
-        const result =
-          toolResultMap[block.tool_call_id] ?? null
+        const result = toolResultMap[block.tool_call_id] ?? null
         const isPending = isStreaming && !result
         return (
           <ToolCallItem
@@ -39,13 +35,15 @@ export function ToolCallGroup({
             arguments={block.arguments}
             toolCallId={block.tool_call_id}
             contentTypeOverride={block.name === 'write_file' ? 'write_file' : undefined}
-            toolRef={block.name === 'write_file'
-              ? {
-                  agent_id: agentId ?? null,
-                  tool_call_id: block.tool_call_id,
-                  index: null,
-                } satisfies ToolCallRef
-              : undefined}
+            toolRef={
+              block.name === 'write_file'
+                ? ({
+                    agent_id: agentId ?? null,
+                    tool_call_id: block.tool_call_id,
+                    index: null,
+                  } satisfies ToolCallRef)
+                : undefined
+            }
             toolResult={result}
             timestamp={messageCreatedAt}
             isPending={isPending}

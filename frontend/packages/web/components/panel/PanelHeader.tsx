@@ -2,10 +2,7 @@
 
 import { useState } from 'react'
 import { X, Copy, Check } from 'lucide-react'
-import {
-  getToolIcon,
-  getParamSummary,
-} from '@/lib/toolIcons'
+import { getToolIcon, getParamSummary } from '@/lib/toolIcons'
 
 interface PanelHeaderProps {
   toolName: string
@@ -14,19 +11,13 @@ interface PanelHeaderProps {
   onClose: () => void
 }
 
-export function PanelHeader({
-  toolName,
-  toolArgs,
-  toolResult,
-  onClose,
-}: PanelHeaderProps) {
+export function PanelHeader({ toolName, toolArgs, toolResult, onClose }: PanelHeaderProps) {
   const [copied, setCopied] = useState(false)
   const Icon = getToolIcon(toolName)
   const summary = getParamSummary(toolName, toolArgs, 40)
 
   const handleCopy = async () => {
-    const text =
-      toolResult ?? JSON.stringify(toolArgs, null, 2)
+    const text = toolResult ?? JSON.stringify(toolArgs, null, 2)
     await navigator.clipboard.writeText(text)
     setCopied(true)
     setTimeout(() => setCopied(false), 2000)
@@ -63,9 +54,7 @@ export function PanelHeader({
           title="Copy"
         >
           {copied ? (
-            <Check
-              className="size-3.5 text-emerald-500"
-            />
+            <Check className="size-3.5 text-emerald-500" />
           ) : (
             <Copy
               className="size-3.5
@@ -79,9 +68,7 @@ export function PanelHeader({
             transition-colors"
           title="Close"
         >
-          <X
-            className="size-3.5 text-muted-foreground"
-          />
+          <X className="size-3.5 text-muted-foreground" />
         </button>
       </span>
     </header>

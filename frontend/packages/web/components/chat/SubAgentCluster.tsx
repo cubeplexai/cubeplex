@@ -18,9 +18,7 @@ export function SubAgentCluster({ activeCount, totalCount }: SubAgentClusterProp
       <span>
         Agent 集群
         <span className="mx-1 text-muted-foreground/40">·</span>
-        {allDone
-          ? `${totalCount} 个任务已完成`
-          : `${activeCount} 个并行任务`}
+        {allDone ? `${totalCount} 个任务已完成` : `${activeCount} 个并行任务`}
       </span>
     </div>
   )

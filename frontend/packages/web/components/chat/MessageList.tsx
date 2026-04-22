@@ -19,17 +19,10 @@ interface MessageListProps {
  * Build a map from tool_call_id -> SubagentSummary by scanning tool messages
  * that follow each assistant message.
  */
-function buildSubagentDataMap(
-  messages: Message[],
-): Record<string, SubagentSummary> {
+function buildSubagentDataMap(messages: Message[]): Record<string, SubagentSummary> {
   const map: Record<string, SubagentSummary> = {}
   for (const msg of messages) {
-    if (
-      msg.role === 'tool' &&
-      msg.name === 'subagent' &&
-      msg.tool_call_id &&
-      msg.subagent_events
-    ) {
+    if (msg.role === 'tool' && msg.name === 'subagent' && msg.tool_call_id && msg.subagent_events) {
       map[`subagent:${msg.tool_call_id}`] = msg.subagent_events
     }
   }
@@ -39,10 +32,19 @@ function buildSubagentDataMap(
 /** Build toolResultMap from historical tool messages so panel works after refresh. */
 function buildHistoricalToolResultMap(
   messages: Message[],
-): Record<string, { content: string; receivedAt: number; startedAt?: number; contentType?: string }> {
-  const map: Record<string, {
-    content: string; receivedAt: number; startedAt?: number; contentType?: string
-  }> = {}
+): Record<
+  string,
+  { content: string; receivedAt: number; startedAt?: number; contentType?: string }
+> {
+  const map: Record<
+    string,
+    {
+      content: string
+      receivedAt: number
+      startedAt?: number
+      contentType?: string
+    }
+  > = {}
   // Build a map of tool_call_id → authoritative tool start time from history.
   const toolCallStartMap: Record<string, number> = {}
   for (const msg of messages) {
@@ -57,9 +59,7 @@ function buildHistoricalToolResultMap(
   }
   for (const msg of messages) {
     if (msg.role === 'tool' && msg.tool_call_id) {
-      const fallbackStartedAt = msg.started_at
-        ? new Date(msg.started_at).getTime()
-        : undefined
+      const fallbackStartedAt = msg.started_at ? new Date(msg.started_at).getTime() : undefined
       map[msg.tool_call_id] = {
         content: msg.content ?? '',
         receivedAt: new Date(msg.created_at ?? 0).getTime(),
@@ -79,12 +79,10 @@ function buildHistoricalToolResultMap(
           if (tr.tool_call_id) {
             const startedAt = tr.started_at
               ? new Date(tr.started_at).getTime()
-              : saToolCallStartMap[tr.tool_call_id] ?? undefined
+              : (saToolCallStartMap[tr.tool_call_id] ?? undefined)
             map[tr.tool_call_id] = {
               content: tr.content,
-              receivedAt: tr.completed_at
-                ? new Date(tr.completed_at).getTime()
-                : fallbackTs,
+              receivedAt: tr.completed_at ? new Date(tr.completed_at).getTime() : fallbackTs,
               startedAt,
               contentType: tr.content_type ?? undefined,
             }
@@ -98,7 +96,14 @@ function buildHistoricalToolResultMap(
 
 export function MessageList({ conversationId }: MessageListProps) {
   const {
-    messages, isStreaming, statusPhase, mainStream, subAgentStreams, todos, error, toolResultMap,
+    messages,
+    isStreaming,
+    statusPhase,
+    mainStream,
+    subAgentStreams,
+    todos,
+    error,
+    toolResultMap,
   } = useMessages(conversationId)
   const loadMessages = useMessageStore((s) => s.loadMessages)
   const { workspaceId } = useWorkspaceContext()
@@ -109,10 +114,7 @@ export function MessageList({ conversationId }: MessageListProps) {
     loadMessages(client, conversationId)
   }, [conversationId, loadMessages, workspaceId])
 
-  const subagentDataMap = useMemo(
-    () => buildSubagentDataMap(messages ?? []),
-    [messages],
-  )
+  const subagentDataMap = useMemo(() => buildSubagentDataMap(messages ?? []), [messages])
 
   const historicalToolResults = useMemo(
     () => buildHistoricalToolResultMap(messages ?? []),
@@ -216,8 +218,10 @@ export function MessageList({ conversationId }: MessageListProps) {
         )}
 
         {error && (
-          <div className="flex items-start gap-2 px-3 py-2.5 rounded-lg
-            bg-destructive/10 border border-destructive/20 text-destructive text-sm">
+          <div
+            className="flex items-start gap-2 px-3 py-2.5 rounded-lg
+            bg-destructive/10 border border-destructive/20 text-destructive text-sm"
+          >
             <AlertCircle className="size-4 shrink-0 mt-0.5" />
             <span>{error}</span>
           </div>

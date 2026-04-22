@@ -12,12 +12,10 @@ interface ArtifactCardProps {
   artifact: Artifact
 }
 
-export const ArtifactCard = memo(function ArtifactCard({
-  artifact,
-}: ArtifactCardProps) {
+export const ArtifactCard = memo(function ArtifactCard({ artifact }: ArtifactCardProps) {
   const Icon = getArtifactIcon(artifact)
   const label = getArtifactLabel(artifact)
-  const openPreview = usePanelStore(s => s.openArtifact)
+  const openPreview = usePanelStore((s) => s.openArtifact)
   const { workspaceId } = useWorkspaceContext()
 
   const downloadUrl = workspaceId ? buildDownloadUrl(artifact, workspaceId) : '#'
@@ -38,12 +36,12 @@ export const ArtifactCard = memo(function ArtifactCard({
         </div>
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
-            <span className="truncate text-sm font-medium text-foreground">
-              {artifact.name}
-            </span>
+            <span className="truncate text-sm font-medium text-foreground">{artifact.name}</span>
             {artifact.version > 1 && (
-              <span className="shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-[10px]
-                text-muted-foreground">
+              <span
+                className="shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-[10px]
+                text-muted-foreground"
+              >
                 v{artifact.version}
               </span>
             )}
@@ -61,7 +59,10 @@ export const ArtifactCard = memo(function ArtifactCard({
         </div>
         <div className="flex items-center gap-1 shrink-0">
           <button
-            onClick={(e) => { e.stopPropagation(); handlePreview() }}
+            onClick={(e) => {
+              e.stopPropagation()
+              handlePreview()
+            }}
             className="flex size-8 items-center justify-center rounded-md
               text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
             title="Preview"

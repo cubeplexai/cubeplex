@@ -16,38 +16,39 @@
 
 ### New Files
 
-| File | Responsibility |
-|------|---------------|
-| `core/src/types/citation.ts` | `CitationChunk`, `CitationMetadata`, `CitationData`, `CitationEvent` types |
-| `core/src/stores/citationStore.ts` | Zustand store: add/load/get citations by conversationId + citationId |
-| `web/components/chat/CitationMarker.tsx` | Inline pill component (`3.0` format) + HoverCard popover |
-| `web/lib/citations.tsx` | `renderWithCitations()` — parse `【N-M】` in React children, insert `CitationMarker` |
+| File                                     | Responsibility                                                                       |
+| ---------------------------------------- | ------------------------------------------------------------------------------------ |
+| `core/src/types/citation.ts`             | `CitationChunk`, `CitationMetadata`, `CitationData`, `CitationEvent` types           |
+| `core/src/stores/citationStore.ts`       | Zustand store: add/load/get citations by conversationId + citationId                 |
+| `web/components/chat/CitationMarker.tsx` | Inline pill component (`3.0` format) + HoverCard popover                             |
+| `web/lib/citations.tsx`                  | `renderWithCitations()` — parse `【N-M】` in React children, insert `CitationMarker` |
 
 ### Modified Files
 
-| File | Change |
-|------|--------|
-| `core/src/types/events.ts` | Add `'citation'` to `AgentEventType` |
-| `core/src/types/message.ts` | Add `citations?: CitationData[]` to `Message` |
-| `core/src/types/index.ts` | Re-export from `citation.ts` |
-| `core/src/stores/index.ts` | Export `citationStore` |
-| `core/src/stores/messageStore.ts` | Handle `citation` event in `send()`; restore citations in `loadMessages()` |
-| `web/components/chat/AssistantMessage.tsx` | Use `renderWithCitations()` in text block rendering |
-| `core/src/stores/panelStore.ts` | Add optional `highlightText` to tool view; add to `openTool` |
-| `core/src/stores/toolDetailStore.ts` | Pass `highlightText` through facade |
-| `web/hooks/useToolDetail.ts` | Expose `highlightText` |
-| `web/components/panel/ToolDetailPanel.tsx` | Pass `highlightText` to view components |
-| `web/components/panel/SearchResultView.tsx` | Accept `highlightText`, scroll + highlight matching item |
-| `web/components/panel/WebFetchView.tsx` | Accept `highlightText`, scroll + highlight matching text |
-| `web/components/panel/GenericToolView.tsx` | Accept `highlightText`, scroll + highlight matching text |
-| `backend/cubebox/middleware/citations/middleware.py` | Store `citations` list in `additional_kwargs` |
-| `backend/cubebox/agents/convert.py` | Extract `citations` from ToolMessage for API response |
+| File                                                 | Change                                                                     |
+| ---------------------------------------------------- | -------------------------------------------------------------------------- |
+| `core/src/types/events.ts`                           | Add `'citation'` to `AgentEventType`                                       |
+| `core/src/types/message.ts`                          | Add `citations?: CitationData[]` to `Message`                              |
+| `core/src/types/index.ts`                            | Re-export from `citation.ts`                                               |
+| `core/src/stores/index.ts`                           | Export `citationStore`                                                     |
+| `core/src/stores/messageStore.ts`                    | Handle `citation` event in `send()`; restore citations in `loadMessages()` |
+| `web/components/chat/AssistantMessage.tsx`           | Use `renderWithCitations()` in text block rendering                        |
+| `core/src/stores/panelStore.ts`                      | Add optional `highlightText` to tool view; add to `openTool`               |
+| `core/src/stores/toolDetailStore.ts`                 | Pass `highlightText` through facade                                        |
+| `web/hooks/useToolDetail.ts`                         | Expose `highlightText`                                                     |
+| `web/components/panel/ToolDetailPanel.tsx`           | Pass `highlightText` to view components                                    |
+| `web/components/panel/SearchResultView.tsx`          | Accept `highlightText`, scroll + highlight matching item                   |
+| `web/components/panel/WebFetchView.tsx`              | Accept `highlightText`, scroll + highlight matching text                   |
+| `web/components/panel/GenericToolView.tsx`           | Accept `highlightText`, scroll + highlight matching text                   |
+| `backend/cubebox/middleware/citations/middleware.py` | Store `citations` list in `additional_kwargs`                              |
+| `backend/cubebox/agents/convert.py`                  | Extract `citations` from ToolMessage for API response                      |
 
 ---
 
 ## Task 1: Citation Types
 
 **Files:**
+
 - Create: `frontend/packages/core/src/types/citation.ts`
 - Modify: `frontend/packages/core/src/types/events.ts`
 - Modify: `frontend/packages/core/src/types/message.ts`
@@ -94,7 +95,7 @@ export type AgentEventType =
   | 'error'
   | 'done'
   | 'status'
-  | 'citation'   // NEW
+  | 'citation' // NEW
 ```
 
 Add the event interface at the bottom (before the closing of the file), importing `CitationData`:
@@ -117,7 +118,7 @@ import type { CitationData } from './citation'
 
 export interface Message {
   // ... existing fields ...
-  citations?: CitationData[] | null  // for tool messages: citation data from this tool result
+  citations?: CitationData[] | null // for tool messages: citation data from this tool result
 }
 ```
 
@@ -146,6 +147,7 @@ git commit -m "feat(citations): add citation type definitions"
 ## Task 2: Citation Store
 
 **Files:**
+
 - Create: `frontend/packages/core/src/stores/citationStore.ts`
 - Modify: `frontend/packages/core/src/stores/index.ts`
 
@@ -216,10 +218,7 @@ export const useCitationStore = create<CitationStore>((set, get) => ({
 In `frontend/packages/core/src/stores/index.ts`, add:
 
 ```ts
-export {
-  useCitationStore,
-  type CitationStore,
-} from './citationStore'
+export { useCitationStore, type CitationStore } from './citationStore'
 ```
 
 - [ ] **Step 3: Type-check**
@@ -239,6 +238,7 @@ git commit -m "feat(citations): add citation Zustand store"
 ## Task 3: Backend — Persist Citations in Checkpoint
 
 **Files:**
+
 - Modify: `backend/cubebox/middleware/citations/middleware.py`
 - Modify: `backend/cubebox/agents/convert.py`
 
@@ -323,6 +323,7 @@ git commit -m "feat(citations): persist citation data in checkpoint and API resp
 ## Task 4: Wire Citation SSE Events into Message Store
 
 **Files:**
+
 - Modify: `frontend/packages/core/src/stores/messageStore.ts`
 
 - [ ] **Step 1: Add `citation` event handling in `send()`**
@@ -349,13 +350,13 @@ Note: uses dynamic import to match the existing pattern for `artifactStore` (lin
 In the `loadMessages()` method, after the todo restoration loop (after line 186 `let restoredTodos: TodoItem[] = []` block ends around line 196), add citation restoration:
 
 ```ts
-      // Restore citations from tool messages in history
-      const { useCitationStore } = await import('./citationStore')
-      for (const msg of messages) {
-        if (msg.role === 'tool' && msg.citations?.length) {
-          useCitationStore.getState().loadCitations(conversationId, msg.citations)
-        }
-      }
+// Restore citations from tool messages in history
+const { useCitationStore } = await import('./citationStore')
+for (const msg of messages) {
+  if (msg.role === 'tool' && msg.citations?.length) {
+    useCitationStore.getState().loadCitations(conversationId, msg.citations)
+  }
+}
 ```
 
 Place this before the `set()` call at line 188.
@@ -377,6 +378,7 @@ git commit -m "feat(citations): handle citation SSE events and restore from hist
 ## Task 5: Citation Text Parser (`renderWithCitations`)
 
 **Files:**
+
 - Create: `frontend/packages/web/lib/citations.tsx`
 
 - [ ] **Step 1: Create the citation text parser**
@@ -398,9 +400,7 @@ export interface CitationRef {
  * Parse a string for 【N-M】 markers and return an array of alternating
  * text strings and CitationRef objects.
  */
-export function parseCitationMarkers(
-  text: string,
-): (string | CitationRef)[] {
+export function parseCitationMarkers(text: string): (string | CitationRef)[] {
   const parts: (string | CitationRef)[] = []
   let lastIndex = 0
 
@@ -484,6 +484,7 @@ git commit -m "feat(citations): add citation marker parser and renderWithCitatio
 ## Task 6: CitationMarker Component with Hover Card
 
 **Files:**
+
 - Create: `frontend/packages/web/components/chat/CitationMarker.tsx`
 
 - [ ] **Step 1: Create the CitationMarker component**
@@ -497,11 +498,7 @@ import { useState, useCallback } from 'react'
 import { Globe, ExternalLink, Calendar } from 'lucide-react'
 import { useCitationStore, usePanelStore } from '@cubebox/core'
 import type { CitationData } from '@cubebox/core'
-import {
-  Popover,
-  PopoverTrigger,
-  PopoverContent,
-} from '@/components/ui/popover'
+import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover'
 
 interface CitationMarkerProps {
   citationId: number
@@ -513,7 +510,11 @@ function getFaviconUrl(domain: string): string {
   return `https://www.google.com/s2/favicons?domain=${encodeURIComponent(domain)}&sz=16`
 }
 
-function CitationHoverContent({ citation, chunkIndex, onOpenPanel }: {
+function CitationHoverContent({
+  citation,
+  chunkIndex,
+  onOpenPanel,
+}: {
   citation: CitationData
   chunkIndex: number
   onOpenPanel: () => void
@@ -540,8 +541,10 @@ function CitationHoverContent({ citation, chunkIndex, onOpenPanel }: {
         <span className="text-xs text-muted-foreground truncate">
           {metadata.domain || metadata.source_type}
         </span>
-        <span className="ml-auto text-[10px] font-medium text-muted-foreground/60
-          bg-muted px-1.5 py-0.5 rounded shrink-0">
+        <span
+          className="ml-auto text-[10px] font-medium text-muted-foreground/60
+          bg-muted px-1.5 py-0.5 rounded shrink-0"
+        >
           {metadata.source_type}
         </span>
       </div>
@@ -615,7 +618,11 @@ export function CitationMarker({ citationId, chunkIndex, conversationId }: Citat
 
   // No citation data available — render marker as plain text
   if (!citation) {
-    return <span className="text-muted-foreground/50 text-xs">【{citationId}-{chunkIndex}】</span>
+    return (
+      <span className="text-muted-foreground/50 text-xs">
+        【{citationId}-{chunkIndex}】
+      </span>
+    )
   }
 
   return (
@@ -629,11 +636,7 @@ export function CitationMarker({ citationId, chunkIndex, conversationId }: Citat
       >
         {citationId}.{chunkIndex}
       </PopoverTrigger>
-      <PopoverContent
-        side="top"
-        sideOffset={4}
-        className="w-80 p-3"
-      >
+      <PopoverContent side="top" sideOffset={4} className="w-80 p-3">
         <CitationHoverContent
           citation={citation}
           chunkIndex={chunkIndex}
@@ -662,6 +665,7 @@ git commit -m "feat(citations): add CitationMarker component with hover card"
 ## Task 7: Integrate Citations into Text Block Rendering
 
 **Files:**
+
 - Modify: `frontend/packages/web/components/chat/AssistantMessage.tsx`
 
 - [ ] **Step 1: Add citation rendering to text blocks**
@@ -679,48 +683,48 @@ import { useConversationStore } from '@cubebox/core'
 In the `ContentBlockRenderer` function, find the text block rendering (around line 328):
 
 ```tsx
-  if (block.type === 'text') {
+if (block.type === 'text') {
+  return (
+    <div className={proseClasses}>
+      <ReactMarkdown remarkPlugins={[remarkGfm]}>{block.content}</ReactMarkdown>
+    </div>
+  )
+}
+```
+
+Replace it with:
+
+```tsx
+if (block.type === 'text') {
+  const hasCitations = /【\d+-\d+】/.test(block.content)
+  if (!hasCitations) {
     return (
       <div className={proseClasses}>
         <ReactMarkdown remarkPlugins={[remarkGfm]}>{block.content}</ReactMarkdown>
       </div>
     )
   }
-```
-
-Replace it with:
-
-```tsx
-  if (block.type === 'text') {
-    const hasCitations = /【\d+-\d+】/.test(block.content)
-    if (!hasCitations) {
-      return (
-        <div className={proseClasses}>
-          <ReactMarkdown remarkPlugins={[remarkGfm]}>{block.content}</ReactMarkdown>
-        </div>
-      )
-    }
-    return (
-      <div className={proseClasses}>
-        <ReactMarkdown
-          remarkPlugins={[remarkGfm]}
-          components={{
-            p: ({ children }) => (
-              <p>{renderWithCitations(children, conversationId, CitationMarker)}</p>
-            ),
-            li: ({ children }) => (
-              <li>{renderWithCitations(children, conversationId, CitationMarker)}</li>
-            ),
-            td: ({ children }) => (
-              <td>{renderWithCitations(children, conversationId, CitationMarker)}</td>
-            ),
-          }}
-        >
-          {block.content}
-        </ReactMarkdown>
-      </div>
-    )
-  }
+  return (
+    <div className={proseClasses}>
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
+        components={{
+          p: ({ children }) => (
+            <p>{renderWithCitations(children, conversationId, CitationMarker)}</p>
+          ),
+          li: ({ children }) => (
+            <li>{renderWithCitations(children, conversationId, CitationMarker)}</li>
+          ),
+          td: ({ children }) => (
+            <td>{renderWithCitations(children, conversationId, CitationMarker)}</td>
+          ),
+        }}
+      >
+        {block.content}
+      </ReactMarkdown>
+    </div>
+  )
+}
 ```
 
 The `ContentBlockRenderer` function needs access to `conversationId`. Add it as a prop:
@@ -758,20 +762,20 @@ export function AssistantMessage(
 Then pass it to `ContentBlockRenderer`:
 
 ```tsx
-            <ContentBlockRenderer
-              key={i}
-              block={item}
-              index={i}
-              isLast={i === grouped.length - 1}
-              isStreaming={isStreaming === true}
-              subAgentStreams={subAgentStreams}
-              subagentDataMap={subagentDataMap}
-              toolResultMap={toolResultMap}
-              messageCreatedAt={msgCreatedAt}
-              subagentIndex={subagentIndexMap.get(i)}
-              agentId={streamAgentId}
-              conversationId={activeConversationId}
-            />
+<ContentBlockRenderer
+  key={i}
+  block={item}
+  index={i}
+  isLast={i === grouped.length - 1}
+  isStreaming={isStreaming === true}
+  subAgentStreams={subAgentStreams}
+  subagentDataMap={subagentDataMap}
+  toolResultMap={toolResultMap}
+  messageCreatedAt={msgCreatedAt}
+  subagentIndex={subagentIndexMap.get(i)}
+  agentId={streamAgentId}
+  conversationId={activeConversationId}
+/>
 ```
 
 Also pass it in the `ToolCallGroup` branches — but `ToolCallGroup` doesn't need it, only `ContentBlockRenderer` does. Make sure all `ContentBlockRenderer` calls include `conversationId={activeConversationId}`.
@@ -793,6 +797,7 @@ git commit -m "feat(citations): integrate citation markers into text block rende
 ## Task 8: Panel Store — Add `highlightText` Support
 
 **Files:**
+
 - Modify: `frontend/packages/core/src/stores/panelStore.ts`
 - Modify: `frontend/packages/core/src/stores/toolDetailStore.ts`
 - Modify: `frontend/packages/web/hooks/useToolDetail.ts`
@@ -876,49 +881,20 @@ export interface ToolDetailStore {
 In the facade builder (around line 28), add `highlightText`:
 
 ```ts
-      const facade: ToolDetailStore =
-        v.type === 'tool'
-          ? {
-              isOpen: true,
-              toolName: v.toolName,
-              toolArgs: v.toolArgs,
-              toolResult: v.toolResult,
-              contentType: v.contentType,
-              toolRef: v.toolRef,
-              highlightText: v.highlightText,
-              open: panel.openTool,
-              close: panel.close,
-            }
-          : {
-              isOpen: false,
-              toolName: '',
-              toolArgs: {},
-              toolResult: null,
-              contentType: 'generic',
-              toolRef: null,
-              highlightText: null,
-              open: panel.openTool,
-              close: panel.close,
-            }
-```
-
-Same for the `getState()` version (around line 54):
-
-```ts
-      if (v.type === 'tool') {
-        return {
-          isOpen: true,
-          toolName: v.toolName,
-          toolArgs: v.toolArgs,
-          toolResult: v.toolResult,
-          contentType: v.contentType,
-          toolRef: v.toolRef,
-          highlightText: v.highlightText,
-          open: panel.openTool,
-          close: panel.close,
-        }
+const facade: ToolDetailStore =
+  v.type === 'tool'
+    ? {
+        isOpen: true,
+        toolName: v.toolName,
+        toolArgs: v.toolArgs,
+        toolResult: v.toolResult,
+        contentType: v.contentType,
+        toolRef: v.toolRef,
+        highlightText: v.highlightText,
+        open: panel.openTool,
+        close: panel.close,
       }
-      return {
+    : {
         isOpen: false,
         toolName: '',
         toolArgs: {},
@@ -931,29 +907,57 @@ Same for the `getState()` version (around line 54):
       }
 ```
 
+Same for the `getState()` version (around line 54):
+
+```ts
+if (v.type === 'tool') {
+  return {
+    isOpen: true,
+    toolName: v.toolName,
+    toolArgs: v.toolArgs,
+    toolResult: v.toolResult,
+    contentType: v.contentType,
+    toolRef: v.toolRef,
+    highlightText: v.highlightText,
+    open: panel.openTool,
+    close: panel.close,
+  }
+}
+return {
+  isOpen: false,
+  toolName: '',
+  toolArgs: {},
+  toolResult: null,
+  contentType: 'generic',
+  toolRef: null,
+  highlightText: null,
+  open: panel.openTool,
+  close: panel.close,
+}
+```
+
 - [ ] **Step 3: Update `useToolDetail` hook**
 
 In `frontend/packages/web/hooks/useToolDetail.ts`, add:
 
 ```ts
-  const highlightText =
-    useToolDetailStore((s) => s.highlightText)
+const highlightText = useToolDetailStore((s) => s.highlightText)
 ```
 
 And include in the return:
 
 ```ts
-  return {
-    isOpen,
-    toolName,
-    toolArgs,
-    toolResult,
-    contentType,
-    toolRef,
-    highlightText,
-    open,
-    close,
-  }
+return {
+  isOpen,
+  toolName,
+  toolArgs,
+  toolResult,
+  contentType,
+  toolRef,
+  highlightText,
+  open,
+  close,
+}
 ```
 
 - [ ] **Step 4: Type-check**
@@ -973,6 +977,7 @@ git commit -m "feat(citations): add highlightText support to panel store"
 ## Task 9: Panel Views — Pass and Render Highlight
 
 **Files:**
+
 - Modify: `frontend/packages/web/components/panel/ToolDetailPanel.tsx`
 - Modify: `frontend/packages/web/components/panel/SearchResultView.tsx`
 - Modify: `frontend/packages/web/components/panel/WebFetchView.tsx`
@@ -983,43 +988,28 @@ git commit -m "feat(citations): add highlightText support to panel store"
 In `frontend/packages/web/components/panel/ToolDetailPanel.tsx`, destructure `highlightText` from `useToolDetail()`:
 
 ```tsx
-  const {
-    toolName,
-    toolArgs,
-    toolResult,
-    contentType,
-    toolRef,
-    highlightText,
-    close,
-  } = useToolDetail()
+const { toolName, toolArgs, toolResult, contentType, toolRef, highlightText, close } =
+  useToolDetail()
 ```
 
 Pass it to the view components that support it:
 
 ```tsx
-        {contentType === 'search' && (
-          <SearchResultView
-            result={toolResult}
-            args={toolArgs}
-            highlightText={highlightText}
-          />
-        )}
-        {contentType === 'web_fetch' && (
-          <WebFetchView
-            args={toolArgs}
-            result={toolResult}
-            highlightText={highlightText}
-          />
-        )}
-        {(contentType === 'generic' ||
-          contentType === 'code_execute' ||
-          contentType === 'artifact') && (
-          <GenericToolView
-            args={toolArgs}
-            result={toolResult}
-            highlightText={highlightText}
-          />
-        )}
+{
+  contentType === 'search' && (
+    <SearchResultView result={toolResult} args={toolArgs} highlightText={highlightText} />
+  )
+}
+{
+  contentType === 'web_fetch' && (
+    <WebFetchView args={toolArgs} result={toolResult} highlightText={highlightText} />
+  )
+}
+{
+  ;(contentType === 'generic' || contentType === 'code_execute' || contentType === 'artifact') && (
+    <GenericToolView args={toolArgs} result={toolResult} highlightText={highlightText} />
+  )
+}
 ```
 
 - [ ] **Step 2: Add highlight to SearchResultView**
@@ -1096,19 +1086,13 @@ interface WebFetchViewProps {
   highlightText?: string | null
 }
 
-export function WebFetchView({
-  args,
-  result,
-  highlightText,
-}: WebFetchViewProps) {
+export function WebFetchView({ args, result, highlightText }: WebFetchViewProps) {
   const contentRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     if (!highlightText || !contentRef.current) return
     // Use TreeWalker to find text nodes containing the highlight text
-    const walker = document.createTreeWalker(
-      contentRef.current, NodeFilter.SHOW_TEXT,
-    )
+    const walker = document.createTreeWalker(contentRef.current, NodeFilter.SHOW_TEXT)
     const searchText = highlightText.slice(0, 50)
     while (walker.nextNode()) {
       const node = walker.currentNode
@@ -1131,16 +1115,18 @@ export function WebFetchView({
   return (
     <div className="p-4 space-y-3">
       {url && (
-        <a href={url} target="_blank" rel="noopener noreferrer"
-          className="text-xs text-primary hover:underline break-all">
+        <a
+          href={url}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-xs text-primary hover:underline break-all"
+        >
           {url}
         </a>
       )}
       {result && (
         <div ref={contentRef} className={proseClasses}>
-          <ReactMarkdown remarkPlugins={[remarkGfm]}>
-            {result}
-          </ReactMarkdown>
+          <ReactMarkdown remarkPlugins={[remarkGfm]}>{result}</ReactMarkdown>
         </div>
       )}
     </div>
@@ -1185,12 +1171,9 @@ export function GenericToolView({
 Add `import { useState, useEffect, useRef } from 'react'` at top, and `ref={responseRef}` to the response `<pre>`:
 
 ```tsx
-          <pre
-            ref={responseRef}
-            className="font-mono text-sm text-foreground whitespace-pre-wrap break-all"
-          >
-            {responseText}
-          </pre>
+<pre ref={responseRef} className="font-mono text-sm text-foreground whitespace-pre-wrap break-all">
+  {responseText}
+</pre>
 ```
 
 - [ ] **Step 5: Type-check**
@@ -1210,6 +1193,7 @@ git commit -m "feat(citations): add highlight text support to panel views"
 ## Task 10: Fix CitationMarker Panel Integration
 
 **Files:**
+
 - Modify: `frontend/packages/web/components/chat/CitationMarker.tsx`
 
 Now that `openTool` accepts `highlightText`, update the `CitationMarker` component to use the proper import pattern (avoid `require`) and pass `highlightText`.
@@ -1219,23 +1203,23 @@ Now that `openTool` accepts `highlightText`, update the `CitationMarker` compone
 Replace the `handleOpenPanel` callback in `CitationMarker.tsx`:
 
 ```tsx
-  const handleOpenPanel = useCallback(() => {
-    if (!citation) return
-    const chunk = citation.chunks.find((c) => c.chunk_index === chunkIndex)
-    const toolResultMap = useMessageStore.getState().toolResultMap
-    const result = toolResultMap[citation.tool_call_id]
+const handleOpenPanel = useCallback(() => {
+  if (!citation) return
+  const chunk = citation.chunks.find((c) => c.chunk_index === chunkIndex)
+  const toolResultMap = useMessageStore.getState().toolResultMap
+  const result = toolResultMap[citation.tool_call_id]
 
-    if (result) {
-      openTool(
-        'web_search', // toolName — panel will route based on contentType
-        {},
-        result.content,
-        result.contentType,
-        undefined,
-        chunk?.content,
-      )
-    }
-  }, [citation, chunkIndex, openTool])
+  if (result) {
+    openTool(
+      'web_search', // toolName — panel will route based on contentType
+      {},
+      result.content,
+      result.contentType,
+      undefined,
+      chunk?.content,
+    )
+  }
+}, [citation, chunkIndex, openTool])
 ```
 
 Add import at top:
@@ -1280,12 +1264,14 @@ Expected: All checks pass
 - [ ] **Step 4: Manual test with dev server**
 
 Start both servers:
+
 ```bash
 cd backend && python main.py &
 cd frontend && pnpm dev &
 ```
 
 Test scenarios:
+
 1. Send a message that triggers a web_search tool (e.g., "搜索一下最近的AI新闻")
 2. Verify `【N-M】` markers in the response text are replaced with clickable pills showing `N.M`
 3. Hover over a pill — verify the popover card appears with title, domain, favicon, snippet

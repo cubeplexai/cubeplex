@@ -13,10 +13,9 @@ describe('workspaceStore', () => {
 
   it('fetchList populates workspaces', async () => {
     fetchMock.mockResolvedValueOnce(
-      new Response(
-        JSON.stringify([{ id: 'w1', name: 'Personal', org_id: 'o1', role: 'admin' }]),
-        { status: 200 }
-      )
+      new Response(JSON.stringify([{ id: 'w1', name: 'Personal', org_id: 'o1', role: 'admin' }]), {
+        status: 200,
+      }),
     )
     const client = createApiClient('')
     await useWorkspaceStore.getState().fetchList(client)
@@ -28,7 +27,7 @@ describe('workspaceStore', () => {
       workspaces: [{ id: 'w1', name: 'Personal', org_id: 'o1', role: 'admin' }],
     })
     fetchMock.mockResolvedValueOnce(
-      new Response(JSON.stringify({ id: 'w2', name: 'Team', org_id: 'o1' }), { status: 201 })
+      new Response(JSON.stringify({ id: 'w2', name: 'Team', org_id: 'o1' }), { status: 201 }),
     )
     const client = createApiClient('')
     const created = await useWorkspaceStore.getState().create(client, 'Team')
@@ -41,7 +40,7 @@ describe('workspaceStore', () => {
   it('create throws when no workspaces (no org_id to use)', async () => {
     const client = createApiClient('')
     await expect(useWorkspaceStore.getState().create(client, 'Team')).rejects.toThrow(
-      /load workspaces first/i
+      /load workspaces first/i,
     )
   })
 

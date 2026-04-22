@@ -39,6 +39,7 @@ pnpm dev      # Starts Next.js dev server on http://localhost:3000
 ```
 
 首次运行 E2E 测试前需要安装 Playwright 浏览器：
+
 ```bash
 npx playwright install
 ```
@@ -66,12 +67,14 @@ pnpm --filter @cubebox/core type-check
 ## Architecture
 
 **Tech Stack:**
+
 - **Frontend**: Next.js 16, React 19, TypeScript 5
 - **Styling**: Tailwind CSS 4, shadcn/ui components (via components.json)
 - **State**: Zustand (web and core)
 - **Package Manager**: pnpm with workspace
 
 **Package Structure:**
+
 - `@cubebox/core` — TypeScript library exporting:
   - `./api` — API client code
   - `./stores` — Zustand stores
@@ -107,6 +110,7 @@ pnpm --filter @cubebox/core type-check
 **CSRF:** double-submit pattern. `ApiClient` reads `cubebox_csrf` from `document.cookie` and adds `X-CSRF-Token` on every non-GET. The backend seeds the cookie on login.
 
 **Stores:**
+
 - `authStore` — `{id, email}` of the current user, or `null`. Populated by `loadMe` on `(app)` mount.
 - `workspaceStore` — list of the user's workspaces + `create(client, name)` (reuses the first workspace's `org_id`, M1 assumption: one user = one org).
 

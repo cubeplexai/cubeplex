@@ -3,7 +3,12 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { Document, Page, pdfjs } from 'react-pdf'
 import {
-  ChevronLeft, ChevronRight, ZoomIn, ZoomOut, List, ChevronRight as Chevron,
+  ChevronLeft,
+  ChevronRight,
+  ZoomIn,
+  ZoomOut,
+  List,
+  ChevronRight as Chevron,
 } from 'lucide-react'
 import type { Artifact } from '@cubebox/core'
 import { PreviewLoading } from './PreviewLoading'
@@ -32,7 +37,7 @@ interface PdfOutlineItem {
 
 interface TocEntry {
   title: string
-  page: number          // 1-based
+  page: number // 1-based
   depth: number
   children: TocEntry[]
 }
@@ -56,10 +61,10 @@ async function resolveOutline(
         const idx = await pdf.getPageIndex(dest[0])
         page = idx + 1
       }
-    } catch { /* skip unresolvable items */ }
-    const children = item.items?.length
-      ? await resolveOutline(pdf, item.items, depth + 1)
-      : []
+    } catch {
+      /* skip unresolvable items */
+    }
+    const children = item.items?.length ? await resolveOutline(pdf, item.items, depth + 1) : []
     entries.push({ title: item.title, page, depth, children })
   }
   return entries
@@ -125,7 +130,10 @@ function TocItem({
       >
         {hasChildren && (
           <span
-            onClick={(e) => { e.stopPropagation(); setExpanded(!expanded) }}
+            onClick={(e) => {
+              e.stopPropagation()
+              setExpanded(!expanded)
+            }}
             className="shrink-0 p-0.5 rounded hover:bg-muted"
           >
             <Chevron className={`size-3 transition-transform ${expanded ? 'rotate-90' : ''}`} />
@@ -229,12 +237,14 @@ export function PdfPreview({ artifact, version, workspaceId }: PdfPreviewProps) 
   return (
     <div ref={containerRef} className="flex flex-col h-full">
       {/* Toolbar */}
-      <div className="flex items-center justify-between px-3 py-1.5 border-b border-border
-        bg-muted/30 shrink-0">
+      <div
+        className="flex items-center justify-between px-3 py-1.5 border-b border-border
+        bg-muted/30 shrink-0"
+      >
         <div className="flex items-center gap-1">
           {hasToc && (
             <button
-              onClick={() => setTocOpen(v => !v)}
+              onClick={() => setTocOpen((v) => !v)}
               className={`p-1 rounded transition-colors
                 ${tocOpen ? 'bg-primary/10 text-primary' : 'hover:bg-muted text-foreground'}`}
               title="Table of contents"
@@ -243,7 +253,10 @@ export function PdfPreview({ artifact, version, workspaceId }: PdfPreviewProps) 
             </button>
           )}
           <button
-            onClick={() => { const p = Math.max(1, currentPage - 1); scrollToPage(p) }}
+            onClick={() => {
+              const p = Math.max(1, currentPage - 1)
+              scrollToPage(p)
+            }}
             disabled={currentPage <= 1}
             className="p-1 rounded hover:bg-muted disabled:opacity-30 disabled:cursor-not-allowed
               transition-colors"
@@ -254,7 +267,10 @@ export function PdfPreview({ artifact, version, workspaceId }: PdfPreviewProps) 
             {numPages > 0 ? `${currentPage} / ${numPages}` : '-'}
           </span>
           <button
-            onClick={() => { const p = Math.min(numPages, currentPage + 1); scrollToPage(p) }}
+            onClick={() => {
+              const p = Math.min(numPages, currentPage + 1)
+              scrollToPage(p)
+            }}
             disabled={currentPage >= numPages}
             className="p-1 rounded hover:bg-muted disabled:opacity-30 disabled:cursor-not-allowed
               transition-colors"
@@ -264,7 +280,7 @@ export function PdfPreview({ artifact, version, workspaceId }: PdfPreviewProps) 
         </div>
         <div className="flex items-center gap-1">
           <button
-            onClick={() => setScale(s => Math.max(0.5, +(s - 0.25).toFixed(2)))}
+            onClick={() => setScale((s) => Math.max(0.5, +(s - 0.25).toFixed(2)))}
             disabled={scale <= 0.5}
             className="p-1 rounded hover:bg-muted disabled:opacity-30 disabled:cursor-not-allowed
               transition-colors"
@@ -275,7 +291,7 @@ export function PdfPreview({ artifact, version, workspaceId }: PdfPreviewProps) 
             {Math.round(scale * 100)}%
           </span>
           <button
-            onClick={() => setScale(s => Math.min(3, +(s + 0.25).toFixed(2)))}
+            onClick={() => setScale((s) => Math.min(3, +(s + 0.25).toFixed(2)))}
             disabled={scale >= 3}
             className="p-1 rounded hover:bg-muted disabled:opacity-30 disabled:cursor-not-allowed
               transition-colors"
@@ -300,7 +316,9 @@ export function PdfPreview({ artifact, version, workspaceId }: PdfPreviewProps) 
             <TocPanel
               entries={tocEntries}
               currentPage={currentPage}
-              onNavigate={(page) => { scrollToPage(page) }}
+              onNavigate={(page) => {
+                scrollToPage(page)
+              }}
             />
           </div>
         )}
@@ -311,9 +329,7 @@ export function PdfPreview({ artifact, version, workspaceId }: PdfPreviewProps) 
             file={fileUrl}
             onLoadSuccess={onDocumentLoadSuccess}
             error={
-              <div className="p-4 text-sm text-destructive text-center">
-                Failed to load PDF
-              </div>
+              <div className="p-4 text-sm text-destructive text-center">Failed to load PDF</div>
             }
           >
             <div className="flex flex-col items-center py-4 gap-4">

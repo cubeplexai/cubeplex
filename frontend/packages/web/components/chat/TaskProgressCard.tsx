@@ -1,14 +1,7 @@
 'use client'
 
 import { useState, useEffect, useRef } from 'react'
-import {
-  CheckCircle2,
-  Circle,
-  ChevronDown,
-  ChevronRight,
-  Loader2,
-  ListChecks,
-} from 'lucide-react'
+import { CheckCircle2, Circle, ChevronDown, ChevronRight, Loader2, ListChecks } from 'lucide-react'
 import type { TodoItem } from '@cubebox/core'
 
 interface TaskProgressCardProps {
@@ -42,13 +35,11 @@ export function TaskProgressCard({ todos, isStreaming }: TaskProgressCardProps) 
         className="flex items-center gap-1.5 text-xs text-muted-foreground
           transition-colors group w-full text-left hover:text-foreground cursor-pointer"
       >
-        <span className="text-muted-foreground/60 group-hover:text-muted-foreground
-          transition-colors">
-          {isExpanded ? (
-            <ChevronDown className="size-3" />
-          ) : (
-            <ChevronRight className="size-3" />
-          )}
+        <span
+          className="text-muted-foreground/60 group-hover:text-muted-foreground
+          transition-colors"
+        >
+          {isExpanded ? <ChevronDown className="size-3" /> : <ChevronRight className="size-3" />}
         </span>
 
         {allDone ? (
@@ -61,9 +52,7 @@ export function TaskProgressCard({ todos, isStreaming }: TaskProgressCardProps) 
         ) : isStreaming && inProgress ? (
           <>
             <Loader2 className="size-3 text-primary animate-spin shrink-0" />
-            <span className="text-foreground truncate">
-              {inProgress.description}
-            </span>
+            <span className="text-foreground truncate">{inProgress.description}</span>
             <span className="text-muted-foreground/50 ml-auto shrink-0">
               {completed}/{todos.length}
             </span>
@@ -81,10 +70,7 @@ export function TaskProgressCard({ todos, isStreaming }: TaskProgressCardProps) 
       {isExpanded && (
         <div className="mt-2 space-y-1 pl-1">
           {todos.map((todo, i) => (
-            <div
-              key={todo.id ?? i}
-              className="flex items-center gap-2 py-0.5 text-xs"
-            >
+            <div key={todo.id ?? i} className="flex items-center gap-2 py-0.5 text-xs">
               {todo.status === 'completed' ? (
                 <CheckCircle2 className="size-3 text-emerald-500 shrink-0" />
               ) : todo.status === 'in_progress' ? (

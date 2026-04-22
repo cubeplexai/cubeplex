@@ -21,10 +21,7 @@ interface SearchResultViewProps {
   highlightKey?: number
 }
 
-function parseSearchData(
-  raw: string,
-  args?: Record<string, unknown>,
-): SearchData | null {
+function parseSearchData(raw: string, args?: Record<string, unknown>): SearchData | null {
   try {
     const parsed = JSON.parse(raw)
     // Direct format: { query, results: [...] }
@@ -34,8 +31,7 @@ function parseSearchData(
     // Array of results
     if (Array.isArray(parsed)) {
       return {
-        query:
-          String(args?.query ?? '') || 'Search',
+        query: String(args?.query ?? '') || 'Search',
         results: parsed,
       }
     }
@@ -47,10 +43,7 @@ function parseSearchData(
 
 function getDomain(url: string): string {
   try {
-    return new URL(url).hostname.replace(
-      /^www\./,
-      '',
-    )
+    return new URL(url).hostname.replace(/^www\./, '')
   } catch {
     return url
   }
@@ -85,15 +78,13 @@ export function SearchResultView({
         break
       }
     }
-    return () => { matched?.classList.remove('ring-2', 'ring-primary/50', 'bg-primary/10') }
+    return () => {
+      matched?.classList.remove('ring-2', 'ring-primary/50', 'bg-primary/10')
+    }
   }, [highlightText, highlightKey])
 
   if (!result) {
-    return (
-      <div className="p-6 text-sm text-muted-foreground">
-        No results
-      </div>
-    )
+    return <div className="p-6 text-sm text-muted-foreground">No results</div>
   }
 
   const data = parseSearchData(result, args)
@@ -120,9 +111,7 @@ export function SearchResultView({
       >
         <div className="flex items-center gap-2 text-sm">
           <Search className="size-3.5 text-muted-foreground shrink-0" />
-          <span className="font-medium text-foreground">
-            {data.query}
-          </span>
+          <span className="font-medium text-foreground">{data.query}</span>
           <span className="text-muted-foreground ml-auto shrink-0">
             {data.results.length} results
           </span>
@@ -158,11 +147,8 @@ export function SearchResultView({
                   alt=""
                   className="size-3.5 rounded-sm"
                   onError={(e) => {
-                    e.currentTarget.style.display =
-                      'none'
-                    const next =
-                      e.currentTarget
-                        .nextElementSibling as HTMLElement | null
+                    e.currentTarget.style.display = 'none'
+                    const next = e.currentTarget.nextElementSibling as HTMLElement | null
                     if (next) next.style.display = ''
                   }}
                 />

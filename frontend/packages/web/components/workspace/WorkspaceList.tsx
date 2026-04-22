@@ -7,9 +7,7 @@ export function WorkspaceList() {
   const workspaces = useWorkspaceStore((s) => s.workspaces)
 
   if (workspaces.length === 0) {
-    return (
-      <div className="text-sm text-foreground/60">You have no workspaces yet.</div>
-    )
+    return <div className="text-sm text-foreground/60">You have no workspaces yet.</div>
   }
 
   return (
@@ -18,9 +16,7 @@ export function WorkspaceList() {
         <li key={w.id} className="flex items-center justify-between px-4 py-3">
           <div>
             <div className="text-sm font-medium">{w.name}</div>
-            <div className="text-xs text-foreground/50">
-              Role: {w.role ?? 'unknown'}
-            </div>
+            <div className="text-xs text-foreground/50">Role: {w.role ?? 'unknown'}</div>
           </div>
           <Link
             href={`/w/${w.id}`}

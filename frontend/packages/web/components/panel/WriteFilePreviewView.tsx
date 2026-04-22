@@ -5,10 +5,7 @@ import { useMessageStore } from '@cubebox/core'
 import type { ToolCallRef } from '@cubebox/core'
 import { proseClasses } from '@/lib/utils'
 import { MarkdownWithCitations } from '@/components/shared/MarkdownWithCitations'
-import {
-  parseWriteFileArgs,
-  resolveLiveWriteFile,
-} from '@/lib/writeFilePreview'
+import { parseWriteFileArgs, resolveLiveWriteFile } from '@/lib/writeFilePreview'
 
 interface WriteFilePreviewViewProps {
   args: Record<string, unknown>
@@ -71,10 +68,14 @@ function getTokenPatterns(language: string | null): Array<{ type: Token['type'];
   if (language === 'python') {
     return [
       { type: 'comment', regex: /#[^\n]*/ },
-      { type: 'string', regex: /"""[\s\S]*?"""|'''[\s\S]*?'''|"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'/ },
+      {
+        type: 'string',
+        regex: /"""[\s\S]*?"""|'''[\s\S]*?'''|"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'/,
+      },
       {
         type: 'keyword',
-        regex: /\b(?:def|class|return|if|elif|else|for|while|import|from|as|try|except|finally|with|yield|lambda|pass|raise|True|False|None|async|await)\b/,
+        regex:
+          /\b(?:def|class|return|if|elif|else|for|while|import|from|as|try|except|finally|with|yield|lambda|pass|raise|True|False|None|async|await)\b/,
       },
       { type: 'number', regex: /\b\d+(?:\.\d+)?\b/ },
     ]
@@ -108,7 +109,8 @@ function getTokenPatterns(language: string | null): Array<{ type: Token['type'];
     { type: 'string', regex: /"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|`(?:\\.|[^`\\])*`/ },
     {
       type: 'keyword',
-      regex: /\b(?:const|let|var|function|return|if|else|for|while|import|from|export|default|class|extends|new|async|await|try|catch|throw|switch|case|break|continue|type|interface|implements|public|private|protected|readonly|true|false|null|undefined)\b/,
+      regex:
+        /\b(?:const|let|var|function|return|if|else|for|while|import|from|export|default|class|extends|new|async|await|try|catch|throw|switch|case|break|continue|type|interface|implements|public|private|protected|readonly|true|false|null|undefined)\b/,
     },
     { type: 'number', regex: /\b\d+(?:\.\d+)?\b/ },
   ]
@@ -120,9 +122,7 @@ function tokenizeCode(code: string, language: string | null): Token[] {
   let cursor = 0
 
   while (cursor < code.length) {
-    let bestMatch:
-      | { start: number; end: number; type: Token['type']; value: string }
-      | null = null
+    let bestMatch: { start: number; end: number; type: Token['type']; value: string } | null = null
 
     for (const pattern of patterns) {
       const match = pattern.regex.exec(code.slice(cursor))
@@ -198,14 +198,10 @@ export function WriteFilePreviewView({ args, result, toolRef }: WriteFilePreview
   const parsed = useMemo(() => {
     const live = resolveLiveWriteFile(liveBlocks, toolRef)
     if (live) {
-      return result
-        ? { ...live, status: 'completed' as const }
-        : live
+      return result ? { ...live, status: 'completed' as const } : live
     }
     const fallback = parseWriteFileArgs(args)
-    return result
-      ? { ...fallback, status: 'completed' as const }
-      : fallback
+    return result ? { ...fallback, status: 'completed' as const } : fallback
   }, [args, liveBlocks, result, toolRef])
 
   const filePath = parsed.filePath || 'Untitled file'
@@ -253,9 +249,7 @@ export function WriteFilePreviewView({ args, result, toolRef }: WriteFilePreview
         </div>
 
         {mode === 'markdown' ? (
-          <MarkdownWithCitations className={`p-4 ${proseClasses}`}>
-            {content}
-          </MarkdownWithCitations>
+          <MarkdownWithCitations className={`p-4 ${proseClasses}`}>{content}</MarkdownWithCitations>
         ) : mode === 'code' ? (
           <CodePreview code={content} language={language} />
         ) : (
