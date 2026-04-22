@@ -1,20 +1,63 @@
 # Test Configuration for cubebox
-# Used for E2E testing with real API calls
+# Used by CI e2e and local e2e dev.
+# All endpoints, keys, model ids are injected via environment variables.
+# Real values are kept in GitHub Secrets (CI) or local .env (dev).
 
 dynaconf_merge: true
 test:
   env: test
-
   debug: true
 
-  # API Configuration
   api:
     host: "127.0.0.1"
     port: 8001
     reload: false
 
-  # Sandbox Configuration for Testing
+  # LLM: provider / base_url / api_key / model id 全部通过 env 注入
+  # 仓库内看不到真实 endpoint 或模型名
+  llm:
+    default_model: "@format e2e/{env[CUBEBOX_E2E_LLM_MODEL_ID]}"
+    fallback_models: []
+    providers:
+      e2e:
+        base_url: "@format {env[CUBEBOX_E2E_LLM_BASE_URL]}"
+        api_key: "@format {env[CUBEBOX_E2E_LLM_API_KEY]}"
+        api: openai-completions
+        extra_body: {}
+        extra_headers: {}
+        models:
+          - id: "@format {env[CUBEBOX_E2E_LLM_MODEL_ID]}"
+            name: "E2E Model"
+            input: ["text", "image"]
+            context_window: 128000
+            max_tokens: 32000
+            reasoning: true
+
+  # Sandbox 复用 base config.yaml 的 @format {env[CUBEBOX_SANDBOX__*]} 模式
   sandbox:
     enabled: true
-    domain: "localhost:8090"
-    image: "hub.sensedeal.vip/library/cubebox-sandbox:24.04-20260311"
+
+  # CI 里用 service containers，localhost 连接
+  database:
+    host: "127.0.0.1"
+    port: 3306
+    user: "root"
+    password: "testpass"
+    name: "cubebox_test"
+
+  # LangSmith: e2e 不上报
+  langsmith:
+    enabled: false
+
+  # MCP: CI 无 webtools server
+  mcp:
+    enabled: false
+
+  # ObjectStore: RustFS service container
+  objectstore:
+    provider: "s3"
+    endpoint: "http://127.0.0.1:9000"
+    bucket: "cubebox-test"
+    region: "us-east-1"
+    access_key: "rustfsadmin"
+    access_secret: "rustfsadmin"
