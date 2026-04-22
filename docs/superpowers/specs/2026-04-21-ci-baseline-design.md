@@ -570,11 +570,16 @@ make pre-commit-install-all
 
 ---
 
-## 14. 附录 A · Coverage 基线（实施时回填）
+## 14. 附录 A · Coverage 基线
 
-- Backend unit: _TBD_
-- Backend unit + e2e: _TBD_
-- Frontend unit: _TBD_
+**记录日期**: 2026-04-22（首次 4 job CI 全绿当天）
+**Run**: [#24765601392](https://github.com/xfgong/cubebox/actions/runs/24765601392)
+
+- Backend unit: **45.9%**（1607 / 3501 行覆盖）
+- Backend unit + e2e: _待测（e2e job 不产出 coverage.xml，需在后续独立测一次）_
+- Frontend unit: _待测（vitest coverage 未启用）_
+
+**当前 PR 阈值**: _未设_。观察 2 周 baseline 稳定后再启用 `基线 × 0.95 = 43.6%` gate，避免首月卡 PR。
 
 ---
 
