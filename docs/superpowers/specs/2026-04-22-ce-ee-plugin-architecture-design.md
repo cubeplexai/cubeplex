@@ -56,6 +56,7 @@
 | D11 | 单一 `CUBEBOX_PLUGIN_API_VERSION: int`，不做 per-Protocol 版本 | 每 Protocol 独立版本 | 一年内生态小，简单 trump 精细 |
 | D12 | 每个插件 wheel **必须** 声明 `cubebox.plugin_manifest` 入口；无则拒启 | 缺省当 v1 | 强制兼容性声明，避免"静默用错版本" |
 | D13 | `test-ee-compat` 分两层：Layer 1（CE 自测 + fake plugin fixture）Batch 1 真做；Layer 2（跨仓跑真 cubebox-ee）占位 `if: false` | 一步到位 | 无真 EE 仓可跑 Layer 2；Layer 1 先做保证契约有自动化回归 |
+| D14 | v1 `cubebox-ee` 走"**单一大包**"打包策略（一个 wheel 同时注册多组 entry_points） | 按功能拆成多 wheel / 命名空间子包 | 对齐"按 seat 单 EE license"商业模式；v1 EE 功能少、提前拆粒度是过度设计；切换策略零 CE 改动（见 §5.5） |
 
 ---
 
@@ -351,6 +352,24 @@ CE 的 `defaults/*.py` 由 `PluginRegistry` 在缺失候选或 `selected == "bui
 
 **保留名 `"builtin"`**：外部插件的 entry_point name 不得为 `"builtin"`；若发现，启动失败并给出可读错误（`PluginRegistry` 显式校验）。
 
+### 5.5 打包策略与 API 契约相互独立
+
+Protocol 契约以"每个 entry_point 独立发现、独立装载"为语义，**不约束**插件作者如何把实现打成 wheel。同一 API 契约下，以下打包粒度都合法且对 CE 透明：
+
+| 策略 | 示例 | 典型场景 |
+|---|---|---|
+| 单一大包 | `cubebox-ee` 同时注册 SAML + SIEM + Billing 等多组 entry_points | v1 商业模式：按 seat 单 EE license 对齐一个 wheel |
+| 独立多包 | `cubebox-ee-sso` / `cubebox-ee-audit` / `cubebox-ee-billing` 各自一个 wheel | EE 功能繁多、想按需装或独立计费时 |
+| 命名空间子包 | `cubebox-ee-core` + 可选 `cubebox-ee-sso` 等 | 共享 core utils + 可选 extras |
+| 3rd-party 插件 | 独立仓 `cubebox-plugin-xxx` 与 EE 并存 | 开源社区插件（与 EE **一视同仁**，同样走 entry_points） |
+
+**关键不变式**：
+- Protocol 发现遍历**全部**已装 wheel 的 entry_points；一个 wheel 装 1 个还是 5 个 entry_points，CE 侧代码完全相同
+- 每个 wheel **各自**声明一次 `cubebox.plugin_manifest`（manifest 属于 wheel，不属于 Protocol）
+- 切换打包粒度**不需要任何 CE 代码改动**；仅是 EE 仓内部 pyproject 的拆分重组
+
+**v1 打包决定**：`cubebox-ee` 以**单一大包**形态发布，对齐"按 seat 单 EE license"的商业模式。将来若需按功能拆分，仅在 EE 仓内部演进，CE 不受影响。
+
 ---
 
 ## 6. Plugin API 版本策略
@@ -397,7 +416,7 @@ class PluginManifest:
 
 ## 7. `cubebox-ee` 仓骨架蓝图
 
-**Batch 1 不真建仓**。以下结构在首个真实 EE 功能立项时作为仓库初始化模板。
+**Batch 1 不真建仓**。以下结构在首个真实 EE 功能立项时作为仓库初始化模板。结构示例按 §5.5 的 v1 打包决定采用"单一大包"形态；若将来拆分，按 §5.5 表格中的其它策略演进即可。
 
 ### 7.1 目录结构
 
