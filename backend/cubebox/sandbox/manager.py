@@ -38,9 +38,14 @@ class SandboxManager:
         self._request_timeout: int = config.get("sandbox.request_timeout", 60)
         self._ttl: int = config.get("sandbox.ttl", 600)
         self._ready_timeout: int = config.get("sandbox.ready_timeout", 60)
+        self._use_server_proxy: bool = config.get("sandbox.use_server_proxy", False)
 
         # Sandbox workdir
         self._workdir: str = config.get("sandbox.workdir", "/workspace")
+
+        # Resource config
+        self._resource_cpu: str = config.get("sandbox.resource.cpu", "100m")
+        self._resource_memory: str = config.get("sandbox.resource.memory", "100Mi")
 
         # Volume config
         self._volume_enabled: bool = config.get("sandbox.volume.enabled", False)
@@ -53,6 +58,7 @@ class SandboxManager:
             domain=self._domain,
             api_key=self._api_key,
             request_timeout=timedelta(seconds=self._request_timeout),
+            use_server_proxy=self._use_server_proxy,
         )
 
     def _build_user_volume(self, user_id: str) -> Volume:
@@ -150,6 +156,7 @@ class SandboxManager:
                 timeout=None,
                 ready_timeout=timedelta(seconds=self._ready_timeout),
                 volumes=volumes,
+                resource={"cpu": self._resource_cpu, "memory": self._resource_memory},
             )
 
             backend = OpenSandbox(sandbox=raw_sandbox, workdir=self._workdir)
