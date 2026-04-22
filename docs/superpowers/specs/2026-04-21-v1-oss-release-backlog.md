@@ -190,21 +190,19 @@
 
 **做什么**: 处理用户上传的非纯文本文件，把各种格式归一化为 LLM 可消费的内容。参考 Claude Code 的 `FileReadTool` 思路（硬编码工具 + discriminated output），但覆盖面更广。
 **Scope (v1)** — **硬编码工具**（非 skill）:
-- 输出 discriminated union：`text` / `image` / `notebook` / `pdf` / `office_markdown` / `parts` / `file_unchanged`
-- **主方案**: **MarkItDown**（Microsoft）作为默认解析器
-  - 覆盖 PDF / DOCX / XLSX / PPTX / HTML / CSV / JSON / image / audio
-  - 轻量依赖，输出 Markdown，LLM 友好
-- **可选补强**: 复杂排版 PDF 场景允许装 **Docling**（IBM）作为可选 skill 接管 PDF 分支（安装 1GB+，按需启用）
-- **Notebook**: 内置 parser（Jupyter 结构化处理）
-- **图片**: `Pillow` resize + token 预算感知压缩（Python 等价 sharp）
-- **去重**: file state 去重机制，避免重读未变文件
+- 输出 discriminated union（v1 共 5 种 kind）：`text` / `notebook` / `unsupported` / `unchanged` / `error`
+- **主方案**: 独立 **docling-serve** 服务（CPU 镜像 4.4 GB，HTTP API），不把 heavy 依赖引入核心库
+- **架构**: `Sandbox.file_read()` 抽象方法 + `cubebox.parsers` 后台共享库（FileParser Protocol + entry_points 插件机制）
+- **v1 三个内置 plugin**: `TextParser`（文本/代码）+ `NotebookParser`（.ipynb）+ `DoclingParser`（PDF/DOCX/PPTX/XLSX/EPUB/图像 OCR）
+- **去重**: conversation 级 SHA-256 hash cache，无副作用 invalidation
 **关键决定**:
-- 选 MarkItDown 而非从零硬编码单格式解析器，覆盖面大、落地快
-- 硬编码而非 skill：核心工具可靠可测，扩展走 skill（例：Docling skill）
-- 明确**拒绝** 视频 / 可执行二进制；未知格式降级为"内容摘要 + 元数据"提示
-**不做**: OCR 识别图片文字（v1 不做，留给后续 skill）；流式大文件
+- Parser 跑 backend，sandbox 只暴露文件；`cubebox.parsers` 后续给 filebox（workspace RAG）复用
+- 走插件架构（参考 MarkItDown converter registry）：用户后续可发 wheel 注册自定义 parser
+- 明确**拒绝** 视频 / 音频 / 可执行 / 归档；HTML 走文本不走 docling（因 agent 常读写 HTML artifacts）
+- v1 砍掉 backlog 原列的 `image` / `pdf` / `office_markdown` / `parts` 这些无下游消费者的 kind（待 vision 管线接通后非破坏性扩展）
+**不做**: 视觉/模型原生 PDF（vision 管线未接通）；OCR 之外的图像理解；远程 URL；artifact 反向读取
 **依赖**: —
-**Spec**: `2026-04-XX-file-read-tool-design.md`
+**Spec**: `2026-04-22-file-read-tool-design.md`
 
 ---
 
