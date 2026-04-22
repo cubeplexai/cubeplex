@@ -33,6 +33,11 @@
 **依赖**: —
 **Spec**: `2026-04-XX-ci-baseline-design.md`
 
+**Follow-ups（2026-04-22 实施中发现，需要后续单独处理）**:
+- **Skipped test**: `frontend/packages/web/__tests__/hooks/useMessages.test.ts::preserves tool timing from the first tool_call_delta through completion` — `Date.now` mock 预期 4 次调用，实际观测到 6 次（生产代码多了两处 `Date.now()`）。当前 `it.skip` 带 TODO 标记；需要查是回归还是 mock 不够。
+- **Coverage 观察期**: backend unit 基线 45.9%（1607/3501）。运行 2 周（起 2026-04-22）观察无大起伏后，在 `backend/Makefile` 的 `check-ci` 里加 `--cov-fail-under=<基线-5>`。
+- **config.development.yaml 硬编码 key 清理**: 已在 M12 backlog §10 里（本次不处理，发布前统一清）。
+
 ---
 
 ## M0 · CE/EE 插件架构基础 · P0
