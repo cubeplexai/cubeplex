@@ -11,6 +11,8 @@ import pytest
 
 from cubebox.api.middleware.rate_limit import limiter
 
+pytestmark = pytest.mark.e2e
+
 
 @pytest.fixture(autouse=True)
 def _reset_rate_limiter():

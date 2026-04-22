@@ -15,6 +15,8 @@ from sqlalchemy.ext.asyncio import create_async_engine
 
 from cubebox.db.engine import _build_database_url
 
+pytestmark = pytest.mark.e2e
+
 
 @pytest.mark.asyncio
 async def test_default_org_and_workspace_exist_after_migration() -> None:

@@ -50,6 +50,8 @@ filterwarnings = ["ignore::DeprecationWarning", "ignore::UserWarning"]
 asyncio_mode = "auto"
 markers = [
     "sandbox: tests that require a running OpenSandbox service (deselect with '-m \"not sandbox\"')",
+    "e2e: end-to-end tests that hit real services (MySQL/Redis/LLM/Sandbox); deselect with '-m \"not e2e\"'",
+    "unit: fast unit tests with no external dependencies",
 ]
 
 [tool.hatch.build.targets.wheel]

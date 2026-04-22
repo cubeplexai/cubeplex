@@ -11,6 +11,8 @@ from cubebox.api.routes.v1 import conversations as conversations_route
 from cubebox.auth.context import RequestContext
 from cubebox.models import Role
 
+pytestmark = pytest.mark.e2e
+
 
 def _make_fake_ctx() -> RequestContext:
     """Build a RequestContext for unit-style direct route invocation."""

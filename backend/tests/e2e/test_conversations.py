@@ -9,8 +9,9 @@ from fastapi.testclient import TestClient
 
 from tests.e2e.helpers import parse_sse_stream
 
+pytestmark = pytest.mark.e2e
 
-@pytest.mark.e2e
+
 class TestConversationsCRUD:
     """Conversations CRUD endpoint tests."""
 
