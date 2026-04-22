@@ -82,7 +82,14 @@ check-ci:
 	uv run ruff check cubebox/ scripts/ tests/
 	uv run ruff format --check cubebox/ scripts/ tests/
 	uv run mypy cubebox/
-	uv run pytest -m "not sandbox and not e2e"
+	@echo "Running pytest unit tests (dummy env for dynaconf @format)..."
+	CUBEBOX_E2E_LLM_BASE_URL=http://dummy \
+	CUBEBOX_E2E_LLM_API_KEY=dummy \
+	CUBEBOX_E2E_LLM_MODEL_ID=dummy \
+	CUBEBOX_SANDBOX__DOMAIN=dummy:9000 \
+	CUBEBOX_SANDBOX__IMAGE=dummy:image \
+	CUBEBOX_SANDBOX__API_KEY=dummy \
+		uv run pytest -m "not sandbox and not e2e"
 	@echo "✓ CI-equivalent checks passed"
 
 clean:
