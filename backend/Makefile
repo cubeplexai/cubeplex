@@ -1,4 +1,4 @@
-.PHONY: help install dev-install format lint type-check test test-cov test-ui test-ui-unit test-ui-e2e test-all clean pre-commit-install pre-commit-run
+.PHONY: help install dev-install format lint lint-fix type-check test test-cov test-ui test-ui-unit test-ui-e2e test-all check check-ci clean pre-commit-install pre-commit-install-all pre-commit-run
 
 help:
 	@echo "Available commands:"
@@ -14,6 +14,8 @@ help:
 	@echo "  make test-ui-e2e       - Run frontend E2E tests (Playwright)"
 	@echo "  make test-all          - Run all tests (backend + frontend)"
 	@echo "  make check             - Run all checks (format, lint, type-check)"
+	@echo "  make check-ci          - CI-equivalent checks (ruff check + format check + mypy + pytest unit)"
+	@echo "  make pre-commit-install-all - Install both pre-commit and pre-push hooks"
 	@echo "  make clean             - Clean cache and build files"
 	@echo "  make pre-commit-install - Install pre-commit hooks"
 	@echo "  make pre-commit-run    - Run pre-commit on all files"
@@ -75,6 +77,14 @@ test-all: test test-ui
 check: format lint type-check
 	@echo "✓ All checks passed"
 
+check-ci:
+	@echo "Running CI-equivalent checks..."
+	uv run ruff check cubebox/ scripts/ tests/
+	uv run ruff format --check cubebox/ scripts/ tests/
+	uv run mypy cubebox/
+	uv run pytest -m "not sandbox and not e2e"
+	@echo "✓ CI-equivalent checks passed"
+
 clean:
 	@echo "Cleaning cache and build files..."
 	find . -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
@@ -91,6 +101,12 @@ pre-commit-install:
 	@echo "Installing pre-commit hooks..."
 	uv run pre-commit install
 	@echo "✓ Pre-commit hooks installed"
+
+pre-commit-install-all:
+	@echo "Installing pre-commit and pre-push hooks..."
+	uv run pre-commit install
+	uv run pre-commit install --hook-type pre-push
+	@echo "✓ Pre-commit and pre-push hooks installed"
 
 pre-commit-run:
 	@echo "Running pre-commit on all files..."
