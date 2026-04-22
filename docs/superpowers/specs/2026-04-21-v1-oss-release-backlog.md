@@ -54,7 +54,7 @@
 - 接口不做 ACL 兜底，调用方必须显式注册；未注册 → fallback 到 CE 默认
 **不做**: 插件热加载；EE 功能真实实现（留到开源后首个 EE 发布）
 **依赖**: —
-**Spec**: `2026-04-XX-ce-ee-plugin-architecture-design.md`
+**Spec**: `2026-04-22-ce-ee-plugin-architecture-design.md`
 
 ---
 
