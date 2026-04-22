@@ -2,6 +2,8 @@
 
 import pytest
 
+pytestmark = pytest.mark.e2e
+
 
 @pytest.mark.asyncio
 async def test_admin_can_create_invite(admin_client):

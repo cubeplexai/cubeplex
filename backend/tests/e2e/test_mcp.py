@@ -4,6 +4,8 @@ import pytest
 
 from cubebox.mcp.client import MCPManager
 
+pytestmark = pytest.mark.e2e
+
 
 class TestMCPManager:
     """Tests for MCPManager tool loading behavior."""

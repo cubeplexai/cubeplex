@@ -5,6 +5,8 @@ import pytest
 from cubebox.middleware.sandbox import SandboxMiddleware
 from cubebox.sandbox.local import LocalSandbox
 
+pytestmark = pytest.mark.e2e
+
 
 def test_sandbox_middleware_registers_file_tools() -> None:
     sandbox = LocalSandbox(workdir="/tmp")

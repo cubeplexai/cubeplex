@@ -5,6 +5,8 @@ import pytest
 
 from tests.e2e.conftest import collect_sse_events
 
+pytestmark = pytest.mark.e2e
+
 
 @pytest.mark.asyncio
 async def test_send_message_returns_sse_stream(memory_client: httpx.AsyncClient) -> None:

@@ -12,6 +12,8 @@ from cubebox.db.engine import _build_database_url
 from cubebox.models import Role, User
 from cubebox.repositories import MembershipRepository, WorkspaceRepository
 
+pytestmark = pytest.mark.e2e
+
 
 @pytest.fixture(autouse=True)
 def _reset_rate_limiter():

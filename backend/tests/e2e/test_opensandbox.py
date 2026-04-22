@@ -12,6 +12,8 @@ import pytest_asyncio
 
 from cubebox.config import config
 
+pytestmark = pytest.mark.e2e
+
 # Module-level sandbox ID to share across all tests
 _shared_sandbox_id: str | None = None
 
