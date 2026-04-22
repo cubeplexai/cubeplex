@@ -100,6 +100,142 @@ jobs:
         working-directory: frontend
         run: pnpm build
 
+  e2e:
+    name: E2E (backend pytest + frontend playwright)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      ENV_FOR_DYNACONF: test
+      CUBEBOX_E2E_LLM_BASE_URL: ${{ secrets.CUBEBOX_E2E_LLM_BASE_URL }}
+      CUBEBOX_E2E_LLM_API_KEY: ${{ secrets.CUBEBOX_E2E_LLM_API_KEY }}
+      CUBEBOX_E2E_LLM_MODEL_ID: ${{ secrets.CUBEBOX_E2E_LLM_MODEL_ID }}
+      CUBEBOX_SANDBOX__DOMAIN: ${{ secrets.CUBEBOX_SANDBOX__DOMAIN }}
+      CUBEBOX_SANDBOX__IMAGE: ${{ secrets.CUBEBOX_SANDBOX__IMAGE }}
+      CUBEBOX_SANDBOX__API_KEY: ${{ secrets.CUBEBOX_SANDBOX__API_KEY }}
+      # Frontend proxies to local backend:8001 (matches config.test.yaml)
+      CUBEBOX_API_URL: http://127.0.0.1:8001
+    services:
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_ROOT_PASSWORD: testpass
+          MYSQL_DATABASE: cubebox_test
+        ports: ['3306:3306']
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -u root -ptestpass"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+      redis:
+        image: redis:7-alpine
+        ports: ['6379:6379']
+        options: >-
+          --health-cmd="redis-cli ping"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+          enable-cache: true
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: frontend/package.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+
+      - name: Install backend
+        working-directory: backend
+        run: uv sync --all-extras
+
+      - name: Install frontend
+        working-directory: frontend
+        run: pnpm install --frozen-lockfile
+
+      - name: Build @cubebox/core
+        working-directory: frontend
+        run: pnpm --filter @cubebox/core build
+
+      - name: Prepare RustFS data dirs
+        run: |
+          mkdir -p /tmp/rustfs/data /tmp/rustfs/logs
+          sudo chown -R 10001:10001 /tmp/rustfs
+
+      - name: Start RustFS
+        run: |
+          docker run -d --name rustfs \
+            -p 9000:9000 -p 9001:9001 \
+            -v /tmp/rustfs/data:/data \
+            -v /tmp/rustfs/logs:/logs \
+            rustfs/rustfs:1.0.0-alpha.97
+          # TCP/HTTP-level readiness; RustFS alpha lacks a unified /health endpoint.
+          # Accept any 2xx/3xx/4xx HTTP response as ready.
+          for i in {1..30}; do
+            if curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:9000/ | grep -qE '^(2|3|4)'; then
+              echo "RustFS ready"
+              break
+            fi
+            sleep 2
+          done
+
+      - name: Alembic migrate (pre-pytest)
+        working-directory: backend
+        run: uv run alembic upgrade head
+
+      - name: Pytest e2e (in-process TestClient)
+        working-directory: backend
+        run: uv run pytest tests/e2e/ -v
+
+      - name: Reset DB state for playwright
+        # pytest may leave data behind; drop + recreate + migrate for a clean playwright start.
+        run: |
+          mysql -h 127.0.0.1 -P 3306 -uroot -ptestpass \
+            -e "DROP DATABASE cubebox_test; CREATE DATABASE cubebox_test;"
+          cd backend && uv run alembic upgrade head
+
+      - name: Start backend in background
+        working-directory: backend
+        run: |
+          nohup uv run python main.py > /tmp/backend.log 2>&1 &
+          echo $! > /tmp/backend.pid
+
+      - name: Wait for backend ready
+        run: |
+          timeout 60 bash -c '
+            until curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8001/docs | grep -qE "^(2|3|4)"; do
+              sleep 2
+            done
+          '
+
+      - name: Install playwright browsers
+        working-directory: frontend
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Playwright e2e
+        working-directory: frontend
+        run: pnpm test:e2e
+
+      - name: Upload backend log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-log
+          path: /tmp/backend.log
+
+      - name: Upload playwright traces on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-traces
+          path: |
+            frontend/test-results/
+            frontend/playwright-report/
+
   test-ee-compat:
     name: EE Compat (placeholder)
     runs-on: ubuntu-latest
