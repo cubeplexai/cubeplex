@@ -18,6 +18,10 @@ const config = [
       'next-env.d.ts',
     ],
   },
+  // Downgraded from error → warn to unblock the initial CI baseline.
+  // To re-tighten: fix each underlying warning, then change the value back to 'error'
+  // and restore `--max-warnings=0` on `web`'s `lint` script in package.json.
+  // Current baseline count: ~16 warnings in production code (see `pnpm --filter web lint`).
   {
     rules: {
       '@typescript-eslint/no-unused-vars': [
@@ -28,8 +32,6 @@ const config = [
           destructuredArrayIgnorePattern: '^_',
         },
       ],
-      // TODO(cubebox-ci-baseline Task 11+): tighten these back to error and fix underlying code.
-      // Downgraded to warn to land the CI baseline without a code refactor.
       '@typescript-eslint/no-explicit-any': 'warn',
       '@next/next/no-img-element': 'warn',
       'react-hooks/refs': 'warn',
