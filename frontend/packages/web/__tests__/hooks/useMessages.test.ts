@@ -114,6 +114,9 @@ describe('messageStore.send', () => {
     })
 
     expect(useMessageStore.getState().error).toBe('Something failed')
+    const msgs = useMessageStore.getState().messages[CONV_ID] ?? []
+    expect(msgs.some((m) => m.role === 'assistant')).toBe(false)
+    expect(useMessageStore.getState().isStreaming).toBe(true)
   })
 
   it('updates statusPhase on status events', async () => {

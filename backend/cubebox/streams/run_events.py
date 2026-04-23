@@ -51,8 +51,8 @@ async def create_run(
     status: str,
     started_at: str,
     user_message: str | None = None,
-) -> RunMeta:
-    """Create metadata for a new run and register it as active for the conversation."""
+) -> RunMeta | None:
+    """Create metadata for a new run and atomically register it as active."""
     meta = RunMeta(
         run_id=run_id,
         conversation_id=conversation_id,
@@ -61,10 +61,32 @@ async def create_run(
         user_message=user_message,
     )
     payload = json.dumps(asdict(meta))
-    pipe = redis.pipeline()
-    pipe.set(_run_meta_key(prefix, run_id), payload)
-    pipe.set(_active_run_key(prefix, conversation_id), run_id)
-    await pipe.execute()
+    active_key = _active_run_key(prefix, conversation_id)
+    meta_key = _run_meta_key(prefix, run_id)
+
+    acquired = bool(await redis.set(active_key, run_id, nx=True))
+    if not acquired:
+        existing_run_id = await redis.get(active_key)
+        if existing_run_id is not None:
+            existing_meta = await get_run_meta(redis, prefix=prefix, run_id=existing_run_id)
+            if existing_meta is None:
+                current_run_id = await redis.get(active_key)
+                if current_run_id == existing_run_id:
+                    await redis.delete(active_key)
+                    acquired = bool(await redis.set(active_key, run_id, nx=True))
+        if not acquired:
+            return None
+
+    try:
+        await redis.set(meta_key, payload)
+    except Exception:
+        await clear_active_run(
+            redis,
+            prefix=prefix,
+            conversation_id=conversation_id,
+            run_id=run_id,
+        )
+        raise
     return meta
 
 

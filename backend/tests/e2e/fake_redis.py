@@ -68,7 +68,9 @@ class FakeRedis:
     async def get(self, key: str) -> str | None:
         return self._strings.get(key)
 
-    async def set(self, key: str, value: str) -> bool:
+    async def set(self, key: str, value: str, nx: bool = False) -> bool:
+        if nx and key in self._strings:
+            return False
         self._strings[key] = value
         return True
 

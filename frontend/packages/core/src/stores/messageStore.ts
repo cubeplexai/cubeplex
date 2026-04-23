@@ -521,7 +521,7 @@ async function consumeRunStream(
     set as (updater: (s: MessageStore) => Partial<MessageStore>) => void,
   )
   let shouldFinalize = true
-  let reachedTerminalEvent = false
+  let sawDone = false
 
   try {
     for await (const event of streamRun(client, conversationId, runId, lastEventId)) {
@@ -549,13 +549,12 @@ async function consumeRunStream(
           error: errData.details || errData.message,
           lastAppliedEventId: nextEventId(get().lastAppliedEventId, event.event_id),
         })
-        reachedTerminalEvent = true
         break
       } else if (event.type === 'done') {
         set({
           lastAppliedEventId: nextEventId(get().lastAppliedEventId, event.event_id),
         })
-        reachedTerminalEvent = true
+        sawDone = true
         break
       }
 
@@ -565,7 +564,7 @@ async function consumeRunStream(
     set({ error: (err as Error).message })
   } finally {
     flush()
-    if (shouldFinalize && reachedTerminalEvent && get().currentRunId === runId) {
+    if (shouldFinalize && sawDone && get().currentRunId === runId) {
       await finalizeCompletedStream(get, set, conversationId)
     }
   }
@@ -667,6 +666,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
     const { batchedSet, flush } = createBatcher(
       set as (updater: (s: MessageStore) => Partial<MessageStore>) => void,
     )
+    let sawDone = false
 
     try {
       for await (const event of streamMessages(client, conversationId, content)) {
@@ -694,6 +694,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
           set({
             lastAppliedEventId: nextEventId(get().lastAppliedEventId, event.event_id),
           })
+          sawDone = true
           break
         }
 
@@ -711,7 +712,12 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
       flush()
     }
 
-    await finalizeCompletedStream(get, set, conversationId)
+    if (sawDone) {
+      const lastState = get()
+      if (!lastState.error) {
+        await finalizeCompletedStream(get, set, conversationId)
+      }
+    }
   },
 
   clearStream() {

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 from contextlib import suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -24,6 +25,8 @@ from cubebox.streams.run_events import (
     update_run_meta,
 )
 from cubebox.utils.time import utc_isoformat
+
+_CITATION_ID_PATTERN = re.compile(r"【(\d+)-\d+】")
 
 
 @dataclass(slots=True)
@@ -158,6 +161,47 @@ def _dicts_to_sse_events(
     return events
 
 
+def _extract_citation_ids(content: Any) -> list[int]:
+    if isinstance(content, str):
+        return [int(match.group(1)) for match in _CITATION_ID_PATTERN.finditer(content)]
+    if isinstance(content, list):
+        list_ids: list[int] = []
+        for item in content:
+            list_ids.extend(_extract_citation_ids(item))
+        return list_ids
+    if isinstance(content, dict):
+        dict_ids: list[int] = []
+        for value in content.values():
+            dict_ids.extend(_extract_citation_ids(value))
+        return dict_ids
+    return []
+
+
+async def _recover_next_citation_id(agent: Any, conversation_id: str) -> int:
+    aget_state = getattr(agent, "aget_state", None)
+    if aget_state is None:
+        return 1
+
+    try:
+        from langchain_core.runnables import RunnableConfig
+
+        state = await aget_state(RunnableConfig(configurable={"thread_id": conversation_id}))
+    except Exception as exc:
+        logger.debug("Could not recover citation counter: {}", exc)
+        return 1
+
+    if not state or not getattr(state, "values", None):
+        return 1
+
+    max_citation_id = 0
+    for message in state.values.get("messages", []):
+        for citation_id in _extract_citation_ids(getattr(message, "content", "")):
+            if citation_id > max_citation_id:
+                max_citation_id = citation_id
+
+    return max_citation_id + 1 if max_citation_id > 0 else 1
+
+
 class RunManager:
     """Owns background run execution and Redis persistence."""
 
@@ -183,17 +227,9 @@ class RunManager:
         ctx: RunContext,
     ) -> str:
         """Create and start a new background run."""
-        existing = await get_active_run(
-            self._redis,
-            prefix=self._key_prefix,
-            conversation_id=conversation_id,
-        )
-        if existing and existing.status == "running":
-            raise RuntimeError(f"Conversation {conversation_id} already has an active run")
-
         run_id = str(uuid7())
         started_at = utc_isoformat(datetime.now(UTC))
-        await create_run(
+        created_run = await create_run(
             self._redis,
             prefix=self._key_prefix,
             run_id=run_id,
@@ -202,6 +238,15 @@ class RunManager:
             started_at=started_at,
             user_message=content,
         )
+        if created_run is None:
+            existing = await get_active_run(
+                self._redis,
+                prefix=self._key_prefix,
+                conversation_id=conversation_id,
+            )
+            if existing and existing.status == "running":
+                raise RuntimeError(f"Conversation {conversation_id} already has an active run")
+            raise RuntimeError(f"Conversation {conversation_id} could not claim an active run")
 
         task = asyncio.create_task(
             self._execute_run(
@@ -396,6 +441,7 @@ class RunManager:
                 event_queue=event_q,
             )
             config_dict = {"configurable": {"thread_id": conversation_id}}
+            citation_counter._next = await _recover_next_citation_id(agent, conversation_id)
 
             async def drain_main_stream() -> None:
                 try:

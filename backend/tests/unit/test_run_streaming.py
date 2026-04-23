@@ -4,11 +4,13 @@ import json
 from types import SimpleNamespace
 
 import pytest
+from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.memory import MemorySaver
 
 from cubebox.api.routes.v1 import conversations as conversations_route
 from cubebox.auth.context import RequestContext
 from cubebox.models import Role
+from cubebox.streams.run_events import create_run
 from cubebox.streams.run_manager import RunManager
 from tests.e2e.fake_redis import FakeRedis
 
@@ -36,6 +38,31 @@ class _FakeAgent:
     async def astream(self, *_args, **_kwargs):
         yield ((), ("messages", (_FakeMessage("hello"), {})))
         yield ((), ("messages", (_FakeMessage(" world"), {})))
+
+
+class _FakeStatefulAgent:
+    async def aget_state(self, config: RunnableConfig):
+        assert config["configurable"]["thread_id"] == "conv-1"
+        return SimpleNamespace(
+            values={
+                "messages": [
+                    SimpleNamespace(content="Earlier answer with citations 【2-1】 and 【5-1】"),
+                    SimpleNamespace(
+                        content=[
+                            {"type": "text", "text": "Nested marker 【7-1】"},
+                            {"type": "tool", "payload": {"note": "ignored"}},
+                        ]
+                    ),
+                ]
+            }
+        )
+
+    async def astream(self, *_args, **_kwargs):
+        from cubebox.middleware.citations.counter import citation_counter_var
+
+        counter = citation_counter_var.get()
+        assert counter is not None
+        yield ((), ("messages", (_FakeMessage(f"next citation {counter._next}"), {})))
 
 
 class _FakeLLMFactory:
@@ -140,3 +167,104 @@ async def test_run_bootstrap_and_stream_replay(monkeypatch: pytest.MonkeyPatch) 
 
     assert [event["type"] for event in events] == ["text_delta", "text_delta", "done"]
     assert all("event_id" in event for event in events)
+
+
+@pytest.mark.asyncio
+async def test_create_run_claim_is_atomic() -> None:
+    redis = FakeRedis()
+
+    first = await create_run(
+        redis,
+        prefix="test",
+        run_id="run-1",
+        conversation_id="conv-1",
+        status="running",
+        started_at="2026-04-23T00:00:00Z",
+    )
+    second = await create_run(
+        redis,
+        prefix="test",
+        run_id="run-2",
+        conversation_id="conv-1",
+        status="running",
+        started_at="2026-04-23T00:00:01Z",
+    )
+
+    assert first is not None
+    assert second is None
+
+
+@pytest.mark.asyncio
+async def test_run_recovers_citation_counter_from_history(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    redis = FakeRedis()
+    app = SimpleNamespace(state=SimpleNamespace())
+    app.state.redis = redis
+    app.state.redis_key_prefix = "test"
+    app.state.checkpointer_factory = lambda: MemorySaver()
+    app.state.sandbox_factory = lambda: None
+    app.state.skills = []
+    app.state.run_manager = RunManager(
+        app=app,
+        redis=redis,
+        key_prefix="test",
+        run_event_ttl_seconds=900,
+    )
+
+    raw_request = SimpleNamespace(app=app, headers={})
+    fake_user = SimpleNamespace(id="test-user", email="test@example.com")
+    ctx = RequestContext(  # type: ignore[arg-type]
+        user=fake_user,
+        org_id="default-org",
+        workspace_id="default-ws",
+        role=Role.ADMIN,
+    )
+
+    monkeypatch.setattr(
+        conversations_route,
+        "async_session_maker",
+        lambda: _DummySessionContext(),
+    )
+    monkeypatch.setattr(conversations_route.ConversationRepository, "get_by_id", _fake_get_by_id)
+    monkeypatch.setattr(
+        conversations_route,
+        "_update_conversation_timestamp",
+        _noop_update_timestamp,
+    )
+
+    import cubebox.agents.graph
+    import cubebox.llm.factory
+    import cubebox.tools
+
+    monkeypatch.setattr(
+        cubebox.agents.graph,
+        "create_cubebox_agent",
+        lambda **_kwargs: _FakeStatefulAgent(),
+    )
+    monkeypatch.setattr(cubebox.llm.factory, "LLMFactory", _FakeLLMFactory)
+    monkeypatch.setattr(cubebox.tools, "get_registry", lambda: _FakeRegistry())
+
+    send_response = await conversations_route.send_message(
+        "conv-1",
+        conversations_route.SendMessageRequest(content="hi"),
+        raw_request,
+        ctx,
+    )
+    stream_response = await conversations_route.stream_run(
+        "conv-1", send_response.run_id, raw_request, object(), ctx
+    )
+
+    events: list[dict[str, object]] = []
+    async for chunk in stream_response.body_iterator:
+        line = chunk.strip()
+        if isinstance(line, bytes):
+            line = line.decode()
+        for part in str(line).split("\n"):
+            if part.startswith("data: "):
+                events.append(json.loads(part[6:]))
+        if events and events[-1]["type"] == "done":
+            break
+
+    assert events[0]["type"] == "text_delta"
+    assert events[0]["data"]["content"] == "next citation 8"
