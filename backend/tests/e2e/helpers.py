@@ -6,10 +6,13 @@ from cubebox.agents.schemas import AgentEvent
 
 def _parse_sse_event(event_str: str) -> AgentEvent | None:
     event_str = event_str.strip()
-    if not event_str or not event_str.startswith("data: "):
+    if not event_str:
+        return None
+    data_lines = [line[6:] for line in event_str.splitlines() if line.startswith("data: ")]
+    if not data_lines:
         return None
     try:
-        return AgentEvent(**json.loads(event_str[6:]))
+        return AgentEvent(**json.loads("\n".join(data_lines)))
     except (json.JSONDecodeError, ValueError) as e:
         raise ValueError(f"Failed to parse SSE event: {event_str}") from e
 
