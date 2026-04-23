@@ -112,7 +112,7 @@
 - skills/MCP 管理界面为 M3 市场提供"我的组织"视图
 **不做**: 审计查看 UI（v1 先走日志导出）；成本看板（归 M1-E1 自己做）
 **依赖**: M1-E4（凭证）、M3（skills 管理复用市场 UI）
-**Spec**: `2026-04-XX-admin-console-design.md`
+**Spec**: `2026-04-23-admin-console-design.md`（骨架部分；完整 5 tab 各 1 份后续 spec）
 
 ---
 
