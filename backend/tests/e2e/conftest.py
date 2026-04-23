@@ -282,7 +282,12 @@ async def collect_sse_events(
 ) -> list[dict]:  # type: ignore[type-arg]
     """POST to an SSE endpoint and collect all parsed events."""
     events = []
-    async with client.stream("POST", url, json=json_data) as response:
+    async with client.stream(
+        "POST",
+        url,
+        json=json_data,
+        headers={"Accept": "text/event-stream", "Cache-Control": "no-cache"},
+    ) as response:
         assert response.status_code == 200, response.text
         async for line in response.aiter_lines():
             if line.startswith("data: "):

@@ -141,6 +141,7 @@ class TestSendMessage:
             "POST",
             f"/api/v1/ws/default-ws/conversations/{conversation_id}/messages",
             json={"content": "Say 'hello' in one word."},
+            headers={"Accept": "text/event-stream", "Cache-Control": "no-cache"},
         ) as response:
             assert response.status_code == 200
             events = await parse_sse_stream(response.aiter_bytes())
@@ -164,6 +165,7 @@ class TestSendMessage:
             "POST",
             f"/api/v1/ws/default-ws/conversations/{conversation_id}/messages",
             json={"content": "What is 1+1?"},
+            headers={"Accept": "text/event-stream", "Cache-Control": "no-cache"},
         ) as response:
             assert response.status_code == 200
             # Consume the stream

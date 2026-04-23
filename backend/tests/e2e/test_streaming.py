@@ -10,6 +10,8 @@ import pytest
 from cubebox.api.routes.v1 import conversations as conversations_route
 from cubebox.auth.context import RequestContext
 from cubebox.models import Role
+from cubebox.streams.run_manager import RunManager
+from tests.e2e.fake_redis import FakeRedis
 
 pytestmark = pytest.mark.e2e
 
@@ -25,6 +27,28 @@ def _make_fake_ctx() -> RequestContext:
     )
 
 
+def _make_streaming_request_state(
+    *,
+    checkpointer_factory: object,
+    sandbox_factory: object,
+    skills: list[object] | None = None,
+) -> SimpleNamespace:
+    redis = FakeRedis()
+    app = SimpleNamespace(state=SimpleNamespace())
+    app.state.checkpointer_factory = checkpointer_factory
+    app.state.sandbox_factory = sandbox_factory
+    app.state.skills = skills or []
+    app.state.redis = redis
+    app.state.redis_key_prefix = "test"
+    app.state.run_manager = RunManager(
+        app=app,
+        redis=redis,
+        key_prefix="test",
+        run_event_ttl_seconds=900,
+    )
+    return app
+
+
 @pytest.mark.asyncio
 async def test_sse_response_content_type(memory_client: httpx.AsyncClient) -> None:
     resp = await memory_client.post("/api/v1/ws/default-ws/conversations", params={"title": "test"})
@@ -34,6 +58,7 @@ async def test_sse_response_content_type(memory_client: httpx.AsyncClient) -> No
         "POST",
         f"/api/v1/ws/default-ws/conversations/{conv_id}/messages",
         json={"content": "Say hi."},
+        headers={"Accept": "text/event-stream", "Cache-Control": "no-cache"},
     ) as response:
         assert "text/event-stream" in response.headers["content-type"]
 
@@ -47,6 +72,7 @@ async def test_every_event_is_valid_json(memory_client: httpx.AsyncClient) -> No
         "POST",
         f"/api/v1/ws/default-ws/conversations/{conv_id}/messages",
         json={"content": "Say hi."},
+        headers={"Accept": "text/event-stream", "Cache-Control": "no-cache"},
     ) as response:
         async for line in response.aiter_lines():
             if line.startswith("data: "):
@@ -65,6 +91,7 @@ async def test_stream_always_ends_with_done(memory_client: httpx.AsyncClient) ->
         "POST",
         f"/api/v1/ws/default-ws/conversations/{conv_id}/messages",
         json={"content": "Say hi."},
+        headers={"Accept": "text/event-stream", "Cache-Control": "no-cache"},
     ) as response:
         async for line in response.aiter_lines():
             if line.startswith("data: "):
@@ -140,6 +167,7 @@ async def test_agent_id_is_null_for_main_agent(memory_client: httpx.AsyncClient)
         "POST",
         f"/api/v1/ws/default-ws/conversations/{conv_id}/messages",
         json={"content": "Say hi."},
+        headers={"Accept": "text/event-stream", "Cache-Control": "no-cache"},
     ) as response:
         async for line in response.aiter_lines():
             if line.startswith("data: "):
@@ -203,7 +231,7 @@ async def test_client_disconnect_cancels_stream_before_closing_checkpointer(
         return SimpleNamespace(id=conversation_id, title=conversation_id)
 
     async def _noop_update_timestamp(
-        _conversation_id: str, *, org_id: str, workspace_id: str
+        _conversation_id: str, *, org_id: str, workspace_id: str, user_id: str
     ) -> None:
         return None
 
@@ -226,14 +254,13 @@ async def test_client_disconnect_cancels_stream_before_closing_checkpointer(
         _fake_create_cubebox_agent,
     )
 
+    app = _make_streaming_request_state(
+        checkpointer_factory=_FakeCheckpointer,
+        sandbox_factory=lambda: None,
+    )
     raw_request = SimpleNamespace(
-        app=SimpleNamespace(
-            state=SimpleNamespace(
-                checkpointer_factory=_FakeCheckpointer,
-                sandbox_factory=lambda: None,
-                skills=[],
-            )
-        ),
+        app=app,
+        headers={"accept": "text/event-stream"},
         state=SimpleNamespace(user_id="test-user"),
     )
 
@@ -246,7 +273,7 @@ async def test_client_disconnect_cancels_stream_before_closing_checkpointer(
     slow_iter = slow_response.body_iterator.__aiter__()
 
     first_chunk = await anext(slow_iter)
-    first_event = json.loads(first_chunk.removeprefix("data: ").strip())
+    first_event = json.loads(str(first_chunk).split("data: ", 1)[1].strip())
     assert first_event["type"] == "text_delta"
 
     pending_chunk = asyncio.create_task(anext(slow_iter))
@@ -255,6 +282,11 @@ async def test_client_disconnect_cancels_stream_before_closing_checkpointer(
     with pytest.raises(asyncio.CancelledError):
         await pending_chunk
 
+    await asyncio.sleep(0.05)
+    assert not slow_agent_cancelled.is_set()
+    assert not checkpointer_closed_before_cancel.is_set()
+
+    await app.state.run_manager.shutdown()
     await asyncio.wait_for(slow_agent_cancelled.wait(), timeout=1)
     assert not checkpointer_closed_before_cancel.is_set()
 
@@ -266,9 +298,9 @@ async def test_client_disconnect_cancels_stream_before_closing_checkpointer(
     )
     events = []
     async for chunk in fast_response.body_iterator:
-        payload = chunk.removeprefix("data: ").strip()
-        if payload:
-            events.append(json.loads(payload))
+        for line in str(chunk).splitlines():
+            if line.startswith("data: "):
+                events.append(json.loads(line[6:]))
 
     assert events[-1]["type"] == "done"
 
@@ -327,7 +359,7 @@ async def test_tool_call_delta_events_in_sse_stream(
         return SimpleNamespace(id=conversation_id, title=conversation_id)
 
     async def _noop_update_timestamp(
-        _conversation_id: str, *, org_id: str, workspace_id: str
+        _conversation_id: str, *, org_id: str, workspace_id: str, user_id: str
     ) -> None:
         return None
 
@@ -341,14 +373,13 @@ async def test_tool_call_delta_events_in_sse_stream(
         lambda **_kwargs: _FakeToolCallAgent(),
     )
 
+    app = _make_streaming_request_state(
+        checkpointer_factory=_FakeCheckpointer,
+        sandbox_factory=lambda: None,
+    )
     raw_request = SimpleNamespace(
-        app=SimpleNamespace(
-            state=SimpleNamespace(
-                checkpointer_factory=_FakeCheckpointer,
-                sandbox_factory=lambda: None,
-                skills=[],
-            )
-        ),
+        app=app,
+        headers={"accept": "text/event-stream"},
         state=SimpleNamespace(user_id="test-user"),
     )
 
@@ -361,9 +392,9 @@ async def test_tool_call_delta_events_in_sse_stream(
 
     events = []
     async for chunk in response.body_iterator:
-        payload = chunk.removeprefix("data: ").strip()
-        if payload:
-            events.append(json.loads(payload))
+        for line in str(chunk).splitlines():
+            if line.startswith("data: "):
+                events.append(json.loads(line[6:]))
 
     delta_events = [e for e in events if e["type"] == "tool_call_delta"]
     assert len(delta_events) == 2, f"Expected 2 tool_call_delta events, got {len(delta_events)}"

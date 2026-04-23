@@ -1,7 +1,7 @@
 import os
 
 # Set environment BEFORE any imports
-os.environ["ENV_FOR_DYNACONF"] = "test"
+os.environ.setdefault("ENV_FOR_DYNACONF", "test")
 
 from cubebox.config import config
 
