@@ -836,6 +836,35 @@ async def test_line_range_clamps_to_file_length() -> None:
 
 
 @pytest.mark.asyncio
+async def test_line_range_open_end() -> None:
+    """'3-' = from line 3 to end."""
+    p = TextParser()
+    body = "\n".join(f"line{i}" for i in range(1, 6)).encode()
+    out = await p.parse(body, mime="text/plain", options=ParseOptions(line_range="3-"))
+    assert out.content == "line3\nline4\nline5"
+    assert out.metadata["lines_returned"] == "3-5"
+
+
+@pytest.mark.asyncio
+async def test_line_range_negative_returns_last_n() -> None:
+    """'-3' = last 3 lines (tail-style)."""
+    p = TextParser()
+    body = "\n".join(f"line{i}" for i in range(1, 11)).encode()
+    out = await p.parse(body, mime="text/plain", options=ParseOptions(line_range="-3"))
+    assert out.content == "line8\nline9\nline10"
+    assert out.metadata["lines_returned"] == "8-10"
+
+
+@pytest.mark.asyncio
+async def test_line_range_negative_more_than_file_returns_all() -> None:
+    """'-100' on a 5-line file returns all 5 lines."""
+    p = TextParser()
+    body = "\n".join(f"line{i}" for i in range(1, 6)).encode()
+    out = await p.parse(body, mime="text/plain", options=ParseOptions(line_range="-100"))
+    assert out.metadata["lines_returned"] == "1-5"
+
+
+@pytest.mark.asyncio
 async def test_no_line_range_returns_all_with_truncation_hint() -> None:
     """Without line_range and content > 20K → truncated + hint to use line_range."""
     p = TextParser()
@@ -843,6 +872,22 @@ async def test_no_line_range_returns_all_with_truncation_hint() -> None:
     out = await p.parse(body, mime="text/plain", options=ParseOptions())
     assert out.truncated is True
     assert "line_range" in out.metadata.get("hint", "")
+
+
+@pytest.mark.asyncio
+async def test_truncation_emits_next_line_to_read() -> None:
+    """When truncated, metadata.next_line_to_read tells agent where to resume."""
+    p = TextParser()
+    # Each line is ~20 chars so 1500 lines ~= 30k chars (will truncate ~= line 1000)
+    body = ("x" * 19 + "\n").join(f"" for _ in range(1500)).encode()
+    out = await p.parse(body, mime="text/plain", options=ParseOptions())
+    assert out.truncated is True
+    assert "next_line_to_read" in out.metadata
+    assert out.metadata["next_line_to_read"] > 1
+    # next_line_to_read should equal end-of-returned-range + 1
+    returned = out.metadata["lines_returned"]
+    end = int(returned.split("-")[1])
+    assert out.metadata["next_line_to_read"] == end + 1
 ```
 
 - [ ] **Step 2: Run, verify fail**
@@ -903,23 +948,34 @@ class TextParser:
 
         # Apply line_range slice (1-indexed inclusive); ignore page_range.
         start_idx, end_idx = self._parse_line_range(options.line_range, total_lines)
-        sliced = "".join(all_lines[start_idx:end_idx])
+        sliced_lines = all_lines[start_idx:end_idx]
+        sliced = "".join(sliced_lines)
 
         truncated = False
+        last_line_returned = end_idx  # 1-indexed end (inclusive)
         metadata: dict[str, object] = {
             "parser": "text",
             "total_lines": total_lines,
-            "lines_returned": f"{start_idx + 1}-{end_idx}",
         }
         if decode_fallback:
             metadata["decode_fallback"] = decode_fallback
+
         if len(sliced) > MAX_CONTENT_CHARS:
+            # Truncate by chars, then back-compute how many full lines fit
             sliced = sliced[:MAX_CONTENT_CHARS]
             truncated = True
+            # Count complete lines (those ending in \n) within the truncated text
+            lines_kept = sliced.count("\n")
+            # Edge case: if no newline in truncated text but we kept content, count as 1 partial line
+            if lines_kept == 0 and sliced:
+                lines_kept = 1
+            last_line_returned = start_idx + lines_kept   # 1-indexed last fully-included line
             metadata["truncated_at_char"] = MAX_CONTENT_CHARS
-            metadata["total_chars"] = sum(len(l) for l in all_lines)
-        if options.line_range is None and truncated:
-            metadata["hint"] = "use line_range to read later sections"
+            metadata["next_line_to_read"] = last_line_returned + 1
+            if options.line_range is None:
+                metadata["hint"] = "content truncated; use line_range to navigate"
+
+        metadata["lines_returned"] = f"{start_idx + 1}-{last_line_returned}"
 
         return TextOutput(
             path="<set-by-caller>",
@@ -932,23 +988,42 @@ class TextParser:
 
     @staticmethod
     def _parse_line_range(spec: str | None, total_lines: int) -> tuple[int, int]:
-        """Parse '2-4' or '3' into (start_index, end_index_exclusive). 1-indexed input.
+        """Parse line_range syntax → (start_index_0based, end_index_exclusive).
 
-        Defaults to (0, total_lines) if spec is None or invalid. End is clamped to total_lines.
+        Supported syntaxes (1-indexed input):
+          "42"       → line 42 only
+          "100-200"  → lines 100 through 200
+          "100-"     → from line 100 to end (sed-style)
+          "-50"      → last 50 lines (tail-style)
+
+        Returns (0, total_lines) on None or invalid input. End clamped to total_lines.
         """
         if not spec:
             return 0, total_lines
         try:
+            if spec.startswith("-"):
+                # "-50" → last N lines
+                n = int(spec[1:])
+                if n <= 0:
+                    return 0, total_lines
+                start = max(total_lines - n, 0)
+                return start, total_lines
+            if spec.endswith("-"):
+                # "100-" → from N to end
+                start = max(int(spec[:-1]), 1) - 1
+                start = min(start, total_lines)
+                return start, total_lines
             if "-" in spec:
+                # "100-200" → range
                 a, b = spec.split("-", 1)
-                start = max(int(a), 1) - 1   # 1-indexed → 0-indexed
+                start = max(int(a), 1) - 1
                 end = min(int(b), total_lines)
-            else:
-                n = max(int(spec), 1) - 1
-                start, end = n, min(n + 1, total_lines)
+                return start, max(end, start)
+            # "42" → single line
+            n = max(int(spec), 1) - 1
+            return n, min(n + 1, total_lines)
         except (ValueError, TypeError):
             return 0, total_lines
-        return start, end
 ```
 
 NOTE: `path` is set to placeholder; the registry's `dispatch` overwrites with the actual path before returning. (Alternative: pass `path` into `parse`. Stick with current Protocol signature; registry overwrites.)
@@ -956,13 +1031,13 @@ NOTE: `path` is set to placeholder; the registry's `dispatch` overwrites with th
 - [ ] **Step 4: Run tests, verify pass**
 
 Run: `cd backend && uv run pytest tests/parsers/test_text_parser.py -v`
-Expected: PASS (8 tests).
+Expected: PASS (11 tests).
 
 - [ ] **Step 5: Commit**
 
 ```bash
 git add backend/cubebox/parsers/plugins/text.py backend/tests/parsers/test_text_parser.py
-git commit -m "feat(parsers): TextParser plugin with line_range slicing + 20K char truncation"
+git commit -m "feat(parsers): TextParser with full line_range syntax + next_line_to_read on truncation"
 ```
 
 ---
@@ -1017,11 +1092,12 @@ async def test_parses_simple_notebook() -> None:
 
 
 @pytest.mark.asyncio
-async def test_truncates_when_exceeds_20k() -> None:
+async def test_truncates_when_exceeds_20k_with_next_cell_index() -> None:
     nb = {
         "cells": [
             {"cell_type": "markdown", "source": "x" * 25_000},
             {"cell_type": "code", "source": "y", "outputs": []},
+            {"cell_type": "code", "source": "z", "outputs": []},
         ]
     }
     p = NotebookParser()
@@ -1030,8 +1106,11 @@ async def test_truncates_when_exceeds_20k() -> None:
         mime="application/x-ipynb+json",
         options=ParseOptions(),
     )
-    # truncation happens at the cell level; first big cell included, second omitted
-    assert out.metadata.get("truncated_cells", 0) >= 1
+    # First big cell included, second + third omitted
+    assert out.metadata["truncated_cells"] == 2
+    assert out.metadata["cells_returned"] == 1
+    assert out.metadata["next_cell_index"] == 2  # 1-indexed
+    assert out.metadata["total_cells"] == 3
 ```
 
 - [ ] **Step 2: Run, verify fail**
@@ -1111,9 +1190,11 @@ class NotebookParser:
         metadata: dict[str, Any] = {
             "parser": "notebook",
             "total_cells": len(all_cells),
+            "cells_returned": len(result_cells),
         }
         if truncated_cells > 0:
             metadata["truncated_cells"] = truncated_cells
+            metadata["next_cell_index"] = len(result_cells) + 1  # 1-indexed
 
         return NotebookOutput(
             path="<set-by-caller>",
@@ -1234,6 +1315,36 @@ async def test_sync_path_truncates_long_content() -> None:
     assert isinstance(out, TextOutput)
     assert out.truncated is True
     assert len(out.content) == 20_000
+    # No page markers in this fake response → hint instead of next_page_to_read
+    assert "hint" in out.metadata
+    assert "page_range" in out.metadata["hint"]
+
+
+@pytest.mark.asyncio
+async def test_sync_path_extracts_last_page_from_markers() -> None:
+    """When docling output contains <!-- page N --> markers, metadata exposes them."""
+    md = "intro\n<!-- page 1 -->\n" + "filler\n" * 1000 + "<!-- page 7 -->\nmore content\n" + "filler\n" * 3000 + "<!-- page 12 -->\nlate stuff"
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"document": {"md_content": md}})
+
+    transport = httpx.MockTransport(handler)
+    p = DoclingParser(
+        base_url="http://docling",
+        api_key=None,
+        timeout_sync_seconds=30,
+        timeout_async_minutes=10,
+        async_threshold_mb=3,
+        poll_interval_seconds=2,
+        _transport=transport,
+    )
+    out = await p.parse(b"x", mime="application/pdf", options=ParseOptions())
+    assert isinstance(out, TextOutput)
+    assert out.truncated is True
+    # Last page marker found within the truncated content
+    assert "last_page_returned" in out.metadata
+    assert "next_page_to_read" in out.metadata
+    assert out.metadata["next_page_to_read"] == out.metadata["last_page_returned"] + 1
 ```
 
 - [ ] **Step 2: Add httpx to deps if missing**
@@ -1398,9 +1509,20 @@ class DoclingParser:
         total = len(md)
         metadata: dict[str, object] = {"parser": "docling", "total_chars": total}
         if total > MAX_CONTENT_CHARS:
-            md = md[:MAX_CONTENT_CHARS]
+            truncated_md = md[:MAX_CONTENT_CHARS]
             truncated = True
             metadata["truncated_at_char"] = MAX_CONTENT_CHARS
+
+            # Best-effort: try to extract last page number visible in truncated md.
+            # Docling can emit page markers like "<!-- page 5 -->" or h1/h2 with page meta.
+            # We try common patterns; if none match, the agent gets just truncated_at_char.
+            last_page = self._extract_last_page(truncated_md)
+            if last_page is not None:
+                metadata["last_page_returned"] = last_page
+                metadata["next_page_to_read"] = last_page + 1
+            else:
+                metadata["hint"] = "use page_range to read later sections"
+            md = truncated_md
 
         return TextOutput(
             path="<set-by-caller>",
@@ -1410,6 +1532,32 @@ class DoclingParser:
             truncated=truncated,
             metadata=metadata,
         )
+
+    @staticmethod
+    def _extract_last_page(md: str) -> int | None:
+        """Best-effort scan for the last page marker in docling markdown.
+
+        Patterns checked (last occurrence wins):
+          - HTML comments:  <!-- page N -->
+          - Heading line:   ## Page N
+          - PageBreak:      <!-- PageBreak: N -->
+
+        Returns None if no marker found (caller falls back to char-only truncation info).
+        """
+        import re
+        patterns = [
+            re.compile(r"<!--\s*page[:\s]+(\d+)\s*-->", re.IGNORECASE),
+            re.compile(r"<!--\s*PageBreak[:\s]+(\d+)\s*-->", re.IGNORECASE),
+            re.compile(r"^#+\s+Page\s+(\d+)\s*$", re.MULTILINE | re.IGNORECASE),
+        ]
+        last_page: int | None = None
+        for pat in patterns:
+            for m in pat.finditer(md):
+                try:
+                    last_page = int(m.group(1))
+                except (ValueError, IndexError):
+                    pass
+        return last_page
 ```
 
 - [ ] **Step 5: Run tests, verify pass**
@@ -2323,14 +2471,29 @@ RETURN FORMAT (discriminated by `kind`):
 
 PARAMETERS:
 - path (required)         — absolute sandbox path
-- page_range (optional)   — "1-5" or "3"; PDF/DOCX/PPTX only; ignored elsewhere
-- line_range (optional)   — "100-200" or "42"; text/code/log only; ignored elsewhere
+- page_range (optional)   — paginated documents only: PDF/DOCX/PPTX
+- line_range (optional)   — text/code/log files only
+
+RANGE SYNTAX (page_range and line_range share these 4 forms):
+  "42"      — single line/page (item 42)
+  "100-200" — range from 100 to 200 inclusive
+  "100-"    — from 100 to end of file (sed '100,$' style)
+  "-50"     — last 50 lines/pages (tail -50 style)
+
+HOW TO CONTINUE READING WHEN truncated=true:
+- text/code/log: read metadata.next_line_to_read and call
+  file_read(path, line_range=f"{N}-") to continue from there.
+- PDF/DOCX/PPTX (best-effort): read metadata.next_page_to_read
+  and call file_read(path, page_range=f"{N}-"). If the field
+  is absent (parser couldn't map char-offset back to page),
+  fall back to ranges you guess or ask the user.
+- notebook: metadata.next_cell_index is informational only —
+  v1 has no cell_range param. The first batch is what you get.
 
 LIMITS:
 - Files > 100 MB are refused with kind="unsupported".
-- Content longer than 20,000 characters is truncated (truncated=True).
-  Use `page_range` (PDF/DOCX/PPTX) or `line_range` (text/code/log)
-  to retrieve a specific segment.
+- Content longer than 20,000 characters is truncated. See
+  "HOW TO CONTINUE READING" above.
 - Large files (>3 MB) trigger async parsing; up to 10 minutes.
 """
 
