@@ -8,12 +8,13 @@ Creates and configures the FastAPI application with:
 """
 
 import asyncio
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from contextlib import asynccontextmanager
 from typing import Any
 
 from fastapi import FastAPI
 from loguru import logger
+from redis.asyncio import Redis
 
 from cubebox.utils import log
 
@@ -43,6 +44,40 @@ async def lifespan(_app: FastAPI):  # type: ignore
         logger.info("Loaded {} builtin skill(s)", len(_app.state.skills))
     else:
         _app.state.skills = []
+
+    redis_client: Redis | None = None
+    run_manager = None
+    try:
+        redis_factory = getattr(_app.state, "redis_factory", None)
+        if redis_factory is not None:
+            redis_client = redis_factory()
+        else:
+            from cubebox.config import config
+
+            redis_client = Redis.from_url(
+                config.get("streaming.redis_url", "redis://localhost:6379/0"),
+                decode_responses=True,
+            )
+        ping_result = redis_client.ping()
+        if isinstance(ping_result, Awaitable):
+            await ping_result
+        _app.state.redis = redis_client
+
+        from cubebox.config import config
+        from cubebox.streams.run_manager import RunManager
+
+        _app.state.redis_key_prefix = config.get("streaming.redis_key_prefix", "cubebox")
+        run_manager = RunManager(
+            app=_app,
+            redis=redis_client,
+            key_prefix=_app.state.redis_key_prefix,
+            run_event_ttl_seconds=config.get("streaming.run_event_ttl_seconds", 900),
+        )
+        _app.state.run_manager = run_manager
+        logger.info("Redis streaming runtime initialized")
+    except Exception as e:
+        logger.error("Failed to initialize Redis streaming runtime: {}", str(e))
+        raise
 
     # Initialize LangGraph checkpointer tables (one-time setup)
     try:
@@ -99,6 +134,10 @@ async def lifespan(_app: FastAPI):  # type: ignore
 
     # ==================== Shutdown ====================
     logger.info("Application shutting down")
+    if run_manager is not None:
+        await run_manager.shutdown()
+    if redis_client is not None:
+        await redis_client.aclose()
     if cleanup_task:
         cleanup_task.cancel()
         try:
@@ -111,6 +150,7 @@ async def lifespan(_app: FastAPI):  # type: ignore
 def create_app(
     checkpointer_factory: Callable[[], Any] | None = None,
     sandbox_factory: Callable[[], Any] | None = None,
+    redis_factory: Callable[[], Redis] | None = None,
 ) -> FastAPI:
     """
     Create and configure the FastAPI application.
@@ -132,6 +172,7 @@ def create_app(
     # Store DI factories for route handlers
     app.state.checkpointer_factory = checkpointer_factory
     app.state.sandbox_factory = sandbox_factory
+    app.state.redis_factory = redis_factory
 
     # Register middleware
     from cubebox.api.middleware.cancellation import CancellationMiddleware

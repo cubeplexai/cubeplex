@@ -1,18 +1,19 @@
 // frontend/packages/core/src/stores/messageStore.ts
 import { create } from 'zustand'
 import type {
-  ContentBlock,
-  TodoItem,
-  Message,
-  TextDeltaEvent,
-  ToolCallEvent,
-  ToolCallDeltaEvent,
-  ToolResultEvent,
-  ReasoningEvent,
+  AgentEvent,
   ArtifactEventData,
+  ContentBlock,
+  Message,
+  ReasoningEvent,
+  TextDeltaEvent,
+  TodoItem,
+  ToolCallDeltaEvent,
+  ToolCallEvent,
+  ToolResultEvent,
 } from '../types'
 import type { ApiClient } from '../api'
-import { listMessages, streamMessages } from '../api'
+import { getConversationBootstrap, streamMessages, streamRun } from '../api'
 import { useCitationStore } from './citationStore'
 
 export interface AgentStream {
@@ -29,6 +30,8 @@ export interface MessageStore {
   streamAgents: Record<string, AgentStream> // "main" or "task:xxx"
   isStreaming: boolean
   streamingConversationId: string | null
+  currentRunId: string | null
+  lastAppliedEventId: string | null
   statusPhase: string | null
   error: string | null
   todos: TodoItem[]
@@ -49,6 +52,23 @@ function emptyStream(name: string | null = null): AgentStream {
   return { text: '', toolCalls: [], toolResults: [], reasoning: '', blocks: [], name }
 }
 
+function timestampToMs(timestamp?: string): number {
+  return timestamp ? new Date(timestamp).getTime() : Date.now()
+}
+
+function compareEventIds(left: string, right: string): number {
+  const [leftMs, leftSeq] = left.split('-').map(Number)
+  const [rightMs, rightSeq] = right.split('-').map(Number)
+  if (leftMs !== rightMs) return leftMs - rightMs
+  return leftSeq - rightSeq
+}
+
+function nextEventId(current: string | null, next?: string): string | null {
+  if (!next) return current
+  if (!current) return next
+  return compareEventIds(next, current) > 0 ? next : current
+}
+
 /** Finalize the last reasoning block's duration if switching to a different block type */
 function finalizeLastReasoning(blocks: ContentBlock[]): ContentBlock[] {
   const last = blocks[blocks.length - 1]
@@ -65,6 +85,7 @@ function appendBlock(
   blocks: ContentBlock[],
   type: 'reasoning' | 'text',
   content: string,
+  timestampMs?: number,
 ): ContentBlock[] {
   const last = blocks[blocks.length - 1]
   if (last && last.type === type) {
@@ -72,10 +93,9 @@ function appendBlock(
     updated[updated.length - 1] = { ...last, content: last.content + content }
     return updated
   }
-  // Switching type — finalize any pending reasoning block
   const finalized = finalizeLastReasoning(blocks)
   if (type === 'reasoning') {
-    return [...finalized, { type, content, started_at: Date.now() }]
+    return [...finalized, { type, content, started_at: timestampMs ?? Date.now() }]
   }
   return [...finalized, { type, content }]
 }
@@ -132,6 +152,41 @@ function parseTodosFromToolCall(args: Record<string, unknown>): TodoItem[] {
   return todos
 }
 
+function buildPendingUserMessage(runId: string, content: string): Message {
+  return {
+    id: `pending-${runId}`,
+    role: 'user',
+    content,
+    created_at: new Date().toISOString(),
+  }
+}
+
+function ensurePendingUserMessage(messages: Message[], runId: string, content: string): Message[] {
+  const lastMessage = messages[messages.length - 1]
+  if (lastMessage?.role === 'user' && lastMessage.content === content) {
+    return messages
+  }
+  return [...messages, buildPendingUserMessage(runId, content)]
+}
+
+function restoreTodosFromHistory(messages: Message[]): TodoItem[] {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const msg = messages[i]
+    if (msg.role !== 'assistant' || !msg.tool_calls) continue
+    const tc = msg.tool_calls.find((toolCall) => toolCall.name === 'write_todos')
+    if (tc) return parseTodosFromToolCall(tc.arguments)
+  }
+  return []
+}
+
+function hydrateCitationsFromHistory(conversationId: string, messages: Message[]): void {
+  for (const msg of messages) {
+    if (msg.role === 'tool' && msg.citations?.length) {
+      useCitationStore.getState().loadCitations(conversationId, msg.citations)
+    }
+  }
+}
+
 /**
  * Batched state updater: collects multiple set() calls within a single microtask
  * and flushes them as one Zustand update. This prevents N SSE events arriving in
@@ -166,11 +221,363 @@ function createBatcher(set: (updater: (s: MessageStore) => Partial<MessageStore>
   return { batchedSet, flush }
 }
 
+function applyStreamEvent(state: MessageStore, event: AgentEvent): Partial<MessageStore> {
+  const eventId = event.event_id
+  if (
+    eventId &&
+    state.lastAppliedEventId &&
+    compareEventIds(eventId, state.lastAppliedEventId) <= 0
+  ) {
+    return {}
+  }
+
+  const agentKey = event.agent_id ?? MAIN_AGENT_KEY
+  const lastAppliedEventId = nextEventId(state.lastAppliedEventId, eventId)
+  const base = lastAppliedEventId ? { lastAppliedEventId } : {}
+
+  if (event.type === 'text_delta') {
+    const e = event as TextDeltaEvent
+    const prev = state.streamAgents[agentKey] ?? emptyStream(event.agent_name)
+    return {
+      ...base,
+      streamAgents: {
+        ...state.streamAgents,
+        [agentKey]: {
+          ...prev,
+          text: prev.text + e.data.content,
+          blocks: appendBlock(prev.blocks, 'text', e.data.content, timestampToMs(event.timestamp)),
+        },
+      },
+    }
+  }
+
+  if (event.type === 'reasoning') {
+    const e = event as ReasoningEvent
+    const prev = state.streamAgents[agentKey] ?? emptyStream(event.agent_name)
+    return {
+      ...base,
+      streamAgents: {
+        ...state.streamAgents,
+        [agentKey]: {
+          ...prev,
+          reasoning: prev.reasoning + e.data.content,
+          blocks: appendBlock(
+            prev.blocks,
+            'reasoning',
+            e.data.content,
+            timestampToMs(event.timestamp),
+          ),
+        },
+      },
+    }
+  }
+
+  if (event.type === 'tool_call') {
+    const e = event as ToolCallEvent
+    const prev = state.streamAgents[agentKey] ?? emptyStream(event.agent_name)
+    const existingStartedAt = state.toolStartedMap[e.data.tool_call_id]
+    const nextTodos =
+      e.data.name === 'write_todos' ? parseTodosFromToolCall(e.data.arguments) : state.todos
+
+    return {
+      ...base,
+      todos: nextTodos,
+      toolStartedMap: {
+        ...state.toolStartedMap,
+        [e.data.tool_call_id]:
+          existingStartedAt ?? timestampToMs(e.data.started_at ?? event.timestamp),
+      },
+      streamAgents: {
+        ...state.streamAgents,
+        [agentKey]: {
+          ...prev,
+          toolCalls: [...prev.toolCalls, e],
+          blocks: appendToolCallBlock(
+            prev.blocks,
+            e.data.name,
+            e.data.arguments,
+            e.data.tool_call_id,
+          ),
+        },
+      },
+    }
+  }
+
+  if (event.type === 'tool_call_delta') {
+    const e = event as ToolCallDeltaEvent
+    const prev = state.streamAgents[agentKey] ?? emptyStream(event.agent_name)
+    const idx = e.data.index ?? 0
+    const blocks = [...prev.blocks]
+    const startedAt = timestampToMs(event.timestamp)
+    const nextToolStartedMap =
+      e.data.tool_call_id && !state.toolStartedMap[e.data.tool_call_id]
+        ? {
+            ...state.toolStartedMap,
+            [e.data.tool_call_id]: startedAt,
+          }
+        : state.toolStartedMap
+
+    const existingIdx = blocks.findIndex(
+      (block) => block.type === 'tool_call_streaming' && block.index === idx,
+    )
+
+    if (existingIdx >= 0) {
+      const existing = blocks[existingIdx] as Extract<ContentBlock, { type: 'tool_call_streaming' }>
+      blocks[existingIdx] = {
+        ...existing,
+        args_text: existing.args_text + (e.data.args_delta || ''),
+        tool_call_id: e.data.tool_call_id ?? existing.tool_call_id,
+      }
+      return {
+        ...base,
+        toolStartedMap: nextToolStartedMap,
+        streamAgents: {
+          ...state.streamAgents,
+          [agentKey]: { ...prev, blocks },
+        },
+      }
+    }
+
+    const finalized = finalizeLastReasoning(blocks)
+    finalized.push({
+      type: 'tool_call_streaming',
+      name: e.data.name ?? '',
+      args_text: e.data.args_delta || '',
+      tool_call_id: e.data.tool_call_id ?? null,
+      index: idx,
+    })
+    return {
+      ...base,
+      toolStartedMap: nextToolStartedMap,
+      streamAgents: {
+        ...state.streamAgents,
+        [agentKey]: { ...prev, blocks: finalized },
+      },
+    }
+  }
+
+  if (event.type === 'tool_result') {
+    const e = event as ToolResultEvent
+    const tcId = e.data.tool_call_id ?? ''
+    const newMap = { ...state.toolResultMap }
+    if (tcId) {
+      newMap[tcId] = {
+        content: e.data.content,
+        receivedAt: timestampToMs(event.timestamp),
+        startedAt:
+          state.toolStartedMap[tcId] ??
+          (e.data.started_at ? timestampToMs(e.data.started_at) : undefined),
+        contentType: e.data.content_type,
+      }
+    }
+
+    return {
+      ...base,
+      toolResultMap: newMap,
+      streamAgents: {
+        ...state.streamAgents,
+        [agentKey]: {
+          ...(state.streamAgents[agentKey] ?? emptyStream(event.agent_name)),
+          toolResults: [...(state.streamAgents[agentKey]?.toolResults ?? []), e],
+        },
+      },
+    }
+  }
+
+  if (event.type === 'status') {
+    return {
+      ...base,
+      statusPhase: (event.data as { phase: string }).phase,
+    }
+  }
+
+  if (event.type === 'artifact' || event.type === 'citation') {
+    return base
+  }
+
+  return base
+}
+
+async function finalizeCompletedStream(
+  get: () => MessageStore,
+  set: (partial: Partial<MessageStore> | ((state: MessageStore) => Partial<MessageStore>)) => void,
+  conversationId: string,
+): Promise<void> {
+  const agents = get().streamAgents
+  const mainStream = agents[MAIN_AGENT_KEY]
+
+  if (!mainStream) {
+    set({
+      isStreaming: false,
+      streamingConversationId: null,
+      currentRunId: null,
+      statusPhase: null,
+    })
+    return
+  }
+
+  const finalBlocks = finalizeLastReasoning(mainStream.blocks)
+    .filter((block) => block.type !== 'tool_call_streaming')
+    .map((block) => {
+      if (block.type === 'reasoning') {
+        const { started_at: _startedAt, ...rest } = block
+        return rest
+      }
+      return block
+    })
+
+  const assistantMessage: Message = {
+    id: `assistant-${Date.now()}`,
+    role: 'assistant',
+    content: mainStream.text || null,
+    tool_calls:
+      mainStream.toolCalls.length > 0
+        ? mainStream.toolCalls.map((tc) => ({
+            name: tc.data.name,
+            arguments: tc.data.arguments,
+            tool_call_id: tc.data.tool_call_id,
+            started_at: tc.data.started_at ?? null,
+          }))
+        : null,
+    reasoning: mainStream.reasoning || null,
+    blocks: finalBlocks.length > 0 ? finalBlocks : null,
+    created_at: new Date().toISOString(),
+  }
+
+  const toolMessages: Message[] = []
+  const subagentArgs: Record<string, { role?: string; task?: string }> = {}
+  for (const block of finalBlocks) {
+    if (block.type === 'tool_call' && block.name === 'subagent') {
+      const args = block.arguments as { role?: string; task?: string }
+      subagentArgs[`subagent:${block.tool_call_id}`] = args
+    }
+  }
+
+  for (const [key, agentStream] of Object.entries(agents)) {
+    if (key === MAIN_AGENT_KEY) continue
+    const toolCallId = key.startsWith('subagent:') ? key.slice(9) : key
+    const args = subagentArgs[key]
+    const currentToolResultMap = get().toolResultMap
+    toolMessages.push({
+      id: `tool-${toolCallId}-${Date.now()}`,
+      role: 'tool',
+      content: agentStream.text || null,
+      name: 'subagent',
+      tool_call_id: toolCallId,
+      subagent_events: {
+        text: agentStream.text,
+        tool_calls: agentStream.toolCalls.map((tc) => ({
+          name: tc.data.name,
+          arguments: tc.data.arguments,
+          tool_call_id: tc.data.tool_call_id,
+          started_at: tc.data.started_at ?? (tc.timestamp || null),
+        })),
+        tool_results: agentStream.toolResults
+          .map((tr) => {
+            const mapEntry = currentToolResultMap[tr.data.tool_call_id ?? '']
+            return {
+              tool_name: tr.data.tool_name ?? '',
+              tool_call_id: tr.data.tool_call_id ?? '',
+              content: tr.data.content ?? '',
+              content_type: tr.data.content_type ?? mapEntry?.contentType ?? null,
+              started_at: tr.data.started_at ?? null,
+              completed_at: tr.timestamp || null,
+            }
+          })
+          .filter((tr) => tr.tool_call_id),
+        reasoning: agentStream.reasoning,
+        role: args?.role,
+        task: args?.task,
+      },
+      created_at: new Date().toISOString(),
+    })
+  }
+
+  set((state) => ({
+    messages: {
+      ...state.messages,
+      [conversationId]: [
+        ...(state.messages[conversationId] ?? []),
+        assistantMessage,
+        ...toolMessages,
+      ],
+    },
+    isStreaming: false,
+    streamingConversationId: null,
+    currentRunId: null,
+    statusPhase: null,
+  }))
+}
+
+async function consumeRunStream(
+  client: ApiClient,
+  conversationId: string,
+  runId: string,
+  lastEventId: string | undefined,
+  set: (partial: Partial<MessageStore> | ((state: MessageStore) => Partial<MessageStore>)) => void,
+  get: () => MessageStore,
+): Promise<void> {
+  const { batchedSet, flush } = createBatcher(
+    set as (updater: (s: MessageStore) => Partial<MessageStore>) => void,
+  )
+  let shouldFinalize = true
+  let reachedTerminalEvent = false
+
+  try {
+    for await (const event of streamRun(client, conversationId, runId, lastEventId)) {
+      const state = get()
+      if (state.currentRunId !== runId) {
+        shouldFinalize = false
+        return
+      }
+      if (event.event_id && state.lastAppliedEventId) {
+        if (compareEventIds(event.event_id, state.lastAppliedEventId) <= 0) continue
+      }
+
+      if (event.type === 'artifact') {
+        const artifactData = event.data as unknown as ArtifactEventData
+        if (artifactData.artifact) {
+          const { useArtifactStore } = await import('./artifactStore')
+          useArtifactStore.getState().addOrUpdate(conversationId, artifactData.artifact)
+        }
+      } else if (event.type === 'citation') {
+        const citationData = event.data as unknown as import('../types').CitationData
+        useCitationStore.getState().addCitation(conversationId, citationData)
+      } else if (event.type === 'error') {
+        const errData = event.data as { message: string; details?: string }
+        set({
+          error: errData.details || errData.message,
+          lastAppliedEventId: nextEventId(get().lastAppliedEventId, event.event_id),
+        })
+        reachedTerminalEvent = true
+        break
+      } else if (event.type === 'done') {
+        set({
+          lastAppliedEventId: nextEventId(get().lastAppliedEventId, event.event_id),
+        })
+        reachedTerminalEvent = true
+        break
+      }
+
+      batchedSet((s) => applyStreamEvent(s, event))
+    }
+  } catch (err) {
+    set({ error: (err as Error).message })
+  } finally {
+    flush()
+    if (shouldFinalize && reachedTerminalEvent && get().currentRunId === runId) {
+      await finalizeCompletedStream(get, set, conversationId)
+    }
+  }
+}
+
 export const useMessageStore = create<MessageStore>((set, get) => ({
   messages: {},
   streamAgents: {},
   isStreaming: false,
   streamingConversationId: null,
+  currentRunId: null,
+  lastAppliedEventId: null,
   statusPhase: null,
   error: null,
   todos: [],
@@ -178,50 +585,61 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
   toolResultMap: {},
 
   async loadMessages(client: ApiClient, conversationId: string) {
-    // Only skip if this conversation is currently streaming
     const state = get()
     if (state.isStreaming && state.streamingConversationId === conversationId) return
+
     try {
-      const messages = await listMessages(client, conversationId)
-      // Re-check after await: if streaming started for this conversation while
-      // we were fetching, discard the API response to preserve the optimistic user message.
+      const bootstrap = await getConversationBootstrap(client, conversationId)
       const current = get()
       if (current.isStreaming && current.streamingConversationId === conversationId) return
 
-      // Restore todos from the last write_todos tool call in history
-      let restoredTodos: TodoItem[] = []
-      for (let i = messages.length - 1; i >= 0; i--) {
-        const msg = messages[i]
-        if (msg.role !== 'assistant' || !msg.tool_calls) continue
-        const tc = msg.tool_calls.find((t) => t.name === 'write_todos')
-        if (tc) {
-          restoredTodos = parseTodosFromToolCall(tc.arguments)
-          break
-        }
+      let messages = bootstrap.messages ?? []
+      if (bootstrap.active_run?.user_message) {
+        messages = ensurePendingUserMessage(
+          messages,
+          bootstrap.active_run.run_id,
+          bootstrap.active_run.user_message,
+        )
       }
 
-      // Restore citations from tool messages in history
-      for (const msg of messages) {
-        if (msg.role === 'tool' && msg.citations?.length) {
-          useCitationStore.getState().loadCitations(conversationId, msg.citations)
-        }
-      }
+      const restoredTodos = restoreTodosFromHistory(messages)
+      hydrateCitationsFromHistory(conversationId, messages)
+      const nextStreamAgents: Record<string, AgentStream> = bootstrap.active_run
+        ? { [MAIN_AGENT_KEY]: emptyStream() }
+        : {}
 
       set((s) => ({
         messages: { ...s.messages, [conversationId]: messages },
         todos: restoredTodos,
         error: null,
-        // Clear completed stream state — history messages are now source of truth
-        streamAgents: {},
+        streamAgents: nextStreamAgents,
+        toolStartedMap: {},
         toolResultMap: {},
+        isStreaming: !!bootstrap.active_run,
+        streamingConversationId: bootstrap.active_run ? conversationId : null,
+        currentRunId: bootstrap.active_run?.run_id ?? null,
+        lastAppliedEventId: null,
+        statusPhase: null,
       }))
+
+      if (bootstrap.active_run) {
+        queueMicrotask(() => {
+          void consumeRunStream(
+            client,
+            conversationId,
+            bootstrap.active_run!.run_id,
+            undefined,
+            set,
+            get,
+          )
+        })
+      }
     } catch (err) {
       set({ error: (err as Error).message })
     }
   },
 
   async send(client: ApiClient, conversationId: string, content: string) {
-    // Optimistic: add user message immediately to the correct conversation
     const userMessage: Message = {
       id: `temp-${Date.now()}`,
       role: 'user',
@@ -229,14 +647,16 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
       created_at: new Date().toISOString(),
     }
 
-    set((s) => ({
+    set((state) => ({
       messages: {
-        ...s.messages,
-        [conversationId]: [...(s.messages[conversationId] ?? []), userMessage],
+        ...state.messages,
+        [conversationId]: [...(state.messages[conversationId] ?? []), userMessage],
       },
       streamAgents: { [MAIN_AGENT_KEY]: emptyStream() },
       isStreaming: true,
       streamingConversationId: conversationId,
+      currentRunId: null,
+      lastAppliedEventId: null,
       statusPhase: null,
       error: null,
       todos: [],
@@ -244,160 +664,17 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
       toolResultMap: {},
     }))
 
-    const { batchedSet, flush } = createBatcher(set)
+    const { batchedSet, flush } = createBatcher(
+      set as (updater: (s: MessageStore) => Partial<MessageStore>) => void,
+    )
 
     try {
       for await (const event of streamMessages(client, conversationId, content)) {
-        const agentKey = event.agent_id ?? MAIN_AGENT_KEY
+        if (event.event_id && get().lastAppliedEventId) {
+          if (compareEventIds(event.event_id, get().lastAppliedEventId!) <= 0) continue
+        }
 
-        if (event.type === 'text_delta') {
-          const e = event as TextDeltaEvent
-          batchedSet((s) => {
-            const prev = s.streamAgents[agentKey] ?? emptyStream(event.agent_name)
-            return {
-              streamAgents: {
-                ...s.streamAgents,
-                [agentKey]: {
-                  ...prev,
-                  text: prev.text + e.data.content,
-                  blocks: appendBlock(prev.blocks, 'text', e.data.content),
-                },
-              },
-            }
-          })
-        } else if (event.type === 'reasoning') {
-          const e = event as ReasoningEvent
-          batchedSet((s) => {
-            const prev = s.streamAgents[agentKey] ?? emptyStream(event.agent_name)
-            return {
-              streamAgents: {
-                ...s.streamAgents,
-                [agentKey]: {
-                  ...prev,
-                  reasoning: prev.reasoning + e.data.content,
-                  blocks: appendBlock(prev.blocks, 'reasoning', e.data.content),
-                },
-              },
-            }
-          })
-        } else if (event.type === 'tool_call') {
-          const e = event as ToolCallEvent
-          batchedSet((s) => {
-            const prev = s.streamAgents[agentKey] ?? emptyStream(event.agent_name)
-            const existingStartedAt = s.toolStartedMap[e.data.tool_call_id]
-
-            let nextTodos = s.todos
-            if (e.data.name === 'write_todos') {
-              nextTodos = parseTodosFromToolCall(e.data.arguments)
-            }
-
-            return {
-              todos: nextTodos,
-              toolStartedMap: {
-                ...s.toolStartedMap,
-                [e.data.tool_call_id]:
-                  existingStartedAt ??
-                  (e.data.started_at ? new Date(e.data.started_at).getTime() : Date.now()),
-              },
-              streamAgents: {
-                ...s.streamAgents,
-                [agentKey]: {
-                  ...prev,
-                  toolCalls: [...prev.toolCalls, e],
-                  blocks: appendToolCallBlock(
-                    prev.blocks,
-                    e.data.name,
-                    e.data.arguments,
-                    e.data.tool_call_id,
-                  ),
-                },
-              },
-            }
-          })
-        } else if (event.type === 'tool_call_delta') {
-          const e = event as ToolCallDeltaEvent
-          batchedSet((s) => {
-            const prev = s.streamAgents[agentKey] ?? emptyStream(event.agent_name)
-            const idx = e.data.index ?? 0
-            const blocks = [...prev.blocks]
-            const startedAt = e.timestamp ? new Date(e.timestamp).getTime() : Date.now()
-            const nextToolStartedMap =
-              e.data.tool_call_id && !s.toolStartedMap[e.data.tool_call_id]
-                ? {
-                    ...s.toolStartedMap,
-                    [e.data.tool_call_id]: startedAt,
-                  }
-                : s.toolStartedMap
-
-            // Find existing streaming block for this index
-            const existingIdx = blocks.findIndex(
-              (b) => b.type === 'tool_call_streaming' && b.index === idx,
-            )
-
-            if (existingIdx >= 0) {
-              const existing = blocks[existingIdx] as Extract<
-                ContentBlock,
-                { type: 'tool_call_streaming' }
-              >
-              blocks[existingIdx] = {
-                ...existing,
-                args_text: existing.args_text + (e.data.args_delta || ''),
-                tool_call_id: e.data.tool_call_id ?? existing.tool_call_id,
-              }
-              return {
-                toolStartedMap: nextToolStartedMap,
-                streamAgents: {
-                  ...s.streamAgents,
-                  [agentKey]: { ...prev, blocks },
-                },
-              }
-            }
-
-            // Create new streaming block
-            const finalized = finalizeLastReasoning(blocks)
-            finalized.push({
-              type: 'tool_call_streaming',
-              name: e.data.name ?? '',
-              args_text: e.data.args_delta || '',
-              tool_call_id: e.data.tool_call_id ?? null,
-              index: idx,
-            })
-            return {
-              toolStartedMap: nextToolStartedMap,
-              streamAgents: {
-                ...s.streamAgents,
-                [agentKey]: { ...prev, blocks: finalized },
-              },
-            }
-          })
-        } else if (event.type === 'tool_result') {
-          const e = event as ToolResultEvent
-          const tcId = e.data.tool_call_id ?? ''
-          batchedSet((s) => {
-            const newMap = { ...s.toolResultMap }
-            if (tcId) {
-              newMap[tcId] = {
-                content: e.data.content,
-                receivedAt: Date.now(),
-                startedAt:
-                  s.toolStartedMap[tcId] ??
-                  (e.data.started_at ? new Date(e.data.started_at).getTime() : undefined),
-                contentType: e.data.content_type,
-              }
-            }
-
-            return {
-              toolResultMap: newMap,
-              streamAgents: {
-                ...s.streamAgents,
-                [agentKey]: {
-                  ...(s.streamAgents[agentKey] ?? emptyStream(event.agent_name)),
-                  toolResults: [...(s.streamAgents[agentKey]?.toolResults ?? []), e],
-                },
-              },
-            }
-          })
-        } else if (event.type === 'artifact') {
+        if (event.type === 'artifact') {
           const artifactData = event.data as unknown as ArtifactEventData
           if (artifactData.artifact) {
             const { useArtifactStore } = await import('./artifactStore')
@@ -406,125 +683,35 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
         } else if (event.type === 'citation') {
           const citationData = event.data as unknown as import('../types').CitationData
           useCitationStore.getState().addCitation(conversationId, citationData)
-        } else if (event.type === 'status') {
-          batchedSet(() => ({ statusPhase: (event.data as { phase: string }).phase }))
-        } else if (event.type === 'done') {
-          break
         } else if (event.type === 'error') {
           const errData = event.data as { message: string; details?: string }
-          set({ error: errData.details || errData.message })
+          set({
+            error: errData.details || errData.message,
+            lastAppliedEventId: nextEventId(get().lastAppliedEventId, event.event_id),
+          })
+          break
+        } else if (event.type === 'done') {
+          set({
+            lastAppliedEventId: nextEventId(get().lastAppliedEventId, event.event_id),
+          })
           break
         }
+
+        batchedSet((s) => applyStreamEvent(s, event))
       }
     } catch (err) {
-      set({ error: (err as Error).message })
+      set({
+        error: (err as Error).message,
+        isStreaming: false,
+        streamingConversationId: null,
+        currentRunId: null,
+      })
+      return
     } finally {
-      // Flush any pending batched updates so streamAgents is fully up-to-date
       flush()
-
-      // Build final assistant message from accumulated main agent stream
-      const agents = get().streamAgents
-      const mainStream = agents[MAIN_AGENT_KEY]
-      if (mainStream) {
-        // Finalize any pending reasoning block and strip internal started_at field
-        const finalBlocks = finalizeLastReasoning(mainStream.blocks)
-          .filter((b) => b.type !== 'tool_call_streaming')
-          .map((b) => {
-            if (b.type === 'reasoning') {
-              const { started_at: _, ...rest } = b
-              return rest
-            }
-            return b
-          })
-        const assistantMessage: Message = {
-          id: `assistant-${Date.now()}`,
-          role: 'assistant',
-          content: mainStream.text || null,
-          tool_calls:
-            mainStream.toolCalls.length > 0
-              ? mainStream.toolCalls.map((tc) => ({
-                  name: tc.data.name,
-                  arguments: tc.data.arguments,
-                  tool_call_id: tc.data.tool_call_id,
-                  started_at: tc.data.started_at ?? null,
-                }))
-              : null,
-          reasoning: mainStream.reasoning || null,
-          blocks: finalBlocks.length > 0 ? finalBlocks : null,
-          created_at: new Date().toISOString(),
-        }
-
-        // Build tool messages for subagent streams so cards render after streaming ends
-        const toolMessages: Message[] = []
-        // Extract role/task from main stream's subagent tool_call blocks
-        const subagentArgs: Record<string, { role?: string; task?: string }> = {}
-        for (const block of finalBlocks) {
-          if (block.type === 'tool_call' && block.name === 'subagent') {
-            const args = block.arguments as { role?: string; task?: string }
-            subagentArgs[`subagent:${block.tool_call_id}`] = args
-          }
-        }
-        for (const [key, agentStream] of Object.entries(agents)) {
-          if (key === MAIN_AGENT_KEY) continue
-          // key is like "subagent:<tool_call_id>"
-          const toolCallId = key.startsWith('subagent:') ? key.slice(9) : key
-          const args = subagentArgs[key]
-          const currentToolResultMap = get().toolResultMap
-          toolMessages.push({
-            id: `tool-${toolCallId}-${Date.now()}`,
-            role: 'tool',
-            content: agentStream.text || null,
-            name: 'subagent',
-            tool_call_id: toolCallId,
-            subagent_events: {
-              text: agentStream.text,
-              tool_calls: agentStream.toolCalls.map((tc) => ({
-                name: tc.data.name,
-                arguments: tc.data.arguments,
-                tool_call_id: tc.data.tool_call_id,
-                started_at: tc.data.started_at ?? (tc.timestamp || null),
-              })),
-              tool_results: agentStream.toolResults
-                .map((tr) => {
-                  const mapEntry = currentToolResultMap[tr.data.tool_call_id ?? '']
-                  return {
-                    tool_name: tr.data.tool_name ?? '',
-                    tool_call_id: tr.data.tool_call_id ?? '',
-                    content: tr.data.content ?? '',
-                    content_type: tr.data.content_type ?? mapEntry?.contentType ?? null,
-                    started_at: tr.data.started_at ?? null,
-                    completed_at: tr.timestamp || null,
-                  }
-                })
-                .filter((tr) => tr.tool_call_id),
-              reasoning: agentStream.reasoning,
-              role: args?.role,
-              task: args?.task,
-            },
-            created_at: new Date().toISOString(),
-          })
-        }
-
-        set((s) => ({
-          messages: {
-            ...s.messages,
-            [conversationId]: [
-              ...(s.messages[conversationId] ?? []),
-              assistantMessage,
-              ...toolMessages,
-            ],
-          },
-          isStreaming: false,
-          streamingConversationId: null,
-          statusPhase: null,
-          // Keep streamAgents intact — the same AssistantMessage component stays
-          // mounted and transitions smoothly from streaming to completed state.
-          // Cleared on next send() or loadMessages().
-        }))
-      } else {
-        set({ isStreaming: false, streamingConversationId: null, statusPhase: null })
-      }
     }
+
+    await finalizeCompletedStream(get, set, conversationId)
   },
 
   clearStream() {
@@ -532,6 +719,8 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
       streamAgents: {},
       isStreaming: false,
       streamingConversationId: null,
+      currentRunId: null,
+      lastAppliedEventId: null,
       statusPhase: null,
       todos: [],
       toolStartedMap: {},

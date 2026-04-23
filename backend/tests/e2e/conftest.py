@@ -26,6 +26,7 @@ from cubebox.repositories import (
     WorkspaceRepository,
 )
 from cubebox.sandbox.local import LocalSandbox
+from tests.e2e.fake_redis import FakeRedis
 
 
 @pytest.fixture(autouse=True)
@@ -70,7 +71,7 @@ def _make_test_app() -> FastAPI:
         async with test_session_maker() as session:
             yield session
 
-    app = create_app()
+    app = create_app(redis_factory=FakeRedis)
     app.dependency_overrides[get_session] = override_get_session
     return app
 
@@ -88,7 +89,11 @@ def _make_memory_test_app() -> FastAPI:
             yield session
 
     memory_saver = MemorySaver()
-    app = create_app(checkpointer_factory=lambda: memory_saver, sandbox_factory=LocalSandbox)
+    app = create_app(
+        checkpointer_factory=lambda: memory_saver,
+        sandbox_factory=LocalSandbox,
+        redis_factory=FakeRedis,
+    )
     app.dependency_overrides[get_session] = override_get_session
     return app
 

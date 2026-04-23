@@ -1,0 +1,577 @@
+"""Background run orchestration decoupled from HTTP connections."""
+
+from __future__ import annotations
+
+import asyncio
+from contextlib import suppress
+from dataclasses import dataclass
+from datetime import UTC, datetime
+from typing import Any
+
+from fastapi import FastAPI
+from langchain_core.messages import HumanMessage
+from loguru import logger
+from redis.asyncio import Redis
+from uuid_utils import uuid7
+
+from cubebox.agents.schemas import AgentEvent, DoneEvent, ErrorEvent, StatusEvent
+from cubebox.streams.run_events import (
+    append_run_event,
+    clear_active_run,
+    create_run,
+    expire_run_data,
+    get_active_run,
+    update_run_meta,
+)
+from cubebox.utils.time import utc_isoformat
+
+
+@dataclass(slots=True)
+class RunContext:
+    """Scoped context required to execute a run."""
+
+    user_id: str
+    org_id: str
+    workspace_id: str
+    skills: list[Any]
+
+
+def _ns_to_agent_id(ns: tuple[Any, ...]) -> str | None:
+    if not ns:
+        return None
+    return ":".join(str(part) for part in ns)
+
+
+def _backfill_tool_call_delta_identity(
+    evt_dict: dict[str, Any],
+    delta_context: dict[tuple[str | None, int], dict[str, Any]],
+) -> dict[str, Any]:
+    if evt_dict.get("type") != "tool_call_delta":
+        return evt_dict
+
+    data = evt_dict.get("data")
+    if not isinstance(data, dict):
+        return evt_dict
+
+    index = data.get("index")
+    if not isinstance(index, int):
+        return evt_dict
+
+    key = (evt_dict.get("agent_id"), index)
+    cached = delta_context.get(key, {})
+    normalized_data = dict(data)
+
+    if normalized_data.get("tool_call_id") is None and cached.get("tool_call_id") is not None:
+        normalized_data["tool_call_id"] = cached["tool_call_id"]
+    if normalized_data.get("name") is None and cached.get("name") is not None:
+        normalized_data["name"] = cached["name"]
+
+    delta_context[key] = {
+        "tool_call_id": normalized_data.get("tool_call_id"),
+        "name": normalized_data.get("name"),
+    }
+    return {**evt_dict, "data": normalized_data}
+
+
+def _dicts_to_sse_events(
+    event_dicts: list[dict[str, Any]],
+    delta_context: dict[tuple[str | None, int], dict[str, Any]] | None = None,
+) -> list[AgentEvent]:
+    from cubebox.agents.schemas import (
+        ArtifactEvent,
+        CitationEvent,
+        ReasoningEvent,
+        TextDeltaEvent,
+        ToolCallDeltaEvent,
+        ToolCallEvent,
+        ToolResultEvent,
+    )
+
+    events: list[AgentEvent] = []
+    for evt_dict in event_dicts:
+        if delta_context is not None:
+            evt_dict = _backfill_tool_call_delta_identity(evt_dict, delta_context)
+        evt_type = evt_dict.get("type")
+        if evt_type == "reasoning":
+            events.append(
+                ReasoningEvent(
+                    timestamp=evt_dict["timestamp"],
+                    data=evt_dict["data"],
+                    agent_id=evt_dict.get("agent_id"),
+                    agent_name=evt_dict.get("agent_name"),
+                )
+            )
+        elif evt_type == "tool_call":
+            events.append(
+                ToolCallEvent(
+                    timestamp=evt_dict["timestamp"],
+                    data=evt_dict["data"],
+                    agent_id=evt_dict.get("agent_id"),
+                    agent_name=evt_dict.get("agent_name"),
+                )
+            )
+        elif evt_type == "tool_result":
+            events.append(
+                ToolResultEvent(
+                    timestamp=evt_dict["timestamp"],
+                    data=evt_dict["data"],
+                    agent_id=evt_dict.get("agent_id"),
+                    agent_name=evt_dict.get("agent_name"),
+                )
+            )
+        elif evt_type == "text_delta":
+            events.append(
+                TextDeltaEvent(
+                    timestamp=evt_dict["timestamp"],
+                    data=evt_dict["data"],
+                    agent_id=evt_dict.get("agent_id"),
+                    agent_name=evt_dict.get("agent_name"),
+                )
+            )
+        elif evt_type == "tool_call_delta":
+            events.append(
+                ToolCallDeltaEvent(
+                    timestamp=evt_dict["timestamp"],
+                    data=evt_dict["data"],
+                    agent_id=evt_dict.get("agent_id"),
+                    agent_name=evt_dict.get("agent_name"),
+                )
+            )
+        elif evt_type == "artifact":
+            events.append(
+                ArtifactEvent(
+                    timestamp=evt_dict["timestamp"],
+                    data=evt_dict["data"],
+                    agent_id=evt_dict.get("agent_id"),
+                    agent_name=evt_dict.get("agent_name"),
+                )
+            )
+        elif evt_type == "citation":
+            events.append(
+                CitationEvent(
+                    timestamp=evt_dict["timestamp"],
+                    data=evt_dict["data"],
+                    agent_id=evt_dict.get("agent_id"),
+                    agent_name=evt_dict.get("agent_name"),
+                )
+            )
+    return events
+
+
+class RunManager:
+    """Owns background run execution and Redis persistence."""
+
+    def __init__(
+        self,
+        *,
+        app: FastAPI,
+        redis: Redis,
+        key_prefix: str,
+        run_event_ttl_seconds: int,
+    ) -> None:
+        self._app = app
+        self._redis = redis
+        self._key_prefix = key_prefix
+        self._run_event_ttl_seconds = run_event_ttl_seconds
+        self._tasks: dict[str, asyncio.Task[None]] = {}
+
+    async def start_run(
+        self,
+        *,
+        conversation_id: str,
+        content: str,
+        ctx: RunContext,
+    ) -> str:
+        """Create and start a new background run."""
+        existing = await get_active_run(
+            self._redis,
+            prefix=self._key_prefix,
+            conversation_id=conversation_id,
+        )
+        if existing and existing.status == "running":
+            raise RuntimeError(f"Conversation {conversation_id} already has an active run")
+
+        run_id = str(uuid7())
+        started_at = utc_isoformat(datetime.now(UTC))
+        await create_run(
+            self._redis,
+            prefix=self._key_prefix,
+            run_id=run_id,
+            conversation_id=conversation_id,
+            status="running",
+            started_at=started_at,
+            user_message=content,
+        )
+
+        task = asyncio.create_task(
+            self._execute_run(
+                run_id=run_id,
+                conversation_id=conversation_id,
+                content=content,
+                ctx=ctx,
+            ),
+            name=f"run:{run_id}",
+        )
+        self._tasks[run_id] = task
+        task.add_done_callback(lambda _: self._tasks.pop(run_id, None))
+        return run_id
+
+    async def shutdown(self) -> None:
+        """Cancel all in-flight run tasks."""
+        tasks = list(self._tasks.values())
+        for task in tasks:
+            task.cancel()
+        for task in tasks:
+            with suppress(asyncio.CancelledError):
+                await task
+
+    async def _append_event(self, run_id: str, event: AgentEvent) -> str:
+        payload = event.model_dump()
+        return await append_run_event(
+            self._redis,
+            prefix=self._key_prefix,
+            run_id=run_id,
+            payload=payload,
+        )
+
+    async def _append_error(self, run_id: str, message: str, details: str | None = None) -> None:
+        error_event = ErrorEvent(
+            timestamp=datetime.now(UTC).isoformat(),
+            data={
+                "error_code": "run_error",
+                "message": message,
+                "details": details or message,
+            },
+        )
+        await self._append_event(run_id, error_event)
+
+    async def _execute_run(
+        self,
+        *,
+        run_id: str,
+        conversation_id: str,
+        content: str,
+        ctx: RunContext,
+    ) -> None:
+        from cubebox.api.routes.v1.conversations import _update_conversation_timestamp
+        from cubebox.middleware.citations.counter import (
+            CitationCounter,
+            citation_counter_var,
+            citation_event_queue,
+        )
+        from cubebox.middleware.subagents import subagent_event_queue
+
+        checkpointer = None
+        sandbox = None
+        sandbox_manager = None
+        sandbox_create_task: asyncio.Task[Any] | None = None
+        stream_task: asyncio.Task[None] | None = None
+        event_q: asyncio.Queue[tuple[str, Any, Any] | None] = asyncio.Queue()
+        cv_token = subagent_event_queue.set(event_q)
+
+        citation_counter = CitationCounter(start=1)
+        cc_token = citation_counter_var.set(citation_counter)
+        ce_token = citation_event_queue.set(event_q)
+
+        tool_delta_context: dict[tuple[str | None, int], dict[str, Any]] = {}
+        citation_buffers: dict[str | None, str] = {}
+
+        async def emit_status(phase: str, detail: str | None = None) -> None:
+            data: dict[str, str] = {"phase": phase}
+            if detail:
+                data["detail"] = detail
+            await self._append_event(
+                run_id,
+                StatusEvent(
+                    timestamp=datetime.now(UTC).isoformat(),
+                    data=data,
+                ),
+            )
+
+        async def publish_event(event: AgentEvent) -> None:
+            await self._append_event(run_id, event)
+
+        async def flush_citation_buffer(
+            agent_key: str | None,
+            fallback_agent_id: str | None,
+        ) -> None:
+            buf = citation_buffers.get(agent_key, "")
+            if not buf:
+                return
+            from cubebox.agents.schemas import TextDeltaEvent
+
+            citation_buffers[agent_key] = ""
+            await publish_event(
+                TextDeltaEvent(
+                    timestamp=datetime.now(UTC).isoformat(),
+                    data={
+                        "content": buf,
+                        "usage": {"input_tokens": 0, "output_tokens": 0},
+                    },
+                    agent_id=fallback_agent_id,
+                )
+            )
+
+        async def publish_stream_event(sse_event: AgentEvent, agent_key: str | None) -> None:
+            if sse_event.type == "text_delta":
+                buffered = citation_buffers.get(agent_key, "") + str(
+                    sse_event.data.get("content", "")
+                )
+                citation_buffers[agent_key] = ""
+                last_open = buffered.rfind("【")
+                if last_open != -1 and "】" not in buffered[last_open:]:
+                    citation_buffers[agent_key] = buffered[last_open:]
+                    buffered = buffered[:last_open]
+                if buffered:
+                    sse_event.data["content"] = buffered
+                    await publish_event(sse_event)
+                return
+
+            await flush_citation_buffer(agent_key, sse_event.agent_id)
+            await publish_event(sse_event)
+
+        try:
+            factory = getattr(self._app.state, "checkpointer_factory", None)
+            if factory:
+                checkpointer = factory()
+            else:
+                from cubebox.agents.checkpointer import create_checkpointer
+
+                checkpointer = await create_checkpointer()
+
+            sandbox_factory = getattr(self._app.state, "sandbox_factory", None)
+            if sandbox_factory:
+                sandbox = sandbox_factory()
+            else:
+                from cubebox.config import config
+
+                sandbox_enabled = config.get("sandbox.enabled", False)
+                if sandbox_enabled:
+                    try:
+                        from cubebox.sandbox.lazy import LazySandbox
+                        from cubebox.sandbox.manager import get_sandbox_manager
+
+                        sandbox_manager = get_sandbox_manager()
+                        sandbox = LazySandbox(
+                            manager=sandbox_manager,
+                            user_id=ctx.user_id,
+                            org_id=ctx.org_id,
+                            workspace_id=ctx.workspace_id,
+                            workdir=config.get("sandbox.workdir", "/workspace"),
+                        )
+                    except Exception as exc:
+                        logger.warning("Sandbox unavailable, continuing without: {}", exc)
+                        await emit_status("sandbox_failed", detail=str(exc))
+
+            from cubebox.agents.graph import create_cubebox_agent
+            from cubebox.llm.factory import LLMFactory
+            from cubebox.middleware.citations import CitationConfig, load_citation_configs
+            from cubebox.tools import get_registry
+
+            llm = LLMFactory().create_default()
+            tools = get_registry().list_tools()
+
+            all_citation_configs: dict[str, CitationConfig] = {}
+            try:
+                from cubebox.config import config as app_config
+
+                mcp_servers = app_config.get("mcp.servers", {})
+                for _server_name, server_cfg in (mcp_servers or {}).items():
+                    tool_defs = server_cfg.get("tools", [])
+                    if tool_defs:
+                        all_citation_configs.update(load_citation_configs(tool_defs))
+            except Exception as exc:
+                logger.debug("Failed to load citation configs: {}", exc)
+
+            agent = create_cubebox_agent(
+                llm=llm,
+                tools=tools,
+                sandbox=sandbox,
+                conversation_id=conversation_id,
+                org_id=ctx.org_id,
+                workspace_id=ctx.workspace_id,
+                skills=ctx.skills,
+                checkpointer=checkpointer,
+                citation_configs=all_citation_configs,
+                event_queue=event_q,
+            )
+            config_dict = {"configurable": {"thread_id": conversation_id}}
+
+            async def drain_main_stream() -> None:
+                try:
+                    human_msg = HumanMessage(
+                        content=content,
+                        response_metadata={"created_at": datetime.now(UTC).isoformat()},
+                    )
+                    async for event in agent.astream(  # type: ignore[call-overload]
+                        {"messages": [human_msg]},
+                        stream_mode=["messages", "updates"],
+                        stream_subgraphs=True,
+                        config=config_dict,
+                    ):
+                        ns: tuple[Any, ...] = ()
+                        payload = event
+                        if isinstance(event, tuple) and len(event) == 2:
+                            first, second = event
+                            if isinstance(first, tuple):
+                                ns = first
+                                payload = second
+                        await event_q.put(("main", ns, payload))
+                except asyncio.CancelledError:
+                    raise
+                except Exception as exc:
+                    await event_q.put(("error", None, exc))
+                finally:
+                    await event_q.put(None)
+
+            from cubebox.agents.stream import convert_messages_chunk, convert_updates_chunk
+
+            stream_task = asyncio.create_task(drain_main_stream())
+
+            while True:
+                item = await event_q.get()
+                if item is None:
+                    break
+
+                kind = item[0]
+                if kind == "main":
+                    ns, payload = item[1], item[2]
+                    agent_id = _ns_to_agent_id(ns)
+                    if isinstance(payload, tuple) and len(payload) == 2:
+                        mode, data = payload
+                        if mode == "messages":
+                            evts = convert_messages_chunk(data, agent_id=agent_id)
+                        elif mode == "updates":
+                            evts = convert_updates_chunk(data, agent_id=agent_id)
+                        else:
+                            evts = []
+                        for sse_event in _dicts_to_sse_events(evts, tool_delta_context):
+                            await publish_stream_event(sse_event, agent_id)
+                elif kind == "subagent":
+                    sa_agent_id, payload = item[1], item[2]
+                    if isinstance(payload, tuple) and len(payload) == 2:
+                        mode, data = payload
+                        if mode == "messages":
+                            evts = convert_messages_chunk(data, agent_id=sa_agent_id)
+                        elif mode == "updates":
+                            evts = convert_updates_chunk(data, agent_id=sa_agent_id)
+                        else:
+                            evts = []
+                        for sse_event in _dicts_to_sse_events(evts, tool_delta_context):
+                            await publish_stream_event(sse_event, sa_agent_id)
+                elif kind == "citation":
+                    from cubebox.agents.schemas import CitationEvent
+
+                    citation_event = CitationEvent(
+                        timestamp=datetime.now(UTC).isoformat(),
+                        data=item[2],
+                        agent_id=item[1],
+                    )
+                    await publish_event(citation_event)
+                elif kind == "error":
+                    raise item[2]
+
+            for agent_key in list(citation_buffers):
+                await flush_citation_buffer(agent_key, agent_key)
+
+            if stream_task is not None:
+                await stream_task
+
+            await _update_conversation_timestamp(
+                conversation_id,
+                org_id=ctx.org_id,
+                workspace_id=ctx.workspace_id,
+                user_id=ctx.user_id,
+            )
+            await update_run_meta(
+                self._redis,
+                prefix=self._key_prefix,
+                run_id=run_id,
+                status="completed",
+            )
+            await self._append_event(
+                run_id,
+                DoneEvent(timestamp=datetime.now(UTC).isoformat()),
+            )
+        except asyncio.CancelledError:
+            await update_run_meta(
+                self._redis,
+                prefix=self._key_prefix,
+                run_id=run_id,
+                status="cancelled",
+            )
+            with suppress(Exception):
+                await self._append_error(run_id, "Run cancelled", "Run cancelled")
+            raise
+        except Exception as exc:
+            logger.error("Run {} failed: {}", run_id, exc, exc_info=True)
+            await update_run_meta(
+                self._redis,
+                prefix=self._key_prefix,
+                run_id=run_id,
+                status="failed",
+            )
+            with suppress(Exception):
+                await self._append_error(
+                    run_id,
+                    "An unexpected error occurred during execution",
+                    str(exc),
+                )
+        finally:
+            if stream_task is not None and not stream_task.done():
+                stream_task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await stream_task
+
+            if sandbox_create_task is not None and not sandbox_create_task.done():
+                sandbox_create_task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await sandbox_create_task
+
+            try:
+                subagent_event_queue.reset(cv_token)
+            except ValueError:
+                subagent_event_queue.set(None)
+            try:
+                citation_counter_var.reset(cc_token)
+            except ValueError:
+                citation_counter_var.set(None)
+            try:
+                citation_event_queue.reset(ce_token)
+            except ValueError:
+                citation_event_queue.set(None)
+
+            if sandbox:
+                from cubebox.sandbox.lazy import LazySandbox
+
+                if isinstance(sandbox, LazySandbox) and sandbox.initialized:
+                    with suppress(Exception):
+                        await sandbox._manager.release(
+                            sandbox.id,
+                            org_id=ctx.org_id,
+                            workspace_id=ctx.workspace_id,
+                        )
+                elif sandbox_manager and not isinstance(sandbox, LazySandbox):
+                    with suppress(Exception):
+                        await sandbox_manager.release(
+                            sandbox.id,
+                            org_id=ctx.org_id,
+                            workspace_id=ctx.workspace_id,
+                        )
+
+            if checkpointer is not None and hasattr(checkpointer, "conn"):
+                with suppress(Exception):
+                    checkpointer.conn.close()
+
+            await clear_active_run(
+                self._redis,
+                prefix=self._key_prefix,
+                conversation_id=conversation_id,
+                run_id=run_id,
+            )
+            await expire_run_data(
+                self._redis,
+                prefix=self._key_prefix,
+                run_id=run_id,
+                ttl_seconds=self._run_event_ttl_seconds,
+            )

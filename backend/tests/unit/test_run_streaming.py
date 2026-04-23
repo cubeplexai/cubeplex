@@ -1,0 +1,142 @@
+"""Run streaming runtime tests."""
+
+import json
+from types import SimpleNamespace
+
+import pytest
+from langgraph.checkpoint.memory import MemorySaver
+
+from cubebox.api.routes.v1 import conversations as conversations_route
+from cubebox.auth.context import RequestContext
+from cubebox.models import Role
+from cubebox.streams.run_manager import RunManager
+from tests.e2e.fake_redis import FakeRedis
+
+
+class _DummySessionContext:
+    async def __aenter__(self) -> object:
+        return object()
+
+    async def __aexit__(self, exc_type, exc, tb) -> bool:
+        return False
+
+
+class _FakeMessage:
+    type = "ai"
+
+    def __init__(self, content: str) -> None:
+        self.content = content
+        self.additional_kwargs: dict[str, object] = {}
+        self.name = None
+        self.tool_call_chunks: list[dict[str, object]] = []
+        self.usage_metadata: dict[str, object] = {}
+
+
+class _FakeAgent:
+    async def astream(self, *_args, **_kwargs):
+        yield ((), ("messages", (_FakeMessage("hello"), {})))
+        yield ((), ("messages", (_FakeMessage(" world"), {})))
+
+
+class _FakeLLMFactory:
+    def create_default(self) -> object:
+        return object()
+
+
+class _FakeRegistry:
+    def list_tools(self) -> list[object]:
+        return []
+
+    def get_content_type(self, _tool_name: str) -> None:
+        return None
+
+
+async def _fake_get_by_id(self, conversation_id: str):
+    return SimpleNamespace(id=conversation_id, title=conversation_id)
+
+
+async def _noop_update_timestamp(*args, **kwargs) -> None:
+    return None
+
+
+@pytest.mark.asyncio
+async def test_run_bootstrap_and_stream_replay(monkeypatch: pytest.MonkeyPatch) -> None:
+    redis = FakeRedis()
+    app = SimpleNamespace(state=SimpleNamespace())
+    app.state.redis = redis
+    app.state.redis_key_prefix = "test"
+    app.state.checkpointer_factory = lambda: MemorySaver()
+    app.state.sandbox_factory = lambda: None
+    app.state.skills = []
+    app.state.run_manager = RunManager(
+        app=app,
+        redis=redis,
+        key_prefix="test",
+        run_event_ttl_seconds=900,
+    )
+
+    raw_request = SimpleNamespace(app=app, headers={})
+    fake_user = SimpleNamespace(id="test-user", email="test@example.com")
+    ctx = RequestContext(  # type: ignore[arg-type]
+        user=fake_user,
+        org_id="default-org",
+        workspace_id="default-ws",
+        role=Role.ADMIN,
+    )
+
+    monkeypatch.setattr(
+        conversations_route,
+        "async_session_maker",
+        lambda: _DummySessionContext(),
+    )
+    monkeypatch.setattr(conversations_route.ConversationRepository, "get_by_id", _fake_get_by_id)
+    monkeypatch.setattr(
+        conversations_route,
+        "_update_conversation_timestamp",
+        _noop_update_timestamp,
+    )
+
+    import cubebox.agents.graph
+    import cubebox.llm.factory
+    import cubebox.tools
+
+    monkeypatch.setattr(
+        cubebox.agents.graph, "create_cubebox_agent", lambda **_kwargs: _FakeAgent()
+    )
+    monkeypatch.setattr(cubebox.llm.factory, "LLMFactory", _FakeLLMFactory)
+    monkeypatch.setattr(cubebox.tools, "get_registry", lambda: _FakeRegistry())
+
+    send_response = await conversations_route.send_message(
+        "conv-1",
+        conversations_route.SendMessageRequest(content="hi"),
+        raw_request,
+        ctx,
+    )
+    assert isinstance(send_response, conversations_route.SendMessageResponse)
+    run_id = send_response.run_id
+
+    bootstrap = await conversations_route.get_conversation_bootstrap(
+        "conv-1",
+        raw_request,
+        object(),
+        ctx,
+    )
+    assert bootstrap["active_run"]["run_id"] == run_id
+    assert bootstrap["active_run"]["user_message"] == "hi"
+
+    stream_response = await conversations_route.stream_run(
+        "conv-1", run_id, raw_request, object(), ctx
+    )
+    events: list[dict[str, object]] = []
+    async for chunk in stream_response.body_iterator:
+        line = chunk.strip()
+        if isinstance(line, bytes):
+            line = line.decode()
+        for part in str(line).split("\n"):
+            if part.startswith("data: "):
+                events.append(json.loads(part[6:]))
+        if events and events[-1]["type"] == "done":
+            break
+
+    assert [event["type"] for event in events] == ["text_delta", "text_delta", "done"]
+    assert all("event_id" in event for event in events)

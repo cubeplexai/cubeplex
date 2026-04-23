@@ -62,6 +62,7 @@ export interface AgentEvent {
   data: Record<string, unknown>
   agent_id: string | null
   agent_name: string | null
+  event_id?: string
 }
 
 export interface TextDeltaEvent extends AgentEvent {

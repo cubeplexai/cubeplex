@@ -1,9 +1,7 @@
 /**
  * Conversations messages endpoint — Route Handler proxy.
  *
- * POST: SSE streaming proxy that bypasses Next.js rewrite proxy (which uses
- *   http-proxy with 30s default timeout and response buffering). Pipes the
- *   backend SSE stream through the Web Streams API — no timeout, no buffering.
+ * POST: JSON proxy for starting a background run.
  *
  * GET: Plain JSON proxy for message history (list messages).
  */
@@ -55,30 +53,17 @@ export async function POST(
   const backendRes = await fetch(`${BACKEND_URL}/api/v1/ws/${wsId}/conversations/${id}/messages`, {
     method: 'POST',
     headers: {
-      ...buildProxyHeaders(request, 'text/event-stream'),
+      ...buildProxyHeaders(request, 'application/json'),
       'Content-Type': 'application/json',
     },
     body,
   })
 
-  if (!backendRes.ok || !backendRes.body) {
-    const headers = new Headers({ 'Content-Type': 'application/json' })
-    appendSetCookie(headers, backendRes.headers)
-    return new Response(await backendRes.text(), {
-      status: backendRes.status,
-      headers,
-    })
-  }
-
-  // Pipe the backend SSE stream straight through — no buffering
   const headers = new Headers({
-    'Content-Type': 'text/event-stream',
-    'Cache-Control': 'no-cache, no-transform',
-    Connection: 'keep-alive',
-    'X-Accel-Buffering': 'no',
+    'Content-Type': backendRes.headers.get('content-type') ?? 'application/json',
   })
   appendSetCookie(headers, backendRes.headers)
-  return new Response(backendRes.body, {
+  return new Response(await backendRes.text(), {
     status: backendRes.status,
     headers,
   })
