@@ -64,7 +64,8 @@
 | D18 | CI **不**起真 docling-serve；mock `DoclingParser` | 真实服务跑 e2e | docling-serve 不在 backend 关键链路（挂掉只影响 file_read）；mock 充分 |
 | D19 | Tool description 是本 spec 的**固定产出**，逐字进 StructuredTool | 只写大致 | agent 使用率/误用率高度依赖 description；一字一句都要审 |
 | D20 | dedup cache 直接走 **Redis**（CI 已挂 redis service；backend 增加 redis-py async client） | 进程内 dict + session-sticky routing | conversation 没有明确"结束"事件，Redis TTL 替代 lifecycle 钩子；多副本天然共享；重启不丢热缓存 |
-| D21 | `ParseOptions` 提供两个独立 range 参数：`page_range`（PDF/DOCX/PPTX）+ `line_range`（text/code/log） | 单一通用 `range` 字段 / 只 page_range / 不做 | text 文件用行号比页号自然；分两参数语义清晰；plugin 各取所需，互不影响；cache key 由 dispatch 层把 options 整体签入即可 |
+| D21 | `ParseOptions` 提供两个独立 range 参数：`page_range`（PDF/DOCX/PPTX）+ `line_range`（text/code/log）；两者共享 4 种语法 `"N"` / `"M-N"` / `"M-"` / `"-N"` | 单一通用 `range` 字段 / 只 page_range / 只支持 `"M-N"` | text 文件用行号比页号自然；分两参数语义清晰；语法对齐 sed/tail 直觉（`"3-"` = 从第 3 起；`"-3"` = 末尾 3 个）；plugin 各取所需，互不影响 |
+| D23 | 截断时 metadata 必含"下一个该读位置"：`next_line_to_read`（text）/ `next_page_to_read`（PDF，best-effort）/ `next_cell_index`（notebook） | 仅返 truncated=True，agent 自己猜 | agent 续读 round-trip 零思考成本；DoclingParser 的 page 信息是 best-effort（取决于 docling-serve 输出能否解析到页号） |
 | D22 | **不维护 REJECT_EXT / REJECT_MIME 硬名单**；"哪些格式支持"完全由 plugin 注册决定，未匹配 → `unsupported` + 智能 hint | hardcoded REJECT 视频/音频/归档/可执行 | 双数据源维护成本；REJECT 阻断合法扩展（mp4 转写 / zip listing / exe 元数据等 plugin 被预先枪毙）；零性能收益；零安全收益（file_read 是只读，读 .exe 字节无副作用） |
 
 ---
@@ -264,9 +265,20 @@ def discover() -> ParserRegistry:
 **parse 行为**：
 1. UTF-8 解码；失败 fallback 到 latin-1（仅避免 crash，`metadata.decode_fallback = "latin-1"` 标注）
 2. 按 `\n` 切行 → `total_lines`
-3. 若 `options.line_range` 不为空（如 `"100-200"` 或 `"42"`），切片该行范围；否则取全部行
+3. 解析 `options.line_range` 为 `(start_idx, end_idx)`，支持 4 种语法：
+   - `"42"` → 第 42 行
+   - `"100-200"` → 第 100-200 行
+   - `"100-"` → 第 100 行到末尾
+   - `"-50"` → 末尾 50 行
+   - `None` → 全部
 4. 切片后内容超 20K 字符 → 截断 + `truncated=True`
-5. metadata 必含：`{parser, total_lines, lines_returned: "<start>-<end>"}`；line_range 未传且发生截断时附 `hint: "use line_range to read later sections"`
+5. metadata 必含字段：
+   - `parser: "text"`
+   - `total_lines: <int>`
+   - `lines_returned: "<start>-<end>"`（实际返回的行范围，1-indexed）
+   - 若 `truncated=True`：
+     - `next_line_to_read: <int>`（agent 续读用，1-indexed）
+     - 若 `line_range` 未传：附 `hint: "content truncated; use line_range to navigate"`
 
 `page_range` 参数对 TextParser **不生效**（silently ignored）；`line_range` 是 text 文件的"切片"语义。
 
@@ -279,7 +291,15 @@ def discover() -> ParserRegistry:
 - `source`: join cell.source 数组
 - `outputs`（仅 code cell）：简化为 `[{type, text_repr}]`，舍弃图像 base64 blob（M6 无 vision 路径）
 
-总输出内容（`sum(len(cell.source) + len(cell.outputs_text)) for cells`）超 20K → 截断到前 N 个 cell 填满 20K，剩余 cell 省略，metadata 标 `truncated_cells: M`。
+总输出内容（`sum(len(cell.source) + len(cell.outputs_text)) for cells`）超 20K → 截断到前 N 个 cell 填满 20K，剩余 cell 省略。
+
+metadata 必含字段：
+- `parser: "notebook"`
+- `total_cells: <int>`
+- `cells_returned: <int>`（实际返回的 cell 数）
+- 若截断：`truncated_cells: <int>` + `next_cell_index: <int>`（1-indexed）
+
+NotebookParser 当前不接受 cell_range 参数；agent 续读靠 cache（hash 不变 → unchanged sentinel；想看后面 cells 只能等未来扩展 cell_range，本 spec 不做）。
 
 #### `DoclingParser`（`cubebox/parsers/plugins/docling.py`）
 
@@ -299,7 +319,14 @@ def discover() -> ParserRegistry:
    - 总超时 `timeout_async_minutes` (默认 10)
 4. 超时 / HTTP 错 / task FAILED → `ErrorOutput(error=..., retryable=...)`
 5. 超 20K 字符 → 截断 + `truncated=True`
-6. `page_range` 通过 docling options 传递（具体字段名实现时确认）；对 DOCX/PPTX 若 docling 不支持 page_range，在 markdown 输出层做后处理截取（按 heading 或 `---` 分隔）
+6. `page_range` 通过 docling options 传递（4 种语法 `"N"` / `"M-N"` / `"M-"` / `"-N"`，由 plugin 翻译为 docling 实际请求字段；具体字段名实现时确认）；对 DOCX/PPTX 若 docling 不支持 page_range，在 markdown 输出层做后处理截取（按 heading 或 `---` 分隔）
+
+metadata 必含字段：
+- `parser: "docling"`
+- `total_chars: <int>`（解析后 markdown 总长度）
+- 若 `truncated=True`：
+  - `truncated_at_char: 20000`
+  - **best-effort** `last_page_returned: <int>` + `next_page_to_read: <int>`：仅当 docling 输出含可解析的 page 标记（如 `<!-- page N -->` 或 heading metadata）时填入；否则附 `hint: "use page_range to read later sections"`
 
 ### 4.4 调度逻辑（`registry.dispatch`）
 
@@ -522,20 +549,36 @@ to the user; don't keep retrying file_read on the same path.
 ═══════════════════════ PARAMETERS ══════════════════════════════
 • path (required)         — absolute sandbox path, e.g.
                             /home/user/uploads/report.pdf
-• page_range (optional)   — "1-5" or "3". Paginated documents only:
-                            PDF / DOCX / PPTX. Silently ignored
-                            for other formats.
-• line_range (optional)   — "100-200" or "42". Text / code / log
-                            files only. Lets you navigate large
-                            text files (e.g. 100k-line logs) by
-                            line number. Silently ignored for
-                            paginated docs and notebooks.
+• page_range (optional)   — paginated documents only: PDF/DOCX/PPTX.
+                            Silently ignored for other formats.
+• line_range (optional)   — text/code/log files only. Lets you
+                            navigate large text files (e.g. 100k-line
+                            logs) by line number. Silently ignored
+                            for paginated docs and notebooks.
+
+═══════════════════ RANGE SYNTAX (page_range and line_range) ════
+Both parameters share 4 syntactic forms:
+  "42"      — single line/page (item 42)
+  "100-200" — range from 100 to 200 inclusive
+  "100-"    — from 100 to end of file (like sed '100,$')
+  "-50"     — last 50 lines/pages (like tail -50)
+
+═══════════════ HOW TO CONTINUE READING WHEN TRUNCATED ═════════
+When truncated=true, metadata tells you where to resume:
+• text/code/log: `metadata.next_line_to_read` →
+  call file_read(path, line_range=f"{N}-") to continue.
+• PDF/DOCX/PPTX (best-effort): `metadata.next_page_to_read` →
+  call file_read(path, page_range=f"{N}-") to continue. If the
+  field is absent, the parser couldn't map char-offset back to
+  page; fall back to guessing or asking the user.
+• notebook: `metadata.next_cell_index` (informational only —
+  v1 has no cell_range param; this batch is the most you'll get
+  for now).
 
 ═══════════════════════ LIMITS ══════════════════════════════════
 • Files > 100 MB are refused with kind="unsupported".
 • Content longer than 20,000 characters is truncated (truncated=True).
-  Use `page_range` (PDF/DOCX/PPTX) or `line_range` (text/code/log)
-  to retrieve a specific segment, or read in multiple narrower calls.
+  Use the metadata fields above to read the next segment.
 • Large files (>3 MB) trigger async parsing and may take up to
   10 minutes; do not retry prematurely.
 ```
