@@ -5,20 +5,28 @@
   "type": "module",
   "exports": {
     ".": {
+      "types": "./src/index.ts",
       "source": "./src/index.ts",
-      "default": "./dist/index.js"
+      "import": "./src/index.ts",
+      "default": "./src/index.ts"
     },
     "./api": {
+      "types": "./src/api/index.ts",
       "source": "./src/api/index.ts",
-      "default": "./dist/api/index.js"
+      "import": "./src/api/index.ts",
+      "default": "./src/api/index.ts"
     },
     "./stores": {
+      "types": "./src/stores/index.ts",
       "source": "./src/stores/index.ts",
-      "default": "./dist/stores/index.js"
+      "import": "./src/stores/index.ts",
+      "default": "./src/stores/index.ts"
     },
     "./types": {
+      "types": "./src/types/index.ts",
       "source": "./src/types/index.ts",
-      "default": "./dist/types/index.js"
+      "import": "./src/types/index.ts",
+      "default": "./src/types/index.ts"
     }
   },
   "main": "dist/index.js",

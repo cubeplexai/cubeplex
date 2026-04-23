@@ -3,7 +3,7 @@ import type { NextConfig } from 'next'
 const nextConfig: NextConfig = {
   allowedDevOrigins: ['localhost', '127.0.0.1', '[::1]', '192.168.1.111'],
   compress: false,
-  transpilePackages: ['katex'],
+  transpilePackages: ['katex', '@cubebox/core'],
   turbopack: {},
   async rewrites() {
     return {
