@@ -511,86 +511,97 @@ git commit -m "feat(parsers): MIME sniffing helpers (libmagic + filetype + ext f
 - Create: `backend/tests/parsers/test_dedup.py`
 - Modify: `backend/pyproject.toml` (add `redis>=5.0`)
 
-**Note on prior art**: cubebox CE backend currently has **no Redis Python client**, **no `cubebox.cache` module**, and **no `redis:` config section**. Redis is only present as a CI service (`.github/workflows/ci.yml` line 129); no application code uses it. This task introduces all three from scratch. Verify before starting:
+**Note on prior art**: cubebox already has Redis fully wired up (introduced by the recent streaming/resumable-runs feature):
+- `redis>=5.2.0` is a direct dep in `backend/pyproject.toml` ✓
+- `Redis.from_url(...)` is constructed in `backend/cubebox/api/app.py:48-77` lifespan
+- Stored in `_app.state.redis`; routes access via `raw_request.app.state.redis`
+- Config: `streaming.redis_url` and `streaming.redis_key_prefix` in `config.yaml:191-194`
+- `backend/cubebox/streams/run_events.py` is the primary consumer
+
+What's MISSING: a way for non-route code (like `dedup.py`, called from `Sandbox.file_read` deep in the parser dispatch) to reach the Redis client without dragging app context through. We add a tiny `cubebox.cache` module with `get_redis()` / `set_redis()` that the lifespan registers after constructing the client. Dedup imports `from cubebox.cache import get_redis`. Streaming code keeps using `app.state.redis` (don't touch).
+
+Verify before starting:
+```bash
+grep -E '"redis>=' backend/pyproject.toml          # should print redis dep
+grep -n 'streaming.redis_url' backend/config.yaml   # should print line ~192
+grep -n 'app.state.redis' backend/cubebox/api/app.py # should print lines around 64
+```
+
+- [ ] **Step 1: Add fakeredis dev dep (only new dep needed)**
 
 ```bash
-ls backend/cubebox/cache 2>/dev/null || echo "(absent — confirmed)"
-grep -rn "import redis\|from redis" backend/cubebox/ 2>/dev/null | grep -v ".venv" || echo "(no redis imports — confirmed)"
+cd backend && uv add --dev fakeredis
 ```
 
-Both should report absent. If either exists (a parallel feature landed), reuse rather than recreate.
+(`redis>=5.2.0` is already installed; do NOT re-add.)
 
-- [ ] **Step 1: Add deps**
-
-```bash
-cd backend && uv add 'redis>=5.0' && uv add --dev fakeredis
-```
-
-- [ ] **Step 2: Add `redis:` section to YAML configs**
-
-Append to `backend/config.yaml`, `backend/config.development.yaml`, `backend/config.test.yaml`:
-
-```yaml
-redis:
-  url: redis://localhost:6379/0
-```
-
-(Production deployments override via `CUBEBOX_REDIS__URL` env var, per dynaconf convention.)
-
-- [ ] **Step 3: Create cache module with async Redis client factory**
+- [ ] **Step 2: Create `cubebox.cache` thin accessor module**
 
 ```python
 # backend/cubebox/cache/__init__.py
-"""Async Redis client factory shared across cubebox subsystems.
+"""Module-level accessor for the shared async Redis client.
 
-Introduced in M6 (file_read dedup). Other future consumers (rate_limit
-storage backend, session cache, etc.) reuse the same singleton.
+cubebox already constructs a single async Redis client in app lifespan
+(see api/app.py for the streaming feature). This module exposes that
+SAME client to non-route code (parsers/dedup, future filebox indexer)
+that doesn't have a Request handle.
+
+Lifespan calls `set_redis(client)` after building the connection;
+consumers call `get_redis()`. No second connection is opened.
 """
-
-from cubebox.cache.redis import get_redis, reset_redis_for_tests
-
-__all__ = ["get_redis", "reset_redis_for_tests"]
-```
-
-```python
-# backend/cubebox/cache/redis.py
-"""Async Redis client factory (dynaconf-driven)."""
 
 from __future__ import annotations
 
 import redis.asyncio as redis_asyncio
 
-from cubebox.config import config
-
 _client: redis_asyncio.Redis | None = None
 
 
-def get_redis() -> redis_asyncio.Redis:
-    """Return a singleton async Redis client.
-
-    URL from config.redis.url; defaults to localhost:6379/0 (matches CI service).
-    """
+def set_redis(client: redis_asyncio.Redis) -> None:
+    """Register the shared async Redis client (called by app lifespan)."""
     global _client
+    _client = client
+
+
+def get_redis() -> redis_asyncio.Redis:
+    """Return the registered shared async Redis client.
+
+    Raises RuntimeError if called before lifespan registered the client.
+    """
     if _client is None:
-        _client = redis_asyncio.from_url(
-            config.get("redis.url", "redis://localhost:6379/0"),
-            decode_responses=True,
+        raise RuntimeError(
+            "cubebox.cache.get_redis() called before lifespan set the client. "
+            "Either app startup is incomplete or test fixture didn't inject one."
         )
     return _client
 
 
-def reset_redis_for_tests() -> None:
-    """Tests call this to force re-creation of the singleton."""
+def reset_for_tests() -> None:
+    """Tests call this between cases to clear the registered client."""
     global _client
     _client = None
+
+
+__all__ = ["get_redis", "reset_for_tests", "set_redis"]
 ```
 
-- [ ] **Step 3.5: Smoke test the cache factory imports cleanly**
+- [ ] **Step 3: Wire lifespan to register the shared client**
+
+In `backend/cubebox/api/app.py`, find the line `_app.state.redis = redis_client` (around line 64). Immediately after it, add:
+
+```python
+        from cubebox.cache import set_redis as _set_shared_redis
+        _set_shared_redis(redis_client)
+```
+
+This shares the SAME client object via the module-level accessor. No second connection, no separate config.
+
+- [ ] **Step 4: Smoke test**
 
 ```bash
-cd backend && uv run python -c "from cubebox.cache import get_redis; r = get_redis(); print(type(r).__name__)"
+cd backend && uv run python -c "from cubebox.cache import get_redis, set_redis; print('cache module imports OK')"
 ```
-Expected: prints `Redis` (the client is constructed lazily — doesn't actually connect).
+Expected: `cache module imports OK`.
 
 - [ ] **Step 4: Write failing tests for dedup.py (using fakeredis)**
 
@@ -606,12 +617,14 @@ from cubebox.parsers.schema import ParseOptions
 
 
 @pytest.fixture
-async def fake_redis(monkeypatch):
+async def fake_redis():
+    """Inject a fakeredis instance via cubebox.cache.set_redis."""
+    from cubebox.cache import reset_for_tests, set_redis
     fake = fakeredis.aioredis.FakeRedis(decode_responses=True)
-    from cubebox import cache as cache_mod
-    monkeypatch.setattr(cache_mod, "get_redis", lambda: fake)
+    set_redis(fake)
     yield fake
     await fake.flushall()
+    reset_for_tests()
 
 
 @pytest.mark.asyncio
@@ -1833,12 +1846,12 @@ async def test_resolve_picks_notebook_for_ipynb() -> None:
 
 
 @pytest.mark.asyncio
-async def test_dispatch_unsupported_when_no_plugin_matches(monkeypatch) -> None:
+async def test_dispatch_unsupported_when_no_plugin_matches() -> None:
     """No plugin claims video/* → returns unsupported with format-aware hint."""
     import fakeredis.aioredis
-    from cubebox import cache as cache_mod
+    from cubebox.cache import set_redis
     fake = fakeredis.aioredis.FakeRedis(decode_responses=True)
-    monkeypatch.setattr(cache_mod, "get_redis", lambda: fake)
+    set_redis(fake)
 
     sandbox = MagicMock()
     # Plausible MP4 magic so libmagic detects video/mp4
@@ -1859,12 +1872,12 @@ async def test_dispatch_unsupported_when_no_plugin_matches(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
-async def test_dispatch_unsupported_archive_hint(monkeypatch) -> None:
+async def test_dispatch_unsupported_archive_hint() -> None:
     """Archives suggest extract-then-read flow."""
     import fakeredis.aioredis
-    from cubebox import cache as cache_mod
+    from cubebox.cache import set_redis
     fake = fakeredis.aioredis.FakeRedis(decode_responses=True)
-    monkeypatch.setattr(cache_mod, "get_redis", lambda: fake)
+    set_redis(fake)
 
     sandbox = MagicMock()
     sandbox._download_one = AsyncMock(
@@ -1898,12 +1911,12 @@ async def test_dispatch_rejects_oversize() -> None:
 
 
 @pytest.mark.asyncio
-async def test_dispatch_returns_unchanged_on_second_read(monkeypatch) -> None:
+async def test_dispatch_returns_unchanged_on_second_read() -> None:
     """Same content + same options + same conv → second call returns UnchangedOutput."""
     import fakeredis.aioredis
-    from cubebox import cache as cache_mod
+    from cubebox.cache import set_redis
     fake = fakeredis.aioredis.FakeRedis(decode_responses=True)
-    monkeypatch.setattr(cache_mod, "get_redis", lambda: fake)
+    set_redis(fake)
 
     sandbox = MagicMock()
     sandbox._download_one = AsyncMock(return_value=b"hello world")
@@ -1923,12 +1936,12 @@ async def test_dispatch_returns_unchanged_on_second_read(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
-async def test_dispatch_different_line_range_does_not_unchanged(monkeypatch) -> None:
+async def test_dispatch_different_line_range_does_not_unchanged() -> None:
     """Different line_range = different cache key = re-parses."""
     import fakeredis.aioredis
-    from cubebox import cache as cache_mod
+    from cubebox.cache import set_redis
     fake = fakeredis.aioredis.FakeRedis(decode_responses=True)
-    monkeypatch.setattr(cache_mod, "get_redis", lambda: fake)
+    set_redis(fake)
 
     sandbox = MagicMock()
     body = "\n".join(f"line{i}" for i in range(1, 21)).encode()
