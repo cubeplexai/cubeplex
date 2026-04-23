@@ -299,11 +299,12 @@
 - Issue 模板 / PR 模板 / branch protection 建议配置
 - Release 流程：tag → changelog → GitHub Release
 - 仓库名最终定：暂用 `cubebox`，后续可能改 `cubeplex` 等（发布前最终决定）
+- **生产 CSP 收紧**：M2 batch 1 的 `frame-src 'self'` 安全目标已达成；但 `default-src` 仍开 `'unsafe-inline'` / `'unsafe-eval'`（Next.js dev 需要）。生产模式应改为 `script-src 'self' 'nonce-{x}'` + 删 unsafe-eval；按 NODE_ENV 动态生成 CSP；配合 `SECURITY.md` 一起做
 **关键决定**:
 - 所有 CI 作业必须在公开状态下通过（不依赖内部凭证）
 - 发布流程手动触发，v1 不做自动发包
 **不做**: 自动生成文档站；docker hub 镜像自动推送
-**依赖**: M0（EE 兼容 CI 作业）
+**依赖**: M0（EE 兼容 CI 作业）、M2（CSP 在 next.config.ts 已埋点，M12 收紧）
 
 ---
 
