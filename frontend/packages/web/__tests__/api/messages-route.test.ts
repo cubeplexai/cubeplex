@@ -5,7 +5,7 @@ describe('conversation messages route proxy', () => {
     vi.restoreAllMocks()
   })
 
-  it('forwards identity headers and wsId in the URL for streaming POST requests', async () => {
+  it('forwards identity headers and wsId in the URL for POST run-start requests', async () => {
     const backendFetch = vi.fn(async () => new Response('ok', { status: 200 }))
     vi.stubGlobal('fetch', backendFetch)
 
@@ -26,26 +26,20 @@ describe('conversation messages route proxy', () => {
     expect(url).toContain('/api/v1/ws/ws-42/conversations/conv-1/messages')
     expect(init.headers).toMatchObject({
       'Content-Type': 'application/json',
-      Accept: 'text/event-stream',
+      Accept: 'application/json',
       cookie: 'cubebox_user_id=user-cookie',
       'x-user-id': 'header-user',
     })
     expect(init.headers).not.toHaveProperty('X-Workspace-Id')
   })
 
-  it('passes backend set-cookie through the streaming response', async () => {
-    const stream = new ReadableStream({
-      start(controller) {
-        controller.enqueue(new TextEncoder().encode('data: {"type":"done"}\n\n'))
-        controller.close()
-      },
-    })
+  it('passes backend set-cookie through the JSON response', async () => {
     const backendFetch = vi.fn(
       async () =>
-        new Response(stream, {
+        new Response(JSON.stringify({ run_id: 'run-1' }), {
           status: 200,
           headers: {
-            'content-type': 'text/event-stream',
+            'content-type': 'application/json',
             'set-cookie': 'cubebox_user_id=user-cookie; Path=/; HttpOnly',
           },
         }),

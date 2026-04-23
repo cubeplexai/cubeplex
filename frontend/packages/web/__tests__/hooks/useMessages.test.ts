@@ -30,6 +30,9 @@ beforeEach(() => {
     messages: {},
     streamAgents: {},
     isStreaming: false,
+    streamingConversationId: null,
+    currentRunId: null,
+    lastAppliedEventId: null,
     statusPhase: null,
     error: null,
     todos: [],
@@ -160,6 +163,43 @@ describe('messageStore.send', () => {
     })
 
     expect(useMessageStore.getState().isStreaming).toBe(false)
+  })
+
+  it('does not finalize a bootstrap replay stream when the reconnect fails mid-run', async () => {
+    mockClient.get.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          messages: [],
+          total: 0,
+          active_run: {
+            run_id: 'run-1',
+            status: 'running',
+            user_message: 'resume me',
+          },
+        }),
+        { headers: { 'content-type': 'application/json' } },
+      ),
+    )
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() => Promise.reject(new Error('socket closed'))),
+    )
+
+    await act(async () => {
+      await useMessageStore.getState().loadMessages(mockClient as any, CONV_ID)
+      await Promise.resolve()
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    })
+
+    const state = useMessageStore.getState()
+    const msgs = state.messages[CONV_ID] ?? []
+    expect(msgs).toHaveLength(1)
+    expect(msgs[0]).toMatchObject({ role: 'user', content: 'resume me' })
+    expect(msgs.some((m) => m.role === 'assistant')).toBe(false)
+    expect(state.currentRunId).toBe('run-1')
+    expect(state.isStreaming).toBe(true)
+    expect(state.error).toBe('socket closed')
   })
 
   it('renders todos from write_todos batch payload', async () => {

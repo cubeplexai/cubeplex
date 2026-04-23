@@ -1,5 +1,6 @@
 import type { AgentEvent } from '../types'
 import type { ApiClient } from './client'
+import { streamRun } from './runStreams'
 
 async function* readLines(reader: ReadableStreamDefaultReader<Uint8Array>): AsyncGenerator<string> {
   let buffer = ''
@@ -37,35 +38,49 @@ export async function* streamMessages(
   if (csrf) headers['X-CSRF-Token'] = csrf
 
   const path = client.resolvePath(`/api/v1/conversations/${conversationId}/messages`)
-  const res = await fetch(`${client.baseUrl}${path}`, {
-    method: 'POST',
-    credentials: 'include',
-    headers,
-    cache: 'no-store',
-    body: JSON.stringify({ content }),
-  })
-
-  if (!res.ok) {
-    yield {
-      type: 'error',
-      timestamp: new Date().toISOString(),
-      data: { message: `HTTP ${res.status}` },
-      agent_id: null,
-      agent_name: null,
-    } as AgentEvent
-    return
-  }
-
-  const reader = res.body!.getReader()
   try {
-    for await (const line of readLines(reader)) {
-      if (line.startsWith('data: ')) {
-        try {
-          yield JSON.parse(line.slice(6)) as AgentEvent
-        } catch {
-          // skip malformed lines
+    const res = await fetch(`${client.baseUrl}${path}`, {
+      method: 'POST',
+      credentials: 'include',
+      headers,
+      cache: 'no-store',
+      body: JSON.stringify({ content }),
+    })
+
+    if (!res.ok) {
+      yield {
+        type: 'error',
+        timestamp: new Date().toISOString(),
+        data: { message: `HTTP ${res.status}` },
+        agent_id: null,
+        agent_name: null,
+      } as AgentEvent
+      return
+    }
+
+    const contentType = res.headers.get('content-type') ?? ''
+    if (contentType.includes('text/event-stream')) {
+      const reader = res.body?.getReader()
+      if (!reader) return
+      try {
+        for await (const line of readLines(reader)) {
+          if (line.startsWith('data: ')) {
+            try {
+              yield JSON.parse(line.slice(6)) as AgentEvent
+            } catch {
+              // skip malformed lines
+            }
+          }
         }
+      } finally {
+        reader.releaseLock()
       }
+      return
+    }
+
+    const body = (await res.json()) as { run_id: string }
+    for await (const event of streamRun(client, conversationId, body.run_id)) {
+      yield event
     }
   } catch {
     yield {

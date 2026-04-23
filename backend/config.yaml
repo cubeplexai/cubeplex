@@ -188,6 +188,12 @@ default:
     max_overflow: 20
     echo: false
 
+  streaming:
+    redis_url: "redis://localhost:6379/0"
+    redis_key_prefix: "cubebox"
+    run_event_ttl_seconds: 900
+    run_stream_block_ms: 15000
+
   # Auth Configuration (P1)
   auth:
     jwt_secret: "CHANGE_ME_IN_PRODUCTION" # ENV: CUBEBOX_AUTH__JWT_SECRET
