@@ -557,25 +557,29 @@ class WorkspaceResponse(BaseModel):
     last_activity_at: str | None = None  # ISO-8601 UTC; null if no conversations yet
 ```
 
-In the GET handler in `backend/cubebox/api/routes/v1/workspaces.py`, compute via aggregate:
+In the GET handler in `backend/cubebox/api/routes/v1/workspaces.py`, compute via aggregate over `Conversation.updated_at`:
 
 ```python
 from sqlalchemy import func, select
 
-from cubebox.models import Conversation, Message
-from cubebox.utils.time import utc_isoformat  # use project's standard helper
+from cubebox.models import Conversation
+from cubebox.utils.time import utc_isoformat  # project standard for UTC-tagged ISO
 
 
 async def list_workspaces(...) -> list[WorkspaceResponse]:
     # ... existing code that fetches the user's workspaces ...
 
-    # Bulk last-activity lookup: max(message.updated_at) per workspace
+    # cubebox doesn't have a Message table — messages live in LangGraph
+    # checkpointer thread state. But Conversation.updated_at is bumped by
+    # ConversationRepository.update_timestamp() on every message round-trip
+    # (called from POST /api/v1/ws/{ws}/conversations/{id}/messages).
+    # So aggregating max(Conversation.updated_at) per workspace gives accurate
+    # "last activity" semantics.
     activity_stmt = (
         select(
             Conversation.workspace_id,
-            func.max(Message.updated_at).label("last_at"),
+            func.max(Conversation.updated_at).label("last_at"),
         )
-        .join(Message, Message.conversation_id == Conversation.id)
         .where(Conversation.workspace_id.in_([ws.id for ws in workspaces]))
         .group_by(Conversation.workspace_id)
     )
@@ -595,16 +599,6 @@ async def list_workspaces(...) -> list[WorkspaceResponse]:
 ```
 
 NOTE: Use `utc_isoformat()` per memory `feedback_timestamp_handling.md` — DB datetimes need explicit UTC offset for frontend.
-
-NOTE 2: If cubebox doesn't have a Message model directly (perhaps messages are checkpointer-backed only), substitute Conversation.updated_at as a proxy:
-
-```python
-activity_stmt = (
-    select(Conversation.workspace_id, func.max(Conversation.updated_at).label("last_at"))
-    .where(Conversation.workspace_id.in_([ws.id for ws in workspaces]))
-    .group_by(Conversation.workspace_id)
-)
-```
 
 - [ ] **Step 5: Run tests, verify pass**
 
@@ -1844,6 +1838,6 @@ git status
 - ✅ Frontend file paths use existing `@/` alias and `@cubebox/core` package
 - ✅ Existing AppTopBar / AvatarMenu / WorkspaceSwitcher explicitly deleted
 - ✅ AppShell refactor preserves resizable artifact-panel logic (only Sidebar removed since outer layout provides it)
-- ⚠ Task 5 `last_activity_at` SQL has alternative (Conversation.updated_at vs Message.updated_at) depending on whether Message model exists in cubebox; implementer picks the one that compiles
+- ✅ Task 5 `last_activity_at` confirmed to use `Conversation.updated_at` (verified that `ConversationRepository.update_timestamp()` is called from messages endpoint at conversations.py:55 on every message round-trip); no Message table exists in cubebox
 - ⚠ Task 4 `_resolve_current_org_id` v1 picks user's first workspace's org. Multi-org users see only one org's admin until OrgSwitcher lands (Path A in spec §8). Acceptable per D9.
 - ⚠ Task 10 deletes WorkspaceSwitcher; before merging, grep for any non-(app)/layout reference (deep-linked imports). The plan's grep step covers this.
