@@ -54,7 +54,7 @@
 | D8 | TEXT_DIRECT 扩展名列表**宽**（含 `.py .js .ts .go .rs .c .cpp .java .rb .php .html .svg .xml` 等） | 严格文本 `.txt .md` | cubebox 是 dev-friendly agent 平台；读代码文件是常态；TextParser 只做 UTF-8 decode 代价极小 |
 | D9 | OCR 图片归 `text` kind，`metadata.parser = "docling-ocr"` 区分 | 独立 `image` kind | v1 无 vision 管线；OCR 结果本质是文本；union 不提前扩展 |
 | D10 | Output union 共 **5 种 kind**：`text` / `notebook` / `unsupported` / `unchanged` / `error` | 7 种（含 image / pdf_native / parts / office_markdown） | 砍掉无下游消费者的 kind；`image` / `pdf_native` 未来加为纯新增，非破坏性 |
-| D11 | `unchanged` sentinel 走 **conversation 级 SHA-256 hash cache**，无显式 invalidation | 显式 write_file / execute 回调 invalidate | hash 对比天然捕获写入变化；代码面无 cross-module 耦合 |
+| D11 | `unchanged` sentinel 走 **conversation 级 SHA-256 hash cache，存 Redis**；无显式 invalidation；TTL 6h 自动过期 | 显式 write_file / execute 回调 invalidate | hash 对比天然捕获写入变化；Redis TTL 处理空闲清理（conversation 没有明确"结束"事件）；多 backend 副本天然共享 |
 | D12 | hash 一律走 `asyncio.to_thread(hashlib.sha256, ...)` | 直接同步 hash | 100MB SHA-256 约 300ms；不能阻塞 event loop |
 | D13 | 超大 parsed content 截断阈值：**20,000 字符**（约 4-6K tokens） | 500K 字符 / 无限制 | 不把单次 file_read 占满 context；agent 有 `page_range` 和分段重读的手段 |
 | D14 | 文件硬上限：**100 MB** | 无限制 | docling-serve 和 backend memory 的合理上限；超大文件应该预处理后再读 |
@@ -63,7 +63,8 @@
 | D17 | v1 只发 CPU 镜像；GPU 镜像留给用户自换 | 三镜像矩阵（cpu / cu128 / cu130） | 单变体减少文档分叉与首装复杂度；自部署想加速自换 |
 | D18 | CI **不**起真 docling-serve；mock `DoclingParser` | 真实服务跑 e2e | docling-serve 不在 backend 关键链路（挂掉只影响 file_read）；mock 充分 |
 | D19 | Tool description 是本 spec 的**固定产出**，逐字进 StructuredTool | 只写大致 | agent 使用率/误用率高度依赖 description；一字一句都要审 |
-| D20 | 多 backend 副本场景需 **session-sticky routing** 或后续改 Redis-backed cache | 进程外共享 | v1 进程内 dict 简单；SaaS 扩展时再换 |
+| D20 | dedup cache 直接走 **Redis**（CI 已挂 redis service；backend 增加 redis-py async client） | 进程内 dict + session-sticky routing | conversation 没有明确"结束"事件，Redis TTL 替代 lifecycle 钩子；多副本天然共享；重启不丢热缓存 |
+| D21 | `ParseOptions` 提供两个独立 range 参数：`page_range`（PDF/DOCX/PPTX）+ `line_range`（text/code/log） | 单一通用 `range` 字段 / 只 page_range / 不做 | text 文件用行号比页号自然；分两参数语义清晰；plugin 各取所需，互不影响；cache key 由 dispatch 层把 options 整体签入即可 |
 
 ---
 
@@ -259,7 +260,14 @@ def discover() -> ParserRegistry:
   ```
 - `priority = 0`（最低；特定格式 plugin 优先）
 
-**parse 行为**：UTF-8 解码；失败 fallback 到 latin-1（仅为避免 crash，`metadata.decode_fallback = true` 标注）。超 20K 字符截断，`truncated=True`。
+**parse 行为**：
+1. UTF-8 解码；失败 fallback 到 latin-1（仅避免 crash，`metadata.decode_fallback = "latin-1"` 标注）
+2. 按 `\n` 切行 → `total_lines`
+3. 若 `options.line_range` 不为空（如 `"100-200"` 或 `"42"`），切片该行范围；否则取全部行
+4. 切片后内容超 20K 字符 → 截断 + `truncated=True`
+5. metadata 必含：`{parser, total_lines, lines_returned: "<start>-<end>"}`；line_range 未传且发生截断时附 `hint: "use line_range to read later sections"`
+
+`page_range` 参数对 TextParser **不生效**（silently ignored）；`line_range` 是 text 文件的"切片"语义。
 
 #### `NotebookParser`（`cubebox/parsers/plugins/notebook.py`）
 
@@ -442,7 +450,8 @@ FileReadOutput = Annotated[
 
 
 class ParseOptions(BaseModel):
-    page_range: str | None = None   # "1-5" or "3"
+    page_range: str | None = None   # PDF/DOCX/PPTX 用；"1-5" or "3"
+    line_range: str | None = None   # text/code/log 用；"100-200" or "42"
     language_hint: str | None = None
 ```
 
@@ -458,7 +467,7 @@ class ParseOptions(BaseModel):
 ## 6. Tool Description（逐字进 StructuredTool）
 
 ```
-file_read(path: str, page_range: str | None = None) -> FileReadOutput
+file_read(path: str, page_range: str | None = None, line_range: str | None = None) -> FileReadOutput
 
 Read a file from the sandbox workspace and return its content in a form
 you can reason about. Use this whenever you need to inspect user uploads,
@@ -486,9 +495,10 @@ output, not network resources.
   then file_read on extracted files.
 • Remote URLs — file_read only reads sandbox paths. Use web-fetch
   tools for URLs.
-• Quick single-line peeks — if you only need a specific line or
-  want to grep, `execute("sed -n '42p' <file>")` or
-  `execute("grep -n 'pattern' <file>")` is faster and cheaper.
+• Grep / search — for pattern-find within files, `execute("grep -n
+  'pattern' <file>")` is more direct than file_read + scan.
+• Tiny single-line peeks where you already know the byte offset —
+  `execute("sed -n '42p' <file>")` skips parser overhead.
 
 ═══════════════════ RETURN FORMAT (by `kind`) ═══════════════════
 • "text"       — {content, mime, size_bytes, truncated, metadata}
@@ -506,15 +516,20 @@ output, not network resources.
 ═══════════════════════ PARAMETERS ══════════════════════════════
 • path (required)         — absolute sandbox path, e.g.
                             /home/user/uploads/report.pdf
-• page_range (optional)   — "1-5" or "3". Only honored for PDF /
-                            DOCX / PPTX; silently ignored for
-                            other formats.
+• page_range (optional)   — "1-5" or "3". Paginated documents only:
+                            PDF / DOCX / PPTX. Silently ignored
+                            for other formats.
+• line_range (optional)   — "100-200" or "42". Text / code / log
+                            files only. Lets you navigate large
+                            text files (e.g. 100k-line logs) by
+                            line number. Silently ignored for
+                            paginated docs and notebooks.
 
 ═══════════════════════ LIMITS ══════════════════════════════════
 • Files > 100 MB are refused with kind="unsupported".
 • Content longer than 20,000 characters is truncated (truncated=True).
-  Use `page_range` to retrieve a specific segment, or read in
-  multiple calls with narrower ranges.
+  Use `page_range` (PDF/DOCX/PPTX) or `line_range` (text/code/log)
+  to retrieve a specific segment, or read in multiple narrower calls.
 • Large files (>3 MB) trigger async parsing and may take up to
   10 minutes; do not retry prematurely.
 ```
@@ -523,55 +538,70 @@ output, not network resources.
 
 ## 7. File state dedup（`unchanged` 实现）
 
-### 7.1 Hash cache
+### 7.1 Redis-backed hash cache
 
 **`backend/cubebox/parsers/dedup.py`**：
 
 ```python
 import asyncio
 import hashlib
+import json
 from uuid import UUID
 
-# Keyed by (conversation_id, path). Stores SHA-256 hex digest.
-# v1 进程内 dict；多 backend 副本需 session-sticky 或迁移 Redis.
-_file_state: dict[tuple[UUID, str], str] = {}
+from cubebox.cache import get_redis  # async redis client (已在 M-CI 接入)
+from cubebox.parsers.schema import ParseOptions
+
+DEDUP_TTL_SECONDS = 6 * 3600       # 6 小时不活跃自动过期
+KEY_PREFIX = "parsers:dedup:v1:"
 
 
 async def hash_bytes(data: bytes) -> str:
-    # 100MB SHA-256 约 ~300ms；offload 到 thread pool 避免阻塞 event loop
-    return await asyncio.to_thread(
-        lambda: hashlib.sha256(data).hexdigest()
+    """SHA-256 hex；offload 到 thread pool 避免阻塞 event loop。"""
+    return await asyncio.to_thread(lambda: hashlib.sha256(data).hexdigest())
+
+
+def _options_signature(options: ParseOptions) -> str:
+    """每个 parser 关心 options 的不同子集；这里把 range 类参数整体签入。
+    无关参数最多浪费一次 cache miss，可接受。"""
+    return json.dumps(
+        {"page_range": options.page_range, "line_range": options.line_range},
+        sort_keys=True,
     )
 
 
-def check(conversation_id: UUID, path: str, digest: str) -> bool:
-    """Returns True if digest matches cached (→ unchanged)."""
-    return _file_state.get((conversation_id, path)) == digest
+def _key(conversation_id: UUID, path: str, options: ParseOptions) -> str:
+    return f"{KEY_PREFIX}{conversation_id}:{path}:{_options_signature(options)}"
 
 
-def update(conversation_id: UUID, path: str, digest: str) -> None:
-    _file_state[(conversation_id, path)] = digest
+async def check(conversation_id: UUID, path: str, options: ParseOptions, digest: str) -> bool:
+    redis = get_redis()
+    cached = await redis.get(_key(conversation_id, path, options))
+    if cached is None:
+        return False
+    return cached == digest if isinstance(cached, str) else cached == digest.encode()
 
 
-def forget_conversation(conversation_id: UUID) -> None:
-    # 会话结束时清理（挂入 ConversationManager 的 on_close 钩子）
-    keys = [k for k in _file_state if k[0] == conversation_id]
-    for k in keys:
-        _file_state.pop(k, None)
+async def update(conversation_id: UUID, path: str, options: ParseOptions, digest: str) -> None:
+    redis = get_redis()
+    await redis.set(
+        _key(conversation_id, path, options), digest, ex=DEDUP_TTL_SECONDS
+    )
 ```
 
 ### 7.2 行为
 
-- **首次 read** → 计算 hash → 存 `(conv_id, path) -> digest` → 返回完整内容
-- **后续同 path read** → hash 相同 → `UnchangedOutput`（content 省略）
-- **文件被改过**（agent 用 execute / write_file / edit_file 写过）→ hash 变化 → 正常解析返回
-- **无需显式 invalidation**：hash-based detection 自动捕获变化
+- **首次 read** → 计算 hash → `SET key digest EX 21600` → 返回完整内容
+- **后续同 path 同 options read** → hash 相同 → `UnchangedOutput`
+- **文件被改过**（agent 用 execute / write_file / edit_file 写过）→ hash 变化 → 正常解析返回 + 更新缓存
+- **6 小时不活跃自动过期**（Redis TTL）—— 不需要 conversation lifecycle 钩子
+- **多 backend 副本天然共享**（无需 session-sticky）
 
 ### 7.3 边界
 
-- `page_range` 参数**不**计入 key；同文件用不同 page_range 重读仍可能 `unchanged`（期望 agent 从历史全量结果自取片段）
-- `unsupported` / `error` 结果也缓存 hash；后续同 path 同 hash 读仍走 `unchanged`（无副作用，agent 查历史即可）
-- 多 backend 副本：进程内 dict 不跨副本。SaaS 部署需 session-sticky（将 conversation 路由到固定 backend）；后续可扩展到 Redis-backed cache
+- **`page_range` / `line_range` 都计入 cache key**：不同 range 参数 = 不同 cache slot，agent 能正确拿到对应内容
+- **不相关 range 参数会浪费 cache slot**：例如 agent 对 .txt 文件传 `page_range="1-5"`（TextParser 忽略），与不传 page_range 的调用是不同 slot；浪费一次解析，acceptable（agents 通常按 description 用对参数）
+- **`unsupported` / `error` 结果也缓存 hash**：后续同条件读仍走 `unchanged`（无副作用，agent 查历史即可）
+- **Redis 不可达**：`check` / `update` 抛错 → 调用方应 try/except 把错误转化为"按 cache miss 处理"（不阻塞 file_read），日志告警；具体策略实现时确定
 
 ---
 
@@ -705,7 +735,8 @@ Unit 测试覆盖：
 - `backend/cubebox/parsers/protocols.py`（`FileParser`）
 - `backend/cubebox/parsers/schema.py`（`FileReadOutput` / `ParseOptions` / dataclasses）
 - `backend/cubebox/parsers/registry.py`（discover + dispatch + resolve）
-- `backend/cubebox/parsers/dedup.py`（hash cache）
+- `backend/cubebox/parsers/dedup.py`（Redis-backed hash cache，key 含 ParseOptions 签名）
+- `backend/cubebox/cache/__init__.py` + `backend/cubebox/cache/redis.py`（async redis 客户端工厂；若已存在则复用）
 - `backend/cubebox/parsers/plugins/__init__.py`
 - `backend/cubebox/parsers/plugins/text.py`
 - `backend/cubebox/parsers/plugins/notebook.py`
@@ -726,7 +757,7 @@ Unit 测试覆盖：
 - `backend/cubebox/middleware/sandbox.py` —— `SandboxMiddleware` 注册 `file_read` 工具到 tools 列表
 - `backend/cubebox/config.py` —— 加 `parsers.*` pydantic schema
 - `backend/config.yaml` / `config.development.yaml` / `config.test.yaml` —— 加 `parsers:` 节
-- `backend/pyproject.toml` —— `[project.entry-points."cubebox.parsers"]` + 新依赖：`libmagic` (python-magic-bin) + `httpx`（已有）+ `filetype`（libmagic 不可用时 fallback）
+- `backend/pyproject.toml` —— `[project.entry-points."cubebox.parsers"]` + 新依赖：`python-magic` (libmagic 包装) + `filetype`（fallback）+ `redis>=5.0`（async client；CI 已起 redis service）；`httpx` 已有
 - `docker-compose.yml` / 部署编排 —— 加 docling-serve service
 - `.github/workflows/ci.yml` —— e2e job 配置 mock `DoclingParser` 的 fixture 路径
 
@@ -774,7 +805,7 @@ Unit 测试覆盖：
 | docling-serve 启动慢（镜像 4.4 GB） | 部署文档写清预拉镜像步骤；K8s 用 initContainer 预热 |
 | docling-serve 单点 | v1 单实例可接受；后续按请求量 HPA；parser 是非关键链路（挂掉不阻塞 agent 对话，只是 file_read 不可用） |
 | 20K 截断对长文档过紧 | `page_range` 参数 + description 明示截断 + metadata 暴露 total_chars；agent 可多次调用补全 |
-| hash cache 多副本不一致 | v1 session-sticky；文档化后续 Redis 迁移路径 |
+| Redis 不可达让 dedup 失效 | dispatch 里 try/except，把 Redis 错误降级为 cache miss（继续解析）；告警日志；不影响 file_read 主路径 |
 | docling 对极端布局 PDF 解析错 | `error(retryable=False)` 可读 reason；agent 告诉用户；未来可装 Marker / LlamaParse 做 fallback plugin |
 | Protocol runtime_checkable 性能 | 仅启动时用一次（`discover()`），运行时不重复 check；无影响 |
 | libmagic 跨平台依赖 | `python-magic-bin` 自带 libmagic binary；不依赖系统包；macOS/Linux/Windows 统一 |
@@ -786,6 +817,6 @@ Unit 测试覆盖：
 
 - [ ] `DoclingParser` 对 DOCX/PPTX 的 `page_range` 实现策略（docling-serve 本身是否支持 page_range / 若不支持的 markdown 后处理剪裁算法）—— 实现时确认
 - [ ] docling-serve `FileSourceRequest` 的确切 JSON schema（multipart vs base64）—— 读 OpenAPI 后确认
-- [ ] SaaS 场景多副本 backend 的 session-sticky routing vs Redis-backed hash cache 切换时机 —— 后续扩展观察
+- [ ] Redis dedup TTL（默认 6h）是否需要按 conversation 活跃度自适应延长 —— 上线观察后再调
 - [ ] `UnchangedOutput` 是否应包含首次读取的 metadata 摘要（便于 agent 不回翻历史也能快速引用）—— v1 先不加，等使用反馈
-- [ ] Conversation 关闭钩子接入 `dedup.forget_conversation` 的具体位置 —— 实现时确认
+- [ ] `cubebox.cache` 模块若已存在（M-CI 引入 redis service 时是否同步加了 client）—— 实现时复用，不重复实现

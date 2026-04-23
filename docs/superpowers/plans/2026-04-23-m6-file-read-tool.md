@@ -19,16 +19,20 @@
 ```
 backend/cubebox/parsers/
 ├─ __init__.py                  # Re-exports
-├─ schema.py                    # FileReadOutput union + ParseOptions
+├─ schema.py                    # FileReadOutput union + ParseOptions (page_range + line_range)
 ├─ protocols.py                 # FileParser Protocol
 ├─ mime.py                      # libmagic + extension fallback + REJECT lists
-├─ dedup.py                     # asyncio.to_thread hash cache
+├─ dedup.py                     # Redis-backed hash cache; key includes ParseOptions sig
 ├─ registry.py                  # ParserRegistry (discover + dispatch)
 └─ plugins/
    ├─ __init__.py
-   ├─ text.py                   # TextParser (UTF-8 decode + truncation)
+   ├─ text.py                   # TextParser (UTF-8 + line_range slicing + truncation)
    ├─ notebook.py               # NotebookParser (Jupyter cells)
    └─ docling.py                # DoclingParser (HTTP to docling-serve)
+
+backend/cubebox/cache/
+├─ __init__.py                  # exposes get_redis()
+└─ redis.py                     # async Redis client factory (skip if exists)
 
 backend/tests/parsers/
 ├─ __init__.py
@@ -48,12 +52,12 @@ backend/tests/parsers/
 ```
 backend/cubebox/sandbox/base.py            # Add Sandbox.file_read non-abstract method
 backend/cubebox/middleware/sandbox.py      # Register file_read tool with description
-backend/cubebox/config.py                  # Add parsers.docling_serve schema
-backend/config.yaml                        # Add parsers: section
-backend/config.development.yaml            # Add parsers: section
-backend/config.test.yaml                   # Add parsers: section
-backend/pyproject.toml                     # Deps + entry_points group
-docker-compose.yml                         # Add docling-serve service
+backend/cubebox/config.py                  # Add parsers.docling_serve + redis.url schemas
+backend/config.yaml                        # Add parsers: + redis: sections
+backend/config.development.yaml            # Add parsers: + redis: sections
+backend/config.test.yaml                   # Add parsers: + redis: sections
+backend/pyproject.toml                     # Deps (redis>=5.0, python-magic, filetype, fakeredis dev) + entry_points group
+docker-compose.yml                         # Add docling-serve service (redis already present)
 ```
 
 ---
@@ -185,7 +189,21 @@ def test_discriminated_union_rejects_unknown_kind() -> None:
 def test_parse_options_default_empty() -> None:
     p = ParseOptions()
     assert p.page_range is None
+    assert p.line_range is None
     assert p.language_hint is None
+
+
+def test_parse_options_accepts_line_range() -> None:
+    p = ParseOptions(line_range="100-200")
+    assert p.line_range == "100-200"
+    assert p.page_range is None
+
+
+def test_parse_options_accepts_both_ranges() -> None:
+    """Both range params can coexist; each plugin honors only what it cares about."""
+    p = ParseOptions(page_range="1-5", line_range="100-200")
+    assert p.page_range == "1-5"
+    assert p.line_range == "100-200"
 ```
 
 - [ ] **Step 2: Run, verify fail**
@@ -257,7 +275,8 @@ FileReadOutput = Annotated[
 
 
 class ParseOptions(BaseModel):
-    page_range: str | None = None  # "1-5" or "3"
+    page_range: str | None = None  # PDF/DOCX/PPTX 用；"1-5" or "3"
+    line_range: str | None = None  # text/code/log 用；"100-200" or "42"
     language_hint: str | None = None
 ```
 
@@ -539,101 +558,196 @@ git commit -m "feat(parsers): MIME sniffing via libmagic + REJECT lists for unsu
 
 ---
 
-### Task 5: Async hash dedup cache
+### Task 5: Redis-backed dedup cache + async client setup
 
 **Files:**
+- Create: `backend/cubebox/cache/__init__.py`
+- Create: `backend/cubebox/cache/redis.py` (skip if `cubebox.cache` already exists; reuse existing client)
 - Create: `backend/cubebox/parsers/dedup.py`
 - Create: `backend/tests/parsers/test_dedup.py`
+- Modify: `backend/pyproject.toml` (add `redis>=5.0`)
 
-- [ ] **Step 1: Write failing tests**
+- [ ] **Step 1: Add redis dep**
+
+```bash
+cd backend && uv add 'redis>=5.0'
+```
+
+- [ ] **Step 2: Check whether `cubebox.cache` already exists**
+
+```bash
+ls backend/cubebox/cache 2>/dev/null && echo "exists; reuse get_redis from there" || echo "create new"
+```
+
+If exists, **skip Step 3** and just use existing `get_redis()`. Otherwise proceed:
+
+- [ ] **Step 3: Create cache module with async Redis client factory**
+
+```python
+# backend/cubebox/cache/__init__.py
+"""Async Redis client factory shared across cubebox subsystems."""
+
+from cubebox.cache.redis import get_redis, reset_redis_for_tests
+
+__all__ = ["get_redis", "reset_redis_for_tests"]
+```
+
+```python
+# backend/cubebox/cache/redis.py
+"""Async Redis client factory."""
+
+from __future__ import annotations
+
+import redis.asyncio as redis_asyncio
+
+from cubebox.config import config
+
+_client: redis_asyncio.Redis | None = None
+
+
+def get_redis() -> redis_asyncio.Redis:
+    """Return a singleton async Redis client.
+
+    Connection params from config; default localhost:6379 (matches CI service).
+    """
+    global _client
+    if _client is None:
+        _client = redis_asyncio.from_url(
+            config.get("redis.url", "redis://localhost:6379/0"),
+            decode_responses=True,
+        )
+    return _client
+
+
+def reset_redis_for_tests() -> None:
+    """Tests call this to force re-creation of the singleton."""
+    global _client
+    _client = None
+```
+
+Add `redis: { url: redis://localhost:6379/0 }` to `config.yaml`, `config.development.yaml`, `config.test.yaml` if not already present.
+
+- [ ] **Step 4: Write failing tests for dedup.py (using fakeredis for unit tests)**
+
+```bash
+cd backend && uv add --dev fakeredis
+```
 
 ```python
 # backend/tests/parsers/test_dedup.py
 from uuid import uuid4
 
+import fakeredis.aioredis
 import pytest
 
-from cubebox.parsers.dedup import (
-    check,
-    forget_conversation,
-    hash_bytes,
-    update,
-    _file_state,
-)
+from cubebox.parsers.dedup import check, hash_bytes, update
+from cubebox.parsers.schema import ParseOptions
 
 
-@pytest.fixture(autouse=True)
-def clear_state():
-    _file_state.clear()
-    yield
-    _file_state.clear()
+@pytest.fixture
+async def fake_redis(monkeypatch):
+    fake = fakeredis.aioredis.FakeRedis(decode_responses=True)
+    from cubebox import cache as cache_mod
+    monkeypatch.setattr(cache_mod, "get_redis", lambda: fake)
+    yield fake
+    await fake.flushall()
 
 
 @pytest.mark.asyncio
 async def test_hash_bytes_returns_sha256_hex() -> None:
     digest = await hash_bytes(b"hello")
-    # SHA-256 of "hello" = 2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824
     assert digest == "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
 
 
-def test_check_returns_false_when_empty() -> None:
+@pytest.mark.asyncio
+async def test_check_returns_false_when_empty(fake_redis) -> None:
     conv = uuid4()
-    assert check(conv, "/p", "abc") is False
+    assert await check(conv, "/p", ParseOptions(), "abc") is False
 
 
-def test_update_then_check_matches() -> None:
+@pytest.mark.asyncio
+async def test_update_then_check_matches(fake_redis) -> None:
     conv = uuid4()
-    update(conv, "/p", "abc")
-    assert check(conv, "/p", "abc") is True
-    assert check(conv, "/p", "different") is False
+    await update(conv, "/p", ParseOptions(), "abc")
+    assert await check(conv, "/p", ParseOptions(), "abc") is True
+    assert await check(conv, "/p", ParseOptions(), "different") is False
 
 
-def test_check_isolates_per_conversation() -> None:
+@pytest.mark.asyncio
+async def test_check_isolates_per_conversation(fake_redis) -> None:
     a, b = uuid4(), uuid4()
-    update(a, "/p", "abc")
-    assert check(b, "/p", "abc") is False
+    await update(a, "/p", ParseOptions(), "abc")
+    assert await check(b, "/p", ParseOptions(), "abc") is False
 
 
-def test_forget_conversation_clears_only_that_conv() -> None:
-    a, b = uuid4(), uuid4()
-    update(a, "/p", "abc")
-    update(b, "/p", "abc")
-    forget_conversation(a)
-    assert check(a, "/p", "abc") is False
-    assert check(b, "/p", "abc") is True
+@pytest.mark.asyncio
+async def test_check_isolates_per_page_range(fake_redis) -> None:
+    """Different page_range = different cache slot."""
+    conv = uuid4()
+    await update(conv, "/p", ParseOptions(page_range="1-5"), "abc")
+    assert await check(conv, "/p", ParseOptions(page_range="6-10"), "abc") is False
+    assert await check(conv, "/p", ParseOptions(page_range="1-5"), "abc") is True
+
+
+@pytest.mark.asyncio
+async def test_check_isolates_per_line_range(fake_redis) -> None:
+    """Different line_range = different cache slot."""
+    conv = uuid4()
+    await update(conv, "/p", ParseOptions(line_range="1-100"), "abc")
+    assert await check(conv, "/p", ParseOptions(line_range="200-300"), "abc") is False
+
+
+@pytest.mark.asyncio
+async def test_ttl_set_on_update(fake_redis) -> None:
+    """Update sets TTL so cache eventually expires."""
+    conv = uuid4()
+    await update(conv, "/p", ParseOptions(), "abc")
+    # fakeredis exposes ttl
+    keys = await fake_redis.keys("parsers:dedup:v1:*")
+    assert len(keys) == 1
+    ttl = await fake_redis.ttl(keys[0])
+    assert ttl > 0  # TTL is set
 
 
 @pytest.mark.asyncio
 async def test_hash_bytes_offloads_to_thread() -> None:
-    """Verifies the call returns awaitable (i.e. async-safe for large inputs)."""
+    """Verifies async-safe for large inputs."""
     big = b"x" * (10 * 1024 * 1024)  # 10 MB
     digest = await hash_bytes(big)
     assert len(digest) == 64
 ```
 
-- [ ] **Step 2: Run, verify fail**
+- [ ] **Step 5: Run, verify fail**
 
 Run: `cd backend && uv run pytest tests/parsers/test_dedup.py -v`
 Expected: FAIL with ImportError.
 
-- [ ] **Step 3: Implement dedup.py**
+- [ ] **Step 6: Implement dedup.py**
 
 ```python
 # backend/cubebox/parsers/dedup.py
-"""Conversation-scoped SHA-256 file_state dedup cache.
+"""Redis-backed conversation-scoped SHA-256 file_state dedup cache.
 
-v1: in-process dict. SaaS multi-replica needs session-sticky routing OR
-swap to Redis-backed cache (TTL = conversation lifetime).
+Cache key: (conversation_id, path, options-signature). The options-signature
+includes page_range + line_range so different range-slices land in different
+cache slots and don't incorrectly return UnchangedOutput.
+
+TTL: 6 hours of inactivity → auto-expire (Redis-managed; conversation has
+no explicit "end" event in cubebox).
 """
 
 from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 from uuid import UUID
 
-# Keyed by (conversation_id, path); value = SHA-256 hex digest.
-_file_state: dict[tuple[UUID, str], str] = {}
+from cubebox.cache import get_redis
+from cubebox.parsers.schema import ParseOptions
+
+DEDUP_TTL_SECONDS = 6 * 3600
+KEY_PREFIX = "parsers:dedup:v1:"
 
 
 async def hash_bytes(data: bytes) -> str:
@@ -641,32 +755,56 @@ async def hash_bytes(data: bytes) -> str:
     return await asyncio.to_thread(lambda: hashlib.sha256(data).hexdigest())
 
 
-def check(conversation_id: UUID, path: str, digest: str) -> bool:
-    """True if digest matches cached value (→ caller emits UnchangedOutput)."""
-    return _file_state.get((conversation_id, path)) == digest
+def _options_signature(options: ParseOptions) -> str:
+    """JSON-serialize range params (sorted) so equivalent options → same key."""
+    return json.dumps(
+        {"page_range": options.page_range, "line_range": options.line_range},
+        sort_keys=True,
+    )
 
 
-def update(conversation_id: UUID, path: str, digest: str) -> None:
-    _file_state[(conversation_id, path)] = digest
+def _key(conversation_id: UUID, path: str, options: ParseOptions) -> str:
+    return f"{KEY_PREFIX}{conversation_id}:{path}:{_options_signature(options)}"
 
 
-def forget_conversation(conversation_id: UUID) -> None:
-    """Drop all keys for the given conversation. Hook from ConversationManager.close."""
-    keys = [k for k in _file_state if k[0] == conversation_id]
-    for k in keys:
-        _file_state.pop(k, None)
+async def check(
+    conversation_id: UUID,
+    path: str,
+    options: ParseOptions,
+    digest: str,
+) -> bool:
+    """True if digest matches Redis-cached value (→ caller emits UnchangedOutput)."""
+    redis = get_redis()
+    cached = await redis.get(_key(conversation_id, path, options))
+    if cached is None:
+        return False
+    return cached == digest if isinstance(cached, str) else cached == digest.encode()
+
+
+async def update(
+    conversation_id: UUID,
+    path: str,
+    options: ParseOptions,
+    digest: str,
+) -> None:
+    redis = get_redis()
+    await redis.set(
+        _key(conversation_id, path, options),
+        digest,
+        ex=DEDUP_TTL_SECONDS,
+    )
 ```
 
-- [ ] **Step 4: Run tests, verify pass**
+- [ ] **Step 7: Run tests, verify pass**
 
 Run: `cd backend && uv run pytest tests/parsers/test_dedup.py -v`
-Expected: PASS (6 tests).
+Expected: PASS (8 tests).
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 8: Commit**
 
 ```bash
-git add backend/cubebox/parsers/dedup.py backend/tests/parsers/test_dedup.py
-git commit -m "feat(parsers): async SHA-256 file_state dedup cache (conversation-scoped)"
+git add backend/cubebox/cache/ backend/cubebox/parsers/dedup.py backend/tests/parsers/test_dedup.py backend/pyproject.toml backend/uv.lock backend/config*.yaml
+git commit -m "feat(parsers): Redis-backed dedup cache with ParseOptions signature key"
 ```
 
 ---
@@ -721,6 +859,46 @@ async def test_falls_back_to_latin1_on_decode_error() -> None:
     out = await p.parse(body, mime="text/plain", options=ParseOptions())
     assert isinstance(out, TextOutput)
     assert out.metadata.get("decode_fallback") == "latin-1"
+
+
+@pytest.mark.asyncio
+async def test_line_range_returns_specific_lines() -> None:
+    """line_range='2-4' returns lines 2 through 4 (1-indexed, inclusive)."""
+    p = TextParser()
+    body = "\n".join(f"line{i}" for i in range(1, 11)).encode()
+    out = await p.parse(body, mime="text/plain", options=ParseOptions(line_range="2-4"))
+    assert out.content == "line2\nline3\nline4"
+    assert out.metadata["lines_returned"] == "2-4"
+    assert out.metadata["total_lines"] == 10
+
+
+@pytest.mark.asyncio
+async def test_line_range_single_line() -> None:
+    p = TextParser()
+    body = "\n".join(f"line{i}" for i in range(1, 6)).encode()
+    out = await p.parse(body, mime="text/plain", options=ParseOptions(line_range="3"))
+    assert out.content == "line3"
+    assert out.metadata["lines_returned"] == "3-3"
+
+
+@pytest.mark.asyncio
+async def test_line_range_clamps_to_file_length() -> None:
+    """Out-of-range end is clamped silently."""
+    p = TextParser()
+    body = "\n".join(f"line{i}" for i in range(1, 6)).encode()
+    out = await p.parse(body, mime="text/plain", options=ParseOptions(line_range="3-100"))
+    assert out.content == "line3\nline4\nline5"
+    assert out.metadata["lines_returned"] == "3-5"
+
+
+@pytest.mark.asyncio
+async def test_no_line_range_returns_all_with_truncation_hint() -> None:
+    """Without line_range and content > 20K → truncated + hint to use line_range."""
+    p = TextParser()
+    body = ("line\n" * 5000).encode()  # 25k chars total
+    out = await p.parse(body, mime="text/plain", options=ParseOptions())
+    assert out.truncated is True
+    assert "line_range" in out.metadata.get("hint", "")
 ```
 
 - [ ] **Step 2: Run, verify fail**
@@ -775,24 +953,58 @@ class TextParser:
             text = content.decode("latin-1", errors="replace")
             decode_fallback = "latin-1"
 
+        # Split into lines preserving line endings
+        all_lines = text.splitlines(keepends=True)
+        total_lines = len(all_lines)
+
+        # Apply line_range slice (1-indexed inclusive); ignore page_range.
+        start_idx, end_idx = self._parse_line_range(options.line_range, total_lines)
+        sliced = "".join(all_lines[start_idx:end_idx])
+
         truncated = False
-        total_chars = len(text)
-        metadata: dict[str, object] = {"parser": "text", "total_chars": total_chars}
+        metadata: dict[str, object] = {
+            "parser": "text",
+            "total_lines": total_lines,
+            "lines_returned": f"{start_idx + 1}-{end_idx}",
+        }
         if decode_fallback:
             metadata["decode_fallback"] = decode_fallback
-        if len(text) > MAX_CONTENT_CHARS:
-            text = text[:MAX_CONTENT_CHARS]
+        if len(sliced) > MAX_CONTENT_CHARS:
+            sliced = sliced[:MAX_CONTENT_CHARS]
             truncated = True
             metadata["truncated_at_char"] = MAX_CONTENT_CHARS
+            metadata["total_chars"] = sum(len(l) for l in all_lines)
+        if options.line_range is None and truncated:
+            metadata["hint"] = "use line_range to read later sections"
 
         return TextOutput(
             path="<set-by-caller>",
             mime=mime,
-            content=text,
+            content=sliced,
             size_bytes=size,
             truncated=truncated,
             metadata=metadata,
         )
+
+    @staticmethod
+    def _parse_line_range(spec: str | None, total_lines: int) -> tuple[int, int]:
+        """Parse '2-4' or '3' into (start_index, end_index_exclusive). 1-indexed input.
+
+        Defaults to (0, total_lines) if spec is None or invalid. End is clamped to total_lines.
+        """
+        if not spec:
+            return 0, total_lines
+        try:
+            if "-" in spec:
+                a, b = spec.split("-", 1)
+                start = max(int(a), 1) - 1   # 1-indexed → 0-indexed
+                end = min(int(b), total_lines)
+            else:
+                n = max(int(spec), 1) - 1
+                start, end = n, min(n + 1, total_lines)
+        except (ValueError, TypeError):
+            return 0, total_lines
+        return start, end
 ```
 
 NOTE: `path` is set to placeholder; the registry's `dispatch` overwrites with the actual path before returning. (Alternative: pass `path` into `parse`. Stick with current Protocol signature; registry overwrites.)
@@ -800,13 +1012,13 @@ NOTE: `path` is set to placeholder; the registry's `dispatch` overwrites with th
 - [ ] **Step 4: Run tests, verify pass**
 
 Run: `cd backend && uv run pytest tests/parsers/test_text_parser.py -v`
-Expected: PASS (4 tests).
+Expected: PASS (8 tests).
 
 - [ ] **Step 5: Commit**
 
 ```bash
 git add backend/cubebox/parsers/plugins/text.py backend/tests/parsers/test_text_parser.py
-git commit -m "feat(parsers): TextParser plugin (UTF-8 decode + 20K char truncation)"
+git commit -m "feat(parsers): TextParser plugin with line_range slicing + 20K char truncation"
 ```
 
 ---
@@ -1544,7 +1756,13 @@ async def test_dispatch_rejects_oversize() -> None:
 
 
 @pytest.mark.asyncio
-async def test_dispatch_returns_unchanged_on_second_read() -> None:
+async def test_dispatch_returns_unchanged_on_second_read(monkeypatch) -> None:
+    """Same content + same options + same conv → second call returns UnchangedOutput."""
+    import fakeredis.aioredis
+    from cubebox import cache as cache_mod
+    fake = fakeredis.aioredis.FakeRedis(decode_responses=True)
+    monkeypatch.setattr(cache_mod, "get_redis", lambda: fake)
+
     sandbox = MagicMock()
     sandbox._download_one = AsyncMock(return_value=b"hello world")
     reg = ParserRegistry()
@@ -1560,6 +1778,36 @@ async def test_dispatch_returns_unchanged_on_second_read() -> None:
         sandbox=sandbox, path="/tmp/a.txt", options=ParseOptions(), conversation_id=conv
     )
     assert isinstance(second, UnchangedOutput)
+
+
+@pytest.mark.asyncio
+async def test_dispatch_different_line_range_does_not_unchanged(monkeypatch) -> None:
+    """Different line_range = different cache key = re-parses."""
+    import fakeredis.aioredis
+    from cubebox import cache as cache_mod
+    fake = fakeredis.aioredis.FakeRedis(decode_responses=True)
+    monkeypatch.setattr(cache_mod, "get_redis", lambda: fake)
+
+    sandbox = MagicMock()
+    body = "\n".join(f"line{i}" for i in range(1, 21)).encode()
+    sandbox._download_one = AsyncMock(return_value=body)
+    reg = ParserRegistry()
+    await reg.discover()
+    conv = uuid4()
+
+    first = await reg.dispatch(
+        sandbox=sandbox, path="/tmp/log.txt",
+        options=ParseOptions(line_range="1-5"), conversation_id=conv,
+    )
+    assert isinstance(first, TextOutput)
+
+    second = await reg.dispatch(
+        sandbox=sandbox, path="/tmp/log.txt",
+        options=ParseOptions(line_range="10-15"), conversation_id=conv,
+    )
+    # Different line_range → different cache slot → re-parses, returns TextOutput, not Unchanged
+    assert isinstance(second, TextOutput)
+    assert "line10" in second.content
 
 
 @pytest.mark.asyncio
@@ -1726,12 +1974,16 @@ class ParserRegistry:
                 path=path, mime=mime, size_bytes=size, reason=reason, hint=hint,
             )
 
-        # 5. dedup check
+        # 5. dedup check (Redis-backed; key includes ParseOptions signature)
         if conversation_id is not None:
             digest = await dedup.hash_bytes(content)
-            if dedup.check(conversation_id, path, digest):
-                return UnchangedOutput(path=path)
-            dedup.update(conversation_id, path, digest)
+            try:
+                if await dedup.check(conversation_id, path, options, digest):
+                    return UnchangedOutput(path=path)
+                await dedup.update(conversation_id, path, options, digest)
+            except Exception as exc:
+                # Redis unreachable → fall through (cache miss treatment)
+                logger.warning("dedup cache unavailable, proceeding without: %s", exc)
 
         # 6. resolve plugin & parse
         ext = Path(path).suffix.lstrip(".").lower()
@@ -2026,7 +2278,15 @@ class _FileReadArgs(BaseModel):
         default=None,
         description=(
             "Optional 1-indexed page range, e.g. '1-5' or '3'. "
-            "Only honored for paginated formats (PDF, DOCX, PPTX)."
+            "Paginated documents only: PDF / DOCX / PPTX."
+        ),
+    )
+    line_range: str | None = PField(
+        default=None,
+        description=(
+            "Optional 1-indexed line range, e.g. '100-200' or '42'. "
+            "Text / code / log files only. Lets you navigate large text "
+            "files (e.g. 100k-line logs) by line number."
         ),
     )
 
@@ -2051,7 +2311,9 @@ DO NOT USE THIS TOOL FOR:
 - Archives (.zip .tar .gz) — extract first via execute("unzip ..."),
   then file_read on extracted files.
 - Remote URLs — file_read only reads sandbox paths.
-- Quick line peeks — execute("sed -n '42p' <file>") is faster.
+- Grep / search — execute("grep -n 'pattern' <file>") is more direct.
+- Tiny known-offset peeks — execute("sed -n '42p' <file>") skips
+  parser overhead.
 
 RETURN FORMAT (discriminated by `kind`):
 - "text"        : {content, mime, size_bytes, truncated, metadata}
@@ -2060,10 +2322,16 @@ RETURN FORMAT (discriminated by `kind`):
 - "unchanged"   : file unchanged since previous file_read in this session
 - "error"       : {error, retryable}
 
+PARAMETERS:
+- path (required)         — absolute sandbox path
+- page_range (optional)   — "1-5" or "3"; PDF/DOCX/PPTX only; ignored elsewhere
+- line_range (optional)   — "100-200" or "42"; text/code/log only; ignored elsewhere
+
 LIMITS:
 - Files > 100 MB are refused with kind="unsupported".
 - Content longer than 20,000 characters is truncated (truncated=True).
-  Use `page_range` for narrower slices.
+  Use `page_range` (PDF/DOCX/PPTX) or `line_range` (text/code/log)
+  to retrieve a specific segment.
 - Large files (>3 MB) trigger async parsing; up to 10 minutes.
 """
 
@@ -2071,10 +2339,14 @@ LIMITS:
 def _create_file_read_tool(sandbox: Sandbox, conversation_id: UUID | None) -> BaseTool:
     """Build the file_read tool backed by a sandbox + conversation."""
 
-    async def _file_read(path: str, page_range: str | None = None):
+    async def _file_read(
+        path: str,
+        page_range: str | None = None,
+        line_range: str | None = None,
+    ):
         result = await sandbox.file_read(
             path,
-            options=ParseOptions(page_range=page_range),
+            options=ParseOptions(page_range=page_range, line_range=line_range),
             conversation_id=conversation_id,
         )
         # Return the dict; LangChain will JSON-serialize for the LLM.
