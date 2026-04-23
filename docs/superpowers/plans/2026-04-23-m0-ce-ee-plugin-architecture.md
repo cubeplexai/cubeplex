@@ -2843,7 +2843,96 @@ git commit -m "ci(plugins): add test-ee-compat job for Layer 1 contract tests + 
 
 ---
 
-### Task 24: Final integration smoke test
+### Task 24: E2E — end-to-end plugin architecture path
+
+Per CLAUDE.md project rule "Focus on E2E tests". Contract tests (Task 22) verify the registry surface in isolation; this task verifies real integration: discovery via entry_points, auth/permission delegation on a live FastAPI app, and the admin extensions manifest served through a real HTTP request.
+
+**Files:**
+- Create: `backend/tests/e2e/test_plugin_architecture_e2e.py`
+
+- [ ] **Step 1: Write failing e2e**
+
+```python
+# backend/tests/e2e/test_plugin_architecture_e2e.py
+"""E2E: plugin discovery + CE defaults + admin manifest via real HTTP."""
+from __future__ import annotations
+
+import httpx
+import pytest
+from fastapi.testclient import TestClient
+
+
+@pytest.mark.e2e
+def test_ce_defaults_load_and_serve(client: TestClient) -> None:
+    """CE-only deployment: all Protocols resolve to builtin; app starts cleanly."""
+    from cubebox.plugins import get_registry
+
+    reg = get_registry()
+    assert reg.auth_provider is not None
+    assert reg.permission_checker is not None
+    assert reg.audit_sink is not None
+    assert reg.user_directory_syncer is None  # no default CE directory syncer
+    # get_admin_panel_extensions returns a list in the current contract.
+    assert isinstance(reg.get_admin_panel_extensions(), list)
+
+
+@pytest.mark.e2e
+def test_admin_extensions_manifest_requires_admin(client: TestClient, admin_cookie: str, member_cookie: str) -> None:
+    """Manifest endpoint enforces admin gating end-to-end through real middleware."""
+    r = client.get("/api/v1/admin/_extensions/manifest")
+    assert r.status_code == 401  # unauthenticated
+
+    r = client.get("/api/v1/admin/_extensions/manifest", cookies={"access_token": member_cookie})
+    assert r.status_code == 403  # non-admin
+
+    r = client.get("/api/v1/admin/_extensions/manifest", cookies={"access_token": admin_cookie})
+    assert r.status_code == 200
+    assert r.json() == []  # CE-only: no external AdminPanelExtension installed
+
+
+@pytest.mark.e2e
+def test_login_emits_audit_event(client: TestClient, member_credentials: tuple[str, str], caplog) -> None:
+    """AuditSink receives `auth.login` via the real login flow."""
+    email, password = member_credentials
+    with caplog.at_level("INFO", logger="cubebox.audit"):
+        r = client.post("/auth/jwt/login", data={"username": email, "password": password})
+        assert r.status_code == 200
+    assert any("auth.login" in rec.message for rec in caplog.records), (
+        "audit sink did not record auth.login"
+    )
+
+
+@pytest.mark.e2e
+def test_permission_check_denies_non_admin_on_workspace_admin_route(
+    client: TestClient, member_cookie: str, workspace_id: str
+) -> None:
+    """require_admin → PermissionChecker.check → denies non-admin on admin-only route."""
+    r = client.get(f"/api/v1/workspaces/{workspace_id}/admin", cookies={"access_token": member_cookie})
+    assert r.status_code == 403
+```
+
+- [ ] **Step 2: Add fixtures if missing**
+
+In `backend/tests/e2e/conftest.py` ensure the following fixtures exist and are reused (don't duplicate if already present in other e2e modules): `client`, `admin_cookie`, `member_cookie`, `member_credentials`, `workspace_id`.
+
+- [ ] **Step 3: Run e2e**
+
+```bash
+cd backend && uv run pytest tests/e2e/test_plugin_architecture_e2e.py -v
+```
+
+Expected: 4 passed.
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add backend/tests/e2e/test_plugin_architecture_e2e.py backend/tests/e2e/conftest.py
+git commit -m "test(plugins): e2e plugin architecture (CE defaults + admin manifest + audit + authz)"
+```
+
+---
+
+### Task 25: Final integration smoke test
 
 **Files:**
 - Run all tests + start server
