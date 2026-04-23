@@ -597,7 +597,7 @@ import hashlib
 import json
 from uuid import UUID
 
-from cubebox.cache import get_redis  # async redis client (已在 M-CI 接入)
+from cubebox.cache import get_redis  # async redis client (新增；CI 已挂 redis service，但 backend 此前无 client)
 from cubebox.parsers.schema import ParseOptions
 
 DEDUP_TTL_SECONDS = 6 * 3600       # 6 小时不活跃自动过期
@@ -804,9 +804,9 @@ Unit 测试覆盖：
 - `backend/cubebox/sandbox/base.py` —— 新增 `Sandbox.file_read(...)` 默认实现
 - `backend/cubebox/sandbox/opensandbox.py` —— 继承默认即可，无需 override
 - `backend/cubebox/middleware/sandbox.py` —— `SandboxMiddleware` 注册 `file_read` 工具到 tools 列表
-- `backend/cubebox/config.py` —— 加 `parsers.*` pydantic schema
-- `backend/config.yaml` / `config.development.yaml` / `config.test.yaml` —— 加 `parsers:` 节
-- `backend/pyproject.toml` —— `[project.entry-points."cubebox.parsers"]` + 新依赖：`python-magic` (libmagic 包装) + `filetype`（fallback）+ `redis>=5.0`（async client；CI 已起 redis service）；`httpx` 已有
+- `backend/cubebox/config.py` —— **不改**（cubebox 用 dynaconf，无 pydantic Settings 类；配置通过 `config.get(...)` 访问，YAML 是默认值的源）
+- `backend/config.yaml` / `config.development.yaml` / `config.test.yaml` —— 加 `parsers:` + `redis:` 两节
+- `backend/pyproject.toml` —— `[project.entry-points."cubebox.parsers"]` + 新依赖：`python-magic` (libmagic 包装) + `filetype`（fallback）+ `redis>=5.0`（**新引入** —— backend 此前无 redis client；CI 已挂 redis service 但应用层未接入）+ `fakeredis`（dev only，单测用）；`httpx` 已有
 - `docker-compose.yml` / 部署编排 —— 加 docling-serve service
 - `.github/workflows/ci.yml` —— e2e job 配置 mock `DoclingParser` 的 fixture 路径
 
@@ -868,4 +868,4 @@ Unit 测试覆盖：
 - [ ] docling-serve `FileSourceRequest` 的确切 JSON schema（multipart vs base64）—— 读 OpenAPI 后确认
 - [ ] Redis dedup TTL（默认 6h）是否需要按 conversation 活跃度自适应延长 —— 上线观察后再调
 - [ ] `UnchangedOutput` 是否应包含首次读取的 metadata 摘要（便于 agent 不回翻历史也能快速引用）—— v1 先不加，等使用反馈
-- [ ] `cubebox.cache` 模块若已存在（M-CI 引入 redis service 时是否同步加了 client）—— 实现时复用，不重复实现
+- [ ] `cubebox.cache` 当前**不存在**（CI 起了 redis service 但 backend 没接入 Python client）；本 spec 顺带新增。命名空间 `cubebox.cache.redis` 是否合理 —— 实现时若 future 还有别的 cache backend 再调整
