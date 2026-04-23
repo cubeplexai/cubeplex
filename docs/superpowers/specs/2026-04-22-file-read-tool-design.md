@@ -61,7 +61,7 @@
 | D15 | sync / async 路径按 file_size **硬分流**（阈值 3 MB），**不**自动降级 | sync 先试 → 超时降级 async | 代码路径清晰；避免服务端 CPU 被吃两次；timeout 做 retryable error 由 agent 决策重试 |
 | D16 | docling-serve 超时：sync **30s** / async **10 min**；双硬上限 | 无限制 / 动态 | 配置可调；超时 → `error(retryable=True)` |
 | D17 | v1 只发 CPU 镜像；GPU 镜像留给用户自换 | 三镜像矩阵（cpu / cu128 / cu130） | 单变体减少文档分叉与首装复杂度；自部署想加速自换 |
-| D18 | CI **不**起真 docling-serve；mock `DoclingParser` | 真实服务跑 e2e | docling-serve 不在 backend 关键链路（挂掉只影响 file_read）；mock 充分 |
+| D18 | CI **不**动态起 docling-serve 容器；但 e2e 跑真 docling — 通过环境变量 `DOCLING_URL` 指向外部托管实例；不可达时 `pytest.skip(...)` 并告警，不回退 mock | CI 内拉起容器（4.4 GB 镜像太慢）／mock `DoclingParser` | CLAUDE.md 项目约束 "Focus on E2E tests" —— mock 把真实解析路径留白；外部托管服务由维护者提供，CI 只消费；skip-with-warning 保证 docling 不可用时 CI 仍可推进，但不会伪装通过 |
 | D19 | Tool description 是本 spec 的**固定产出**，逐字进 StructuredTool | 只写大致 | agent 使用率/误用率高度依赖 description；一字一句都要审 |
 | D20 | dedup cache 直接走 **Redis**（CI 已挂 redis service；backend 增加 redis-py async client） | 进程内 dict + session-sticky routing | conversation 没有明确"结束"事件，Redis TTL 替代 lifecycle 钩子；多副本天然共享；重启不丢热缓存 |
 | D21 | `ParseOptions` 提供两个独立 range 参数：`page_range`（PDF/DOCX/PPTX）+ `line_range`（text/code/log）；两者共享 4 种语法 `"N"` / `"M-N"` / `"M-"` / `"-N"` | 单一通用 `range` 字段 / 只 page_range / 只支持 `"M-N"` | text 文件用行号比页号自然；分两参数语义清晰；语法对齐 sed/tail 直觉（`"3-"` = 从第 3 起；`"-3"` = 末尾 3 个）；plugin 各取所需，互不影响 |
@@ -753,26 +753,37 @@ services:
 
 ### 9.4 CI
 
-**不**起真 docling-serve。e2e 测试在 `conftest.py` 注入 mock `DoclingParser`：
+**不**在 CI 内动态拉起 docling-serve（镜像 4.4 GB，启动不经济），**但** e2e 必须跑真实解析路径——由维护者托管一个外部 docling-serve 实例，CI 通过环境变量消费：
 
-```python
-class MockDoclingParser:
-    mime_types = [...]
-    extensions = [...]
-    priority = 20
-    async def parse(self, content, *, mime, options):
-        return TextOutput(
-            path="<mock>", mime=mime,
-            content=f"<MOCK docling parsed {len(content)} bytes>",
-            size_bytes=len(content),
-            metadata={"parser": "mock-docling"},
-        )
+```yaml
+# .github/workflows/ci.yml (e2e job)
+env:
+  DOCLING_URL: ${{ secrets.DOCLING_E2E_URL }}         # e.g. https://docling-e2e.internal:5001
+  DOCLING_SERVE_API_KEY: ${{ secrets.DOCLING_E2E_KEY }}
 ```
 
-Unit 测试覆盖：
+e2e `conftest.py` 模式：
+
+```python
+@pytest.fixture(scope="session")
+def docling_url() -> str:
+    url = os.environ.get("DOCLING_URL")
+    if not url:
+        pytest.skip("DOCLING_URL not set — skipping docling e2e")
+    # Probe once per session; skip if unreachable (do NOT fall back to mock).
+    try:
+        httpx.get(f"{url.rstrip('/')}/health", timeout=5).raise_for_status()
+    except Exception as exc:
+        pytest.skip(f"docling-serve at {url} unreachable: {exc}")
+    return url
+```
+
+关键原则：**不** mock `DoclingParser`；docling 不可达 → `skip-with-warning`，而不是伪装通过。
+
+Unit 测试仅覆盖纯逻辑层（不替代 e2e）：
 - registry 启动、Protocol 校验失败、plugin 解析
 - TextParser / NotebookParser 纯逻辑（不依赖外部）
-- DoclingParser 用 httpx mock server 测 HTTP 交互（sync/async/超时/task FAILED）
+- DoclingParser 的 HTTP 客户端边界：sync/async 分流、超时包装、task FAILED 映射 —— 用 httpx `MockTransport` 而非假 server
 
 ---
 
@@ -795,7 +806,7 @@ Unit 测试覆盖：
 - `backend/tests/parsers/test_registry.py`
 - `backend/tests/parsers/test_text_parser.py`
 - `backend/tests/parsers/test_notebook_parser.py`
-- `backend/tests/parsers/test_docling_parser.py`（httpx mock server）
+- `backend/tests/parsers/test_docling_parser.py`（httpx `MockTransport` 覆盖 sync/async 分流、超时、FAILED 映射）
 - `backend/tests/parsers/test_dedup.py`
 - `backend/tests/sandbox/test_file_read.py`
 
@@ -809,7 +820,7 @@ Unit 测试覆盖：
 - `backend/config.yaml` / `config.development.yaml` / `config.test.yaml` —— 加 `parsers:` 节（**不**加 `redis:`：复用现有 `streaming.redis_url`）
 - `backend/pyproject.toml` —— `[project.entry-points."cubebox.parsers"]` + 新依赖：`python-magic` (libmagic 包装) + `filetype`（fallback）+ `fakeredis`（dev only，dedup 单测用）；`redis>=5.2.0` 与 `httpx` 已有
 - `docker-compose.yml` / 部署编排 —— 加 docling-serve service
-- `.github/workflows/ci.yml` —— e2e job 配置 mock `DoclingParser` 的 fixture 路径
+- `.github/workflows/ci.yml` —— e2e job 注入 `DOCLING_URL` / `DOCLING_SERVE_API_KEY` secrets；缺失时对应 e2e skip
 
 ### 10.3 实现阶段
 
@@ -819,7 +830,7 @@ Unit 测试覆盖：
 | 2 | mime.py + dedup.py | 单元测试 |
 | 3 | registry.py（discover + resolve + dispatch） + 3 默认 plugin 骨架（只实现 text） | registry tests 通过；text parser e2e 通过 |
 | 4 | NotebookParser 完整实现 | notebook tests 全绿 |
-| 5 | DoclingParser 完整实现（httpx client + sync + async + 超时 + mock server tests） | docling parser tests 全绿 |
+| 5 | DoclingParser 完整实现（httpx client + sync + async + 超时 + `MockTransport` 边界测试） | docling parser unit tests 全绿 |
 | 6 | Sandbox.file_read 默认实现接入；conversation_id 从 middleware context 传入 | sandbox integration tests 全绿 |
 | 7 | `file_read` agent 工具注册到 SandboxMiddleware；StructuredTool description 逐字对齐 | agent e2e 能调通；工具出现在工具列表 |
 | 8 | config schema 扩展；docker-compose 加 docling-serve；手动启动一次真 docling-serve 做冒烟 | 冒烟通过 |
@@ -856,7 +867,7 @@ Unit 测试覆盖：
 | docling-serve 单点 | v1 单实例可接受；后续按请求量 HPA；parser 是非关键链路（挂掉不阻塞 agent 对话，只是 file_read 不可用） |
 | 20K 截断对长文档过紧 | `page_range` 参数 + description 明示截断 + metadata 暴露 total_chars；agent 可多次调用补全 |
 | Redis 不可达让 dedup 失效 | dispatch 里 try/except，把 Redis 错误降级为 cache miss（继续解析）；告警日志；不影响 file_read 主路径 |
-| docling 对极端布局 PDF 解析错 | `error(retryable=False)` 可读 reason；agent 告诉用户；未来可装 Marker / LlamaParse 做 fallback plugin |
+| docling 对极端布局 PDF 解析错 | `error(retryable=False)` 可读 reason（文件内容本身的问题，重试无益）；agent 告诉用户；未来可装 Marker / LlamaParse 做 fallback plugin。仅网络 / 超时 / HTTP 5xx 才 `retryable=True` |
 | Protocol runtime_checkable 性能 | 仅启动时用一次（`discover()`），运行时不重复 check；无影响 |
 | libmagic 跨平台依赖 | `python-magic-bin` 自带 libmagic binary；不依赖系统包；macOS/Linux/Windows 统一 |
 | `.html` 走 TextParser 但 HTML 内嵌 `<script>` 等含大量无意义代码 | agent description 明说 HTML 返 raw；agent 按需要 `execute("html2text ...")` 或让用户转换 |

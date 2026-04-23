@@ -1988,6 +1988,115 @@ async def test_dispatch_wraps_parser_exceptions_as_error() -> None:
         sandbox=sandbox, path="/tmp/x.ipynb", options=ParseOptions(), conversation_id=None
     )
     assert isinstance(out, ErrorOutput)
+    # Parse-format error: not retryable (re-parsing same bytes won't help).
+    assert out.retryable is False
+
+
+@pytest.mark.asyncio
+async def test_dispatch_marks_transient_errors_retryable() -> None:
+    """httpx.TransportError / timeout → retryable=True so agents can retry."""
+    import httpx
+
+    class FlakyParser:
+        name = "flaky"
+        priority = 50
+        mime_types = ("application/pdf",)
+        extensions = ("pdf",)
+
+        async def parse(self, content, *, mime, options):
+            raise httpx.ConnectError("connection refused")
+
+    sandbox = MagicMock()
+    sandbox._download_one = AsyncMock(return_value=b"%PDF-1.4\n...")
+    reg = ParserRegistry()
+    reg._parsers = [FlakyParser()]  # type: ignore[list-item]
+    out = await reg.dispatch(
+        sandbox=sandbox, path="/tmp/x.pdf", options=ParseOptions(), conversation_id=None
+    )
+    assert isinstance(out, ErrorOutput)
+    assert out.retryable is True
+
+
+@pytest.mark.asyncio
+async def test_dispatch_does_not_cache_unsupported_so_retry_works() -> None:
+    """Unsupported result must NOT update dedup; user can install a plugin and retry."""
+    import fakeredis.aioredis
+    from cubebox.cache import set_redis
+    fake = fakeredis.aioredis.FakeRedis(decode_responses=True)
+    set_redis(fake)
+
+    sandbox = MagicMock()
+    sandbox._download_one = AsyncMock(return_value=b"\x00\x01binary")
+    reg = ParserRegistry()
+    reg._parsers = []  # no plugins → unsupported
+    conv = uuid4()
+
+    first = await reg.dispatch(
+        sandbox=sandbox, path="/tmp/x.bin",
+        options=ParseOptions(), conversation_id=conv,
+    )
+    assert isinstance(first, UnsupportedOutput)
+
+    # Install a plugin and retry — must NOT short-circuit as UnchangedOutput.
+    class BinParser:
+        name = "bin"
+        priority = 10
+        mime_types = ("application/octet-stream",)
+        extensions = ("bin",)
+
+        async def parse(self, content, *, mime, options):
+            return TextOutput(path="", content="parsed", line_count=1, truncated=False)
+
+    reg._parsers = [BinParser()]  # type: ignore[list-item]
+    second = await reg.dispatch(
+        sandbox=sandbox, path="/tmp/x.bin",
+        options=ParseOptions(), conversation_id=conv,
+    )
+    assert isinstance(second, TextOutput), "unsupported must not be cached"
+
+
+@pytest.mark.asyncio
+async def test_dispatch_does_not_cache_error_so_retry_works() -> None:
+    """ErrorOutput must NOT update dedup; transient failures should be retryable end-to-end."""
+    import fakeredis.aioredis
+    import httpx
+    from cubebox.cache import set_redis
+    fake = fakeredis.aioredis.FakeRedis(decode_responses=True)
+    set_redis(fake)
+
+    call_count = 0
+
+    class RecoveringParser:
+        name = "recovering"
+        priority = 50
+        mime_types = ("application/pdf",)
+        extensions = ("pdf",)
+
+        async def parse(self, content, *, mime, options):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                raise httpx.ConnectError("transient outage")
+            return TextOutput(path="", content="ok", line_count=1, truncated=False)
+
+    sandbox = MagicMock()
+    sandbox._download_one = AsyncMock(return_value=b"%PDF-1.4\n...")
+    reg = ParserRegistry()
+    reg._parsers = [RecoveringParser()]  # type: ignore[list-item]
+    conv = uuid4()
+
+    first = await reg.dispatch(
+        sandbox=sandbox, path="/tmp/x.pdf",
+        options=ParseOptions(), conversation_id=conv,
+    )
+    assert isinstance(first, ErrorOutput)
+    assert first.retryable is True
+
+    second = await reg.dispatch(
+        sandbox=sandbox, path="/tmp/x.pdf",
+        options=ParseOptions(), conversation_id=conv,
+    )
+    assert isinstance(second, TextOutput), "error must not be cached"
 ```
 
 - [ ] **Step 2: Run, verify fail**
@@ -2014,11 +2123,14 @@ docling = "cubebox.parsers.plugins.docling:DoclingParser"
 
 from __future__ import annotations
 
+import asyncio
 import importlib.metadata
 import logging
 from pathlib import Path
 from typing import Any
 from uuid import UUID
+
+import httpx
 
 from cubebox.parsers import dedup
 from cubebox.parsers.mime import sniff_mime_async
@@ -2035,6 +2147,21 @@ logger = logging.getLogger(__name__)
 
 GROUP = "cubebox.parsers"
 MAX_FILE_BYTES = 100 * 1024 * 1024
+
+
+def _is_retryable_exception(exc: BaseException) -> bool:
+    """Classify parser exceptions: transient faults are retryable.
+
+    Agents should retry network/timeout errors; parse-format errors should not
+    be retried since the file content itself is the problem.
+    """
+    if isinstance(exc, (asyncio.TimeoutError, TimeoutError, ConnectionError)):
+        return True
+    if isinstance(exc, httpx.TransportError):  # covers ConnectError, ReadTimeout, etc.
+        return True
+    if isinstance(exc, httpx.HTTPStatusError):
+        return 500 <= exc.response.status_code < 600
+    return False
 
 
 class ParserRegistry:
@@ -2118,16 +2245,18 @@ class ParserRegistry:
         # 3. MIME sniff
         mime = await sniff_mime_async(path, content)
 
-        # 4. dedup check (Redis-backed; key includes ParseOptions signature)
+        # 4. dedup check only (write is deferred until after a successful parse so
+        # transient failures are not cached as "already read").
+        digest: str | None = None
         if conversation_id is not None:
-            digest = await dedup.hash_bytes(content)
             try:
+                digest = await dedup.hash_bytes(content)
                 if await dedup.check(conversation_id, path, options, digest):
                     return UnchangedOutput(path=path)
-                await dedup.update(conversation_id, path, options, digest)
             except Exception as exc:
                 # Redis unreachable → fall through (cache miss treatment)
                 logger.warning("dedup cache unavailable, proceeding without: %s", exc)
+                digest = None
 
         # 5. resolve plugin
         ext = Path(path).suffix.lstrip(".").lower()
@@ -2136,6 +2265,7 @@ class ParserRegistry:
             # No plugin claims this MIME. CE doesn't maintain a hardcoded
             # REJECT list (see spec D22) — extensibility means future plugins
             # can claim ANY format. Return unsupported with format-aware hint.
+            # Do NOT update dedup: user may install a plugin and retry.
             return UnsupportedOutput(
                 path=path, mime=mime, size_bytes=size,
                 reason=f"no parser registered for mime={mime}",
@@ -2147,7 +2277,19 @@ class ParserRegistry:
             out = await parser.parse(content, mime=mime, options=options)
         except Exception as exc:
             logger.exception("parser %s failed on %s", type(parser).__name__, path)
-            return ErrorOutput(path=path, error=str(exc), retryable=False)
+            # Do NOT update dedup on failure — allow retry. Classify transient
+            # failures (network/timeout) as retryable so agents can recover.
+            return ErrorOutput(
+                path=path, error=str(exc), retryable=_is_retryable_exception(exc)
+            )
+
+        # 7. dedup update only after a successful parse result
+        if conversation_id is not None and digest is not None:
+            try:
+                await dedup.update(conversation_id, path, options, digest)
+            except Exception as exc:
+                # Non-fatal: result is already computed; we just lose dedup benefit.
+                logger.warning("dedup update failed, continuing: %s", exc)
 
         # Overwrite the placeholder path; preserve all other fields
         out_dict = out.model_dump()
@@ -2685,7 +2827,137 @@ git commit -m "feat(api): discover parser plugins at app startup; add docling-se
 
 ---
 
-### Task 15: Final integration + check
+### Task 15: E2E test — real docling parse end-to-end
+
+Per CLAUDE.md project rule "Focus on E2E tests" and spec D18: CI does **not** bundle docling-serve, but e2e exercises the real parse path against an externally hosted docling-serve. Mocks are forbidden here — if docling is unreachable the test must skip-with-warning, not fall back.
+
+**Files:**
+- Create: `backend/tests/e2e/test_file_read_docling_e2e.py`
+- Modify: `backend/tests/e2e/conftest.py` (add `docling_url` session fixture)
+
+- [ ] **Step 1: Add `docling_url` session fixture**
+
+Append to `backend/tests/e2e/conftest.py`:
+
+```python
+import os
+import httpx
+import pytest
+
+
+@pytest.fixture(scope="session")
+def docling_url() -> str:
+    """Return reachable DOCLING_URL or skip. Never mocks."""
+    url = os.environ.get("DOCLING_URL")
+    if not url:
+        pytest.skip("DOCLING_URL not set — external docling-serve required for e2e")
+    try:
+        resp = httpx.get(f"{url.rstrip('/')}/health", timeout=5)
+        resp.raise_for_status()
+    except Exception as exc:  # noqa: BLE001 — any probe failure → skip
+        pytest.skip(f"docling-serve at {url} unreachable: {exc}")
+    return url
+```
+
+- [ ] **Step 2: Write e2e that exercises the real parser**
+
+```python
+# backend/tests/e2e/test_file_read_docling_e2e.py
+"""E2E: agent calls file_read on a PDF → real docling-serve parses → markdown returns."""
+from __future__ import annotations
+
+from pathlib import Path
+from uuid import uuid4
+
+import pytest
+
+from cubebox.config import config
+from cubebox.parsers import ParseOptions, TextOutput, get_parser_registry
+
+FIXTURE = Path(__file__).parent / "fixtures" / "hello.pdf"  # small (<100 KB) fixture PDF
+
+
+@pytest.mark.asyncio
+@pytest.mark.e2e
+async def test_pdf_flows_through_real_docling(docling_url: str, monkeypatch) -> None:
+    """Read a small PDF via the real docling-serve endpoint; assert markdown + parser metadata."""
+    monkeypatch.setenv("CUBEBOX_PARSERS__DOCLING_SERVE__BASE_URL", docling_url)
+    config.reload()
+
+    from cubebox.parsers.registry import reset_parser_registry_for_tests
+    reset_parser_registry_for_tests()
+    reg = get_parser_registry()
+    await reg.discover()
+
+    class _LocalSandbox:
+        async def _download_one(self, path: str) -> bytes:
+            return FIXTURE.read_bytes()
+
+    out = await reg.dispatch(
+        sandbox=_LocalSandbox(),
+        path=str(FIXTURE),
+        options=ParseOptions(),
+        conversation_id=uuid4(),
+    )
+    assert isinstance(out, TextOutput), f"expected markdown text output, got {type(out).__name__}"
+    assert out.metadata.get("parser") == "docling"
+    assert len(out.content) > 0
+    assert "hello" in out.content.lower()  # fixture contains the word "hello"
+
+
+@pytest.mark.asyncio
+@pytest.mark.e2e
+async def test_unchanged_second_read_hits_dedup(docling_url: str, monkeypatch) -> None:
+    """Same conversation + same bytes + same ParseOptions → second read returns UnchangedOutput."""
+    from cubebox.parsers import UnchangedOutput
+
+    monkeypatch.setenv("CUBEBOX_PARSERS__DOCLING_SERVE__BASE_URL", docling_url)
+    config.reload()
+
+    from cubebox.parsers.registry import reset_parser_registry_for_tests
+    reset_parser_registry_for_tests()
+    reg = get_parser_registry()
+    await reg.discover()
+
+    class _LocalSandbox:
+        async def _download_one(self, path: str) -> bytes:
+            return FIXTURE.read_bytes()
+
+    sandbox = _LocalSandbox()
+    conv = uuid4()
+    first = await reg.dispatch(
+        sandbox=sandbox, path=str(FIXTURE),
+        options=ParseOptions(), conversation_id=conv,
+    )
+    assert isinstance(first, TextOutput)
+
+    second = await reg.dispatch(
+        sandbox=sandbox, path=str(FIXTURE),
+        options=ParseOptions(), conversation_id=conv,
+    )
+    assert isinstance(second, UnchangedOutput)
+```
+
+- [ ] **Step 3: Commit fixture + test**
+
+Add a small hand-crafted PDF at `backend/tests/e2e/fixtures/hello.pdf` (≤ 10 KB). Ensure it renders the literal word "hello" so the assertion above is robust.
+
+```bash
+git add backend/tests/e2e/test_file_read_docling_e2e.py backend/tests/e2e/conftest.py backend/tests/e2e/fixtures/hello.pdf
+git commit -m "test(parsers): e2e file_read against real docling-serve"
+```
+
+- [ ] **Step 4: Run e2e locally against docling**
+
+```bash
+DOCLING_URL=http://localhost:5001 cd backend && uv run pytest tests/e2e/test_file_read_docling_e2e.py -v
+```
+
+Expected: 2 passed. (If DOCLING_URL is unset the tests skip — that is intended in developer environments but **not** acceptable in CI where the secret must be configured.)
+
+---
+
+### Task 16: Final integration + check
 
 **Files:**
 - Run all tests + smoke
@@ -2696,7 +2968,7 @@ git commit -m "feat(api): discover parser plugins at app startup; add docling-se
 cd backend && uv run pytest tests/ -v
 ```
 
-Expected: ALL pass.
+Expected: ALL pass (docling e2e skips with warning if `DOCLING_URL` is absent; must pass when set).
 
 - [ ] **Step 2: Run lint + type-check**
 
@@ -2706,20 +2978,7 @@ cd backend && make check
 
 Expected: All green.
 
-- [ ] **Step 3: Manual smoke against real docling-serve (optional)**
-
-If you have docling-serve running locally:
-
-```bash
-docker run -d -p 5001:5001 quay.io/docling-project/docling-serve-cpu
-cd backend && uv run python main.py &
-sleep 5
-# Trigger an agent conversation that uses file_read on a small PDF
-kill %1
-docker stop $(docker ps -q --filter ancestor=quay.io/docling-project/docling-serve-cpu)
-```
-
-- [ ] **Step 4: Verify clean git status**
+- [ ] **Step 3: Verify clean git status**
 
 ```bash
 git status

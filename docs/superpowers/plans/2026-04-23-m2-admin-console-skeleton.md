@@ -1769,7 +1769,84 @@ git commit -m "feat(admin): set CSP frame-src 'self' for /admin routes (plugin i
 
 ---
 
-### Task 16: Final integration smoke test
+### Task 16: E2E — admin console sidebar + /admin gating
+
+Per CLAUDE.md project rule "Focus on E2E tests". Protocol / hook-level tests from earlier tasks are not sufficient; this task drives the browser against real backend + frontend to cover: sidebar structure, admin popover gating, `/admin` route, `org_admin` enforcement, and non-admin redirect. Uses the existing frontend e2e harness.
+
+**Files:**
+- Create: `frontend/packages/web/e2e/admin-console-skeleton.spec.ts`
+
+- [ ] **Step 1: Write failing Playwright e2e**
+
+```ts
+// frontend/packages/web/e2e/admin-console-skeleton.spec.ts
+import { test, expect } from "@playwright/test";
+import { loginAs } from "./helpers/auth";
+
+test.describe("admin console skeleton", () => {
+  test("admin sees 管理后台 in avatar popover and can reach /admin", async ({ page, context }) => {
+    await loginAs(page, "admin");
+    await page.goto("/");
+    await expect(page.getByRole("complementary", { name: /sidebar/i })).toBeVisible();
+    await page.getByRole("button", { name: /avatar/i }).click();
+    const adminLink = page.getByRole("menuitem", { name: "管理后台" });
+    await expect(adminLink).toBeVisible();
+
+    const pagePromise = context.waitForEvent("page");
+    await adminLink.click();
+    const adminPage = await pagePromise;
+    await adminPage.waitForLoadState();
+
+    await expect(adminPage).toHaveURL(/\/admin(\/|$)/);
+    await expect(adminPage.getByText(/cubebox · 管理后台/)).toBeVisible();
+    for (const tab of ["模型", "技能", "MCP", "成员", "审计"]) {
+      await expect(adminPage.getByRole("link", { name: new RegExp(tab) })).toBeVisible();
+    }
+  });
+
+  test("non-admin member cannot access /admin", async ({ page }) => {
+    await loginAs(page, "member");
+
+    await page.goto("/");
+    await page.getByRole("button", { name: /avatar/i }).click();
+    await expect(page.getByRole("menuitem", { name: "管理后台" })).toHaveCount(0);
+
+    await page.goto("/admin");
+    await expect(page).toHaveURL(/^.*\/$/); // redirected to root
+  });
+
+  test("CE deployment: extensions manifest returns empty and no external tabs render", async ({ page }) => {
+    await loginAs(page, "admin");
+    await page.goto("/admin");
+    // Only the 5 built-in CE tabs should be present in the sub-nav.
+    const navLinks = page.getByRole("navigation", { name: /admin sub-nav/i }).getByRole("link");
+    await expect(navLinks).toHaveCount(5);
+  });
+});
+```
+
+- [ ] **Step 2: Ensure `loginAs(page, "admin" | "member")` helper exists**
+
+If `frontend/packages/web/e2e/helpers/auth.ts` does not already expose a dual-role `loginAs`, extend it to accept `"admin" | "member"` and seed / reuse both fixture users against the backend's auth endpoints. Reuse the same fixtures the streaming e2e already depends on — do not create a parallel auth harness.
+
+- [ ] **Step 3: Run**
+
+```bash
+cd frontend && pnpm --filter @cubebox/web exec playwright test admin-console-skeleton.spec.ts
+```
+
+Expected: 3 passed.
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add frontend/packages/web/e2e/admin-console-skeleton.spec.ts frontend/packages/web/e2e/helpers/auth.ts
+git commit -m "test(admin): e2e admin console skeleton (sidebar + /admin gating + CE extensions)"
+```
+
+---
+
+### Task 17: Final integration smoke test
 
 **Files:**
 - Run all tests + manual smoke
