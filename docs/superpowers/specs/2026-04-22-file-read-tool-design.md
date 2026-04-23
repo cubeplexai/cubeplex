@@ -65,6 +65,7 @@
 | D19 | Tool description 是本 spec 的**固定产出**，逐字进 StructuredTool | 只写大致 | agent 使用率/误用率高度依赖 description；一字一句都要审 |
 | D20 | dedup cache 直接走 **Redis**（CI 已挂 redis service；backend 增加 redis-py async client） | 进程内 dict + session-sticky routing | conversation 没有明确"结束"事件，Redis TTL 替代 lifecycle 钩子；多副本天然共享；重启不丢热缓存 |
 | D21 | `ParseOptions` 提供两个独立 range 参数：`page_range`（PDF/DOCX/PPTX）+ `line_range`（text/code/log） | 单一通用 `range` 字段 / 只 page_range / 不做 | text 文件用行号比页号自然；分两参数语义清晰；plugin 各取所需，互不影响；cache key 由 dispatch 层把 options 整体签入即可 |
+| D22 | **不维护 REJECT_EXT / REJECT_MIME 硬名单**；"哪些格式支持"完全由 plugin 注册决定，未匹配 → `unsupported` + 智能 hint | hardcoded REJECT 视频/音频/归档/可执行 | 双数据源维护成本；REJECT 阻断合法扩展（mp4 转写 / zip listing / exe 元数据等 plugin 被预先枪毙）；零性能收益；零安全收益（file_read 是只读，读 .exe 字节无副作用） |
 
 ---
 
@@ -314,63 +315,67 @@ async def dispatch(
     content = await sandbox._download_one(path)
     size = len(content)
 
-    # 2. size precheck
+    # 2. size precheck（backend 资源保护，与格式无关）
     if size > 100 * 1024 * 1024:
         return UnsupportedOutput(
-            path=path, mime="?", size_bytes=size,
+            path=path, mime="application/octet-stream", size_bytes=size,
             reason="file too large (100MB limit)",
-            hint="try reading specific pages with page_range",
+            hint="try reading specific pages with page_range or specific lines with line_range",
         )
 
     # 3. MIME sniff
-    mime = await _sniff_mime(path, content)  # libmagic → ext fallback
+    mime = await sniff_mime_async(path, content)
     ext = Path(path).suffix.lstrip(".").lower()
 
-    # 4. hard REJECT list
-    if ext in REJECT_EXT or mime in REJECT_MIME:
-        return UnsupportedOutput(
-            path=path, mime=mime, size_bytes=size,
-            reason=_reject_reason(ext, mime),
-            hint=_reject_hint(ext),
-        )
-
-    # 5. dedup check (conversation-scoped hash cache)
+    # 4. dedup check (Redis-backed; key includes ParseOptions signature)
     if conversation_id is not None:
-        digest = await _hash_bytes(content)
-        if dedup.check(conversation_id, path, digest):
-            return UnchangedOutput(path=path)
-        dedup.update(conversation_id, path, digest)
+        digest = await dedup.hash_bytes(content)
+        try:
+            if await dedup.check(conversation_id, path, options, digest):
+                return UnchangedOutput(path=path)
+            await dedup.update(conversation_id, path, options, digest)
+        except Exception as exc:
+            logger.warning("dedup cache unavailable, proceeding without: %s", exc)
 
-    # 6. resolve plugin & parse
+    # 5. resolve plugin
     parser = self.resolve(mime=mime, ext=ext)
     if parser is None:
+        # No plugin claims this format. CE doesn't maintain a hardcoded REJECT
+        # list — extensibility means future plugins can claim ANY format
+        # (transcribers for video/audio, listers for archives, etc.). When no
+        # plugin matches, return unsupported with a format-family hint.
         return UnsupportedOutput(
             path=path, mime=mime, size_bytes=size,
-            reason="no parser matched",
+            reason=f"no parser registered for mime={mime}",
+            hint=self._unsupported_hint(mime, ext),
         )
+
+    # 6. parse
     try:
         return await parser.parse(content, mime=mime, options=options)
     except Exception as exc:
         return ErrorOutput(path=path, error=str(exc), retryable=_is_retryable(exc))
+
+
+@staticmethod
+def _unsupported_hint(mime: str, ext: str) -> str | None:
+    """Generate a format-family-aware hint for the unsupported case."""
+    if mime.startswith("video/"):
+        return "video transcription requires a parser plugin (none installed)"
+    if mime.startswith("audio/"):
+        return "audio transcription requires a parser plugin (none installed)"
+    if mime in {
+        "application/zip", "application/x-tar", "application/gzip",
+        "application/x-bzip2", "application/x-7z-compressed",
+        "application/x-rar-compressed", "application/x-xz",
+    }:
+        return 'extract first via execute("unzip <file>") then file_read on contents'
+    if ext in {"exe", "so", "dll", "dylib", "bin"}:
+        return "binary executable; install a metadata parser plugin if needed"
+    return None
 ```
 
-**REJECT 列表**（硬拒绝，不走任何 plugin）：
-
-```python
-REJECT_EXT = {
-    # video
-    "mp4", "mov", "mkv", "webm", "avi", "flv", "wmv", "m4v",
-    # audio
-    "mp3", "wav", "m4a", "ogg", "flac", "opus", "aac", "wma",
-    # binary / executable
-    "exe", "so", "dll", "dylib", "o", "a", "bin", "com",
-    # archive
-    "zip", "tar", "gz", "bz2", "rar", "7z", "tgz", "xz", "zst",
-}
-REJECT_MIME = {
-    # ... 对应 MIME
-}
-```
+**没有 REJECT 列表**：CE 不维护"哪些格式禁读"硬名单。哪些格式被支持，**完全由 plugin 注册决定**。未匹配 plugin → `UnsupportedOutput` + 智能 hint。详见 D22。
 
 ---
 
@@ -484,21 +489,22 @@ output, not network resources.
 • Images — .png .jpg .webp .tiff. Returns OCR'd text content (no
   visual understanding in v1).
 
-═══════════════════ DO NOT USE THIS TOOL FOR ═══════════════════
-• Video / Audio (.mp4 .mov .mp3 .wav etc.) — will return
-  kind="unsupported". Acknowledge to the user that these cannot
-  be read as text.
-• Executables / Binaries (.exe .so .dll .bin) — will return
-  kind="unsupported".
-• Archives (.zip .tar .gz) — will return kind="unsupported".
-  To access contents, first `execute("unzip <file> -d <dest>")`
-  then file_read on extracted files.
-• Remote URLs — file_read only reads sandbox paths. Use web-fetch
-  tools for URLs.
+═══════════════ WHEN OTHER TOOLS ARE BETTER ═══════════════════
+• Remote URLs — file_read only reads sandbox paths. Use a web-fetch
+  tool for URLs.
 • Grep / search — for pattern-find within files, `execute("grep -n
   'pattern' <file>")` is more direct than file_read + scan.
-• Tiny single-line peeks where you already know the byte offset —
-  `execute("sed -n '42p' <file>")` skips parser overhead.
+• Tiny known-offset peeks — `execute("sed -n '42p' <file>")` skips
+  parser overhead.
+
+═══════════════ HOW UNSUPPORTED FORMATS BEHAVE ═══════════════════
+The tool returns kind="unsupported" with a `hint` when no parser
+plugin handles the file's MIME type. Common cases — video, audio,
+archives (.zip / .tar / .gz), binary executables — fall here in the
+default deployment. The `hint` field tells you what alternative to
+try (e.g., extract archive first via execute, then file_read on
+extracted files). If you see kind="unsupported", surface the hint
+to the user; don't keep retrying file_read on the same path.
 
 ═══════════════════ RETURN FORMAT (by `kind`) ═══════════════════
 • "text"       — {content, mime, size_bytes, truncated, metadata}

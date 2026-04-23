@@ -385,7 +385,7 @@ git commit -m "feat(parsers): FileParser runtime_checkable Protocol"
 
 ---
 
-### Task 4: MIME sniff + REJECT lists
+### Task 4: MIME sniff (no REJECT lists — see D22)
 
 **Files:**
 - Create: `backend/cubebox/parsers/mime.py`
@@ -404,40 +404,7 @@ NOTE: `python-magic` requires libmagic shared library on the system. macOS: `bre
 
 ```python
 # backend/tests/parsers/test_mime.py
-from cubebox.parsers.mime import (
-    REJECT_EXT,
-    REJECT_MIME,
-    is_rejected,
-    sniff_mime,
-)
-
-
-def test_reject_ext_includes_video() -> None:
-    assert "mp4" in REJECT_EXT
-    assert "mov" in REJECT_EXT
-
-
-def test_reject_ext_includes_audio() -> None:
-    assert "mp3" in REJECT_EXT
-    assert "wav" in REJECT_EXT
-
-
-def test_reject_ext_includes_archives() -> None:
-    assert "zip" in REJECT_EXT
-    assert "tar" in REJECT_EXT
-
-
-def test_reject_ext_includes_executables() -> None:
-    assert "exe" in REJECT_EXT
-    assert "so" in REJECT_EXT
-
-
-def test_is_rejected_true_for_video_ext() -> None:
-    assert is_rejected("/tmp/foo.mp4", "video/mp4") is True
-
-
-def test_is_rejected_false_for_text() -> None:
-    assert is_rejected("/tmp/foo.txt", "text/plain") is False
+from cubebox.parsers.mime import sniff_mime, sniff_mime_async
 
 
 def test_sniff_mime_detects_pdf_from_bytes() -> None:
@@ -451,7 +418,23 @@ def test_sniff_mime_falls_back_to_extension() -> None:
     mime = sniff_mime("/tmp/x.py", b"print('hi')\n")
     # libmagic detects as text/x-python or text/plain; either acceptable
     assert mime.startswith("text/") or mime == "application/x-python"
+
+
+def test_sniff_mime_returns_octet_stream_for_unknown() -> None:
+    # Random bytes with no recognizable magic and no useful extension
+    mime = sniff_mime("/tmp/x", b"\x01\x02\x03\x04random")
+    # libmagic may detect as text/plain or octet-stream; either is acceptable
+    assert mime in {"application/octet-stream", "text/plain"}
+
+
+@pytest.mark.asyncio
+async def test_sniff_mime_async_returns_same_result() -> None:
+    pdf_magic = b"%PDF-1.4\nstuff"
+    mime = await sniff_mime_async("/tmp/a.pdf", pdf_magic)
+    assert mime == "application/pdf"
 ```
+
+(Add `import pytest` to the top of the file.)
 
 - [ ] **Step 3: Run, verify fail**
 
@@ -462,37 +445,20 @@ Expected: FAIL.
 
 ```python
 # backend/cubebox/parsers/mime.py
-"""MIME sniffing + REJECT lists for file_read pre-screening."""
+"""MIME sniffing helpers for file_read.
+
+Note: there is intentionally NO hardcoded REJECT list. "Unsupported"
+status is determined by whether any registered FileParser plugin claims
+the MIME type. See spec D22 for rationale.
+"""
 
 from __future__ import annotations
 
 import asyncio
 import mimetypes
-from pathlib import Path
 
 import filetype
 import magic
-
-REJECT_EXT: set[str] = {
-    # video
-    "mp4", "mov", "mkv", "webm", "avi", "flv", "wmv", "m4v",
-    # audio
-    "mp3", "wav", "m4a", "ogg", "flac", "opus", "aac", "wma",
-    # binary / executable
-    "exe", "so", "dll", "dylib", "o", "a", "bin", "com",
-    # archive
-    "zip", "tar", "gz", "bz2", "rar", "7z", "tgz", "xz", "zst",
-}
-
-REJECT_MIME: set[str] = {
-    "video/mp4", "video/quicktime", "video/x-matroska", "video/webm",
-    "video/x-msvideo", "video/x-flv", "video/x-ms-wmv",
-    "audio/mpeg", "audio/wav", "audio/x-m4a", "audio/ogg", "audio/flac",
-    "application/x-executable", "application/x-shared-library",
-    "application/zip", "application/x-tar", "application/gzip",
-    "application/x-bzip2", "application/x-rar-compressed", "application/x-7z-compressed",
-    "application/x-xz", "application/zstd",
-}
 
 
 def sniff_mime(path: str, content: bytes) -> str:
@@ -520,40 +486,18 @@ def sniff_mime(path: str, content: bytes) -> str:
 
 async def sniff_mime_async(path: str, content: bytes) -> str:
     return await asyncio.to_thread(sniff_mime, path, content)
-
-
-def is_rejected(path: str, mime: str) -> bool:
-    ext = Path(path).suffix.lstrip(".").lower()
-    return ext in REJECT_EXT or mime in REJECT_MIME
-
-
-def reject_reason(path: str, mime: str) -> tuple[str, str | None]:
-    """Return (reason, hint) for a rejected file."""
-    ext = Path(path).suffix.lstrip(".").lower()
-    if ext in {"mp4", "mov", "mkv", "webm", "avi", "flv", "wmv", "m4v"} or mime.startswith("video/"):
-        return ("video file not supported", "video content cannot be read as text")
-    if ext in {"mp3", "wav", "m4a", "ogg", "flac", "opus", "aac", "wma"} or mime.startswith("audio/"):
-        return ("audio file not supported", "audio content cannot be read as text")
-    if ext in {"exe", "so", "dll", "dylib", "o", "a", "bin", "com"}:
-        return ("binary executable not supported", "use shell tools to inspect metadata")
-    if ext in {"zip", "tar", "gz", "bz2", "rar", "7z", "tgz", "xz", "zst"}:
-        return (
-            "archive file not supported",
-            "extract first with execute(\"unzip <file>\") then file_read on contents",
-        )
-    return ("file type not supported", None)
 ```
 
 - [ ] **Step 5: Run tests, verify pass**
 
 Run: `cd backend && uv run pytest tests/parsers/test_mime.py -v`
-Expected: PASS (8 tests). If a test fails because libmagic isn't installed, install it on the host.
+Expected: PASS (4 tests). If a test fails because libmagic isn't installed, install it on the host.
 
 - [ ] **Step 6: Commit**
 
 ```bash
 git add backend/cubebox/parsers/mime.py backend/tests/parsers/test_mime.py backend/pyproject.toml backend/uv.lock
-git commit -m "feat(parsers): MIME sniffing via libmagic + REJECT lists for unsupported types"
+git commit -m "feat(parsers): MIME sniffing helpers (libmagic + filetype + ext fallback)"
 ```
 
 ---
@@ -1724,19 +1668,52 @@ async def test_resolve_picks_notebook_for_ipynb() -> None:
 
 
 @pytest.mark.asyncio
-async def test_dispatch_rejects_video() -> None:
+async def test_dispatch_unsupported_when_no_plugin_matches(monkeypatch) -> None:
+    """No plugin claims video/* → returns unsupported with format-aware hint."""
+    import fakeredis.aioredis
+    from cubebox import cache as cache_mod
+    fake = fakeredis.aioredis.FakeRedis(decode_responses=True)
+    monkeypatch.setattr(cache_mod, "get_redis", lambda: fake)
+
     sandbox = MagicMock()
-    sandbox._download_one = AsyncMock(return_value=b"\x00" * 100)
+    # Plausible MP4 magic so libmagic detects video/mp4
+    sandbox._download_one = AsyncMock(
+        return_value=b"\x00\x00\x00\x20ftypisom" + b"\x00" * 200
+    )
     reg = ParserRegistry()
     await reg.discover()
     out = await reg.dispatch(
-        sandbox=sandbox,
-        path="/tmp/movie.mp4",
-        options=ParseOptions(),
-        conversation_id=uuid4(),
+        sandbox=sandbox, path="/tmp/movie.mp4",
+        options=ParseOptions(), conversation_id=uuid4(),
     )
     assert isinstance(out, UnsupportedOutput)
-    assert "video" in out.reason
+    assert "no parser registered" in out.reason
+    # Hint mentions video transcription
+    assert out.hint is not None
+    assert "video" in out.hint.lower()
+
+
+@pytest.mark.asyncio
+async def test_dispatch_unsupported_archive_hint(monkeypatch) -> None:
+    """Archives suggest extract-then-read flow."""
+    import fakeredis.aioredis
+    from cubebox import cache as cache_mod
+    fake = fakeredis.aioredis.FakeRedis(decode_responses=True)
+    monkeypatch.setattr(cache_mod, "get_redis", lambda: fake)
+
+    sandbox = MagicMock()
+    sandbox._download_one = AsyncMock(
+        return_value=b"PK\x03\x04" + b"\x00" * 200  # ZIP magic
+    )
+    reg = ParserRegistry()
+    await reg.discover()
+    out = await reg.dispatch(
+        sandbox=sandbox, path="/tmp/data.zip",
+        options=ParseOptions(), conversation_id=uuid4(),
+    )
+    assert isinstance(out, UnsupportedOutput)
+    assert out.hint is not None
+    assert "extract" in out.hint.lower() or "unzip" in out.hint.lower()
 
 
 @pytest.mark.asyncio
@@ -1866,11 +1843,7 @@ from typing import Any
 from uuid import UUID
 
 from cubebox.parsers import dedup
-from cubebox.parsers.mime import (
-    is_rejected,
-    reject_reason,
-    sniff_mime_async,
-)
+from cubebox.parsers.mime import sniff_mime_async
 from cubebox.parsers.protocols import FileParser
 from cubebox.parsers.schema import (
     ErrorOutput,
@@ -1956,25 +1929,18 @@ class ParserRegistry:
             content = files[0][1]
         size = len(content)
 
-        # 2. size precheck
+        # 2. size precheck (backend resource protection, format-agnostic)
         if size > MAX_FILE_BYTES:
             return UnsupportedOutput(
                 path=path, mime="application/octet-stream", size_bytes=size,
                 reason="file too large (100MB limit)",
-                hint="try reading specific pages with page_range",
+                hint="try reading specific pages with page_range or specific lines with line_range",
             )
 
         # 3. MIME sniff
         mime = await sniff_mime_async(path, content)
 
-        # 4. REJECT list
-        if is_rejected(path, mime):
-            reason, hint = reject_reason(path, mime)
-            return UnsupportedOutput(
-                path=path, mime=mime, size_bytes=size, reason=reason, hint=hint,
-            )
-
-        # 5. dedup check (Redis-backed; key includes ParseOptions signature)
+        # 4. dedup check (Redis-backed; key includes ParseOptions signature)
         if conversation_id is not None:
             digest = await dedup.hash_bytes(content)
             try:
@@ -1985,14 +1951,20 @@ class ParserRegistry:
                 # Redis unreachable → fall through (cache miss treatment)
                 logger.warning("dedup cache unavailable, proceeding without: %s", exc)
 
-        # 6. resolve plugin & parse
+        # 5. resolve plugin
         ext = Path(path).suffix.lstrip(".").lower()
         parser = self.resolve(mime=mime, ext=ext)
         if parser is None:
+            # No plugin claims this MIME. CE doesn't maintain a hardcoded
+            # REJECT list (see spec D22) — extensibility means future plugins
+            # can claim ANY format. Return unsupported with format-aware hint.
             return UnsupportedOutput(
                 path=path, mime=mime, size_bytes=size,
-                reason="no parser matched",
+                reason=f"no parser registered for mime={mime}",
+                hint=self._unsupported_hint(mime, ext),
             )
+
+        # 6. parse
         try:
             out = await parser.parse(content, mime=mime, options=options)
         except Exception as exc:
@@ -2003,6 +1975,25 @@ class ParserRegistry:
         out_dict = out.model_dump()
         out_dict["path"] = path
         return type(out).model_validate(out_dict)
+
+    @staticmethod
+    def _unsupported_hint(mime: str, ext: str) -> str | None:
+        """Format-family-aware hint for the no-parser-matched case."""
+        if mime.startswith("video/"):
+            return "video transcription requires a parser plugin (none installed)"
+        if mime.startswith("audio/"):
+            return "audio transcription requires a parser plugin (none installed)"
+        archive_mimes = {
+            "application/zip", "application/x-tar", "application/gzip",
+            "application/x-bzip2", "application/x-7z-compressed",
+            "application/x-rar-compressed", "application/x-xz",
+        }
+        archive_exts = {"zip", "tar", "gz", "bz2", "rar", "7z", "tgz", "xz"}
+        if mime in archive_mimes or ext in archive_exts:
+            return 'extract first via execute("unzip <file>") then file_read on contents'
+        if ext in {"exe", "so", "dll", "dylib", "bin"}:
+            return "binary executable; install a metadata parser plugin if needed"
+        return None
 
 
 _registry: ParserRegistry | None = None
@@ -2305,15 +2296,23 @@ USE THIS TOOL FOR:
 - Notebooks (.ipynb) — returns structured cells.
 - Images (.png .jpg .webp .tiff) — returns OCR'd text content.
 
-DO NOT USE THIS TOOL FOR:
-- Video / Audio — returns kind="unsupported".
-- Executables / Binaries — returns kind="unsupported".
-- Archives (.zip .tar .gz) — extract first via execute("unzip ..."),
-  then file_read on extracted files.
-- Remote URLs — file_read only reads sandbox paths.
-- Grep / search — execute("grep -n 'pattern' <file>") is more direct.
+WHEN OTHER TOOLS ARE BETTER:
+- Remote URLs — file_read only reads sandbox paths. Use a web-fetch
+  tool for URLs.
+- Grep / search — for pattern-find, execute("grep -n 'pattern' <file>")
+  is more direct than file_read + scan.
 - Tiny known-offset peeks — execute("sed -n '42p' <file>") skips
   parser overhead.
+
+HOW UNSUPPORTED FORMATS BEHAVE:
+- The tool returns kind="unsupported" with a `hint` when no parser
+  plugin handles the file's MIME type. Common cases — video, audio,
+  archives, binary executables — fall here in the default deployment.
+- The `hint` field tells you what alternative to try (e.g., for
+  archives: extract first via execute("unzip <file>") then file_read
+  on extracted files).
+- If you see kind="unsupported", surface the hint to the user; don't
+  retry file_read on the same path.
 
 RETURN FORMAT (discriminated by `kind`):
 - "text"        : {content, mime, size_bytes, truncated, metadata}
