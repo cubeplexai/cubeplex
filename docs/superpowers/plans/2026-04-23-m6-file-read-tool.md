@@ -511,25 +511,41 @@ git commit -m "feat(parsers): MIME sniffing helpers (libmagic + filetype + ext f
 - Create: `backend/tests/parsers/test_dedup.py`
 - Modify: `backend/pyproject.toml` (add `redis>=5.0`)
 
-- [ ] **Step 1: Add redis dep**
+**Note on prior art**: cubebox CE backend currently has **no Redis Python client**, **no `cubebox.cache` module**, and **no `redis:` config section**. Redis is only present as a CI service (`.github/workflows/ci.yml` line 129); no application code uses it. This task introduces all three from scratch. Verify before starting:
 
 ```bash
-cd backend && uv add 'redis>=5.0'
+ls backend/cubebox/cache 2>/dev/null || echo "(absent — confirmed)"
+grep -rn "import redis\|from redis" backend/cubebox/ 2>/dev/null | grep -v ".venv" || echo "(no redis imports — confirmed)"
 ```
 
-- [ ] **Step 2: Check whether `cubebox.cache` already exists**
+Both should report absent. If either exists (a parallel feature landed), reuse rather than recreate.
+
+- [ ] **Step 1: Add deps**
 
 ```bash
-ls backend/cubebox/cache 2>/dev/null && echo "exists; reuse get_redis from there" || echo "create new"
+cd backend && uv add 'redis>=5.0' && uv add --dev fakeredis
 ```
 
-If exists, **skip Step 3** and just use existing `get_redis()`. Otherwise proceed:
+- [ ] **Step 2: Add `redis:` section to YAML configs**
+
+Append to `backend/config.yaml`, `backend/config.development.yaml`, `backend/config.test.yaml`:
+
+```yaml
+redis:
+  url: redis://localhost:6379/0
+```
+
+(Production deployments override via `CUBEBOX_REDIS__URL` env var, per dynaconf convention.)
 
 - [ ] **Step 3: Create cache module with async Redis client factory**
 
 ```python
 # backend/cubebox/cache/__init__.py
-"""Async Redis client factory shared across cubebox subsystems."""
+"""Async Redis client factory shared across cubebox subsystems.
+
+Introduced in M6 (file_read dedup). Other future consumers (rate_limit
+storage backend, session cache, etc.) reuse the same singleton.
+"""
 
 from cubebox.cache.redis import get_redis, reset_redis_for_tests
 
@@ -538,7 +554,7 @@ __all__ = ["get_redis", "reset_redis_for_tests"]
 
 ```python
 # backend/cubebox/cache/redis.py
-"""Async Redis client factory."""
+"""Async Redis client factory (dynaconf-driven)."""
 
 from __future__ import annotations
 
@@ -552,7 +568,7 @@ _client: redis_asyncio.Redis | None = None
 def get_redis() -> redis_asyncio.Redis:
     """Return a singleton async Redis client.
 
-    Connection params from config; default localhost:6379 (matches CI service).
+    URL from config.redis.url; defaults to localhost:6379/0 (matches CI service).
     """
     global _client
     if _client is None:
@@ -569,13 +585,14 @@ def reset_redis_for_tests() -> None:
     _client = None
 ```
 
-Add `redis: { url: redis://localhost:6379/0 }` to `config.yaml`, `config.development.yaml`, `config.test.yaml` if not already present.
-
-- [ ] **Step 4: Write failing tests for dedup.py (using fakeredis for unit tests)**
+- [ ] **Step 3.5: Smoke test the cache factory imports cleanly**
 
 ```bash
-cd backend && uv add --dev fakeredis
+cd backend && uv run python -c "from cubebox.cache import get_redis; r = get_redis(); print(type(r).__name__)"
 ```
+Expected: prints `Redis` (the client is constructed lazily — doesn't actually connect).
+
+- [ ] **Step 4: Write failing tests for dedup.py (using fakeredis)**
 
 ```python
 # backend/tests/parsers/test_dedup.py
@@ -2541,40 +2558,18 @@ git commit -m "feat(sandbox): register file_read agent tool in SandboxMiddleware
 
 ---
 
-### Task 13: Backend `parsers.docling_serve` config schema + YAML
+### Task 13: Backend `parsers.docling_serve` YAML config
 
 **Files:**
-- Modify: `backend/cubebox/config.py`
 - Modify: `backend/config.yaml`
 - Modify: `backend/config.development.yaml`
 - Modify: `backend/config.test.yaml`
 
-- [ ] **Step 1: Add config schema (if pydantic-based)**
+**Note**: cubebox uses **dynaconf**, not pydantic Settings (see `backend/cubebox/config.py`). There is no top-level `Settings` class; configuration is accessed via `config.get("parsers.docling_serve.base_url", default)`. No schema class needs to be added to `config.py` — YAML alone is the source of truth for defaults; env vars (`CUBEBOX_PARSERS__DOCLING_SERVE__BASE_URL`) override at runtime.
 
-In `backend/cubebox/config.py`:
+- [ ] **Step 1: Append to YAML configs**
 
-```python
-class _DoclingServeConfig(BaseModel):
-    base_url: str = "http://docling-serve:5001"
-    api_key: str | None = None
-    timeout_sync_seconds: int = 30
-    timeout_async_minutes: int = 10
-    async_threshold_mb: int = 3
-    poll_interval_seconds: int = 2
-
-
-class ParsersConfig(BaseModel):
-    docling_serve: _DoclingServeConfig = _DoclingServeConfig()
-
-
-# Add `parsers: ParsersConfig = ParsersConfig()` to top-level Settings
-```
-
-(If using dynaconf, just rely on the YAML defaults — no schema class needed.)
-
-- [ ] **Step 2: Append to YAML configs**
-
-To `backend/config.yaml`, `backend/config.development.yaml`, `backend/config.test.yaml`:
+Append to `backend/config.yaml` and `backend/config.development.yaml`:
 
 ```yaml
 parsers:
@@ -2587,24 +2582,31 @@ parsers:
     poll_interval_seconds: 2
 ```
 
-For test config, use a localhost URL that won't be hit during tests (mocked):
+For `backend/config.test.yaml`, use a localhost URL that won't be hit during tests (httpx mock transport intercepts):
 
 ```yaml
 parsers:
   docling_serve:
     base_url: http://localhost-test-no-hit
+    timeout_sync_seconds: 30
+    timeout_async_minutes: 10
+    async_threshold_mb: 3
+    poll_interval_seconds: 2
 ```
 
-- [ ] **Step 3: Verify config loads**
-
-Run: `cd backend && uv run python -c "from cubebox.config import config; print(config.get('parsers.docling_serve.base_url'))"`
-Expected: prints `http://docling-serve:5001`.
-
-- [ ] **Step 4: Commit**
+- [ ] **Step 2: Verify config loads**
 
 ```bash
-git add backend/cubebox/config.py backend/config.yaml backend/config.development.yaml backend/config.test.yaml
-git commit -m "feat(parsers): add parsers.docling_serve config schema with sensible defaults"
+cd backend && uv run python -c "from cubebox.config import config; print(config.get('parsers.docling_serve.base_url'))"
+```
+
+Expected: prints `http://docling-serve:5001` (or the development.yaml override).
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add backend/config.yaml backend/config.development.yaml backend/config.test.yaml
+git commit -m "feat(parsers): add parsers.docling_serve YAML config (dynaconf-driven)"
 ```
 
 ---
