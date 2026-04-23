@@ -1748,7 +1748,7 @@ const nextConfig: NextConfig = {
 export default nextConfig
 ```
 
-NOTE: The `default-src` portion includes `'unsafe-inline' 'unsafe-eval'` because Next.js dev mode requires them. For production tightening, narrow this in a follow-up.
+NOTE: The `default-src` portion includes `'unsafe-inline' 'unsafe-eval'` because Next.js dev mode requires them (React Refresh injects inline scripts; HMR uses `eval()`). The **security-critical** part of this CSP is `frame-src 'self'` (prevents arbitrary iframe URLs from manifest), which is enforced regardless of dev/prod mode. Production CSP tightening (NODE_ENV-driven, nonce-based `script-src`, drop unsafe-eval) is tracked in **M12 · 开源工程基建** scope per backlog — out of M2 batch 1 scope.
 
 - [ ] **Step 3: Verify dev server starts without errors**
 
