@@ -5,6 +5,8 @@ export interface Workspace {
   name: string
   org_id: string
   role?: 'admin' | 'member'
+  /** ISO-8601 with UTC offset, or null if the workspace has no conversations yet. */
+  last_activity_at?: string | null
 }
 
 export async function listWorkspaces(client: ApiClient): Promise<Workspace[]> {

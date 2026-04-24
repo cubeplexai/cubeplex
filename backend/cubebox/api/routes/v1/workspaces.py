@@ -1,15 +1,17 @@
 """Workspace routes: list / create / invite / accept-invite."""
 
+from datetime import datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Body, Depends, HTTPException, status
 from pydantic import BaseModel
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cubebox.auth.context import RequestContext
 from cubebox.auth.dependencies import current_active_user, require_admin
 from cubebox.db import get_session
-from cubebox.models import Role, User
+from cubebox.models import Conversation, Role, User, Workspace
 from cubebox.repositories import (
     InviteTokenRepository,
     MembershipRepository,
@@ -37,15 +39,41 @@ class AcceptInvite(BaseModel):
 async def list_my_workspaces(
     user: Annotated[User, Depends(current_active_user)],
     session: Annotated[AsyncSession, Depends(get_session)],
-) -> list[dict[str, str]]:
+) -> list[dict[str, str | None]]:
     mem_repo = MembershipRepository(session)
     ws_repo = WorkspaceRepository(session)
     memberships = await mem_repo.list_user_workspaces(user.id)
-    out: list[dict[str, str]] = []
+    pairs: list[tuple[str, Workspace]] = []
     for m in memberships:
         ws = await ws_repo.get(m.workspace_id)
-        if ws:
-            out.append({"id": ws.id, "name": ws.name, "org_id": ws.org_id, "role": m.role})
+        if ws is not None:
+            pairs.append((m.role, ws))
+
+    # Aggregate max(Conversation.updated_at) per workspace — cubebox has no
+    # Message table (history lives in LangGraph checkpointer), but
+    # ConversationRepository.update_timestamp() bumps updated_at on every
+    # message round-trip, so this is an accurate "last activity" signal.
+    activity_map: dict[str, datetime] = {}
+    for _, ws in pairs:
+        stmt = select(func.max(Conversation.updated_at)).where(
+            Conversation.workspace_id == ws.id  # type: ignore[arg-type]
+        )
+        last_at = (await session.execute(stmt)).scalar_one_or_none()
+        if last_at is not None:
+            activity_map[ws.id] = last_at
+
+    out: list[dict[str, str | None]] = []
+    for role, ws in pairs:
+        last_at = activity_map.get(ws.id)
+        out.append(
+            {
+                "id": ws.id,
+                "name": ws.name,
+                "org_id": ws.org_id,
+                "role": role,
+                "last_activity_at": utc_isoformat(last_at) if last_at else None,
+            }
+        )
     return out
 
 
