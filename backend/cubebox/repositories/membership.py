@@ -3,7 +3,7 @@
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from cubebox.models import Membership, Role
+from cubebox.models import Membership, Role, Workspace
 
 
 class MembershipRepository:
@@ -31,3 +31,28 @@ class MembershipRepository:
     async def list_workspace_members(self, workspace_id: str) -> list[Membership]:
         stmt = select(Membership).where(Membership.workspace_id == workspace_id)  # type: ignore[arg-type]
         return list((await self.session.execute(stmt)).scalars().all())
+
+    async def user_has_role_in_org(
+        self,
+        *,
+        user_id: str,
+        org_id: str,
+        role: Role,
+    ) -> bool:
+        """True if `user_id` has `role` in any workspace belonging to `org_id`.
+
+        v1: "org admin" = admin in any workspace of the org. M2 uses this as the
+        gate for /admin/* until a real org-level role concept is introduced.
+        """
+        stmt = (
+            select(Membership)
+            .join(Workspace, Workspace.id == Membership.workspace_id)  # type: ignore[arg-type]
+            .where(
+                Workspace.org_id == org_id,  # type: ignore[arg-type]
+                Membership.user_id == user_id,  # type: ignore[arg-type]
+                Membership.role == role.value,  # type: ignore[arg-type]
+            )
+            .limit(1)
+        )
+        result = await self.session.execute(stmt)
+        return result.scalars().first() is not None
