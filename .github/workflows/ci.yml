@@ -243,8 +243,52 @@ jobs:
             frontend/playwright-report/
 
   test-ee-compat:
-    name: EE Compat (placeholder)
+    name: EE Compat (Layer 1 contract tests)
     runs-on: ubuntu-latest
-    timeout-minutes: 1
+    timeout-minutes: 5
+    needs: [backend-check]
     steps:
-      - run: echo "EE compat placeholder — will be wired after M0 lands."
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+          enable-cache: true
+      - name: Install backend
+        working-directory: backend
+        run: uv sync --all-extras
+      - name: Run plugin contract tests
+        working-directory: backend
+        env:
+          # Contract tests don't touch LLM/sandbox/DB but tests/conftest.py
+          # loads the full config which requires these env vars (see backend-check).
+          CUBEBOX_E2E_LLM_BASE_URL: http://dummy
+          CUBEBOX_E2E_LLM_API_KEY: dummy
+          CUBEBOX_E2E_LLM_MODEL_ID: dummy
+          CUBEBOX_SANDBOX__DOMAIN: dummy:9000
+          CUBEBOX_SANDBOX__IMAGE: dummy:image
+          CUBEBOX_SANDBOX__API_KEY: dummy
+        run: uv run pytest tests/plugins/test_contracts.py -v --no-cov
+
+  test-ee-compat-cross-repo:
+    name: EE Compat Cross-Repo (Layer 2 placeholder)
+    # Enable once cubebox-ee repo exists and has integration tests.
+    if: false
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+        with: { path: cubebox }
+      - uses: actions/checkout@v5
+        with:
+          repository: cubebox/cubebox-ee
+          path: cubebox-ee
+          token: ${{ secrets.EE_REPO_READ_TOKEN }}
+      - uses: astral-sh/setup-uv@v6
+      - name: Install CE from working tree + EE
+        run: |
+          cd cubebox-ee
+          uv pip install -e ../cubebox/backend
+          uv pip install -e .
+      - name: Run EE smoke tests
+        working-directory: cubebox-ee
+        run: uv run pytest
