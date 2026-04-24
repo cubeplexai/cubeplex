@@ -28,7 +28,7 @@ test:
         models:
           - id: "@format {env[CUBEBOX_E2E_LLM_MODEL_ID]}"
             name: "E2E Model"
-            input: ["text", "image"]
+            input: [ "text", "image" ]
             context_window: 128000
             max_tokens: 32000
             reasoning: true
@@ -82,15 +82,3 @@ test:
       timeout_async_minutes: 10
       async_threshold_mb: 3
       poll_interval_seconds: 2
-
-  plugins:
-    auth_provider:
-      selected: null           # null / "builtin" / "<plugin_name>"
-    permission_checker:
-      selected: null
-    audit_sink:
-      disabled: []
-    user_directory_syncer:
-      disabled: []
-    admin_panel_extension:
-      disabled: []
