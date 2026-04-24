@@ -153,17 +153,19 @@ async def client() -> AsyncIterator[TestClient]:
     """
     await _ensure_default_user_and_membership()
     app = _make_test_app()
-    sync_client = TestClient(app)
-    sync_client.get("/api/v1/auth/me")  # obtain CSRF cookie
-    csrf = sync_client.cookies.get("cubebox_csrf") or ""
-    r = sync_client.post(
-        "/api/v1/auth/login",
-        data={"username": DEFAULT_TEST_EMAIL, "password": DEFAULT_TEST_PASSWORD},
-        headers={"X-CSRF-Token": csrf},
-    )
-    assert r.status_code in (200, 204), f"login failed: {r.status_code} {r.text}"
-    sync_client.headers["X-CSRF-Token"] = sync_client.cookies.get("cubebox_csrf") or csrf
-    yield sync_client
+    # TestClient as a context manager runs the FastAPI lifespan — required
+    # since auth routers are now mounted at lifespan startup (not in create_app).
+    with TestClient(app) as sync_client:
+        sync_client.get("/api/v1/auth/me")  # obtain CSRF cookie
+        csrf = sync_client.cookies.get("cubebox_csrf") or ""
+        r = sync_client.post(
+            "/api/v1/auth/login",
+            data={"username": DEFAULT_TEST_EMAIL, "password": DEFAULT_TEST_PASSWORD},
+            headers={"X-CSRF-Token": csrf},
+        )
+        assert r.status_code in (200, 204), f"login failed: {r.status_code} {r.text}"
+        sync_client.headers["X-CSRF-Token"] = sync_client.cookies.get("cubebox_csrf") or csrf
+        yield sync_client
 
 
 @pytest_asyncio.fixture
