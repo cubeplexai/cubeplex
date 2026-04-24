@@ -48,3 +48,8 @@ development:
                 title: "title"
 
         enabled: true
+
+  # File parsers: local docling-serve (developer runs `docker compose up docling-serve`)
+  parsers:
+    docling_serve:
+      base_url: "http://localhost:5001"
