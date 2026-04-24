@@ -4,11 +4,16 @@ from uuid import uuid4
 from cubebox.plugins.protocols import (
     CUBEBOX_PLUGIN_API_VERSION,
     AdminNavItem,
+    AdminPanelExtension,
     AuditEvent,
+    AuditSink,
+    AuthProvider,
+    PermissionChecker,
     PermissionResource,
     PluginManifest,
     SyncResult,
     SyncSchedule,
+    UserDirectorySyncer,
 )
 
 
@@ -85,3 +90,59 @@ def test_sync_result_defaults_to_zero_counts() -> None:
 def test_sync_schedule_allows_none_for_on_demand() -> None:
     s = SyncSchedule(interval_seconds=None)
     assert s.interval_seconds is None
+
+
+class _SatisfiesAuthProvider:
+    async def authenticate(self, request):  # type: ignore[no-untyped-def]
+        return None
+
+    def get_auth_routers(self):  # type: ignore[no-untyped-def]
+        return []
+
+
+class _SatisfiesPermissionChecker:
+    async def check(self, user, action, resource):  # type: ignore[no-untyped-def]
+        return False
+
+
+class _SatisfiesAuditSink:
+    async def record(self, event):  # type: ignore[no-untyped-def]
+        return None
+
+
+class _SatisfiesUserDirectorySyncer:
+    async def sync(self):  # type: ignore[no-untyped-def]
+        return SyncResult(added=0, updated=0, removed=0, errors=[])
+
+    def get_schedule(self):  # type: ignore[no-untyped-def]
+        return SyncSchedule(interval_seconds=None)
+
+
+class _SatisfiesAdminPanelExtension:
+    def get_router(self):  # type: ignore[no-untyped-def]
+        return None
+
+    def get_nav_items(self):  # type: ignore[no-untyped-def]
+        return []
+
+    def get_static_path(self):  # type: ignore[no-untyped-def]
+        return None
+
+
+def test_protocols_are_runtime_checkable() -> None:
+    assert isinstance(_SatisfiesAuthProvider(), AuthProvider)
+    assert isinstance(_SatisfiesPermissionChecker(), PermissionChecker)
+    assert isinstance(_SatisfiesAuditSink(), AuditSink)
+    assert isinstance(_SatisfiesUserDirectorySyncer(), UserDirectorySyncer)
+    assert isinstance(_SatisfiesAdminPanelExtension(), AdminPanelExtension)
+
+
+class _MissingMethod:
+    """Doesn't satisfy AuthProvider — only has authenticate, no get_auth_routers."""
+
+    async def authenticate(self, request):  # type: ignore[no-untyped-def]
+        return None
+
+
+def test_protocol_rejects_incomplete_impl() -> None:
+    assert not isinstance(_MissingMethod(), AuthProvider)
