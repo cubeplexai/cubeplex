@@ -9,3 +9,14 @@ if config.langsmith.enabled:
     print("setup langsmith")
     os.environ["LANGSMITH_TRACING"] = "true"
     os.environ["LANGSMITH_API_KEY"] = config.langsmith.key
+
+import pytest
+
+from cubebox.plugins import ensure_registry_bound, reset_registry_for_tests
+
+
+@pytest.fixture(autouse=True)
+def _bind_plugin_registry():
+    reset_registry_for_tests()
+    ensure_registry_bound()
+    yield
