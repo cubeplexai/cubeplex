@@ -1,4 +1,15 @@
-from cubebox.plugins.protocols import CUBEBOX_PLUGIN_API_VERSION, PluginManifest
+from datetime import UTC, datetime
+from uuid import uuid4
+
+from cubebox.plugins.protocols import (
+    CUBEBOX_PLUGIN_API_VERSION,
+    AdminNavItem,
+    AuditEvent,
+    PermissionResource,
+    PluginManifest,
+    SyncResult,
+    SyncSchedule,
+)
 
 
 def test_plugin_manifest_constructs_with_required_fields() -> None:
@@ -17,3 +28,60 @@ def test_plugin_manifest_accepts_description() -> None:
 def test_api_version_constant_is_int_one() -> None:
     assert CUBEBOX_PLUGIN_API_VERSION == 1
     assert isinstance(CUBEBOX_PLUGIN_API_VERSION, int)
+
+
+def test_permission_resource_minimal() -> None:
+    r = PermissionResource(type="workspace", id=None)
+    assert r.type == "workspace"
+    assert r.id is None
+    assert r.org_id is None
+    assert r.workspace_id is None
+
+
+def test_permission_resource_full() -> None:
+    ws_id = uuid4()
+    org_id = uuid4()
+    r = PermissionResource(type="workspace", id=ws_id, org_id=org_id, workspace_id=ws_id)
+    assert r.workspace_id == ws_id
+    assert r.org_id == org_id
+
+
+def test_audit_event_constructs() -> None:
+    ev = AuditEvent(
+        timestamp=datetime.now(UTC),
+        user_id=uuid4(),
+        org_id=uuid4(),
+        workspace_id=None,
+        action="auth.login",
+        target_type=None,
+        target_id=None,
+        ip="127.0.0.1",
+        user_agent="pytest",
+        metadata={"foo": "bar"},
+    )
+    assert ev.action == "auth.login"
+    assert ev.metadata == {"foo": "bar"}
+
+
+def test_admin_nav_item_constructs() -> None:
+    item = AdminNavItem(
+        id="billing",
+        label="Billing",
+        icon="dollar",
+        section="settings",
+        order=10,
+        url_path="billing/usage",
+    )
+    assert item.id == "billing"
+    assert item.section == "settings"
+
+
+def test_sync_result_defaults_to_zero_counts() -> None:
+    r = SyncResult(added=0, updated=0, removed=0, errors=[])
+    assert r.added == 0
+    assert r.errors == []
+
+
+def test_sync_schedule_allows_none_for_on_demand() -> None:
+    s = SyncSchedule(interval_seconds=None)
+    assert s.interval_seconds is None
