@@ -1,0 +1,7 @@
+# Exclude vendored/minified JavaScript assets from GitHub language statistics.
+*.min.js linguist-vendored=true
+*.min.mjs linguist-vendored=true
+*.min.cjs linguist-vendored=true
+*.js.map linguist-vendored=true
+*.mjs.map linguist-vendored=true
+*.cjs.map linguist-vendored=true
