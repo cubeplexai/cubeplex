@@ -54,13 +54,16 @@ async def list_my_workspaces(
     # ConversationRepository.update_timestamp() bumps updated_at on every
     # message round-trip, so this is an accurate "last activity" signal.
     activity_map: dict[str, datetime] = {}
-    for _, ws in pairs:
-        stmt = select(func.max(Conversation.updated_at)).where(
-            Conversation.workspace_id == ws.id  # type: ignore[arg-type]
+    ws_ids = [ws.id for _, ws in pairs]
+    if ws_ids:
+        tbl = Conversation.__table__  # type: ignore[attr-defined]
+        stmt = (
+            select(tbl.c.workspace_id, func.max(tbl.c.updated_at))
+            .where(tbl.c.workspace_id.in_(ws_ids))
+            .group_by(tbl.c.workspace_id)
         )
-        last_at = (await session.execute(stmt)).scalar_one_or_none()
-        if last_at is not None:
-            activity_map[ws.id] = last_at
+        rows = (await session.execute(stmt)).all()
+        activity_map = {row[0]: row[1] for row in rows}
 
     out: list[dict[str, str | None]] = []
     for role, ws in pairs:

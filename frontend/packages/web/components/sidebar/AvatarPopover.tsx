@@ -34,7 +34,7 @@ export function AvatarPopover() {
     } catch {
       /* ignore */
     }
-    useAuthStore.setState({ user: null })
+    useAuthStore.getState().reset()
     useConversationStore.setState({ conversations: [], activeId: null })
     useWorkspaceStore.getState().reset()
     router.replace('/login')
