@@ -85,6 +85,16 @@ async def lifespan(_app: FastAPI):  # type: ignore
         logger.error("Failed to initialize Redis streaming runtime: {}", str(e))
         raise
 
+    # Discover file parser plugins (text / notebook / docling)
+    try:
+        from cubebox.parsers import get_parser_registry
+
+        await get_parser_registry().discover()
+        logger.info("Parser registry initialized")
+    except Exception as e:
+        logger.error("Failed to initialize parser registry: {}", str(e))
+        raise
+
     # Initialize LangGraph checkpointer tables (one-time setup)
     try:
         import aiomysql
