@@ -215,3 +215,15 @@ default:
       timeout_async_minutes: 10
       async_threshold_mb: 3
       poll_interval_seconds: 2
+
+  plugins:
+    auth_provider:
+      selected: null           # null / "builtin" / "<plugin_name>"
+    permission_checker:
+      selected: null
+    audit_sink:
+      disabled: []
+    user_directory_syncer:
+      disabled: []
+    admin_panel_extension:
+      disabled: []
