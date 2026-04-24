@@ -70,7 +70,10 @@ def create_cubebox_agent(
         inherited_subagent_middleware.append(citation_middleware)
 
     if sandbox is not None:
-        sandbox_middleware = SandboxMiddleware(sandbox=sandbox)
+        sandbox_middleware = SandboxMiddleware(
+            sandbox=sandbox,
+            conversation_id=conversation_id,
+        )
         middleware.append(sandbox_middleware)
         inherited_subagent_middleware.append(sandbox_middleware)
         if conversation_id:
