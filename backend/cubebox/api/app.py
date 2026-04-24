@@ -198,6 +198,7 @@ def create_app(
 
     # Register routers
     from cubebox.api.routes.v1 import (
+        admin_router,
         artifacts_router,
         auth_router,
         conversations_router,
@@ -208,5 +209,6 @@ def create_app(
     app.include_router(workspaces_router, prefix="/api/v1")
     app.include_router(conversations_router, prefix="/api/v1")
     app.include_router(artifacts_router, prefix="/api/v1")
+    app.include_router(admin_router, prefix="/api/v1")
 
     return app
