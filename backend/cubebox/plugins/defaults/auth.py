@@ -10,18 +10,50 @@ contract doesn't alter production behavior.
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Request
+from typing import Any, cast
 
-from cubebox.auth.users import fastapi_users
+from fastapi import APIRouter, Request
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from cubebox.auth.jwt import auth_backend
+from cubebox.auth.users import get_user_manager
 from cubebox.models import User
 
 
 class DefaultAuthProvider:
     """CE default: cookie-based JWT via fastapi-users + custom route layer."""
 
-    async def authenticate(self, request: Request) -> User | None:
-        get_user = fastapi_users.current_user(active=True, optional=True)
-        return await get_user(request)  # type: ignore[no-any-return]
+    async def authenticate(self, request: Request, session: AsyncSession) -> User | None:
+        """Authenticate user by extracting and validating JWT from cookies.
+
+        Mimics fastapi-users.current_user(active=True, optional=True) by:
+        1. Extracting token from cookie via transport.scheme
+        2. Validating token and getting user via strategy.read_token
+        3. Returning user if active, None otherwise
+        """
+        # Extract token from cookies using the backend's transport
+        token: str | None = None
+        try:
+            token = await auth_backend.transport.scheme(request)  # type: ignore[operator]
+        except Exception:
+            # Transport returns None if token missing or invalid
+            pass
+
+        if token is None:
+            return None
+
+        # Get user manager to look up user from token
+        from cubebox.auth.db import get_user_db
+
+        user_db_inst = await get_user_db(session).__anext__()
+        async for user_mgr in get_user_manager(user_db_inst):
+            # Validate token and get user
+            strategy: Any = auth_backend.get_strategy()
+            user = cast(User | None, await strategy.read_token(token, user_mgr))
+            if user and user.is_active:
+                return user
+            return None
+        return None
 
     def get_auth_routers(self) -> list[APIRouter]:
         # Import here to avoid circular import at module load (auth routes
