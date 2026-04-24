@@ -83,7 +83,7 @@ class DoclingParser:
                 {
                     "kind": "file",
                     "filename": "input",
-                    "base64": base64.b64encode(content).decode("ascii"),
+                    "base64_string": base64.b64encode(content).decode("ascii"),
                 }
             ],
             "options": self._build_options(options),
@@ -127,7 +127,7 @@ class DoclingParser:
                 {
                     "kind": "file",
                     "filename": "input",
-                    "base64": base64.b64encode(content).decode("ascii"),
+                    "base64_string": base64.b64encode(content).decode("ascii"),
                 }
             ],
             "options": self._build_options(options),
@@ -135,7 +135,7 @@ class DoclingParser:
         try:
             async with self._client(timeout=self.timeout_async_seconds) as client:
                 resp = await client.post(
-                    "/v1alpha/convert/source/async",
+                    "/v1/convert/source/async",
                     json=body,
                     headers=self._headers(),
                 )
@@ -156,7 +156,7 @@ class DoclingParser:
                 deadline = asyncio.get_event_loop().time() + self.timeout_async_seconds
                 while asyncio.get_event_loop().time() < deadline:
                     poll = await client.get(
-                        f"/v1alpha/convert/tasks/{task_id}",
+                        f"/v1/status/poll/{task_id}",
                         headers=self._headers(),
                     )
                     if poll.status_code >= 500:
@@ -168,15 +168,29 @@ class DoclingParser:
                             error=f"docling-serve poll {poll.status_code}: {poll.text[:200]}",
                             retryable=False,
                         )
-                    data = poll.json()
-                    status = data.get("status")
-                    if status == "COMPLETED":
-                        result = data.get("result", {})
-                        return self._make_text_output(result, content, mime)
-                    if status == "FAILED":
+                    status = (poll.json().get("task_status") or "").lower()
+                    if status in ("success", "partial_success"):
+                        result_resp = await client.get(
+                            f"/v1/result/{task_id}",
+                            headers=self._headers(),
+                        )
+                        if result_resp.status_code >= 400:
+                            return ErrorOutput(
+                                path="<set-by-caller>",
+                                error=(
+                                    f"docling-serve result {result_resp.status_code}: "
+                                    f"{result_resp.text[:200]}"
+                                ),
+                                retryable=result_resp.status_code >= 500,
+                            )
+                        return self._make_text_output(result_resp.json(), content, mime)
+                    if status == "failure":
                         return ErrorOutput(
                             path="<set-by-caller>",
-                            error=f"docling-serve task FAILED: {data.get('error', 'no detail')}",
+                            error=(
+                                "docling-serve task failed: "
+                                f"{poll.json().get('error_message') or 'no detail'}"
+                            ),
                             retryable=False,
                         )
                     await asyncio.sleep(self.poll_interval)

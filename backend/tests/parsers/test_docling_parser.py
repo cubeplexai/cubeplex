@@ -20,6 +20,8 @@ async def test_sync_path_for_small_file() -> None:
         assert request.url.path == "/v1/convert/source"
         body = json.loads(request.content)
         assert body["sources"][0]["kind"] == "file"
+        # docling-serve's FileSourceRequest wants base64_string (flat, not nested).
+        assert "base64_string" in body["sources"][0]
         return httpx.Response(
             200,
             json={"document": {"md_content": "# Parsed\n\nhello"}},
@@ -119,23 +121,20 @@ async def test_sync_path_extracts_last_page_from_markers() -> None:
 
 
 async def test_async_path_for_large_file() -> None:
-    """File >= async_threshold_mb hits async submit + poll."""
+    """File >= async_threshold_mb hits async submit + poll + result-fetch."""
     poll_count = {"n": 0}
 
     async def handler(request: httpx.Request) -> httpx.Response:
-        if request.url.path == "/v1alpha/convert/source/async":
-            return httpx.Response(202, json={"task_id": "tk_123"})
-        if request.url.path == "/v1alpha/convert/tasks/tk_123":
+        path = request.url.path
+        if path == "/v1/convert/source/async":
+            return httpx.Response(200, json={"task_id": "tk_123", "task_status": "pending"})
+        if path == "/v1/status/poll/tk_123":
             poll_count["n"] += 1
             if poll_count["n"] < 2:
-                return httpx.Response(200, json={"status": "STARTED"})
-            return httpx.Response(
-                200,
-                json={
-                    "status": "COMPLETED",
-                    "result": {"document": {"md_content": "# Big\n\ndata"}},
-                },
-            )
+                return httpx.Response(200, json={"task_status": "started"})
+            return httpx.Response(200, json={"task_status": "success"})
+        if path == "/v1/result/tk_123":
+            return httpx.Response(200, json={"document": {"md_content": "# Big\n\ndata"}})
         return httpx.Response(404)
 
     transport = httpx.MockTransport(handler)
@@ -156,12 +155,14 @@ async def test_async_path_for_large_file() -> None:
 
 async def test_async_path_task_failed_returns_error() -> None:
     async def handler(request: httpx.Request) -> httpx.Response:
-        if request.url.path == "/v1alpha/convert/source/async":
-            return httpx.Response(202, json={"task_id": "tk_x"})
-        return httpx.Response(
-            200,
-            json={"status": "FAILED", "error": "corrupt input"},
-        )
+        path = request.url.path
+        if path == "/v1/convert/source/async":
+            return httpx.Response(200, json={"task_id": "tk_x", "task_status": "pending"})
+        if path == "/v1/status/poll/tk_x":
+            return httpx.Response(
+                200, json={"task_status": "failure", "error_message": "corrupt input"}
+            )
+        return httpx.Response(404)
 
     transport = httpx.MockTransport(handler)
     p = DoclingParser(
