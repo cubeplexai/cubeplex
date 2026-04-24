@@ -200,12 +200,17 @@ default:
     retry_on_timeout: true
 
   streaming:
-    run_event_ttl_seconds: 900
+    # Retention for a completed run's meta + event log. Long enough that a
+    # user can come back hours later and still replay; agents can also
+    # legitimately run for a long time, so this doubles as the upper bound
+    # on how long an in-flight run can stay active (active-run key TTL is
+    # heartbeated up to this on every event append).
+    run_event_ttl_seconds: 43200 # 12h
     run_stream_block_ms: 15000
-    # Upper bound on a single run's event log (approximate trim).
-    # Sized above the largest llm.*.max_tokens (64k) with headroom for
-    # multi-call tool loops, reasoning deltas, and subagent events.
-    run_stream_max_events: 100000
+    # DoS safety net only: XADD ~ MAXLEN. Trimming is silent data loss
+    # (breaks replay / resume), so size this well above any realistic run.
+    # Normal runs should be orders of magnitude smaller.
+    run_stream_max_events: 1000000
 
   # Auth Configuration (P1)
   auth:

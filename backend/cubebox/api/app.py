@@ -132,8 +132,8 @@ async def lifespan(_app: FastAPI):  # type: ignore
             app=_app,
             redis=redis_client,
             key_prefix=_app.state.redis_key_prefix,
-            run_event_ttl_seconds=config.get("streaming.run_event_ttl_seconds", 900),
-            run_stream_max_events=config.get("streaming.run_stream_max_events", 10000),
+            run_event_ttl_seconds=config.get("streaming.run_event_ttl_seconds", 43200),
+            run_stream_max_events=config.get("streaming.run_stream_max_events", 1000000),
         )
         _app.state.run_manager = run_manager
         logger.info(
