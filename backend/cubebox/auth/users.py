@@ -3,7 +3,7 @@
 from collections.abc import AsyncIterator
 from typing import Annotated
 
-from fastapi import Depends, Request
+from fastapi import Depends, Request, Response
 from fastapi_users import BaseUserManager, FastAPIUsers
 from fastapi_users.db import SQLAlchemyUserDatabase
 from loguru import logger
@@ -62,6 +62,30 @@ class UserManager(BaseUserManager[User, str]):
             ) from exc
 
         user._default_workspace_id = ws.id
+
+        from cubebox.plugins.audit import audit_log
+
+        await audit_log(
+            action="auth.register",
+            user_id=user.id,
+            ip=request.client.host if request and request.client else None,
+            user_agent=request.headers.get("user-agent") if request else None,
+        )
+
+    async def on_after_login(
+        self,
+        user: User,
+        request: Request | None = None,
+        response: Response | None = None,
+    ) -> None:
+        from cubebox.plugins.audit import audit_log
+
+        await audit_log(
+            action="auth.login",
+            user_id=user.id,
+            ip=request.client.host if request and request.client else None,
+            user_agent=request.headers.get("user-agent") if request else None,
+        )
 
 
 async def get_user_manager(
