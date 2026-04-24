@@ -203,7 +203,9 @@ default:
     run_event_ttl_seconds: 900
     run_stream_block_ms: 15000
     # Upper bound on a single run's event log (approximate trim).
-    run_stream_max_events: 10000
+    # Sized above the largest llm.*.max_tokens (64k) with headroom for
+    # multi-call tool loops, reasoning deltas, and subagent events.
+    run_stream_max_events: 100000
 
   # Auth Configuration (P1)
   auth:

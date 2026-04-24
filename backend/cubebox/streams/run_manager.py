@@ -212,7 +212,7 @@ class RunManager:
         redis: Redis,
         key_prefix: str,
         run_event_ttl_seconds: int,
-        run_stream_max_events: int = 10000,
+        run_stream_max_events: int = 100000,
     ) -> None:
         self._app = app
         self._redis = redis
