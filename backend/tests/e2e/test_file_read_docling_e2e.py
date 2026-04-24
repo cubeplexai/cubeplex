@@ -11,8 +11,8 @@ from pathlib import Path
 from typing import cast
 from uuid import uuid4
 
-import fakeredis.aioredis
 import pytest
+from redis.asyncio import Redis
 
 from cubebox.cache import reset_for_tests, set_redis
 from cubebox.config import config
@@ -29,15 +29,22 @@ FIXTURE = Path(__file__).parent / "fixtures" / "hello.pdf"
 
 @pytest.fixture
 async def _bound_registry_and_redis() -> AsyncIterator[None]:
-    """Configure a fresh parser registry + fakeredis cache for each test."""
-    fake = fakeredis.aioredis.FakeRedis(decode_responses=True)
-    set_redis(fake)
+    """Configure a fresh parser registry + real Redis cache for each test.
+
+    The autouse _flush_test_redis fixture in the e2e conftest clears the DB
+    before every test, so we don't need per-fixture flushall here.
+    """
+    client = Redis.from_url(
+        config.get("redis.url", "redis://127.0.0.1:6379/0"),
+        decode_responses=True,
+    )
+    set_redis(client)
     reset_parser_registry_for_tests()
     try:
         yield
     finally:
         reset_parser_registry_for_tests()
-        await fake.flushall()
+        await client.aclose()
         reset_for_tests()
 
 

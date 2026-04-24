@@ -4,19 +4,15 @@ import asyncio
 import json
 from types import SimpleNamespace
 
-import fakeredis.aioredis
 import httpx
 import pytest
+from redis.asyncio import Redis
 
 from cubebox.api.routes.v1 import conversations as conversations_route
 from cubebox.auth.context import RequestContext
+from cubebox.config import config as _cubebox_config
 from cubebox.models import Role
 from cubebox.streams.run_manager import RunManager
-
-
-def FakeRedis() -> fakeredis.aioredis.FakeRedis:  # noqa: N802 — preserves call sites below
-    return fakeredis.aioredis.FakeRedis(decode_responses=True)
-
 
 pytestmark = pytest.mark.e2e
 
@@ -38,7 +34,12 @@ def _make_streaming_request_state(
     sandbox_factory: object,
     skills: list[object] | None = None,
 ) -> SimpleNamespace:
-    redis = FakeRedis()
+    # Real Redis — matches the `e2e` marker contract (hits real services).
+    # The autouse _flush_test_redis fixture in conftest clears state between tests.
+    redis = Redis.from_url(
+        _cubebox_config.get("redis.url", "redis://127.0.0.1:6379/0"),
+        decode_responses=True,
+    )
     app = SimpleNamespace(state=SimpleNamespace())
     app.state.checkpointer_factory = checkpointer_factory
     app.state.sandbox_factory = sandbox_factory
