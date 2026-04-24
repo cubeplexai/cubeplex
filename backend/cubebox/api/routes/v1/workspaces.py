@@ -3,7 +3,7 @@
 from datetime import datetime
 from typing import Annotated
 
-from fastapi import APIRouter, Body, Depends, HTTPException, status
+from fastapi import APIRouter, Body, Depends, HTTPException, Request, status
 from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -103,6 +103,7 @@ async def create_invite(
     body: Annotated[InviteCreate, Body()],
     ctx: Annotated[RequestContext, Depends(require_admin)],
     session: Annotated[AsyncSession, Depends(get_session)],
+    request: Request,
 ) -> dict[str, str]:
     if body.role not in ("admin", "member"):
         raise HTTPException(
@@ -110,6 +111,19 @@ async def create_invite(
         )
     inv_repo = InviteTokenRepository(session)
     tok = await inv_repo.issue(workspace_id=workspace_id, role=body.role, created_by=ctx.user.id)
+
+    from cubebox.plugins.audit import audit_log
+
+    await audit_log(
+        action="workspace.invite_created",
+        user_id=ctx.user.id,
+        org_id=ctx.org_id,
+        workspace_id=ctx.workspace_id,
+        target_type="invite",
+        target_id=tok.token,
+        ip=request.client.host if request.client else None,
+        metadata={"role": body.role},
+    )
     return {"token": tok.token, "expires_at": utc_isoformat(tok.expires_at)}
 
 
