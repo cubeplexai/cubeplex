@@ -100,3 +100,40 @@ class PluginRegistry:
             return ep.dist.name if ep.dist else None
         except AttributeError:
             return None
+
+    def resolve_singular(
+        self,
+        group: str,
+        *,
+        default: object,
+        selected: str | None,
+    ) -> object:
+        """Resolve a singular Protocol candidate; instantiate or pass through default.
+
+        Resolution rules:
+        - selected="builtin" → CE default (forces fallback even if externals present)
+        - selected="<name>"  → look up that entry_point name; raise if missing
+        - selected=None      → 0 ext: default; 1 ext: that one; ≥2 ext: RuntimeError
+        """
+        candidates = self._candidates[group]
+
+        if selected == RESERVED_NAME:
+            return default
+        if selected is not None:
+            if selected not in candidates:
+                raise RuntimeError(
+                    f"{group}: 'selected' is {selected!r} but no such entry_point is "
+                    f"not registered (available: {sorted(candidates)})"
+                )
+            return candidates[selected]()
+
+        # selected is None — implicit rules
+        if len(candidates) == 0:
+            return default
+        if len(candidates) == 1:
+            (cls,) = candidates.values()
+            return cls()
+        raise RuntimeError(
+            f"{group}: multiple entry_points registered ({sorted(candidates)}); "
+            f"set plugins.{group.split('.')[1]}.selected = '<name>' to pick one"
+        )
