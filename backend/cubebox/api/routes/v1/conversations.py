@@ -15,6 +15,7 @@ from cubebox.agents.schemas import AgentEvent
 from cubebox.api.exceptions import InvalidInputError
 from cubebox.auth.context import RequestContext
 from cubebox.auth.dependencies import require_member
+from cubebox.cache import RedisHandle, redis_dep
 from cubebox.db import get_session
 from cubebox.db.engine import _build_database_url, async_session_maker
 from cubebox.repositories import ConversationRepository
@@ -203,10 +204,11 @@ def _build_run_streaming_response(
     raw_request: Request,
     conversation_id: str,
     run_id: str,
+    redis_handle: RedisHandle,
 ) -> StreamingResponse:
     """Build an SSE response that replays and tails a run event stream."""
-    redis = raw_request.app.state.redis
-    prefix = raw_request.app.state.redis_key_prefix
+    redis = redis_handle.client
+    prefix = redis_handle.key_prefix
 
     from cubebox.config import config
 
@@ -392,6 +394,7 @@ async def send_message(
     request_obj: SendMessageRequest,
     raw_request: Request,
     ctx: Annotated[RequestContext, Depends(require_member)],
+    rds: Annotated[RedisHandle, Depends(redis_dep)],
 ) -> SendMessageResponse | StreamingResponse:
     """Send a user message and start a background run."""
     # Use a short-lived session for the pre-check only.
@@ -443,6 +446,7 @@ async def send_message(
             raw_request=raw_request,
             conversation_id=conversation_id,
             run_id=run_id,
+            redis_handle=rds,
         )
 
     return SendMessageResponse(run_id=run_id)
@@ -510,6 +514,7 @@ async def get_conversation_bootstrap(
     raw_request: Request,
     session: Annotated[AsyncSession, Depends(get_session)],
     ctx: Annotated[RequestContext, Depends(require_member)],
+    rds: Annotated[RedisHandle, Depends(redis_dep)],
 ) -> dict[str, object]:
     """Return history baseline plus active run metadata."""
     conv_repo = ConversationRepository(
@@ -526,9 +531,9 @@ async def get_conversation_bootstrap(
         )
 
     history = await _get_history_messages(raw_request, conversation_id)
-    redis = raw_request.app.state.redis
-    prefix = raw_request.app.state.redis_key_prefix
-    active_run = await get_active_run(redis, prefix=prefix, conversation_id=conversation_id)
+    active_run = await get_active_run(
+        rds.client, prefix=rds.key_prefix, conversation_id=conversation_id
+    )
 
     active_run_payload: dict[str, Any] | None = None
     if active_run is not None:
@@ -558,6 +563,7 @@ async def stream_run(
     raw_request: Request,
     session: Annotated[AsyncSession, Depends(get_session)],
     ctx: Annotated[RequestContext, Depends(require_member)],
+    rds: Annotated[RedisHandle, Depends(redis_dep)],
 ) -> StreamingResponse:
     """Replay a run's event log, then continue with live blocking reads."""
     conv_repo = ConversationRepository(
@@ -573,9 +579,7 @@ async def stream_run(
             detail=f"Conversation {conversation_id} not found",
         )
 
-    redis = raw_request.app.state.redis
-    prefix = raw_request.app.state.redis_key_prefix
-    run_meta = await get_run_meta(redis, prefix=prefix, run_id=run_id)
+    run_meta = await get_run_meta(rds.client, prefix=rds.key_prefix, run_id=run_id)
     if run_meta is None or run_meta.conversation_id != conversation_id:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -585,4 +589,5 @@ async def stream_run(
         raw_request=raw_request,
         conversation_id=conversation_id,
         run_id=run_id,
+        redis_handle=rds,
     )

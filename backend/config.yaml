@@ -188,11 +188,22 @@ default:
     max_overflow: 20
     echo: false
 
+  redis:
+    url: "redis://:passwd@localhost:6379/0" # ENV: CUBEBOX_REDIS__URL
+    key_prefix: "cubebox" # effective prefix is "{key_prefix}:{env}" at runtime
+    # Connection pool / socket options passed to redis.asyncio.Redis.from_url
+    max_connections: 64
+    socket_timeout_seconds: 10
+    socket_connect_timeout_seconds: 5
+    socket_keepalive: true
+    health_check_interval_seconds: 30
+    retry_on_timeout: true
+
   streaming:
-    redis_url: "redis://localhost:6379/0"
-    redis_key_prefix: "cubebox"
     run_event_ttl_seconds: 900
     run_stream_block_ms: 15000
+    # Upper bound on a single run's event log (approximate trim).
+    run_stream_max_events: 10000
 
   # Auth Configuration (P1)
   auth:
@@ -218,7 +229,7 @@ default:
 
   plugins:
     auth_provider:
-      selected: null           # null / "builtin" / "<plugin_name>"
+      selected: null # null / "builtin" / "<plugin_name>"
     permission_checker:
       selected: null
     audit_sink:
