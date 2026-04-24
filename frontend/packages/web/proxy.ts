@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server'
 
 const PUBLIC_PATHS = ['/login', '/register']
-const PROTECTED_PREFIXES = ['/w/', '/workspaces']
+const PROTECTED_PREFIXES = ['/w/', '/workspaces', '/admin']
 
 function isProtected(pathname: string): boolean {
   return PROTECTED_PREFIXES.some((p) => pathname === p.replace(/\/$/, '') || pathname.startsWith(p))
