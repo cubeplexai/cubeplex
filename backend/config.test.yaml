@@ -45,6 +45,11 @@ test:
     password: "testpass"
     name: "cubebox_test"
 
+  # CI 启动的 redis:7-alpine 无密码，走 127.0.0.1。
+  # 覆盖 base config.yaml 里带密码的本地 dev URL。
+  redis:
+    url: "redis://127.0.0.1:6379/0"
+
   # LangSmith: e2e 不上报
   langsmith:
     enabled: false

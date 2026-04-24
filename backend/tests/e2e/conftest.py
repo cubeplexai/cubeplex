@@ -3,7 +3,6 @@ import secrets
 from collections.abc import AsyncIterator, Iterator
 from contextlib import asynccontextmanager
 
-import fakeredis.aioredis
 import httpx
 import pytest
 import pytest_asyncio
@@ -12,6 +11,7 @@ from fastapi.testclient import TestClient
 from fastapi_users.db import SQLAlchemyUserDatabase
 from fastapi_users.schemas import BaseUserCreate
 from langgraph.checkpoint.memory import MemorySaver
+from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
@@ -19,6 +19,7 @@ import cubebox.db as _cubebox_db
 from cubebox.api.app import create_app
 from cubebox.api.middleware.rate_limit import limiter
 from cubebox.auth.users import UserManager
+from cubebox.config import config as _cubebox_config
 from cubebox.db.engine import _build_database_url, engine
 from cubebox.db.session import get_session
 from cubebox.models import Role, User
@@ -30,8 +31,22 @@ from cubebox.repositories import (
 from cubebox.sandbox.local import LocalSandbox
 
 
-def FakeRedis() -> fakeredis.aioredis.FakeRedis:  # noqa: N802 — preserves existing call sites
-    return fakeredis.aioredis.FakeRedis(decode_responses=True)
+@pytest_asyncio.fixture(autouse=True)
+async def _flush_test_redis() -> AsyncIterator[None]:
+    """E2E tests share one Redis DB; flush before each test to isolate state.
+
+    Uses FLUSHDB (current DB only) rather than FLUSHALL so a mis-pointed URL
+    can't nuke a dev Redis.
+    """
+    client: Redis = Redis.from_url(
+        _cubebox_config.get("redis.url", "redis://127.0.0.1:6379/0"),
+        decode_responses=True,
+    )
+    try:
+        await client.flushdb()
+    finally:
+        await client.aclose()
+    yield
 
 
 @pytest.fixture(autouse=True)
@@ -79,7 +94,7 @@ def _make_test_app() -> FastAPI:
         async with test_session_maker() as session:
             yield session
 
-    app = create_app(redis_factory=FakeRedis)
+    app = create_app()
     app.dependency_overrides[get_session] = override_get_session
     return app
 
@@ -103,7 +118,6 @@ def _make_memory_test_app() -> FastAPI:
     app = create_app(
         checkpointer_factory=lambda: memory_saver,
         sandbox_factory=LocalSandbox,
-        redis_factory=FakeRedis,
     )
     app.dependency_overrides[get_session] = override_get_session
     return app
