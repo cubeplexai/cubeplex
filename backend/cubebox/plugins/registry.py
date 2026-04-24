@@ -137,3 +137,26 @@ class PluginRegistry:
             f"{group}: multiple entry_points registered ({sorted(candidates)}); "
             f"set plugins.{group.split('.')[1]}.selected = '<name>' to pick one"
         )
+
+    def resolve_plural(
+        self,
+        group: str,
+        *,
+        default: object | None,
+        disabled: list[str],
+    ) -> list[object]:
+        """Resolve all candidates for a plural Protocol; honor `disabled` filter.
+
+        - default: optional CE built-in instance (registered as RESERVED_NAME)
+        - disabled: list of entry_point names to exclude (incl. RESERVED_NAME for
+          default)
+        """
+        disabled_set = set(disabled)
+        out: list[object] = []
+        if default is not None and RESERVED_NAME not in disabled_set:
+            out.append(default)
+        for name, cls in self._candidates[group].items():
+            if name in disabled_set:
+                continue
+            out.append(cls())
+        return out
