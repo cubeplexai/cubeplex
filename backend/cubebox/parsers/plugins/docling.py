@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import re
 from typing import Any
@@ -121,12 +122,76 @@ class DoclingParser:
         mime: str,
         options: ParseOptions,
     ) -> FileReadOutput:
-        # Implemented in Task 9
-        return ErrorOutput(
-            path="<set-by-caller>",
-            error="async path not implemented",
-            retryable=False,
-        )
+        body = {
+            "sources": [
+                {
+                    "kind": "file",
+                    "filename": "input",
+                    "base64": base64.b64encode(content).decode("ascii"),
+                }
+            ],
+            "options": self._build_options(options),
+        }
+        try:
+            async with self._client(timeout=self.timeout_async_seconds) as client:
+                resp = await client.post(
+                    "/v1alpha/convert/source/async",
+                    json=body,
+                    headers=self._headers(),
+                )
+                if resp.status_code >= 400:
+                    return ErrorOutput(
+                        path="<set-by-caller>",
+                        error=f"docling-serve submit {resp.status_code}: {resp.text[:200]}",
+                        retryable=resp.status_code >= 500,
+                    )
+                task_id = resp.json().get("task_id")
+                if not task_id:
+                    return ErrorOutput(
+                        path="<set-by-caller>",
+                        error="docling-serve async submit returned no task_id",
+                        retryable=False,
+                    )
+
+                deadline = asyncio.get_event_loop().time() + self.timeout_async_seconds
+                while asyncio.get_event_loop().time() < deadline:
+                    poll = await client.get(
+                        f"/v1alpha/convert/tasks/{task_id}",
+                        headers=self._headers(),
+                    )
+                    if poll.status_code >= 500:
+                        await asyncio.sleep(self.poll_interval)
+                        continue
+                    if poll.status_code >= 400:
+                        return ErrorOutput(
+                            path="<set-by-caller>",
+                            error=f"docling-serve poll {poll.status_code}: {poll.text[:200]}",
+                            retryable=False,
+                        )
+                    data = poll.json()
+                    status = data.get("status")
+                    if status == "COMPLETED":
+                        result = data.get("result", {})
+                        return self._make_text_output(result, content, mime)
+                    if status == "FAILED":
+                        return ErrorOutput(
+                            path="<set-by-caller>",
+                            error=f"docling-serve task FAILED: {data.get('error', 'no detail')}",
+                            retryable=False,
+                        )
+                    await asyncio.sleep(self.poll_interval)
+
+                return ErrorOutput(
+                    path="<set-by-caller>",
+                    error="docling-serve async timeout",
+                    retryable=True,
+                )
+        except (httpx.TimeoutException, httpx.NetworkError) as e:
+            return ErrorOutput(
+                path="<set-by-caller>",
+                error=f"docling-serve unreachable: {e}",
+                retryable=True,
+            )
 
     def _build_options(self, options: ParseOptions) -> dict[str, object]:
         opts: dict[str, object] = {}

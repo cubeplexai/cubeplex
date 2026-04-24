@@ -116,3 +116,65 @@ async def test_sync_path_extracts_last_page_from_markers() -> None:
     assert "last_page_returned" in out.metadata
     assert "next_page_to_read" in out.metadata
     assert out.metadata["next_page_to_read"] == out.metadata["last_page_returned"] + 1
+
+
+async def test_async_path_for_large_file() -> None:
+    """File >= async_threshold_mb hits async submit + poll."""
+    poll_count = {"n": 0}
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/v1alpha/convert/source/async":
+            return httpx.Response(202, json={"task_id": "tk_123"})
+        if request.url.path == "/v1alpha/convert/tasks/tk_123":
+            poll_count["n"] += 1
+            if poll_count["n"] < 2:
+                return httpx.Response(200, json={"status": "STARTED"})
+            return httpx.Response(
+                200,
+                json={
+                    "status": "COMPLETED",
+                    "result": {"document": {"md_content": "# Big\n\ndata"}},
+                },
+            )
+        return httpx.Response(404)
+
+    transport = httpx.MockTransport(handler)
+    p = DoclingParser(
+        base_url="http://docling",
+        api_key=None,
+        timeout_sync_seconds=30,
+        timeout_async_minutes=10,
+        async_threshold_mb=1,
+        poll_interval_seconds=0,  # tests should not sleep
+        _transport=transport,
+    )
+    big = b"x" * (2 * 1024 * 1024)  # 2 MB > 1 MB threshold
+    out = await p.parse(big, mime="application/pdf", options=ParseOptions())
+    assert isinstance(out, TextOutput)
+    assert "Big" in out.content
+
+
+async def test_async_path_task_failed_returns_error() -> None:
+    async def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/v1alpha/convert/source/async":
+            return httpx.Response(202, json={"task_id": "tk_x"})
+        return httpx.Response(
+            200,
+            json={"status": "FAILED", "error": "corrupt input"},
+        )
+
+    transport = httpx.MockTransport(handler)
+    p = DoclingParser(
+        base_url="http://docling",
+        api_key=None,
+        timeout_sync_seconds=30,
+        timeout_async_minutes=10,
+        async_threshold_mb=1,
+        poll_interval_seconds=0,
+        _transport=transport,
+    )
+    big = b"x" * (2 * 1024 * 1024)
+    out = await p.parse(big, mime="application/pdf", options=ParseOptions())
+    assert isinstance(out, ErrorOutput)
+    assert out.retryable is False
+    assert "corrupt" in out.error
