@@ -30,8 +30,11 @@ async def lifespan(_app: FastAPI):  # type: ignore
     logger.info("Application starting up")
 
     # Discover + bind plugin registry; mount AuthProvider routers.
+    from typing import cast
+
     from cubebox.config import config as _cubebox_config
     from cubebox.plugins import get_registry
+    from cubebox.plugins.protocols import AdminPanelExtension
     from cubebox.plugins.protocols import AuthProvider as _AuthProvider
 
     _reg = get_registry()
@@ -43,6 +46,33 @@ async def lifespan(_app: FastAPI):  # type: ignore
     for _auth_router in _auth_routers:
         _app.include_router(_auth_router, prefix="/api/v1")
     logger.info("Mounted {} AuthProvider router(s)", len(_auth_routers))
+
+    # Mount the admin-extensions manifest endpoint + each extension's router/static.
+    from fastapi.staticfiles import StaticFiles
+
+    from cubebox.api.routes.v1 import admin_extensions
+
+    _app.include_router(admin_extensions.router, prefix="/api/v1")
+
+    for _ext_obj in _reg.get_admin_panel_extensions():
+        _ext = cast(AdminPanelExtension, _ext_obj)
+        _plugin_name = type(_ext).__module__.split(".")[0]
+        _ext_router = _ext.get_router()
+        if _ext_router is not None:
+            _app.include_router(
+                _ext_router,
+                prefix=f"/api/v1/admin/_extensions/{_plugin_name}",
+            )
+        _ext_static = _ext.get_static_path()
+        if _ext_static is not None:
+            _app.mount(
+                f"/api/v1/admin/_extensions/{_plugin_name}/static",
+                StaticFiles(directory=str(_ext_static)),
+            )
+    logger.info(
+        "Mounted {} AdminPanelExtension(s)",
+        len(_reg.get_admin_panel_extensions()),
+    )
 
     # Load MCP tools into the global registry
     from cubebox.tools import init_mcp_tools
