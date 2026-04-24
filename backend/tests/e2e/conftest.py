@@ -32,12 +32,17 @@ from cubebox.sandbox.local import LocalSandbox
 
 
 @pytest_asyncio.fixture(autouse=True)
-async def _flush_test_redis() -> AsyncIterator[None]:
-    """E2E tests share one Redis DB; flush before each test to isolate state.
+async def _flush_test_redis(request: pytest.FixtureRequest) -> AsyncIterator[None]:
+    """E2E tests share one Redis DB; flush before each e2e-marked test.
 
-    Uses FLUSHDB (current DB only) rather than FLUSHALL so a mis-pointed URL
-    can't nuke a dev Redis.
+    Gated on the ``e2e`` marker so a stray unit-style test placed under
+    ``tests/e2e/`` doesn't trigger a real Redis connection. Uses FLUSHDB
+    (current DB only) rather than FLUSHALL so a mis-pointed URL can't
+    nuke a dev Redis.
     """
+    if request.node.get_closest_marker("e2e") is None:
+        yield
+        return
     client: Redis = Redis.from_url(
         _cubebox_config.get("redis.url", "redis://127.0.0.1:6379/0"),
         decode_responses=True,
