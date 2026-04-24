@@ -4,6 +4,7 @@ import asyncio
 import json
 from types import SimpleNamespace
 
+import fakeredis.aioredis
 import httpx
 import pytest
 
@@ -11,7 +12,11 @@ from cubebox.api.routes.v1 import conversations as conversations_route
 from cubebox.auth.context import RequestContext
 from cubebox.models import Role
 from cubebox.streams.run_manager import RunManager
-from tests.e2e.fake_redis import FakeRedis
+
+
+def FakeRedis() -> fakeredis.aioredis.FakeRedis:  # noqa: N802 — preserves call sites below
+    return fakeredis.aioredis.FakeRedis(decode_responses=True)
+
 
 pytestmark = pytest.mark.e2e
 
@@ -263,12 +268,16 @@ async def test_client_disconnect_cancels_stream_before_closing_checkpointer(
         headers={"accept": "text/event-stream"},
         state=SimpleNamespace(user_id="test-user"),
     )
+    from cubebox.cache import RedisHandle
+
+    rds = RedisHandle(client=app.state.redis, key_prefix=app.state.redis_key_prefix)
 
     slow_response = await conversations_route.send_message(
         "slow",
         conversations_route.SendMessageRequest(content="slow request"),
         raw_request,
         _make_fake_ctx(),
+        rds,
     )
     slow_iter = slow_response.body_iterator.__aiter__()
 
@@ -295,6 +304,7 @@ async def test_client_disconnect_cancels_stream_before_closing_checkpointer(
         conversations_route.SendMessageRequest(content="fast request"),
         raw_request,
         _make_fake_ctx(),
+        rds,
     )
     events = []
     async for chunk in fast_response.body_iterator:
@@ -382,12 +392,16 @@ async def test_tool_call_delta_events_in_sse_stream(
         headers={"accept": "text/event-stream"},
         state=SimpleNamespace(user_id="test-user"),
     )
+    from cubebox.cache import RedisHandle
+
+    rds = RedisHandle(client=app.state.redis, key_prefix=app.state.redis_key_prefix)
 
     response = await conversations_route.send_message(
         "test-conv",
         conversations_route.SendMessageRequest(content="write a file"),
         raw_request,
         _make_fake_ctx(),
+        rds,
     )
 
     events = []

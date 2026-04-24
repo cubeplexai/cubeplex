@@ -3,6 +3,7 @@ import secrets
 from collections.abc import AsyncIterator, Iterator
 from contextlib import asynccontextmanager
 
+import fakeredis.aioredis
 import httpx
 import pytest
 import pytest_asyncio
@@ -27,7 +28,10 @@ from cubebox.repositories import (
     WorkspaceRepository,
 )
 from cubebox.sandbox.local import LocalSandbox
-from tests.e2e.fake_redis import FakeRedis
+
+
+def FakeRedis() -> fakeredis.aioredis.FakeRedis:  # noqa: N802 — preserves existing call sites
+    return fakeredis.aioredis.FakeRedis(decode_responses=True)
 
 
 @pytest.fixture(autouse=True)

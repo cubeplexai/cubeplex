@@ -1,11 +1,10 @@
 """Redis-backed conversation-scoped SHA-256 file_state dedup cache.
 
-Cache key: (conversation_id, path, options-signature). The options-signature
-includes page_range + line_range so different range-slices land in different
-cache slots and don't incorrectly return UnchangedOutput.
+Cache key: (conversation_id, sha1(path), options-signature). We hash the path
+so raw path separators don't interact badly with Redis SCAN patterns.
 
-TTL: 6 hours of inactivity → auto-expire (Redis-managed; conversation has
-no explicit "end" event in cubebox).
+TTL: 6 hours of inactivity → auto-expire. We refresh the TTL on every hit
+so frequently-reused files don't evict mid-session.
 """
 
 from __future__ import annotations
@@ -35,8 +34,12 @@ def _options_signature(options: ParseOptions) -> str:
     )
 
 
+def _path_digest(path: str) -> str:
+    return hashlib.sha1(path.encode("utf-8"), usedforsecurity=False).hexdigest()
+
+
 def _key(conversation_id: UUID, path: str, options: ParseOptions) -> str:
-    return f"{KEY_PREFIX}{conversation_id}:{path}:{_options_signature(options)}"
+    return f"{KEY_PREFIX}{conversation_id}:{_path_digest(path)}:{_options_signature(options)}"
 
 
 async def check(
@@ -45,14 +48,17 @@ async def check(
     options: ParseOptions,
     digest: str,
 ) -> bool:
-    """True if digest matches Redis-cached value (caller emits UnchangedOutput)."""
+    """True if digest matches Redis-cached value (caller emits UnchangedOutput).
+
+    Refreshes the TTL on a hit so active files don't expire mid-session.
+    """
     redis = get_redis()
-    cached = await redis.get(_key(conversation_id, path, options))
-    if cached is None:
+    key = _key(conversation_id, path, options)
+    cached = await redis.get(key)
+    if cached is None or cached != digest:
         return False
-    if isinstance(cached, bytes):
-        return cached == digest.encode()
-    return bool(cached == digest)
+    await redis.expire(key, DEDUP_TTL_SECONDS)
+    return True
 
 
 async def update(

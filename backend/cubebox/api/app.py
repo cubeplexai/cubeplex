@@ -99,9 +99,20 @@ async def lifespan(_app: FastAPI):  # type: ignore
         else:
             from cubebox.config import config
 
+            # Legacy path: streaming.redis_url / streaming.redis_key_prefix used
+            # to live under the streaming section. Prefer redis.* if present.
+            url = config.get("redis.url") or config.get(
+                "streaming.redis_url", "redis://localhost:6379/0"
+            )
             redis_client = Redis.from_url(
-                config.get("streaming.redis_url", "redis://localhost:6379/0"),
+                url,
                 decode_responses=True,
+                max_connections=config.get("redis.max_connections", 64),
+                socket_timeout=config.get("redis.socket_timeout_seconds", 10),
+                socket_connect_timeout=config.get("redis.socket_connect_timeout_seconds", 5),
+                socket_keepalive=config.get("redis.socket_keepalive", True),
+                health_check_interval=config.get("redis.health_check_interval_seconds", 30),
+                retry_on_timeout=config.get("redis.retry_on_timeout", True),
             )
         ping_result = redis_client.ping()
         if isinstance(ping_result, Awaitable):
@@ -114,18 +125,28 @@ async def lifespan(_app: FastAPI):  # type: ignore
 
         _set_shared_redis(redis_client)
 
+        import os
+
         from cubebox.config import config
         from cubebox.streams.run_manager import RunManager
 
-        _app.state.redis_key_prefix = config.get("streaming.redis_key_prefix", "cubebox")
+        base_prefix = config.get("redis.key_prefix") or config.get(
+            "streaming.redis_key_prefix", "cubebox"
+        )
+        env_name = os.getenv("ENV_FOR_DYNACONF", "development")
+        _app.state.redis_key_prefix = f"{base_prefix}:{env_name}"
         run_manager = RunManager(
             app=_app,
             redis=redis_client,
             key_prefix=_app.state.redis_key_prefix,
             run_event_ttl_seconds=config.get("streaming.run_event_ttl_seconds", 900),
+            run_stream_max_events=config.get("streaming.run_stream_max_events", 10000),
         )
         _app.state.run_manager = run_manager
-        logger.info("Redis streaming runtime initialized")
+        logger.info(
+            "Redis streaming runtime initialized (prefix={})",
+            _app.state.redis_key_prefix,
+        )
     except Exception as e:
         logger.error("Failed to initialize Redis streaming runtime: {}", str(e))
         raise

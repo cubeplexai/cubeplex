@@ -212,11 +212,13 @@ class RunManager:
         redis: Redis,
         key_prefix: str,
         run_event_ttl_seconds: int,
+        run_stream_max_events: int = 10000,
     ) -> None:
         self._app = app
         self._redis = redis
         self._key_prefix = key_prefix
         self._run_event_ttl_seconds = run_event_ttl_seconds
+        self._run_stream_max_events = run_stream_max_events
         self._tasks: dict[str, asyncio.Task[None]] = {}
 
     async def start_run(
@@ -237,6 +239,7 @@ class RunManager:
             status="running",
             started_at=started_at,
             user_message=content,
+            ttl_seconds=self._run_event_ttl_seconds,
         )
         if created_run is None:
             existing = await get_active_run(
@@ -277,6 +280,8 @@ class RunManager:
             prefix=self._key_prefix,
             run_id=run_id,
             payload=payload,
+            ttl_seconds=self._run_event_ttl_seconds,
+            maxlen=self._run_stream_max_events,
         )
 
     async def _append_error(self, run_id: str, message: str, details: str | None = None) -> None:

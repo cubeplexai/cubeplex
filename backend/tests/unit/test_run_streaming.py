@@ -3,16 +3,21 @@
 import json
 from types import SimpleNamespace
 
+import fakeredis.aioredis
 import pytest
 from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.memory import MemorySaver
 
 from cubebox.api.routes.v1 import conversations as conversations_route
 from cubebox.auth.context import RequestContext
+from cubebox.cache import RedisHandle
 from cubebox.models import Role
 from cubebox.streams.run_events import create_run
 from cubebox.streams.run_manager import RunManager
-from tests.e2e.fake_redis import FakeRedis
+
+
+def FakeRedis() -> fakeredis.aioredis.FakeRedis:  # noqa: N802 — preserves call sites below
+    return fakeredis.aioredis.FakeRedis(decode_responses=True)
 
 
 class _DummySessionContext:
@@ -133,11 +138,13 @@ async def test_run_bootstrap_and_stream_replay(monkeypatch: pytest.MonkeyPatch) 
     monkeypatch.setattr(cubebox.llm.factory, "LLMFactory", _FakeLLMFactory)
     monkeypatch.setattr(cubebox.tools, "get_registry", lambda: _FakeRegistry())
 
+    rds = RedisHandle(client=redis, key_prefix="test")
     send_response = await conversations_route.send_message(
         "conv-1",
         conversations_route.SendMessageRequest(content="hi"),
         raw_request,
         ctx,
+        rds,
     )
     assert isinstance(send_response, conversations_route.SendMessageResponse)
     run_id = send_response.run_id
@@ -147,12 +154,13 @@ async def test_run_bootstrap_and_stream_replay(monkeypatch: pytest.MonkeyPatch) 
         raw_request,
         object(),
         ctx,
+        rds,
     )
     assert bootstrap["active_run"]["run_id"] == run_id
     assert bootstrap["active_run"]["user_message"] == "hi"
 
     stream_response = await conversations_route.stream_run(
-        "conv-1", run_id, raw_request, object(), ctx
+        "conv-1", run_id, raw_request, object(), ctx, rds
     )
     events: list[dict[str, object]] = []
     async for chunk in stream_response.body_iterator:
@@ -180,6 +188,7 @@ async def test_create_run_claim_is_atomic() -> None:
         conversation_id="conv-1",
         status="running",
         started_at="2026-04-23T00:00:00Z",
+        ttl_seconds=60,
     )
     second = await create_run(
         redis,
@@ -188,6 +197,7 @@ async def test_create_run_claim_is_atomic() -> None:
         conversation_id="conv-1",
         status="running",
         started_at="2026-04-23T00:00:01Z",
+        ttl_seconds=60,
     )
 
     assert first is not None
@@ -245,14 +255,16 @@ async def test_run_recovers_citation_counter_from_history(
     monkeypatch.setattr(cubebox.llm.factory, "LLMFactory", _FakeLLMFactory)
     monkeypatch.setattr(cubebox.tools, "get_registry", lambda: _FakeRegistry())
 
+    rds = RedisHandle(client=redis, key_prefix="test")
     send_response = await conversations_route.send_message(
         "conv-1",
         conversations_route.SendMessageRequest(content="hi"),
         raw_request,
         ctx,
+        rds,
     )
     stream_response = await conversations_route.stream_run(
-        "conv-1", send_response.run_id, raw_request, object(), ctx
+        "conv-1", send_response.run_id, raw_request, object(), ctx, rds
     )
 
     events: list[dict[str, object]] = []
