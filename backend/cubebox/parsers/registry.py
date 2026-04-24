@@ -164,8 +164,9 @@ class ParserRegistry:
             logger.exception("parser %s failed on %s", type(parser).__name__, path)
             return ErrorOutput(path=path, error=str(exc), retryable=_is_retryable_exception(exc))
 
-        # 7. dedup update only after a successful parse result
-        if conversation_id is not None and digest is not None:
+        # 7. dedup update only after a successful parse (skip errors — transient
+        #    failures like docling timeouts return ErrorOutput and must be retryable)
+        if conversation_id is not None and digest is not None and not isinstance(out, ErrorOutput):
             try:
                 await dedup.update(conversation_id, path, options, digest)
             except Exception as exc:
