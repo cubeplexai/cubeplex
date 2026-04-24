@@ -13,8 +13,6 @@ from uuid import UUID
 from fastapi import APIRouter, Request
 
 if TYPE_CHECKING:
-    from sqlalchemy.ext.asyncio import AsyncSession
-
     from cubebox.models import User
 
 CUBEBOX_PLUGIN_API_VERSION: Final[int] = 1
@@ -81,7 +79,7 @@ class AdminNavItem:
 class AuthProvider(Protocol):
     """Authenticate requests and yield a User principal."""
 
-    async def authenticate(self, request: Request, session: "AsyncSession") -> "User | None": ...
+    async def authenticate(self, request: Request) -> "User | None": ...
 
     def get_auth_routers(self) -> list[APIRouter]: ...
 

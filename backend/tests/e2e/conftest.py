@@ -14,6 +14,7 @@ from langgraph.checkpoint.memory import MemorySaver
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
+import cubebox.db as _cubebox_db
 from cubebox.api.app import create_app
 from cubebox.api.middleware.rate_limit import limiter
 from cubebox.auth.users import UserManager
@@ -66,6 +67,9 @@ def _make_test_app() -> FastAPI:
     test_session_maker = async_sessionmaker(
         test_engine, class_=AsyncSession, expire_on_commit=False
     )
+    # Patch module-level async_session_maker so DefaultAuthProvider.authenticate
+    # (which opens its own session inline) also uses NullPool in tests.
+    _cubebox_db.async_session_maker = test_session_maker
 
     async def override_get_session() -> AsyncIterator[AsyncSession]:
         async with test_session_maker() as session:
@@ -83,6 +87,9 @@ def _make_memory_test_app() -> FastAPI:
     test_session_maker = async_sessionmaker(
         test_engine, class_=AsyncSession, expire_on_commit=False
     )
+    # Patch module-level async_session_maker so DefaultAuthProvider.authenticate
+    # (which opens its own session inline) also uses NullPool in tests.
+    _cubebox_db.async_session_maker = test_session_maker
 
     async def override_get_session() -> AsyncIterator[AsyncSession]:
         async with test_session_maker() as session:
