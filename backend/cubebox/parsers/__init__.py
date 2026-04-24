@@ -1,4 +1,33 @@
-"""File parser plugin registry shared by file_read tool and future filebox.
+"""File parser plugin registry shared by file_read tool and future filebox."""
 
-See docs/superpowers/specs/2026-04-22-file-read-tool-design.md.
-"""
+from cubebox.parsers.protocols import FileParser
+from cubebox.parsers.registry import (
+    ParserRegistry,
+    get_parser_registry,
+    reset_parser_registry_for_tests,
+)
+from cubebox.parsers.schema import (
+    ErrorOutput,
+    FileReadOutput,
+    NotebookCell,
+    NotebookOutput,
+    ParseOptions,
+    TextOutput,
+    UnchangedOutput,
+    UnsupportedOutput,
+)
+
+__all__ = [
+    "ErrorOutput",
+    "FileParser",
+    "FileReadOutput",
+    "NotebookCell",
+    "NotebookOutput",
+    "ParseOptions",
+    "ParserRegistry",
+    "TextOutput",
+    "UnchangedOutput",
+    "UnsupportedOutput",
+    "get_parser_registry",
+    "reset_parser_registry_for_tests",
+]

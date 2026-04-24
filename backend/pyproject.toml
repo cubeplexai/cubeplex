@@ -45,6 +45,11 @@ test = [
     "httpx>=0.27.0",
 ]
 
+[project.entry-points."cubebox.parsers"]
+text = "cubebox.parsers.plugins.text:TextParser"
+notebook = "cubebox.parsers.plugins.notebook:NotebookParser"
+docling = "cubebox.parsers.plugins.docling:DoclingParser"
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = ["test_*.py"]
