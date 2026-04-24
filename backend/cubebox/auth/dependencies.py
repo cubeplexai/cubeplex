@@ -1,7 +1,7 @@
 """FastAPI dependencies for auth + scoping."""
 
 from collections.abc import Awaitable, Callable
-from typing import Annotated
+from typing import Annotated, cast
 
 from fastapi import Depends, HTTPException, Path, status
 from sqlalchemy import select
@@ -11,6 +11,8 @@ from cubebox.auth.context import RequestContext
 from cubebox.auth.users import fastapi_users
 from cubebox.db import get_session
 from cubebox.models import Membership, Role, User, Workspace
+from cubebox.plugins import PermissionChecker, PermissionResource, get_registry
+from cubebox.plugins.defaults.permissions import DefaultPermissionChecker
 from cubebox.repositories import MembershipRepository, WorkspaceRepository
 
 current_active_user = fastapi_users.current_user(active=True)
@@ -47,21 +49,40 @@ async def request_context(
     return RequestContext(user=user, org_id=workspace.org_id, workspace_id=workspace_id, role=role)
 
 
+def _action_for_roles(allowed: tuple[Role, ...]) -> str:
+    """Map allowed-role set → action name for PermissionChecker."""
+    s = set(allowed)
+    if s == {Role.ADMIN}:
+        return "admin_access"
+    if s == {Role.ADMIN, Role.MEMBER}:
+        return "member_access"
+    raise NotImplementedError(f"role set {s} has no mapped action")
+
+
 def require_role(
     *allowed: Role,
 ) -> Callable[..., Awaitable[RequestContext]]:
-    """Dependency factory: enforce that ctx.role is in `allowed`."""
+    """Dependency factory: enforce permission via PermissionChecker."""
+
+    action = _action_for_roles(allowed)
 
     async def _check(
         ctx: Annotated[RequestContext, Depends(request_context)],
+        session: Annotated[AsyncSession, Depends(get_session)],
     ) -> RequestContext:
-        if ctx.role not in allowed:
+        checker = cast(PermissionChecker, get_registry().get_permission_checker())
+        # CE default needs a session-bound repo factory at call time.
+        if isinstance(checker, DefaultPermissionChecker):
+            checker._repo_factory = lambda _s: MembershipRepository(session)
+        resource = PermissionResource(
+            type="workspace",
+            id=ctx.workspace_id,  # type: ignore[arg-type]
+            workspace_id=ctx.workspace_id,  # type: ignore[arg-type]
+        )
+        if not await checker.check(ctx.user, action, resource):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail=(
-                    f"Role {ctx.role.value} is not allowed; "
-                    f"need one of {[r.value for r in allowed]}"
-                ),
+                detail=f"Permission denied: action={action}",
             )
         return ctx
 
