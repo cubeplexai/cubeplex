@@ -2,6 +2,7 @@ import json as json_lib
 import secrets
 from collections.abc import AsyncIterator, Iterator
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 import httpx
 import pytest
@@ -29,6 +30,20 @@ from cubebox.repositories import (
     WorkspaceRepository,
 )
 from cubebox.sandbox.local import LocalSandbox
+
+
+def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
+    """Force `@pytest.mark.e2e` on every test collected under `tests/e2e/`.
+
+    Makes the directory the source of truth for the marker so a forgotten
+    `pytestmark` can't slip past `-m "not e2e"` and run alongside unit
+    tests. The directory-is-the-contract rule is mechanically enforced —
+    see backend/CLAUDE.md.
+    """
+    e2e_dir = str(Path(__file__).parent.resolve())
+    for item in items:
+        if str(item.path).startswith(e2e_dir):
+            item.add_marker(pytest.mark.e2e)
 
 
 @pytest_asyncio.fixture(autouse=True)
