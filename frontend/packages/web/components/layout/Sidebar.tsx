@@ -1,11 +1,13 @@
 'use client'
 
-import { useConversationStore, createApiClient } from '@cubebox/core'
+import Link from 'next/link'
+import { usePathname } from 'next/navigation'
+import { createApiClient, useConversationStore } from '@cubebox/core'
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import Link from 'next/link'
-import { Plus, Trash2, Box } from 'lucide-react'
-import { useWorkspaceContext } from '@/hooks/useWorkspaceContext'
+import { AvatarPopover } from '@/components/sidebar/AvatarPopover'
+import { WorkspacesSection } from '@/components/sidebar/WorkspacesSection'
+import { Box, Plus, Trash2 } from 'lucide-react'
 
 function formatRelativeTime(dateStr: string): string {
   const date = new Date(dateStr)
@@ -23,13 +25,17 @@ function formatRelativeTime(dateStr: string): string {
 
 export function Sidebar() {
   const { conversations, activeId, remove, setActive } = useConversationStore()
-  const { workspaceId } = useWorkspaceContext()
-  const homeHref = workspaceId ? `/w/${workspaceId}` : '/'
+  const pathname = usePathname()
+
+  // Current workspace inferred from URL (no WorkspaceContext dependency).
+  const wsMatch = pathname?.match(/^\/w\/([^/]+)/)
+  const currentWsId = wsMatch ? wsMatch[1] : null
+  const newChatHref = currentWsId ? `/w/${currentWsId}` : '/'
 
   const handleDeleteClick = async (e: React.MouseEvent, id: string) => {
     e.preventDefault()
     const client = createApiClient('')
-    if (workspaceId) client.setWorkspaceId(workspaceId)
+    if (currentWsId) client.setWorkspaceId(currentWsId)
     try {
       await remove(client, id)
     } catch (err) {
@@ -38,16 +44,19 @@ export function Sidebar() {
   }
 
   return (
-    <div className="w-56 bg-card border-r border-border flex flex-col h-screen shrink-0">
-      {/* Brand */}
-      <div className="px-4 pt-4 pb-3 border-b border-border">
+    <aside
+      aria-label="Sidebar"
+      className="w-56 bg-card border-r border-border flex flex-col h-screen shrink-0"
+    >
+      {/* Brand + new chat */}
+      <div className="px-4 pt-4 pb-3 border-b border-border/60">
         <div className="flex items-center gap-2 mb-3">
-          <div className="w-6 h-6 rounded-md bg-primary flex items-center justify-center shrink-0">
-            <Box className="size-3.5 text-white" strokeWidth={2.5} />
+          <div className="w-6 h-6 rounded-md bg-primary flex items-center justify-center shrink-0 shadow-sm">
+            <Box className="size-3.5 text-primary-foreground" strokeWidth={2.5} />
           </div>
           <span className="text-sm font-semibold tracking-tight">cubebox</span>
         </div>
-        <Link href={homeHref}>
+        <Link href={newChatHref}>
           <Button variant="outline" size="sm" className="w-full h-7 text-xs gap-1.5">
             <Plus className="size-3" />
             新建对话
@@ -55,48 +64,60 @@ export function Sidebar() {
         </Link>
       </div>
 
-      {/* Conversation list */}
-      <ScrollArea className="flex-1">
-        <div className="py-2 px-2">
-          <div className="px-2 py-1 text-[10px] font-medium uppercase tracking-widest text-muted-foreground/50 mb-1">
-            历史对话
-          </div>
+      {/* Workspaces */}
+      <WorkspacesSection />
+
+      {/* Recent conversations */}
+      <div className="px-2 pt-2 pb-1">
+        <p className="px-2 text-[10px] font-medium uppercase tracking-widest text-muted-foreground/60">
+          最近会话
+        </p>
+      </div>
+      <ScrollArea className="flex-1 px-2">
+        <ul className="space-y-0.5">
           {conversations.map((convo) => (
-            <Link
-              key={convo.id}
-              href={
-                workspaceId
-                  ? `/w/${workspaceId}/conversations/${convo.id}`
-                  : `/conversations/${convo.id}`
-              }
-              onClick={() => setActive(convo.id)}
-              className={`group relative flex items-center gap-2 px-2 py-2 rounded-md transition-colors ${
-                activeId === convo.id
-                  ? 'text-foreground bg-primary/8'
-                  : 'text-muted-foreground hover:text-foreground hover:bg-accent/60'
-              }`}
-            >
-              {activeId === convo.id && (
-                <div className="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-5 bg-primary rounded-r-full" />
-              )}
-              <div className="flex-1 min-w-0 pl-1">
-                <div className="truncate text-[12.5px] font-medium leading-none mb-1">
-                  {convo.title || '新对话'}
-                </div>
-                <div className="text-[10px] text-muted-foreground/50">
-                  {formatRelativeTime(convo.created_at)}
-                </div>
-              </div>
-              <button
-                onClick={(e) => handleDeleteClick(e, convo.id)}
-                className="opacity-0 group-hover:opacity-40 hover:!opacity-80 transition-opacity shrink-0 p-0.5"
+            <li key={convo.id}>
+              <Link
+                href={
+                  currentWsId
+                    ? `/w/${currentWsId}/conversations/${convo.id}`
+                    : `/conversations/${convo.id}`
+                }
+                onClick={() => setActive(convo.id)}
+                className={`group relative flex items-center gap-2 px-2 py-2 rounded-md transition-colors ${
+                  activeId === convo.id
+                    ? 'text-foreground bg-primary/8'
+                    : 'text-muted-foreground hover:text-foreground hover:bg-accent/60'
+                }`}
               >
-                <Trash2 className="size-3" />
-              </button>
-            </Link>
+                {activeId === convo.id && (
+                  <div className="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-5 bg-primary rounded-r-full" />
+                )}
+                <div className="flex-1 min-w-0 pl-1">
+                  <div className="truncate text-[12.5px] font-medium leading-none mb-1">
+                    {convo.title || '新对话'}
+                  </div>
+                  <div className="text-[10px] text-muted-foreground/50">
+                    {formatRelativeTime(convo.created_at)}
+                  </div>
+                </div>
+                <button
+                  onClick={(e) => handleDeleteClick(e, convo.id)}
+                  className="opacity-0 group-hover:opacity-40 hover:!opacity-80 transition-opacity shrink-0 p-0.5"
+                  aria-label="Delete conversation"
+                >
+                  <Trash2 className="size-3" />
+                </button>
+              </Link>
+            </li>
           ))}
-        </div>
+        </ul>
       </ScrollArea>
-    </div>
+
+      {/* Footer: avatar popover */}
+      <div className="border-t border-border/60 p-2">
+        <AvatarPopover />
+      </div>
+    </aside>
   )
 }
