@@ -3,7 +3,7 @@
 import { useEffect, useMemo } from 'react'
 import { createApiClient, useAuthStore, useWorkspaceStore } from '@cubebox/core'
 import { useAuthRedirect } from '@/hooks/useAuthRedirect'
-import { AppTopBar } from '@/components/layout/AppTopBar'
+import { Sidebar } from '@/components/layout/Sidebar'
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const client = useMemo(() => createApiClient(''), [])
@@ -15,9 +15,9 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   }, [client])
 
   return (
-    <div className="min-h-screen flex flex-col bg-background text-foreground">
-      <AppTopBar />
-      <div className="flex-1 flex flex-col">{children}</div>
+    <div className="flex h-screen bg-background text-foreground">
+      <Sidebar />
+      <div className="flex-1 flex flex-col overflow-hidden">{children}</div>
     </div>
   )
 }
