@@ -63,6 +63,12 @@ async def lifespan(_app: FastAPI):  # type: ignore
             await ping_result
         _app.state.redis = redis_client
 
+        # Share the client with non-route code (parsers/dedup, filebox) via
+        # the module-level accessor. Same client object, no second connection.
+        from cubebox.cache import set_redis as _set_shared_redis
+
+        _set_shared_redis(redis_client)
+
         from cubebox.config import config
         from cubebox.streams.run_manager import RunManager
 
