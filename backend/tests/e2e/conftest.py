@@ -275,6 +275,27 @@ async def member_client() -> AsyncIterator[tuple[httpx.AsyncClient, str]]:
             yield c, workspace_id
 
 
+@pytest.fixture(scope="session")
+def docling_url() -> str:
+    """Return a reachable DOCLING_URL or skip. Never mocks.
+
+    M6 e2e tests must exercise a real docling-serve (CLAUDE.md: focus on E2E).
+    Developers run ``docker compose up docling-serve`` locally; CI provides the
+    URL via the DOCLING_URL secret.
+    """
+    import os
+
+    url = os.environ.get("DOCLING_URL")
+    if not url:
+        pytest.skip("DOCLING_URL not set — external docling-serve required for e2e")
+    try:
+        resp = httpx.get(f"{url.rstrip('/')}/health", timeout=5)
+        resp.raise_for_status()
+    except Exception as exc:  # noqa: BLE001 — any probe failure → skip
+        pytest.skip(f"docling-serve at {url} unreachable: {exc}")
+    return url
+
+
 async def collect_sse_events(
     client: httpx.AsyncClient,
     url: str,
