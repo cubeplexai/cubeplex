@@ -17,7 +17,7 @@ export function AdminAvatarMenu() {
     } catch {
       /* ignore */
     }
-    useAuthStore.setState({ user: null })
+    useAuthStore.getState().reset()
     router.replace('/login')
   }
 
