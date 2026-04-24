@@ -3,19 +3,33 @@
 from collections.abc import Awaitable, Callable
 from typing import Annotated, cast
 
-from fastapi import Depends, HTTPException, Path, status
+from fastapi import Depends, HTTPException, Path, Request, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cubebox.auth.context import RequestContext
-from cubebox.auth.users import fastapi_users
 from cubebox.db import get_session
 from cubebox.models import Membership, Role, User, Workspace
 from cubebox.plugins import PermissionChecker, PermissionResource, get_registry
 from cubebox.plugins.defaults.permissions import DefaultPermissionChecker
 from cubebox.repositories import MembershipRepository, WorkspaceRepository
 
-current_active_user = fastapi_users.current_user(active=True)
+
+async def current_active_user(
+    request: Request,
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> User:
+    """Resolve the active user via the configured AuthProvider.
+
+    CE default = fastapi-users JWT cookie. EE plugins (e.g. SAML) override.
+    """
+    user = await get_registry().get_auth_provider().authenticate(request, session)  # type: ignore[attr-defined]
+    if user is None or not getattr(user, "is_active", True):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authentication required",
+        )
+    return user  # type: ignore[no-any-return]
 
 
 async def request_context(
