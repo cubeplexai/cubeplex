@@ -126,7 +126,6 @@ After modifying SQLModel schemas, use auto-generation: `alembic revision --autog
 - **Async event loop issues**: Tests use `pytest-asyncio` with `asyncio_mode = "auto"`. If you manually create event loops, use `nest_asyncio.apply()`.
 - **alembic/versions/**: Auto-generated migration files are excluded from ruff/mypy checks to avoid false lints.
 - **Config precedence**: ENV vars override YAML config. Use `CUBEBOX_*` prefix for env overrides.
-- **Test directory is the contract**: `tests/e2e/` hits real services (MySQL/Redis/LLM/Sandbox) and its `conftest.py` has autouse fixtures that assume those. Unit-style tests (no network, pure logic) go in `tests/unit/` or `tests/parsers/` — never in `tests/e2e/`, even if marked `@pytest.mark.unit`.
 
 ## Rules
 
