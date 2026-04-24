@@ -99,13 +99,8 @@ async def lifespan(_app: FastAPI):  # type: ignore
         else:
             from cubebox.config import config
 
-            # Legacy path: streaming.redis_url / streaming.redis_key_prefix used
-            # to live under the streaming section. Prefer redis.* if present.
-            url = config.get("redis.url") or config.get(
-                "streaming.redis_url", "redis://localhost:6379/0"
-            )
             redis_client = Redis.from_url(
-                url,
+                config.get("redis.url", "redis://localhost:6379/0"),
                 decode_responses=True,
                 max_connections=config.get("redis.max_connections", 64),
                 socket_timeout=config.get("redis.socket_timeout_seconds", 10),
@@ -130,9 +125,7 @@ async def lifespan(_app: FastAPI):  # type: ignore
         from cubebox.config import config
         from cubebox.streams.run_manager import RunManager
 
-        base_prefix = config.get("redis.key_prefix") or config.get(
-            "streaming.redis_key_prefix", "cubebox"
-        )
+        base_prefix = config.get("redis.key_prefix", "cubebox")
         env_name = os.getenv("ENV_FOR_DYNACONF", "development")
         _app.state.redis_key_prefix = f"{base_prefix}:{env_name}"
         run_manager = RunManager(

@@ -273,18 +273,25 @@ class RunManager:
             with suppress(asyncio.CancelledError):
                 await task
 
-    async def _append_event(self, run_id: str, event: AgentEvent) -> str:
+    async def _append_event(self, run_id: str, conversation_id: str, event: AgentEvent) -> str:
         payload = event.model_dump()
         return await append_run_event(
             self._redis,
             prefix=self._key_prefix,
             run_id=run_id,
+            conversation_id=conversation_id,
             payload=payload,
             ttl_seconds=self._run_event_ttl_seconds,
             maxlen=self._run_stream_max_events,
         )
 
-    async def _append_error(self, run_id: str, message: str, details: str | None = None) -> None:
+    async def _append_error(
+        self,
+        run_id: str,
+        conversation_id: str,
+        message: str,
+        details: str | None = None,
+    ) -> None:
         error_event = ErrorEvent(
             timestamp=datetime.now(UTC).isoformat(),
             data={
@@ -293,7 +300,7 @@ class RunManager:
                 "details": details or message,
             },
         )
-        await self._append_event(run_id, error_event)
+        await self._append_event(run_id, conversation_id, error_event)
 
     async def _execute_run(
         self,
@@ -332,6 +339,7 @@ class RunManager:
                 data["detail"] = detail
             await self._append_event(
                 run_id,
+                conversation_id,
                 StatusEvent(
                     timestamp=datetime.now(UTC).isoformat(),
                     data=data,
@@ -339,7 +347,7 @@ class RunManager:
             )
 
         async def publish_event(event: AgentEvent) -> None:
-            await self._append_event(run_id, event)
+            await self._append_event(run_id, conversation_id, event)
 
         async def flush_citation_buffer(
             agent_key: str | None,
@@ -542,6 +550,7 @@ class RunManager:
             )
             await self._append_event(
                 run_id,
+                conversation_id,
                 DoneEvent(timestamp=datetime.now(UTC).isoformat()),
             )
         except asyncio.CancelledError:
@@ -552,7 +561,7 @@ class RunManager:
                 status="cancelled",
             )
             with suppress(Exception):
-                await self._append_error(run_id, "Run cancelled", "Run cancelled")
+                await self._append_error(run_id, conversation_id, "Run cancelled", "Run cancelled")
             raise
         except Exception as exc:
             logger.error("Run {} failed: {}", run_id, exc, exc_info=True)
@@ -565,6 +574,7 @@ class RunManager:
             with suppress(Exception):
                 await self._append_error(
                     run_id,
+                    conversation_id,
                     "An unexpected error occurred during execution",
                     str(exc),
                 )

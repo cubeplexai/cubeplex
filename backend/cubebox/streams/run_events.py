@@ -115,9 +115,12 @@ end
 return 0
 """
 
-# XADD + meta update + TTL refresh in one round trip.
-# KEYS[1] = stream_key, KEYS[2] = meta_key
-# ARGV[1] = payload_json, ARGV[2] = ttl_seconds, ARGV[3] = maxlen
+# XADD + meta update + TTL refresh (including active-run lock) in one round trip.
+# KEYS[1] = stream_key, KEYS[2] = meta_key, KEYS[3] = active_key
+# ARGV[1] = payload_json, ARGV[2] = ttl_seconds, ARGV[3] = maxlen, ARGV[4] = run_id
+# The active-run TTL is refreshed only if it still points at this run_id, so a
+# late-arriving append from an already-superseded run can't keep a zombie lock
+# alive.
 _APPEND_EVENT_LUA = """
 local eid = redis.call(
   'XADD', KEYS[1], 'MAXLEN', '~', tonumber(ARGV[3]), '*', 'payload', ARGV[1]
@@ -126,6 +129,9 @@ redis.call('HSET', KEYS[2], 'last_event_id', eid)
 redis.call('HSETNX', KEYS[2], 'first_event_id', eid)
 redis.call('EXPIRE', KEYS[1], tonumber(ARGV[2]))
 redis.call('EXPIRE', KEYS[2], tonumber(ARGV[2]))
+if redis.call('GET', KEYS[3]) == ARGV[4] then
+  redis.call('EXPIRE', KEYS[3], tonumber(ARGV[2]))
+end
 return eid
 """
 
@@ -290,21 +296,28 @@ async def append_run_event(
     *,
     prefix: str,
     run_id: str,
+    conversation_id: str,
     payload: dict[str, Any],
     ttl_seconds: int,
     maxlen: int,
 ) -> str:
-    """Append an event payload and update event bounds in a single call."""
+    """Append an event payload and update event bounds in a single call.
+
+    Also heartbeats the active-run lock for this conversation so runs longer
+    than ``ttl_seconds`` don't drop the lock mid-execution.
+    """
     return cast(
         str,
         await redis.eval(  # type: ignore[misc]
             _APPEND_EVENT_LUA,
-            2,
+            3,
             _run_events_key(prefix, run_id),
             _run_meta_key(prefix, run_id),
+            _active_run_key(prefix, conversation_id),
             json.dumps(payload),
             str(ttl_seconds),
             str(maxlen),
+            run_id,
         ),
     )
 
