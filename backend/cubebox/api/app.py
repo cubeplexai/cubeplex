@@ -29,6 +29,21 @@ async def lifespan(_app: FastAPI):  # type: ignore
     log.init()
     logger.info("Application starting up")
 
+    # Discover + bind plugin registry; mount AuthProvider routers.
+    from cubebox.config import config as _cubebox_config
+    from cubebox.plugins import get_registry
+    from cubebox.plugins.protocols import AuthProvider as _AuthProvider
+
+    _reg = get_registry()
+    await _reg.discover()
+    _reg.bind_defaults(config=_cubebox_config)
+    _auth_provider = _reg.get_auth_provider()
+    assert isinstance(_auth_provider, _AuthProvider)
+    _auth_routers = _auth_provider.get_auth_routers()
+    for _auth_router in _auth_routers:
+        _app.include_router(_auth_router, prefix="/api/v1")
+    logger.info("Mounted {} AuthProvider router(s)", len(_auth_routers))
+
     # Load MCP tools into the global registry
     from cubebox.tools import init_mcp_tools
 
@@ -216,12 +231,10 @@ def create_app(
     from cubebox.api.routes.v1 import (
         admin_router,
         artifacts_router,
-        auth_router,
         conversations_router,
         workspaces_router,
     )
 
-    app.include_router(auth_router, prefix="/api/v1")
     app.include_router(workspaces_router, prefix="/api/v1")
     app.include_router(conversations_router, prefix="/api/v1")
     app.include_router(artifacts_router, prefix="/api/v1")
