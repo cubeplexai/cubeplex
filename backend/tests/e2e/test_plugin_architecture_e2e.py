@@ -13,6 +13,8 @@ import logging
 import httpx
 import pytest
 
+pytestmark = pytest.mark.e2e
+
 
 @pytest.mark.asyncio
 async def test_ce_defaults_load_after_lifespan(
