@@ -15,15 +15,12 @@ from cubebox.plugins.defaults.permissions import DefaultPermissionChecker
 from cubebox.repositories import MembershipRepository, WorkspaceRepository
 
 
-async def current_active_user(
-    request: Request,
-    session: Annotated[AsyncSession, Depends(get_session)],
-) -> User:
+async def current_active_user(request: Request) -> User:
     """Resolve the active user via the configured AuthProvider.
 
     CE default = fastapi-users JWT cookie. EE plugins (e.g. SAML) override.
     """
-    user = await get_registry().get_auth_provider().authenticate(request, session)  # type: ignore[attr-defined]
+    user = await get_registry().get_auth_provider().authenticate(request)  # type: ignore[attr-defined]
     if user is None or not getattr(user, "is_active", True):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
