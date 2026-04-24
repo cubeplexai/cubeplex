@@ -67,7 +67,6 @@ export function AvatarPopover() {
           <a
             href="/admin"
             target="_blank"
-            rel="noopener"
             className="flex items-center gap-2 px-2 py-1.5 rounded-sm text-[12.5px] hover:bg-accent/60 transition-colors"
           >
             <Shield className="size-3.5 text-muted-foreground" />

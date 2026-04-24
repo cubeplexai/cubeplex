@@ -78,11 +78,7 @@ export function Sidebar() {
           {conversations.map((convo) => (
             <li key={convo.id}>
               <Link
-                href={
-                  currentWsId
-                    ? `/w/${currentWsId}/conversations/${convo.id}`
-                    : `/conversations/${convo.id}`
-                }
+                href={currentWsId ? `/w/${currentWsId}/conversations/${convo.id}` : '/'}
                 onClick={() => setActive(convo.id)}
                 className={`group relative flex items-center gap-2 px-2 py-2 rounded-md transition-colors ${
                   activeId === convo.id
