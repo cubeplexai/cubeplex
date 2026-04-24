@@ -160,3 +160,101 @@ class PluginRegistry:
                 continue
             out.append(cls())
         return out
+
+    # Resolved instances (set by bind_defaults after discover).
+    _auth_provider: object | None = None
+    _permission_checker: object | None = None
+    _audit_sinks: list[object] | None = None
+    _user_directory_syncers: list[object] | None = None
+    _admin_panel_extensions: list[object] | None = None
+
+    def bind_defaults(
+        self,
+        *,
+        auth_default: object | None = None,
+        permissions_default: object | None = None,
+        audit_default: object | None = None,
+        admin_panel_default: object | None = None,
+        config: object | None = None,
+    ) -> None:
+        """Resolve every Protocol with the supplied defaults + applied config."""
+        from cubebox.plugins.defaults.admin_panel import (
+            DefaultAdminPanelExtension,
+        )
+        from cubebox.plugins.defaults.audit import DefaultAuditSink
+        from cubebox.plugins.defaults.auth import DefaultAuthProvider
+        from cubebox.plugins.defaults.permissions import (
+            DefaultPermissionChecker,
+        )
+
+        auth_default = auth_default or DefaultAuthProvider()
+        permissions_default = permissions_default or DefaultPermissionChecker()
+        audit_default = audit_default or DefaultAuditSink()
+        admin_panel_default = admin_panel_default or DefaultAdminPanelExtension()
+
+        sel_auth: str | None = self._cfg(config, "auth_provider", "selected")  # type: ignore[assignment]
+        sel_perm: str | None = self._cfg(config, "permission_checker", "selected")  # type: ignore[assignment]
+        dis_audit: list[str] = self._cfg(config, "audit_sink", "disabled") or []  # type: ignore[assignment]
+        dis_dir: list[str] = self._cfg(config, "user_directory_syncer", "disabled") or []  # type: ignore[assignment]
+        dis_admin: list[str] = self._cfg(config, "admin_panel_extension", "disabled") or []  # type: ignore[assignment]
+
+        self._auth_provider = self.resolve_singular(
+            GROUP_AUTH, default=auth_default, selected=sel_auth
+        )
+        self._permission_checker = self.resolve_singular(
+            GROUP_PERMISSIONS, default=permissions_default, selected=sel_perm
+        )
+        self._audit_sinks = self.resolve_plural(
+            GROUP_AUDIT, default=audit_default, disabled=dis_audit
+        )
+        self._user_directory_syncers = self.resolve_plural(
+            GROUP_DIRECTORY, default=None, disabled=dis_dir
+        )
+        self._admin_panel_extensions = self.resolve_plural(
+            GROUP_ADMIN_PANEL, default=admin_panel_default, disabled=dis_admin
+        )
+
+    @staticmethod
+    def _cfg(config: object | None, group_name: str, key: str) -> object | None:
+        if config is None:
+            return None
+        return getattr(
+            getattr(getattr(config, "plugins", None), group_name, None),
+            key,
+            None,
+        )
+
+    def get_auth_provider(self) -> object:
+        if self._auth_provider is None:
+            raise RuntimeError("call bind_defaults() first")
+        return self._auth_provider
+
+    def get_permission_checker(self) -> object:
+        if self._permission_checker is None:
+            raise RuntimeError("call bind_defaults() first")
+        return self._permission_checker
+
+    def get_audit_sinks(self) -> list[object]:
+        return self._audit_sinks or []
+
+    def get_user_directory_syncers(self) -> list[object]:
+        return self._user_directory_syncers or []
+
+    def get_admin_panel_extensions(self) -> list[object]:
+        return self._admin_panel_extensions or []
+
+
+# Module-level singleton, populated by app startup.
+_registry: PluginRegistry | None = None
+
+
+def get_registry() -> PluginRegistry:
+    global _registry
+    if _registry is None:
+        _registry = PluginRegistry()
+    return _registry
+
+
+def reset_registry_for_tests() -> None:
+    global _registry
+    _registry = None

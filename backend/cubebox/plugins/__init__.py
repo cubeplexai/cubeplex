@@ -14,6 +14,11 @@ from cubebox.plugins.protocols import (
     SyncSchedule,
     UserDirectorySyncer,
 )
+from cubebox.plugins.registry import (
+    PluginRegistry,
+    get_registry,
+    reset_registry_for_tests,
+)
 
 __all__ = [
     "CUBEBOX_PLUGIN_API_VERSION",
@@ -25,7 +30,10 @@ __all__ = [
     "PermissionChecker",
     "PermissionResource",
     "PluginManifest",
+    "PluginRegistry",
     "SyncResult",
     "SyncSchedule",
     "UserDirectorySyncer",
+    "get_registry",
+    "reset_registry_for_tests",
 ]
