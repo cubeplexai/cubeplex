@@ -31,6 +31,9 @@ jobs:
         with:
           python-version: "3.12"
           enable-cache: true
+          # Ephemeral runner — skip post-run `uv cache prune --ci`
+          # which occasionally hangs on a concurrent lock and fails the job.
+          prune-cache: false
       - name: Install backend
         working-directory: backend
         run: uv sync --all-extras
@@ -140,6 +143,9 @@ jobs:
         with:
           python-version: "3.12"
           enable-cache: true
+          # Ephemeral runner — skip post-run `uv cache prune --ci`
+          # which occasionally hangs on a concurrent lock and fails the job.
+          prune-cache: false
       - uses: pnpm/action-setup@v4
         with:
           package_json_file: frontend/package.json
