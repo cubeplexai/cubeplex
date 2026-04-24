@@ -67,3 +67,13 @@ test:
     rate_limit:
       login_per_minute: 1000
       register_per_minute: 1000
+
+  # Parsers: docling-serve URL comes from DOCLING_URL env when running e2e.
+  # Non-e2e unit tests use httpx MockTransport and never hit this URL.
+  parsers:
+    docling_serve:
+      base_url: "http://localhost-test-no-hit"
+      timeout_sync_seconds: 30
+      timeout_async_minutes: 10
+      async_threshold_mb: 3
+      poll_interval_seconds: 2

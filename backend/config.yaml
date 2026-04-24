@@ -205,3 +205,13 @@ default:
     rate_limit:
       login_per_minute: 5
       register_per_minute: 3
+
+  # File parsers (M6 file_read tool)
+  parsers:
+    docling_serve:
+      base_url: "http://docling-serve:5001" # ENV: CUBEBOX_PARSERS__DOCLING_SERVE__BASE_URL
+      api_key: "" # ENV: CUBEBOX_PARSERS__DOCLING_SERVE__API_KEY
+      timeout_sync_seconds: 30
+      timeout_async_minutes: 10
+      async_threshold_mb: 3
+      poll_interval_seconds: 2
