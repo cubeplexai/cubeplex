@@ -61,11 +61,14 @@ class TextParser:
             sliced = sliced[:MAX_CONTENT_CHARS]
             truncated = True
             lines_kept = sliced.count("\n")
-            if lines_kept == 0 and sliced:
+            single_line_truncated = lines_kept == 0 and bool(sliced)
+            if single_line_truncated:
                 lines_kept = 1
             last_line_returned = start_idx + lines_kept
             metadata["truncated_at_char"] = MAX_CONTENT_CHARS
-            metadata["next_line_to_read"] = last_line_returned + 1
+            metadata["next_line_to_read"] = (
+                last_line_returned if single_line_truncated else last_line_returned + 1
+            )
             if options.line_range is None:
                 metadata["hint"] = "content truncated; use line_range to navigate"
 
@@ -110,7 +113,7 @@ class TextParser:
                 start = max(int(a), 1) - 1
                 end = min(int(b), total_lines)
                 return start, max(end, start)
-            n = max(int(spec), 1) - 1
+            n = min(max(int(spec), 1), total_lines) - 1
             return n, min(n + 1, total_lines)
         except (ValueError, TypeError):
             return 0, total_lines
