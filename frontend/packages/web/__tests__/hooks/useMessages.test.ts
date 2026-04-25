@@ -231,6 +231,7 @@ describe('messageStore.send', () => {
             run_id: 'run-1',
             status: 'running',
             user_message: 'resume me',
+            started_at: '2026-04-25T00:00:00Z',
           },
         }),
         { headers: { 'content-type': 'application/json' } },
@@ -255,6 +256,65 @@ describe('messageStore.send', () => {
     // Partial assistant checkpoint must be trimmed — the stream replay will
     // re-emit it, so leaving it in history would render the response twice.
     expect(msgs.some((m) => m.role === 'assistant')).toBe(false)
+  })
+
+  it('does not bind to a prior turn when the same prompt is repeated and the new user message is not yet checkpointed', async () => {
+    // Reproduces the edge case where a user resends an identical prompt and
+    // refreshes during the brief window before LangGraph has checkpointed
+    // the new user message. The active run's started_at must steer the trim
+    // away from the prior turn's user message; otherwise the previous
+    // assistant reply gets dropped from the rendered history.
+    mockClient.get.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          messages: [
+            {
+              id: 'user-1',
+              role: 'user',
+              content: 'hi',
+              created_at: '2026-04-25T00:00:00Z',
+            },
+            {
+              id: 'assistant-1',
+              role: 'assistant',
+              content: 'hello',
+              created_at: '2026-04-25T00:00:01Z',
+            },
+          ],
+          total: 2,
+          active_run: {
+            run_id: 'run-2',
+            status: 'running',
+            user_message: 'hi',
+            started_at: '2026-04-25T00:00:05Z',
+          },
+        }),
+        { headers: { 'content-type': 'application/json' } },
+      ),
+    )
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() => Promise.reject(new Error('socket closed'))),
+    )
+
+    await act(async () => {
+      await useMessageStore.getState().loadMessages(mockClient as any, CONV_ID)
+      await Promise.resolve()
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    })
+
+    const msgs = useMessageStore.getState().messages[CONV_ID] ?? []
+    // Prior turn must be preserved.
+    expect(msgs.some((m) => m.id === 'user-1')).toBe(true)
+    expect(msgs.some((m) => m.id === 'assistant-1')).toBe(true)
+    // A pending placeholder is appended for the active run since its user
+    // message has not been checkpointed yet.
+    expect(msgs[msgs.length - 1]).toMatchObject({
+      id: 'pending-run-2',
+      role: 'user',
+      content: 'hi',
+    })
   })
 
   it('renders todos from write_todos batch payload', async () => {
