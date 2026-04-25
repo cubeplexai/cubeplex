@@ -212,7 +212,13 @@ def _build_run_streaming_response(
 
     from cubebox.config import config
 
-    block_ms = config.get("streaming.run_stream_block_ms", 15000)
+    # Clamp BLOCK to stay strictly under the Redis socket_timeout. redis-py
+    # applies socket_timeout to blocking commands, so a BLOCK >= socket_timeout
+    # causes XREAD to raise TimeoutError mid-read even though Redis is healthy.
+    socket_timeout_s = config.get("redis.socket_timeout_seconds", 10)
+    configured_block_ms = config.get("streaming.run_stream_block_ms", 5000)
+    safe_block_ms = max(1000, int(socket_timeout_s * 1000) - 2000)
+    block_ms = min(configured_block_ms, safe_block_ms)
     last_event_id = raw_request.headers.get("last-event-id")
 
     async def event_generator() -> AsyncIterator[str]:

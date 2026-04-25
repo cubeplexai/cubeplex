@@ -161,10 +161,20 @@ function buildPendingUserMessage(runId: string, content: string): Message {
   }
 }
 
-function ensurePendingUserMessage(messages: Message[], runId: string, content: string): Message[] {
-  const lastMessage = messages[messages.length - 1]
-  if (lastMessage?.role === 'user' && lastMessage.content === content) {
-    return messages
+/**
+ * History returned by `/bootstrap` may contain checkpoints from the active run
+ * (e.g. an AIMessage with tool calls saved between LangGraph nodes). The stream
+ * replay re-emits all of that content, so anything after the active run's user
+ * message would render twice. Trim history to end at that user message — or
+ * append a pending placeholder if the run is so early that the user message
+ * has not been checkpointed yet.
+ */
+function trimHistoryForActiveRun(messages: Message[], runId: string, content: string): Message[] {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const msg = messages[i]
+    if (msg.role !== 'user') continue
+    if (msg.content === content) return messages.slice(0, i + 1)
+    break
   }
   return [...messages, buildPendingUserMessage(runId, content)]
 }
@@ -594,7 +604,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
 
       let messages = bootstrap.messages ?? []
       if (bootstrap.active_run?.user_message) {
-        messages = ensurePendingUserMessage(
+        messages = trimHistoryForActiveRun(
           messages,
           bootstrap.active_run.run_id,
           bootstrap.active_run.user_message,
