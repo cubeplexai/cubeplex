@@ -206,7 +206,11 @@ default:
     # on how long an in-flight run can stay active (active-run key TTL is
     # heartbeated up to this on every event append).
     run_event_ttl_seconds: 43200 # 12h
-    run_stream_block_ms: 15000
+    # XREAD BLOCK time. MUST be strictly less than redis.socket_timeout_seconds
+    # (in ms) — redis-py's socket_timeout applies to blocking commands too, and
+    # a BLOCK longer than the socket timeout raises TimeoutError mid-read.
+    # Doubles as the SSE heartbeat cadence when there are no events.
+    run_stream_block_ms: 5000
     # DoS safety net only: XADD ~ MAXLEN. Trimming is silent data loss
     # (breaks replay / resume), so size this well above any realistic run.
     # Normal runs should be orders of magnitude smaller.

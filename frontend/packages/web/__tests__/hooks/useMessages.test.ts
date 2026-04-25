@@ -205,6 +205,58 @@ describe('messageStore.send', () => {
     expect(state.error).toBe('socket closed')
   })
 
+  it('does not duplicate the user message when bootstrap history already contains it', async () => {
+    mockClient.get.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          messages: [
+            {
+              id: 'user-1',
+              role: 'user',
+              content: 'resume me',
+              created_at: '2026-04-25T00:00:00Z',
+            },
+            {
+              id: 'assistant-1',
+              role: 'assistant',
+              content: 'partial...',
+              tool_calls: [
+                { name: 'read_file', arguments: {}, tool_call_id: 'tc-1', started_at: null },
+              ],
+              created_at: '2026-04-25T00:00:01Z',
+            },
+          ],
+          total: 2,
+          active_run: {
+            run_id: 'run-1',
+            status: 'running',
+            user_message: 'resume me',
+          },
+        }),
+        { headers: { 'content-type': 'application/json' } },
+      ),
+    )
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() => Promise.reject(new Error('socket closed'))),
+    )
+
+    await act(async () => {
+      await useMessageStore.getState().loadMessages(mockClient as any, CONV_ID)
+      await Promise.resolve()
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    })
+
+    const msgs = useMessageStore.getState().messages[CONV_ID] ?? []
+    const userMsgs = msgs.filter((m) => m.role === 'user')
+    expect(userMsgs).toHaveLength(1)
+    expect(userMsgs[0]).toMatchObject({ id: 'user-1', content: 'resume me' })
+    // Partial assistant checkpoint must be trimmed — the stream replay will
+    // re-emit it, so leaving it in history would render the response twice.
+    expect(msgs.some((m) => m.role === 'assistant')).toBe(false)
+  })
+
   it('renders todos from write_todos batch payload', async () => {
     vi.stubGlobal(
       'fetch',
