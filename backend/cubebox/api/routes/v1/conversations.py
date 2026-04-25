@@ -215,9 +215,12 @@ def _build_run_streaming_response(
     # Clamp BLOCK to stay strictly under the Redis socket_timeout. redis-py
     # applies socket_timeout to blocking commands, so a BLOCK >= socket_timeout
     # causes XREAD to raise TimeoutError mid-read even though Redis is healthy.
+    # Use 80% of the socket timeout so the invariant holds for any socket
+    # timeout (a fixed subtraction would underflow for low timeouts and a
+    # 1000ms floor would equal a 1s socket_timeout — both regress to TimeoutError).
     socket_timeout_s = config.get("redis.socket_timeout_seconds", 10)
     configured_block_ms = config.get("streaming.run_stream_block_ms", 5000)
-    safe_block_ms = max(1000, int(socket_timeout_s * 1000) - 2000)
+    safe_block_ms = max(100, int(socket_timeout_s * 1000 * 0.8))
     block_ms = min(configured_block_ms, safe_block_ms)
     last_event_id = raw_request.headers.get("last-event-id")
 
@@ -548,6 +551,10 @@ async def get_conversation_bootstrap(
             "status": active_run.status,
             "user_message": active_run.user_message,
             "last_event_id": active_run.last_event_id,
+            # Disambiguates the active run's user message from a prior turn
+            # with identical content: any history user message older than
+            # this timestamp belongs to a completed turn, not this run.
+            "started_at": active_run.started_at,
         }
 
     return {

@@ -6,6 +6,11 @@ export interface ActiveRunBootstrap {
   status: string
   user_message?: string | null
   last_event_id?: string | null
+  // ISO timestamp recorded when the run was claimed in Redis. Used by the
+  // frontend to tell the active run's user message apart from a prior turn
+  // with identical content (any history user message older than this
+  // belongs to a completed turn, not the active one).
+  started_at?: string | null
 }
 
 export interface ConversationBootstrap {

@@ -168,11 +168,31 @@ function buildPendingUserMessage(runId: string, content: string): Message {
  * message would render twice. Trim history to end at that user message — or
  * append a pending placeholder if the run is so early that the user message
  * has not been checkpointed yet.
+ *
+ * `startedAt` disambiguates a same-content user message from a prior turn:
+ * only consider history entries created at or after the run was claimed.
+ * Without it, a repeated prompt + a refresh during the brief window before
+ * the new user message lands in the checkpoint would bind to the prior
+ * turn's user message and silently drop the previous assistant reply.
  */
-function trimHistoryForActiveRun(messages: Message[], runId: string, content: string): Message[] {
+function trimHistoryForActiveRun(
+  messages: Message[],
+  runId: string,
+  content: string,
+  startedAt: string | null,
+): Message[] {
+  const startedAtMs = startedAt ? Date.parse(startedAt) : NaN
   for (let i = messages.length - 1; i >= 0; i--) {
     const msg = messages[i]
     if (msg.role !== 'user') continue
+    const msgMs = msg.created_at ? Date.parse(msg.created_at) : NaN
+    if (Number.isFinite(startedAtMs) && Number.isFinite(msgMs) && msgMs < startedAtMs) {
+      // This user message predates the active run — it belongs to a prior
+      // completed turn. Keep walking back? No: every earlier user message
+      // is also older. Bail out and treat the active run's user message
+      // as not-yet-checkpointed.
+      break
+    }
     if (msg.content === content) return messages.slice(0, i + 1)
     break
   }
@@ -608,6 +628,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
           messages,
           bootstrap.active_run.run_id,
           bootstrap.active_run.user_message,
+          bootstrap.active_run.started_at ?? null,
         )
       }
 
