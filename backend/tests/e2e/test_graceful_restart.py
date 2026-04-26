@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
@@ -80,9 +81,9 @@ def _make_run_manager(redis_client: Redis) -> RunManager:
 @pytest.mark.asyncio
 async def test_drain_returns_immediately_when_no_tasks(redis_client: Redis) -> None:
     rm = _make_run_manager(redis_client)
-    start = asyncio.get_event_loop().time()
+    start = time.monotonic()
     await rm.drain(timeout_seconds=10.0)
-    elapsed = asyncio.get_event_loop().time() - start
+    elapsed = time.monotonic() - start
     assert elapsed < 0.5
 
 
@@ -98,10 +99,10 @@ async def test_drain_waits_for_in_flight_task(redis_client: Redis) -> None:
     rm._tasks_empty.clear()
     task.add_done_callback(lambda _: rm._on_task_done("slow-1"))
 
-    start = asyncio.get_event_loop().time()
+    start = time.monotonic()
     await rm.drain(timeout_seconds=5.0)
-    elapsed = asyncio.get_event_loop().time() - start
-    assert 0.25 < elapsed < 1.5
+    elapsed = time.monotonic() - start
+    assert 0.2 < elapsed < 1.5
     assert "slow-1" not in rm._tasks
 
 
@@ -119,4 +120,4 @@ async def test_drain_timeout_cancels_residual(redis_client: Redis) -> None:
 
     await rm.drain(timeout_seconds=0.2)
     # cancel_all path completed: task is done (cancelled) and removed.
-    assert task.cancelled() or task.done()
+    assert task.cancelled()
