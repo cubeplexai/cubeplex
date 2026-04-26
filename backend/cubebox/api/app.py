@@ -29,6 +29,48 @@ async def lifespan(_app: FastAPI):  # type: ignore
     log.init()
     logger.info("Application starting up")
 
+    # Install signal handlers as early as possible so a SIGTERM / SIGINT
+    # arriving during the rest of startup still flips drain mode rather
+    # than killing in-flight runs.
+    import os
+    import signal as _signal
+
+    from cubebox.config import config as _lifecycle_config
+
+    drain_state = _app.state.drain_state
+    loop = asyncio.get_running_loop()
+    force_exit_enabled = _lifecycle_config.get("lifecycle.dev_double_signal_force_exit", True)
+    _signal_seen: dict[str, bool] = {"first": False}
+
+    def _on_signal(signame: str) -> None:
+        if not _signal_seen["first"]:
+            _signal_seen["first"] = True
+            logger.info("{} received — entering drain mode", signame)
+            drain_state.enter_draining()
+            return
+        if force_exit_enabled:
+            logger.warning("Second {} received — force exiting", signame)
+            # Schedule cancel_all and exit immediately. We do not block on
+            # cancel_all because the developer pressed Ctrl-C twice
+            # precisely to skip the wait.
+            rm = getattr(_app.state, "run_manager", None)
+            if rm is not None:
+                asyncio.ensure_future(rm.cancel_all())
+            os._exit(130)
+
+    for sig in (_signal.SIGTERM, _signal.SIGINT):
+        try:
+            loop.add_signal_handler(sig, _on_signal, sig.name)
+        except NotImplementedError:
+            # Non-POSIX (Windows): no graceful drain via signal there, but
+            # the lifespan-shutdown path still drains on uvicorn reload.
+            logger.debug("Signal {} not installable on this platform", sig.name)
+        except RuntimeError as exc:
+            # Off-main-thread (e.g. Starlette TestClient runs lifespan in a
+            # worker thread): signal.set_wakeup_fd refuses. The shutdown
+            # path still drains via lifespan, which is what tests exercise.
+            logger.debug("Signal {} not installable in this thread: {}", sig.name, exc)
+
     # Discover + bind plugin registry; mount AuthProvider routers.
     from typing import cast
 
@@ -210,7 +252,11 @@ async def lifespan(_app: FastAPI):  # type: ignore
     # ==================== Shutdown ====================
     logger.info("Application shutting down")
     if run_manager is not None:
-        await run_manager.cancel_all()
+        # Idempotent: if a signal already flipped the state, this is a no-op.
+        # Covers uvicorn reload and other paths that don't deliver a signal.
+        _app.state.drain_state.enter_draining()
+        drain_timeout = _lifecycle_config.get("lifecycle.graceful_drain_timeout_seconds", 3600)
+        await run_manager.drain(timeout_seconds=float(drain_timeout))
     if redis_client is not None:
         await redis_client.aclose()
     if cleanup_task:
@@ -249,15 +295,27 @@ def create_app(
     app.state.sandbox_factory = sandbox_factory
     app.state.redis_factory = redis_factory
 
+    # Drain state must be created before middleware registration so the
+    # DrainMiddleware can capture the same instance the lifespan + signal
+    # handlers will write to (add_middleware runs at construction time,
+    # before the lifespan starts).
+    from cubebox.lifecycle.drain import DrainState
+
+    app.state.drain_state = DrainState()
+
     # Register middleware
     from cubebox.api.middleware.cancellation import CancellationMiddleware
     from cubebox.api.middleware.csrf import CSRFMiddleware
+    from cubebox.api.middleware.drain import DrainMiddleware
     from cubebox.api.middleware.rate_limit import limiter
     from cubebox.api.middleware.user_identity import UserIdentityMiddleware
 
     app.add_middleware(CancellationMiddleware)
     app.add_middleware(UserIdentityMiddleware)
     app.add_middleware(CSRFMiddleware)
+    # Registered last → outermost on the request path. A draining server
+    # refuses new runs before any other middleware does work.
+    app.add_middleware(DrainMiddleware, drain_state=app.state.drain_state)
 
     # Wire slowapi limiter into app state + exception handler
     from slowapi import _rate_limit_exceeded_handler
