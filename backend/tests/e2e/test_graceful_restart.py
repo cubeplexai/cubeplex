@@ -11,7 +11,9 @@ import pytest
 import pytest_asyncio
 from redis.asyncio import Redis
 
+from cubebox.api.middleware.drain import DrainMiddleware
 from cubebox.config import config as _cubebox_config
+from cubebox.lifecycle.drain import DrainState
 from cubebox.streams.run_events import (
     append_run_event,
     create_run,
@@ -121,3 +123,90 @@ async def test_drain_timeout_cancels_residual(redis_client: Redis) -> None:
     await rm.drain(timeout_seconds=0.2)
     # cancel_all path completed: task is done (cancelled) and removed.
     assert task.cancelled()
+
+
+@pytest.mark.asyncio
+async def test_drain_middleware_passthrough_when_accepting() -> None:
+    state = DrainState()
+    received_scope: dict[str, object] = {}
+
+    async def downstream(scope, receive, send):
+        received_scope["called"] = True
+        await send({"type": "http.response.start", "status": 200, "headers": []})
+        await send({"type": "http.response.body", "body": b"ok"})
+
+    mw = DrainMiddleware(downstream, drain_state=state)
+    sent: list[dict] = []
+
+    async def receive():
+        return {"type": "http.request"}
+
+    async def send(msg):
+        sent.append(msg)
+
+    scope = {
+        "type": "http",
+        "method": "POST",
+        "path": "/api/v1/ws/ws-1/conversations/c-1/messages",
+    }
+    await mw(scope, receive, send)
+    assert received_scope.get("called") is True
+    assert sent[0]["status"] == 200
+
+
+@pytest.mark.asyncio
+async def test_drain_middleware_blocks_new_run_when_draining() -> None:
+    state = DrainState()
+    state.enter_draining()
+
+    async def downstream(scope, receive, send):
+        raise AssertionError("downstream must not be called during drain")
+
+    mw = DrainMiddleware(downstream, drain_state=state)
+    sent: list[dict] = []
+
+    async def receive():
+        return {"type": "http.request"}
+
+    async def send(msg):
+        sent.append(msg)
+
+    scope = {
+        "type": "http",
+        "method": "POST",
+        "path": "/api/v1/ws/ws-1/conversations/c-1/messages",
+    }
+    await mw(scope, receive, send)
+    assert sent[0]["status"] == 503
+    headers = dict(sent[0]["headers"])
+    assert headers[b"retry-after"] == b"5"
+
+
+@pytest.mark.asyncio
+async def test_drain_middleware_passes_through_non_run_paths_when_draining() -> None:
+    state = DrainState()
+    state.enter_draining()
+
+    called = {"yes": False}
+
+    async def downstream(scope, receive, send):
+        called["yes"] = True
+        await send({"type": "http.response.start", "status": 200, "headers": []})
+        await send({"type": "http.response.body", "body": b"ok"})
+
+    mw = DrainMiddleware(downstream, drain_state=state)
+
+    async def receive():
+        return {"type": "http.request"}
+
+    async def send(_msg):
+        pass
+
+    # SSE subscription should pass through
+    scope = {
+        "type": "http",
+        "method": "GET",
+        "path": "/api/v1/ws/ws-1/conversations/c-1/runs/r-1/stream",
+    }
+    await mw(scope, receive, send)
+    assert called["yes"] is True
