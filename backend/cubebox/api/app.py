@@ -29,49 +29,16 @@ async def lifespan(_app: FastAPI):  # type: ignore
     log.init()
     logger.info("Application starting up")
 
-    # Install signal handlers as early as possible so a SIGTERM / SIGINT
-    # arriving during the rest of startup still flips drain mode rather
-    # than killing in-flight runs.
-    import os
-    import signal as _signal
-
-    from cubebox.config import config as _lifecycle_config
-
-    drain_state = _app.state.drain_state
-    loop = asyncio.get_running_loop()
-    force_exit_enabled = _lifecycle_config.get("lifecycle.dev_double_signal_force_exit", True)
-    _signal_seen: dict[str, bool] = {"first": False}
-
-    def _on_signal(signame: str) -> None:
-        if not _signal_seen["first"]:
-            _signal_seen["first"] = True
-            logger.info("{} received — entering drain mode", signame)
-            drain_state.enter_draining()
-            return
-        if force_exit_enabled:
-            logger.warning("Second {} received — force exiting", signame)
-            # Best-effort schedule of cancel_all, then immediate _exit. The
-            # scheduled coroutine almost certainly does NOT run because
-            # os._exit returns synchronously without yielding to the loop.
-            # That is intentional: the developer pressed Ctrl-C twice
-            # precisely to skip the wait. Do not "fix" this by awaiting.
-            rm = getattr(_app.state, "run_manager", None)
-            if rm is not None:
-                asyncio.ensure_future(rm.cancel_all())
-            os._exit(130)
-
-    for sig in (_signal.SIGTERM, _signal.SIGINT):
-        try:
-            loop.add_signal_handler(sig, _on_signal, sig.name)
-        except NotImplementedError:
-            # Non-POSIX (Windows): no graceful drain via signal there, but
-            # the lifespan-shutdown path still drains on uvicorn reload.
-            logger.debug("Signal {} not installable on this platform", sig.name)
-        except RuntimeError as exc:
-            # Off-main-thread (e.g. Starlette TestClient runs lifespan in a
-            # worker thread): signal.set_wakeup_fd refuses. The shutdown
-            # path still drains via lifespan, which is what tests exercise.
-            logger.debug("Signal {} not installable in this thread: {}", sig.name, exc)
+    # NOTE: we deliberately do NOT install signal handlers here. Uvicorn's
+    # own SIGTERM / SIGINT handlers trigger graceful shutdown, which awaits
+    # this lifespan's shutdown phase below. Drain happens there. Installing
+    # our own handlers via loop.add_signal_handler shadowed uvicorn's
+    # handlers and prevented the shutdown sequence from ever firing — the
+    # process would log "entering drain mode" and then sit forever because
+    # uvicorn never learned the signal arrived.
+    #
+    # Double Ctrl-C in dev: uvicorn already handles this natively
+    # (the second SIGINT flips force_exit and tears the server down).
 
     # Discover + bind plugin registry; mount AuthProvider routers.
     from typing import cast
@@ -254,8 +221,8 @@ async def lifespan(_app: FastAPI):  # type: ignore
     # ==================== Shutdown ====================
     logger.info("Application shutting down")
     if run_manager is not None:
-        # Idempotent: if a signal already flipped the state, this is a no-op.
-        # Covers uvicorn reload and other paths that don't deliver a signal.
+        from cubebox.config import config as _lifecycle_config
+
         _app.state.drain_state.enter_draining()
         drain_timeout = _lifecycle_config.get("lifecycle.graceful_drain_timeout_seconds", 3600)
         await run_manager.drain(timeout_seconds=float(drain_timeout))
