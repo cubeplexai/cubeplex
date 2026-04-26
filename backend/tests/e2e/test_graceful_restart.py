@@ -224,3 +224,36 @@ async def test_health_live_always_200(memory_client: httpx.AsyncClient) -> None:
 async def test_legacy_health_removed(memory_client: httpx.AsyncClient) -> None:
     resp = await memory_client.get("/health")
     assert resp.status_code == 404
+
+
+@pytest_asyncio.fixture
+async def app_state_drain(memory_client: httpx.AsyncClient) -> DrainState:
+    """Pull the live DrainState from the app the test client targets."""
+    app = memory_client._transport.app  # type: ignore[attr-defined]
+    state = getattr(app.state, "drain_state", None)
+    assert isinstance(state, DrainState), "lifespan did not install drain_state"
+    return state
+
+
+@pytest.mark.asyncio
+async def test_post_messages_returns_503_when_draining(
+    memory_client: httpx.AsyncClient,
+    app_state_drain: DrainState,
+) -> None:
+    # Create a conversation first while still accepting.
+    create_resp = await memory_client.post(
+        "/api/v1/ws/default-ws/conversations", params={"title": "drain-test"}
+    )
+    assert create_resp.status_code == 201
+    conv_id = create_resp.json()["id"]
+
+    app_state_drain.enter_draining()
+    try:
+        resp = await memory_client.post(
+            f"/api/v1/ws/default-ws/conversations/{conv_id}/messages",
+            json={"content": "hi"},
+        )
+        assert resp.status_code == 503
+        assert resp.headers.get("retry-after") == "5"
+    finally:
+        app_state_drain._state = "accepting"  # type: ignore[attr-defined]
