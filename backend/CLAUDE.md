@@ -63,6 +63,36 @@ make pre-commit-install
 
 Single test file: `uv run pytest tests/e2e/test_agents.py`
 
+### Running E2E tests locally
+
+Local E2E runs use the `development` env (default). The dev env loads:
+
+- `backend/.env` — secret-bearing env vars (`OPENAI_API_KEY`, the
+  `CUBEBOX_E2E_LLM_*` and `CUBEBOX_SANDBOX__*` values that
+  `config.test.yaml` interpolates via dynaconf `@format`)
+- `backend/config.development.local.yaml` — machine-specific overrides
+  (LLM endpoint URL, sandbox domain, etc.)
+
+Both files are gitignored — copy them from a working machine, do NOT
+recreate from scratch. With them in place, `uv run pytest tests/e2e/`
+runs cleanly without exporting any env vars on the command line.
+
+When working from a worktree (`git worktree add ...`), the worktree
+gets a fresh `backend/` without these files. Copy them in before the
+first test run:
+
+```bash
+cp /path/to/main/backend/.env backend/.env
+cp /path/to/main/backend/config.development.local.yaml \
+   backend/config.development.local.yaml
+```
+
+Skipping this step shows up as `DynaconfFormatError: Dynaconf can't
+interpolate variable because 'CUBEBOX_E2E_LLM_*'` at config load, OR
+as quiet `'error' == 'text_delta'` SSE assertion failures inside agent
+tests (the agent crashes mid-stream on lazy interpolation and emits an
+error event instead of normal output).
+
 ## Architecture
 
 **Request flow:** `POST /api/v1/ws/{workspace_id}/conversations/{id}/messages` → `create_cubebox_agent()` → LangGraph `astream(stream_mode="messages", stream_subgraphs=True)` → SSE stream of typed events (`text_delta`, `reasoning`, `tool_call`, `tool_result`, `error`, `done`)
