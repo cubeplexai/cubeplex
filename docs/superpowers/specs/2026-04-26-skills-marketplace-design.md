@@ -19,6 +19,7 @@
 - **Frontmatter 解析**用正则只取 `name` / `description`（`backend/cubebox/middleware/skills.py:54-69`），完全忽略 `version` / `keywords` / Openclaw 扩展字段。
 - **管理后台 Skills tab** 在 M2 已落 `/admin/skills` 路由占位（`frontend/packages/web/app/admin/skills/page.tsx`），目前是 `<ComingSoonCard backlogRef="M3 Skills 市场">`。等 M3 替换。
 - **artifact 基础设施**已具备：`Artifact` 模型 + `ArtifactVersion` 历史 + `save_artifact` 工具（`backend/cubebox/middleware/artifacts.py`）。`artifact_type` 是自由字符串，能直接承载 `"skill"` 类型而无需扩 schema。
+- **Organization 模型只有 `id`/`name`/`created_at`**，无 slug 列；M3 设计需要"用户可见的 org 标识"作为 skill 命名空间前缀，需要扩此模型一列。
 - **现存预装 skill**：`deep-research`（仅 SKILL.md，24KB）/ `git-commit`（仅 SKILL.md，0.8KB）/ `pdf-creator`（SKILL.md + scripts/ + design/）/ `web-artifacts-builder`（SKILL.md + scripts/ + LICENSE.txt）。约一半带 sandbox-runnable 文件。
 
 ### 1.2 目标
@@ -67,27 +68,32 @@
 | D15 | Openclaw alias 合并: `clawdbot` / `clawdis` / `openclaw` 嵌套字段优先于顶层同名字段，merge 进 `raw_metadata` | 不处理 alias / 顶层优先 | 对齐 Openclaw spec 行为；减少作者重复声明 |
 | D16 | 上传体积限制: 单文件 10 MB / 单包 50 MB（v1 硬编码） | 不限 / 通过 config 暴露 | v1 skill 普遍只是 markdown + 小模板；限制能挡住"上传 bomb"；硬编码到 implementation 时再决定要不要 config 化 |
 | D17 | Workspace toggle 变更不影响进行中 agent run；下次 awrap_model_call 取新值 | 对当前 run 即时生效 | session-cached 简化；admin 行为对运行中 chat 突然生效会造成怪异 UX |
+| D18 | Skill 命名空间: 预装裸 slug；上传强制 `<org-slug>:<skill-slug>` | 全裸 slug + (source, owner_org_id, name) 唯一约束 / 全部带前缀（含 preinstalled 加 `core:`） | 跨 org 名字隔离；视觉一眼可辨；将来联邦市场零破坏；preinstalled 是 system-level 不需名空间 |
+| D19 | 新表全部不声明数据库外键；引用完整性靠 repository / service 层保证 | 用 SQLAlchemy `foreign_key=`（artifact 表的现存做法） | 用户偏好；MySQL 无 FK 检查在批量 / soft-delete / 分库场景更稳；与本仓 invite_tokens / membership 等已有"裸 id 列"风格更一致 |
+| D20 | 新增 `Organization.slug` 列（UNIQUE，`^[a-z0-9][a-z0-9-]{0,30}$`）；M3 PR 内一并落，注册时基于 `name` 自动生成 + 冲突追加 `-2` / `-3` 后缀 | 单独 spec 拆出 / 用 org_id 截短做前缀 | M3 强依赖；slug 是用户可见标识，UUID 截短不可读；改 Organization 是小动作，单独 spec 不值得 |
 
 ---
 
 ## 3. 数据模型
 
-5 张新表。`WorkspaceSkillBinding` 沿用 `OrgScopedMixin`（同时带 `org_id` + `workspace_id`）。`OrgSkillInstall` 与 `OrgPreinstalledTombstone` 仅 org 级，单独声明 `org_id` 列（不引入新 mixin，避免 2 张表抽象成本）。`Skill` 与 `SkillVersion` 是全局的，无 org/workspace 列。
+5 张新表 + Organization 加 1 列（`slug`）。`WorkspaceSkillBinding` 沿用 `OrgScopedMixin`（同时带 `org_id` + `workspace_id`）。`OrgSkillInstall` 与 `OrgPreinstalledTombstone` 仅 org 级，单独声明 `org_id` 列（不引入新 mixin，避免 2 张表抽象成本）。`Skill` 与 `SkillVersion` 是全局的，无 org/workspace 列。
+
+**外键策略（D19）**: 新表全部不声明数据库 FK；`*_id` 列为带索引的普通字符串列，引用完整性由 repository / service 层保证（uninstall 时显式 cascade 删 `WorkspaceSkillBinding`、publish 时显式校验 skill 与 version 存在等）。Spec 中的 `# refs <table>.id` 注释仅为可读性提示。
 
 ### 3.1 表定义
 
 ```python
 class Skill(SQLModel, table=True):
     """全局 skill 目录行（部署级）。
-    source="preinstalled" → owner_org_id=NULL，部署 seed 创建。
-    source="uploaded"     → owner_org_id=<上传者所在 org>，仅该 org 可见。
+    source="preinstalled" → owner_org_id=NULL；name 是裸 slug（如 'deep-research'）。
+    source="uploaded"     → owner_org_id=<上传者所在 org>；name 形如 '<org-slug>:<skill-slug>'.
     """
     __tablename__ = "skills"
 
     id: str = Field(default_factory=lambda: str(uuid7()), primary_key=True)
-    name: str = Field(max_length=64)             # slug: ^[a-z0-9][a-z0-9-]{0,62}$
+    name: str = Field(max_length=128)            # 见 § 4.5 命名规则
     source: str = Field(max_length=16)           # "preinstalled" | "uploaded"
-    owner_org_id: str | None = Field(default=None, foreign_key="organizations.id")
+    owner_org_id: str | None = Field(default=None, max_length=36, index=True)  # refs organizations.id
     current_version: str = Field(max_length=32)  # 跟随最新 skill_version.version
     description: str = Field(max_length=1024)    # 反范式：跟最新版本同步
     keywords: list[str] = Field(default_factory=list, sa_column=Column(JSON))
@@ -95,8 +101,7 @@ class Skill(SQLModel, table=True):
     updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
     __table_args__ = (
-        UniqueConstraint("source", "owner_org_id", "name",
-                         name="uq_skill_source_org_name"),
+        UniqueConstraint("name", name="uq_skill_name"),  # 命名空间已含 org 前缀，全局唯一
         Index("ix_skill_source_owner", "source", "owner_org_id"),
     )
 
@@ -106,14 +111,14 @@ class SkillVersion(SQLModel, table=True):
     __tablename__ = "skill_versions"
 
     id: str = Field(default_factory=lambda: str(uuid7()), primary_key=True)
-    skill_id: str = Field(foreign_key="skills.id", index=True)
+    skill_id: str = Field(max_length=36, index=True)  # refs skills.id
     version: str = Field(max_length=32)
     description: str = Field(max_length=1024)
     keywords: list[str] = Field(default_factory=list, sa_column=Column(JSON))
     raw_metadata: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
     storage_prefix: str = Field(max_length=512)  # 对象存储前缀
     entry_file: str = Field(max_length=128, default="SKILL.md")
-    uploaded_by_user_id: str | None = Field(default=None, foreign_key="users.id")
+    uploaded_by_user_id: str | None = Field(default=None, max_length=36)  # refs users.id, NULL for preinstalled
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
     __table_args__ = (
@@ -126,10 +131,10 @@ class OrgSkillInstall(SQLModel, table=True):
     __tablename__ = "org_skill_installs"
 
     id: str = Field(default_factory=lambda: str(uuid7()), primary_key=True)
-    org_id: str = Field(max_length=36, index=True, foreign_key="organizations.id")
-    skill_id: str = Field(foreign_key="skills.id", index=True)
+    org_id: str = Field(max_length=36, index=True)         # refs organizations.id
+    skill_id: str = Field(max_length=36, index=True)       # refs skills.id
     installed_version: str = Field(max_length=32)
-    installed_by_user_id: str = Field(foreign_key="users.id")
+    installed_by_user_id: str = Field(max_length=36)       # refs users.id
     installed_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
     __table_args__ = (
@@ -142,7 +147,7 @@ class WorkspaceSkillBinding(SQLModel, OrgScopedMixin, table=True):
     __tablename__ = "workspace_skill_bindings"
 
     id: str = Field(default_factory=lambda: str(uuid7()), primary_key=True)
-    org_skill_install_id: str = Field(foreign_key="org_skill_installs.id", index=True)
+    org_skill_install_id: str = Field(max_length=36, index=True)  # refs org_skill_installs.id
     enabled: bool = Field(default=True)
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
@@ -157,15 +162,29 @@ class OrgPreinstalledTombstone(SQLModel, table=True):
     __tablename__ = "org_preinstalled_tombstones"
 
     id: str = Field(default_factory=lambda: str(uuid7()), primary_key=True)
-    org_id: str = Field(max_length=36, index=True, foreign_key="organizations.id")
-    skill_id: str = Field(foreign_key="skills.id", index=True)
-    hidden_by_user_id: str = Field(foreign_key="users.id")
+    org_id: str = Field(max_length=36, index=True)         # refs organizations.id
+    skill_id: str = Field(max_length=36, index=True)       # refs skills.id
+    hidden_by_user_id: str = Field(max_length=36)          # refs users.id
     hidden_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
     __table_args__ = (
         UniqueConstraint("org_id", "skill_id", name="uq_org_preinstalled_tombstone"),
     )
 ```
+
+### 3.1.1 Organization 加列
+
+```python
+# 现有 Organization 模型 + 1 列
+class Organization(SQLModel, table=True):
+    ...
+    slug: str = Field(max_length=32, unique=True, index=True)
+    # 正则 ^[a-z0-9][a-z0-9-]{0,30}$；UNIQUE；M3 PR 内自动生成 + 加索引
+```
+
+**Bootstrap 自动生成**: `UserManager.on_after_register` 创建 personal Org 时把 org name slugify（`"Foo's Org"` → `"foo-s-org"`），冲突追加 `-2` / `-3` 直到 UNIQUE。
+
+**现网迁移**: Alembic data migration 给所有现存 Organization 行计算 slug 并填充。
 
 ### 3.2 关键查询模式
 
@@ -261,19 +280,32 @@ def parse_skill_md(text: str) -> SkillFrontmatter:
 ### 4.4 发布管线
 
 ```
-1. 接收 multipart .zip 或 {"artifact_id": ...}
-2. 物化文件:
-   - zip 模式: 流式抽取到临时目录，逐文件校验大小（≤10MB 单/≤50MB 总）
-   - artifact_id 模式: 从 artifacts/<conv>/<id>/v<latest>/ list 对象，下载到临时目录
-3. 定位 SKILL.md（zip root / artifact entry_file）→ 缺失 → 400 SKILL_MD_MISSING
-4. parse_skill_md(SKILL.md.read_text()) → 失败 → 400 INVALID_FRONTMATTER
-5. slug 校验 → 失败 → 400 INVALID_SKILL_NAME
-6. 版本唯一性查询: 当前可见 skill 上是否已有同版本？ → 有 → 409 VERSION_EXISTS
-7. 写对象存储: skills/<org_id>/<name>/<version>/  (or skills/_global/... for preinstalled seed)
-8. DB 事务: upsert Skill + INSERT SkillVersion + upsert OrgSkillInstall (自动 install)
-9. audit_log("skill.publish", target_id=skill_version.id, metadata={...})
+ 1. 接收 multipart .zip 或 {"artifact_id": ...}
+ 2. 物化文件:
+    - zip 模式: 流式抽取到临时目录，逐文件校验大小（≤10MB 单/≤50MB 总）
+    - artifact_id 模式: 从 artifacts/<conv>/<id>/v<latest>/ list 对象，下载到临时目录
+ 3. 定位 SKILL.md（zip root / artifact entry_file）→ 缺失 → 400 SKILL_MD_MISSING
+ 4. parse_skill_md(SKILL.md.read_text()) → 失败 → 400 INVALID_FRONTMATTER
+ 5. 名字校验:
+    - 裸 skill-slug 校验 ^[a-z0-9][a-z0-9-]{0,62}$ → 失败 → 400 INVALID_SKILL_NAME
+    - 拒绝含 ':' 的 frontmatter name (用户不应自带 org 前缀) → 400 INVALID_SKILL_NAME
+    - 服务端 prepend `<publishing-org.slug>:` → canonical_name = "<org-slug>:<skill-slug>"
+ 6. 版本唯一性查询: skills WHERE name=:canonical_name 找到 skill_id；该 skill 已有同版本？ → 有 → 409 VERSION_EXISTS
+ 7. 写对象存储: skills/<org_id>/<skill-slug>/<version>/  (preinstalled seed: skills/_global/<skill-slug>/<version>/)
+ 8. DB 事务: upsert Skill (name=canonical_name) + INSERT SkillVersion + upsert OrgSkillInstall
+ 9. audit_log("skill.publish", target_id=skill_version.id, metadata={...})
 10. 返回 SkillVersion + Skill
 ```
+
+### 4.5 命名规则汇总
+
+| 字段 | 形式 | 例 |
+|---|---|---|
+| Frontmatter `name`（用户写） | 裸 slug；不含 `:` | `my-skill` |
+| `Skill.name`（DB 存储；agent 见到） | 预装裸 slug / 上传 `<org-slug>:<skill-slug>` | `deep-research` / `acme:my-skill` |
+| 对象存储路径 | `skills/<org_id>/<skill-slug>/<version>/` 或 `skills/_global/<skill-slug>/<version>/` | `skills/01HX.../my-skill/0.1.0/` |
+| `Skill.name` 正则 | `^([a-z0-9][a-z0-9-]{0,30}:)?[a-z0-9][a-z0-9-]{0,62}$` | — |
+| Agent 调用 | 用 canonical name | `load_skill("acme:my-skill")` / `load_skill("deep-research")` |
 
 ---
 
@@ -774,6 +806,11 @@ backend/skills/preinstalled/
 - `backend/cubebox/auth/dependencies.py` 不需要改（M2 已加 `require_org_admin`）
 - `backend/config.yaml` —— 删 `sandbox.skills.builtin_dir`；保留 `container_path`
 
+**Backend Organization 改动（D20）**:
+- `backend/cubebox/models/organization.py` —— 加 `slug` 列（UNIQUE + 索引）
+- `backend/cubebox/auth/users.py::UserManager.on_after_register` —— 创建 Org 时基于 name slugify + 冲突追加后缀
+- Alembic 迁移内同时给现存 Org 行 backfill slug（data migration 段）
+
 **Backend 删除**:
 - `backend/cubebox/sandbox/skills.py` —— 整个文件删
 
@@ -788,7 +825,8 @@ backend/skills/preinstalled/
 
 | Stage | 内容 | 回归 | 估算 |
 |---|---|---|---|
-| 1 | 5 张表模型 + Alembic 迁移 + Repository | DB unit | 0.5d |
+| 0 | Organization 加 slug 列 + bootstrap slugify + data migration | 现有 auth/register e2e 全绿 | 0.5d |
+| 1 | 5 张表模型 + Alembic 迁移 + Repository（无 FK） | DB unit | 0.5d |
 | 2 | `frontmatter.py` (含单测) + `cache.py` + `seeder.py` | 单测 + 4 个预装 snapshot | 0.5d |
 | 3 | `SkillCatalogService` + `SkillPublishService` + admin/member 路由 | E2E 50% | 1.0d |
 | 4 | `SkillsMiddleware` + `load_skill` 重构 + `LazySandbox` 同步 hook | 既有 agent E2E + 新 sandbox sync E2E | 0.75d |
@@ -797,7 +835,7 @@ backend/skills/preinstalled/
 | 7 | Frontend workspace bindings + 上传 modal | Playwright toggle/upload | 1.0d |
 | 8 | E2E 测试补齐（backend + frontend） | 全套 E2E 全绿 | 1.0d |
 | 9 | 手测 + bug bash | manual | 0.5d |
-| **合计 Batch 1** | | | **~7d** |
+| **合计 Batch 1** | | | **~7.5d** |
 
 ---
 
@@ -845,6 +883,9 @@ backend/skills/preinstalled/
 | Artifact bytes ≠ marketplace bytes（B2） | 发布时 service 一次性拷贝，不再回读 artifact；文档化语义 |
 | Workspace toggle 改动对进行中 run 不生效 | 文档化，admin 操作下次 run 才生效；v2 考虑 invalidate 信号 |
 | 上传或发布期 sandbox 已休眠且不需要唤醒 | 整条发布管线纯后端 / 对象存储，零 sandbox 接触（D13） |
+| Org slug 冲突 / 现网 backfill 撞名 | bootstrap slugify 加冲突追加后缀 `-2` / `-3` 直到 UNIQUE；data migration 同算法 |
+| 没有 DB FK 时 cascade 漏删（如卸载未 cascade WorkspaceSkillBinding） | service 层显式 cascade；E2E `test_admin_uninstall_*` 校验子表行数为 0 |
+| Org rename slug → 已发布 skill 名字保留旧前缀 | v1 不让 admin 改 slug（仅 bootstrap 自动生成）；将来若开放 rename，老 skill 名保留旧前缀，新发布用新前缀 |
 
 ---
 
