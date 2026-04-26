@@ -82,9 +82,3 @@ test:
       timeout_async_minutes: 10
       async_threshold_mb: 3
       poll_interval_seconds: 2
-
-  # Graceful Restart: fast test values
-  lifecycle:
-    graceful_drain_timeout_seconds: 5
-    dev_double_signal_force_exit: false
-    stale_run_threshold_seconds: 1

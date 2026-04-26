@@ -224,6 +224,7 @@ class RunManager:
         self._tasks_empty.set()
 
     def _on_task_done(self, run_id: str) -> None:
+        """Done-callback that removes the run task and signals drain when empty."""
         self._tasks.pop(run_id, None)
         if not self._tasks:
             self._tasks_empty.set()
