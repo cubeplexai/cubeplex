@@ -284,4 +284,8 @@ def create_app(
     app.include_router(artifacts_router, prefix="/api/v1")
     app.include_router(admin_router, prefix="/api/v1")
 
+    from cubebox.api.routes.health import router as health_router
+
+    app.include_router(health_router)
+
     return app

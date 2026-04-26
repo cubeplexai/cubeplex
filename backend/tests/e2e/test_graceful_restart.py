@@ -7,6 +7,7 @@ import time
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
+import httpx
 import pytest
 import pytest_asyncio
 from redis.asyncio import Redis
@@ -210,3 +211,16 @@ async def test_drain_middleware_passes_through_non_run_paths_when_draining() -> 
     }
     await mw(scope, receive, send)
     assert called["yes"] is True
+
+
+@pytest.mark.asyncio
+async def test_health_live_always_200(memory_client: httpx.AsyncClient) -> None:
+    resp = await memory_client.get("/health/live")
+    assert resp.status_code == 200
+    assert resp.json() == {"status": "ok"}
+
+
+@pytest.mark.asyncio
+async def test_legacy_health_removed(memory_client: httpx.AsyncClient) -> None:
+    resp = await memory_client.get("/health")
+    assert resp.status_code == 404
