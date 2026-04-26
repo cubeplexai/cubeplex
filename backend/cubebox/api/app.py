@@ -50,9 +50,11 @@ async def lifespan(_app: FastAPI):  # type: ignore
             return
         if force_exit_enabled:
             logger.warning("Second {} received — force exiting", signame)
-            # Schedule cancel_all and exit immediately. We do not block on
-            # cancel_all because the developer pressed Ctrl-C twice
-            # precisely to skip the wait.
+            # Best-effort schedule of cancel_all, then immediate _exit. The
+            # scheduled coroutine almost certainly does NOT run because
+            # os._exit returns synchronously without yielding to the loop.
+            # That is intentional: the developer pressed Ctrl-C twice
+            # precisely to skip the wait. Do not "fix" this by awaiting.
             rm = getattr(_app.state, "run_manager", None)
             if rm is not None:
                 asyncio.ensure_future(rm.cancel_all())
