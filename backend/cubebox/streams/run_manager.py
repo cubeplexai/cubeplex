@@ -220,6 +220,13 @@ class RunManager:
         self._run_event_ttl_seconds = run_event_ttl_seconds
         self._run_stream_max_events = run_stream_max_events
         self._tasks: dict[str, asyncio.Task[None]] = {}
+        self._tasks_empty: asyncio.Event = asyncio.Event()
+        self._tasks_empty.set()
+
+    def _on_task_done(self, run_id: str) -> None:
+        self._tasks.pop(run_id, None)
+        if not self._tasks:
+            self._tasks_empty.set()
 
     async def start_run(
         self,
@@ -260,18 +267,55 @@ class RunManager:
             ),
             name=f"run:{run_id}",
         )
+        self._tasks_empty.clear()
         self._tasks[run_id] = task
-        task.add_done_callback(lambda _: self._tasks.pop(run_id, None))
+        task.add_done_callback(lambda _: self._on_task_done(run_id))
         return run_id
 
-    async def shutdown(self) -> None:
-        """Cancel all in-flight run tasks."""
+    async def cancel_all(self) -> None:
+        """Cancel every in-flight run task. Forced shutdown path."""
         tasks = list(self._tasks.values())
         for task in tasks:
             task.cancel()
         for task in tasks:
             with suppress(asyncio.CancelledError):
                 await task
+
+    async def drain(self, timeout_seconds: float) -> None:
+        """Wait for in-flight runs to finish, then return.
+
+        On timeout, cancels residual tasks via ``cancel_all`` (which lets
+        the per-task cancel path mark status=cancelled and write an
+        ``error`` event before the lock is released).
+
+        Logs a progress line every 30 seconds while waiting.
+        """
+        if self._tasks_empty.is_set():
+            return
+
+        progress_task = asyncio.create_task(self._log_drain_progress())
+        try:
+            await asyncio.wait_for(self._tasks_empty.wait(), timeout=timeout_seconds)
+        except TimeoutError:
+            logger.warning(
+                "Drain timeout after {}s, cancelling {} residual run(s)",
+                timeout_seconds,
+                len(self._tasks),
+            )
+            await self.cancel_all()
+        finally:
+            progress_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await progress_task
+
+    async def _log_drain_progress(self) -> None:
+        try:
+            while True:
+                await asyncio.sleep(30)
+                if self._tasks:
+                    logger.info("Still draining: {} run(s) remaining", len(self._tasks))
+        except asyncio.CancelledError:
+            return
 
     async def _append_event(self, run_id: str, conversation_id: str, event: AgentEvent) -> str:
         payload = event.model_dump()

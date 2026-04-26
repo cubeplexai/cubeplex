@@ -210,7 +210,7 @@ async def lifespan(_app: FastAPI):  # type: ignore
     # ==================== Shutdown ====================
     logger.info("Application shutting down")
     if run_manager is not None:
-        await run_manager.shutdown()
+        await run_manager.cancel_all()
     if redis_client is not None:
         await redis_client.aclose()
     if cleanup_task:
