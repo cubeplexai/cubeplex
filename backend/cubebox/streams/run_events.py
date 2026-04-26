@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import asdict, dataclass
+from datetime import UTC, datetime
 from typing import Any, cast
 
 from redis.asyncio import Redis
@@ -34,6 +35,7 @@ class RunMeta:
     user_message: str | None = None
     first_event_id: str | None = None
     last_event_id: str | None = None
+    last_event_at: str | None = None
 
 
 @dataclass(slots=True)
@@ -117,7 +119,8 @@ return 0
 
 # XADD + meta update + TTL refresh (including active-run lock) in one round trip.
 # KEYS[1] = stream_key, KEYS[2] = meta_key, KEYS[3] = active_key
-# ARGV[1] = payload_json, ARGV[2] = ttl_seconds, ARGV[3] = maxlen, ARGV[4] = run_id
+# ARGV[1] = payload_json, ARGV[2] = ttl_seconds, ARGV[3] = maxlen,
+# ARGV[4] = run_id, ARGV[5] = last_event_at (ISO-8601 wall-clock heartbeat)
 # The active-run TTL is refreshed only if it still points at this run_id, so a
 # late-arriving append from an already-superseded run can't keep a zombie lock
 # alive.
@@ -125,7 +128,7 @@ _APPEND_EVENT_LUA = """
 local eid = redis.call(
   'XADD', KEYS[1], 'MAXLEN', '~', tonumber(ARGV[3]), '*', 'payload', ARGV[1]
 )
-redis.call('HSET', KEYS[2], 'last_event_id', eid)
+redis.call('HSET', KEYS[2], 'last_event_id', eid, 'last_event_at', ARGV[5])
 redis.call('HSETNX', KEYS[2], 'first_event_id', eid)
 redis.call('EXPIRE', KEYS[1], tonumber(ARGV[2]))
 redis.call('EXPIRE', KEYS[2], tonumber(ARGV[2]))
@@ -157,6 +160,7 @@ def _meta_from_hash(raw: dict[str, str]) -> RunMeta | None:
         user_message=raw.get("user_message"),
         first_event_id=raw.get("first_event_id"),
         last_event_id=raw.get("last_event_id"),
+        last_event_at=raw.get("last_event_at"),
     )
 
 
@@ -303,9 +307,12 @@ async def append_run_event(
 ) -> str:
     """Append an event payload and update event bounds in a single call.
 
-    Also heartbeats the active-run lock for this conversation so runs longer
-    than ``ttl_seconds`` don't drop the lock mid-execution.
+    Stamps a wall-clock ``last_event_at`` heartbeat so stale-run detection
+    can spot dead workers. Also heartbeats the active-run lock for this
+    conversation so runs longer than ``ttl_seconds`` don't drop the lock
+    mid-execution.
     """
+    last_event_at = datetime.now(UTC).isoformat()
     return cast(
         str,
         await redis.eval(  # type: ignore[misc]
@@ -318,6 +325,7 @@ async def append_run_event(
             str(ttl_seconds),
             str(maxlen),
             run_id,
+            last_event_at,
         ),
     )
 
