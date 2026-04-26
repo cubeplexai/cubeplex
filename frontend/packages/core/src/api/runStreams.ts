@@ -17,6 +17,7 @@ export interface ConversationBootstrap {
   messages: Message[]
   total: number
   active_run: ActiveRunBootstrap | null
+  last_run_status: 'stale' | null
 }
 
 export interface StartRunResponse {

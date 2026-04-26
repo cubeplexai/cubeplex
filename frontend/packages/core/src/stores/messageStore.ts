@@ -34,6 +34,7 @@ export interface MessageStore {
   lastAppliedEventId: string | null
   statusPhase: string | null
   error: string | null
+  lastRunStatus: 'stale' | null
   todos: TodoItem[]
   toolStartedMap: Record<string, number>
   toolResultMap: Record<
@@ -44,6 +45,7 @@ export interface MessageStore {
   loadMessages(client: ApiClient, conversationId: string): Promise<void>
   send(client: ApiClient, conversationId: string, content: string): Promise<void>
   clearStream(): void
+  clearLastRunStatus(): void
 }
 
 const MAIN_AGENT_KEY = 'main'
@@ -609,6 +611,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
   lastAppliedEventId: null,
   statusPhase: null,
   error: null,
+  lastRunStatus: null,
   todos: [],
   toolStartedMap: {},
   toolResultMap: {},
@@ -642,6 +645,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
         messages: { ...s.messages, [conversationId]: messages },
         todos: restoredTodos,
         error: null,
+        lastRunStatus: bootstrap.last_run_status ?? null,
         streamAgents: nextStreamAgents,
         toolStartedMap: {},
         toolResultMap: {},
@@ -689,6 +693,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
       lastAppliedEventId: null,
       statusPhase: null,
       error: null,
+      lastRunStatus: null,
       todos: [],
       toolStartedMap: {},
       toolResultMap: {},
@@ -763,5 +768,9 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
       toolStartedMap: {},
       toolResultMap: {},
     })
+  },
+
+  clearLastRunStatus() {
+    set({ lastRunStatus: null })
   },
 }))
