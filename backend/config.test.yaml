@@ -84,7 +84,12 @@ test:
       poll_interval_seconds: 2
 
   # Graceful Restart: fast test values
+  # NOTE: stale_run_threshold_seconds is intentionally NOT lowered here.
+  # The route-level stale tests plant timestamps 600s in the past and the
+  # unit tests pass an explicit `now=` kwarg, so a tight threshold buys
+  # nothing — but a tight threshold DOES make the playwright chat-flow
+  # test flaky, because CI has occasional >1s gaps between run creation
+  # and stream subscribe. Inherit the prod default (120s) instead.
   lifecycle:
     graceful_drain_timeout_seconds: 5
     dev_double_signal_force_exit: false
-    stale_run_threshold_seconds: 1
