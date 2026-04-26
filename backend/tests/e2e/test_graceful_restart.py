@@ -19,6 +19,8 @@ from cubebox.streams.run_events import (
     append_run_event,
     create_run,
     get_run_meta,
+    is_stale_meta,
+    mark_run_stale,
 )
 from cubebox.streams.run_manager import RunManager
 
@@ -257,3 +259,183 @@ async def test_post_messages_returns_503_when_draining(
         assert resp.headers.get("retry-after") == "5"
     finally:
         app_state_drain._state = "accepting"  # type: ignore[attr-defined]
+
+
+def test_is_stale_meta_detects_stale_running() -> None:
+    from datetime import UTC, datetime, timedelta
+
+    from cubebox.streams.run_events import RunMeta
+
+    now = datetime.now(UTC)
+    fresh = RunMeta(
+        run_id="r1",
+        conversation_id="c1",
+        status="running",
+        started_at=now.isoformat(),
+        last_event_at=(now - timedelta(seconds=5)).isoformat(),
+    )
+    stale = RunMeta(
+        run_id="r2",
+        conversation_id="c2",
+        status="running",
+        started_at=now.isoformat(),
+        last_event_at=(now - timedelta(seconds=300)).isoformat(),
+    )
+    completed = RunMeta(
+        run_id="r3",
+        conversation_id="c3",
+        status="completed",
+        started_at=now.isoformat(),
+        last_event_at=(now - timedelta(seconds=300)).isoformat(),
+    )
+
+    assert not is_stale_meta(fresh, threshold_seconds=120, now=now)
+    assert is_stale_meta(stale, threshold_seconds=120, now=now)
+    # Completed runs are never stale, regardless of age.
+    assert not is_stale_meta(completed, threshold_seconds=120, now=now)
+
+
+@pytest.mark.asyncio
+async def test_mark_run_stale_clears_active_and_sets_status(redis_client: Redis) -> None:
+    from datetime import UTC, datetime
+
+    from cubebox.streams.run_events import (
+        create_run,
+        get_active_run,
+        get_run_meta,
+    )
+
+    prefix = "test_stale_mark"
+    run_id = "r-stale-1"
+    conv_id = "c-stale-1"
+    await create_run(
+        redis_client,
+        prefix=prefix,
+        run_id=run_id,
+        conversation_id=conv_id,
+        status="running",
+        started_at=datetime.now(UTC).isoformat(),
+        ttl_seconds=60,
+    )
+
+    await mark_run_stale(redis_client, prefix=prefix, run_id=run_id, conversation_id=conv_id)
+
+    fresh = await get_run_meta(redis_client, prefix=prefix, run_id=run_id)
+    assert fresh is not None
+    assert fresh.status == "stale"
+    active = await get_active_run(redis_client, prefix=prefix, conversation_id=conv_id)
+    assert active is None
+
+
+@pytest.mark.asyncio
+async def test_mark_run_stale_is_idempotent(redis_client: Redis) -> None:
+    from datetime import UTC, datetime
+
+    from cubebox.streams.run_events import create_run, get_run_meta
+
+    prefix = "test_stale_idem"
+    run_id = "r-stale-2"
+    conv_id = "c-stale-2"
+    await create_run(
+        redis_client,
+        prefix=prefix,
+        run_id=run_id,
+        conversation_id=conv_id,
+        status="running",
+        started_at=datetime.now(UTC).isoformat(),
+        ttl_seconds=60,
+    )
+
+    await mark_run_stale(redis_client, prefix=prefix, run_id=run_id, conversation_id=conv_id)
+    # Second call: status already stale, active_run already cleared — no-op.
+    await mark_run_stale(redis_client, prefix=prefix, run_id=run_id, conversation_id=conv_id)
+    fresh = await get_run_meta(redis_client, prefix=prefix, run_id=run_id)
+    assert fresh is not None
+    assert fresh.status == "stale"
+
+
+@pytest.mark.asyncio
+async def test_bootstrap_clears_stale_run_and_sets_last_run_status(
+    memory_client: httpx.AsyncClient, redis_client: Redis
+) -> None:
+    from datetime import UTC, datetime, timedelta
+
+    from cubebox.streams.run_events import _active_run_key, create_run
+
+    create_resp = await memory_client.post(
+        "/api/v1/ws/default-ws/conversations", params={"title": "stale-test"}
+    )
+    assert create_resp.status_code == 201
+    conv_id = create_resp.json()["id"]
+
+    # The app under test uses prefix "test:test" (env=test). Reach it from app.state.
+    app = memory_client._transport.app  # type: ignore[attr-defined]
+    prefix = app.state.redis_key_prefix
+    run_id = "stale-run-1"
+    long_ago = (datetime.now(UTC) - timedelta(seconds=600)).isoformat()
+
+    # Plant a fake active run with an old last_event_at.
+    meta = await create_run(
+        redis_client,
+        prefix=prefix,
+        run_id=run_id,
+        conversation_id=conv_id,
+        status="running",
+        started_at=long_ago,
+        ttl_seconds=120,
+    )
+    assert meta is not None
+    # Stamp last_event_at directly (no real append, so we set the hash field).
+    await redis_client.hset(  # type: ignore[misc]
+        f"{prefix}:run_meta:v2:{run_id}", "last_event_at", long_ago
+    )
+
+    resp = await memory_client.get(f"/api/v1/ws/default-ws/conversations/{conv_id}/bootstrap")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["active_run"] is None
+    assert body["last_run_status"] == "stale"
+
+    # Active key cleared.
+    active = await redis_client.get(_active_run_key(prefix, conv_id))
+    assert active is None
+
+
+@pytest.mark.asyncio
+async def test_stream_subscribe_emits_stale_error_for_dead_run(
+    memory_client: httpx.AsyncClient, redis_client: Redis
+) -> None:
+    from datetime import UTC, datetime, timedelta
+
+    from cubebox.streams.run_events import create_run
+
+    create_resp = await memory_client.post(
+        "/api/v1/ws/default-ws/conversations", params={"title": "stale-stream"}
+    )
+    conv_id = create_resp.json()["id"]
+
+    app = memory_client._transport.app  # type: ignore[attr-defined]
+    prefix = app.state.redis_key_prefix
+    run_id = "stale-run-2"
+    long_ago = (datetime.now(UTC) - timedelta(seconds=600)).isoformat()
+    await create_run(
+        redis_client,
+        prefix=prefix,
+        run_id=run_id,
+        conversation_id=conv_id,
+        status="running",
+        started_at=long_ago,
+        ttl_seconds=120,
+    )
+    await redis_client.hset(  # type: ignore[misc]
+        f"{prefix}:run_meta:v2:{run_id}", "last_event_at", long_ago
+    )
+
+    async with memory_client.stream(
+        "GET",
+        f"/api/v1/ws/default-ws/conversations/{conv_id}/runs/{run_id}/stream",
+    ) as resp:
+        body = await resp.aread()
+    text = body.decode()
+    # SSE chunks are concatenated; find any data: line that contains run_stale.
+    assert "run_stale" in text

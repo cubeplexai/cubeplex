@@ -138,6 +138,19 @@ end
 return eid
 """
 
+# Mark a run as stale and clear the active-run lock if it still points at it.
+# KEYS[1] = meta_key, KEYS[2] = active_key
+# ARGV[1] = expected_run_id
+_MARK_STALE_LUA = """
+if redis.call('HGET', KEYS[1], 'status') == 'running' then
+  redis.call('HSET', KEYS[1], 'status', 'stale')
+end
+if redis.call('GET', KEYS[2]) == ARGV[1] then
+  redis.call('DEL', KEYS[2])
+end
+return 1
+"""
+
 
 def _meta_hash_pairs(meta: RunMeta) -> list[str]:
     """Return a flat list of field/value pairs for HSET, skipping None values."""
@@ -403,3 +416,44 @@ async def expire_run_data(
     pipe.expire(_run_meta_key(prefix, run_id), ttl_seconds)
     pipe.expire(_run_events_key(prefix, run_id), ttl_seconds)
     await pipe.execute()
+
+
+async def mark_run_stale(
+    redis: Redis,
+    *,
+    prefix: str,
+    run_id: str,
+    conversation_id: str,
+) -> None:
+    """Atomically mark a run stale and release its active-run lock if held.
+
+    Idempotent: a no-op when status is already non-running and the active
+    key no longer points at this run.
+    """
+    await redis.eval(  # type: ignore[misc]
+        _MARK_STALE_LUA,
+        2,
+        _run_meta_key(prefix, run_id),
+        _active_run_key(prefix, conversation_id),
+        run_id,
+    )
+
+
+def is_stale_meta(
+    meta: RunMeta,
+    *,
+    threshold_seconds: int,
+    now: datetime | None = None,
+) -> bool:
+    """A run is stale when status='running' and last_event_at is too old.
+
+    A fresh run that hasn't appended its first event yet has
+    ``last_event_at = None``; in that case fall back to ``started_at`` so
+    the staleness window starts at run creation.
+    """
+    if meta.status != "running":
+        return False
+    current = now or datetime.now(UTC)
+    reference = meta.last_event_at or meta.started_at
+    last = datetime.fromisoformat(reference)
+    return (current - last).total_seconds() > threshold_seconds

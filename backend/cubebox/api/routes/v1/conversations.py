@@ -23,7 +23,9 @@ from cubebox.streams.run_events import (
     get_active_run,
     get_latest_event_id,
     get_run_meta,
+    is_stale_meta,
     iter_run_events,
+    mark_run_stale,
     read_run_events_after,
 )
 from cubebox.streams.run_manager import RunContext
@@ -539,10 +541,25 @@ async def get_conversation_bootstrap(
             detail=f"Conversation {conversation_id} not found",
         )
 
+    from cubebox.config import config as _cfg
+
     history = await _get_history_messages(raw_request, conversation_id)
     active_run = await get_active_run(
         rds.client, prefix=rds.key_prefix, conversation_id=conversation_id
     )
+
+    last_run_status: str | None = None
+    if active_run is not None:
+        threshold = int(_cfg.get("lifecycle.stale_run_threshold_seconds", 120))
+        if is_stale_meta(active_run, threshold_seconds=threshold):
+            await mark_run_stale(
+                rds.client,
+                prefix=rds.key_prefix,
+                run_id=active_run.run_id,
+                conversation_id=conversation_id,
+            )
+            active_run = None
+            last_run_status = "stale"
 
     active_run_payload: dict[str, Any] | None = None
     if active_run is not None:
@@ -561,6 +578,7 @@ async def get_conversation_bootstrap(
         "messages": history["messages"],
         "total": history["total"],
         "active_run": active_run_payload,
+        "last_run_status": last_run_status,
     }
 
 
@@ -598,6 +616,33 @@ async def stream_run(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Run {run_id} not found",
         )
+
+    from cubebox.config import config as _cfg
+
+    threshold = int(_cfg.get("lifecycle.stale_run_threshold_seconds", 120))
+    if is_stale_meta(run_meta, threshold_seconds=threshold):
+        await mark_run_stale(
+            rds.client,
+            prefix=rds.key_prefix,
+            run_id=run_id,
+            conversation_id=conversation_id,
+        )
+
+        async def _stale_stream() -> AsyncIterator[bytes]:
+            from datetime import UTC, datetime
+
+            payload = {
+                "type": "error",
+                "timestamp": datetime.now(UTC).isoformat(),
+                "data": {
+                    "error_code": "run_stale",
+                    "message": "This run died before finishing.",
+                },
+            }
+            yield _format_sse_event("0-0", payload).encode()
+
+        return StreamingResponse(_stale_stream(), media_type="text/event-stream")
+
     return _build_run_streaming_response(
         raw_request=raw_request,
         conversation_id=conversation_id,
