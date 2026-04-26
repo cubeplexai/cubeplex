@@ -106,6 +106,7 @@ export function MessageList({ conversationId }: MessageListProps) {
     toolResultMap,
   } = useMessages(conversationId)
   const loadMessages = useMessageStore((s) => s.loadMessages)
+  const lastRunStatus = useMessageStore((s) => s.lastRunStatus)
   const { workspaceId } = useWorkspaceContext()
 
   useEffect(() => {
@@ -224,6 +225,16 @@ export function MessageList({ conversationId }: MessageListProps) {
           >
             <AlertCircle className="size-4 shrink-0 mt-0.5" />
             <span>{error}</span>
+          </div>
+        )}
+
+        {lastRunStatus === 'stale' && (
+          <div
+            className="flex items-start gap-2 px-3 py-2.5 rounded-lg
+            bg-amber-500/10 border border-amber-500/30 text-amber-700 dark:text-amber-400 text-sm"
+          >
+            <AlertCircle className="size-4 shrink-0 mt-0.5" />
+            <span>上次回答未完成（服务异常退出），请重试。</span>
           </div>
         )}
       </div>
