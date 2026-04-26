@@ -289,10 +289,20 @@ def test_is_stale_meta_detects_stale_running() -> None:
         last_event_at=(now - timedelta(seconds=300)).isoformat(),
     )
 
+    # Worker died before producing the first event: last_event_at is None
+    # and is_stale_meta must fall back to started_at.
+    no_heartbeat = RunMeta(
+        run_id="r4",
+        conversation_id="c4",
+        status="running",
+        started_at=(now - timedelta(seconds=300)).isoformat(),
+    )
+
     assert not is_stale_meta(fresh, threshold_seconds=120, now=now)
     assert is_stale_meta(stale, threshold_seconds=120, now=now)
     # Completed runs are never stale, regardless of age.
     assert not is_stale_meta(completed, threshold_seconds=120, now=now)
+    assert is_stale_meta(no_heartbeat, threshold_seconds=120, now=now)
 
 
 @pytest.mark.asyncio
