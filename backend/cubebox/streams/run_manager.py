@@ -289,11 +289,17 @@ class RunManager:
         the per-task cancel path mark status=cancelled and write an
         ``error`` event before the lock is released).
 
-        Logs a progress line every 30 seconds while waiting.
+        Logs a status line on entry when there's anything to wait for, plus
+        a progress line every 30 seconds while waiting.
         """
         if self._tasks_empty.is_set():
             return
 
+        logger.info(
+            "Draining {} in-flight run(s) (timeout {}s)",
+            len(self._tasks),
+            timeout_seconds,
+        )
         progress_task = asyncio.create_task(self._log_drain_progress())
         try:
             await asyncio.wait_for(self._tasks_empty.wait(), timeout=timeout_seconds)

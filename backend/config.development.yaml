@@ -8,6 +8,13 @@ development:
   api:
     reload: true
 
+  # Graceful Restart: keep dev reload fast — uvicorn StatReload sends SIGTERM
+  # on every file save, and the prod default of 3600s would block reload for
+  # up to an hour if a chat is in flight. 5s lets clean post-completion
+  # writes finish; anything still running gets cancelled.
+  lifecycle:
+    graceful_drain_timeout_seconds: 5
+
   # Sandbox Configuration for Development
   sandbox:
     enabled: true
