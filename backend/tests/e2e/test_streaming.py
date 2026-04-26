@@ -296,7 +296,7 @@ async def test_client_disconnect_cancels_stream_before_closing_checkpointer(
     assert not slow_agent_cancelled.is_set()
     assert not checkpointer_closed_before_cancel.is_set()
 
-    await app.state.run_manager.shutdown()
+    await app.state.run_manager.cancel_all()
     await asyncio.wait_for(slow_agent_cancelled.wait(), timeout=1)
     assert not checkpointer_closed_before_cancel.is_set()
 
