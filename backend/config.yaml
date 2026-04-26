@@ -249,3 +249,9 @@ default:
       disabled: []
     admin_panel_extension:
       disabled: []
+
+  # Graceful Restart and Lifecycle Configuration
+  lifecycle:
+    graceful_drain_timeout_seconds: 3600
+    dev_double_signal_force_exit: true
+    stale_run_threshold_seconds: 120
