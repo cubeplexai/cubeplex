@@ -228,6 +228,13 @@ async def test_legacy_health_removed(memory_client: httpx.AsyncClient) -> None:
     assert resp.status_code == 404
 
 
+@pytest.mark.asyncio
+async def test_health_ready_200_when_accepting(memory_client: httpx.AsyncClient) -> None:
+    resp = await memory_client.get("/health/ready")
+    assert resp.status_code == 200
+    assert resp.json() == {"status": "ok"}
+
+
 @pytest_asyncio.fixture
 async def app_state_drain(memory_client: httpx.AsyncClient) -> DrainState:
     """Pull the live DrainState from the app the test client targets."""
@@ -257,6 +264,23 @@ async def test_post_messages_returns_503_when_draining(
         )
         assert resp.status_code == 503
         assert resp.headers.get("retry-after") == "5"
+    finally:
+        app_state_drain._state = "accepting"  # type: ignore[attr-defined]
+
+
+@pytest.mark.asyncio
+async def test_health_ready_503_when_draining(
+    memory_client: httpx.AsyncClient,
+    app_state_drain: DrainState,
+) -> None:
+    app_state_drain.enter_draining()
+    try:
+        ready_resp = await memory_client.get("/health/ready")
+        assert ready_resp.status_code == 503
+        assert ready_resp.json() == {"status": "draining"}
+        # Liveness must remain 200 — k8s should not kill the pod during drain.
+        live_resp = await memory_client.get("/health/live")
+        assert live_resp.status_code == 200
     finally:
         app_state_drain._state = "accepting"  # type: ignore[attr-defined]
 
@@ -362,6 +386,62 @@ async def test_mark_run_stale_is_idempotent(redis_client: Redis) -> None:
     fresh = await get_run_meta(redis_client, prefix=prefix, run_id=run_id)
     assert fresh is not None
     assert fresh.status == "stale"
+
+
+@pytest.mark.asyncio
+async def test_update_run_meta_status_cas_preserves_stale(redis_client: Redis) -> None:
+    """If a worker tries to flip status from stale → completed, the CAS must reject it."""
+    from datetime import UTC, datetime
+
+    from cubebox.streams.run_events import create_run, update_run_meta
+
+    prefix = "test_cas_stale"
+    run_id = "r-cas-1"
+    conv_id = "c-cas-1"
+    await create_run(
+        redis_client,
+        prefix=prefix,
+        run_id=run_id,
+        conversation_id=conv_id,
+        status="running",
+        started_at=datetime.now(UTC).isoformat(),
+        ttl_seconds=60,
+    )
+
+    # Detection-then-recovery flips to stale.
+    await mark_run_stale(redis_client, prefix=prefix, run_id=run_id, conversation_id=conv_id)
+
+    # Worker's "I finished" path tries to overwrite. CAS must drop the write.
+    after = await update_run_meta(redis_client, prefix=prefix, run_id=run_id, status="completed")
+    assert after is not None
+    assert after.status == "stale", "CAS leaked through; stale flag was overwritten"
+
+
+@pytest.mark.asyncio
+async def test_update_run_meta_status_cas_allows_running_transition(
+    redis_client: Redis,
+) -> None:
+    """Normal running → completed transition must still happen."""
+    from datetime import UTC, datetime
+
+    from cubebox.streams.run_events import create_run, update_run_meta
+
+    prefix = "test_cas_running"
+    run_id = "r-cas-2"
+    conv_id = "c-cas-2"
+    await create_run(
+        redis_client,
+        prefix=prefix,
+        run_id=run_id,
+        conversation_id=conv_id,
+        status="running",
+        started_at=datetime.now(UTC).isoformat(),
+        ttl_seconds=60,
+    )
+
+    after = await update_run_meta(redis_client, prefix=prefix, run_id=run_id, status="completed")
+    assert after is not None
+    assert after.status == "completed"
 
 
 @pytest.mark.asyncio

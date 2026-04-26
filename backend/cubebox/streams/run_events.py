@@ -138,6 +138,22 @@ end
 return eid
 """
 
+# Conditional status transition: only HSET status if current status is 'running'.
+# Workers transition (running → completed|failed|cancelled) only when nobody else
+# has flipped the run's status in the meantime — e.g. inline stale-run detection
+# may have set status='stale' and DELed the active key while the worker was mid-
+# tool-call. Without this guard, the worker's success path silently overwrites
+# the stale flag, hiding the orphan from the operator.
+# KEYS[1] = meta_key, ARGV[1] = new_status
+# Returns 1 if status was 'running' (and now ARGV[1]); 0 otherwise.
+_TRANSITION_STATUS_FROM_RUNNING_LUA = """
+if redis.call('HGET', KEYS[1], 'status') ~= 'running' then
+  return 0
+end
+redis.call('HSET', KEYS[1], 'status', ARGV[1])
+return 1
+"""
+
 # Mark a run as stale and clear the active-run lock if it still points at it.
 # KEYS[1] = meta_key, KEYS[2] = active_key
 # ARGV[1] = expected_run_id
@@ -276,17 +292,38 @@ async def update_run_meta(
     last_event_id: str | None = None,
     ttl_seconds: int | None = None,
 ) -> RunMeta | None:
-    """Patch run metadata fields without read-modify-write races."""
+    """Patch run metadata fields without read-modify-write races.
+
+    ``status`` updates use CAS: the write only happens when the current status
+    is ``running``. If a worker tries to flip the status to a terminal state
+    after stale detection has already marked the run ``stale``, the CAS fails
+    and the existing ``stale`` value is preserved. Other fields are written
+    unconditionally because they are append-driven and don't conflict.
+    """
     meta_key = _run_meta_key(prefix, run_id)
-    updates: dict[str, str] = {}
     if status is not None:
-        updates["status"] = status
+        wrote = await redis.eval(  # type: ignore[misc]
+            _TRANSITION_STATUS_FROM_RUNNING_LUA,
+            1,
+            meta_key,
+            status,
+        )
+        if not wrote:
+            from loguru import logger
+
+            logger.warning(
+                "Run {} status transition to {} ignored — meta is no longer 'running' "
+                "(likely supplanted by stale detection)",
+                run_id,
+                status,
+            )
+    other_updates: dict[str, str] = {}
     if first_event_id is not None:
-        updates["first_event_id"] = first_event_id
+        other_updates["first_event_id"] = first_event_id
     if last_event_id is not None:
-        updates["last_event_id"] = last_event_id
-    if updates:
-        await redis.hset(meta_key, mapping=updates)  # type: ignore[misc]
+        other_updates["last_event_id"] = last_event_id
+    if other_updates:
+        await redis.hset(meta_key, mapping=other_updates)  # type: ignore[misc]
     if ttl_seconds is not None:
         await redis.expire(meta_key, ttl_seconds)
     return await get_run_meta(redis, prefix=prefix, run_id=run_id)
