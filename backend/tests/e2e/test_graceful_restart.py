@@ -449,3 +449,56 @@ async def test_stream_subscribe_emits_stale_error_for_dead_run(
     text = body.decode()
     # SSE chunks are concatenated; find any data: line that contains run_stale.
     assert "run_stale" in text
+
+
+@pytest.mark.asyncio
+async def test_drain_waits_for_in_flight_run_then_returns(
+    memory_client: httpx.AsyncClient,
+) -> None:
+    """Plant a slow async task in run_manager._tasks; drain should wait for it."""
+    app = memory_client._transport.app  # type: ignore[attr-defined]
+    rm = app.state.run_manager
+
+    completed = asyncio.Event()
+
+    async def slow_run() -> None:
+        try:
+            await asyncio.sleep(0.5)
+        finally:
+            completed.set()
+
+    task = asyncio.create_task(slow_run(), name="run:integration-slow")
+    rm._tasks["integration-slow"] = task
+    rm._tasks_empty.clear()
+    task.add_done_callback(lambda _: rm._on_task_done("integration-slow"))
+
+    start = time.monotonic()
+    await rm.drain(timeout_seconds=5.0)
+    elapsed = time.monotonic() - start
+    assert completed.is_set()
+    assert elapsed >= 0.4
+    assert "integration-slow" not in rm._tasks
+
+
+@pytest.mark.asyncio
+async def test_drain_timeout_force_cancels(memory_client: httpx.AsyncClient) -> None:
+    app = memory_client._transport.app  # type: ignore[attr-defined]
+    rm = app.state.run_manager
+
+    cancelled_seen = asyncio.Event()
+
+    async def long_run() -> None:
+        try:
+            await asyncio.sleep(60)
+        except asyncio.CancelledError:
+            cancelled_seen.set()
+            raise
+
+    task = asyncio.create_task(long_run(), name="run:integration-long")
+    rm._tasks["integration-long"] = task
+    rm._tasks_empty.clear()
+    task.add_done_callback(lambda _: rm._on_task_done("integration-long"))
+
+    await rm.drain(timeout_seconds=0.2)
+    assert cancelled_seen.is_set()
+    assert "integration-long" not in rm._tasks
