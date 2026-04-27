@@ -230,7 +230,7 @@ function CompareTab({ skillId, versions }: { skillId: string; versions: SkillVer
   const [vLeft, setVLeft] = useState<string>(sorted[1]?.version ?? '')
   const [vRight, setVRight] = useState<string>(sorted[0]?.version ?? '')
   const [selectedFile, setSelectedFile] = useState<string | null>(null)
-  const [splitView, setSplitView] = useState(true)
+  const [splitView, setSplitView] = useState(false)
 
   const leftKey = vLeft ? `/api/v1/admin/skills/${skillId}/versions/${vLeft}` : null
   const rightKey = vRight ? `/api/v1/admin/skills/${skillId}/versions/${vRight}` : null
