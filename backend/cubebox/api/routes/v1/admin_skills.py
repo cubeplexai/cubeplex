@@ -5,6 +5,7 @@ See spec § 5.1.
 
 from __future__ import annotations
 
+import hashlib
 from pathlib import Path
 from typing import Annotated
 
@@ -179,7 +180,14 @@ async def get_skill_version(
         name=skill.name,
         version=sv.version,
         content=content,
-        files=[SkillFiles(rel_path=p, size=len(b)) for p, b in files_list],
+        files=[
+            SkillFiles(
+                rel_path=p,
+                size=len(b),
+                content_hash=hashlib.md5(b, usedforsecurity=False).hexdigest(),
+            )
+            for p, b in files_list
+        ],
     )
 
 

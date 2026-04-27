@@ -227,8 +227,8 @@ const STATUS_STYLES: Record<FileStatus, { label: string; cls: string }> = {
 function CompareTab({ skillId, versions }: { skillId: string; versions: SkillVersionDetail[] }) {
   const sorted = versions.slice().sort((a, b) => b.version.localeCompare(a.version))
 
-  const [vLeft, setVLeft] = useState<string>(sorted[0]?.version ?? '')
-  const [vRight, setVRight] = useState<string>(sorted[1]?.version ?? '')
+  const [vLeft, setVLeft] = useState<string>(sorted[1]?.version ?? '')
+  const [vRight, setVRight] = useState<string>(sorted[0]?.version ?? '')
   const [selectedFile, setSelectedFile] = useState<string | null>(null)
   const [splitView, setSplitView] = useState(true)
 
@@ -242,22 +242,22 @@ function CompareTab({ skillId, versions }: { skillId: string; versions: SkillVer
     revalidateOnFocus: false,
   })
 
-  // Compute file diff list
+  // Compute file diff list (compare by content hash; fall back to size)
   const fileDiffs = useMemo((): FileDiffEntry[] => {
     if (!leftContent || !rightContent) return []
-    const leftMap = new Map(leftContent.files.map((f) => [f.rel_path, f.size]))
-    const rightMap = new Map(rightContent.files.map((f) => [f.rel_path, f.size]))
+    const leftMap = new Map(leftContent.files.map((f) => [f.rel_path, f]))
+    const rightMap = new Map(rightContent.files.map((f) => [f.rel_path, f]))
     const allPaths = new Set([...leftMap.keys(), ...rightMap.keys()])
     const entries: FileDiffEntry[] = []
     for (const path of allPaths) {
-      const sizeA = leftMap.get(path)
-      const sizeB = rightMap.get(path)
+      const a = leftMap.get(path)
+      const b = rightMap.get(path)
       let status: FileStatus
-      if (sizeA === undefined) status = 'added'
-      else if (sizeB === undefined) status = 'removed'
-      else if (sizeA !== sizeB) status = 'changed'
+      if (a === undefined) status = 'added'
+      else if (b === undefined) status = 'removed'
+      else if (a.content_hash !== b.content_hash) status = 'changed'
       else status = 'same'
-      entries.push({ path, status, sizeA, sizeB })
+      entries.push({ path, status, sizeA: a?.size, sizeB: b?.size })
     }
     return entries.sort((a, b) => {
       const order: FileStatus[] = ['changed', 'added', 'removed', 'same']
@@ -488,7 +488,7 @@ export function SkillDetailPanel({ skillId, onActionDone }: SkillDetailPanelProp
         <h4 className="mb-2 text-sm font-medium uppercase tracking-wide text-muted-foreground/80">
           组织级安装
         </h4>
-        <OrgInstallActions skill={skill} onActionDone={handleActionDone} />
+        <OrgInstallActions key={skill.id} skill={skill} onActionDone={handleActionDone} />
       </section>
 
       {/* Tabs */}

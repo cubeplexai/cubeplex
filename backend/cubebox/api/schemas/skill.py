@@ -10,6 +10,7 @@ class SkillFiles(BaseModel):
     rel_path: str
     size: int
     mime: str | None = None
+    content_hash: str  # MD5 hex digest for change detection
 
 
 class SkillSummary(BaseModel):
