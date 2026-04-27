@@ -28,6 +28,7 @@ class Skill(SQLModel, table=True):
     keywords: list[str] = Field(default_factory=list, sa_column=Column(JSON))
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    deprecated_at: datetime | None = Field(default=None, nullable=True)
 
     __table_args__ = (
         UniqueConstraint("name", name="uq_skill_name"),

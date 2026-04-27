@@ -56,6 +56,8 @@ async def _do_seed(preinstalled_dir: Path, db_session: AsyncSession) -> None:
     versions = SkillVersionRepository(db_session)
     store = get_objectstore_client()
 
+    found_names: set[str] = set()
+
     for skill_dir in sorted(preinstalled_dir.iterdir()):
         if not skill_dir.is_dir():
             continue
@@ -71,6 +73,8 @@ async def _do_seed(preinstalled_dir: Path, db_session: AsyncSession) -> None:
             logger.error("Failed to parse {}/SKILL.md: {}", skill_dir.name, e)
             continue
 
+        found_names.add(fm.name)
+
         # 1. Upsert Skill row
         skill = await skills.find_by_name(fm.name)
         if skill is None:
@@ -80,14 +84,21 @@ async def _do_seed(preinstalled_dir: Path, db_session: AsyncSession) -> None:
                 keywords=fm.keywords,
                 current_version=fm.version,
             )
-        elif skill.current_version != fm.version:
-            await skills.update_current_version(
-                skill.id, fm.version, fm.description, fm.keywords
-            )
-            skill = await skills.get(skill.id)  # refresh
-            if skill is None:
-                logger.error("Skill {} disappeared during seeding; skipping", fm.name)
-                continue
+        else:
+            if skill.deprecated_at is not None:
+                await skills.undeprecate(skill.id)
+                logger.info("Un-deprecated re-added preinstalled skill: {}", fm.name)
+                skill = await skills.get(skill.id)  # refresh
+                if skill is None:
+                    continue
+            if skill.current_version != fm.version:
+                await skills.update_current_version(
+                    skill.id, fm.version, fm.description, fm.keywords
+                )
+                skill = await skills.get(skill.id)  # refresh
+                if skill is None:
+                    logger.error("Skill {} disappeared during seeding; skipping", fm.name)
+                    continue
 
         # 2. Check if this version is already in the DB.
         existing = await versions.find(skill.id, fm.version)
@@ -124,3 +135,9 @@ async def _do_seed(preinstalled_dir: Path, db_session: AsyncSession) -> None:
             uploaded_by_user_id=None,
         )
         logger.info("Seeded preinstalled skill {} v{}", fm.name, fm.version)
+
+    # 5. Deprecate any preinstalled skills no longer present on disk.
+    for skill in await skills.list_preinstalled():
+        if skill.name not in found_names and skill.deprecated_at is None:
+            await skills.deprecate(skill.id)
+            logger.info("Deprecated removed preinstalled skill: {}", skill.name)
