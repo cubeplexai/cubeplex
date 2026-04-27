@@ -36,6 +36,7 @@ async def _allocate_org_slug(session: AsyncSession, base: str) -> str:
 
     from cubebox.models.organization import Organization
 
+    base = base[:29]  # reserve room for -NN suffix within 32-char limit
     candidate = base
     n = 2
     while True:
@@ -44,7 +45,7 @@ async def _allocate_org_slug(session: AsyncSession, base: str) -> str:
         )
         if existing.scalar_one_or_none() is None:
             return candidate
-        candidate = f"{base}-{n}"[:32].rstrip("-")
+        candidate = f"{base}-{n}"
         n += 1
 
 
