@@ -1,6 +1,5 @@
 """Pydantic response schemas for skill marketplace endpoints."""
 
-from datetime import datetime
 from typing import Literal
 
 from pydantic import BaseModel
@@ -37,7 +36,7 @@ class SkillVersionDetail(BaseModel):
     storage_prefix: str
     entry_file: str
     uploaded_by_user_id: str | None
-    created_at: datetime
+    created_at: str  # ISO-8601 with UTC offset
 
 
 class SkillDetail(BaseModel):
