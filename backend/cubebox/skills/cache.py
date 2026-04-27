@@ -36,7 +36,18 @@ class SkillCache:
 
         async with self._lock_for(skill_version_id):
             if sentinel.exists():
-                return target
+                # Validate the sentinel: if no real files exist (stale empty cache from
+                # a previous run where objectstore was empty), delete it and re-extract.
+                has_files = any(
+                    f for f in target.rglob("*") if f.is_file() and f.name != ".extracted"
+                )
+                if has_files:
+                    return target
+                sentinel.unlink(missing_ok=True)
+                logger.warning(
+                    "Skill cache: stale sentinel for {} (no files); re-extracting",
+                    skill_version_id,
+                )
             target.mkdir(parents=True, exist_ok=True)
 
             store = get_objectstore_client()
@@ -52,6 +63,14 @@ class SkillCache:
                 local_path.write_bytes(data)
                 written += 1
 
+            if written == 0:
+                logger.warning(
+                    "Skill cache: no files found in objectstore for {} (prefix={}); "
+                    "not writing sentinel so next request retries",
+                    skill_version_id,
+                    storage_prefix,
+                )
+                return target
             sentinel.write_bytes(b"")
             logger.debug(
                 "Skill cache: extracted {} files for {}", written, skill_version_id
