@@ -33,7 +33,7 @@ async def session():
 
 
 async def test_user_with_admin_membership_in_org_returns_true(session: AsyncSession) -> None:
-    org = await OrganizationRepository(session).create(name="Acme")
+    org = await OrganizationRepository(session).create(name="Acme", slug="acme")
     ws = await WorkspaceRepository(session).create(org_id=org.id, name="Team")
     user_id = str(uuid4())
     await MembershipRepository(session).grant(user_id=user_id, workspace_id=ws.id, role=Role.ADMIN)
@@ -43,7 +43,7 @@ async def test_user_with_admin_membership_in_org_returns_true(session: AsyncSess
 
 
 async def test_user_with_only_member_role_admin_check_returns_false(session: AsyncSession) -> None:
-    org = await OrganizationRepository(session).create(name="Acme")
+    org = await OrganizationRepository(session).create(name="Acme", slug="acme")
     ws = await WorkspaceRepository(session).create(org_id=org.id, name="Team")
     user_id = str(uuid4())
     await MembershipRepository(session).grant(user_id=user_id, workspace_id=ws.id, role=Role.MEMBER)
@@ -53,7 +53,7 @@ async def test_user_with_only_member_role_admin_check_returns_false(session: Asy
 
 
 async def test_user_with_no_membership_in_org_returns_false(session: AsyncSession) -> None:
-    org = await OrganizationRepository(session).create(name="Acme")
+    org = await OrganizationRepository(session).create(name="Acme", slug="acme")
     user_id = str(uuid4())
     repo = MembershipRepository(session)
     assert await repo.user_has_role_in_org(user_id=user_id, org_id=org.id, role=Role.ADMIN) is False
@@ -61,7 +61,7 @@ async def test_user_with_no_membership_in_org_returns_false(session: AsyncSessio
 
 async def test_admin_in_one_workspace_grants_org_admin(session: AsyncSession) -> None:
     """User who is ADMIN in any workspace of the org passes the check."""
-    org = await OrganizationRepository(session).create(name="Acme")
+    org = await OrganizationRepository(session).create(name="Acme", slug="acme")
     ws_a = await WorkspaceRepository(session).create(org_id=org.id, name="A")
     ws_b = await WorkspaceRepository(session).create(org_id=org.id, name="B")
     user_id = str(uuid4())

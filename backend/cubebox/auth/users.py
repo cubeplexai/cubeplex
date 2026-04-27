@@ -1,5 +1,6 @@
 """UserManager and fastapi_users instance."""
 
+import re
 from collections.abc import AsyncIterator
 from typing import Annotated
 
@@ -7,11 +8,44 @@ from fastapi import Depends, Request, Response
 from fastapi_users import BaseUserManager, FastAPIUsers
 from fastapi_users.db import SQLAlchemyUserDatabase
 from loguru import logger
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from cubebox.auth.db import get_user_db
 from cubebox.auth.jwt import auth_backend
 from cubebox.config import config
 from cubebox.models import User
+
+_SLUG_RE = re.compile(r"[^a-z0-9-]+")
+_SLUG_DEDUP = re.compile(r"-{2,}")
+_SLUG_MAX = 31
+
+
+def _slugify_org_name(name: str) -> str:
+    """Convert an org name → URL-safe slug (max 31 chars)."""
+    lowered = name.strip().lower()
+    raw = _SLUG_RE.sub("-", lowered)
+    deduped = _SLUG_DEDUP.sub("-", raw).strip("-")
+    if not deduped:
+        return "org"
+    return deduped[:_SLUG_MAX].rstrip("-")
+
+
+async def _allocate_org_slug(session: AsyncSession, base: str) -> str:
+    """Pick a slug not already taken; append -2, -3, ... if needed."""
+    import sqlalchemy as sa
+
+    from cubebox.models.organization import Organization
+
+    candidate = base
+    n = 2
+    while True:
+        existing = await session.execute(
+            sa.select(Organization).where(Organization.slug == candidate)  # type: ignore[arg-type]
+        )
+        if existing.scalar_one_or_none() is None:
+            return candidate
+        candidate = f"{base}-{n}"[:32].rstrip("-")
+        n += 1
 
 
 class UserManager(BaseUserManager[User, str]):
@@ -34,7 +68,9 @@ class UserManager(BaseUserManager[User, str]):
 
         try:
             local_part = user.email.split("@", 1)[0]
-            org = await OrganizationRepository(session).create(name=f"{local_part}'s Org")
+            org_name = f"{local_part}'s Org"
+            slug = await _allocate_org_slug(session, _slugify_org_name(org_name))
+            org = await OrganizationRepository(session).create(name=org_name, slug=slug)
             ws = await WorkspaceRepository(session).create(org_id=org.id, name="Personal")
             await MembershipRepository(session).grant(
                 user_id=user.id, workspace_id=ws.id, role=Role.ADMIN
