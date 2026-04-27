@@ -61,7 +61,7 @@ async def test_register_bootstrap_is_atomic_on_failure(unauthenticated_memory_cl
 
     original_create = OrganizationRepository.create
 
-    async def boom(self, name: str):
+    async def boom(self, name: str, slug: str) -> None:
         raise RuntimeError("simulated org create failure")
 
     monkeypatch.setattr(OrganizationRepository, "create", boom)
