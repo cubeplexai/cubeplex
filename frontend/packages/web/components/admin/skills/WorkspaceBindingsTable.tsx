@@ -1,19 +1,24 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useState } from 'react'
 import useSWR from 'swr'
+import { Check, X } from 'lucide-react'
 import { createApiClient, listWorkspaces, type Workspace } from '@cubebox/core'
+import type { SkillSummary, WorkspaceBindingState } from '@cubebox/core'
 import { csrfHeaders, jsonHeaders, readApiError } from '@/lib/csrf'
 
 interface WorkspaceBindingsTableProps {
   skillId: string
   installed: boolean
+  autoBind: boolean
 }
 
-interface BindingState {
-  enabled: boolean
+interface WsBindingEntry {
+  ws: Workspace
+  state: WorkspaceBindingState
   pending: boolean
   error: string | null
+  confirmDisable: boolean
 }
 
 const workspacesFetcher = async (): Promise<Workspace[]> => {
@@ -21,13 +26,17 @@ const workspacesFetcher = async (): Promise<Workspace[]> => {
   return listWorkspaces(client)
 }
 
-const wsSkillsFetcher = async (url: string): Promise<{ id: string }[]> => {
+const wsSkillsFetcher = async (url: string): Promise<SkillSummary[]> => {
   const res = await fetch(url, { credentials: 'include' })
   if (!res.ok) throw new Error(`workspace skills fetch failed: ${res.status}`)
-  return res.json() as Promise<{ id: string }[]>
+  return res.json() as Promise<SkillSummary[]>
 }
 
-export function WorkspaceBindingsTable({ skillId, installed }: WorkspaceBindingsTableProps) {
+export function WorkspaceBindingsTable({
+  skillId,
+  installed,
+  autoBind,
+}: WorkspaceBindingsTableProps) {
   const {
     data: workspaces,
     isLoading: wsLoading,
@@ -37,82 +46,81 @@ export function WorkspaceBindingsTable({ skillId, installed }: WorkspaceBindings
     shouldRetryOnError: false,
   })
 
-  const [state, setState] = useState<Record<string, BindingState>>({})
+  const [entries, setEntries] = useState<Record<string, WsBindingEntry>>({})
 
-  // Fetch initial enabled state per workspace.
-  useEffect(() => {
-    if (!installed || !workspaces || workspaces.length === 0) return
-    let cancelled = false
-    ;(async () => {
-      const next: Record<string, BindingState> = {}
+  const wsIds = workspaces?.map((w) => w.id).join(',') ?? ''
+
+  // Fetch binding state for all workspaces at once per workspace.
+  useSWR<void>(
+    installed && workspaces && workspaces.length > 0 ? `ws-bindings:${skillId}:${wsIds}` : null,
+    async () => {
+      if (!workspaces) return
+      const next: Record<string, WsBindingEntry> = {}
       await Promise.all(
         workspaces.map(async (ws) => {
           try {
             const list = await wsSkillsFetcher(`/api/v1/admin/workspaces/${ws.id}/skills`)
-            next[ws.id] = {
-              enabled: list.some((s) => s.id === skillId),
-              pending: false,
-              error: null,
-            }
+            const match = list.find((s) => s.id === skillId)
+            const state: WorkspaceBindingState = match?.workspace_binding_state ?? 'disabled'
+            next[ws.id] = { ws, state, pending: false, error: null, confirmDisable: false }
           } catch (err) {
-            next[ws.id] = { enabled: false, pending: false, error: (err as Error).message }
+            next[ws.id] = {
+              ws,
+              state: 'disabled',
+              pending: false,
+              error: (err as Error).message,
+              confirmDisable: false,
+            }
           }
         }),
       )
-      if (!cancelled) setState(next)
-    })()
-    return () => {
-      cancelled = true
-    }
-  }, [installed, workspaces, skillId])
+      setEntries(next)
+    },
+    { revalidateOnFocus: false, shouldRetryOnError: false },
+  )
 
-  async function toggle(wsId: string, nextEnabled: boolean): Promise<void> {
-    setState((s) => ({
-      ...s,
-      [wsId]: { ...(s[wsId] ?? { enabled: false }), pending: true, error: null },
+  function setEntry(wsId: string, patch: Partial<WsBindingEntry>): void {
+    setEntries((prev) => ({
+      ...prev,
+      [wsId]: { ...prev[wsId], ...patch },
     }))
+  }
+
+  async function enableWs(wsId: string): Promise<void> {
+    setEntry(wsId, { pending: true, error: null, confirmDisable: false })
     try {
-      if (nextEnabled) {
-        const res = await fetch(`/api/v1/admin/workspaces/${wsId}/skills`, {
-          method: 'POST',
-          credentials: 'include',
-          headers: jsonHeaders(),
-          body: JSON.stringify({ skill_ids: [skillId] }),
-        })
-        if (!res.ok) throw new Error(await readApiError(res))
-      } else {
-        const res = await fetch(`/api/v1/admin/workspaces/${wsId}/skills/${skillId}`, {
-          method: 'DELETE',
-          credentials: 'include',
-          headers: csrfHeaders(),
-        })
-        if (!res.ok && res.status !== 204) throw new Error(await readApiError(res))
-      }
-      setState((s) => ({
-        ...s,
-        [wsId]: { enabled: nextEnabled, pending: false, error: null },
-      }))
+      const res = await fetch(`/api/v1/admin/workspaces/${wsId}/skills`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: jsonHeaders(),
+        body: JSON.stringify({ skill_ids: [skillId] }),
+      })
+      if (!res.ok) throw new Error(await readApiError(res))
+      setEntry(wsId, { state: 'enabled', pending: false })
     } catch (err) {
-      setState((s) => ({
-        ...s,
-        [wsId]: {
-          enabled: s[wsId]?.enabled ?? false,
-          pending: false,
-          error: (err as Error).message,
-        },
-      }))
+      setEntry(wsId, { pending: false, error: (err as Error).message })
     }
   }
 
-  const sortedWorkspaces = useMemo(
-    () => (workspaces ?? []).slice().sort((a, b) => a.name.localeCompare(b.name)),
-    [workspaces],
-  )
+  async function disableWs(wsId: string): Promise<void> {
+    setEntry(wsId, { pending: true, error: null, confirmDisable: false })
+    try {
+      const res = await fetch(`/api/v1/admin/workspaces/${wsId}/skills/${skillId}`, {
+        method: 'DELETE',
+        credentials: 'include',
+        headers: csrfHeaders(),
+      })
+      if (!res.ok && res.status !== 204) throw new Error(await readApiError(res))
+      setEntry(wsId, { state: autoBind ? 'auto' : 'disabled', pending: false })
+    } catch (err) {
+      setEntry(wsId, { pending: false, error: (err as Error).message })
+    }
+  }
 
   if (!installed) {
     return (
       <div className="rounded-md border border-dashed border-border/70 bg-muted/20 px-3 py-4 text-xs text-muted-foreground">
-        先在组织安装该 skill，才能在 workspace 启用。
+        先在组织安装该 skill，才能管理 Workspace 绑定。
       </div>
     )
   }
@@ -125,17 +133,20 @@ export function WorkspaceBindingsTable({ skillId, installed }: WorkspaceBindings
       <div className="text-xs text-destructive">无法加载 workspace 列表：{wsError.message}</div>
     )
   }
-  if (sortedWorkspaces.length === 0) {
+  if (!workspaces || workspaces.length === 0) {
     return <div className="text-xs text-muted-foreground">尚无 workspace。</div>
+  }
+
+  const sortedEntries = Object.values(entries).sort((a, b) => a.ws.name.localeCompare(b.ws.name))
+
+  if (sortedEntries.length === 0) {
+    return <div className="text-xs text-muted-foreground">加载绑定状态…</div>
   }
 
   return (
     <ul className="flex flex-col divide-y divide-border/70 rounded-md border border-border/70">
-      {sortedWorkspaces.map((ws) => {
-        const cur = state[ws.id]
-        const enabled = cur?.enabled ?? false
-        const pending = cur?.pending ?? false
-        const err = cur?.error ?? null
+      {sortedEntries.map(({ ws, state, pending, error, confirmDisable }) => {
+        const effective = state === 'enabled' || state === 'auto'
         return (
           <li
             key={ws.id}
@@ -144,20 +155,56 @@ export function WorkspaceBindingsTable({ skillId, installed }: WorkspaceBindings
           >
             <div className="min-w-0 flex-1">
               <div className="truncate font-medium">{ws.name}</div>
-              {err && <div className="mt-0.5 text-[11px] text-destructive">{err}</div>}
+              {state === 'auto' && (
+                <div className="text-[11px] text-muted-foreground">自动关联（默认）</div>
+              )}
+              {error && <div className="mt-0.5 text-[11px] text-destructive">{error}</div>}
             </div>
-            <label className="inline-flex cursor-pointer items-center gap-2 text-xs text-muted-foreground">
-              <input
-                type="checkbox"
-                checked={enabled}
-                disabled={pending}
-                onChange={(e) => void toggle(ws.id, e.target.checked)}
-                className="size-4 rounded border-border accent-primary"
-                aria-label={`enable ${ws.name}`}
-                data-testid={`ws-binding-checkbox-${ws.name}`}
-              />
-              {pending ? '保存中…' : enabled ? '已启用' : '未启用'}
-            </label>
+
+            <div className="flex shrink-0 items-center gap-1.5">
+              {pending ? (
+                <span className="text-xs text-muted-foreground">保存中…</span>
+              ) : confirmDisable ? (
+                <>
+                  <span className="text-xs text-destructive">确认关闭？</span>
+                  <button
+                    type="button"
+                    className="cursor-pointer rounded p-0.5 text-destructive hover:bg-destructive/10"
+                    onClick={() => void disableWs(ws.id)}
+                    aria-label="confirm disable"
+                  >
+                    <Check className="size-3.5" />
+                  </button>
+                  <button
+                    type="button"
+                    className="cursor-pointer rounded p-0.5 text-muted-foreground hover:bg-muted"
+                    onClick={() => setEntry(ws.id, { confirmDisable: false })}
+                    aria-label="cancel"
+                  >
+                    <X className="size-3.5" />
+                  </button>
+                </>
+              ) : (
+                <label className="inline-flex cursor-pointer items-center gap-2 text-xs text-muted-foreground">
+                  <input
+                    type="checkbox"
+                    checked={effective}
+                    disabled={pending}
+                    onChange={(e) => {
+                      if (e.target.checked) {
+                        void enableWs(ws.id)
+                      } else {
+                        setEntry(ws.id, { confirmDisable: true })
+                      }
+                    }}
+                    className="size-4 cursor-pointer rounded border-border accent-primary"
+                    aria-label={`enable ${ws.name}`}
+                    data-testid={`ws-binding-checkbox-${ws.name}`}
+                  />
+                  {effective ? (state === 'auto' ? '自动启用' : '已启用') : '未启用'}
+                </label>
+              )}
+            </div>
           </li>
         )
       })}

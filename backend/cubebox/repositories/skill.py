@@ -267,15 +267,24 @@ class WorkspaceSkillBindingRepository(ScopedRepository[WorkspaceSkillBinding]):
 
     async def disable(self, org_skill_install_id: str) -> bool:
         existing = await self.get_by_install(org_skill_install_id)
-        if existing is None:
-            return False
-        await self.session.delete(existing)
-        await self.session.commit()
+        if existing is not None:
+            existing.enabled = False
+            await self.session.commit()
+            return True
+        row = WorkspaceSkillBinding(
+            org_skill_install_id=org_skill_install_id,
+            enabled=False,
+        )
+        await self.add(row)
         return True
 
     async def list_enabled(self) -> list[WorkspaceSkillBinding]:
         stmt = self._scoped_select().where(WorkspaceSkillBinding.enabled.is_(True))  # type: ignore[attr-defined]
         result = await self.session.execute(stmt)
+        return list(result.scalars().all())
+
+    async def list_all(self) -> list[WorkspaceSkillBinding]:
+        result = await self.session.execute(self._scoped_select())
         return list(result.scalars().all())
 
 

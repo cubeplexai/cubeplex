@@ -8,7 +8,7 @@ import zipfile
 from dataclasses import dataclass
 from pathlib import PurePosixPath
 
-from sqlalchemy import select
+from sqlalchemy import exists, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cubebox.models import OrgSkillInstall, Skill, SkillVersion, WorkspaceSkillBinding
@@ -51,7 +51,24 @@ class SkillCatalogService:
     async def list_enabled_for_workspace(
         self, workspace_id: str, *, org_id: str
     ) -> list[ResolvedSkill]:
-        """JOIN bindings → installs → skills → matching version."""
+        """Return skills that are effectively enabled for this workspace.
+
+        A skill is enabled if:
+        - It has an explicit WorkspaceSkillBinding with enabled=True, OR
+        - auto_bind=True on the install AND no explicit binding with enabled=False exists.
+        """
+        explicit_disable = exists().where(
+            WorkspaceSkillBinding.org_skill_install_id == OrgSkillInstall.id,  # type: ignore[arg-type]
+            WorkspaceSkillBinding.workspace_id == workspace_id,  # type: ignore[arg-type]
+            WorkspaceSkillBinding.org_id == org_id,  # type: ignore[arg-type]
+            WorkspaceSkillBinding.enabled.is_(False),  # type: ignore[attr-defined]
+        )
+        explicit_enable = exists().where(
+            WorkspaceSkillBinding.org_skill_install_id == OrgSkillInstall.id,  # type: ignore[arg-type]
+            WorkspaceSkillBinding.workspace_id == workspace_id,  # type: ignore[arg-type]
+            WorkspaceSkillBinding.org_id == org_id,  # type: ignore[arg-type]
+            WorkspaceSkillBinding.enabled.is_(True),  # type: ignore[attr-defined]
+        )
         stmt = (
             select(Skill, SkillVersion)
             .join(OrgSkillInstall, OrgSkillInstall.skill_id == Skill.id)  # type: ignore[arg-type]
@@ -60,15 +77,12 @@ class SkillCatalogService:
                 (SkillVersion.skill_id == Skill.id)  # type: ignore[arg-type]
                 & (SkillVersion.version == OrgSkillInstall.installed_version),
             )
-            .join(
-                WorkspaceSkillBinding,
-                WorkspaceSkillBinding.org_skill_install_id == OrgSkillInstall.id,  # type: ignore[arg-type]
-            )
             .where(
-                WorkspaceSkillBinding.workspace_id == workspace_id,  # type: ignore[arg-type]
-                WorkspaceSkillBinding.org_id == org_id,  # type: ignore[arg-type]
-                WorkspaceSkillBinding.enabled.is_(True),  # type: ignore[attr-defined]
                 OrgSkillInstall.org_id == org_id,  # type: ignore[arg-type]
+                or_(
+                    explicit_enable,
+                    (OrgSkillInstall.auto_bind.is_(True) & ~explicit_disable),  # type: ignore[attr-defined]
+                ),
             )
             .order_by(Skill.name)
         )

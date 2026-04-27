@@ -24,6 +24,8 @@ class SkillSummary(BaseModel):
     install_state: Literal["uninstalled", "installed", "update_available"]
     installed_version: str | None = None
     workspace_bindings_count: int = 0
+    # Per-workspace effective binding: "auto" | "enabled" | "disabled" | null (not installed)
+    workspace_binding_state: Literal["auto", "enabled", "disabled"] | None = None
 
 
 class SkillVersionDetail(BaseModel):
@@ -47,6 +49,7 @@ class SkillDetail(BaseModel):
     versions: list[SkillVersionDetail]
     install_state: Literal["uninstalled", "installed", "update_available"]
     installed_version: str | None = None
+    auto_bind: bool | None = None  # None when not installed
 
 
 class SkillContentResponse(BaseModel):
@@ -62,6 +65,10 @@ class SkillContentResponse(BaseModel):
 
 class InstallRequest(BaseModel):
     version: str
+
+
+class PatchInstallRequest(BaseModel):
+    auto_bind: bool
 
 
 class WorkspaceBindingsRequest(BaseModel):
