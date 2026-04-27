@@ -734,6 +734,7 @@ test = [
 dev = [
     { name = "aiosqlite" },
     { name = "fakeredis", extra = ["lua"] },
+    { name = "types-pyyaml" },
 ]
 
 [package.metadata]
@@ -777,6 +778,7 @@ provides-extras = ["dev", "test"]
 dev = [
     { name = "aiosqlite", specifier = ">=0.20" },
     { name = "fakeredis", extras = ["lua"], specifier = ">=2.35.1" },
+    { name = "types-pyyaml", specifier = ">=6.0.12.20260408" },
 ]
 
 [[package]]
@@ -2850,6 +2852,15 @@ dependencies = [
 sdist = { url = "https://mirrors.bfsu.edu.cn/pypi/web/packages/09/a9/6ba95a270c6f1fbcd8dac228323f2777d886cb206987444e4bce66338dd4/tqdm-4.67.3.tar.gz", hash = "sha256:7d825f03f89244ef73f1d4ce193cb1774a8179fd96f31d7e1dcde62092b960bb", size = 169598, upload-time = "2026-02-03T17:35:53.048Z" }
 wheels = [
     { url = "https://mirrors.bfsu.edu.cn/pypi/web/packages/16/e1/3079a9ff9b8e11b846c6ac5c8b5bfb7ff225eee721825310c91b3b50304f/tqdm-4.67.3-py3-none-any.whl", hash = "sha256:ee1e4c0e59148062281c49d80b25b67771a127c85fc9676d3be5f243206826bf", size = 78374, upload-time = "2026-02-03T17:35:50.982Z" },
+]
+
+[[package]]
+name = "types-pyyaml"
+version = "6.0.12.20260408"
+source = { registry = "https://mirrors.bfsu.edu.cn/pypi/web/simple/" }
+sdist = { url = "https://mirrors.bfsu.edu.cn/pypi/web/packages/74/73/b759b1e413c31034cc01ecdfb96b38115d0ab4db55a752a3929f0cd449fd/types_pyyaml-6.0.12.20260408.tar.gz", hash = "sha256:92a73f2b8d7f39ef392a38131f76b970f8c66e4c42b3125ae872b7c93b556307", size = 17735, upload-time = "2026-04-08T04:30:50.974Z" }
+wheels = [
+    { url = "https://mirrors.bfsu.edu.cn/pypi/web/packages/1c/f0/c391068b86abb708882c6d75a08cd7d25b2c7227dab527b3a3685a3c635b/types_pyyaml-6.0.12.20260408-py3-none-any.whl", hash = "sha256:fbc42037d12159d9c801ebfcc79ebd28335a7c13b08a4cfbc6916df78fee9384", size = 20339, upload-time = "2026-04-08T04:30:50.113Z" },
 ]
 
 [[package]]
