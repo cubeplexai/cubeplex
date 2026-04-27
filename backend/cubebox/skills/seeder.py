@@ -89,19 +89,28 @@ async def _do_seed(preinstalled_dir: Path, db_session: AsyncSession) -> None:
                 logger.error("Skill {} disappeared during seeding; skipping", fm.name)
                 continue
 
-        # 2. Skip if this version already seeded
+        # 2. Check if this version is already in the DB.
         existing = await versions.find(skill.id, fm.version)
+        prefix = global_skill_prefix(fm.name, fm.version)
+
+        # 3. Upload all files to object storage.
+        # Always check for presence even when DB row exists: objectstore data can be
+        # lost (e.g. Docker restart wipes /tmp/rustfs) while the DB row survives.
+        existing_keys = await store.list_objects(prefix)
+        if not existing_keys:
+            for file_path in skill_dir.rglob("*"):
+                if not file_path.is_file():
+                    continue
+                rel = file_path.relative_to(skill_dir).as_posix()
+                key = skill_object_key(prefix, rel)
+                await store.upload_file(key, file_path.read_bytes())
+            if existing is not None:
+                logger.info(
+                    "Re-uploaded missing objectstore files for {} v{}", fm.name, fm.version
+                )
+
         if existing is not None:
             continue
-
-        # 3. Upload all files to object storage
-        prefix = global_skill_prefix(fm.name, fm.version)
-        for file_path in skill_dir.rglob("*"):
-            if not file_path.is_file():
-                continue
-            rel = file_path.relative_to(skill_dir).as_posix()
-            key = skill_object_key(prefix, rel)
-            await store.upload_file(key, file_path.read_bytes())
 
         # 4. Insert SkillVersion row
         await versions.create(
