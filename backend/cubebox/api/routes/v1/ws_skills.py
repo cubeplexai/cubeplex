@@ -1,4 +1,4 @@
-"""Member-callable skill endpoints under /api/v1/ws/{ws_id}/skills.
+"""Member-callable skill endpoints under /api/v1/ws/{workspace_id}/skills.
 
 See spec § 5.1.
 """
@@ -37,7 +37,7 @@ from cubebox.skills.service import (
     VersionCollisionError,
 )
 
-router = APIRouter(prefix="/ws/{ws_id}/skills", tags=["ws-skills"])
+router = APIRouter(prefix="/ws/{workspace_id}/skills", tags=["ws-skills"])
 
 
 def _cache() -> SkillCache:
@@ -46,7 +46,7 @@ def _cache() -> SkillCache:
 
 @router.get("", response_model=list[SkillSummary])
 async def list_skills_in_ws(
-    ws_id: str,
+    workspace_id: str,
     *,
     ctx: Annotated[RequestContext, Depends(require_member)],
     session: Annotated[AsyncSession, Depends(get_session)],
@@ -58,7 +58,7 @@ async def list_skills_in_ws(
     repo = SkillRepository(session)
     if scope == "workspace":
         catalog = SkillCatalogService(session=session, cache=_cache())
-        resolved = await catalog.list_enabled_for_workspace(ws_id, org_id=ctx.org_id)
+        resolved = await catalog.list_enabled_for_workspace(workspace_id, org_id=ctx.org_id)
         skill_ids = [r.skill_id for r in resolved]
         maybe_skills = [await repo.get(sid) for sid in skill_ids]
         ws_skills = [s for s in maybe_skills if s is not None]
@@ -126,7 +126,7 @@ async def list_skills_in_ws(
 
 @router.get("/{skill_id}", response_model=SkillContentResponse)
 async def preview_skill(
-    ws_id: str,
+    workspace_id: str,
     skill_id: str,
     *,
     ctx: Annotated[RequestContext, Depends(require_member)],
@@ -161,7 +161,7 @@ async def preview_skill(
 
 @router.get("/{skill_id}/files/{path:path}")
 async def get_skill_file(
-    ws_id: str,
+    workspace_id: str,
     skill_id: str,
     path: str,
     *,
@@ -189,7 +189,7 @@ async def get_skill_file(
 
 @router.post("/publish", status_code=201)
 async def publish_from_ws(
-    ws_id: str,
+    workspace_id: str,
     file: Annotated[UploadFile | None, File()] = None,
     *,
     ctx: Annotated[RequestContext, Depends(require_member)],
