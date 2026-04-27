@@ -25,7 +25,7 @@ from cubebox.tools import get_registry
 class _SaveArtifactArgs(BaseModel):
     name: str = Field(description="Human-readable artifact name")
     artifact_type: str = Field(
-        description="Type of artifact: file, website, code, document, image, or data"
+        description="Type of artifact: file, website, code, document, image, data, or skill"
     )
     path: str = Field(description="Absolute path in sandbox (file or directory)")
     entry_file: str | None = Field(
@@ -158,7 +158,9 @@ def _create_save_artifact_tool(
         description=(
             "Register a file or directory created in the sandbox as an artifact "
             "so the user can preview and download it. "
-            "First create the files with the execute tool, then call this."
+            "First create the files with the execute tool, then call this. "
+            "For agent-authored skills, use artifact_type='skill', entry_file='SKILL.md', "
+            "and ensure path points to a directory containing SKILL.md at the root."
         ),
         args_schema=_SaveArtifactArgs,
     )
