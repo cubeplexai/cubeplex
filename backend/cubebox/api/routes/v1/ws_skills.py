@@ -8,10 +8,11 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cubebox.api.schemas.skill import (
+    PublishFromArtifactRequest,
     SkillContentResponse,
     SkillFiles,
     SkillSummary,
@@ -190,32 +191,46 @@ async def get_skill_file(
 @router.post("/publish", status_code=201)
 async def publish_from_ws(
     workspace_id: str,
-    file: Annotated[UploadFile | None, File()] = None,
+    request: Request,
     *,
     ctx: Annotated[RequestContext, Depends(require_member)],
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> dict[str, str]:
-    """Member publish: multipart .zip OR JSON {artifact_id} (Batch 2)."""
-    if file is None:
-        raise HTTPException(
-            status_code=400,
-            detail={
-                "code": "MISSING_BODY",
-                "reason": "expected multipart file or {artifact_id}",
-            },
-        )
+    """Member publish: multipart .zip OR JSON {artifact_id}."""
     org = await OrganizationRepository(session).get(ctx.org_id)
     if org is None:
         raise HTTPException(status_code=404, detail="ORG_NOT_FOUND")
-    zip_bytes = await file.read()
     publisher = SkillPublishService(session=session, cache=_cache())
+    content_type = request.headers.get("content-type", "")
     try:
-        sv = await publisher.publish_from_zip(
-            org_id=ctx.org_id,
-            org_slug=org.slug,
-            actor_user_id=ctx.user.id,
-            zip_bytes=zip_bytes,
-        )
+        if content_type.startswith("application/json"):
+            body = await request.json()
+            req = PublishFromArtifactRequest(**body)
+            sv = await publisher.publish_from_artifact(
+                org_id=ctx.org_id,
+                org_slug=org.slug,
+                actor_user_id=ctx.user.id,
+                artifact_id=req.artifact_id,
+                workspace_id=workspace_id,
+            )
+        else:
+            form = await request.form()
+            file = form.get("file")
+            if file is None or not isinstance(file, UploadFile):
+                raise HTTPException(
+                    status_code=400,
+                    detail={
+                        "code": "MISSING_BODY",
+                        "reason": "expected multipart file= or JSON {artifact_id}",
+                    },
+                )
+            zip_bytes = await file.read()
+            sv = await publisher.publish_from_zip(
+                org_id=ctx.org_id,
+                org_slug=org.slug,
+                actor_user_id=ctx.user.id,
+                zip_bytes=zip_bytes,
+            )
     except InvalidFrontmatterError as e:
         raise HTTPException(
             status_code=400,

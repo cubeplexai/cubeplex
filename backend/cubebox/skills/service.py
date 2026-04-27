@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from cubebox.models import OrgSkillInstall, Skill, SkillVersion, WorkspaceSkillBinding
 from cubebox.objectstore import get_objectstore_client
+from cubebox.repositories.artifact import ArtifactRepository
 from cubebox.repositories.skill import (
     OrgSkillInstallRepository,
     SkillRepository,
@@ -136,6 +137,43 @@ class SkillPublishService:
     def __init__(self, *, session: AsyncSession, cache: SkillCache) -> None:
         self.session = session
         self.cache = cache
+
+    async def publish_from_artifact(
+        self,
+        *,
+        org_id: str,
+        org_slug: str,
+        actor_user_id: str,
+        artifact_id: str,
+        workspace_id: str,
+    ) -> SkillVersion:
+        """Read artifact files from object storage and run the publish pipeline."""
+        repo = ArtifactRepository(self.session, org_id=org_id, workspace_id=workspace_id)
+        artifact = await repo.get_by_id(artifact_id)
+        if artifact is None:
+            raise SkillMdMissingError(f"artifact {artifact_id} not found")
+        if artifact.artifact_type != "skill":
+            raise SkillMdMissingError(
+                f"artifact {artifact_id!r} has type {artifact.artifact_type!r}, expected 'skill'"
+            )
+
+        prefix = f"artifacts/{artifact.conversation_id}/{artifact.id}/v{artifact.version}/"
+        store = get_objectstore_client()
+        keys = await store.list_objects(prefix)
+        files: dict[str, bytes] = {}
+        for key in keys:
+            rel = key[len(prefix):].lstrip("/")
+            if not rel:
+                continue
+            data, _ = await store.download_file(key)
+            files[rel] = data
+
+        return await self._publish_from_files(
+            org_id=org_id,
+            org_slug=org_slug,
+            actor_user_id=actor_user_id,
+            files=files,
+        )
 
     async def publish_from_zip(
         self,
