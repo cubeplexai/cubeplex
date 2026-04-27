@@ -20,7 +20,11 @@ from cubebox.repositories.skill import (
     SkillVersionRepository,
 )
 from cubebox.skills.cache import SkillCache
-from cubebox.skills.frontmatter import InvalidFrontmatterError, parse_skill_md  # noqa: F401
+from cubebox.skills.frontmatter import (  # noqa: F401
+    InvalidFrontmatterError,
+    parse_skill_md,
+    peek_skill_name,
+)
 from cubebox.skills.storage_paths import org_skill_prefix, skill_object_key
 
 
@@ -192,6 +196,26 @@ class SkillPublishService:
             files=files,
         )
 
+    async def _next_version_for(self, canonical_name: str) -> str:
+        """Return the next patch version for *canonical_name*, starting at 1.0.0."""
+        skill = await SkillRepository(self.session).find_by_name(canonical_name)
+        if skill is None:
+            return "1.0.0"
+        all_versions = await SkillVersionRepository(self.session).list_for_skill(skill.id)
+        best = (0, 0, 0)
+        for v in all_versions:
+            parts = v.version.split(".")
+            if len(parts) == 3:
+                try:
+                    triple = (int(parts[0]), int(parts[1]), int(parts[2]))
+                    if triple > best:
+                        best = triple
+                except ValueError:
+                    continue
+        if best == (0, 0, 0):
+            return "1.0.0"
+        return f"{best[0]}.{best[1]}.{best[2] + 1}"
+
     async def _publish_from_files(
         self,
         *,
@@ -202,7 +226,15 @@ class SkillPublishService:
     ) -> SkillVersion:
         if "SKILL.md" not in files:
             raise SkillMdMissingError("zip must contain SKILL.md at root")
-        fm = parse_skill_md(files["SKILL.md"].decode("utf-8"))
+        skill_md_text = files["SKILL.md"].decode("utf-8")
+
+        # If version is absent, auto-assign the next patch version for this skill.
+        default_version: str | None = None
+        raw_name = peek_skill_name(skill_md_text)
+        if raw_name is not None:
+            canonical = f"{org_slug}:{raw_name}"
+            default_version = await self._next_version_for(canonical)
+        fm = parse_skill_md(skill_md_text, default_version=default_version)
 
         if ":" in fm.name:
             raise InvalidSkillNameError(

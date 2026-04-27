@@ -30,11 +30,33 @@ class SkillFrontmatter:
     raw_metadata: dict[str, Any] = field(default_factory=dict)
 
 
-def parse_skill_md(text: str) -> SkillFrontmatter:
+def peek_skill_name(text: str) -> str | None:
+    """Return the raw name value from SKILL.md frontmatter without full validation.
+
+    Returns None if the frontmatter block is absent, unparseable, or name is missing.
+    Used by the publish service to compute an auto-version before the full parse.
+    """
+    match = _FRONTMATTER_RE.match(text)
+    if match is None:
+        return None
+    try:
+        data = yaml.safe_load(match.group(1)) or {}
+    except yaml.YAMLError:
+        return None
+    if not isinstance(data, dict):
+        return None
+    name = data.get("name")
+    return name.strip() if isinstance(name, str) and name.strip() else None
+
+
+def parse_skill_md(text: str, *, default_version: str | None = None) -> SkillFrontmatter:
     """Parse a SKILL.md document; return its frontmatter.
 
     Raises InvalidFrontmatterError if the YAML block is missing, malformed,
     or required fields are missing/invalid.
+
+    If *default_version* is provided it is used when the version field is absent
+    or blank, instead of raising InvalidFrontmatterError for that field.
     """
     match = _FRONTMATTER_RE.match(text)
     if match is None:
@@ -62,10 +84,13 @@ def parse_skill_md(text: str) -> SkillFrontmatter:
     version_raw = data.get("version")
     version = str(version_raw).strip() if version_raw is not None else ""
     if not version or any(c.isspace() for c in version):
-        raise InvalidFrontmatterError(
-            field="version",
-            reason="required, non-empty, must not contain whitespace",
-        )
+        if default_version is not None:
+            version = default_version
+        else:
+            raise InvalidFrontmatterError(
+                field="version",
+                reason="required, non-empty, must not contain whitespace",
+            )
 
     keywords = _normalise_keywords(data.get("keywords"))
 
