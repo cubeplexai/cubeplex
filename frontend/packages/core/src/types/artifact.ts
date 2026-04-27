@@ -3,7 +3,7 @@ export interface Artifact {
   id: string
   conversation_id: string
   name: string
-  artifact_type: 'file' | 'website' | 'code' | 'document' | 'image' | 'data'
+  artifact_type: 'file' | 'website' | 'code' | 'document' | 'image' | 'data' | 'skill'
   path: string
   entry_file?: string | null
   mime_type?: string | null
