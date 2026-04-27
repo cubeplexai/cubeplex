@@ -6,6 +6,7 @@ import io
 import re
 import zipfile
 from dataclasses import dataclass
+from pathlib import PurePosixPath
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -60,6 +61,7 @@ class SkillCatalogService:
             )
             .where(
                 WorkspaceSkillBinding.workspace_id == workspace_id,  # type: ignore[arg-type]
+                WorkspaceSkillBinding.org_id == org_id,  # type: ignore[arg-type]
                 WorkspaceSkillBinding.enabled.is_(True),  # type: ignore[attr-defined]
                 OrgSkillInstall.org_id == org_id,  # type: ignore[arg-type]
             )
@@ -117,6 +119,10 @@ class VersionCollisionError(ValueError):
 
 
 class FileTooLargeError(ValueError):
+    pass
+
+
+class InvalidZipPathError(ValueError):
     pass
 
 
@@ -231,6 +237,8 @@ def _extract_zip(zip_bytes: bytes) -> dict[str, bytes]:
         for info in z.infolist():
             if info.is_dir():
                 continue
+            if ".." in PurePosixPath(info.filename).parts:
+                raise InvalidZipPathError(f"invalid path in zip: {info.filename!r}")
             if info.file_size > MAX_FILE_BYTES:
                 raise FileTooLargeError(
                     f"{info.filename} is {info.file_size} bytes; cap is {MAX_FILE_BYTES}"
