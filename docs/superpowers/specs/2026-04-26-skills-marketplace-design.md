@@ -29,7 +29,7 @@
 - **前端 admin**: `/admin/skills` 真实 UI（列表 / 详情 / 安装 / 升级 / workspace 启停 / 上传 modal）。
 - **运行时改造**: `SkillsMiddleware` 与 `load_skill` 改为基于 catalog 而非文件系统。`load_skill` 永远不唤醒 sandbox；sandbox 同步在 `LazySandbox._ensure()` 内透明进行，对 agent 不可见。
 - **Batch 2 闭环**: 通过 `skill-creator` 这个预装 skill，用户在 chat 中由 agent 引导创作 → 通过既有 `save_artifact` 工具产出 `artifact_type="skill"` 的产物 → artifact 预览面板上的"发布到组织市场"按钮一键打通到市场 API。
-- **预装迁移**: `backend/skills/builtin/` 整体改名为 `backend/skills/preinstalled/`，启动 seeder 把它们 upsert 到全局池。已部署的现网组织一次性脚本批量自动 install，避免行为退化。
+- **预装迁移**: `backend/skills/builtin/` 整体改名为 `backend/skills/preinstalled/`，启动 seeder 把它们 upsert 到全局池。多副本部署下用 MySQL `GET_LOCK` 命名锁互斥，只有一个进程跑 seeder（其他直接跳过；本身幂等也不会出错）。已部署的现网组织一次性脚本批量自动 install，避免行为退化。
 
 ### 1.3 非目标
 
@@ -42,7 +42,7 @@
 - **付费 skill / 配额 / 计费**: 不做。
 - **跨 workspace 复制 skill**: 不做（每个 workspace 自己 toggle）。
 - **运行中改 binding 立即生效**: workspace toggle 变更对当前进行中的 agent run 不生效；下次模型调用时取新结果。
-- **缓存淘汰策略 / 多副本 seeder 协调**: v1 单副本部署假设；缓存目录无界增长是已知项。
+- **缓存淘汰策略**: 缓存目录无界增长是已知项；v1 不做 LRU。
 - **持久化 sandbox volume + per-sandbox skill 版本状态**: v2 优化方向，目前每次 sandbox 唤醒重新同步。
 
 ---
@@ -677,6 +677,31 @@ backend/skills/preinstalled/
 
 启动时由 FastAPI lifespan 调用一次。流程沿用 § 4.4 的发布管线 + 写 `skills/_global/<name>/<version>/`，但 `source="preinstalled"` / `owner_org_id=NULL`。**幂等**: 相同版本不重写文件、不插重复 SkillVersion 行。
 
+**多副本互斥（MySQL `GET_LOCK`）**: 同一部署下多个 backend 副本同时启动时，只让一个进程跑 seeder。其他进程拿不到锁直接跳过（seeder 本身幂等，重复跑结果一致，但避免对象存储 + DB 重复写）。
+
+```python
+async def seed_preinstalled_skills() -> None:
+    LOCK_NAME = "cubebox.skill_seeder"
+    LOCK_TIMEOUT_SECONDS = 30  # 等到锁或超时即跳过
+
+    async with engine.connect() as conn:
+        result = await conn.execute(
+            text("SELECT GET_LOCK(:name, :timeout)"),
+            {"name": LOCK_NAME, "timeout": LOCK_TIMEOUT_SECONDS},
+        )
+        got_lock = result.scalar()
+        if got_lock != 1:
+            logger.info("Skill seeder: another replica holds lock; skipping this run")
+            return
+        try:
+            await _do_seed(conn)   # 实际遍历 + upsert
+        finally:
+            await conn.execute(text("SELECT RELEASE_LOCK(:name)"),
+                               {"name": LOCK_NAME})
+```
+
+锁是 connection-scoped；`engine.connect()` 退出会自动释放，`finally` 是双保险。`GET_LOCK` 返回值: `1`=拿到，`0`=超时未拿到，`NULL`=出错（按未拿到处理）。
+
 **版本变更检测**:
 - 当前预装版本（SKILL.md frontmatter）= DB `current_version` → no-op。
 - 不同 → 必须比 DB 中现有 SkillVersion 行版本号都新；新版本 INSERT，旧版本不动。
@@ -711,6 +736,7 @@ backend/skills/preinstalled/
 | `test_seed_preinstalled_creates_global_rows` | 启动 seeder 读 `preinstalled/` → global skill+version 行 + 对象存储文件；幂等 |
 | `test_seed_refuses_to_overwrite_same_version` | SKILL.md 改但 version 未改 → seeder warning，不覆盖 |
 | `test_seed_adds_new_version_on_bump` | bump version → 追加 SkillVersion，旧版本不动 |
+| `test_seed_named_lock_prevents_concurrent_runs` | 一个连接持有 `GET_LOCK("cubebox.skill_seeder")` → seeder 在另一连接被调用时跳过；释放后再调用恢复正常 |
 | `test_admin_install_preinstalled_creates_org_install` | `POST /admin/skills/{id}/install` → org_install 行 + audit |
 | `test_admin_uninstall_preinstalled_creates_tombstone` | `DELETE` → tombstone；下次 reseed 不自动 install |
 | `test_admin_upgrade_changes_pin` | 重 POST install 新版本 → pin 改；下次 sandbox 唤醒同步新版本 |
@@ -873,7 +899,7 @@ backend/skills/preinstalled/
 | 风险 | 缓解 |
 |---|---|
 | Seeder 写对象存储成功但 DB 失败 → 孤儿文件 | 写顺序：upsert Skill → INSERT SkillVersion → upload files；upload 失败回滚 version row。下次部署幂等重试自愈 |
-| 多副本 seeder 同时跑 race | v1 单副本假设并文档化；v2 用 MySQL advisory lock |
+| 多副本 seeder 同时跑 race | MySQL `GET_LOCK("cubebox.skill_seeder", 30)` 命名锁互斥；其他副本跳过；seeder 自身幂等做兜底 |
 | Frontmatter 正则→YAML 迁移破坏现存 skill | 4 个预装 SKILL.md 各跑 snapshot 单测；CI 必跑；改 frontmatter 必须同步更新 fixture |
 | Sandbox 同步失败连带 sandbox 不可用 | `LazySandbox._ensure()` 内 try/except；记日志后继续；agent 仍可用 sandbox 但缺 skill 文件 → execute 调脚本时报"file not found"，agent 自然重试或换路径 |
 | `/.skills/builtin/` 路径被 hard-code 引用 | 全部预装 SKILL.md 是我们维护的；迁移 PR 内 grep 修正 |
@@ -912,7 +938,6 @@ backend/skills/preinstalled/
 
 - [ ] 持久化 sandbox volume + per-sandbox skill 版本状态缓存，避免每次 sandbox 唤醒重复同步（v2 优化）
 - [ ] 缓存淘汰策略（LRU + 大小上限），v1 不做
-- [ ] 多副本 seeder 协调（advisory lock），v1 单副本部署假设
 - [ ] `cubebox-skills-extra` pip 包 + `entry_points` group `cubebox.preinstalled_skill` 让第三方贡献预装 skill
 - [ ] Member chat-side 的 marketplace 浏览页（v1 只暴露 API，UI 留 v2）
 - [ ] Marketplace 数据（安装数 / 最近上传），v1 显式不做
