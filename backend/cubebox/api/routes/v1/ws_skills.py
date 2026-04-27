@@ -182,7 +182,9 @@ async def get_skill_file(
         raise HTTPException(status_code=404, detail="SKILL_VERSION_NOT_FOUND")
 
     cache_dir = await _cache().ensure_extracted(sv.id, storage_prefix=sv.storage_prefix)
-    target = cache_dir / path
+    target = (cache_dir / path).resolve()
+    if not target.is_relative_to(cache_dir.resolve()):
+        raise HTTPException(status_code=400, detail="INVALID_PATH")
     if not target.is_file():
         raise HTTPException(status_code=404, detail="FILE_NOT_FOUND")
     return target.read_bytes()
