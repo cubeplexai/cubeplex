@@ -48,20 +48,20 @@ class SkillCatalogService:
         """JOIN bindings → installs → skills → matching version."""
         stmt = (
             select(Skill, SkillVersion)
-            .join(OrgSkillInstall, OrgSkillInstall.skill_id == Skill.id)
+            .join(OrgSkillInstall, OrgSkillInstall.skill_id == Skill.id)  # type: ignore[arg-type]
             .join(
                 SkillVersion,
-                (SkillVersion.skill_id == Skill.id)
+                (SkillVersion.skill_id == Skill.id)  # type: ignore[arg-type]
                 & (SkillVersion.version == OrgSkillInstall.installed_version),
             )
             .join(
                 WorkspaceSkillBinding,
-                WorkspaceSkillBinding.org_skill_install_id == OrgSkillInstall.id,
+                WorkspaceSkillBinding.org_skill_install_id == OrgSkillInstall.id,  # type: ignore[arg-type]
             )
             .where(
-                WorkspaceSkillBinding.workspace_id == workspace_id,
-                WorkspaceSkillBinding.enabled.is_(True),
-                OrgSkillInstall.org_id == org_id,
+                WorkspaceSkillBinding.workspace_id == workspace_id,  # type: ignore[arg-type]
+                WorkspaceSkillBinding.enabled.is_(True),  # type: ignore[attr-defined]
+                OrgSkillInstall.org_id == org_id,  # type: ignore[arg-type]
             )
             .order_by(Skill.name)
         )
