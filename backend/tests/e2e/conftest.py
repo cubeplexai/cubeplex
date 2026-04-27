@@ -347,6 +347,115 @@ async def member_client_org_b() -> AsyncIterator[tuple[httpx.AsyncClient, str]]:
             yield c, workspace_id
 
 
+async def _seed_skill_artifact(workspace_id: str, *, skill_md: bytes) -> tuple[str, str]:
+    """Create Conversation + Artifact rows in DB and upload skill_md to object storage.
+
+    Returns (artifact_id, conv_id).
+    """
+    from sqlalchemy import select as sa_select
+
+    from cubebox.models import Artifact, Conversation, Membership, Workspace
+    from cubebox.objectstore import get_objectstore_client
+
+    test_engine = create_async_engine(_build_database_url(), poolclass=NullPool)
+    maker = async_sessionmaker(test_engine, class_=AsyncSession, expire_on_commit=False)
+    try:
+        async with maker() as session:
+            ws = await session.get(Workspace, workspace_id)
+            assert ws is not None
+            org_id = ws.org_id
+
+            stmt = sa_select(Membership).where(Membership.workspace_id == workspace_id)
+            mem = (await session.execute(stmt)).scalars().first()
+            assert mem is not None
+            user_id = str(mem.user_id)
+
+            conv = Conversation(
+                org_id=org_id,
+                workspace_id=workspace_id,
+                creator_user_id=user_id,
+                title="skill artifact test",
+            )
+            session.add(conv)
+            await session.flush()
+
+            artifact = Artifact(
+                org_id=org_id,
+                workspace_id=workspace_id,
+                conversation_id=conv.id,
+                name="my-test-skill",
+                artifact_type="skill",
+                path="/.skills/my-test-skill",
+                entry_file="SKILL.md",
+            )
+            session.add(artifact)
+            await session.flush()
+            artifact_id = artifact.id
+            conv_id = conv.id
+            await session.commit()
+    finally:
+        await test_engine.dispose()
+
+    store = get_objectstore_client()
+    prefix = f"artifacts/{conv_id}/{artifact_id}/v1/"
+    await store.upload_file(f"{prefix}SKILL.md", skill_md)
+    return artifact_id, conv_id
+
+
+_VALID_SKILL_MD = b"""\
+---
+name: my-test-skill
+description: A test skill for artifact publish flow.
+version: 0.1.0
+keywords:
+  - test
+---
+
+# My Test Skill
+
+Use this skill in tests.
+"""
+
+_INVALID_SKILL_MD = b"""\
+---
+description: Missing required name field.
+version: 0.1.0
+---
+
+# Bad Skill
+"""
+
+
+@pytest_asyncio.fixture
+async def member_client_with_artifact() -> AsyncIterator[tuple[httpx.AsyncClient, str, str]]:
+    """Fresh member + valid skill artifact in object storage.
+
+    Yields (client, workspace_id, artifact_id).
+    """
+    app, email, password, workspace_id = await _make_isolated_user(Role.MEMBER)
+    artifact_id, _ = await _seed_skill_artifact(workspace_id, skill_md=_VALID_SKILL_MD)
+    async with _lifespan_context(app):
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
+            await _login_and_attach(c, email, password)
+            yield c, workspace_id, artifact_id
+
+
+@pytest_asyncio.fixture
+async def member_client_with_bad_artifact() -> AsyncIterator[tuple[httpx.AsyncClient, str, str]]:
+    """Fresh member + skill artifact whose SKILL.md has invalid frontmatter.
+
+    Yields (client, workspace_id, artifact_id).
+    """
+    app, email, password, workspace_id = await _make_isolated_user(Role.MEMBER)
+    artifact_id, _ = await _seed_skill_artifact(workspace_id, skill_md=_INVALID_SKILL_MD)
+    async with _lifespan_context(app):
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
+            await _login_and_attach(c, email, password)
+            yield c, workspace_id, artifact_id
+
+
 @pytest.fixture(scope="session")
 def docling_url() -> str:
     """Return a reachable DOCLING_URL or skip. Never mocks.
