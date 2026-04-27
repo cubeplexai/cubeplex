@@ -35,7 +35,7 @@ export function SkillsList({ skills, loading, error, selectedId, onSelect }: Ski
     )
   }
   return (
-    <ul className="flex flex-col gap-1.5 p-3">
+    <ul data-testid="skills-list" className="flex flex-col gap-1.5 p-3">
       {skills.map((skill) => (
         <li key={skill.id}>
           <SkillCard

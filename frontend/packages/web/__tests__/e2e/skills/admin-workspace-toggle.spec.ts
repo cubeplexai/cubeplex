@@ -11,6 +11,9 @@ test.describe('admin workspace binding toggle', () => {
     await expect(card).toBeVisible({ timeout: 10_000 })
     await card.click()
 
+    // Wait for the detail panel to fully load before inspecting buttons.
+    await expect(page.getByTestId('skill-detail-panel')).toBeVisible({ timeout: 10_000 })
+
     // Ensure the org install exists (idempotent).
     const installBtn = page.getByTestId('skill-install-button')
     if (await installBtn.isVisible().catch(() => false)) {

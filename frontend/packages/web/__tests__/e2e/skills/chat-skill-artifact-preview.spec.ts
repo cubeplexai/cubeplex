@@ -32,7 +32,7 @@ test.describe('skill artifact preview — publish path', () => {
     // Skill should now appear in the catalog list
     await page.getByTestId('upload-skill-modal').waitFor({ state: 'hidden', timeout: 5_000 })
     await expect(page.getByTestId('skills-list')).toBeVisible()
-    const skillCards = page.getByTestId('skill-card')
+    const skillCards = page.locator('[data-testid^="skill-card-"]')
     await expect(skillCards.first()).toBeVisible({ timeout: 10_000 })
   })
 
