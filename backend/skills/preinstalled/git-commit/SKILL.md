@@ -1,3 +1,13 @@
+---
+name: git-commit
+description: Create well-formatted git commits following conventional commit standards (type/scope/subject, with body and footer).
+version: 1.0.0
+keywords:
+  - git
+  - commit
+  - conventional-commits
+---
+
 # Git Commit Skill
 
 This skill helps create well-formatted git commits following conventional commit standards.
