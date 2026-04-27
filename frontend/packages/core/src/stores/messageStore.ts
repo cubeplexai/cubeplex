@@ -662,7 +662,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
             client,
             conversationId,
             bootstrap.active_run!.run_id,
-            undefined,
+            bootstrap.active_run!.last_event_id ?? undefined,
             set,
             get,
           )
