@@ -31,11 +31,12 @@ def upgrade() -> None:
     rows = bind.execute(sa.text("SELECT id, name FROM organizations")).fetchall()
     used: set[str] = set()
     for row in rows:
-        base = _slugify(row.name)
+        raw_base = _slugify(row.name)
+        base = raw_base[:29]  # reserve room for -NN suffix
         candidate = base
         n = 2
         while candidate in used:
-            candidate = f"{base}-{n}"[:32]
+            candidate = f"{base}-{n}"
             n += 1
         used.add(candidate)
         bind.execute(
