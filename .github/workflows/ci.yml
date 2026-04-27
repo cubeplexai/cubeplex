@@ -189,6 +189,14 @@ jobs:
             sleep 2
           done
 
+      - name: Create RustFS test bucket
+        env:
+          AWS_ACCESS_KEY_ID: rustfsadmin
+          AWS_SECRET_ACCESS_KEY: rustfsadmin
+        run: |
+          aws --endpoint-url http://127.0.0.1:9000 \
+            s3 mb s3://cubebox-test --region us-east-1
+
       - name: Alembic migrate (pre-pytest)
         working-directory: backend
         run: uv run alembic upgrade head
