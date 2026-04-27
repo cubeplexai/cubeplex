@@ -35,7 +35,6 @@ async def _sync_skills(
     received via ``Sandbox.has_synced``/``mark_synced``.
     """
     skills = await catalog.list_enabled_for_workspace(workspace_id, org_id=org_id)
-    files: list[tuple[str, bytes]] = []
     for s in skills:
         if sandbox.has_synced(s.skill_version_id):
             continue
@@ -43,11 +42,12 @@ async def _sync_skills(
             s.skill_version_id, storage_prefix=s.storage_prefix
         )
         target_root = f"/.skills/{s.name}/{s.version}/"
-        for rel, data in per_skill:
-            files.append((target_root + rel, data))
+        files = [(target_root + rel, data) for rel, data in per_skill]
+        if files:
+            await sandbox.upload(files)
+        # Mark only after a successful upload so a failed upload is retried
+        # the next time this sandbox instance is used.
         sandbox.mark_synced(s.skill_version_id)
-    if files:
-        await sandbox.upload(files)
 
 
 class LazySandbox(Sandbox):
