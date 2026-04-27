@@ -364,3 +364,19 @@ async def collect_sse_events(
             if line.startswith("data: "):
                 events.append(json_lib.loads(line[6:]))
     return events
+
+
+@pytest_asyncio.fixture
+async def db_session() -> AsyncIterator[AsyncSession]:
+    """Yield a raw AsyncSession connected to the test database (NullPool).
+
+    Use for repository-layer E2E tests that verify DB state directly without
+    going through the HTTP layer.
+    """
+    test_engine = create_async_engine(_build_database_url(), poolclass=NullPool)
+    try:
+        maker = async_sessionmaker(test_engine, class_=AsyncSession, expire_on_commit=False)
+        async with maker() as session:
+            yield session
+    finally:
+        await test_engine.dispose()
