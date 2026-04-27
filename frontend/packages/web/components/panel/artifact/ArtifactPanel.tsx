@@ -15,6 +15,7 @@ import { CodePreview } from './CodePreview'
 import { DocumentPreview } from './DocumentPreview'
 import { DataPreview } from './DataPreview'
 import { FallbackPreview } from './FallbackPreview'
+import { SkillArtifactPreview } from './SkillArtifactPreview'
 import { buildDownloadUrl } from './previewUtils'
 
 const PdfPreview = dynamic(() => import('./PdfPreview').then((m) => m.PdfPreview), {
@@ -170,6 +171,10 @@ function PreviewContent({
       return <DocumentPreview artifact={artifact} version={version} workspaceId={workspaceId} />
     case 'data':
       return <DataPreview artifact={artifact} version={version} workspaceId={workspaceId} />
+    case 'skill':
+      return (
+        <SkillArtifactPreview artifact={artifact} version={version} workspaceId={workspaceId} />
+      )
     default:
       return <FallbackPreview artifact={artifact} version={version} workspaceId={workspaceId} />
   }
