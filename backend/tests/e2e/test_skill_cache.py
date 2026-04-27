@@ -25,6 +25,7 @@ async def test_cache_fetches_files_on_miss(tmp_path: Path) -> None:
     rel_paths = sorted(f[0] for f in files)
     assert rel_paths == ["SKILL.md", "scripts/run.sh"]
     assert dict(files)["SKILL.md"].startswith(b"---")
+    assert dict(files)["scripts/run.sh"] == b"#!/bin/sh\necho hi\n"
 
 
 @pytest.mark.asyncio
