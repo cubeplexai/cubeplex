@@ -325,6 +325,28 @@ async def member_client() -> AsyncIterator[tuple[httpx.AsyncClient, str]]:
             yield c, workspace_id
 
 
+@pytest_asyncio.fixture
+async def member_client_org_a() -> AsyncIterator[tuple[httpx.AsyncClient, str]]:
+    """Fresh org A with a member user."""
+    app, email, password, workspace_id = await _make_isolated_user(Role.MEMBER)
+    async with _lifespan_context(app):
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
+            await _login_and_attach(c, email, password)
+            yield c, workspace_id
+
+
+@pytest_asyncio.fixture
+async def member_client_org_b() -> AsyncIterator[tuple[httpx.AsyncClient, str]]:
+    """Fresh org B with a member user — distinct from org A."""
+    app, email, password, workspace_id = await _make_isolated_user(Role.MEMBER)
+    async with _lifespan_context(app):
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
+            await _login_and_attach(c, email, password)
+            yield c, workspace_id
+
+
 @pytest.fixture(scope="session")
 def docling_url() -> str:
     """Return a reachable DOCLING_URL or skip. Never mocks.
