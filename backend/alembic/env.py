@@ -15,9 +15,14 @@ from cubebox.models import (  # noqa: F401
     InviteToken,
     Membership,
     Organization,
+    OrgPreinstalledTombstone,
+    OrgSkillInstall,
+    Skill,
+    SkillVersion,
     User,
     UserSandbox,
     Workspace,
+    WorkspaceSkillBinding,
 )
 
 # this is the Alembic Config object, which provides
