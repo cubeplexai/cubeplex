@@ -137,7 +137,7 @@ export function SkillDetailPanel({ skillId, onActionDone }: SkillDetailPanelProp
       </section>
 
       {/* Tabs */}
-      <Tabs defaultValue="overview" className="flex-1">
+      <Tabs defaultValue="overview" className="flex-1 flex-col">
         <TabsList variant="line" className="w-full justify-start border-b border-border/60 pb-0">
           <TabsTrigger value="overview">
             <FileText className="size-3.5" />
