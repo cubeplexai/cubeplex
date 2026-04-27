@@ -40,6 +40,12 @@ class UserManager(BaseUserManager[User, str]):
                 user_id=user.id, workspace_id=ws.id, role=Role.ADMIN
             )
         except Exception as exc:
+            logger.exception(
+                "register_bootstrap failed for user {} ({}): {!r}",
+                user.email,
+                user.id,
+                exc,
+            )
             # Repo create/grant methods commit internally, so org/ws rows may already
             # be persisted when bootstrap fails mid-flight. Best-effort DELETE of the
             # user row here — and translate to a 500 so clients see an HTTP error

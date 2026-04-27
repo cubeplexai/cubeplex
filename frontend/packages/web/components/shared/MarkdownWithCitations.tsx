@@ -24,6 +24,7 @@ function fixCjkBoldQuotes(text: string): string {
 interface MarkdownWithCitationsProps {
   children: string
   className?: string
+  conversationId?: string
 }
 
 /**
@@ -31,8 +32,13 @@ interface MarkdownWithCitationsProps {
  * them as interactive CitationMarker components. Falls back to plain
  * ReactMarkdown when no markers are present.
  */
-export function MarkdownWithCitations({ children, className }: MarkdownWithCitationsProps) {
-  const conversationId = useConversationStore((s) => s.activeId) ?? ''
+export function MarkdownWithCitations({
+  children,
+  className,
+  conversationId: conversationIdProp,
+}: MarkdownWithCitationsProps) {
+  const activeId = useConversationStore((s) => s.activeId)
+  const conversationId = conversationIdProp ?? activeId ?? ''
   const md = fixCjkBoldQuotes(children)
   const hasCitations = CITATION_RE.test(md)
 
