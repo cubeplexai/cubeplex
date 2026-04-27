@@ -139,7 +139,6 @@ def test_create_agent_passes_inherited_middleware_to_subagents(monkeypatch, tmp_
             subagents,
             default_model=None,
             shared_tools=None,
-            shared_skills=None,
             inherited_middleware=None,
         ) -> None:
             captured["subagents"] = subagents

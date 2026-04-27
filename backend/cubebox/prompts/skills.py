@@ -1,11 +1,13 @@
 """Skills system prompt template — injected by SkillsMiddleware."""
 
 # This is a template — formatted by SkillsMiddleware with discovered skills
-SKILLS_PROMPT_TEMPLATE = """## Available Skills
+SKILLS_PROMPT_TEMPLATE = """\
 
-Skills are pre-defined workflows stored as SKILL.md files. Use them for common tasks.
+# Available skills
 
 {skills_list}
 
-If a task is well-suited for a skill, prefer using the skill over ad-hoc approaches.
-To invoke a skill, use the `load_skill` tool to get its SKILL.md content, then follow the instructions within it."""
+Use `load_skill(name)` to read a skill's instructions. Skills' sibling files
+(scripts, templates) are available at `/.skills/<name>/<version>/` inside the
+sandbox when you actually use them.
+"""
