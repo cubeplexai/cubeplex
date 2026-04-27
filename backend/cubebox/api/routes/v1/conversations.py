@@ -436,7 +436,6 @@ async def send_message(
         user_id=ctx.user.id,
         org_id=ctx.org_id,
         workspace_id=ctx.workspace_id,
-        skills=raw_request.app.state.skills,
     )
 
     try:

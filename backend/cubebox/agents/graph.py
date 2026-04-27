@@ -1,6 +1,7 @@
 """Agent graph factory — builds the cubebox agent using create_agent() + middleware."""
 
 import asyncio
+from pathlib import Path
 from typing import Any
 
 from langchain.agents import create_agent
@@ -10,16 +11,21 @@ from langchain_core.tools import BaseTool
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.types import Checkpointer
 from loguru import logger
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from cubebox.config import config as _config
 from cubebox.middleware.artifacts import ArtifactMiddleware
 from cubebox.middleware.citations import CitationConfig, CitationMiddleware
 from cubebox.middleware.sandbox import SandboxMiddleware
-from cubebox.middleware.skills import SkillsMiddleware, SkillSpec
+from cubebox.middleware.skills import SkillsMiddleware
 from cubebox.middleware.subagents import SubAgent, SubAgentMiddleware
 from cubebox.middleware.timestamps import TimestampMiddleware
 from cubebox.middleware.todo import TodoListMiddleware
 from cubebox.prompts.system import BASE_SYSTEM_PROMPT
 from cubebox.sandbox.base import Sandbox
+from cubebox.skills.cache import SkillCache
+from cubebox.skills.service import SkillCatalogService
+from cubebox.tools.builtin.load_skill import create_load_skill_tool
 
 
 def create_cubebox_agent(
@@ -30,7 +36,7 @@ def create_cubebox_agent(
     conversation_id: str | None = None,
     org_id: str | None = None,
     workspace_id: str | None = None,
-    skills: list[SkillSpec] | None = None,
+    catalog_session: AsyncSession | None = None,
     subagents: list[SubAgent] | None = None,
     checkpointer: Checkpointer | None = None,
     citation_configs: dict[str, CitationConfig] | None = None,
@@ -46,11 +52,13 @@ def create_cubebox_agent(
         tools: Additional tools beyond what middleware provides.
         sandbox: If provided, SandboxMiddleware is added (registers execute tool).
         conversation_id: Required when sandbox is provided; used by ArtifactMiddleware.
-        org_id: Required when both sandbox and conversation_id are provided
-            (needed by ArtifactMiddleware for scoped DB access).
-        workspace_id: Required when both sandbox and conversation_id are provided
-            (needed by ArtifactMiddleware for scoped DB access).
-        skills: If provided, SkillsMiddleware is added.
+        org_id: Active org scope (required when catalog_session is provided so the
+            skill catalog can be queried).
+        workspace_id: Active workspace scope (required when catalog_session is
+            provided so the skill catalog can be queried).
+        catalog_session: SQLAlchemy AsyncSession used by the SkillCatalogService.
+            When omitted, SkillsMiddleware + load_skill are not added (skills are
+            simply unavailable for that run).
         subagents: If provided, SubAgentMiddleware is added.
         checkpointer: LangGraph checkpointer for conversation persistence.
     """
@@ -92,8 +100,21 @@ def create_cubebox_agent(
             )
         logger.debug("SandboxMiddleware + ArtifactMiddleware added (sandbox id={})", sandbox.id)
 
-    _skills = skills or []
-    middleware.append(SkillsMiddleware(skills=_skills))
+    # Skill catalog wiring — middleware injects available skills into the
+    # system prompt; load_skill is registered as a request-scoped tool.
+    if catalog_session is not None and workspace_id is not None and org_id is not None:
+        cache_root = Path(_config.get("skills.cache_root", "skills_cache"))
+        skill_catalog = SkillCatalogService(
+            session=catalog_session, cache=SkillCache(cache_root=cache_root)
+        )
+        middleware.append(
+            SkillsMiddleware(catalog=skill_catalog, workspace_id=workspace_id, org_id=org_id)
+        )
+        load_skill_tool = create_load_skill_tool(
+            catalog=skill_catalog, workspace_id=workspace_id, org_id=org_id
+        )
+        tools = [*tools, load_skill_tool]
+
     middleware.append(TodoListMiddleware())
     middleware.append(
         SubAgentMiddleware(
