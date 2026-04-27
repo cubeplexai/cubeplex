@@ -3,7 +3,7 @@
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cubebox.models import (
@@ -88,16 +88,20 @@ class SkillRepository:
 
     async def list_visible_for_org(self, org_id: str, *, source: str | None = None) -> list[Skill]:
         """Catalog visible to org_id: preinstalled (any) + uploaded (own org)."""
-        from sqlalchemy import or_
-
-        stmt = select(Skill).where(
-            or_(
-                Skill.source == "preinstalled",  # type: ignore[arg-type]
-                (Skill.source == "uploaded") & (Skill.owner_org_id == org_id),  # type: ignore[arg-type]
+        if source == "preinstalled":
+            stmt = select(Skill).where(Skill.source == "preinstalled")  # type: ignore[arg-type]
+        elif source == "uploaded":
+            stmt = select(Skill).where(
+                Skill.source == "uploaded",  # type: ignore[arg-type]
+                Skill.owner_org_id == org_id,  # type: ignore[arg-type]
             )
-        )
-        if source is not None:
-            stmt = stmt.where(Skill.source == source)  # type: ignore[arg-type]
+        else:
+            stmt = select(Skill).where(
+                or_(
+                    Skill.source == "preinstalled",  # type: ignore[arg-type]
+                    (Skill.source == "uploaded") & (Skill.owner_org_id == org_id),  # type: ignore[arg-type]
+                )
+            )
         stmt = stmt.order_by(Skill.name)
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
