@@ -15,6 +15,9 @@ register it using the `save_artifact` tool so the user can preview and download 
 - "image" — PNG, SVG, JPG images (e.g. matplotlib output)
 - "code" — Source code files or projects
 - "data" — CSV, JSON, Excel data files
+- "skill" — A skill bundle directory with SKILL.md at its root. Use this when the \
+user is authoring a skill via the skill-creator skill. Set entry_file to 'SKILL.md'. \
+The user can publish the artifact to the org marketplace from the artifact preview panel.
 - "file" — Anything else
 
 **Updating artifacts (IMPORTANT):**
