@@ -44,6 +44,7 @@ from cubebox.skills.service import (
     SkillPublishService,
     VersionCollisionError,
 )
+from cubebox.utils.time import utc_isoformat
 
 router = APIRouter(prefix="/admin/skills", tags=["admin-skills"])
 
@@ -145,7 +146,7 @@ async def get_skill(
                 storage_prefix=v.storage_prefix,
                 entry_file=v.entry_file,
                 uploaded_by_user_id=v.uploaded_by_user_id,
-                created_at=v.created_at,
+                created_at=utc_isoformat(v.created_at),
             )
             for v in versions
         ],
