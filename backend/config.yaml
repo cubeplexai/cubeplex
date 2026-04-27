@@ -119,13 +119,11 @@ default:
       enabled: true
       mount_path: "/workspace"
       pvc_prefix: "cubebox-user" # PVC naming: cubebox-user-{user_id[:8]}
-    skills:
-      enabled: true
-      builtin_dir: "skills/builtin" # Relative to backend/
-      container_path: "/.skills" # Container root path for skills
-      sources:
-        # Skill source paths passed to DeepAgents
-        - "/.skills/builtin"
+
+  # Skill marketplace (M3) — catalog-driven; replaces filesystem-based skills loader.
+  skills:
+    cache_root: "skills_cache" # Local extraction cache for object-store-fetched skills
+    preinstalled_dir: "skills/preinstalled" # Relative to backend/, seeded into the global catalog
 
   # Memory Configuration
   memory:

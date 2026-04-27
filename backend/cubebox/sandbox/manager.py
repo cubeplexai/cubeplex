@@ -4,14 +4,17 @@ Core responsibilities:
 - Get or create a sandbox for a user (reuse existing running sandbox)
 - Health-check existing sandboxes before reuse
 - Build user-specific PVC volumes
-- Sync skills to newly created sandboxes
 - Clean up expired sandboxes in the background
+
+Note: skill sync no longer happens here. After M3 it is handled by
+``LazySandbox._ensure()`` via the SkillCatalogService — only the skills
+that are enabled for the request's workspace get pushed, and they get
+versioned paths under ``/.skills/<name>/<version>/``.
 """
 
 import hashlib
 import re
 from datetime import timedelta
-from pathlib import Path
 
 import opensandbox
 from loguru import logger
@@ -162,8 +165,7 @@ class SandboxManager:
             backend = OpenSandbox(sandbox=raw_sandbox, workdir=self._workdir)
             logger.info("Sandbox created: {}", backend.id)
 
-            # Sync skills
-            await self._sync_skills(backend)
+            # Skill sync is the LazySandbox's responsibility post-M3.
 
             # Persist to DB
             await repo.create(
@@ -237,50 +239,6 @@ class SandboxManager:
                     workspace_id=record.workspace_id,
                 )
                 await scoped_repo.mark_terminated(record.id)
-
-    async def _sync_skills(self, backend: Sandbox) -> None:
-        """Sync builtin skills to the sandbox container.
-
-        Loads skills from the local filesystem and uploads them to the
-        container's /.skills directory.
-
-        Args:
-            backend: Sandbox backend instance
-        """
-        from cubebox.sandbox.skills import SkillLoader
-
-        skills_enabled: bool = config.get("sandbox.skills.enabled", True)
-        if not skills_enabled:
-            logger.info("Skills sync disabled in config")
-            return
-
-        skills_dir_str: str = config.get("sandbox.skills.builtin_dir", "skills/builtin")
-        backend_dir = Path(__file__).parent.parent.parent
-        skills_dir = backend_dir / skills_dir_str
-
-        if not skills_dir.exists():
-            logger.warning("Skills directory not found: {}", skills_dir)
-            return
-
-        loader = SkillLoader(skills_dir)
-        files = loader.load_builtin()
-
-        if not files:
-            logger.info("No skill files to sync")
-            return
-
-        # Create parent directories
-        dirs = set()
-        for path, _ in files:
-            parent = path.rsplit("/", 1)[0]
-            if parent:
-                dirs.add(parent)
-        if dirs:
-            mkdir_cmd = "mkdir -p " + " ".join(f'"{d}"' for d in dirs)
-            await backend.execute(mkdir_cmd)
-
-        await backend.upload(files)
-        logger.info("Synced {} skill files to sandbox", len(files))
 
 
 # ---------------------------------------------------------------------------

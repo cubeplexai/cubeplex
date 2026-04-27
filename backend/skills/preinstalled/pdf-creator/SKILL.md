@@ -12,9 +12,13 @@ description: >
   This skill uses a token-based design system: color, typography, and spacing are derived
   from the document type and flow through every page. The output is print-ready.
   Prefer this skill when appearance matters, not just when any PDF output is needed.
+version: 1.0.0
 license: MIT
+keywords:
+  - pdf
+  - document-generation
+  - design
 metadata:
-  version: "1.0"
   category: document-generation
 ---
 
