@@ -49,6 +49,27 @@ async def _allocate_org_slug(session: AsyncSession, base: str) -> str:
         n += 1
 
 
+async def _install_preinstalled_skills(session: AsyncSession, *, org_id: str, user_id: str) -> None:
+    """Auto-install all non-deprecated preinstalled skills for a newly created org."""
+    from cubebox.repositories.skill import OrgSkillInstallRepository, SkillRepository
+
+    skills = await SkillRepository(session).list_visible_for_org(org_id, source="preinstalled")
+    installs = OrgSkillInstallRepository(session)
+    for skill in skills:
+        try:
+            await installs.upsert(
+                org_id=org_id,
+                skill_id=skill.id,
+                installed_version=skill.current_version,
+                installed_by_user_id=user_id,
+                auto_bind=True,
+            )
+        except Exception:
+            logger.warning(
+                "Failed to auto-install preinstalled skill {} for org {}", skill.name, org_id
+            )
+
+
 class UserManager(BaseUserManager[User, str]):
     reset_password_token_secret = config.get("auth.jwt_secret", "CHANGE_ME")
     verification_token_secret = config.get("auth.jwt_secret", "CHANGE_ME")
@@ -111,6 +132,8 @@ class UserManager(BaseUserManager[User, str]):
             ) from exc
 
         user._default_workspace_id = ws.id
+
+        await _install_preinstalled_skills(session, org_id=org.id, user_id=user.id)
 
         from cubebox.plugins.audit import audit_log
 
