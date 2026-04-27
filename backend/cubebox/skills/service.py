@@ -309,6 +309,7 @@ class SkillPublishService:
             skill_id=skill.id,
             installed_version=fm.version,
             installed_by_user_id=actor_user_id,
+            auto_bind=False,  # uploaded skills opt-in; admin enables per workspace
         )
         return sv
 

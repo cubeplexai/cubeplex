@@ -85,6 +85,7 @@ exclude = [
     "migrations",
     "alembic/versions",
     "skills",
+    "skills_cache",
 ]
 
 [tool.ruff.lint]
