@@ -36,7 +36,6 @@ class RunContext:
     user_id: str
     org_id: str
     workspace_id: str
-    skills: list[Any]
 
 
 def _ns_to_agent_id(ns: tuple[Any, ...]) -> str | None:
@@ -374,6 +373,9 @@ class RunManager:
         sandbox_manager = None
         sandbox_create_task: asyncio.Task[Any] | None = None
         stream_task: asyncio.Task[None] | None = None
+        catalog_session_ctx: Any | None = None
+        catalog_session: Any | None = None
+        skill_catalog: Any | None = None
         event_q: asyncio.Queue[tuple[str, Any, Any] | None] = asyncio.Queue()
         cv_token = subagent_event_queue.set(event_q)
 
@@ -448,6 +450,29 @@ class RunManager:
 
                 checkpointer = await create_checkpointer()
 
+            # Open a long-lived session for the SkillCatalogService — used by
+            # both SkillsMiddleware (read prompts) and LazySandbox (push files
+            # to sandbox on first use). Same session is fine: skill reads are
+            # idempotent and no writes happen here.
+            try:
+                from pathlib import Path
+
+                from cubebox.config import config as _cfg
+                from cubebox.db.engine import async_session_maker
+                from cubebox.skills.cache import SkillCache
+                from cubebox.skills.service import SkillCatalogService
+
+                catalog_session_ctx = async_session_maker()
+                catalog_session = await catalog_session_ctx.__aenter__()
+                skill_catalog = SkillCatalogService(
+                    session=catalog_session,
+                    cache=SkillCache(
+                        cache_root=Path(_cfg.get("skills.cache_root", "skills_cache"))
+                    ),
+                )
+            except Exception as exc:
+                logger.warning("Skill catalog unavailable for run: {}", exc)
+
             sandbox_factory = getattr(self._app.state, "sandbox_factory", None)
             if sandbox_factory:
                 sandbox = sandbox_factory()
@@ -467,6 +492,7 @@ class RunManager:
                             org_id=ctx.org_id,
                             workspace_id=ctx.workspace_id,
                             workdir=config.get("sandbox.workdir", "/workspace"),
+                            catalog=skill_catalog,
                         )
                     except Exception as exc:
                         logger.warning("Sandbox unavailable, continuing without: {}", exc)
@@ -499,7 +525,7 @@ class RunManager:
                 conversation_id=conversation_id,
                 org_id=ctx.org_id,
                 workspace_id=ctx.workspace_id,
-                skills=ctx.skills,
+                catalog_session=catalog_session,
                 checkpointer=checkpointer,
                 citation_configs=all_citation_configs,
                 event_queue=event_q,
@@ -674,6 +700,10 @@ class RunManager:
             if checkpointer is not None and hasattr(checkpointer, "conn"):
                 with suppress(Exception):
                     checkpointer.conn.close()
+
+            if catalog_session_ctx is not None:
+                with suppress(Exception):
+                    await catalog_session_ctx.__aexit__(None, None, None)
 
             await clear_active_run(
                 self._redis,

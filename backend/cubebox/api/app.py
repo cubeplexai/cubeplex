@@ -90,17 +90,6 @@ async def lifespan(_app: FastAPI):  # type: ignore
 
     await init_mcp_tools()
 
-    # Load builtin skills and store on app state
-    from cubebox.config import backend_dir, config
-    from cubebox.middleware.skills import load_builtin_skills
-
-    if config.get("sandbox.skills.enabled", True):
-        skills_dir = backend_dir / config.get("sandbox.skills.builtin_dir", "skills/builtin")
-        _app.state.skills = load_builtin_skills(skills_dir)
-        logger.info("Loaded {} builtin skill(s)", len(_app.state.skills))
-    else:
-        _app.state.skills = []
-
     redis_client: Redis | None = None
     run_manager = None
     try:
@@ -216,6 +205,26 @@ async def lifespan(_app: FastAPI):  # type: ignore
     except Exception as e:
         logger.warning("Failed to initialize SandboxManager: {}", str(e))
 
+    # Seed preinstalled skills into the global catalog (idempotent, lock-guarded).
+    try:
+        from pathlib import Path
+
+        from cubebox.config import backend_dir, config
+        from cubebox.db.engine import async_session_maker
+        from cubebox.skills.seeder import seed_preinstalled_skills
+
+        preinstalled_rel = config.get("skills.preinstalled_dir", "skills/preinstalled")
+        preinstalled_dir = Path(backend_dir) / preinstalled_rel
+        async with async_session_maker() as seed_session:
+            await seed_preinstalled_skills(
+                preinstalled_dir=preinstalled_dir,
+                db_session=seed_session,
+                redis=redis_client,
+            )
+        logger.info("Preinstalled skill seed step completed")
+    except Exception as e:
+        logger.warning("Failed to seed preinstalled skills: {}", str(e))
+
     yield
 
     # ==================== Shutdown ====================
@@ -301,15 +310,20 @@ def create_app(
     # Register routers
     from cubebox.api.routes.v1 import (
         admin_router,
+        admin_skills,
         artifacts_router,
         conversations_router,
         workspaces_router,
+        ws_skills,
     )
 
     app.include_router(workspaces_router, prefix="/api/v1")
     app.include_router(conversations_router, prefix="/api/v1")
     app.include_router(artifacts_router, prefix="/api/v1")
     app.include_router(admin_router, prefix="/api/v1")
+    app.include_router(admin_skills.router, prefix="/api/v1")
+    app.include_router(admin_skills.bindings_router, prefix="/api/v1")
+    app.include_router(ws_skills.router, prefix="/api/v1")
 
     from cubebox.api.routes.health import router as health_router
 

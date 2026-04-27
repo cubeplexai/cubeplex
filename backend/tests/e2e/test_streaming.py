@@ -32,7 +32,6 @@ def _make_streaming_request_state(
     *,
     checkpointer_factory: object,
     sandbox_factory: object,
-    skills: list[object] | None = None,
 ) -> SimpleNamespace:
     # Real Redis — matches the `e2e` marker contract (hits real services).
     # The autouse _flush_test_redis fixture in conftest clears state between tests.
@@ -43,7 +42,6 @@ def _make_streaming_request_state(
     app = SimpleNamespace(state=SimpleNamespace())
     app.state.checkpointer_factory = checkpointer_factory
     app.state.sandbox_factory = sandbox_factory
-    app.state.skills = skills or []
     app.state.redis = redis
     app.state.redis_key_prefix = "test"
     app.state.run_manager = RunManager(
