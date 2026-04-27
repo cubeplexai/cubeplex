@@ -154,4 +154,5 @@ exclude_lines = [
 dev = [
     "aiosqlite>=0.20",
     "fakeredis[lua]>=2.35.1",
+    "types-pyyaml>=6.0.12.20260408",
 ]
