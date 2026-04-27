@@ -19,6 +19,35 @@ from cubebox.sandbox.base import ExecuteResult, Sandbox
 
 if TYPE_CHECKING:
     from cubebox.sandbox.manager import SandboxManager
+    from cubebox.skills.service import SkillCatalogService
+
+
+async def _sync_skills(
+    *,
+    catalog: SkillCatalogService,
+    workspace_id: str,
+    org_id: str,
+    sandbox: Sandbox,
+) -> None:
+    """Push enabled skills' files into the freshly-created sandbox.
+
+    Idempotent per skill_version_id: a sandbox tracks what it has already
+    received via ``Sandbox.has_synced``/``mark_synced``.
+    """
+    skills = await catalog.list_enabled_for_workspace(workspace_id, org_id=org_id)
+    files: list[tuple[str, bytes]] = []
+    for s in skills:
+        if sandbox.has_synced(s.skill_version_id):
+            continue
+        per_skill = await catalog.list_files_for_sandbox_sync(
+            s.skill_version_id, storage_prefix=s.storage_prefix
+        )
+        target_root = f"/.skills/{s.name}/{s.version}/"
+        for rel, data in per_skill:
+            files.append((target_root + rel, data))
+        sandbox.mark_synced(s.skill_version_id)
+    if files:
+        await sandbox.upload(files)
 
 
 class LazySandbox(Sandbox):
@@ -40,12 +69,14 @@ class LazySandbox(Sandbox):
         org_id: str,
         workspace_id: str,
         workdir: str = "/workspace",
+        catalog: SkillCatalogService | None = None,
     ) -> None:
         self._manager = manager
         self._user_id = user_id
         self._org_id = org_id
         self._workspace_id = workspace_id
         self._workdir = workdir
+        self._catalog = catalog
         self._sandbox: Sandbox | None = None
         self._lock = asyncio.Lock()
 
@@ -83,11 +114,25 @@ class LazySandbox(Sandbox):
                 return self._sandbox
 
             logger.info("Lazy sandbox: creating sandbox for user {}", self._user_id)
-            self._sandbox = await self._manager.get_or_create(
+            sandbox = await self._manager.get_or_create(
                 self._user_id,
                 org_id=self._org_id,
                 workspace_id=self._workspace_id,
             )
+            if self._catalog is not None:
+                try:
+                    await _sync_skills(
+                        catalog=self._catalog,
+                        workspace_id=self._workspace_id,
+                        org_id=self._org_id,
+                        sandbox=sandbox,
+                    )
+                except Exception:
+                    logger.exception(
+                        "Skill sync failed for ws {}; sandbox usable without skills",
+                        self._workspace_id,
+                    )
+            self._sandbox = sandbox
             logger.info("Lazy sandbox: ready (id={})", self._sandbox.id)
             return self._sandbox
 
