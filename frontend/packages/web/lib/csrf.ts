@@ -26,13 +26,14 @@ export async function readApiError(res: Response): Promise<string> {
   try {
     const data = (await res.json()) as {
       message?: string
-      detail?: string | { reason?: string; code?: string }
+      detail?: string | { reason?: string; code?: string; field?: string }
     }
     if (typeof data.detail === 'string') return data.detail
     if (data.detail && typeof data.detail === 'object') {
       const code = data.detail.code ? `${data.detail.code}: ` : ''
+      const field = data.detail.field ? `field "${data.detail.field}": ` : ''
       const reason = data.detail.reason ?? ''
-      if (code || reason) return `${code}${reason}`.trim()
+      if (code || field || reason) return `${code}${field}${reason}`.trim()
     }
     if (data.message) return data.message
   } catch {
