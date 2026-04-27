@@ -45,6 +45,16 @@ async def test_seed_creates_global_rows(tmp_path: Path, db_session, redis_client
     assert len(deep_versions) == 1
     assert deep_versions[0].storage_prefix == f"skills/_global/{name_a}/1.0.0/"
 
+    git = await skills.find_by_name(name_b)
+    assert git is not None
+    assert git.source == "preinstalled"
+    assert git.owner_org_id is None
+    assert git.current_version == "0.1.0"
+
+    git_versions = await versions.list_for_skill(git.id)
+    assert len(git_versions) == 1
+    assert git_versions[0].storage_prefix == f"skills/_global/{name_b}/0.1.0/"
+
 
 @pytest.mark.asyncio
 async def test_seed_idempotent(tmp_path: Path, db_session, redis_client: Redis) -> None:
