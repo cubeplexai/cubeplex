@@ -13,7 +13,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { useAdminSkill } from '@/hooks/useAdminSkill'
 import { proseClasses } from '@/lib/utils'
 import { jsonHeaders, readApiError } from '@/lib/csrf'
-import { OrgInstallActions } from './OrgInstallActions'
+import { AutoBindToggle, OrgInstallActions } from './OrgInstallActions'
 import { WorkspaceBindingsTable } from './WorkspaceBindingsTable'
 
 // Dynamically import diff viewer to avoid SSR issues
@@ -470,6 +470,9 @@ export function SkillDetailPanel({ skillId, onActionDone }: SkillDetailPanelProp
               可升级
             </Badge>
           )}
+          <div className="ml-auto">
+            <OrgInstallActions key={skill.id} skill={skill} onActionDone={handleActionDone} />
+          </div>
         </div>
         {skill.description && (
           <p className="text-sm leading-relaxed text-muted-foreground">{skill.description}</p>
@@ -483,13 +486,7 @@ export function SkillDetailPanel({ skillId, onActionDone }: SkillDetailPanelProp
         </div>
       </header>
 
-      {/* Install actions */}
-      <section>
-        <h4 className="mb-2 text-sm font-medium uppercase tracking-wide text-muted-foreground/80">
-          组织级安装
-        </h4>
-        <OrgInstallActions key={skill.id} skill={skill} onActionDone={handleActionDone} />
-      </section>
+      <AutoBindToggle key={skill.id} skill={skill} onActionDone={handleActionDone} />
 
       {/* Tabs */}
       <Tabs defaultValue="overview" className="flex-1 flex-col">

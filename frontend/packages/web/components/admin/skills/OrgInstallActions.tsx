@@ -17,7 +17,6 @@ export function OrgInstallActions({ skill, onActionDone }: OrgInstallActionsProp
   const [busy, setBusy] = useState<Action>(null)
   const [error, setError] = useState<string | null>(null)
   const [confirmUninstall, setConfirmUninstall] = useState(false)
-  const [autoBindBusy, setAutoBinBusy] = useState(false)
 
   // Reset confirm dialog whenever install_state changes (e.g. after upgrade or version switch)
   useEffect(() => {
@@ -56,30 +55,11 @@ export function OrgInstallActions({ skill, onActionDone }: OrgInstallActionsProp
     }
   }
 
-  async function toggleAutoBind(nextValue: boolean): Promise<void> {
-    setAutoBinBusy(true)
-    setError(null)
-    try {
-      const res = await fetch(`/api/v1/admin/skills/${skill.id}/install`, {
-        method: 'PATCH',
-        credentials: 'include',
-        headers: jsonHeaders(),
-        body: JSON.stringify({ auto_bind: nextValue }),
-      })
-      if (!res.ok) throw new Error(await readApiError(res))
-      onActionDone()
-    } catch (err) {
-      setError((err as Error).message)
-    } finally {
-      setAutoBinBusy(false)
-    }
-  }
-
   const installed =
     skill.install_state === 'installed' || skill.install_state === 'update_available'
 
   return (
-    <div className="flex flex-col gap-3">
+    <div className="flex flex-col items-end gap-1.5">
       <div className="flex flex-wrap items-center gap-2">
         {skill.install_state === 'uninstalled' && (
           <Button
@@ -141,36 +121,68 @@ export function OrgInstallActions({ skill, onActionDone }: OrgInstallActionsProp
         )}
       </div>
 
-      {/* auto_bind toggle — only when installed */}
-      {installed && skill.auto_bind !== null && (
-        <div className="flex items-center gap-2 rounded-md border border-border/60 bg-muted/20 px-3 py-2">
-          <label className="flex flex-1 cursor-pointer select-none items-center gap-2 text-xs">
-            <input
-              type="checkbox"
-              checked={skill.auto_bind ?? false}
-              disabled={autoBindBusy}
-              onChange={(e) => void toggleAutoBind(e.target.checked)}
-              className="size-3.5 cursor-pointer rounded border-border accent-primary"
-              data-testid="skill-auto-bind-toggle"
-            />
-            <div className="flex flex-col gap-0.5">
-              <span className="font-medium text-foreground/90">默认关联所有 Workspace</span>
-              <span className="text-[11px] text-muted-foreground">
-                {skill.auto_bind
-                  ? '所有 Workspace 默认启用此 skill（可在各 Workspace 单独关闭）'
-                  : '各 Workspace 需手动启用此 skill'}
-              </span>
-            </div>
-          </label>
-          {autoBindBusy && <span className="text-[11px] text-muted-foreground">保存中…</span>}
-        </div>
-      )}
+      {error && <p className="text-xs text-destructive">{error}</p>}
+    </div>
+  )
+}
 
-      {error && (
-        <div className="rounded-md border border-destructive/30 bg-destructive/5 px-2.5 py-1.5 text-xs text-destructive">
-          {error}
-        </div>
-      )}
+interface AutoBindToggleProps {
+  skill: SkillDetail
+  onActionDone: () => void
+}
+
+export function AutoBindToggle({ skill, onActionDone }: AutoBindToggleProps) {
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const installed =
+    skill.install_state === 'installed' || skill.install_state === 'update_available'
+
+  if (!installed || skill.auto_bind === null) return null
+
+  async function toggle(nextValue: boolean): Promise<void> {
+    setBusy(true)
+    setError(null)
+    try {
+      const res = await fetch(`/api/v1/admin/skills/${skill.id}/install`, {
+        method: 'PATCH',
+        credentials: 'include',
+        headers: jsonHeaders(),
+        body: JSON.stringify({ auto_bind: nextValue }),
+      })
+      if (!res.ok) throw new Error(await readApiError(res))
+      onActionDone()
+    } catch (err) {
+      setError((err as Error).message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="flex flex-col gap-1">
+      <div className="flex items-center gap-2 rounded-md border border-border/60 bg-muted/20 px-3 py-2">
+        <label className="flex flex-1 cursor-pointer select-none items-center gap-2 text-xs">
+          <input
+            type="checkbox"
+            checked={skill.auto_bind ?? false}
+            disabled={busy}
+            onChange={(e) => void toggle(e.target.checked)}
+            className="size-3.5 cursor-pointer rounded border-border accent-primary"
+            data-testid="skill-auto-bind-toggle"
+          />
+          <div className="flex flex-col gap-0.5">
+            <span className="font-medium text-foreground/90">默认关联所有 Workspace</span>
+            <span className="text-[11px] text-muted-foreground">
+              {skill.auto_bind
+                ? '所有 Workspace 默认启用此 skill（可在各 Workspace 单独关闭）'
+                : '各 Workspace 需手动启用此 skill'}
+            </span>
+          </div>
+        </label>
+        {busy && <span className="text-[11px] text-muted-foreground">保存中…</span>}
+      </div>
+      {error && <p className="text-xs text-destructive">{error}</p>}
     </div>
   )
 }
