@@ -8,7 +8,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, UploadFile
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cubebox.api.schemas.skill import (
@@ -216,7 +216,7 @@ async def publish_from_ws(
         else:
             form = await request.form()
             file = form.get("file")
-            if file is None or not isinstance(file, UploadFile):
+            if file is None or not hasattr(file, "read"):
                 raise HTTPException(
                     status_code=400,
                     detail={
