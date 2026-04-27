@@ -137,6 +137,7 @@ interface HistoryProps {
   message: Message
   subagentDataMap?: Record<string, SubagentSummary>
   toolResultMap: Record<string, { content: string; receivedAt: number }>
+  conversationId?: string
   stream?: never
   isStreaming?: never
   statusPhase?: never
@@ -148,6 +149,7 @@ interface StreamingProps {
   message?: never
   subagentDataMap?: never
   toolResultMap: Record<string, { content: string; receivedAt: number }>
+  conversationId?: string
   stream: AgentStream
   isStreaming: boolean
   statusPhase?: string | null
@@ -216,6 +218,7 @@ function ContentBlockRenderer({
   messageCreatedAt,
   subagentIndex,
   agentId,
+  conversationId,
 }: {
   block: ContentBlock
   index: number
@@ -227,6 +230,7 @@ function ContentBlockRenderer({
   messageCreatedAt?: string
   subagentIndex?: number
   agentId?: string | null
+  conversationId?: string
 }) {
   if (block.type === 'reasoning') {
     return (
@@ -262,6 +266,7 @@ function ContentBlockRenderer({
         stream={stream ?? historicalStream}
         isRunning={isStreaming && !!stream && !toolResultMap[block.tool_call_id]}
         toolResultMap={toolResultMap}
+        conversationId={conversationId}
       />
     )
   }
@@ -358,7 +363,11 @@ function ContentBlockRenderer({
     )
   }
   if (block.type === 'text') {
-    return <MarkdownWithCitations className={proseClasses}>{block.content}</MarkdownWithCitations>
+    return (
+      <MarkdownWithCitations className={proseClasses} conversationId={conversationId}>
+        {block.content}
+      </MarkdownWithCitations>
+    )
   }
 
   const _exhaustive: never = block
@@ -403,6 +412,7 @@ export function AssistantMessage({
   subagentDataMap,
   toolResultMap,
   todos,
+  conversationId,
 }: AssistantMessageProps) {
   const streamAgentId = stream ? 'main' : undefined
   const blocks: ContentBlock[] = stream
@@ -472,6 +482,7 @@ export function AssistantMessage({
               messageCreatedAt={msgCreatedAt}
               subagentIndex={subagentIndexMap.get(i)}
               agentId={streamAgentId}
+              conversationId={conversationId}
             />
           )
         })}

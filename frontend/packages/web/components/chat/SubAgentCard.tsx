@@ -18,6 +18,7 @@ interface Props {
   stream?: AgentStream
   isRunning: boolean
   toolResultMap: Record<string, { content: string; receivedAt: number }>
+  conversationId?: string
 }
 
 type ToolDisplayBlock = Extract<ContentBlock, { type: 'tool_call' | 'tool_call_streaming' }>
@@ -40,6 +41,7 @@ export const SubAgentCard = memo(function SubAgentCard({
   stream,
   isRunning,
   toolResultMap,
+  conversationId,
 }: Props) {
   const [expanded, setExpanded] = useState(false)
   const [elapsed, setElapsed] = useState(0)
@@ -201,7 +203,9 @@ export const SubAgentCard = memo(function SubAgentCard({
               {visibleToolBlocks.map((block, i) => renderToolBlock(block, i, i > 0))}
               {stream?.text && (
                 <div className={`px-3 py-2 border-t border-border ${proseClasses}`}>
-                  <MarkdownWithCitations>{stream.text}</MarkdownWithCitations>
+                  <MarkdownWithCitations conversationId={conversationId}>
+                    {stream.text}
+                  </MarkdownWithCitations>
                 </div>
               )}
             </div>

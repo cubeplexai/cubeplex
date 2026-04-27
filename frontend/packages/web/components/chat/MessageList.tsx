@@ -193,6 +193,7 @@ export function MessageList({ conversationId }: MessageListProps) {
                 message={msg}
                 subagentDataMap={subagentDataMap}
                 toolResultMap={mergedToolResultMap}
+                conversationId={conversationId}
               />
             )}
           </div>
@@ -206,6 +207,7 @@ export function MessageList({ conversationId }: MessageListProps) {
             subAgentStreams={subAgentStreams}
             toolResultMap={mergedToolResultMap}
             todos={todos}
+            conversationId={conversationId}
           />
         )}
 
