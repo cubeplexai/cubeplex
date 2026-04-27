@@ -62,6 +62,14 @@ async def list_skills_in_ws(
         skill_ids = [r.skill_id for r in resolved]
         maybe_skills = [await repo.get(sid) for sid in skill_ids]
         ws_skills = [s for s in maybe_skills if s is not None]
+        if q:
+            ws_skills = [
+                s
+                for s in ws_skills
+                if q.lower() in s.name.lower() or q.lower() in s.description.lower()
+            ]
+        if tag:
+            ws_skills = [s for s in ws_skills if tag in s.keywords]
         return [
             SkillSummary(
                 id=s.id,
@@ -79,7 +87,7 @@ async def list_skills_in_ws(
     elif scope == "org":
         skills = await repo.list_visible_for_org(ctx.org_id, source=source)
         installs = await OrgSkillInstallRepository(session).list_for_org(ctx.org_id)
-        installed_ids = {i.skill_id for i in installs}
+        installed_versions: dict[str, str] = {i.skill_id: i.installed_version for i in installs}
         return [
             SkillSummary(
                 id=s.id,
@@ -88,13 +96,14 @@ async def list_skills_in_ws(
                 description=s.description,
                 current_version=s.current_version,
                 keywords=s.keywords,
-                install_state="installed" if s.id in installed_ids else "uninstalled",
+                install_state="installed",
+                installed_version=installed_versions.get(s.id),
                 workspace_bindings_count=0,
             )
             for s in skills
             if (q is None or q.lower() in s.name.lower() or q.lower() in s.description.lower())
             and (tag is None or tag in s.keywords)
-            and s.id in installed_ids
+            and s.id in installed_versions
         ]
     else:  # catalog
         skills = await repo.list_visible_for_org(ctx.org_id, source=source)
