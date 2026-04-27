@@ -380,3 +380,19 @@ async def db_session() -> AsyncIterator[AsyncSession]:
             yield session
     finally:
         await test_engine.dispose()
+
+
+@pytest_asyncio.fixture
+async def redis_client() -> AsyncIterator[Redis]:
+    """Yield an async Redis client connected to the test Redis instance.
+
+    Use for repository/seeder-layer E2E tests that interact with Redis directly.
+    """
+    client: Redis = Redis.from_url(
+        _cubebox_config.get("redis.url", "redis://127.0.0.1:6379/0"),
+        decode_responses=False,
+    )
+    try:
+        yield client
+    finally:
+        await client.aclose()
