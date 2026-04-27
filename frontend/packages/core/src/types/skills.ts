@@ -50,6 +50,7 @@ export interface SkillFile {
   rel_path: string
   size: number
   mime: string | null
+  content_hash: string
 }
 
 export interface SkillContent {
