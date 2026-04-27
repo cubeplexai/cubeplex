@@ -64,6 +64,7 @@ async def test_skill_name_unique(db_session) -> None:
             keywords=[],
             current_version="0.2.0",
         )
+    await db_session.rollback()
 
 
 @pytest.mark.asyncio
