@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from cubebox.api.schemas.skill import (
     InstallRequest,
+    PatchInstallRequest,
     SkillContentResponse,
     SkillDetail,
     SkillFiles,
@@ -23,7 +24,7 @@ from cubebox.api.schemas.skill import (
 from cubebox.auth.dependencies import require_org_admin, resolve_current_org_id
 from cubebox.config import config as _config
 from cubebox.db import get_session
-from cubebox.models import OrgSkillInstall, Skill, User
+from cubebox.models import Skill, User
 from cubebox.repositories.organization import OrganizationRepository
 from cubebox.repositories.skill import (
     OrgPreinstalledTombstoneRepository,
@@ -149,6 +150,7 @@ async def get_skill(
         ],
         install_state=install_state,  # type: ignore[arg-type]
         installed_version=installed_version,
+        auto_bind=install.auto_bind if install is not None else None,
     )
 
 
@@ -206,6 +208,27 @@ async def install_skill(
         installed_by_user_id=user.id,
     )
     return {"install_id": install.id, "installed_version": install.installed_version}
+
+
+@router.patch("/{skill_id}/install", status_code=200)
+async def patch_install(
+    skill_id: str,
+    body: PatchInstallRequest,
+    *,
+    user: Annotated[User, Depends(require_org_admin)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> dict[str, object]:
+    org_id = await resolve_current_org_id(user, session)
+    skill = await SkillRepository(session).get(skill_id)
+    if skill is None or not _visible(skill, org_id):
+        raise HTTPException(status_code=404, detail="SKILL_NOT_FOUND")
+    install = await OrgSkillInstallRepository(session).get(org_id, skill_id)
+    if install is None:
+        raise HTTPException(status_code=404, detail="SKILL_NOT_INSTALLED")
+    install.auto_bind = body.auto_bind
+    session.add(install)
+    await session.commit()
+    return {"auto_bind": install.auto_bind}
 
 
 @router.delete("/{skill_id}/install", status_code=204)
@@ -301,20 +324,31 @@ async def list_workspace_skills(
     user: Annotated[User, Depends(require_org_admin)],
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> list[SkillSummary]:
+    """List all org-installed skills with their effective binding state for this workspace."""
     org_id = await resolve_current_org_id(user, session)
-    bindings_repo = WorkspaceSkillBindingRepository(session, org_id=org_id, workspace_id=ws_id)
-    enabled = await bindings_repo.list_enabled()
-    if not enabled:
+    installs = await OrgSkillInstallRepository(session).list_for_org(org_id)
+    if not installs:
         return []
     skill_repo = SkillRepository(session)
+    bindings_repo = WorkspaceSkillBindingRepository(session, org_id=org_id, workspace_id=ws_id)
+    all_bindings = await bindings_repo.list_all()
+    binding_by_install: dict[str, bool | None] = {
+        b.org_skill_install_id: b.enabled for b in all_bindings
+    }
     out: list[SkillSummary] = []
-    for b in enabled:
-        install_obj = await session.get(OrgSkillInstall, b.org_skill_install_id)
-        if install_obj is None:
-            continue
+    for install_obj in installs:
         skill = await skill_repo.get(install_obj.skill_id)
         if skill is None:
             continue
+        explicit = binding_by_install.get(install_obj.id)  # True / False / None
+        if explicit is True:
+            ws_state: str = "enabled"
+        elif explicit is False:
+            ws_state = "disabled"
+        elif install_obj.auto_bind:
+            ws_state = "auto"
+        else:
+            ws_state = "disabled"
         out.append(
             SkillSummary(
                 id=skill.id,
@@ -325,10 +359,11 @@ async def list_workspace_skills(
                 keywords=skill.keywords,
                 install_state="installed",
                 installed_version=install_obj.installed_version,
-                workspace_bindings_count=1,
+                workspace_bindings_count=1 if ws_state in ("enabled", "auto") else 0,
+                workspace_binding_state=ws_state,  # type: ignore[arg-type]
             )
         )
-    return out
+    return sorted(out, key=lambda s: s.name)
 
 
 @bindings_router.post("", status_code=200)

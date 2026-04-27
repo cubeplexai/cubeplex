@@ -6,6 +6,7 @@
 
 export type SkillSource = 'preinstalled' | 'uploaded'
 export type InstallState = 'uninstalled' | 'installed' | 'update_available'
+export type WorkspaceBindingState = 'auto' | 'enabled' | 'disabled'
 
 export interface SkillSummary {
   id: string
@@ -17,6 +18,7 @@ export interface SkillSummary {
   install_state: InstallState
   installed_version: string | null
   workspace_bindings_count: number
+  workspace_binding_state?: WorkspaceBindingState | null
 }
 
 export interface SkillVersionDetail {
@@ -41,6 +43,7 @@ export interface SkillDetail {
   versions: SkillVersionDetail[]
   install_state: InstallState
   installed_version: string | null
+  auto_bind: boolean | null
 }
 
 export interface SkillFile {

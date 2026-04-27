@@ -66,6 +66,9 @@ class OrgSkillInstall(SQLModel, table=True):
     installed_version: str = Field(max_length=32)
     installed_by_user_id: str = Field(max_length=36)  # refs users.id
     installed_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    # If True, skill is automatically active in all workspaces (no explicit binding needed).
+    # If False, workspace admins must explicitly enable it per workspace.
+    auto_bind: bool = Field(default=True)
 
     __table_args__ = (UniqueConstraint("org_id", "skill_id", name="uq_org_skill_install"),)
 

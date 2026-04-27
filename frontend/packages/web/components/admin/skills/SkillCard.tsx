@@ -14,7 +14,7 @@ interface SkillCardProps {
 function StateBadge({ state }: { state: SkillSummary['install_state'] }) {
   if (state === 'installed') {
     return (
-      <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-medium text-emerald-600 dark:text-emerald-400">
+      <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-medium text-emerald-600 transition-colors group-hover/skill-card:bg-emerald-500/20 dark:text-emerald-400">
         <CheckCircle2 className="size-3" />
         已安装
       </span>
