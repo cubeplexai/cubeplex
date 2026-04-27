@@ -85,8 +85,9 @@ async def _do_seed(preinstalled_dir: Path, db_session: AsyncSession) -> None:
                 skill.id, fm.version, fm.description, fm.keywords
             )
             skill = await skills.get(skill.id)  # refresh
-
-        assert skill is not None
+            if skill is None:
+                logger.error("Skill {} disappeared during seeding; skipping", fm.name)
+                continue
 
         # 2. Skip if this version already seeded
         existing = await versions.find(skill.id, fm.version)
