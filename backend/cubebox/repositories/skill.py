@@ -207,12 +207,16 @@ class OrgSkillInstallRepository:
         skill_id: str,
         installed_version: str,
         installed_by_user_id: str,
+        auto_bind: bool | None = None,
     ) -> OrgSkillInstall:
         existing = await self.get(org_id, skill_id)
         if existing is not None:
             existing.installed_version = installed_version
             existing.installed_by_user_id = installed_by_user_id
             existing.installed_at = datetime.now(UTC)
+            # Only update auto_bind if explicitly provided (preserve user's setting on upgrade)
+            if auto_bind is not None:
+                existing.auto_bind = auto_bind
             await self.session.commit()
             await self.session.refresh(existing)
             return existing
@@ -221,6 +225,7 @@ class OrgSkillInstallRepository:
             skill_id=skill_id,
             installed_version=installed_version,
             installed_by_user_id=installed_by_user_id,
+            auto_bind=auto_bind if auto_bind is not None else False,
         )
         self.session.add(row)
         await self.session.commit()

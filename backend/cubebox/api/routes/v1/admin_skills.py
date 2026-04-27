@@ -183,6 +183,39 @@ async def get_skill_version(
     )
 
 
+@router.get("/{skill_id}/versions/{version}/files/{path:path}")
+async def get_skill_version_file(
+    skill_id: str,
+    version: str,
+    path: str,
+    *,
+    user: Annotated[User, Depends(require_org_admin)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> bytes:
+    from fastapi.responses import Response
+
+    org_id = await resolve_current_org_id(user, session)
+    skill = await SkillRepository(session).get(skill_id)
+    if skill is None or not _visible(skill, org_id):
+        raise HTTPException(status_code=404, detail="SKILL_NOT_FOUND")
+    sv = await SkillVersionRepository(session).find(skill_id, version)
+    if sv is None:
+        raise HTTPException(status_code=404, detail="SKILL_VERSION_NOT_FOUND")
+
+    cache_dir = await _cache().ensure_extracted(sv.id, storage_prefix=sv.storage_prefix)
+    target = (cache_dir / path).resolve()
+    if not target.is_relative_to(cache_dir.resolve()):
+        raise HTTPException(status_code=400, detail="INVALID_PATH")
+    if not target.is_file():
+        raise HTTPException(status_code=404, detail="FILE_NOT_FOUND")
+    data = target.read_bytes()
+    try:
+        text = data.decode("utf-8")
+        return Response(content=text, media_type="text/plain; charset=utf-8")  # type: ignore[return-value]
+    except UnicodeDecodeError:
+        raise HTTPException(status_code=422, detail="BINARY_FILE") from None
+
+
 @router.post("/{skill_id}/install", status_code=200)
 async def install_skill(
     skill_id: str,
@@ -201,11 +234,19 @@ async def install_skill(
 
     await OrgPreinstalledTombstoneRepository(session).remove_tombstone(org_id, skill_id)
 
+    # Preinstalled skills default auto_bind=True; uploaded default False.
+    # On upgrade, auto_bind=None preserves the user's existing setting.
+    existing_install = await OrgSkillInstallRepository(session).get(org_id, skill_id)
+    default_auto_bind: bool | None = None
+    if existing_install is None:
+        default_auto_bind = skill.source == "preinstalled"
+
     install = await OrgSkillInstallRepository(session).upsert(
         org_id=org_id,
         skill_id=skill_id,
         installed_version=body.version,
         installed_by_user_id=user.id,
+        auto_bind=default_auto_bind,
     )
     return {"install_id": install.id, "installed_version": install.installed_version}
 
