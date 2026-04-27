@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+import json
 import re
 import zipfile
 from dataclasses import dataclass
@@ -242,10 +243,20 @@ class SkillPublishService:
             raise SkillMdMissingError("zip must contain SKILL.md at root")
         skill_md_text = files["SKILL.md"].decode("utf-8")
 
-        # If version is absent, auto-assign the next patch version for this skill.
-        default_version: str | None = None
+        # Use _meta.json version (clawhub format) as fallback before auto-assignment.
+        meta_version: str | None = None
+        if "_meta.json" in files:
+            try:
+                meta = json.loads(files["_meta.json"])
+                v = meta.get("version") if isinstance(meta, dict) else None
+                if isinstance(v, str) and v.strip():
+                    meta_version = v.strip()
+            except (json.JSONDecodeError, Exception):
+                pass
+
+        default_version: str | None = meta_version
         raw_name = peek_skill_name(skill_md_text)
-        if raw_name is not None:
+        if raw_name is not None and default_version is None:
             canonical = f"{org_slug}:{raw_name}"
             default_version = await self._next_version_for(canonical)
         fm = parse_skill_md(skill_md_text, default_version=default_version)
