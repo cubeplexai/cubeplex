@@ -53,7 +53,11 @@ async def _install_preinstalled_skills(session: AsyncSession, *, org_id: str, us
     """Auto-install all non-deprecated preinstalled skills for a newly created org."""
     from cubebox.repositories.skill import OrgSkillInstallRepository, SkillRepository
 
-    skills = await SkillRepository(session).list_visible_for_org(org_id, source="preinstalled")
+    try:
+        skills = await SkillRepository(session).list_visible_for_org(org_id, source="preinstalled")
+    except Exception as e:
+        logger.warning("Failed to list preinstalled skills: {}", e)
+        return
     installs = OrgSkillInstallRepository(session)
     for skill in skills:
         try:
@@ -127,7 +131,13 @@ class UserManager(BaseUserManager[User, str]):
 
         user._default_workspace_id = ws.id
 
-        await _install_preinstalled_skills(session, org_id=org.id, user_id=user.id)
+        try:
+            await _install_preinstalled_skills(session, org_id=org.id, user_id=user.id)
+        except Exception:
+            logger.warning(
+                "Failed to auto-install preinstalled skills for new org {}; skipping",
+                org.id,
+            )
 
         from cubebox.plugins.audit import audit_log
 
