@@ -42,7 +42,7 @@ async def session():
 
 
 async def test_passes_for_org_admin(session: AsyncSession) -> None:
-    org = await OrganizationRepository(session).create(name="Acme")
+    org = await OrganizationRepository(session).create(name="Acme", slug="acme")
     ws = await WorkspaceRepository(session).create(org_id=org.id, name="Team")
     user = MagicMock(id=str(uuid4()))
     await MembershipRepository(session).grant(user_id=user.id, workspace_id=ws.id, role=Role.ADMIN)
@@ -52,7 +52,7 @@ async def test_passes_for_org_admin(session: AsyncSession) -> None:
 
 
 async def test_raises_403_for_non_admin(session: AsyncSession) -> None:
-    org = await OrganizationRepository(session).create(name="Acme")
+    org = await OrganizationRepository(session).create(name="Acme", slug="acme")
     ws = await WorkspaceRepository(session).create(org_id=org.id, name="Team")
     user = MagicMock(id=str(uuid4()))
     await MembershipRepository(session).grant(user_id=user.id, workspace_id=ws.id, role=Role.MEMBER)

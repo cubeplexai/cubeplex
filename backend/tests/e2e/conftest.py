@@ -255,7 +255,10 @@ async def _ensure_test_user_membership(
     ws_repo = WorkspaceRepository(session)
     mem_repo = MembershipRepository(session)
 
-    org = await org_repo.create(name=f"Org {email}")
+    from cubebox.auth.users import _slugify_org_name
+
+    org_name = f"Org {email}"
+    org = await org_repo.create(name=org_name, slug=_slugify_org_name(org_name))
     ws = await ws_repo.create(org_id=org.id, name=f"WS {email}")
 
     password = secrets.token_urlsafe(16)
