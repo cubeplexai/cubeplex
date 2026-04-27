@@ -87,24 +87,52 @@ class SkillRepository:
         await self.session.commit()
 
     async def list_visible_for_org(self, org_id: str, *, source: str | None = None) -> list[Skill]:
-        """Catalog visible to org_id: preinstalled (any) + uploaded (own org)."""
+        """Catalog visible to org_id: preinstalled (any) + uploaded (own org). Excludes deprecated."""
         if source == "preinstalled":
-            stmt = select(Skill).where(Skill.source == "preinstalled")  # type: ignore[arg-type]
+            stmt = select(Skill).where(
+                Skill.source == "preinstalled",  # type: ignore[arg-type]
+                Skill.deprecated_at.is_(None),  # type: ignore[union-attr]
+            )
         elif source == "uploaded":
             stmt = select(Skill).where(
                 Skill.source == "uploaded",  # type: ignore[arg-type]
                 Skill.owner_org_id == org_id,  # type: ignore[arg-type]
+                Skill.deprecated_at.is_(None),  # type: ignore[union-attr]
             )
         else:
             stmt = select(Skill).where(
                 or_(
                     Skill.source == "preinstalled",  # type: ignore[arg-type]
                     (Skill.source == "uploaded") & (Skill.owner_org_id == org_id),  # type: ignore[arg-type]
-                )
+                ),
+                Skill.deprecated_at.is_(None),  # type: ignore[union-attr]
             )
         stmt = stmt.order_by(Skill.name)
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
+
+    async def list_preinstalled(self) -> list[Skill]:
+        """All preinstalled skills including deprecated; used by seeder for cleanup."""
+        result = await self.session.execute(
+            select(Skill).where(Skill.source == "preinstalled")  # type: ignore[arg-type]
+        )
+        return list(result.scalars().all())
+
+    async def deprecate(self, skill_id: str) -> None:
+        skill = await self.get(skill_id)
+        if skill is None:
+            return
+        skill.deprecated_at = datetime.now(UTC)
+        skill.updated_at = datetime.now(UTC)
+        await self.session.commit()
+
+    async def undeprecate(self, skill_id: str) -> None:
+        skill = await self.get(skill_id)
+        if skill is None:
+            return
+        skill.deprecated_at = None
+        skill.updated_at = datetime.now(UTC)
+        await self.session.commit()
 
 
 class SkillVersionRepository:
