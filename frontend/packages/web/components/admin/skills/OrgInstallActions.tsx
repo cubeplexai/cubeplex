@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { ArrowUpCircle, Download, Trash2, X, Check } from 'lucide-react'
 import type { SkillDetail } from '@cubebox/core'
 import { Button } from '@/components/ui/button'
@@ -18,6 +18,11 @@ export function OrgInstallActions({ skill, onActionDone }: OrgInstallActionsProp
   const [error, setError] = useState<string | null>(null)
   const [confirmUninstall, setConfirmUninstall] = useState(false)
   const [autoBindBusy, setAutoBinBusy] = useState(false)
+
+  // Reset confirm dialog whenever install_state changes (e.g. after upgrade or version switch)
+  useEffect(() => {
+    setConfirmUninstall(false)
+  }, [skill.install_state])
 
   async function install(version: string): Promise<void> {
     const res = await fetch(`/api/v1/admin/skills/${skill.id}/install`, {
