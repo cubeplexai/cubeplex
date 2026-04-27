@@ -36,7 +36,7 @@ async def _allocate_org_slug(session: AsyncSession, base: str) -> str:
 
     from cubebox.models.organization import Organization
 
-    base = base[:29]  # reserve room for -NN suffix within 32-char limit
+    base = base[:27]  # reserve room for -NNN suffix within 32-char limit
     candidate = base
     n = 2
     while True:
@@ -67,6 +67,7 @@ class UserManager(BaseUserManager[User, str]):
             WorkspaceRepository,
         )
 
+        org = None
         try:
             local_part = user.email.split("@", 1)[0]
             org_name = f"{local_part}'s Org"
@@ -85,14 +86,19 @@ class UserManager(BaseUserManager[User, str]):
             )
             # Repo create/grant methods commit internally, so org/ws rows may already
             # be persisted when bootstrap fails mid-flight. Best-effort DELETE of the
-            # user row here — and translate to a 500 so clients see an HTTP error
-            # instead of an opaque 500 from the framework's default handler.
+            # org and user rows here — and translate to a 500 so clients see an HTTP
+            # error instead of an opaque 500 from the framework's default handler.
             from fastapi import HTTPException, status
             from sqlalchemy import delete
 
             from cubebox.models import User as UserModel
+            from cubebox.models.organization import Organization
 
             try:
+                if org is not None:
+                    await session.execute(
+                        delete(Organization).where(Organization.id == org.id)  # type: ignore[arg-type]
+                    )
                 await session.execute(
                     delete(UserModel).where(UserModel.id == user.id)  # type: ignore[arg-type]
                 )
