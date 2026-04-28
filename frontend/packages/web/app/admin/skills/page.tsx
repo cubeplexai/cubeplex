@@ -20,9 +20,7 @@ export default function SkillsPage() {
     <div className="flex h-full flex-col">
       <header className="border-b border-border/70 px-6 py-4">
         <h2 className="text-lg font-semibold tracking-tight">{t('skills')}</h2>
-        <p className="mt-0.5 text-xs text-muted-foreground">
-          安装内置 / 上传的 skill 到组织，再按 workspace 启用。
-        </p>
+        <p className="mt-0.5 text-xs text-muted-foreground">{t('skillsSubtitle')}</p>
       </header>
 
       <SkillsToolbar

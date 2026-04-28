@@ -41,7 +41,8 @@
   },
   "admin": {
     "title": "管理后台",
-    "skills": "技能管理"
+    "skills": "技能管理",
+    "skillsSubtitle": "安装内置 / 上传的 skill 到组织，再按 workspace 启用。"
   },
   "chat": {
     "incompletePreviousAnswer": "上次回答未完成（服务异常退出），请重试。"

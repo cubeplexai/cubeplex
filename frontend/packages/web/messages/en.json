@@ -41,7 +41,8 @@
   },
   "admin": {
     "title": "Admin",
-    "skills": "Skills"
+    "skills": "Skills",
+    "skillsSubtitle": "Install built-in / uploaded skills to the org, then enable them per workspace."
   },
   "chat": {
     "incompletePreviousAnswer": "Previous response was incomplete (service exit). Please retry."
