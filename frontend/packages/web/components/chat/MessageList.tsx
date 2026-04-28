@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useCallback, useMemo } from 'react'
+import { useTranslations } from 'next-intl'
 import { useMessageStore, createApiClient } from '@cubebox/core'
 import type { Message, SubagentSummary } from '@cubebox/core'
 import { AlertCircle } from 'lucide-react'
@@ -95,6 +96,7 @@ function buildHistoricalToolResultMap(
 }
 
 export function MessageList({ conversationId }: MessageListProps) {
+  const t = useTranslations('chat')
   const {
     messages,
     isStreaming,
@@ -236,7 +238,7 @@ export function MessageList({ conversationId }: MessageListProps) {
             bg-amber-500/10 border border-amber-500/30 text-amber-700 dark:text-amber-400 text-sm"
           >
             <AlertCircle className="size-4 shrink-0 mt-0.5" />
-            <span>上次回答未完成（服务异常退出），请重试。</span>
+            <span>{t('incompletePreviousAnswer')}</span>
           </div>
         )}
       </div>

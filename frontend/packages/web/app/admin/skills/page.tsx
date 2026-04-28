@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import { useTranslations } from 'next-intl'
 import type { SkillFilters } from '@cubebox/core'
 import { SkillsToolbar } from '@/components/admin/skills/SkillsToolbar'
 import { SkillsList } from '@/components/admin/skills/SkillsList'
@@ -9,6 +10,7 @@ import { UploadSkillModal } from '@/components/admin/skills/UploadSkillModal'
 import { useAdminSkills } from '@/hooks/useAdminSkills'
 
 export default function SkillsPage() {
+  const t = useTranslations('admin')
   const [filters, setFilters] = useState<SkillFilters>({})
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [uploadOpen, setUploadOpen] = useState(false)
@@ -17,7 +19,7 @@ export default function SkillsPage() {
   return (
     <div className="flex h-full flex-col">
       <header className="border-b border-border/70 px-6 py-4">
-        <h2 className="text-lg font-semibold tracking-tight">技能管理</h2>
+        <h2 className="text-lg font-semibold tracking-tight">{t('skills')}</h2>
         <p className="mt-0.5 text-xs text-muted-foreground">
           安装内置 / 上传的 skill 到组织，再按 workspace 启用。
         </p>
