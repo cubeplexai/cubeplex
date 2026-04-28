@@ -468,6 +468,25 @@ def cmd_destroy(args: argparse.Namespace) -> int:
     slug = slugify(info.branch)
     registry = Registry.load(info.main_path / ".worktrees" / "registry.json")
 
+    # Refuse if the registry doesn't claim this worktree, or claims a different
+    # path. Without this guard, destroying a detached-HEAD worktree (slug "head")
+    # or a manually-created worktree could drop schemas owned by something else.
+    entry = registry.entries.get(slug)
+    if entry is None:
+        print(
+            f"Refusing to destroy: slug {slug!r} is not in the registry. "
+            "Was this worktree created via `scripts/new-worktree`?",
+            file=sys.stderr,
+        )
+        return 1
+    if Path(entry["path"]).resolve() != info.path:
+        print(
+            f"Refusing to destroy: registry says slug {slug!r} lives at "
+            f"{entry['path']}, but destroy was invoked from {info.path}.",
+            file=sys.stderr,
+        )
+        return 1
+
     # Load env so DB creds are in os.environ
     _load_dotenv_into_environ(info.path / "backend" / ".env")
     _load_dotenv_into_environ(env_file_path(info.path))
@@ -477,10 +496,9 @@ def cmd_destroy(args: argparse.Namespace) -> int:
     deleted = _redis_delete_prefix(redis_prefix(slug))
     print(f"→ deleted {deleted} Redis keys under prefix {redis_prefix(slug)}:*")
 
-    if slug in registry.entries:
-        del registry.entries[slug]
-        registry.save()
-        print(f"→ removed {slug} from registry")
+    del registry.entries[slug]
+    registry.save()
+    print(f"→ removed {slug} from registry")
 
     env_file = env_file_path(info.path)
     if env_file.exists():

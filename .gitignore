@@ -15,6 +15,7 @@ logs
 
 # Git worktrees
 .worktrees/
+.worktree.env
 
 # Node.js / Frontend
 node_modules/
