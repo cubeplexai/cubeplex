@@ -3,8 +3,27 @@
 from __future__ import annotations
 
 import io
+import mimetypes
+from typing import TYPE_CHECKING, Literal
 
+from loguru import logger
 from PIL import Image, UnidentifiedImageError
+from uuid_utils import uuid7
+
+from cubebox.api.exceptions import (
+    AttachmentInvalidImageError,
+    AttachmentMimeRejectedError,
+    AttachmentQuotaExceededError,
+    AttachmentTooLargeError,
+)
+from cubebox.config import config
+from cubebox.models import Attachment
+from cubebox.objectstore import get_objectstore_client
+from cubebox.repositories import AttachmentRepository
+from cubebox.utils.time import utc_isoformat
+
+if TYPE_CHECKING:
+    from cubebox.objectstore.client import ObjectStoreClient
 
 
 class InvalidImageError(ValueError):
@@ -44,3 +63,225 @@ def resize_to_long_edge(data: bytes, *, target: int, jpeg_quality: int) -> bytes
     buf = io.BytesIO()
     img.save(buf, format="JPEG", quality=jpeg_quality)
     return buf.getvalue()
+
+
+# ---------------------------------------------------------------------------
+# Kind classification
+# ---------------------------------------------------------------------------
+
+AttachmentKind = Literal["image", "document", "other"]
+_IMAGE_MIMES = {"image/png", "image/jpeg", "image/webp", "image/gif"}
+
+
+def classify_kind(mime: str) -> AttachmentKind:
+    if mime in _IMAGE_MIMES:
+        return "image"
+    if mime in {
+        "application/pdf",
+        "text/plain",
+        "text/markdown",
+        "text/csv",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "application/json",
+        "application/x-yaml",
+    }:
+        return "document"
+    return "other"
+
+
+# ---------------------------------------------------------------------------
+# Key / path builders
+# ---------------------------------------------------------------------------
+
+
+def _build_object_key(
+    *, org_id: str, workspace_id: str, conversation_id: str, file_id: str, filename: str
+) -> str:
+    return f"attachments/{org_id}/{workspace_id}/{conversation_id}/{file_id}/original/{filename}"
+
+
+def _build_thumbnail_key(
+    *, org_id: str, workspace_id: str, conversation_id: str, file_id: str
+) -> str:
+    return f"attachments/{org_id}/{workspace_id}/{conversation_id}/{file_id}/thumb/thumb.webp"
+
+
+def _build_sandbox_path(*, conversation_id: str, file_id: str, filename: str) -> str:
+    return f"/workspace/uploads/{conversation_id}/{file_id}/{filename}"
+
+
+# ---------------------------------------------------------------------------
+# Thumbnail helper
+# ---------------------------------------------------------------------------
+
+
+def _make_thumbnail(data: bytes, *, max_long_edge: int, quality: int) -> bytes:
+    img = Image.open(io.BytesIO(data)).convert("RGB")
+    img.thumbnail((max_long_edge, max_long_edge), Image.Resampling.LANCZOS)
+    buf = io.BytesIO()
+    img.save(buf, format="WEBP", quality=quality)
+    return buf.getvalue()
+
+
+# ---------------------------------------------------------------------------
+# AttachmentService
+# ---------------------------------------------------------------------------
+
+
+class AttachmentService:
+    """Validate, persist, and lifecycle-manage conversation attachments."""
+
+    def __init__(
+        self,
+        *,
+        repo: AttachmentRepository,
+        objectstore: ObjectStoreClient | None = None,
+    ) -> None:
+        self.repo = repo
+        self.objectstore = objectstore or get_objectstore_client()
+
+    async def upload(
+        self,
+        *,
+        conversation_id: str,
+        uploader_user_id: str,
+        filename: str,
+        content: bytes,
+        mime_type: str | None,
+    ) -> Attachment:
+        """Validate + store + record a new attachment. Returns the persisted row."""
+        max_bytes: int = int(config.get("attachments.max_file_bytes", 52428800))
+        if len(content) > max_bytes:
+            raise AttachmentTooLargeError(size_bytes=len(content), max_bytes=max_bytes)
+
+        resolved_mime = mime_type or mimetypes.guess_type(filename)[0] or "application/octet-stream"
+        allowed: list[str] = list(config.get("attachments.allowed_mime_types", []))
+        if resolved_mime not in allowed:
+            raise AttachmentMimeRejectedError(resolved_mime)
+
+        max_conv: int = int(config.get("attachments.max_per_conversation_bytes", 524288000))
+        current = await self.repo.sum_active_size(conversation_id)
+        if current + len(content) > max_conv:
+            raise AttachmentQuotaExceededError(
+                current=current,
+                incoming=len(content),
+                limit=max_conv,
+            )
+
+        kind = classify_kind(resolved_mime)
+        file_id = str(uuid7())
+
+        width: int | None = None
+        height: int | None = None
+        thumbnail_bytes: bytes | None = None
+
+        if kind == "image":
+            try:
+                width, height = decode_image_dimensions(
+                    content,
+                    max_long_edge=int(
+                        config.get("attachments.view_images.max_decoded_long_edge", 16384)
+                    ),
+                )
+                thumbnail_bytes = _make_thumbnail(
+                    content,
+                    max_long_edge=int(config.get("attachments.thumbnail.max_long_edge", 256)),
+                    quality=int(config.get("attachments.thumbnail.quality", 80)),
+                )
+            except InvalidImageError as exc:
+                raise AttachmentInvalidImageError(str(exc)) from exc
+
+        object_key = _build_object_key(
+            org_id=self.repo.org_id,
+            workspace_id=self.repo.workspace_id,
+            conversation_id=conversation_id,
+            file_id=file_id,
+            filename=filename,
+        )
+        sandbox_path = _build_sandbox_path(
+            conversation_id=conversation_id,
+            file_id=file_id,
+            filename=filename,
+        )
+        thumbnail_key: str | None = None
+
+        await self.objectstore.upload_file(object_key, content, content_type=resolved_mime)
+        if thumbnail_bytes is not None:
+            thumbnail_key = _build_thumbnail_key(
+                org_id=self.repo.org_id,
+                workspace_id=self.repo.workspace_id,
+                conversation_id=conversation_id,
+                file_id=file_id,
+            )
+            await self.objectstore.upload_file(
+                thumbnail_key,
+                thumbnail_bytes,
+                content_type="image/webp",
+            )
+
+        row = Attachment(
+            id=file_id,
+            conversation_id=conversation_id,
+            uploader_user_id=uploader_user_id,
+            filename=filename,
+            mime_type=resolved_mime,
+            size_bytes=len(content),
+            kind=kind,
+            object_key=object_key,
+            sandbox_path=sandbox_path,
+            thumbnail_object_key=thumbnail_key,
+            width=width,
+            height=height,
+        )
+        return await self.repo.add(row)
+
+    async def delete_pending(self, *, conversation_id: str, attachment_id: str) -> None:
+        """Delete a pending attachment row + ObjectStore objects.
+
+        Caller validates state (must be pending) before calling this.
+        """
+        row = await self.repo.get_in_conversation(
+            conversation_id=conversation_id,
+            attachment_id=attachment_id,
+        )
+        if row is None:
+            return
+        try:
+            await self.objectstore.delete_file(row.object_key)
+            if row.thumbnail_object_key:
+                await self.objectstore.delete_file(row.thumbnail_object_key)
+        except Exception as exc:  # noqa: BLE001 — non-fatal
+            logger.warning("ObjectStore delete failed for {}: {}", row.id, exc)
+        await self.repo.delete(row.id)
+
+    async def delete_for_conversation(self, *, conversation_id: str) -> None:
+        """Cascade-delete every attachment row + ObjectStore object for a conversation."""
+        rows = await self.repo.list_by_conversation(conversation_id=conversation_id)
+        for row in rows:
+            try:
+                await self.objectstore.delete_file(row.object_key)
+                if row.thumbnail_object_key:
+                    await self.objectstore.delete_file(row.thumbnail_object_key)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("ObjectStore delete failed for {}: {}", row.id, exc)
+            await self.repo.delete(row.id)
+
+    @staticmethod
+    def attachment_to_api_dto(att: Attachment, *, base_url: str) -> dict[str, object]:
+        """Render attachment metadata for API responses."""
+        return {
+            "id": att.id,
+            "filename": att.filename,
+            "kind": att.kind,
+            "mime_type": att.mime_type,
+            "size_bytes": att.size_bytes,
+            "width": att.width,
+            "height": att.height,
+            "status": att.status,
+            "thumbnail_url": (
+                f"{base_url}/{att.id}/thumbnail" if att.thumbnail_object_key else None
+            ),
+            "download_url": f"{base_url}/{att.id}/content",
+            "created_at": utc_isoformat(att.created_at),
+        }
