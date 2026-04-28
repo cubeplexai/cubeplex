@@ -47,7 +47,7 @@ test.describe('admin workspace binding toggle', () => {
     }
 
     await page.reload()
-    await expect(page.getByRole('heading', { name: '技能管理' })).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'Skills' })).toBeVisible()
     await page.getByTestId('skill-card-deep-research').click()
 
     // Wait for detail panel to load and click Workspace tab.

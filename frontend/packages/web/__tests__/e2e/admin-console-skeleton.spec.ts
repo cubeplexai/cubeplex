@@ -15,7 +15,7 @@ async function registerAs(page: import('@playwright/test').Page, email: string):
 }
 
 test.describe('admin console skeleton', () => {
-  test('registered user (auto-admin) sees 管理后台 popover entry and reaches /admin', async ({
+  test('registered user (auto-admin) sees Admin panel popover entry and reaches /admin', async ({
     page,
     context,
   }) => {
@@ -25,7 +25,7 @@ test.describe('admin console skeleton', () => {
 
     // Open avatar popover and verify admin entry
     await page.getByRole('button', { name: /account menu/i }).click()
-    const adminLink = page.getByRole('link', { name: '管理后台' })
+    const adminLink = page.getByRole('link', { name: 'Admin panel' })
     await expect(adminLink).toBeVisible()
 
     // Click opens /admin in a new tab (target=_blank)
@@ -36,12 +36,12 @@ test.describe('admin console skeleton', () => {
     await expect(adminPage).toHaveURL(/\/admin(\/models)?/, { timeout: 10_000 })
 
     // Top bar shows product name + admin heading
-    await expect(adminPage.getByRole('heading', { name: '管理后台' })).toBeVisible()
+    await expect(adminPage.getByRole('heading', { name: 'Admin' })).toBeVisible()
 
     // Sub-nav: 5 CE native items should be present
     const nav = adminPage.getByRole('navigation', { name: /admin sub-nav/i })
     await expect(nav).toBeVisible()
-    for (const label of ['模型', 'Web 工具', '技能管理', 'MCP 连接器', '沙盒']) {
+    for (const label of ['Models', 'Web Tools', 'Skills', 'MCP Connectors', 'Sandbox']) {
       await expect(nav.getByRole('link', { name: label })).toBeVisible()
     }
   })
@@ -52,7 +52,7 @@ test.describe('admin console skeleton', () => {
     await registerAs(page, uniqueEmail())
     await page.goto('/admin')
     // Wait for the loading state to pass (admin-me resolved)
-    await expect(page.getByRole('heading', { name: '管理后台' })).toBeVisible({ timeout: 10_000 })
+    await expect(page.getByRole('heading', { name: 'Admin' })).toBeVisible({ timeout: 10_000 })
     const navLinks = page.getByRole('navigation', { name: /admin sub-nav/i }).getByRole('link')
     await expect(navLinks).toHaveCount(5)
   })

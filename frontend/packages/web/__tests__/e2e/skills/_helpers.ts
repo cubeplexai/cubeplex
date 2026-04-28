@@ -25,7 +25,7 @@ export async function registerAsAdmin(page: Page): Promise<string> {
  */
 export async function gotoAdminSkills(page: Page): Promise<void> {
   await page.goto('/admin/skills')
-  await expect(page.getByRole('heading', { name: '技能管理' })).toBeVisible({
+  await expect(page.getByRole('heading', { name: 'Skills' })).toBeVisible({
     timeout: 10_000,
   })
 }

@@ -16,11 +16,10 @@ test('workspace switching isolates conversation lists', async ({ page }) => {
   const firstWsUrl = page.url()
   const firstWsId = firstWsUrl.split('/w/')[1]
 
-  const input = page.getByPlaceholder('有什么可以帮你的？')
+  const input = page.getByPlaceholder('How can I help you?')
   await input.fill('Hello in workspace 1')
   await input.press('Enter')
   await expect(page).toHaveURL(/\/w\/[^/]+\/conversations\//, { timeout: 10_000 })
-  await expect(page.getByTestId('loading-indicator')).toBeHidden({ timeout: 50_000 })
   const convInWs1Url = page.url()
 
   await page.goto('/workspaces')

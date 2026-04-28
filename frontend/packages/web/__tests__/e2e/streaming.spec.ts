@@ -14,7 +14,7 @@ async function registerAndLand(page: Page): Promise<void> {
 test('loading animation appears while streaming', async ({ page }) => {
   await registerAndLand(page)
 
-  const input = page.getByPlaceholder('有什么可以帮你的？')
+  const input = page.getByPlaceholder('How can I help you?')
   await input.fill('Write a haiku about coding.')
   await input.press('Enter')
 
@@ -31,15 +31,15 @@ test('loading animation appears while streaming', async ({ page }) => {
 test('input is disabled while streaming', async ({ page }) => {
   await registerAndLand(page)
 
-  const input = page.getByPlaceholder('有什么可以帮你的？')
+  const input = page.getByPlaceholder('How can I help you?')
   await input.fill('Write a short poem.')
   await input.press('Enter')
 
   await expect(page).toHaveURL(/\/w\/[^/]+\/conversations\//)
 
-  await expect(page.getByPlaceholder('有什么可以帮你的？')).toBeDisabled({ timeout: 5_000 })
+  await expect(page.getByPlaceholder('How can I help you?')).toBeDisabled({ timeout: 5_000 })
 
   await expect(page.getByTestId('loading-indicator')).toBeHidden({ timeout: 50_000 })
 
-  await expect(page.getByPlaceholder('有什么可以帮你的？')).toBeEnabled()
+  await expect(page.getByPlaceholder('How can I help you?')).toBeEnabled()
 })

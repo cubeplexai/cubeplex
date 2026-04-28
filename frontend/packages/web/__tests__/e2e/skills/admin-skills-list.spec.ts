@@ -16,7 +16,7 @@ test.describe('admin skills list', () => {
     await registerAsAdmin(page)
     await gotoAdminSkills(page)
 
-    await page.getByRole('searchbox', { name: /搜索 skill/i }).fill('deep')
+    await page.getByRole('searchbox', { name: /search skills/i }).fill('deep')
     await expect(page.getByTestId('skill-card-deep-research')).toBeVisible({
       timeout: 5_000,
     })

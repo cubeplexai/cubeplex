@@ -9,7 +9,7 @@ test.describe('admin skills upload', () => {
     await registerAsAdmin(page)
     await gotoAdminSkills(page)
 
-    await page.getByRole('button', { name: /上传 skill/ }).click()
+    await page.getByRole('button', { name: /upload skill/i }).click()
     await expect(page.getByTestId('upload-skill-modal')).toBeVisible()
 
     await page.getByTestId('upload-skill-file-input').setInputFiles(FIXTURE_ZIP)
