@@ -1,6 +1,7 @@
 """Repository layer."""
 
 from cubebox.repositories.artifact import ArtifactRepository, ArtifactVersionRepository
+from cubebox.repositories.billing import BillingRepository
 from cubebox.repositories.conversation import ConversationRepository
 from cubebox.repositories.invite_token import InviteTokenRepository
 from cubebox.repositories.membership import MembershipRepository
@@ -11,6 +12,7 @@ from cubebox.repositories.workspace import WorkspaceRepository
 __all__ = [
     "ArtifactRepository",
     "ArtifactVersionRepository",
+    "BillingRepository",
     "ConversationRepository",
     "InviteTokenRepository",
     "MembershipRepository",
