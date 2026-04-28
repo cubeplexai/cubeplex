@@ -30,7 +30,10 @@ export const useAuthStore = create<AuthStore>((set) => ({
     try {
       const user = await getMe(client)
       set({ user })
-      if (user?.language) writeLocaleCookie(user.language)
+      if (user?.language) {
+        writeLocaleCookie(user.language)
+        client.setLocale(user.language)
+      }
     } catch (err) {
       set({ error: (err as Error).message })
     } finally {

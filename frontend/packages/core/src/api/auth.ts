@@ -42,7 +42,7 @@ export async function getMe(client: ApiClient): Promise<MeResult | null> {
   return (await res.json()) as MeResult
 }
 
-export async function updateLanguage(client: ApiClient, language: string): Promise<MeResult> {
+export async function updateLanguage(client: ApiClient, language: 'en' | 'zh'): Promise<MeResult> {
   const res = await client.patch('/api/v1/auth/me', { language })
   if (!res.ok) throw await toApiError(res)
   return (await res.json()) as MeResult
