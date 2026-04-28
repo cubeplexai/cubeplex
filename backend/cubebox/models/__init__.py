@@ -3,6 +3,7 @@
 from cubebox.models.agent_config import AgentConfig
 from cubebox.models.artifact import Artifact
 from cubebox.models.artifact_version import ArtifactVersion
+from cubebox.models.attachment import Attachment
 from cubebox.models.conversation import Conversation
 from cubebox.models.invite_token import InviteToken
 from cubebox.models.membership import Membership, Role
@@ -22,6 +23,7 @@ __all__ = [
     "AgentConfig",
     "Artifact",
     "ArtifactVersion",
+    "Attachment",
     "Conversation",
     "InviteToken",
     "Membership",
