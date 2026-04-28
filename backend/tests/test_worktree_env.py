@@ -2,6 +2,8 @@
 
 import importlib.machinery
 import importlib.util
+import os
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -133,3 +135,39 @@ class TestAllocate:
         reg.entries["main"] = {"offset": 0, "branch": "main", "path": "/m", "created_at": "t"}
         offset = we.allocate_offset(slug="feat-foo", registry=reg, is_main_worktree=False)
         assert offset != 0
+
+
+class TestWorktreeDiscovery:
+    def test_find_main_repo_from_main(self, we, tmp_path):
+        # Initialize a real git repo as the "main"
+        subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+        subprocess.run(
+            ["git", "-C", str(tmp_path), "commit", "--allow-empty", "-m", "init", "-q"],
+            check=True,
+            env={
+                **os.environ,
+                "GIT_AUTHOR_NAME": "t",
+                "GIT_AUTHOR_EMAIL": "t@t",
+                "GIT_COMMITTER_NAME": "t",
+                "GIT_COMMITTER_EMAIL": "t@t",
+            },
+        )
+        main = we.find_main_repo(start_dir=tmp_path)
+        assert main == tmp_path.resolve()
+
+    def test_is_main_worktree_true_in_main(self, we, tmp_path):
+        subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+        subprocess.run(
+            ["git", "-C", str(tmp_path), "commit", "--allow-empty", "-m", "init", "-q"],
+            check=True,
+            env={
+                **os.environ,
+                "GIT_AUTHOR_NAME": "t",
+                "GIT_AUTHOR_EMAIL": "t@t",
+                "GIT_COMMITTER_NAME": "t",
+                "GIT_COMMITTER_EMAIL": "t@t",
+            },
+        )
+        info = we.current_worktree_info(start_dir=tmp_path)
+        assert info.is_main is True
+        assert info.branch in ("master", "main")
