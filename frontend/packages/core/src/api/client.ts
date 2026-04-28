@@ -31,7 +31,7 @@ export interface ApiClient {
   onUnauthorized(handler: () => void): () => void
 }
 
-const WS_NEUTRAL_PREFIXES = ['/api/v1/auth/', '/api/v1/workspaces']
+const WS_NEUTRAL_PREFIXES = ['/api/v1/auth/', '/api/v1/workspaces', '/api/v1/admin']
 const SCOPED_ROOT = '/api/v1/'
 
 function isWorkspaceNeutral(path: string): boolean {
