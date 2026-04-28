@@ -1,5 +1,6 @@
 import io
 import json as json_lib
+import os
 import secrets
 from collections.abc import AsyncIterator, Iterator
 from contextlib import asynccontextmanager
@@ -69,9 +70,10 @@ async def _flush_test_redis(request: pytest.FixtureRequest) -> AsyncIterator[Non
     try:
         # Delete only keys belonging to this worktree's prefix so parallel E2E
         # in other worktrees isn't clobbered. Prefix matches what app.py builds
-        # at startup: f"{base_prefix}:{env}".
+        # at startup for `app.state.redis_key_prefix`. We read env_name from
+        # the SAME source app.py uses (ENV_FOR_DYNACONF) so the two cannot drift.
         base_prefix = _cubebox_config.get("redis.key_prefix", "cubebox")
-        env_name = _cubebox_config.get("env", "test")
+        env_name = os.getenv("ENV_FOR_DYNACONF", "development")
         pattern = f"{base_prefix}:{env_name}:*"
         deleted_keys: list[str] = []
         async for key in client.scan_iter(match=pattern, count=500):
