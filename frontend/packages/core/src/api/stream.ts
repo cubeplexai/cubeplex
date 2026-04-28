@@ -28,6 +28,7 @@ export async function* streamMessages(
   client: ApiClient,
   conversationId: string,
   content: string,
+  attachmentIds?: string[],
 ): AsyncGenerator<AgentEvent> {
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
@@ -38,13 +39,15 @@ export async function* streamMessages(
   if (csrf) headers['X-CSRF-Token'] = csrf
 
   const path = client.resolvePath(`/api/v1/conversations/${conversationId}/messages`)
+  const requestBody: { content: string; attachments?: string[] } = { content }
+  if (attachmentIds && attachmentIds.length) requestBody.attachments = attachmentIds
   try {
     const res = await fetch(`${client.baseUrl}${path}`, {
       method: 'POST',
       credentials: 'include',
       headers,
       cache: 'no-store',
-      body: JSON.stringify({ content }),
+      body: JSON.stringify(requestBody),
     })
 
     if (!res.ok) {

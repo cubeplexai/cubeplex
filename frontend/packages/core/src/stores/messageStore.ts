@@ -43,7 +43,12 @@ export interface MessageStore {
   >
 
   loadMessages(client: ApiClient, conversationId: string): Promise<void>
-  send(client: ApiClient, conversationId: string, content: string): Promise<void>
+  send(
+    client: ApiClient,
+    conversationId: string,
+    content: string,
+    attachmentIds?: string[],
+  ): Promise<void>
   clearStream(): void
   clearLastRunStatus(): void
 }
@@ -673,7 +678,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
     }
   },
 
-  async send(client: ApiClient, conversationId: string, content: string) {
+  async send(client: ApiClient, conversationId: string, content: string, attachmentIds?: string[]) {
     const userMessage: Message = {
       id: `temp-${Date.now()}`,
       role: 'user',
@@ -705,7 +710,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
     let sawDone = false
 
     try {
-      for await (const event of streamMessages(client, conversationId, content)) {
+      for await (const event of streamMessages(client, conversationId, content, attachmentIds)) {
         if (event.event_id && get().lastAppliedEventId) {
           if (compareEventIds(event.event_id, get().lastAppliedEventId!) <= 0) continue
         }
