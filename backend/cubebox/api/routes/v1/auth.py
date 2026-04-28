@@ -1,17 +1,20 @@
 """Auth routes: register, login, logout (cookie-based) with rate limit."""
 
-from typing import Annotated
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Request, Response, status
 from fastapi.security import OAuth2PasswordRequestForm
 from fastapi_users.authentication import Strategy
 from fastapi_users.exceptions import InvalidPasswordException, UserAlreadyExists, UserNotExists
 from fastapi_users.schemas import BaseUser, BaseUserCreate
+from pydantic import BaseModel
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from cubebox.api.middleware.rate_limit import LOGIN_LIMIT, REGISTER_LIMIT, limiter
 from cubebox.auth.dependencies import current_active_user
 from cubebox.auth.jwt import auth_backend
 from cubebox.auth.users import UserManager, fastapi_users, get_user_manager
+from cubebox.db import get_session
 from cubebox.models import User
 
 
@@ -69,9 +72,26 @@ async def login(
     return await auth_backend.login(strategy, user)
 
 
+class UserLanguageUpdate(BaseModel):
+    language: Literal["en", "zh"]
+
+
 @router.get("/me")
 async def me(user: Annotated[User, Depends(current_active_user)]) -> dict[str, str]:
-    return {"id": user.id, "email": user.email}
+    return {"id": user.id, "email": user.email, "language": user.language}
+
+
+@router.patch("/me")
+async def patch_me(
+    user: Annotated[User, Depends(current_active_user)],
+    body: Annotated[UserLanguageUpdate, Body()],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> dict[str, str]:
+    user.language = body.language
+    session.add(user)
+    await session.commit()
+    await session.refresh(user)
+    return {"id": user.id, "email": user.email, "language": user.language}
 
 
 # Include fastapi-users built-in auth routes for /logout. Must stay BELOW our

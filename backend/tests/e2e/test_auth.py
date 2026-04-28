@@ -91,3 +91,83 @@ async def test_logout_clears_cookie(unauthenticated_memory_client):
 async def test_me_requires_auth(unauthenticated_memory_client):
     r = await unauthenticated_memory_client.get("/api/v1/auth/me")
     assert r.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_me_returns_default_language(unauthenticated_memory_client):
+    """Test that GET /auth/me returns language field with default value."""
+    email = f"u-{secrets.token_hex(4)}@example.com"
+    pw = "correcthorsebatterystaple"
+
+    # Register and login
+    await unauthenticated_memory_client.post(
+        "/api/v1/auth/register", json={"email": email, "password": pw}
+    )
+    await unauthenticated_memory_client.post(
+        "/api/v1/auth/login", data={"username": email, "password": pw}
+    )
+
+    # Fresh user should have default language "en"
+    resp = await unauthenticated_memory_client.get("/api/v1/auth/me")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["language"] == "en"
+
+
+@pytest.mark.asyncio
+async def test_patch_me_updates_language(unauthenticated_memory_client):
+    """Test that PATCH /auth/me updates and persists language."""
+    email = f"u-{secrets.token_hex(4)}@example.com"
+    pw = "correcthorsebatterystaple"
+
+    # Register and login
+    await unauthenticated_memory_client.post(
+        "/api/v1/auth/register", json={"email": email, "password": pw}
+    )
+    await unauthenticated_memory_client.post(
+        "/api/v1/auth/login", data={"username": email, "password": pw}
+    )
+
+    # Seed CSRF cookie via a safe GET.
+    await unauthenticated_memory_client.get("/api/v1/auth/me")
+    csrf = unauthenticated_memory_client.cookies.get("cubebox_csrf") or ""
+
+    # Update language
+    resp = await unauthenticated_memory_client.patch(
+        "/api/v1/auth/me",
+        json={"language": "zh"},
+        headers={"X-CSRF-Token": csrf},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["language"] == "zh"
+
+    # Verify persisted
+    me = await unauthenticated_memory_client.get("/api/v1/auth/me")
+    assert me.json()["language"] == "zh"
+
+
+@pytest.mark.asyncio
+async def test_patch_me_rejects_invalid_language(unauthenticated_memory_client):
+    """Test that PATCH /auth/me rejects invalid language values."""
+    email = f"u-{secrets.token_hex(4)}@example.com"
+    pw = "correcthorsebatterystaple"
+
+    # Register and login
+    await unauthenticated_memory_client.post(
+        "/api/v1/auth/register", json={"email": email, "password": pw}
+    )
+    await unauthenticated_memory_client.post(
+        "/api/v1/auth/login", data={"username": email, "password": pw}
+    )
+
+    # Seed CSRF cookie via a safe GET.
+    await unauthenticated_memory_client.get("/api/v1/auth/me")
+    csrf = unauthenticated_memory_client.cookies.get("cubebox_csrf") or ""
+
+    # Attempt to set invalid language
+    resp = await unauthenticated_memory_client.patch(
+        "/api/v1/auth/me",
+        json={"language": "ja"},
+        headers={"X-CSRF-Token": csrf},
+    )
+    assert resp.status_code == 422  # Pydantic Literal validation
