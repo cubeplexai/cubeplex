@@ -21,7 +21,7 @@ test.describe('skill artifact preview — publish path', () => {
     await gotoAdminSkills(page)
 
     // Upload a skill zip via the admin modal
-    await page.getByRole('button', { name: /上传 skill/ }).click()
+    await page.getByRole('button', { name: /upload skill/i }).click()
     await expect(page.getByTestId('upload-skill-modal')).toBeVisible()
 
     await page.getByTestId('upload-skill-file-input').setInputFiles(FIXTURE_ZIP)

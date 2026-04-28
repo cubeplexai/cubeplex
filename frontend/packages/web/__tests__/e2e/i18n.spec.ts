@@ -7,9 +7,12 @@ function uniqueEmail(): string {
 const PASSWORD = 'correcthorsebatterystaple'
 
 test.describe('i18n — language preference', () => {
-  test('login page shows Chinese when browser prefers zh', async ({ page }) => {
-    await page.setExtraHTTPHeaders({ 'Accept-Language': 'zh-CN,zh;q=0.9' })
+  test('login page shows Chinese when NEXT_LOCALE cookie is zh', async ({ page }) => {
     await page.goto('/login')
+    await page.evaluate(() => {
+      document.cookie = 'NEXT_LOCALE=zh; path=/'
+    })
+    await page.reload()
     await expect(page.getByRole('heading', { name: '登录到 cubebox' })).toBeVisible()
     await expect(page.getByRole('button', { name: '登录' })).toBeVisible()
   })
@@ -42,7 +45,7 @@ test.describe('i18n — language preference', () => {
 
     // Switch back to English
     await page.getByRole('button', { name: 'Account menu' }).click()
-    await page.getByRole('button', { name: 'EN' }).click()
+    await page.getByRole('button', { name: 'EN', exact: true }).click()
     await expect(page.getByPlaceholder('How can I help you?')).toBeVisible({ timeout: 8_000 })
   })
 })
