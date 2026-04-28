@@ -87,3 +87,62 @@ cubebox/
 - Common gotcha:
   - Core package must be built before web can consume API/type changes
   - Use `npx shadcn-ui@latest` from `packages/web/` when adding components
+
+## Worktrees and parallel dev
+
+This repo uses `git worktree` for parallel feature development. Each
+worktree gets its own allocated ports, MySQL schemas, and Redis prefix to
+avoid collisions when multiple worktrees run dev servers or E2E suites at
+the same time. All allocations land in `<worktree_root>/.worktree.env`
+(gitignored).
+
+### Creating a new worktree
+
+Always run from the main repo root. The wrapper branches from latest
+`origin/main`:
+
+    ./scripts/new-worktree feat/<branch-name>
+
+This: fetches origin/main, creates the worktree, allocates a slot,
+provisions MySQL schemas, runs `alembic upgrade head`, copies
+`backend/.env` and `config.development.local.yaml` from main if missing,
+and writes `.worktree.env`.
+
+### Working inside a worktree
+
+**First thing on entry: read the allocated values.**
+
+    ./scripts/worktree-env show
+    # or just: cat .worktree.env
+
+`.worktree.env` declares values like:
+
+    CUBEBOX_WORKTREE_NAME=feat-m7-file-upload
+    CUBEBOX_WORKTREE_SLOT=37
+    CUBEBOX_API__PORT=8037
+    CUBEBOX_DATABASE__NAME=cubebox_feat_m7_file_upload
+    CUBEBOX_REDIS__KEY_PREFIX=cubebox-feat-m7-file-upload
+    CUBEBOX_API_URL=http://localhost:8037
+    PORT=3037
+    BASE_URL=http://localhost:3037
+
+Backend (`backend/cubebox/config.py`), Next (`next.config.ts`), and
+Playwright (`playwright.config.ts`) all auto-load this file. So
+`python main.py`, `pnpm dev`, and `pnpm test:e2e` just work with the
+allocated ports — but **never assume 3000 / 8000** when checking
+manually with `curl` or `lsof`.
+
+### Other subcommands
+
+- `./scripts/worktree-env doctor` — verify schemas exist, ports free, MySQL/Redis reachable, alembic at head
+- `./scripts/worktree-env destroy` — drop schemas, clear redis prefix, delete `.worktree.env` (run **before** `git worktree remove`)
+- `./scripts/worktree-env clean-orphans` — interactive cleanup of registry entries and MySQL schemas left behind by removed worktrees
+
+### Notes for AI agents
+
+- Subagents do not inherit `cwd`. When dispatching work into a worktree,
+  pin the absolute path AND tell the agent to `cat .worktree.env` first.
+- Default ports (3000 / 8000) only apply in the **main** worktree. Inside
+  any other worktree they are wrong.
+- CI runs in the main checkout (no `.worktree.env`); all the dotenv
+  loaders no-op there, so CI behavior is unchanged.
