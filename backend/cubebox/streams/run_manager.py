@@ -233,6 +233,7 @@ class RunManager:
         *,
         conversation_id: str,
         content: str,
+        attachments: list[str] | None = None,
         ctx: RunContext,
     ) -> str:
         """Create and start a new background run."""
@@ -263,6 +264,7 @@ class RunManager:
                 run_id=run_id,
                 conversation_id=conversation_id,
                 content=content,
+                attachments=list(attachments or []),
                 ctx=ctx,
             ),
             name=f"run:{run_id}",
@@ -358,6 +360,7 @@ class RunManager:
         run_id: str,
         conversation_id: str,
         content: str,
+        attachments: list[str],
         ctx: RunContext,
     ) -> None:
         from cubebox.api.routes.v1.conversations import _update_conversation_timestamp
