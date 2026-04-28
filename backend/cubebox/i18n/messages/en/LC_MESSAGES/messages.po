@@ -14,5 +14,3 @@ msgstr "An account with this email already exists"
 msgid "register_invalid_password"
 msgstr "Password does not meet requirements"
 
-msgid "invalid_language"
-msgstr "Invalid language code"
