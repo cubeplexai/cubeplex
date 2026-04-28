@@ -11,7 +11,9 @@ from langchain_core.tools import BaseTool
 from loguru import logger
 from uuid_utils import uuid7
 
+from cubebox.db.engine import async_session_maker
 from cubebox.models.billing import BillingEvent, LlmBillingEvent
+from cubebox.repositories.billing import BillingRepository
 
 
 class CostMiddleware(AgentMiddleware[Any, Any, Any]):
@@ -22,7 +24,6 @@ class CostMiddleware(AgentMiddleware[Any, Any, Any]):
     def __init__(
         self,
         *,
-        repo: Any,
         org_id: str,
         workspace_id: str,
         user_id: str,
@@ -30,7 +31,6 @@ class CostMiddleware(AgentMiddleware[Any, Any, Any]):
         parent_billing_id: str | None = None,
         subagent_depth: int = 0,
     ) -> None:
-        self._repo = repo
         self._org_id = org_id
         self._workspace_id = workspace_id
         self._user_id = user_id
@@ -119,7 +119,9 @@ class CostMiddleware(AgentMiddleware[Any, Any, Any]):
                 error_class=error_class,
             )
 
-            await self._repo.insert_llm_event(be, le)
+            async with async_session_maker() as session:
+                repo = BillingRepository(session, org_id=self._org_id)
+                await repo.insert_llm_event(be, le)
 
         except Exception as exc:
             logger.warning("billing write failed (run_id={}): {}", run_id, exc)
