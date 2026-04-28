@@ -1,0 +1,21 @@
+#!/usr/bin/env python3
+"""worktree-env — allocate ports, MySQL schemas, and Redis prefixes per
+git worktree so multiple worktrees can run dev servers and E2E in parallel.
+
+See docs/superpowers/specs/2026-04-28-worktree-parallel-dev-isolation-design.md
+"""
+
+from __future__ import annotations
+
+import re
+
+# ------------------------------------------------------------------ slug
+
+_SLUG_PUNCT = re.compile(r"[^a-z0-9]+")
+
+
+def slugify(name: str) -> str:
+    """Normalize a branch name into a slug usable in DNS, DB, Redis."""
+    lowered = name.lower()
+    replaced = _SLUG_PUNCT.sub("-", lowered)
+    return replaced.strip("-")
