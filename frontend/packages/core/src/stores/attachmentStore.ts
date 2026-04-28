@@ -104,7 +104,12 @@ export const useAttachmentStore = create<AttachmentStoreState>((set, get) => ({
   },
 
   async hydrate(client, convId) {
-    const list = await listAttachments(client, convId, 'pending')
+    let list: Awaited<ReturnType<typeof listAttachments>>
+    try {
+      list = await listAttachments(client, convId, 'pending')
+    } catch {
+      return
+    }
     if (!list.attachments.length) return
     set((s) => ({
       staging: {

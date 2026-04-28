@@ -25,7 +25,7 @@ test.describe('M7 attachments happy path', () => {
     // First create a conversation by sending a plain message, then navigate to the
     // conversation page where InputBar receives a conversationId and the attach button
     // becomes enabled.
-    const input = page.getByPlaceholder('有什么可以帮你的？')
+    const input = page.getByTestId('chat-input')
     await input.fill('hello')
     await input.press('Enter')
 

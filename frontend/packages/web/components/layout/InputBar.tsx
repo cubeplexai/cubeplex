@@ -113,6 +113,7 @@ export function InputBar({ conversationId, onSubmit, isLoading = false }: InputB
         </button>
         <textarea
           ref={textareaRef}
+          data-testid="chat-input"
           value={content}
           onChange={handleChange}
           onKeyDown={handleKeyDown}
