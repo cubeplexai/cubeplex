@@ -50,12 +50,14 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
 
 @pytest_asyncio.fixture(autouse=True)
 async def _flush_test_redis(request: pytest.FixtureRequest) -> AsyncIterator[None]:
-    """E2E tests share one Redis DB; flush before each e2e-marked test.
+    """Delete this worktree's Redis keys before each e2e-marked test.
 
-    Gated on the ``e2e`` marker so a stray unit-style test placed under
-    ``tests/e2e/`` doesn't trigger a real Redis connection. Uses FLUSHDB
-    (current DB only) rather than FLUSHALL so a mis-pointed URL can't
-    nuke a dev Redis.
+    Uses a prefix-scoped SCAN + DEL instead of FLUSHDB so two worktrees can
+    run E2E in parallel against the same Redis without clobbering each other.
+    The prefix is `{redis.key_prefix}:{env}` matching what app.py builds at
+    startup; outside a worktree (CI) the key_prefix defaults to "cubebox" and
+    env to "test", so behavior matches the previous FLUSHDB for a single
+    isolated runner.
     """
     if request.node.get_closest_marker("e2e") is None:
         yield
@@ -65,7 +67,20 @@ async def _flush_test_redis(request: pytest.FixtureRequest) -> AsyncIterator[Non
         decode_responses=True,
     )
     try:
-        await client.flushdb()
+        # Delete only keys belonging to this worktree's prefix so parallel E2E
+        # in other worktrees isn't clobbered. Prefix matches what app.py builds
+        # at startup: f"{base_prefix}:{env}".
+        base_prefix = _cubebox_config.get("redis.key_prefix", "cubebox")
+        env_name = _cubebox_config.get("env", "test")
+        pattern = f"{base_prefix}:{env_name}:*"
+        deleted_keys: list[str] = []
+        async for key in client.scan_iter(match=pattern, count=500):
+            deleted_keys.append(key)
+            if len(deleted_keys) >= 500:
+                await client.delete(*deleted_keys)
+                deleted_keys.clear()
+        if deleted_keys:
+            await client.delete(*deleted_keys)
     finally:
         await client.aclose()
     yield
