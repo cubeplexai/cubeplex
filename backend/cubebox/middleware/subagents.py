@@ -109,6 +109,29 @@ def _create_subagent_tool(
         tools: list[BaseTool] = _shared_tools + list(spec.get("tools", []))
         middleware = list(inherited_middleware or []) + list(spec.get("middleware", []))
 
+        # Clone CostMiddleware for billing attribution with incremented depth
+        from cubebox.middleware.cost import CostMiddleware
+
+        _cost_mw: CostMiddleware | None = None
+        for mw in inherited_middleware or []:
+            if isinstance(mw, CostMiddleware):
+                _cost_mw = mw
+                break
+
+        child_cost_mw: CostMiddleware | None = None
+        if _cost_mw is not None:
+            child_cost_mw = CostMiddleware(
+                org_id=_cost_mw._org_id,
+                workspace_id=_cost_mw._workspace_id,
+                user_id=_cost_mw._user_id,
+                conversation_id=_cost_mw._conversation_id,
+                parent_billing_id=_cost_mw._last_billing_id,
+                subagent_depth=_cost_mw._subagent_depth + 1,
+            )
+            # Replace any existing CostMiddleware in child middleware with the new one
+            middleware = [m for m in middleware if not isinstance(m, CostMiddleware)]
+            middleware.append(child_cost_mw)
+
         agent = create_agent(
             model=model,
             tools=tools,
