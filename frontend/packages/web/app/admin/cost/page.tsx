@@ -71,25 +71,37 @@ export default function CostPage() {
       {/* By Workspace table */}
       <section className="space-y-2">
         <h2 className="text-sm font-medium">按 Workspace</h2>
-        {summary.by_workspace.length === 0 ? (
-          <p className="text-sm text-muted-foreground">本月暂无数据</p>
-        ) : (
-          <div className="rounded-lg border border-border overflow-hidden">
-            <Table>
-              <TableHeader>
+        <div className="rounded-lg border border-border overflow-hidden">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Workspace</TableHead>
+                <TableHead className="text-right">调用次数</TableHead>
+                <TableHead className="text-right">Input Tokens</TableHead>
+                <TableHead className="text-right">Output Tokens</TableHead>
+                <TableHead className="text-right">花费</TableHead>
+                <TableHead className="w-10" />
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {summary.by_workspace.length === 0 ? (
                 <TableRow>
-                  <TableHead>Workspace</TableHead>
-                  <TableHead className="text-right">调用次数</TableHead>
-                  <TableHead className="text-right">费用</TableHead>
-                  <TableHead className="w-10" />
+                  <TableCell colSpan={6} className="text-center text-muted-foreground">
+                    本月暂无数据
+                  </TableCell>
                 </TableRow>
-              </TableHeader>
-              <TableBody>
-                {summary.by_workspace.map((row) => (
+              ) : (
+                summary.by_workspace.map((row) => (
                   <TableRow key={row.bucket}>
                     <TableCell className="font-mono text-xs">{row.bucket}</TableCell>
                     <TableCell className="text-right tabular-nums">
                       {row.call_count.toLocaleString()}
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums">
+                      {row.input_tokens.toLocaleString()}
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums">
+                      {row.output_tokens.toLocaleString()}
                     </TableCell>
                     <TableCell className="text-right tabular-nums">
                       {formatCostUsd(row.cost_amount_micro, row.currency)}
@@ -105,44 +117,56 @@ export default function CostPage() {
                       </a>
                     </TableCell>
                   </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </div>
-        )}
+                ))
+              )}
+            </TableBody>
+          </Table>
+        </div>
       </section>
 
       {/* By Model table */}
       <section className="space-y-2">
         <h2 className="text-sm font-medium">按 Model</h2>
-        {summary.by_model.length === 0 ? (
-          <p className="text-sm text-muted-foreground">本月暂无数据</p>
-        ) : (
-          <div className="rounded-lg border border-border overflow-hidden">
-            <Table>
-              <TableHeader>
+        <div className="rounded-lg border border-border overflow-hidden">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Provider / Model</TableHead>
+                <TableHead className="text-right">调用次数</TableHead>
+                <TableHead className="text-right">Input Tokens</TableHead>
+                <TableHead className="text-right">Output Tokens</TableHead>
+                <TableHead className="text-right">花费</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {summary.by_model.length === 0 ? (
                 <TableRow>
-                  <TableHead>Model</TableHead>
-                  <TableHead className="text-right">调用次数</TableHead>
-                  <TableHead className="text-right">费用</TableHead>
+                  <TableCell colSpan={5} className="text-center text-muted-foreground">
+                    本月暂无数据
+                  </TableCell>
                 </TableRow>
-              </TableHeader>
-              <TableBody>
-                {summary.by_model.map((row) => (
+              ) : (
+                summary.by_model.map((row) => (
                   <TableRow key={row.bucket}>
                     <TableCell className="font-mono text-xs">{row.bucket}</TableCell>
                     <TableCell className="text-right tabular-nums">
                       {row.call_count.toLocaleString()}
                     </TableCell>
                     <TableCell className="text-right tabular-nums">
+                      {row.input_tokens.toLocaleString()}
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums">
+                      {row.output_tokens.toLocaleString()}
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums">
                       {formatCostUsd(row.cost_amount_micro, row.currency)}
                     </TableCell>
                   </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </div>
-        )}
+                ))
+              )}
+            </TableBody>
+          </Table>
+        </div>
       </section>
     </div>
   )
