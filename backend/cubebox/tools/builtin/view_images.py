@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import base64
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 from langchain_core.messages import ToolMessage
 from langchain_core.tools import StructuredTool
+from langchain_core.tools.base import InjectedToolCallId
 from loguru import logger
 from pydantic import BaseModel, Field
 
@@ -34,6 +35,7 @@ class ViewImagesInput(BaseModel):
             "auto: server picks based on original size."
         ),
     )
+    tool_call_id: Annotated[str, InjectedToolCallId]
 
 
 def _resolve_target(detail: str) -> int:
@@ -59,14 +61,15 @@ def make_view_images_tool(
     short-lived to avoid holding connections across the agent loop.
     """
 
-    async def view_images(paths: list[str], detail: str = "auto") -> ToolMessage:
+    async def view_images(paths: list[str], tool_call_id: str, detail: str = "auto") -> ToolMessage:
         if not capabilities.supports_image():
             return ToolMessage(
                 content=(
                     "Error: the current model and fallbacks do not support image input. "
                     "Cannot view images."
                 ),
-                tool_call_id="",
+                name="view_images",
+                tool_call_id=tool_call_id,
                 status="error",
             )
 
@@ -131,7 +134,7 @@ def make_view_images_tool(
                         }
                     )
 
-        return ToolMessage(content=out_blocks, tool_call_id="")
+        return ToolMessage(content=out_blocks, name="view_images", tool_call_id=tool_call_id)
 
     return StructuredTool.from_function(
         coroutine=view_images,
