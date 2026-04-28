@@ -142,6 +142,7 @@ export function SearchResultView({
             <div className="flex-1 min-w-0">
               {/* Domain line */}
               <div className="flex items-center gap-1.5 mb-0.5">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img
                   src={getFaviconUrl(item.url)}
                   alt=""

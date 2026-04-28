@@ -22,6 +22,7 @@ export function OrgInstallActions({ skill, onActionDone }: OrgInstallActionsProp
 
   // Reset confirm dialog whenever install_state changes (e.g. after upgrade or version switch)
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setConfirmUninstall(false)
   }, [skill.install_state])
 

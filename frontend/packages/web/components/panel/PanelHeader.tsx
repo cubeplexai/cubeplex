@@ -28,6 +28,7 @@ export function PanelHeader({ toolName, toolArgs, toolResult, onClose }: PanelHe
       className="h-11 border-b border-border flex
         items-center gap-2 px-4 shrink-0 bg-card"
     >
+      {/* eslint-disable-next-line react-hooks/static-components */}
       <Icon
         className="size-3.5 text-muted-foreground
           shrink-0"

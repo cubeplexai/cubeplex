@@ -23,6 +23,7 @@ export function ImagePreview({ artifact, version, workspaceId }: ImagePreviewPro
           <PreviewLoading />
         </div>
       )}
+      {/* eslint-disable-next-line @next/next/no-img-element */}
       <img
         key={`${artifact.id}-${version}`}
         src={previewUrl}

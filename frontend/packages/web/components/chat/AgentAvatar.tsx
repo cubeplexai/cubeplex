@@ -19,5 +19,6 @@ export function AgentAvatar({ seed, size = 32, className }: AgentAvatarProps) {
     return avatar.toDataUri()
   }, [seed, size])
 
+  // eslint-disable-next-line @next/next/no-img-element
   return <img src={svgDataUri} alt="" width={size} height={size} className={className} />
 }

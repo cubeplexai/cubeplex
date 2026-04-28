@@ -62,6 +62,7 @@ function CitationHoverContent({
       {/* Source: favicon + URL + date + badge */}
       <div className="flex items-center gap-1.5">
         {isWeb && metadata.url && !faviconError ? (
+          // eslint-disable-next-line @next/next/no-img-element
           <img
             src={getFaviconUrl(metadata.url)}
             alt=""
