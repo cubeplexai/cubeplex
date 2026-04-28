@@ -169,38 +169,6 @@ def create_cubebox_agent(
     # Mount CostMiddleware last in the chain so it wraps all model calls.
     if cost_mw is not None:
         middleware.append(cost_mw)
-    # All four billing dimensions must be present; if any is None, skip silently
-    # (callers in test contexts may not provide all params).
-    cost_mw = None
-    if (
-        user_id is not None
-        and conversation_id is not None
-        and org_id is not None
-        and workspace_id is not None
-    ):
-        from cubebox.middleware.cost import CostMiddleware
-
-        cost_mw = CostMiddleware(
-            org_id=org_id,
-            workspace_id=workspace_id,
-            user_id=user_id,
-            conversation_id=conversation_id,
-        )
-        inherited_subagent_middleware.append(cost_mw)
-
-    middleware.append(TodoListMiddleware())
-    middleware.append(
-        SubAgentMiddleware(
-            subagents=subagents or [],
-            default_model=llm,
-            shared_tools=tools,
-            inherited_middleware=inherited_subagent_middleware,
-        )
-    )
-
-    # Mount CostMiddleware last in the chain so it wraps all model calls.
-    if cost_mw is not None:
-        middleware.append(cost_mw)
 
     logger.info(
         "Creating cubebox agent: {} tools, {} middleware",
