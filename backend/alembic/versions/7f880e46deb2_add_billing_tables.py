@@ -1,8 +1,8 @@
 """add billing tables
 
-Revision ID: ca53eca52cc3
+Revision ID: 7f880e46deb2
 Revises: 704767f28f2b
-Create Date: 2026-04-28 14:33:19.924174
+Create Date: 2026-04-28 14:39:54.737613
 
 """
 from typing import Sequence, Union
@@ -12,7 +12,7 @@ from alembic import op
 import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
-revision: str = 'ca53eca52cc3'
+revision: str = '7f880e46deb2'
 down_revision: Union[str, Sequence[str], None] = '704767f28f2b'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
@@ -23,7 +23,7 @@ def upgrade() -> None:
     op.create_table('billing_events',
     sa.Column('org_id', sqlmodel.sql.sqltypes.AutoString(length=36), nullable=False),
     sa.Column('workspace_id', sqlmodel.sql.sqltypes.AutoString(length=36), nullable=False),
-    sa.Column('id', sqlmodel.sql.sqltypes.AutoString(), nullable=False),
+    sa.Column('id', sqlmodel.sql.sqltypes.AutoString(length=36), nullable=False),
     sa.Column('user_id', sqlmodel.sql.sqltypes.AutoString(length=36), nullable=False),
     sa.Column('conversation_id', sqlmodel.sql.sqltypes.AutoString(length=36), nullable=False),
     sa.Column('event_type', sqlmodel.sql.sqltypes.AutoString(length=32), nullable=False),
@@ -43,7 +43,7 @@ def upgrade() -> None:
     op.create_index(op.f('ix_billing_events_user_id'), 'billing_events', ['user_id'], unique=False)
     op.create_index(op.f('ix_billing_events_workspace_id'), 'billing_events', ['workspace_id'], unique=False)
     op.create_table('billing_llm_events',
-    sa.Column('id', sqlmodel.sql.sqltypes.AutoString(), nullable=False),
+    sa.Column('id', sqlmodel.sql.sqltypes.AutoString(length=36), nullable=False),
     sa.Column('billing_event_id', sqlmodel.sql.sqltypes.AutoString(length=36), nullable=False),
     sa.Column('provider', sqlmodel.sql.sqltypes.AutoString(length=64), nullable=False),
     sa.Column('model_id', sqlmodel.sql.sqltypes.AutoString(length=128), nullable=False),
@@ -62,14 +62,14 @@ def upgrade() -> None:
     sa.PrimaryKeyConstraint('id')
     )
     op.create_index(op.f('ix_billing_llm_events_billing_event_id'), 'billing_llm_events', ['billing_event_id'], unique=False)
-    op.create_index('ix_billing_llm_parent', 'billing_llm_events', ['parent_run_id'], unique=False)
-    op.create_index('ix_billing_llm_provider_model', 'billing_llm_events', ['provider', 'model_id'], unique=False)
+    op.create_index('ix_billing_llm_events_parent_run_id', 'billing_llm_events', ['parent_run_id'], unique=False)
+    op.create_index('ix_billing_llm_events_provider_model', 'billing_llm_events', ['provider', 'model_id'], unique=False)
 
 
 def downgrade() -> None:
     """Downgrade schema."""
-    op.drop_index('ix_billing_llm_provider_model', table_name='billing_llm_events')
-    op.drop_index('ix_billing_llm_parent', table_name='billing_llm_events')
+    op.drop_index('ix_billing_llm_events_provider_model', table_name='billing_llm_events')
+    op.drop_index('ix_billing_llm_events_parent_run_id', table_name='billing_llm_events')
     op.drop_index(op.f('ix_billing_llm_events_billing_event_id'), table_name='billing_llm_events')
     op.drop_table('billing_llm_events')
     op.drop_index(op.f('ix_billing_events_workspace_id'), table_name='billing_events')
