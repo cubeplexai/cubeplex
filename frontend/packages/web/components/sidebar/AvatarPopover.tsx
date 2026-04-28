@@ -3,18 +3,21 @@
 import { useRouter } from 'next/navigation'
 import { useTheme } from 'next-themes'
 import { useEffect, useState } from 'react'
+import { useTranslations } from 'next-intl'
 import {
   createApiClient,
   logoutUser,
+  updateLanguage,
   useAuthStore,
   useConversationStore,
   useWorkspaceStore,
 } from '@cubebox/core'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { useAdminAccess } from '@/hooks/useAdminAccess'
-import { LogOut, Moon, Shield, Sun } from 'lucide-react'
+import { Languages, LogOut, Moon, Shield, Sun } from 'lucide-react'
 
 export function AvatarPopover() {
+  const t = useTranslations('avatar')
   const router = useRouter()
   const user = useAuthStore((s) => s.user)
   const { isAdmin } = useAdminAccess()
@@ -39,6 +42,17 @@ export function AvatarPopover() {
     useWorkspaceStore.getState().reset()
     router.replace('/login')
   }
+
+  const onLanguageChange = async (lang: 'en' | 'zh') => {
+    if (user) {
+      const client = createApiClient('')
+      await updateLanguage(client, lang)
+    }
+    document.cookie = `NEXT_LOCALE=${lang}; path=/; SameSite=Lax`
+    router.refresh()
+  }
+
+  const currentLocale = user?.language ?? 'en'
 
   return (
     <Popover>
@@ -70,7 +84,7 @@ export function AvatarPopover() {
             className="flex items-center gap-2 px-2 py-1.5 rounded-sm text-[12.5px] hover:bg-accent/60 transition-colors"
           >
             <Shield className="size-3.5 text-muted-foreground" />
-            <span>管理后台</span>
+            <span>{t('adminPanel')}</span>
           </a>
         )}
 
@@ -85,9 +99,38 @@ export function AvatarPopover() {
             ) : (
               <Moon className="size-3.5 text-muted-foreground" />
             )}
-            <span>{theme === 'dark' ? '浅色主题' : '深色主题'}</span>
+            <span>{theme === 'dark' ? t('lightTheme') : t('darkTheme')}</span>
           </button>
         )}
+
+        <div className="flex items-center gap-2 px-2 py-1.5 rounded-sm text-[12.5px]">
+          <Languages className="size-3.5 text-muted-foreground shrink-0" />
+          <span className="text-muted-foreground">{t('language')}</span>
+          <div className="ml-auto flex gap-1">
+            <button
+              type="button"
+              onClick={() => onLanguageChange('zh')}
+              className={`px-1.5 py-0.5 rounded text-[11px] transition-colors ${
+                currentLocale === 'zh'
+                  ? 'bg-primary text-primary-foreground'
+                  : 'hover:bg-accent/60 text-muted-foreground'
+              }`}
+            >
+              中文
+            </button>
+            <button
+              type="button"
+              onClick={() => onLanguageChange('en')}
+              className={`px-1.5 py-0.5 rounded text-[11px] transition-colors ${
+                currentLocale === 'en'
+                  ? 'bg-primary text-primary-foreground'
+                  : 'hover:bg-accent/60 text-muted-foreground'
+              }`}
+            >
+              EN
+            </button>
+          </div>
+        </div>
 
         <button
           type="button"
@@ -96,7 +139,7 @@ export function AvatarPopover() {
           className="w-full flex items-center gap-2 px-2 py-1.5 rounded-sm text-[12.5px] hover:bg-destructive/10 text-destructive transition-colors"
         >
           <LogOut className="size-3.5" />
-          <span>退出</span>
+          <span>{t('signOut')}</span>
         </button>
       </PopoverContent>
     </Popover>
