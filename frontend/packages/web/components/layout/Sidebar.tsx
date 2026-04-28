@@ -2,6 +2,7 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
+import { useTranslations } from 'next-intl'
 import { createApiClient, useConversationStore } from '@cubebox/core'
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -9,7 +10,10 @@ import { AvatarPopover } from '@/components/sidebar/AvatarPopover'
 import { WorkspacesSection } from '@/components/sidebar/WorkspacesSection'
 import { Box, Plus, Trash2 } from 'lucide-react'
 
-function formatRelativeTime(dateStr: string): string {
+function formatRelativeTime(
+  dateStr: string,
+  t: ReturnType<typeof useTranslations<'time'>>,
+): string {
   const date = new Date(dateStr)
   const now = new Date()
   const diffMs = now.getTime() - date.getTime()
@@ -17,13 +21,15 @@ function formatRelativeTime(dateStr: string): string {
   const diffHours = Math.floor(diffMs / 3600000)
   const diffDays = Math.floor(diffMs / 86400000)
 
-  if (diffMins < 1) return '刚刚'
-  if (diffMins < 60) return `${diffMins}m 前`
-  if (diffHours < 24) return `${diffHours}h 前`
-  return `${diffDays}d 前`
+  if (diffMins < 1) return t('justNow')
+  if (diffMins < 60) return t('minutesAgo', { n: diffMins })
+  if (diffHours < 24) return t('hoursAgo', { n: diffHours })
+  return t('daysAgo', { n: diffDays })
 }
 
 export function Sidebar() {
+  const tSidebar = useTranslations('sidebar')
+  const tTime = useTranslations('time')
   const { conversations, activeId, remove, setActive } = useConversationStore()
   const pathname = usePathname()
 
@@ -59,7 +65,7 @@ export function Sidebar() {
         <Link href={newChatHref}>
           <Button variant="outline" size="sm" className="w-full h-7 text-xs gap-1.5">
             <Plus className="size-3" />
-            新建对话
+            {tSidebar('newChat')}
           </Button>
         </Link>
       </div>
@@ -70,7 +76,7 @@ export function Sidebar() {
       {/* Recent conversations */}
       <div className="px-2 pt-2 pb-1">
         <p className="px-2 text-[10px] font-medium uppercase tracking-widest text-muted-foreground/60">
-          最近会话
+          {tSidebar('recentChats')}
         </p>
       </div>
       <ScrollArea className="flex-1 px-2">
@@ -91,10 +97,10 @@ export function Sidebar() {
                 )}
                 <div className="flex-1 min-w-0 pl-1">
                   <div className="truncate text-[12.5px] font-medium leading-none mb-1">
-                    {convo.title || '新对话'}
+                    {convo.title || tSidebar('untitledChat')}
                   </div>
                   <div className="text-[10px] text-muted-foreground/50">
-                    {formatRelativeTime(convo.created_at)}
+                    {formatRelativeTime(convo.created_at, tTime)}
                   </div>
                 </div>
                 <button

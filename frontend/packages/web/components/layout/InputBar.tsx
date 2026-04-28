@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useRef } from 'react'
+import { useTranslations } from 'next-intl'
 import { useMessageStore, createApiClient } from '@cubebox/core'
 import { ArrowUp, Loader2 } from 'lucide-react'
 import { useWorkspaceContext } from '@/hooks/useWorkspaceContext'
@@ -12,6 +13,7 @@ interface InputBarProps {
 }
 
 export function InputBar({ conversationId, onSubmit, isLoading = false }: InputBarProps) {
+  const t = useTranslations('input')
   const [content, setContent] = useState('')
   const send = useMessageStore((s) => s.send)
   const { workspaceId } = useWorkspaceContext()
@@ -70,7 +72,7 @@ export function InputBar({ conversationId, onSubmit, isLoading = false }: InputB
           value={content}
           onChange={handleChange}
           onKeyDown={handleKeyDown}
-          placeholder="有什么可以帮你的？"
+          placeholder={t('placeholder')}
           rows={1}
           className="flex-1 bg-transparent resize-none outline-none text-sm text-foreground placeholder:text-muted-foreground/40 leading-relaxed min-h-[22px] max-h-[180px] overflow-y-auto py-0.5"
           disabled={isSubmitting}
@@ -88,9 +90,7 @@ export function InputBar({ conversationId, onSubmit, isLoading = false }: InputB
           )}
         </button>
       </div>
-      <p className="text-center mt-1 text-[10px] text-muted-foreground/35">
-        Enter 发送 / Shift+Enter 换行
-      </p>
+      <p className="text-center mt-1 text-[10px] text-muted-foreground/35">{t('hint')}</p>
     </div>
   )
 }

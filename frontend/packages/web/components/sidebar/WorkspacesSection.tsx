@@ -3,6 +3,7 @@
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { useMemo, useState } from 'react'
+import { useTranslations } from 'next-intl'
 import { useWorkspaceStore } from '@cubebox/core'
 import { Folder, Plus } from 'lucide-react'
 import { cn } from '@/lib/utils'
@@ -10,6 +11,7 @@ import { cn } from '@/lib/utils'
 const DEFAULT_VISIBLE = 5
 
 export function WorkspacesSection() {
+  const t = useTranslations('workspace')
   const workspaces = useWorkspaceStore((s) => s.workspaces)
   const pathname = usePathname()
   const [showAll, setShowAll] = useState(false)
@@ -35,7 +37,7 @@ export function WorkspacesSection() {
   return (
     <div className="px-2 py-2">
       <p className="px-2 mb-1 text-[10px] font-medium uppercase tracking-widest text-muted-foreground/60">
-        工作区
+        {t('title')}
       </p>
       <ul className="space-y-0.5">
         {visible.map((ws) => {
@@ -72,7 +74,7 @@ export function WorkspacesSection() {
               onClick={() => setShowAll(true)}
               className="w-full text-left px-2 py-1 text-[11px] text-muted-foreground/60 hover:text-foreground transition-colors"
             >
-              更多 ({hidden}) ↓
+              {t('showMore', { count: hidden })}
             </button>
           </li>
         )}
@@ -82,7 +84,7 @@ export function WorkspacesSection() {
             className="flex items-center gap-2 rounded-md px-2 py-1.5 text-[12.5px] text-muted-foreground/70 hover:text-foreground hover:bg-accent/60 transition-colors"
           >
             <Plus className="size-3.5 shrink-0" />
-            <span>新建工作区</span>
+            <span>{t('new')}</span>
           </Link>
         </li>
       </ul>
