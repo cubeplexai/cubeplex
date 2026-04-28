@@ -232,6 +232,93 @@ def write_worktree_env(
     env_file_path(worktree_root).write_text(content)
 
 
+# ----------------------------------------------------------- mysql + alembic
+
+def _mysql_creds_from_env() -> dict[str, str]:
+    """Read DB host/port/user/password from process env after .worktree.env load.
+
+    We re-read from os.environ because `init` already loaded .worktree.env
+    earlier in this run; we want CUBEBOX_DATABASE__HOST etc. that come from
+    backend/.env (the secrets file).
+    """
+    return {
+        "host": os.environ.get("CUBEBOX_DATABASE__HOST", "127.0.0.1"),
+        "port": os.environ.get("CUBEBOX_DATABASE__PORT", "3306"),
+        "user": os.environ.get("CUBEBOX_DATABASE__USER", "root"),
+        "password": os.environ.get("CUBEBOX_DATABASE__PASSWORD", ""),
+    }
+
+
+def _mysql_exec(sql: str) -> None:
+    """Run a single SQL statement via the `mysql` CLI."""
+    creds = _mysql_creds_from_env()
+    cmd = [
+        "mysql",
+        f"--host={creds['host']}",
+        f"--port={creds['port']}",
+        f"--user={creds['user']}",
+        f"--password={creds['password']}",
+        "-e",
+        sql,
+    ]
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"mysql command failed (exit {result.returncode}):\n"
+            f"  cmd: {' '.join(cmd[:-2])} -e <hidden>\n"
+            f"  stderr: {result.stderr}"
+        )
+
+
+def _create_schemas(slug: str) -> None:
+    dev = db_dev_schema(slug)
+    test = db_test_schema(slug)
+    _mysql_exec(f"CREATE DATABASE IF NOT EXISTS `{dev}` CHARACTER SET utf8mb4;")
+    _mysql_exec(f"CREATE DATABASE IF NOT EXISTS `{test}` CHARACTER SET utf8mb4;")
+    print(f"→ ensured MySQL schemas: {dev}, {test}")
+
+
+def _drop_schemas(slug: str) -> None:
+    dev = db_dev_schema(slug)
+    test = db_test_schema(slug)
+    _mysql_exec(f"DROP DATABASE IF EXISTS `{dev}`;")
+    _mysql_exec(f"DROP DATABASE IF EXISTS `{test}`;")
+    print(f"→ dropped MySQL schemas: {dev}, {test}")
+
+
+def _alembic_upgrade(worktree_path: Path) -> None:
+    """Run `alembic upgrade head` in the worktree's backend dir.
+
+    The subprocess inherits this process's os.environ, which already has
+    .worktree.env loaded — so alembic targets the worktree's dev schema.
+    """
+    backend = worktree_path / "backend"
+    print(f"→ running alembic upgrade head in {backend}")
+    result = subprocess.run(
+        ["uv", "run", "alembic", "upgrade", "head"],
+        cwd=backend,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"alembic upgrade head failed (exit {result.returncode}). "
+            "Schema is left as-is per design (no rollback)."
+        )
+
+
+def _load_dotenv_into_environ(path: Path) -> None:
+    """Minimal dotenv loader (stdlib only) — set keys not already present."""
+    if not path.exists():
+        return
+    for line in path.read_text().splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        os.environ.setdefault(key.strip(), value.strip())
+
+
 # --------------------------------------------------------------- subcommands
 
 import argparse
@@ -254,7 +341,6 @@ def cmd_init(args: argparse.Namespace) -> int:
 
     print(f"→ slug={slug} slot={offset} branch={info.branch}")
 
-    # 1. Copy backend secrets from main if missing
     _copy_if_missing(
         info.main_path / "backend" / ".env",
         info.path / "backend" / ".env",
@@ -264,12 +350,19 @@ def cmd_init(args: argparse.Namespace) -> int:
         info.path / "backend" / "config.development.local.yaml",
     )
 
-    # 2. Write .worktree.env BEFORE alembic so config picks up the new schema name
     write_worktree_env(info.path, slug, offset)
     print(f"→ wrote {env_file_path(info.path)}")
 
-    # 3. (MySQL + alembic added in next task)
-    # 4. Show summary
+    # Load .worktree.env into our own os.environ so alembic subprocess inherits
+    # the worktree's CUBEBOX_DATABASE__NAME. Backend's config.py will reload it
+    # again at import time inside the subprocess — same values, idempotent.
+    # Also load backend/.env for DB credentials (host/port/user/password).
+    _load_dotenv_into_environ(info.path / "backend" / ".env")
+    _load_dotenv_into_environ(env_file_path(info.path))
+
+    _create_schemas(slug)
+    _alembic_upgrade(info.path)
+
     return cmd_show(args)
 
 
