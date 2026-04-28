@@ -476,7 +476,93 @@ def cmd_destroy(args: argparse.Namespace) -> int:
 
 
 def cmd_doctor(args: argparse.Namespace) -> int:
-    raise NotImplementedError("cmd_doctor in later task")
+    info = current_worktree_info()
+    slug = slugify(info.branch)
+    issues: list[str] = []
+
+    # 1. .worktree.env exists
+    env_file = env_file_path(info.path)
+    if not env_file.exists():
+        issues.append(f"missing {env_file} — run `worktree-env init`")
+        # Print and bail; rest of checks need the env file
+        for issue in issues:
+            print(f"✗ {issue}", file=sys.stderr)
+        return 1
+    print(f"✓ {env_file} present")
+
+    # Load env so we can probe MySQL / Redis with current creds
+    _load_dotenv_into_environ(info.path / "backend" / ".env")
+    _load_dotenv_into_environ(env_file)
+
+    # 2. Registry entry consistent
+    registry = Registry.load(info.main_path / ".worktrees" / "registry.json")
+    entry = registry.entries.get(slug)
+    if entry is None:
+        issues.append(f"slug {slug} missing from registry")
+    elif Path(entry["path"]).resolve() != info.path:
+        issues.append(
+            f"registry path drift: registry={entry['path']} actual={info.path}"
+        )
+    else:
+        print(f"✓ registry entry slot={entry['offset']}")
+
+    # 3. MySQL schemas exist
+    try:
+        _mysql_exec(f"USE `{db_dev_schema(slug)}`;")
+        print(f"✓ MySQL schema {db_dev_schema(slug)} reachable")
+    except RuntimeError as e:
+        issues.append(f"dev schema unusable: {e}")
+    try:
+        _mysql_exec(f"USE `{db_test_schema(slug)}`;")
+        print(f"✓ MySQL schema {db_test_schema(slug)} reachable")
+    except RuntimeError as e:
+        issues.append(f"test schema unusable: {e}")
+
+    # 4. Redis reachable
+    redis_url = os.environ.get("CUBEBOX_REDIS__URL")
+    if redis_url:
+        result = subprocess.run(
+            ["redis-cli", "-u", redis_url, "PING"],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode == 0 and result.stdout.strip() == "PONG":
+            print("✓ Redis reachable")
+        else:
+            issues.append(f"Redis not reachable: {result.stderr or result.stdout}")
+    else:
+        issues.append("CUBEBOX_REDIS__URL not set")
+
+    # 5. Alembic head matches latest migration
+    backend = info.path / "backend"
+    cur = subprocess.run(
+        ["uv", "run", "alembic", "current"],
+        cwd=backend,
+        capture_output=True,
+        text=True,
+    )
+    head = subprocess.run(
+        ["uv", "run", "alembic", "heads"],
+        cwd=backend,
+        capture_output=True,
+        text=True,
+    )
+    if cur.returncode == 0 and head.returncode == 0:
+        cur_rev = (cur.stdout.strip().split() or [""])[0]
+        head_rev = (head.stdout.strip().split() or [""])[0]
+        if cur_rev and cur_rev == head_rev:
+            print(f"✓ alembic at head ({head_rev})")
+        else:
+            issues.append(f"alembic not at head: current={cur_rev} head={head_rev}")
+    else:
+        issues.append("alembic check failed")
+
+    if issues:
+        print()
+        for issue in issues:
+            print(f"✗ {issue}", file=sys.stderr)
+        return 1
+    return 0
 
 
 def cmd_clean_orphans(args: argparse.Namespace) -> int:
