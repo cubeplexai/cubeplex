@@ -19,6 +19,8 @@ export interface ApiClient {
   baseUrl: string
   workspaceId: string | null
   setWorkspaceId(id: string | null): void
+  locale: string | null
+  setLocale(locale: string | null): void
   /** Rewrite a path by injecting the workspace segment when applicable. */
   resolvePath(path: string): string
   get(path: string): Promise<Response>
@@ -52,6 +54,7 @@ function readCookie(name: string): string {
 
 export function createApiClient(baseUrl: string): ApiClient {
   let workspaceId: string | null = null
+  let locale: string | null = null
   const unauthorizedHandlers = new Set<() => void>()
 
   const resolvePath = (path: string): string =>
@@ -59,6 +62,7 @@ export function createApiClient(baseUrl: string): ApiClient {
 
   const buildHeaders = (method: string, base: Record<string, string>) => {
     const headers: Record<string, string> = { ...base }
+    if (locale) headers['Accept-Language'] = locale
     if (method !== 'GET') {
       const csrf = readCookie('cubebox_csrf')
       if (csrf) headers['X-CSRF-Token'] = csrf
@@ -86,6 +90,12 @@ export function createApiClient(baseUrl: string): ApiClient {
     },
     setWorkspaceId(id) {
       workspaceId = id
+    },
+    get locale() {
+      return locale
+    },
+    setLocale(l) {
+      locale = l
     },
     resolvePath,
     get(path) {
