@@ -11,6 +11,7 @@ from cubebox.models import (  # noqa: F401
     AgentConfig,
     Artifact,
     ArtifactVersion,
+    Attachment,
     Conversation,
     InviteToken,
     Membership,
