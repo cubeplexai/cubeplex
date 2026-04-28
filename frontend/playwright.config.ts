@@ -1,3 +1,11 @@
+// Worktree-specific overrides — see next.config.ts for rationale.
+import dotenv from 'dotenv'
+import path from 'path'
+dotenv.config({
+  path: path.resolve(__dirname, '../.worktree.env'),
+  override: false,
+})
+
 import { defineConfig, devices } from '@playwright/test'
 
 const BASE_URL = process.env.BASE_URL ?? 'http://localhost:3000'
