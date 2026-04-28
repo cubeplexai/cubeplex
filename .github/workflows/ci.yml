@@ -234,6 +234,11 @@ jobs:
         working-directory: frontend
         run: pnpm test:e2e
 
+      - name: Cleanup leftover test sandboxes
+        if: always()
+        working-directory: backend
+        run: uv run python scripts/cleanup_sandboxes.py
+
       - name: Upload backend log on failure
         if: failure()
         uses: actions/upload-artifact@v4
