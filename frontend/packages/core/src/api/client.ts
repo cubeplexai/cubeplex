@@ -54,7 +54,7 @@ function readCookie(name: string): string {
 
 export function createApiClient(baseUrl: string): ApiClient {
   let workspaceId: string | null = null
-  let locale: string | null = null
+  let locale: string | null = readCookie('NEXT_LOCALE') || null
   const unauthorizedHandlers = new Set<() => void>()
 
   const resolvePath = (path: string): string =>
