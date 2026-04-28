@@ -154,6 +154,7 @@ exclude_lines = [
 [dependency-groups]
 dev = [
     "aiosqlite>=0.20",
+    "babel>=2.18.0",
     "fakeredis[lua]>=2.35.1",
     "types-pyyaml>=6.0.12.20260408",
 ]

@@ -171,3 +171,31 @@ async def test_patch_me_rejects_invalid_language(unauthenticated_memory_client):
         headers={"X-CSRF-Token": csrf},
     )
     assert resp.status_code == 422  # Pydantic Literal validation
+
+
+@pytest.mark.asyncio
+async def test_login_error_is_localized_zh(
+    unauthenticated_memory_client,
+) -> None:
+    """Login error is localized to Chinese when Accept-Language is zh."""
+    resp = await unauthenticated_memory_client.post(
+        "/api/v1/auth/login",
+        data={"username": "nobody@example.com", "password": "wrong"},
+        headers={"Accept-Language": "zh-CN,zh;q=0.9"},
+    )
+    assert resp.status_code == 400
+    assert resp.json()["detail"] == "邮箱或密码错误"
+
+
+@pytest.mark.asyncio
+async def test_login_error_is_localized_en(
+    unauthenticated_memory_client,
+) -> None:
+    """Login error is in English when Accept-Language is en."""
+    resp = await unauthenticated_memory_client.post(
+        "/api/v1/auth/login",
+        data={"username": "nobody@example.com", "password": "wrong"},
+        headers={"Accept-Language": "en-US,en;q=0.9"},
+    )
+    assert resp.status_code == 400
+    assert resp.json()["detail"] == "Invalid email or password"
