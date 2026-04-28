@@ -115,6 +115,25 @@ def create_cubebox_agent(
         )
         tools = [*tools, load_skill_tool]
 
+    # view_images — multimodal image-viewing tool, bound per-run to org/workspace scope.
+    # Only registered when org_id + workspace_id are available (always true in production
+    # runs; may be absent in unit tests that call this factory directly without a request
+    # context).
+    if org_id is not None and workspace_id is not None:
+        from cubebox.llm.capabilities import LLMCapabilities
+        from cubebox.llm.config import LLMConfig
+        from cubebox.objectstore import get_objectstore_client
+        from cubebox.tools.builtin.view_images import make_view_images_tool
+
+        _llm_cfg = LLMConfig(**_config.llm)
+        view_images_tool = make_view_images_tool(
+            org_id=org_id,
+            workspace_id=workspace_id,
+            objectstore=get_objectstore_client(),
+            capabilities=LLMCapabilities(_llm_cfg),
+        )
+        tools = [*tools, view_images_tool]
+
     middleware.append(TodoListMiddleware())
     middleware.append(
         SubAgentMiddleware(
