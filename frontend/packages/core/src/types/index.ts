@@ -1,4 +1,5 @@
 export type * from './artifact'
+export type * from './attachment'
 export type * from './citation'
 export type * from './conversation'
 export type * from './message'

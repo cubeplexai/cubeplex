@@ -1,4 +1,5 @@
 export { createApiClient, toApiError, type ApiClient } from './client'
+export * from './attachments'
 export * from './auth'
 export * from './workspaces'
 export * from './conversations'
