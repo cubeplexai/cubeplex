@@ -56,10 +56,13 @@ def _parse_date_range(
     to_date: str | None,
 ) -> tuple[datetime, datetime]:
     today = date.today()
-    since_d = (
-        date(today.year, today.month, 1) if from_date is None else date.fromisoformat(from_date)
-    )
-    until_d = today if to_date is None else date.fromisoformat(to_date)
+    try:
+        since_d = (
+            date(today.year, today.month, 1) if from_date is None else date.fromisoformat(from_date)
+        )
+        until_d = today if to_date is None else date.fromisoformat(to_date)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid date: {exc}") from exc
     since = datetime(since_d.year, since_d.month, since_d.day, tzinfo=UTC)
     until = datetime(until_d.year, until_d.month, until_d.day, 23, 59, 59, tzinfo=UTC)
     return since, until
