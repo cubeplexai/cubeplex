@@ -47,6 +47,7 @@
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "@vitest/ui": "^4.1.2",
+    "dotenv": "^17.4.2",
     "jsdom": "^29.0.1",
     "tailwindcss": "^4",
     "typescript": "^5",
