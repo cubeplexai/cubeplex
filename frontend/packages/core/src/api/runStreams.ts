@@ -59,8 +59,11 @@ export async function startMessageRun(
   client: ApiClient,
   conversationId: string,
   content: string,
+  attachmentIds?: string[],
 ): Promise<StartRunResponse> {
-  const res = await client.post(`/api/v1/conversations/${conversationId}/messages`, { content })
+  const body: { content: string; attachments?: string[] } = { content }
+  if (attachmentIds && attachmentIds.length) body.attachments = attachmentIds
+  const res = await client.post(`/api/v1/conversations/${conversationId}/messages`, body)
   if (!res.ok) throw await toApiError(res)
   return res.json() as Promise<StartRunResponse>
 }
