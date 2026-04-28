@@ -1,11 +1,8 @@
 import type { NextConfig } from 'next'
+import createNextIntlPlugin from 'next-intl/plugin'
 
-// CSP for /admin/* routes. The security-critical directive here is
-// `frame-src 'self'` — it prevents the plugin-manifest iframe from being
-// redirected to an arbitrary URL. `default-src` includes 'unsafe-inline'
-// and 'unsafe-eval' to accommodate Next.js dev mode (React Refresh inlines
-// scripts; HMR uses eval). Production CSP tightening (nonce-based
-// script-src, dropping unsafe-eval) is tracked in M12 per backlog.
+const withNextIntl = createNextIntlPlugin('./i18n/request.ts')
+
 const ADMIN_CSP = "frame-src 'self'; default-src 'self' 'unsafe-inline' 'unsafe-eval' data: blob:"
 
 const nextConfig: NextConfig = {
@@ -25,9 +22,6 @@ const nextConfig: NextConfig = {
     return {
       beforeFiles: [],
       afterFiles: [],
-      // fallback: checked AFTER all filesystem routes (including dynamic route
-      // handlers like app/api/v1/conversations/[id]/messages/route.ts).
-      // This ensures our SSE streaming route handler takes precedence.
       fallback: [
         {
           source: '/api/:path*',
@@ -38,4 +32,4 @@ const nextConfig: NextConfig = {
   },
 }
 
-export default nextConfig
+export default withNextIntl(nextConfig)
