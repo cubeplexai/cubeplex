@@ -1,7 +1,7 @@
 """Unit tests for CostMiddleware."""
 
 import asyncio
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from langchain_core.messages import AIMessage
@@ -38,23 +38,29 @@ def _make_llm(provider: str = "openai", model_id: str = "gpt-4o-mini") -> MagicM
     return llm
 
 
+def _make_middleware(**kwargs) -> CostMiddleware:
+    defaults = {
+        "org_id": "org-1",
+        "workspace_id": "ws-1",
+        "user_id": "user-1",
+        "conversation_id": "conv-1",
+    }
+    return CostMiddleware(**{**defaults, **kwargs})
+
+
 async def test_success_path_writes_billing_row() -> None:
     written: list[tuple] = []
 
-    class FakeRepo:
-        org_id = "org-1"
+    mock_repo = MagicMock()
+    mock_repo.insert_llm_event = AsyncMock(side_effect=lambda be, le: written.append((be, le)))
 
-        async def insert_llm_event(self, be, le):
-            written.append((be, le))
+    mock_session = AsyncMock()
+    mock_session.__aenter__ = AsyncMock(return_value=mock_session)
+    mock_session.__aexit__ = AsyncMock(return_value=False)
 
-    middleware = CostMiddleware(
-        repo=FakeRepo(),
-        org_id="org-1",
-        workspace_id="ws-1",
-        user_id="user-1",
-        conversation_id="conv-1",
-    )
+    mock_repo_class = MagicMock(return_value=mock_repo)
 
+    middleware = _make_middleware()
     request = MagicMock()
     request.model = _make_llm()
     response = MagicMock()
@@ -63,8 +69,12 @@ async def test_success_path_writes_billing_row() -> None:
     async def handler(req):
         return response
 
-    result = await middleware.awrap_model_call(request, handler)
-    await asyncio.sleep(0.05)  # let fire-and-forget task complete
+    with (
+        patch("cubebox.middleware.cost.async_session_maker", return_value=mock_session),
+        patch("cubebox.middleware.cost.BillingRepository", mock_repo_class),
+    ):
+        result = await middleware.awrap_model_call(request, handler)
+        await asyncio.sleep(0.05)
 
     assert result is response
     assert len(written) == 1
@@ -80,29 +90,30 @@ async def test_success_path_writes_billing_row() -> None:
 async def test_error_path_writes_error_row_and_reraises() -> None:
     written: list[tuple] = []
 
-    class FakeRepo:
-        org_id = "org-1"
+    mock_repo = MagicMock()
+    mock_repo.insert_llm_event = AsyncMock(side_effect=lambda be, le: written.append((be, le)))
 
-        async def insert_llm_event(self, be, le):
-            written.append((be, le))
+    mock_session = AsyncMock()
+    mock_session.__aenter__ = AsyncMock(return_value=mock_session)
+    mock_session.__aexit__ = AsyncMock(return_value=False)
 
-    middleware = CostMiddleware(
-        repo=FakeRepo(),
-        org_id="org-1",
-        workspace_id="ws-1",
-        user_id="user-1",
-        conversation_id="conv-1",
-    )
+    mock_repo_class = MagicMock(return_value=mock_repo)
+
+    middleware = _make_middleware()
     request = MagicMock()
     request.model = _make_llm()
 
     async def handler(req):
         raise ValueError("LLM failed")
 
-    with pytest.raises(ValueError, match="LLM failed"):
-        await middleware.awrap_model_call(request, handler)
+    with (
+        patch("cubebox.middleware.cost.async_session_maker", return_value=mock_session),
+        patch("cubebox.middleware.cost.BillingRepository", mock_repo_class),
+    ):
+        with pytest.raises(ValueError, match="LLM failed"):
+            await middleware.awrap_model_call(request, handler)
+        await asyncio.sleep(0.05)
 
-    await asyncio.sleep(0.05)
     assert len(written) == 1
     be, le = written[0]
     assert be.status == "error"
@@ -113,19 +124,16 @@ async def test_error_path_writes_error_row_and_reraises() -> None:
 async def test_cost_calculation_uses_snapshot_price() -> None:
     written: list[tuple] = []
 
-    class FakeRepo:
-        org_id = "org-1"
+    mock_repo = MagicMock()
+    mock_repo.insert_llm_event = AsyncMock(side_effect=lambda be, le: written.append((be, le)))
 
-        async def insert_llm_event(self, be, le):
-            written.append((be, le))
+    mock_session = AsyncMock()
+    mock_session.__aenter__ = AsyncMock(return_value=mock_session)
+    mock_session.__aexit__ = AsyncMock(return_value=False)
 
-    middleware = CostMiddleware(
-        repo=FakeRepo(),
-        org_id="org-1",
-        workspace_id="ws-1",
-        user_id="user-1",
-        conversation_id="conv-1",
-    )
+    mock_repo_class = MagicMock(return_value=mock_repo)
+
+    middleware = _make_middleware()
     llm = _make_llm()
     llm._cubebox_model_cost = _make_model_cost(input=0.15, output=0.60)
 
@@ -137,8 +145,12 @@ async def test_cost_calculation_uses_snapshot_price() -> None:
     async def handler(req):
         return response
 
-    await middleware.awrap_model_call(request, handler)
-    await asyncio.sleep(0.05)
+    with (
+        patch("cubebox.middleware.cost.async_session_maker", return_value=mock_session),
+        patch("cubebox.middleware.cost.BillingRepository", mock_repo_class),
+    ):
+        await middleware.awrap_model_call(request, handler)
+        await asyncio.sleep(0.05)
 
     _be, le = written[0]
     # 1M input tokens × $0.15/1M = $0.15 = 150_000 micro
