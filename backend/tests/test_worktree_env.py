@@ -41,3 +41,38 @@ class TestSlugify:
 
     def test_main_passthrough(self, we):
         assert we.slugify("main") == "main"
+
+
+class TestRegistry:
+    def test_load_missing_returns_empty(self, we, tmp_path):
+        path = tmp_path / "registry.json"
+        reg = we.Registry.load(path)
+        assert reg.entries == {}
+
+    def test_save_then_load_roundtrip(self, we, tmp_path):
+        path = tmp_path / "registry.json"
+        reg = we.Registry.load(path)
+        reg.entries["feat-foo"] = {
+            "offset": 7,
+            "branch": "feat/foo",
+            "path": "/x/y",
+            "created_at": "2026-04-28T00:00:00Z",
+        }
+        reg.save()
+        again = we.Registry.load(path)
+        assert again.entries == reg.entries
+
+    def test_save_is_atomic(self, we, tmp_path):
+        path = tmp_path / "registry.json"
+        reg = we.Registry.load(path)
+        reg.entries["a"] = {"offset": 1, "branch": "a", "path": "/p", "created_at": "t"}
+        reg.save()
+        # No leftover .tmp file
+        assert not (tmp_path / "registry.json.tmp").exists()
+        assert path.exists()
+
+    def test_load_corrupt_raises(self, we, tmp_path):
+        path = tmp_path / "registry.json"
+        path.write_text("not json")
+        with pytest.raises(ValueError):
+            we.Registry.load(path)

@@ -19,3 +19,50 @@ def slugify(name: str) -> str:
     lowered = name.lower()
     replaced = _SLUG_PUNCT.sub("-", lowered)
     return replaced.strip("-")
+
+
+# ---------------------------------------------------------------- registry
+
+import json
+import os
+import sys
+import types
+from dataclasses import dataclass, field
+from pathlib import Path
+
+# When loaded via SourceFileLoader the module is not in sys.modules, which
+# causes Python 3.13 dataclasses to fail resolving string annotations.
+if __name__ not in sys.modules:
+    _self_mod = types.ModuleType(__name__)
+    _self_mod.__dict__.update(globals())
+    sys.modules[__name__] = _self_mod
+
+
+@dataclass
+class Registry:
+    """Per-main-repo allocation registry.
+
+    Stored at <main_repo>/.worktrees/registry.json. Maps slug -> entry dict
+    with keys: offset, branch, path, created_at.
+    """
+
+    path: Path
+    entries: dict[str, dict] = field(default_factory=dict)
+
+    @classmethod
+    def load(cls, path: Path) -> "Registry":
+        if not path.exists():
+            return cls(path=path, entries={})
+        try:
+            data = json.loads(path.read_text())
+        except json.JSONDecodeError as e:
+            raise ValueError(f"registry at {path} is not valid JSON: {e}") from e
+        if not isinstance(data, dict):
+            raise ValueError(f"registry at {path} must be an object, got {type(data).__name__}")
+        return cls(path=path, entries=data)
+
+    def save(self) -> None:
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = self.path.with_suffix(self.path.suffix + ".tmp")
+        tmp.write_text(json.dumps(self.entries, indent=2, sort_keys=True) + "\n")
+        os.replace(tmp, self.path)
