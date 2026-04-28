@@ -1,6 +1,8 @@
 """E2E tests for billing — assert billing rows are written on real LLM calls."""
 
 import asyncio
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 
 import httpx
 import pytest
@@ -16,11 +18,16 @@ pytestmark = pytest.mark.e2e
 _DEFAULT_WS = "default-ws"
 
 
-async def _make_session() -> AsyncSession:
+@asynccontextmanager
+async def _db_session() -> AsyncIterator[AsyncSession]:
     """Create a direct AsyncSession to the test DB (NullPool, no connection sharing)."""
-    engine = create_async_engine(_build_database_url(), poolclass=NullPool)
-    maker = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-    return maker()
+    _engine = create_async_engine(_build_database_url(), poolclass=NullPool)
+    maker = async_sessionmaker(_engine, class_=AsyncSession, expire_on_commit=False)
+    try:
+        async with maker() as session:
+            yield session
+    finally:
+        await _engine.dispose()
 
 
 async def _count_billing_rows(session: AsyncSession, conversation_id: str) -> int:
@@ -61,7 +68,7 @@ async def test_send_message_creates_billing_event(
     # Give fire-and-forget write a moment to complete
     await asyncio.sleep(0.5)
 
-    async with await _make_session() as session:
+    async with _db_session() as session:
         count = await _count_billing_rows(session, conv_id)
         assert count >= 1, "Expected at least one billing row after LLM call"
 
