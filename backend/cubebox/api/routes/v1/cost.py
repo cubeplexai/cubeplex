@@ -64,7 +64,7 @@ def _parse_date_range(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=f"Invalid date: {exc}") from exc
     since = datetime(since_d.year, since_d.month, since_d.day, tzinfo=UTC)
-    until = datetime(until_d.year, until_d.month, until_d.day, 23, 59, 59, tzinfo=UTC)
+    until = datetime(until_d.year, until_d.month, until_d.day, 23, 59, 59, 999999, tzinfo=UTC)
     return since, until
 
 
@@ -83,9 +83,9 @@ async def get_cost_summary(
     by_model = await repo.get_org_spend(since=since, until=until, group_by="model")
     by_day = await repo.get_org_spend(since=since, until=until, group_by="day")
 
-    total_cost = sum(r["cost_amount_micro"] for r in by_workspace)
-    total_calls = sum(r["call_count"] for r in by_workspace)
     currency = by_workspace[0]["currency"] if by_workspace else "USD"
+    total_cost = sum(r["cost_amount_micro"] for r in by_workspace if r["currency"] == currency)
+    total_calls = sum(r["call_count"] for r in by_workspace)
 
     return CostSummaryResponse(
         from_date=since.date(),
