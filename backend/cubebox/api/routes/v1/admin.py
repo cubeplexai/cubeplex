@@ -12,6 +12,7 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from cubebox.api.routes.v1.cost import router as cost_router
 from cubebox.auth.dependencies import current_active_user, resolve_current_org_id
 from cubebox.db import get_session
 from cubebox.models import Role, User
@@ -41,3 +42,6 @@ async def get_admin_me(
         org_id=org_id,
         org_name=org.name if org else "",
     )
+
+
+router.include_router(cost_router)
