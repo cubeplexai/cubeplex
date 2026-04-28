@@ -256,3 +256,87 @@ def register_exception_handlers(app: FastAPI) -> None:
         api_exception_handler,  # type: ignore[arg-type]
     )
     app.add_exception_handler(Exception, generic_exception_handler)
+
+
+class AttachmentTooLargeError(APIException):
+    """413 — uploaded file exceeds max_file_bytes."""
+
+    def __init__(self, size_bytes: int, max_bytes: int) -> None:
+        super().__init__(
+            error_code="FILE_TOO_LARGE",
+            message="Uploaded file is too large.",
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            details=f"size={size_bytes} bytes, max={max_bytes} bytes",
+        )
+
+
+class AttachmentMimeRejectedError(APIException):
+    """400 — MIME type not in allowed_mime_types."""
+
+    def __init__(self, mime: str) -> None:
+        super().__init__(
+            error_code="INVALID_MIME_TYPE",
+            message="File type is not allowed.",
+            status_code=status.HTTP_400_BAD_REQUEST,
+            details=f"mime={mime!r}",
+        )
+
+
+class AttachmentQuotaExceededError(APIException):
+    """409 — conversation total would exceed max_per_conversation_bytes."""
+
+    def __init__(self, *, current: int, incoming: int, limit: int) -> None:
+        super().__init__(
+            error_code="QUOTA_EXCEEDED",
+            message="Conversation attachment quota exceeded.",
+            status_code=status.HTTP_409_CONFLICT,
+            details=f"current={current} incoming={incoming} limit={limit} bytes",
+        )
+
+
+class AttachmentInvalidImageError(APIException):
+    """400 — file claims to be image but PIL cannot decode."""
+
+    def __init__(self, reason: str) -> None:
+        super().__init__(
+            error_code="INVALID_IMAGE",
+            message="Image file is invalid or unprocessable.",
+            status_code=status.HTTP_400_BAD_REQUEST,
+            details=reason,
+        )
+
+
+class AttachmentAlreadyAttachedError(APIException):
+    """409 — cannot delete an attachment that has been referenced by a sent message."""
+
+    def __init__(self, attachment_id: str) -> None:
+        super().__init__(
+            error_code="ATTACHMENT_ALREADY_ATTACHED",
+            message="Attachment cannot be deleted after it has been sent in a message.",
+            status_code=status.HTTP_409_CONFLICT,
+            details=f"attachment_id={attachment_id}",
+        )
+
+
+class AttachmentReferenceInvalidError(APIException):
+    """400 — file_id does not exist, or does not belong to this conversation."""
+
+    def __init__(self, attachment_id: str) -> None:
+        super().__init__(
+            error_code="INVALID_ATTACHMENT_REFERENCE",
+            message="Attachment id does not belong to this conversation.",
+            status_code=status.HTTP_400_BAD_REQUEST,
+            details=f"attachment_id={attachment_id}",
+        )
+
+
+class AttachmentTooManyError(APIException):
+    """400 — more than max_per_message attachments referenced."""
+
+    def __init__(self, count: int, limit: int) -> None:
+        super().__init__(
+            error_code="TOO_MANY_ATTACHMENTS",
+            message="Too many attachments in one message.",
+            status_code=status.HTTP_400_BAD_REQUEST,
+            details=f"count={count} limit={limit}",
+        )
