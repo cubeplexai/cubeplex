@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { Box, Cpu, Globe, Plug, Puzzle, Sparkles } from 'lucide-react'
+import { Box, CircleDollarSign, Cpu, Globe, Plug, Puzzle, Sparkles } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { Separator } from '@/components/ui/separator'
 import { useAdminExtensions } from '@/hooks/useAdminExtensions'
@@ -20,6 +20,7 @@ const NATIVE_ITEMS: NavDef[] = [
   { href: '/admin/skills', label: '技能管理', icon: Sparkles },
   { href: '/admin/mcp', label: 'MCP 连接器', icon: Plug },
   { href: '/admin/sandbox', label: '沙盒', icon: Box },
+  { href: '/admin/cost', label: '成本', icon: CircleDollarSign },
 ]
 
 function NavItem({ href, label, icon: Icon, active }: NavDef & { active: boolean }) {
