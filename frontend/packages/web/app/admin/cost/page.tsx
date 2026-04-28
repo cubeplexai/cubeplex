@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
+import { useTranslations } from 'next-intl'
 import { buildExportUrl, createApiClient, fetchCostSummary, formatCostUsd } from '@cubebox/core'
 import type { CostSummaryResponse } from '@cubebox/core'
 import {
@@ -15,6 +16,7 @@ import { buttonVariants } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 
 export default function CostPage() {
+  const t = useTranslations('adminCost')
   const client = useMemo(() => createApiClient(''), [])
   const [summary, setSummary] = useState<CostSummaryResponse | null>(null)
   const [loading, setLoading] = useState(true)
@@ -30,7 +32,7 @@ export default function CostPage() {
       .finally(() => setLoading(false))
   }, [client])
 
-  if (loading) return <div className="p-6 text-sm text-muted-foreground">加载中…</div>
+  if (loading) return <div className="p-6 text-sm text-muted-foreground">{t('loading')}</div>
   if (error) return <div className="p-6 text-sm text-destructive">{error}</div>
   if (!summary) return null
 
@@ -42,7 +44,7 @@ export default function CostPage() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-xl font-semibold">成本概览</h1>
+          <h1 className="text-xl font-semibold">{t('heading')}</h1>
           <p className="text-xs text-muted-foreground mt-0.5">{dateRange}</p>
         </div>
         <a
@@ -50,18 +52,18 @@ export default function CostPage() {
           download
           className={cn(buttonVariants({ variant: 'outline', size: 'sm' }))}
         >
-          导出全 org CSV ↓
+          {t('exportOrgCsv')}
         </a>
       </div>
 
       {/* Summary cards */}
       <div className="grid grid-cols-2 gap-4 max-w-lg">
         <div className="rounded-lg border border-border bg-card p-4 space-y-1">
-          <p className="text-xs text-muted-foreground">总费用</p>
+          <p className="text-xs text-muted-foreground">{t('totalCost')}</p>
           <p className="text-lg font-semibold tabular-nums">{totalCost}</p>
         </div>
         <div className="rounded-lg border border-border bg-card p-4 space-y-1">
-          <p className="text-xs text-muted-foreground">总调用次数</p>
+          <p className="text-xs text-muted-foreground">{t('totalCalls')}</p>
           <p className="text-lg font-semibold tabular-nums">
             {summary.total_calls.toLocaleString()}
           </p>
@@ -70,16 +72,16 @@ export default function CostPage() {
 
       {/* By Workspace table */}
       <section className="space-y-2">
-        <h2 className="text-sm font-medium">按 Workspace</h2>
+        <h2 className="text-sm font-medium">{t('byWorkspace')}</h2>
         <div className="rounded-lg border border-border overflow-hidden">
           <Table>
             <TableHeader>
               <TableRow>
                 <TableHead>Workspace</TableHead>
-                <TableHead className="text-right">调用次数</TableHead>
-                <TableHead className="text-right">Input Tokens</TableHead>
-                <TableHead className="text-right">Output Tokens</TableHead>
-                <TableHead className="text-right">花费</TableHead>
+                <TableHead className="text-right">{t('callCount')}</TableHead>
+                <TableHead className="text-right">{t('inputTokens')}</TableHead>
+                <TableHead className="text-right">{t('outputTokens')}</TableHead>
+                <TableHead className="text-right">{t('cost')}</TableHead>
                 <TableHead className="w-10" />
               </TableRow>
             </TableHeader>
@@ -87,7 +89,7 @@ export default function CostPage() {
               {summary.by_workspace.length === 0 ? (
                 <TableRow>
                   <TableCell colSpan={6} className="text-center text-muted-foreground">
-                    本月暂无数据
+                    {t('noData')}
                   </TableCell>
                 </TableRow>
               ) : (
@@ -110,7 +112,7 @@ export default function CostPage() {
                       <a
                         href={buildExportUrl(row.bucket)}
                         download
-                        title="导出 CSV"
+                        title={t('exportCsv')}
                         className="text-muted-foreground hover:text-foreground text-xs underline underline-offset-2"
                       >
                         CSV
@@ -126,23 +128,23 @@ export default function CostPage() {
 
       {/* By Model table */}
       <section className="space-y-2">
-        <h2 className="text-sm font-medium">按 Model</h2>
+        <h2 className="text-sm font-medium">{t('byModel')}</h2>
         <div className="rounded-lg border border-border overflow-hidden">
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Provider / Model</TableHead>
-                <TableHead className="text-right">调用次数</TableHead>
-                <TableHead className="text-right">Input Tokens</TableHead>
-                <TableHead className="text-right">Output Tokens</TableHead>
-                <TableHead className="text-right">花费</TableHead>
+                <TableHead>{t('providerModel')}</TableHead>
+                <TableHead className="text-right">{t('callCount')}</TableHead>
+                <TableHead className="text-right">{t('inputTokens')}</TableHead>
+                <TableHead className="text-right">{t('outputTokens')}</TableHead>
+                <TableHead className="text-right">{t('cost')}</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {summary.by_model.length === 0 ? (
                 <TableRow>
                   <TableCell colSpan={5} className="text-center text-muted-foreground">
-                    本月暂无数据
+                    {t('noData')}
                   </TableCell>
                 </TableRow>
               ) : (

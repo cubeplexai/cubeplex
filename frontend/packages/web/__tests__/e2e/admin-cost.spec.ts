@@ -18,15 +18,19 @@ test.describe('Admin cost page', () => {
   test('cost page renders heading and tables', async ({ page }) => {
     await registerAs(page, uniqueEmail())
     await page.goto('/admin/cost')
-    await expect(page.getByRole('heading', { name: '成本概览' })).toBeVisible({ timeout: 10_000 })
-    await expect(page.getByText('按 Workspace')).toBeVisible()
-    await expect(page.getByText('按 Model')).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'Cost Overview' })).toBeVisible({
+      timeout: 10_000,
+    })
+    await expect(page.getByText('By Workspace')).toBeVisible()
+    await expect(page.getByText('By Model')).toBeVisible()
   })
 
   test('export CSV button returns csv content-type', async ({ page, request }) => {
     await registerAs(page, uniqueEmail())
     await page.goto('/admin/cost')
-    await expect(page.getByRole('heading', { name: '成本概览' })).toBeVisible({ timeout: 10_000 })
+    await expect(page.getByRole('heading', { name: 'Cost Overview' })).toBeVisible({
+      timeout: 10_000,
+    })
 
     // Get auth cookies from logged-in page
     const cookies = await page.context().cookies()
