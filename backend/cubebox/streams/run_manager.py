@@ -615,13 +615,14 @@ class RunManager:
                                         file_ids=attachments,
                                     )
                             except AttachmentHydrationError as exc:
-                                await self._append_error(
-                                    run_id,
-                                    conversation_id,
-                                    "Attachment hydration failed",
-                                    str(exc),
+                                # Hydration failure is non-fatal: the run continues
+                                # without files staged in the sandbox. The LLM still
+                                # receives the attachment hint text; the sandbox_path
+                                # references simply won't resolve to real files.
+                                logger.warning(
+                                    "Attachment hydration failed (run continues): {}", exc
                                 )
-                                return
+                                await emit_status("hydration_failed", detail=str(exc))
 
                         attachment_blocks = await _build_attachment_content_blocks(
                             org_id=ctx.org_id,
@@ -630,17 +631,19 @@ class RunManager:
                             attachment_ids=attachments,
                         )
 
-                    human_content: str | list[Any]
+                    from cubebox.agents.convert import render_attachments_hint
+
+                    plain_content: str
                     if attachment_blocks:
-                        human_content = [
-                            {"type": "text", "text": content},
-                            *attachment_blocks,
-                        ]
+                        plain_content = (content or "") + render_attachments_hint(attachment_blocks)
                     else:
-                        human_content = content
+                        plain_content = content
 
                     human_msg = HumanMessage(
-                        content=human_content,
+                        content=plain_content,
+                        additional_kwargs=(
+                            {"attachments_meta": attachment_blocks} if attachment_blocks else {}
+                        ),
                         response_metadata={"created_at": datetime.now(UTC).isoformat()},
                     )
 

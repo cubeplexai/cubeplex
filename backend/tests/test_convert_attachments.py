@@ -68,6 +68,26 @@ def test_convert_to_api_messages_legacy_string_content() -> None:
     assert out[0].get("attachments", []) == []
 
 
+def test_convert_to_api_messages_reads_additional_kwargs_attachments_meta() -> None:
+    """New Strategy-1 shape: plain string content + additional_kwargs.attachments_meta."""
+    block = _file_attachment()
+    msg = HumanMessage(
+        content="look at this",
+        additional_kwargs={"attachments_meta": [block]},
+    )
+    out = convert_to_api_messages([msg])
+    assert out[0]["role"] == "user"
+    assert out[0]["content"] == "look at this"
+    atts = out[0]["attachments"]
+    assert isinstance(atts, list)
+    assert len(atts) == 1
+    assert atts[0]["id"] == "01HXY"
+    assert atts[0]["filename"] == "chart.png"
+    assert atts[0]["kind"] == "image"
+    assert atts[0]["thumbnail_url"]
+    assert atts[0]["download_url"]
+
+
 def test_convert_to_lc_messages_appends_attachments_hint() -> None:
     from cubebox.agents.convert import convert_to_lc_messages
 

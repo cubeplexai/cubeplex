@@ -170,6 +170,7 @@ def convert_to_api_messages(lc_messages: list[BaseMessage]) -> list[dict[str, An
             attachments: list[dict[str, object]] = []
             raw = msg.content
             if isinstance(raw, list):
+                # Legacy list-content shape: [{type:"text",...}, {type:"file_attachment",...}]
                 for block in raw:
                     if not isinstance(block, dict):
                         continue
@@ -180,6 +181,11 @@ def convert_to_api_messages(lc_messages: list[BaseMessage]) -> list[dict[str, An
                         attachments.append(_attachment_to_api_block(block))
             else:
                 text_parts.append(str(raw))
+                # New shape: plain string content + attachments_meta in additional_kwargs
+                meta_blocks = (msg.additional_kwargs or {}).get("attachments_meta") or []
+                for block in meta_blocks:
+                    if isinstance(block, dict):
+                        attachments.append(_attachment_to_api_block(block))
             result.append(
                 {
                     "id": getattr(msg, "id", None) or str(uuid.uuid4()),
