@@ -15,6 +15,7 @@ from cubebox.auth.dependencies import current_active_user
 from cubebox.auth.jwt import auth_backend
 from cubebox.auth.users import UserManager, fastapi_users, get_user_manager
 from cubebox.db import get_session
+from cubebox.i18n import get_locale, get_translator
 from cubebox.models import User
 
 
@@ -35,17 +36,20 @@ async def register(
     request: Request,
     body: Annotated[UserCreate, Body()],
     user_manager: Annotated[UserManager, Depends(get_user_manager)],
+    locale: Annotated[str, Depends(get_locale)],
 ) -> dict[str, str]:
+    _t = get_translator(locale)
     try:
         user = await user_manager.create(body, safe=True, request=request)
     except UserAlreadyExists:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail="REGISTER_USER_ALREADY_EXISTS"
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=_t("register_user_already_exists"),
         ) from None
-    except InvalidPasswordException as exc:
+    except InvalidPasswordException:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail={"code": "REGISTER_INVALID_PASSWORD", "reason": exc.reason},
+            detail=_t("register_invalid_password"),
         ) from None
     default_ws = getattr(user, "_default_workspace_id", None)
     return {
@@ -62,13 +66,18 @@ async def login(
     credentials: Annotated[OAuth2PasswordRequestForm, Depends()],
     user_manager: Annotated[UserManager, Depends(get_user_manager)],
     strategy: Annotated[Strategy[User, str], Depends(auth_backend.get_strategy)],
+    locale: Annotated[str, Depends(get_locale)],
 ) -> Response:
+    _t = get_translator(locale)
     try:
         user = await user_manager.authenticate(credentials)
     except UserNotExists:
         user = None
     if user is None or not user.is_active:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="LOGIN_BAD_CREDENTIALS")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=_t("login_bad_credentials"),
+        )
     return await auth_backend.login(strategy, user)
 
 
