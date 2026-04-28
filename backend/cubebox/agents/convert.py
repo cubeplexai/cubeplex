@@ -7,6 +7,64 @@ from typing import Any
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
 
 
+def _format_size(n: int) -> str:
+    if n < 1024:
+        return f"{n}B"
+    if n < 1024 * 1024:
+        return f"{n / 1024:.1f}KB"
+    return f"{n / (1024 * 1024):.1f}MB"
+
+
+def render_attachments_hint(blocks: list[dict[str, object]]) -> str:
+    """Render file_attachment blocks as a [Attachments] text section."""
+    if not blocks:
+        return ""
+    lines = ["", "[Attachments]"]
+    for b in blocks:
+        kind = b.get("kind")
+        filename = b.get("filename", "(unnamed)")
+        size_raw = b.get("size_bytes", 0)
+        size = int(size_raw) if isinstance(size_raw, (int, float)) else 0
+        path = b.get("sandbox_path", "")
+        if kind == "image":
+            w = b.get("width")
+            h = b.get("height")
+            lines.append(
+                f"- {filename} (image, {w}x{h}, {_format_size(size)})\n"
+                f"  path: {path}\n"
+                f"  hint: call view_images(paths=[...]) to inspect"
+            )
+        elif kind == "document":
+            lines.append(
+                f"- {filename} (document, {_format_size(size)})\n"
+                f"  path: {path}\n"
+                f"  hint: call file_read(path) to inspect"
+            )
+        else:
+            lines.append(f"- {filename} ({_format_size(size)})\n  path: {path}")
+    return "\n".join(lines)
+
+
+def _attachment_to_api_block(block: dict[str, object]) -> dict[str, object]:
+    """Render a stored file_attachment block as a hydrated API DTO.
+
+    URLs are RELATIVE to the conversation route. The frontend resolves them
+    via `client.resolvePath` after prefixing with workspace + conversation.
+    """
+    file_id = str(block.get("file_id", ""))
+    base = f"./attachments/{file_id}"
+    return {
+        "id": file_id,
+        "filename": block.get("filename"),
+        "kind": block.get("kind"),
+        "size_bytes": block.get("size_bytes"),
+        "width": block.get("width"),
+        "height": block.get("height"),
+        "thumbnail_url": f"{base}/thumbnail",
+        "download_url": f"{base}/content",
+    }
+
+
 def _unwrap_mcp_content(content: Any) -> str:
     """Extract text from MCP content blocks format.
 
@@ -108,11 +166,26 @@ def convert_to_api_messages(lc_messages: list[BaseMessage]) -> list[dict[str, An
     for msg in lc_messages:
         if isinstance(msg, HumanMessage):
             ts = _get_timestamp(msg)
+            text_parts: list[str] = []
+            attachments: list[dict[str, object]] = []
+            raw = msg.content
+            if isinstance(raw, list):
+                for block in raw:
+                    if not isinstance(block, dict):
+                        continue
+                    t = block.get("type")
+                    if t == "text":
+                        text_parts.append(str(block.get("text", "")))
+                    elif t == "file_attachment":
+                        attachments.append(_attachment_to_api_block(block))
+            else:
+                text_parts.append(str(raw))
             result.append(
                 {
                     "id": getattr(msg, "id", None) or str(uuid.uuid4()),
                     "role": "user",
-                    "content": msg.content if isinstance(msg.content, str) else str(msg.content),
+                    "content": "\n".join(text_parts),
+                    "attachments": attachments,
                     "tool_calls": None,
                     "reasoning": None,
                     "name": None,
