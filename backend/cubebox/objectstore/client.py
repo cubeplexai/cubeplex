@@ -82,6 +82,12 @@ class ObjectStoreClient:
 
         logger.debug("Uploaded {} ({} bytes)", key, len(data))
 
+    async def delete_file(self, key: str) -> None:
+        """Delete an object. No-op when key already absent."""
+        async with self._client_ctx() as s3:
+            await s3.delete_object(Bucket=self._bucket, Key=key)
+        logger.debug("Deleted {}", key)
+
     async def download_file(self, key: str) -> tuple[bytes, str]:
         """Download an object and return ``(data, content_type)``."""
         async with self._client_ctx() as s3:
