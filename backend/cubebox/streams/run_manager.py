@@ -499,6 +499,7 @@ class RunManager:
                 conversation_id=conversation_id,
                 org_id=ctx.org_id,
                 workspace_id=ctx.workspace_id,
+                user_id=ctx.user_id,
                 skills=ctx.skills,
                 checkpointer=checkpointer,
                 citation_configs=all_citation_configs,

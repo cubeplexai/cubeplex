@@ -30,6 +30,8 @@ def create_cubebox_agent(
     conversation_id: str | None = None,
     org_id: str | None = None,
     workspace_id: str | None = None,
+    user_id: str | None = None,
+    billing_repo: Any | None = None,
     skills: list[SkillSpec] | None = None,
     subagents: list[SubAgent] | None = None,
     checkpointer: Checkpointer | None = None,
@@ -50,6 +52,9 @@ def create_cubebox_agent(
             (needed by ArtifactMiddleware for scoped DB access).
         workspace_id: Required when both sandbox and conversation_id are provided
             (needed by ArtifactMiddleware for scoped DB access).
+        user_id: If provided along with conversation_id, CostMiddleware is added.
+        billing_repo: Unused — reserved for API compatibility; CostMiddleware manages
+            its own DB sessions internally.
         skills: If provided, SkillsMiddleware is added.
         subagents: If provided, SubAgentMiddleware is added.
         checkpointer: LangGraph checkpointer for conversation persistence.
@@ -103,6 +108,18 @@ def create_cubebox_agent(
             inherited_middleware=inherited_subagent_middleware,
         )
     )
+
+    # Mount CostMiddleware last in the chain so it wraps all model calls
+    if user_id is not None and conversation_id is not None:
+        from cubebox.middleware.cost import CostMiddleware
+
+        cost_mw = CostMiddleware(
+            org_id=org_id or "",
+            workspace_id=workspace_id or "",
+            user_id=user_id,
+            conversation_id=conversation_id,
+        )
+        middleware.append(cost_mw)
 
     logger.info(
         "Creating cubebox agent: {} tools, {} middleware",
