@@ -109,13 +109,20 @@ def create_cubebox_agent(
         )
     )
 
-    # Mount CostMiddleware last in the chain so it wraps all model calls
-    if user_id is not None and conversation_id is not None:
+    # Mount CostMiddleware last in the chain so it wraps all model calls.
+    # All four billing dimensions must be present; if any is None, skip silently
+    # (callers in test contexts may not provide all params).
+    if (
+        user_id is not None
+        and conversation_id is not None
+        and org_id is not None
+        and workspace_id is not None
+    ):
         from cubebox.middleware.cost import CostMiddleware
 
         cost_mw = CostMiddleware(
-            org_id=org_id or "",
-            workspace_id=workspace_id or "",
+            org_id=org_id,
+            workspace_id=workspace_id,
             user_id=user_id,
             conversation_id=conversation_id,
         )
