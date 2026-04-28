@@ -1,7 +1,9 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import { FileText, Download } from 'lucide-react'
+import { createApiClient } from '@cubebox/core'
+import { useWorkspaceContext } from '@/hooks/useWorkspaceContext'
 import { ImageLightbox } from './ImageLightbox'
 
 export interface MessageAttachmentDto {
@@ -17,6 +19,7 @@ export interface MessageAttachmentDto {
 
 interface Props {
   attachments: MessageAttachmentDto[]
+  conversationId: string
 }
 
 function formatSize(n: number): string {
@@ -25,13 +28,36 @@ function formatSize(n: number): string {
   return `${(n / (1024 * 1024)).toFixed(1)}MB`
 }
 
-export function MessageAttachments({ attachments }: Props) {
+export function MessageAttachments({ attachments, conversationId }: Props) {
+  const { workspaceId } = useWorkspaceContext()
   const [openSrc, setOpenSrc] = useState<{ src: string; alt: string } | null>(null)
-  if (!attachments?.length) return null
+
+  const resolved = useMemo(() => {
+    const client = createApiClient('')
+    if (workspaceId) client.setWorkspaceId(workspaceId)
+    const baseApi = `/api/v1/conversations/${conversationId}/attachments`
+    const fix = (url: string | null | undefined): string => {
+      if (!url) return ''
+      // Backend emits e.g. "./attachments/{id}/thumbnail" — replace the relative
+      // prefix with the API path; the client will inject /ws/{wsId}/ on resolve.
+      if (url.startsWith('./attachments/')) {
+        const tail = url.slice('./attachments/'.length)
+        return client.resolvePath(`${baseApi}/${tail}`)
+      }
+      return url
+    }
+    return attachments.map((a) => ({
+      ...a,
+      thumbnail_url: a.thumbnail_url ? fix(a.thumbnail_url) : null,
+      download_url: fix(a.download_url),
+    }))
+  }, [attachments, conversationId, workspaceId])
+
+  if (!resolved.length) return null
 
   return (
     <div className="mt-2 flex flex-wrap gap-2" data-testid="message-attachments">
-      {attachments.map((a) => {
+      {resolved.map((a) => {
         if (a.kind === 'image' && a.thumbnail_url) {
           return (
             <button
