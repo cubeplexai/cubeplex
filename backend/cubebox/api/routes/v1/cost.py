@@ -1,5 +1,7 @@
 """Admin cost/billing endpoints. All routes require org-admin access."""
 
+import csv
+import io
 from collections.abc import AsyncGenerator
 from datetime import UTC, date, datetime
 from typing import Annotated
@@ -12,9 +14,27 @@ from cubebox.api.schemas.billing import CostAggregateRow, CostSummaryResponse
 from cubebox.auth.dependencies import current_active_user, resolve_current_org_id
 from cubebox.db import get_session
 from cubebox.models import Role, User
-from cubebox.repositories import BillingRepository, MembershipRepository
+from cubebox.repositories import BillingRepository, MembershipRepository, WorkspaceRepository
 
 router = APIRouter(prefix="/cost", tags=["cost"])
+
+_EXPORT_FIELDS: list[str] = [
+    "started_at",
+    "workspace_id",
+    "user_id",
+    "conversation_id",
+    "provider",
+    "model_id",
+    "input_tokens",
+    "output_tokens",
+    "cache_read_tokens",
+    "cache_write_tokens",
+    "cost_amount",
+    "currency",
+    "status",
+    "subagent_depth",
+    "duration_ms",
+]
 
 
 async def _require_org_admin(
@@ -86,6 +106,11 @@ async def get_workspace_cost(
     group_by: str = Query(default="day"),
 ) -> list[CostAggregateRow]:
     _, org_id = auth
+    # Verify workspace belongs to this org
+    ws_repo = WorkspaceRepository(session)
+    ws = await ws_repo.get(ws_id)
+    if ws is None or ws.org_id != org_id:
+        raise HTTPException(status_code=404, detail="Workspace not found")
     since, until = _parse_date_range(from_date, to_date)
     repo = BillingRepository(session, org_id=org_id)
     rows = await repo.get_workspace_spend(
@@ -108,28 +133,16 @@ async def export_org_csv(
     since, until = _parse_date_range(from_date, to_date)
     repo = BillingRepository(session, org_id=org_id)
 
-    _EXPORT_FIELDS = [
-        "started_at",
-        "workspace_id",
-        "user_id",
-        "conversation_id",
-        "provider",
-        "model_id",
-        "input_tokens",
-        "output_tokens",
-        "cache_read_tokens",
-        "cache_write_tokens",
-        "cost_amount",
-        "currency",
-        "status",
-        "subagent_depth",
-        "duration_ms",
-    ]
-
     async def _generate() -> AsyncGenerator[str, None]:
-        yield ",".join(_EXPORT_FIELDS) + "\n"
+        buf = io.StringIO()
+        writer = csv.writer(buf)
+        writer.writerow(_EXPORT_FIELDS)
+        yield buf.getvalue()
         async for row in repo.stream_events_for_export(since=since, until=until):
-            yield ",".join(str(row[k]) for k in _EXPORT_FIELDS) + "\n"
+            buf = io.StringIO()
+            writer = csv.writer(buf)
+            writer.writerow([row[k] for k in _EXPORT_FIELDS])
+            yield buf.getvalue()
 
     filename = f"cost_{since.strftime('%Y-%m')}_{org_id[:8]}.csv"
     return StreamingResponse(
@@ -148,33 +161,26 @@ async def export_workspace_csv(
     to_date: str | None = Query(default=None),
 ) -> StreamingResponse:
     _, org_id = auth
+    # Verify workspace belongs to this org
+    ws_repo = WorkspaceRepository(session)
+    ws = await ws_repo.get(ws_id)
+    if ws is None or ws.org_id != org_id:
+        raise HTTPException(status_code=404, detail="Workspace not found")
     since, until = _parse_date_range(from_date, to_date)
     repo = BillingRepository(session, org_id=org_id)
 
-    _EXPORT_FIELDS = [
-        "started_at",
-        "workspace_id",
-        "user_id",
-        "conversation_id",
-        "provider",
-        "model_id",
-        "input_tokens",
-        "output_tokens",
-        "cache_read_tokens",
-        "cache_write_tokens",
-        "cost_amount",
-        "currency",
-        "status",
-        "subagent_depth",
-        "duration_ms",
-    ]
-
     async def _generate() -> AsyncGenerator[str, None]:
-        yield ",".join(_EXPORT_FIELDS) + "\n"
+        buf = io.StringIO()
+        writer = csv.writer(buf)
+        writer.writerow(_EXPORT_FIELDS)
+        yield buf.getvalue()
         async for row in repo.stream_events_for_export(
             since=since, until=until, workspace_id=ws_id
         ):
-            yield ",".join(str(row[k]) for k in _EXPORT_FIELDS) + "\n"
+            buf = io.StringIO()
+            writer = csv.writer(buf)
+            writer.writerow([row[k] for k in _EXPORT_FIELDS])
+            yield buf.getvalue()
 
     filename = f"cost_{since.strftime('%Y-%m')}_{ws_id[:8]}.csv"
     return StreamingResponse(
