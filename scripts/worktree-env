@@ -286,6 +286,23 @@ def _drop_schemas(slug: str) -> None:
     print(f"→ dropped MySQL schemas: {dev}, {test}")
 
 
+def _uv_sync_all_extras(worktree_path: Path) -> None:
+    """Install backend deps including test/dev extras so pytest works in this worktree.
+
+    Without this, `uv run alembic` only pulls runtime + alembic deps, leaving
+    pytest/pytest-asyncio/etc. missing — the worktree can run the dev server
+    but not the test suite. We sync the same way `make dev-install` does.
+    """
+    backend = worktree_path / "backend"
+    print(f"→ syncing backend deps (uv sync --all-extras) in {backend}")
+    result = subprocess.run(
+        ["uv", "sync", "--all-extras"],
+        cwd=backend,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(f"uv sync --all-extras failed (exit {result.returncode}).")
+
+
 def _alembic_upgrade(worktree_path: Path) -> None:
     """Run `alembic upgrade head` in the worktree's backend dir.
 
@@ -408,6 +425,7 @@ def cmd_init(args: argparse.Namespace) -> int:
     _load_dotenv_into_environ(info.path / "backend" / ".env")
     _load_dotenv_into_environ(env_file_path(info.path))
 
+    _uv_sync_all_extras(info.path)
     _create_schemas(slug)
     _alembic_upgrade(info.path)
 
