@@ -11,6 +11,7 @@ import os
 from pathlib import Path
 
 import dynaconf
+from dotenv import load_dotenv as _load_worktree_dotenv
 
 # Get the backend directory (where config files are located)
 backend_dir = Path(__file__).parent.parent
@@ -22,6 +23,14 @@ settings_files = [
     str(backend_dir / f"config.{env}.yaml"),
     str(backend_dir / f"config.{env}.local.yaml"),
 ]
+
+# Load worktree-specific allocations (ports, DB schema, Redis prefix) from
+# .worktree.env at the worktree root, BEFORE dynaconf reads. override=False
+# means real shell exports still win. See
+# docs/superpowers/specs/2026-04-28-worktree-parallel-dev-isolation-design.md
+_worktree_env_path = backend_dir.parent / ".worktree.env"
+if _worktree_env_path.exists():
+    _load_worktree_dotenv(_worktree_env_path, override=False)
 
 config = dynaconf.Dynaconf(
     environments=True,
