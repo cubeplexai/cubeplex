@@ -66,3 +66,30 @@ def test_convert_to_api_messages_legacy_string_content() -> None:
     out = convert_to_api_messages([msg])
     assert out[0]["content"] == "plain text only"
     assert out[0].get("attachments", []) == []
+
+
+def test_convert_to_lc_messages_appends_attachments_hint() -> None:
+    from cubebox.agents.convert import convert_to_lc_messages
+
+    api_msgs = [
+        {
+            "role": "user",
+            "content": "look",
+            "attachments": [
+                {
+                    "id": "01HXY",
+                    "kind": "image",
+                    "filename": "chart.png",
+                    "sandbox_path": "/workspace/uploads/abc/01HXY/chart.png",
+                    "size_bytes": 100,
+                    "width": 800,
+                    "height": 600,
+                }
+            ],
+        }
+    ]
+    lc = convert_to_lc_messages(api_msgs)
+    assert isinstance(lc[0].content, str)
+    assert "look" in lc[0].content
+    assert "[Attachments]" in lc[0].content
+    assert "view_images" in lc[0].content
