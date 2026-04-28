@@ -32,7 +32,9 @@ export function useThemeInitializer() {
     if (initial !== theme) {
       toggle()
     }
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setMounted(true)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   return mounted

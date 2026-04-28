@@ -87,6 +87,7 @@ function ArtifactGalleryItem({
         border border-border/50 cursor-pointer hover:border-primary/30 transition-colors"
       onClick={onPreview}
     >
+      {/* eslint-disable-next-line react-hooks/static-components */}
       <Icon className="size-3.5 text-primary/70 shrink-0" />
       <span className="text-xs font-medium text-foreground truncate flex-1">{artifact.name}</span>
       {artifact.version > 1 && (

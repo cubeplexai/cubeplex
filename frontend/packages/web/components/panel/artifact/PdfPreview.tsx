@@ -25,12 +25,14 @@ pdfjs.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.mjs'
 interface PdfProxy {
   numPages: number
   getOutline(): Promise<PdfOutlineItem[] | null>
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   getDestination(id: string): Promise<any[] | null>
   getPageIndex(ref: unknown): Promise<number>
 }
 
 interface PdfOutlineItem {
   title: string
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   dest: string | any[] | null
   items: PdfOutlineItem[]
 }

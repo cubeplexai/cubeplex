@@ -10,11 +10,15 @@ import type { AgentStream } from '@cubebox/core'
  */
 function useStableRecord<T>(record: Record<string, T>): Record<string, T> {
   const prev = useRef(record)
+  // eslint-disable-next-line react-hooks/refs
   const prevKeys = Object.keys(prev.current)
   const nextKeys = Object.keys(record)
+  // eslint-disable-next-line react-hooks/refs
   if (prevKeys.length === nextKeys.length && nextKeys.every((k) => prev.current[k] === record[k])) {
+    // eslint-disable-next-line react-hooks/refs
     return prev.current
   }
+  // eslint-disable-next-line react-hooks/refs
   prev.current = record
   return record
 }

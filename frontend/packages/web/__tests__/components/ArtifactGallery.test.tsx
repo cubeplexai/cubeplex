@@ -1,5 +1,15 @@
 import { render, screen } from '@testing-library/react'
+import { NextIntlClientProvider } from 'next-intl'
+import en from '../../messages/en.json'
 import { ArtifactGallery } from '../../components/chat/ArtifactGallery'
+
+function renderWithIntl(ui: React.ReactElement) {
+  return render(
+    <NextIntlClientProvider locale="en" messages={en}>
+      {ui}
+    </NextIntlClientProvider>,
+  )
+}
 
 const CONVERSATION_ID = 'conv-1'
 
@@ -47,7 +57,7 @@ describe('ArtifactGallery', () => {
       isLoading: (conversationId) => conversationId === CONVERSATION_ID,
     }
 
-    render(<ArtifactGallery conversationId={CONVERSATION_ID} />)
+    renderWithIntl(<ArtifactGallery conversationId={CONVERSATION_ID} />)
 
     expect(screen.queryByText('Artifacts')).not.toBeInTheDocument()
   })
@@ -58,7 +68,7 @@ describe('ArtifactGallery', () => {
       isLoading: () => false,
     }
 
-    render(<ArtifactGallery conversationId={CONVERSATION_ID} />)
+    renderWithIntl(<ArtifactGallery conversationId={CONVERSATION_ID} />)
 
     expect(screen.getByText('Artifacts')).toBeInTheDocument()
     expect(screen.getByText('1')).toBeInTheDocument()
