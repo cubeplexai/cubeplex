@@ -66,3 +66,69 @@ class Registry:
         tmp = self.path.with_suffix(self.path.suffix + ".tmp")
         tmp.write_text(json.dumps(self.entries, indent=2, sort_keys=True) + "\n")
         os.replace(tmp, self.path)
+
+
+# -------------------------------------------------------------- allocation
+
+import hashlib
+from datetime import datetime, timezone
+
+SLOT_RANGE = 100  # offsets 0..99
+
+
+def _hash_slot(slug: str) -> int:
+    """Stable hash of slug into 0..SLOT_RANGE-1."""
+    digest = hashlib.sha1(slug.encode("utf-8")).hexdigest()
+    return int(digest[:8], 16) % SLOT_RANGE
+
+
+def allocate_offset(
+    slug: str,
+    registry: Registry,
+    is_main_worktree: bool,
+) -> int:
+    """Return offset for slug, allocating a new slot if needed.
+
+    - Main worktree always gets 0.
+    - Existing slug returns its existing offset (idempotent).
+    - New slug: hash to a starting slot, then linear-probe for the first
+      free slot. Slot 0 is reserved for main.
+    """
+    if is_main_worktree:
+        return 0
+
+    if slug in registry.entries:
+        return int(registry.entries[slug]["offset"])
+
+    used = {int(e["offset"]) for e in registry.entries.values()}
+    initial = _hash_slot(slug)
+    if initial == 0:
+        initial = 1  # never auto-pick reserved main slot
+
+    slot = initial
+    for _ in range(SLOT_RANGE):
+        if slot != 0 and slot not in used:
+            return slot
+        slot = (slot + 1) % SLOT_RANGE
+        if slot == 0:
+            slot = 1
+
+    raise RuntimeError(
+        "all 100 slots taken; run `worktree-env clean-orphans` to reclaim"
+    )
+
+
+def record_allocation(
+    registry: Registry,
+    slug: str,
+    branch: str,
+    offset: int,
+    worktree_path: Path,
+) -> None:
+    registry.entries[slug] = {
+        "offset": offset,
+        "branch": branch,
+        "path": str(worktree_path),
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    registry.save()
