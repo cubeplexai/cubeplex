@@ -238,7 +238,50 @@ import argparse
 
 
 def cmd_init(args: argparse.Namespace) -> int:
-    raise NotImplementedError("cmd_init in next task")
+    info = current_worktree_info()
+    slug = slugify(info.branch)
+
+    registry_path = info.main_path / ".worktrees" / "registry.json"
+    registry = Registry.load(registry_path)
+    offset = allocate_offset(slug=slug, registry=registry, is_main_worktree=info.is_main)
+    record_allocation(
+        registry=registry,
+        slug=slug,
+        branch=info.branch,
+        offset=offset,
+        worktree_path=info.path,
+    )
+
+    print(f"→ slug={slug} slot={offset} branch={info.branch}")
+
+    # 1. Copy backend secrets from main if missing
+    _copy_if_missing(
+        info.main_path / "backend" / ".env",
+        info.path / "backend" / ".env",
+    )
+    _copy_if_missing(
+        info.main_path / "backend" / "config.development.local.yaml",
+        info.path / "backend" / "config.development.local.yaml",
+    )
+
+    # 2. Write .worktree.env BEFORE alembic so config picks up the new schema name
+    write_worktree_env(info.path, slug, offset)
+    print(f"→ wrote {env_file_path(info.path)}")
+
+    # 3. (MySQL + alembic added in next task)
+    # 4. Show summary
+    return cmd_show(args)
+
+
+def _copy_if_missing(src: Path, dst: Path) -> None:
+    if dst.exists():
+        return
+    if not src.exists():
+        print(f"⚠ missing source {src}; skipping copy", file=sys.stderr)
+        return
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    dst.write_bytes(src.read_bytes())
+    print(f"→ copied {src.name} from main")
 
 
 def cmd_show(args: argparse.Namespace) -> int:
