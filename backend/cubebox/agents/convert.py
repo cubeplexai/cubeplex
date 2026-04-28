@@ -289,6 +289,49 @@ def convert_to_api_messages(lc_messages: list[BaseMessage]) -> list[dict[str, An
     return result
 
 
+def convert_to_lc_messages(api_messages: list[dict[str, Any]]) -> list[BaseMessage]:
+    """Convert a list of API wire-format messages to LangChain message types.
+
+    API role mapping -> LangChain type:
+      "user"      -> HumanMessage  (attachments rendered as [Attachments] hint)
+      "assistant" -> AIMessage
+      "tool"      -> ToolMessage
+    """
+    result: list[BaseMessage] = []
+    for msg in api_messages:
+        role = msg.get("role")
+        if role == "user":
+            text = msg.get("content", "") or ""
+            attachments_meta = msg.get("attachments") or []
+            if attachments_meta:
+                blocks: list[dict[str, object]] = [
+                    {
+                        "kind": a.get("kind"),
+                        "filename": a.get("filename"),
+                        "sandbox_path": a.get("sandbox_path"),
+                        "size_bytes": a.get("size_bytes"),
+                        "width": a.get("width"),
+                        "height": a.get("height"),
+                    }
+                    for a in attachments_meta
+                    if isinstance(a, dict)
+                ]
+                text = text + render_attachments_hint(blocks)
+            result.append(HumanMessage(content=text))
+        elif role == "assistant":
+            content = msg.get("content") or ""
+            result.append(AIMessage(content=content))
+        elif role == "tool":
+            result.append(
+                ToolMessage(
+                    content=msg.get("content") or "",
+                    tool_call_id=msg.get("tool_call_id") or "",
+                    name=msg.get("name") or "",
+                )
+            )
+    return result
+
+
 def _get_timestamp(msg: BaseMessage) -> str:
     ts = (msg.response_metadata or {}).get("created_at")
     return ts or datetime.now(UTC).isoformat()
