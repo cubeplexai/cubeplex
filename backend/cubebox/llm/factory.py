@@ -229,18 +229,24 @@ class LLMFactory:
                 not provider_config.base_url or "api.openai.com" in provider_config.base_url
             )
 
+            # Build the llm instance
             if is_official_openai:
                 # Official OpenAI API - use ChatOpenAI with Responses API for reasoning
                 if reasoning_config:
                     llm_kwargs["reasoning"] = reasoning_config
                 elif use_responses_api:
                     llm_kwargs["use_responses_api"] = True
+                llm = ChatOpenAI(**llm_kwargs)
+            else:
+                # Custom OpenAI-compatible endpoint - use ChatOpenAICompatible
+                # This supports reasoning_content extraction from Chat Completions API
+                llm = ChatOpenAICompatible(**llm_kwargs)
 
-                return ChatOpenAI(**llm_kwargs)
-
-            # Custom OpenAI-compatible endpoint - use ChatOpenAICompatible
-            # This supports reasoning_content extraction from Chat Completions API
-            return ChatOpenAICompatible(**llm_kwargs)
+            # Attach cubebox metadata for CostMiddleware to read
+            llm._cubebox_provider = provider_name  # type: ignore[attr-defined]
+            llm._cubebox_model_id = model_config.id  # type: ignore[attr-defined]
+            llm._cubebox_model_cost = model_config.cost  # type: ignore[attr-defined]
+            return llm
 
         if provider_config.api == "anthropic":
             # TODO: Implement Anthropic support
