@@ -181,12 +181,27 @@ async def delete_conversation(
         workspace_id=ctx.workspace_id,
         user_id=ctx.user.id,
     )
-    deleted = await repo.delete(conversation_id)
-    if not deleted:
+    if (await repo.get_by_id(conversation_id)) is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Conversation {conversation_id} not found",
         )
+
+    # Cascade-delete attachments first (best-effort; service swallows ObjectStore errors)
+    from cubebox.repositories import AttachmentRepository
+    from cubebox.services.attachments import AttachmentService
+
+    att_repo = AttachmentRepository(
+        session, org_id=ctx.org_id, workspace_id=ctx.workspace_id
+    )
+    await AttachmentService(repo=att_repo).delete_for_conversation(
+        conversation_id=conversation_id,
+    )
+
+    deleted = await repo.delete(conversation_id)
+    if not deleted:
+        # Race condition: someone else deleted it between get and delete; treat as success
+        pass
 
 
 class SendMessageRequest(BaseModel):
