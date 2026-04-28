@@ -191,9 +191,7 @@ async def delete_conversation(
     from cubebox.repositories import AttachmentRepository
     from cubebox.services.attachments import AttachmentService
 
-    att_repo = AttachmentRepository(
-        session, org_id=ctx.org_id, workspace_id=ctx.workspace_id
-    )
+    att_repo = AttachmentRepository(session, org_id=ctx.org_id, workspace_id=ctx.workspace_id)
     await AttachmentService(repo=att_repo).delete_for_conversation(
         conversation_id=conversation_id,
     )
