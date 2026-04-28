@@ -157,6 +157,9 @@ async def test_get_org_spend_groups_by_workspace(session: AsyncSession) -> None:
     assert len(rows) == 2
     workspaces = {r["bucket"] for r in rows}
     assert workspaces == {"ws-a", "ws-b"}
+    for r in rows:
+        assert r["cost_amount_micro"] == 500_000
+        assert r["call_count"] == 1
 
 
 async def test_stream_events_for_export_yields_all_rows(session: AsyncSession) -> None:
