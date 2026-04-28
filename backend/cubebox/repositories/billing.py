@@ -2,13 +2,9 @@
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator  # noqa: F401  (used in Task 3 aggregate queries)
-from datetime import UTC, datetime  # noqa: F401  (UTC used in Task 3)
-from typing import Any, Literal  # noqa: F401  (used in Task 3 aggregate queries)
+from datetime import datetime
 
-from sqlalchemy import func, select  # noqa: F401  (used in Task 3 aggregate queries)
 from sqlalchemy.ext.asyncio import AsyncSession
-from uuid_utils import uuid7  # noqa: F401  (used in Task 3 aggregate queries)
 
 from cubebox.models.billing import BillingEvent, LlmBillingEvent
 
