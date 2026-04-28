@@ -23,3 +23,4 @@ class User(SQLModel, table=True):
     is_superuser: bool = Field(default=False)
     is_verified: bool = Field(default=False)
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    language: str = Field(default="en", max_length=10)
