@@ -566,7 +566,76 @@ def cmd_doctor(args: argparse.Namespace) -> int:
 
 
 def cmd_clean_orphans(args: argparse.Namespace) -> int:
-    raise NotImplementedError("cmd_clean_orphans in later task")
+    info = current_worktree_info()
+
+    # 1. Find live worktree paths according to git
+    live_paths: set[Path] = set()
+    output = _git(["worktree", "list", "--porcelain"], cwd=info.main_path)
+    for line in output.splitlines():
+        if line.startswith("worktree "):
+            live_paths.add(Path(line.removeprefix("worktree ")).resolve())
+
+    # 2. Orphan registry entries
+    registry = Registry.load(info.main_path / ".worktrees" / "registry.json")
+    orphan_slugs: list[str] = []
+    for slug, entry in registry.entries.items():
+        entry_path = Path(entry["path"]).resolve()
+        if entry_path not in live_paths:
+            orphan_slugs.append(slug)
+
+    # 3. Orphan MySQL schemas (cubebox_* not referenced by any live entry)
+    referenced_dev = {db_dev_schema(s) for s in registry.entries if s not in orphan_slugs}
+    referenced_test = {db_test_schema(s) for s in registry.entries if s not in orphan_slugs}
+    referenced = referenced_dev | referenced_test | {"cubebox", "cubebox_test"}
+
+    # Load main's backend/.env for MySQL creds
+    _load_dotenv_into_environ(info.main_path / "backend" / ".env")
+
+    creds = _mysql_creds_from_env()
+    list_result = subprocess.run(
+        [
+            "mysql",
+            f"--host={creds['host']}",
+            f"--port={creds['port']}",
+            f"--user={creds['user']}",
+            f"--password={creds['password']}",
+            "--batch",
+            "--skip-column-names",
+            "-e",
+            "SHOW DATABASES LIKE 'cubebox_%';",
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    all_schemas = {s.strip() for s in list_result.stdout.splitlines() if s.strip()}
+    orphan_schemas = sorted(all_schemas - referenced)
+
+    if not orphan_slugs and not orphan_schemas:
+        print("No orphans found.")
+        return 0
+
+    print("The following orphans will be cleaned:")
+    for slug in orphan_slugs:
+        print(f"  registry: {slug} -> {registry.entries[slug]['path']}")
+    for schema in orphan_schemas:
+        print(f"  schema:   {schema}")
+    print()
+
+    answer = input("Proceed? [y/N] ").strip().lower()
+    if answer != "y":
+        print("Aborted.")
+        return 1
+
+    for slug in orphan_slugs:
+        del registry.entries[slug]
+    registry.save()
+
+    for schema in orphan_schemas:
+        _mysql_exec(f"DROP DATABASE IF EXISTS `{schema}`;")
+
+    print(f"→ pruned {len(orphan_slugs)} registry entries, dropped {len(orphan_schemas)} schemas")
+    return 0
 
 
 # --------------------------------------------------------------------- main
