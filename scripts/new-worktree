@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+# Create a new worktree branched from latest origin/main and run `worktree-env init`.
+#
+# Usage:  scripts/new-worktree <branch-name> [extra git worktree add args...]
+# Example: scripts/new-worktree feat/some-thing
+#
+# The branch is created from latest origin/main. Worktree path is
+# .worktrees/<branch-name>. Extra args are passed to `git worktree add`.
+
+set -euo pipefail
+
+if [[ $# -lt 1 ]]; then
+  echo "Usage: $0 <branch-name> [extra git worktree add args...]" >&2
+  exit 2
+fi
+
+BRANCH="$1"
+shift || true
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+WORKTREE_PATH=".worktrees/${BRANCH}"
+
+if [[ -e "${REPO_ROOT}/${WORKTREE_PATH}" ]]; then
+  echo "Path ${REPO_ROOT}/${WORKTREE_PATH} already exists." >&2
+  exit 1
+fi
+
+cd "${REPO_ROOT}"
+
+echo "→ fetching origin/main..."
+git fetch origin main
+
+echo "→ creating worktree at ${WORKTREE_PATH} from origin/main..."
+git worktree add "${WORKTREE_PATH}" -b "${BRANCH}" origin/main "$@"
+
+echo "→ running worktree-env init..."
+cd "${WORKTREE_PATH}"
+"${REPO_ROOT}/scripts/worktree-env" init
+
+echo
+echo "✓ worktree ready at ${REPO_ROOT}/${WORKTREE_PATH}"
+echo "  cd ${REPO_ROOT}/${WORKTREE_PATH}"
