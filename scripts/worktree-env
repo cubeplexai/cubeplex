@@ -132,3 +132,52 @@ def record_allocation(
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
     registry.save()
+
+
+# --------------------------------------------------------------- discovery
+
+import subprocess
+from dataclasses import dataclass
+
+
+@dataclass
+class WorktreeInfo:
+    path: Path        # absolute path to current worktree
+    main_path: Path   # absolute path to main repo
+    branch: str       # current branch name
+    is_main: bool
+
+
+def _git(args: list[str], cwd: Path | None = None) -> str:
+    result = subprocess.run(
+        ["git", *args],
+        cwd=cwd,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return result.stdout.strip()
+
+
+def find_main_repo(start_dir: Path | None = None) -> Path:
+    """Return the absolute path to the main repo (first entry of git worktree list)."""
+    cwd = start_dir or Path.cwd()
+    output = _git(["worktree", "list", "--porcelain"], cwd=cwd)
+    for line in output.splitlines():
+        if line.startswith("worktree "):
+            return Path(line.removeprefix("worktree ")).resolve()
+    raise RuntimeError(f"no worktrees found from {cwd}")
+
+
+def current_worktree_info(start_dir: Path | None = None) -> WorktreeInfo:
+    """Inspect the current working directory's worktree."""
+    cwd = (start_dir or Path.cwd()).resolve()
+    main = find_main_repo(cwd)
+    here = Path(_git(["rev-parse", "--show-toplevel"], cwd=cwd)).resolve()
+    branch = _git(["rev-parse", "--abbrev-ref", "HEAD"], cwd=cwd)
+    return WorktreeInfo(
+        path=here,
+        main_path=main,
+        branch=branch,
+        is_main=(here == main),
+    )
