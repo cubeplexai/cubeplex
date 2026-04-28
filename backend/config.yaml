@@ -248,6 +248,36 @@ default:
     admin_panel_extension:
       disabled: []
 
+  # Attachments Configuration (M7 file upload)
+  attachments:
+    max_file_bytes: 52428800
+    max_per_message: 10
+    max_per_conversation_bytes: 524288000
+    orphan_ttl_seconds: 3600
+    cleanup_interval_seconds: 300
+    allowed_mime_types:
+      - image/png
+      - image/jpeg
+      - image/webp
+      - image/gif
+      - application/pdf
+      - text/plain
+      - text/markdown
+      - text/csv
+      - application/vnd.openxmlformats-officedocument.wordprocessingml.document
+      - application/vnd.openxmlformats-officedocument.spreadsheetml.sheet
+      - application/json
+      - application/x-yaml
+    thumbnail:
+      max_long_edge: 256
+      format: webp
+      quality: 80
+    view_images:
+      max_long_edge: 1568
+      jpeg_quality: 85
+      max_decoded_long_edge: 16384
+      batch_max: 8
+
   # Graceful Restart and Lifecycle Configuration
   lifecycle:
     graceful_drain_timeout_seconds: 3600
