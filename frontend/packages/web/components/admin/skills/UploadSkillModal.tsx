@@ -1,6 +1,7 @@
 'use client'
 
 import { useRef, useState } from 'react'
+import { useTranslations } from 'next-intl'
 import { Dialog as DialogPrimitive } from '@base-ui/react/dialog'
 import { Upload, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -14,6 +15,7 @@ interface UploadSkillModalProps {
 }
 
 export function UploadSkillModal({ open, onOpenChange, onUploaded }: UploadSkillModalProps) {
+  const t = useTranslations('adminSkills')
   const inputRef = useRef<HTMLInputElement | null>(null)
   const [file, setFile] = useState<File | null>(null)
   const [busy, setBusy] = useState(false)
@@ -36,7 +38,7 @@ export function UploadSkillModal({ open, onOpenChange, onUploaded }: UploadSkill
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>): Promise<void> {
     e.preventDefault()
     if (!file) {
-      setError('请选择 .zip 文件')
+      setError(t('errorSelectZip'))
       return
     }
     setBusy(true)
@@ -53,7 +55,7 @@ export function UploadSkillModal({ open, onOpenChange, onUploaded }: UploadSkill
       })
       if (!res.ok) throw new Error(await readApiError(res))
       const data = (await res.json()) as { skill_id: string; version: string }
-      setSuccess(`上传成功：${data.skill_id}（v${data.version}）`)
+      setSuccess(t('uploadSuccess', { skillId: data.skill_id, version: data.version }))
       onUploaded()
       // Auto-close after a short pause so the toast is visible.
       setTimeout(() => {
@@ -81,10 +83,10 @@ export function UploadSkillModal({ open, onOpenChange, onUploaded }: UploadSkill
           <div className="flex items-start justify-between gap-3">
             <div>
               <DialogPrimitive.Title className="text-base font-semibold">
-                上传 skill
+                {t('uploadModalTitle')}
               </DialogPrimitive.Title>
               <DialogPrimitive.Description className="mt-0.5 text-xs text-muted-foreground">
-                上传一个包含 SKILL.md 的 .zip 包；上传后会自动安装到组织。
+                {t('uploadModalSubtitle')}
               </DialogPrimitive.Description>
             </div>
             <DialogPrimitive.Close
@@ -109,9 +111,9 @@ export function UploadSkillModal({ open, onOpenChange, onUploaded }: UploadSkill
               )}
             >
               <Upload className="size-5 text-muted-foreground" />
-              <span className="text-sm font-medium">{file ? file.name : '选择 .zip 文件'}</span>
+              <span className="text-sm font-medium">{file ? file.name : t('selectZipFile')}</span>
               <span className="text-[11px] text-muted-foreground">
-                {file ? `${(file.size / 1024).toFixed(1)} KB` : '最大 5 MB · SKILL.md 必须在根目录'}
+                {file ? `${(file.size / 1024).toFixed(1)} KB` : t('maxFileSize')}
               </span>
               <input
                 ref={inputRef}
@@ -147,7 +149,7 @@ export function UploadSkillModal({ open, onOpenChange, onUploaded }: UploadSkill
               <DialogPrimitive.Close
                 render={
                   <Button type="button" variant="ghost" size="sm" disabled={busy}>
-                    取消
+                    {t('cancel')}
                   </Button>
                 }
               />
@@ -157,7 +159,7 @@ export function UploadSkillModal({ open, onOpenChange, onUploaded }: UploadSkill
                 disabled={busy || !file}
                 data-testid="upload-skill-submit"
               >
-                {busy ? '上传中…' : '上传'}
+                {busy ? t('uploading') : t('upload')}
               </Button>
             </div>
           </form>

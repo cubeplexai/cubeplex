@@ -1,6 +1,7 @@
 'use client'
 
 import { useMemo, useState } from 'react'
+import { useTranslations } from 'next-intl'
 import dynamic from 'next/dynamic'
 import useSWR from 'swr'
 import ReactMarkdown from 'react-markdown'
@@ -58,6 +59,7 @@ function FilesTab({
   version: string
   files: SkillContent['files']
 }) {
+  const t = useTranslations('adminSkills')
   const [selected, setSelected] = useState<string | null>(null)
 
   const fileUrl = selected
@@ -68,7 +70,8 @@ function FilesTab({
     shouldRetryOnError: false,
   })
 
-  if (files.length === 0) return <p className="text-xs text-muted-foreground">该版本无附加文件。</p>
+  if (files.length === 0)
+    return <p className="text-xs text-muted-foreground">{t('noAdditionalFiles')}</p>
 
   return (
     <div className="grid min-h-[200px] grid-cols-[200px_1fr] gap-3 overflow-hidden rounded-lg border border-border/70">
@@ -92,10 +95,12 @@ function FilesTab({
 
       {/* Preview pane */}
       <div className="overflow-auto p-3">
-        {!selected && <p className="text-xs text-muted-foreground">点击左侧文件名预览内容。</p>}
-        {selected && fileLoading && <p className="text-xs text-muted-foreground">加载中…</p>}
+        {!selected && <p className="text-xs text-muted-foreground">{t('clickToPreview')}</p>}
+        {selected && fileLoading && (
+          <p className="text-xs text-muted-foreground">{t('previewLoading')}</p>
+        )}
         {selected && fileContent === '__BINARY__' && (
-          <p className="text-xs text-muted-foreground">无法预览：该文件为二进制文件。</p>
+          <p className="text-xs text-muted-foreground">{t('binaryFile')}</p>
         )}
         {selected && fileContent && fileContent !== '__BINARY__' && (
           <pre className="whitespace-pre-wrap break-all font-mono text-xs leading-relaxed text-foreground/80">
@@ -123,6 +128,7 @@ function VersionsTab({
   }
   onInstalled: () => void
 }) {
+  const t = useTranslations('adminSkills')
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
@@ -148,7 +154,8 @@ function VersionsTab({
     }
   }
 
-  if (versions.length === 0) return <p className="text-xs text-muted-foreground">暂无版本记录。</p>
+  if (versions.length === 0)
+    return <p className="text-xs text-muted-foreground">{t('noVersions')}</p>
 
   return (
     <div className="flex flex-col gap-2">
@@ -173,12 +180,12 @@ function VersionsTab({
                     variant="outline"
                     className="border-emerald-500/40 text-[10px] text-emerald-600"
                   >
-                    已安装
+                    {t('versionInstalled')}
                   </Badge>
                 )}
                 {isCurrent && !isInstalled && (
                   <Badge variant="outline" className="text-[10px]">
-                    最新
+                    {t('versionLatest')}
                   </Badge>
                 )}
               </div>
@@ -194,7 +201,7 @@ function VersionsTab({
                     disabled={busy === v.version}
                     onClick={() => void installVersion(v.version)}
                   >
-                    {busy === v.version ? '切换中…' : '安装此版本'}
+                    {busy === v.version ? t('switchingVersion') : t('installVersion')}
                   </Button>
                 )}
               </div>
@@ -225,6 +232,7 @@ const STATUS_STYLES: Record<FileStatus, { label: string; cls: string }> = {
 }
 
 function CompareTab({ skillId, versions }: { skillId: string; versions: SkillVersionDetail[] }) {
+  const t = useTranslations('adminSkills')
   const sorted = versions.slice().sort((a, b) => b.version.localeCompare(a.version))
 
   const [vLeft, setVLeft] = useState<string>(sorted[1]?.version ?? '')
@@ -287,7 +295,7 @@ function CompareTab({ skillId, versions }: { skillId: string; versions: SkillVer
       <div className="flex items-end gap-3">
         <div className="flex flex-col gap-1">
           <label className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground/70">
-            版本 A（旧）
+            {t('versionA')}
           </label>
           <select
             value={vLeft}
@@ -307,7 +315,7 @@ function CompareTab({ skillId, versions }: { skillId: string; versions: SkillVer
         <span className="mb-2 text-muted-foreground">→</span>
         <div className="flex flex-col gap-1">
           <label className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground/70">
-            版本 B（新）
+            {t('versionB')}
           </label>
           <select
             value={vRight}
@@ -330,25 +338,27 @@ function CompareTab({ skillId, versions }: { skillId: string; versions: SkillVer
             onClick={() => setSplitView(true)}
             className={`cursor-pointer rounded px-2 py-1 text-[11px] transition-colors ${splitView ? 'bg-accent font-medium' : 'text-muted-foreground hover:text-foreground'}`}
           >
-            左右对比
+            {t('compareSideBySide')}
           </button>
           <button
             type="button"
             onClick={() => setSplitView(false)}
             className={`cursor-pointer rounded px-2 py-1 text-[11px] transition-colors ${!splitView ? 'bg-accent font-medium' : 'text-muted-foreground hover:text-foreground'}`}
           >
-            内联
+            {t('compareInline')}
           </button>
         </div>
       </div>
 
-      {!ready && <p className="text-xs text-muted-foreground">请选择两个不同的版本进行对比。</p>}
+      {!ready && <p className="text-xs text-muted-foreground">{t('selectTwoVersions')}</p>}
 
       {ready && (
         <div className="grid grid-cols-[180px_1fr] gap-3 overflow-hidden">
           {/* File list */}
           <ul className="flex flex-col gap-1 overflow-y-auto">
-            {fileDiffs.length === 0 && <li className="text-xs text-muted-foreground">加载中…</li>}
+            {fileDiffs.length === 0 && (
+              <li className="text-xs text-muted-foreground">{t('loading')}</li>
+            )}
             {fileDiffs.map(({ path, status }) => {
               const { label, cls } = STATUS_STYLES[status]
               return (
@@ -378,12 +388,12 @@ function CompareTab({ skillId, versions }: { skillId: string; versions: SkillVer
           <div className="min-w-0 overflow-auto rounded-lg border border-border/70">
             {!selectedFile && (
               <div className="flex h-full items-center justify-center p-6 text-xs text-muted-foreground">
-                点击左侧文件查看 diff
+                {t('clickViewDiff')}
               </div>
             )}
             {selectedFile && (fileLeft === '__BINARY__' || fileRight === '__BINARY__') && (
               <div className="flex h-full items-center justify-center p-6 text-xs text-muted-foreground">
-                该文件为二进制文件，无法显示 diff。
+                {t('binaryDiff')}
               </div>
             )}
             {selectedFile && fileLeft !== '__BINARY__' && fileRight !== '__BINARY__' && (
@@ -406,6 +416,7 @@ function CompareTab({ skillId, versions }: { skillId: string; versions: SkillVer
 // ─── Main Panel ──────────────────────────────────────────────────────────────
 
 export function SkillDetailPanel({ skillId, onActionDone }: SkillDetailPanelProps) {
+  const t = useTranslations('adminSkills')
   const { skill, loading, error, refresh } = useAdminSkill(skillId)
 
   const contentKey =
@@ -421,21 +432,21 @@ export function SkillDetailPanel({ skillId, onActionDone }: SkillDetailPanelProp
   if (!skillId) {
     return (
       <div className="flex flex-1 items-center justify-center p-8 text-sm text-muted-foreground">
-        选择一个 skill 查看详情
+        {t('selectSkill')}
       </div>
     )
   }
   if (loading) {
     return (
       <div className="flex flex-1 items-center justify-center p-8 text-sm text-muted-foreground">
-        加载中…
+        {t('loadingSkill')}
       </div>
     )
   }
   if (error || !skill) {
     return (
       <div className="m-6 flex-1 rounded-md border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive">
-        加载失败：{error?.message ?? 'skill 不存在'}
+        {t('loadSkillFailed', { message: error?.message ?? 'skill 不存在' })}
       </div>
     )
   }
@@ -458,16 +469,16 @@ export function SkillDetailPanel({ skillId, onActionDone }: SkillDetailPanelProp
             v{skill.current_version}
           </Badge>
           <Badge variant={skill.source === 'preinstalled' ? 'default' : 'secondary'}>
-            {skill.source === 'preinstalled' ? '内置' : '组织上传'}
+            {skill.source === 'preinstalled' ? t('preinstalled') : t('orgUploaded')}
           </Badge>
           {skill.install_state === 'installed' && (
             <Badge variant="outline" className="border-emerald-500/40 text-emerald-600">
-              已安装
+              {t('installed')}
             </Badge>
           )}
           {skill.install_state === 'update_available' && (
             <Badge variant="outline" className="border-amber-500/40 text-amber-600">
-              可升级
+              {t('upgradable')}
             </Badge>
           )}
           <div className="ml-auto">
@@ -493,11 +504,11 @@ export function SkillDetailPanel({ skillId, onActionDone }: SkillDetailPanelProp
         <TabsList variant="line" className="w-full justify-start border-b border-border/60 pb-0">
           <TabsTrigger value="overview">
             <FileText className="size-3.5" />
-            概览
+            {t('overview')}
           </TabsTrigger>
           <TabsTrigger value="files">
             <Files className="size-3.5" />
-            文件{content ? ` (${content.files.length})` : ''}
+            {content ? t('filesCount', { count: content.files.length }) : t('files')}
           </TabsTrigger>
           <TabsTrigger value="workspaces">
             <Network className="size-3.5" />
@@ -505,18 +516,18 @@ export function SkillDetailPanel({ skillId, onActionDone }: SkillDetailPanelProp
           </TabsTrigger>
           <TabsTrigger value="versions">
             <History className="size-3.5" />
-            版本{versions.length > 0 ? ` (${versions.length})` : ''}
+            {versions.length > 0 ? t('versionsCount', { count: versions.length }) : t('versions')}
           </TabsTrigger>
           {versions.length > 1 && (
             <TabsTrigger value="compare">
               <GitCompare className="size-3.5" />
-              对比
+              {t('compare')}
             </TabsTrigger>
           )}
         </TabsList>
 
         <TabsContent value="overview" className="mt-4">
-          {contentLoading && <p className="text-xs text-muted-foreground">加载 SKILL.md…</p>}
+          {contentLoading && <p className="text-xs text-muted-foreground">{t('loadingSkillMd')}</p>}
           {content && (
             <div className="rounded-lg border border-border/70 bg-card/40 px-4 py-3">
               <div className={proseClasses}>
@@ -529,7 +540,9 @@ export function SkillDetailPanel({ skillId, onActionDone }: SkillDetailPanelProp
         </TabsContent>
 
         <TabsContent value="files" className="mt-4">
-          {contentLoading && <p className="text-xs text-muted-foreground">加载文件列表…</p>}
+          {contentLoading && (
+            <p className="text-xs text-muted-foreground">{t('loadingFileList')}</p>
+          )}
           {content && (
             <FilesTab skillId={skill.id} version={skill.current_version} files={content.files} />
           )}

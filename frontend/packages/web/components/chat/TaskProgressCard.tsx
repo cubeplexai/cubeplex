@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useRef } from 'react'
+import { useTranslations } from 'next-intl'
 import { CheckCircle2, Circle, ChevronDown, ChevronRight, Loader2, ListChecks } from 'lucide-react'
 import type { TodoItem } from '@cubebox/core'
 
@@ -10,6 +11,7 @@ interface TaskProgressCardProps {
 }
 
 export function TaskProgressCard({ todos, isStreaming }: TaskProgressCardProps) {
+  const t = useTranslations('chat')
   const [isExpanded, setIsExpanded] = useState(false)
   const prevStreamingRef = useRef(isStreaming)
 
@@ -46,7 +48,7 @@ export function TaskProgressCard({ todos, isStreaming }: TaskProgressCardProps) 
           <>
             <CheckCircle2 className="size-3 text-emerald-500 shrink-0" />
             <span className="text-foreground">
-              所有任务已完成 ({completed}/{todos.length})
+              {t('tasksDone', { completed, total: todos.length })}
             </span>
           </>
         ) : isStreaming && inProgress ? (
@@ -61,7 +63,7 @@ export function TaskProgressCard({ todos, isStreaming }: TaskProgressCardProps) 
           <>
             <ListChecks className="size-3 text-muted-foreground/70 shrink-0" />
             <span className="text-foreground">
-              任务进度 {completed}/{todos.length}
+              {t('tasksProgress', { completed, total: todos.length })}
             </span>
           </>
         )}

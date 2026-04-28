@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import useSWR from 'swr'
+import { useTranslations } from 'next-intl'
 import { Check, X } from 'lucide-react'
 import { createApiClient, listWorkspaces, type Workspace } from '@cubebox/core'
 import type { SkillSummary, WorkspaceBindingState } from '@cubebox/core'
@@ -37,6 +38,7 @@ export function WorkspaceBindingsTable({
   installed,
   autoBind,
 }: WorkspaceBindingsTableProps) {
+  const t = useTranslations('adminSkills')
   const {
     data: workspaces,
     isLoading: wsLoading,
@@ -120,27 +122,29 @@ export function WorkspaceBindingsTable({
   if (!installed) {
     return (
       <div className="rounded-md border border-dashed border-border/70 bg-muted/20 px-3 py-4 text-xs text-muted-foreground">
-        先在组织安装该 skill，才能管理 Workspace 绑定。
+        {t('installFirst')}
       </div>
     )
   }
 
   if (wsLoading) {
-    return <div className="text-xs text-muted-foreground">加载 workspace 列表…</div>
+    return <div className="text-xs text-muted-foreground">{t('loadingWorkspaces')}</div>
   }
   if (wsError) {
     return (
-      <div className="text-xs text-destructive">无法加载 workspace 列表：{wsError.message}</div>
+      <div className="text-xs text-destructive">
+        {t('wsLoadFailed', { message: wsError.message })}
+      </div>
     )
   }
   if (!workspaces || workspaces.length === 0) {
-    return <div className="text-xs text-muted-foreground">尚无 workspace。</div>
+    return <div className="text-xs text-muted-foreground">{t('noWorkspaces')}</div>
   }
 
   const sortedEntries = Object.values(entries).sort((a, b) => a.ws.name.localeCompare(b.ws.name))
 
   if (sortedEntries.length === 0) {
-    return <div className="text-xs text-muted-foreground">加载绑定状态…</div>
+    return <div className="text-xs text-muted-foreground">{t('loadingBindings')}</div>
   }
 
   return (
@@ -156,17 +160,17 @@ export function WorkspaceBindingsTable({
             <div className="min-w-0 flex-1">
               <div className="truncate font-medium">{ws.name}</div>
               {state === 'auto' && (
-                <div className="text-[11px] text-muted-foreground">自动关联（默认）</div>
+                <div className="text-[11px] text-muted-foreground">{t('autoLinked')}</div>
               )}
               {error && <div className="mt-0.5 text-[11px] text-destructive">{error}</div>}
             </div>
 
             <div className="flex shrink-0 items-center gap-1.5">
               {pending ? (
-                <span className="text-xs text-muted-foreground">保存中…</span>
+                <span className="text-xs text-muted-foreground">{t('saving')}</span>
               ) : confirmDisable ? (
                 <>
-                  <span className="text-xs text-destructive">确认关闭？</span>
+                  <span className="text-xs text-destructive">{t('confirmDisable')}</span>
                   <button
                     type="button"
                     className="cursor-pointer rounded p-0.5 text-destructive hover:bg-destructive/10"
@@ -201,7 +205,11 @@ export function WorkspaceBindingsTable({
                     aria-label={`enable ${ws.name}`}
                     data-testid={`ws-binding-checkbox-${ws.name}`}
                   />
-                  {effective ? (state === 'auto' ? '自动启用' : '已启用') : '未启用'}
+                  {effective
+                    ? state === 'auto'
+                      ? t('autoEnabled')
+                      : t('manualEnabled')
+                    : t('notEnabled')}
                 </label>
               )}
             </div>

@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useRef } from 'react'
+import { useTranslations } from 'next-intl'
 import type { Message, ContentBlock, SubagentSummary, TodoItem } from '@cubebox/core'
 import type { AgentStream } from '@cubebox/core'
 import { useArtifactStore } from '@cubebox/core'
@@ -31,6 +32,7 @@ function formatDuration(ms: number): string {
 }
 
 function ReasoningBlock({ reasoning, isStreaming, startedAt, durationMs }: ReasoningBlockProps) {
+  const t = useTranslations('chat')
   const [isExpanded, setIsExpanded] = useState(false)
   const [elapsed, setElapsed] = useState(0)
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -88,7 +90,7 @@ function ReasoningBlock({ reasoning, isStreaming, startedAt, durationMs }: Reaso
           )}
         </span>
         {!isStreaming && <Brain className="size-3 text-muted-foreground/70" />}
-        <span>{isStreaming ? '思考中...' : '思考过程'}</span>
+        <span>{isStreaming ? t('thinking') : t('thinkingProcess')}</span>
         {displayTime != null && displayTime >= 1000 && (
           <span className="text-muted-foreground/50 ml-0.5">{formatDuration(displayTime)}</span>
         )}
@@ -414,6 +416,7 @@ export function AssistantMessage({
   todos,
   conversationId,
 }: AssistantMessageProps) {
+  const t = useTranslations('chat')
   const streamAgentId = stream ? 'main' : undefined
   const blocks: ContentBlock[] = stream
     ? stream.blocks
@@ -493,12 +496,10 @@ export function AssistantMessage({
           <div data-testid="loading-indicator" className="flex items-center gap-1 pl-1 h-6">
             {statusPhase === 'sandbox_creating' ? (
               <span className="text-xs text-muted-foreground animate-pulse">
-                正在准备沙箱环境...
+                {t('sandboxPreparing')}
               </span>
             ) : statusPhase === 'sandbox_failed' ? (
-              <span className="text-xs text-destructive">
-                沙箱环境创建失败，将在无沙箱模式下继续
-              </span>
+              <span className="text-xs text-destructive">{t('sandboxFailed')}</span>
             ) : (
               <>
                 <span

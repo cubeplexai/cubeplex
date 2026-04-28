@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useRef, memo } from 'react'
+import { useTranslations } from 'next-intl'
 import { MarkdownWithCitations } from '@/components/shared/MarkdownWithCitations'
 import { CheckCircle2, ChevronDown, ChevronRight } from 'lucide-react'
 import type { AgentStream, ContentBlock, ToolCallRef } from '@cubebox/core'
@@ -43,6 +44,7 @@ export const SubAgentCard = memo(function SubAgentCard({
   toolResultMap,
   conversationId,
 }: Props) {
+  const t = useTranslations('chat')
   const [expanded, setExpanded] = useState(false)
   const [elapsed, setElapsed] = useState(0)
   const startedAt = useRef(Date.now())
@@ -237,7 +239,7 @@ export const SubAgentCard = memo(function SubAgentCard({
               hover:text-foreground transition-colors"
           >
             {expanded ? <ChevronDown className="size-3" /> : <ChevronRight className="size-3" />}
-            <span>{expanded ? '收起' : '展开'}</span>
+            <span>{expanded ? t('collapse') : t('expand')}</span>
           </button>
         )}
 
@@ -262,7 +264,7 @@ export const SubAgentCard = memo(function SubAgentCard({
       {/* Empty running state */}
       {!hasContent && isRunning && (
         <div className="px-3 pb-2.5">
-          <span className="text-xs text-muted-foreground animate-pulse">正在执行...</span>
+          <span className="text-xs text-muted-foreground animate-pulse">{t('executing')}</span>
         </div>
       )}
     </div>
