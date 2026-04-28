@@ -1,1 +1,49 @@
-{}
+{
+  "auth": {
+    "signIn": "登录",
+    "signInTitle": "登录到 cubebox",
+    "signUp": "创建账户",
+    "signUpTitle": "创建您的 cubebox 账户",
+    "email": "邮箱",
+    "password": "密码",
+    "signingIn": "登录中…",
+    "creatingAccount": "创建中…",
+    "newHere": "还没有账户？",
+    "alreadyHaveAccount": "已有账户？",
+    "createAccount": "注册"
+  },
+  "sidebar": {
+    "newChat": "新建对话",
+    "recentChats": "最近会话",
+    "untitledChat": "新对话"
+  },
+  "time": {
+    "justNow": "刚刚",
+    "minutesAgo": "{n}m 前",
+    "hoursAgo": "{n}h 前",
+    "daysAgo": "{n}d 前"
+  },
+  "workspace": {
+    "title": "工作区",
+    "showMore": "更多 ({count}) ↓",
+    "new": "新建工作区"
+  },
+  "input": {
+    "placeholder": "有什么可以帮你的？",
+    "hint": "Enter 发送 / Shift+Enter 换行"
+  },
+  "avatar": {
+    "adminPanel": "管理后台",
+    "lightTheme": "浅色主题",
+    "darkTheme": "深色主题",
+    "signOut": "退出",
+    "language": "语言"
+  },
+  "admin": {
+    "title": "管理后台",
+    "skills": "技能管理"
+  },
+  "chat": {
+    "incompletePreviousAnswer": "上次回答未完成（服务异常退出），请重试。"
+  }
+}

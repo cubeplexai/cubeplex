@@ -1,1 +1,49 @@
-{}
+{
+  "auth": {
+    "signIn": "Sign in",
+    "signInTitle": "Sign in to cubebox",
+    "signUp": "Create account",
+    "signUpTitle": "Create your cubebox account",
+    "email": "Email",
+    "password": "Password",
+    "signingIn": "Signing in…",
+    "creatingAccount": "Creating…",
+    "newHere": "New here?",
+    "alreadyHaveAccount": "Already have an account?",
+    "createAccount": "Create an account"
+  },
+  "sidebar": {
+    "newChat": "New chat",
+    "recentChats": "Recent chats",
+    "untitledChat": "New conversation"
+  },
+  "time": {
+    "justNow": "Just now",
+    "minutesAgo": "{n}m ago",
+    "hoursAgo": "{n}h ago",
+    "daysAgo": "{n}d ago"
+  },
+  "workspace": {
+    "title": "Workspaces",
+    "showMore": "More ({count}) ↓",
+    "new": "New workspace"
+  },
+  "input": {
+    "placeholder": "How can I help you?",
+    "hint": "Enter to send / Shift+Enter for newline"
+  },
+  "avatar": {
+    "adminPanel": "Admin panel",
+    "lightTheme": "Light theme",
+    "darkTheme": "Dark theme",
+    "signOut": "Sign out",
+    "language": "Language"
+  },
+  "admin": {
+    "title": "Admin",
+    "skills": "Skills"
+  },
+  "chat": {
+    "incompletePreviousAnswer": "Previous response was incomplete (service exit). Please retry."
+  }
+}
