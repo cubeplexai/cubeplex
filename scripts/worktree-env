@@ -242,7 +242,19 @@ def cmd_init(args: argparse.Namespace) -> int:
 
 
 def cmd_show(args: argparse.Namespace) -> int:
-    raise NotImplementedError("cmd_show in later task")
+    info = current_worktree_info()
+    env_file = env_file_path(info.path)
+    if not env_file.exists():
+        print(f"No {ENV_FILE_NAME} at {info.path}.", file=sys.stderr)
+        print("Run `./scripts/worktree-env init` from this worktree to allocate.", file=sys.stderr)
+        return 1
+    print(f"# Worktree: {info.path}")
+    print(f"# Branch:   {info.branch}")
+    print(f"# Main:     {info.main_path}")
+    print(f"# is_main:  {info.is_main}")
+    print()
+    print(env_file.read_text(), end="")
+    return 0
 
 
 def cmd_destroy(args: argparse.Namespace) -> int:
