@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator
 from datetime import datetime
 from typing import Any, Literal
 
@@ -202,7 +202,7 @@ class BillingRepository:
         since: datetime,
         until: datetime,
         workspace_id: str | None = None,
-    ) -> AsyncIterator[dict[str, Any]]:
+    ) -> AsyncGenerator[dict[str, Any], None]:
         """Stream flat join rows for CSV export (lazy cursor, no full load)."""
         stmt = (
             select(  # type: ignore[call-overload]
