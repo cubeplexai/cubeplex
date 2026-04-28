@@ -192,7 +192,8 @@ async def delete_conversation(
 class SendMessageRequest(BaseModel):
     """Request body for sending a message."""
 
-    content: str
+    content: str = ""
+    attachments: list[str] = []
 
 
 class SendMessageResponse(BaseModel):
@@ -425,11 +426,41 @@ async def send_message(
             detail=f"Conversation {conversation_id} not found",
         )
 
-    if not request_obj.content or not request_obj.content.strip():
+    if not (request_obj.content and request_obj.content.strip()) and not request_obj.attachments:
         raise InvalidInputError(
-            message="Content field cannot be empty",
-            details="Please provide a non-empty content string",
+            message="Message must include content or attachments",
+            details="Provide content text and/or one or more file attachments",
         )
+
+    from cubebox.api.exceptions import (
+        AttachmentReferenceInvalidError,
+        AttachmentTooManyError,
+    )
+    from cubebox.config import config as _cfg
+
+    max_per_msg = int(_cfg.get("attachments.max_per_message", 10))
+    if len(request_obj.attachments) > max_per_msg:
+        raise AttachmentTooManyError(
+            count=len(request_obj.attachments),
+            limit=max_per_msg,
+        )
+
+    if request_obj.attachments:
+        from cubebox.repositories import AttachmentRepository
+
+        async with async_session_maker() as att_session:
+            att_repo = AttachmentRepository(
+                att_session,
+                org_id=ctx.org_id,
+                workspace_id=ctx.workspace_id,
+            )
+            for fid in request_obj.attachments:
+                row = await att_repo.get_in_conversation(
+                    conversation_id=conversation_id,
+                    attachment_id=fid,
+                )
+                if row is None or row.status not in {"pending", "attached"}:
+                    raise AttachmentReferenceInvalidError(fid)
 
     run_manager = raw_request.app.state.run_manager
     run_ctx = RunContext(
@@ -442,6 +473,7 @@ async def send_message(
         run_id = await run_manager.start_run(
             conversation_id=conversation_id,
             content=request_obj.content,
+            attachments=list(request_obj.attachments),
             ctx=run_ctx,
         )
     except RuntimeError as exc:
