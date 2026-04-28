@@ -201,6 +201,54 @@ async def _recover_next_citation_id(agent: Any, conversation_id: str) -> int:
     return max_citation_id + 1 if max_citation_id > 0 else 1
 
 
+async def _build_attachment_content_blocks(
+    *,
+    org_id: str,
+    workspace_id: str,
+    conversation_id: str,
+    attachment_ids: list[str],
+) -> list[dict[str, Any]]:
+    """Return file_attachment content blocks for the given file_ids.
+
+    Reads metadata via a short-lived session. Rows are expected to exist
+    (validated at the API layer); missing rows are silently skipped here
+    since hydration would have already failed for them.
+    """
+    if not attachment_ids:
+        return []
+
+    from cubebox.db.engine import async_session_maker
+    from cubebox.repositories import AttachmentRepository
+
+    async with async_session_maker() as session:
+        repo = AttachmentRepository(
+            session,
+            org_id=org_id,
+            workspace_id=workspace_id,
+        )
+        blocks: list[dict[str, Any]] = []
+        for fid in attachment_ids:
+            row = await repo.get_in_conversation(
+                conversation_id=conversation_id,
+                attachment_id=fid,
+            )
+            if row is None:
+                continue
+            blocks.append(
+                {
+                    "type": "file_attachment",
+                    "file_id": row.id,
+                    "kind": row.kind,
+                    "filename": row.filename,
+                    "sandbox_path": row.sandbox_path,
+                    "size_bytes": row.size_bytes,
+                    "width": row.width,
+                    "height": row.height,
+                }
+            )
+        return blocks
+
+
 class RunManager:
     """Owns background run execution and Redis persistence."""
 
@@ -538,10 +586,79 @@ class RunManager:
 
             async def drain_main_stream() -> None:
                 try:
+                    # M7: hydrate attachments into sandbox + build mixed content
+                    attachment_blocks: list[dict[str, Any]] = []
+                    if attachments:
+                        if sandbox is not None:
+                            from cubebox.agents.hydrator import (
+                                AttachmentHydrationError,
+                                AttachmentHydrator,
+                            )
+                            from cubebox.db.engine import async_session_maker
+                            from cubebox.objectstore import get_objectstore_client
+                            from cubebox.repositories import AttachmentRepository
+
+                            try:
+                                async with async_session_maker() as h_session:
+                                    h_repo = AttachmentRepository(
+                                        h_session,
+                                        org_id=ctx.org_id,
+                                        workspace_id=ctx.workspace_id,
+                                    )
+                                    hydrator = AttachmentHydrator(
+                                        repo=h_repo,
+                                        sandbox=sandbox,
+                                        objectstore=get_objectstore_client(),
+                                    )
+                                    await hydrator.hydrate(
+                                        conversation_id=conversation_id,
+                                        file_ids=attachments,
+                                    )
+                            except AttachmentHydrationError as exc:
+                                await self._append_error(
+                                    run_id,
+                                    conversation_id,
+                                    "Attachment hydration failed",
+                                    str(exc),
+                                )
+                                return
+
+                        attachment_blocks = await _build_attachment_content_blocks(
+                            org_id=ctx.org_id,
+                            workspace_id=ctx.workspace_id,
+                            conversation_id=conversation_id,
+                            attachment_ids=attachments,
+                        )
+
+                    human_content: str | list[Any]
+                    if attachment_blocks:
+                        human_content = [
+                            {"type": "text", "text": content},
+                            *attachment_blocks,
+                        ]
+                    else:
+                        human_content = content
+
                     human_msg = HumanMessage(
-                        content=content,
+                        content=human_content,
                         response_metadata={"created_at": datetime.now(UTC).isoformat()},
                     )
+
+                    if attachments:
+                        from cubebox.db.engine import async_session_maker
+                        from cubebox.repositories import AttachmentRepository
+
+                        async with async_session_maker() as att_session:
+                            mark_repo = AttachmentRepository(
+                                att_session,
+                                org_id=ctx.org_id,
+                                workspace_id=ctx.workspace_id,
+                            )
+                            await mark_repo.mark_attached_bulk(
+                                conversation_id=conversation_id,
+                                attachment_ids=attachments,
+                            )
+
                     async for event in agent.astream(  # type: ignore[call-overload]
                         {"messages": [human_msg]},
                         stream_mode=["messages", "updates"],
