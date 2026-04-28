@@ -2,6 +2,7 @@
 
 from cubebox.repositories.artifact import ArtifactRepository, ArtifactVersionRepository
 from cubebox.repositories.attachment import AttachmentRepository
+from cubebox.repositories.billing import BillingRepository
 from cubebox.repositories.conversation import ConversationRepository
 from cubebox.repositories.invite_token import InviteTokenRepository
 from cubebox.repositories.membership import MembershipRepository
@@ -20,6 +21,7 @@ __all__ = [
     "AttachmentRepository",
     "ArtifactRepository",
     "ArtifactVersionRepository",
+    "BillingRepository",
     "ConversationRepository",
     "InviteTokenRepository",
     "MembershipRepository",
