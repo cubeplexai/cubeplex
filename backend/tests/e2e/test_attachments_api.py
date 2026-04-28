@@ -118,3 +118,33 @@ async def test_cross_workspace_returns_404(
     # client_b uses its OWN workspace id but conv_a id from org A → expect 4xx
     resp = await client_b.get(_atta_url(ws_b, conv_a, f"/{aid}"))
     assert resp.status_code in (403, 404)
+
+
+async def test_upload_filename_path_traversal_is_sanitized(
+    member_client_org_a, sample_png_bytes
+) -> None:
+    """Multipart filename like ../../etc/passwd must NOT escape the upload prefix."""
+    from sqlalchemy import select as sa_select
+
+    from cubebox.db.engine import async_session_maker
+    from cubebox.models import Attachment
+
+    client, ws_id = member_client_org_a
+    conv_id = await _make_conversation(client, ws_id)
+    files = {"file": ("../../etc/passwd.png", sample_png_bytes, "image/png")}
+    resp = await client.post(_atta_url(ws_id, conv_id), files=files)
+    assert resp.status_code == 201, resp.text
+    body = resp.json()
+    # Persisted name is the safe basename, not the traversal path
+    assert body["filename"] == "passwd.png"
+    aid = body["id"]
+
+    # Sandbox path stays under the per-conversation prefix (no traversal)
+    async with async_session_maker() as session:
+        row = (
+            await session.execute(sa_select(Attachment).where(Attachment.id == aid))
+        ).scalar_one()
+        assert row.sandbox_path == f"/workspace/uploads/{conv_id}/{aid}/passwd.png"
+        assert "../" not in row.sandbox_path
+        assert "../" not in row.object_key
+        assert row.object_key.endswith(f"/{aid}/original/passwd.png")
