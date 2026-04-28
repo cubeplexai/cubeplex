@@ -75,6 +75,22 @@
   "home": {
     "subtitle": "AI Agent System"
   },
+  "adminCost": {
+    "loading": "Loading…",
+    "heading": "Cost Overview",
+    "exportOrgCsv": "Export all org CSV ↓",
+    "totalCost": "Total cost",
+    "totalCalls": "Total calls",
+    "byWorkspace": "By Workspace",
+    "callCount": "Calls",
+    "inputTokens": "Input Tokens",
+    "outputTokens": "Output Tokens",
+    "cost": "Cost",
+    "noData": "No data this month",
+    "byModel": "By Model",
+    "providerModel": "Provider / Model",
+    "exportCsv": "Export CSV"
+  },
   "adminSkills": {
     "loading": "Loading…",
     "loadFailed": "Load failed: {message}",
