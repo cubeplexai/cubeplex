@@ -38,15 +38,15 @@ test.describe('admin console skeleton', () => {
     // Top bar shows product name + admin heading
     await expect(adminPage.getByRole('heading', { name: 'Admin' })).toBeVisible()
 
-    // Sub-nav: 5 CE native items should be present
+    // Sub-nav: 6 CE native items should be present
     const nav = adminPage.getByRole('navigation', { name: /admin sub-nav/i })
     await expect(nav).toBeVisible()
-    for (const label of ['Models', 'Web Tools', 'Skills', 'MCP Connectors', 'Sandbox']) {
+    for (const label of ['Models', 'Web Tools', 'Skills', 'MCP Connectors', 'Sandbox', 'Cost']) {
       await expect(nav.getByRole('link', { name: label })).toBeVisible()
     }
   })
 
-  test('CE deployment: no external extension tabs render beyond the 5 natives', async ({
+  test('CE deployment: no external extension tabs render beyond the 6 natives', async ({
     page,
   }) => {
     await registerAs(page, uniqueEmail())
@@ -54,7 +54,7 @@ test.describe('admin console skeleton', () => {
     // Wait for the loading state to pass (admin-me resolved)
     await expect(page.getByRole('heading', { name: 'Admin' })).toBeVisible({ timeout: 10_000 })
     const navLinks = page.getByRole('navigation', { name: /admin sub-nav/i }).getByRole('link')
-    await expect(navLinks).toHaveCount(5)
+    await expect(navLinks).toHaveCount(6)
   })
 
   test('unauthenticated /admin visit redirects to /login', async ({ context, page }) => {
