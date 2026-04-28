@@ -225,10 +225,35 @@ async def lifespan(_app: FastAPI):  # type: ignore
     except Exception as e:
         logger.warning("Failed to seed preinstalled skills: {}", str(e))
 
+    # M7: orphan attachment reaper
+    from cubebox.config import config
+    from cubebox.services.attachments import cleanup_orphan_attachments
+
+    _attachment_cleanup_task: asyncio.Task[None] | None = None
+
+    async def _attachment_cleanup_loop() -> None:
+        interval = int(config.get("attachments.cleanup_interval_seconds", 300))
+        while True:
+            try:
+                await cleanup_orphan_attachments()
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("attachment cleanup failed: {}", exc)
+            await asyncio.sleep(interval)
+
+    _attachment_cleanup_task = asyncio.create_task(
+        _attachment_cleanup_loop(), name="attachment-cleanup"
+    )
+
     yield
 
     # ==================== Shutdown ====================
     logger.info("Application shutting down")
+    if _attachment_cleanup_task is not None:
+        _attachment_cleanup_task.cancel()
+        try:
+            await _attachment_cleanup_task
+        except asyncio.CancelledError:
+            pass
     if run_manager is not None:
         from cubebox.config import config as _lifecycle_config
 
