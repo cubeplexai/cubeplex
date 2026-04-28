@@ -312,6 +312,7 @@ def create_app(
         admin_router,
         admin_skills,
         artifacts_router,
+        attachments_router,
         conversations_router,
         workspaces_router,
         ws_skills,
@@ -320,6 +321,7 @@ def create_app(
     app.include_router(workspaces_router, prefix="/api/v1")
     app.include_router(conversations_router, prefix="/api/v1")
     app.include_router(artifacts_router, prefix="/api/v1")
+    app.include_router(attachments_router, prefix="/api/v1")
     app.include_router(admin_router, prefix="/api/v1")
     app.include_router(admin_skills.router, prefix="/api/v1")
     app.include_router(admin_skills.bindings_router, prefix="/api/v1")
