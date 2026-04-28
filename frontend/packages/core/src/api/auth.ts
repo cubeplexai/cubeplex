@@ -9,6 +9,7 @@ export interface RegisterResult {
 export interface MeResult {
   id: string
   email: string
+  language: string
 }
 
 export async function registerUser(
@@ -37,6 +38,12 @@ export async function logoutUser(client: ApiClient): Promise<void> {
 export async function getMe(client: ApiClient): Promise<MeResult | null> {
   const res = await client.get('/api/v1/auth/me')
   if (res.status === 401) return null
+  if (!res.ok) throw await toApiError(res)
+  return (await res.json()) as MeResult
+}
+
+export async function updateLanguage(client: ApiClient, language: string): Promise<MeResult> {
+  const res = await client.patch('/api/v1/auth/me', { language })
   if (!res.ok) throw await toApiError(res)
   return (await res.json()) as MeResult
 }
