@@ -14,5 +14,3 @@ msgstr "该邮箱已注册"
 msgid "register_invalid_password"
 msgstr "密码不符合要求"
 
-msgid "invalid_language"
-msgstr "无效的语言代码"
