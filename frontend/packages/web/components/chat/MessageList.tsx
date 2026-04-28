@@ -195,7 +195,10 @@ export function MessageList({ conversationId }: MessageListProps) {
                 <UserMessage content={msg.content ?? ''} />
                 {msg.attachments && msg.attachments.length > 0 && (
                   <div className="flex justify-end">
-                    <MessageAttachments attachments={msg.attachments} />
+                    <MessageAttachments
+                      attachments={msg.attachments}
+                      conversationId={conversationId}
+                    />
                   </div>
                 )}
               </>
