@@ -324,6 +324,54 @@ def _load_dotenv_into_environ(path: Path) -> None:
 import argparse
 
 
+def _read_redis_url_from_env_file() -> str | None:
+    """Fallback: read CUBEBOX_REDIS__URL from backend/.env if not in os.environ."""
+    info = current_worktree_info()
+    env_file = info.path / "backend" / ".env"
+    if not env_file.exists():
+        return None
+    for line in env_file.read_text().splitlines():
+        if line.startswith("CUBEBOX_REDIS__URL="):
+            return line.split("=", 1)[1].strip()
+    return None
+
+
+def _redis_delete_prefix(prefix: str) -> int:
+    """Delete every key matching `<prefix>:*` from the configured Redis URL.
+
+    Returns the number of keys deleted. Uses redis-cli with --scan + xargs DEL.
+    """
+    redis_url = os.environ.get("CUBEBOX_REDIS__URL") or _read_redis_url_from_env_file()
+    if not redis_url:
+        print("⚠ no CUBEBOX_REDIS__URL set; skipping Redis cleanup", file=sys.stderr)
+        return 0
+
+    pattern = f"{prefix}:*"
+    # SCAN keys
+    scan = subprocess.run(
+        ["redis-cli", "-u", redis_url, "--scan", "--pattern", pattern],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    keys = [k for k in scan.stdout.splitlines() if k]
+    if not keys:
+        return 0
+    # DEL in chunks
+    deleted = 0
+    chunk_size = 500
+    for i in range(0, len(keys), chunk_size):
+        chunk = keys[i:i + chunk_size]
+        result = subprocess.run(
+            ["redis-cli", "-u", redis_url, "DEL", *chunk],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        deleted += int(result.stdout.strip() or 0)
+    return deleted
+
+
 def cmd_init(args: argparse.Namespace) -> int:
     info = current_worktree_info()
     slug = slugify(info.branch)
@@ -394,7 +442,37 @@ def cmd_show(args: argparse.Namespace) -> int:
 
 
 def cmd_destroy(args: argparse.Namespace) -> int:
-    raise NotImplementedError("cmd_destroy in later task")
+    info = current_worktree_info()
+    if info.is_main:
+        print("Refusing to destroy main worktree allocation.", file=sys.stderr)
+        return 1
+
+    slug = slugify(info.branch)
+    registry = Registry.load(info.main_path / ".worktrees" / "registry.json")
+
+    # Load env so DB creds are in os.environ
+    _load_dotenv_into_environ(info.path / "backend" / ".env")
+    _load_dotenv_into_environ(env_file_path(info.path))
+
+    _drop_schemas(slug)
+
+    deleted = _redis_delete_prefix(redis_prefix(slug))
+    print(f"→ deleted {deleted} Redis keys under prefix {redis_prefix(slug)}:*")
+
+    if slug in registry.entries:
+        del registry.entries[slug]
+        registry.save()
+        print(f"→ removed {slug} from registry")
+
+    env_file = env_file_path(info.path)
+    if env_file.exists():
+        env_file.unlink()
+        print(f"→ removed {env_file}")
+
+    print(
+        "Done. Run `git worktree remove <path>` separately to delete the worktree filesystem."
+    )
+    return 0
 
 
 def cmd_doctor(args: argparse.Namespace) -> int:
