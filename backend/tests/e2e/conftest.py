@@ -1,3 +1,4 @@
+import io
 import json as json_lib
 import secrets
 from collections.abc import AsyncIterator, Iterator
@@ -12,6 +13,7 @@ from fastapi.testclient import TestClient
 from fastapi_users.db import SQLAlchemyUserDatabase
 from fastapi_users.schemas import BaseUserCreate
 from langgraph.checkpoint.memory import MemorySaver
+from PIL import Image
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
@@ -527,3 +529,27 @@ async def redis_client() -> AsyncIterator[Redis]:
         yield client
     finally:
         await client.aclose()
+
+
+@pytest.fixture
+def sample_png_bytes() -> bytes:
+    """Tiny valid PNG, generated in-memory."""
+    img = Image.new("RGB", (100, 100), color=(255, 0, 0))
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    return buf.getvalue()
+
+
+@pytest.fixture
+def sample_pdf_bytes() -> bytes:
+    """Minimal valid PDF (one empty page)."""
+    return (
+        b"%PDF-1.4\n"
+        b"1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n"
+        b"2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj\n"
+        b"3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 612 792]>>endobj\n"
+        b"xref\n0 4\n"
+        b"0000000000 65535 f\n0000000009 00000 n\n"
+        b"0000000052 00000 n\n0000000095 00000 n\n"
+        b"trailer<</Size 4/Root 1 0 R>>\nstartxref\n145\n%%EOF\n"
+    )
