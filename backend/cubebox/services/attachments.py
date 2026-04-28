@@ -285,3 +285,50 @@ class AttachmentService:
             "download_url": f"{base_url}/{att.id}/content",
             "created_at": utc_isoformat(att.created_at),
         }
+
+
+async def cleanup_orphan_attachments() -> int:
+    """Sweep all orgs/workspaces and physically delete pending attachments older than TTL.
+
+    Returns the number of rows removed. Safe to call concurrently — DB rows
+    are deleted under the same scope each time and ObjectStore deletes are
+    idempotent.
+    """
+    from datetime import UTC as _UTC
+    from datetime import datetime as _dt
+    from datetime import timedelta as _td
+
+    from sqlalchemy import select as sa_select
+
+    from cubebox.db.engine import async_session_maker
+    from cubebox.models import Attachment as _Attachment
+
+    ttl = int(config.get("attachments.orphan_ttl_seconds", 3600))
+    objectstore = get_objectstore_client()
+    removed = 0
+
+    async with async_session_maker() as session:
+        cutoff = _dt.now(_UTC) - _td(seconds=ttl)
+        stmt = sa_select(_Attachment).where(
+            _Attachment.status == "pending",  # type: ignore[arg-type]
+            _Attachment.created_at < cutoff,  # type: ignore[arg-type]
+        )
+        result = await session.execute(stmt)
+        rows = list(result.scalars().all())
+        for row in rows:
+            try:
+                await objectstore.delete_file(row.object_key)
+                if row.thumbnail_object_key:
+                    await objectstore.delete_file(row.thumbnail_object_key)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "orphan cleanup: ObjectStore delete failed for {}: {}",
+                    row.id,
+                    exc,
+                )
+            await session.delete(row)
+            removed += 1
+        await session.commit()
+    if removed:
+        logger.info("Cleaned {} orphan attachment(s)", removed)
+    return removed
