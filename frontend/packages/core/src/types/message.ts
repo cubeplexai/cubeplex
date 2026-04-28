@@ -25,6 +25,17 @@ export interface SubagentSummary {
   task?: string
 }
 
+export interface MessageAttachment {
+  id: string
+  filename: string
+  kind: 'image' | 'document' | 'other'
+  size_bytes: number
+  width?: number | null
+  height?: number | null
+  thumbnail_url?: string | null
+  download_url: string
+}
+
 export interface Message {
   id: string
   role: 'user' | 'assistant' | 'tool'
@@ -46,4 +57,5 @@ export interface Message {
   citations?: CitationData[] | null // for tool messages: citation data from this tool result
   subagent_events?: SubagentSummary | null // consolidated subagent data for tool messages
   created_at?: string
+  attachments?: MessageAttachment[] | null // for user messages: uploaded file attachments
 }

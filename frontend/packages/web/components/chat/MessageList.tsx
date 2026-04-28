@@ -7,6 +7,7 @@ import type { Message, SubagentSummary } from '@cubebox/core'
 import { AlertCircle } from 'lucide-react'
 import { UserMessage } from './UserMessage'
 import { AssistantMessage } from './AssistantMessage'
+import { MessageAttachments } from './MessageAttachments'
 import { TaskProgressCard } from './TaskProgressCard'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { useMessages } from '@/hooks/useMessages'
@@ -189,7 +190,16 @@ export function MessageList({ conversationId }: MessageListProps) {
       <div ref={contentRef} className="space-y-4 max-w-2xl mx-auto">
         {(messages ?? []).map((msg) => (
           <div key={msg.id}>
-            {msg.role === 'user' && <UserMessage content={msg.content ?? ''} />}
+            {msg.role === 'user' && (
+              <>
+                <UserMessage content={msg.content ?? ''} />
+                {msg.attachments && msg.attachments.length > 0 && (
+                  <div className="flex justify-end">
+                    <MessageAttachments attachments={msg.attachments} />
+                  </div>
+                )}
+              </>
+            )}
             {msg.role === 'assistant' && msg.id !== lastAssistantId && (
               <AssistantMessage
                 message={msg}
