@@ -19,7 +19,7 @@ class BillingEvent(SQLModel, OrgScopedMixin, table=True):
         Index("ix_billing_events_conversation", "conversation_id"),
     )
 
-    id: str = Field(default_factory=lambda: str(uuid7()), primary_key=True)
+    id: str = Field(default_factory=lambda: str(uuid7()), primary_key=True, max_length=36)
     user_id: str = Field(max_length=36, index=True)
     conversation_id: str = Field(max_length=36)
     event_type: str = Field(max_length=32)  # "llm_call" | "sandbox_compute" | …
@@ -37,11 +37,11 @@ class LlmBillingEvent(SQLModel, table=True):
 
     __tablename__ = "billing_llm_events"
     __table_args__ = (
-        Index("ix_billing_llm_provider_model", "provider", "model_id"),
-        Index("ix_billing_llm_parent", "parent_run_id"),
+        Index("ix_billing_llm_events_provider_model", "provider", "model_id"),
+        Index("ix_billing_llm_events_parent_run_id", "parent_run_id"),
     )
 
-    id: str = Field(default_factory=lambda: str(uuid7()), primary_key=True)
+    id: str = Field(default_factory=lambda: str(uuid7()), primary_key=True, max_length=36)
     billing_event_id: str = Field(max_length=36, foreign_key="billing_events.id", index=True)
     provider: str = Field(max_length=64)
     model_id: str = Field(max_length=128)
