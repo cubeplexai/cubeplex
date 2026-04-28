@@ -97,3 +97,13 @@ async def test_record_fallback_failure_writes_error_row(session: AsyncSession) -
     row = result.scalar_one_or_none()
     assert row is not None
     assert row.cost_amount_micro == 0
+
+    # Verify child LlmBillingEvent was also written
+    result_le = await session.execute(
+        select(LlmBillingEvent).where(LlmBillingEvent.billing_event_id == row.id)
+    )
+    le_row = result_le.scalar_one_or_none()
+    assert le_row is not None
+    assert le_row.error_class == "RateLimitError"
+    assert le_row.input_tokens == 0
+    assert le_row.output_tokens == 0
