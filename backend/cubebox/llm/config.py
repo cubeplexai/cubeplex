@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field
 class ModelCost(BaseModel):
     """Cost configuration for a model"""
 
+    currency: str = Field(default="USD", description="Currency code (ISO 4217)")
     input: float = Field(description="Input token cost per million tokens")
     output: float = Field(description="Output token cost per million tokens")
     cache_read: float = Field(
