@@ -3,9 +3,11 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
+import { useTranslations } from 'next-intl'
 import { createApiClient, registerUser, loginUser, useAuthStore } from '@cubebox/core'
 
 export function RegisterForm() {
+  const t = useTranslations('auth')
   const router = useRouter()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -33,10 +35,10 @@ export function RegisterForm() {
   return (
     <form onSubmit={onSubmit} className="space-y-4">
       <div className="text-center mb-6">
-        <h1 className="text-xl font-semibold">Create your cubebox account</h1>
+        <h1 className="text-xl font-semibold">{t('signUpTitle')}</h1>
       </div>
       <label className="block">
-        <span className="text-sm text-foreground/80">Email</span>
+        <span className="text-sm text-foreground/80">{t('email')}</span>
         <input
           type="email"
           required
@@ -47,7 +49,7 @@ export function RegisterForm() {
         />
       </label>
       <label className="block">
-        <span className="text-sm text-foreground/80">Password</span>
+        <span className="text-sm text-foreground/80">{t('password')}</span>
         <input
           type="password"
           required
@@ -64,12 +66,12 @@ export function RegisterForm() {
         disabled={submitting}
         className="w-full rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50"
       >
-        {submitting ? 'Creating…' : 'Create account'}
+        {submitting ? t('creatingAccount') : t('signUp')}
       </button>
       <div className="text-center text-sm text-foreground/60">
-        Already have an account?{' '}
+        {t('alreadyHaveAccount')}{' '}
         <Link href="/login" className="underline">
-          Sign in
+          {t('signIn')}
         </Link>
       </div>
     </form>
