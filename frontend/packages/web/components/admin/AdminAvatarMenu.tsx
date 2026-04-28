@@ -1,11 +1,13 @@
 'use client'
 
 import { useRouter } from 'next/navigation'
+import { useTranslations } from 'next-intl'
 import { createApiClient, logoutUser, useAuthStore } from '@cubebox/core'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { LogOut } from 'lucide-react'
 
 export function AdminAvatarMenu() {
+  const t = useTranslations('adminSkills')
   const router = useRouter()
   const user = useAuthStore((s) => s.user)
   const initials = user?.email ? user.email[0]?.toUpperCase() : '?'
@@ -44,7 +46,7 @@ export function AdminAvatarMenu() {
           className="w-full flex items-center gap-2 px-2 py-1.5 rounded-sm text-[12.5px] hover:bg-destructive/10 text-destructive transition-colors"
         >
           <LogOut className="size-3.5" />
-          <span>退出</span>
+          <span>{t('signOut')}</span>
         </button>
       </PopoverContent>
     </Popover>

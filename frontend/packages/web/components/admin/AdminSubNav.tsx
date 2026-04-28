@@ -2,6 +2,7 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
+import { useTranslations } from 'next-intl'
 import { Box, Cpu, Globe, Plug, Puzzle, Sparkles } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { Separator } from '@/components/ui/separator'
@@ -13,14 +14,6 @@ type NavDef = {
   label: string
   icon: LucideIcon
 }
-
-const NATIVE_ITEMS: NavDef[] = [
-  { href: '/admin/models', label: '模型', icon: Cpu },
-  { href: '/admin/web-tools', label: 'Web 工具', icon: Globe },
-  { href: '/admin/skills', label: '技能管理', icon: Sparkles },
-  { href: '/admin/mcp', label: 'MCP 连接器', icon: Plug },
-  { href: '/admin/sandbox', label: '沙盒', icon: Box },
-]
 
 function NavItem({ href, label, icon: Icon, active }: NavDef & { active: boolean }) {
   return (
@@ -45,8 +38,17 @@ function NavItem({ href, label, icon: Icon, active }: NavDef & { active: boolean
 }
 
 export function AdminSubNav() {
+  const t = useTranslations('adminNav')
   const pathname = usePathname() ?? ''
   const { extensions } = useAdminExtensions()
+
+  const NATIVE_ITEMS: NavDef[] = [
+    { href: '/admin/models', label: t('models'), icon: Cpu },
+    { href: '/admin/web-tools', label: t('webTools'), icon: Globe },
+    { href: '/admin/skills', label: t('skills'), icon: Sparkles },
+    { href: '/admin/mcp', label: t('mcp'), icon: Plug },
+    { href: '/admin/sandbox', label: t('sandbox'), icon: Box },
+  ]
 
   const extItems: NavDef[] = extensions.flatMap((ext) =>
     ext.nav_items.map((item) => ({
@@ -78,7 +80,7 @@ export function AdminSubNav() {
             </li>
             <li>
               <p className="px-2 py-1 text-[10px] font-medium uppercase tracking-widest text-muted-foreground/60">
-                扩展
+                {t('extensions')}
               </p>
             </li>
             {extItems.map((item) => {

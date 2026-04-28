@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { useTranslations } from 'next-intl'
 import { ArrowUpCircle, Download, Trash2, X, Check } from 'lucide-react'
 import type { SkillDetail } from '@cubebox/core'
 import { Button } from '@/components/ui/button'
@@ -14,6 +15,7 @@ interface OrgInstallActionsProps {
 type Action = 'install' | 'upgrade' | 'uninstall' | null
 
 export function OrgInstallActions({ skill, onActionDone }: OrgInstallActionsProps) {
+  const t = useTranslations('adminSkills')
   const [busy, setBusy] = useState<Action>(null)
   const [error, setError] = useState<string | null>(null)
   const [confirmUninstall, setConfirmUninstall] = useState(false)
@@ -69,7 +71,9 @@ export function OrgInstallActions({ skill, onActionDone }: OrgInstallActionsProp
             data-testid="skill-install-button"
           >
             <Download className="size-3.5" />
-            {busy === 'install' ? '安装中…' : `安装 v${skill.current_version}`}
+            {busy === 'install'
+              ? t('installing')
+              : t('installAction', { version: skill.current_version })}
           </Button>
         )}
 
@@ -81,7 +85,9 @@ export function OrgInstallActions({ skill, onActionDone }: OrgInstallActionsProp
             data-testid="skill-upgrade-button"
           >
             <ArrowUpCircle className="size-3.5" />
-            {busy === 'upgrade' ? '升级中…' : `升级到 v${skill.current_version}`}
+            {busy === 'upgrade'
+              ? t('upgrading')
+              : t('upgradeAction', { version: skill.current_version })}
           </Button>
         )}
 
@@ -95,13 +101,13 @@ export function OrgInstallActions({ skill, onActionDone }: OrgInstallActionsProp
             data-testid="skill-uninstall-button"
           >
             <Trash2 className="size-3.5" />
-            卸载
+            {t('uninstall')}
           </Button>
         )}
 
         {installed && confirmUninstall && (
           <div className="flex items-center gap-1.5 rounded-md border border-destructive/30 bg-destructive/5 px-2.5 py-1.5">
-            <span className="text-xs text-destructive">确认卸载？</span>
+            <span className="text-xs text-destructive">{t('confirmUninstall')}</span>
             <button
               type="button"
               className="cursor-pointer rounded p-0.5 text-destructive hover:bg-destructive/20"
@@ -132,6 +138,7 @@ interface AutoBindToggleProps {
 }
 
 export function AutoBindToggle({ skill, onActionDone }: AutoBindToggleProps) {
+  const t = useTranslations('adminSkills')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -172,15 +179,13 @@ export function AutoBindToggle({ skill, onActionDone }: AutoBindToggleProps) {
             data-testid="skill-auto-bind-toggle"
           />
           <div className="flex flex-col gap-0.5">
-            <span className="font-medium text-foreground/90">默认关联所有 Workspace</span>
+            <span className="font-medium text-foreground/90">{t('defaultLinkAll')}</span>
             <span className="text-[11px] text-muted-foreground">
-              {skill.auto_bind
-                ? '所有 Workspace 默认启用此 skill（可在各 Workspace 单独关闭）'
-                : '各 Workspace 需手动启用此 skill'}
+              {skill.auto_bind ? t('defaultLinkAllEnabled') : t('defaultLinkAllDisabled')}
             </span>
           </div>
         </label>
-        {busy && <span className="text-[11px] text-muted-foreground">保存中…</span>}
+        {busy && <span className="text-[11px] text-muted-foreground">{t('saving')}</span>}
       </div>
       {error && <p className="text-xs text-destructive">{error}</p>}
     </div>

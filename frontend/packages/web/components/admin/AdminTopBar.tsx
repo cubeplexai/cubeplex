@@ -1,5 +1,6 @@
 'use client'
 
+import { useTranslations } from 'next-intl'
 import { Button } from '@/components/ui/button'
 import { Separator } from '@/components/ui/separator'
 import { Box } from 'lucide-react'
@@ -19,6 +20,7 @@ function handleBackToApp() {
 }
 
 export function AdminTopBar({ orgName }: AdminTopBarProps) {
+  const t = useTranslations('admin')
   return (
     <header className="flex items-center gap-3 border-b border-border bg-card/80 backdrop-blur supports-[backdrop-filter]:bg-card/60 px-4 h-14 shrink-0">
       <div className="flex items-center gap-2">
@@ -28,7 +30,7 @@ export function AdminTopBar({ orgName }: AdminTopBarProps) {
         <span className="text-sm font-semibold tracking-tight">cubebox</span>
       </div>
       <Separator orientation="vertical" className="h-5" />
-      <h1 className="text-sm font-medium">管理后台</h1>
+      <h1 className="text-sm font-medium">{t('title')}</h1>
       {orgName && (
         <span className="text-sm text-muted-foreground/70 before:content-['·'] before:mr-2 before:text-muted-foreground/40">
           {orgName}
@@ -37,7 +39,7 @@ export function AdminTopBar({ orgName }: AdminTopBarProps) {
 
       <div className="ml-auto flex items-center gap-2">
         <Button variant="ghost" size="sm" onClick={handleBackToApp}>
-          回应用
+          {t('backToApp')}
         </Button>
         <AdminAvatarMenu />
       </div>

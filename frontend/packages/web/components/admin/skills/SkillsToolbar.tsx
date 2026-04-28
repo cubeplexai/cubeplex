@@ -1,6 +1,7 @@
 'use client'
 
 import { Search, Upload } from 'lucide-react'
+import { useTranslations } from 'next-intl'
 import type { SkillFilters, SkillSource } from '@cubebox/core'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -11,18 +12,6 @@ interface SkillsToolbarProps {
   onFiltersChange: (next: SkillFilters) => void
   onUploadClick: () => void
 }
-
-const SOURCE_OPTIONS: { value: SkillSource | 'all'; label: string }[] = [
-  { value: 'all', label: '全部' },
-  { value: 'preinstalled', label: '内置' },
-  { value: 'uploaded', label: '组织上传' },
-]
-
-const INSTALLED_OPTIONS: { value: 'all' | 'installed' | 'uninstalled'; label: string }[] = [
-  { value: 'all', label: '全部状态' },
-  { value: 'installed', label: '已安装' },
-  { value: 'uninstalled', label: '未安装' },
-]
 
 function PillGroup<T extends string>({
   options,
@@ -64,6 +53,20 @@ function PillGroup<T extends string>({
 }
 
 export function SkillsToolbar({ filters, onFiltersChange, onUploadClick }: SkillsToolbarProps) {
+  const t = useTranslations('adminSkills')
+
+  const SOURCE_OPTIONS: { value: SkillSource | 'all'; label: string }[] = [
+    { value: 'all', label: t('sourceAll') },
+    { value: 'preinstalled', label: t('sourcePreinstalled') },
+    { value: 'uploaded', label: t('sourceUploaded') },
+  ]
+
+  const INSTALLED_OPTIONS: { value: 'all' | 'installed' | 'uninstalled'; label: string }[] = [
+    { value: 'all', label: t('statusAll') },
+    { value: 'installed', label: t('statusInstalled') },
+    { value: 'uninstalled', label: t('statusUninstalled') },
+  ]
+
   const sourceValue: SkillSource | 'all' = filters.source ?? 'all'
   const installedValue: 'all' | 'installed' | 'uninstalled' =
     filters.installed === true ? 'installed' : filters.installed === false ? 'uninstalled' : 'all'
@@ -74,16 +77,16 @@ export function SkillsToolbar({ filters, onFiltersChange, onUploadClick }: Skill
         <Search className="pointer-events-none absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground/70" />
         <Input
           type="search"
-          placeholder="搜索 skill 名称或描述…"
+          placeholder={t('searchPlaceholder')}
           value={filters.q ?? ''}
           onChange={(e) => onFiltersChange({ ...filters, q: e.target.value || undefined })}
           className="pl-7"
-          aria-label="搜索 skill"
+          aria-label={t('searchAriaLabel')}
         />
       </div>
 
       <PillGroup
-        ariaLabel="按来源过滤"
+        ariaLabel={t('filterBySource')}
         options={SOURCE_OPTIONS}
         value={sourceValue}
         onChange={(next) =>
@@ -92,7 +95,7 @@ export function SkillsToolbar({ filters, onFiltersChange, onUploadClick }: Skill
       />
 
       <PillGroup
-        ariaLabel="按安装状态过滤"
+        ariaLabel={t('filterByStatus')}
         options={INSTALLED_OPTIONS}
         value={installedValue}
         onChange={(next) =>
@@ -105,7 +108,7 @@ export function SkillsToolbar({ filters, onFiltersChange, onUploadClick }: Skill
 
       <Button size="sm" onClick={onUploadClick} className="ml-auto">
         <Upload className="size-3.5" />
-        上传 skill
+        {t('uploadButton')}
       </Button>
     </div>
   )

@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import { useTranslations } from 'next-intl'
 import { Package, ChevronDown, ChevronRight, Eye, Download, Loader2 } from 'lucide-react'
 import { useArtifactStore, usePanelStore } from '@cubebox/core'
 import type { Artifact } from '@cubebox/core'
@@ -13,6 +14,7 @@ interface ArtifactGalleryProps {
 }
 
 export function ArtifactGallery({ conversationId }: ArtifactGalleryProps) {
+  const t = useTranslations('chat')
   const [isExpanded, setIsExpanded] = useState(false)
   const artifacts = useArtifactStore((s) => s.getArtifacts(conversationId))
   const isLoading = useArtifactStore((s) => s.isLoading(conversationId))
@@ -29,7 +31,7 @@ export function ArtifactGallery({ conversationId }: ArtifactGalleryProps) {
       >
         {isExpanded ? <ChevronDown className="size-3" /> : <ChevronRight className="size-3" />}
         <Package className="size-3" />
-        <span>Artifacts</span>
+        <span>{t('artifacts')}</span>
         {isLoading ? (
           <Loader2 className="size-3 animate-spin text-muted-foreground/70" />
         ) : (

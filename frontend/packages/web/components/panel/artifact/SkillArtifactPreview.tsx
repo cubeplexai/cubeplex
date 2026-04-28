@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import { useTranslations } from 'next-intl'
 import { Dialog as DialogPrimitive } from '@base-ui/react/dialog'
 import { X } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
@@ -27,6 +28,7 @@ export function SkillArtifactPreview({
   version: number | null
   workspaceId: string
 }) {
+  const t = useTranslations('adminSkills')
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [result, setResult] = useState<{ ok: boolean; message: string } | null>(null)
@@ -47,14 +49,14 @@ export function SkillArtifactPreview({
         body: JSON.stringify({ artifact_id: artifact.id }),
       })
       if (res.status === 409) {
-        setResult({ ok: false, message: '版本已存在，请在 SKILL.md 中更新 version 后再发布' })
+        setResult({ ok: false, message: t('versionExists') })
         return
       }
       if (!res.ok) {
         setResult({ ok: false, message: await readApiError(res) })
         return
       }
-      setResult({ ok: true, message: '已发布到组织市场' })
+      setResult({ ok: true, message: t('publishSuccess') })
       setConfirmOpen(false)
     } finally {
       setSubmitting(false)
@@ -84,17 +86,17 @@ export function SkillArtifactPreview({
 
       <div className={proseClasses}>
         {isLoading ? (
-          <p className="text-sm text-muted-foreground">加载中…</p>
+          <p className="text-sm text-muted-foreground">{t('previewLoading')}</p>
         ) : skillMd ? (
           <ReactMarkdown remarkPlugins={[remarkGfm]}>{skillMd}</ReactMarkdown>
         ) : (
-          <p className="text-sm text-muted-foreground">未找到 SKILL.md</p>
+          <p className="text-sm text-muted-foreground">{t('noSkillMd')}</p>
         )}
       </div>
 
       <div className="border-t pt-3">
         <Button size="sm" onClick={() => setConfirmOpen(true)} disabled={!!result?.ok}>
-          发布到组织市场
+          {t('publishButton')}
         </Button>
       </div>
 
@@ -110,7 +112,7 @@ export function SkillArtifactPreview({
           >
             <div className="flex items-start justify-between gap-3">
               <DialogPrimitive.Title className="text-base font-semibold">
-                确认发布
+                {t('confirmPublishTitle')}
               </DialogPrimitive.Title>
               <DialogPrimitive.Close
                 render={
@@ -124,10 +126,7 @@ export function SkillArtifactPreview({
                 }
               />
             </div>
-            <p className="mt-3 text-sm text-muted-foreground">
-              将这个 skill 发布到组织市场。version 取自 SKILL.md
-              frontmatter，发布后无法修改。若要更新，请在 SKILL.md 里 bump version 后重新发布。
-            </p>
+            <p className="mt-3 text-sm text-muted-foreground">{t('publishDesc')}</p>
             <div className="mt-4 flex justify-end gap-2">
               <Button
                 variant="outline"
@@ -135,10 +134,10 @@ export function SkillArtifactPreview({
                 onClick={() => setConfirmOpen(false)}
                 disabled={submitting}
               >
-                取消
+                {t('cancel')}
               </Button>
               <Button size="sm" onClick={() => void handlePublish()} disabled={submitting}>
-                {submitting ? '发布中…' : '确认发布'}
+                {submitting ? t('publishing') : t('confirmPublishBtn')}
               </Button>
             </div>
           </DialogPrimitive.Popup>

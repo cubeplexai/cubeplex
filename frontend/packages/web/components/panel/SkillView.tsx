@@ -1,6 +1,7 @@
 'use client'
 
 import useSWR from 'swr'
+import { useTranslations } from 'next-intl'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import type { SkillContent } from '@cubebox/core'
@@ -38,6 +39,7 @@ const contentFetcher = async (url: string): Promise<SkillContent> => {
 }
 
 export function SkillView({ args, result, skillId }: SkillViewProps) {
+  const t = useTranslations('adminSkills')
   const { workspaceId } = useWorkspaceContext()
   const skillNameFromArgs = String(args.skill_name ?? '')
   const parsed = parseResult(result)
@@ -93,7 +95,7 @@ export function SkillView({ args, result, skillId }: SkillViewProps) {
       )}
 
       {fetchLoading && !displayContent && (
-        <p className="text-xs text-muted-foreground">加载 SKILL.md…</p>
+        <p className="text-xs text-muted-foreground">{t('loadingSkillMd')}</p>
       )}
 
       {displayContent && (
