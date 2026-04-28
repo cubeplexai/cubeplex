@@ -577,6 +577,7 @@ class RunManager:
                 org_id=ctx.org_id,
                 workspace_id=ctx.workspace_id,
                 catalog_session=catalog_session,
+                user_id=ctx.user_id,
                 checkpointer=checkpointer,
                 citation_configs=all_citation_configs,
                 event_queue=event_q,

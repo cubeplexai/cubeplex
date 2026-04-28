@@ -37,6 +37,7 @@ def create_cubebox_agent(
     org_id: str | None = None,
     workspace_id: str | None = None,
     catalog_session: AsyncSession | None = None,
+    user_id: str | None = None,
     subagents: list[SubAgent] | None = None,
     checkpointer: Checkpointer | None = None,
     citation_configs: dict[str, CitationConfig] | None = None,
@@ -59,6 +60,7 @@ def create_cubebox_agent(
         catalog_session: SQLAlchemy AsyncSession used by the SkillCatalogService.
             When omitted, SkillsMiddleware + load_skill are not added (skills are
             simply unavailable for that run).
+        user_id: If provided along with conversation_id, CostMiddleware is added.
         subagents: If provided, SubAgentMiddleware is added.
         checkpointer: LangGraph checkpointer for conversation persistence.
     """
@@ -143,6 +145,18 @@ def create_cubebox_agent(
             inherited_middleware=inherited_subagent_middleware,
         )
     )
+
+    # Mount CostMiddleware last in the chain so it wraps all model calls
+    if user_id is not None and conversation_id is not None:
+        from cubebox.middleware.cost import CostMiddleware
+
+        cost_mw = CostMiddleware(
+            org_id=org_id or "",
+            workspace_id=workspace_id or "",
+            user_id=user_id,
+            conversation_id=conversation_id,
+        )
+        middleware.append(cost_mw)
 
     logger.info(
         "Creating cubebox agent: {} tools, {} middleware",
