@@ -1,41 +1,72 @@
 """Checkpointer module for LangGraph conversation persistence."""
 
-from typing import Any
+from __future__ import annotations
 
+from urllib.parse import quote_plus
+
+from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from loguru import logger
+from psycopg import AsyncConnection
+from psycopg.rows import DictRow, dict_row
+from psycopg_pool import AsyncConnectionPool
+
+from cubebox.config import config
+
+_pool: AsyncConnectionPool[AsyncConnection[DictRow]] | None = None
+_saver: AsyncPostgresSaver | None = None
 
 
-async def create_checkpointer() -> Any:
-    """Create a new LangGraph checkpointer instance with its own connection.
+def _build_conn_string() -> str:
+    host = config.get("database.host", "localhost")
+    port = config.get("database.port", 5432)
+    user = config.get("database.user", "postgres")
+    password = config.get("database.password", "")
+    name = config.get("database.name", "cubebox")
+    encoded_password = quote_plus(password)
+    return f"postgresql://{user}:{encoded_password}@{host}:{port}/{name}"
 
-    This creates a fresh connection for each request to avoid issues with
-    connection sharing across event loops or processes.
 
-    Returns:
-        AIOMySQLSaver instance or None if initialization fails
+async def init_checkpointer() -> AsyncPostgresSaver:
+    """Open the shared connection pool and run idempotent setup.
+
+    Called once at application startup from the FastAPI lifespan.
     """
-    try:
-        import aiomysql
-        from langgraph.checkpoint.mysql.aio import AIOMySQLSaver
+    global _pool, _saver
+    if _saver is not None:
+        return _saver
+    conn_str = _build_conn_string()
+    pool_size = int(config.get("database.pool_size", 10))
+    _pool = AsyncConnectionPool(
+        conn_str,
+        min_size=1,
+        max_size=pool_size,
+        kwargs={"autocommit": True, "prepare_threshold": None, "row_factory": dict_row},
+        open=False,
+    )
+    await _pool.open(wait=True)
+    _saver = AsyncPostgresSaver(_pool)
+    await _saver.setup()
+    logger.info("LangGraph checkpointer initialized (pg pool max_size={})", pool_size)
+    return _saver
 
-        from cubebox.config import config
 
-        # Build connection parameters
-        conn_params = {
-            "host": config.get("database.host", "localhost"),
-            "port": config.get("database.port", 3306),
-            "user": config.get("database.user", "root"),
-            "password": config.get("database.password", ""),
-            "db": config.get("database.name", "cubebox"),
-            "autocommit": True,
-        }
+async def shutdown_checkpointer() -> None:
+    """Close the shared connection pool. Called from lifespan shutdown."""
+    global _pool, _saver
+    if _pool is not None:
+        await _pool.close()
+        logger.debug("Checkpointer connection pool closed")
+    _pool = None
+    _saver = None
 
-        # Create connection and checkpointer
-        conn = await aiomysql.connect(**conn_params)
-        checkpointer = AIOMySQLSaver(conn=conn)
-        logger.debug("Created new checkpointer instance")
-        return checkpointer
 
-    except Exception as e:
-        logger.warning("Failed to create checkpointer: {}", str(e))
-        return None
+async def create_checkpointer() -> AsyncPostgresSaver:
+    """Return the shared checkpointer.
+
+    Production path: lifespan has already called `init_checkpointer`.
+    Fallback (unusual): if called before lifespan startup, we initialize
+    on demand so test harnesses that bypass the lifespan still work.
+    """
+    if _saver is None:
+        return await init_checkpointer()
+    return _saver
