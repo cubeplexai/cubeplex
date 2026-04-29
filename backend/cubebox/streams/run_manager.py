@@ -591,6 +591,10 @@ class RunManager:
                     attachment_blocks: list[dict[str, Any]] = []
                     if attachments:
                         if sandbox is not None:
+                            from opensandbox.exceptions.sandbox import (
+                                SandboxReadyTimeoutException,
+                            )
+
                             from cubebox.agents.hydrator import (
                                 AttachmentHydrationError,
                                 AttachmentHydrator,
@@ -615,7 +619,7 @@ class RunManager:
                                         conversation_id=conversation_id,
                                         file_ids=attachments,
                                     )
-                            except AttachmentHydrationError as exc:
+                            except (AttachmentHydrationError, SandboxReadyTimeoutException) as exc:
                                 # Hydration failure is non-fatal: the run continues
                                 # without files staged in the sandbox. The LLM still
                                 # receives the attachment hint text; the sandbox_path

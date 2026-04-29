@@ -115,7 +115,7 @@ def init(log_path: str | None = None, debug: bool | None = None) -> None:
         debug: Enable debug logging. Defaults to config.get("debug", False)
     """
     if log_path is None:
-        log_path = get_log_path()
+        log_path = config.get("logging.path", None) or get_log_path()
     if debug is None:
         debug = config.get("debug", False)
 

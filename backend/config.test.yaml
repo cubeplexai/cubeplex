@@ -54,6 +54,9 @@ test:
   langsmith:
     enabled: false
 
+  logging:
+    path: "/tmp/backend.log"
+
   # MCP: CI 无 webtools server
   mcp:
     enabled: false
