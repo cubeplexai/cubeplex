@@ -178,9 +178,9 @@ default:
   # Database Configuration
   database:
     host: "localhost"
-    port: 3306
-    user: "root"
-    password: ""
+    port: 5432
+    user: "postgres"
+    password: "postgres"
     name: "cubebox"
     pool_size: 10
     max_overflow: 20
