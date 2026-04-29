@@ -118,6 +118,40 @@ def allocate_offset(
     )
 
 
+def check_slug_collision(
+    registry: Registry,
+    slug: str,
+    branch: str,
+) -> None:
+    """Raise if `slug` is already registered to a different branch.
+
+    slugify() is intentionally lossy (lowercases, collapses punctuation), so
+    `feat/foo-bar` and `feat/foo_bar` (or `Feat/Foo` and `feat/foo`) all
+    collapse to the same key. Without this guard, the second `init` would
+    silently reuse the first's allocation slot AND overwrite its `path` —
+    both worktrees would think they own the same schemas/Redis prefix, and
+    a `destroy` from one would drop the other's data.
+
+    Same slug + same branch is allowed (path may legitimately drift if the
+    worktree was moved on disk; record_allocation will refresh the path).
+    """
+    existing = registry.entries.get(slug)
+    if existing is None:
+        return
+    if existing["branch"] == branch:
+        return
+    raise RuntimeError(
+        f"Slug collision: '{slug}' is already registered to branch "
+        f"'{existing['branch']}' at {existing['path']}.\n"
+        f"Branch '{branch}' slugifies to the same key but is a different "
+        f"branch — slugify() is lossy across case and punctuation.\n"
+        f"Resolve by either:\n"
+        f"  1. Renaming branch '{branch}' to something that doesn't collide.\n"
+        f"  2. Running `worktree-env destroy` from {existing['path']} first "
+        f"if that worktree is no longer needed."
+    )
+
+
 def record_allocation(
     registry: Registry,
     slug: str,
@@ -395,6 +429,7 @@ def cmd_init(args: argparse.Namespace) -> int:
 
     registry_path = info.main_path / ".worktrees" / "registry.json"
     registry = Registry.load(registry_path)
+    check_slug_collision(registry=registry, slug=slug, branch=info.branch)
     offset = allocate_offset(slug=slug, registry=registry, is_main_worktree=info.is_main)
     record_allocation(
         registry=registry,
