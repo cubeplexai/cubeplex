@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""worktree-env — allocate ports, MySQL schemas, and Redis prefixes per
+"""worktree-env — allocate ports, PostgreSQL databases, and Redis prefixes per
 git worktree so multiple worktrees can run dev servers and E2E in parallel.
 
 See docs/superpowers/specs/2026-04-28-worktree-parallel-dev-isolation-design.md
@@ -266,58 +266,92 @@ def write_worktree_env(
     env_file_path(worktree_root).write_text(content)
 
 
-# ----------------------------------------------------------- mysql + alembic
+# --------------------------------------------------------- postgres + alembic
 
-def _mysql_creds_from_env() -> dict[str, str]:
-    """Read DB host/port/user/password from process env after .worktree.env load.
+def _pg_creds_from_env() -> dict[str, str]:
+    """Read PG creds from CUBEBOX_DATABASE__* env vars, with sane defaults.
 
     We re-read from os.environ because `init` already loaded .worktree.env
     earlier in this run; we want CUBEBOX_DATABASE__HOST etc. that come from
     backend/.env (the secrets file).
     """
     return {
-        "host": os.environ.get("CUBEBOX_DATABASE__HOST", "127.0.0.1"),
-        "port": os.environ.get("CUBEBOX_DATABASE__PORT", "3306"),
-        "user": os.environ.get("CUBEBOX_DATABASE__USER", "root"),
-        "password": os.environ.get("CUBEBOX_DATABASE__PASSWORD", ""),
+        "host": os.environ.get("CUBEBOX_DATABASE__HOST", "localhost"),
+        "port": os.environ.get("CUBEBOX_DATABASE__PORT", "5432"),
+        "user": os.environ.get("CUBEBOX_DATABASE__USER", "postgres"),
+        "password": os.environ.get("CUBEBOX_DATABASE__PASSWORD", "postgres"),
     }
 
 
-def _mysql_exec(sql: str) -> None:
-    """Run a single SQL statement via the `mysql` CLI."""
-    creds = _mysql_creds_from_env()
+def _quote_ident(name: str) -> str:
+    """Quote a PG identifier for safe inclusion in DDL."""
+    if '"' in name:
+        raise ValueError(f"refusing to quote identifier containing double quote: {name!r}")
+    return f'"{name}"'
+
+
+def _pg_exec(sql: str, db: str = "postgres") -> None:
+    """Run a single SQL statement via the `psql` CLI against `db`."""
+    creds = _pg_creds_from_env()
     cmd = [
-        "mysql",
-        f"--host={creds['host']}",
-        f"--port={creds['port']}",
-        f"--user={creds['user']}",
-        f"--password={creds['password']}",
-        "-e",
-        sql,
+        "psql",
+        "-h", creds["host"],
+        "-p", creds["port"],
+        "-U", creds["user"],
+        "-d", db,
+        "-v", "ON_ERROR_STOP=1",
+        "-tAc", sql,
     ]
-    result = subprocess.run(cmd, capture_output=True, text=True)
+    env = {**os.environ, "PGPASSWORD": creds["password"]}
+    result = subprocess.run(cmd, capture_output=True, text=True, env=env)
     if result.returncode != 0:
         raise RuntimeError(
-            f"mysql command failed (exit {result.returncode}):\n"
-            f"  cmd: {' '.join(cmd[:-2])} -e <hidden>\n"
-            f"  stderr: {result.stderr}"
+            f"psql command failed (exit {result.returncode}):\n"
+            f"  cmd: {' '.join(cmd[:-1])} <sql>\n"
+            f"  sql: {sql}\n"
+            f"  stderr: {result.stderr.strip()}"
         )
 
 
 def _create_schemas(slug: str) -> None:
+    """Create per-worktree dev/test databases if absent."""
     dev = db_dev_schema(slug)
     test = db_test_schema(slug)
-    _mysql_exec(f"CREATE DATABASE IF NOT EXISTS `{dev}` CHARACTER SET utf8mb4;")
-    _mysql_exec(f"CREATE DATABASE IF NOT EXISTS `{test}` CHARACTER SET utf8mb4;")
-    print(f"→ ensured MySQL schemas: {dev}, {test}")
+    creds = _pg_creds_from_env()
+    env = {**os.environ, "PGPASSWORD": creds["password"]}
+    for db_name in (dev, test):
+        # PG has no CREATE DATABASE IF NOT EXISTS — pre-check via pg_database.
+        out = subprocess.run(
+            [
+                "psql",
+                "-h", creds["host"],
+                "-p", creds["port"],
+                "-U", creds["user"],
+                "-d", "postgres",
+                "-tAc",
+                f"SELECT 1 FROM pg_database WHERE datname = '{db_name}';",
+            ],
+            capture_output=True,
+            text=True,
+            env=env,
+            check=True,
+        )
+        if out.stdout.strip() != "1":
+            _pg_exec(f"CREATE DATABASE {_quote_ident(db_name)};")
+    print(f"→ ensured PG databases: {dev}, {test}")
 
 
 def _drop_schemas(slug: str) -> None:
+    """Drop per-worktree dev/test databases, terminating live connections first."""
     dev = db_dev_schema(slug)
     test = db_test_schema(slug)
-    _mysql_exec(f"DROP DATABASE IF EXISTS `{dev}`;")
-    _mysql_exec(f"DROP DATABASE IF EXISTS `{test}`;")
-    print(f"→ dropped MySQL schemas: {dev}, {test}")
+    for db_name in (dev, test):
+        _pg_exec(
+            f"SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
+            f"WHERE datname = '{db_name}';"
+        )
+        _pg_exec(f"DROP DATABASE IF EXISTS {_quote_ident(db_name)};")
+    print(f"→ dropped PG databases: {dev}, {test}")
 
 
 def _uv_sync_all_extras(worktree_path: Path) -> None:
@@ -453,12 +487,12 @@ def cmd_init(args: argparse.Namespace) -> int:
     write_worktree_env(info.path, slug, offset)
     print(f"→ wrote {env_file_path(info.path)}")
 
-    # Load .worktree.env into our own os.environ so alembic subprocess inherits
-    # the worktree's CUBEBOX_DATABASE__NAME. Backend's config.py will reload it
-    # again at import time inside the subprocess — same values, idempotent.
-    # Also load backend/.env for DB credentials (host/port/user/password).
-    _load_dotenv_into_environ(info.path / "backend" / ".env")
+    # Load .worktree.env FIRST so its CUBEBOX_DATABASE__NAME wins over backend/.env
+    # (which holds the main worktree's default 'cubebox'). _load_dotenv_into_environ
+    # uses setdefault, so first-loaded keys win. This mirrors config.py's order.
+    # Backend's config.py will reload both at import time inside subprocesses.
     _load_dotenv_into_environ(env_file_path(info.path))
+    _load_dotenv_into_environ(info.path / "backend" / ".env")
 
     _uv_sync_all_extras(info.path)
     _create_schemas(slug)
@@ -522,9 +556,10 @@ def cmd_destroy(args: argparse.Namespace) -> int:
         )
         return 1
 
-    # Load env so DB creds are in os.environ
-    _load_dotenv_into_environ(info.path / "backend" / ".env")
+    # Load env so DB creds are in os.environ. .worktree.env first so worktree
+    # values win over backend/.env defaults (setdefault semantics).
     _load_dotenv_into_environ(env_file_path(info.path))
+    _load_dotenv_into_environ(info.path / "backend" / ".env")
 
     _drop_schemas(slug)
 
@@ -561,9 +596,10 @@ def cmd_doctor(args: argparse.Namespace) -> int:
         return 1
     print(f"✓ {env_file} present")
 
-    # Load env so we can probe MySQL / Redis with current creds
-    _load_dotenv_into_environ(info.path / "backend" / ".env")
+    # Load env so we can probe PostgreSQL / Redis with current creds.
+    # .worktree.env first so worktree DB name wins over backend/.env's default.
     _load_dotenv_into_environ(env_file)
+    _load_dotenv_into_environ(info.path / "backend" / ".env")
 
     # 2. Registry entry consistent
     registry = Registry.load(info.main_path / ".worktrees" / "registry.json")
@@ -577,17 +613,17 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     else:
         print(f"✓ registry entry slot={entry['offset']}")
 
-    # 3. MySQL schemas exist
+    # 3. PostgreSQL databases exist
     try:
-        _mysql_exec(f"USE `{db_dev_schema(slug)}`;")
-        print(f"✓ MySQL schema {db_dev_schema(slug)} reachable")
+        _pg_exec("SELECT 1;", db=db_dev_schema(slug))
+        print(f"✓ PG database {db_dev_schema(slug)} reachable")
     except RuntimeError as e:
-        issues.append(f"dev schema unusable: {e}")
+        issues.append(f"dev database unusable: {e}")
     try:
-        _mysql_exec(f"USE `{db_test_schema(slug)}`;")
-        print(f"✓ MySQL schema {db_test_schema(slug)} reachable")
+        _pg_exec("SELECT 1;", db=db_test_schema(slug))
+        print(f"✓ PG database {db_test_schema(slug)} reachable")
     except RuntimeError as e:
-        issues.append(f"test schema unusable: {e}")
+        issues.append(f"test database unusable: {e}")
 
     # 4. Redis reachable
     redis_url = os.environ.get("CUBEBOX_REDIS__URL")
@@ -654,29 +690,28 @@ def cmd_clean_orphans(args: argparse.Namespace) -> int:
         if entry_path not in live_paths:
             orphan_slugs.append(slug)
 
-    # 3. Orphan MySQL schemas (cubebox_* not referenced by any live entry)
+    # 3. Orphan PG databases (cubebox_* not referenced by any live entry)
     referenced_dev = {db_dev_schema(s) for s in registry.entries if s not in orphan_slugs}
     referenced_test = {db_test_schema(s) for s in registry.entries if s not in orphan_slugs}
     referenced = referenced_dev | referenced_test | {"cubebox", "cubebox_test"}
 
-    # Load main's backend/.env for MySQL creds
+    # Load main's backend/.env for PG creds
     _load_dotenv_into_environ(info.main_path / "backend" / ".env")
 
-    creds = _mysql_creds_from_env()
+    creds = _pg_creds_from_env()
     list_result = subprocess.run(
         [
-            "mysql",
-            f"--host={creds['host']}",
-            f"--port={creds['port']}",
-            f"--user={creds['user']}",
-            f"--password={creds['password']}",
-            "--batch",
-            "--skip-column-names",
-            "-e",
-            "SHOW DATABASES LIKE 'cubebox_%';",
+            "psql",
+            "-h", creds["host"],
+            "-p", creds["port"],
+            "-U", creds["user"],
+            "-d", "postgres",
+            "-tAc",
+            "SELECT datname FROM pg_database WHERE datname LIKE 'cubebox_%';",
         ],
         capture_output=True,
         text=True,
+        env={**os.environ, "PGPASSWORD": creds["password"]},
         check=True,
     )
     all_schemas = {s.strip() for s in list_result.stdout.splitlines() if s.strip()}
@@ -703,9 +738,13 @@ def cmd_clean_orphans(args: argparse.Namespace) -> int:
     registry.save()
 
     for schema in orphan_schemas:
-        _mysql_exec(f"DROP DATABASE IF EXISTS `{schema}`;")
+        _pg_exec(
+            f"SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
+            f"WHERE datname = '{schema}';"
+        )
+        _pg_exec(f"DROP DATABASE IF EXISTS {_quote_ident(schema)};")
 
-    print(f"→ pruned {len(orphan_slugs)} registry entries, dropped {len(orphan_schemas)} schemas")
+    print(f"→ pruned {len(orphan_slugs)} registry entries, dropped {len(orphan_schemas)} databases")
     return 0
 
 
