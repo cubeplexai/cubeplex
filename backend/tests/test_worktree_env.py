@@ -137,36 +137,60 @@ class TestAllocate:
         assert offset != 0
 
 
+def _clean_git_env() -> dict[str, str]:
+    """Build an env for git subprocess calls that doesn't inherit GIT_*.
+
+    pre-commit and some parent shells set GIT_DIR / GIT_WORK_TREE /
+    GIT_INDEX_FILE pointing at the outer repo; if those leak into a
+    subprocess `git init <tmp_path>` or `git -C <tmp_path> ...`, git
+    operates on the wrong repo and the test asserts about the wrong
+    state. Strip them, then add the author/committer identities.
+    """
+    env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+    env.update(
+        {
+            "GIT_AUTHOR_NAME": "t",
+            "GIT_AUTHOR_EMAIL": "t@t",
+            "GIT_COMMITTER_NAME": "t",
+            "GIT_COMMITTER_EMAIL": "t@t",
+        }
+    )
+    return env
+
+
+def _strip_git_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Remove inherited GIT_* vars from os.environ for this test.
+
+    The production helpers (`find_main_repo`, `current_worktree_info`)
+    fork `git rev-parse`, which inherits env. If a parent (pre-commit,
+    a shell with GIT_DIR set) leaks GIT_DIR / GIT_WORK_TREE /
+    GIT_INDEX_FILE, those calls operate on the wrong repo.
+    """
+    for key in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR"):
+        monkeypatch.delenv(key, raising=False)
+
+
 class TestWorktreeDiscovery:
-    def test_find_main_repo_from_main(self, we, tmp_path):
-        # Initialize a real git repo as the "main"
-        subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    def test_find_main_repo_from_main(self, we, tmp_path, monkeypatch):
+        _strip_git_env(monkeypatch)
+        env = _clean_git_env()
+        subprocess.run(["git", "init", "-q", str(tmp_path)], check=True, env=env)
         subprocess.run(
             ["git", "-C", str(tmp_path), "commit", "--allow-empty", "-m", "init", "-q"],
             check=True,
-            env={
-                **os.environ,
-                "GIT_AUTHOR_NAME": "t",
-                "GIT_AUTHOR_EMAIL": "t@t",
-                "GIT_COMMITTER_NAME": "t",
-                "GIT_COMMITTER_EMAIL": "t@t",
-            },
+            env=env,
         )
         main = we.find_main_repo(start_dir=tmp_path)
         assert main == tmp_path.resolve()
 
-    def test_is_main_worktree_true_in_main(self, we, tmp_path):
-        subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    def test_is_main_worktree_true_in_main(self, we, tmp_path, monkeypatch):
+        _strip_git_env(monkeypatch)
+        env = _clean_git_env()
+        subprocess.run(["git", "init", "-q", str(tmp_path)], check=True, env=env)
         subprocess.run(
             ["git", "-C", str(tmp_path), "commit", "--allow-empty", "-m", "init", "-q"],
             check=True,
-            env={
-                **os.environ,
-                "GIT_AUTHOR_NAME": "t",
-                "GIT_AUTHOR_EMAIL": "t@t",
-                "GIT_COMMITTER_NAME": "t",
-                "GIT_COMMITTER_EMAIL": "t@t",
-            },
+            env=env,
         )
         info = we.current_worktree_info(start_dir=tmp_path)
         assert info.is_main is True
