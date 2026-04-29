@@ -40,8 +40,8 @@ test:
   # CI 里用 service containers，localhost 连接
   database:
     host: "127.0.0.1"
-    port: 3306
-    user: "root"
+    port: 5432
+    user: "postgres"
     password: "testpass"
     name: "cubebox_test"
 
