@@ -65,18 +65,16 @@ def include_object(
     return True
 
 
-# 从 app config 各字段拼接数据库 URL（Alembic 用同步驱动 pymysql）
 def get_url() -> str:
     from urllib.parse import quote_plus
 
     host = app_config.get("database.host", "localhost")
-    port = app_config.get("database.port", 3306)
-    user = app_config.get("database.user", "root")
+    port = app_config.get("database.port", 5432)
+    user = app_config.get("database.user", "postgres")
     password = app_config.get("database.password", "")
     name = app_config.get("database.name", "cubebox")
-    # URL encode password to handle special characters
     encoded_password = quote_plus(password)
-    url = f"mysql+pymysql://{user}:{encoded_password}@{host}:{port}/{name}"
+    url = f"postgresql+psycopg://{user}:{encoded_password}@{host}:{port}/{name}"
     # Escape % for ConfigParser (% -> %%)
     return url.replace("%", "%%")
 
