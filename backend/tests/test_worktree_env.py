@@ -171,3 +171,44 @@ class TestWorktreeDiscovery:
         info = we.current_worktree_info(start_dir=tmp_path)
         assert info.is_main is True
         assert info.branch in ("master", "main")
+
+
+class TestSlugCollision:
+    def test_no_collision_for_new_slug(self, we, tmp_path):
+        reg = we.Registry(path=tmp_path / "r.json")
+        # Empty registry — never raises.
+        we.check_slug_collision(registry=reg, slug="feat-foo", branch="feat/foo")
+
+    def test_no_collision_when_branch_matches(self, we, tmp_path):
+        reg = we.Registry(path=tmp_path / "r.json")
+        reg.entries["feat-foo"] = {
+            "offset": 7,
+            "branch": "feat/foo",
+            "path": "/old/path",
+            "created_at": "t",
+        }
+        # Same branch, different path (worktree moved) — allowed.
+        we.check_slug_collision(registry=reg, slug="feat-foo", branch="feat/foo")
+
+    def test_raises_on_punctuation_collision(self, we, tmp_path):
+        # feat/foo-bar and feat/foo_bar both slugify to "feat-foo-bar".
+        reg = we.Registry(path=tmp_path / "r.json")
+        reg.entries["feat-foo-bar"] = {
+            "offset": 11,
+            "branch": "feat/foo-bar",
+            "path": "/p1",
+            "created_at": "t",
+        }
+        with pytest.raises(RuntimeError, match="Slug collision"):
+            we.check_slug_collision(registry=reg, slug="feat-foo-bar", branch="feat/foo_bar")
+
+    def test_raises_on_case_collision(self, we, tmp_path):
+        reg = we.Registry(path=tmp_path / "r.json")
+        reg.entries["feat-foo"] = {
+            "offset": 11,
+            "branch": "feat/foo",
+            "path": "/p1",
+            "created_at": "t",
+        }
+        with pytest.raises(RuntimeError, match="Slug collision"):
+            we.check_slug_collision(registry=reg, slug="feat-foo", branch="Feat/Foo")
