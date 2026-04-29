@@ -1,4 +1,4 @@
-.PHONY: help install dev-install format lint lint-fix type-check test test-cov test-ui test-ui-unit test-ui-e2e test-all check check-ci clean pre-commit-install pre-commit-install-all pre-commit-run
+.PHONY: help install dev-install format lint lint-fix type-check test test-cov test-e2e test-contracts migrate start cleanup-sandboxes check check-ci clean pre-commit-install pre-commit-install-all pre-commit-run
 
 help:
 	@echo "Available commands:"
@@ -9,10 +9,11 @@ help:
 	@echo "  make type-check        - Run mypy type checker"
 	@echo "  make test              - Run backend tests"
 	@echo "  make test-cov          - Run backend tests with coverage report"
-	@echo "  make test-ui           - Run all frontend tests (unit + e2e)"
-	@echo "  make test-ui-unit      - Run frontend unit tests (Vitest)"
-	@echo "  make test-ui-e2e       - Run frontend E2E tests (Playwright)"
-	@echo "  make test-all          - Run all tests (backend + frontend)"
+	@echo "  make test-e2e          - Run backend E2E tests"
+	@echo "  make test-contracts    - Run plugin contract tests (EE compat)"
+	@echo "  make migrate           - Run Alembic migrations"
+	@echo "  make start             - Start backend server"
+	@echo "  make cleanup-sandboxes - Cleanup leftover test sandboxes"
 	@echo "  make check             - Run all checks (format, lint, type-check)"
 	@echo "  make check-ci          - CI-equivalent checks (ruff check + format check + mypy + pytest unit)"
 	@echo "  make pre-commit-install-all - Install both pre-commit and pre-push hooks"
@@ -58,21 +59,22 @@ test-cov:
 	uv run pytest -s --cov=cubebox --cov-report=term-missing --cov-report=html
 	@echo "✓ Coverage report generated in htmlcov/"
 
-test-ui-unit:
-	@echo "Running frontend unit tests..."
-	cd ../frontend && pnpm test
-	@echo "✓ Frontend unit tests passed"
+test-e2e:
+	@echo "Running backend E2E tests..."
+	uv run pytest tests/e2e/ -v
+	@echo "✓ Backend E2E tests passed"
 
-test-ui-e2e:
-	@echo "Running frontend E2E tests..."
-	cd ../frontend && pnpm test:e2e
-	@echo "✓ Frontend E2E tests passed"
+test-contracts:
+	uv run pytest tests/plugins/test_contracts.py -v --no-cov
 
-test-ui: test-ui-unit test-ui-e2e
-	@echo "✓ All frontend tests passed"
+migrate:
+	uv run alembic upgrade head
 
-test-all: test test-ui
-	@echo "✓ All tests passed"
+start:
+	uv run python main.py
+
+cleanup-sandboxes:
+	uv run python scripts/cleanup_sandboxes.py
 
 check: format lint type-check
 	@echo "✓ All checks passed"
@@ -89,7 +91,7 @@ check-ci:
 	CUBEBOX_SANDBOX__DOMAIN=dummy:9000 \
 	CUBEBOX_SANDBOX__IMAGE=dummy:image \
 	CUBEBOX_SANDBOX__API_KEY=dummy \
-		uv run pytest --ignore=tests/e2e -m "not sandbox and not e2e"
+		uv run pytest --ignore=tests/e2e -m "not sandbox and not e2e" --cov-report=xml
 	@echo "✓ CI-equivalent checks passed"
 
 clean:
