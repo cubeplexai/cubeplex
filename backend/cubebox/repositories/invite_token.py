@@ -26,7 +26,7 @@ class InviteTokenRepository:
         if tok is None:
             return None
         now = datetime.now(UTC)
-        # MySQL DATETIME drops tz on round-trip — coerce to UTC-aware before comparing.
+        # `timestamp without time zone` columns drop tz on round-trip — coerce to UTC-aware before comparing.
         expires_at = tok.expires_at
         if expires_at.tzinfo is None:
             expires_at = expires_at.replace(tzinfo=UTC)
