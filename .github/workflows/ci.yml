@@ -232,7 +232,7 @@ jobs:
 
       - name: Playwright e2e
         working-directory: frontend
-        run: pnpm test:e2e -- --reporter=list
+        run: pnpm exec playwright test --reporter=list
 
       - name: Cleanup leftover test sandboxes
         if: always()
