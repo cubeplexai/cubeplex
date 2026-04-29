@@ -215,7 +215,7 @@ jobs:
       - name: Start backend in background
         working-directory: backend
         run: |
-          nohup uv run python main.py > /tmp/backend.log 2>&1 &
+          nohup uv run python main.py > /tmp/backend-console.log 2>&1 &
           echo $! > /tmp/backend.pid
 
       - name: Wait for backend ready
@@ -232,7 +232,7 @@ jobs:
 
       - name: Playwright e2e
         working-directory: frontend
-        run: pnpm test:e2e
+        run: pnpm test:e2e -- --reporter=list
 
       - name: Cleanup leftover test sandboxes
         if: always()
