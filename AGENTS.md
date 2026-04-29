@@ -91,9 +91,9 @@ cubebox/
 ## Worktrees and parallel dev
 
 This repo uses `git worktree` for parallel feature development. Each
-worktree gets its own allocated ports, MySQL schemas, and Redis prefix to
-avoid collisions when multiple worktrees run dev servers or E2E suites at
-the same time. All allocations land in `<worktree_root>/.worktree.env`
+worktree gets its own allocated ports, PostgreSQL databases, and Redis
+prefix to avoid collisions when multiple worktrees run dev servers or E2E
+suites at the same time. All allocations land in `<worktree_root>/.worktree.env`
 (gitignored).
 
 ### Creating a new worktree
@@ -104,9 +104,10 @@ Always run from the main repo root. The wrapper branches from latest
     ./scripts/new-worktree feat/<branch-name>
 
 This: fetches origin/main, creates the worktree, allocates a slot,
-provisions MySQL schemas, runs `alembic upgrade head`, copies
-`backend/.env` and `config.development.local.yaml` from main if missing,
-and writes `.worktree.env`.
+provisions PostgreSQL databases on the shared `~/infra/postgresql`
+cluster, runs `alembic upgrade head`, copies `backend/.env` and
+`config.development.local.yaml` from main if missing, and writes
+`.worktree.env`.
 
 ### Working inside a worktree
 
@@ -134,9 +135,9 @@ manually with `curl` or `lsof`.
 
 ### Other subcommands
 
-- `./scripts/worktree-env doctor` — verify schemas exist, ports free, MySQL/Redis reachable, alembic at head
-- `./scripts/worktree-env destroy` — drop schemas, clear redis prefix, delete `.worktree.env` (run **before** `git worktree remove`)
-- `./scripts/worktree-env clean-orphans` — interactive cleanup of registry entries and MySQL schemas left behind by removed worktrees
+- `./scripts/worktree-env doctor` — verify databases exist, ports free, Postgres/Redis reachable, alembic at head
+- `./scripts/worktree-env destroy` — drop databases, clear redis prefix, delete `.worktree.env` (run **before** `git worktree remove`)
+- `./scripts/worktree-env clean-orphans` — interactive cleanup of registry entries and PostgreSQL databases left behind by removed worktrees
 
 ### Notes for AI agents
 
@@ -146,3 +147,5 @@ manually with `curl` or `lsof`.
   any other worktree they are wrong.
 - CI runs in the main checkout (no `.worktree.env`); all the dotenv
   loaders no-op there, so CI behavior is unchanged.
+- The Postgres cluster lives at `~/infra/postgresql` on `localhost:5432`
+  and is shared across worktrees; isolation is per-database, not per-port.
