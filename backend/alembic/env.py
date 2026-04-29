@@ -43,7 +43,7 @@ if config.config_file_name is not None:
 # target_metadata = mymodel.Base.metadata
 target_metadata = SQLModel.metadata
 
-# Tables managed by langgraph-checkpoint-mysql — exclude from autogenerate
+# Tables managed by langgraph-checkpoint-postgres — exclude from autogenerate
 _CHECKPOINT_TABLES = {
     "checkpoint_migrations",
     "checkpoints",
