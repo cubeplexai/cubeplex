@@ -30,22 +30,39 @@ async def init_checkpointer() -> AsyncPostgresSaver:
     """Open the shared connection pool and run idempotent setup.
 
     Called once at application startup from the FastAPI lifespan.
+    Cleans up the partial pool on failure so subsequent retries start fresh —
+    FastAPI does not call the lifespan shutdown clause when startup raises,
+    so transactional cleanup is owned here.
     """
     global _pool, _saver
     if _saver is not None:
         return _saver
     conn_str = _build_conn_string()
     pool_size = int(config.get("database.pool_size", 10))
-    _pool = AsyncConnectionPool(
+    pool: AsyncConnectionPool[AsyncConnection[DictRow]] = AsyncConnectionPool(
         conn_str,
         min_size=1,
         max_size=pool_size,
+        # AsyncPostgresSaver issues cross-connection DDL during setup() that
+        # conflicts with cached prepared plans; disabling the cache is the
+        # documented LangGraph workaround.
         kwargs={"autocommit": True, "prepare_threshold": None, "row_factory": dict_row},
         open=False,
     )
-    await _pool.open(wait=True)
-    _saver = AsyncPostgresSaver(_pool)
-    await _saver.setup()
+    try:
+        await pool.open(wait=True)
+        saver = AsyncPostgresSaver(pool)
+        await saver.setup()
+    except Exception:
+        # Best-effort cleanup of the half-built pool; FastAPI's lifespan
+        # shutdown clause does not run when startup raises.
+        try:
+            await pool.close()
+        except Exception:  # noqa: BLE001
+            pass
+        raise
+    _pool = pool
+    _saver = saver
     logger.info("LangGraph checkpointer initialized (pg pool max_size={})", pool_size)
     return _saver
 
