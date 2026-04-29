@@ -154,33 +154,15 @@ async def lifespan(_app: FastAPI):  # type: ignore
         logger.error("Failed to initialize parser registry: {}", str(e))
         raise
 
-    # Initialize LangGraph checkpointer tables (one-time setup)
+    # Initialize LangGraph checkpointer (creates pool + setup tables)
     try:
-        import aiomysql
-        from langgraph.checkpoint.mysql.aio import AIOMySQLSaver
+        from cubebox.agents.checkpointer import init_checkpointer
 
-        from cubebox.config import config
-
-        # Build connection parameters
-        conn_params = {
-            "host": config.get("database.host", "localhost"),
-            "port": config.get("database.port", 3306),
-            "user": config.get("database.user", "root"),
-            "password": config.get("database.password", ""),
-            "db": config.get("database.name", "cubebox"),
-            "autocommit": True,
-        }
-
-        # Create temporary connection to setup tables
-        setup_conn = await aiomysql.connect(**conn_params)
-        try:
-            checkpointer = AIOMySQLSaver(conn=setup_conn)
-            await checkpointer.setup()
-            logger.info("LangGraph checkpointer tables initialized")
-        finally:
-            setup_conn.close()
+        await init_checkpointer()
+        logger.info("LangGraph checkpointer initialized")
     except Exception as e:
-        logger.warning("Failed to initialize LangGraph checkpointer tables: {}", str(e))
+        logger.error("Failed to initialize LangGraph checkpointer: {}", str(e))
+        raise
 
     # Initialize SandboxManager and start cleanup loop
     cleanup_task = None
@@ -248,6 +230,9 @@ async def lifespan(_app: FastAPI):  # type: ignore
 
     # ==================== Shutdown ====================
     logger.info("Application shutting down")
+    from cubebox.agents.checkpointer import shutdown_checkpointer
+
+    await shutdown_checkpointer()
     if _attachment_cleanup_task is not None:
         _attachment_cleanup_task.cancel()
         try:
