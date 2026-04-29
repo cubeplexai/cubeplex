@@ -58,14 +58,14 @@ repos:
     hooks:
       - id: backend-check-ci
         name: backend check-ci (ruff + mypy + pytest unit)
-        entry: bash -c 'cd backend && make check-ci'
+        entry: make backend-check-ci
         language: system
         stages: [pre-push]
         pass_filenames: false
         always_run: true
       - id: frontend-check-ci
-        name: frontend check-ci (type-check + lint + format + vitest)
-        entry: bash -c 'cd frontend && pnpm -r type-check && pnpm -r lint && pnpm -r format:check && pnpm -r test'
+        name: frontend check-ci (build-core + lint + format + type-check + vitest + next build)
+        entry: make frontend-check-ci
         language: system
         stages: [pre-push]
         pass_filenames: false

@@ -35,19 +35,8 @@ jobs:
           # which occasionally hangs on a concurrent lock and fails the job.
           prune-cache: false
       - name: Install backend
-        working-directory: backend
-        run: uv sync --all-extras
-      - name: Ruff check
-        working-directory: backend
-        run: uv run ruff check cubebox/ scripts/ tests/
-      - name: Ruff format check
-        working-directory: backend
-        run: uv run ruff format --check cubebox/ scripts/ tests/
-      - name: Mypy (strict)
-        working-directory: backend
-        run: uv run mypy cubebox/
-      - name: Pytest unit
-        working-directory: backend
+        run: make backend-install
+      - name: Backend CI checks
         env:
           # Dummy env vars required because tests/conftest.py forces ENV_FOR_DYNACONF=test
           # which loads config.test.yaml, and that file uses @format {env[...]} for secrets.
@@ -59,7 +48,7 @@ jobs:
           CUBEBOX_SANDBOX__DOMAIN: dummy:9000
           CUBEBOX_SANDBOX__IMAGE: dummy:image
           CUBEBOX_SANDBOX__API_KEY: dummy
-        run: uv run pytest -m "not sandbox and not e2e" --cov-report=xml
+        run: make backend-check-ci
       - name: Upload coverage
         uses: actions/upload-artifact@v4
         if: always()
@@ -82,26 +71,9 @@ jobs:
           cache: pnpm
           cache-dependency-path: frontend/pnpm-lock.yaml
       - name: Install frontend
-        working-directory: frontend
-        run: pnpm install --frozen-lockfile
-      - name: Build core
-        working-directory: frontend
-        run: pnpm --filter @cubebox/core build
-      - name: ESLint
-        working-directory: frontend
-        run: pnpm -r lint
-      - name: Prettier check
-        working-directory: frontend
-        run: pnpm format:check
-      - name: Type check
-        working-directory: frontend
-        run: pnpm -r type-check
-      - name: Vitest
-        working-directory: frontend
-        run: pnpm -r test
-      - name: Next build
-        working-directory: frontend
-        run: pnpm build
+        run: make frontend-install
+      - name: Frontend CI checks
+        run: make frontend-check-ci
 
   e2e:
     name: E2E (backend pytest + frontend playwright)
@@ -156,16 +128,13 @@ jobs:
           cache-dependency-path: frontend/pnpm-lock.yaml
 
       - name: Install backend
-        working-directory: backend
-        run: uv sync --all-extras
+        run: make backend-install
 
       - name: Install frontend
-        working-directory: frontend
-        run: pnpm install --frozen-lockfile
+        run: make frontend-install
 
       - name: Build @cubebox/core
-        working-directory: frontend
-        run: pnpm --filter @cubebox/core build
+        run: make frontend-build-core
 
       - name: Prepare RustFS data dirs
         run: |
@@ -198,25 +167,21 @@ jobs:
             s3 mb s3://cubebox-test --region us-east-1
 
       - name: Alembic migrate (pre-pytest)
-        working-directory: backend
-        run: uv run alembic upgrade head
+        run: make backend-migrate
 
       - name: Pytest e2e (in-process TestClient)
-        working-directory: backend
-        run: uv run pytest tests/e2e/ -v
+        run: make backend-test-e2e
 
       - name: Reset DB state for playwright
         # pytest may leave data behind; drop + recreate + migrate for a clean playwright start.
         run: |
           mysql -h 127.0.0.1 -P 3306 -uroot -ptestpass \
             -e "DROP DATABASE cubebox_test; CREATE DATABASE cubebox_test;"
-          cd backend && uv run alembic upgrade head
+          make backend-migrate
 
       - name: Start backend in background
-        working-directory: backend
         run: |
-          nohup uv run python main.py > /tmp/backend-console.log 2>&1 &
-          echo $! > /tmp/backend.pid
+          nohup make backend-start > /tmp/backend-console.log 2>&1 &
 
       - name: Wait for backend ready
         run: |
@@ -227,17 +192,14 @@ jobs:
           '
 
       - name: Install playwright browsers
-        working-directory: frontend
-        run: pnpm exec playwright install --with-deps chromium
+        run: make frontend-install-browsers
 
       - name: Playwright e2e
-        working-directory: frontend
-        run: pnpm exec playwright test --reporter=list
+        run: make frontend-test-e2e-ci
 
       - name: Cleanup leftover test sandboxes
         if: always()
-        working-directory: backend
-        run: uv run python scripts/cleanup_sandboxes.py
+        run: make backend-cleanup-sandboxes
 
       - name: Upload backend log on failure
         if: failure()
@@ -267,10 +229,8 @@ jobs:
           python-version: "3.12"
           enable-cache: true
       - name: Install backend
-        working-directory: backend
-        run: uv sync --all-extras
+        run: make backend-install
       - name: Run plugin contract tests
-        working-directory: backend
         env:
           # Contract tests don't touch LLM/sandbox/DB but tests/conftest.py
           # loads the full config which requires these env vars (see backend-check).
@@ -280,7 +240,7 @@ jobs:
           CUBEBOX_SANDBOX__DOMAIN: dummy:9000
           CUBEBOX_SANDBOX__IMAGE: dummy:image
           CUBEBOX_SANDBOX__API_KEY: dummy
-        run: uv run pytest tests/plugins/test_contracts.py -v --no-cov
+        run: make backend-test-contracts
 
   test-ee-compat-cross-repo:
     name: EE Compat Cross-Repo (Layer 2 placeholder)
