@@ -1,15 +1,14 @@
 'use client'
 
 import { useState } from 'react'
-import { useRouter, useSearchParams } from 'next/navigation'
+import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { useTranslations } from 'next-intl'
 import { createApiClient, loginUser, useAuthStore } from '@cubebox/core'
 
-export function LoginForm() {
+export function LoginForm({ nextPath = '/' }: { nextPath?: string }) {
   const t = useTranslations('auth')
   const router = useRouter()
-  const searchParams = useSearchParams()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
@@ -23,8 +22,7 @@ export function LoginForm() {
       const client = createApiClient('')
       await loginUser(client, email, password)
       await useAuthStore.getState().loadMe(client)
-      const next = searchParams.get('next') ?? '/'
-      const safeNext = next.startsWith('/') && !next.startsWith('//') ? next : '/'
+      const safeNext = nextPath.startsWith('/') && !nextPath.startsWith('//') ? nextPath : '/'
       router.push(safeNext)
     } catch (err) {
       setError((err as Error).message)

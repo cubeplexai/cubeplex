@@ -1,10 +1,10 @@
-import { Suspense } from 'react'
 import { LoginForm } from '@/components/auth/LoginForm'
 
-export default function LoginPage() {
-  return (
-    <Suspense fallback={null}>
-      <LoginForm />
-    </Suspense>
-  )
+export default async function LoginPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ next?: string }>
+}) {
+  const { next } = await searchParams
+  return <LoginForm nextPath={next ?? '/'} />
 }
