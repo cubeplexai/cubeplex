@@ -297,6 +297,18 @@ def upgrade() -> None:
     op.create_index(op.f('ix_artifact_versions_workspace_id'), 'artifact_versions', ['workspace_id'], unique=False)
     # ### end Alembic commands ###
 
+    # Seed the default organization and workspace expected by E2E tests.
+    # Carried forward from the original m1 migration (d3a4dffee1e1) so a fresh
+    # `alembic upgrade head` produces a DB that test conftest can use directly.
+    op.execute(
+        "INSERT INTO organizations (id, name, slug, created_at) "
+        "VALUES ('default-org', 'Default', 'default', now())"
+    )
+    op.execute(
+        "INSERT INTO workspaces (id, org_id, name, created_at) "
+        "VALUES ('default-ws', 'default-org', 'Default Workspace', now())"
+    )
+
 
 def downgrade() -> None:
     """Downgrade schema."""
