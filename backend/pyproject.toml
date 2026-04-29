@@ -64,7 +64,7 @@ markers = [
 ]
 
 [tool.hatch.build.targets.wheel]
-packages = ["src"]
+packages = ["cubebox"]
 
 [tool.ruff.format]
 quote-style = "double"
