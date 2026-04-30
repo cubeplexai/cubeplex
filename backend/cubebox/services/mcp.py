@@ -1,0 +1,205 @@
+"""MCP connector service: CRUD, invariants, credential wiring, and discovery."""
+
+import hashlib
+from datetime import UTC, datetime
+
+from cubebox.auth.context import RequestContext
+from cubebox.mcp.discovery import discover_tools
+from cubebox.mcp.exceptions import (
+    MCPCredentialRequired,
+    MCPOAuthNotImplemented,
+    MCPServerNameConflict,
+    MCPServerURLConflict,
+    MCPUserScopeCredentialForbidden,
+)
+from cubebox.models import MCPServer, WorkspaceMCPCredential
+from cubebox.repositories.mcp import (
+    MCPServerRepository,
+    UserMCPCredentialRepository,
+    WorkspaceMCPBindingRepository,
+    WorkspaceMCPCredentialRepository,
+)
+from cubebox.services.credential import CredentialService
+
+_VALID_SCOPES = {"org", "workspace", "user", "none"}
+_VALID_METHODS = {"static", "oauth", "none"}
+_VALID_TRANSPORTS = {"streamable_http", "sse", "stdio"}
+_CREDENTIAL_KIND_MCP = "mcp_server"
+
+
+def _sha256_hex(value: str) -> str:
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+class MCPServerService:
+    """Application service for DB-backed MCP connectors."""
+
+    def __init__(
+        self,
+        *,
+        server_repo: MCPServerRepository,
+        ws_cred_repo: WorkspaceMCPCredentialRepository,
+        user_cred_repo: UserMCPCredentialRepository,
+        binding_repo: WorkspaceMCPBindingRepository,
+        cred_service: CredentialService,
+        request_context: RequestContext,
+    ) -> None:
+        self.server_repo = server_repo
+        self.ws_cred_repo = ws_cred_repo
+        self.user_cred_repo = user_cred_repo
+        self.binding_repo = binding_repo
+        self.cred_service = cred_service
+        self._ctx = request_context
+
+    async def create(
+        self,
+        *,
+        name: str,
+        server_url: str,
+        transport: str,
+        auth_method: str,
+        credential_scope: str,
+        credential_plaintext: str | None = None,
+        credential_name: str | None = None,
+        owner_workspace_id: str | None = None,
+        headers: dict[str, str] | None = None,
+        timeout: float = 30.0,
+        sse_read_timeout: float = 300.0,
+    ) -> MCPServer:
+        self._validate_create_invariants(
+            transport=transport,
+            auth_method=auth_method,
+            credential_scope=credential_scope,
+            credential_plaintext=credential_plaintext,
+            owner_workspace_id=owner_workspace_id,
+        )
+        await self._ensure_unique_name_and_url(
+            name=name,
+            server_url=server_url,
+            owner_workspace_id=owner_workspace_id,
+        )
+
+        credential_id: str | None = None
+        if credential_scope == "org":
+            credential_id = await self.cred_service.create(
+                kind=_CREDENTIAL_KIND_MCP,
+                name=credential_name or f"mcp:{name}:org",
+                plaintext=credential_plaintext or "",
+            )
+
+        server = await self.server_repo.add(
+            MCPServer(
+                org_id=self._ctx.org_id,
+                owner_workspace_id=owner_workspace_id,
+                name=name,
+                server_url=server_url,
+                server_url_hash=_sha256_hex(server_url),
+                transport=transport,
+                auth_method=auth_method,
+                credential_scope=credential_scope,
+                credential_id=credential_id,
+                headers=headers or {},
+                timeout=timeout,
+                sse_read_timeout=sse_read_timeout,
+                created_by_user_id=self._ctx.user.id,
+            )
+        )
+
+        if credential_scope == "workspace":
+            if credential_plaintext is None or owner_workspace_id is None:
+                raise MCPCredentialRequired()
+            workspace_credential_id = await self.cred_service.create(
+                kind=_CREDENTIAL_KIND_MCP,
+                name=credential_name or f"mcp:{name}:ws:{owner_workspace_id}",
+                plaintext=credential_plaintext,
+            )
+            await self.ws_cred_repo.add(
+                WorkspaceMCPCredential(
+                    org_id=self._ctx.org_id,
+                    workspace_id=owner_workspace_id,
+                    mcp_server_id=server.id,
+                    credential_id=workspace_credential_id,
+                    created_by_user_id=self._ctx.user.id,
+                )
+            )
+
+        await self._refresh_tools_for_server(server)
+        return await self.server_repo.get(server.id) or server
+
+    async def _ensure_unique_name_and_url(
+        self,
+        *,
+        name: str,
+        server_url: str,
+        owner_workspace_id: str | None,
+    ) -> None:
+        url_hash = _sha256_hex(server_url)
+        if await self.server_repo.find_by_url_hash(
+            owner_workspace_id=owner_workspace_id,
+            server_url_hash=url_hash,
+        ):
+            raise MCPServerURLConflict(server_url)
+
+        existing_servers = await self.server_repo.list_for_org(
+            owner_workspace_id=owner_workspace_id
+        )
+        if any(server.name == name for server in existing_servers):
+            raise MCPServerNameConflict(name)
+
+    def _validate_create_invariants(
+        self,
+        *,
+        transport: str,
+        auth_method: str,
+        credential_scope: str,
+        credential_plaintext: str | None,
+        owner_workspace_id: str | None,
+    ) -> None:
+        if auth_method == "oauth":
+            raise MCPOAuthNotImplemented()
+        if auth_method not in _VALID_METHODS:
+            raise ValueError(f"unknown auth_method: {auth_method}")
+        if credential_scope not in _VALID_SCOPES:
+            raise ValueError(f"unknown credential_scope: {credential_scope}")
+        if transport not in _VALID_TRANSPORTS:
+            raise ValueError(f"unknown transport: {transport}")
+        if (auth_method == "none") != (credential_scope == "none"):
+            raise ValueError("auth_method=none and credential_scope=none must be set together")
+        if credential_scope in {"org", "workspace"} and not credential_plaintext:
+            raise MCPCredentialRequired()
+        if credential_scope in {"user", "none"} and credential_plaintext:
+            raise MCPUserScopeCredentialForbidden()
+        if owner_workspace_id is not None and credential_scope == "org":
+            raise ValueError("workspace-private servers cannot use credential_scope=org")
+
+    async def _refresh_tools_for_server(self, server: MCPServer) -> None:
+        """Best-effort discovery; failures mark the server unauthenticated."""
+        if server.credential_scope == "user":
+            return
+
+        token: str | None = None
+        if server.credential_scope == "org":
+            if server.credential_id is None:
+                raise MCPCredentialRequired()
+            token = await self.cred_service.get_decrypted(
+                credential_id=server.credential_id,
+                requesting_kind=_CREDENTIAL_KIND_MCP,
+            )
+        elif server.credential_scope == "workspace":
+            credential_row = await self.ws_cred_repo.get(
+                workspace_id=server.owner_workspace_id or "",
+                mcp_server_id=server.id,
+            )
+            if credential_row is None:
+                return
+            token = await self.cred_service.get_decrypted(
+                credential_id=credential_row.credential_id,
+                requesting_kind=_CREDENTIAL_KIND_MCP,
+            )
+
+        success, tools, error = await discover_tools(server, credential_or_token=token)
+        server.authed = success
+        server.tools_cache = tools or []
+        server.last_error = None if success else error
+        server.last_discovered_at = datetime.now(UTC)
+        await self.server_repo.update(server)
