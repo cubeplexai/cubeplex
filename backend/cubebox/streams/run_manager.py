@@ -554,7 +554,7 @@ class RunManager:
             from cubebox.middleware.citations import CitationConfig, load_citation_configs
             from cubebox.tools import get_registry
 
-            llm = LLMFactory().create_default()
+            llm = await LLMFactory().create_default()
             tools = get_registry().list_tools()
             try:
                 from cubebox.credentials.dependencies import build_credential_service

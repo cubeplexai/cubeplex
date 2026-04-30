@@ -72,7 +72,7 @@ class _FakeStatefulAgent:
 
 
 class _FakeLLMFactory:
-    def create_default(self) -> object:
+    async def create_default(self) -> object:
         return object()
 
 
