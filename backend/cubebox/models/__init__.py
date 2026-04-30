@@ -15,6 +15,8 @@ from cubebox.models.mcp import (
     WorkspaceMCPCredential,
 )
 from cubebox.models.membership import Membership, Role
+from cubebox.models.org_provider_override import OrgProviderOverride
+from cubebox.models.org_settings import OrgSettings
 from cubebox.models.organization import Organization
 from cubebox.models.provider import Model, Provider
 from cubebox.models.skill import (
@@ -42,6 +44,8 @@ __all__ = [
     "Membership",
     "Model",
     "OrgPreinstalledTombstone",
+    "OrgProviderOverride",
+    "OrgSettings",
     "OrgSkillInstall",
     "Organization",
     "Provider",
