@@ -8,6 +8,7 @@ Creates and configures the FastAPI application with:
 """
 
 import asyncio
+import os
 from collections.abc import Awaitable, Callable
 from contextlib import asynccontextmanager
 from typing import Any
@@ -16,7 +17,25 @@ from fastapi import FastAPI
 from loguru import logger
 from redis.asyncio import Redis
 
+from cubebox.credentials.encryption import FernetBackend
 from cubebox.utils import log
+
+
+def _build_encryption_backend() -> FernetBackend:
+    """Build the process-wide credential vault encryption backend."""
+    from cubebox.config import config
+    from cubebox.credentials.encryption import FernetBackend
+    from cubebox.credentials.keys import parse_vault_keys
+
+    raw_key = os.getenv("CUBEBOX_AUTH__VAULT_KEY") or config.get("auth.vault_key")
+    if not raw_key or not str(raw_key).strip():
+        raise RuntimeError(
+            "CUBEBOX_AUTH__VAULT_KEY is required. Generate one with: "
+            'python -c "from cryptography.fernet import Fernet; '
+            'print(Fernet.generate_key().decode())"'
+        )
+
+    return FernetBackend(parse_vault_keys(str(raw_key)))
 
 
 @asynccontextmanager
@@ -28,6 +47,7 @@ async def lifespan(_app: FastAPI):  # type: ignore
     # ==================== Startup ====================
     log.init()
     logger.info("Application starting up")
+    _app.state.encryption_backend = _build_encryption_backend()
 
     # NOTE: we deliberately do NOT install signal handlers here. Uvicorn's
     # own SIGTERM / SIGINT handlers trigger graceful shutdown, which awaits
