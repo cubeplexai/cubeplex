@@ -8,6 +8,12 @@ from cubebox.models.billing import BillingEvent, LlmBillingEvent
 from cubebox.models.conversation import Conversation
 from cubebox.models.credential import Credential
 from cubebox.models.invite_token import InviteToken
+from cubebox.models.mcp import (
+    MCPServer,
+    UserMCPCredential,
+    WorkspaceMCPBinding,
+    WorkspaceMCPCredential,
+)
 from cubebox.models.membership import Membership, Role
 from cubebox.models.organization import Organization
 from cubebox.models.skill import (
@@ -31,6 +37,7 @@ __all__ = [
     "Credential",
     "InviteToken",
     "LlmBillingEvent",
+    "MCPServer",
     "Membership",
     "OrgPreinstalledTombstone",
     "OrgSkillInstall",
@@ -39,7 +46,10 @@ __all__ = [
     "Skill",
     "SkillVersion",
     "User",
+    "UserMCPCredential",
     "UserSandbox",
     "Workspace",
+    "WorkspaceMCPCredential",
+    "WorkspaceMCPBinding",
     "WorkspaceSkillBinding",
 ]
