@@ -556,6 +556,30 @@ class RunManager:
 
             llm = LLMFactory().create_default()
             tools = get_registry().list_tools()
+            try:
+                from cubebox.credentials.dependencies import build_credential_service
+                from cubebox.db.engine import async_session_maker
+                from cubebox.mcp.runtime import load_db_servers_for_workspace
+
+                async with async_session_maker() as mcp_session:
+                    cred_service = build_credential_service(
+                        mcp_session,
+                        self._app.state.encryption_backend,
+                        org_id=ctx.org_id,
+                        actor_user_id=ctx.user_id,
+                    )
+                    tools.extend(
+                        await load_db_servers_for_workspace(
+                            org_id=ctx.org_id,
+                            workspace_id=ctx.workspace_id,
+                            user_id=ctx.user_id,
+                            cred_service=cred_service,
+                            signer=self._app.state.mcp_user_token_signer,
+                            session=mcp_session,
+                        )
+                    )
+            except Exception as exc:
+                logger.warning("DB MCP tools unavailable for run: {}", exc)
 
             all_citation_configs: dict[str, CitationConfig] = {}
             try:
