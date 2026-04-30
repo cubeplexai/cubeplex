@@ -54,7 +54,8 @@ class ModelRepository:
         return len(result.scalars().all())
 
     async def delete_by_provider(self, provider_id: str) -> None:
-        models = await self.list_by_provider(provider_id)
-        for m in models:
-            await self.session.delete(m)
-        await self.session.commit()
+        from sqlalchemy import delete
+
+        stmt = delete(Model).where(Model.provider_id == provider_id)  # type: ignore[arg-type]
+        await self.session.execute(stmt)
+        await self.session.flush()

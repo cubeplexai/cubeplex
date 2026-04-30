@@ -69,4 +69,4 @@ class ProviderRepository:
 
     async def delete(self, provider: Provider) -> None:
         await self.session.delete(provider)
-        await self.session.commit()
+        await self.session.flush()

@@ -44,10 +44,13 @@ class LLMFactory:
 
     # ── DB-driven config loading ────────────────────────────────────
 
-    async def _load_db_provider_configs(self) -> dict[str, dict[str, Any]]:
-        """Load enabled provider configs from DB. Returns dict[name, config_dict]."""
+    async def _load_db_provider_configs(self) -> tuple[dict[str, dict[str, Any]], set[str]]:
+        """Load enabled provider configs from DB.
+
+        Returns (dict[name, config_dict], set of ALL provider names in DB).
+        """
         if not self._session or not self._org_id:
-            return {}
+            return {}, set()
 
         from cubebox.models.org_provider_override import OrgProviderOverride as DBO
         from cubebox.models.provider import Model as DBM
@@ -107,9 +110,18 @@ class LLMFactory:
                     for m in db_models
                 ],
             }
-        return db_configs
+        # Also get ALL provider names (including disabled) so _build_merged_config
+        # can skip config.yaml providers that exist in DB regardless of enabled state.
+        all_names_stmt = select(DBP).where(
+            (DBP.org_id == None) | (DBP.org_id == self._org_id),  # type: ignore[arg-type]  # noqa: E711
+        )
+        all_names_result = await self._session.execute(all_names_stmt)
+        db_names = {p.name for p in all_names_result.scalars().all()}
+        return db_configs, db_names
 
-    def _build_merged_config(self, db_configs: dict[str, dict[str, Any]]) -> LLMConfig:
+    def _build_merged_config(
+        self, db_configs: dict[str, dict[str, Any]], db_names: set[str]
+    ) -> LLMConfig:
         """Merge DB configs with config.yaml fallback.
 
         CRITICAL: Only config-fallback providers that do NOT exist in DB at all.
@@ -119,7 +131,7 @@ class LLMFactory:
         config_providers = dict(self.llm_config.providers)
         merged: dict[str, ProviderConfig] = {}
         for name, cfg in config_providers.items():
-            if name not in db_configs:
+            if name not in db_names:  # Skip if provider exists in DB (even disabled)
                 merged[name] = cfg  # Only use config when provider not in DB
         for name, db_cfg in db_configs.items():
             merged[name] = ProviderConfig(**db_cfg)  # DB always overrides
@@ -210,8 +222,8 @@ class LLMFactory:
             LLM instance (with fallbacks if configured)
         """
         if self._session and self._org_id:
-            db_cfgs = await self._load_db_provider_configs()
-            self.llm_config = self._build_merged_config(db_cfgs)
+            db_cfgs, db_names = await self._load_db_provider_configs()
+            self.llm_config = self._build_merged_config(db_cfgs, db_names)
 
         provider_name, model_id = await self.get_default_model()
         llm = self.create(model_id=model_id, provider_name=provider_name, **kwargs)

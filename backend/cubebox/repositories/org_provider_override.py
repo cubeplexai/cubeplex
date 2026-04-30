@@ -36,4 +36,4 @@ class OrgProviderOverrideRepository:
         existing = await self.get(provider_id)
         if existing:
             await self.session.delete(existing)
-            await self.session.commit()
+            await self.session.flush()

@@ -239,8 +239,8 @@ export function ProviderDetail({
         </div>
       )}
 
-      {/* Override toggle */}
-      {!isSystem && (
+      {/* Override toggle — only applies to system providers */}
+      {isSystem && (
         <div className="flex items-center gap-3 rounded-lg border border-border/70 bg-card/40 px-4 py-3">
           <Switch
             id="provider-override"
