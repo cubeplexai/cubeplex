@@ -201,3 +201,36 @@ async def test_delete_cascades_and_removes_server(mcp_service: MCPServerService)
 
     with pytest.raises(MCPServerNotFound):
         await mcp_service.update(server_id=server.id, name="x")
+
+
+async def test_refresh_tools_updates_server_auth_state(
+    mcp_service: MCPServerService,
+) -> None:
+    server = await mcp_service.create(
+        name="refresh",
+        server_url="https://refresh",
+        transport="streamable_http",
+        auth_method="none",
+        credential_scope="none",
+    )
+
+    refreshed = await mcp_service.refresh_tools(server_id=server.id)
+
+    assert refreshed.authed is True
+    assert refreshed.last_discovered_at is not None
+
+
+async def test_test_connection_does_not_persist_server(
+    mcp_service: MCPServerService,
+) -> None:
+    success, tools, error = await mcp_service.test_connection(
+        server_url="https://dry-run",
+        transport="streamable_http",
+        auth_method="none",
+        credential_scope="none",
+    )
+
+    assert success is True
+    assert tools == []
+    assert error is None
+    assert await mcp_service.server_repo.list_for_org() == []
