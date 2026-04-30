@@ -2,6 +2,10 @@ import os
 
 # Set environment BEFORE any imports
 os.environ.setdefault("ENV_FOR_DYNACONF", "test")
+os.environ.setdefault(
+    "CUBEBOX_AUTH__VAULT_KEY",
+    "Nmu-K8QhP_uhdjmwbaiNmgxVQHbGeCkMOCz8RKp1LMM=",
+)
 
 from cubebox.config import config
 
