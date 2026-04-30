@@ -8,6 +8,8 @@ import logging
 from typing import Any
 
 from langchain_openai import ChatOpenAI
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from cubebox.config import config
 from cubebox.llm.config import LLMConfig, ModelConfig, ProviderConfig
@@ -17,19 +19,145 @@ logger = logging.getLogger(__name__)
 
 
 class LLMFactory:
-    """Factory for creating LLM instances from config.yaml"""
+    """Factory for creating LLM instances from config.yaml (fallback) and DB (primary)."""
 
-    def __init__(self, llm_config: LLMConfig | None = None):
+    def __init__(
+        self,
+        llm_config: LLMConfig | None = None,
+        session: AsyncSession | None = None,
+        org_id: str | None = None,
+    ):
         """
         Initialize LLM factory.
 
         Args:
             llm_config: LLM configuration. If None, loads from global config.
+            session: Optional async DB session for DB-driven config loading.
+            org_id: Optional org ID for DB-driven config loading.
         """
+        self._session = session
+        self._org_id = org_id
         if llm_config is None:
             # Load from global config
             llm_config = LLMConfig(**config.llm)
         self.llm_config = llm_config
+
+    # ── DB-driven config loading ────────────────────────────────────
+
+    async def _load_db_provider_configs(self) -> dict[str, dict[str, Any]]:
+        """Load enabled provider configs from DB. Returns dict[name, config_dict]."""
+        if not self._session or not self._org_id:
+            return {}
+
+        from cubebox.models.org_provider_override import OrgProviderOverride as DBO
+        from cubebox.models.provider import Model as DBM
+        from cubebox.models.provider import Provider as DBP
+
+        # Load providers visible to this org (handles org_provider_overrides)
+        stmt = (
+            select(DBP)
+            .outerjoin(
+                DBO,
+                (DBP.id == DBO.provider_id) & (DBO.org_id == self._org_id),  # type: ignore[arg-type]
+            )
+            .where(
+                (DBP.org_id == None) | (DBP.org_id == self._org_id),  # type: ignore[arg-type]  # noqa: E711
+            )
+            .where(
+                func.coalesce(DBO.enabled, DBP.enabled, True),
+            )
+        )
+        result = await self._session.execute(stmt)
+        providers = result.scalars().all()
+
+        db_configs: dict[str, dict[str, Any]] = {}
+        for p in providers:
+            # Load enabled models for this provider
+            models_result = await self._session.execute(
+                select(DBM).where(
+                    DBM.provider_id == p.id,  # type: ignore[arg-type]
+                    DBM.enabled,  # type: ignore[arg-type]
+                ),
+            )
+            db_models = models_result.scalars().all()
+
+            db_configs[p.name] = {
+                "base_url": p.base_url,
+                "api_key": p.api_key,
+                "api": "openai-completions",
+                "extra_body": p.extra_body,
+                "extra_headers": p.extra_headers,
+                "models": [
+                    {
+                        "id": m.model_id,
+                        "name": m.display_name,
+                        "reasoning": m.reasoning,
+                        "input": m.input_modalities,
+                        "cost": {
+                            "input": m.cost_input,
+                            "output": m.cost_output,
+                            "cache_read": m.cost_cache_read,
+                            "cache_write": m.cost_cache_write,
+                        },
+                        "contextWindow": m.context_window,
+                        "maxTokens": m.max_tokens,
+                        "extra_body": m.extra_body,
+                        "extra_headers": m.extra_headers,
+                    }
+                    for m in db_models
+                ],
+            }
+        return db_configs
+
+    def _build_merged_config(self, db_configs: dict[str, dict[str, Any]]) -> LLMConfig:
+        """Merge DB configs with config.yaml fallback.
+
+        CRITICAL: Only config-fallback providers that do NOT exist in DB at all.
+        Once a provider is seeded into DB, its visibility is governed by DB +
+        OrgProviderOverride, and config.yaml must NOT reintroduce it.
+        """
+        config_providers = dict(self.llm_config.providers)
+        merged: dict[str, ProviderConfig] = {}
+        for name, cfg in config_providers.items():
+            if name not in db_configs:
+                merged[name] = cfg  # Only use config when provider not in DB
+        for name, db_cfg in db_configs.items():
+            merged[name] = ProviderConfig(**db_cfg)  # DB always overrides
+        return LLMConfig(
+            default_model=self.llm_config.default_model,
+            fallback_models=self.llm_config.fallback_models,
+            providers=merged,
+        )
+
+    async def _get_org_default_model(self) -> str | None:
+        if not self._session or not self._org_id:
+            return None
+        from cubebox.models.org_settings import OrgSettings as DBS
+
+        stmt = select(DBS).where(
+            DBS.org_id == self._org_id,  # type: ignore[arg-type]
+            DBS.key == "default_model",  # type: ignore[arg-type]
+        )
+        result = await self._session.execute(stmt)
+        setting = result.scalar_one_or_none()
+        if setting and setting.value.get("model_ref"):
+            return str(setting.value["model_ref"])
+        return None
+
+    async def _get_org_fallback_models(self) -> list[str]:
+        if not self._session or not self._org_id:
+            return []
+        from cubebox.models.org_settings import OrgSettings as DBS
+
+        stmt = select(DBS).where(
+            DBS.org_id == self._org_id,  # type: ignore[arg-type]
+            DBS.key == "fallback_models",  # type: ignore[arg-type]
+        )
+        result = await self._session.execute(stmt)
+        setting = result.scalar_one_or_none()
+        if setting and setting.value.get("models"):
+            return list(setting.value["models"])
+        return []
 
     @staticmethod
     def _parse_model_ref(model_ref: str) -> tuple[str, str]:
@@ -50,9 +178,9 @@ class LLMFactory:
             raise ValueError(f"Invalid model format: '{model_ref}'. Expected 'provider/model-id'")
         return parts[0], parts[1]
 
-    def get_default_model(self) -> tuple[str, str]:
+    async def get_default_model(self) -> tuple[str, str]:
         """
-        Parse the default_model config value ("provider/model-id").
+        Parse the default_model, checking org override first.
 
         Returns:
             Tuple of (provider_name, model_id)
@@ -60,15 +188,20 @@ class LLMFactory:
         Raises:
             ValueError: If default_model is not set or has invalid format
         """
-        default_model = self.llm_config.default_model
-        if not default_model:
-            raise ValueError("No default_model configured in llm config")
-        return self._parse_model_ref(default_model)
+        model_ref = await self._get_org_default_model()
+        if not model_ref:
+            model_ref = self.llm_config.default_model
+        if not model_ref:
+            raise ValueError("No default_model configured")
+        return self._parse_model_ref(model_ref)
 
-    def create_default(self, **kwargs: Any) -> Any:
+    async def create_default(self, **kwargs: Any) -> Any:
         """
         Create an LLM instance using the configured default_model,
         with fallback models chained via with_fallbacks() if configured.
+
+        With session+org_id: loads from DB, merges with config fallback.
+        Without session: pure config.yaml (startup/CI compatibility).
 
         Args:
             **kwargs: Additional kwargs passed to create()
@@ -76,18 +209,25 @@ class LLMFactory:
         Returns:
             LLM instance (with fallbacks if configured)
         """
-        provider_name, model_id = self.get_default_model()
+        if self._session and self._org_id:
+            db_cfgs = await self._load_db_provider_configs()
+            self.llm_config = self._build_merged_config(db_cfgs)
+
+        provider_name, model_id = await self.get_default_model()
         llm = self.create(model_id=model_id, provider_name=provider_name, **kwargs)
 
-        if not self.llm_config.fallback_models:
+        fallback_refs = await self._get_org_fallback_models()
+        if not fallback_refs:
+            fallback_refs = self.llm_config.fallback_models
+        if not fallback_refs:
             return llm
 
         fallbacks = []
-        for model_ref in self.llm_config.fallback_models:
+        for model_ref in fallback_refs:
             try:
                 fb_provider, fb_model_id = self._parse_model_ref(model_ref)
                 fallbacks.append(
-                    self.create(model_id=fb_model_id, provider_name=fb_provider, **kwargs)
+                    self.create(model_id=fb_model_id, provider_name=fb_provider, **kwargs),
                 )
             except ValueError:
                 logger.warning("Skipping invalid fallback model: '%s'", model_ref)
@@ -98,7 +238,7 @@ class LLMFactory:
         logger.info(
             "LLM fallback chain: %s -> %s",
             self.llm_config.default_model,
-            list(self.llm_config.fallback_models),
+            list(fallback_refs),
         )
         return llm.with_fallbacks(fallbacks)
 
