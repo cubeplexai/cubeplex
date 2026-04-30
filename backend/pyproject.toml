@@ -36,6 +36,7 @@ dependencies = [
     "python-magic>=0.4.27",
     "filetype>=1.2.0",
     "pillow>=10.4.0",
+    "pyjwt>=2.12.1",
 ]
 
 [project.optional-dependencies]
