@@ -412,3 +412,27 @@ async def test_user_credential_management_rejects_wrong_scope(
         server_id=user_server.id,
         user_id="u2",
     )
+
+
+async def test_setting_user_credential_discovers_tools(
+    mcp_service: MCPServerService,
+) -> None:
+    server = await mcp_service.create(
+        name="user-discovery",
+        server_url="https://user-discovery",
+        transport="streamable_http",
+        auth_method="static",
+        credential_scope="user",
+    )
+    assert server.authed is False
+
+    await mcp_service.set_user_credential(
+        server_id=server.id,
+        user_id="u2",
+        plaintext="user-secret",
+    )
+
+    updated = await mcp_service.server_repo.get(server.id)
+    assert updated is not None
+    assert updated.authed is True
+    assert updated.last_discovered_at is not None

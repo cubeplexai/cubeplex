@@ -3,7 +3,7 @@
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import JSON, Column, UniqueConstraint
+from sqlalchemy import JSON, Column, Index, UniqueConstraint
 from sqlmodel import Field, SQLModel
 from uuid_utils import uuid7
 
@@ -89,3 +89,23 @@ class WorkspaceMCPBinding(SQLModel, table=True):
     created_by_user_id: str = Field(max_length=36)
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+
+
+_MCP_SERVER_TABLE = SQLModel.metadata.tables["mcp_servers"]
+
+Index(
+    "ix_mcp_server_org_wide_name_unique",
+    _MCP_SERVER_TABLE.c.org_id,
+    _MCP_SERVER_TABLE.c.name,
+    unique=True,
+    postgresql_where=_MCP_SERVER_TABLE.c.owner_workspace_id.is_(None),
+    sqlite_where=_MCP_SERVER_TABLE.c.owner_workspace_id.is_(None),
+)
+Index(
+    "ix_mcp_server_org_wide_url_unique",
+    _MCP_SERVER_TABLE.c.org_id,
+    _MCP_SERVER_TABLE.c.server_url_hash,
+    unique=True,
+    postgresql_where=_MCP_SERVER_TABLE.c.owner_workspace_id.is_(None),
+    sqlite_where=_MCP_SERVER_TABLE.c.owner_workspace_id.is_(None),
+)

@@ -56,6 +56,20 @@ def upgrade() -> None:
     )
     op.create_index(op.f("ix_mcp_servers_org_id"), "mcp_servers", ["org_id"], unique=False)
     op.create_index(
+        "ix_mcp_server_org_wide_name_unique",
+        "mcp_servers",
+        ["org_id", "name"],
+        unique=True,
+        postgresql_where=sa.text("owner_workspace_id IS NULL"),
+    )
+    op.create_index(
+        "ix_mcp_server_org_wide_url_unique",
+        "mcp_servers",
+        ["org_id", "server_url_hash"],
+        unique=True,
+        postgresql_where=sa.text("owner_workspace_id IS NULL"),
+    )
+    op.create_index(
         op.f("ix_mcp_servers_owner_workspace_id"),
         "mcp_servers",
         ["owner_workspace_id"],
@@ -183,6 +197,8 @@ def downgrade() -> None:
     op.drop_index(op.f("ix_user_mcp_credentials_mcp_server_id"), table_name="user_mcp_credentials")
     op.drop_table("user_mcp_credentials")
     op.drop_index(op.f("ix_mcp_servers_owner_workspace_id"), table_name="mcp_servers")
+    op.drop_index("ix_mcp_server_org_wide_url_unique", table_name="mcp_servers")
+    op.drop_index("ix_mcp_server_org_wide_name_unique", table_name="mcp_servers")
     op.drop_index(op.f("ix_mcp_servers_org_id"), table_name="mcp_servers")
     op.drop_table("mcp_servers")
     # ### end Alembic commands ###

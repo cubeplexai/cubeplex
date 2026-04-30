@@ -442,6 +442,10 @@ class MCPServerService:
                 credential_id=existing.credential_id,
                 plaintext=plaintext,
             )
+            await self._refresh_tools_for_server_with_token(
+                server,
+                credential_or_token=plaintext,
+            )
             return existing.credential_id
 
         credential_id = await self.cred_service.create(
@@ -456,6 +460,10 @@ class MCPServerService:
                 mcp_server_id=server_id,
                 credential_id=credential_id,
             )
+        )
+        await self._refresh_tools_for_server_with_token(
+            server,
+            credential_or_token=plaintext,
         )
         return credential_id
 
@@ -576,7 +584,18 @@ class MCPServerService:
                 requesting_kind=_CREDENTIAL_KIND_MCP,
             )
 
-        success, tools, error = await discover_tools(server, credential_or_token=token)
+        await self._refresh_tools_for_server_with_token(server, credential_or_token=token)
+
+    async def _refresh_tools_for_server_with_token(
+        self,
+        server: MCPServer,
+        *,
+        credential_or_token: str | None,
+    ) -> None:
+        success, tools, error = await discover_tools(
+            server,
+            credential_or_token=credential_or_token,
+        )
         server.authed = success
         server.tools_cache = tools or []
         server.last_error = None if success else error
