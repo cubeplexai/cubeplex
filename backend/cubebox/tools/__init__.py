@@ -32,8 +32,7 @@ async def init_mcp_tools() -> None:
 
         from cubebox.mcp.client import MCPManager
 
-        manager = MCPManager()
-        tools: list[BaseTool] = await manager.load_tools()
+        tools: list[BaseTool] = await MCPManager.load_legacy_config_servers()
 
         for tool in tools:
             _registry.register_tool(tool)
