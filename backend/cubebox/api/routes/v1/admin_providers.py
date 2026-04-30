@@ -1,0 +1,365 @@
+"""Admin-only provider and model endpoints. Gated by require_org_admin."""
+
+from __future__ import annotations
+
+from typing import Annotated
+
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from cubebox.api.schemas.provider import (
+    ModelCreate,
+    ModelOut,
+    ModelUpdate,
+    OrgLLMSettingsOut,
+    OrgLLMSettingsUpdate,
+    OrgProviderOverrideOut,
+    OrgProviderOverrideUpdate,
+    ProviderCreate,
+    ProviderOut,
+    ProviderTest,
+    ProviderUpdate,
+    TestResultOut,
+)
+from cubebox.auth.dependencies import require_org_admin, resolve_current_org_id
+from cubebox.db import get_session
+from cubebox.models import User
+from cubebox.models.org_provider_override import OrgProviderOverride
+from cubebox.models.provider import Model, Provider
+from cubebox.repositories.model import ModelRepository
+from cubebox.repositories.org_provider_override import OrgProviderOverrideRepository
+from cubebox.repositories.org_settings import OrgSettingsRepository
+from cubebox.repositories.provider import ProviderRepository
+from cubebox.services.provider_service import (
+    ModelNotFoundError,
+    ProviderNameConflictError,
+    ProviderNotFoundError,
+    ProviderOAuthNotImplementedError,
+    ProviderOverrideNotApplicableError,
+    ProviderService,
+    ProviderSystemReadonlyError,
+)
+
+router = APIRouter(prefix="/admin", tags=["admin-providers"])
+
+
+async def _svc(user: User, session: AsyncSession) -> ProviderService:
+    org_id = await resolve_current_org_id(user, session)
+    return ProviderService(
+        provider_repo=ProviderRepository(session, org_id=org_id),
+        model_repo=ModelRepository(session),
+        override_repo=OrgProviderOverrideRepository(session, org_id=org_id),
+        org_settings_repo=OrgSettingsRepository(session, org_id=org_id),
+        session=session,
+        org_id=org_id,
+        actor_user_id=user.id,
+    )
+
+
+def _model_out(m: Model) -> ModelOut:
+    return ModelOut(
+        id=m.id,
+        provider_id=m.provider_id,
+        model_id=m.model_id,
+        display_name=m.display_name,
+        reasoning=m.reasoning,
+        input_modalities=m.input_modalities,
+        cost_input=m.cost_input,
+        cost_output=m.cost_output,
+        cost_cache_read=m.cost_cache_read,
+        cost_cache_write=m.cost_cache_write,
+        context_window=m.context_window,
+        max_tokens=m.max_tokens,
+        extra_body=m.extra_body,
+        extra_headers=m.extra_headers,
+        enabled=m.enabled,
+        is_system=m.org_id is None,
+        created_at=m.created_at,
+        updated_at=m.updated_at,
+    )
+
+
+def _provider_out(
+    p: Provider,
+    model_count: int = 0,
+    models: list[Model] | None = None,
+    override: OrgProviderOverride | None = None,
+) -> ProviderOut:
+    return ProviderOut(
+        id=p.id,
+        name=p.name,
+        provider_type=p.provider_type,
+        base_url=p.base_url,
+        auth_type=p.auth_type,
+        has_api_key=bool(p.api_key),
+        logo_url=p.logo_url,
+        enabled=p.enabled,
+        is_system=p.org_id is None,
+        model_count=model_count,
+        models=[_model_out(m) for m in models] if models is not None else None,
+        org_override=OrgProviderOverrideOut(enabled=override.enabled) if override else None,
+        extra_body=p.extra_body,
+        extra_headers=p.extra_headers,
+        created_by_user_id=p.created_by_user_id,
+        created_at=p.created_at,
+        updated_at=p.updated_at,
+    )
+
+
+# -- Provider CRUD -----------------------------------------------------------------
+
+
+@router.get("/providers", response_model=list[ProviderOut])
+async def list_providers(
+    *,
+    user: Annotated[User, Depends(require_org_admin)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> list[ProviderOut]:
+    svc = await _svc(user, session)
+    providers = await svc.list_providers()
+    if not providers:
+        return []
+
+    provider_ids = [p.id for p in providers]
+    count_stmt = (
+        select(Model.provider_id, func.count())  # type: ignore[call-overload]
+        .where(Model.provider_id.in_(provider_ids))  # type: ignore[attr-defined]
+        .group_by(Model.provider_id)
+    )
+    result = await session.execute(count_stmt)
+    counts: dict[str, int] = dict(result.all())  # type: ignore[arg-type]
+    return [_provider_out(p, model_count=counts.get(p.id, 0)) for p in providers]
+
+
+@router.post("/providers", response_model=ProviderOut, status_code=201)
+async def create_provider(
+    body: ProviderCreate,
+    *,
+    user: Annotated[User, Depends(require_org_admin)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> ProviderOut:
+    svc = await _svc(user, session)
+    try:
+        p = await svc.create_provider(body)
+    except ProviderOAuthNotImplementedError as e:
+        raise HTTPException(
+            status_code=409, detail={"code": "provider_oauth_not_implemented"}
+        ) from e
+    except ProviderNameConflictError as e:
+        raise HTTPException(status_code=409, detail={"code": "provider_name_conflict"}) from e
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    return _provider_out(p)
+
+
+@router.get("/providers/{provider_id}", response_model=ProviderOut)
+async def get_provider(
+    provider_id: str,
+    *,
+    user: Annotated[User, Depends(require_org_admin)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> ProviderOut:
+    svc = await _svc(user, session)
+    try:
+        p = await svc.get_provider(provider_id)
+    except ProviderNotFoundError as e:
+        raise HTTPException(status_code=404, detail="provider_not_found") from e
+
+    stmt = (
+        select(Model)
+        .where(Model.provider_id == provider_id)  # type: ignore[arg-type]
+        .order_by(Model.model_id)
+    )
+    result = await session.execute(stmt)
+    models = list(result.scalars().all())
+    override = await svc.get_override(provider_id)
+    return _provider_out(p, model_count=len(models), models=models, override=override)
+
+
+@router.patch("/providers/{provider_id}", response_model=ProviderOut)
+async def update_provider(
+    provider_id: str,
+    body: ProviderUpdate,
+    *,
+    user: Annotated[User, Depends(require_org_admin)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> ProviderOut:
+    svc = await _svc(user, session)
+    try:
+        p = await svc.update_provider(provider_id, body)
+    except ProviderNotFoundError as e:
+        raise HTTPException(status_code=404, detail="provider_not_found") from e
+    except ProviderSystemReadonlyError as e:
+        raise HTTPException(status_code=403, detail={"code": "provider_system_readonly"}) from e
+    except ProviderNameConflictError as e:
+        raise HTTPException(status_code=409, detail={"code": "provider_name_conflict"}) from e
+    except ProviderOAuthNotImplementedError as e:
+        raise HTTPException(
+            status_code=409, detail={"code": "provider_oauth_not_implemented"}
+        ) from e
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    return _provider_out(p)
+
+
+@router.delete("/providers/{provider_id}", status_code=204)
+async def delete_provider(
+    provider_id: str,
+    *,
+    user: Annotated[User, Depends(require_org_admin)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> None:
+    svc = await _svc(user, session)
+    try:
+        await svc.delete_provider(provider_id)
+    except ProviderNotFoundError as e:
+        raise HTTPException(status_code=404, detail="provider_not_found") from e
+    except ProviderSystemReadonlyError as e:
+        raise HTTPException(status_code=403, detail={"code": "provider_system_readonly"}) from e
+
+
+# -- Model CRUD --------------------------------------------------------------------
+
+
+@router.post("/providers/{provider_id}/models", response_model=ModelOut, status_code=201)
+async def create_model(
+    provider_id: str,
+    body: ModelCreate,
+    *,
+    user: Annotated[User, Depends(require_org_admin)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> ModelOut:
+    svc = await _svc(user, session)
+    try:
+        m = await svc.create_model(provider_id, body)
+    except ProviderNotFoundError as e:
+        raise HTTPException(status_code=404, detail="provider_not_found") from e
+    except ProviderSystemReadonlyError as e:
+        raise HTTPException(status_code=403, detail={"code": "provider_system_readonly"}) from e
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    return _model_out(m)
+
+
+@router.patch("/providers/{provider_id}/models/{mid}", response_model=ModelOut)
+async def update_model(
+    provider_id: str,
+    mid: str,
+    body: ModelUpdate,
+    *,
+    user: Annotated[User, Depends(require_org_admin)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> ModelOut:
+    svc = await _svc(user, session)
+    try:
+        m = await svc.update_model(provider_id, mid, body)
+    except ProviderNotFoundError as e:
+        raise HTTPException(status_code=404, detail="provider_not_found") from e
+    except ProviderSystemReadonlyError as e:
+        raise HTTPException(status_code=403, detail={"code": "provider_system_readonly"}) from e
+    except ModelNotFoundError as e:
+        raise HTTPException(status_code=404, detail="model_not_found") from e
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    return _model_out(m)
+
+
+@router.delete("/providers/{provider_id}/models/{mid}", status_code=204)
+async def delete_model(
+    provider_id: str,
+    mid: str,
+    *,
+    user: Annotated[User, Depends(require_org_admin)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> None:
+    svc = await _svc(user, session)
+    try:
+        await svc.delete_model(provider_id, mid)
+    except ProviderNotFoundError as e:
+        raise HTTPException(status_code=404, detail="provider_not_found") from e
+    except ProviderSystemReadonlyError as e:
+        raise HTTPException(status_code=403, detail={"code": "provider_system_readonly"}) from e
+    except ModelNotFoundError as e:
+        raise HTTPException(status_code=404, detail="model_not_found") from e
+
+
+# -- Test connection ---------------------------------------------------------------
+
+
+@router.post("/providers/test", response_model=TestResultOut)
+async def test_provider(
+    body: ProviderTest,
+    *,
+    user: Annotated[User, Depends(require_org_admin)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> TestResultOut:
+    svc = await _svc(user, session)
+    return await svc.test_connection(body)
+
+
+# -- Org provider overrides --------------------------------------------------------
+
+
+@router.get("/providers/{provider_id}/override", response_model=OrgProviderOverrideOut)
+async def get_provider_override(
+    provider_id: str,
+    *,
+    user: Annotated[User, Depends(require_org_admin)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> OrgProviderOverrideOut:
+    svc = await _svc(user, session)
+    try:
+        override = await svc.get_override(provider_id)
+    except ProviderNotFoundError as e:
+        raise HTTPException(status_code=404, detail="provider_not_found") from e
+    if override is None:
+        return OrgProviderOverrideOut(enabled=True)
+    return OrgProviderOverrideOut(enabled=override.enabled)
+
+
+@router.patch("/providers/{provider_id}/override", response_model=OrgProviderOverrideOut)
+async def set_provider_override(
+    provider_id: str,
+    body: OrgProviderOverrideUpdate,
+    *,
+    user: Annotated[User, Depends(require_org_admin)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> OrgProviderOverrideOut:
+    svc = await _svc(user, session)
+    try:
+        override = await svc.set_override(provider_id, body.enabled)
+    except ProviderNotFoundError as e:
+        raise HTTPException(status_code=404, detail="provider_not_found") from e
+    except ProviderOverrideNotApplicableError as e:
+        raise HTTPException(
+            status_code=400, detail={"code": "provider_override_not_applicable"}
+        ) from e
+    return OrgProviderOverrideOut(enabled=override.enabled)
+
+
+# -- Org LLM settings --------------------------------------------------------------
+
+
+@router.get("/settings/llm", response_model=OrgLLMSettingsOut)
+async def get_llm_settings(
+    *,
+    user: Annotated[User, Depends(require_org_admin)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> OrgLLMSettingsOut:
+    svc = await _svc(user, session)
+    return await svc.get_llm_settings()
+
+
+@router.put("/settings/llm", response_model=OrgLLMSettingsOut)
+async def update_llm_settings(
+    body: OrgLLMSettingsUpdate,
+    *,
+    user: Annotated[User, Depends(require_org_admin)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> OrgLLMSettingsOut:
+    svc = await _svc(user, session)
+    try:
+        return await svc.update_llm_settings(body)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
