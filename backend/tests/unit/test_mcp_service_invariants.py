@@ -12,6 +12,7 @@ from cubebox.credentials.encryption import FernetBackend
 from cubebox.mcp.exceptions import (
     MCPCredentialRequired,
     MCPOAuthNotImplemented,
+    MCPServerAlreadyOrgWide,
     MCPServerNameConflict,
     MCPServerNotFound,
     MCPServerURLConflict,
@@ -234,3 +235,86 @@ async def test_test_connection_does_not_persist_server(
     assert tools == []
     assert error is None
     assert await mcp_service.server_repo.list_for_org() == []
+
+
+async def test_promote_alpha_moves_workspace_cred_to_inline(
+    mcp_service: MCPServerService,
+) -> None:
+    server = await mcp_service.create(
+        name="prom-a",
+        server_url="https://p1",
+        transport="streamable_http",
+        auth_method="static",
+        credential_scope="workspace",
+        credential_plaintext="ws-key-1",
+        owner_workspace_id="ws-test",
+    )
+
+    promoted = await mcp_service.promote_to_org(
+        server_id=server.id,
+        share_credential=True,
+    )
+
+    assert promoted.owner_workspace_id is None
+    assert promoted.credential_scope == "org"
+    assert promoted.credential_id is not None
+    assert (
+        await mcp_service.ws_cred_repo.get(
+            workspace_id="ws-test",
+            mcp_server_id=server.id,
+        )
+        is None
+    )
+    binding = await mcp_service.binding_repo.get(
+        workspace_id="ws-test",
+        mcp_server_id=server.id,
+    )
+    assert binding is not None
+    assert binding.enabled is True
+
+
+async def test_promote_beta_keeps_workspace_cred(
+    mcp_service: MCPServerService,
+) -> None:
+    server = await mcp_service.create(
+        name="prom-b",
+        server_url="https://p2",
+        transport="streamable_http",
+        auth_method="static",
+        credential_scope="workspace",
+        credential_plaintext="ws-key-2",
+        owner_workspace_id="ws-test",
+    )
+
+    promoted = await mcp_service.promote_to_org(
+        server_id=server.id,
+        share_credential=False,
+    )
+
+    assert promoted.owner_workspace_id is None
+    assert promoted.credential_scope == "workspace"
+    ws_credential = await mcp_service.ws_cred_repo.get(
+        workspace_id="ws-test",
+        mcp_server_id=server.id,
+    )
+    assert ws_credential is not None
+    binding = await mcp_service.binding_repo.get(
+        workspace_id="ws-test",
+        mcp_server_id=server.id,
+    )
+    assert binding is not None
+
+
+async def test_promote_already_org_wide_raises(
+    mcp_service: MCPServerService,
+) -> None:
+    server = await mcp_service.create(
+        name="prom-c",
+        server_url="https://p3",
+        transport="streamable_http",
+        auth_method="none",
+        credential_scope="none",
+    )
+
+    with pytest.raises(MCPServerAlreadyOrgWide):
+        await mcp_service.promote_to_org(server_id=server.id, share_credential=False)
