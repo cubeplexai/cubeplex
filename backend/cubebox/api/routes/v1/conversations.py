@@ -6,7 +6,6 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
-from loguru import logger
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.pool import NullPool
@@ -520,23 +519,16 @@ async def _get_history_messages(raw_request: Request, conversation_id: str) -> d
     if checkpointer is None:
         return {"messages": [], "total": 0}
 
-    try:
-        config = {"configurable": {"thread_id": conversation_id}}
-        checkpoint = await checkpointer.aget(config)
-        if not checkpoint:
-            return {"messages": [], "total": 0}
+    config = {"configurable": {"thread_id": conversation_id}}
+    checkpoint = await checkpointer.aget(config)
+    if not checkpoint:
+        return {"messages": [], "total": 0}
 
-        from cubebox.agents.convert import convert_to_api_messages
+    from cubebox.agents.convert import convert_to_api_messages
 
-        lc_messages = checkpoint["channel_values"].get("messages", [])
-        messages = convert_to_api_messages(lc_messages)
-        return {"messages": messages, "total": len(messages)}
-    finally:
-        if hasattr(checkpointer, "conn"):
-            try:
-                checkpointer.conn.close()
-            except Exception as e:
-                logger.warning("Error closing checkpointer: {}", e)
+    lc_messages = checkpoint["channel_values"].get("messages", [])
+    messages = convert_to_api_messages(lc_messages)
+    return {"messages": messages, "total": len(messages)}
 
 
 @router.get("/{conversation_id}/messages")
