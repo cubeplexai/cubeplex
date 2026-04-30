@@ -1,5 +1,6 @@
 """Run streaming runtime tests."""
 
+import importlib
 import json
 from types import SimpleNamespace
 
@@ -278,3 +279,92 @@ async def test_run_recovers_citation_counter_from_history(
 
     assert events[0]["type"] == "text_delta"
     assert events[0]["data"]["content"] == "next citation 8"
+
+
+@pytest.mark.asyncio
+async def test_run_appends_db_mcp_tools_per_run(monkeypatch: pytest.MonkeyPatch) -> None:
+    redis = FakeRedis()
+    app = SimpleNamespace(state=SimpleNamespace())
+    app.state.redis = redis
+    app.state.redis_key_prefix = "test"
+    app.state.checkpointer_factory = lambda: MemorySaver()
+    app.state.sandbox_factory = lambda: None
+    app.state.encryption_backend = object()
+    app.state.mcp_user_token_signer = object()
+    app.state.run_manager = RunManager(
+        app=app,
+        redis=redis,
+        key_prefix="test",
+        run_event_ttl_seconds=900,
+    )
+
+    raw_request = SimpleNamespace(app=app, headers={})
+    fake_user = SimpleNamespace(id="test-user", email="test@example.com")
+    ctx = RequestContext(  # type: ignore[arg-type]
+        user=fake_user,
+        org_id="default-org",
+        workspace_id="default-ws",
+        role=Role.ADMIN,
+    )
+
+    monkeypatch.setattr(
+        conversations_route,
+        "async_session_maker",
+        lambda: _DummySessionContext(),
+    )
+    monkeypatch.setattr(conversations_route.ConversationRepository, "get_by_id", _fake_get_by_id)
+    monkeypatch.setattr(
+        conversations_route,
+        "_update_conversation_timestamp",
+        _noop_update_timestamp,
+    )
+
+    import cubebox.agents.graph
+    import cubebox.llm.factory
+    import cubebox.mcp.runtime
+    import cubebox.tools
+
+    db_engine_module = importlib.import_module("cubebox.db.engine")
+
+    base_tool = object()
+    db_tool = object()
+    captured_tools: list[object] = []
+
+    async def _load_db_tools(**kwargs):
+        assert kwargs["org_id"] == "default-org"
+        assert kwargs["workspace_id"] == "default-ws"
+        assert kwargs["user_id"] == "test-user"
+        return [db_tool]
+
+    def _create_agent(**kwargs):
+        captured_tools.extend(kwargs["tools"])
+        return _FakeAgent()
+
+    monkeypatch.setattr(db_engine_module, "async_session_maker", lambda: _DummySessionContext())
+    monkeypatch.setattr(cubebox.mcp.runtime, "load_db_servers_for_workspace", _load_db_tools)
+    monkeypatch.setattr(cubebox.agents.graph, "create_cubebox_agent", _create_agent)
+    monkeypatch.setattr(cubebox.llm.factory, "LLMFactory", _FakeLLMFactory)
+    monkeypatch.setattr(
+        cubebox.tools, "get_registry", lambda: SimpleNamespace(list_tools=lambda: [base_tool])
+    )
+
+    rds = RedisHandle(client=redis, key_prefix="test")
+    send_response = await conversations_route.send_message(
+        "conv-1",
+        conversations_route.SendMessageRequest(content="hi"),
+        raw_request,
+        ctx,
+        rds,
+    )
+    stream_response = await conversations_route.stream_run(
+        "conv-1", send_response.run_id, raw_request, object(), ctx, rds
+    )
+
+    async for chunk in stream_response.body_iterator:
+        line = chunk.strip()
+        if isinstance(line, bytes):
+            line = line.decode()
+        if '"type": "done"' in str(line):
+            break
+
+    assert captured_tools == [base_tool, db_tool]
