@@ -38,6 +38,13 @@ def _build_encryption_backend() -> FernetBackend:
     return FernetBackend(parse_vault_keys(str(raw_key)))
 
 
+def _build_mcp_user_token_signer() -> Any:
+    """Build the process-wide MCP passthrough token signer."""
+    from cubebox.mcp.dependencies import build_user_token_signer
+
+    return build_user_token_signer()
+
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI):  # type: ignore
     """
@@ -48,6 +55,10 @@ async def lifespan(_app: FastAPI):  # type: ignore
     log.init()
     logger.info("Application starting up")
     _app.state.encryption_backend = _build_encryption_backend()
+    _app.state.mcp_user_token_signer = _build_mcp_user_token_signer()
+    from cubebox.audit.sink import NoOpAuditSink
+
+    _app.state.audit_sink = NoOpAuditSink()
 
     # NOTE: we deliberately do NOT install signal handlers here. Uvicorn's
     # own SIGTERM / SIGINT handlers trigger graceful shutdown, which awaits
