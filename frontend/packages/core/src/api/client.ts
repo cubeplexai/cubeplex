@@ -26,6 +26,7 @@ export interface ApiClient {
   get(path: string): Promise<Response>
   post(path: string, body: unknown): Promise<Response>
   postForm(path: string, form: Record<string, string>): Promise<Response>
+  put(path: string, body: unknown): Promise<Response>
   patch(path: string, body: unknown): Promise<Response>
   del(path: string): Promise<Response>
   onUnauthorized(handler: () => void): () => void
@@ -119,6 +120,13 @@ export function createApiClient(baseUrl: string): ApiClient {
           'Content-Type': 'application/x-www-form-urlencoded',
         }),
         body,
+      })
+    },
+    put(path, body) {
+      return doFetch(path, {
+        method: 'PUT',
+        headers: buildHeaders('PUT', { 'Content-Type': 'application/json' }),
+        body: JSON.stringify(body),
       })
     },
     patch(path, body) {
