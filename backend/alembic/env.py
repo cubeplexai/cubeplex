@@ -14,6 +14,7 @@ from cubebox.models import (  # noqa: F401
     Attachment,
     BillingEvent,
     Conversation,
+    Credential,
     InviteToken,
     LlmBillingEvent,
     Membership,
