@@ -357,6 +357,7 @@ def create_app(
         attachments_router,
         conversations_router,
         workspaces_router,
+        ws_mcp,
         ws_skills,
     )
 
@@ -368,6 +369,7 @@ def create_app(
     app.include_router(admin_mcp.router, prefix="/api/v1")
     app.include_router(admin_skills.router, prefix="/api/v1")
     app.include_router(admin_skills.bindings_router, prefix="/api/v1")
+    app.include_router(ws_mcp.router, prefix="/api/v1")
     app.include_router(ws_skills.router, prefix="/api/v1")
 
     from cubebox.api.routes.health import router as health_router
