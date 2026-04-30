@@ -10,6 +10,7 @@ from sqlmodel import SQLModel
 from cubebox.auth.context import RequestContext
 from cubebox.credentials.encryption import FernetBackend
 from cubebox.mcp.exceptions import (
+    MCPCredentialPathMismatch,
     MCPCredentialRequired,
     MCPOAuthNotImplemented,
     MCPServerAlreadyOrgWide,
@@ -318,3 +319,96 @@ async def test_promote_already_org_wide_raises(
 
     with pytest.raises(MCPServerAlreadyOrgWide):
         await mcp_service.promote_to_org(server_id=server.id, share_credential=False)
+
+
+async def test_workspace_credential_management_and_bindings(
+    mcp_service: MCPServerService,
+) -> None:
+    server = await mcp_service.create(
+        name="ws-cred",
+        server_url="https://ws-cred",
+        transport="streamable_http",
+        auth_method="static",
+        credential_scope="workspace",
+        credential_plaintext="initial",
+        owner_workspace_id="ws-test",
+    )
+    await mcp_service.promote_to_org(server_id=server.id, share_credential=False)
+
+    credential_id = await mcp_service.set_workspace_credential(
+        server_id=server.id,
+        workspace_id="ws-2",
+        plaintext="ws-secret",
+    )
+    assert credential_id
+    assert (
+        await mcp_service.has_workspace_credential(
+            server_id=server.id,
+            workspace_id="ws-2",
+        )
+        is True
+    )
+
+    await mcp_service.replace_bindings(
+        server_id=server.id,
+        bindings=[("ws-test", True), ("ws-2", False)],
+    )
+    binding = await mcp_service.binding_repo.get(
+        workspace_id="ws-2",
+        mcp_server_id=server.id,
+    )
+    assert binding is not None
+    assert binding.enabled is False
+
+    await mcp_service.delete_workspace_credential(
+        server_id=server.id,
+        workspace_id="ws-2",
+    )
+    assert (
+        await mcp_service.has_workspace_credential(
+            server_id=server.id,
+            workspace_id="ws-2",
+        )
+        is False
+    )
+
+
+async def test_user_credential_management_rejects_wrong_scope(
+    mcp_service: MCPServerService,
+) -> None:
+    workspace_server = await mcp_service.create(
+        name="wrong-user-scope",
+        server_url="https://wrong-user-scope",
+        transport="streamable_http",
+        auth_method="static",
+        credential_scope="workspace",
+        credential_plaintext="initial",
+        owner_workspace_id="ws-test",
+    )
+    user_server = await mcp_service.create(
+        name="user-cred",
+        server_url="https://user-cred",
+        transport="streamable_http",
+        auth_method="static",
+        credential_scope="user",
+    )
+
+    with pytest.raises(MCPCredentialPathMismatch):
+        await mcp_service.set_user_credential(
+            server_id=workspace_server.id,
+            user_id="u2",
+            plaintext="user-secret",
+        )
+
+    credential_id = await mcp_service.set_user_credential(
+        server_id=user_server.id,
+        user_id="u2",
+        plaintext="user-secret",
+    )
+    assert credential_id
+    assert await mcp_service.has_user_credential(server_id=user_server.id, user_id="u2")
+    await mcp_service.delete_user_credential(server_id=user_server.id, user_id="u2")
+    assert not await mcp_service.has_user_credential(
+        server_id=user_server.id,
+        user_id="u2",
+    )

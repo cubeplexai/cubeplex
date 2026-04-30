@@ -9,6 +9,7 @@ from cubebox.auth.context import RequestContext
 from cubebox.credentials.exceptions import CredentialNotFound
 from cubebox.mcp.discovery import discover_tools
 from cubebox.mcp.exceptions import (
+    MCPCredentialPathMismatch,
     MCPCredentialRequired,
     MCPOAuthNotImplemented,
     MCPServerAlreadyOrgWide,
@@ -17,8 +18,14 @@ from cubebox.mcp.exceptions import (
     MCPServerURLConflict,
     MCPShareCredentialOnlyForWorkspaceScope,
     MCPUserScopeCredentialForbidden,
+    MCPWorkspaceOwnedNoBinding,
 )
-from cubebox.models import MCPServer, WorkspaceMCPBinding, WorkspaceMCPCredential
+from cubebox.models import (
+    MCPServer,
+    UserMCPCredential,
+    WorkspaceMCPBinding,
+    WorkspaceMCPCredential,
+)
 from cubebox.repositories.mcp import (
     MCPServerRepository,
     UserMCPCredentialRepository,
@@ -334,6 +341,169 @@ class MCPServerService:
             )
 
         return await self.server_repo.get(server.id) or server
+
+    async def set_workspace_credential(
+        self,
+        *,
+        server_id: str,
+        workspace_id: str,
+        plaintext: str,
+        credential_name: str | None = None,
+    ) -> str:
+        server = await self.server_repo.get(server_id)
+        if server is None:
+            raise MCPServerNotFound(server_id)
+        if server.credential_scope != "workspace":
+            raise MCPCredentialPathMismatch(
+                f"server {server_id} has scope={server.credential_scope}, not 'workspace'"
+            )
+
+        existing = await self.ws_cred_repo.get(
+            workspace_id=workspace_id,
+            mcp_server_id=server_id,
+        )
+        if existing is not None:
+            await self.cred_service.update(
+                credential_id=existing.credential_id,
+                plaintext=plaintext,
+            )
+            return existing.credential_id
+
+        credential_id = await self.cred_service.create(
+            kind=_CREDENTIAL_KIND_MCP,
+            name=credential_name or f"mcp:{server.name}:ws:{workspace_id}",
+            plaintext=plaintext,
+        )
+        await self.ws_cred_repo.add(
+            WorkspaceMCPCredential(
+                org_id=self._ctx.org_id,
+                workspace_id=workspace_id,
+                mcp_server_id=server_id,
+                credential_id=credential_id,
+                created_by_user_id=self._ctx.user.id,
+            )
+        )
+        return credential_id
+
+    async def delete_workspace_credential(
+        self,
+        *,
+        server_id: str,
+        workspace_id: str,
+    ) -> None:
+        existing = await self.ws_cred_repo.get(
+            workspace_id=workspace_id,
+            mcp_server_id=server_id,
+        )
+        if existing is None:
+            return
+        await self.ws_cred_repo.delete(
+            workspace_id=workspace_id,
+            mcp_server_id=server_id,
+        )
+        with suppress(CredentialNotFound):
+            await self.cred_service.delete(credential_id=existing.credential_id)
+
+    async def has_workspace_credential(
+        self,
+        *,
+        server_id: str,
+        workspace_id: str,
+    ) -> bool:
+        return (
+            await self.ws_cred_repo.get(
+                workspace_id=workspace_id,
+                mcp_server_id=server_id,
+            )
+        ) is not None
+
+    async def set_user_credential(
+        self,
+        *,
+        server_id: str,
+        user_id: str,
+        plaintext: str,
+        credential_name: str | None = None,
+    ) -> str:
+        server = await self.server_repo.get(server_id)
+        if server is None:
+            raise MCPServerNotFound(server_id)
+        if server.credential_scope != "user":
+            raise MCPCredentialPathMismatch(
+                f"server {server_id} has scope={server.credential_scope}, not 'user'"
+            )
+
+        existing = await self.user_cred_repo.get(
+            user_id=user_id,
+            mcp_server_id=server_id,
+        )
+        if existing is not None:
+            await self.cred_service.update(
+                credential_id=existing.credential_id,
+                plaintext=plaintext,
+            )
+            return existing.credential_id
+
+        credential_id = await self.cred_service.create(
+            kind=_CREDENTIAL_KIND_MCP,
+            name=credential_name or f"mcp:{server.name}:user:{user_id}",
+            plaintext=plaintext,
+        )
+        await self.user_cred_repo.add(
+            UserMCPCredential(
+                org_id=self._ctx.org_id,
+                user_id=user_id,
+                mcp_server_id=server_id,
+                credential_id=credential_id,
+            )
+        )
+        return credential_id
+
+    async def delete_user_credential(
+        self,
+        *,
+        server_id: str,
+        user_id: str,
+    ) -> None:
+        existing = await self.user_cred_repo.get(
+            user_id=user_id,
+            mcp_server_id=server_id,
+        )
+        if existing is None:
+            return
+        await self.user_cred_repo.delete(user_id=user_id, mcp_server_id=server_id)
+        with suppress(CredentialNotFound):
+            await self.cred_service.delete(credential_id=existing.credential_id)
+
+    async def has_user_credential(
+        self,
+        *,
+        server_id: str,
+        user_id: str,
+    ) -> bool:
+        return (
+            await self.user_cred_repo.get(
+                user_id=user_id,
+                mcp_server_id=server_id,
+            )
+        ) is not None
+
+    async def replace_bindings(
+        self,
+        *,
+        server_id: str,
+        bindings: list[tuple[str, bool]],
+    ) -> None:
+        server = await self.server_repo.get(server_id)
+        if server is None:
+            raise MCPServerNotFound(server_id)
+        if server.owner_workspace_id is not None:
+            raise MCPWorkspaceOwnedNoBinding()
+        await self.binding_repo.upsert_bulk(
+            mcp_server_id=server_id,
+            bindings=bindings,
+            created_by_user_id=self._ctx.user.id,
+        )
 
     async def _ensure_unique_name_and_url(
         self,
