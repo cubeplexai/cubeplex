@@ -54,6 +54,7 @@ export function MCPServerDetail({
   const [promoteOpen, setPromoteOpen] = useState(false)
   const showBindingsTab = mode === 'admin' && server.owner_workspace_id === null
   const showCredentialPanel = (mode === 'ws-owned' || mode === 'ws-readonly') && wsId
+  const canRefreshTools = mode !== 'ws-readonly'
 
   async function handleRefresh(): Promise<void> {
     setRefreshing(true)
@@ -95,20 +96,22 @@ export function MCPServerDetail({
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            disabled={refreshing || deleting}
-            onClick={() => void handleRefresh()}
-          >
-            {refreshing ? (
-              <Loader2 data-icon="inline-start" className="animate-spin" />
-            ) : (
-              <RefreshCw data-icon="inline-start" />
-            )}
-            Refresh tools
-          </Button>
+          {canRefreshTools ? (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={refreshing || deleting}
+              onClick={() => void handleRefresh()}
+            >
+              {refreshing ? (
+                <Loader2 data-icon="inline-start" className="animate-spin" />
+              ) : (
+                <RefreshCw data-icon="inline-start" />
+              )}
+              Refresh tools
+            </Button>
+          ) : null}
           {mode === 'ws-owned' && onPromote ? (
             <Button
               type="button"
