@@ -11,12 +11,14 @@ from cubebox.mcp.discovery import discover_tools
 from cubebox.mcp.exceptions import (
     MCPCredentialRequired,
     MCPOAuthNotImplemented,
+    MCPServerAlreadyOrgWide,
     MCPServerNameConflict,
     MCPServerNotFound,
     MCPServerURLConflict,
+    MCPShareCredentialOnlyForWorkspaceScope,
     MCPUserScopeCredentialForbidden,
 )
-from cubebox.models import MCPServer, WorkspaceMCPCredential
+from cubebox.models import MCPServer, WorkspaceMCPBinding, WorkspaceMCPCredential
 from cubebox.repositories.mcp import (
     MCPServerRepository,
     UserMCPCredentialRepository,
@@ -282,6 +284,56 @@ class MCPServerService:
             return True, None, "user-scope: per-user discovery not supported in test-connection"
         token = None if credential_scope == "none" else credential_plaintext
         return await discover_tools(transient, credential_or_token=token)
+
+    async def promote_to_org(
+        self,
+        *,
+        server_id: str,
+        share_credential: bool,
+    ) -> MCPServer:
+        server = await self.server_repo.get(server_id)
+        if server is None:
+            raise MCPServerNotFound(server_id)
+        if server.owner_workspace_id is None:
+            raise MCPServerAlreadyOrgWide(server_id)
+        if share_credential and server.credential_scope != "workspace":
+            raise MCPShareCredentialOnlyForWorkspaceScope()
+
+        original_workspace_id = server.owner_workspace_id
+
+        if server.credential_scope == "workspace" and share_credential:
+            workspace_credential = await self.ws_cred_repo.get(
+                workspace_id=original_workspace_id,
+                mcp_server_id=server_id,
+            )
+            if workspace_credential is None:
+                raise MCPCredentialRequired()
+            server.credential_scope = "org"
+            server.credential_id = workspace_credential.credential_id
+            await self.ws_cred_repo.delete(
+                workspace_id=original_workspace_id,
+                mcp_server_id=server_id,
+            )
+
+        server.owner_workspace_id = None
+        await self.server_repo.update(server)
+
+        existing_binding = await self.binding_repo.get(
+            workspace_id=original_workspace_id,
+            mcp_server_id=server_id,
+        )
+        if existing_binding is None:
+            await self.binding_repo.add(
+                WorkspaceMCPBinding(
+                    org_id=self._ctx.org_id,
+                    workspace_id=original_workspace_id,
+                    mcp_server_id=server_id,
+                    enabled=True,
+                    created_by_user_id=self._ctx.user.id,
+                )
+            )
+
+        return await self.server_repo.get(server.id) or server
 
     async def _ensure_unique_name_and_url(
         self,
