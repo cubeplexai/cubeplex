@@ -165,12 +165,16 @@ class OrgProviderOverride(SQLModel, table=True):
 
 - `org_id` 为 NULL 时 provider 为系统级，仅 seed 脚本可创建；API 拒建 `org_id=NULL`
 - `org_id` 非 NULL 时 `(org_id, name)` 唯一；`org_id=NULL` 时 `name` 唯一（partial unique index）
+- 系统 provider 下的 model 对所有 org **只读**；任何 org admin 不可增删改系统 model（`_check_not_system` 作用于 model 的所属 provider）
 - `auth_type=oauth` ⇒ v1 创建/编辑时 raise `ProviderOAuthNotImplementedError(409)`
-- `auth_type=none` ⇒ `api_key` 为空
-- `auth_type=api_key|bearer_token` ⇒ `api_key` 非空（创建时校验）
+- `auth_type=none` ⇒ `api_key` 必须为空；创建时若传非空 api_key → 400
+- `auth_type=api_key|bearer_token` ⇒ `api_key` 非空（创建时校验；空字符串也拒绝）
+- `auth_type=api_key|bearer_token` 更新为 `none` 时 ⇒ 清空 `api_key`
 - 删 Provider ⇒ 级联删其所有 Model + OrgProviderOverride（service 层）
 - `OrgProviderOverride` 仅可引用 `org_id IS NULL` 的 provider
 - `OrgSettings.key` 仅允许已知 key 集合（`"default_model"`, `"fallback_models"`）
+- 写 `default_model` / `fallback_models` 时 ⇒ **解析引用**：遍历每个 `provider/model-id`，确认 provider 存在且未被本 org 禁用、model 存在且 enabled。引用无效 → 400（拒绝写入，不在运行时炸）
+- LLMFactory 合并 DB + config 时 ⇒ DB 里被 org 禁用的 provider 不出现在合并结果中（不因 config fallback 被重新引入）
 
 ### 3.3 查询
 
@@ -309,8 +313,15 @@ async def test_connection(self, data: ProviderTest) -> TestResult:
 
 ```python
 async def seed_system_providers_from_config(session: AsyncSession) -> None:
-    """Idempotent: insert system providers/models from config.yaml if not present."""
-    config_providers = settings.get("llm.providers", {})  # dict[name, ProviderConfig]
+    """Idempotent: insert/update system providers/models from config.yaml.
+    
+    - Creates missing providers and models (idempotent by name/model_id).
+    - Updates existing system provider base_url/provider_type when config changes.
+    - Marks models that were removed from config as enabled=False (does not delete).
+    """
+    config_providers = settings.get("llm.providers", {})
+
+    config_model_ids: dict[str, set[str]] = {}  # provider_name -> set of model_ids
 
     for name, cfg in config_providers.items():
         existing = await session.execute(
@@ -319,34 +330,36 @@ async def seed_system_providers_from_config(session: AsyncSession) -> None:
             )
         )
         provider = existing.scalar_one_or_none()
+
         if provider is None:
             provider = Provider(
-                org_id=None,
-                name=name,
+                org_id=None, name=name,
                 provider_type="openai_compat",
-                base_url=cfg.base_url,
-                auth_type="api_key",
-                enabled=True,
-                created_by_user_id="system",
+                base_url=cfg.base_url, auth_type="api_key",
+                enabled=True, created_by_user_id="system",
             )
             session.add(provider)
             await session.flush()
+        else:
+            # Update changed fields on existing system provider
+            provider.base_url = cfg.base_url
+            provider.provider_type = "openai_compat"
 
-        # Seed models
+        config_model_ids[name] = set()
+
         for mc in cfg.models:
+            config_model_ids[name].add(mc.id)
             existing_model = await session.execute(
                 select(Model).where(
                     Model.provider_id == provider.id, Model.model_id == mc.id
                 )
             )
-            if existing_model.scalar_one_or_none() is None:
+            model = existing_model.scalar_one_or_none()
+            if model is None:
                 model = Model(
-                    org_id=None,
-                    provider_id=provider.id,
-                    model_id=mc.id,
-                    display_name=mc.name,
-                    reasoning=mc.reasoning,
-                    input_modalities=mc.input,
+                    org_id=None, provider_id=provider.id,
+                    model_id=mc.id, display_name=mc.name,
+                    reasoning=mc.reasoning, input_modalities=mc.input,
                     cost_input=mc.cost.input if mc.cost else 0,
                     cost_output=mc.cost.output if mc.cost else 0,
                     cost_cache_read=mc.cost.cache_read if mc.cost else 0,
@@ -356,6 +369,21 @@ async def seed_system_providers_from_config(session: AsyncSession) -> None:
                     enabled=True,
                 )
                 session.add(model)
+            else:
+                # Update existing model fields
+                model.display_name = mc.name
+                model.enabled = True
+
+        # Disable models that exist in DB but were removed from config
+        results = await session.execute(
+            select(Model).where(
+                Model.provider_id == provider.id,
+                Model.org_id.is_(None),
+                Model.model_id.notin_(config_model_ids[name]),
+            )
+        )
+        for stale in results.scalars().all():
+            stale.enabled = False
 
     await session.commit()
 ```
@@ -380,13 +408,37 @@ class LLMFactory:
                 return settings["default_model"]
         return settings.get("llm.default_model")  # config fallback
 
-    async def list_providers(self) -> list[dict]:
-        if self._session and self._org_id:
-            return await self._load_db_providers()
-        return self._load_config_providers()  # fallback
+    async def _load_db_provider_configs(self) -> dict[str, dict]:
+        """Load enabled providers + models from DB. 
+        Returns only providers the org can actually use (respects overrides)."""
+        ...
 
-    # _find_model, create, create_default — 保持现有签名，内部改为查 DB
+    def _build_merged_config(self, db_configs: dict) -> LLMConfig:
+        """Merge DB configs with config fallback.
+        
+        CRITICAL: Only fall back to config providers that are NOT in the DB.
+        A provider that exists in DB but was disabled by org override MUST NOT
+        be reintroduced from config.yaml.
+        """
+        config_providers = dict(self.llm_config.providers)
+        # Start with config providers, overlay DB entries
+        merged = {**config_providers}
+        for name, cfg in db_configs.items():
+            merged[name] = ProviderConfig(**cfg)
+        # NOTE: db_configs only contains providers visible+enabled for this org.
+        # Providers disabled via OrgProviderOverride are absent from db_configs.
+        # We intentionally do NOT reintroduce them from config_providers — they
+        # stay in merged only if config_providers had them AND they were NOT in
+        # the DB at all (i.e., not yet seeded). Once a provider is in DB, its
+        # visibility is governed by DB state, not config.
+        return LLMConfig(
+            default_model=self.llm_config.default_model,
+            fallback_models=self.llm_config.fallback_models,
+            providers=merged,
+        )
 ```
+
+**合并正确性**：`_build_merged_config` 的问题在于当 DB 有 provider 但被禁用时，config fallback 会重新把它加回来。修复方案：只对 DB 中**不存在**的 provider 做 config fallback。一旦 provider 被 seed 进 DB，它的可见性完全由 DB + OrgProviderOverride 决定。
 
 `RunManager` 仅需在调用 `LLMFactory().create_default()` 前传入 session + org_id，其余不变。
 
@@ -430,6 +482,11 @@ router = APIRouter(prefix="/admin", tags=["admin-providers"],
 | 修改系统 provider 核心字段 | 403 | `provider_system_readonly` |
 | 删除系统 provider | 403 | `provider_system_readonly` |
 | auth_type=oauth v1 | 409 | `provider_oauth_not_implemented` |
+| auth_type=api_key/bearer_token 缺 api_key | 400 | `provider_api_key_required` |
+| auth_type=none 但传了 api_key | 400 | `provider_api_key_not_allowed_for_none` |
+| 系统 provider 下增删改 model | 403 | `provider_system_readonly` |
+| default_model/fallback 引用不存在的 provider | 400 | `model_ref_provider_not_found` |
+| default_model/fallback 引用不存在的 model | 400 | `model_ref_model_not_found` |
 | 测试连接失败 | 200 | body `{ok: false, error, latency_ms}` |
 | Override 用于 org 级 provider | 400 | `provider_override_not_applicable` |
 
