@@ -238,6 +238,17 @@ async def lifespan(_app: FastAPI):  # type: ignore
     except Exception as e:
         logger.warning("Failed to seed preinstalled skills: {}", str(e))
 
+    # Seed system providers from config.yaml (idempotent).
+    try:
+        from cubebox.db import async_session_maker
+        from cubebox.services.seed import seed_system_providers_from_config
+
+        async with async_session_maker() as seed_session:
+            await seed_system_providers_from_config(seed_session)
+        logger.info("System provider seed step completed")
+    except Exception as e:
+        logger.warning("Failed to seed system providers: {}", str(e))
+
     # M7: orphan attachment reaper
     from cubebox.config import config
     from cubebox.services.attachments import cleanup_orphan_attachments
