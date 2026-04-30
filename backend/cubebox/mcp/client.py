@@ -1,8 +1,8 @@
-"""MCP (Model Context Protocol) Client
+"""MCP manager for legacy config-backed servers.
 
-Manages connections to MCP servers and tool integration.
-Uses langchain-mcp-adapters MultiServerMCPClient to connect to servers
-and expose their tools as LangChain BaseTool instances.
+DB-backed MCP servers are assembled per run and must not be registered in the
+global tool registry. This module only handles the legacy ``mcp.servers`` config
+path that is shared across all workspaces.
 """
 
 from typing import Any, cast
@@ -13,35 +13,30 @@ from langchain_mcp_adapters.sessions import Connection
 from loguru import logger
 
 
-def _build_connection_params(
-    server_name: str, server_config: dict[str, Any]
+def _build_legacy_connection_params(
+    server_name: str,
+    server_config: dict[str, Any],
 ) -> dict[str, Any] | None:
-    """
-    Build MultiServerMCPClient connection params for one server.
-
-    Returns None if the transport is unsupported.
-    """
+    """Build MultiServerMCPClient connection params for a legacy config server."""
     transport = server_config.get("transport")
 
     if transport in ("streamable_http", "sse"):
         url = server_config.get("url")
         if not url:
-            logger.warning("MCP server '{}': missing required 'url' field, skipping", server_name)
+            logger.warning("Legacy MCP '{}': missing required 'url'; skipping", server_name)
             return None
-        params: dict[str, Any] = {
-            "url": url,
-            "transport": transport,
-        }
+        params: dict[str, Any] = {"url": url, "transport": transport}
         key = server_config.get("key")
         if key:
             params["headers"] = {"Authorization": f"Bearer {key}"}
         return params
 
-    elif transport == "stdio":
+    if transport == "stdio":
         command = server_config.get("command")
         if not command:
             logger.warning(
-                "MCP server '{}': missing required 'command' field, skipping", server_name
+                "Legacy MCP '{}': missing required 'command'; skipping",
+                server_name,
             )
             return None
         params = {
@@ -54,125 +49,134 @@ def _build_connection_params(
             params["env"] = env
         return params
 
-    else:
-        logger.warning(
-            "MCP server '{}': unsupported transport '{}', skipping", server_name, transport
-        )
-        return None
+    logger.warning("Legacy MCP '{}': unsupported transport '{}'; skipping", server_name, transport)
+    return None
+
+
+async def _load_tools_from_server_configs(
+    server_configs: dict[str, Any],
+) -> list[BaseTool]:
+    """Connect to configured servers and return successfully loaded tools."""
+    if not server_configs:
+        return []
+
+    all_tools: list[BaseTool] = []
+    for server_name, server_config in server_configs.items():
+        try:
+            params = _build_legacy_connection_params(server_name, server_config)
+            if params is None:
+                continue
+
+            client = MultiServerMCPClient({server_name: cast(Connection, params)})
+            tools: list[BaseTool] = await client.get_tools()
+            tools = _filter_and_annotate_tools(tools, server_config)
+
+            logger.info(
+                "Legacy MCP '{}': loaded {} tool(s): {}",
+                server_name,
+                len(tools),
+                [tool.name for tool in tools],
+            )
+            all_tools.extend(tools)
+        except Exception as exc:
+            if isinstance(exc, BaseExceptionGroup):
+                causes = "; ".join(str(sub) for sub in exc.exceptions)
+                logger.warning(
+                    "Legacy MCP '{}' failed to load tools: {} (causes: {}). Skipping.",
+                    server_name,
+                    exc,
+                    causes,
+                )
+            else:
+                logger.warning(
+                    "Legacy MCP '{}' failed to load tools: {}. Skipping.",
+                    server_name,
+                    exc,
+                )
+
+    return all_tools
+
+
+def _filter_and_annotate_tools(
+    tools: list[BaseTool],
+    server_config: dict[str, Any],
+) -> list[BaseTool]:
+    tool_defs: list[str | dict[str, Any]] | None = server_config.get("tools")
+    if not tool_defs:
+        return tools
+
+    tool_config_map: dict[str, dict[str, Any]] = {}
+    for tool_def in tool_defs:
+        if isinstance(tool_def, str):
+            tool_config_map[tool_def] = {}
+        elif isinstance(tool_def, dict) and "name" in tool_def:
+            tool_config_map[str(tool_def["name"])] = tool_def
+
+    filtered = [tool for tool in tools if tool.name in tool_config_map]
+    for tool in filtered:
+        tool_config = tool_config_map.get(tool.name, {})
+        content_type = tool_config.get("content_type")
+        if content_type:
+            if tool.metadata is None:
+                tool.metadata = {}
+            tool.metadata["content_type"] = str(content_type)
+    return filtered
 
 
 class MCPManager:
-    """
-    Manager for MCP server connections.
+    """Legacy config-backed MCP manager.
 
-    Wraps MultiServerMCPClient to connect to configured MCP servers,
-    fetch their tools, and apply optional per-server tool filtering.
+    The class-level methods are used by app startup. The constructor and
+    ``load_tools`` remain for existing tests and explicit legacy loaders.
     """
+
+    _legacy_cache: list[BaseTool] | None = None
 
     def __init__(self, servers: dict[str, Any] | None = None) -> None:
-        """
-        Initialize MCPManager.
-
-        Args:
-            servers: Dict of server configs keyed by server name.
-                     If None, loads from dynaconf config.
-        """
         self._server_configs: dict[str, Any] = {}
-
         if servers is not None:
             self._load_from_dict(servers)
         else:
             self._load_from_config()
 
     def _load_from_dict(self, servers: dict[str, Any]) -> None:
-        """Load server configs from a dict (used in tests)."""
+        """Load enabled legacy server configs from a dict."""
         for server_name, server_config in servers.items():
             if not server_config.get("enabled", True):
-                logger.debug("MCP server '{}' is disabled, skipping", server_name)
+                logger.debug("Legacy MCP '{}' is disabled; skipping", server_name)
                 continue
             self._server_configs[server_name] = server_config
 
     def _load_from_config(self) -> None:
-        """Load server configs from dynaconf config."""
+        """Load enabled legacy server configs from dynaconf."""
         from cubebox.config import config
 
         if not config.get("mcp.enabled", False):
-            logger.debug("MCP is globally disabled, skipping all servers")
+            logger.debug("Legacy MCP config is disabled; skipping all servers")
             return
-
-        servers = config.get("mcp.servers", {})
-        if not servers:
-            return
+        servers = config.get("mcp.servers", {}) or {}
         self._load_from_dict(servers)
 
     async def load_tools(self) -> list[BaseTool]:
-        """
-        Connect to all enabled MCP servers and return their tools.
+        """Load tools from this manager's server configs."""
+        return await _load_tools_from_server_configs(self._server_configs)
 
-        Per-server failures are caught and logged as warnings — the method
-        always returns whatever tools were successfully loaded.
+    @classmethod
+    async def load_legacy_config_servers(cls) -> list[BaseTool]:
+        """Load legacy config servers once and return the process-wide cache."""
+        if cls._legacy_cache is not None:
+            return cls._legacy_cache
 
-        Returns:
-            List of BaseTool instances from all reachable servers.
-        """
-        if not self._server_configs:
-            return []
+        manager = cls()
+        cls._legacy_cache = await manager.load_tools()
+        if cls._legacy_cache:
+            logger.info(
+                "Loaded {} legacy MCP tool(s) from config; DB MCP tools are run-scoped",
+                len(cls._legacy_cache),
+            )
+        return cls._legacy_cache
 
-        all_tools: list[BaseTool] = []
-
-        for server_name, server_config in self._server_configs.items():
-            try:
-                params = _build_connection_params(server_name, server_config)
-                if params is None:
-                    continue
-
-                client = MultiServerMCPClient({server_name: cast(Connection, params)})
-                tools: list[BaseTool] = await client.get_tools()
-
-                # Filter to requested tool names and apply per-tool config
-                tool_defs: list[str | dict[str, Any]] | None = server_config.get("tools")
-                if tool_defs:
-                    # Build lookup: tool_name -> {content_type, ...}
-                    tool_config_map: dict[str, dict[str, Any]] = {}
-                    for td in tool_defs:
-                        if isinstance(td, str):
-                            tool_config_map[td] = {}
-                        elif isinstance(td, dict) and "name" in td:
-                            tool_config_map[str(td["name"])] = td
-                    tools = [t for t in tools if t.name in tool_config_map]
-
-                    # Merge per-tool config into tool metadata
-                    for tool in tools:
-                        tc = tool_config_map.get(tool.name, {})
-                        content_type = tc.get("content_type")
-                        if content_type:
-                            if tool.metadata is None:
-                                tool.metadata = {}
-                            tool.metadata["content_type"] = str(content_type)
-
-                logger.info(
-                    "MCP server '{}': loaded {} tool(s): {}",
-                    server_name,
-                    len(tools),
-                    [t.name for t in tools],
-                )
-                all_tools.extend(tools)
-
-            except Exception as e:
-                cause = e
-                if isinstance(e, BaseExceptionGroup):
-                    causes = "; ".join(str(sub) for sub in e.exceptions)
-                    logger.warning(
-                        "MCP server '{}' failed to load tools: {} (causes: {}). Skipping.",
-                        server_name,
-                        str(e),
-                        causes,
-                    )
-                else:
-                    logger.warning(
-                        "MCP server '{}' failed to load tools: {}. Skipping.",
-                        server_name,
-                        str(cause),
-                    )
-
-        return all_tools
+    @classmethod
+    def legacy_tools_cache(cls) -> list[BaseTool]:
+        """Return cached legacy tools; assumes startup already loaded them."""
+        return cls._legacy_cache or []
