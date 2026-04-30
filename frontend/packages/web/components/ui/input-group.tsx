@@ -82,11 +82,25 @@ function InputGroupButton({
   type = 'button',
   variant = 'ghost',
   size = 'xs',
+  render,
   ...props
 }: Omit<React.ComponentProps<typeof Button>, 'size' | 'type'> &
   VariantProps<typeof inputGroupButtonVariants> & {
     type?: 'button' | 'submit' | 'reset'
+    render?: React.ReactElement
   }) {
+  if (render) {
+    return React.cloneElement(render, {
+      type,
+      'data-size': size,
+      className: cn(
+        inputGroupButtonVariants({ size }),
+        className,
+        (render.props as Record<string, string>).className,
+      ),
+      ...props,
+    } as Record<string, unknown>)
+  }
   return (
     <Button
       type={type}
