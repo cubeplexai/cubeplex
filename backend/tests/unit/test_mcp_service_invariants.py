@@ -13,6 +13,7 @@ from cubebox.mcp.exceptions import (
     MCPCredentialRequired,
     MCPOAuthNotImplemented,
     MCPServerNameConflict,
+    MCPServerNotFound,
     MCPServerURLConflict,
     MCPUserScopeCredentialForbidden,
 )
@@ -163,3 +164,40 @@ async def test_duplicate_name_in_same_scope_conflicts(mcp_service: MCPServerServ
             auth_method="none",
             credential_scope="none",
         )
+
+
+async def test_update_renaming_to_existing_name_conflicts(
+    mcp_service: MCPServerService,
+) -> None:
+    first = await mcp_service.create(
+        name="a",
+        server_url="https://x",
+        transport="streamable_http",
+        auth_method="none",
+        credential_scope="none",
+    )
+    await mcp_service.create(
+        name="b",
+        server_url="https://y",
+        transport="streamable_http",
+        auth_method="none",
+        credential_scope="none",
+    )
+
+    with pytest.raises(MCPServerNameConflict):
+        await mcp_service.update(server_id=first.id, name="b")
+
+
+async def test_delete_cascades_and_removes_server(mcp_service: MCPServerService) -> None:
+    server = await mcp_service.create(
+        name="c",
+        server_url="https://z",
+        transport="streamable_http",
+        auth_method="none",
+        credential_scope="none",
+    )
+
+    await mcp_service.delete(server_id=server.id)
+
+    with pytest.raises(MCPServerNotFound):
+        await mcp_service.update(server_id=server.id, name="x")
