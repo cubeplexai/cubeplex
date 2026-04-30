@@ -960,8 +960,18 @@ class ProviderService:
             raise ProviderNotFoundError(f"Provider {provider_id} not found")
         return p
 
+    def _validate_auth_creds(self, auth_type: str, api_key: str | None) -> None:
+        """Enforce auth_type / api_key cross-invariants."""
+        if auth_type in ("api_key", "bearer_token"):
+            if not api_key:
+                raise ValueError("api_key is required for auth_type={}".format(auth_type))
+        if auth_type == "none":
+            if api_key:
+                raise ValueError("api_key must be empty for auth_type='none'")
+
     async def create_provider(self, data: ProviderCreate) -> Provider:
         self._check_oauth(data)
+        self._validate_auth_creds(data.auth_type, data.api_key)
         existing = await self._providers.get_by_name(data.name)
         if existing is not None:
             raise ProviderNameConflictError(f"Provider name '{data.name}' already exists")
@@ -971,7 +981,9 @@ class ProviderService:
             provider_type=data.provider_type,
             base_url=data.base_url,
             auth_type=data.auth_type,
-            api_key=data.api_key,
+            api_key=data.api_key if data.auth_type != "none" else None,
+            # TODO(vault): Encrypt api_key when M1-E4 vault integration lands.
+            #              Plaintext storage is temporary per spec D10.
             logo_url=data.logo_url,
             extra_body=data.extra_body,
             extra_headers=data.extra_headers,
@@ -982,8 +994,15 @@ class ProviderService:
     async def update_provider(self, provider_id: str, data: ProviderUpdate) -> Provider:
         p = await self.get_provider(provider_id)
         self._check_not_system(p)
-        if data.auth_type is not None:
+        # Determine effective auth_type for validation
+        effective_auth = data.auth_type if data.auth_type is not None else p.auth_type
+        effective_key = data.api_key if data.api_key is not None else p.api_key
+        if data.auth_type is not None or data.api_key is not None:
             self._check_oauth(data)
+            self._validate_auth_creds(effective_auth, effective_key)
+        # auth_type switch to 'none' clears api_key
+        if data.auth_type == "none":
+            p.api_key = None
         if data.name is not None and data.name != p.name:
             existing = await self._providers.get_by_name(data.name)
             if existing is not None:
@@ -1017,6 +1036,7 @@ class ProviderService:
 
     async def create_model(self, provider_id: str, data: ModelCreate) -> Model:
         provider = await self.get_provider(provider_id)
+        self._check_not_system(provider)  # system provider models are readonly
         existing = await self._models.get_by_model_id(provider_id, data.model_id)
         if existing is not None:
             raise ValueError(f"Model '{data.model_id}' already exists in this provider")
@@ -1041,7 +1061,8 @@ class ProviderService:
     async def update_model(
         self, provider_id: str, model_db_id: str, data: ModelUpdate
     ) -> Model:
-        await self.get_provider(provider_id)
+        provider = await self.get_provider(provider_id)
+        self._check_not_system(provider)  # system provider models are readonly
         m = await self._models.get(model_db_id)
         if m is None or m.provider_id != provider_id:
             raise ModelNotFoundError(f"Model {model_db_id} not found")
@@ -1058,7 +1079,8 @@ class ProviderService:
         return await self._models.update(m)
 
     async def delete_model(self, provider_id: str, model_db_id: str) -> None:
-        await self.get_provider(provider_id)
+        provider = await self.get_provider(provider_id)
+        self._check_not_system(provider)  # system provider models are readonly
         m = await self._models.get(model_db_id)
         if m is None or m.provider_id != provider_id:
             raise ModelNotFoundError(f"Model {model_db_id} not found")
@@ -1068,27 +1090,32 @@ class ProviderService:
 
     async def test_connection(self, data: ProviderTest) -> TestResultOut:
         start = time.monotonic()
-        try:
-            llm = ChatOpenAICompatible(
-                base_url=data.base_url,
-                api_key=data.api_key or "placeholder",
-                model="ping",
-                timeout=15,
+        if data.provider_type not in ("openai_compat",):
+            return TestResultOut(
+                ok=False,
+                error=f"Unsupported provider_type: {data.provider_type}",
+                latency_ms=0,
             )
-            await llm.ainvoke([HumanMessage(content="ping")])
+        try:
+            if data.provider_type == "openai_compat":
+                llm = ChatOpenAICompatible(
+                    base_url=data.base_url,
+                    api_key=data.api_key or "placeholder",
+                    model="ping",
+                    timeout=15,
+                )
+                await llm.ainvoke([HumanMessage(content="ping")])
             latency_ms = int((time.monotonic() - start) * 1000)
             return TestResultOut(ok=False, error="Unexpected success — ping should fail", latency_ms=latency_ms)
         except Exception as e:
             latency_ms = int((time.monotonic() - start) * 1000)
             error_str = str(e)
-            # Distinguish "can reach" from "can't reach"
             if (
                 "Connection refused" in error_str
                 or "Name or service not known" in error_str
                 or "getaddrinfo" in error_str.lower()
             ):
                 return TestResultOut(ok=False, error=error_str, latency_ms=latency_ms)
-            # Any other error (auth, model not found) = server is reachable
             return TestResultOut(ok=True, error=None, latency_ms=latency_ms)
 
     # ── Org overrides ──────────────────────────────────────────────
@@ -1119,10 +1146,33 @@ class ProviderService:
 
     async def update_llm_settings(self, data: OrgLLMSettingsUpdate) -> OrgLLMSettingsOut:
         if data.default_model is not None:
+            await self._validate_model_ref(data.default_model)
             await self._org_settings.set("default_model", {"model_ref": data.default_model})
         if data.fallback_models is not None:
+            for ref in data.fallback_models:
+                await self._validate_model_ref(ref)
             await self._org_settings.set("fallback_models", {"models": data.fallback_models})
         return await self.get_llm_settings()
+
+    async def _validate_model_ref(self, model_ref: str) -> None:
+        """Verify a provider/model-id reference points to a visible, enabled model."""
+        parts = model_ref.split("/", 1)
+        if len(parts) != 2:
+            raise ValueError(f"Invalid model ref format: '{model_ref}'")
+        provider_name, model_id = parts
+        provider = await self._providers.get_by_name(provider_name)
+        if provider is None:
+            raise ValueError(f"Provider '{provider_name}' not found")
+        # Check org-level disable
+        if provider.org_id is None:
+            override = await self._overrides.get(provider.id)
+            if override and not override.enabled:
+                raise ValueError(f"Provider '{provider_name}' is disabled by org")
+        model = await self._models.get_by_model_id(provider.id, model_id)
+        if model is None:
+            raise ValueError(f"Model '{model_id}' not found in provider '{provider_name}'")
+        if not model.enabled:
+            raise ValueError(f"Model '{model_id}' is disabled")
 ```
 
 - [ ] **Step 4: Run unit tests**
@@ -1353,6 +1403,7 @@ async def delete_provider(
 
 
 # ── Model routes (nested under provider) ──────────────────────────
+# NOTE: path param {mid} is the DB UUID primary key, NOT model_id (the business id).
 
 @router.post("/providers/{provider_id}/models", response_model=ModelOut, status_code=201)
 async def create_model(
@@ -1366,37 +1417,43 @@ async def create_model(
         m = await svc.create_model(provider_id, body)
     except ProviderNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
+    except ProviderSystemReadonlyError as e:
+        raise HTTPException(status_code=403, detail={"code": "provider_system_readonly", "message": str(e)})
     except ValueError as e:
         raise HTTPException(status_code=409, detail=str(e))
     return _model_out(m)
 
 
-@router.patch("/providers/{provider_id}/models/{model_id}", response_model=ModelOut)
+@router.patch("/providers/{provider_id}/models/{mid}", response_model=ModelOut)
 async def update_model(
     provider_id: str,
-    model_id: str,
+    mid: str,  # DB UUID of the model row (not model_id)
     body: ModelUpdate,
     user: Annotated[User, Depends(require_org_admin)],
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> ModelOut:
     svc = await _svc(user, session)
     try:
-        m = await svc.update_model(provider_id, model_id, body)
+        m = await svc.update_model(provider_id, mid, body)
+    except ProviderSystemReadonlyError as e:
+        raise HTTPException(status_code=403, detail={"code": "provider_system_readonly", "message": str(e)})
     except ModelNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
     return _model_out(m)
 
 
-@router.delete("/providers/{provider_id}/models/{model_id}", status_code=204)
+@router.delete("/providers/{provider_id}/models/{mid}", status_code=204)
 async def delete_model(
     provider_id: str,
-    model_id: str,
+    mid: str,  # DB UUID of the model row (not model_id)
     user: Annotated[User, Depends(require_org_admin)],
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> None:
     svc = await _svc(user, session)
     try:
-        await svc.delete_model(provider_id, model_id)
+        await svc.delete_model(provider_id, mid)
+    except ProviderSystemReadonlyError as e:
+        raise HTTPException(status_code=403, detail={"code": "provider_system_readonly", "message": str(e)})
     except ModelNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
 
@@ -1563,12 +1620,20 @@ from cubebox.models.provider import Model, Provider
 
 
 async def seed_system_providers_from_config(session: AsyncSession) -> None:
+    """Idempotent: insert/update system providers/models from config.yaml.
+    
+    - Creates missing providers and models (idempotent by name/model_id).
+    - Updates existing system provider base_url/provider_type when config changes.
+    - Marks models removed from config as enabled=False (does NOT delete).
+    """
     cfg = settings.get("llm", {})
     config_providers: dict = cfg.get("providers", {})
 
     if not config_providers:
         logger.info("No providers in config — skipping seed")
         return
+
+    config_model_ids: dict[str, set[str]] = {}  # provider_name -> set of model_ids from config
 
     for name, cfg_dict in config_providers.items():
         existing = await session.execute(
@@ -1580,32 +1645,36 @@ async def seed_system_providers_from_config(session: AsyncSession) -> None:
 
         if provider is None:
             provider = Provider(
-                org_id=None,
-                name=name,
+                org_id=None, name=name,
                 provider_type="openai_compat",
                 base_url=cfg_dict.get("base_url", ""),
-                auth_type="api_key",
-                enabled=True,
+                auth_type="api_key", enabled=True,
                 created_by_user_id="system",
             )
             session.add(provider)
             await session.flush()
             logger.info("Seeded system provider: {}", name)
         else:
-            logger.debug("System provider '{}' already exists, skipping", name)
+            # Update changed fields on existing system provider
+            provider.base_url = cfg_dict.get("base_url", "")
+            provider.provider_type = "openai_compat"
+            logger.debug("System provider '{}' already exists, updated", name)
 
+        config_model_ids[name] = set()
         models_list = cfg_dict.get("models", [])
+
         for mc in models_list:
+            config_model_ids[name].add(mc["id"])
             existing_model = await session.execute(
                 select(Model).where(
                     Model.provider_id == provider.id, Model.model_id == mc["id"]
                 )
             )
-            if existing_model.scalar_one_or_none() is None:
+            model = existing_model.scalar_one_or_none()
+            if model is None:
                 cost = mc.get("cost", {})
                 model = Model(
-                    org_id=None,
-                    provider_id=provider.id,
+                    org_id=None, provider_id=provider.id,
                     model_id=mc["id"],
                     display_name=mc.get("name", mc["id"]),
                     reasoning=mc.get("reasoning", False),
@@ -1620,6 +1689,22 @@ async def seed_system_providers_from_config(session: AsyncSession) -> None:
                 )
                 session.add(model)
                 logger.info("Seeded model: {} / {}", name, mc["id"])
+            else:
+                # Update existing model fields
+                model.display_name = mc.get("name", mc["id"])
+                model.enabled = True
+
+        # Disable models that exist in DB but were removed from config
+        stale_results = await session.execute(
+            select(Model).where(
+                Model.provider_id == provider.id,
+                Model.org_id.is_(None),
+                Model.model_id.notin_(config_model_ids[name]),
+            )
+        )
+        for stale in stale_results.scalars().all():
+            stale.enabled = False
+            logger.info("Disabled stale model: {} / {}", name, stale.model_id)
 
     await session.commit()
     logger.info("System provider seed complete")
@@ -1757,13 +1842,22 @@ class LLMFactory:
         return db_configs  # type: ignore[return-value]
 
     def _build_merged_config(self, db_configs: dict) -> LLMConfig:
-        """Merge DB configs with config.yaml fallback. DB wins."""
+        """Merge DB configs with config.yaml fallback. DB wins.
+        
+        CRITICAL: Only config-fallback providers that do NOT exist in DB at all.
+        Once a provider is seeded into DB, its visibility is governed by DB +
+        OrgProviderOverride, and config.yaml must NOT reintroduce it.
+        """
         config_providers = dict(self.llm_config.providers)
-        # DB entries override config entries with same name
-        merged = {**config_providers, **{
-            name: ProviderConfig(**cfg)
-            for name, cfg in db_configs.items()
-        }}
+        # Start from config, then overlay DB entries
+        merged = {}
+        for name, cfg in config_providers.items():
+            if name not in db_configs:
+                # Only use config when provider not in DB at all
+                merged[name] = cfg
+        # DB entries always override
+        for name, cfg in db_configs.items():
+            merged[name] = ProviderConfig(**cfg)
         return LLMConfig(
             default_model=self.llm_config.default_model,
             fallback_models=self.llm_config.fallback_models,
@@ -1812,7 +1906,11 @@ Replace `create_default`:
 
 ```python
     async def create_default(self, **kwargs: Any) -> Any:
-        """Create an LLM instance using the configured default_model."""
+        """Create an LLM instance using the configured default_model.
+        
+        With session+org_id: loads from DB, merges with config fallback.
+        Without session: pure config.yaml (startup/CI compatibility).
+        """
         # Refresh config from DB if available
         if self._session and self._org_id:
             db_cfgs = await self._load_db_provider_configs()
@@ -2097,6 +2195,38 @@ async def test_org_settings_default_model(admin_client: AsyncClient) -> None:
     assert res.status_code == 200
     assert res.json()["default_model"] == "cubebox/test-model"
     assert res.json()["fallback_models"] == ["cubebox/fallback-1"]
+
+
+@pytest.mark.e2e
+async def test_config_fallback_when_db_empty(admin_client: AsyncClient) -> None:
+    """LLMFactory.create_default() works from config.yaml when DB has no providers."""
+    from cubebox.llm.factory import LLMFactory
+
+    # LLMFactory with no DB session must still work via config fallback
+    factory = LLMFactory()
+    llm = factory.create_default()
+    assert llm is not None
+
+
+@pytest.mark.e2e
+async def test_system_provider_model_mutations_rejected(admin_client: AsyncClient) -> None:
+    """Org admin cannot create/edit/delete models on system providers."""
+    # Get a system provider
+    res = await admin_client.get("/api/v1/admin/providers")
+    system = [p for p in res.json() if p["is_system"]]
+    if not system:
+        pytest.skip("No system providers available")
+    sys_id = system[0]["id"]
+
+    # Try to create a model on system provider
+    res = await admin_client.post(f"/api/v1/admin/providers/{sys_id}/models", json={
+        "model_id": "hacker-model",
+        "display_name": "Hack",
+        "context_window": 128000,
+        "max_tokens": 64000,
+    })
+    assert res.status_code == 403
+    assert res.json()["detail"]["code"] == "provider_system_readonly"
 ```
 
 - [ ] **Step 2: Setup admin_client fixture in conftest**
@@ -2375,7 +2505,8 @@ git commit -m "feat(core): add provider/model TypeScript types"
 
 ```typescript
 // frontend/packages/core/src/api/providers.ts
-import type { ApiClient, toApiError } from './client'
+import type { ApiClient } from './client'
+import { toApiError } from './client'
 import type {
   Provider,
   ProviderCreate,
@@ -2390,9 +2521,18 @@ import type {
 
 export async function fetchProviders(client: ApiClient): Promise<Provider[]> {
   const res = await client.get('/api/v1/admin/providers')
-  if (!res.ok) throw await (await import('./client')).toApiError(res)
+  if (!res.ok) throw await toApiError(res)
   return res.json() as Promise<Provider[]>
 }
+
+export async function fetchProvider(client: ApiClient, id: string): Promise<Provider> {
+  const res = await client.get(`/api/v1/admin/providers/${id}`)
+  if (!res.ok) throw await toApiError(res)
+  return res.json() as Promise<Provider>
+}
+
+// ... etc, all functions use: import { toApiError } from './client'
+// and: if (!res.ok) throw await toApiError(res)
 
 export async function fetchProvider(client: ApiClient, id: string): Promise<Provider> {
   const res = await client.get(`/api/v1/admin/providers/${id}`)
@@ -2560,7 +2700,7 @@ interface ProvidersState {
   toggleOverride: (client: ApiClient, providerId: string, enabled: boolean) => Promise<void>
 }
 
-export const useProvidersStore = create<ProvidersState>((set, get) => ({
+export const useProvidersStore = create<ProvidersState>((set, _get) => ({
   providers: [],
   selectedId: null,
   loading: false,
