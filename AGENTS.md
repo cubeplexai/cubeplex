@@ -38,6 +38,8 @@ cubebox/
   - `CUBEBOX_LLM__DEFAULT_MODEL`（覆盖 `default_model`，值如 `provider/model-id`）
   - `CUBEBOX_AUTH__JWT_SECRET`
   - `CUBEBOX_AUTH__CSRF_SECRET`
+  - `CUBEBOX_AUTH__VAULT_KEY` — comma-separated Fernet keys; first key encrypts,
+    all keys decrypt. Required once Credential Vault is enabled.
   - `CUBEBOX_REDIS__URL`
   - `CUBEBOX_DATABASE__HOST|PORT|USER|PASSWORD|NAME`
   - `CUBEBOX_SANDBOX__DOMAIN`
@@ -65,6 +67,11 @@ cubebox/
   - Local E2E requires `backend/.env` and `backend/config.development.local.yaml` (gitignored); copy from main worktree when in worktree environments.
 - Database:
   - Alembic for migrations (`alembic upgrade head`, `alembic revision ...`)
+- Vault rotation:
+  - Generate a new Fernet key.
+  - Deploy `CUBEBOX_AUTH__VAULT_KEY=<new>,<old>`.
+  - Run the key rotation command once it lands.
+  - Deploy `CUBEBOX_AUTH__VAULT_KEY=<new>` only after rotation is verified.
 
 ## Frontend essentials
 - Tech stack: Next.js app router + React + TypeScript + Tailwind + shadcn/ui + Zustand + pnpm workspace.
