@@ -87,6 +87,8 @@ jobs:
       CUBEBOX_SANDBOX__DOMAIN: ${{ secrets.CUBEBOX_SANDBOX__DOMAIN }}
       CUBEBOX_SANDBOX__IMAGE: ${{ secrets.CUBEBOX_SANDBOX__IMAGE }}
       CUBEBOX_SANDBOX__API_KEY: ${{ secrets.CUBEBOX_SANDBOX__API_KEY }}
+      # Test-only Fernet key for CI startup and vault E2E. Production must set its own key.
+      CUBEBOX_AUTH__VAULT_KEY: 1EwVRAtWccVJhdXX_2iepp7OlPfadfHpWNwVFpRzLBI=
       # Frontend proxies to local backend:8001 (matches config.test.yaml)
       CUBEBOX_API_URL: http://127.0.0.1:8001
     services:
