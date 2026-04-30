@@ -3,7 +3,11 @@
 from typing import Any
 
 from cubebox.credentials.encryption import EncryptionBackend
-from cubebox.credentials.exceptions import CredentialKindMismatch, CredentialNotFound
+from cubebox.credentials.exceptions import (
+    CredentialInUseError,
+    CredentialKindMismatch,
+    CredentialNotFound,
+)
 from cubebox.models import Credential
 from cubebox.repositories.credential import CredentialRepository
 
@@ -75,8 +79,31 @@ class CredentialService:
         await self._repo.update(cred)
 
     async def delete(self, *, credential_id: str) -> None:
-        # Reverse-reference checks are added when MCP credential references exist.
         cred = await self._repo.get(credential_id)
         if cred is None:
             raise CredentialNotFound(credential_id)
+        await self._guard_references(credential_id)
         await self._repo.delete(credential_id)
+
+    async def _guard_references(self, credential_id: str) -> None:
+        """Refuse deletion while MCP tables still reference the credential."""
+        from cubebox.repositories.mcp import (
+            MCPServerRepository,
+            UserMCPCredentialRepository,
+            WorkspaceMCPCredentialRepository,
+        )
+
+        session = self._repo.session
+        for repo_class in (
+            MCPServerRepository,
+            WorkspaceMCPCredentialRepository,
+            UserMCPCredentialRepository,
+        ):
+            repo = repo_class(session, org_id=self._org_id)
+            references = await repo.find_by_credential_id(credential_id)
+            if references:
+                reference_ids = [getattr(reference, "id", "?") for reference in references]
+                raise CredentialInUseError(
+                    f"credential {credential_id} referenced by "
+                    f"{repo_class.__name__}: {reference_ids}"
+                )

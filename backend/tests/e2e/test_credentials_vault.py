@@ -6,8 +6,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from uuid_utils import uuid7
 
 from cubebox.credentials.encryption import FernetBackend
-from cubebox.credentials.exceptions import CredentialKindMismatch, CredentialNotFound
+from cubebox.credentials.exceptions import (
+    CredentialInUseError,
+    CredentialKindMismatch,
+    CredentialNotFound,
+)
+from cubebox.models import MCPServer
 from cubebox.repositories.credential import CredentialRepository
+from cubebox.repositories.mcp import MCPServerRepository
 from cubebox.services.credential import CredentialService
 
 
@@ -125,3 +131,36 @@ async def test_delete_removes_row(db_session: AsyncSession, backend: FernetBacke
 
     with pytest.raises(CredentialNotFound):
         await service.get_decrypted(credential_id=credential_id, requesting_kind="mcp_server")
+
+
+async def test_delete_credential_referenced_by_mcp_server_raises(
+    db_session: AsyncSession,
+    backend: FernetBackend,
+) -> None:
+    service = CredentialService(
+        CredentialRepository(db_session, org_id="org-vault-mcp-ref"),
+        backend,
+        org_id="org-vault-mcp-ref",
+        actor_user_id="user-1",
+    )
+    credential_id = await service.create(
+        kind="mcp_server",
+        name=_name("mcp-ref"),
+        plaintext="secret",
+    )
+    await MCPServerRepository(db_session, org_id="org-vault-mcp-ref").add(
+        MCPServer(
+            org_id="org-vault-mcp-ref",
+            name=_name("srv"),
+            server_url="https://mcp-ref",
+            server_url_hash="mcp-ref-hash",
+            transport="streamable_http",
+            auth_method="static",
+            credential_scope="org",
+            credential_id=credential_id,
+            created_by_user_id="user-1",
+        )
+    )
+
+    with pytest.raises(CredentialInUseError):
+        await service.delete(credential_id=credential_id)
