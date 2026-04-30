@@ -825,10 +825,6 @@ class RunManager:
                             workspace_id=ctx.workspace_id,
                         )
 
-            if checkpointer is not None and hasattr(checkpointer, "conn"):
-                with suppress(Exception):
-                    checkpointer.conn.close()
-
             if catalog_session_ctx is not None:
                 with suppress(Exception):
                     await catalog_session_ctx.__aexit__(None, None, None)
