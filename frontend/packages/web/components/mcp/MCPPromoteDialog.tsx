@@ -17,7 +17,7 @@ export interface MCPPromoteDialogProps {
 }
 
 export function MCPPromoteDialog({ server, open, onOpenChange, onConfirm }: MCPPromoteDialogProps) {
-  const canShareCredential = server.credential_scope === 'workspace' && server.credential !== null
+  const canShareCredential = server.credential_scope === 'workspace'
   const [shareCredential, setShareCredential] = useState(canShareCredential)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
