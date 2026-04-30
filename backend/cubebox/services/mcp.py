@@ -1,14 +1,17 @@
 """MCP connector service: CRUD, invariants, credential wiring, and discovery."""
 
 import hashlib
+from contextlib import suppress
 from datetime import UTC, datetime
 
 from cubebox.auth.context import RequestContext
+from cubebox.credentials.exceptions import CredentialNotFound
 from cubebox.mcp.discovery import discover_tools
 from cubebox.mcp.exceptions import (
     MCPCredentialRequired,
     MCPOAuthNotImplemented,
     MCPServerNameConflict,
+    MCPServerNotFound,
     MCPServerURLConflict,
     MCPUserScopeCredentialForbidden,
 )
@@ -125,6 +128,110 @@ class MCPServerService:
 
         await self._refresh_tools_for_server(server)
         return await self.server_repo.get(server.id) or server
+
+    async def update(
+        self,
+        *,
+        server_id: str,
+        name: str | None = None,
+        server_url: str | None = None,
+        transport: str | None = None,
+        credential_plaintext: str | None = None,
+        headers: dict[str, str] | None = None,
+        timeout: float | None = None,
+        sse_read_timeout: float | None = None,
+    ) -> MCPServer:
+        server = await self.server_repo.get(server_id)
+        if server is None:
+            raise MCPServerNotFound(server_id)
+
+        if name is not None and name != server.name:
+            existing_servers = await self.server_repo.list_for_org(
+                owner_workspace_id=server.owner_workspace_id
+            )
+            if any(
+                existing.id != server.id and existing.name == name for existing in existing_servers
+            ):
+                raise MCPServerNameConflict(name)
+            server.name = name
+
+        if server_url is not None and server_url != server.server_url:
+            new_hash = _sha256_hex(server_url)
+            existing = await self.server_repo.find_by_url_hash(
+                owner_workspace_id=server.owner_workspace_id,
+                server_url_hash=new_hash,
+            )
+            if existing is not None and existing.id != server.id:
+                raise MCPServerURLConflict(server_url)
+            server.server_url = server_url
+            server.server_url_hash = new_hash
+
+        if transport is not None:
+            if transport not in _VALID_TRANSPORTS:
+                raise ValueError(f"unknown transport: {transport}")
+            server.transport = transport
+
+        if credential_plaintext is not None:
+            if server.credential_scope != "org":
+                raise MCPUserScopeCredentialForbidden(
+                    "inline credential update is only valid for credential_scope=org"
+                )
+            if server.credential_id is None:
+                server.credential_id = await self.cred_service.create(
+                    kind=_CREDENTIAL_KIND_MCP,
+                    name=f"mcp:{server.name}:org",
+                    plaintext=credential_plaintext,
+                )
+            else:
+                await self.cred_service.update(
+                    credential_id=server.credential_id,
+                    plaintext=credential_plaintext,
+                )
+
+        if headers is not None:
+            server.headers = headers
+        if timeout is not None:
+            server.timeout = timeout
+        if sse_read_timeout is not None:
+            server.sse_read_timeout = sse_read_timeout
+
+        await self.server_repo.update(server)
+        if server_url is not None or transport is not None or credential_plaintext is not None:
+            await self._refresh_tools_for_server(server)
+        return await self.server_repo.get(server.id) or server
+
+    async def delete(self, *, server_id: str) -> None:
+        server = await self.server_repo.get(server_id)
+        if server is None:
+            raise MCPServerNotFound(server_id)
+
+        for binding in await self.binding_repo.list_for_server(server_id):
+            await self.binding_repo.delete(
+                workspace_id=binding.workspace_id,
+                mcp_server_id=server_id,
+            )
+
+        for workspace_credential in await self.ws_cred_repo.list_for_server(server_id):
+            await self.ws_cred_repo.delete(
+                workspace_id=workspace_credential.workspace_id,
+                mcp_server_id=server_id,
+            )
+            with suppress(CredentialNotFound):
+                await self.cred_service.delete(credential_id=workspace_credential.credential_id)
+
+        for user_credential in await self.user_cred_repo.list_for_server(server_id):
+            await self.user_cred_repo.delete(
+                user_id=user_credential.user_id,
+                mcp_server_id=server_id,
+            )
+            with suppress(CredentialNotFound):
+                await self.cred_service.delete(credential_id=user_credential.credential_id)
+
+        if server.credential_id is not None:
+            with suppress(CredentialNotFound):
+                await self.cred_service.delete(credential_id=server.credential_id)
+
+        await self.server_repo.delete(server_id)
 
     async def _ensure_unique_name_and_url(
         self,
