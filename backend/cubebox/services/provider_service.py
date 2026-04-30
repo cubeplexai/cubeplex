@@ -157,6 +157,7 @@ class ProviderService:
         await self._models.delete_by_provider(provider_id)
         await self._overrides.delete(provider_id)
         await self._providers.delete(p)
+        await self._session.commit()
 
     # -- Model CRUD -------------------------------------------------------------
 
