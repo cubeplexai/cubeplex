@@ -16,6 +16,7 @@ from cubebox.models.mcp import (
 )
 from cubebox.models.membership import Membership, Role
 from cubebox.models.organization import Organization
+from cubebox.models.provider import Model, Provider
 from cubebox.models.skill import (
     OrgPreinstalledTombstone,
     OrgSkillInstall,
@@ -39,9 +40,11 @@ __all__ = [
     "LlmBillingEvent",
     "MCPServer",
     "Membership",
+    "Model",
     "OrgPreinstalledTombstone",
     "OrgSkillInstall",
     "Organization",
+    "Provider",
     "Role",
     "Skill",
     "SkillVersion",
