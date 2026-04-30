@@ -1,0 +1,133 @@
+"""Request/response schemas for provider & model admin API."""
+
+from __future__ import annotations
+
+from datetime import datetime
+from typing import Any
+
+from pydantic import BaseModel, Field
+
+
+class ProviderCreate(BaseModel):
+    name: str = Field(max_length=64)
+    provider_type: str = Field(default="openai_compat", max_length=32)
+    base_url: str = Field(max_length=2048)
+    auth_type: str = Field(default="api_key", max_length=32)
+    api_key: str | None = Field(default=None, max_length=512)
+    logo_url: str | None = Field(default=None, max_length=512)
+    extra_body: dict[str, Any] = Field(default_factory=dict)
+    extra_headers: dict[str, Any] = Field(default_factory=dict)
+
+
+class ProviderUpdate(BaseModel):
+    name: str | None = Field(default=None, max_length=64)
+    provider_type: str | None = Field(default=None, max_length=32)
+    base_url: str | None = Field(default=None, max_length=2048)
+    auth_type: str | None = Field(default=None, max_length=32)
+    api_key: str | None = Field(default=None, max_length=512)
+    logo_url: str | None = Field(default=None, max_length=512)
+    extra_body: dict[str, Any] | None = None
+    extra_headers: dict[str, Any] | None = None
+    enabled: bool | None = None
+
+
+class ProviderTest(BaseModel):
+    provider_type: str = Field(default="openai_compat", max_length=32)
+    base_url: str = Field(max_length=2048)
+    api_key: str | None = Field(default=None, max_length=512)
+    auth_type: str = Field(default="api_key", max_length=32)
+
+
+class TestResultOut(BaseModel):
+    ok: bool
+    error: str | None = None
+    latency_ms: int
+
+
+class OrgProviderOverrideUpdate(BaseModel):
+    enabled: bool
+
+
+class OrgProviderOverrideOut(BaseModel):
+    enabled: bool
+
+
+class ModelCreate(BaseModel):
+    model_id: str = Field(max_length=128)
+    display_name: str = Field(max_length=128)
+    reasoning: bool = False
+    input_modalities: list[str] = Field(default_factory=lambda: ["text"])
+    cost_input: float = 0.0
+    cost_output: float = 0.0
+    cost_cache_read: float = 0.0
+    cost_cache_write: float = 0.0
+    context_window: int
+    max_tokens: int
+    extra_body: dict[str, Any] = Field(default_factory=dict)
+    extra_headers: dict[str, Any] = Field(default_factory=dict)
+
+
+class ModelUpdate(BaseModel):
+    display_name: str | None = Field(default=None, max_length=128)
+    reasoning: bool | None = None
+    input_modalities: list[str] | None = None
+    cost_input: float | None = None
+    cost_output: float | None = None
+    cost_cache_read: float | None = None
+    cost_cache_write: float | None = None
+    context_window: int | None = None
+    max_tokens: int | None = None
+    extra_body: dict[str, Any] | None = None
+    extra_headers: dict[str, Any] | None = None
+    enabled: bool | None = None
+
+
+class ModelOut(BaseModel):
+    id: str
+    provider_id: str
+    model_id: str
+    display_name: str
+    reasoning: bool
+    input_modalities: list[str]
+    cost_input: float
+    cost_output: float
+    cost_cache_read: float
+    cost_cache_write: float
+    context_window: int
+    max_tokens: int
+    extra_body: dict[str, Any]
+    extra_headers: dict[str, Any]
+    enabled: bool
+    is_system: bool
+    created_at: datetime
+    updated_at: datetime
+
+
+class ProviderOut(BaseModel):
+    id: str
+    name: str
+    provider_type: str
+    base_url: str
+    auth_type: str
+    has_api_key: bool
+    logo_url: str | None
+    enabled: bool
+    is_system: bool
+    model_count: int
+    models: list[ModelOut] | None = None
+    org_override: OrgProviderOverrideOut | None = None
+    extra_body: dict[str, Any]
+    extra_headers: dict[str, Any]
+    created_by_user_id: str
+    created_at: datetime
+    updated_at: datetime
+
+
+class OrgLLMSettingsOut(BaseModel):
+    default_model: str | None = None
+    fallback_models: list[str] = Field(default_factory=list)
+
+
+class OrgLLMSettingsUpdate(BaseModel):
+    default_model: str | None = None
+    fallback_models: list[str] | None = None
