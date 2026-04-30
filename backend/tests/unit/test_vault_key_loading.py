@@ -6,11 +6,18 @@ from cryptography.fernet import Fernet
 
 def test_build_encryption_backend_requires_vault_key(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("CUBEBOX_AUTH__VAULT_KEY", raising=False)
+    from cubebox.config import config
+
+    original_config_key = config.get("auth.vault_key")
+    config.set("auth.vault_key", "")
 
     from cubebox.api.app import _build_encryption_backend
 
-    with pytest.raises(RuntimeError, match="CUBEBOX_AUTH__VAULT_KEY is required"):
-        _build_encryption_backend()
+    try:
+        with pytest.raises(RuntimeError, match="CUBEBOX_AUTH__VAULT_KEY is required"):
+            _build_encryption_backend()
+    finally:
+        config.set("auth.vault_key", original_config_key)
 
 
 def test_build_encryption_backend_uses_env_key(monkeypatch: pytest.MonkeyPatch) -> None:

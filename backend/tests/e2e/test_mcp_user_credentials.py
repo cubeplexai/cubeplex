@@ -27,8 +27,9 @@ async def test_user_scope_credentials_are_isolated_per_workspace_member(
 ) -> None:
     client = unauthenticated_memory_client
     password = "passwordpassword"
-    alice_email = f"mcp-alice-{secrets.token_hex(4)}@example.com"
-    bob_email = f"mcp-bob-{secrets.token_hex(4)}@example.com"
+    run_id = secrets.token_hex(4)
+    alice_email = f"mcp-alice-{run_id}@example.com"
+    bob_email = f"mcp-bob-{run_id}@example.com"
 
     for email in (alice_email, bob_email):
         resp = await client.post(
@@ -78,7 +79,7 @@ async def test_user_scope_credentials_are_isolated_per_workspace_member(
 
     alice_put_resp = await client.put(
         f"/api/v1/ws/{workspace_id}/mcp/servers/{server_id}/my-credential",
-        json={"plaintext": "alice-token", "name": "alice"},
+        json={"plaintext": "alice-token", "name": f"alice-{run_id}"},
         headers={"X-CSRF-Token": csrf_alice},
     )
     assert alice_put_resp.status_code == 200, alice_put_resp.text
@@ -100,7 +101,7 @@ async def test_user_scope_credentials_are_isolated_per_workspace_member(
 
     bob_put_resp = await client.put(
         f"/api/v1/ws/{workspace_id}/mcp/servers/{server_id}/my-credential",
-        json={"plaintext": "bob-token", "name": "bob"},
+        json={"plaintext": "bob-token", "name": f"bob-{run_id}"},
         headers={"X-CSRF-Token": csrf_bob},
     )
     assert bob_put_resp.status_code == 200, bob_put_resp.text
