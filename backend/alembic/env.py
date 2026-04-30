@@ -17,6 +17,7 @@ from cubebox.models import (  # noqa: F401
     Credential,
     InviteToken,
     LlmBillingEvent,
+    MCPServer,
     Membership,
     Organization,
     OrgPreinstalledTombstone,
@@ -24,8 +25,11 @@ from cubebox.models import (  # noqa: F401
     Skill,
     SkillVersion,
     User,
+    UserMCPCredential,
     UserSandbox,
     Workspace,
+    WorkspaceMCPBinding,
+    WorkspaceMCPCredential,
     WorkspaceSkillBinding,
 )
 
