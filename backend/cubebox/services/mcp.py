@@ -3,6 +3,7 @@
 import hashlib
 from contextlib import suppress
 from datetime import UTC, datetime
+from typing import Any
 
 from cubebox.auth.context import RequestContext
 from cubebox.credentials.exceptions import CredentialNotFound
@@ -232,6 +233,55 @@ class MCPServerService:
                 await self.cred_service.delete(credential_id=server.credential_id)
 
         await self.server_repo.delete(server_id)
+
+    async def refresh_tools(self, *, server_id: str) -> MCPServer:
+        server = await self.server_repo.get(server_id)
+        if server is None:
+            raise MCPServerNotFound(server_id)
+        await self._refresh_tools_for_server(server)
+        return await self.server_repo.get(server.id) or server
+
+    async def test_connection(
+        self,
+        *,
+        server_url: str,
+        transport: str,
+        auth_method: str,
+        credential_scope: str,
+        credential_plaintext: str | None = None,
+        headers: dict[str, str] | None = None,
+        timeout: float = 30.0,
+        sse_read_timeout: float = 300.0,
+        owner_workspace_id: str | None = None,
+    ) -> tuple[bool, list[dict[str, Any]] | None, str | None]:
+        """Dry-run discovery without persisting a server or credentials."""
+        self._validate_create_invariants(
+            transport=transport,
+            auth_method=auth_method,
+            credential_scope=credential_scope,
+            credential_plaintext=credential_plaintext,
+            owner_workspace_id=owner_workspace_id,
+        )
+        transient = MCPServer(
+            org_id=self._ctx.org_id,
+            owner_workspace_id=owner_workspace_id,
+            name="__test__",
+            server_url=server_url,
+            server_url_hash=_sha256_hex(server_url),
+            transport=transport,
+            auth_method=auth_method,
+            credential_scope=credential_scope,
+            credential_id=None,
+            headers=headers or {},
+            timeout=timeout,
+            sse_read_timeout=sse_read_timeout,
+            created_by_user_id=self._ctx.user.id,
+        )
+
+        if credential_scope == "user":
+            return True, None, "user-scope: per-user discovery not supported in test-connection"
+        token = None if credential_scope == "none" else credential_plaintext
+        return await discover_tools(transient, credential_or_token=token)
 
     async def _ensure_unique_name_and_url(
         self,
