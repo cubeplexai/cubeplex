@@ -1,12 +1,19 @@
 """Tests for MCP connector SQLModels."""
 
-from sqlalchemy import UniqueConstraint
+from sqlalchemy import Index, UniqueConstraint
 
 
 def _unique_constraint_columns(model: type, name: str) -> list[str] | None:
     for constraint in model.__table__.constraints:
         if isinstance(constraint, UniqueConstraint) and constraint.name == name:
             return [column.name for column in constraint.columns]
+    return None
+
+
+def _index_columns(model: type, name: str) -> list[str] | None:
+    for index in model.__table__.indexes:
+        if isinstance(index, Index) and index.name == name:
+            return [column.name for column in index.columns]
     return None
 
 
@@ -39,6 +46,14 @@ def test_mcp_server_json_columns_and_constraints() -> None:
         "org_id",
         "owner_workspace_id",
         "name",
+    ]
+    assert _index_columns(MCPServer, "ix_mcp_server_org_wide_name_unique") == [
+        "org_id",
+        "name",
+    ]
+    assert _index_columns(MCPServer, "ix_mcp_server_org_wide_url_unique") == [
+        "org_id",
+        "server_url_hash",
     ]
 
 
