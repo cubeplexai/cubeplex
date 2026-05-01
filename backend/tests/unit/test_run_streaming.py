@@ -341,7 +341,7 @@ async def test_run_appends_db_mcp_tools_per_run(monkeypatch: pytest.MonkeyPatch)
         return _FakeAgent()
 
     monkeypatch.setattr(db_engine_module, "async_session_maker", lambda: _DummySessionContext())
-    monkeypatch.setattr(cubebox.mcp.runtime, "load_db_servers_for_workspace", _load_db_tools)
+    monkeypatch.setattr(cubebox.mcp.runtime, "load_mcp_tools_for_workspace", _load_db_tools)
     monkeypatch.setattr(cubebox.agents.graph, "create_cubebox_agent", _create_agent)
     monkeypatch.setattr(cubebox.llm.factory, "LLMFactory", _FakeLLMFactory)
     monkeypatch.setattr(

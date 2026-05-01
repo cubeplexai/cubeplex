@@ -11,7 +11,7 @@ from sqlalchemy.pool import NullPool
 
 from cubebox.config import config
 from cubebox.db.engine import _build_database_url
-from cubebox.mcp.runtime import load_db_servers_for_workspace
+from cubebox.mcp.runtime import load_mcp_tools_for_workspace
 from cubebox.mcp.user_token import HS256Signer
 from cubebox.models import MCPServer, Workspace
 from cubebox.services.credential import CredentialService
@@ -120,7 +120,7 @@ async def test_legacy_config_tools_and_db_tools_both_load(
             session.add(server)
             await session.commit()
 
-            db_tools = await load_db_servers_for_workspace(
+            db_tools = await load_mcp_tools_for_workspace(
                 org_id=workspace.org_id,
                 workspace_id=workspace_id,
                 user_id=user_id,

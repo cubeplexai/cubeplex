@@ -559,7 +559,7 @@ class RunManager:
             try:
                 from cubebox.credentials.dependencies import build_credential_service
                 from cubebox.db.engine import async_session_maker
-                from cubebox.mcp.runtime import load_db_servers_for_workspace
+                from cubebox.mcp.runtime import load_mcp_tools_for_workspace
 
                 async with async_session_maker() as mcp_session:
                     cred_service = build_credential_service(
@@ -569,7 +569,7 @@ class RunManager:
                         actor_user_id=ctx.user_id,
                     )
                     tools.extend(
-                        await load_db_servers_for_workspace(
+                        await load_mcp_tools_for_workspace(
                             org_id=ctx.org_id,
                             workspace_id=ctx.workspace_id,
                             user_id=ctx.user_id,
