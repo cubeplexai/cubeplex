@@ -58,11 +58,11 @@ class _Signer:
         return f"{user_id}:{org_id}:{workspace_id}:{mcp_server_id}:{int(ttl.total_seconds())}"
 
 
-async def test_load_db_servers_builds_tools_from_visible_server_cache(
+async def test_load_mcp_tools_builds_tools_from_visible_server_cache(
     monkeypatch: pytest.MonkeyPatch,
     session: AsyncSession,
 ) -> None:
-    from cubebox.mcp.runtime import load_db_servers_for_workspace
+    from cubebox.mcp.runtime import load_mcp_tools_for_workspace
 
     server = await MCPServerRepository(session, org_id="org-1").add(_server())
     captured: dict[str, Any] = {}
@@ -78,7 +78,7 @@ async def test_load_db_servers_builds_tools_from_visible_server_cache(
 
     monkeypatch.setattr("cubebox.mcp.runtime.construct_basetools_from_cache", _construct)
 
-    tools = await load_db_servers_for_workspace(
+    tools = await load_mcp_tools_for_workspace(
         org_id="org-1",
         workspace_id="ws-1",
         user_id="u-1",
@@ -94,11 +94,11 @@ async def test_load_db_servers_builds_tools_from_visible_server_cache(
     )
 
 
-async def test_load_db_servers_skips_user_scope_without_user_credential(
+async def test_load_mcp_tools_skips_user_scope_without_user_credential(
     monkeypatch: pytest.MonkeyPatch,
     session: AsyncSession,
 ) -> None:
-    from cubebox.mcp.runtime import load_db_servers_for_workspace
+    from cubebox.mcp.runtime import load_mcp_tools_for_workspace
 
     await MCPServerRepository(session, org_id="org-1").add(
         _server(auth_method="static", credential_scope="user")
@@ -115,7 +115,7 @@ async def test_load_db_servers_skips_user_scope_without_user_credential(
 
     monkeypatch.setattr("cubebox.mcp.runtime.construct_basetools_from_cache", _construct)
 
-    tools = await load_db_servers_for_workspace(
+    tools = await load_mcp_tools_for_workspace(
         org_id="org-1",
         workspace_id="ws-1",
         user_id="u-1",

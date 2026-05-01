@@ -22,7 +22,7 @@ _USER_TOKEN_TTL = timedelta(minutes=5)
 _CREDENTIAL_KIND_MCP = "mcp_server"
 
 
-async def load_db_servers_for_workspace(
+async def load_mcp_tools_for_workspace(
     *,
     org_id: str,
     workspace_id: str,
