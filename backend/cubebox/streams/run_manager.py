@@ -550,11 +550,18 @@ class RunManager:
                         await emit_status("sandbox_failed", detail=str(exc))
 
             from cubebox.agents.graph import create_cubebox_agent
+            from cubebox.db.engine import async_session_maker
             from cubebox.llm.factory import LLMFactory
             from cubebox.middleware.citations import CitationConfig, load_citation_configs
             from cubebox.tools import get_registry
 
-            llm = await LLMFactory().create_default()
+            try:
+                async with async_session_maker() as llm_session:
+                    llm = await LLMFactory(session=llm_session, org_id=ctx.org_id).create_default()
+                    await llm_session.commit()
+            except Exception:
+                logger.warning("LLMFactory DB load failed, falling back to config-only")
+                llm = await LLMFactory().create_default()
             tools = get_registry().list_tools()
             try:
                 from cubebox.credentials.dependencies import build_credential_service

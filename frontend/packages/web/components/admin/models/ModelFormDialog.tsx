@@ -113,7 +113,7 @@ export function ModelFormDialog({ open, onOpenChange, model, onSave }: ModelForm
       if (isEdit) {
         const body: ModelUpdate = {
           display_name: displayName || null,
-          reasoning: reasoning || null,
+          reasoning: reasoning,
           input_modalities: inputModalities.length > 0 ? inputModalities : null,
           cost_input: costInput ? parseNumber(costInput) : null,
           cost_output: costOutput ? parseNumber(costOutput) : null,
