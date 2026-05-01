@@ -7,7 +7,7 @@ from sqlalchemy.pool import StaticPool
 from sqlmodel import SQLModel
 
 from cubebox.models.provider import Model, Provider
-from cubebox.services.seed import seed_system_providers_from_config
+from cubebox.seeders import seed_system_providers_from_config
 
 
 @pytest.fixture()

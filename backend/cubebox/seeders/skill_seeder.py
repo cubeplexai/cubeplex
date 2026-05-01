@@ -116,9 +116,7 @@ async def _do_seed(preinstalled_dir: Path, db_session: AsyncSession) -> None:
                 key = skill_object_key(prefix, rel)
                 await store.upload_file(key, file_path.read_bytes())
             if existing is not None:
-                logger.info(
-                    "Re-uploaded missing objectstore files for {} v{}", fm.name, fm.version
-                )
+                logger.info("Re-uploaded missing objectstore files for {} v{}", fm.name, fm.version)
 
         if existing is not None:
             continue

@@ -7,7 +7,7 @@ import pytest
 from redis.asyncio import Redis
 
 from cubebox.repositories.skill import SkillRepository, SkillVersionRepository
-from cubebox.skills.seeder import seed_preinstalled_skills
+from cubebox.seeders import seed_preinstalled_skills
 
 
 def _unique_name(prefix: str) -> str:

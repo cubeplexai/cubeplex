@@ -224,7 +224,7 @@ async def lifespan(_app: FastAPI):  # type: ignore
 
         from cubebox.config import backend_dir, config
         from cubebox.db.engine import async_session_maker
-        from cubebox.skills.seeder import seed_preinstalled_skills
+        from cubebox.seeders import seed_preinstalled_skills
 
         preinstalled_rel = config.get("skills.preinstalled_dir", "skills/preinstalled")
         preinstalled_dir = Path(backend_dir) / preinstalled_rel
@@ -241,7 +241,7 @@ async def lifespan(_app: FastAPI):  # type: ignore
     # Seed system providers from config.yaml (idempotent).
     try:
         from cubebox.db import async_session_maker
-        from cubebox.services.seed import seed_system_providers_from_config
+        from cubebox.seeders import seed_system_providers_from_config
 
         async with async_session_maker() as seed_session:
             await seed_system_providers_from_config(seed_session)
