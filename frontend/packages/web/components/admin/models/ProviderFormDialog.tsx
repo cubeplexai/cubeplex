@@ -57,7 +57,7 @@ export function ProviderFormDialog({
 
   // Form fields
   const [name, setName] = useState('')
-  const [providerType, setProviderType] = useState('openai')
+  const [providerType, setProviderType] = useState('openai_compat')
   const [baseUrl, setBaseUrl] = useState('')
   const [authType, setAuthType] = useState<AuthType>('api_key')
   const [apiKey, setApiKey] = useState('')
@@ -83,7 +83,7 @@ export function ProviderFormDialog({
         )
       } else {
         setName('')
-        setProviderType('openai')
+        setProviderType('openai_compat')
         setBaseUrl('')
         setAuthType('api_key')
         setApiKey('')
@@ -100,7 +100,7 @@ export function ProviderFormDialog({
 
   function reset(): void {
     setName('')
-    setProviderType('openai')
+    setProviderType('openai_compat')
     setBaseUrl('')
     setAuthType('api_key')
     setApiKey('')
@@ -240,15 +240,30 @@ export function ProviderFormDialog({
                 onChange={(e) => setProviderType(e.target.value)}
                 className="h-8 w-full rounded-lg border border-input bg-transparent px-2.5 py-1 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
               >
+                <option value="openai_compat">OpenAI Compatible</option>
                 <option value="openai">OpenAI</option>
                 <option value="anthropic">Anthropic</option>
-                <option value="google">Google</option>
-                <option value="azure">Azure</option>
-                <option value="aws_bedrock">AWS Bedrock</option>
-                <option value="openrouter">OpenRouter</option>
-                <option value="together">Together AI</option>
-                <option value="ollama">Ollama</option>
-                <option value="custom">Custom</option>
+                <option disabled value="google">
+                  Google (coming soon)
+                </option>
+                <option disabled value="azure">
+                  Azure (coming soon)
+                </option>
+                <option disabled value="aws_bedrock">
+                  AWS Bedrock (coming soon)
+                </option>
+                <option disabled value="openrouter">
+                  OpenRouter (coming soon)
+                </option>
+                <option disabled value="together">
+                  Together AI (coming soon)
+                </option>
+                <option disabled value="ollama">
+                  Ollama (coming soon)
+                </option>
+                <option disabled value="custom">
+                  Custom (coming soon)
+                </option>
               </select>
             </div>
 
