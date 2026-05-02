@@ -75,6 +75,19 @@ describe('InputBar', () => {
     expect(document.activeElement).toBe(textarea)
   })
 
+  it('keeps the file input out of the visible input shell hit area', () => {
+    const { container } = renderWithIntl(<InputBar conversationId="conv-1" />)
+
+    const textarea = screen.getByTestId('chat-input')
+    const shell = textarea.parentElement
+    const fileInput = container.querySelector('input[type="file"]')
+
+    expect(shell).toBeInstanceOf(HTMLElement)
+    expect(fileInput).toBeInstanceOf(HTMLInputElement)
+    expect(fileInput).toHaveAttribute('hidden')
+    expect(shell).not.toContainElement(fileInput)
+  })
+
   it('stages files on the new chat input and passes them to onSubmit', async () => {
     const onSubmit = vi.fn().mockResolvedValue(undefined)
     const { container } = renderWithIntl(<InputBar onSubmit={onSubmit} />)

@@ -14,6 +14,11 @@ interface InputBarProps {
   isLoading?: boolean
 }
 
+function isInteractiveTarget(target: EventTarget): boolean {
+  if (!(target instanceof Element)) return false
+  return Boolean(target.closest('button,input,textarea,select,a,label,[role="button"]'))
+}
+
 export function InputBar({
   conversationId,
   onSubmit,
@@ -112,7 +117,7 @@ export function InputBar({
   }
 
   const handleShellMouseDown = (e: React.MouseEvent<HTMLDivElement>): void => {
-    if (e.target !== e.currentTarget) return
+    if (isInteractiveTarget(e.target)) return
     e.preventDefault()
     textareaRef.current?.focus()
   }
@@ -127,6 +132,16 @@ export function InputBar({
     <div className="w-full max-w-3xl mx-auto">
       {conversationId && <UploadDropzone conversationId={conversationId} />}
       {conversationId && <AttachmentChips conversationId={conversationId} />}
+      <input
+        ref={fileInputRef}
+        type="file"
+        multiple
+        hidden
+        onChange={(e) => {
+          void handleFiles(e.target.files)
+          e.target.value = ''
+        }}
+      />
       {!conversationId && pendingFiles.length > 0 && (
         <div className="flex flex-wrap gap-1.5 pb-2">
           {pendingFiles.map((file, index) => (
@@ -156,17 +171,6 @@ export function InputBar({
         className="relative flex cursor-text items-end gap-2 rounded-xl border border-border bg-card px-3 py-2.5 transition-colors focus-within:border-primary/40"
         onMouseDown={handleShellMouseDown}
       >
-        <input
-          ref={fileInputRef}
-          type="file"
-          multiple
-          className="pointer-events-none sr-only"
-          tabIndex={-1}
-          onChange={(e) => {
-            void handleFiles(e.target.files)
-            e.target.value = ''
-          }}
-        />
         <button
           type="button"
           aria-label="Attach files"
