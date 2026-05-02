@@ -69,12 +69,12 @@ RUN curl -fsSL https://dot.net/v1/dotnet-install.sh -o /tmp/dotnet-install.sh \
 
 # Install common frontend packages globally
 RUN npm install -g \
-    typescript \
-    ts-node \
-    vite \
-    create-react-app \
-    next \
-    pnpm
+    typescript@5.8.3 \
+    ts-node@10.9.2 \
+    pnpm@9.15.4 \
+    --no-audit \
+    --no-fund \
+    --prefer-online
 
 # Install office authoring packages separately so transient npm timeouts do not
 # force reinstalling the larger generic frontend package set.
