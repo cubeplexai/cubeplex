@@ -22,6 +22,7 @@ async def test_sync_path_for_small_file() -> None:
         assert body["sources"][0]["kind"] == "file"
         # docling-serve's FileSourceRequest wants base64_string (flat, not nested).
         assert "base64_string" in body["sources"][0]
+        assert body["options"]["image_export_mode"] == "placeholder"
         return httpx.Response(
             200,
             json={"document": {"md_content": "# Parsed\n\nhello"}},
@@ -127,6 +128,8 @@ async def test_async_path_for_large_file() -> None:
     async def handler(request: httpx.Request) -> httpx.Response:
         path = request.url.path
         if path == "/v1/convert/source/async":
+            body = json.loads(request.content)
+            assert body["options"]["image_export_mode"] == "placeholder"
             return httpx.Response(200, json={"task_id": "tk_123", "task_status": "pending"})
         if path == "/v1/status/poll/tk_123":
             poll_count["n"] += 1

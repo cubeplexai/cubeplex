@@ -12,6 +12,7 @@ import httpx
 from cubebox.parsers.schema import ErrorOutput, FileReadOutput, ParseOptions, TextOutput
 
 MAX_CONTENT_CHARS = 20_000
+DOCLING_IMAGE_EXPORT_MODE = "placeholder"
 
 
 class DoclingParser:
@@ -208,7 +209,7 @@ class DoclingParser:
             )
 
     def _build_options(self, options: ParseOptions) -> dict[str, object]:
-        opts: dict[str, object] = {}
+        opts: dict[str, object] = {"image_export_mode": DOCLING_IMAGE_EXPORT_MODE}
         if options.page_range:
             opts["page_range"] = options.page_range
         if options.language_hint:
