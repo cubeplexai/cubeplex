@@ -67,7 +67,7 @@ test.describe('M7 attachments happy path', () => {
 
       // Wait for the LLM run to finish. After the stream ends, the user message
       // (with attachment metadata) is persisted in the LangGraph checkpoint.
-      await expect(page.getByTestId('loading-indicator')).toBeHidden({ timeout: 60_000 })
+      await expect(page.getByTestId('loading-indicator')).toBeHidden({ timeout: 90_000 })
 
       // Reload to fetch fresh history from the bootstrap endpoint. Without an
       // active run, loadMessages returns the full checkpoint including the user
