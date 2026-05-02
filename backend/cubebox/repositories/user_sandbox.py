@@ -78,7 +78,7 @@ class UserSandboxRepository(ScopedRepository[UserSandbox]):
         stmt = (
             self._scoped_select()
             .where(UserSandbox.status == "running")
-            .where(text("TIMESTAMPADD(SECOND, ttl_seconds, last_activity_at) < UTC_TIMESTAMP()"))
+            .where(text("last_activity_at + ttl_seconds * INTERVAL '1 second' < NOW()"))
         )
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
@@ -92,7 +92,7 @@ class UserSandboxRepository(ScopedRepository[UserSandbox]):
         stmt = (
             select(UserSandbox)
             .where(UserSandbox.status == "running")  # type: ignore[arg-type]
-            .where(text("TIMESTAMPADD(SECOND, ttl_seconds, last_activity_at) < UTC_TIMESTAMP()"))
+            .where(text("last_activity_at + ttl_seconds * INTERVAL '1 second' < NOW()"))
         )
         result = await session.execute(stmt)
         return list(result.scalars().all())
