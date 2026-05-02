@@ -31,7 +31,6 @@ export default function WorkspaceHomePage({
       const title = content.trim() ? content.trim().slice(0, 30) : files[0]?.name
       const convo = await createConversation(client, title)
       useConversationStore.setState({ activeId: convo.id })
-      router.push(`/w/${wsId}/conversations/${convo.id}`)
 
       let attachmentIds: string[] = []
       if (files.length > 0) {
@@ -45,6 +44,7 @@ export default function WorkspaceHomePage({
       send(client, convo.id, content, attachmentIds).catch((err) => {
         console.error('Failed to send message:', err)
       })
+      router.push(`/w/${wsId}/conversations/${convo.id}`)
     } catch (err) {
       console.error('Failed to create conversation:', err)
     }
