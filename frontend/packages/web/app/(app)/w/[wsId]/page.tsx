@@ -3,25 +3,46 @@
 import { use } from 'react'
 import { useRouter } from 'next/navigation'
 import { useTranslations } from 'next-intl'
-import { createApiClient, useConversationStore, useMessageStore } from '@cubebox/core'
+import {
+  createApiClient,
+  useAttachmentStore,
+  useConversationStore,
+  useMessageStore,
+} from '@cubebox/core'
 import { InputBar } from '@/components/layout/InputBar'
 import { Box } from 'lucide-react'
 
-export default function WorkspaceHomePage({ params }: { params: Promise<{ wsId: string }> }) {
+export default function WorkspaceHomePage({
+  params,
+}: {
+  params: Promise<{ wsId: string }>
+}): React.ReactElement {
   const t = useTranslations('home')
   const { wsId } = use(params)
   const router = useRouter()
   const { create: createConversation } = useConversationStore()
   const send = useMessageStore((s) => s.send)
+  const upload = useAttachmentStore((s) => s.upload)
 
-  const handleSubmit = async (content: string) => {
+  const handleSubmit = async (content: string, files: File[] = []): Promise<void> => {
     const client = createApiClient('')
     client.setWorkspaceId(wsId)
     try {
-      const convo = await createConversation(client, content.slice(0, 30))
+      const title = content.trim() ? content.trim().slice(0, 30) : files[0]?.name
+      const convo = await createConversation(client, title)
       useConversationStore.setState({ activeId: convo.id })
       router.push(`/w/${wsId}/conversations/${convo.id}`)
-      send(client, convo.id, content).catch((err) => {
+
+      let attachmentIds: string[] = []
+      if (files.length > 0) {
+        await upload(client, convo.id, files)
+        attachmentIds = useAttachmentStore.getState().attachedIds(convo.id)
+      }
+
+      if (!content.trim() && attachmentIds.length === 0) return
+
+      useAttachmentStore.getState().clear(convo.id)
+      send(client, convo.id, content, attachmentIds).catch((err) => {
         console.error('Failed to send message:', err)
       })
     } catch (err) {

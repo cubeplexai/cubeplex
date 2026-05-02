@@ -3,20 +3,26 @@
 import { useState, useRef, useEffect } from 'react'
 import { useTranslations } from 'next-intl'
 import { useMessageStore, useAttachmentStore, createApiClient } from '@cubebox/core'
-import { ArrowUp, Loader2, Paperclip } from 'lucide-react'
+import { ArrowUp, Loader2, Paperclip, X } from 'lucide-react'
 import { useWorkspaceContext } from '@/hooks/useWorkspaceContext'
 import { AttachmentChips } from '@/components/chat/AttachmentChips'
 import { UploadDropzone } from '@/components/chat/UploadDropzone'
 
 interface InputBarProps {
   conversationId?: string
-  onSubmit?: (content: string) => void
+  onSubmit?: (content: string, files: File[]) => void | Promise<void>
   isLoading?: boolean
 }
 
-export function InputBar({ conversationId, onSubmit, isLoading = false }: InputBarProps) {
+export function InputBar({
+  conversationId,
+  onSubmit,
+  isLoading = false,
+}: InputBarProps): React.ReactElement {
   const t = useTranslations('input')
   const [content, setContent] = useState('')
+  const [pendingFiles, setPendingFiles] = useState<File[]>([])
+  const [isHandlingSubmit, setIsHandlingSubmit] = useState(false)
   const send = useMessageStore((s) => s.send)
   const { workspaceId } = useWorkspaceContext()
   const messageIsStreaming =
@@ -40,36 +46,51 @@ export function InputBar({ conversationId, onSubmit, isLoading = false }: InputB
     void hydrate(client, conversationId)
   }, [conversationId, workspaceId, hydrate])
 
-  const handleSubmit = async () => {
-    if (!content.trim() && attachedIds.length === 0) return
-    if (!conversationId) {
-      onSubmit?.(content)
-      setContent('')
-      return
-    }
-    const client = createApiClient('')
-    if (workspaceId) client.setWorkspaceId(workspaceId)
+  const isSubmitting = isLoading || messageIsStreaming || isHandlingSubmit
+  const stagedFileCount = conversationId ? attachedIds.length : pendingFiles.length
+
+  const resetTextareaHeight = (): void => {
+    if (textareaRef.current) textareaRef.current.style.height = 'auto'
+  }
+
+  const handleSubmit = async (): Promise<void> => {
+    if (isSubmitting || (!content.trim() && stagedFileCount === 0)) return
+    if (!conversationId && !onSubmit) return
+
     try {
+      setIsHandlingSubmit(true)
+      if (!conversationId) {
+        await onSubmit?.(content, [...pendingFiles])
+        setContent('')
+        setPendingFiles([])
+        resetTextareaHeight()
+        return
+      }
+
+      const client = createApiClient('')
+      if (workspaceId) client.setWorkspaceId(workspaceId)
       const ids = [...attachedIds]
       const text = content
       setContent('')
-      if (textareaRef.current) textareaRef.current.style.height = 'auto'
+      resetTextareaHeight()
       clearStaging(conversationId)
       await send(client, conversationId, text, ids)
     } catch (err) {
       console.error('Failed to send message:', err)
+    } finally {
+      setIsHandlingSubmit(false)
     }
   }
 
-  const handleKeyDown = (e: React.KeyboardEvent) => {
+  const handleKeyDown = (e: React.KeyboardEvent): void => {
     if (e.nativeEvent.isComposing) return
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
-      handleSubmit()
+      void handleSubmit()
     }
   }
 
-  const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+  const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>): void => {
     setContent(e.target.value)
     const ta = textareaRef.current
     if (ta) {
@@ -78,25 +99,69 @@ export function InputBar({ conversationId, onSubmit, isLoading = false }: InputB
     }
   }
 
-  const handleFiles = async (files: FileList | null) => {
-    if (!files || !files.length || !conversationId) return
+  const handleFiles = async (files: FileList | null): Promise<void> => {
+    if (!files || !files.length) return
+    const selectedFiles = Array.from(files)
+    if (!conversationId) {
+      if (onSubmit) setPendingFiles((current) => [...current, ...selectedFiles])
+      return
+    }
     const client = createApiClient('')
     if (workspaceId) client.setWorkspaceId(workspaceId)
-    await upload(client, conversationId, Array.from(files))
+    await upload(client, conversationId, selectedFiles)
   }
 
-  const isSubmitting = isLoading || messageIsStreaming
+  const handleShellMouseDown = (e: React.MouseEvent<HTMLDivElement>): void => {
+    if (e.target !== e.currentTarget) return
+    e.preventDefault()
+    textareaRef.current?.focus()
+  }
+
+  const removePendingFile = (index: number): void => {
+    setPendingFiles((current) => current.filter((_, currentIndex) => currentIndex !== index))
+  }
+
+  const canAttach = Boolean(conversationId || onSubmit) && !isSubmitting
 
   return (
     <div className="w-full max-w-3xl mx-auto">
       {conversationId && <UploadDropzone conversationId={conversationId} />}
       {conversationId && <AttachmentChips conversationId={conversationId} />}
-      <div className="relative flex items-end bg-card border border-border rounded-xl px-3 py-2.5 gap-2 focus-within:border-primary/40 transition-colors">
+      {!conversationId && pendingFiles.length > 0 && (
+        <div className="flex flex-wrap gap-1.5 pb-2">
+          {pendingFiles.map((file, index) => (
+            <div
+              key={`${file.name}-${file.lastModified}-${index}`}
+              className="inline-flex items-center gap-2 rounded-md border border-border bg-card px-2 py-1.5 text-xs"
+            >
+              <div className="flex flex-col leading-tight">
+                <span className="max-w-[140px] truncate font-medium">{file.name}</span>
+                <span className="text-[10px] text-muted-foreground">
+                  {(file.size / 1024).toFixed(0)}KB
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => removePendingFile(index)}
+                className="ml-1 grid size-5 place-items-center rounded hover:bg-muted"
+                aria-label={`Remove ${file.name}`}
+              >
+                <X className="size-3" />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+      <div
+        className="relative flex cursor-text items-end gap-2 rounded-xl border border-border bg-card px-3 py-2.5 transition-colors focus-within:border-primary/40"
+        onMouseDown={handleShellMouseDown}
+      >
         <input
           ref={fileInputRef}
           type="file"
           multiple
-          hidden
+          className="pointer-events-none sr-only"
+          tabIndex={-1}
           onChange={(e) => {
             void handleFiles(e.target.files)
             e.target.value = ''
@@ -106,8 +171,8 @@ export function InputBar({ conversationId, onSubmit, isLoading = false }: InputB
           type="button"
           aria-label="Attach files"
           onClick={() => fileInputRef.current?.click()}
-          disabled={!conversationId || isSubmitting}
-          className="shrink-0 grid place-items-center w-7 h-7 rounded-lg text-muted-foreground hover:bg-muted disabled:opacity-30"
+          disabled={!canAttach}
+          className="grid size-7 shrink-0 cursor-pointer place-items-center rounded-lg text-muted-foreground hover:bg-muted disabled:cursor-not-allowed disabled:opacity-30"
         >
           <Paperclip className="size-3.5" />
         </button>
@@ -119,14 +184,14 @@ export function InputBar({ conversationId, onSubmit, isLoading = false }: InputB
           onKeyDown={handleKeyDown}
           placeholder={t('placeholder')}
           rows={1}
-          className="flex-1 bg-transparent resize-none outline-none text-sm text-foreground placeholder:text-muted-foreground/40 leading-relaxed min-h-[22px] max-h-[180px] overflow-y-auto py-0.5"
+          className="flex-1 bg-transparent resize-none outline-none text-sm text-foreground placeholder:text-muted-foreground/40 leading-relaxed min-h-7 max-h-[180px] overflow-y-auto py-0.5"
           disabled={isSubmitting}
         />
         <button
           data-testid="send-button"
-          onClick={handleSubmit}
-          disabled={(!content.trim() && attachedIds.length === 0) || isSubmitting}
-          className="shrink-0 w-7 h-7 flex items-center justify-center rounded-lg bg-primary text-white hover:bg-primary/80 disabled:opacity-25 disabled:cursor-not-allowed transition-all"
+          onClick={() => void handleSubmit()}
+          disabled={(!content.trim() && stagedFileCount === 0) || isSubmitting}
+          className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-primary text-white transition-all hover:bg-primary/80 disabled:cursor-not-allowed disabled:opacity-25"
         >
           {isSubmitting ? (
             <Loader2 className="size-3.5 animate-spin" />
