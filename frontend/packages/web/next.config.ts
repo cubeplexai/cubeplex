@@ -13,6 +13,7 @@ import type { NextConfig } from 'next'
 import createNextIntlPlugin from 'next-intl/plugin'
 
 const withNextIntl = createNextIntlPlugin('./i18n/request.ts')
+export const ATTACHMENT_PROXY_BODY_LIMIT = '60mb'
 
 // CSP for /admin/* routes. The security-critical directive here is
 // `frame-src 'self'` — it prevents the plugin-manifest iframe from being
@@ -22,11 +23,14 @@ const withNextIntl = createNextIntlPlugin('./i18n/request.ts')
 // script-src, dropping unsafe-eval) is tracked in M12 per backlog.
 const ADMIN_CSP = "frame-src 'self'; default-src 'self' 'unsafe-inline' 'unsafe-eval' data: blob:"
 
-const nextConfig: NextConfig = {
+export const nextConfig: NextConfig = {
   allowedDevOrigins: ['localhost', '127.0.0.1', '[::1]', '192.168.1.111'],
   compress: false,
   transpilePackages: ['katex', '@cubebox/core'],
   turbopack: {},
+  experimental: {
+    proxyClientMaxBodySize: ATTACHMENT_PROXY_BODY_LIMIT,
+  },
   async headers() {
     return [
       {
