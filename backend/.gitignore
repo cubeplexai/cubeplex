@@ -1,4 +1,5 @@
 .env
 .coverage
+coverage.xml
 scripts/dev
 skills_cache/
