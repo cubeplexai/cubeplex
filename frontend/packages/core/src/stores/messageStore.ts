@@ -490,6 +490,33 @@ async function finalizeCompletedStream(
     }
   }
 
+  // Persist main-agent tool results into history so the just-finished message
+  // remains interactive after streamingConversationId clears. Without this,
+  // useMessages drops the in-memory toolResultMap and the historical builder
+  // finds no role='tool' rows for top-level tool calls, so cards turn dead
+  // until the next page refresh repopulates from the backend.
+  // Skip subagent tool results — those get richer messages from the loop below.
+  const mainToolResultMap = get().toolResultMap
+  for (const tr of mainStream.toolResults) {
+    const tcId = tr.data.tool_call_id
+    if (!tcId || tr.data.tool_name === 'subagent') continue
+    const mapEntry = mainToolResultMap[tcId]
+    const startedAtIso =
+      tr.data.started_at ??
+      (mapEntry?.startedAt ? new Date(mapEntry.startedAt).toISOString() : null)
+    const receivedAtMs =
+      mapEntry?.receivedAt ?? (tr.timestamp ? new Date(tr.timestamp).getTime() : Date.now())
+    toolMessages.push({
+      id: `tool-${tcId}-${Date.now()}`,
+      role: 'tool',
+      content: tr.data.content ?? mapEntry?.content ?? '',
+      name: tr.data.tool_name ?? null,
+      tool_call_id: tcId,
+      started_at: startedAtIso,
+      created_at: new Date(receivedAtMs).toISOString(),
+    })
+  }
+
   for (const [key, agentStream] of Object.entries(agents)) {
     if (key === MAIN_AGENT_KEY) continue
     const toolCallId = key.startsWith('subagent:') ? key.slice(9) : key
