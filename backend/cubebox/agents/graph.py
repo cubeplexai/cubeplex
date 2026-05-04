@@ -17,6 +17,7 @@ from cubebox.config import config as _config
 from cubebox.middleware.artifacts import ArtifactMiddleware
 from cubebox.middleware.attachments import AttachmentHintMiddleware
 from cubebox.middleware.citations import CitationConfig, CitationMiddleware
+from cubebox.middleware.citations.config import load_builtin_citation_configs
 from cubebox.middleware.sandbox import SandboxMiddleware
 from cubebox.middleware.skills import SkillsMiddleware
 from cubebox.middleware.subagents import SubAgent, SubAgentMiddleware
@@ -70,8 +71,24 @@ def create_cubebox_agent(
 
     middleware.append(TimestampMiddleware())
 
-    # Citation middleware — chunks tool results and assigns citation IDs
-    _citation_configs = citation_configs or {}
+    # Build sandbox middleware first (if a sandbox is provided) so we can
+    # extract citation metadata from its built-in tools (e.g. file_read).
+    sandbox_middleware: SandboxMiddleware | None = None
+    if sandbox is not None:
+        sandbox_middleware = SandboxMiddleware(
+            sandbox=sandbox,
+            conversation_id=conversation_id,
+        )
+
+    # Citation middleware — chunks tool results and assigns citation IDs.
+    # Built-in tools (file_read, etc.) carry their citation config on
+    # tool.metadata['citation']; merge those alongside any caller-provided configs.
+    _citation_configs = dict(citation_configs or {})
+    if sandbox_middleware is not None:
+        try:
+            _citation_configs.update(load_builtin_citation_configs(list(sandbox_middleware.tools)))
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("Failed to load builtin citation configs: {}", exc)
     if _citation_configs:
         citation_middleware = CitationMiddleware(
             citation_configs=_citation_configs,
@@ -80,11 +97,7 @@ def create_cubebox_agent(
         middleware.append(citation_middleware)
         inherited_subagent_middleware.append(citation_middleware)
 
-    if sandbox is not None:
-        sandbox_middleware = SandboxMiddleware(
-            sandbox=sandbox,
-            conversation_id=conversation_id,
-        )
+    if sandbox_middleware is not None:
         middleware.append(sandbox_middleware)
         inherited_subagent_middleware.append(sandbox_middleware)
         if conversation_id:
@@ -95,13 +108,16 @@ def create_cubebox_agent(
                 )
             middleware.append(
                 ArtifactMiddleware(
-                    sandbox=sandbox,
+                    sandbox=sandbox_middleware.sandbox,
                     conversation_id=conversation_id,
                     org_id=org_id,
                     workspace_id=workspace_id,
                 )
             )
-        logger.debug("SandboxMiddleware + ArtifactMiddleware added (sandbox id={})", sandbox.id)
+        logger.debug(
+            "SandboxMiddleware + ArtifactMiddleware added (sandbox id={})",
+            sandbox_middleware.sandbox.id,
+        )
 
     # Build CostMiddleware before SubAgentMiddleware so it can be inherited by subagents.
     # All four billing dimensions must be present; if any is None, skip silently
