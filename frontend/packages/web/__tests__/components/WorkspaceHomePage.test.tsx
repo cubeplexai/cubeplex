@@ -38,6 +38,7 @@ vi.mock('@cubebox/core', () => {
   return {
     createApiClient: () => ({
       setWorkspaceId: storeMocks.setWorkspaceId,
+      put: vi.fn().mockResolvedValue({ ok: true }),
     }),
     useAttachmentStore,
     useConversationStore: Object.assign(
@@ -66,14 +67,6 @@ vi.mock('@/hooks/useWorkspaceContext', () => ({
   useWorkspaceContext: () => ({ workspaceId: 'ws-1' }),
 }))
 
-function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
-  let resolve!: (value: T) => void
-  const promise = new Promise<T>((res) => {
-    resolve = res
-  })
-  return { promise, resolve }
-}
-
 function renderWithIntl(ui: React.ReactElement): ReturnType<typeof render> {
   return render(
     <NextIntlClientProvider locale="en" messages={en}>
@@ -90,9 +83,7 @@ describe('WorkspaceHomePage', () => {
     storeMocks.attachedIds.mockReturnValue(['file-1'])
   })
 
-  it('uploads staged files before navigating to the created conversation', async () => {
-    const upload = deferred<void>()
-    storeMocks.upload.mockReturnValue(upload.promise)
+  it('eagerly creates a draft conversation on file pick and uploads to it', async () => {
     let view!: ReturnType<typeof render>
     await act(async () => {
       view = renderWithIntl(<WorkspaceHomePage params={Promise.resolve({ wsId: 'ws-1' })} />)
@@ -103,19 +94,27 @@ describe('WorkspaceHomePage', () => {
     const fileInput = view.container.querySelector('input[type="file"]')
     expect(fileInput).toBeInstanceOf(HTMLInputElement)
     const file = new File(['hello'], 'hello.txt', { type: 'text/plain' })
-    fireEvent.change(fileInput!, { target: { files: [file] } })
-    fireEvent.click(screen.getByTestId('send-button'))
 
+    await act(async () => {
+      fireEvent.change(fileInput!, { target: { files: [file] } })
+      await Promise.resolve()
+    })
+
+    await waitFor(() => {
+      expect(storeMocks.createConversation).toHaveBeenCalledTimes(1)
+    })
     await waitFor(() => {
       expect(storeMocks.upload).toHaveBeenCalledWith(expect.anything(), 'conv-1', [file])
     })
     expect(storeMocks.push).not.toHaveBeenCalled()
 
-    upload.resolve()
+    fireEvent.click(screen.getByTestId('send-button'))
 
     await waitFor(() => {
       expect(storeMocks.send).toHaveBeenCalledWith(expect.anything(), 'conv-1', '', ['file-1'])
     })
     expect(storeMocks.push).toHaveBeenCalledWith('/w/ws-1/conversations/conv-1')
+    // Conversation creation is cached — second call (on submit) does NOT re-create.
+    expect(storeMocks.createConversation).toHaveBeenCalledTimes(1)
   })
 })
