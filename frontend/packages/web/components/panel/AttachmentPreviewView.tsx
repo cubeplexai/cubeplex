@@ -70,7 +70,6 @@ function Body({ info, family }: { info: AttachmentPanelInfo; family: string }): 
   if (family === 'video') {
     return (
       <div className="flex-1 grid place-items-center bg-black">
-        {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
         <video src={info.downloadUrl} controls className="max-h-full max-w-full" />
       </div>
     )
@@ -106,6 +105,7 @@ function TextBody({
 
   useEffect(() => {
     const ac = new AbortController()
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setState({ kind: 'loading' })
     void (async () => {
       try {
