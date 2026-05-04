@@ -143,7 +143,11 @@ def _extract_usage(response: Any) -> dict[str, int]:
             "cache_write_tokens": 0,
         }
 
+    # ModelResponse.result is list[BaseMessage]; AIMessage can be returned directly.
     result = getattr(response, "result", response)
+    if isinstance(result, list):
+        result = next((m for m in result if isinstance(m, AIMessage)), None)
+
     usage = getattr(result, "usage_metadata", None) or {}
     if callable(usage):
         usage = {}
