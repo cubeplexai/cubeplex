@@ -250,3 +250,24 @@ class TestLoadBuiltinCitationConfigs:
 
     def test_empty_input_returns_empty(self):
         assert load_builtin_citation_configs([]) == {}
+
+
+class TestFileReadToolCitationWiring:
+    def test_file_read_tool_metadata_loadable(self):
+        from unittest.mock import MagicMock
+
+        from cubebox.middleware.sandbox import _create_file_read_tool
+
+        sandbox = MagicMock()
+        tool = _create_file_read_tool(sandbox, conversation_id=None)
+        configs = load_builtin_citation_configs([tool])
+        assert "file_read" in configs
+        cfg = configs["file_read"]
+        assert cfg.source_type == "file"
+        assert cfg.discriminator_field == "kind"
+        assert cfg.discriminator_values == ["text"]
+        # text result chunks via 'content'
+        items = cfg.extract_items({"kind": "text", "path": "/a.md", "content": "x" * 50})
+        assert len(items) == 1
+        # error result is filtered
+        assert cfg.extract_items({"kind": "error", "path": "/a.md", "error": "boom"}) == []
