@@ -9,12 +9,19 @@ export async function uploadAttachment(
   conversationId: string,
   file: File,
   onProgress?: (fraction: number) => void,
+  signal?: AbortSignal,
 ): Promise<AttachmentDto> {
   const url = client.resolvePath(base(conversationId))
   const fd = new FormData()
   fd.append('file', file)
 
   return new Promise<AttachmentDto>((resolve, reject) => {
+    if (signal?.aborted) {
+      const err = new Error('aborted') as Error & { name: string }
+      err.name = 'AbortError'
+      reject(err)
+      return
+    }
     const xhr = new XMLHttpRequest()
     xhr.open('POST', url)
     xhr.withCredentials = true
@@ -24,12 +31,15 @@ export async function uploadAttachment(
       ?.split('=')[1]
     if (csrf) xhr.setRequestHeader('X-CSRF-Token', decodeURIComponent(csrf))
 
+    const abortHandler = () => xhr.abort()
+    signal?.addEventListener('abort', abortHandler)
+    const cleanup = () => signal?.removeEventListener('abort', abortHandler)
+
     xhr.upload.onprogress = (ev) => {
-      if (ev.lengthComputable && onProgress) {
-        onProgress(ev.loaded / ev.total)
-      }
+      if (ev.lengthComputable && onProgress) onProgress(ev.loaded / ev.total)
     }
     xhr.onload = () => {
+      cleanup()
       if (xhr.status >= 200 && xhr.status < 300) {
         try {
           resolve(JSON.parse(xhr.responseText))
@@ -45,7 +55,16 @@ export async function uploadAttachment(
         }
       }
     }
-    xhr.onerror = () => reject(new Error('Network error'))
+    xhr.onerror = () => {
+      cleanup()
+      reject(new Error('Network error'))
+    }
+    xhr.onabort = () => {
+      cleanup()
+      const err = new Error('aborted') as Error & { name: string }
+      err.name = 'AbortError'
+      reject(err)
+    }
     xhr.send(fd)
   })
 }
