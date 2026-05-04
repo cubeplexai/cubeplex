@@ -15,7 +15,7 @@ export interface ConversationStore {
   isFetchingList: boolean
   error: string | null
   fetchList(client: ApiClient): Promise<void>
-  create(client: ApiClient, title?: string): Promise<Conversation>
+  create(client: ApiClient, title?: string, opts?: { draft?: boolean }): Promise<Conversation>
   remove(client: ApiClient, id: string): Promise<void>
   rename(client: ApiClient, id: string, title: string): Promise<void>
   setActive(id: string | null): void
@@ -41,10 +41,10 @@ export const useConversationStore = create<ConversationStore>((set, get) => ({
     }
   },
 
-  async create(client: ApiClient, title?: string) {
+  async create(client: ApiClient, title?: string, opts?: { draft?: boolean }) {
     set({ isLoading: true, error: null })
     try {
-      const convo = await createConversation(client, title)
+      const convo = await createConversation(client, title, opts)
       set((s) => ({ conversations: [convo, ...s.conversations] }))
       return convo
     } catch (err) {

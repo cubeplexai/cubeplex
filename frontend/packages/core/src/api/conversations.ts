@@ -1,10 +1,16 @@
 import type { Artifact, ArtifactVersion, Conversation, Message } from '../types'
 import { toApiError, type ApiClient } from './client'
 
-export async function createConversation(client: ApiClient, title?: string): Promise<Conversation> {
-  const url = title
-    ? `/api/v1/conversations?title=${encodeURIComponent(title)}`
-    : '/api/v1/conversations'
+export async function createConversation(
+  client: ApiClient,
+  title?: string,
+  opts: { draft?: boolean } = {},
+): Promise<Conversation> {
+  const params = new URLSearchParams()
+  if (title) params.set('title', title)
+  if (opts.draft) params.set('draft', 'true')
+  const qs = params.toString()
+  const url = qs ? `/api/v1/conversations?${qs}` : '/api/v1/conversations'
   const res = await client.post(url, {})
   if (!res.ok) throw await toApiError(res)
   return res.json() as Promise<Conversation>

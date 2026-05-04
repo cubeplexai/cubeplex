@@ -38,12 +38,13 @@ class ConversationRepository(ScopedRepository[Conversation]):
             )
         )
 
-    async def create(self, title: str) -> Conversation:
+    async def create(self, title: str, *, draft: bool = False) -> Conversation:
         conv = Conversation(
             title=title,
             org_id=self.org_id,
             workspace_id=self.workspace_id,
             creator_user_id=self.user_id,
+            has_messages=not draft,
         )
         return await self.add(conv)
 
@@ -89,13 +90,21 @@ class ConversationRepository(ScopedRepository[Conversation]):
             conv.updated_at = datetime.now(UTC)
             await self.session.commit()
 
-    async def mark_has_messages(self, conversation_id: str) -> None:
-        """Set has_messages=True (idempotent) and refresh updated_at."""
+    async def mark_active(self, conversation_id: str) -> None:
+        """Mark the conversation as having user activity.
+
+        Always sets ``has_messages=True`` and bumps ``updated_at`` to now.
+        Called both at message-stream start (so the conversation becomes
+        visible immediately, even if the stream errors) and at stream end
+        (so the timestamp reflects the latest activity for recency
+        ordering in ``list_all``).
+        """
         conv = await self.get(conversation_id)
-        if conv and not conv.has_messages:
-            conv.has_messages = True
-            conv.updated_at = datetime.now(UTC)
-            await self.session.commit()
+        if not conv:
+            return
+        conv.has_messages = True
+        conv.updated_at = datetime.now(UTC)
+        await self.session.commit()
 
     async def delete_conversation(self, conversation_id: str) -> bool:
         return await self.delete(conversation_id)

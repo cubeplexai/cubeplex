@@ -28,7 +28,7 @@ export default function WorkspaceHomePage({
     if (draftConvId) return draftConvId
     const client = createApiClient('')
     client.setWorkspaceId(wsId)
-    const convo = await createConversation(client, 'New chat')
+    const convo = await createConversation(client, 'New chat', { draft: true })
     useConversationStore.setState({ activeId: convo.id })
     setDraftConvId(convo.id)
     return convo.id
