@@ -34,14 +34,11 @@ def _attachments_meta(msg: Any) -> list[dict[str, object]]:
 
 
 def _augment_with_hint(msg: HumanMessage, meta: list[dict[str, object]]) -> HumanMessage:
-    """Return a HumanMessage whose content carries the [Attachments] hint.
+    """Return a fresh HumanMessage with the [Attachments] hint appended.
 
-    Builds a fresh object rather than mutating the original — `request.messages`
+    Builds a new object rather than mutating the original — `request.messages`
     in LangGraph is the same list as `state["messages"]`, so in-place edits
-    would leak into the checkpointed history. Pre-PR checkpoints have the hint
-    baked into `content` *and* `attachments_meta` in additional_kwargs; if the
-    content already ends with the exact rendered hint we skip re-appending so
-    the LLM doesn't see a duplicated block.
+    would leak into the checkpointed history.
     """
     # Lazy import: cubebox.agents.__init__ imports graph.py, which imports this
     # module. Pulling render_attachments_hint at module-load time would close the
@@ -49,11 +46,8 @@ def _augment_with_hint(msg: HumanMessage, meta: list[dict[str, object]]) -> Huma
     from cubebox.agents.convert import render_attachments_hint
 
     base = msg.content if isinstance(msg.content, str) else str(msg.content)
-    hint = render_attachments_hint(meta)
-    if not hint or base.endswith(hint):
-        return msg
     return HumanMessage(
-        content=base + hint,
+        content=base + render_attachments_hint(meta),
         additional_kwargs=msg.additional_kwargs,
         response_metadata=msg.response_metadata,
         id=msg.id,
