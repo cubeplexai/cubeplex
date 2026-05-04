@@ -184,17 +184,18 @@ def convert_to_api_messages(lc_messages: list[BaseMessage]) -> list[dict[str, An
                 # AttachmentHintMiddleware injects the [Attachments] hint at model-call
                 # time, so freshly-checkpointed HumanMessages already carry plain text.
                 # Pre-middleware checkpoints baked the hint into content — strip the
-                # trailing `\n[Attachments]\n...` block when we still see one.
+                # exact rendered suffix when present so we don't truncate legitimate
+                # user text that happens to contain the marker.
                 meta_blocks = (msg.additional_kwargs or {}).get("attachments_meta") or []
+                meta_dicts = [b for b in meta_blocks if isinstance(b, dict)]
                 raw_str = str(raw)
-                if meta_blocks:
-                    marker_idx = raw_str.rfind("\n[Attachments]\n")
-                    if marker_idx >= 0:
-                        raw_str = raw_str[:marker_idx]
+                if meta_dicts:
+                    legacy_hint = render_attachments_hint(meta_dicts)
+                    if legacy_hint and raw_str.endswith(legacy_hint):
+                        raw_str = raw_str[: -len(legacy_hint)]
                 text_parts.append(raw_str)
-                for block in meta_blocks:
-                    if isinstance(block, dict):
-                        attachments.append(_attachment_to_api_block(block))
+                for block in meta_dicts:
+                    attachments.append(_attachment_to_api_block(block))
             result.append(
                 {
                     "id": getattr(msg, "id", None) or str(uuid.uuid4()),

@@ -101,6 +101,19 @@ def test_convert_to_api_messages_strips_legacy_baked_in_hint() -> None:
     assert "[Attachments]" not in out[0]["content"]
 
 
+def test_convert_to_api_messages_keeps_user_text_with_attachments_marker() -> None:
+    """New-shape checkpoints: don't truncate user content that happens to contain the marker."""
+    block = _file_attachment()
+    user_text = "discuss\n[Attachments]\nas mentioned earlier"
+    msg = HumanMessage(
+        content=user_text,
+        additional_kwargs={"attachments_meta": [block]},
+    )
+    out = convert_to_api_messages([msg])
+    # Suffix doesn't match the rendered hint, so content stays intact
+    assert out[0]["content"] == user_text
+
+
 def test_convert_to_lc_messages_appends_attachments_hint() -> None:
     from cubebox.agents.convert import convert_to_lc_messages
 
