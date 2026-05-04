@@ -108,6 +108,33 @@ async def test_middleware_no_op_when_no_attachments() -> None:
 
 
 @pytest.mark.asyncio
+async def test_middleware_skips_already_augmented_legacy_content() -> None:
+    """Legacy checkpoints carry the hint in content AND attachments_meta — don't duplicate."""
+    from cubebox.agents.convert import render_attachments_hint
+
+    meta = [_meta_block()]
+    legacy_content = "how many companies" + render_attachments_hint(meta)
+    state_messages = [
+        HumanMessage(content=legacy_content, additional_kwargs={"attachments_meta": meta})
+    ]
+    request = _build_request(state_messages)
+
+    seen: dict[str, Any] = {}
+
+    async def handler(req: ModelRequest[Any]) -> ModelResponse:
+        seen["messages"] = req.messages
+        return ModelResponse(result=[AIMessage(content="ok")])
+
+    mw = AttachmentHintMiddleware()
+    await mw.awrap_model_call(request, handler)
+
+    seen_msg = seen["messages"][0]
+    # Hint appears exactly once, not twice
+    assert seen_msg.content.count("[Attachments]") == 1
+    assert seen_msg.content == legacy_content
+
+
+@pytest.mark.asyncio
 async def test_middleware_only_augments_messages_with_meta() -> None:
     """Mixed history: only messages carrying attachments_meta get the hint."""
     plain = HumanMessage(content="follow-up question")
