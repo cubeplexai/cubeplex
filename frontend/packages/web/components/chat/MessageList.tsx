@@ -192,15 +192,13 @@ export function MessageList({ conversationId }: MessageListProps) {
           <div key={msg.id}>
             {msg.role === 'user' && (
               <>
-                <UserMessage content={msg.content ?? ''} />
                 {msg.attachments && msg.attachments.length > 0 && (
-                  <div className="flex justify-end">
-                    <MessageAttachments
-                      attachments={msg.attachments}
-                      conversationId={conversationId}
-                    />
-                  </div>
+                  <MessageAttachments
+                    attachments={msg.attachments}
+                    conversationId={conversationId}
+                  />
                 )}
+                <UserMessage content={msg.content ?? ''} />
               </>
             )}
             {msg.role === 'assistant' && msg.id !== lastAssistantId && (
