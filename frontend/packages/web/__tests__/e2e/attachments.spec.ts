@@ -87,3 +87,100 @@ test.describe('M7 attachments happy path', () => {
     }
   })
 })
+
+test.describe('M7 attachments — home page eager-create flow', () => {
+  test.setTimeout(180_000)
+
+  test('cancels an in-flight upload from the home page', async ({ page }) => {
+    await registerAndLand(page)
+
+    // Write a 1MB temp text file (large enough that the upload is cancellable).
+    const tmp = path.join(__dirname, '__tmp_cancel.bin')
+    fs.writeFileSync(tmp, Buffer.alloc(1024 * 1024, 0))
+
+    try {
+      // Pick a file via the file chooser. The home-page InputBar now has
+      // onCreateConversation, so this triggers eager-create + upload.
+      const fileChooserPromise = page.waitForEvent('filechooser')
+      await page.getByRole('button', { name: 'Attach files' }).click()
+      const fc = await fileChooserPromise
+      await fc.setFiles(tmp)
+
+      // The cancel/remove button on the chip becomes visible immediately.
+      const removeBtn = page.locator('[aria-label^="Remove"]').first()
+      await expect(removeBtn).toBeVisible({ timeout: 5_000 })
+
+      // Click cancel BEFORE the upload completes. With a 1 MB file this is
+      // typically a few hundred ms of network time — plenty for Playwright.
+      await removeBtn.click()
+
+      // Chip is gone (no chips remain in the staging area).
+      await expect(page.locator('[aria-label^="Remove"]')).toHaveCount(0)
+    } finally {
+      try {
+        fs.unlinkSync(tmp)
+      } catch {
+        // ignore
+      }
+    }
+  })
+
+  test('uploads on the home page and sends with attachment above the bubble', async ({ page }) => {
+    await registerAndLand(page)
+
+    // Write a tiny valid PNG inline (re-use the same trick as the existing test).
+    const tmp = path.join(__dirname, '__tmp_homeflow.png')
+    fs.writeFileSync(
+      tmp,
+      Buffer.from(
+        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==',
+        'base64',
+      ),
+    )
+
+    try {
+      const fileChooserPromise = page.waitForEvent('filechooser')
+      await page.getByRole('button', { name: 'Attach files' }).click()
+      const fc = await fileChooserPromise
+      await fc.setFiles(tmp)
+
+      // Wait for upload completion: the upload-progress spinner inside the chip
+      // disappears when the upload resolves.
+      await expect(page.locator('.animate-spin').first()).toBeHidden({ timeout: 15_000 })
+
+      // Send a short prompt.
+      await page.locator('textarea').fill('Reply with the single word OK')
+      await page.getByTestId('send-button').click()
+
+      // Navigation should land on the conversation page.
+      await expect(page).toHaveURL(/\/w\/[^/]+\/conversations\//, { timeout: 10_000 })
+
+      // Wait for the LLM round to finish.
+      await expect(page.getByTestId('loading-indicator')).toBeHidden({ timeout: 90_000 })
+      await page.reload()
+
+      // After reload, the user message + attachments are in history. The
+      // attachments block should render above the user message bubble.
+      const attach = page.getByTestId('message-attachments').first()
+      await expect(attach).toBeVisible({ timeout: 15_000 })
+
+      // Find the user message bubble. The existing UserMessage component
+      // renders the prompt text we sent.
+      const userMsg = page.getByText('Reply with the single word OK').first()
+      await expect(userMsg).toBeVisible()
+
+      // Attachments block is positioned ABOVE the user message in DOM/visual order.
+      const userBox = await userMsg.boundingBox()
+      const attachBox = await attach.boundingBox()
+      expect(userBox).not.toBeNull()
+      expect(attachBox).not.toBeNull()
+      expect(userBox!.y).toBeGreaterThan(attachBox!.y)
+    } finally {
+      try {
+        fs.unlinkSync(tmp)
+      } catch {
+        // ignore
+      }
+    }
+  })
+})
