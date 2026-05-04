@@ -8,6 +8,8 @@ vi.mock('@cubebox/core', () => ({
     setWorkspaceId: vi.fn(),
     resolvePath: (path: string) => path,
   }),
+  usePanelStore: (selector: (state: { openAttachment: () => void }) => unknown) =>
+    selector({ openAttachment: vi.fn() }),
 }))
 
 vi.mock('@/hooks/useWorkspaceContext', () => ({

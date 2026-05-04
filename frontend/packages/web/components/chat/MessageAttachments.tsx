@@ -1,15 +1,16 @@
 'use client'
 
 import { useState, useMemo } from 'react'
-import { FileText, Download } from 'lucide-react'
 import { createApiClient } from '@cubebox/core'
 import { useWorkspaceContext } from '@/hooks/useWorkspaceContext'
 import { ImageLightbox } from './ImageLightbox'
+import { MessageFileChip } from './MessageFileChip'
 
 export interface MessageAttachmentDto {
   id: string
   filename: string
   kind: 'image' | 'document' | 'other'
+  mime_type?: string
   size_bytes: number
   width?: number | null
   height?: number | null
@@ -22,13 +23,10 @@ interface Props {
   conversationId: string
 }
 
-function formatSize(n: number): string {
-  if (n < 1024) return `${n}B`
-  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)}KB`
-  return `${(n / (1024 * 1024)).toFixed(1)}MB`
-}
-
-export function MessageAttachments({ attachments, conversationId }: Props) {
+export function MessageAttachments({
+  attachments,
+  conversationId,
+}: Props): React.ReactElement | null {
   const { workspaceId } = useWorkspaceContext()
   const [openSrc, setOpenSrc] = useState<{ src: string; alt: string } | null>(null)
 
@@ -38,8 +36,6 @@ export function MessageAttachments({ attachments, conversationId }: Props) {
     const baseApi = `/api/v1/conversations/${conversationId}/attachments`
     const fix = (url: string | null | undefined): string => {
       if (!url) return ''
-      // Backend emits e.g. "./attachments/{id}/thumbnail" — replace the relative
-      // prefix with the API path; the client will inject /ws/{wsId}/ on resolve.
       if (url.startsWith('./attachments/')) {
         const tail = url.slice('./attachments/'.length)
         return client.resolvePath(`${baseApi}/${tail}`)
@@ -56,7 +52,10 @@ export function MessageAttachments({ attachments, conversationId }: Props) {
   if (!resolved.length) return null
 
   return (
-    <div className="mt-2 flex flex-wrap gap-2" data-testid="message-attachments">
+    <div
+      className="flex flex-wrap gap-1.5 justify-end max-w-[72%] ml-auto mb-1.5"
+      data-testid="message-attachments"
+    >
       {resolved.map((a) => {
         if (a.kind === 'image' && a.thumbnail_url) {
           return (
@@ -79,18 +78,15 @@ export function MessageAttachments({ attachments, conversationId }: Props) {
           )
         }
         return (
-          <a
+          <MessageFileChip
             key={a.id}
-            href={a.download_url}
-            target="_blank"
-            rel="noreferrer"
-            className="inline-flex items-center gap-2 rounded-md border border-border bg-card px-2.5 py-1.5 text-xs hover:bg-muted"
-          >
-            <FileText className="size-4 text-muted-foreground" />
-            <span className="max-w-[180px] truncate">{a.filename}</span>
-            <span className="text-muted-foreground">{formatSize(a.size_bytes)}</span>
-            <Download className="size-3.5 text-muted-foreground" />
-          </a>
+            attachmentId={a.id}
+            filename={a.filename}
+            mimeType={a.mime_type ?? ''}
+            sizeBytes={a.size_bytes}
+            downloadUrl={a.download_url}
+            onOpenImage={(src, alt) => setOpenSrc({ src, alt })}
+          />
         )
       })}
       {openSrc && (
