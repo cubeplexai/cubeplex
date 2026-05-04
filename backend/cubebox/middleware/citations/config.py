@@ -4,8 +4,10 @@ Parses per-tool citation config from config.yaml and provides
 methods to extract metadata and text from tool output.
 """
 
+from collections.abc import Sequence
 from typing import Any
 
+from langchain_core.tools import BaseTool
 from pydantic import BaseModel
 
 _SNIPPET_KEY = "snippet"
@@ -100,7 +102,7 @@ def load_citation_configs(
 
 
 def load_builtin_citation_configs(
-    tools: list[Any],
+    tools: Sequence[BaseTool],
 ) -> dict[str, CitationConfig]:
     """Build tool_name -> CitationConfig from each tool's metadata['citation']."""
     configs: dict[str, CitationConfig] = {}
