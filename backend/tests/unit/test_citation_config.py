@@ -171,3 +171,35 @@ class TestArgsMapping:
         item = {"text": "content"}
         metadata = cfg.extract_metadata(item)
         assert "url" not in metadata
+
+
+class TestCitationDiscriminator:
+    def _file_cfg(self) -> CitationConfig:
+        return CitationConfig(
+            source_type="file",
+            content_field=None,
+            discriminator_field="kind",
+            discriminator_values=["text"],
+            mapping={"snippet": "content", "path": "path"},
+        )
+
+    def test_discriminator_allows_matching_kind(self):
+        cfg = self._file_cfg()
+        items = cfg.extract_items({"kind": "text", "path": "/a.md", "content": "hello"})
+        assert len(items) == 1
+        assert items[0]["content"] == "hello"
+
+    def test_discriminator_rejects_other_kind(self):
+        cfg = self._file_cfg()
+        assert cfg.extract_items({"kind": "notebook", "path": "/a.ipynb"}) == []
+        assert cfg.extract_items({"kind": "unsupported", "path": "/a.bin"}) == []
+        assert cfg.extract_items({"kind": "error", "path": "/a.md", "error": "boom"}) == []
+
+    def test_discriminator_no_field_set_passes_through(self):
+        # No discriminator_field → behaviour unchanged from before.
+        cfg = CitationConfig(
+            source_type="web",
+            content_field=None,
+            mapping={"snippet": "body"},
+        )
+        assert cfg.extract_items({"body": "x"}) == [{"body": "x"}]

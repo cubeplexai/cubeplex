@@ -23,12 +23,18 @@ class CitationConfig(BaseModel):
         args_mapping: Maps citation metadata field names to tool call argument names.
                       Used as fallback when metadata fields are missing from the result
                       (e.g., web_fetch returns plain text but the URL is in the args).
+        discriminator_field: Field name to check for filtering results.
+                             If set, results are filtered by discriminator_values.
+        discriminator_values: Allowed values for discriminator_field.
+                              Results with other values are skipped.
     """
 
     source_type: str
     content_field: str | None
     mapping: dict[str, str]
     args_mapping: dict[str, str] | None = None
+    discriminator_field: str | None = None
+    discriminator_values: list[str] | None = None
 
     def extract_metadata(
         self,
@@ -64,6 +70,10 @@ class CitationConfig(BaseModel):
 
     def extract_items(self, data: dict[str, Any]) -> list[dict[str, Any]]:
         """Extract the list of result items from parsed tool output."""
+        if self.discriminator_field:
+            value = data.get(self.discriminator_field)
+            if self.discriminator_values is not None and (value not in self.discriminator_values):
+                return []
         if self.content_field is None:
             return [data]
         items = data.get(self.content_field, [])
