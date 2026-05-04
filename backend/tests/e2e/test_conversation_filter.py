@@ -26,8 +26,11 @@ async def _reset_loop_bound_singletons() -> AsyncIterator[None]:
     _cache.reset_for_tests()
 
 
-async def _make_conv(client: httpx.AsyncClient, ws: str, title: str) -> str:
-    r = await client.post(f"/api/v1/ws/{ws}/conversations", params={"title": title})
+async def _make_conv(client: httpx.AsyncClient, ws: str, title: str, *, draft: bool = False) -> str:
+    params: dict[str, object] = {"title": title}
+    if draft:
+        params["draft"] = "true"
+    r = await client.post(f"/api/v1/ws/{ws}/conversations", params=params)
     r.raise_for_status()
     return r.json()["id"]
 
@@ -48,18 +51,29 @@ async def _drain_to_done(client: httpx.AsyncClient, ws: str, conv: str, content:
                 return
 
 
-async def test_empty_conversation_not_listed(member_client_org_a) -> None:
+async def test_empty_draft_conversation_not_listed(member_client_org_a) -> None:
     client, ws = member_client_org_a
-    convo_id = await _make_conv(client, ws, "draft")
+    convo_id = await _make_conv(client, ws, "draft", draft=True)
 
     listed = (await client.get(f"/api/v1/ws/{ws}/conversations")).json()
     ids = [c["id"] for c in listed["conversations"]]
     assert convo_id not in ids
 
 
-async def test_conversation_listed_after_first_message(member_client_org_a) -> None:
+async def test_explicit_conversation_listed_immediately(member_client_org_a) -> None:
+    """Explicit POSTs (no draft flag) appear in the list right away — only
+    eager-create drafts are hidden until the user actually sends a message."""
     client, ws = member_client_org_a
-    convo_id = await _make_conv(client, ws, "hi")
+    convo_id = await _make_conv(client, ws, "explicit")
+
+    listed = (await client.get(f"/api/v1/ws/{ws}/conversations")).json()
+    ids = [c["id"] for c in listed["conversations"]]
+    assert convo_id in ids
+
+
+async def test_draft_conversation_listed_after_first_message(member_client_org_a) -> None:
+    client, ws = member_client_org_a
+    convo_id = await _make_conv(client, ws, "hi", draft=True)
     await _drain_to_done(client, ws, convo_id, "hello")
 
     listed = (await client.get(f"/api/v1/ws/{ws}/conversations")).json()

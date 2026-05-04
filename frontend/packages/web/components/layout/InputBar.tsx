@@ -44,6 +44,9 @@ export function InputBar({
   const attachedIds = useAttachmentStore((s) =>
     conversationId ? s.attachedIds(conversationId) : [],
   )
+  const stagingItems = useAttachmentStore((s) =>
+    conversationId ? (s.staging[conversationId] ?? []) : [],
+  )
   const hydrate = useAttachmentStore((s) => s.hydrate)
 
   useEffect(() => {
@@ -53,6 +56,7 @@ export function InputBar({
     void hydrate(client, conversationId)
   }, [conversationId, workspaceId, hydrate])
 
+  const uploadInFlight = stagingItems.some((u) => u.status === 'uploading')
   const isSubmitting = isLoading || messageIsStreaming || isHandlingSubmit
   const stagedFileCount = conversationId ? attachedIds.length : pendingFiles.length
 
@@ -61,7 +65,7 @@ export function InputBar({
   }
 
   const handleSubmit = async (): Promise<void> => {
-    if (isSubmitting || (!content.trim() && stagedFileCount === 0)) return
+    if (isSubmitting || uploadInFlight || (!content.trim() && stagedFileCount === 0)) return
     if (!conversationId && !onSubmit) return
 
     try {
@@ -205,7 +209,7 @@ export function InputBar({
         <button
           data-testid="send-button"
           onClick={() => void handleSubmit()}
-          disabled={(!content.trim() && stagedFileCount === 0) || isSubmitting}
+          disabled={(!content.trim() && stagedFileCount === 0) || isSubmitting || uploadInFlight}
           className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-primary text-white transition-all hover:bg-primary/80 disabled:cursor-not-allowed disabled:opacity-25"
         >
           {isSubmitting ? (

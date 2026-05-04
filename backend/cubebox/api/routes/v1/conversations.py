@@ -40,11 +40,12 @@ async def _update_conversation_timestamp(
     workspace_id: str,
     user_id: str,
 ) -> None:
-    """Mark conversation as having messages and refresh its timestamp.
+    """Mark conversation as active and refresh its timestamp.
 
     Uses a dedicated NullPool connection so post-stream persistence does not
-    depend on the request-scoped pool state. Sets has_messages=True on the
-    first call (idempotent) so the conversation becomes visible in list_all.
+    depend on the request-scoped pool state. Always sets has_messages=True
+    and bumps updated_at, so the conversation is visible in ``list_all`` and
+    its position in the recency-ordered list reflects the latest activity.
     """
     save_engine = create_async_engine(_build_database_url(), poolclass=NullPool)
     try:
@@ -55,7 +56,7 @@ async def _update_conversation_timestamp(
                 workspace_id=workspace_id,
                 user_id=user_id,
             )
-            await save_conv_repo.mark_has_messages(conversation_id)
+            await save_conv_repo.mark_active(conversation_id)
     finally:
         await save_engine.dispose()
 
@@ -65,15 +66,22 @@ async def create_conversation(
     title: str,
     session: Annotated[AsyncSession, Depends(get_session)],
     ctx: Annotated[RequestContext, Depends(require_member)],
+    draft: bool = False,
 ) -> dict[str, object]:
-    """Create a new conversation."""
+    """Create a new conversation.
+
+    When ``draft=true`` the conversation is created hidden — it stays out of
+    the list endpoint until the user actually sends a message. The home page
+    uses this for the eager-create-on-file-pick flow so abandoned drafts
+    don't clutter the sidebar.
+    """
     repo = ConversationRepository(
         session,
         org_id=ctx.org_id,
         workspace_id=ctx.workspace_id,
         user_id=ctx.user.id,
     )
-    conversation = await repo.create(title=title)
+    conversation = await repo.create(title=title, draft=draft)
     return {
         "id": conversation.id,
         "title": conversation.title,
@@ -474,6 +482,17 @@ async def send_message(
                 )
                 if row is None or row.status not in {"pending", "attached"}:
                     raise AttachmentReferenceInvalidError(fid)
+
+    # Mark the conversation active synchronously, before the run starts.
+    # This ensures the conversation becomes visible in list_all even if the
+    # stream errors before the post-stream persistence runs, and bumps
+    # updated_at on every send so recency ordering tracks activity.
+    await _update_conversation_timestamp(
+        conversation_id,
+        org_id=ctx.org_id,
+        workspace_id=ctx.workspace_id,
+        user_id=ctx.user.id,
+    )
 
     run_manager = raw_request.app.state.run_manager
     run_ctx = RunContext(
