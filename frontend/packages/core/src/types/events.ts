@@ -43,6 +43,7 @@ export type PanelContentType =
   | 'generic'
   | 'artifact'
   | 'skill'
+  | 'file_read'
 
 export type AgentEventType =
   | 'text_delta'

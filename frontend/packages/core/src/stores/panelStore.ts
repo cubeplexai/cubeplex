@@ -8,6 +8,8 @@ function mapContentType(toolName: string, backendContentType?: string): PanelCon
   if (toolName === 'execute') return 'terminal'
   if (toolName === 'write_file') return 'write_file'
   if (toolName === 'code_execute' || toolName === 'python') return 'code_execute'
+  if (toolName === 'file_read') return 'file_read'
+  if (backendContentType === 'file_read') return 'file_read'
 
   if (backendContentType === 'json') {
     if (toolName === 'web_search' || toolName === 'search') return 'search'
