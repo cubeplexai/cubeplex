@@ -1,4 +1,10 @@
-from cubebox.middleware.citations.config import CitationConfig, load_citation_configs
+from langchain_core.tools import StructuredTool
+
+from cubebox.middleware.citations.config import (
+    CitationConfig,
+    load_builtin_citation_configs,
+    load_citation_configs,
+)
 
 
 class TestCitationConfig:
@@ -203,3 +209,44 @@ class TestCitationDiscriminator:
             mapping={"snippet": "body"},
         )
         assert cfg.extract_items({"body": "x"}) == [{"body": "x"}]
+
+
+def _make_tool(name: str, metadata: dict | None) -> StructuredTool:
+    async def _noop() -> str:
+        return ""
+
+    return StructuredTool.from_function(
+        coroutine=_noop,
+        name=name,
+        description="t",
+        metadata=metadata,
+    )
+
+
+class TestLoadBuiltinCitationConfigs:
+    def test_reads_citation_from_tool_metadata(self):
+        tool = _make_tool(
+            "file_read",
+            {
+                "content_type": "file_read",
+                "citation": {
+                    "source_type": "file",
+                    "content_field": None,
+                    "mapping": {"snippet": "content"},
+                },
+            },
+        )
+        configs = load_builtin_citation_configs([tool])
+        assert "file_read" in configs
+        assert configs["file_read"].source_type == "file"
+
+    def test_skips_tool_without_citation_metadata(self):
+        tool = _make_tool("execute", {"content_type": "shell"})
+        assert load_builtin_citation_configs([tool]) == {}
+
+    def test_skips_tool_without_metadata(self):
+        tool = _make_tool("calculator", None)
+        assert load_builtin_citation_configs([tool]) == {}
+
+    def test_empty_input_returns_empty(self):
+        assert load_builtin_citation_configs([]) == {}
