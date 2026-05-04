@@ -667,16 +667,12 @@ class RunManager:
                             attachment_ids=attachments,
                         )
 
-                    from cubebox.agents.convert import render_attachments_hint
-
-                    plain_content: str
-                    if attachment_blocks:
-                        plain_content = (content or "") + render_attachments_hint(attachment_blocks)
-                    else:
-                        plain_content = content
-
+                    # Persist the user-typed text only. AttachmentHintMiddleware
+                    # appends the [Attachments] hint at model-call time so the LLM
+                    # sees sandbox paths, while the checkpoint stays equal to
+                    # what the user wrote.
                     human_msg = HumanMessage(
-                        content=plain_content,
+                        content=content,
                         additional_kwargs=(
                             {"attachments_meta": attachment_blocks} if attachment_blocks else {}
                         ),
