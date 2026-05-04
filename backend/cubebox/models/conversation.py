@@ -18,5 +18,6 @@ class Conversation(SQLModel, OrgScopedMixin, table=True):
     id: str = Field(default_factory=lambda: str(uuid7()), primary_key=True)
     creator_user_id: str = Field(max_length=36)
     title: str = Field(max_length=255)
+    has_messages: bool = Field(default=False, index=True)
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
