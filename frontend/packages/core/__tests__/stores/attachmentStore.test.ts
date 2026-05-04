@@ -100,4 +100,53 @@ describe('attachmentStore', () => {
     expect(list?.length).toBe(1)
     expect(list?.[0].serverFile?.id).toBe('srv-1')
   })
+
+  describe('cancel', () => {
+    it('aborts the in-flight upload and removes the staging entry', async () => {
+      ;(uploadAttachment as unknown as ReturnType<typeof vi.fn>).mockImplementation(
+        (_c: unknown, _id: unknown, _f: unknown, _onP: unknown, signal: AbortSignal) =>
+          new Promise<AttachmentDto>((_res, rej) => {
+            signal.addEventListener('abort', () => {
+              const err = new Error('aborted') as Error & { name: string }
+              err.name = 'AbortError'
+              rej(err)
+            })
+          }),
+      )
+      const file = new File(['x'], 'a.txt')
+      const client = {} as never
+
+      const uploadPromise = useAttachmentStore.getState().upload(client, 'c1', [file])
+
+      const list = useAttachmentStore.getState().staging['c1'] ?? []
+      expect(list.length).toBe(1)
+      const tempId = list[0].tempId
+
+      await useAttachmentStore.getState().cancel('c1', tempId)
+      await uploadPromise
+
+      expect(useAttachmentStore.getState().staging['c1'] ?? []).toEqual([])
+      expect(uploadAttachment).toHaveBeenCalled()
+    })
+
+    it('does NOT call deleteAttachment when canceling an in-flight upload', async () => {
+      ;(uploadAttachment as unknown as ReturnType<typeof vi.fn>).mockImplementation(
+        (_c: unknown, _id: unknown, _f: unknown, _onP: unknown, signal: AbortSignal) =>
+          new Promise<AttachmentDto>((_res, rej) =>
+            signal.addEventListener('abort', () => {
+              const err = new Error('aborted') as Error & { name: string }
+              err.name = 'AbortError'
+              rej(err)
+            }),
+          ),
+      )
+      const promise = useAttachmentStore
+        .getState()
+        .upload({} as never, 'c2', [new File(['x'], 'b.txt')])
+      const tempId = useAttachmentStore.getState().staging['c2'][0].tempId
+      await useAttachmentStore.getState().cancel('c2', tempId)
+      await promise
+      expect(deleteAttachment).not.toHaveBeenCalled()
+    })
+  })
 })
