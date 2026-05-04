@@ -11,6 +11,7 @@ import { UploadDropzone } from '@/components/chat/UploadDropzone'
 interface InputBarProps {
   conversationId?: string
   onSubmit?: (content: string, files: File[]) => void | Promise<void>
+  onCreateConversation?: () => Promise<string>
   isLoading?: boolean
 }
 
@@ -22,6 +23,7 @@ function isInteractiveTarget(target: EventTarget): boolean {
 export function InputBar({
   conversationId,
   onSubmit,
+  onCreateConversation,
   isLoading = false,
 }: InputBarProps): React.ReactElement {
   const t = useTranslations('input')
@@ -64,8 +66,8 @@ export function InputBar({
 
     try {
       setIsHandlingSubmit(true)
-      if (!conversationId) {
-        await onSubmit?.(content, [...pendingFiles])
+      if (onSubmit) {
+        await onSubmit(content, [...pendingFiles])
         setContent('')
         setPendingFiles([])
         resetTextareaHeight()
@@ -78,8 +80,8 @@ export function InputBar({
       const text = content
       setContent('')
       resetTextareaHeight()
-      clearStaging(conversationId)
-      await send(client, conversationId, text, ids)
+      clearStaging(conversationId!)
+      await send(client, conversationId!, text, ids)
     } catch (err) {
       console.error('Failed to send message:', err)
     } finally {
@@ -107,13 +109,22 @@ export function InputBar({
   const handleFiles = async (files: FileList | null): Promise<void> => {
     if (!files || !files.length) return
     const selectedFiles = Array.from(files)
-    if (!conversationId) {
+    let convId = conversationId
+    if (!convId && onCreateConversation) {
+      try {
+        convId = await onCreateConversation()
+      } catch (err) {
+        console.error('Failed to create conversation for upload:', err)
+        return
+      }
+    }
+    if (!convId) {
       if (onSubmit) setPendingFiles((current) => [...current, ...selectedFiles])
       return
     }
     const client = createApiClient('')
     if (workspaceId) client.setWorkspaceId(workspaceId)
-    await upload(client, conversationId, selectedFiles)
+    await upload(client, convId, selectedFiles)
   }
 
   const handleShellMouseDown = (e: React.MouseEvent<HTMLDivElement>): void => {

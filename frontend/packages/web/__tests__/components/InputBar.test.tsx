@@ -108,4 +108,25 @@ describe('InputBar', () => {
       expect(onSubmit).toHaveBeenCalledWith('', [file])
     })
   })
+
+  it('creates a draft conversation on first file pick when onCreateConversation is provided', async () => {
+    const onCreateConversation = vi.fn().mockResolvedValue('conv-1')
+    const onSubmit = vi.fn()
+    const { container } = renderWithIntl(
+      <InputBar onCreateConversation={onCreateConversation} onSubmit={onSubmit} />,
+    )
+    const fileInput = container.querySelector('input[type="file"]')
+    expect(fileInput).toBeInstanceOf(HTMLInputElement)
+    const file = new File(['x'], 'a.txt', { type: 'text/plain' })
+
+    fireEvent.change(fileInput!, { target: { files: [file] } })
+
+    await waitFor(() => {
+      expect(onCreateConversation).toHaveBeenCalledTimes(1)
+    })
+    await waitFor(() => {
+      expect(storeMocks.upload).toHaveBeenCalledWith(expect.anything(), 'conv-1', [file])
+    })
+    expect(onSubmit).not.toHaveBeenCalled()
+  })
 })
