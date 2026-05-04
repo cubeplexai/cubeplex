@@ -72,7 +72,7 @@ class CitationConfig(BaseModel):
         """Extract the list of result items from parsed tool output."""
         if self.discriminator_field:
             value = data.get(self.discriminator_field)
-            if self.discriminator_values is not None and (value not in self.discriminator_values):
+            if self.discriminator_values and value not in self.discriminator_values:
                 return []
         if self.content_field is None:
             return [data]
