@@ -5,6 +5,7 @@ import { ThemeToggle } from '@/components/ui/theme-toggle'
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from '@/components/ui/resizable'
 import { ToolDetailPanel } from '@/components/panel/ToolDetailPanel'
 import { ArtifactPanel } from '@/components/panel/artifact/ArtifactPanel'
+import { AttachmentPreviewView } from '@/components/panel/AttachmentPreviewView'
 import { usePanelStore } from '@cubebox/core'
 
 interface AppShellProps {
@@ -13,8 +14,8 @@ interface AppShellProps {
 }
 
 export function AppShell({ children, headerTitle }: AppShellProps) {
-  const viewType = usePanelStore((s) => s.view.type)
-  const panelOpen = viewType !== 'closed'
+  const view = usePanelStore((s) => s.view)
+  const panelOpen = view.type !== 'closed'
 
   return (
     <ResizablePanelGroup orientation="horizontal" className="h-full">
@@ -34,7 +35,13 @@ export function AppShell({ children, headerTitle }: AppShellProps) {
         <>
           <ResizableHandle withHandle />
           <ResizablePanel defaultSize={50} minSize={25}>
-            {viewType === 'artifact' ? <ArtifactPanel /> : <ToolDetailPanel />}
+            {view.type === 'artifact' ? (
+              <ArtifactPanel />
+            ) : view.type === 'attachment' ? (
+              <AttachmentPreviewView info={view.info} />
+            ) : (
+              <ToolDetailPanel />
+            )}
           </ResizablePanel>
         </>
       )}

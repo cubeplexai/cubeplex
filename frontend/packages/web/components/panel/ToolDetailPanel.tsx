@@ -9,6 +9,7 @@ import { WebFetchView } from './WebFetchView'
 import { GenericToolView } from './GenericToolView'
 import { SkillView } from './SkillView'
 import { WriteFilePreviewView } from './WriteFilePreviewView'
+import { FileReadView } from './FileReadView'
 
 export function ToolDetailPanel() {
   const {
@@ -51,6 +52,14 @@ export function ToolDetailPanel() {
         {contentType === 'skill' && <SkillView args={toolArgs} result={toolResult} />}
         {contentType === 'write_file' && (
           <WriteFilePreviewView args={toolArgs} result={toolResult} toolRef={toolRef} />
+        )}
+        {contentType === 'file_read' && (
+          <FileReadView
+            args={toolArgs}
+            result={toolResult}
+            highlightText={highlightText}
+            highlightKey={highlightKey}
+          />
         )}
         {(contentType === 'generic' ||
           contentType === 'code_execute' ||
