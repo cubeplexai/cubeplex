@@ -207,7 +207,26 @@ def _create_file_read_tool(sandbox: Sandbox, conversation_id: UUID | None) -> Ba
         name="file_read",
         description=_FILE_READ_DESCRIPTION,
         args_schema=_FileReadArgs,
-        metadata={"content_type": "file_read"},
+        metadata={
+            "content_type": "file_read",
+            "citation": {
+                "source_type": "file",
+                "content_field": None,
+                "discriminator_field": "kind",
+                "discriminator_values": ["text"],
+                "mapping": {
+                    "snippet": "content",
+                    "path": "path",
+                    "mime": "mime",
+                    "size_bytes": "size_bytes",
+                    "truncated": "truncated",
+                },
+                "args_mapping": {
+                    "page_range": "page_range",
+                    "line_range": "line_range",
+                },
+            },
+        },
     )
 
 
