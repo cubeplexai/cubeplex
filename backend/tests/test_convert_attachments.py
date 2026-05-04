@@ -88,19 +88,6 @@ def test_convert_to_api_messages_reads_additional_kwargs_attachments_meta() -> N
     assert atts[0]["download_url"]
 
 
-def test_convert_to_api_messages_strips_legacy_baked_in_hint() -> None:
-    """Pre-middleware checkpoints had the [Attachments] hint baked into content."""
-    block = _file_attachment()
-    augmented = "look at this" + render_attachments_hint([block])
-    msg = HumanMessage(
-        content=augmented,
-        additional_kwargs={"attachments_meta": [block]},
-    )
-    out = convert_to_api_messages([msg])
-    assert out[0]["content"] == "look at this"
-    assert "[Attachments]" not in out[0]["content"]
-
-
 def test_convert_to_api_messages_keeps_user_text_with_attachments_marker() -> None:
     """New-shape checkpoints: don't truncate user content that happens to contain the marker."""
     block = _file_attachment()
