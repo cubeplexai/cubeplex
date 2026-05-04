@@ -6,7 +6,7 @@ the primary access check is ``creator_user_id``.
 """
 
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, cast
 
 from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -53,6 +53,7 @@ class ConversationRepository(ScopedRepository[Conversation]):
     async def list_all(self, *, limit: int = 20, offset: int = 0) -> tuple[list[Conversation], int]:
         stmt = (
             self._scoped_select()
+            .where(cast(Any, Conversation.has_messages).is_(True))
             .order_by(desc(Conversation.updated_at))  # type: ignore[arg-type]
             .limit(limit)
             .offset(offset)
@@ -66,6 +67,7 @@ class ConversationRepository(ScopedRepository[Conversation]):
             .where(
                 Conversation.workspace_id == self.workspace_id,  # type: ignore[arg-type]
                 Conversation.creator_user_id == self.user_id,  # type: ignore[arg-type]
+                cast(Any, Conversation.has_messages).is_(True),
             )
         )
         total = (await self.session.execute(count_stmt)).scalar_one()
@@ -84,6 +86,14 @@ class ConversationRepository(ScopedRepository[Conversation]):
     async def update_timestamp(self, conversation_id: str) -> None:
         conv = await self.get(conversation_id)
         if conv:
+            conv.updated_at = datetime.now(UTC)
+            await self.session.commit()
+
+    async def mark_has_messages(self, conversation_id: str) -> None:
+        """Set has_messages=True (idempotent) and refresh updated_at."""
+        conv = await self.get(conversation_id)
+        if conv and not conv.has_messages:
+            conv.has_messages = True
             conv.updated_at = datetime.now(UTC)
             await self.session.commit()
 
