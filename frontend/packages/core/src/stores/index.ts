@@ -2,7 +2,12 @@ export { useCitationStore, type CitationStore } from './citationStore'
 export { useArtifactStore, type ArtifactStore } from './artifactStore'
 export { useConversationStore, type ConversationStore } from './conversationStore'
 export { useMessageStore, type MessageStore, type AgentStream } from './messageStore'
-export { usePanelStore, type PanelStore, type PanelView } from './panelStore'
+export {
+  usePanelStore,
+  type PanelStore,
+  type PanelView,
+  type AttachmentPanelInfo,
+} from './panelStore'
 export { useToolDetailStore, type ToolDetailStore } from './toolDetailStore'
 export { useAuthStore, type AuthStore } from './authStore'
 export { useWorkspaceStore, type WorkspaceStore } from './workspaceStore'
