@@ -17,6 +17,7 @@ interface AttachmentStoreState {
   staging: Record<string, UploadingFile[]>
 
   upload(client: ApiClient, convId: string, files: File[]): Promise<void>
+  cancel(convId: string, tempId: string): Promise<void>
   remove(client: ApiClient, convId: string, tempId: string): Promise<void>
   clear(convId: string): void
   attachedIds(convId: string): string[]
@@ -24,6 +25,8 @@ interface AttachmentStoreState {
 }
 
 const newTempId = (): string => `tmp_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+
+const abortControllers: Record<string, AbortController> = {}
 
 export const useAttachmentStore = create<AttachmentStoreState>((set, get) => ({
   staging: {},
@@ -36,6 +39,7 @@ export const useAttachmentStore = create<AttachmentStoreState>((set, get) => ({
       progress: 0,
       status: 'uploading',
     }))
+    for (const item of next) abortControllers[item.tempId] = new AbortController()
     set((s) => ({
       staging: {
         ...s.staging,
@@ -45,15 +49,22 @@ export const useAttachmentStore = create<AttachmentStoreState>((set, get) => ({
 
     await Promise.all(
       next.map(async (item, idx) => {
+        const controller = abortControllers[item.tempId]
         try {
-          const dto = await uploadAttachment(client, convId, files[idx], (p) => {
-            set((s) => {
-              const list = (s.staging[convId] || []).map((u) =>
-                u.tempId === item.tempId ? { ...u, progress: p } : u,
-              )
-              return { staging: { ...s.staging, [convId]: list } }
-            })
-          })
+          const dto = await uploadAttachment(
+            client,
+            convId,
+            files[idx],
+            (p) => {
+              set((s) => {
+                const list = (s.staging[convId] || []).map((u) =>
+                  u.tempId === item.tempId ? { ...u, progress: p } : u,
+                )
+                return { staging: { ...s.staging, [convId]: list } }
+              })
+            },
+            controller?.signal,
+          )
           set((s) => {
             const list = (s.staging[convId] || []).map((u) =>
               u.tempId === item.tempId
@@ -63,15 +74,39 @@ export const useAttachmentStore = create<AttachmentStoreState>((set, get) => ({
             return { staging: { ...s.staging, [convId]: list } }
           })
         } catch (err) {
-          set((s) => {
-            const list = (s.staging[convId] || []).map((u) =>
-              u.tempId === item.tempId ? { ...u, status: 'error' as const, error: String(err) } : u,
-            )
-            return { staging: { ...s.staging, [convId]: list } }
-          })
+          const aborted = (err as Error)?.name === 'AbortError'
+          if (aborted) {
+            set((s) => {
+              const list = (s.staging[convId] || []).filter((u) => u.tempId !== item.tempId)
+              return { staging: { ...s.staging, [convId]: list } }
+            })
+          } else {
+            set((s) => {
+              const list = (s.staging[convId] || []).map((u) =>
+                u.tempId === item.tempId
+                  ? { ...u, status: 'error' as const, error: String(err) }
+                  : u,
+              )
+              return { staging: { ...s.staging, [convId]: list } }
+            })
+          }
+        } finally {
+          delete abortControllers[item.tempId]
         }
       }),
     )
+  },
+
+  async cancel(convId, tempId) {
+    const controller = abortControllers[tempId]
+    if (controller) {
+      controller.abort()
+      delete abortControllers[tempId]
+    }
+    set((s) => {
+      const list = (s.staging[convId] || []).filter((u) => u.tempId !== tempId)
+      return { staging: { ...s.staging, [convId]: list } }
+    })
   },
 
   async remove(client, convId, tempId) {
