@@ -376,6 +376,12 @@ class LLMFactory:
 
         # Handle different API types
         if provider_config.api == "openai-completions":
+            # Ensure streamed responses include token usage so CostMiddleware can
+            # populate billing rows. ChatOpenAI defaults stream_usage to False,
+            # which causes usage_metadata to be missing on streamed AIMessages
+            # and every billing event ends up with zero tokens.
+            llm_kwargs.setdefault("stream_usage", True)
+
             # Check if this is official OpenAI API
             is_official_openai = (
                 not provider_config.base_url or "api.openai.com" in provider_config.base_url

@@ -81,7 +81,8 @@ async def test_send_message_creates_billing_event(
         rows = result.all()
         assert len(rows) >= 1
         _be, le = rows[0]
-        assert le.input_tokens >= 0  # some test LLMs don't report usage metadata
+        assert le.input_tokens > 0, "input_tokens should be populated by stream_usage=True"
+        assert le.output_tokens > 0, "output_tokens should be populated by stream_usage=True"
         assert le.provider != "unknown"
         assert le.model_id != "unknown"
         assert _be.cost_amount_micro >= 0
