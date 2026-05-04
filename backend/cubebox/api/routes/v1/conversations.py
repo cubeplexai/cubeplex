@@ -40,10 +40,11 @@ async def _update_conversation_timestamp(
     workspace_id: str,
     user_id: str,
 ) -> None:
-    """Update conversation timestamp using an isolated NullPool engine.
+    """Mark conversation as having messages and refresh its timestamp.
 
-    Uses a dedicated connection so post-stream persistence does not
-    depend on the request-scoped pool state.
+    Uses a dedicated NullPool connection so post-stream persistence does not
+    depend on the request-scoped pool state. Sets has_messages=True on the
+    first call (idempotent) so the conversation becomes visible in list_all.
     """
     save_engine = create_async_engine(_build_database_url(), poolclass=NullPool)
     try:
@@ -54,7 +55,7 @@ async def _update_conversation_timestamp(
                 workspace_id=workspace_id,
                 user_id=user_id,
             )
-            await save_conv_repo.update_timestamp(conversation_id)
+            await save_conv_repo.mark_has_messages(conversation_id)
     finally:
         await save_engine.dispose()
 
