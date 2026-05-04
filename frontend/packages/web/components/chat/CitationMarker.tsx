@@ -5,6 +5,7 @@ import { Globe, Calendar } from 'lucide-react'
 import { useCitationStore, usePanelStore, useMessageStore } from '@cubebox/core'
 import type { CitationData } from '@cubebox/core'
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover'
+import { getFileVisual } from '@/lib/fileIcons'
 
 interface CitationMarkerProps {
   citationId: number
@@ -20,7 +21,36 @@ function getFaviconUrl(url: string): string {
   }
 }
 
+function basename(path?: string): string {
+  if (!path) return ''
+  const i = path.lastIndexOf('/')
+  return i >= 0 ? path.slice(i + 1) : path
+}
+
 function CitationHoverContent({
+  citation,
+  chunkIndex,
+  onOpenPanel,
+}: {
+  citation: CitationData
+  chunkIndex: number
+  onOpenPanel: () => void
+}) {
+  if (citation.metadata.source_type === 'file') {
+    return (
+      <FileSourceHoverContent
+        citation={citation}
+        chunkIndex={chunkIndex}
+        onOpenPanel={onOpenPanel}
+      />
+    )
+  }
+  return (
+    <WebSourceHoverContent citation={citation} chunkIndex={chunkIndex} onOpenPanel={onOpenPanel} />
+  )
+}
+
+function WebSourceHoverContent({
   citation,
   chunkIndex,
   onOpenPanel,
@@ -108,6 +138,86 @@ function CitationHoverContent({
       </div>
 
       {/* Chunk list with active highlight */}
+      {sortedChunks.length > 0 && (
+        <div ref={scrollRef} className="max-h-40 overflow-y-auto -mx-1 px-1">
+          <div className="flex flex-col gap-0.5">
+            {sortedChunks.map((c) => {
+              const isActive = c.chunk_index === chunkIndex
+              return (
+                <div
+                  key={c.chunk_index}
+                  ref={isActive ? activeRef : undefined}
+                  className={`text-xs leading-relaxed rounded px-2 py-1 ${
+                    isActive
+                      ? 'bg-primary/8 text-foreground border-l-2 border-primary'
+                      : 'text-muted-foreground/50'
+                  }`}
+                >
+                  <span className={isActive ? '' : 'line-clamp-2'}>{c.content}</span>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function FileSourceHoverContent({
+  citation,
+  chunkIndex,
+  onOpenPanel,
+}: {
+  citation: CitationData
+  chunkIndex: number
+  onOpenPanel: () => void
+}) {
+  const { metadata, chunks } = citation
+  const sortedChunks = [...chunks].sort((a, b) => a.chunk_index - b.chunk_index)
+  const visual = getFileVisual({ filename: basename(metadata.path), mime_type: metadata.mime })
+  const activeRef = useRef<HTMLDivElement>(null)
+  const scrollRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (activeRef.current && scrollRef.current) {
+      const container = scrollRef.current
+      const el = activeRef.current
+      const top = el.offsetTop - container.offsetTop
+      container.scrollTop = top - 8
+    }
+  }, [])
+
+  const range = metadata.page_range
+    ? `Pages ${metadata.page_range}`
+    : metadata.line_range
+      ? `Lines ${metadata.line_range}`
+      : null
+
+  return (
+    <div className="flex flex-col gap-2">
+      <button
+        type="button"
+        onClick={onOpenPanel}
+        className="flex items-center gap-2 text-left text-sm font-semibold text-foreground hover:text-primary transition-colors cursor-pointer"
+      >
+        <span className={`size-6 grid place-items-center rounded ${visual.bg}`}>
+          <visual.Icon className={`size-3 ${visual.fg}`} />
+        </span>
+        <span className="truncate">{basename(metadata.path) || '(file)'}</span>
+      </button>
+      <div className="flex flex-wrap items-center gap-1.5 text-[10px] text-muted-foreground">
+        <span className="truncate" title={metadata.path}>
+          {metadata.path}
+        </span>
+        {range && <span className="rounded bg-muted px-1.5 py-0.5 font-medium">{range}</span>}
+        {metadata.truncated && (
+          <span className="rounded bg-amber-500/10 px-1.5 py-0.5 font-medium text-amber-700 dark:text-amber-400">
+            Truncated
+          </span>
+        )}
+        <span className="ml-auto rounded bg-muted px-1.5 py-0.5 font-medium">file</span>
+      </div>
       {sortedChunks.length > 0 && (
         <div ref={scrollRef} className="max-h-40 overflow-y-auto -mx-1 px-1">
           <div className="flex flex-col gap-0.5">
