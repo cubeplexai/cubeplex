@@ -25,6 +25,14 @@ function mapContentType(toolName: string, backendContentType?: string): PanelCon
   return 'generic'
 }
 
+export interface AttachmentPanelInfo {
+  attachmentId: string
+  filename: string
+  downloadUrl: string
+  mimeType: string
+  sizeBytes: number
+}
+
 export type PanelView =
   | { type: 'closed' }
   | {
@@ -42,6 +50,10 @@ export type PanelView =
       conversationId: string
       artifactId: string
     }
+  | {
+      type: 'attachment'
+      info: AttachmentPanelInfo
+    }
 
 export interface PanelStore {
   view: PanelView
@@ -56,6 +68,8 @@ export interface PanelStore {
   ) => void
 
   openArtifact: (conversationId: string, artifactId: string) => void
+
+  openAttachment: (info: AttachmentPanelInfo) => void
 
   close: () => void
 }
@@ -82,6 +96,11 @@ export const usePanelStore = create<PanelStore>((set) => ({
   openArtifact: (conversationId, artifactId) =>
     set({
       view: { type: 'artifact', conversationId, artifactId },
+    }),
+
+  openAttachment: (info) =>
+    set({
+      view: { type: 'attachment', info },
     }),
 
   close: () => set({ view: { type: 'closed' } }),

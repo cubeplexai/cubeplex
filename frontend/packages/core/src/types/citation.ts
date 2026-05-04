@@ -5,10 +5,18 @@ export interface CitationChunk {
 
 export interface CitationMetadata {
   source_type: string
+  // web fields
   url?: string
   title?: string
   domain?: string
   published_at?: string
+  // file fields
+  path?: string
+  mime?: string
+  size_bytes?: number
+  truncated?: boolean
+  page_range?: string
+  line_range?: string
 }
 
 export interface CitationData {
