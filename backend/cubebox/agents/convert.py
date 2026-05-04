@@ -180,9 +180,18 @@ def convert_to_api_messages(lc_messages: list[BaseMessage]) -> list[dict[str, An
                     elif t == "file_attachment":
                         attachments.append(_attachment_to_api_block(block))
             else:
-                text_parts.append(str(raw))
-                # New shape: plain string content + attachments_meta in additional_kwargs
+                # New shape: plain string content + attachments_meta in additional_kwargs.
+                # AttachmentHintMiddleware injects the [Attachments] hint at model-call
+                # time, so freshly-checkpointed HumanMessages already carry plain text.
+                # Pre-middleware checkpoints baked the hint into content — strip the
+                # trailing `\n[Attachments]\n...` block when we still see one.
                 meta_blocks = (msg.additional_kwargs or {}).get("attachments_meta") or []
+                raw_str = str(raw)
+                if meta_blocks:
+                    marker_idx = raw_str.rfind("\n[Attachments]\n")
+                    if marker_idx >= 0:
+                        raw_str = raw_str[:marker_idx]
+                text_parts.append(raw_str)
                 for block in meta_blocks:
                     if isinstance(block, dict):
                         attachments.append(_attachment_to_api_block(block))

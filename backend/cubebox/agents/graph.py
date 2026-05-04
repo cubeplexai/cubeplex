@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from cubebox.config import config as _config
 from cubebox.middleware.artifacts import ArtifactMiddleware
+from cubebox.middleware.attachments import AttachmentHintMiddleware
 from cubebox.middleware.citations import CitationConfig, CitationMiddleware
 from cubebox.middleware.sandbox import SandboxMiddleware
 from cubebox.middleware.skills import SkillsMiddleware
@@ -165,6 +166,11 @@ def create_cubebox_agent(
             inherited_middleware=inherited_subagent_middleware,
         )
     )
+
+    # Sits innermost (before CostMiddleware) so it's the last layer to modify
+    # request.messages before the LLM call — keeps the [Attachments] hint
+    # invisible to outer middlewares that scan history.
+    middleware.append(AttachmentHintMiddleware())
 
     # Mount CostMiddleware last in the chain so it wraps all model calls.
     if cost_mw is not None:
