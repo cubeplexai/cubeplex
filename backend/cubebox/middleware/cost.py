@@ -9,10 +9,10 @@ from langchain.agents.middleware.types import AgentMiddleware, ModelRequest, Mod
 from langchain_core.messages import AIMessage
 from langchain_core.tools import BaseTool
 from loguru import logger
-from uuid_utils import uuid7
 
 from cubebox.db.engine import async_session_maker
 from cubebox.models.billing import BillingEvent, LlmBillingEvent
+from cubebox.models.public_id import PREFIX_BILLING_EVENT, generate_public_id
 from cubebox.repositories.billing import BillingRepository
 
 
@@ -44,7 +44,7 @@ class CostMiddleware(AgentMiddleware[Any, Any, Any]):
         request: ModelRequest[Any],
         handler: Callable[[ModelRequest[Any]], Awaitable[ModelResponse[Any] | AIMessage]],
     ) -> ModelResponse[Any] | AIMessage:
-        run_id = str(uuid7())
+        run_id = generate_public_id(PREFIX_BILLING_EVENT)
         self._last_billing_id = run_id
         started_at = datetime.now(UTC)
 
@@ -81,7 +81,7 @@ class CostMiddleware(AgentMiddleware[Any, Any, Any]):
             duration_ms = max(0, int((ended_at - started_at).total_seconds() * 1000))
 
             be = BillingEvent(
-                id=run_id,
+                id=run_id,  # already a valid short ID from generate_public_id above
                 org_id=self._org_id,
                 workspace_id=self._workspace_id,
                 user_id=self._user_id,
