@@ -10,13 +10,18 @@ by name (``id``, ``email``, ``hashed_password``, ``is_active``, ``is_superuser``
 from datetime import UTC, datetime
 
 from sqlmodel import Field, SQLModel
-from uuid_utils import uuid7
+
+from cubebox.models.public_id import PREFIX_USER, generate_public_id
 
 
 class User(SQLModel, table=True):
     __tablename__ = "users"
 
-    id: str = Field(default_factory=lambda: str(uuid7()), primary_key=True, max_length=36)
+    id: str = Field(
+        default_factory=lambda: generate_public_id(PREFIX_USER),
+        primary_key=True,
+        max_length=20,
+    )
     email: str = Field(max_length=320, unique=True, index=True)
     hashed_password: str = Field(max_length=1024)
     is_active: bool = Field(default=True)
