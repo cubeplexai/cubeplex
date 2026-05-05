@@ -1,13 +1,23 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import dynamic from 'next/dynamic'
 import { Download, X } from 'lucide-react'
 import type { AttachmentPanelInfo } from '@cubebox/core'
 import { usePanelStore } from '@cubebox/core'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { MarkdownWithCitations } from '@/components/shared/MarkdownWithCitations'
+import { PreviewLoading } from '@/components/panel/artifact/PreviewLoading'
 import { getFileVisual } from '@/lib/fileIcons'
 import { cn } from '@/lib/utils'
+
+const PdfPreview = dynamic(
+  () => import('@/components/panel/artifact/PdfPreview').then((m) => m.PdfPreview),
+  {
+    ssr: false,
+    loading: () => <PreviewLoading />,
+  },
+)
 
 const TEXT_MAX_BYTES = 5 * 1024 * 1024
 
@@ -64,7 +74,9 @@ export function AttachmentPreviewView({ info }: Props): React.ReactElement {
 function Body({ info, family }: { info: AttachmentPanelInfo; family: string }): React.ReactElement {
   if (family === 'pdf') {
     return (
-      <iframe src={info.downloadUrl} title={info.filename} className="flex-1 w-full border-0" />
+      <div className="flex-1 min-h-0">
+        <PdfPreview fileUrl={info.downloadUrl} />
+      </div>
     )
   }
   if (family === 'video') {

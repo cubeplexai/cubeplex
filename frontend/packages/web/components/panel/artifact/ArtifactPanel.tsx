@@ -16,7 +16,7 @@ import { DocumentPreview } from './DocumentPreview'
 import { DataPreview } from './DataPreview'
 import { FallbackPreview } from './FallbackPreview'
 import { SkillArtifactPreview } from './SkillArtifactPreview'
-import { buildDownloadUrl } from './previewUtils'
+import { buildDownloadUrl, buildPreviewUrl } from './previewUtils'
 
 const PdfPreview = dynamic(() => import('./PdfPreview').then((m) => m.PdfPreview), {
   ssr: false,
@@ -158,7 +158,9 @@ function PreviewContent({
   workspaceId: string
 }) {
   if (isPdf(artifact)) {
-    return <PdfPreview artifact={artifact} version={version} workspaceId={workspaceId} />
+    const filename = artifact.entry_file || artifact.path.split('/').pop() || 'file.pdf'
+    const fileUrl = buildPreviewUrl(artifact, filename, version, workspaceId)
+    return <PdfPreview fileUrl={fileUrl} />
   }
 
   switch (artifact.artifact_type) {
