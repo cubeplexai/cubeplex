@@ -6,7 +6,7 @@ from typing import Any, ClassVar
 from sqlalchemy import JSON, Column, Index, UniqueConstraint
 from sqlmodel import Field, SQLModel
 
-from cubebox.models.mixins import CubeboxBase, OrgScopedMixin, TimestampMixin
+from cubebox.models.mixins import CubeboxBase, TimestampMixin
 
 
 class Skill(CubeboxBase, table=True):
@@ -69,7 +69,7 @@ class OrgSkillInstall(CubeboxBase, table=True):
     __table_args__ = (UniqueConstraint("org_id", "skill_id", name="uq_org_skill_install"),)
 
 
-class WorkspaceSkillBinding(SQLModel, OrgScopedMixin, TimestampMixin, table=True):
+class WorkspaceSkillBinding(SQLModel, TimestampMixin, table=True):
     """Workspace-level enablement of an org-installed skill.
 
     Pure association — composite PK; no public_id."""
@@ -77,6 +77,7 @@ class WorkspaceSkillBinding(SQLModel, OrgScopedMixin, TimestampMixin, table=True
     __tablename__ = "workspace_skill_bindings"
     __table_args__ = (Index("ix_wsb_org_ws", "org_id", "workspace_id"),)
 
+    org_id: str = Field(foreign_key="organizations.id", max_length=20, index=True)
     workspace_id: str = Field(
         primary_key=True, foreign_key="workspaces.id", max_length=20, index=True
     )
