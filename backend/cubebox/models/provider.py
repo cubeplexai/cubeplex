@@ -6,7 +6,12 @@ from typing import Any
 from sqlalchemy import Column, UniqueConstraint
 from sqlalchemy.types import JSON
 from sqlmodel import Field, SQLModel
-from uuid_utils import uuid7
+
+from cubebox.models.public_id import (
+    PREFIX_MODEL,
+    PREFIX_PROVIDER,
+    generate_public_id,
+)
 
 
 class Provider(SQLModel, table=True):
@@ -15,8 +20,14 @@ class Provider(SQLModel, table=True):
     __tablename__ = "providers"
     __table_args__ = (UniqueConstraint("org_id", "name", name="uq_provider_org_name"),)
 
-    id: str = Field(default_factory=lambda: str(uuid7()), primary_key=True, max_length=36)
-    org_id: str | None = Field(default=None, max_length=36, index=True)
+    id: str = Field(
+        default_factory=lambda: generate_public_id(PREFIX_PROVIDER),
+        primary_key=True,
+        max_length=20,
+    )
+    org_id: str | None = Field(
+        default=None, foreign_key="organizations.id", max_length=20, index=True
+    )
     name: str = Field(max_length=64)
     provider_type: str = Field(default="openai_compat", max_length=32)
     base_url: str = Field(max_length=2048)
@@ -31,7 +42,7 @@ class Provider(SQLModel, table=True):
     extra_body: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
     extra_headers: dict[str, str] = Field(default_factory=dict, sa_column=Column(JSON))
     enabled: bool = Field(default=True)
-    created_by_user_id: str = Field(max_length=36)
+    created_by_user_id: str = Field(foreign_key="users.id", max_length=20)
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
@@ -42,9 +53,15 @@ class Model(SQLModel, table=True):
     __tablename__ = "models"
     __table_args__ = (UniqueConstraint("provider_id", "model_id", name="uq_model_provider_model"),)
 
-    id: str = Field(default_factory=lambda: str(uuid7()), primary_key=True, max_length=36)
-    org_id: str | None = Field(default=None, max_length=36, index=True)
-    provider_id: str = Field(max_length=36, index=True)
+    id: str = Field(
+        default_factory=lambda: generate_public_id(PREFIX_MODEL),
+        primary_key=True,
+        max_length=20,
+    )
+    org_id: str | None = Field(
+        default=None, foreign_key="organizations.id", max_length=20, index=True
+    )
+    provider_id: str = Field(foreign_key="providers.id", max_length=20, index=True)
     model_id: str = Field(max_length=128)
     display_name: str = Field(max_length=128)
     reasoning: bool = Field(default=False)
