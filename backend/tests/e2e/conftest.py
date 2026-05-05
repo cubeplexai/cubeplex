@@ -101,8 +101,8 @@ def _reset_rate_limiter_between_tests() -> Iterator[None]:
     limiter.reset()
 
 
-DEFAULT_ORG_ID = "default-org"
-DEFAULT_WS_ID = "default-ws"
+DEFAULT_ORG_ID = "org-00000000000000"
+DEFAULT_WS_ID = "ws-00000000000000"
 DEFAULT_TEST_EMAIL = "test-default@example.com"
 DEFAULT_TEST_PASSWORD = "test-default-password-12345"
 
@@ -163,13 +163,47 @@ def _make_memory_test_app() -> FastAPI:
 
 
 async def _ensure_default_user_and_membership() -> None:
-    """Idempotently ensure a DEFAULT_TEST_EMAIL user exists as admin of default-ws."""
+    """Idempotently ensure a DEFAULT_TEST_EMAIL user exists as admin of DEFAULT_WS_ID.
+
+    Creates DEFAULT_ORG_ID / DEFAULT_WS_ID with fixed IDs if they don't exist yet,
+    then creates the user (which also auto-creates a personal org/ws via
+    on_after_register — that's fine, both memberships coexist) and grants
+    membership to DEFAULT_WS_ID if not already present.
+    """
+    from cubebox.models import Organization, Workspace
+
     test_engine = create_async_engine(_build_database_url(), poolclass=NullPool)
     test_session_maker = async_sessionmaker(
         test_engine, class_=AsyncSession, expire_on_commit=False
     )
     try:
         async with test_session_maker() as session:
+            # Ensure the fixed-ID org exists.
+            org_repo = OrganizationRepository(session)
+            org = await org_repo.get(DEFAULT_ORG_ID)
+            if org is None:
+                org = Organization(
+                    id=DEFAULT_ORG_ID,
+                    name="Test Default Org",
+                    slug="test-default-org",
+                )
+                session.add(org)
+                await session.commit()
+
+            # Ensure the fixed-ID workspace exists inside that org.
+            ws_repo = WorkspaceRepository(session)
+            ws = await ws_repo.get(DEFAULT_WS_ID)
+            if ws is None:
+                ws = Workspace(
+                    id=DEFAULT_WS_ID,
+                    org_id=DEFAULT_ORG_ID,
+                    name="Test Default Workspace",
+                )
+                session.add(ws)
+                await session.commit()
+
+            # Create the test user (on_after_register will auto-create a
+            # second personal org/ws/membership — that is acceptable).
             user_db = SQLAlchemyUserDatabase(session, User)
             existing = await user_db.get_by_email(DEFAULT_TEST_EMAIL)
             if existing is None:
@@ -181,6 +215,7 @@ async def _ensure_default_user_and_membership() -> None:
             else:
                 user = existing
 
+            # Ensure membership in the fixed workspace.
             mem_repo = MembershipRepository(session)
             role = await mem_repo.get_role(user_id=user.id, workspace_id=DEFAULT_WS_ID)
             if role is None:

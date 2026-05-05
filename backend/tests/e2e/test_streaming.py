@@ -13,6 +13,7 @@ from cubebox.auth.context import RequestContext
 from cubebox.config import config as _cubebox_config
 from cubebox.models import Role
 from cubebox.streams.run_manager import RunManager
+from tests.e2e.conftest import DEFAULT_ORG_ID, DEFAULT_WS_ID
 
 pytestmark = pytest.mark.e2e
 
@@ -22,8 +23,8 @@ def _make_fake_ctx() -> RequestContext:
     fake_user = SimpleNamespace(id="test-user", email="test@example.com")
     return RequestContext(
         user=fake_user,  # type: ignore[arg-type]
-        org_id="default-org",
-        workspace_id="default-ws",
+        org_id=DEFAULT_ORG_ID,
+        workspace_id=DEFAULT_WS_ID,
         role=Role.ADMIN,
     )
 
@@ -55,12 +56,14 @@ def _make_streaming_request_state(
 
 @pytest.mark.asyncio
 async def test_sse_response_content_type(memory_client: httpx.AsyncClient) -> None:
-    resp = await memory_client.post("/api/v1/ws/default-ws/conversations", params={"title": "test"})
+    resp = await memory_client.post(
+        f"/api/v1/ws/{DEFAULT_WS_ID}/conversations", params={"title": "test"}
+    )
     conv_id = resp.json()["id"]
 
     async with memory_client.stream(
         "POST",
-        f"/api/v1/ws/default-ws/conversations/{conv_id}/messages",
+        f"/api/v1/ws/{DEFAULT_WS_ID}/conversations/{conv_id}/messages",
         json={"content": "Say hi."},
         headers={"Accept": "text/event-stream", "Cache-Control": "no-cache"},
     ) as response:
@@ -69,12 +72,14 @@ async def test_sse_response_content_type(memory_client: httpx.AsyncClient) -> No
 
 @pytest.mark.asyncio
 async def test_every_event_is_valid_json(memory_client: httpx.AsyncClient) -> None:
-    resp = await memory_client.post("/api/v1/ws/default-ws/conversations", params={"title": "test"})
+    resp = await memory_client.post(
+        f"/api/v1/ws/{DEFAULT_WS_ID}/conversations", params={"title": "test"}
+    )
     conv_id = resp.json()["id"]
 
     async with memory_client.stream(
         "POST",
-        f"/api/v1/ws/default-ws/conversations/{conv_id}/messages",
+        f"/api/v1/ws/{DEFAULT_WS_ID}/conversations/{conv_id}/messages",
         json={"content": "Say hi."},
         headers={"Accept": "text/event-stream", "Cache-Control": "no-cache"},
     ) as response:
@@ -87,13 +92,15 @@ async def test_every_event_is_valid_json(memory_client: httpx.AsyncClient) -> No
 
 @pytest.mark.asyncio
 async def test_stream_always_ends_with_done(memory_client: httpx.AsyncClient) -> None:
-    resp = await memory_client.post("/api/v1/ws/default-ws/conversations", params={"title": "test"})
+    resp = await memory_client.post(
+        f"/api/v1/ws/{DEFAULT_WS_ID}/conversations", params={"title": "test"}
+    )
     conv_id = resp.json()["id"]
 
     events = []
     async with memory_client.stream(
         "POST",
-        f"/api/v1/ws/default-ws/conversations/{conv_id}/messages",
+        f"/api/v1/ws/{DEFAULT_WS_ID}/conversations/{conv_id}/messages",
         json={"content": "Say hi."},
         headers={"Accept": "text/event-stream", "Cache-Control": "no-cache"},
     ) as response:
@@ -163,13 +170,15 @@ def test_tool_call_delta_identity_is_backfilled_per_agent() -> None:
 
 @pytest.mark.asyncio
 async def test_agent_id_is_null_for_main_agent(memory_client: httpx.AsyncClient) -> None:
-    resp = await memory_client.post("/api/v1/ws/default-ws/conversations", params={"title": "test"})
+    resp = await memory_client.post(
+        f"/api/v1/ws/{DEFAULT_WS_ID}/conversations", params={"title": "test"}
+    )
     conv_id = resp.json()["id"]
 
     events = []
     async with memory_client.stream(
         "POST",
-        f"/api/v1/ws/default-ws/conversations/{conv_id}/messages",
+        f"/api/v1/ws/{DEFAULT_WS_ID}/conversations/{conv_id}/messages",
         json={"content": "Say hi."},
         headers={"Accept": "text/event-stream", "Cache-Control": "no-cache"},
     ) as response:

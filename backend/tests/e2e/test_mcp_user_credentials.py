@@ -39,9 +39,13 @@ async def test_user_scope_credentials_are_isolated_per_workspace_member(
         assert resp.status_code == 201, resp.text
 
     csrf_alice = await _login(client, alice_email, password)
+    # Fetch Alice's org_id from her auto-created workspace (via on_after_register).
+    ws_list_resp = await client.get("/api/v1/workspaces")
+    assert ws_list_resp.status_code == 200, ws_list_resp.text
+    alice_org_id = ws_list_resp.json()[0]["org_id"]
     workspace_resp = await client.post(
         "/api/v1/workspaces",
-        json={"name": "MCP Shared", "org_id": "default-org"},
+        json={"name": "MCP Shared", "org_id": alice_org_id},
         headers={"X-CSRF-Token": csrf_alice},
     )
     assert workspace_resp.status_code == 201, workspace_resp.text

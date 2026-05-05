@@ -1,8 +1,8 @@
 """E2E migration verification.
 
 These tests run against whatever DB ``cubebox.config`` resolves to. They
-are read-only — they only check that the M1 migration has been applied
-and that the default ``default-org`` / ``default-ws`` rows exist.
+are read-only — they only check that the short-public-id baseline migration
+has been applied (tables exist with the expected column shapes).
 
 For the destructive upgrade/downgrade roundtrip verification, see the
 manual procedure documented in plan Task 6 (run alembic against a
@@ -19,24 +19,28 @@ pytestmark = pytest.mark.e2e
 
 
 @pytest.mark.asyncio
-async def test_default_org_and_workspace_exist_after_migration() -> None:
+async def test_short_id_schema_tables_exist() -> None:
+    """Verify the short-public-id baseline migration has been applied.
+
+    Checks that all key tables exist with VARCHAR(20) PK columns —
+    the signature of the new short-id schema.
+    """
     engine = create_async_engine(_build_database_url())
     try:
         async with engine.connect() as conn:
-            org_row = (
-                await conn.execute(text("SELECT id FROM organizations WHERE id = 'default-org'"))
-            ).first()
-            assert org_row is not None, "default-org missing — run alembic upgrade head"
-            assert org_row[0] == "default-org"
-
-            ws_row = (
-                await conn.execute(
-                    text("SELECT id, org_id FROM workspaces WHERE id = 'default-ws'")
-                )
-            ).first()
-            assert ws_row is not None, "default-ws missing — run alembic upgrade head"
-            assert ws_row[0] == "default-ws"
-            assert ws_row[1] == "default-org"
+            for table in ("organizations", "workspaces", "users", "conversations"):
+                row = (
+                    await conn.execute(
+                        text(
+                            "SELECT column_name, character_maximum_length "
+                            "FROM information_schema.columns "
+                            "WHERE table_name = :tbl AND column_name = 'id'"
+                        ),
+                        {"tbl": table},
+                    )
+                ).first()
+                assert row is not None, f"table '{table}' missing — run alembic upgrade head"
+                assert row[1] == 20, f"{table}.id expected VARCHAR(20) but got VARCHAR({row[1]})"
     finally:
         await engine.dispose()
 

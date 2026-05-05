@@ -52,9 +52,13 @@ async def test_conversation_invisible_to_other_member_same_workspace(
 
     # --- A: create shared workspace, invite B, create a conversation --------
     csrf_a = await _login(client, a_email, pw)
+    # Fetch A's org_id from their auto-created workspace (via on_after_register).
+    r = await client.get("/api/v1/workspaces")
+    assert r.status_code == 200, r.text
+    a_org_id = r.json()[0]["org_id"]
     r = await client.post(
         "/api/v1/workspaces",
-        json={"name": "Shared", "org_id": "default-org"},
+        json={"name": "Shared", "org_id": a_org_id},
         headers={"X-CSRF-Token": csrf_a},
     )
     assert r.status_code == 201, r.text
