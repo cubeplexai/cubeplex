@@ -1,22 +1,19 @@
 """Workspace model — collaboration unit inside an Organization."""
 
-from datetime import UTC, datetime
+from typing import ClassVar
 
 from sqlalchemy import Index
-from sqlmodel import Field, SQLModel
+from sqlmodel import Field
 
-from cubebox.models.public_id import PREFIX_WORKSPACE, generate_public_id
+from cubebox.models.mixins import CubeboxBase
 
 
-class Workspace(SQLModel, table=True):
+class Workspace(CubeboxBase, table=True):
+    """Workspace belongs to an Organization; users collaborate inside a workspace."""
+
+    _PREFIX: ClassVar[str] = "ws"
     __tablename__ = "workspaces"
     __table_args__ = (Index("ix_workspaces_org", "org_id"),)
 
-    id: str = Field(
-        default_factory=lambda: generate_public_id(PREFIX_WORKSPACE),
-        primary_key=True,
-        max_length=20,
-    )
     org_id: str = Field(foreign_key="organizations.id", max_length=20)
     name: str = Field(max_length=255)
-    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))

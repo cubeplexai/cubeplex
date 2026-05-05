@@ -7,25 +7,22 @@ by name (``id``, ``email``, ``hashed_password``, ``is_active``, ``is_superuser``
 ``is_verified``).
 """
 
-from datetime import UTC, datetime
+from typing import ClassVar
 
-from sqlmodel import Field, SQLModel
+from sqlmodel import Field
 
-from cubebox.models.public_id import PREFIX_USER, generate_public_id
+from cubebox.models.mixins import CubeboxBase
 
 
-class User(SQLModel, table=True):
+class User(CubeboxBase, table=True):
+    """User is a global identity; membership ties users to workspaces."""
+
+    _PREFIX: ClassVar[str] = "usr"
     __tablename__ = "users"
 
-    id: str = Field(
-        default_factory=lambda: generate_public_id(PREFIX_USER),
-        primary_key=True,
-        max_length=20,
-    )
     email: str = Field(max_length=320, unique=True, index=True)
     hashed_password: str = Field(max_length=1024)
     is_active: bool = Field(default=True)
     is_superuser: bool = Field(default=False)
     is_verified: bool = Field(default=False)
-    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     language: str = Field(default="en", max_length=10)
