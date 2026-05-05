@@ -151,6 +151,20 @@ alembic revision -m "description"  # Create new migration
 
 After modifying SQLModel schemas, use auto-generation: `alembic revision --autogenerate -m "description"`
 
+### Short prefixed public IDs
+
+All business tables use short prefixed string PKs (e.g. `conv-V1StGXR8Z5jdHi`,
+20 chars max). New IDs come from `cubebox.models.public_id.generate_public_id`
+which packs a 41-bit ms timestamp + 42-bit random into 14 base62 chars; sortable
+at ms granularity, multi-instance safe. To add a new business table: define a
+`PREFIX_<NAME>` constant in `public_id.py`, then use
+`default_factory=lambda: generate_public_id(PREFIX_<NAME>)` on the `id` column
+with `max_length=20`. Pure association tables (composite PK) skip the prefix.
+
+When pulling this branch into an existing checkout, drop and recreate the local
+DB before running migrations — the alembic baseline is incompatible with prior
+revisions.
+
 ## Gotchas
 
 - **Async event loop issues**: Tests use `pytest-asyncio` with `asyncio_mode = "auto"`. If you manually create event loops, use `nest_asyncio.apply()`.
