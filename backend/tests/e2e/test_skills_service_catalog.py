@@ -1,6 +1,10 @@
 """E2E: SkillCatalogService.list_enabled_for_workspace + fetch_skill_md."""
 
+import secrets
+
 import pytest
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from cubebox.objectstore import get_objectstore_client
 from cubebox.repositories.skill import (
@@ -14,17 +18,54 @@ from cubebox.skills.service import SkillCatalogService
 from cubebox.skills.storage_paths import global_skill_prefix
 
 
+async def _seed_org_ws_user(
+    db_session: AsyncSession,
+    org_id: str,
+    ws_id: str,
+    user_id: str,
+) -> None:
+    """Seed minimal org, workspace, and user rows for skill catalog tests.
+
+    These FKs were added in the short-id schema migration and are required
+    by org_skill_installs.org_id → organizations, workspace_skill_bindings.workspace_id
+    → workspaces, and org_skill_installs.installed_by_user_id → users.
+    """
+    await db_session.execute(
+        text(
+            "INSERT INTO organizations (id, name, slug, created_at)"
+            " VALUES (:id, :name, :slug, NOW()) ON CONFLICT (id) DO NOTHING"
+        ),
+        {"id": org_id, "name": org_id, "slug": org_id},
+    )
+    await db_session.execute(
+        text(
+            "INSERT INTO workspaces (id, org_id, name, created_at)"
+            " VALUES (:id, :org_id, :name, NOW()) ON CONFLICT (id) DO NOTHING"
+        ),
+        {"id": ws_id, "org_id": org_id, "name": ws_id},
+    )
+    await db_session.execute(
+        text(
+            "INSERT INTO users (id, email, hashed_password, is_active, is_superuser,"
+            " is_verified, created_at, language)"
+            " VALUES (:id, :email, 'x', true, false, false, NOW(), 'en')"
+            " ON CONFLICT (id) DO NOTHING"
+        ),
+        {"id": user_id, "email": f"{user_id}@skill-catalog-test.local"},
+    )
+    await db_session.commit()
+
+
 @pytest.mark.asyncio
 async def test_list_enabled_for_workspace(tmp_path, db_session) -> None:
     skills = SkillRepository(db_session)
     versions = SkillVersionRepository(db_session)
     installs = OrgSkillInstallRepository(db_session)
 
-    import secrets
-
     org_id = f"org-{secrets.token_hex(4)}"
     ws_id = f"ws-{secrets.token_hex(4)}"
     user_id = "user-1"
+    await _seed_org_ws_user(db_session, org_id, ws_id, user_id)
     skill_name = f"deep-research-{secrets.token_hex(4)}"
 
     skill = await skills.create_preinstalled(
@@ -66,8 +107,6 @@ async def test_list_enabled_for_workspace(tmp_path, db_session) -> None:
 
 @pytest.mark.asyncio
 async def test_fetch_skill_md_returns_content(tmp_path, db_session) -> None:
-    import secrets
-
     skills = SkillRepository(db_session)
     versions = SkillVersionRepository(db_session)
 
@@ -97,8 +136,6 @@ async def test_fetch_skill_md_returns_content(tmp_path, db_session) -> None:
 
 @pytest.mark.asyncio
 async def test_find_enabled_by_name(tmp_path, db_session) -> None:
-    import secrets
-
     skills = SkillRepository(db_session)
     versions = SkillVersionRepository(db_session)
     installs = OrgSkillInstallRepository(db_session)
@@ -107,6 +144,7 @@ async def test_find_enabled_by_name(tmp_path, db_session) -> None:
     ws_id = f"ws-{secrets.token_hex(4)}"
     user_id = "user-1"
     skill_name = f"find-skill-{secrets.token_hex(4)}"
+    await _seed_org_ws_user(db_session, org_id, ws_id, user_id)
 
     skill = await skills.create_preinstalled(
         name=skill_name, description="d", keywords=[], current_version="1.0.0"

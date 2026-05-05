@@ -1,7 +1,9 @@
 """Vault E2E tests for CredentialService with the real test database."""
 
 import pytest
+import pytest_asyncio
 from cryptography.fernet import Fernet
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 from uuid_utils import uuid7
 
@@ -15,6 +17,50 @@ from cubebox.models import MCPServer
 from cubebox.repositories.credential import CredentialRepository
 from cubebox.repositories.mcp import MCPServerRepository
 from cubebox.services.credential import CredentialService
+
+# All org IDs used across vault tests. Each needs an organizations row so the
+# credentials.org_id FK is satisfied. user-1/user-2 need users rows.
+_VAULT_ORG_IDS = [
+    "org-vault-a",
+    "org-vault-kind",
+    "org-vault-cross-a",
+    "org-vault-cross-b",
+    "org-vault-update",
+    "org-vault-delete",
+    "org-vault-mcp-ref",
+]
+_VAULT_USER_IDS = ["user-1", "user-2"]
+
+
+@pytest_asyncio.fixture(autouse=True)
+async def _seed_vault_deps(db_session: AsyncSession) -> None:
+    """Insert minimal org and user rows required by vault tests.
+
+    FK constraints on credentials(org_id) → organizations and
+    credentials(created_by_user_id) → users were introduced with the
+    short-id schema. These rows are not created by _ensure_default_user_and_membership
+    because the vault tests use their own isolated org/user IDs.
+    """
+    for org_id in _VAULT_ORG_IDS:
+        await db_session.execute(
+            text(
+                "INSERT INTO organizations (id, name, slug, created_at)"
+                " VALUES (:id, :name, :slug, NOW())"
+                " ON CONFLICT (id) DO NOTHING"
+            ),
+            {"id": org_id, "name": org_id, "slug": org_id},
+        )
+    for user_id in _VAULT_USER_IDS:
+        await db_session.execute(
+            text(
+                "INSERT INTO users (id, email, hashed_password, is_active, is_superuser,"
+                " is_verified, created_at, language)"
+                " VALUES (:id, :email, 'x', true, false, false, NOW(), 'en')"
+                " ON CONFLICT (id) DO NOTHING"
+            ),
+            {"id": user_id, "email": f"{user_id}@vault-test.local"},
+        )
+    await db_session.commit()
 
 
 @pytest.fixture
@@ -153,7 +199,7 @@ async def test_delete_credential_referenced_by_mcp_server_raises(
             org_id="org-vault-mcp-ref",
             name=_name("srv"),
             server_url="https://mcp-ref",
-            server_url_hash="mcp-ref-hash",
+            server_url_hash=_name("mcp-ref-hash"),
             transport="streamable_http",
             auth_method="static",
             credential_scope="org",
