@@ -5,6 +5,8 @@ import secrets
 import zipfile
 
 import pytest
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from cubebox.repositories.skill import (
     OrgSkillInstallRepository,
@@ -12,6 +14,35 @@ from cubebox.repositories.skill import (
 )
 from cubebox.skills.cache import SkillCache
 from cubebox.skills.service import SkillPublishService
+
+
+async def _seed_org_and_user(
+    db_session: AsyncSession,
+    org_id: str,
+    user_id: str,
+) -> None:
+    """Insert minimal org and user rows to satisfy FK constraints.
+
+    Skills and OrgSkillInstall have FKs to organizations and users
+    introduced in the short-id schema.
+    """
+    await db_session.execute(
+        text(
+            "INSERT INTO organizations (id, name, slug, created_at)"
+            " VALUES (:id, :name, :slug, NOW()) ON CONFLICT (id) DO NOTHING"
+        ),
+        {"id": org_id, "name": org_id, "slug": org_id},
+    )
+    await db_session.execute(
+        text(
+            "INSERT INTO users (id, email, hashed_password, is_active, is_superuser,"
+            " is_verified, created_at, language)"
+            " VALUES (:id, :email, 'x', true, false, false, NOW(), 'en')"
+            " ON CONFLICT (id) DO NOTHING"
+        ),
+        {"id": user_id, "email": f"{user_id}@skill-publish-test.local"},
+    )
+    await db_session.commit()
 
 
 def _make_zip(files: dict[str, bytes]) -> bytes:
@@ -27,6 +58,7 @@ async def test_publish_from_zip_creates_skill_version_and_install(tmp_path, db_s
     org_id = f"org-{secrets.token_hex(4)}"
     org_slug = f"org-{secrets.token_hex(4)}"
     skill_name = f"my-skill-{secrets.token_hex(4)}"
+    await _seed_org_and_user(db_session, org_id, "user-1")
     zip_bytes = _make_zip(
         {
             "SKILL.md": f"---\nname: {skill_name}\ndescription: ms\nversion: 0.1.0\n---\n# X\n".encode(),
@@ -64,6 +96,7 @@ async def test_publish_version_collision_raises(tmp_path, db_session) -> None:
     org_id = f"org-{secrets.token_hex(4)}"
     org_slug = f"org-{secrets.token_hex(4)}"
     skill_name = f"x-{secrets.token_hex(4)}"
+    await _seed_org_and_user(db_session, org_id, "u")
     z = _make_zip(
         {"SKILL.md": f"---\nname: {skill_name}\ndescription: y\nversion: 1.0.0\n---\n".encode()}
     )
