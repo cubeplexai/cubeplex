@@ -1,22 +1,18 @@
 """MCP connector models."""
 
-from datetime import UTC, datetime
-from typing import Any
+from datetime import datetime
+from typing import Any, ClassVar
 
 from sqlalchemy import JSON, Column, Index, UniqueConstraint
 from sqlmodel import Field, SQLModel
 
-from cubebox.models.public_id import (
-    PREFIX_MCP_SERVER,
-    PREFIX_USER_MCP_CREDENTIAL,
-    PREFIX_WORKSPACE_MCP_CREDENTIAL,
-    generate_public_id,
-)
+from cubebox.models.mixins import CubeboxBase, TimestampMixin
 
 
-class MCPServer(SQLModel, table=True):
+class MCPServer(CubeboxBase, table=True):
     """MCP server registration. owner_workspace_id=None means org-wide."""
 
+    _PREFIX: ClassVar[str] = "mcp"
     __tablename__ = "mcp_servers"
     __table_args__ = (
         UniqueConstraint(
@@ -25,11 +21,6 @@ class MCPServer(SQLModel, table=True):
         UniqueConstraint("org_id", "owner_workspace_id", "name", name="uq_mcp_server_name"),
     )
 
-    id: str = Field(
-        default_factory=lambda: generate_public_id(PREFIX_MCP_SERVER),
-        primary_key=True,
-        max_length=20,
-    )
     org_id: str = Field(foreign_key="organizations.id", max_length=20, index=True)
     owner_workspace_id: str | None = Field(
         default=None, foreign_key="workspaces.id", max_length=20, index=True
@@ -50,41 +41,29 @@ class MCPServer(SQLModel, table=True):
     timeout: float = Field(default=30.0)
     sse_read_timeout: float = Field(default=300.0)
     created_by_user_id: str = Field(foreign_key="users.id", max_length=20)
-    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
-    updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
-class WorkspaceMCPCredential(SQLModel, table=True):
+class WorkspaceMCPCredential(CubeboxBase, table=True):
     """credential_scope=workspace: one row per workspace using the server."""
 
+    _PREFIX: ClassVar[str] = "wmc"
     __tablename__ = "workspace_mcp_credentials"
     __table_args__ = (UniqueConstraint("workspace_id", "mcp_server_id", name="uq_ws_mcp_cred"),)
 
-    id: str = Field(
-        default_factory=lambda: generate_public_id(PREFIX_WORKSPACE_MCP_CREDENTIAL),
-        primary_key=True,
-        max_length=20,
-    )
     org_id: str = Field(foreign_key="organizations.id", max_length=20, index=True)
     workspace_id: str = Field(foreign_key="workspaces.id", max_length=20, index=True)
     mcp_server_id: str = Field(foreign_key="mcp_servers.id", max_length=20, index=True)
     credential_id: str = Field(foreign_key="credentials.id", max_length=20)
     created_by_user_id: str = Field(foreign_key="users.id", max_length=20)
-    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
-    updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
-class UserMCPCredential(SQLModel, table=True):
+class UserMCPCredential(CubeboxBase, table=True):
     """credential_scope=user: one row per user and server."""
 
+    _PREFIX: ClassVar[str] = "umc"
     __tablename__ = "user_mcp_credentials"
     __table_args__ = (UniqueConstraint("user_id", "mcp_server_id", name="uq_user_mcp_cred"),)
 
-    id: str = Field(
-        default_factory=lambda: generate_public_id(PREFIX_USER_MCP_CREDENTIAL),
-        primary_key=True,
-        max_length=20,
-    )
     org_id: str = Field(foreign_key="organizations.id", max_length=20, index=True)
     user_id: str = Field(foreign_key="users.id", max_length=20, index=True)
     mcp_server_id: str = Field(foreign_key="mcp_servers.id", max_length=20, index=True)
@@ -93,11 +72,9 @@ class UserMCPCredential(SQLModel, table=True):
         default=None, foreign_key="credentials.id", max_length=20
     )
     oauth_expires_at: datetime | None = None
-    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
-    updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
-class WorkspaceMCPBinding(SQLModel, table=True):
+class WorkspaceMCPBinding(SQLModel, TimestampMixin, table=True):
     """Org-wide server to workspace visibility binding.
 
     Pure association — composite PK; no public_id."""
@@ -114,8 +91,6 @@ class WorkspaceMCPBinding(SQLModel, table=True):
     )
     enabled: bool = Field(default=True)
     created_by_user_id: str = Field(foreign_key="users.id", max_length=20)
-    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
-    updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
 _MCP_SERVER_TABLE = SQLModel.metadata.tables["mcp_servers"]
