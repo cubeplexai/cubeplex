@@ -4,9 +4,13 @@ from datetime import UTC, datetime
 
 from sqlalchemy import Index
 from sqlmodel import Field, SQLModel
-from uuid_utils import uuid7
 
 from cubebox.models.mixins import OrgScopedMixin
+from cubebox.models.public_id import (
+    PREFIX_BILLING_EVENT,
+    PREFIX_BILLING_LLM_EVENT,
+    generate_public_id,
+)
 
 
 class BillingEvent(SQLModel, OrgScopedMixin, table=True):
@@ -19,9 +23,13 @@ class BillingEvent(SQLModel, OrgScopedMixin, table=True):
         Index("ix_billing_events_conversation", "conversation_id"),
     )
 
-    id: str = Field(default_factory=lambda: str(uuid7()), primary_key=True, max_length=36)
-    user_id: str = Field(max_length=36, index=True)
-    conversation_id: str = Field(max_length=36)
+    id: str = Field(
+        default_factory=lambda: generate_public_id(PREFIX_BILLING_EVENT),
+        primary_key=True,
+        max_length=20,
+    )
+    user_id: str = Field(foreign_key="users.id", max_length=20, index=True)
+    conversation_id: str = Field(foreign_key="conversations.id", max_length=20)
     event_type: str = Field(max_length=32)  # "llm_call" | "sandbox_compute" | …
     cost_amount_micro: int = Field(default=0)  # amount × 10⁶ in `currency`
     currency: str = Field(default="USD", max_length=3)
@@ -41,8 +49,12 @@ class LlmBillingEvent(SQLModel, table=True):
         Index("ix_billing_llm_events_parent_run_id", "parent_run_id"),
     )
 
-    id: str = Field(default_factory=lambda: str(uuid7()), primary_key=True, max_length=36)
-    billing_event_id: str = Field(max_length=36, foreign_key="billing_events.id", index=True)
+    id: str = Field(
+        default_factory=lambda: generate_public_id(PREFIX_BILLING_LLM_EVENT),
+        primary_key=True,
+        max_length=20,
+    )
+    billing_event_id: str = Field(foreign_key="billing_events.id", max_length=20, index=True)
     provider: str = Field(max_length=64)
     model_id: str = Field(max_length=128)
     input_tokens: int = Field(default=0)
@@ -53,6 +65,8 @@ class LlmBillingEvent(SQLModel, table=True):
     price_output_per_mtok_micro: int = Field(default=0)
     price_cache_read_per_mtok_micro: int = Field(default=0)
     price_cache_write_per_mtok_micro: int = Field(default=0)
-    parent_run_id: str | None = Field(default=None, max_length=36)  # set for subagent calls
+    parent_run_id: str | None = Field(
+        default=None, max_length=64
+    )  # LangSmith external UUID, not our DB row
     subagent_depth: int = Field(default=0)
     error_class: str | None = Field(default=None, max_length=128)
