@@ -47,7 +47,7 @@ async def seed_system_providers_from_config(session: AsyncSession) -> None:
                 base_url=base_url,
                 auth_type="api_key",
                 enabled=True,
-                created_by_user_id="system",
+                created_by_user_id=None,
             )
             session.add(provider)
             await session.flush()

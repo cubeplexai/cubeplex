@@ -42,7 +42,9 @@ class Provider(SQLModel, table=True):
     extra_body: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
     extra_headers: dict[str, str] = Field(default_factory=dict, sa_column=Column(JSON))
     enabled: bool = Field(default=True)
-    created_by_user_id: str = Field(foreign_key="users.id", max_length=20)
+    created_by_user_id: str | None = Field(
+        default=None, foreign_key="users.id", max_length=20, nullable=True
+    )
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
