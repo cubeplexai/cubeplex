@@ -5,9 +5,14 @@ from typing import Any
 
 from sqlalchemy import JSON, Column, Index, UniqueConstraint
 from sqlmodel import Field, SQLModel
-from uuid_utils import uuid7
 
 from cubebox.models.mixins import OrgScopedMixin
+from cubebox.models.public_id import (
+    PREFIX_ORG_SKILL_INSTALL,
+    PREFIX_SKILL,
+    PREFIX_SKILL_VERSION,
+    generate_public_id,
+)
 
 
 class Skill(SQLModel, table=True):
@@ -19,10 +24,16 @@ class Skill(SQLModel, table=True):
 
     __tablename__ = "skills"
 
-    id: str = Field(default_factory=lambda: str(uuid7()), primary_key=True, max_length=36)
+    id: str = Field(
+        default_factory=lambda: generate_public_id(PREFIX_SKILL),
+        primary_key=True,
+        max_length=20,
+    )
     name: str = Field(max_length=128)
     source: str = Field(max_length=16)  # "preinstalled" | "uploaded"
-    owner_org_id: str | None = Field(default=None, max_length=36, index=True)
+    owner_org_id: str | None = Field(
+        default=None, foreign_key="organizations.id", max_length=20, index=True
+    )
     current_version: str = Field(max_length=32)
     description: str = Field(max_length=1024)
     keywords: list[str] = Field(default_factory=list, sa_column=Column(JSON))
@@ -41,15 +52,19 @@ class SkillVersion(SQLModel, table=True):
 
     __tablename__ = "skill_versions"
 
-    id: str = Field(default_factory=lambda: str(uuid7()), primary_key=True, max_length=36)
-    skill_id: str = Field(max_length=36, index=True)  # refs skills.id
+    id: str = Field(
+        default_factory=lambda: generate_public_id(PREFIX_SKILL_VERSION),
+        primary_key=True,
+        max_length=20,
+    )
+    skill_id: str = Field(foreign_key="skills.id", max_length=20, index=True)
     version: str = Field(max_length=32)
     description: str = Field(max_length=1024)
     keywords: list[str] = Field(default_factory=list, sa_column=Column(JSON))
     raw_metadata: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
     storage_prefix: str = Field(max_length=512)
     entry_file: str = Field(max_length=128, default="SKILL.md")
-    uploaded_by_user_id: str | None = Field(default=None, max_length=36)
+    uploaded_by_user_id: str | None = Field(default=None, foreign_key="users.id", max_length=20)
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
     __table_args__ = (UniqueConstraint("skill_id", "version", name="uq_skill_version"),)
@@ -60,44 +75,47 @@ class OrgSkillInstall(SQLModel, table=True):
 
     __tablename__ = "org_skill_installs"
 
-    id: str = Field(default_factory=lambda: str(uuid7()), primary_key=True, max_length=36)
-    org_id: str = Field(max_length=36, index=True)  # refs organizations.id
-    skill_id: str = Field(max_length=36, index=True)  # refs skills.id
+    id: str = Field(
+        default_factory=lambda: generate_public_id(PREFIX_ORG_SKILL_INSTALL),
+        primary_key=True,
+        max_length=20,
+    )
+    org_id: str = Field(foreign_key="organizations.id", max_length=20, index=True)
+    skill_id: str = Field(foreign_key="skills.id", max_length=20, index=True)
     installed_version: str = Field(max_length=32)
-    installed_by_user_id: str = Field(max_length=36)  # refs users.id
+    installed_by_user_id: str = Field(foreign_key="users.id", max_length=20)
     installed_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
-    # If True, skill is automatically active in all workspaces (no explicit binding needed).
-    # If False, workspace admins must explicitly enable it per workspace.
     auto_bind: bool = Field(default=False)
 
     __table_args__ = (UniqueConstraint("org_id", "skill_id", name="uq_org_skill_install"),)
 
 
 class WorkspaceSkillBinding(SQLModel, OrgScopedMixin, table=True):
-    """Workspace-level enablement of an org-installed skill."""
+    """Workspace-level enablement of an org-installed skill.
+
+    Pure association — composite PK; no public_id."""
 
     __tablename__ = "workspace_skill_bindings"
+    __table_args__ = (Index("ix_wsb_org_ws", "org_id", "workspace_id"),)
 
-    id: str = Field(default_factory=lambda: str(uuid7()), primary_key=True, max_length=36)
-    org_skill_install_id: str = Field(max_length=36, index=True)  # refs org_skill_installs.id
+    workspace_id: str = Field(
+        primary_key=True, foreign_key="workspaces.id", max_length=20, index=True
+    )
+    org_skill_install_id: str = Field(
+        primary_key=True, foreign_key="org_skill_installs.id", max_length=20, index=True
+    )
     enabled: bool = Field(default=True)
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
-    __table_args__ = (
-        UniqueConstraint("workspace_id", "org_skill_install_id", name="uq_workspace_skill_binding"),
-        Index("ix_wsb_org_ws", "org_id", "workspace_id"),
-    )
-
 
 class OrgPreinstalledTombstone(SQLModel, table=True):
-    """Records that an org admin uninstalled a preinstalled skill; blocks reseed-restore."""
+    """Records that an org admin uninstalled a preinstalled skill; blocks reseed-restore.
+
+    Pure state marker — composite PK; no public_id."""
 
     __tablename__ = "org_preinstalled_tombstones"
 
-    id: str = Field(default_factory=lambda: str(uuid7()), primary_key=True, max_length=36)
-    org_id: str = Field(max_length=36, index=True)  # refs organizations.id
-    skill_id: str = Field(max_length=36, index=True)  # refs skills.id
-    hidden_by_user_id: str = Field(max_length=36)  # refs users.id
+    org_id: str = Field(primary_key=True, foreign_key="organizations.id", max_length=20, index=True)
+    skill_id: str = Field(primary_key=True, foreign_key="skills.id", max_length=20, index=True)
+    hidden_by_user_id: str = Field(foreign_key="users.id", max_length=20)
     hidden_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
-
-    __table_args__ = (UniqueConstraint("org_id", "skill_id", name="uq_org_preinstalled_tombstone"),)
