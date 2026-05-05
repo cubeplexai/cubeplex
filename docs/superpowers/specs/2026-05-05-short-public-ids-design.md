@@ -116,10 +116,11 @@ New module: `backend/cubebox/models/public_id.py`
 
 ```python
 def generate_public_id(prefix: str) -> str: ...
-def parse_public_id(pid: str) -> tuple[str, str]:  # (prefix, body)
-    """Validates shape, raises ValueError on malformed input. Used by route
-    dependencies that receive an ID from a URL/path."""
 ```
+
+That is the entire public surface. No `parse_public_id` / shape-validation
+helper — malformed IDs from clients are filtered naturally by the DB lookup
+returning no row (→ 404), and the cost of a missing-row lookup is trivial.
 
 Implementation notes:
 - `secrets.randbits(42)` for randomness.
@@ -250,31 +251,16 @@ declared as a real FK with `max_length=20`**.
 
 ### 4.1 Repositories
 
-`ScopedRepository[T]` already filters by `(org_id, workspace_id)`. No
-structural change. Add one method to the base class for clarity:
-
-```python
-def get_by_id(self, public_id: str) -> T | None: ...
-```
-
-This is a no-op rename (the column is `id`) but provides a single place to
-add prefix validation later (e.g. reject mismatched prefixes early to avoid
-expensive lookups).
+`ScopedRepository[T]` already filters by `(org_id, workspace_id)` and exposes
+the row via its existing `get` / `get_by_id` API. No structural change —
+column is still named `id`, so existing query call sites continue to work.
 
 ### 4.2 Routes / dependencies
 
 Existing FastAPI dependencies that resolve `workspace_id` / `conversation_id`
-from the URL stay structurally unchanged — they already accept a string and do
-a DB lookup. We add light input validation:
-
-```python
-def get_conversation(conv_id: str = Path(...)) -> Conversation:
-    parse_public_id(conv_id)  # ValueError -> 404 (mapped via exception handler)
-    ...
-```
-
-`parse_public_id` enforces the `^{2-4 lowercase}-{14 base62}$` shape so
-malformed IDs short-circuit to 404 without hitting the DB.
+from the URL stay unchanged. They accept a string from the path, look up the
+row, and 404 on miss — that path already handles malformed IDs correctly
+without any pre-validation.
 
 ### 4.3 API schemas (Pydantic / response models)
 
@@ -310,7 +296,6 @@ renaming, no payload version bump.
   - Format shape and base62 alphabet.
   - Monotonicity within one process across ms boundaries (mock clock).
   - Same-ms rand bump and ms-spill on overflow.
-  - `parse_public_id` rejects malformed inputs.
 
 ### 5.2 Frontend
 
@@ -350,7 +335,6 @@ phases:
 1. Generator + prefix registry (`public_id.py`) with unit tests.
 2. Model + mixin updates, tablewise FK rewiring.
 3. Alembic baseline reset.
-4. Repository `get_by_id` polish + route input validation.
-5. Database reset across worktrees + run full backend E2E.
-6. Frontend Playwright pass and any fixture updates.
-7. Merge plan: explicit DB-rebuild step in the PR description.
+4. Database reset across worktrees + run full backend E2E.
+5. Frontend Playwright pass and any fixture updates.
+6. Merge plan: explicit DB-rebuild step in the PR description.
