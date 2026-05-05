@@ -14,7 +14,7 @@ class Role(StrEnum):
 class Membership(SQLModel, table=True):
     __tablename__ = "memberships"
 
-    user_id: str = Field(primary_key=True, max_length=36)
-    workspace_id: str = Field(primary_key=True, max_length=36)
+    user_id: str = Field(primary_key=True, foreign_key="users.id", max_length=20)
+    workspace_id: str = Field(primary_key=True, foreign_key="workspaces.id", max_length=20)
     role: str = Field(max_length=32)  # values from Role enum
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
