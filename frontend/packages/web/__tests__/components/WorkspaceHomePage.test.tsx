@@ -9,6 +9,7 @@ const storeMocks = vi.hoisted(() => ({
   push: vi.fn(),
   createConversation: vi.fn(),
   setConversationState: vi.fn(),
+  renameConversation: vi.fn(),
   send: vi.fn(),
   upload: vi.fn(),
   clear: vi.fn(),
@@ -38,8 +39,8 @@ vi.mock('@cubebox/core', () => {
   return {
     createApiClient: () => ({
       setWorkspaceId: storeMocks.setWorkspaceId,
-      put: vi.fn().mockResolvedValue({ ok: true }),
     }),
+    renameConversation: storeMocks.renameConversation,
     useAttachmentStore,
     useConversationStore: Object.assign(
       (selector?: (state: { create: typeof storeMocks.createConversation }) => unknown) => {
@@ -79,6 +80,7 @@ describe('WorkspaceHomePage', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     storeMocks.createConversation.mockResolvedValue({ id: 'conv-1' })
+    storeMocks.renameConversation.mockResolvedValue({ id: 'conv-1', title: 'Reply with' })
     storeMocks.send.mockResolvedValue(undefined)
     storeMocks.attachedIds.mockReturnValue(['file-1'])
   })

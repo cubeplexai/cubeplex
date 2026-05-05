@@ -44,9 +44,13 @@ export async function renameConversation(
   id: string,
   title: string,
 ): Promise<Conversation> {
-  const res = await client.post(`/api/v1/conversations/${id}?_method=PATCH`, {
-    title,
-  })
+  // Backend route is `@router.patch("/{conversation_id}")` with `title` as a
+  // query parameter, not a body. There is no method-override middleware,
+  // so we call PATCH directly.
+  const res = await client.patch(
+    `/api/v1/conversations/${id}?title=${encodeURIComponent(title)}`,
+    {},
+  )
   if (!res.ok) throw await toApiError(res)
   return res.json() as Promise<Conversation>
 }

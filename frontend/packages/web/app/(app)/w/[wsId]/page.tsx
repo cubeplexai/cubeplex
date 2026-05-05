@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { useTranslations } from 'next-intl'
 import {
   createApiClient,
+  renameConversation,
   useAttachmentStore,
   useConversationStore,
   useMessageStore,
@@ -64,7 +65,9 @@ export default function WorkspaceHomePage({
         })
 
       const title = content.trim() ? content.trim().slice(0, 30) : 'Files'
-      await client.put(`/api/v1/conversations/${convId}/title`, { title }).catch(() => {})
+      await renameConversation(client, convId, title).catch((err) => {
+        console.error('Failed to set conversation title:', err)
+      })
 
       useAttachmentStore.getState().clear(convId)
       send(client, convId, content, attachedIds, optimisticAttachments).catch((err) => {
