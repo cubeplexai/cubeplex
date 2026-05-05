@@ -48,6 +48,7 @@ export interface MessageStore {
     conversationId: string,
     content: string,
     attachmentIds?: string[],
+    attachments?: import('../types').MessageAttachment[],
   ): Promise<void>
   clearStream(): void
   clearLastRunStatus(): void
@@ -705,12 +706,19 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
     }
   },
 
-  async send(client: ApiClient, conversationId: string, content: string, attachmentIds?: string[]) {
+  async send(
+    client: ApiClient,
+    conversationId: string,
+    content: string,
+    attachmentIds?: string[],
+    attachments?: import('../types').MessageAttachment[],
+  ) {
     const userMessage: Message = {
       id: `temp-${Date.now()}`,
       role: 'user',
       content,
       created_at: new Date().toISOString(),
+      attachments: attachments && attachments.length > 0 ? attachments : null,
     }
 
     set((state) => ({

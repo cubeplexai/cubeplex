@@ -1,6 +1,7 @@
 """Conversation attachments API."""
 
 from typing import Annotated, Literal
+from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 from fastapi.responses import Response
@@ -22,6 +23,19 @@ router = APIRouter(
 
 def _base_url(workspace_id: str, conversation_id: str) -> str:
     return f"/api/v1/ws/{workspace_id}/conversations/{conversation_id}/attachments"
+
+
+def _content_disposition(filename: str) -> str:
+    """Build a Content-Disposition header that survives non-ASCII filenames.
+
+    HTTP headers are latin-1; raw UTF-8 (e.g. CJK characters) raises
+    UnicodeEncodeError when starlette serializes. RFC 5987 lets us emit
+    both an ASCII fallback and a percent-encoded UTF-8 form via
+    ``filename*=UTF-8''<quoted>``; modern browsers prefer ``filename*``.
+    """
+    ascii_fallback = filename.encode("ascii", "replace").decode("ascii").replace('"', "")
+    quoted = quote(filename, safe="")
+    return f"inline; filename=\"{ascii_fallback}\"; filename*=UTF-8''{quoted}"
 
 
 async def _require_conversation(
@@ -156,7 +170,7 @@ async def download_attachment(
         content=data,
         media_type=row.mime_type or content_type,
         headers={
-            "Content-Disposition": f'inline; filename="{row.filename}"',
+            "Content-Disposition": _content_disposition(row.filename),
             "Cache-Control": "private, max-age=3600",
         },
     )
