@@ -23,6 +23,7 @@ from cubebox.streams.run_events import (
     mark_run_stale,
 )
 from cubebox.streams.run_manager import RunManager
+from tests.e2e.conftest import DEFAULT_WS_ID
 
 pytestmark = pytest.mark.e2e
 
@@ -251,7 +252,7 @@ async def test_post_messages_returns_503_when_draining(
 ) -> None:
     # Create a conversation first while still accepting.
     create_resp = await memory_client.post(
-        "/api/v1/ws/default-ws/conversations", params={"title": "drain-test"}
+        f"/api/v1/ws/{DEFAULT_WS_ID}/conversations", params={"title": "drain-test"}
     )
     assert create_resp.status_code == 201
     conv_id = create_resp.json()["id"]
@@ -259,7 +260,7 @@ async def test_post_messages_returns_503_when_draining(
     app_state_drain.enter_draining()
     try:
         resp = await memory_client.post(
-            f"/api/v1/ws/default-ws/conversations/{conv_id}/messages",
+            f"/api/v1/ws/{DEFAULT_WS_ID}/conversations/{conv_id}/messages",
             json={"content": "hi"},
         )
         assert resp.status_code == 503
@@ -453,7 +454,7 @@ async def test_bootstrap_clears_stale_run_and_sets_last_run_status(
     from cubebox.streams.run_events import _active_run_key, create_run
 
     create_resp = await memory_client.post(
-        "/api/v1/ws/default-ws/conversations", params={"title": "stale-test"}
+        f"/api/v1/ws/{DEFAULT_WS_ID}/conversations", params={"title": "stale-test"}
     )
     assert create_resp.status_code == 201
     conv_id = create_resp.json()["id"]
@@ -480,7 +481,7 @@ async def test_bootstrap_clears_stale_run_and_sets_last_run_status(
         f"{prefix}:run_meta:v2:{run_id}", "last_event_at", long_ago
     )
 
-    resp = await memory_client.get(f"/api/v1/ws/default-ws/conversations/{conv_id}/bootstrap")
+    resp = await memory_client.get(f"/api/v1/ws/{DEFAULT_WS_ID}/conversations/{conv_id}/bootstrap")
     assert resp.status_code == 200
     body = resp.json()
     assert body["active_run"] is None
@@ -500,7 +501,7 @@ async def test_stream_subscribe_emits_stale_error_for_dead_run(
     from cubebox.streams.run_events import create_run
 
     create_resp = await memory_client.post(
-        "/api/v1/ws/default-ws/conversations", params={"title": "stale-stream"}
+        f"/api/v1/ws/{DEFAULT_WS_ID}/conversations", params={"title": "stale-stream"}
     )
     conv_id = create_resp.json()["id"]
 
@@ -523,7 +524,7 @@ async def test_stream_subscribe_emits_stale_error_for_dead_run(
 
     async with memory_client.stream(
         "GET",
-        f"/api/v1/ws/default-ws/conversations/{conv_id}/runs/{run_id}/stream",
+        f"/api/v1/ws/{DEFAULT_WS_ID}/conversations/{conv_id}/runs/{run_id}/stream",
     ) as resp:
         body = await resp.aread()
     text = body.decode()

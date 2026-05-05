@@ -61,9 +61,13 @@ async def test_conversation_invisible_to_other_workspace(unauthenticated_memory_
     assert "cubebox_auth" in client.cookies
 
     csrf_a = await _seed_csrf(client)
+    # Fetch the org_id from A's auto-created workspace (created by on_after_register).
+    r = await client.get("/api/v1/workspaces")
+    assert r.status_code == 200, r.text
+    a_org_id = r.json()[0]["org_id"]
     r = await client.post(
         "/api/v1/workspaces",
-        json={"name": "A's ws", "org_id": "default-org"},
+        json={"name": "A's ws", "org_id": a_org_id},
         headers={"X-CSRF-Token": csrf_a},
     )
     assert r.status_code == 201, r.text
@@ -99,9 +103,13 @@ async def test_conversation_invisible_to_other_workspace(unauthenticated_memory_
     assert r.status_code in (200, 204), r.text
 
     csrf_b = await _seed_csrf(client)
+    # Fetch the org_id from B's auto-created workspace (created by on_after_register).
+    r = await client.get("/api/v1/workspaces")
+    assert r.status_code == 200, r.text
+    b_org_id = r.json()[0]["org_id"]
     r = await client.post(
         "/api/v1/workspaces",
-        json={"name": "B's ws", "org_id": "default-org"},
+        json={"name": "B's ws", "org_id": b_org_id},
         headers={"X-CSRF-Token": csrf_b},
     )
     assert r.status_code == 201, r.text

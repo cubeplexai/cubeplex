@@ -111,8 +111,8 @@ async def test_run_bootstrap_and_stream_replay(monkeypatch: pytest.MonkeyPatch) 
     fake_user = SimpleNamespace(id="test-user", email="test@example.com")
     ctx = RequestContext(  # type: ignore[arg-type]
         user=fake_user,
-        org_id="default-org",
-        workspace_id="default-ws",
+        org_id="org-00000000000000",
+        workspace_id="ws-00000000000000",
         role=Role.ADMIN,
     )
 
@@ -225,8 +225,8 @@ async def test_run_recovers_citation_counter_from_history(
     fake_user = SimpleNamespace(id="test-user", email="test@example.com")
     ctx = RequestContext(  # type: ignore[arg-type]
         user=fake_user,
-        org_id="default-org",
-        workspace_id="default-ws",
+        org_id="org-00000000000000",
+        workspace_id="ws-00000000000000",
         role=Role.ADMIN,
     )
 
@@ -302,8 +302,8 @@ async def test_run_appends_db_mcp_tools_per_run(monkeypatch: pytest.MonkeyPatch)
     fake_user = SimpleNamespace(id="test-user", email="test@example.com")
     ctx = RequestContext(  # type: ignore[arg-type]
         user=fake_user,
-        org_id="default-org",
-        workspace_id="default-ws",
+        org_id="org-00000000000000",
+        workspace_id="ws-00000000000000",
         role=Role.ADMIN,
     )
 
@@ -331,8 +331,8 @@ async def test_run_appends_db_mcp_tools_per_run(monkeypatch: pytest.MonkeyPatch)
     captured_tools: list[object] = []
 
     async def _load_db_tools(**kwargs):
-        assert kwargs["org_id"] == "default-org"
-        assert kwargs["workspace_id"] == "default-ws"
+        assert kwargs["org_id"] == "org-00000000000000"
+        assert kwargs["workspace_id"] == "ws-00000000000000"
         assert kwargs["user_id"] == "test-user"
         return [db_tool]
 

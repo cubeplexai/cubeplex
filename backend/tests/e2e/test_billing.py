@@ -12,10 +12,11 @@ from sqlalchemy.pool import NullPool
 
 from cubebox.db.engine import _build_database_url
 from cubebox.models.billing import BillingEvent, LlmBillingEvent
+from tests.e2e.conftest import DEFAULT_WS_ID
 
 pytestmark = pytest.mark.e2e
 
-_DEFAULT_WS = "default-ws"
+_DEFAULT_WS = DEFAULT_WS_ID
 
 
 @asynccontextmanager
