@@ -1,15 +1,15 @@
 """Attachment model for per-conversation file uploads."""
 
-from datetime import UTC, datetime
+from datetime import datetime
+from typing import ClassVar
 
 from sqlalchemy import Index
-from sqlmodel import Field, SQLModel
+from sqlmodel import Field
 
-from cubebox.models.mixins import OrgScopedMixin
-from cubebox.models.public_id import PREFIX_ATTACHMENT, generate_public_id
+from cubebox.models.mixins import CubeboxBase, OrgScopedMixin
 
 
-class Attachment(SQLModel, OrgScopedMixin, table=True):
+class Attachment(CubeboxBase, OrgScopedMixin, table=True):
     """A user-uploaded file scoped to a single conversation.
 
     Status state machine:
@@ -18,17 +18,13 @@ class Attachment(SQLModel, OrgScopedMixin, table=True):
     Deletion is physical (no soft-delete state).
     """
 
+    _PREFIX: ClassVar[str] = "atch"
     __tablename__ = "attachments"
     __table_args__ = (
         Index("ix_attachments_conv_status", "conversation_id", "status"),
         Index("ix_attachments_org_ws", "org_id", "workspace_id"),
     )
 
-    id: str = Field(
-        default_factory=lambda: generate_public_id(PREFIX_ATTACHMENT),
-        primary_key=True,
-        max_length=20,
-    )
     conversation_id: str = Field(foreign_key="conversations.id", max_length=20, index=True)
     uploader_user_id: str = Field(foreign_key="users.id", max_length=20)
 
@@ -46,6 +42,3 @@ class Attachment(SQLModel, OrgScopedMixin, table=True):
 
     status: str = Field(default="pending", max_length=16)
     attached_at: datetime | None = None
-
-    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
-    updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
