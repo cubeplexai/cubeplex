@@ -6,9 +6,9 @@ from typing import Any
 from sqlalchemy import Column, Index
 from sqlalchemy.types import JSON
 from sqlmodel import Field, SQLModel
-from uuid_utils import uuid7
 
 from cubebox.models.mixins import OrgScopedMixin
+from cubebox.models.public_id import PREFIX_USER_SANDBOX, generate_public_id
 
 
 class UserSandbox(SQLModel, OrgScopedMixin, table=True):
@@ -25,8 +25,12 @@ class UserSandbox(SQLModel, OrgScopedMixin, table=True):
         Index("ix_user_sandboxes_org_ws", "org_id", "workspace_id"),
     )
 
-    id: str = Field(default_factory=lambda: str(uuid7()), primary_key=True)
-    user_id: str = Field(max_length=64, index=True)
+    id: str = Field(
+        default_factory=lambda: generate_public_id(PREFIX_USER_SANDBOX),
+        primary_key=True,
+        max_length=20,
+    )
+    user_id: str = Field(foreign_key="users.id", max_length=20, index=True)
     sandbox_id: str = Field(max_length=255, unique=True)
     status: str = Field(default="running", max_length=20)
     image: str = Field(max_length=512)
