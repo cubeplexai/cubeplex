@@ -4,9 +4,9 @@ from datetime import UTC, datetime
 
 from sqlalchemy import Index
 from sqlmodel import Field, SQLModel
-from uuid_utils import uuid7
 
 from cubebox.models.mixins import OrgScopedMixin
+from cubebox.models.public_id import PREFIX_ARTIFACT, generate_public_id
 from cubebox.utils.time import utc_isoformat
 
 
@@ -16,8 +16,12 @@ class Artifact(SQLModel, OrgScopedMixin, table=True):
     __tablename__ = "artifacts"
     __table_args__ = (Index("ix_artifacts_org_ws", "org_id", "workspace_id"),)
 
-    id: str = Field(default_factory=lambda: str(uuid7()), primary_key=True)
-    conversation_id: str = Field(foreign_key="conversations.id", index=True)
+    id: str = Field(
+        default_factory=lambda: generate_public_id(PREFIX_ARTIFACT),
+        primary_key=True,
+        max_length=20,
+    )
+    conversation_id: str = Field(foreign_key="conversations.id", max_length=20, index=True)
     name: str = Field(max_length=255)
     artifact_type: str = Field(max_length=50)
     path: str = Field(max_length=1024)
