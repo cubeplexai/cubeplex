@@ -7,12 +7,13 @@ from sqlmodel import Field
 class OrgScopedMixin:
     """Mixin for tables that belong to an org + workspace.
 
-    Adds org_id and workspace_id columns. Composite index defined on
-    each concrete table via __table_args__ — see e.g. Conversation.
+    Adds org_id and workspace_id columns, both as real foreign keys to the
+    parent tables. The shared composite index lives on each concrete table
+    via ``__table_args__`` (see e.g. ``Conversation``).
     """
 
-    org_id: str = Field(max_length=36, index=True)
-    workspace_id: str = Field(max_length=36, index=True)
+    org_id: str = Field(foreign_key="organizations.id", max_length=20, index=True)
+    workspace_id: str = Field(foreign_key="workspaces.id", max_length=20, index=True)
 
 
 def org_scope_index(table_name: str) -> Index:
