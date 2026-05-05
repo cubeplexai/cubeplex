@@ -57,7 +57,7 @@ async def test_seed_creates_providers(clean_db: AsyncSession) -> None:
 
     for p in providers:
         assert p.org_id is None
-        assert p.created_by_user_id == "system"
+        assert p.created_by_user_id is None
         models = (
             (await clean_db.execute(select(Model).where(Model.provider_id == p.id))).scalars().all()
         )
@@ -74,7 +74,7 @@ async def test_seed_updates_existing_provider_url(clean_db: AsyncSession) -> Non
         base_url="http://old-url",
         auth_type="api_key",
         enabled=True,
-        created_by_user_id="system",
+        created_by_user_id=None,
     )
     clean_db.add(p)
     await clean_db.commit()
