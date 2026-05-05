@@ -81,11 +81,26 @@ export function InputBar({
       const client = createApiClient('')
       if (workspaceId) client.setWorkspaceId(workspaceId)
       const ids = [...attachedIds]
+      const optimisticAttachments = stagingItems
+        .filter((u) => u.status === 'done' && u.serverFile)
+        .map((u) => {
+          const f = u.serverFile!
+          return {
+            id: f.id,
+            filename: f.filename,
+            kind: f.kind,
+            size_bytes: f.size_bytes,
+            width: f.width,
+            height: f.height,
+            thumbnail_url: f.thumbnail_url,
+            download_url: f.download_url,
+          }
+        })
       const text = content
       setContent('')
       resetTextareaHeight()
       clearStaging(conversationId!)
-      await send(client, conversationId!, text, ids)
+      await send(client, conversationId!, text, ids, optimisticAttachments)
     } catch (err) {
       console.error('Failed to send message:', err)
     } finally {

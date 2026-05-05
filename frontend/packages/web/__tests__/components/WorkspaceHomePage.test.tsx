@@ -111,7 +111,13 @@ describe('WorkspaceHomePage', () => {
     fireEvent.click(screen.getByTestId('send-button'))
 
     await waitFor(() => {
-      expect(storeMocks.send).toHaveBeenCalledWith(expect.anything(), 'conv-1', '', ['file-1'])
+      expect(storeMocks.send).toHaveBeenCalledWith(
+        expect.anything(),
+        'conv-1',
+        '',
+        ['file-1'],
+        expect.any(Array),
+      )
     })
     expect(storeMocks.push).toHaveBeenCalledWith('/w/ws-1/conversations/conv-1')
     // Conversation creation is cached — second call (on submit) does NOT re-create.

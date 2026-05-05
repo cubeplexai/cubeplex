@@ -40,14 +40,34 @@ export default function WorkspaceHomePage({
     try {
       const convId = await ensureConversation()
 
+      const stagingItems = useAttachmentStore.getState().staging[convId] ?? []
       const attachedIds = useAttachmentStore.getState().attachedIds(convId)
       if (!content.trim() && attachedIds.length === 0) return
+
+      // Snapshot attachment metadata so the optimistic user message renders
+      // attachments above the bubble during streaming, matching the
+      // post-refresh layout where MessageList reads them from history.
+      const optimisticAttachments = stagingItems
+        .filter((u) => u.status === 'done' && u.serverFile)
+        .map((u) => {
+          const f = u.serverFile!
+          return {
+            id: f.id,
+            filename: f.filename,
+            kind: f.kind,
+            size_bytes: f.size_bytes,
+            width: f.width,
+            height: f.height,
+            thumbnail_url: f.thumbnail_url,
+            download_url: f.download_url,
+          }
+        })
 
       const title = content.trim() ? content.trim().slice(0, 30) : 'Files'
       await client.put(`/api/v1/conversations/${convId}/title`, { title }).catch(() => {})
 
       useAttachmentStore.getState().clear(convId)
-      send(client, convId, content, attachedIds).catch((err) => {
+      send(client, convId, content, attachedIds, optimisticAttachments).catch((err) => {
         console.error('Failed to send message:', err)
       })
       router.push(`/w/${wsId}/conversations/${convId}`)
