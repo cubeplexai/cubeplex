@@ -1,30 +1,21 @@
 """Provider and Model — LLM provider/model configuration tables."""
 
-from datetime import UTC, datetime
-from typing import Any
+from typing import Any, ClassVar
 
 from sqlalchemy import Column, UniqueConstraint
 from sqlalchemy.types import JSON
-from sqlmodel import Field, SQLModel
+from sqlmodel import Field
 
-from cubebox.models.public_id import (
-    PREFIX_MODEL,
-    PREFIX_PROVIDER,
-    generate_public_id,
-)
+from cubebox.models.mixins import CubeboxBase
 
 
-class Provider(SQLModel, table=True):
+class Provider(CubeboxBase, table=True):
     """LLM provider — system-level (org_id=NULL) or org-specific."""
 
+    _PREFIX: ClassVar[str] = "prv"
     __tablename__ = "providers"
     __table_args__ = (UniqueConstraint("org_id", "name", name="uq_provider_org_name"),)
 
-    id: str = Field(
-        default_factory=lambda: generate_public_id(PREFIX_PROVIDER),
-        primary_key=True,
-        max_length=20,
-    )
     org_id: str | None = Field(
         default=None, foreign_key="organizations.id", max_length=20, index=True
     )
@@ -45,21 +36,15 @@ class Provider(SQLModel, table=True):
     created_by_user_id: str | None = Field(
         default=None, foreign_key="users.id", max_length=20, nullable=True
     )
-    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
-    updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
-class Model(SQLModel, table=True):
+class Model(CubeboxBase, table=True):
     """LLM model — belongs to a provider."""
 
+    _PREFIX: ClassVar[str] = "mdl"
     __tablename__ = "models"
     __table_args__ = (UniqueConstraint("provider_id", "model_id", name="uq_model_provider_model"),)
 
-    id: str = Field(
-        default_factory=lambda: generate_public_id(PREFIX_MODEL),
-        primary_key=True,
-        max_length=20,
-    )
     org_id: str | None = Field(
         default=None, foreign_key="organizations.id", max_length=20, index=True
     )
@@ -77,5 +62,3 @@ class Model(SQLModel, table=True):
     extra_body: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
     extra_headers: dict[str, str] = Field(default_factory=dict, sa_column=Column(JSON))
     enabled: bool = Field(default=True)
-    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
-    updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))

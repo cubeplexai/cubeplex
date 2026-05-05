@@ -1,32 +1,25 @@
 """Credential vault models."""
 
-from datetime import UTC, datetime
-from typing import Any
+from typing import Any, ClassVar
 
 from sqlalchemy import JSON, Column, UniqueConstraint
-from sqlmodel import Field, SQLModel
+from sqlmodel import Field
 
-from cubebox.models.public_id import PREFIX_CREDENTIAL, generate_public_id
+from cubebox.models.mixins import CubeboxBase
 
 
-class Credential(SQLModel, table=True):
+class Credential(CubeboxBase, table=True):
     """Vault entry. v1 only kind='mcp_server'; future kinds extend without schema changes."""
 
+    _PREFIX: ClassVar[str] = "cred"
     __tablename__ = "credentials"
     __table_args__ = (
         UniqueConstraint("org_id", "kind", "name", name="uq_credential_org_kind_name"),
     )
 
-    id: str = Field(
-        default_factory=lambda: generate_public_id(PREFIX_CREDENTIAL),
-        primary_key=True,
-        max_length=20,
-    )
     org_id: str = Field(foreign_key="organizations.id", max_length=20, index=True)
     kind: str = Field(max_length=32)
     name: str = Field(max_length=128)
     value_encrypted: bytes
     cred_metadata: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
     created_by_user_id: str = Field(foreign_key="users.id", max_length=20)
-    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
-    updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
