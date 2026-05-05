@@ -5,7 +5,13 @@ from typing import Any
 
 from sqlalchemy import JSON, Column, Index, UniqueConstraint
 from sqlmodel import Field, SQLModel
-from uuid_utils import uuid7
+
+from cubebox.models.public_id import (
+    PREFIX_MCP_SERVER,
+    PREFIX_USER_MCP_CREDENTIAL,
+    PREFIX_WORKSPACE_MCP_CREDENTIAL,
+    generate_public_id,
+)
 
 
 class MCPServer(SQLModel, table=True):
@@ -19,16 +25,22 @@ class MCPServer(SQLModel, table=True):
         UniqueConstraint("org_id", "owner_workspace_id", "name", name="uq_mcp_server_name"),
     )
 
-    id: str = Field(default_factory=lambda: str(uuid7()), primary_key=True, max_length=36)
-    org_id: str = Field(max_length=36, index=True)
-    owner_workspace_id: str | None = Field(default=None, max_length=36, index=True)
+    id: str = Field(
+        default_factory=lambda: generate_public_id(PREFIX_MCP_SERVER),
+        primary_key=True,
+        max_length=20,
+    )
+    org_id: str = Field(foreign_key="organizations.id", max_length=20, index=True)
+    owner_workspace_id: str | None = Field(
+        default=None, foreign_key="workspaces.id", max_length=20, index=True
+    )
     name: str = Field(max_length=64)
     server_url: str = Field(max_length=2048)
     server_url_hash: str = Field(max_length=64)
     transport: str = Field(max_length=16)
     auth_method: str = Field(max_length=16)
     credential_scope: str = Field(max_length=16)
-    credential_id: str | None = Field(default=None, max_length=36)
+    credential_id: str | None = Field(default=None, foreign_key="credentials.id", max_length=20)
     oauth_client_config: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
     headers: dict[str, str] = Field(default_factory=dict, sa_column=Column(JSON))
     tools_cache: list[dict[str, Any]] = Field(default_factory=list, sa_column=Column(JSON))
@@ -37,7 +49,7 @@ class MCPServer(SQLModel, table=True):
     last_discovered_at: datetime | None = None
     timeout: float = Field(default=30.0)
     sse_read_timeout: float = Field(default=300.0)
-    created_by_user_id: str = Field(max_length=36)
+    created_by_user_id: str = Field(foreign_key="users.id", max_length=20)
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
@@ -48,12 +60,16 @@ class WorkspaceMCPCredential(SQLModel, table=True):
     __tablename__ = "workspace_mcp_credentials"
     __table_args__ = (UniqueConstraint("workspace_id", "mcp_server_id", name="uq_ws_mcp_cred"),)
 
-    id: str = Field(default_factory=lambda: str(uuid7()), primary_key=True, max_length=36)
-    org_id: str = Field(max_length=36, index=True)
-    workspace_id: str = Field(max_length=36, index=True)
-    mcp_server_id: str = Field(max_length=36, index=True)
-    credential_id: str = Field(max_length=36)
-    created_by_user_id: str = Field(max_length=36)
+    id: str = Field(
+        default_factory=lambda: generate_public_id(PREFIX_WORKSPACE_MCP_CREDENTIAL),
+        primary_key=True,
+        max_length=20,
+    )
+    org_id: str = Field(foreign_key="organizations.id", max_length=20, index=True)
+    workspace_id: str = Field(foreign_key="workspaces.id", max_length=20, index=True)
+    mcp_server_id: str = Field(foreign_key="mcp_servers.id", max_length=20, index=True)
+    credential_id: str = Field(foreign_key="credentials.id", max_length=20)
+    created_by_user_id: str = Field(foreign_key="users.id", max_length=20)
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
@@ -64,29 +80,40 @@ class UserMCPCredential(SQLModel, table=True):
     __tablename__ = "user_mcp_credentials"
     __table_args__ = (UniqueConstraint("user_id", "mcp_server_id", name="uq_user_mcp_cred"),)
 
-    id: str = Field(default_factory=lambda: str(uuid7()), primary_key=True, max_length=36)
-    org_id: str = Field(max_length=36, index=True)
-    user_id: str = Field(max_length=36, index=True)
-    mcp_server_id: str = Field(max_length=36, index=True)
-    credential_id: str = Field(max_length=36)
-    oauth_refresh_token_credential_id: str | None = Field(default=None, max_length=36)
+    id: str = Field(
+        default_factory=lambda: generate_public_id(PREFIX_USER_MCP_CREDENTIAL),
+        primary_key=True,
+        max_length=20,
+    )
+    org_id: str = Field(foreign_key="organizations.id", max_length=20, index=True)
+    user_id: str = Field(foreign_key="users.id", max_length=20, index=True)
+    mcp_server_id: str = Field(foreign_key="mcp_servers.id", max_length=20, index=True)
+    credential_id: str = Field(foreign_key="credentials.id", max_length=20)
+    oauth_refresh_token_credential_id: str | None = Field(
+        default=None, foreign_key="credentials.id", max_length=20
+    )
     oauth_expires_at: datetime | None = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
 class WorkspaceMCPBinding(SQLModel, table=True):
-    """Org-wide server to workspace visibility binding."""
+    """Org-wide server to workspace visibility binding.
+
+    Pure association — composite PK; no public_id."""
 
     __tablename__ = "workspace_mcp_bindings"
     __table_args__ = (UniqueConstraint("workspace_id", "mcp_server_id", name="uq_ws_mcp_binding"),)
 
-    id: str = Field(default_factory=lambda: str(uuid7()), primary_key=True, max_length=36)
-    org_id: str = Field(max_length=36, index=True)
-    workspace_id: str = Field(max_length=36, index=True)
-    mcp_server_id: str = Field(max_length=36, index=True)
+    org_id: str = Field(foreign_key="organizations.id", max_length=20, index=True)
+    workspace_id: str = Field(
+        primary_key=True, foreign_key="workspaces.id", max_length=20, index=True
+    )
+    mcp_server_id: str = Field(
+        primary_key=True, foreign_key="mcp_servers.id", max_length=20, index=True
+    )
     enabled: bool = Field(default=True)
-    created_by_user_id: str = Field(max_length=36)
+    created_by_user_id: str = Field(foreign_key="users.id", max_length=20)
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
