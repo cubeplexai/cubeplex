@@ -41,30 +41,6 @@ _STATE: _State = _State()
 _LOCK: threading.Lock = threading.Lock()
 
 
-# Prefix constants — keep the table in sync with the spec.
-PREFIX_ORGANIZATION: str = "org"
-PREFIX_WORKSPACE: str = "ws"
-PREFIX_USER: str = "usr"
-PREFIX_CONVERSATION: str = "conv"
-PREFIX_ATTACHMENT: str = "atch"
-PREFIX_ARTIFACT: str = "art"
-PREFIX_ARTIFACT_VERSION: str = "artv"
-PREFIX_AGENT_CONFIG: str = "agt"
-PREFIX_USER_SANDBOX: str = "sbx"
-PREFIX_SKILL: str = "skl"
-PREFIX_SKILL_VERSION: str = "sklv"
-PREFIX_ORG_SKILL_INSTALL: str = "osi"
-PREFIX_MCP_SERVER: str = "mcp"
-PREFIX_WORKSPACE_MCP_CREDENTIAL: str = "wmc"
-PREFIX_USER_MCP_CREDENTIAL: str = "umc"
-PREFIX_PROVIDER: str = "prv"
-PREFIX_MODEL: str = "mdl"
-PREFIX_CREDENTIAL: str = "cred"
-PREFIX_BILLING_EVENT: str = "bill"
-PREFIX_BILLING_LLM_EVENT: str = "llmb"
-PREFIX_ORG_PROVIDER_OVERRIDE: str = "opo"
-
-
 def _now_ms() -> int:
     return int(time.time() * 1000) - _EPOCH_MS
 
