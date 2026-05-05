@@ -9,13 +9,13 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import cast
-from uuid import uuid4
 
 import pytest
 from redis.asyncio import Redis
 
 from cubebox.cache import reset_for_tests, set_redis
 from cubebox.config import config
+from cubebox.models.public_id import generate_public_id
 from cubebox.parsers import (
     ParseOptions,
     TextOutput,
@@ -72,7 +72,7 @@ async def test_pdf_flows_through_real_docling(
         sandbox=_LocalSandbox(),
         path=str(FIXTURE),
         options=ParseOptions(),
-        conversation_id=uuid4(),
+        conversation_id=generate_public_id("conv"),
     )
     assert isinstance(out, TextOutput), f"expected markdown, got {type(out).__name__}"
     assert cast(str, out.metadata.get("parser")) == "docling"
@@ -94,7 +94,7 @@ async def test_unchanged_second_read_hits_dedup(
     await reg.discover()
 
     sandbox = _LocalSandbox()
-    conv = uuid4()
+    conv = generate_public_id("conv")
     first = await reg.dispatch(
         sandbox=sandbox,
         path=str(FIXTURE),
