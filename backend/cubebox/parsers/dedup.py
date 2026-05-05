@@ -12,7 +12,6 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
-from uuid import UUID
 
 from cubebox.cache import get_redis
 from cubebox.parsers.schema import ParseOptions
@@ -38,12 +37,12 @@ def _path_digest(path: str) -> str:
     return hashlib.sha1(path.encode("utf-8"), usedforsecurity=False).hexdigest()
 
 
-def _key(conversation_id: UUID, path: str, options: ParseOptions) -> str:
+def _key(conversation_id: str, path: str, options: ParseOptions) -> str:
     return f"{KEY_PREFIX}{conversation_id}:{_path_digest(path)}:{_options_signature(options)}"
 
 
 async def check(
-    conversation_id: UUID,
+    conversation_id: str,
     path: str,
     options: ParseOptions,
     digest: str,
@@ -62,7 +61,7 @@ async def check(
 
 
 async def update(
-    conversation_id: UUID,
+    conversation_id: str,
     path: str,
     options: ParseOptions,
     digest: str,

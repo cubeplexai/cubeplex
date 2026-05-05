@@ -2,7 +2,6 @@
 
 from collections.abc import Awaitable, Callable, Sequence
 from typing import Any
-from uuid import UUID
 
 from langchain.agents.middleware.types import (
     AgentMiddleware,
@@ -187,7 +186,7 @@ LIMITS:
 """
 
 
-def _create_file_read_tool(sandbox: Sandbox, conversation_id: UUID | None) -> BaseTool:
+def _create_file_read_tool(sandbox: Sandbox, conversation_id: str | None) -> BaseTool:
     """Build the file_read tool backed by a sandbox + (optional) conversation."""
 
     async def _file_read(
@@ -230,15 +229,6 @@ def _create_file_read_tool(sandbox: Sandbox, conversation_id: UUID | None) -> Ba
     )
 
 
-def _coerce_uuid(value: str | UUID | None) -> UUID | None:
-    if value is None or isinstance(value, UUID):
-        return value
-    try:
-        return UUID(str(value))
-    except (ValueError, AttributeError):
-        return None
-
-
 class SandboxMiddleware(AgentMiddleware[Any, Any, Any]):
     """Registers the execute tool and injects sandbox context into system prompt."""
 
@@ -246,10 +236,10 @@ class SandboxMiddleware(AgentMiddleware[Any, Any, Any]):
         self,
         *,
         sandbox: Sandbox,
-        conversation_id: str | UUID | None = None,
+        conversation_id: str | None = None,
     ) -> None:
         self.sandbox = sandbox
-        self.conversation_id = _coerce_uuid(conversation_id)
+        self.conversation_id = conversation_id
         self.tools: Sequence[BaseTool] = [
             _create_execute_tool(sandbox),
             _create_write_file_tool(sandbox),

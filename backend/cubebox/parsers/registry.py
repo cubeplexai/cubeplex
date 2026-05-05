@@ -7,7 +7,6 @@ import importlib.metadata
 import logging
 from pathlib import Path
 from typing import Any
-from uuid import UUID
 
 import httpx
 
@@ -111,7 +110,7 @@ class ParserRegistry:
         sandbox: Any,
         path: str,
         options: ParseOptions,
-        conversation_id: UUID | None,
+        conversation_id: str | None,
     ) -> FileReadOutput:
         # 1. download — test mocks expose _download_one; production Sandbox uses download.
         content = await self._download(sandbox, path)

@@ -7,8 +7,6 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from uuid import UUID
-
     from cubebox.parsers import FileReadOutput, ParseOptions
 
 
@@ -82,7 +80,7 @@ class Sandbox(ABC):
         path: str,
         *,
         options: ParseOptions | None = None,
-        conversation_id: UUID | None = None,
+        conversation_id: str | None = None,
     ) -> FileReadOutput:
         """Read and parse a file at ``path`` inside the sandbox.
 

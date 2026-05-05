@@ -1,5 +1,4 @@
 from unittest.mock import AsyncMock, MagicMock
-from uuid import uuid4
 
 import pytest
 
@@ -48,7 +47,7 @@ async def test_file_read_tool_delegates_to_sandbox():
             size_bytes=2,
         )
     )
-    tool = _create_file_read_tool(sandbox, conversation_id=uuid4())
+    tool = _create_file_read_tool(sandbox, conversation_id="conv-aaaaaaaaaaaaaa")
     assert tool.name == "file_read"
     result = await tool.ainvoke({"path": "/tmp/a.txt"})
     assert result["content"] == "hi"
@@ -63,14 +62,17 @@ def test_file_read_tool_description_mentions_use_cases():
     assert "video" in desc or "audio" in desc
 
 
-def test_sandbox_middleware_coerces_string_conversation_id():
+def test_sandbox_middleware_preserves_short_prefixed_conversation_id():
+    """Regression: middleware previously coerced via UUID(...) and dropped
+    short prefixed IDs (e.g. ``conv-V1StGXR8Z5jdHi``) to ``None``, silently
+    disabling the file_read dedup cache for every real conversation."""
     sandbox = LocalSandbox()
-    conv = uuid4()
-    mw = SandboxMiddleware(sandbox=sandbox, conversation_id=str(conv))
-    assert mw.conversation_id == conv
+    cid = "conv-V1StGXR8Z5jdHi"
+    mw = SandboxMiddleware(sandbox=sandbox, conversation_id=cid)
+    assert mw.conversation_id == cid
 
 
-def test_sandbox_middleware_rejects_invalid_conversation_id_gracefully():
+def test_sandbox_middleware_handles_none_conversation_id():
     sandbox = LocalSandbox()
-    mw = SandboxMiddleware(sandbox=sandbox, conversation_id="not-a-uuid")
+    mw = SandboxMiddleware(sandbox=sandbox, conversation_id=None)
     assert mw.conversation_id is None
