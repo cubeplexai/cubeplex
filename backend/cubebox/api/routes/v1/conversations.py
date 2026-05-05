@@ -483,6 +483,16 @@ async def send_message(
                 if row is None or row.status not in {"pending", "attached"}:
                     raise AttachmentReferenceInvalidError(fid)
 
+            # Flip pending → attached synchronously, before the run starts.
+            # The background _execute_run path also calls this (idempotent),
+            # but doing it here closes a race where the client navigates to
+            # the conversation page and rehydrates `pending` attachments
+            # back into the InputBar staging area.
+            await att_repo.mark_attached_bulk(
+                conversation_id=conversation_id,
+                attachment_ids=list(request_obj.attachments),
+            )
+
     # Mark the conversation active synchronously, before the run starts.
     # This ensures the conversation becomes visible in list_all even if the
     # stream errors before the post-stream persistence runs, and bumps
