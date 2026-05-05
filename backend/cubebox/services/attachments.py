@@ -19,7 +19,7 @@ from cubebox.api.exceptions import (
 )
 from cubebox.config import config
 from cubebox.models import Attachment
-from cubebox.models.public_id import PREFIX_ATTACHMENT, generate_public_id
+from cubebox.models.public_id import generate_public_id
 from cubebox.objectstore import get_objectstore_client
 from cubebox.repositories import AttachmentRepository
 from cubebox.utils.time import utc_isoformat
@@ -210,7 +210,7 @@ class AttachmentService:
             )
 
         kind = classify_kind(resolved_mime)
-        file_id = generate_public_id(PREFIX_ATTACHMENT)
+        file_id = generate_public_id("atch")
 
         width: int | None = None
         height: int | None = None
