@@ -1,9 +1,10 @@
 """Membership model — N:M between User and Workspace, with role."""
 
-from datetime import UTC, datetime
 from enum import StrEnum
 
 from sqlmodel import Field, SQLModel
+
+from cubebox.models.mixins import TimestampMixin
 
 
 class Role(StrEnum):
@@ -11,10 +12,11 @@ class Role(StrEnum):
     MEMBER = "member"
 
 
-class Membership(SQLModel, table=True):
+class Membership(SQLModel, TimestampMixin, table=True):
+    """Links a User to a Workspace with a Role; composite PK."""
+
     __tablename__ = "memberships"
 
     user_id: str = Field(primary_key=True, foreign_key="users.id", max_length=20)
     workspace_id: str = Field(primary_key=True, foreign_key="workspaces.id", max_length=20)
     role: str = Field(max_length=32)  # values from Role enum
-    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
