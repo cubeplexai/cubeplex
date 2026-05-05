@@ -118,7 +118,7 @@ class ProviderOut(BaseModel):
     org_override: OrgProviderOverrideOut | None = None
     extra_body: dict[str, Any]
     extra_headers: dict[str, Any]
-    created_by_user_id: str
+    created_by_user_id: str | None
     created_at: datetime
     updated_at: datetime
 
