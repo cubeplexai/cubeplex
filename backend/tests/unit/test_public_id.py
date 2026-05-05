@@ -24,14 +24,14 @@ def test_prefix_2_to_4_chars_accepted() -> None:
 
 
 def test_each_id_unique_in_tight_loop() -> None:
-    ids = {public_id.generate_public_id("t") for _ in range(10_000)}
+    ids = {public_id.generate_public_id("tt") for _ in range(10_000)}
     assert len(ids) == 10_000
 
 
 def test_ids_strictly_increase_within_process() -> None:
     """Sorting by ID must equal the generation order (lexicographic == numeric
     because base62 fixed-width is order-preserving)."""
-    ids = [public_id.generate_public_id("t") for _ in range(5_000)]
+    ids = [public_id.generate_public_id("tt") for _ in range(5_000)]
     assert ids == sorted(ids)
 
 
@@ -39,8 +39,8 @@ def test_monotonic_under_clock_freeze(monkeypatch: pytest.MonkeyPatch) -> None:
     """Two IDs generated at the same ms must still sort in generation order."""
     fixed_ms = int(time.time() * 1000)
     monkeypatch.setattr(public_id, "_now_ms", lambda: fixed_ms)
-    a = public_id.generate_public_id("t")
-    b = public_id.generate_public_id("t")
+    a = public_id.generate_public_id("tt")
+    b = public_id.generate_public_id("tt")
     assert a < b
 
 
@@ -48,8 +48,8 @@ def test_monotonic_under_clock_rewind(monkeypatch: pytest.MonkeyPatch) -> None:
     """Clock going backwards must not produce a smaller ID."""
     times = iter([1_700_000_000_000, 1_700_000_000_000 - 5])
     monkeypatch.setattr(public_id, "_now_ms", lambda: next(times))
-    a = public_id.generate_public_id("t")
-    b = public_id.generate_public_id("t")
+    a = public_id.generate_public_id("tt")
+    b = public_id.generate_public_id("tt")
     assert a < b
 
 
@@ -61,7 +61,7 @@ def test_ms_spill_on_rand_overflow(monkeypatch: pytest.MonkeyPatch) -> None:
     # Force last_rand to its max so the next call must overflow.
     public_id._STATE.last_ms = fixed_ms
     public_id._STATE.last_rand = public_id._RAND_MASK
-    pid = public_id.generate_public_id("t")
+    pid = public_id.generate_public_id("tt")
     # Decode body to int and assert the timestamp portion advanced.
     body = pid.split("-", 1)[1]
     n = public_id._base62_decode(body)
