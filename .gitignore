@@ -35,6 +35,7 @@ tmp
 # Playwright
 .playwright-mcp/
 test-results/
+frontend/playwright-report
 
 research
 
