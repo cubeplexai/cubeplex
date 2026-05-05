@@ -12,7 +12,7 @@ from loguru import logger
 
 from cubebox.db.engine import async_session_maker
 from cubebox.models.billing import BillingEvent, LlmBillingEvent
-from cubebox.models.public_id import PREFIX_BILLING_EVENT, generate_public_id
+from cubebox.models.public_id import generate_public_id
 from cubebox.repositories.billing import BillingRepository
 
 
@@ -44,7 +44,7 @@ class CostMiddleware(AgentMiddleware[Any, Any, Any]):
         request: ModelRequest[Any],
         handler: Callable[[ModelRequest[Any]], Awaitable[ModelResponse[Any] | AIMessage]],
     ) -> ModelResponse[Any] | AIMessage:
-        run_id = generate_public_id(PREFIX_BILLING_EVENT)
+        run_id = generate_public_id("bill")
         self._last_billing_id = run_id
         started_at = datetime.now(UTC)
 
