@@ -35,7 +35,9 @@ export async function getConversation(client: ApiClient, id: string): Promise<Co
 }
 
 export async function deleteConversation(client: ApiClient, id: string): Promise<void> {
-  const res = await client.post(`/api/v1/conversations/${id}?_method=DELETE`, {})
+  // Backend route is `@router.delete("/{conversation_id}")`. There is no
+  // method-override middleware, so we call DELETE directly.
+  const res = await client.del(`/api/v1/conversations/${id}`)
   if (!res.ok) throw await toApiError(res)
 }
 
