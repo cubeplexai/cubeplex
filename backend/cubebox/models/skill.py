@@ -3,6 +3,7 @@
 from datetime import UTC, datetime
 from typing import Any, ClassVar
 
+import sqlalchemy as sa
 from sqlalchemy import JSON, Column, Index, UniqueConstraint
 from sqlmodel import Field, SQLModel
 
@@ -54,19 +55,38 @@ class SkillVersion(CubeboxBase, table=True):
 
 
 class OrgSkillInstall(CubeboxBase, table=True):
-    """Org-level install — admin promoted a skill into the org marketplace."""
+    """Org-level install — admin promoted a skill into the org marketplace.
+
+    workspace_id=None → org-wide install (visible to all workspaces).
+    workspace_id=<id>  → workspace-private install (visible only to that workspace).
+    """
 
     _PREFIX: ClassVar[str] = "osi"
     __tablename__ = "org_skill_installs"
 
     org_id: str = Field(foreign_key="organizations.id", max_length=20, index=True)
     skill_id: str = Field(foreign_key="skills.id", max_length=20, index=True)
+    workspace_id: str | None = Field(
+        default=None, foreign_key="workspaces.id", max_length=20, nullable=True, index=True
+    )
     installed_version: str = Field(max_length=32)
     installed_by_user_id: str = Field(foreign_key="users.id", max_length=20)
     installed_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     auto_bind: bool = Field(default=False)
 
-    __table_args__ = (UniqueConstraint("org_id", "skill_id", name="uq_org_skill_install"),)
+    __table_args__ = (
+        # Org-wide installs: unique per (org, skill) where workspace is null
+        Index(
+            "uq_org_skill_install_org_wide",
+            "org_id",
+            "skill_id",
+            unique=True,
+            postgresql_where=sa.text("workspace_id IS NULL"),
+        ),
+        # Workspace-private installs: unique per (org, workspace, skill)
+        UniqueConstraint("org_id", "workspace_id", "skill_id", name="uq_org_skill_install_ws"),
+        Index("ix_osi_org_workspace", "org_id", "workspace_id"),
+    )
 
 
 class WorkspaceSkillBinding(SQLModel, TimestampMixin, table=True):
