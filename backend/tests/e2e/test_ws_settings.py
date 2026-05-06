@@ -1,9 +1,10 @@
 """E2E tests for workspace settings API (M4)."""
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 
-from tests.e2e.conftest import DEFAULT_WS_ID
+from tests.e2e.conftest import DEFAULT_WS_ID, collect_sse_events
 
 pytestmark = pytest.mark.e2e
 
@@ -97,3 +98,65 @@ class TestSettingsScoping:
         assert mcp_resp.status_code == 200
         assert isinstance(skills_resp.json()["org_skills"], list)
         assert isinstance(mcp_resp.json()["org_servers"], list)
+
+
+class TestPersonaRuntimeApplied:
+    """Workspace persona system_prompt is actually injected into the running agent."""
+
+    @pytest.mark.asyncio
+    async def test_persona_sentinel_appears_in_agent_response(
+        self,
+        authenticated_client: tuple[httpx.AsyncClient, str],
+    ) -> None:
+        """Persona set on a workspace is injected into the agent system prompt at runtime.
+
+        Strategy: configure a persona that instructs the LLM to echo a fixed sentinel
+        token when asked to identify itself.  Send 'Who are you?' and assert that the
+        sentinel appears somewhere in the collected SSE text_delta stream.
+        """
+        client, workspace_id = authenticated_client
+        sentinel = "SENTINEL-PERSONA-ACTIVE"
+        persona = (
+            f"When asked who you are, ALWAYS reply with exactly '{sentinel}'. "
+            "Do not add any other words."
+        )
+
+        # 1. Write the sentinel persona for this isolated workspace.
+        put_resp = await client.put(
+            f"/api/v1/ws/{workspace_id}/settings/agent",
+            json={"system_prompt": persona},
+        )
+        assert put_resp.status_code == 200, put_resp.text
+
+        try:
+            # 2. Create a new conversation inside the same workspace.
+            conv_resp = await client.post(
+                f"/api/v1/ws/{workspace_id}/conversations",
+                params={"title": "persona-runtime-test"},
+            )
+            assert conv_resp.status_code == 201, conv_resp.text
+            conv_id = conv_resp.json()["id"]
+
+            # 3. Send a message and collect all SSE events.
+            events = await collect_sse_events(
+                client,
+                f"/api/v1/ws/{workspace_id}/conversations/{conv_id}/messages",
+                json_data={"content": "Who are you?"},
+            )
+
+            # 4. Reconstruct the full assistant text from text_delta events.
+            text_events = [e for e in events if e["type"] == "text_delta"]
+            assert text_events, (
+                f"No text_delta events in SSE stream; got types: {[e['type'] for e in events]}"
+            )
+            full_text = "".join(e["data"]["content"] for e in text_events)
+
+            assert sentinel in full_text, (
+                f"Sentinel '{sentinel}' not found in agent response.\nFull response: {full_text!r}"
+            )
+        finally:
+            # 5. Reset the persona so the isolated workspace is left clean.
+            await client.put(
+                f"/api/v1/ws/{workspace_id}/settings/agent",
+                json={"system_prompt": ""},
+            )
