@@ -102,6 +102,11 @@ class UserManager(BaseUserManager[User, str]):
             await MembershipRepository(session).grant(
                 user_id=user.id, workspace_id=ws.id, role=Role.ADMIN
             )
+            from cubebox.models.agent_config import AgentConfig
+
+            agent_cfg = AgentConfig(org_id=org.id, workspace_id=ws.id)
+            session.add(agent_cfg)
+            await session.flush()
         except Exception as exc:
             logger.exception(
                 "register_bootstrap failed for user {} ({}): {!r}",
