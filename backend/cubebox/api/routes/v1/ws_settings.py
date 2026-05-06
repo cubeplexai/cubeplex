@@ -21,7 +21,11 @@ from cubebox.auth.context import RequestContext
 from cubebox.auth.dependencies import require_member
 from cubebox.db import get_session
 from cubebox.models.agent_config import AgentConfig
-from cubebox.repositories.skill import OrgSkillInstallRepository, WorkspaceSkillBindingRepository
+from cubebox.repositories.skill import (
+    OrgSkillInstallRepository,
+    SkillVersionRepository,
+    WorkspaceSkillBindingRepository,
+)
 
 router = APIRouter(prefix="/ws/{workspace_id}/settings", tags=["workspace-settings"])
 
@@ -156,6 +160,11 @@ async def install_workspace_skill(
     skill = await skill_repo.get(body.skill_id)
     if skill is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="skill not found in catalog")
+
+    version_repo = SkillVersionRepository(session)
+    skill_version = await version_repo.find(body.skill_id, body.version)
+    if skill_version is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="skill version not found")
 
     install_repo = OrgSkillInstallRepository(session)
     install = await install_repo.create_for_workspace(
