@@ -255,6 +255,30 @@ class ProviderService:
                 return TestResultOut(ok=False, error=error_str, latency_ms=latency_ms)
             return TestResultOut(ok=True, error=None, latency_ms=latency_ms)
 
+    async def test_model_connection(self, provider_id: str, model_id: str) -> TestResultOut:
+        """Test reachability of a specific model on a provider using stored credentials."""
+        start = time.monotonic()
+        provider = await self.get_provider(provider_id)
+        if provider.provider_type != "openai_compat":
+            return TestResultOut(
+                ok=False,
+                error=f"Unsupported provider_type: {provider.provider_type}",
+                latency_ms=0,
+            )
+        try:
+            llm = ChatOpenAICompatible(
+                base_url=provider.base_url,
+                api_key=provider.api_key or "placeholder",  # type: ignore[arg-type]
+                model=model_id,
+                timeout=15,
+            )
+            await llm.ainvoke([HumanMessage(content="ping")])
+            latency_ms = int((time.monotonic() - start) * 1000)
+            return TestResultOut(ok=True, error=None, latency_ms=latency_ms)
+        except Exception as e:
+            latency_ms = int((time.monotonic() - start) * 1000)
+            return TestResultOut(ok=False, error=str(e), latency_ms=latency_ms)
+
     # -- Org overrides ----------------------------------------------------------
 
     async def get_override(self, provider_id: str) -> OrgProviderOverride | None:

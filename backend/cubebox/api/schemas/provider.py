@@ -38,6 +38,10 @@ class ProviderTest(BaseModel):
     auth_type: str = Field(default="api_key", max_length=32)
 
 
+class ModelTest(BaseModel):
+    model_id: str = Field(max_length=128)
+
+
 class TestResultOut(BaseModel):
     ok: bool
     error: str | None = None

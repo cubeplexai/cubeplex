@@ -10,7 +10,6 @@ export interface Provider {
   is_system: boolean
   model_count: number
   models?: Model[]
-  org_override?: { enabled: boolean }
   extra_body: Record<string, unknown>
   extra_headers: Record<string, unknown>
   created_by_user_id: string

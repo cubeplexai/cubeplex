@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from cubebox.api.schemas.provider import (
     ModelCreate,
     ModelOut,
+    ModelTest,
     ModelUpdate,
     OrgLLMSettingsOut,
     OrgLLMSettingsUpdate,
@@ -296,6 +297,21 @@ async def test_provider(
 ) -> TestResultOut:
     svc = await _svc(user, session)
     return await svc.test_connection(body)
+
+
+@router.post("/providers/{provider_id}/models/test", response_model=TestResultOut)
+async def test_provider_model(
+    provider_id: str,
+    body: ModelTest,
+    *,
+    user: Annotated[User, Depends(require_org_admin)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> TestResultOut:
+    svc = await _svc(user, session)
+    try:
+        return await svc.test_model_connection(provider_id, body.model_id)
+    except ProviderNotFoundError as e:
+        raise HTTPException(status_code=404, detail="provider_not_found") from e
 
 
 # -- Org provider overrides --------------------------------------------------------

@@ -3,7 +3,7 @@
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { useTranslations } from 'next-intl'
-import { Box, CircleDollarSign, Cpu, Globe, Plug, Puzzle, Sparkles } from 'lucide-react'
+import { Box, CircleDollarSign, Cpu, Globe, Plug, Puzzle, Settings, Sparkles } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { Separator } from '@/components/ui/separator'
 import { useAdminExtensions } from '@/hooks/useAdminExtensions'
@@ -43,6 +43,7 @@ export function AdminSubNav() {
   const { extensions } = useAdminExtensions()
 
   const NATIVE_ITEMS: NavDef[] = [
+    { href: '/admin/settings', label: t('settings'), icon: Settings },
     { href: '/admin/models', label: t('models'), icon: Cpu },
     { href: '/admin/web-tools', label: t('webTools'), icon: Globe },
     { href: '/admin/skills', label: t('skills'), icon: Sparkles },

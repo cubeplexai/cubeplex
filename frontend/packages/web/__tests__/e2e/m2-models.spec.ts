@@ -6,139 +6,98 @@ function uniqueEmail(): string {
 
 const PASSWORD = 'correcthorsebatterystaple'
 
+async function register(page: import('@playwright/test').Page): Promise<void> {
+  const email = uniqueEmail()
+  await page.goto('/register')
+  await page.getByLabel('Email').fill(email)
+  await page.getByLabel('Password').fill(PASSWORD)
+  await page.getByRole('button', { name: /create account/i }).click()
+  await expect(page).toHaveURL(/\/w\/[^/]+$/, { timeout: 10_000 })
+}
+
 test.describe('M2 Model Management', () => {
-  test('admin can see provider list', async ({ page }) => {
-    const email = uniqueEmail()
-    await page.goto('/register')
-    await page.getByLabel('Email').fill(email)
-    await page.getByLabel('Password').fill(PASSWORD)
-    await page.getByRole('button', { name: /create account/i }).click()
-    await expect(page).toHaveURL(/\/w\/[^/]+$/, { timeout: 10_000 })
-
+  test('admin sees provider list with seeded system provider', async ({ page }) => {
+    await register(page)
     await page.goto('/admin/models')
 
-    // Should see the providers heading
-    await expect(page.getByText('Providers')).toBeVisible({ timeout: 10_000 })
-
-    // System providers should appear (seeded from config.yaml)
-    // The seed creates "cubebox" provider from config.yaml
-    // Use button role to scope to the provider list (avoid banner brand match)
-    await expect(page.getByRole('button', { name: /cubebox/ })).toBeVisible({ timeout: 10_000 })
-  })
-
-  test('admin can create and delete a provider', async ({ page }) => {
-    const email = uniqueEmail()
-    await page.goto('/register')
-    await page.getByLabel('Email').fill(email)
-    await page.getByLabel('Password').fill(PASSWORD)
-    await page.getByRole('button', { name: /create account/i }).click()
-    await expect(page).toHaveURL(/\/w\/[^/]+$/, { timeout: 10_000 })
-
-    await page.goto('/admin/models')
-
-    // Wait for the provider list to load
-    await expect(page.getByRole('button', { name: /cubebox/ })).toBeVisible({ timeout: 10_000 })
-
-    // Click add provider button
-    await page.getByRole('button', { name: '添加' }).click()
-
-    // Wait for dialog
-    await expect(page.getByTestId('provider-form-dialog')).toBeVisible()
-
-    // Fill the form
-    await page.getByLabel('名称').fill('e2e-test-provider')
-    await page.getByLabel(/Base URL/).fill('https://example.com/api')
-
-    // Select auth_type = none
-    await page.getByText('无认证').click()
-
-    // Save
-    await page.getByRole('button', { name: '保存' }).click()
-
-    // Provider should appear in the list (as a button element)
-    await expect(page.getByRole('button', { name: /e2e-test-provider/ })).toBeVisible({
-      timeout: 5_000,
+    // Header
+    await expect(page.getByRole('heading', { name: /Models|模型/ })).toBeVisible({
+      timeout: 10_000,
     })
 
-    // Click the provider button to see details
-    await page.getByRole('button', { name: /e2e-test-provider/ }).click()
+    // Seeded "cubebox" system provider appears as a provider card
+    await expect(page.getByTestId('provider-card-cubebox')).toBeVisible({ timeout: 10_000 })
+  })
 
-    // Should see detail view with action buttons
+  test('admin can create, view, and delete a custom provider', async ({ page }) => {
+    await register(page)
+    await page.goto('/admin/models')
+
+    await expect(page.getByTestId('provider-card-cubebox')).toBeVisible({ timeout: 10_000 })
+
+    // Open create dialog from toolbar
+    await page.getByRole('button', { name: /Add provider|添加 Provider/ }).click()
+    await expect(page.getByTestId('provider-form-dialog')).toBeVisible()
+
+    // Fill the form (i18n agnostic — match by visible label fragment)
+    await page.getByLabel(/^(Name|名称)$/).fill('e2e-test-provider')
+    await page.getByLabel(/Base URL/).fill('https://example.com/api')
+    await page.getByText(/^(None|无认证)$/).click()
+    await page.getByRole('button', { name: /^(Save|保存)$/ }).click()
+
+    // Card appears in the list and gets selected automatically
+    const card = page.getByTestId('provider-card-e2e-test-provider')
+    await expect(card).toBeVisible({ timeout: 5_000 })
+
+    // Detail panel renders
     await expect(page.getByTestId('provider-detail-panel')).toBeVisible()
-    await expect(page.getByRole('button', { name: '编辑' })).toBeVisible()
 
     // Add a model
     await page
-      .getByRole('button', { name: /添加模型/ })
+      .getByRole('button', { name: /Add model|添加模型/ })
       .first()
       .click()
     await expect(page.getByTestId('model-form-dialog')).toBeVisible()
-    await page.getByLabel('Model ID').fill('e2e-test-model')
-    await page.getByLabel('显示名称').fill('E2E Test Model')
-    await page.getByRole('button', { name: '保存' }).last().click()
+    await page.getByLabel(/Model ID/).fill('e2e-test-model')
+    await page.getByLabel(/Display name|显示名称/).fill('E2E Test Model')
+    await page.getByRole('button', { name: /^(Save|保存)$/ }).click()
+    await expect(page.getByTestId('model-row-e2e-test-model')).toBeVisible({ timeout: 5_000 })
 
-    // Model should appear
-    await expect(page.getByText('e2e-test-model')).toBeVisible({ timeout: 5_000 })
+    // Delete provider via inline confirm (no native dialog)
+    await page.getByTestId('provider-delete-button').click()
+    await page.getByTestId('provider-delete-confirm').click()
 
-    // Delete the provider (which cascades to model)
-    page.once('dialog', (dialog) => dialog.accept())
-    await page.getByRole('button', { name: '删除' }).click()
-
-    // Provider should be gone from list
-    await expect(page.getByRole('button', { name: /e2e-test-provider/ })).not.toBeVisible({
+    await expect(page.getByTestId('provider-card-e2e-test-provider')).toBeHidden({
       timeout: 5_000,
     })
   })
 
-  test('test connection button shows result', async ({ page }) => {
-    const email = uniqueEmail()
-    await page.goto('/register')
-    await page.getByLabel('Email').fill(email)
-    await page.getByLabel('Password').fill(PASSWORD)
-    await page.getByRole('button', { name: /create account/i }).click()
-    await expect(page).toHaveURL(/\/w\/[^/]+$/, { timeout: 10_000 })
-
+  test('oauth auth option is disabled in create dialog', async ({ page }) => {
+    await register(page)
     await page.goto('/admin/models')
 
-    // Wait for provider list to load
-    await expect(page.getByRole('button', { name: /cubebox/ })).toBeVisible({ timeout: 10_000 })
+    await expect(page.getByTestId('provider-card-cubebox')).toBeVisible({ timeout: 10_000 })
 
-    // Click add provider
-    await page.getByRole('button', { name: '添加' }).click()
+    await page.getByRole('button', { name: /Add provider|添加 Provider/ }).click()
     await expect(page.getByTestId('provider-form-dialog')).toBeVisible()
 
-    // Fill form
-    await page.getByLabel('名称').fill('connection-test')
-    await page.getByLabel(/Base URL/).fill('https://httpbin.org/post')
-    await page.getByText('无认证').click()
-
-    // Click test connection
-    await page.getByRole('button', { name: '测试连接' }).click()
-
-    // Should show a result (even if the test fails, the result component renders)
-    await expect(page.locator('[data-testid="test-result"]')).toBeVisible({ timeout: 20_000 })
-  })
-
-  test('oauth option is disabled', async ({ page }) => {
-    const email = uniqueEmail()
-    await page.goto('/register')
-    await page.getByLabel('Email').fill(email)
-    await page.getByLabel('Password').fill(PASSWORD)
-    await page.getByRole('button', { name: /create account/i }).click()
-    await expect(page).toHaveURL(/\/w\/[^/]+$/, { timeout: 10_000 })
-
-    await page.goto('/admin/models')
-
-    // Wait for provider list to load
-    await expect(page.getByRole('button', { name: /cubebox/ })).toBeVisible({ timeout: 10_000 })
-
-    // Open add provider dialog
-    await page.getByRole('button', { name: '添加' }).click()
-    await expect(page.getByTestId('provider-form-dialog')).toBeVisible()
-
-    // OAuth 2.0 radio should be disabled
-    const oauthRadio = page.getByRole('radio', { name: 'OAuth 2.0' })
+    const oauthRadio = page.getByRole('radio', { name: /OAuth/ })
     await expect(oauthRadio).toBeVisible()
     await expect(oauthRadio).toBeDisabled()
+  })
+
+  test('filter pills narrow provider list', async ({ page }) => {
+    await register(page)
+    await page.goto('/admin/models')
+
+    await expect(page.getByTestId('provider-card-cubebox')).toBeVisible({ timeout: 10_000 })
+
+    // System filter keeps the seeded provider visible
+    await page.getByRole('button', { name: /^(System|系统)$/ }).click()
+    await expect(page.getByTestId('provider-card-cubebox')).toBeVisible()
+
+    // Custom filter hides it (no custom providers yet)
+    await page.getByRole('button', { name: /^(Custom|自建)$/ }).click()
+    await expect(page.getByTestId('provider-card-cubebox')).toBeHidden()
   })
 })

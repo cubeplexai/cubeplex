@@ -1,20 +1,21 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useEffect, useState } from 'react'
+import { useTranslations } from 'next-intl'
 import { Dialog as DialogPrimitive } from '@base-ui/react/dialog'
-import { X } from 'lucide-react'
-import type { Model, ModelCreate, ModelUpdate } from '@cubebox/core'
+import { Cable, X } from 'lucide-react'
+import type { ApiClient, Model, ModelCreate, ModelUpdate, TestResult } from '@cubebox/core'
+import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from '@/components/ui/accordion'
 import { Button } from '@/components/ui/button'
+import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
-import { Checkbox } from '@/components/ui/checkbox'
-import {
-  Accordion,
-  AccordionItem,
-  AccordionTrigger,
-  AccordionContent,
-} from '@/components/ui/accordion'
 import { cn } from '@/lib/utils'
 
 const MODALITIES = ['text', 'image', 'audio', 'video'] as const
@@ -22,20 +23,33 @@ const MODALITIES = ['text', 'image', 'audio', 'video'] as const
 interface ModelFormDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
-  model: Model | null // null = create, non-null = edit
+  model: Model | null
+  providerId: string
+  client: ApiClient
+  onTest: (client: ApiClient, providerId: string, body: { model_id: string }) => Promise<TestResult>
   onSave: (body: ModelCreate | ModelUpdate) => Promise<void>
 }
 
-export function ModelFormDialog({ open, onOpenChange, model, onSave }: ModelFormDialogProps) {
+export function ModelFormDialog({
+  open,
+  onOpenChange,
+  model,
+  providerId,
+  client,
+  onTest,
+  onSave,
+}: ModelFormDialogProps) {
+  const t = useTranslations('adminModels')
   const isEdit = model !== null
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [testing, setTesting] = useState(false)
+  const [testResult, setTestResult] = useState<TestResult | null>(null)
 
-  // Form fields
   const [modelId, setModelId] = useState('')
   const [displayName, setDisplayName] = useState('')
   const [reasoning, setReasoning] = useState(false)
-  const [inputModalities, setInputModalities] = useState<string[]>([])
+  const [inputModalities, setInputModalities] = useState<string[]>(['text'])
   const [costInput, setCostInput] = useState('')
   const [costOutput, setCostOutput] = useState('')
   const [costCacheRead, setCostCacheRead] = useState('')
@@ -71,29 +85,11 @@ export function ModelFormDialog({ open, onOpenChange, model, onSave }: ModelForm
       }
       setError(null)
       setSaving(false)
+      setTesting(false)
+      setTestResult(null)
     }
     /* eslint-enable react-hooks/set-state-in-effect */
   }, [open, model])
-
-  function reset(): void {
-    setModelId('')
-    setDisplayName('')
-    setReasoning(false)
-    setInputModalities(['text'])
-    setCostInput('')
-    setCostOutput('')
-    setCostCacheRead('')
-    setCostCacheWrite('')
-    setContextWindow('')
-    setMaxTokens('')
-    setError(null)
-    setSaving(false)
-  }
-
-  function handleOpenChange(next: boolean): void {
-    if (!next) reset()
-    onOpenChange(next)
-  }
 
   function toggleModality(mod: string) {
     setInputModalities((prev) =>
@@ -106,6 +102,20 @@ export function ModelFormDialog({ open, onOpenChange, model, onSave }: ModelForm
     return isNaN(n) ? 0 : n
   }
 
+  async function handleTest() {
+    if (!modelId || testing) return
+    setTesting(true)
+    setTestResult(null)
+    try {
+      const result = await onTest(client, providerId, { model_id: modelId })
+      setTestResult(result)
+    } catch (e) {
+      setTestResult({ ok: false, error: (e as Error).message, latency_ms: 0 })
+    } finally {
+      setTesting(false)
+    }
+  }
+
   async function handleSave(): Promise<void> {
     setSaving(true)
     setError(null)
@@ -113,7 +123,7 @@ export function ModelFormDialog({ open, onOpenChange, model, onSave }: ModelForm
       if (isEdit) {
         const body: ModelUpdate = {
           display_name: displayName || null,
-          reasoning: reasoning,
+          reasoning,
           input_modalities: inputModalities.length > 0 ? inputModalities : null,
           cost_input: costInput ? parseNumber(costInput) : null,
           cost_output: costOutput ? parseNumber(costOutput) : null,
@@ -138,7 +148,6 @@ export function ModelFormDialog({ open, onOpenChange, model, onSave }: ModelForm
         }
         await onSave(body)
       }
-      handleOpenChange(false)
     } catch (e) {
       setError((e as Error).message)
     } finally {
@@ -146,27 +155,29 @@ export function ModelFormDialog({ open, onOpenChange, model, onSave }: ModelForm
     }
   }
 
+  const MODALITY_LABEL: Record<string, string> = {
+    text: t('modalityText'),
+    image: t('modalityImage'),
+    audio: t('modalityAudio'),
+    video: t('modalityVideo'),
+  }
+
   return (
-    <DialogPrimitive.Root open={open} onOpenChange={handleOpenChange}>
+    <DialogPrimitive.Root open={open} onOpenChange={onOpenChange}>
       <DialogPrimitive.Portal>
         <DialogPrimitive.Backdrop className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm data-[ending-style]:opacity-0 data-[starting-style]:opacity-0 transition-opacity duration-200" />
         <DialogPrimitive.Popup
           className={cn(
-            'fixed left-1/2 top-1/2 z-50 w-[min(520px,calc(100vw-32px))] -translate-x-1/2 -translate-y-1/2',
+            'fixed left-1/2 top-1/2 z-50 w-[min(560px,calc(100vw-32px))] -translate-x-1/2 -translate-y-1/2',
             'rounded-xl border border-border bg-popover p-5 text-popover-foreground shadow-2xl',
             'data-[ending-style]:opacity-0 data-[starting-style]:opacity-0 transition-opacity duration-200',
           )}
           data-testid="model-form-dialog"
         >
           <div className="flex items-start justify-between gap-3">
-            <div>
-              <DialogPrimitive.Title className="text-base font-semibold">
-                {isEdit ? '编辑模型' : '添加模型'}
-              </DialogPrimitive.Title>
-              <DialogPrimitive.Description className="mt-0.5 text-xs text-muted-foreground">
-                {isEdit ? '修改模型配置' : '为当前 provider 添加新模型'}
-              </DialogPrimitive.Description>
-            </div>
+            <DialogPrimitive.Title className="text-base font-semibold">
+              {isEdit ? t('modelEditTitle') : t('modelCreateTitle')}
+            </DialogPrimitive.Title>
             <DialogPrimitive.Close
               render={
                 <button
@@ -181,9 +192,8 @@ export function ModelFormDialog({ open, onOpenChange, model, onSave }: ModelForm
           </div>
 
           <div className="mt-4 flex flex-col gap-3">
-            {/* Model ID */}
             <div className="flex flex-col gap-1.5">
-              <Label htmlFor="model-id">Model ID</Label>
+              <Label htmlFor="model-id">{t('modelId')}</Label>
               <Input
                 id="model-id"
                 value={modelId}
@@ -191,12 +201,10 @@ export function ModelFormDialog({ open, onOpenChange, model, onSave }: ModelForm
                 placeholder="gpt-4o"
                 disabled={isEdit}
               />
-              {isEdit && <span className="text-[11px] text-muted-foreground">创建后不可修改</span>}
             </div>
 
-            {/* Display Name */}
             <div className="flex flex-col gap-1.5">
-              <Label htmlFor="model-display-name">显示名称</Label>
+              <Label htmlFor="model-display-name">{t('displayName')}</Label>
               <Input
                 id="model-display-name"
                 value={displayName}
@@ -205,7 +213,6 @@ export function ModelFormDialog({ open, onOpenChange, model, onSave }: ModelForm
               />
             </div>
 
-            {/* Reasoning */}
             <div className="flex items-center gap-3">
               <Switch
                 id="model-reasoning"
@@ -213,37 +220,35 @@ export function ModelFormDialog({ open, onOpenChange, model, onSave }: ModelForm
                 onCheckedChange={(c: boolean) => setReasoning(c)}
               />
               <Label htmlFor="model-reasoning" className="cursor-pointer">
-                思考能力 (Reasoning)
+                {t('reasoning')}
               </Label>
             </div>
 
-            {/* Input Modalities */}
             <div className="flex flex-col gap-1.5">
-              <Label>支持模态</Label>
+              <Label>{t('inputModalities')}</Label>
               <div className="flex flex-wrap gap-3">
                 {MODALITIES.map((mod) => (
-                  <label key={mod} className="flex items-center gap-2 text-sm cursor-pointer">
+                  <label key={mod} className="flex cursor-pointer items-center gap-2 text-sm">
                     <Checkbox
                       checked={inputModalities.includes(mod)}
                       onCheckedChange={() => toggleModality(mod)}
                     />
-                    <span>{mod}</span>
+                    <span>{MODALITY_LABEL[mod] ?? mod}</span>
                   </label>
                 ))}
               </div>
             </div>
 
-            {/* Costs & Limits */}
             <Accordion className="mt-1">
               <AccordionItem value="costs">
                 <AccordionTrigger className="text-xs text-muted-foreground">
-                  费用配置
+                  {t('costPerMillion')}
                 </AccordionTrigger>
                 <AccordionContent>
                   <div className="grid grid-cols-2 gap-3">
                     <div className="flex flex-col gap-1">
                       <Label htmlFor="model-cost-input" className="text-xs">
-                        Input (per 1M)
+                        {t('costInput')}
                       </Label>
                       <Input
                         id="model-cost-input"
@@ -256,7 +261,7 @@ export function ModelFormDialog({ open, onOpenChange, model, onSave }: ModelForm
                     </div>
                     <div className="flex flex-col gap-1">
                       <Label htmlFor="model-cost-output" className="text-xs">
-                        Output (per 1M)
+                        {t('costOutput')}
                       </Label>
                       <Input
                         id="model-cost-output"
@@ -269,7 +274,7 @@ export function ModelFormDialog({ open, onOpenChange, model, onSave }: ModelForm
                     </div>
                     <div className="flex flex-col gap-1">
                       <Label htmlFor="model-cost-cache-read" className="text-xs">
-                        Cache Read (per 1M)
+                        {t('costCacheRead')}
                       </Label>
                       <Input
                         id="model-cost-cache-read"
@@ -282,7 +287,7 @@ export function ModelFormDialog({ open, onOpenChange, model, onSave }: ModelForm
                     </div>
                     <div className="flex flex-col gap-1">
                       <Label htmlFor="model-cost-cache-write" className="text-xs">
-                        Cache Write (per 1M)
+                        {t('costCacheWrite')}
                       </Label>
                       <Input
                         id="model-cost-cache-write"
@@ -298,13 +303,13 @@ export function ModelFormDialog({ open, onOpenChange, model, onSave }: ModelForm
               </AccordionItem>
               <AccordionItem value="limits">
                 <AccordionTrigger className="text-xs text-muted-foreground">
-                  上下文限制
+                  {t('contextWindow')} / {t('maxTokens')}
                 </AccordionTrigger>
                 <AccordionContent>
                   <div className="grid grid-cols-2 gap-3">
                     <div className="flex flex-col gap-1">
                       <Label htmlFor="model-context-window" className="text-xs">
-                        Context Window
+                        {t('contextWindow')}
                       </Label>
                       <Input
                         id="model-context-window"
@@ -317,7 +322,7 @@ export function ModelFormDialog({ open, onOpenChange, model, onSave }: ModelForm
                     </div>
                     <div className="flex flex-col gap-1">
                       <Label htmlFor="model-max-tokens" className="text-xs">
-                        Max Tokens
+                        {t('maxTokens')}
                       </Label>
                       <Input
                         id="model-max-tokens"
@@ -333,6 +338,24 @@ export function ModelFormDialog({ open, onOpenChange, model, onSave }: ModelForm
               </AccordionItem>
             </Accordion>
 
+            {testResult && (
+              <div
+                data-testid="model-form-test-result"
+                className={cn(
+                  'rounded-md border px-2.5 py-1.5 text-xs',
+                  testResult.ok
+                    ? 'border-emerald-500/30 bg-emerald-500/5 text-emerald-700 dark:text-emerald-400'
+                    : 'border-destructive/30 bg-destructive/5 text-destructive',
+                )}
+              >
+                {testResult.ok ? (
+                  <span>{t('testOk', { latency: testResult.latency_ms })}</span>
+                ) : (
+                  <span className="break-words">{testResult.error ?? t('testFailed')}</span>
+                )}
+              </div>
+            )}
+
             {error && (
               <div className="rounded-md border border-destructive/30 bg-destructive/5 px-2.5 py-1.5 text-xs text-destructive">
                 {error}
@@ -340,22 +363,36 @@ export function ModelFormDialog({ open, onOpenChange, model, onSave }: ModelForm
             )}
           </div>
 
-          <div className="mt-4 flex items-center justify-end gap-2">
-            <DialogPrimitive.Close
-              render={
-                <Button type="button" variant="ghost" size="sm" disabled={saving}>
-                  取消
-                </Button>
-              }
-            />
+          <div className="mt-4 flex items-center justify-between gap-2">
             <Button
               type="button"
+              variant="outline"
               size="sm"
-              onClick={() => void handleSave()}
-              disabled={saving || !modelId}
+              onClick={() => void handleTest()}
+              disabled={testing || saving || !modelId}
+              className="gap-1.5"
+              data-testid="model-form-test-button"
             >
-              {saving ? '保存中...' : '保存'}
+              <Cable className={cn('size-3.5', testing && 'animate-pulse')} />
+              {testing ? t('testing') : t('test')}
             </Button>
+            <div className="flex items-center gap-2">
+              <DialogPrimitive.Close
+                render={
+                  <Button type="button" variant="ghost" size="sm" disabled={saving}>
+                    {t('cancel')}
+                  </Button>
+                }
+              />
+              <Button
+                type="button"
+                size="sm"
+                onClick={() => void handleSave()}
+                disabled={saving || !modelId}
+              >
+                {saving ? t('saving') : t('save')}
+              </Button>
+            </div>
           </div>
         </DialogPrimitive.Popup>
       </DialogPrimitive.Portal>
