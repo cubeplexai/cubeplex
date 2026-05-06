@@ -16,9 +16,9 @@ Knowledge base is explicitly out of scope for M4 (depends on M7 knowledge-base m
 
 A Workspace **is** the agent config. There is no separate "agent" object. When a user enters a workspace and starts a conversation, the agent behavior is fully determined by that workspace's settings.
 
-- **System Prompt**: optional text appended after the global `BASE_SYSTEM_PROMPT`. Defines persona, constraints, or domain focus for every conversation in this workspace.
-- **Skills**: per-workspace subset of org-installed skills. Members can enable/disable individual skills.
-- **MCP Connectors**: per-workspace subset of org-wide MCP servers, plus workspace-private servers. Members can toggle which servers are available to the agent.
+- **Persona**: optional system prompt appended after the global `BASE_SYSTEM_PROMPT`. Defines persona, constraints, or domain focus for every conversation in this workspace. Grouped under "Workspace Settings" in the UI alongside future per-workspace settings (model selection, etc.).
+- **Skills**: per-workspace set of skills. Members can enable/disable org-installed skills and create workspace-private skills that exist only within this workspace.
+- **MCP Connectors**: per-workspace set of MCP servers. Members can toggle org-wide servers and create workspace-private servers that are not shared with the org.
 
 ---
 
@@ -32,27 +32,30 @@ A settings button in the conversation sidebar footer (col 1). Clicking it switch
 
 | Column | Width | Content |
 |--------|-------|---------|
-| Col 1 | ~200px | Conversation sidebar, with settings nav items appended below the conversation list: **System Prompt**, **Skills**, **MCP Connectors**. Footer shows "← 返回对话" button. |
-| Col 2 | ~220px | List panel for the selected category. Skills and MCP each show a scrollable list with inline toggle switches. System Prompt has no list — col 2 is not rendered and col 3 expands to fill the remaining width. |
-| Col 3 | flex:1 | Detail / edit panel. For Skills: skill detail with per-workspace enable toggle, description, metadata. For MCP: server detail with credential status. For System Prompt: textarea editor with Save / Reset. |
+| Col 1 | ~200px | Conversation sidebar, with settings nav appended below the conversation list. Three top-level items: **Workspace Settings** (group), **Skills**, **MCP Connectors**. No back button — closing settings is done by clicking the settings icon again or navigating to a conversation. |
+| Col 2 | ~220px | List panel for the selected top-level item. For "Workspace Settings": sub-items list (Persona, Model, …). For Skills and MCP: scrollable item list with inline toggles and a "+ 新建" button. |
+| Col 3 | flex:1 | Detail / edit panel for the selected item. |
 
-### System Prompt Tab
+### Workspace Settings Group
 
-Col 3 shows a full-width editor: a resizable textarea pre-filled with the saved prompt, a character/token count hint, Reset and Save buttons. Col 2 is not used.
+"Workspace Settings" is a top-level nav group in col 1. Selecting it shows a sub-item list in col 2:
+
+- **Persona** — col 3 shows a resizable textarea editor pre-filled with the saved persona prompt, with Reset and Save buttons.
+- **Model** — placeholder for future per-workspace model selection (out of scope for M4; shown as a nav item with a "即将推出" badge).
 
 ### Skills Tab
 
-Col 2 lists all org-installed skills with a search box and a count badge ("3 / 5 已启用"). Each row shows icon, name, short description, and a toggle switch. Selecting a row loads the skill detail in col 3: workspace-specific enable/disable toggle, full description, version, source, tags, and how many other org workspaces have it enabled.
+Col 2 lists all skills available to this workspace in two sections: org-installed skills (with per-workspace enable/disable toggle) and workspace-private skills. A "+ 新建 Skill" button at the top allows members to create a workspace-private skill (upload a zip or define inline) without going through the org catalog. Selecting a row loads the skill detail in col 3: enable/disable toggle, description, version, source, tags.
 
 ### MCP Connectors Tab
 
-Col 2 lists connectors in two sections — "组织共享" (org-wide servers bound to this workspace) and "Workspace 私有" (servers owned by this workspace). Each row has icon, name, transport type/URL, credential status badge, and a toggle. Col 3 shows server detail: endpoint, auth type, credential binding UI (add/revoke per-workspace credential), and enable/disable toggle.
+Col 2 lists connectors in two sections — "组织共享" (org-wide servers with a binding toggle) and "Workspace 私有" (servers owned by this workspace). A "+ 新建" button allows members to add a workspace-private MCP server directly. Col 3 shows server detail: endpoint, transport type, credential binding UI, and enable/disable toggle.
 
 ---
 
 ## Backend Architecture
 
-### Gap 1: System Prompt Not Wired to Runtime
+### Gap 1: Persona Not Wired to Runtime
 
 **Current state:** `run_manager.py` calls `create_cubebox_agent(system_prompt=BASE_SYSTEM_PROMPT)`. `AgentConfig.system_prompt` is never read.
 
@@ -68,13 +71,13 @@ if agent_config.system_prompt:
 
 ### Gap 2: No Settings CRUD API
 
-New route group: `GET/PUT /api/v1/ws/{workspace_id}/settings/agent`
+New route: `GET/PUT /api/v1/ws/{workspace_id}/settings/agent`
 
-Returns and accepts the full agent config for the workspace:
+Returns and accepts the workspace persona:
 
 ```json
 {
-  "system_prompt": "You are a research assistant...",
+  "system_prompt": "You are a research assistant..."
 }
 ```
 
@@ -84,18 +87,20 @@ Returns and accepts the full agent config for the workspace:
 
 **Current state:** Enabling/disabling a skill in a workspace is an admin-only operation (`admin_skills.py`). Workspace members cannot manage their own workspace's skill set.
 
-**Fix:** New workspace-scoped skill binding endpoints, accessible to workspace members (no org-admin required):
+**Fix:** New workspace-scoped skill endpoints, accessible to workspace members (no org-admin required):
 
-- `GET /api/v1/ws/{workspace_id}/settings/skills` — list all org-installed skills with their enabled state for this workspace
-- `PATCH /api/v1/ws/{workspace_id}/settings/skills/{skill_id}` — set `enabled: true/false` for this workspace
+- `GET /api/v1/ws/{workspace_id}/settings/skills` — list org-installed skills (with per-workspace enabled state) and workspace-private skills
+- `PATCH /api/v1/ws/{workspace_id}/settings/skills/{skill_id}` — set `enabled: true/false` for an org-installed skill in this workspace
+- `POST /api/v1/ws/{workspace_id}/settings/skills` — create a workspace-private skill (not in the org catalog)
+- `DELETE /api/v1/ws/{workspace_id}/settings/skills/{skill_id}` — delete a workspace-private skill
 
-These operate on `WorkspaceSkillBinding` rows. The org-admin routes in `admin_skills.py` remain unchanged for bulk/administrative operations.
+Org-installed skill enable/disable operates on `WorkspaceSkillBinding` rows. Workspace-private skills are `OrgSkillInstall` rows scoped to this workspace only (the existing `workspace_id` field on that model covers this). The org-admin routes in `admin_skills.py` remain unchanged.
 
 Similarly for MCP:
 
 - `GET /api/v1/ws/{workspace_id}/settings/mcp` — list org-wide servers (with binding state) + workspace-private servers
 - `PATCH /api/v1/ws/{workspace_id}/settings/mcp/{server_id}` — toggle org-wide server binding for this workspace
-- Workspace-private server CRUD already exists in `ws_mcp.py` — no changes needed there
+- Workspace-private server CRUD (`POST/PUT/DELETE`) already exists in `ws_mcp.py` — no changes needed there
 
 ### Dead Code: `AgentConfig.skill_ids` / `mcp_server_ids`
 
@@ -129,7 +134,7 @@ One Alembic data migration is required: backfill an empty `AgentConfig` row for 
 ### New Routes
 
 `/w/[wsId]/settings` — the 3-column settings shell. Sub-routes or query params control which tab is active:
-- `/w/[wsId]/settings?tab=system-prompt`
+- `/w/[wsId]/settings?tab=workspace&sub=persona`
 - `/w/[wsId]/settings?tab=skills`
 - `/w/[wsId]/settings?tab=mcp`
 
@@ -138,8 +143,8 @@ The settings shell is a new page at `app/(app)/w/[wsId]/settings/page.tsx`. It r
 ### Core Package Changes
 
 New API methods in `@cubebox/core`:
-- `getAgentConfig(wsId)` / `updateAgentConfig(wsId, patch)`
-- `listWorkspaceSkills(wsId)` / `toggleWorkspaceSkill(wsId, skillId, enabled)`
+- `getAgentConfig(wsId)` / `updateAgentConfig(wsId, patch)` — persona read/write
+- `listWorkspaceSkills(wsId)` / `toggleWorkspaceSkill(wsId, skillId, enabled)` / `createWorkspaceSkill(wsId, payload)` / `deleteWorkspaceSkill(wsId, skillId)`
 - `listWorkspaceMCP(wsId)` / `toggleWorkspaceMCP(wsId, serverId, enabled)`
 
 New Zustand store: `useWorkspaceSettingsStore` — holds agent config + skill list + MCP list for the current workspace. Loaded on settings page mount.
@@ -152,4 +157,4 @@ New Zustand store: `useWorkspaceSettingsStore` — holds agent config + skill li
 - Per-model selection per workspace (model management is M2, UI wiring is post-M4)
 - Skill publishing / marketplace (separate milestone)
 - Fine-grained settings permissions (workspace owner vs member distinction)
-- Workspace-private MCP server creation UI (already implemented in existing admin console)
+- Workspace-private MCP server creation UI is in scope (the backend already supports it via `ws_mcp.py`; M4 adds the settings UI entry point)
