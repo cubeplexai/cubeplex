@@ -130,7 +130,20 @@ class SkillCatalogService:
             for (skill, sv) in ws_private_rows
         ]
 
-        return org_wide_results + ws_private_results
+        # Deduplicate by skill_id: workspace-private takes precedence over org-wide
+        seen_skill_ids: set[str] = set()
+        deduped: list[ResolvedSkill] = []
+        # Add workspace-private first (higher precedence)
+        for row in ws_private_results:
+            if row.skill_id not in seen_skill_ids:
+                seen_skill_ids.add(row.skill_id)
+                deduped.append(row)
+        # Then add org-wide if not already covered
+        for row in org_wide_results:
+            if row.skill_id not in seen_skill_ids:
+                seen_skill_ids.add(row.skill_id)
+                deduped.append(row)
+        return deduped
 
     async def find_enabled_by_name(
         self, workspace_id: str, *, org_id: str, name: str

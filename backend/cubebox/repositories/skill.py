@@ -288,9 +288,11 @@ class OrgSkillInstallRepository:
         await self.session.refresh(row)
         return row
 
-    async def delete_workspace_private(self, install_id: str, workspace_id: str) -> bool:
+    async def delete_workspace_private(
+        self, install_id: str, *, org_id: str, workspace_id: str
+    ) -> bool:
         row = await self.get_by_id(install_id)
-        if row is None or row.workspace_id != workspace_id:
+        if row is None or row.org_id != org_id or row.workspace_id != workspace_id:
             return False
         await self.session.delete(row)
         await self.session.commit()

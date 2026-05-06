@@ -160,6 +160,8 @@ async def install_workspace_skill(
     skill = await skill_repo.get(body.skill_id)
     if skill is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="skill not found in catalog")
+    if skill.source != "preinstalled" and skill.owner_org_id != ctx.org_id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="skill not found in catalog")
 
     version_repo = SkillVersionRepository(session)
     skill_version = await version_repo.find(body.skill_id, body.version)
@@ -184,6 +186,8 @@ async def delete_workspace_skill(
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> None:
     install_repo = OrgSkillInstallRepository(session)
-    deleted = await install_repo.delete_workspace_private(install_id, ctx.workspace_id)
+    deleted = await install_repo.delete_workspace_private(
+        install_id, org_id=ctx.org_id, workspace_id=ctx.workspace_id
+    )
     if not deleted:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="workspace skill install not found")
