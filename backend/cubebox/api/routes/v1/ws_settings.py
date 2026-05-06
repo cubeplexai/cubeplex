@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Annotated
 
 from fastapi import APIRouter, Depends
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import select
 
@@ -27,12 +28,23 @@ async def _get_or_create_agent_config(
         )
     )
     cfg = result.scalar_one_or_none()
-    if cfg is None:
+    if cfg is not None:
+        return cfg
+    try:
         cfg = AgentConfig(org_id=org_id, workspace_id=workspace_id)
         session.add(cfg)
         await session.commit()
         await session.refresh(cfg)
-    return cfg
+        return cfg
+    except IntegrityError:
+        await session.rollback()
+        result = await session.execute(
+            select(AgentConfig).where(
+                AgentConfig.org_id == org_id,
+                AgentConfig.workspace_id == workspace_id,
+            )
+        )
+        return result.scalar_one()
 
 
 @router.get("/agent", response_model=AgentConfigOut)
