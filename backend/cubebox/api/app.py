@@ -244,7 +244,7 @@ async def lifespan(_app: FastAPI):  # type: ignore
         from cubebox.seeders import seed_system_providers_from_config
 
         async with async_session_maker() as seed_session:
-            await seed_system_providers_from_config(seed_session)
+            await seed_system_providers_from_config(seed_session, _app.state.encryption_backend)
         logger.info("System provider seed step completed")
     except Exception as e:
         logger.warning("Failed to seed system providers: {}", str(e))

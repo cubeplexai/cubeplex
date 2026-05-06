@@ -3,11 +3,15 @@
 from __future__ import annotations
 
 import pytest
+from cryptography.fernet import Fernet
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.pool import StaticPool
 from sqlmodel import SQLModel
 
 from cubebox.api.schemas.provider import ProviderCreate, ProviderUpdate
+from cubebox.credentials.encryption import FernetBackend
+from cubebox.repositories.credential import CredentialRepository
+from cubebox.services.credential import CredentialService
 from cubebox.services.provider_service import (
     ProviderNameConflictError,
     ProviderOAuthNotImplementedError,
@@ -37,11 +41,19 @@ def _make_svc(session: AsyncSession, org_id: str = "org-1") -> ProviderService:
     from cubebox.repositories.org_settings import OrgSettingsRepository
     from cubebox.repositories.provider import ProviderRepository
 
+    backend = FernetBackend([Fernet.generate_key()])
+    cred_service = CredentialService(
+        CredentialRepository(session, org_id=org_id),
+        backend,
+        org_id=org_id,
+        actor_user_id="user-1",
+    )
     return ProviderService(
         provider_repo=ProviderRepository(session, org_id=org_id),
         model_repo=ModelRepository(session),
         override_repo=OrgProviderOverrideRepository(session, org_id=org_id),
         org_settings_repo=OrgSettingsRepository(session, org_id=org_id),
+        credential_service=cred_service,
         session=session,
         org_id=org_id,
         actor_user_id="user-1",
@@ -61,7 +73,7 @@ async def test_oauth_auth_type_rejected(db_session: AsyncSession) -> None:
 
 
 async def test_create_org_provider_sets_org_id(db_session: AsyncSession) -> None:
-    """Org-level provider must have org_id set."""
+    """Org-level provider must have org_id set and credential_id populated."""
     svc = _make_svc(db_session)
     data = ProviderCreate(
         name="my-provider",
@@ -72,7 +84,7 @@ async def test_create_org_provider_sets_org_id(db_session: AsyncSession) -> None
     provider = await svc.create_provider(data)
     assert provider.org_id == "org-1"
     assert provider.name == "my-provider"
-    assert provider.api_key == "sk-test"
+    assert provider.credential_id is not None
 
 
 async def test_name_conflict_raises(db_session: AsyncSession) -> None:
@@ -93,13 +105,11 @@ async def test_system_provider_readonly_on_update(db_session: AsyncSession) -> N
     """Updating a system provider (org_id=None) must raise."""
     from cubebox.models.provider import Provider
 
-    # Seed a system provider directly
     p = Provider(
         org_id=None,
         name="system-openai",
         base_url="https://api.openai.com",
         auth_type="api_key",
-        api_key="sk-system",
         created_by_user_id="system",
     )
     db_session.add(p)
@@ -119,7 +129,6 @@ async def test_system_provider_readonly_on_delete(db_session: AsyncSession) -> N
         name="system-anthropic",
         base_url="https://api.anthropic.com",
         auth_type="api_key",
-        api_key="sk-system",
         created_by_user_id="system",
     )
     db_session.add(p)

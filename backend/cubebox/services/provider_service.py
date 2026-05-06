@@ -17,6 +17,7 @@ from cubebox.api.schemas.provider import (
     ProviderUpdate,
     TestResultOut,
 )
+from cubebox.credentials.exceptions import CredentialNotFound
 from cubebox.llm.openai_compatible import ChatOpenAICompatible
 from cubebox.models.org_provider_override import OrgProviderOverride
 from cubebox.models.provider import Model, Provider
@@ -24,6 +25,9 @@ from cubebox.repositories.model import ModelRepository
 from cubebox.repositories.org_provider_override import OrgProviderOverrideRepository
 from cubebox.repositories.org_settings import OrgSettingsRepository
 from cubebox.repositories.provider import ProviderRepository
+from cubebox.services.credential import CredentialService
+
+_PROVIDER_KEY_KIND = "provider_api_key"
 
 
 class ProviderOAuthNotImplementedError(Exception):
@@ -58,6 +62,7 @@ class ProviderService:
         model_repo: ModelRepository,
         override_repo: OrgProviderOverrideRepository,
         org_settings_repo: OrgSettingsRepository,
+        credential_service: CredentialService,
         session: AsyncSession,
         org_id: str,
         actor_user_id: str,
@@ -66,6 +71,7 @@ class ProviderService:
         self._models = model_repo
         self._overrides = override_repo
         self._org_settings = org_settings_repo
+        self._credentials = credential_service
         self._session = session
         self.org_id = org_id
         self.actor_user_id = actor_user_id
@@ -78,14 +84,24 @@ class ProviderService:
         if auth_type == "oauth":
             raise ProviderOAuthNotImplementedError("OAuth authentication is not yet implemented")
 
-    def _validate_auth_creds(self, auth_type: str, api_key: str | None) -> None:
+    def _validate_auth_creds(self, auth_type: str, has_key: bool) -> None:
         """Enforce auth_type / api_key cross-invariants."""
-        if auth_type in ("api_key", "bearer_token"):
-            if not api_key:
-                raise ValueError(f"api_key is required for auth_type={auth_type}")
-        if auth_type == "none":
-            if api_key:
-                raise ValueError("api_key must be empty for auth_type='none'")
+        if auth_type in ("api_key", "bearer_token") and not has_key:
+            raise ValueError(f"api_key is required for auth_type={auth_type}")
+        if auth_type == "none" and has_key:
+            raise ValueError("api_key must be empty for auth_type='none'")
+
+    async def _resolve_api_key(self, provider: Provider) -> str | None:
+        """Decrypt the provider's stored api key, or None if no credential is set."""
+        if not provider.credential_id:
+            return None
+        try:
+            return await self._credentials.get_decrypted(
+                credential_id=provider.credential_id,
+                requesting_kind=_PROVIDER_KEY_KIND,
+            )
+        except CredentialNotFound:
+            return None
 
     # -- Provider CRUD -----------------------------------------------------------
 
@@ -100,18 +116,26 @@ class ProviderService:
 
     async def create_provider(self, data: ProviderCreate) -> Provider:
         self._check_oauth(data.auth_type)
-        self._validate_auth_creds(data.auth_type, data.api_key)
+        self._validate_auth_creds(data.auth_type, bool(data.api_key))
         existing = await self._providers.get_by_name(data.name)
         if existing is not None:
             raise ProviderNameConflictError(f"Provider name '{data.name}' already exists")
+
+        credential_id: str | None = None
+        if data.auth_type != "none" and data.api_key:
+            credential_id = await self._credentials.create(
+                kind=_PROVIDER_KEY_KIND,
+                name=data.name,
+                plaintext=data.api_key,
+            )
+
         p = Provider(
             org_id=self.org_id,
             name=data.name,
             provider_type=data.provider_type,
             base_url=data.base_url,
             auth_type=data.auth_type,
-            api_key=data.api_key if data.auth_type != "none" else None,
-            # TODO(vault): Encrypt api_key when M1-E4 vault integration lands.
+            credential_id=credential_id,
             logo_url=data.logo_url,
             extra_body=data.extra_body,
             extra_headers=data.extra_headers,
@@ -122,18 +146,25 @@ class ProviderService:
     async def update_provider(self, provider_id: str, data: ProviderUpdate) -> Provider:
         p = await self.get_provider(provider_id)
         self._check_not_system(p)
+
         effective_auth = data.auth_type if data.auth_type is not None else p.auth_type
-        effective_key = data.api_key if data.api_key is not None else p.api_key
+        will_have_key = (
+            bool(data.api_key)
+            if data.api_key is not None
+            else (p.credential_id is not None and effective_auth != "none")
+        )
         if data.auth_type is not None or data.api_key is not None:
             self._check_oauth(effective_auth)
-            self._validate_auth_creds(effective_auth, effective_key)
-        if data.auth_type == "none":
-            p.api_key = None
+            self._validate_auth_creds(effective_auth, will_have_key)
+
         if data.name is not None and data.name != p.name:
             existing = await self._providers.get_by_name(data.name)
             if existing is not None:
                 raise ProviderNameConflictError(f"Provider name '{data.name}' already exists")
+            if p.credential_id:
+                await self._credentials.update(credential_id=p.credential_id, name=data.name)
             p.name = data.name
+
         for field in (
             "provider_type",
             "base_url",
@@ -145,8 +176,30 @@ class ProviderService:
             val = getattr(data, field, None)
             if val is not None:
                 setattr(p, field, val)
-        if data.api_key is not None:
-            p.api_key = data.api_key
+
+        if effective_auth == "none" and p.credential_id:
+            old_cred = p.credential_id
+            p.credential_id = None
+            await self._providers.update(p)
+            await self._credentials.delete(credential_id=old_cred)
+        elif data.api_key is not None:
+            if data.api_key:
+                if p.credential_id:
+                    await self._credentials.update(
+                        credential_id=p.credential_id, plaintext=data.api_key
+                    )
+                else:
+                    p.credential_id = await self._credentials.create(
+                        kind=_PROVIDER_KEY_KIND,
+                        name=p.name,
+                        plaintext=data.api_key,
+                    )
+            elif p.credential_id:
+                old_cred = p.credential_id
+                p.credential_id = None
+                await self._providers.update(p)
+                await self._credentials.delete(credential_id=old_cred)
+
         if data.enabled is not None:
             p.enabled = data.enabled
         return await self._providers.update(p)
@@ -154,10 +207,13 @@ class ProviderService:
     async def delete_provider(self, provider_id: str) -> None:
         p = await self.get_provider(provider_id)
         self._check_not_system(p)
+        cred_id = p.credential_id
         await self._models.delete_by_provider(provider_id)
         await self._overrides.delete(provider_id)
         await self._providers.delete(p)
         await self._session.commit()
+        if cred_id:
+            await self._credentials.delete(credential_id=cred_id)
 
     # -- Model CRUD -------------------------------------------------------------
 
@@ -265,10 +321,11 @@ class ProviderService:
                 error=f"Unsupported provider_type: {provider.provider_type}",
                 latency_ms=0,
             )
+        api_key = await self._resolve_api_key(provider)
         try:
             llm = ChatOpenAICompatible(
                 base_url=provider.base_url,
-                api_key=provider.api_key or "placeholder",  # type: ignore[arg-type]
+                api_key=api_key or "placeholder",  # type: ignore[arg-type]
                 model=model_id,
                 timeout=15,
             )

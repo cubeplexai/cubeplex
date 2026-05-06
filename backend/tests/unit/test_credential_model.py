@@ -1,6 +1,6 @@
 """Tests for the vault Credential SQLModel."""
 
-from sqlalchemy import LargeBinary, UniqueConstraint
+from sqlalchemy import Index, LargeBinary
 
 
 def test_credential_model_is_registered() -> None:
@@ -11,17 +11,26 @@ def test_credential_model_is_registered() -> None:
     assert Credential.__table__.c.cred_metadata.type.python_type is dict
 
 
-def test_credential_model_has_org_kind_name_unique_constraint() -> None:
+def test_credential_model_has_partial_unique_indexes() -> None:
+    """Org-scoped and system-scoped uniqueness are enforced by partial indexes.
+
+    System credentials carry ``org_id IS NULL``, so a single full unique
+    constraint cannot cover both system and org-scoped rows -- two partial
+    indexes do.
+    """
     from cubebox.models import Credential
 
-    constraints = [
-        constraint
-        for constraint in Credential.__table__.constraints
-        if isinstance(constraint, UniqueConstraint)
-    ]
+    indexes: list[Index] = list(Credential.__table__.indexes)
 
-    assert any(
-        constraint.name == "uq_credential_org_kind_name"
-        and [column.name for column in constraint.columns] == ["org_id", "kind", "name"]
-        for constraint in constraints
+    org_scoped = next(
+        (i for i in indexes if i.name == "uq_credential_org_kind_name"),
+        None,
     )
+    system_scoped = next(
+        (i for i in indexes if i.name == "uq_credential_system_kind_name"),
+        None,
+    )
+    assert org_scoped is not None and org_scoped.unique
+    assert [c.name for c in org_scoped.columns] == ["org_id", "kind", "name"]
+    assert system_scoped is not None and system_scoped.unique
+    assert [c.name for c in system_scoped.columns] == ["kind", "name"]

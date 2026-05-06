@@ -20,8 +20,8 @@ class CredentialService:
         repo: CredentialRepository,
         backend: EncryptionBackend,
         *,
-        org_id: str,
-        actor_user_id: str,
+        org_id: str | None,
+        actor_user_id: str | None,
     ) -> None:
         self._repo = repo
         self._backend = backend
@@ -86,7 +86,10 @@ class CredentialService:
         await self._repo.delete(credential_id)
 
     async def _guard_references(self, credential_id: str) -> None:
-        """Refuse deletion while MCP tables still reference the credential."""
+        """Refuse deletion while other rows still reference the credential."""
+        from sqlalchemy import select
+
+        from cubebox.models.provider import Provider
         from cubebox.repositories.mcp import (
             MCPServerRepository,
             UserMCPCredentialRepository,
@@ -94,16 +97,33 @@ class CredentialService:
         )
 
         session = self._repo.session
-        for repo_class in (
-            MCPServerRepository,
-            WorkspaceMCPCredentialRepository,
-            UserMCPCredentialRepository,
-        ):
-            repo = repo_class(session, org_id=self._org_id)
-            references = await repo.find_by_credential_id(credential_id)
-            if references:
-                reference_ids = [getattr(reference, "id", "?") for reference in references]
-                raise CredentialInUseError(
-                    f"credential {credential_id} referenced by "
-                    f"{repo_class.__name__}: {reference_ids}"
+        if self._org_id is not None:
+            for repo_class in (
+                MCPServerRepository,
+                WorkspaceMCPCredentialRepository,
+                UserMCPCredentialRepository,
+            ):
+                repo = repo_class(session, org_id=self._org_id)
+                references = await repo.find_by_credential_id(credential_id)
+                if references:
+                    reference_ids = [getattr(reference, "id", "?") for reference in references]
+                    raise CredentialInUseError(
+                        f"credential {credential_id} referenced by "
+                        f"{repo_class.__name__}: {reference_ids}"
+                    )
+        provider_refs = (
+            (
+                await session.execute(
+                    select(Provider).where(
+                        Provider.credential_id == credential_id  # type: ignore[arg-type]
+                    )
                 )
+            )
+            .scalars()
+            .all()
+        )
+        if provider_refs:
+            raise CredentialInUseError(
+                f"credential {credential_id} referenced by Provider: "
+                f"{[p.id for p in provider_refs]}"
+            )

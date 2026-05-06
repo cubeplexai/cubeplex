@@ -22,8 +22,8 @@ def build_credential_service(
     session: AsyncSession,
     backend: EncryptionBackend,
     *,
-    org_id: str,
-    actor_user_id: str,
+    org_id: str | None,
+    actor_user_id: str | None,
 ) -> CredentialService:
     repo = CredentialRepository(session, org_id=org_id)
     return CredentialService(
