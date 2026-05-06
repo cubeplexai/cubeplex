@@ -80,6 +80,7 @@ class SkillCatalogService:
             )
             .where(
                 OrgSkillInstall.org_id == org_id,  # type: ignore[arg-type]
+                OrgSkillInstall.workspace_id.is_(None),  # type: ignore[union-attr]
                 or_(
                     explicit_enable,
                     (OrgSkillInstall.auto_bind.is_(True) & ~explicit_disable),  # type: ignore[attr-defined]
@@ -88,7 +89,7 @@ class SkillCatalogService:
             .order_by(Skill.name)
         )
         rows = (await self.session.execute(stmt)).all()
-        return [
+        org_wide_results = [
             ResolvedSkill(
                 skill_id=skill.id,
                 skill_version_id=sv.id,
@@ -100,6 +101,36 @@ class SkillCatalogService:
             )
             for (skill, sv) in rows
         ]
+
+        # Also load workspace-private installs (always enabled)
+        ws_private_stmt = (
+            select(Skill, SkillVersion)
+            .join(OrgSkillInstall, OrgSkillInstall.skill_id == Skill.id)  # type: ignore[arg-type]
+            .join(
+                SkillVersion,
+                (SkillVersion.skill_id == Skill.id)  # type: ignore[arg-type]
+                & (SkillVersion.version == OrgSkillInstall.installed_version),
+            )
+            .where(
+                OrgSkillInstall.org_id == org_id,  # type: ignore[arg-type]
+                OrgSkillInstall.workspace_id == workspace_id,  # type: ignore[arg-type]
+            )
+        )
+        ws_private_rows = (await self.session.execute(ws_private_stmt)).all()
+        ws_private_results = [
+            ResolvedSkill(
+                skill_id=skill.id,
+                skill_version_id=sv.id,
+                name=skill.name,
+                description=sv.description,
+                version=sv.version,
+                storage_prefix=sv.storage_prefix,
+                entry_file=sv.entry_file,
+            )
+            for (skill, sv) in ws_private_rows
+        ]
+
+        return org_wide_results + ws_private_results
 
     async def find_enabled_by_name(
         self, workspace_id: str, *, org_id: str, name: str
