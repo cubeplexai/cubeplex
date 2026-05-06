@@ -51,30 +51,35 @@ export function SettingsNav({ wsId }: SettingsNavProps): React.ReactElement {
               </Link>
               {isActive && item.sub && (
                 <div className="ml-6 mt-0.5 space-y-0.5">
-                  {item.sub.map((s) => (
-                    <Link
-                      key={s.key}
-                      href={
-                        'disabled' in s && s.disabled
-                          ? '#'
-                          : `/w/${wsId}/settings?tab=${item.key}&sub=${s.key}`
-                      }
-                      className={`flex items-center justify-between px-2 py-1 rounded-md text-[11.5px] transition-colors ${
-                        currentSub === s.key
-                          ? 'text-primary font-medium'
-                          : 'disabled' in s && s.disabled
-                            ? 'text-muted-foreground/40 cursor-default pointer-events-none'
-                            : 'text-muted-foreground hover:text-foreground hover:bg-accent/60'
-                      }`}
-                    >
-                      {s.label}
-                      {'disabled' in s && s.disabled && (
-                        <span className="text-[9px] bg-muted text-muted-foreground/60 rounded px-1">
-                          soon
+                  {item.sub.map((s) => {
+                    const isDisabled = 'disabled' in s && s.disabled
+                    const itemClass = `flex items-center justify-between px-2 py-1 rounded-md text-[11.5px] transition-colors ${
+                      currentSub === s.key
+                        ? 'text-primary font-medium'
+                        : isDisabled
+                          ? 'text-muted-foreground/40 cursor-default'
+                          : 'text-muted-foreground hover:text-foreground hover:bg-accent/60'
+                    }`
+                    if (isDisabled) {
+                      return (
+                        <span key={s.key} className={itemClass} aria-disabled="true">
+                          {s.label}
+                          <span className="text-[9px] bg-muted text-muted-foreground/60 rounded px-1">
+                            soon
+                          </span>
                         </span>
-                      )}
-                    </Link>
-                  ))}
+                      )
+                    }
+                    return (
+                      <Link
+                        key={s.key}
+                        href={`/w/${wsId}/settings?tab=${item.key}&sub=${s.key}`}
+                        className={itemClass}
+                      >
+                        {s.label}
+                      </Link>
+                    )
+                  })}
                 </div>
               )}
             </div>
