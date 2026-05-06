@@ -5,7 +5,6 @@ import { useRouter } from 'next/navigation'
 import { useTranslations } from 'next-intl'
 import {
   createApiClient,
-  renameConversation,
   useAttachmentStore,
   useConversationStore,
   useMessageStore,
@@ -21,7 +20,7 @@ export default function WorkspaceHomePage({
   const t = useTranslations('home')
   const { wsId } = use(params)
   const router = useRouter()
-  const { create: createConversation } = useConversationStore()
+  const { create: createConversation, rename: renameConversation } = useConversationStore()
   const send = useMessageStore((s) => s.send)
   const [draftConvId, setDraftConvId] = useState<string | null>(null)
 

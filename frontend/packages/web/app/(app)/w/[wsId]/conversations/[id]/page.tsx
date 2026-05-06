@@ -16,7 +16,6 @@ import { ErrorState } from '@/components/shared/ErrorState'
 export default function ChatPage({ params }: { params: Promise<{ wsId: string; id: string }> }) {
   const { wsId, id: conversationId } = use(params)
   const setActive = useConversationStore((s) => s.setActive)
-  const fetchList = useConversationStore((s) => s.fetchList)
   const conversations = useConversationStore((s) => s.conversations)
   const loadArtifacts = useArtifactStore((s) => s.loadArtifacts)
   const [status, setStatus] = useState<'loading' | 'ok' | 'notfound' | 'forbidden'>('loading')
@@ -37,9 +36,8 @@ export default function ChatPage({ params }: { params: Promise<{ wsId: string; i
       else if (res.ok) setStatus('ok')
       else setStatus('notfound')
     })()
-    fetchList(client)
     loadArtifacts(client, conversationId)
-  }, [conversationId, client, setActive, fetchList, loadArtifacts])
+  }, [conversationId, client, setActive, loadArtifacts])
 
   if (status === 'notfound') {
     return (
