@@ -62,3 +62,16 @@ class TestSkillsSettings:
         )
         assert resp.status_code == 200
         assert resp.json()["enabled"] is True
+
+
+class TestMCPSettings:
+    """Workspace MCP settings routes."""
+
+    def test_list_mcp(self, client: TestClient) -> None:
+        resp = client.get(f"/api/v1/ws/{DEFAULT_WS_ID}/settings/mcp")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "org_servers" in data
+        assert "workspace_servers" in data
+        assert isinstance(data["org_servers"], list)
+        assert isinstance(data["workspace_servers"], list)
