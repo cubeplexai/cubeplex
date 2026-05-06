@@ -1,5 +1,6 @@
 import type { AgentEvent } from '../types'
 import type { ApiClient } from './client'
+import { CSRF_COOKIE_NAME } from './cookieNames'
 import { streamRun } from './runStreams'
 
 async function* readLines(reader: ReadableStreamDefaultReader<Uint8Array>): AsyncGenerator<string> {
@@ -35,7 +36,7 @@ export async function* streamMessages(
     Accept: 'text/event-stream',
     'Cache-Control': 'no-cache',
   }
-  const csrf = readCookie('cubebox_csrf')
+  const csrf = readCookie(CSRF_COOKIE_NAME)
   if (csrf) headers['X-CSRF-Token'] = csrf
 
   const path = client.resolvePath(`/api/v1/conversations/${conversationId}/messages`)

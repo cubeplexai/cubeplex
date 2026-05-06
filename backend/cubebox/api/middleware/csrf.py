@@ -1,8 +1,9 @@
 """CSRF double-submit-cookie middleware.
 
-On every safe request (GET/HEAD/OPTIONS), set a `cubebox_csrf` cookie if absent.
-On every mutating request (POST/PUT/PATCH/DELETE), require the cookie value to match
-the `X-CSRF-Token` header. Skip enforcement if there is no auth cookie present (so
+On every safe request (GET/HEAD/OPTIONS), set the CSRF cookie (default
+`cubebox_csrf`, configurable via `auth.csrf_cookie_name`) if absent. On every
+mutating request (POST/PUT/PATCH/DELETE), require the cookie value to match the
+`X-CSRF-Token` header. Skip enforcement if there is no auth cookie present (so
 unauthenticated routes still work).
 """
 
@@ -15,7 +16,6 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from cubebox.config import config
 
-CSRF_COOKIE = "cubebox_csrf"
 CSRF_HEADER = "x-csrf-token"
 SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
 
@@ -24,6 +24,7 @@ class CSRFMiddleware:
     def __init__(self, app: ASGIApp) -> None:
         self.app = app
         self.auth_cookie = config.get("auth.cookie_name", "cubebox_auth")
+        self.csrf_cookie = config.get("auth.csrf_cookie_name", "cubebox_csrf")
         self.cookie_secure = config.get("auth.cookie_secure", False)
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
@@ -34,7 +35,7 @@ class CSRFMiddleware:
         method = scope["method"].upper()
         cookies = _parse_cookies(scope["headers"])
         has_auth = self.auth_cookie in cookies
-        csrf_cookie = cookies.get(CSRF_COOKIE)
+        csrf_cookie = cookies.get(self.csrf_cookie)
 
         if method not in SAFE_METHODS and has_auth:
             csrf_header = _get_header(scope["headers"], CSRF_HEADER.encode())
@@ -44,18 +45,20 @@ class CSRFMiddleware:
 
         if csrf_cookie is None and method in SAFE_METHODS:
             new_token = secrets.token_urlsafe(32)
+            csrf_name = self.csrf_cookie
+            cookie_secure = self.cookie_secure
 
             async def send_with_csrf(message: Message) -> None:
                 if message["type"] == "http.response.start":
                     headers = MutableHeaders(scope=message)
                     cookie: SimpleCookie = SimpleCookie()
-                    cookie[CSRF_COOKIE] = new_token
-                    cookie[CSRF_COOKIE]["path"] = "/"
-                    cookie[CSRF_COOKIE]["samesite"] = "Lax"
-                    cookie[CSRF_COOKIE]["max-age"] = "86400"
-                    if self.cookie_secure:
-                        cookie[CSRF_COOKIE]["secure"] = True
-                    headers.append("set-cookie", cookie[CSRF_COOKIE].OutputString())
+                    cookie[csrf_name] = new_token
+                    cookie[csrf_name]["path"] = "/"
+                    cookie[csrf_name]["samesite"] = "Lax"
+                    cookie[csrf_name]["max-age"] = "86400"
+                    if cookie_secure:
+                        cookie[csrf_name]["secure"] = True
+                    headers.append("set-cookie", cookie[csrf_name].OutputString())
                 await send(message)
 
             await self.app(scope, receive, send_with_csrf)

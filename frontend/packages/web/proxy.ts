@@ -1,4 +1,5 @@
 import { NextResponse, type NextRequest } from 'next/server'
+import { AUTH_COOKIE_NAME } from '@cubebox/core'
 
 const PUBLIC_PATHS = ['/login', '/register']
 const PROTECTED_PREFIXES = ['/w/', '/workspaces', '/admin']
@@ -9,7 +10,7 @@ function isProtected(pathname: string): boolean {
 
 export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl
-  const hasAuth = !!request.cookies.get('cubebox_auth')
+  const hasAuth = !!request.cookies.get(AUTH_COOKIE_NAME)
 
   if (!hasAuth && isProtected(pathname)) {
     const url = request.nextUrl.clone()

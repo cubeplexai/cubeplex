@@ -1,5 +1,6 @@
 import type { AgentEvent, Message } from '../types'
 import { toApiError, type ApiClient } from './client'
+import { CSRF_COOKIE_NAME } from './cookieNames'
 
 export interface ActiveRunBootstrap {
   run_id: string
@@ -79,7 +80,7 @@ export async function* streamRun(
     'Cache-Control': 'no-cache',
   }
   if (lastEventId) headers['Last-Event-ID'] = lastEventId
-  const csrf = readCookie('cubebox_csrf')
+  const csrf = readCookie(CSRF_COOKIE_NAME)
   if (csrf) headers['X-CSRF-Token'] = csrf
 
   const path = client.resolvePath(`/api/v1/conversations/${conversationId}/runs/${runId}/stream`)

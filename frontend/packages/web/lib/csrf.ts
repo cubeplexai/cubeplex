@@ -1,8 +1,11 @@
+import { CSRF_COOKIE_NAME } from '@cubebox/core'
+
 /** Read the CSRF token cookie set by the backend on login. */
 export function readCsrfToken(): string {
   if (typeof document === 'undefined') return ''
-  const match = document.cookie.split('; ').find((c) => c.startsWith('cubebox_csrf='))
-  return match ? decodeURIComponent(match.slice('cubebox_csrf='.length)) : ''
+  const prefix = `${CSRF_COOKIE_NAME}=`
+  const match = document.cookie.split('; ').find((c) => c.startsWith(prefix))
+  return match ? decodeURIComponent(match.slice(prefix.length)) : ''
 }
 
 /** Build standard headers for a JSON-bodied admin request. */

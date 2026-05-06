@@ -1,5 +1,6 @@
 import type { ApiClient } from './client'
 import { toApiError } from './client'
+import { CSRF_COOKIE_NAME } from './cookieNames'
 import type { AttachmentDto, AttachmentListDto, AttachmentStatus } from '../types/attachment'
 
 const base = (convId: string): string => `/api/v1/conversations/${convId}/attachments`
@@ -27,7 +28,7 @@ export async function uploadAttachment(
     xhr.withCredentials = true
     const csrf = document.cookie
       .split('; ')
-      .find((c) => c.startsWith('cubebox_csrf='))
+      .find((c) => c.startsWith(`${CSRF_COOKIE_NAME}=`))
       ?.split('=')[1]
     if (csrf) xhr.setRequestHeader('X-CSRF-Token', decodeURIComponent(csrf))
 

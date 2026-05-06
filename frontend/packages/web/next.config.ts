@@ -28,6 +28,13 @@ export const nextConfig: NextConfig = {
   compress: false,
   transpilePackages: ['katex', '@cubebox/core'],
   turbopack: {},
+  // Inline cookie-name overrides into the client bundle. Worktrees set these
+  // in .worktree.env so each worktree's browser cookies don't collide on
+  // localhost (cookies are host-scoped, not port-scoped).
+  env: {
+    NEXT_PUBLIC_AUTH_COOKIE_NAME: process.env.NEXT_PUBLIC_AUTH_COOKIE_NAME ?? 'cubebox_auth',
+    NEXT_PUBLIC_CSRF_COOKIE_NAME: process.env.NEXT_PUBLIC_CSRF_COOKIE_NAME ?? 'cubebox_csrf',
+  },
   experimental: {
     proxyClientMaxBodySize: ATTACHMENT_PROXY_BODY_LIMIT,
   },

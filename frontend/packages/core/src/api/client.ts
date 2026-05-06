@@ -9,11 +9,14 @@
  *     Paths starting with /api/v1/auth/ or /api/v1/workspaces are left alone
  *     (workspace-neutral).
  *   - X-CSRF-Token is injected on non-GET methods, read from document.cookie
- *     (cubebox_csrf).
+ *     (CSRF_COOKIE_NAME — defaults to "cubebox_csrf"; per-worktree override via
+ *     NEXT_PUBLIC_CSRF_COOKIE_NAME).
  *
  * 401 observable: any response with status 401 fires all registered
  * onUnauthorized callbacks. Login 400s do NOT fire.
  */
+
+import { CSRF_COOKIE_NAME } from './cookieNames'
 
 export interface ApiClient {
   baseUrl: string
@@ -65,7 +68,7 @@ export function createApiClient(baseUrl: string): ApiClient {
     const headers: Record<string, string> = { ...base }
     if (locale) headers['Accept-Language'] = locale
     if (method !== 'GET') {
-      const csrf = readCookie('cubebox_csrf')
+      const csrf = readCookie(CSRF_COOKIE_NAME)
       if (csrf) headers['X-CSRF-Token'] = csrf
     }
     return headers

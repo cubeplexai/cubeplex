@@ -1,9 +1,10 @@
 import { cookies } from 'next/headers'
 import { redirect } from 'next/navigation'
+import { AUTH_COOKIE_NAME } from '@cubebox/core'
 
 export default async function RootRedirectPage() {
   const cookieStore = await cookies()
-  const authed = !!cookieStore.get('cubebox_auth')
+  const authed = !!cookieStore.get(AUTH_COOKIE_NAME)
   if (!authed) redirect('/login')
 
   const cookieHeader = cookieStore.toString()

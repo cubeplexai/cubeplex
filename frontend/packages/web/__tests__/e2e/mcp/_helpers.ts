@@ -12,7 +12,8 @@ export async function registerAndGetWorkspace(page: Page): Promise<{ wsId: strin
 
 async function csrf(page: Page): Promise<string> {
   const cookies = await page.context().cookies()
-  return cookies.find((cookie) => cookie.name === 'cubebox_csrf')?.value ?? ''
+  const name = process.env.NEXT_PUBLIC_CSRF_COOKIE_NAME ?? 'cubebox_csrf'
+  return cookies.find((cookie) => cookie.name === name)?.value ?? ''
 }
 
 export async function createWorkspace(page: Page, name: string): Promise<{ id: string }> {
