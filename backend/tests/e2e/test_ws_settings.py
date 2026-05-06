@@ -75,3 +75,25 @@ class TestMCPSettings:
         assert "workspace_servers" in data
         assert isinstance(data["org_servers"], list)
         assert isinstance(data["workspace_servers"], list)
+
+
+class TestSettingsScoping:
+    """Settings are scoped per workspace — non-members cannot read workspace data."""
+
+    def test_other_workspace_not_found(self, client: TestClient) -> None:
+        """A request for a workspace the user is not a member of returns 403 or 404."""
+        resp = client.get("/api/v1/ws/ws-nonexistent-000/settings/agent")
+        assert resp.status_code in (403, 404)
+
+    def test_persona_key_always_present(self, client: TestClient) -> None:
+        resp = client.get(f"/api/v1/ws/{DEFAULT_WS_ID}/settings/agent")
+        assert resp.status_code == 200
+        assert "system_prompt" in resp.json()
+
+    def test_skills_and_mcp_both_return_lists(self, client: TestClient) -> None:
+        skills_resp = client.get(f"/api/v1/ws/{DEFAULT_WS_ID}/settings/skills")
+        mcp_resp = client.get(f"/api/v1/ws/{DEFAULT_WS_ID}/settings/mcp")
+        assert skills_resp.status_code == 200
+        assert mcp_resp.status_code == 200
+        assert isinstance(skills_resp.json()["org_skills"], list)
+        assert isinstance(mcp_resp.json()["org_servers"], list)
