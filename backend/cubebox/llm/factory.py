@@ -12,6 +12,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cubebox.config import config
+from cubebox.credentials.encryption import EncryptionBackend
 from cubebox.llm.config import LLMConfig, ModelConfig, ProviderConfig
 from cubebox.llm.openai_compatible import ChatOpenAICompatible
 
@@ -26,6 +27,7 @@ class LLMFactory:
         llm_config: LLMConfig | None = None,
         session: AsyncSession | None = None,
         org_id: str | None = None,
+        encryption_backend: EncryptionBackend | None = None,
     ):
         """
         Initialize LLM factory.
@@ -34,9 +36,12 @@ class LLMFactory:
             llm_config: LLM configuration. If None, loads from global config.
             session: Optional async DB session for DB-driven config loading.
             org_id: Optional org ID for DB-driven config loading.
+            encryption_backend: Optional vault backend; required to decrypt
+                provider api_key credentials when loading from DB.
         """
         self._session = session
         self._org_id = org_id
+        self._backend = encryption_backend
         if llm_config is None:
             # Load from global config
             llm_config = LLMConfig(**config.llm)
@@ -52,6 +57,7 @@ class LLMFactory:
         if not self._session or not self._org_id:
             return {}, set()
 
+        from cubebox.models import Credential
         from cubebox.models.org_provider_override import OrgProviderOverride as DBO
         from cubebox.models.provider import Model as DBM
         from cubebox.models.provider import Provider as DBP
@@ -84,9 +90,33 @@ class LLMFactory:
             )
             db_models = models_result.scalars().all()
 
+            api_key: str | None = None
+            if p.credential_id and self._backend is not None:
+                cred_row = await self._session.get(Credential, p.credential_id)
+                if cred_row is None:
+                    logger.warning(
+                        "Provider %s references missing credential %s",
+                        p.name,
+                        p.credential_id,
+                    )
+                elif cred_row.kind == "provider_api_key":
+                    try:
+                        api_key = (await self._backend.decrypt(cred_row.value_encrypted)).decode(
+                            "utf-8"
+                        )
+                    except Exception:
+                        logger.warning(
+                            "Failed to decrypt credential %s for provider %s; "
+                            "skipping api_key. Likely cause: encryption key "
+                            "mismatch (rotate CUBEBOX_AUTH__VAULT_KEY back or "
+                            "rotate the credential).",
+                            p.credential_id,
+                            p.name,
+                        )
+
             db_configs[p.name] = {
                 "base_url": p.base_url,
-                "api_key": p.api_key,
+                "api_key": api_key,
                 "api": "openai-completions",
                 "extra_body": p.extra_body,
                 "extra_headers": p.extra_headers,

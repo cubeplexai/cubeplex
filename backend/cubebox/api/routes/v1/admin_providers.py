@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -24,6 +24,7 @@ from cubebox.api.schemas.provider import (
     TestResultOut,
 )
 from cubebox.auth.dependencies import require_org_admin, resolve_current_org_id
+from cubebox.credentials.dependencies import build_credential_service
 from cubebox.db import get_session
 from cubebox.models import User
 from cubebox.models.org_provider_override import OrgProviderOverride
@@ -45,13 +46,20 @@ from cubebox.services.provider_service import (
 router = APIRouter(prefix="/admin", tags=["admin-providers"])
 
 
-async def _svc(user: User, session: AsyncSession) -> ProviderService:
+async def _svc(user: User, session: AsyncSession, request: Request) -> ProviderService:
     org_id = await resolve_current_org_id(user, session)
+    cred_service = build_credential_service(
+        session,
+        request.app.state.encryption_backend,
+        org_id=org_id,
+        actor_user_id=user.id,
+    )
     return ProviderService(
         provider_repo=ProviderRepository(session, org_id=org_id),
         model_repo=ModelRepository(session),
         override_repo=OrgProviderOverrideRepository(session, org_id=org_id),
         org_settings_repo=OrgSettingsRepository(session, org_id=org_id),
+        credential_service=cred_service,
         session=session,
         org_id=org_id,
         actor_user_id=user.id,
@@ -93,7 +101,7 @@ def _provider_out(
         provider_type=p.provider_type,
         base_url=p.base_url,
         auth_type=p.auth_type,
-        has_api_key=bool(p.api_key),
+        has_api_key=bool(p.credential_id),
         logo_url=p.logo_url,
         enabled=p.enabled,
         is_system=p.org_id is None,
@@ -114,10 +122,11 @@ def _provider_out(
 @router.get("/providers", response_model=list[ProviderOut])
 async def list_providers(
     *,
+    request: Request,
     user: Annotated[User, Depends(require_org_admin)],
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> list[ProviderOut]:
-    svc = await _svc(user, session)
+    svc = await _svc(user, session, request)
     providers = await svc.list_providers()
     if not providers:
         return []
@@ -137,10 +146,11 @@ async def list_providers(
 async def create_provider(
     body: ProviderCreate,
     *,
+    request: Request,
     user: Annotated[User, Depends(require_org_admin)],
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> ProviderOut:
-    svc = await _svc(user, session)
+    svc = await _svc(user, session, request)
     try:
         p = await svc.create_provider(body)
     except ProviderOAuthNotImplementedError as e:
@@ -158,10 +168,11 @@ async def create_provider(
 async def get_provider(
     provider_id: str,
     *,
+    request: Request,
     user: Annotated[User, Depends(require_org_admin)],
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> ProviderOut:
-    svc = await _svc(user, session)
+    svc = await _svc(user, session, request)
     try:
         p = await svc.get_provider(provider_id)
     except ProviderNotFoundError as e:
@@ -183,10 +194,11 @@ async def update_provider(
     provider_id: str,
     body: ProviderUpdate,
     *,
+    request: Request,
     user: Annotated[User, Depends(require_org_admin)],
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> ProviderOut:
-    svc = await _svc(user, session)
+    svc = await _svc(user, session, request)
     try:
         p = await svc.update_provider(provider_id, body)
     except ProviderNotFoundError as e:
@@ -208,10 +220,11 @@ async def update_provider(
 async def delete_provider(
     provider_id: str,
     *,
+    request: Request,
     user: Annotated[User, Depends(require_org_admin)],
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> None:
-    svc = await _svc(user, session)
+    svc = await _svc(user, session, request)
     try:
         await svc.delete_provider(provider_id)
     except ProviderNotFoundError as e:
@@ -228,10 +241,11 @@ async def create_model(
     provider_id: str,
     body: ModelCreate,
     *,
+    request: Request,
     user: Annotated[User, Depends(require_org_admin)],
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> ModelOut:
-    svc = await _svc(user, session)
+    svc = await _svc(user, session, request)
     try:
         m = await svc.create_model(provider_id, body)
     except ProviderNotFoundError as e:
@@ -249,10 +263,11 @@ async def update_model(
     mid: str,
     body: ModelUpdate,
     *,
+    request: Request,
     user: Annotated[User, Depends(require_org_admin)],
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> ModelOut:
-    svc = await _svc(user, session)
+    svc = await _svc(user, session, request)
     try:
         m = await svc.update_model(provider_id, mid, body)
     except ProviderNotFoundError as e:
@@ -271,10 +286,11 @@ async def delete_model(
     provider_id: str,
     mid: str,
     *,
+    request: Request,
     user: Annotated[User, Depends(require_org_admin)],
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> None:
-    svc = await _svc(user, session)
+    svc = await _svc(user, session, request)
     try:
         await svc.delete_model(provider_id, mid)
     except ProviderNotFoundError as e:
@@ -292,10 +308,11 @@ async def delete_model(
 async def test_provider(
     body: ProviderTest,
     *,
+    request: Request,
     user: Annotated[User, Depends(require_org_admin)],
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> TestResultOut:
-    svc = await _svc(user, session)
+    svc = await _svc(user, session, request)
     return await svc.test_connection(body)
 
 
@@ -304,10 +321,11 @@ async def test_provider_model(
     provider_id: str,
     body: ModelTest,
     *,
+    request: Request,
     user: Annotated[User, Depends(require_org_admin)],
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> TestResultOut:
-    svc = await _svc(user, session)
+    svc = await _svc(user, session, request)
     try:
         return await svc.test_model_connection(provider_id, body.model_id)
     except ProviderNotFoundError as e:
@@ -321,10 +339,11 @@ async def test_provider_model(
 async def get_provider_override(
     provider_id: str,
     *,
+    request: Request,
     user: Annotated[User, Depends(require_org_admin)],
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> OrgProviderOverrideOut:
-    svc = await _svc(user, session)
+    svc = await _svc(user, session, request)
     try:
         override = await svc.get_override(provider_id)
     except ProviderNotFoundError as e:
@@ -339,10 +358,11 @@ async def set_provider_override(
     provider_id: str,
     body: OrgProviderOverrideUpdate,
     *,
+    request: Request,
     user: Annotated[User, Depends(require_org_admin)],
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> OrgProviderOverrideOut:
-    svc = await _svc(user, session)
+    svc = await _svc(user, session, request)
     try:
         override = await svc.set_override(provider_id, body.enabled)
     except ProviderNotFoundError as e:
@@ -360,10 +380,11 @@ async def set_provider_override(
 @router.get("/settings/llm", response_model=OrgLLMSettingsOut)
 async def get_llm_settings(
     *,
+    request: Request,
     user: Annotated[User, Depends(require_org_admin)],
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> OrgLLMSettingsOut:
-    svc = await _svc(user, session)
+    svc = await _svc(user, session, request)
     return await svc.get_llm_settings()
 
 
@@ -371,10 +392,11 @@ async def get_llm_settings(
 async def update_llm_settings(
     body: OrgLLMSettingsUpdate,
     *,
+    request: Request,
     user: Annotated[User, Depends(require_org_admin)],
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> OrgLLMSettingsOut:
-    svc = await _svc(user, session)
+    svc = await _svc(user, session, request)
     try:
         return await svc.update_llm_settings(body)
     except ValueError as e:

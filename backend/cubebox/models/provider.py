@@ -23,8 +23,9 @@ class Provider(CubeboxBase, table=True):
     provider_type: str = Field(default="openai_compat", max_length=32)
     base_url: str = Field(max_length=2048)
     auth_type: str = Field(default="api_key", max_length=32)
-    api_key: str | None = Field(default=None, max_length=512)
-    # TODO(vault): Encrypt api_key when M1-E4 vault integration lands.
+    credential_id: str | None = Field(
+        default=None, foreign_key="credentials.id", max_length=20, nullable=True, index=True
+    )
     oauth_client_id: str | None = Field(default=None, max_length=256)
     oauth_client_secret: str | None = Field(default=None, max_length=256)
     oauth_auth_url: str | None = Field(default=None, max_length=2048)

@@ -1,4 +1,10 @@
-"""Seed system providers and models from config.yaml into DB (idempotent)."""
+"""Seed system providers and models from config.yaml into DB (idempotent).
+
+Provider api keys are written to the credential vault as system credentials
+(``org_id=NULL``, ``kind='provider_api_key'``) and Provider rows hold a
+``credential_id`` FK -- the api_key column itself was dropped in the vault
+migration.
+"""
 
 from typing import Any
 
@@ -7,15 +13,63 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cubebox.config import config as settings
+from cubebox.credentials.encryption import EncryptionBackend
+from cubebox.models import Credential
 from cubebox.models.provider import Model, Provider
 
+_PROVIDER_KEY_KIND = "provider_api_key"
 
-async def seed_system_providers_from_config(session: AsyncSession) -> None:
+
+async def _upsert_system_credential(
+    session: AsyncSession,
+    backend: EncryptionBackend,
+    *,
+    provider: Provider,
+    plaintext: str,
+) -> Credential:
+    """Create or update the system Credential that backs ``provider.api_key``.
+
+    System credentials live with ``org_id=NULL``; uniqueness on (kind, name)
+    is enforced by ``uq_credential_system_kind_name``.
+    """
+    existing_q = select(Credential).where(
+        Credential.org_id.is_(None),  # type: ignore[union-attr]
+        Credential.kind == _PROVIDER_KEY_KIND,  # type: ignore[arg-type]
+        Credential.name == provider.name,  # type: ignore[arg-type]
+    )
+    cred = (await session.execute(existing_q)).scalar_one_or_none()
+    ciphertext = await backend.encrypt(plaintext.encode("utf-8"))
+    if cred is None:
+        cred = Credential(
+            org_id=None,
+            kind=_PROVIDER_KEY_KIND,
+            name=provider.name,
+            value_encrypted=ciphertext,
+            cred_metadata={},
+            created_by_user_id=None,
+        )
+        session.add(cred)
+        await session.flush()
+        logger.info("Seeded system credential for provider: {}", provider.name)
+    else:
+        cred.value_encrypted = ciphertext
+        session.add(cred)
+        await session.flush()
+        logger.debug("Refreshed system credential ciphertext for provider: {}", provider.name)
+    return cred
+
+
+async def seed_system_providers_from_config(
+    session: AsyncSession,
+    backend: EncryptionBackend,
+) -> None:
     """Idempotent: insert/update system providers/models from config.yaml.
 
     - Creates missing providers and models (idempotent by name/model_id).
     - Updates existing system provider base_url/provider_type when config changes.
     - Marks models removed from config as ``enabled=False`` (does NOT delete).
+    - Writes the resolved ``api_key`` (already env-interpolated by dynaconf)
+      into the credential vault and sets ``Provider.credential_id``.
     """
     cfg: dict[str, Any] = dict(settings.get("llm", {}))
     config_providers: dict[str, Any] = dict(cfg.get("providers", {}))
@@ -56,6 +110,17 @@ async def seed_system_providers_from_config(session: AsyncSession) -> None:
             provider.base_url = base_url
             provider.provider_type = provider_type
             logger.debug("System provider '{}' already exists, updated", name)
+
+        api_key_raw = cfg_dict.get("api_key")
+        api_key: str | None = (
+            str(api_key_raw).strip() if api_key_raw is not None else None
+        ) or None
+        if api_key:
+            cred = await _upsert_system_credential(
+                session, backend, provider=provider, plaintext=api_key
+            )
+            if provider.credential_id != cred.id:
+                provider.credential_id = cred.id
 
         config_model_ids[name] = set()
         models_list: list[dict[str, Any]] = list(cfg_dict.get("models", []))

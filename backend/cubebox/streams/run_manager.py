@@ -557,7 +557,11 @@ class RunManager:
 
             try:
                 async with async_session_maker() as llm_session:
-                    llm = await LLMFactory(session=llm_session, org_id=ctx.org_id).create_default()
+                    llm = await LLMFactory(
+                        session=llm_session,
+                        org_id=ctx.org_id,
+                        encryption_backend=self._app.state.encryption_backend,
+                    ).create_default()
                     await llm_session.commit()
             except Exception:
                 logger.warning("LLMFactory DB load failed, falling back to config-only")
