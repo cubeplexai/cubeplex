@@ -4,10 +4,12 @@ import secrets
 
 import httpx
 
+from tests.e2e.conftest import _csrf_cookie_name
+
 
 async def _seed_csrf(client: httpx.AsyncClient) -> str:
     await client.get("/api/v1/auth/me")
-    csrf = client.cookies.get("cubebox_csrf")
+    csrf = client.cookies.get(_csrf_cookie_name())
     assert csrf is not None
     return csrf
 

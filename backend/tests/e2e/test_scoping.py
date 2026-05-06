@@ -5,6 +5,7 @@ import secrets
 import pytest
 
 from cubebox.api.middleware.rate_limit import limiter
+from tests.e2e.conftest import _auth_cookie_name, _csrf_cookie_name
 
 pytestmark = pytest.mark.e2e
 
@@ -30,7 +31,7 @@ async def _seed_csrf(client) -> str:
     in the `X-CSRF-Token` header on subsequent mutating requests.
     """
     await client.get("/api/v1/auth/me")
-    csrf = client.cookies.get("cubebox_csrf")
+    csrf = client.cookies.get(_csrf_cookie_name())
     assert csrf, "cubebox_csrf cookie not set after GET /api/v1/auth/me"
     return csrf
 
@@ -58,7 +59,7 @@ async def test_conversation_invisible_to_other_workspace(unauthenticated_memory_
     # --- User A: login, create workspace W_A, create conversation -----------
     r = await client.post("/api/v1/auth/login", data={"username": a_email, "password": pw})
     assert r.status_code in (200, 204), r.text
-    assert "cubebox_auth" in client.cookies
+    assert _auth_cookie_name() in client.cookies
 
     csrf_a = await _seed_csrf(client)
     # Fetch the org_id from A's auto-created workspace (created by on_after_register).
