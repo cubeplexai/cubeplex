@@ -1,7 +1,12 @@
 'use client'
 
 import { use, useEffect, useMemo } from 'react'
-import { createApiClient, useArtifactStore, useConversationStore } from '@cubebox/core'
+import {
+  createApiClient,
+  useArtifactStore,
+  useConversationStore,
+  useWorkspaceSettingsStore,
+} from '@cubebox/core'
 import { WorkspaceContext } from '@/hooks/useWorkspaceContext'
 
 export default function WorkspaceLayout({
@@ -21,6 +26,13 @@ export default function WorkspaceLayout({
     // every page within the workspace (including the home page).
     useConversationStore.setState({ conversations: [], activeId: null })
     useArtifactStore.setState({ artifacts: {} })
+    useWorkspaceSettingsStore.setState({
+      agentConfig: null,
+      skills: null,
+      mcp: null,
+      loading: false,
+      error: null,
+    })
     const client = createApiClient('')
     client.setWorkspaceId(wsId)
     useConversationStore.getState().fetchList(client)
