@@ -59,6 +59,16 @@ export async function testConnection(
   return res.json() as Promise<TestResult>
 }
 
+export async function testModel(
+  client: ApiClient,
+  providerId: string,
+  body: { model_id: string },
+): Promise<TestResult> {
+  const res = await client.post(`/api/v1/admin/providers/${providerId}/models/test`, body)
+  if (!res.ok) throw await toApiError(res)
+  return res.json() as Promise<TestResult>
+}
+
 export async function createModel(
   client: ApiClient,
   providerId: string,
@@ -102,14 +112,4 @@ export async function updateOrgLLMSettings(
   const res = await client.put('/api/v1/admin/settings/llm', body)
   if (!res.ok) throw await toApiError(res)
   return res.json() as Promise<OrgLLMSettings>
-}
-
-export async function setProviderOverride(
-  client: ApiClient,
-  providerId: string,
-  enabled: boolean,
-): Promise<{ enabled: boolean }> {
-  const res = await client.patch(`/api/v1/admin/providers/${providerId}/override`, { enabled })
-  if (!res.ok) throw await toApiError(res)
-  return res.json() as Promise<{ enabled: boolean }>
 }

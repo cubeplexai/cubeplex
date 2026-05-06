@@ -6,7 +6,6 @@ import {
   updateProvider,
   deleteProvider,
   testConnection,
-  setProviderOverride,
 } from '../api/providers'
 import type { Provider, ProviderCreate, ProviderUpdate, TestResult } from '../types/provider'
 
@@ -24,7 +23,6 @@ interface ProvidersState {
     client: ApiClient,
     body: { provider_type: string; base_url: string; api_key?: string | null; auth_type: string },
   ) => Promise<TestResult>
-  toggleOverride: (client: ApiClient, providerId: string, enabled: boolean) => Promise<void>
 }
 
 export const useProvidersStore = create<ProvidersState>((set, _get) => ({
@@ -68,14 +66,5 @@ export const useProvidersStore = create<ProvidersState>((set, _get) => ({
 
   testConnection: async (client, body) => {
     return testConnection(client, body)
-  },
-
-  toggleOverride: async (client, providerId, enabled) => {
-    await setProviderOverride(client, providerId, enabled)
-    set((s) => ({
-      providers: s.providers.map((p) =>
-        p.id === providerId ? { ...p, org_override: { enabled } } : p,
-      ),
-    }))
   },
 }))

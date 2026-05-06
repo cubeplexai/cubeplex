@@ -1,83 +1,134 @@
 'use client'
 
-import { useEffect, useMemo } from 'react'
-import {
-  useProvidersStore,
-  useModelsStore,
-  useOrgModelSettingsStore,
-  createApiClient,
-} from '@cubebox/core'
+import { useEffect, useMemo, useState } from 'react'
+import { useTranslations } from 'next-intl'
+import { createApiClient, useModelsStore, useProvidersStore } from '@cubebox/core'
+import { ModelsToolbar, type ProviderKind } from '@/components/admin/models/ModelsToolbar'
 import { ProviderList } from '@/components/admin/models/ProviderList'
 import { ProviderDetail } from '@/components/admin/models/ProviderDetail'
+import { ProviderFormDialog } from '@/components/admin/models/ProviderFormDialog'
+import type { ProviderCreate } from '@cubebox/core'
 
 export default function ModelsPage() {
+  const t = useTranslations('adminModels')
   const client = useMemo(() => createApiClient(''), [])
   const {
     providers,
     selectedId,
     loading,
+    error,
     fetchProviders,
+    selectProvider,
     createProvider,
     updateProvider,
     deleteProvider,
-    testConnection,
-    selectProvider,
-    toggleOverride,
   } = useProvidersStore()
-  const { models, fetchModels, createModel, updateModel, deleteModel } = useModelsStore()
-  const { settings, fetchSettings, updateSettings } = useOrgModelSettingsStore()
+  const {
+    models,
+    loading: modelsLoading,
+    error: modelsError,
+    fetchModels,
+    clearModels,
+    createModel,
+    updateModel,
+    deleteModel,
+    testModel,
+  } = useModelsStore()
+
+  const [query, setQuery] = useState('')
+  const [kind, setKind] = useState<ProviderKind>('all')
+  const [createOpen, setCreateOpen] = useState(false)
 
   useEffect(() => {
-    fetchProviders(client)
-    fetchSettings(client)
-  }, [client, fetchProviders, fetchSettings])
+    void fetchProviders(client)
+  }, [client, fetchProviders])
 
   useEffect(() => {
     if (selectedId) {
-      fetchModels(client, selectedId)
+      void fetchModels(client, selectedId)
+    } else {
+      clearModels()
     }
-  }, [selectedId, client, fetchModels])
+  }, [selectedId, client, fetchModels, clearModels])
 
-  const selectedProvider = providers.find((p) => p.id === selectedId) || null
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase()
+    return providers.filter((p) => {
+      if (kind === 'system' && !p.is_system) return false
+      if (kind === 'custom' && p.is_system) return false
+      if (q && !p.name.toLowerCase().includes(q)) return false
+      return true
+    })
+  }, [providers, query, kind])
+
+  const selectedProvider = providers.find((p) => p.id === selectedId) ?? null
+
+  async function handleCreate(body: ProviderCreate) {
+    const created = await createProvider(client, body)
+    selectProvider(created.id)
+  }
 
   return (
-    <div className="flex h-full">
-      <div className="w-72 border-r shrink-0 flex flex-col">
-        <div className="flex items-center justify-between p-4 border-b">
-          <h2 className="font-semibold text-sm">Providers</h2>
-        </div>
-        <ProviderList
-          providers={providers}
-          selectedId={selectedId}
-          loading={loading}
-          onSelect={selectProvider}
-          onCreateProvider={createProvider}
-          onTestConnection={testConnection}
-          client={client}
-        />
-      </div>
-      <div className="flex-1 overflow-y-auto">
-        {selectedProvider ? (
-          <ProviderDetail
-            provider={selectedProvider}
-            models={models}
-            settings={settings}
-            client={client}
-            onUpdateProvider={updateProvider}
-            onDeleteProvider={deleteProvider}
-            onTestConnection={testConnection}
-            onToggleOverride={toggleOverride}
-            onCreateModel={createModel}
-            onUpdateModel={updateModel}
-            onDeleteModel={deleteModel}
-            onUpdateSettings={updateSettings}
+    <div className="flex h-full flex-col">
+      <header className="border-b border-border/70 px-6 py-4">
+        <h2 className="text-lg font-semibold tracking-tight">{t('title')}</h2>
+        <p className="mt-0.5 text-xs text-muted-foreground">{t('subtitle')}</p>
+      </header>
+
+      <ModelsToolbar
+        query={query}
+        kind={kind}
+        onQueryChange={setQuery}
+        onKindChange={setKind}
+        onAddClick={() => setCreateOpen(true)}
+      />
+
+      <div className="flex flex-1 overflow-hidden">
+        <aside
+          aria-label="provider-list"
+          className="w-[320px] shrink-0 overflow-y-auto border-r border-border/70 bg-card/20"
+        >
+          <ProviderList
+            providers={filtered}
+            loading={loading}
+            error={error}
+            selectedId={selectedId}
+            onSelect={selectProvider}
           />
-        ) : (
-          <div className="flex items-center justify-center h-full text-muted-foreground">
-            选择一个 provider 查看详情
-          </div>
-        )}
+        </aside>
+
+        <section className="flex flex-1 overflow-y-auto">
+          {selectedProvider ? (
+            <ProviderDetail
+              provider={selectedProvider}
+              models={models}
+              modelsLoading={modelsLoading}
+              modelsError={modelsError}
+              client={client}
+              onUpdateProvider={updateProvider}
+              onDeleteProvider={deleteProvider}
+              onCreateModel={createModel}
+              onUpdateModel={updateModel}
+              onDeleteModel={deleteModel}
+              onTestModel={testModel}
+            />
+          ) : (
+            <div className="flex h-full w-full items-center justify-center text-sm text-muted-foreground">
+              {t('selectProvider')}
+            </div>
+          )}
+        </section>
       </div>
+
+      <ProviderFormDialog
+        open={createOpen}
+        onOpenChange={setCreateOpen}
+        provider={null}
+        onSave={async (body) => {
+          await handleCreate(body as ProviderCreate)
+          setCreateOpen(false)
+        }}
+      />
     </div>
   )
 }

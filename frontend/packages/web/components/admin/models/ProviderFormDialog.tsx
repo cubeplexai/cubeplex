@@ -1,45 +1,30 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useEffect, useState } from 'react'
+import { useTranslations } from 'next-intl'
 import { Dialog as DialogPrimitive } from '@base-ui/react/dialog'
 import { X } from 'lucide-react'
-import type { Provider, ProviderCreate, ProviderUpdate, ApiClient, TestResult } from '@cubebox/core'
+import type { Provider, ProviderCreate, ProviderUpdate } from '@cubebox/core'
+import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from '@/components/ui/accordion'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
-import {
-  Accordion,
-  AccordionItem,
-  AccordionTrigger,
-  AccordionContent,
-} from '@/components/ui/accordion'
 import { cn } from '@/lib/utils'
-import { TestConnectionResult } from './TestConnectionResult'
 
-type AuthType = 'api_key' | 'bearer_token' | 'oauth' | 'none'
+type AuthType = 'api_key' | 'oauth' | 'none'
 
-const AUTH_OPTIONS: { value: AuthType; label: string; disabled?: boolean; tooltip?: string }[] = [
-  { value: 'api_key', label: 'API Key' },
-  { value: 'bearer_token', label: 'Bearer Token' },
-  { value: 'oauth', label: 'OAuth 2.0', disabled: true, tooltip: '即将推出' },
-  { value: 'none', label: '无认证' },
-]
+const PROVIDER_TYPES = ['openai_compat', 'openai', 'anthropic'] as const
 
 interface ProviderFormDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
-  provider: Provider | null // null = create, non-null = edit
-  client: ApiClient
-  onTestConnection: (
-    client: ApiClient,
-    body: {
-      provider_type: string
-      base_url: string
-      api_key?: string | null
-      auth_type: string
-    },
-  ) => Promise<TestResult>
+  provider: Provider | null
   onSave: (body: ProviderCreate | ProviderUpdate) => Promise<void>
 }
 
@@ -47,15 +32,13 @@ export function ProviderFormDialog({
   open,
   onOpenChange,
   provider,
-  client,
-  onTestConnection,
   onSave,
 }: ProviderFormDialogProps) {
+  const t = useTranslations('adminModels')
   const isEdit = provider !== null
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  // Form fields
   const [name, setName] = useState('')
   const [providerType, setProviderType] = useState('openai_compat')
   const [baseUrl, setBaseUrl] = useState('')
@@ -64,10 +47,6 @@ export function ProviderFormDialog({
   const [logoUrl, setLogoUrl] = useState('')
   const [extraHeaders, setExtraHeaders] = useState('')
 
-  // Test connection
-  const [testResult, setTestResult] = useState<TestResult | null>(null)
-  const [testing, setTesting] = useState(false)
-
   useEffect(() => {
     /* eslint-disable react-hooks/set-state-in-effect */
     if (open) {
@@ -75,7 +54,9 @@ export function ProviderFormDialog({
         setName(provider.name)
         setProviderType(provider.provider_type)
         setBaseUrl(provider.base_url)
-        setAuthType(provider.auth_type as AuthType)
+        // Legacy: bearer_token was a synonym for api_key (same wire format).
+        const auth = provider.auth_type === 'bearer_token' ? 'api_key' : provider.auth_type
+        setAuthType(auth as AuthType)
         setApiKey('')
         setLogoUrl(provider.logo_url ?? '')
         setExtraHeaders(
@@ -91,53 +72,16 @@ export function ProviderFormDialog({
         setExtraHeaders('')
       }
       setError(null)
-      setTestResult(null)
       setSaving(false)
-      setTesting(false)
     }
     /* eslint-enable react-hooks/set-state-in-effect */
   }, [open, provider])
 
-  function reset(): void {
-    setName('')
-    setProviderType('openai_compat')
-    setBaseUrl('')
-    setAuthType('api_key')
-    setApiKey('')
-    setLogoUrl('')
-    setExtraHeaders('')
-    setError(null)
-    setTestResult(null)
-    setSaving(false)
-    setTesting(false)
-  }
-
-  function handleOpenChange(next: boolean): void {
-    if (!next) reset()
-    onOpenChange(next)
-  }
-
-  function buildTestPayload() {
-    return {
-      provider_type: providerType,
-      base_url: baseUrl,
-      api_key: apiKey || null,
-      auth_type: authType,
-    }
-  }
-
-  async function handleTest(): Promise<void> {
-    setTesting(true)
-    setTestResult(null)
-    try {
-      const result = await onTestConnection(client, buildTestPayload())
-      setTestResult(result)
-    } catch (e) {
-      setTestResult({ ok: false, error: (e as Error).message, latency_ms: 0 })
-    } finally {
-      setTesting(false)
-    }
-  }
+  const AUTH_OPTIONS: { value: AuthType; label: string; disabled?: boolean }[] = [
+    { value: 'api_key', label: t('authApiKey') },
+    { value: 'oauth', label: t('authOAuth'), disabled: true },
+    { value: 'none', label: t('authNone') },
+  ]
 
   async function handleSave(): Promise<void> {
     setSaving(true)
@@ -148,7 +92,7 @@ export function ProviderFormDialog({
         try {
           parsedHeaders = JSON.parse(extraHeaders) as Record<string, unknown>
         } catch {
-          setError('extra_headers 格式无效，请输入合法 JSON')
+          setError(t('extraHeadersInvalid'))
           setSaving(false)
           return
         }
@@ -177,7 +121,7 @@ export function ProviderFormDialog({
         }
         await onSave(body)
       }
-      handleOpenChange(false)
+      onOpenChange(false)
     } catch (e) {
       setError((e as Error).message)
     } finally {
@@ -186,7 +130,7 @@ export function ProviderFormDialog({
   }
 
   return (
-    <DialogPrimitive.Root open={open} onOpenChange={handleOpenChange}>
+    <DialogPrimitive.Root open={open} onOpenChange={onOpenChange}>
       <DialogPrimitive.Portal>
         <DialogPrimitive.Backdrop className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm data-[ending-style]:opacity-0 data-[starting-style]:opacity-0 transition-opacity duration-200" />
         <DialogPrimitive.Popup
@@ -200,10 +144,10 @@ export function ProviderFormDialog({
           <div className="flex items-start justify-between gap-3">
             <div>
               <DialogPrimitive.Title className="text-base font-semibold">
-                {isEdit ? '编辑 Provider' : '添加 Provider'}
+                {isEdit ? t('editTitle') : t('createTitle')}
               </DialogPrimitive.Title>
               <DialogPrimitive.Description className="mt-0.5 text-xs text-muted-foreground">
-                {isEdit ? '修改 provider 配置' : '添加新的 LLM provider'}
+                {isEdit ? t('editDesc') : t('createDesc')}
               </DialogPrimitive.Description>
             </div>
             <DialogPrimitive.Close
@@ -220,56 +164,34 @@ export function ProviderFormDialog({
           </div>
 
           <div className="mt-4 flex flex-col gap-3">
-            {/* Name */}
             <div className="flex flex-col gap-1.5">
-              <Label htmlFor="provider-name">名称</Label>
+              <Label htmlFor="provider-name">{t('name')}</Label>
               <Input
                 id="provider-name"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                placeholder="e.g. OpenAI"
+                placeholder="OpenAI"
               />
             </div>
 
-            {/* Provider Type */}
             <div className="flex flex-col gap-1.5">
-              <Label htmlFor="provider-type">Provider 类型</Label>
+              <Label htmlFor="provider-type">{t('providerType')}</Label>
               <select
                 id="provider-type"
                 value={providerType}
                 onChange={(e) => setProviderType(e.target.value)}
                 className="h-8 w-full rounded-lg border border-input bg-transparent px-2.5 py-1 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
               >
-                <option value="openai_compat">OpenAI Compatible</option>
-                <option value="openai">OpenAI</option>
-                <option value="anthropic">Anthropic</option>
-                <option disabled value="google">
-                  Google (coming soon)
-                </option>
-                <option disabled value="azure">
-                  Azure (coming soon)
-                </option>
-                <option disabled value="aws_bedrock">
-                  AWS Bedrock (coming soon)
-                </option>
-                <option disabled value="openrouter">
-                  OpenRouter (coming soon)
-                </option>
-                <option disabled value="together">
-                  Together AI (coming soon)
-                </option>
-                <option disabled value="ollama">
-                  Ollama (coming soon)
-                </option>
-                <option disabled value="custom">
-                  Custom (coming soon)
-                </option>
+                {PROVIDER_TYPES.map((pt) => (
+                  <option key={pt} value={pt}>
+                    {pt}
+                  </option>
+                ))}
               </select>
             </div>
 
-            {/* Base URL */}
             <div className="flex flex-col gap-1.5">
-              <Label htmlFor="provider-base-url">Base URL</Label>
+              <Label htmlFor="provider-base-url">{t('baseUrl')}</Label>
               <Input
                 id="provider-base-url"
                 value={baseUrl}
@@ -278,9 +200,8 @@ export function ProviderFormDialog({
               />
             </div>
 
-            {/* Auth Type */}
             <div className="flex flex-col gap-1.5">
-              <Label>认证方式</Label>
+              <Label>{t('authType')}</Label>
               <RadioGroup
                 value={authType}
                 onValueChange={(v) => setAuthType(v as AuthType)}
@@ -290,46 +211,45 @@ export function ProviderFormDialog({
                   <label
                     key={opt.value}
                     className={cn(
-                      'flex items-center gap-2 rounded-lg border px-3 py-2.5 text-sm cursor-pointer transition-colors',
+                      'flex items-center gap-2 rounded-lg border px-3 py-2.5 text-sm transition-colors',
                       authType === opt.value
                         ? 'border-primary/40 bg-primary/5'
                         : 'border-border/70 hover:border-border',
-                      opt.disabled && 'opacity-50 cursor-not-allowed bg-muted/20',
+                      opt.disabled ? 'cursor-not-allowed bg-muted/20 opacity-50' : 'cursor-pointer',
                     )}
                   >
                     <RadioGroupItem value={opt.value} disabled={opt.disabled} />
-                    <span className="text-sm">{opt.label}</span>
+                    <span className="flex-1 text-sm">{opt.label}</span>
+                    {opt.disabled && (
+                      <span className="text-[10px] text-muted-foreground/70">
+                        {t('comingSoon')}
+                      </span>
+                    )}
                   </label>
                 ))}
               </RadioGroup>
             </div>
 
-            {/* API Key (shown for api_key and bearer_token) */}
-            {(authType === 'api_key' || authType === 'bearer_token') && (
+            {authType === 'api_key' && (
               <div className="flex flex-col gap-1.5">
-                <Label htmlFor="provider-api-key">
-                  {authType === 'bearer_token' ? 'Bearer Token' : 'API Key'}
-                </Label>
+                <Label htmlFor="provider-api-key">{t('apiKey')}</Label>
                 <Input
                   id="provider-api-key"
                   type="password"
                   value={apiKey}
                   onChange={(e) => setApiKey(e.target.value)}
-                  placeholder={isEdit ? '留空则不修改' : ''}
+                  placeholder={isEdit ? t('apiKeyEditHint') : ''}
                 />
                 {isEdit && (
-                  <span className="text-[11px] text-muted-foreground">
-                    留空表示不修改已设置的密钥
-                  </span>
+                  <span className="text-[11px] text-muted-foreground">{t('apiKeyEditHint')}</span>
                 )}
               </div>
             )}
 
-            {/* Advanced Settings */}
             <Accordion className="mt-1">
               <AccordionItem value="logo">
                 <AccordionTrigger className="text-xs text-muted-foreground">
-                  Logo URL
+                  {t('logoUrl')}
                 </AccordionTrigger>
                 <AccordionContent>
                   <Input
@@ -341,7 +261,7 @@ export function ProviderFormDialog({
               </AccordionItem>
               <AccordionItem value="headers">
                 <AccordionTrigger className="text-xs text-muted-foreground">
-                  Extra Headers (JSON)
+                  {t('extraHeaders')}
                 </AccordionTrigger>
                 <AccordionContent>
                   <textarea
@@ -349,7 +269,7 @@ export function ProviderFormDialog({
                     onChange={(e) => setExtraHeaders(e.target.value)}
                     placeholder='{"X-Custom-Header": "value"}'
                     rows={3}
-                    className="h-20 w-full rounded-lg border border-input bg-transparent px-2.5 py-1.5 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 placeholder:text-muted-foreground"
+                    className="h-20 w-full rounded-lg border border-input bg-transparent px-2.5 py-1.5 text-sm outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
                   />
                 </AccordionContent>
               </AccordionItem>
@@ -360,37 +280,24 @@ export function ProviderFormDialog({
                 {error}
               </div>
             )}
-
-            <TestConnectionResult result={testResult} busy={testing} />
           </div>
 
-          <div className="mt-4 flex items-center justify-between gap-2">
+          <div className="mt-4 flex items-center justify-end gap-2">
+            <DialogPrimitive.Close
+              render={
+                <Button type="button" variant="ghost" size="sm" disabled={saving}>
+                  {t('cancel')}
+                </Button>
+              }
+            />
             <Button
               type="button"
-              variant="outline"
               size="sm"
-              onClick={() => void handleTest()}
-              disabled={testing || saving || !baseUrl}
+              onClick={() => void handleSave()}
+              disabled={saving || !name}
             >
-              测试连接
+              {saving ? t('saving') : t('save')}
             </Button>
-            <div className="flex items-center gap-2">
-              <DialogPrimitive.Close
-                render={
-                  <Button type="button" variant="ghost" size="sm" disabled={saving}>
-                    取消
-                  </Button>
-                }
-              />
-              <Button
-                type="button"
-                size="sm"
-                onClick={() => void handleSave()}
-                disabled={saving || !name}
-              >
-                {saving ? '保存中...' : '保存'}
-              </Button>
-            </div>
           </div>
         </DialogPrimitive.Popup>
       </DialogPrimitive.Portal>

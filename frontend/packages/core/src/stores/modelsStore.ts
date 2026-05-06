@@ -1,13 +1,15 @@
 import { create } from 'zustand'
 import type { ApiClient } from '../api/client'
-import { fetchProvider, createModel, updateModel, deleteModel } from '../api/providers'
-import type { Model, ModelCreate, ModelUpdate } from '../types/provider'
+import { fetchProvider, createModel, updateModel, deleteModel, testModel } from '../api/providers'
+import type { Model, ModelCreate, ModelUpdate, TestResult } from '../types/provider'
 
 interface ModelsState {
   models: Model[]
+  providerId: string | null
   loading: boolean
   error: string | null
   fetchModels: (client: ApiClient, providerId: string) => Promise<void>
+  clearModels: () => void
   createModel: (client: ApiClient, providerId: string, body: ModelCreate) => Promise<Model>
   updateModel: (
     client: ApiClient,
@@ -16,22 +18,34 @@ interface ModelsState {
     body: ModelUpdate,
   ) => Promise<void>
   deleteModel: (client: ApiClient, providerId: string, modelId: string) => Promise<void>
+  testModel: (
+    client: ApiClient,
+    providerId: string,
+    body: { model_id: string },
+  ) => Promise<TestResult>
 }
 
 export const useModelsStore = create<ModelsState>((set) => ({
   models: [],
+  providerId: null,
   loading: false,
   error: null,
 
   fetchModels: async (client, providerId) => {
-    set({ loading: true, error: null })
+    set({ loading: true, error: null, models: [], providerId })
     try {
       const provider = await fetchProvider(client, providerId)
-      set({ models: provider.models || [], loading: false })
+      set((s) =>
+        s.providerId === providerId ? { models: provider.models || [], loading: false } : s,
+      )
     } catch (e) {
-      set({ error: (e as Error).message, loading: false })
+      set((s) =>
+        s.providerId === providerId ? { error: (e as Error).message, loading: false } : s,
+      )
     }
   },
+
+  clearModels: () => set({ models: [], providerId: null, loading: false, error: null }),
 
   createModel: async (client, providerId, body) => {
     const model = await createModel(client, providerId, body)
@@ -49,5 +63,9 @@ export const useModelsStore = create<ModelsState>((set) => ({
   deleteModel: async (client, providerId, modelId) => {
     await deleteModel(client, providerId, modelId)
     set((s) => ({ models: s.models.filter((m) => m.id !== modelId) }))
+  },
+
+  testModel: async (client, providerId, body) => {
+    return testModel(client, providerId, body)
   },
 }))
