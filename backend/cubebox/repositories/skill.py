@@ -242,9 +242,59 @@ class OrgSkillInstallRepository:
 
     async def list_for_org(self, org_id: str) -> list[OrgSkillInstall]:
         result = await self.session.execute(
-            select(OrgSkillInstall).where(OrgSkillInstall.org_id == org_id)  # type: ignore[arg-type]
+            select(OrgSkillInstall).where(
+                OrgSkillInstall.org_id == org_id,  # type: ignore[arg-type]
+                OrgSkillInstall.workspace_id.is_(None),  # type: ignore[union-attr]
+            )
         )
         return list(result.scalars().all())
+
+    async def list_for_workspace_private(
+        self, org_id: str, workspace_id: str
+    ) -> list[OrgSkillInstall]:
+        result = await self.session.execute(
+            select(OrgSkillInstall).where(
+                OrgSkillInstall.org_id == org_id,  # type: ignore[arg-type]
+                OrgSkillInstall.workspace_id == workspace_id,  # type: ignore[arg-type]
+            )
+        )
+        return list(result.scalars().all())
+
+    async def get_by_id(self, install_id: str) -> OrgSkillInstall | None:
+        result = await self.session.execute(
+            select(OrgSkillInstall).where(OrgSkillInstall.id == install_id)  # type: ignore[arg-type]
+        )
+        return result.scalar_one_or_none()
+
+    async def create_for_workspace(
+        self,
+        *,
+        org_id: str,
+        workspace_id: str,
+        skill_id: str,
+        installed_version: str,
+        installed_by_user_id: str,
+    ) -> OrgSkillInstall:
+        row = OrgSkillInstall(
+            org_id=org_id,
+            workspace_id=workspace_id,
+            skill_id=skill_id,
+            installed_version=installed_version,
+            installed_by_user_id=installed_by_user_id,
+            auto_bind=True,
+        )
+        self.session.add(row)
+        await self.session.commit()
+        await self.session.refresh(row)
+        return row
+
+    async def delete_workspace_private(self, install_id: str, workspace_id: str) -> bool:
+        row = await self.get_by_id(install_id)
+        if row is None or row.workspace_id != workspace_id:
+            return False
+        await self.session.delete(row)
+        await self.session.commit()
+        return True
 
 
 class WorkspaceSkillBindingRepository(ScopedRepository[WorkspaceSkillBinding]):

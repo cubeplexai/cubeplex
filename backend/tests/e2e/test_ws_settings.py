@@ -28,3 +28,37 @@ class TestPersonaRuntime:
 
         get_resp = client.get(f"/api/v1/ws/{DEFAULT_WS_ID}/settings/agent")
         assert get_resp.json()["system_prompt"] == persona
+
+
+class TestSkillsSettings:
+    """Workspace skill binding and private skill management."""
+
+    def test_list_skills_returns_structure(self, client: TestClient) -> None:
+        resp = client.get(f"/api/v1/ws/{DEFAULT_WS_ID}/settings/skills")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "org_skills" in data
+        assert "workspace_skills" in data
+        assert isinstance(data["org_skills"], list)
+        assert isinstance(data["workspace_skills"], list)
+
+    def test_toggle_org_skill_if_available(self, client: TestClient) -> None:
+        skills_resp = client.get(f"/api/v1/ws/{DEFAULT_WS_ID}/settings/skills")
+        org_skills = skills_resp.json()["org_skills"]
+        if not org_skills:
+            pytest.skip("No org skills installed")
+
+        install_id = org_skills[0]["install_id"]
+        resp = client.patch(
+            f"/api/v1/ws/{DEFAULT_WS_ID}/settings/skills/{install_id}",
+            json={"enabled": False},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["enabled"] is False
+
+        resp = client.patch(
+            f"/api/v1/ws/{DEFAULT_WS_ID}/settings/skills/{install_id}",
+            json={"enabled": True},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["enabled"] is True
