@@ -3,7 +3,7 @@
 Exports all v1 API routers.
 """
 
-from cubebox.api.routes.v1 import admin_mcp, admin_skills, ws_mcp, ws_skills
+from cubebox.api.routes.v1 import admin_mcp, admin_skills, ws_mcp, ws_settings, ws_skills
 from cubebox.api.routes.v1.admin import router as admin_router
 from cubebox.api.routes.v1.artifacts import router as artifacts_router
 from cubebox.api.routes.v1.attachments import router as attachments_router
@@ -21,5 +21,6 @@ __all__ = [
     "conversations_router",
     "workspaces_router",
     "ws_mcp",
+    "ws_settings",
     "ws_skills",
 ]

@@ -370,6 +370,7 @@ def create_app(
         conversations_router,
         workspaces_router,
         ws_mcp,
+        ws_settings,
         ws_skills,
     )
 
@@ -382,6 +383,7 @@ def create_app(
     app.include_router(admin_skills.router, prefix="/api/v1")
     app.include_router(admin_skills.bindings_router, prefix="/api/v1")
     app.include_router(ws_mcp.router, prefix="/api/v1")
+    app.include_router(ws_settings.router, prefix="/api/v1")
     app.include_router(admin_providers.router, prefix="/api/v1")
     app.include_router(ws_skills.router, prefix="/api/v1")
 
