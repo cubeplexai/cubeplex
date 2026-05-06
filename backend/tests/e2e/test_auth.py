@@ -5,6 +5,7 @@ import secrets
 import pytest
 
 from cubebox.api.middleware.rate_limit import limiter
+from tests.e2e.conftest import _auth_cookie_name, _csrf_cookie_name
 
 pytestmark = pytest.mark.e2e
 
@@ -36,7 +37,7 @@ async def test_register_and_login_sets_cookie(unauthenticated_memory_client):
         "/api/v1/auth/login", data={"username": email, "password": pw}
     )
     assert r.status_code == 204
-    assert "cubebox_auth" in unauthenticated_memory_client.cookies
+    assert _auth_cookie_name() in unauthenticated_memory_client.cookies
 
 
 @pytest.mark.asyncio
@@ -78,7 +79,7 @@ async def test_logout_clears_cookie(unauthenticated_memory_client):
     # Seed CSRF cookie via a safe GET (logout is a mutating request on an
     # authenticated session, so CSRF middleware requires the double-submit token).
     await unauthenticated_memory_client.get("/api/v1/auth/me")
-    csrf = unauthenticated_memory_client.cookies.get("cubebox_csrf") or ""
+    csrf = unauthenticated_memory_client.cookies.get(_csrf_cookie_name()) or ""
     r = await unauthenticated_memory_client.post(
         "/api/v1/auth/logout", headers={"X-CSRF-Token": csrf}
     )
@@ -130,7 +131,7 @@ async def test_patch_me_updates_language(unauthenticated_memory_client):
 
     # Seed CSRF cookie via a safe GET.
     await unauthenticated_memory_client.get("/api/v1/auth/me")
-    csrf = unauthenticated_memory_client.cookies.get("cubebox_csrf") or ""
+    csrf = unauthenticated_memory_client.cookies.get(_csrf_cookie_name()) or ""
 
     # Update language
     resp = await unauthenticated_memory_client.patch(
@@ -162,7 +163,7 @@ async def test_patch_me_rejects_invalid_language(unauthenticated_memory_client):
 
     # Seed CSRF cookie via a safe GET.
     await unauthenticated_memory_client.get("/api/v1/auth/me")
-    csrf = unauthenticated_memory_client.cookies.get("cubebox_csrf") or ""
+    csrf = unauthenticated_memory_client.cookies.get(_csrf_cookie_name()) or ""
 
     # Attempt to set invalid language
     resp = await unauthenticated_memory_client.patch(

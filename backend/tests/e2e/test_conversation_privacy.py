@@ -10,6 +10,7 @@ import secrets
 import pytest
 
 from cubebox.api.middleware.rate_limit import limiter
+from tests.e2e.conftest import _csrf_cookie_name
 
 pytestmark = pytest.mark.e2e
 
@@ -23,7 +24,7 @@ def _reset_rate_limiter():
 
 async def _seed_csrf(client) -> str:
     await client.get("/api/v1/auth/me")
-    csrf = client.cookies.get("cubebox_csrf")
+    csrf = client.cookies.get(_csrf_cookie_name())
     assert csrf, "cubebox_csrf cookie not set after GET /api/v1/auth/me"
     return csrf
 
