@@ -119,6 +119,10 @@ export function McpPanel({ wsId }: McpPanelProps) {
                 <span>Scope</span>
                 <span>{selected.scope}</span>
               </div>
+              <div className="flex justify-between py-2 border-b border-border">
+                <span>Enabled</span>
+                <span>{selected.enabled ? 'Yes' : 'No'}</span>
+              </div>
             </div>
           </>
         ) : (
