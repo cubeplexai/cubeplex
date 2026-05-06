@@ -611,18 +611,23 @@ class RunManager:
 
             effective_system_prompt = BASE_SYSTEM_PROMPT
             try:
-                _cfg_session = (
-                    catalog_session
-                    if catalog_session is not None
-                    else (await async_session_maker().__aenter__())
-                )
-                result = await _cfg_session.execute(
-                    sqlmodel_select(AgentConfig).where(
-                        AgentConfig.org_id == ctx.org_id,
-                        AgentConfig.workspace_id == ctx.workspace_id,
+                if catalog_session is not None:
+                    result = await catalog_session.execute(
+                        sqlmodel_select(AgentConfig).where(
+                            AgentConfig.org_id == ctx.org_id,
+                            AgentConfig.workspace_id == ctx.workspace_id,
+                        )
                     )
-                )
-                agent_cfg = result.scalar_one_or_none()
+                    agent_cfg = result.scalar_one_or_none()
+                else:
+                    async with async_session_maker() as _cfg_session:
+                        result = await _cfg_session.execute(
+                            sqlmodel_select(AgentConfig).where(
+                                AgentConfig.org_id == ctx.org_id,
+                                AgentConfig.workspace_id == ctx.workspace_id,
+                            )
+                        )
+                        agent_cfg = result.scalar_one_or_none()
                 if agent_cfg and agent_cfg.system_prompt:
                     effective_system_prompt = BASE_SYSTEM_PROMPT + "\n\n" + agent_cfg.system_prompt
             except Exception as exc:

@@ -196,6 +196,7 @@ class OrgSkillInstallRepository:
             select(OrgSkillInstall).where(
                 OrgSkillInstall.org_id == org_id,  # type: ignore[arg-type]
                 OrgSkillInstall.skill_id == skill_id,  # type: ignore[arg-type]
+                OrgSkillInstall.workspace_id.is_(None),  # type: ignore[union-attr]
             )
         )
         return result.scalar_one_or_none()
