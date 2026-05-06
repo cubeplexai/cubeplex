@@ -94,7 +94,7 @@ Returns and accepts the workspace persona:
 - `POST /api/v1/ws/{workspace_id}/settings/skills` — create a workspace-private skill (not in the org catalog)
 - `DELETE /api/v1/ws/{workspace_id}/settings/skills/{skill_id}` — delete a workspace-private skill
 
-Org-installed skill enable/disable operates on `WorkspaceSkillBinding` rows. Workspace-private skills are `OrgSkillInstall` rows scoped to this workspace only (the existing `workspace_id` field on that model covers this). The org-admin routes in `admin_skills.py` remain unchanged.
+Org-installed skill enable/disable operates on `WorkspaceSkillBinding` rows. Workspace-private skills use `OrgSkillInstall` rows with a new nullable `workspace_id` FK column — when set, the install is private to that workspace (not visible org-wide). This requires a schema migration (see Data Model Changes). The org-admin routes in `admin_skills.py` remain unchanged.
 
 Similarly for MCP:
 
@@ -118,14 +118,13 @@ If finer-grained access control is needed (e.g., only workspace owners can chang
 
 ## Data Model Changes
 
-No schema changes required. All necessary tables already exist:
+One schema migration is required for workspace-private skills:
 
-- `agent_config` (system prompt storage)
-- `workspace_skill_binding` (per-workspace skill enable/disable)
-- `workspace_mcp_binding` (per-workspace org MCP server enable/disable)
-- `mcp_server` with `owner_workspace_id` (workspace-private servers)
+- Add `workspace_id` nullable FK column to `org_skill_installs`. When NULL → org-wide install; when set → workspace-private install visible only in that workspace.
+- Convert the `uq_org_skill_install` unique constraint on `(org_id, skill_id)` to a partial unique index covering only rows where `workspace_id IS NULL`. Add a separate unique index on `(org_id, workspace_id, skill_id)` for workspace-private rows.
+- Data backfill: create an empty `AgentConfig` row for any existing workspace that lacks one.
 
-One Alembic data migration is required: backfill an empty `AgentConfig` row for any existing workspace that does not already have one.
+All other tables (`workspace_skill_binding`, `workspace_mcp_binding`, `mcp_server`) already support the required operations unchanged.
 
 ---
 
