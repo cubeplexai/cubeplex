@@ -604,9 +604,32 @@ class RunManager:
             except Exception as exc:
                 logger.debug("Failed to load citation configs: {}", exc)
 
+            from sqlmodel import select as sqlmodel_select
+
+            from cubebox.models.agent_config import AgentConfig
+            from cubebox.prompts.system import BASE_SYSTEM_PROMPT
+
+            effective_system_prompt = BASE_SYSTEM_PROMPT
+            try:
+                async with async_session_maker() as cfg_session:
+                    result = await cfg_session.execute(
+                        sqlmodel_select(AgentConfig).where(
+                            AgentConfig.org_id == ctx.org_id,
+                            AgentConfig.workspace_id == ctx.workspace_id,
+                        )
+                    )
+                    agent_cfg = result.scalar_one_or_none()
+                    if agent_cfg and agent_cfg.system_prompt:
+                        effective_system_prompt = (
+                            BASE_SYSTEM_PROMPT + "\n\n" + agent_cfg.system_prompt
+                        )
+            except Exception as exc:
+                logger.warning("Failed to load AgentConfig, using base prompt: {}", exc)
+
             agent = create_cubebox_agent(
                 llm=llm,
                 tools=tools,
+                system_prompt=effective_system_prompt,
                 sandbox=sandbox,
                 conversation_id=conversation_id,
                 org_id=ctx.org_id,

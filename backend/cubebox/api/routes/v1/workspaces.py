@@ -12,6 +12,7 @@ from cubebox.auth.context import RequestContext
 from cubebox.auth.dependencies import current_active_user, require_admin
 from cubebox.db import get_session
 from cubebox.models import Conversation, Role, User, Workspace
+from cubebox.models.agent_config import AgentConfig
 from cubebox.repositories import (
     InviteTokenRepository,
     MembershipRepository,
@@ -94,6 +95,9 @@ async def create_workspace(
     mem_repo = MembershipRepository(session)
     ws = await ws_repo.create(org_id=body.org_id, name=body.name)
     await mem_repo.grant(user_id=user.id, workspace_id=ws.id, role=Role.ADMIN)
+    agent_cfg = AgentConfig(org_id=body.org_id, workspace_id=ws.id)
+    session.add(agent_cfg)
+    await session.commit()
     return {"id": ws.id, "name": ws.name, "org_id": ws.org_id}
 
 

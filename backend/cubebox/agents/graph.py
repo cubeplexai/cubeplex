@@ -34,6 +34,7 @@ def create_cubebox_agent(
     llm: BaseChatModel,
     tools: list[BaseTool],
     *,
+    system_prompt: str = BASE_SYSTEM_PROMPT,
     sandbox: Sandbox | None = None,
     conversation_id: str | None = None,
     org_id: str | None = None,
@@ -201,7 +202,7 @@ def create_cubebox_agent(
     agent = create_agent(
         model=llm,
         tools=tools,
-        system_prompt=BASE_SYSTEM_PROMPT,
+        system_prompt=system_prompt,
         middleware=middleware,
         checkpointer=checkpointer,
     )

@@ -25,6 +25,6 @@ class AgentConfig(CubeboxBase, OrgScopedMixin, table=True):
     )
 
     system_prompt: str = Field(default="", sa_column=Column(Text, nullable=False))
-    model_id: str = Field(max_length=128)
+    model_id: str = Field(default="", max_length=128)
     skill_ids: list[str] | None = Field(default=None, sa_column=Column(JSON))
     mcp_server_ids: list[str] | None = Field(default=None, sa_column=Column(JSON))
