@@ -31,6 +31,9 @@ test.describe('Workspace Settings', () => {
   }) => {
     await registerAndGetWsId(page)
 
+    // Wait for page hydration to complete before clicking — the workspace home page
+    // briefly covers the viewport during the initial client-side render.
+    await page.waitForLoadState('networkidle')
     await page.getByRole('link', { name: /workspace settings/i }).click()
     await expect(page).toHaveURL(/\/settings/, { timeout: 10_000 })
 
@@ -60,7 +63,8 @@ test.describe('Workspace Settings', () => {
     const wsId = await registerAndGetWsId(page)
 
     await page.goto(`/w/${wsId}/settings?tab=mcp`)
-    // McpPanel renders <p>MCP Connectors</p>
-    await expect(page.getByText('MCP Connectors')).toBeVisible({ timeout: 10_000 })
+    // McpPanel renders <p>MCP Connectors</p>; use .first() because the sidebar nav
+    // also renders an "MCP Connectors" item when on the settings route.
+    await expect(page.getByText('MCP Connectors').first()).toBeVisible({ timeout: 10_000 })
   })
 })
