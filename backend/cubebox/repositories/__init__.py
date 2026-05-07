@@ -13,6 +13,7 @@ from cubebox.repositories.mcp import (
 )
 from cubebox.repositories.membership import MembershipRepository
 from cubebox.repositories.organization import OrganizationRepository
+from cubebox.repositories.organization_membership import OrganizationMembershipRepository
 from cubebox.repositories.skill import (
     OrgPreinstalledTombstoneRepository,
     OrgSkillInstallRepository,
@@ -34,6 +35,7 @@ __all__ = [
     "MCPServerRepository",
     "OrgPreinstalledTombstoneRepository",
     "OrgSkillInstallRepository",
+    "OrganizationMembershipRepository",
     "OrganizationRepository",
     "SkillRepository",
     "SkillVersionRepository",

@@ -18,6 +18,7 @@ from cubebox.models.membership import Membership, Role
 from cubebox.models.org_provider_override import OrgProviderOverride
 from cubebox.models.org_settings import OrgSettings
 from cubebox.models.organization import Organization
+from cubebox.models.organization_membership import OrganizationMembership, OrgRole
 from cubebox.models.provider import Model, Provider
 from cubebox.models.skill import (
     OrgPreinstalledTombstone,
@@ -45,9 +46,11 @@ __all__ = [
     "Model",
     "OrgPreinstalledTombstone",
     "OrgProviderOverride",
+    "OrgRole",
     "OrgSettings",
     "OrgSkillInstall",
     "Organization",
+    "OrganizationMembership",
     "Provider",
     "Role",
     "Skill",
