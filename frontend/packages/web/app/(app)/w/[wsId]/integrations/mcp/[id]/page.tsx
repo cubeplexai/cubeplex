@@ -4,9 +4,12 @@ import { useEffect, useMemo, useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import { createApiClient, useWorkspaceMcpStore, wsGetServer } from '@cubebox/core'
 import type { MCPServer } from '@cubebox/core'
+import { useTranslations } from 'next-intl'
+
 import { MCPServerDetail } from '@/components/mcp/MCPServerDetail'
 
 export default function WorkspaceMcpDetailPage() {
+  const t = useTranslations('mcp.wsPage')
   const { wsId, id } = useParams<{ wsId: string; id: string }>()
   const router = useRouter()
   const client = useMemo(() => {
@@ -39,7 +42,7 @@ export default function WorkspaceMcpDetailPage() {
   }, [client, id, wsId])
 
   if (error) return <div className="text-sm text-destructive">{error}</div>
-  if (!server) return <div className="text-sm text-muted-foreground">Loading connector...</div>
+  if (!server) return <div className="text-sm text-muted-foreground">{t('loadingConnector')}</div>
 
   const isOwned = server.owner_workspace_id === wsId
 
@@ -55,7 +58,7 @@ export default function WorkspaceMcpDetailPage() {
       onDelete={
         isOwned
           ? async () => {
-              if (!window.confirm(`Delete ${server.name}?`)) return
+              if (!window.confirm(t('deleteConfirm', { name: server.name }))) return
               await remove(client, wsId, id)
               router.push(`/w/${wsId}/integrations/mcp`)
             }

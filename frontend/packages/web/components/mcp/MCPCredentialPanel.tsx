@@ -10,6 +10,7 @@ import {
   wsPutMyCredential,
   wsPutWorkspaceCredential,
 } from '@cubebox/core'
+import { useTranslations } from 'next-intl'
 
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -31,6 +32,8 @@ export function MCPCredentialPanel({
   scopeContext,
   onChange,
 }: MCPCredentialPanelProps) {
+  const t = useTranslations('mcp.credential')
+  const tSecret = useTranslations('mcp.secret')
   const [hasValue, setHasValue] = useState(false)
   const [draftPlain, setDraftPlain] = useState('')
   const [loading, setLoading] = useState(false)
@@ -70,12 +73,10 @@ export function MCPCredentialPanel({
     return (
       <Card>
         <CardHeader>
-          <CardTitle>Credential</CardTitle>
+          <CardTitle>{t('managedTitle')}</CardTitle>
         </CardHeader>
         <CardContent>
-          <p className="text-sm text-muted-foreground">
-            This credential is managed by organization administrators.
-          </p>
+          <p className="text-sm text-muted-foreground">{t('managedBody')}</p>
         </CardContent>
       </Card>
     )
@@ -85,23 +86,21 @@ export function MCPCredentialPanel({
     return (
       <Card>
         <CardHeader>
-          <CardTitle>Authentication</CardTitle>
+          <CardTitle>{t('authTitle')}</CardTitle>
         </CardHeader>
         <CardContent>
-          <p className="text-sm text-muted-foreground">
-            This connector uses Cubebox identity passthrough and does not store an API key.
-          </p>
+          <p className="text-sm text-muted-foreground">{t('passthroughBody')}</p>
         </CardContent>
       </Card>
     )
   }
 
-  const title = isUserScope ? 'My credential' : 'Workspace credential'
+  const title = isUserScope ? t('myCredential') : t('workspaceCredential')
   const missingCopy = isUserScope
-    ? 'Until you add a credential, this connector will not appear in your chat tools.'
+    ? t('missingUser')
     : scopeContext === 'via-binding'
-      ? 'This workspace needs its own credential before members can use this shared connector.'
-      : 'Until a workspace credential is added, this connector will not appear for workspace members.'
+      ? t('missingViaBinding')
+      : t('missingWorkspace')
 
   async function save(): Promise<void> {
     setError(null)
@@ -133,23 +132,21 @@ export function MCPCredentialPanel({
         <CardTitle>{title}</CardTitle>
       </CardHeader>
       <CardContent className="flex flex-col gap-4">
-        {loading ? (
-          <p className="text-sm text-muted-foreground">Loading credential status...</p>
-        ) : null}
+        {loading ? <p className="text-sm text-muted-foreground">{t('loadingStatus')}</p> : null}
         {error ? <p className="text-sm text-destructive">{error}</p> : null}
         <MCPSecretInput
-          label="API key / token"
+          label={tSecret('apiKeyPlaceholder')}
           hasValue={hasValue}
           required={!hasValue}
           onChange={setDraftPlain}
         />
         <div className="flex gap-2">
           <Button type="button" onClick={save} disabled={!draftPlain}>
-            Save
+            {t('save')}
           </Button>
           {hasValue ? (
             <Button type="button" variant="outline" onClick={clear}>
-              Clear
+              {t('clear')}
             </Button>
           ) : null}
         </div>

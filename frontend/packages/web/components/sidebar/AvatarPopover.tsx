@@ -18,6 +18,7 @@ import { Languages, LogOut, Moon, Shield, Sun } from 'lucide-react'
 
 export function AvatarPopover() {
   const t = useTranslations('avatar')
+  const tShell = useTranslations('shellLayout')
   const router = useRouter()
   const user = useAuthStore((s) => s.user)
   const { isAdmin } = useAdminAccess()
@@ -58,7 +59,7 @@ export function AvatarPopover() {
   return (
     <Popover>
       <PopoverTrigger
-        aria-label="Account menu"
+        aria-label={tShell('accountMenu')}
         className="w-full min-w-0 flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-accent/60 transition-colors group"
       >
         <div className="size-7 rounded-full bg-gradient-to-br from-primary to-primary/70 text-primary-foreground flex items-center justify-center text-[11px] font-semibold shrink-0 ring-1 ring-primary/20 shadow-sm">
@@ -135,7 +136,7 @@ export function AvatarPopover() {
 
         <button
           type="button"
-          aria-label="Sign out"
+          aria-label={tShell('signOut')}
           onClick={onLogout}
           className="w-full flex items-center gap-2 px-2 py-1.5 rounded-sm text-[12.5px] hover:bg-destructive/10 text-destructive transition-colors"
         >

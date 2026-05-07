@@ -40,6 +40,7 @@ const contentFetcher = async (url: string): Promise<SkillContent> => {
 
 export function SkillView({ args, result, skillId }: SkillViewProps) {
   const t = useTranslations('adminSkills')
+  const tPanel = useTranslations('panel.skillView')
   const { workspaceId } = useWorkspaceContext()
   const skillNameFromArgs = String(args.skill_name ?? '')
   const parsed = parseResult(result)
@@ -70,7 +71,7 @@ export function SkillView({ args, result, skillId }: SkillViewProps) {
   return (
     <div className="space-y-3 p-4">
       <div className="flex items-center gap-2">
-        <span className="text-xs font-medium text-muted-foreground">Skill:</span>
+        <span className="text-xs font-medium text-muted-foreground">{tPanel('labelPrefix')}</span>
         <span className="font-mono text-sm font-semibold">{displayName}</span>
         {displayVersion && (
           <span className="font-mono text-[11px] text-muted-foreground/80">v{displayVersion}</span>
@@ -83,7 +84,7 @@ export function SkillView({ args, result, skillId }: SkillViewProps) {
                 : 'bg-red-500/10 text-red-600 dark:text-red-400'
             }`}
           >
-            {loaded ? 'loaded' : 'failed'}
+            {loaded ? tPanel('loaded') : tPanel('failed')}
           </span>
         )}
       </div>

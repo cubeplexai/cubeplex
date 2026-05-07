@@ -4,9 +4,12 @@ import { useEffect, useMemo, useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import { adminGetServer, createApiClient, useMcpStore, useWorkspaceStore } from '@cubebox/core'
 import type { MCPServer } from '@cubebox/core'
+import { useTranslations } from 'next-intl'
+
 import { MCPServerDetail } from '@/components/mcp/MCPServerDetail'
 
 export default function AdminMcpDetailPage() {
+  const t = useTranslations('mcp.adminPage')
   const params = useParams<{ id: string }>()
   const router = useRouter()
   const client = useMemo(() => createApiClient(''), [])
@@ -39,7 +42,7 @@ export default function AdminMcpDetailPage() {
   }, [client, fetchWorkspaces, params.id])
 
   if (error) return <div className="text-sm text-destructive">{error}</div>
-  if (!server) return <div className="text-sm text-muted-foreground">Loading connector...</div>
+  if (!server) return <div className="text-sm text-muted-foreground">{t('loadingConnector')}</div>
 
   return (
     <MCPServerDetail
@@ -51,11 +54,7 @@ export default function AdminMcpDetailPage() {
         setServer(await refreshTools(client, server.id))
       }}
       onDelete={async () => {
-        if (
-          !window.confirm(
-            `Delete ${server.name}? Bindings and credentials owned by this connector will also be removed.`,
-          )
-        ) {
+        if (!window.confirm(t('deleteConfirm', { name: server.name }))) {
           return
         }
         await remove(client, server.id)

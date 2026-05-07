@@ -4,6 +4,8 @@ import { useState } from 'react'
 import { Dialog as DialogPrimitive } from '@base-ui/react/dialog'
 import type { MCPServer } from '@cubebox/core'
 import { Loader2, X } from 'lucide-react'
+import { useTranslations } from 'next-intl'
+
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
@@ -17,6 +19,7 @@ export interface MCPPromoteDialogProps {
 }
 
 export function MCPPromoteDialog({ server, open, onOpenChange, onConfirm }: MCPPromoteDialogProps) {
+  const t = useTranslations('mcp.promote')
   const canShareCredential = server.credential_scope === 'workspace'
   const [shareCredential, setShareCredential] = useState(canShareCredential)
   const [submitting, setSubmitting] = useState(false)
@@ -58,17 +61,17 @@ export function MCPPromoteDialog({ server, open, onOpenChange, onConfirm }: MCPP
           <div className="flex items-start justify-between gap-3">
             <div className="flex flex-col gap-1">
               <DialogPrimitive.Title className="text-base font-semibold">
-                Promote MCP server
+                {t('title')}
               </DialogPrimitive.Title>
               <DialogPrimitive.Description className="text-sm text-muted-foreground">
-                Move {server.name} to organization scope so admins can bind it to workspaces.
+                {t('description', { name: server.name })}
               </DialogPrimitive.Description>
             </div>
             <DialogPrimitive.Close
               render={
                 <button
                   type="button"
-                  aria-label="Close promote dialog"
+                  aria-label={t('close')}
                   className="rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
                   disabled={submitting}
                 >
@@ -81,7 +84,7 @@ export function MCPPromoteDialog({ server, open, onOpenChange, onConfirm }: MCPP
           <div className="mt-4 flex flex-col gap-4">
             {error && (
               <Alert variant="destructive">
-                <AlertTitle>Promotion failed</AlertTitle>
+                <AlertTitle>{t('failed')}</AlertTitle>
                 <AlertDescription>{error}</AlertDescription>
               </Alert>
             )}
@@ -94,28 +97,21 @@ export function MCPPromoteDialog({ server, open, onOpenChange, onConfirm }: MCPP
                 <label className="flex cursor-pointer items-start gap-3 rounded-lg border border-border p-3">
                   <RadioGroupItem value="share" disabled={submitting} />
                   <span className="flex flex-col gap-1">
-                    <span className="text-sm font-medium">Share credential with organization</span>
-                    <span className="text-sm text-muted-foreground">
-                      Convert the workspace credential into an organization credential and attach it
-                      to the promoted server.
-                    </span>
+                    <span className="text-sm font-medium">{t('share')}</span>
+                    <span className="text-sm text-muted-foreground">{t('shareHelp')}</span>
                   </span>
                 </label>
                 <label className="flex cursor-pointer items-start gap-3 rounded-lg border border-border p-3">
                   <RadioGroupItem value="keep-workspace" disabled={submitting} />
                   <span className="flex flex-col gap-1">
-                    <span className="text-sm font-medium">Promote without credential</span>
-                    <span className="text-sm text-muted-foreground">
-                      Keep credentials workspace-local. Admins can add an organization credential
-                      later.
-                    </span>
+                    <span className="text-sm font-medium">{t('without')}</span>
+                    <span className="text-sm text-muted-foreground">{t('withoutHelp')}</span>
                   </span>
                 </label>
               </RadioGroup>
             ) : (
               <p className="rounded-lg border border-border bg-muted/30 p-3 text-sm text-muted-foreground">
-                This server has no workspace credential to share. It will be promoted without an
-                organization credential.
+                {t('noCredential')}
               </p>
             )}
 
@@ -123,13 +119,13 @@ export function MCPPromoteDialog({ server, open, onOpenChange, onConfirm }: MCPP
               <DialogPrimitive.Close
                 render={
                   <Button type="button" variant="ghost" disabled={submitting}>
-                    Cancel
+                    {t('cancel')}
                   </Button>
                 }
               />
               <Button type="button" disabled={submitting} onClick={() => void handleConfirm()}>
                 {submitting && <Loader2 data-icon="inline-start" className="animate-spin" />}
-                Promote server
+                {t('confirm')}
               </Button>
             </div>
           </div>

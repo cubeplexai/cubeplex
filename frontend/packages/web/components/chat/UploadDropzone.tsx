@@ -3,6 +3,8 @@
 import { useEffect, useState, useCallback } from 'react'
 import { Upload } from 'lucide-react'
 import { useAttachmentStore, createApiClient } from '@cubebox/core'
+import { useTranslations } from 'next-intl'
+
 import { useWorkspaceContext } from '@/hooks/useWorkspaceContext'
 
 interface Props {
@@ -10,6 +12,7 @@ interface Props {
 }
 
 export function UploadDropzone({ conversationId }: Props) {
+  const t = useTranslations('chatExtras')
   const [active, setActive] = useState(false)
   const upload = useAttachmentStore((s) => s.upload)
   const { workspaceId } = useWorkspaceContext()
@@ -61,10 +64,8 @@ export function UploadDropzone({ conversationId }: Props) {
     <div className="pointer-events-none fixed inset-0 z-50 flex items-center justify-center bg-background/60 backdrop-blur-sm">
       <div className="rounded-2xl border-2 border-dashed border-primary/60 bg-card px-12 py-10 text-center shadow-lg">
         <Upload className="mx-auto mb-3 size-10 text-primary" />
-        <p className="text-base font-medium">Drop to upload</p>
-        <p className="mt-1 text-xs text-muted-foreground">
-          Supports PNG/JPG/PDF/CSV/DOCX/XLSX/Markdown
-        </p>
+        <p className="text-base font-medium">{t('uploadDropzone')}</p>
+        <p className="mt-1 text-xs text-muted-foreground">{t('uploadFormats')}</p>
       </div>
     </div>
   )

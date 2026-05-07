@@ -12,6 +12,8 @@ import {
   toggleWorkspaceSkill,
   type SkillContent,
 } from '@cubebox/core'
+import { useTranslations } from 'next-intl'
+
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -28,12 +30,12 @@ function stripFrontmatter(content: string): string {
   return content.replace(/^---\s*\n[\s\S]*?\n---\s*(\n|$)/, '')
 }
 
-const STATE_LABEL: Record<WorkspaceSkillState, string> = {
-  'org-enabled': 'Enabled',
-  'org-disabled': 'Disabled',
-  'workspace-private': 'Workspace-private',
-  available: 'Available',
-}
+const STATE_KEY = {
+  'org-enabled': 'stateEnabled',
+  'org-disabled': 'stateDisabled',
+  'workspace-private': 'statePrivate',
+  available: 'stateAvailable',
+} as const satisfies Record<WorkspaceSkillState, string>
 
 const STATE_BADGE_VARIANT: Record<WorkspaceSkillState, { className: string }> = {
   'org-enabled': { className: 'border-emerald-500/40 text-emerald-600' },
@@ -57,6 +59,7 @@ function WorkspaceActions({
   skill: WorkspaceSkillEntry
   onDone: () => void
 }) {
+  const t = useTranslations('wsSettings.skillDetail')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -89,7 +92,7 @@ function WorkspaceActions({
           disabled={busy}
           onClick={() => void run(() => toggleWorkspaceSkill(client(), skill.installId!, false))}
         >
-          {busy ? 'Disabling…' : 'Disable in workspace'}
+          {busy ? t('actionDisabling') : t('actionDisable')}
         </Button>
       )}
       {skill.workspaceState === 'org-disabled' && skill.installId && (
@@ -98,7 +101,7 @@ function WorkspaceActions({
           disabled={busy}
           onClick={() => void run(() => toggleWorkspaceSkill(client(), skill.installId!, true))}
         >
-          {busy ? 'Enabling…' : 'Enable in workspace'}
+          {busy ? t('actionEnabling') : t('actionEnable')}
         </Button>
       )}
       {skill.workspaceState === 'workspace-private' && skill.installId && (
@@ -108,7 +111,7 @@ function WorkspaceActions({
           disabled={busy}
           onClick={() => void run(() => deleteWorkspaceSkill(client(), skill.installId!))}
         >
-          {busy ? 'Removing…' : 'Remove from workspace'}
+          {busy ? t('actionRemoving') : t('actionRemove')}
         </Button>
       )}
       {skill.workspaceState === 'available' && (
@@ -119,7 +122,7 @@ function WorkspaceActions({
             void run(() => installWorkspaceSkill(client(), skill.id, skill.current_version))
           }
         >
-          {busy ? 'Installing…' : 'Install in workspace'}
+          {busy ? t('actionInstalling') : t('actionInstall')}
         </Button>
       )}
     </div>
@@ -127,6 +130,7 @@ function WorkspaceActions({
 }
 
 export function WorkspaceSkillDetail({ wsId, skill, onActionDone }: WorkspaceSkillDetailProps) {
+  const t = useTranslations('wsSettings.skillDetail')
   const targetVersion = skill.installed_version ?? skill.current_version
   const contentKey = `/api/v1/ws/${wsId}/skills/${skill.id}?version=${encodeURIComponent(targetVersion)}`
   const { data: content, isLoading } = useSWR<SkillContent>(contentKey, contentFetcher, {
@@ -143,13 +147,13 @@ export function WorkspaceSkillDetail({ wsId, skill, onActionDone }: WorkspaceSki
             v{targetVersion}
           </Badge>
           <Badge variant={skill.source === 'preinstalled' ? 'default' : 'secondary'}>
-            {skill.source === 'preinstalled' ? 'Preinstalled' : 'Org-uploaded'}
+            {skill.source === 'preinstalled' ? t('sourcePreinstalled') : t('sourceUploaded')}
           </Badge>
           <Badge
             variant="outline"
             className={cn(STATE_BADGE_VARIANT[skill.workspaceState].className)}
           >
-            {STATE_LABEL[skill.workspaceState]}
+            {t(STATE_KEY[skill.workspaceState])}
           </Badge>
           <div className="ml-auto">
             <WorkspaceActions wsId={wsId} skill={skill} onDone={onActionDone} />
@@ -173,12 +177,12 @@ export function WorkspaceSkillDetail({ wsId, skill, onActionDone }: WorkspaceSki
         <TabsList variant="line" className="w-full justify-start border-b border-border/60 pb-0">
           <TabsTrigger value="overview">
             <FileText className="size-3.5" />
-            Overview
+            {t('overview')}
           </TabsTrigger>
         </TabsList>
 
         <TabsContent value="overview" className="mt-4">
-          {isLoading && <p className="text-xs text-muted-foreground">Loading content…</p>}
+          {isLoading && <p className="text-xs text-muted-foreground">{t('loadingContent')}</p>}
           {content && (
             <div className="rounded-lg border border-border/70 bg-card/40 px-4 py-3">
               <div className={proseClasses}>

@@ -3,8 +3,10 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { createApiClient, useWorkspaceStore } from '@cubebox/core'
+import { useTranslations } from 'next-intl'
 
 export function WorkspaceCreateForm() {
+  const t = useTranslations('workspaceCreate')
   const router = useRouter()
   const [name, setName] = useState('')
   const [error, setError] = useState<string | null>(null)
@@ -29,7 +31,7 @@ export function WorkspaceCreateForm() {
   return (
     <form onSubmit={onSubmit} className="space-y-3 rounded-md border border-border p-4">
       <label className="block">
-        <span className="text-sm text-foreground/80">New workspace name</span>
+        <span className="text-sm text-foreground/80">{t('nameLabel')}</span>
         <input
           type="text"
           required
@@ -37,7 +39,7 @@ export function WorkspaceCreateForm() {
           className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
           value={name}
           onChange={(e) => setName(e.target.value)}
-          placeholder="e.g. Side project"
+          placeholder={t('namePlaceholder')}
         />
       </label>
       {error && <div className="text-sm text-red-500">{error}</div>}
@@ -46,7 +48,7 @@ export function WorkspaceCreateForm() {
         disabled={submitting || !name.trim()}
         className="rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground disabled:opacity-50"
       >
-        {submitting ? 'Creating…' : 'Create workspace'}
+        {submitting ? t('creating') : t('submit')}
       </button>
     </form>
   )

@@ -4,6 +4,8 @@ import { memo, useCallback } from 'react'
 import { Download, Package, Eye } from 'lucide-react'
 import type { Artifact } from '@cubebox/core'
 import { usePanelStore } from '@cubebox/core'
+import { useTranslations } from 'next-intl'
+
 import { getArtifactIcon, getArtifactLabel } from '@/components/panel/artifact/artifactIcons'
 import { buildDownloadUrl } from '@/components/panel/artifact/previewUtils'
 import { useWorkspaceContext } from '@/hooks/useWorkspaceContext'
@@ -13,6 +15,7 @@ interface ArtifactCardProps {
 }
 
 export const ArtifactCard = memo(function ArtifactCard({ artifact }: ArtifactCardProps) {
+  const t = useTranslations('chatExtras')
   const Icon = getArtifactIcon(artifact)
   const label = getArtifactLabel(artifact)
   const openPreview = usePanelStore((s) => s.openArtifact)
@@ -65,7 +68,7 @@ export const ArtifactCard = memo(function ArtifactCard({ artifact }: ArtifactCar
             }}
             className="flex size-8 items-center justify-center rounded-md
               text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-            title="Preview"
+            title={t('preview')}
           >
             <Eye className="size-4" />
           </button>
@@ -74,7 +77,7 @@ export const ArtifactCard = memo(function ArtifactCard({ artifact }: ArtifactCar
             onClick={(e) => e.stopPropagation()}
             className="flex size-8 items-center justify-center rounded-md
               text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-            title="Download"
+            title={t('download')}
           >
             <Download className="size-4" />
           </a>

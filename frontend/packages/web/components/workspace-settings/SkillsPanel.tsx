@@ -1,6 +1,8 @@
 'use client'
 
 import { useState } from 'react'
+import { useTranslations } from 'next-intl'
+
 import {
   useWorkspaceSkillsCatalog,
   type WorkspaceSkillEntry,
@@ -16,6 +18,7 @@ interface SkillsPanelProps {
 }
 
 export function SkillsPanel({ wsId }: SkillsPanelProps) {
+  const t = useTranslations('wsSettings.skillsList')
   const [filters, setFilters] = useState<WorkspaceSkillFilters>({})
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [uploadOpen, setUploadOpen] = useState(false)
@@ -26,10 +29,8 @@ export function SkillsPanel({ wsId }: SkillsPanelProps) {
   return (
     <div className="flex h-full flex-1 flex-col overflow-hidden">
       <header className="border-b border-border/70 px-6 py-4">
-        <h2 className="text-lg font-semibold tracking-tight">Skills</h2>
-        <p className="mt-0.5 text-xs text-muted-foreground">
-          Browse, enable, and install skills available to this workspace.
-        </p>
+        <h2 className="text-lg font-semibold tracking-tight">{t('title')}</h2>
+        <p className="mt-0.5 text-xs text-muted-foreground">{t('subtitle')}</p>
       </header>
 
       <WorkspaceSkillsToolbar
@@ -40,22 +41,19 @@ export function SkillsPanel({ wsId }: SkillsPanelProps) {
 
       <div className="flex flex-1 overflow-hidden">
         <aside
-          aria-label="skills-list"
+          aria-label={t('listAria')}
           className="w-[360px] shrink-0 overflow-y-auto border-r border-border/70 bg-card/20"
         >
           {loading && skills.length === 0 ? (
-            <p className="px-4 py-6 text-center text-xs text-muted-foreground">Loading…</p>
+            <p className="px-4 py-6 text-center text-xs text-muted-foreground">{t('loading')}</p>
           ) : error ? (
             <div className="m-3 rounded-md border border-destructive/30 bg-destructive/5 p-3 text-xs text-destructive">
               {error.message}
             </div>
           ) : skills.length === 0 ? (
             <div className="flex h-full flex-col items-center justify-center gap-1 px-6 text-center">
-              <p className="text-sm text-muted-foreground">No skills match these filters</p>
-              <p className="text-xs text-muted-foreground/70">
-                Adjust the search or filter, or upload a workspace-private skill via &ldquo;Add
-                skill&rdquo;.
-              </p>
+              <p className="text-sm text-muted-foreground">{t('noMatch')}</p>
+              <p className="text-xs text-muted-foreground/70">{t('noMatchHint')}</p>
             </div>
           ) : (
             <ul className="flex flex-col gap-1.5 p-3">
@@ -81,7 +79,7 @@ export function SkillsPanel({ wsId }: SkillsPanelProps) {
             />
           ) : (
             <div className="flex flex-1 items-center justify-center p-8 text-sm text-muted-foreground">
-              Select a skill to view details
+              {t('selectSkill')}
             </div>
           )}
         </section>

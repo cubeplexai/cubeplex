@@ -1,6 +1,8 @@
 'use client'
 
 import { CheckCircle2, CircleSlash, Lock, Package, Plus, Sparkles } from 'lucide-react'
+import { useTranslations } from 'next-intl'
+
 import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'
 import type { WorkspaceSkillEntry, WorkspaceSkillState } from '@/hooks/useWorkspaceSkillsCatalog'
@@ -12,11 +14,12 @@ interface WorkspaceSkillCardProps {
 }
 
 function StateBadge({ state }: { state: WorkspaceSkillState }) {
+  const t = useTranslations('wsSettings.skillCard')
   if (state === 'org-enabled') {
     return (
       <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-medium text-emerald-600 dark:text-emerald-400">
         <CheckCircle2 className="size-3" />
-        Enabled
+        {t('enabled')}
       </span>
     )
   }
@@ -24,7 +27,7 @@ function StateBadge({ state }: { state: WorkspaceSkillState }) {
     return (
       <span className="inline-flex items-center gap-1 rounded-full bg-muted/60 px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
         <CircleSlash className="size-3" />
-        Disabled
+        {t('disabled')}
       </span>
     )
   }
@@ -32,14 +35,14 @@ function StateBadge({ state }: { state: WorkspaceSkillState }) {
     return (
       <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium text-primary">
         <Lock className="size-3" />
-        Private
+        {t('private')}
       </span>
     )
   }
   return (
     <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-600 dark:text-amber-400">
       <Plus className="size-3" />
-      Available
+      {t('available')}
     </span>
   )
 }

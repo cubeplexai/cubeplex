@@ -2,6 +2,8 @@
 
 import { File, Download } from 'lucide-react'
 import type { Artifact } from '@cubebox/core'
+import { useTranslations } from 'next-intl'
+
 import { buildDownloadUrl } from './previewUtils'
 
 interface FallbackPreviewProps {
@@ -11,6 +13,8 @@ interface FallbackPreviewProps {
 }
 
 export function FallbackPreview({ artifact, version, workspaceId }: FallbackPreviewProps) {
+  const t = useTranslations('panel.fallback')
+  const tArtifact = useTranslations('panel.artifactPanel')
   const downloadUrl = buildDownloadUrl(artifact, workspaceId, version)
 
   return (
@@ -24,11 +28,9 @@ export function FallbackPreview({ artifact, version, workspaceId }: FallbackPrev
           <p className="mt-1 text-xs text-muted-foreground">{artifact.description}</p>
         )}
         <p className="mt-1 text-xs text-muted-foreground/60">
-          {artifact.mime_type || 'Unknown type'} &middot; v{version ?? artifact.version}
+          {artifact.mime_type || tArtifact('unknownType')} &middot; v{version ?? artifact.version}
         </p>
-        <p className="mt-2 text-xs text-muted-foreground">
-          This file type does not support preview. Please download to view.
-        </p>
+        <p className="mt-2 text-xs text-muted-foreground">{t('unsupported')}</p>
       </div>
       <a
         href={downloadUrl}
@@ -36,7 +38,7 @@ export function FallbackPreview({ artifact, version, workspaceId }: FallbackPrev
           text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
       >
         <Download className="size-4" />
-        Download
+        {t('download')}
       </a>
     </div>
   )

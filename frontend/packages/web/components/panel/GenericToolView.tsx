@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react'
 import { Copy, Check } from 'lucide-react'
+import { useTranslations } from 'next-intl'
 
 interface GenericToolViewProps {
   args: Record<string, unknown>
@@ -11,6 +12,7 @@ interface GenericToolViewProps {
 }
 
 function CopyButton({ text }: { text: string }) {
+  const t = useTranslations('panel.generic')
   const [copied, setCopied] = useState(false)
 
   const handleCopy = async () => {
@@ -24,7 +26,7 @@ function CopyButton({ text }: { text: string }) {
       onClick={handleCopy}
       className="p-1 rounded hover:bg-muted/50
         transition-colors"
-      title="Copy"
+      title={t('copy')}
     >
       {copied ? (
         <Check className="size-3 text-emerald-500" />
@@ -49,6 +51,7 @@ export function GenericToolView({
   highlightText,
   highlightKey,
 }: GenericToolViewProps) {
+  const t = useTranslations('panel.generic')
   const responseRef = useRef<HTMLPreElement>(null)
 
   useEffect(() => {
@@ -80,7 +83,7 @@ export function GenericToolView({
               text-muted-foreground uppercase
               tracking-wider"
           >
-            Request
+            {t('request')}
           </span>
           <CopyButton text={requestText} />
         </div>
@@ -104,7 +107,7 @@ export function GenericToolView({
                 text-muted-foreground uppercase
                 tracking-wider"
             >
-              Response
+              {t('response')}
             </span>
             <CopyButton text={responseText} />
           </div>

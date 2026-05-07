@@ -3,10 +3,13 @@
 import { useEffect, useMemo } from 'react'
 import Link from 'next/link'
 import { createApiClient, useMcpStore } from '@cubebox/core'
+import { useTranslations } from 'next-intl'
+
 import { buttonVariants } from '@/components/ui/button'
 import { MCPServerList } from '@/components/mcp/MCPServerList'
 
 export default function AdminMcpPage() {
+  const t = useTranslations('mcp.adminPage')
   const client = useMemo(() => createApiClient(''), [])
   const { servers, loading, error, fetchAll } = useMcpStore()
 
@@ -18,13 +21,11 @@ export default function AdminMcpPage() {
     <div className="flex flex-col gap-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-col gap-1">
-          <h1 className="text-2xl font-semibold">MCP connectors</h1>
-          <p className="text-sm text-muted-foreground">
-            Manage organization-level MCP servers and credential scopes.
-          </p>
+          <h1 className="text-2xl font-semibold">{t('title')}</h1>
+          <p className="text-sm text-muted-foreground">{t('subtitle')}</p>
         </div>
         <Link href="/admin/mcp/new" className={buttonVariants({ variant: 'default' })}>
-          Add server
+          {t('addServer')}
         </Link>
       </div>
 
@@ -33,8 +34,8 @@ export default function AdminMcpPage() {
         servers={servers}
         loading={loading}
         detailHrefBase="/admin/mcp"
-        emptyTitle="No MCP connectors yet"
-        emptyDescription="Add a server to expose external MCP tools to Cubebox agents."
+        emptyTitle={t('emptyTitle')}
+        emptyDescription={t('emptyDesc')}
       />
     </div>
   )

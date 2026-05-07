@@ -1,6 +1,7 @@
 'use client'
 
 import { useId, useState } from 'react'
+import { useTranslations } from 'next-intl'
 
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -18,6 +19,7 @@ export function MCPSecretInput({
   onChange,
   required = false,
 }: MCPSecretInputProps) {
+  const t = useTranslations('mcp.secret')
   const inputId = useId()
   const [editing, setEditing] = useState(!hasValue)
   const [value, setValue] = useState('')
@@ -26,9 +28,9 @@ export function MCPSecretInput({
     return (
       <div className="flex items-center gap-3">
         <span className="text-sm font-medium">{label}</span>
-        <span className="font-mono text-sm text-muted-foreground">**** (set)</span>
+        <span className="font-mono text-sm text-muted-foreground">{t('set')}</span>
         <Button type="button" variant="outline" size="sm" onClick={() => setEditing(true)}>
-          Replace
+          {t('replace')}
         </Button>
       </div>
     )
@@ -50,7 +52,7 @@ export function MCPSecretInput({
             setValue(event.target.value)
             onChange(event.target.value)
           }}
-          placeholder="API key / token"
+          placeholder={t('apiKeyPlaceholder')}
           required={required && !hasValue}
         />
         {hasValue ? (
@@ -64,11 +66,11 @@ export function MCPSecretInput({
               setEditing(false)
             }}
           >
-            Cancel
+            {t('cancel')}
           </Button>
         ) : null}
       </div>
-      <p className="text-xs text-muted-foreground">The secret is write-only after saving.</p>
+      <p className="text-xs text-muted-foreground">{t('writeOnly')}</p>
     </div>
   )
 }

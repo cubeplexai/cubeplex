@@ -3,6 +3,8 @@
 import { useState } from 'react'
 import type { ApiClient, MCPServer } from '@cubebox/core'
 import { CircleDot, Loader2, RefreshCw, Trash2 } from 'lucide-react'
+import { useTranslations } from 'next-intl'
+
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -25,11 +27,6 @@ export interface MCPServerDetailProps {
   onPromote?: (shareCredential: boolean) => Promise<void>
 }
 
-function formatDate(value: string | null): string {
-  if (!value) return 'not discovered yet'
-  return new Date(value).toLocaleString()
-}
-
 function InfoRow({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div className="flex flex-col gap-1 rounded-lg bg-muted/30 p-3 sm:flex-row sm:items-center sm:justify-between">
@@ -49,12 +46,17 @@ export function MCPServerDetail({
   onDelete,
   onPromote,
 }: MCPServerDetailProps) {
+  const t = useTranslations('mcp.detail')
   const [refreshing, setRefreshing] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [promoteOpen, setPromoteOpen] = useState(false)
   const showBindingsTab = mode === 'admin' && server.owner_workspace_id === null
   const showCredentialPanel = (mode === 'ws-owned' || mode === 'ws-readonly') && wsId
   const canRefreshTools = mode !== 'ws-readonly'
+
+  const formattedTime = server.last_discovered_at
+    ? new Date(server.last_discovered_at).toLocaleString()
+    : t('notDiscoveredYet')
 
   async function handleRefresh(): Promise<void> {
     setRefreshing(true)
@@ -88,7 +90,7 @@ export function MCPServerDetail({
             <MCPScopeBadge scope={server.credential_scope} />
           </div>
           <p className="text-sm text-muted-foreground">
-            {server.transport} · last discovered {formatDate(server.last_discovered_at)}
+            {t('lastDiscoveredLine', { transport: server.transport, time: formattedTime })}
           </p>
           {server.last_error ? (
             <p className="max-w-3xl text-sm text-destructive">{server.last_error}</p>
@@ -109,7 +111,7 @@ export function MCPServerDetail({
               ) : (
                 <RefreshCw data-icon="inline-start" />
               )}
-              Refresh tools
+              {t('refreshTools')}
             </Button>
           ) : null}
           {mode === 'ws-owned' && onPromote ? (
@@ -120,7 +122,7 @@ export function MCPServerDetail({
               disabled={refreshing || deleting}
               onClick={() => setPromoteOpen(true)}
             >
-              Share to org
+              {t('shareToOrg')}
             </Button>
           ) : null}
           {onDelete ? (
@@ -136,7 +138,7 @@ export function MCPServerDetail({
               ) : (
                 <Trash2 data-icon="inline-start" />
               )}
-              Delete
+              {t('delete')}
             </Button>
           ) : null}
         </div>
@@ -144,23 +146,28 @@ export function MCPServerDetail({
 
       <Tabs defaultValue="overview">
         <TabsList variant="line" className="w-full justify-start border-b border-border/60 pb-0">
-          <TabsTrigger value="overview">Overview</TabsTrigger>
-          <TabsTrigger value="tools">Tools ({server.tools_cache?.length ?? 0})</TabsTrigger>
-          {showBindingsTab ? <TabsTrigger value="bindings">Workspaces</TabsTrigger> : null}
+          <TabsTrigger value="overview">{t('overview')}</TabsTrigger>
+          <TabsTrigger value="tools">
+            {t('toolsTab', { count: server.tools_cache?.length ?? 0 })}
+          </TabsTrigger>
+          {showBindingsTab ? <TabsTrigger value="bindings">{t('workspaces')}</TabsTrigger> : null}
         </TabsList>
 
         <TabsContent value="overview" className="mt-4 flex flex-col gap-4">
           <Card>
             <CardHeader>
-              <CardTitle>Server details</CardTitle>
+              <CardTitle>{t('serverDetails')}</CardTitle>
             </CardHeader>
             <CardContent className="flex flex-col gap-2 text-sm">
-              <InfoRow label="URL">{server.server_url}</InfoRow>
-              <InfoRow label="Transport">{server.transport}</InfoRow>
-              <InfoRow label="Auth method">{server.auth_method}</InfoRow>
-              <InfoRow label="Credential scope">{server.credential_scope}</InfoRow>
-              <InfoRow label="Timeout">
-                {server.timeout}s / SSE {server.sse_read_timeout}s
+              <InfoRow label={t('url')}>{server.server_url}</InfoRow>
+              <InfoRow label={t('transport')}>{server.transport}</InfoRow>
+              <InfoRow label={t('authMethod')}>{server.auth_method}</InfoRow>
+              <InfoRow label={t('credentialScope')}>{server.credential_scope}</InfoRow>
+              <InfoRow label={t('timeout')}>
+                {t('timeoutValue', {
+                  timeout: server.timeout,
+                  sseTimeout: server.sse_read_timeout,
+                })}
               </InfoRow>
             </CardContent>
           </Card>

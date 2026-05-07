@@ -5,6 +5,8 @@ import dynamic from 'next/dynamic'
 import { Download, X } from 'lucide-react'
 import type { AttachmentPanelInfo } from '@cubebox/core'
 import { usePanelStore } from '@cubebox/core'
+import { useTranslations } from 'next-intl'
+
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { MarkdownWithCitations } from '@/components/shared/MarkdownWithCitations'
 import { PreviewLoading } from '@/components/panel/artifact/PreviewLoading'
@@ -32,6 +34,7 @@ function humanSize(n: number): string {
 }
 
 export function AttachmentPreviewView({ info }: Props): React.ReactElement {
+  const t = useTranslations('panel.attachment')
   const close = usePanelStore((s) => s.close)
   const visual = getFileVisual({ filename: info.filename, mime_type: info.mimeType })
 
@@ -53,7 +56,7 @@ export function AttachmentPreviewView({ info }: Props): React.ReactElement {
           href={info.downloadUrl}
           download
           className="ml-auto grid size-7 place-items-center rounded hover:bg-muted"
-          aria-label="Download"
+          aria-label={t('download')}
         >
           <Download className="size-3.5" />
         </a>
@@ -61,7 +64,7 @@ export function AttachmentPreviewView({ info }: Props): React.ReactElement {
           type="button"
           onClick={close}
           className="grid size-7 place-items-center rounded hover:bg-muted"
-          aria-label="Close"
+          aria-label={t('close')}
         >
           <X className="size-3.5" />
         </button>
@@ -72,6 +75,7 @@ export function AttachmentPreviewView({ info }: Props): React.ReactElement {
 }
 
 function Body({ info, family }: { info: AttachmentPanelInfo; family: string }): React.ReactElement {
+  const t = useTranslations('panel.attachment')
   if (family === 'pdf') {
     return (
       <div className="flex-1 min-h-0">
@@ -96,8 +100,7 @@ function Body({ info, family }: { info: AttachmentPanelInfo; family: string }): 
   if (info.sizeBytes > TEXT_MAX_BYTES) {
     return (
       <div className="flex-1 grid place-items-center p-8 text-center text-sm text-muted-foreground">
-        File is too large for inline preview ({(info.sizeBytes / 1024 / 1024).toFixed(1)} MB).
-        Please download to view.
+        {t('tooLarge', { size: (info.sizeBytes / 1024 / 1024).toFixed(1) })}
       </div>
     )
   }
@@ -111,6 +114,7 @@ function TextBody({
   info: AttachmentPanelInfo
   family: string
 }): React.ReactElement {
+  const t = useTranslations('panel.attachment')
   const [state, setState] = useState<
     { kind: 'loading' } | { kind: 'error'; message: string } | { kind: 'ready'; text: string }
   >({ kind: 'loading' })
@@ -143,14 +147,14 @@ function TextBody({
   if (state.kind === 'loading') {
     return (
       <div className="flex-1 grid place-items-center p-8 text-sm text-muted-foreground">
-        Loading…
+        {t('loading')}
       </div>
     )
   }
   if (state.kind === 'error') {
     return (
       <div className="flex-1 grid place-items-center p-8 text-sm text-destructive">
-        Failed to load: {state.message}
+        {t('loadFailed', { message: state.message })}
       </div>
     )
   }
@@ -182,8 +186,10 @@ function prettyJson(raw: string): string {
 }
 
 function CsvTable({ text }: { text: string }): React.ReactElement {
+  const t = useTranslations('panel.attachment')
   const lines = text.split(/\r?\n/).filter(Boolean).slice(0, 1000)
-  if (lines.length === 0) return <div className="p-4 text-sm text-muted-foreground">Empty</div>
+  if (lines.length === 0)
+    return <div className="p-4 text-sm text-muted-foreground">{t('empty')}</div>
   const rows = lines.map((line) => line.split(','))
   return (
     <div className="overflow-x-auto">

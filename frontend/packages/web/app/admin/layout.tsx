@@ -3,11 +3,14 @@
 import { useEffect, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
 import { createApiClient, useAuthStore } from '@cubebox/core'
+import { useTranslations } from 'next-intl'
+
 import { AdminSubNav } from '@/components/admin/AdminSubNav'
 import { AdminTopBar } from '@/components/admin/AdminTopBar'
 import { useAdminAccess } from '@/hooks/useAdminAccess'
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
+  const t = useTranslations('adminLayout')
   const client = useMemo(() => createApiClient(''), [])
   const { isAdmin, orgName, loading, error } = useAdminAccess()
   const router = useRouter()
@@ -31,7 +34,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   if (loading) {
     return (
       <div className="flex h-screen items-center justify-center text-sm text-muted-foreground">
-        Loading…
+        {t('loading')}
       </div>
     )
   }

@@ -43,8 +43,8 @@ test.describe('i18n — language preference', () => {
     await page.reload()
     await expect(page.getByPlaceholder('有什么可以帮你的？')).toBeVisible()
 
-    // Switch back to English
-    await page.getByRole('button', { name: 'Account menu' }).click()
+    // Switch back to English (aria-label is now localized to Chinese here)
+    await page.getByRole('button', { name: '账号菜单' }).click()
     await page.getByRole('button', { name: 'EN', exact: true }).click()
     await expect(page.getByPlaceholder('How can I help you?')).toBeVisible({ timeout: 8_000 })
   })

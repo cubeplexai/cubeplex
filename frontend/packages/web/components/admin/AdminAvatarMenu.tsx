@@ -8,6 +8,7 @@ import { LogOut } from 'lucide-react'
 
 export function AdminAvatarMenu() {
   const t = useTranslations('adminSkills')
+  const tLayout = useTranslations('adminLayout')
   const router = useRouter()
   const user = useAuthStore((s) => s.user)
   const initials = user?.email ? user.email[0]?.toUpperCase() : '?'
@@ -26,7 +27,7 @@ export function AdminAvatarMenu() {
   return (
     <Popover>
       <PopoverTrigger
-        aria-label="Admin account menu"
+        aria-label={tLayout('avatarMenuAria')}
         className="size-8 rounded-full bg-gradient-to-br from-primary to-primary/70 text-primary-foreground flex items-center justify-center text-xs font-semibold ring-1 ring-primary/20 shadow-sm hover:shadow-md transition-shadow"
       >
         {initials}

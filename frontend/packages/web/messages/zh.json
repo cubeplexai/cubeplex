@@ -278,5 +278,395 @@
     "saved": "已保存",
     "saveFailed": "保存失败：{message}",
     "discard": "放弃修改"
+  },
+  "mcp": {
+    "scopeBadge": {
+      "org": "组织共享",
+      "workspace": "工作区共享",
+      "user": "按用户",
+      "none": "身份直通"
+    },
+    "scopeForm": {
+      "orgTitle": "组织共享",
+      "orgHelp": "组织内启用该 connector 的所有工作区共用一份凭证。",
+      "workspaceTitle": "工作区共享",
+      "workspaceHelp": "本工作区所有成员共用一份凭证。",
+      "userTitle": "按用户",
+      "userHelp": "每位用户在使用前各自录入凭证。",
+      "noneTitle": "Cubebox 身份直通",
+      "noneHelp": "不存储 API key。MCP server 接收的是短期 Cubebox 身份令牌。"
+    },
+    "list": {
+      "loading": "加载 connector 中…",
+      "name": "名称",
+      "scope": "作用域",
+      "transport": "传输方式",
+      "tools": "工具",
+      "actions": "操作",
+      "details": "详情",
+      "authenticated": "已认证",
+      "connectionError": "连接错误"
+    },
+    "form": {
+      "basicInfo": "基础信息",
+      "nameLabel": "名称 *",
+      "serverUrlLabel": "服务地址 *",
+      "serverUrlPlaceholder": "https://example.com/mcp 或 stdio 命令",
+      "transport": "传输方式",
+      "credentialMode": "凭证模式",
+      "oauth": "OAuth",
+      "oauthComingSoon": "敬请期待。",
+      "comingSoonTooltip": "敬请期待",
+      "apiKeyLabel": "API key / token",
+      "credentialDisplayName": "凭证显示名",
+      "testConnection": "测试连接",
+      "cancel": "取消",
+      "save": "保存",
+      "connectionSucceeded": "连接成功",
+      "connectionFailed": "连接失败",
+      "discovered": "发现 {count} 个工具：{names}",
+      "noToolsName": "无",
+      "unknownError": "未知错误"
+    },
+    "detail": {
+      "notDiscoveredYet": "尚未发现",
+      "lastDiscoveredLine": "{transport} · 上次发现 {time}",
+      "refreshTools": "刷新工具",
+      "shareToOrg": "共享到组织",
+      "delete": "删除",
+      "overview": "概览",
+      "toolsTab": "工具 ({count})",
+      "workspaces": "工作区",
+      "serverDetails": "服务详情",
+      "url": "URL",
+      "transport": "传输方式",
+      "authMethod": "认证方式",
+      "credentialScope": "凭证作用域",
+      "timeout": "超时",
+      "timeoutValue": "{timeout} 秒 / SSE {sseTimeout} 秒"
+    },
+    "promote": {
+      "title": "提升为组织级 MCP",
+      "description": "把 {name} 改为组织级，由管理员绑定到各工作区。",
+      "close": "关闭提升对话框",
+      "failed": "提升失败",
+      "share": "把凭证一并共享给组织",
+      "shareHelp": "把工作区凭证转换为组织级凭证，并附在提升后的服务上。",
+      "without": "提升但不带凭证",
+      "withoutHelp": "凭证留在工作区本地。管理员可以稍后再添加组织级凭证。",
+      "noCredential": "该服务尚无可共享的工作区凭证，将仅做提升、不带凭证。",
+      "cancel": "取消",
+      "confirm": "确认提升"
+    },
+    "bindings": {
+      "title": "工作区绑定",
+      "description": "为指定工作区启用这个组织级 MCP 服务。",
+      "updateFailed": "绑定更新失败",
+      "summary": "已为 {enabled}/{total} 个工作区启用",
+      "enableAll": "全部启用",
+      "disableAll": "全部禁用",
+      "workspace": "工作区",
+      "enabled": "已启用",
+      "noWorkspaces": "暂无可用工作区。",
+      "toggleAria": "切换 {name}",
+      "save": "保存绑定"
+    },
+    "credential": {
+      "managedTitle": "凭证",
+      "managedBody": "这份凭证由组织管理员维护。",
+      "authTitle": "认证",
+      "passthroughBody": "此 connector 使用 Cubebox 身份直通，不存储 API key。",
+      "myCredential": "我的凭证",
+      "workspaceCredential": "工作区凭证",
+      "loadingStatus": "正在加载凭证状态…",
+      "save": "保存",
+      "clear": "清除",
+      "missingUser": "录入凭证之前，这个 connector 不会出现在你的对话工具里。",
+      "missingViaBinding": "工作区需要先录入自己的凭证，成员才能使用这个共享 connector。",
+      "missingWorkspace": "录入工作区凭证之前，这个 connector 不会对成员可见。"
+    },
+    "secret": {
+      "set": "**** （已设置）",
+      "replace": "替换",
+      "cancel": "取消",
+      "writeOnly": "保存后该秘密只能写入，无法读取。",
+      "apiKeyPlaceholder": "API key / token"
+    },
+    "tools": {
+      "empty": "尚未发现任何工具。MCP 服务可达后请刷新工具。"
+    },
+    "wsPanel": {
+      "title": "MCP Connectors",
+      "summary": "本工作区已启用 {enabled}/{total} 个",
+      "addConnector": "添加 connector",
+      "loading": "加载中…",
+      "empty": "还没有 MCP connector",
+      "emptyHint": "点击「添加 connector」来注册一个。",
+      "orgWide": "组织级",
+      "workspacePrivate": "工作区私有",
+      "workspaceLabel": "工作区私有",
+      "orgLabel": "组织级",
+      "enabledLabel": "已启用",
+      "disabledLabel": "已禁用",
+      "manage": "管理 →",
+      "serverUrl": "服务地址",
+      "transport": "传输方式",
+      "scope": "作用域",
+      "enabled": "启用",
+      "yes": "是",
+      "no": "否",
+      "selectConnector": "选择一个 connector 查看详情",
+      "listAria": "MCP 服务列表",
+      "onBadge": "开"
+    },
+    "wsPage": {
+      "title": "工作区 MCP connectors",
+      "subtitle": "管理本工作区的私有 connector 与凭证。",
+      "addServer": "添加服务",
+      "private": "工作区私有",
+      "privateEmptyTitle": "暂无私有 MCP 服务",
+      "privateEmptyDesc": "添加一个仅在本工作区可见的 connector。",
+      "shared": "组织共享给本工作区",
+      "sharedEmptyTitle": "组织尚未共享 connector 到这里",
+      "sharedEmptyDesc": "组织管理员可以把组织级 MCP 服务绑定到本工作区。",
+      "addTitle": "添加 MCP 服务",
+      "addSubtitle": "配置一个归属本工作区的 connector。",
+      "loadingConnector": "加载 connector 中…",
+      "deleteConfirm": "确认删除 {name}？",
+      "scopeError": "工作区 connector 只支持工作区共享、按用户或身份直通。"
+    },
+    "adminPage": {
+      "title": "MCP connectors",
+      "subtitle": "管理组织级 MCP 服务及其凭证作用域。",
+      "addServer": "添加服务",
+      "emptyTitle": "还没有 MCP connector",
+      "emptyDesc": "添加一个服务，把外部 MCP 工具暴露给 Cubebox agent。",
+      "addTitle": "添加 MCP 服务",
+      "addSubtitle": "配置一个组织级 connector，并发现它的 MCP 工具。",
+      "loadingConnector": "加载 connector 中…",
+      "deleteConfirm": "确认删除 {name}？该服务的绑定与凭证将一并删除。",
+      "scopeError": "组织 connector 只支持组织共享、按用户或身份直通。"
+    }
+  },
+  "wsSettings": {
+    "settingsLabel": "设置",
+    "navWorkspace": "工作区设置",
+    "navPersona": "Persona",
+    "navModel": "模型",
+    "navSkills": "技能",
+    "navMcp": "MCP Connectors",
+    "soonBadge": "即将推出",
+    "persona": {
+      "title": "Persona",
+      "description": "为本工作区里的每一次对话设置 agent 人设，附加在基础 system prompt 之后。",
+      "loading": "加载中…",
+      "placeholder": "比如：你是一名 Python 数据分析专家，回答时优先给出可运行的代码示例。",
+      "charCount": "{count} / 8000 字符",
+      "reset": "重置",
+      "save": "保存",
+      "saving": "保存中…"
+    },
+    "skillsList": {
+      "title": "技能",
+      "subtitle": "浏览、启用、安装本工作区可用的 skills。",
+      "loading": "加载中…",
+      "noMatch": "没有匹配当前筛选的 skill",
+      "noMatchHint": "调整搜索 / 筛选条件，或通过「添加 skill」上传工作区私有 skill。",
+      "selectSkill": "选择一个 skill 查看详情",
+      "listAria": "技能列表"
+    },
+    "skillCard": {
+      "enabled": "已启用",
+      "disabled": "已禁用",
+      "private": "私有",
+      "available": "可安装"
+    },
+    "skillDetail": {
+      "stateEnabled": "已启用",
+      "stateDisabled": "已禁用",
+      "statePrivate": "工作区私有",
+      "stateAvailable": "可安装",
+      "sourcePreinstalled": "内置",
+      "sourceUploaded": "组织上传",
+      "overview": "概览",
+      "loadingContent": "加载内容中…",
+      "fetchFailed": "拉取失败：{status}",
+      "actionDisable": "在工作区禁用",
+      "actionDisabling": "禁用中…",
+      "actionEnable": "在工作区启用",
+      "actionEnabling": "启用中…",
+      "actionRemove": "从工作区移除",
+      "actionRemoving": "移除中…",
+      "actionInstall": "安装到工作区",
+      "actionInstalling": "安装中…"
+    },
+    "skillsToolbar": {
+      "searchPlaceholder": "按名称或描述搜索",
+      "searchAria": "搜索 skills",
+      "filterSourceAria": "按来源筛选",
+      "filterStateAria": "按状态筛选",
+      "sourceAll": "全部来源",
+      "sourcePreinstalled": "内置",
+      "sourceUploaded": "上传",
+      "stateAll": "全部",
+      "stateEnabled": "已启用",
+      "stateDisabled": "已禁用",
+      "stateAvailable": "可安装",
+      "addSkill": "添加 skill"
+    },
+    "uploadModal": {
+      "title": "上传 skill（工作区私有）",
+      "description": "将 SKILL.md 与其资源打包为 zip，仅会安装到当前工作区。",
+      "close": "关闭",
+      "selectFile": "选择 .zip 文件",
+      "filesizeHint": "总大小最多 50 MB",
+      "selectError": "请先选择一个 .zip 文件。",
+      "successPattern": "已安装 {skill} v{version} 为工作区私有。",
+      "cancel": "取消",
+      "upload": "上传",
+      "uploading": "上传中…"
+    }
+  },
+  "panel": {
+    "header": {
+      "copy": "复制",
+      "close": "关闭"
+    },
+    "skillView": {
+      "labelPrefix": "Skill：",
+      "loaded": "已加载",
+      "failed": "失败"
+    },
+    "attachment": {
+      "download": "下载",
+      "close": "关闭",
+      "loading": "加载中…",
+      "loadFailed": "加载失败：{message}",
+      "tooLarge": "文件过大无法内联预览（{size} MB），请下载查看。",
+      "empty": "空"
+    },
+    "fileRead": {
+      "untitled": "（无标题）",
+      "chars": "{count} 个字符",
+      "cells": "{count} 个 cell",
+      "code": "{count} 个 code",
+      "md": "{count} 个 md",
+      "rangePrefix": "范围：{range}",
+      "truncated": "已截断",
+      "noResult": "无结果。",
+      "unsupported": "不支持的格式",
+      "unchanged": "自上次读取以来文件未变化。",
+      "unknown": "未知的结果类型。",
+      "retryable": "（可重试）"
+    },
+    "search": {
+      "noResults": "没有结果",
+      "fallbackQuery": "搜索",
+      "resultsCount": "{count} 条结果"
+    },
+    "generic": {
+      "copy": "复制",
+      "request": "请求",
+      "response": "响应"
+    },
+    "artifactPanel": {
+      "download": "下载",
+      "close": "关闭",
+      "unknownType": "未知类型",
+      "justNow": "刚刚",
+      "minutesAgo": "{n} 分钟前",
+      "hoursAgo": "{n} 小时前",
+      "daysAgo": "{n} 天前"
+    },
+    "fallback": {
+      "unsupported": "此文件类型不支持预览，请下载后查看。",
+      "download": "下载"
+    },
+    "pdf": {
+      "tableOfContents": "目录",
+      "loadFailed": "加载 PDF 失败"
+    }
+  },
+  "common": {
+    "loading": "加载中…",
+    "open": "打开",
+    "close": "关闭",
+    "preview": "预览",
+    "download": "下载",
+    "cancel": "取消",
+    "delete": "删除"
+  },
+  "chatExtras": {
+    "imageClose": "关闭",
+    "citationTruncated": "已截断",
+    "uploadDropzone": "拖到此处上传",
+    "uploadFormats": "支持 PNG/JPG/PDF/CSV/DOCX/XLSX/Markdown",
+    "preview": "预览",
+    "download": "下载"
+  },
+  "workspaceCreate": {
+    "nameLabel": "新工作区名称",
+    "namePlaceholder": "例如：副业项目",
+    "creating": "创建中…",
+    "submit": "创建工作区"
+  },
+  "workspaceList": {
+    "empty": "你还没有工作区。",
+    "open": "打开",
+    "rolePrefix": "角色：{role}",
+    "unknownRole": "未知"
+  },
+  "workspacesPage": {
+    "title": "工作区"
+  },
+  "conversationPage": {
+    "notFoundTitle": "找不到该对话",
+    "notFoundBody": "它可能已被删除，或归属于其他工作区。",
+    "notFoundBack": "返回工作区",
+    "noAccessTitle": "无权限",
+    "noAccessBody": "你不是这个工作区的成员。",
+    "noAccessBack": "选择工作区"
+  },
+  "adminLayout": {
+    "loading": "加载中…",
+    "subNavAria": "管理后台二级导航",
+    "avatarMenuAria": "管理后台账号菜单",
+    "comingSoon": "本版本不可用",
+    "backlogRefPrefix": "实现归属：{ref}"
+  },
+  "adminSandbox": {
+    "title": "沙盒",
+    "subtitle": "指定默认镜像与资源上限。"
+  },
+  "adminWebTools": {
+    "title": "Web 工具",
+    "subtitle": "搜索服务提供商配置（除默认外至少支持 1-2 个可切换）。"
+  },
+  "adminExt": {
+    "loading": "加载扩展中…",
+    "unknownTitle": "未知扩展",
+    "unknownBodyPrefix": "找不到名为"
+  },
+  "adminModelsExtra": {
+    "deleteProviderConfirm": "确认删除 provider",
+    "deleteProviderCancel": "取消删除 provider",
+    "deleteModelConfirm": "确认删除",
+    "deleteModelCancel": "取消删除",
+    "openaiPlaceholder": "OpenAI",
+    "modelIdPlaceholder": "GPT-4o"
+  },
+  "adminSkillsExtra": {
+    "fetchFailed": "拉取失败：{status}",
+    "skillsFetchFailed": "工作区 skills 拉取失败：{status}",
+    "workspace": "工作区",
+    "confirmDisable": "确认禁用"
+  },
+  "shellLayout": {
+    "inputBarAttach": "添加附件",
+    "sidebar": "侧边栏",
+    "deleteConversation": "删除对话",
+    "workspaceSettings": "工作区设置",
+    "accountMenu": "账号菜单",
+    "signOut": "退出登录"
   }
 }

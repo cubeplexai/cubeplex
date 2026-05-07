@@ -1,5 +1,8 @@
+'use client'
+
 import type { MCPCredentialScope } from '@cubebox/core'
 import type { ComponentProps } from 'react'
+import { useTranslations } from 'next-intl'
 
 import { Badge } from '@/components/ui/badge'
 
@@ -10,13 +13,7 @@ const variants: Record<MCPCredentialScope, ComponentProps<typeof Badge>['variant
   none: 'ghost',
 }
 
-const labels: Record<MCPCredentialScope, string> = {
-  org: 'Org shared',
-  workspace: 'Workspace shared',
-  user: 'Per user',
-  none: 'Identity passthrough',
-}
-
 export function MCPScopeBadge({ scope }: { scope: MCPCredentialScope }) {
-  return <Badge variant={variants[scope]}>{labels[scope]}</Badge>
+  const t = useTranslations('mcp.scopeBadge')
+  return <Badge variant={variants[scope]}>{t(scope)}</Badge>
 }

@@ -27,6 +27,7 @@ export function InputBar({
   isLoading = false,
 }: InputBarProps): React.ReactElement {
   const t = useTranslations('input')
+  const tShell = useTranslations('shellLayout')
   const [content, setContent] = useState('')
   const [pendingFiles, setPendingFiles] = useState<File[]>([])
   const [isHandlingSubmit, setIsHandlingSubmit] = useState(false)
@@ -203,7 +204,7 @@ export function InputBar({
       >
         <button
           type="button"
-          aria-label="Attach files"
+          aria-label={tShell('inputBarAttach')}
           onClick={() => fileInputRef.current?.click()}
           disabled={!canAttach}
           className="grid size-7 shrink-0 cursor-pointer place-items-center rounded-lg text-muted-foreground hover:bg-muted disabled:cursor-not-allowed disabled:opacity-30"
