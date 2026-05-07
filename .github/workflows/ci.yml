@@ -75,10 +75,98 @@ jobs:
       - name: Frontend CI checks
         run: make frontend-check-ci
 
-  e2e:
-    name: E2E (backend pytest + frontend playwright)
+  backend-e2e:
+    name: Backend E2E (pytest)
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 20
+    env:
+      ENV_FOR_DYNACONF: test
+      CUBEBOX_E2E_LLM_BASE_URL: ${{ secrets.CUBEBOX_E2E_LLM_BASE_URL }}
+      CUBEBOX_E2E_LLM_API_KEY: ${{ secrets.CUBEBOX_E2E_LLM_API_KEY }}
+      CUBEBOX_E2E_LLM_MODEL_ID: ${{ secrets.CUBEBOX_E2E_LLM_MODEL_ID }}
+      CUBEBOX_SANDBOX__DOMAIN: ${{ secrets.CUBEBOX_SANDBOX__DOMAIN }}
+      CUBEBOX_SANDBOX__IMAGE: ${{ secrets.CUBEBOX_SANDBOX__IMAGE }}
+      CUBEBOX_SANDBOX__API_KEY: ${{ secrets.CUBEBOX_SANDBOX__API_KEY }}
+      # Test-only Fernet key for CI startup and vault E2E. Production must set its own key.
+      CUBEBOX_AUTH__VAULT_KEY: 1EwVRAtWccVJhdXX_2iepp7OlPfadfHpWNwVFpRzLBI=
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: testpass
+          POSTGRES_DB: cubebox_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd="pg_isready -U postgres"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+      redis:
+        image: redis:7-alpine
+        ports: ['6379:6379']
+        options: >-
+          --health-cmd="redis-cli ping"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+          enable-cache: true
+          # Ephemeral runner — skip post-run `uv cache prune --ci`
+          # which occasionally hangs on a concurrent lock and fails the job.
+          prune-cache: false
+
+      - name: Install backend
+        run: make backend-install
+
+      - name: Prepare RustFS data dirs
+        run: |
+          mkdir -p /tmp/rustfs/data /tmp/rustfs/logs
+          sudo chown -R 10001:10001 /tmp/rustfs
+
+      - name: Start RustFS
+        run: |
+          docker run -d --name rustfs \
+            -p 9000:9000 -p 9001:9001 \
+            -v /tmp/rustfs/data:/data \
+            -v /tmp/rustfs/logs:/logs \
+            rustfs/rustfs:1.0.0-alpha.97
+          # TCP/HTTP-level readiness; RustFS alpha lacks a unified /health endpoint.
+          # Accept any 2xx/3xx/4xx HTTP response as ready.
+          for i in {1..30}; do
+            if curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:9000/ | grep -qE '^(2|3|4)'; then
+              echo "RustFS ready"
+              break
+            fi
+            sleep 2
+          done
+
+      - name: Create RustFS test bucket
+        env:
+          AWS_ACCESS_KEY_ID: rustfsadmin
+          AWS_SECRET_ACCESS_KEY: rustfsadmin
+        run: |
+          aws --endpoint-url http://127.0.0.1:9000 \
+            s3 mb s3://cubebox-test --region us-east-1
+
+      - name: Alembic migrate
+        run: make backend-migrate
+
+      - name: Pytest e2e (in-process TestClient)
+        run: make backend-test-e2e
+
+      - name: Cleanup leftover test sandboxes
+        if: always()
+        run: make backend-cleanup-sandboxes
+
+  frontend-e2e:
+    name: Frontend E2E (playwright)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
     env:
       ENV_FOR_DYNACONF: test
       CUBEBOX_E2E_LLM_BASE_URL: ${{ secrets.CUBEBOX_E2E_LLM_BASE_URL }}
@@ -169,21 +257,8 @@ jobs:
           aws --endpoint-url http://127.0.0.1:9000 \
             s3 mb s3://cubebox-test --region us-east-1
 
-      - name: Alembic migrate (pre-pytest)
+      - name: Alembic migrate
         run: make backend-migrate
-
-      - name: Pytest e2e (in-process TestClient)
-        run: make backend-test-e2e
-
-      - name: Reset DB state for playwright
-        # pytest may leave data behind; drop + recreate + migrate for a clean playwright start.
-        run: |
-          PGPASSWORD=testpass psql -h 127.0.0.1 -U postgres -d postgres \
-            -v ON_ERROR_STOP=1 \
-            -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = 'cubebox_test';" \
-            -c "DROP DATABASE IF EXISTS cubebox_test;" \
-            -c "CREATE DATABASE cubebox_test;"
-          make backend-migrate
 
       - name: Start backend in background
         run: |
