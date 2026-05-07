@@ -49,7 +49,7 @@ class OrganizationMembershipRepository:
                 OrganizationMembership.org_id == org_id,  # type: ignore[arg-type]
             )
             .values(role=role.value)
-            .execution_options(synchronize_session="fetch")
+            .execution_options(synchronize_session=False)
         )
         result = cast(CursorResult[tuple[()]], await self.session.execute(stmt))
         await self.session.commit()
