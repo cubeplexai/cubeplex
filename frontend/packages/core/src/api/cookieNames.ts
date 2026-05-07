@@ -4,17 +4,22 @@
  * `NEXT_PUBLIC_AUTH_COOKIE_NAME` / `NEXT_PUBLIC_CSRF_COOKIE_NAME` so each
  * worktree's browser cookies don't collide on `localhost`.
  *
- * Resolved at module-eval time. Next.js inlines `process.env.NEXT_PUBLIC_*` at
- * build time for client bundles; for server code (route handlers, middleware,
- * server components) it reads the live env. In test runners the env is
- * unset, so the defaults apply.
+ * Must use literal `process.env.NEXT_PUBLIC_*` access — Next.js / webpack's
+ * DefinePlugin only inlines values for static property access, not bracket
+ * notation with a variable key. With dynamic access the client bundle reads
+ * `undefined` and silently falls back to the defaults, so the worktree's
+ * suffixed cookies never get used and CSRF check fails.
  */
-function readEnv(name: string): string | undefined {
-  if (typeof process === 'undefined' || !process.env) return undefined
-  const v = process.env[name]
-  return v && v.length > 0 ? v : undefined
+function pick(value: string | undefined, fallback: string): string {
+  return value && value.length > 0 ? value : fallback
 }
 
-export const AUTH_COOKIE_NAME: string = readEnv('NEXT_PUBLIC_AUTH_COOKIE_NAME') ?? 'cubebox_auth'
+export const AUTH_COOKIE_NAME: string =
+  typeof process !== 'undefined' && process.env
+    ? pick(process.env.NEXT_PUBLIC_AUTH_COOKIE_NAME, 'cubebox_auth')
+    : 'cubebox_auth'
 
-export const CSRF_COOKIE_NAME: string = readEnv('NEXT_PUBLIC_CSRF_COOKIE_NAME') ?? 'cubebox_csrf'
+export const CSRF_COOKIE_NAME: string =
+  typeof process !== 'undefined' && process.env
+    ? pick(process.env.NEXT_PUBLIC_CSRF_COOKIE_NAME, 'cubebox_csrf')
+    : 'cubebox_csrf'
