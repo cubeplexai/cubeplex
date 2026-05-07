@@ -24,7 +24,14 @@ export function RegisterForm() {
       // Register endpoint does NOT set an auth cookie — auto log-in here.
       await loginUser(client, email, password)
       await useAuthStore.getState().loadMe(client)
-      router.push(`/w/${result.default_workspace_id}`)
+      // M9: in single_tenant mode the first registrant is a pending owner with
+      // no workspace yet — backend returns default_workspace_id="". Bounce them
+      // to /setup; the (app) layout would 404 on /w/ otherwise.
+      if (!result.default_workspace_id) {
+        router.push('/setup')
+      } else {
+        router.push(`/w/${result.default_workspace_id}`)
+      }
     } catch (err) {
       setError((err as Error).message)
     } finally {
