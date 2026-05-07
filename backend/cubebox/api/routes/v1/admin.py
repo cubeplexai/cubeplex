@@ -15,8 +15,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from cubebox.api.routes.v1.cost import router as cost_router
 from cubebox.auth.dependencies import current_active_user, resolve_current_org_id
 from cubebox.db import get_session
-from cubebox.models import Role, User
-from cubebox.repositories import MembershipRepository, OrganizationRepository
+from cubebox.models import User
+from cubebox.repositories import OrganizationMembershipRepository, OrganizationRepository
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -33,8 +33,8 @@ async def get_admin_me(
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> AdminMeResponse:
     org_id = await resolve_current_org_id(user, session)
-    is_admin = await MembershipRepository(session).user_has_role_in_org(
-        user_id=user.id, org_id=org_id, role=Role.ADMIN
+    is_admin = await OrganizationMembershipRepository(session).is_admin(
+        user_id=user.id, org_id=org_id
     )
     org = await OrganizationRepository(session).get(org_id)
     return AdminMeResponse(

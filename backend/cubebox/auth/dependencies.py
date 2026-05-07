@@ -135,16 +135,12 @@ async def require_org_admin(
     user: Annotated[User, Depends(current_active_user)],
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> User:
-    """v1: user is "org admin" iff they hold ADMIN in any workspace of their org.
+    """User has org-level admin or owner role in their current org."""
+    from cubebox.repositories import OrganizationMembershipRepository
 
-    Admin routes (`/admin/*`) are not workspace-scoped — this dependency
-    resolves the user's current org from their membership graph directly.
-    When an org-level role concept lands, this implementation is replaced;
-    callers (admin routes, /admin/me endpoint) are unchanged.
-    """
     org_id = await resolve_current_org_id(user, session)
-    is_admin = await MembershipRepository(session).user_has_role_in_org(
-        user_id=user.id, org_id=org_id, role=Role.ADMIN
+    is_admin = await OrganizationMembershipRepository(session).is_admin(
+        user_id=user.id, org_id=org_id
     )
     if not is_admin:
         raise HTTPException(
