@@ -118,6 +118,15 @@ pnpm --filter @cubebox/core type-check
 
 **Known one-user-one-org assumption:** `workspaceStore.create` reads `workspaces[0].org_id`. When multi-org-per-user ships (P2), this must take an explicit org id.
 
+## Deployment Mode (M9)
+
+The backend exposes `GET /api/v1/system/info` (public, pre-login) returning `{deployment_mode, version, needs_org_setup}`. The `useDeploymentMode()` hook in `@cubebox/core` reads it.
+
+- `deployment_mode = 'single_tenant'` (OSS default): one shared org for the whole deployment. First registrant becomes a pending owner; an extra `/setup` step (route group `(setup)/setup`) collects org name + slug. Subsequent users join the singleton org as members.
+- `deployment_mode = 'multi_tenant'` (Cloud SaaS): per-user org auto-created on register, current behavior.
+
+`MeResult` carries `needs_org_setup?: boolean`. The `(app)/layout.tsx` redirects pending owners (and any user with `needs_org_setup === true`) to `/setup`. Any UI surface that lets a user create another org or switch between orgs **must** be hidden when `mode === 'single_tenant'`. M9 itself adds no such surfaces; future work landing org chrome must respect this contract.
+
 ## Common Gotchas
 
 - **pnpm workspace**: Always use `pnpm` not `npm`. Use `pnpm -w` for root, `pnpm --filter <pkg>` for single package.

@@ -70,22 +70,14 @@ async def test_grant_admin_promotes_member(memory_client, session_factory):
 
 async def test_grant_admin_refuses_to_revoke_owner(memory_client, session_factory):
     """The default test user is owner of their fixture org; revoke-admin must refuse."""
-    from tests.e2e.conftest import DEFAULT_TEST_EMAIL
+    from tests.e2e.conftest import DEFAULT_ORG_ID, DEFAULT_TEST_EMAIL
 
+    # The default test user is OWNER of DEFAULT_ORG_ID (granted in conftest's
+    # _ensure_default_user_and_membership). They also own a personal auto-bootstrapped
+    # org via on_after_register, so we look up DEFAULT_ORG_ID's slug explicitly.
     async with session_factory() as session:
-        user = (
-            await session.execute(select(User).where(User.email == DEFAULT_TEST_EMAIL))
-        ).scalar_one()
-        om = (
-            await session.execute(
-                select(OrganizationMembership).where(
-                    OrganizationMembership.user_id == user.id,
-                    OrganizationMembership.role == OrgRole.OWNER.value,
-                )
-            )
-        ).scalar_one()
         org = (
-            await session.execute(select(Organization).where(Organization.id == om.org_id))
+            await session.execute(select(Organization).where(Organization.id == DEFAULT_ORG_ID))
         ).scalar_one()
         slug = org.slug
 

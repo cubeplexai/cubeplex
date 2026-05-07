@@ -227,6 +227,19 @@ async def _ensure_default_user_and_membership() -> None:
             role = await mem_repo.get_role(user_id=user.id, workspace_id=DEFAULT_WS_ID)
             if role is None:
                 await mem_repo.grant(user_id=user.id, workspace_id=DEFAULT_WS_ID, role=Role.ADMIN)
+
+            # Ensure org-level OWNER membership for the default user in the fixed
+            # default org. M9 admin gates read OrganizationMembership directly;
+            # the on_after_register hook only grants OWNER on the user's
+            # auto-created personal org, so DEFAULT_ORG_ID needs an explicit grant
+            # for routes resolving to it (e.g. /admin/cost via DEFAULT_WS_ID).
+            from cubebox.models import OrgRole
+            from cubebox.repositories import OrganizationMembershipRepository
+
+            om_repo = OrganizationMembershipRepository(session)
+            om_role = await om_repo.get_role(user_id=user.id, org_id=DEFAULT_ORG_ID)
+            if om_role is None:
+                await om_repo.grant(user_id=user.id, org_id=DEFAULT_ORG_ID, role=OrgRole.OWNER)
     finally:
         await test_engine.dispose()
 

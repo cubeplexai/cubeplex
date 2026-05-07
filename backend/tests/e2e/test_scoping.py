@@ -5,7 +5,8 @@ import secrets
 import pytest
 
 from cubebox.api.middleware.rate_limit import limiter
-from tests.e2e.conftest import _auth_cookie_name, _csrf_cookie_name
+from tests.e2e.conftest import _auth_cookie_name
+from tests.e2e.helpers import csrf_cookie_name as _csrf_cookie_name
 
 pytestmark = pytest.mark.e2e
 

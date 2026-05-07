@@ -125,11 +125,22 @@ Identity model: `Organization` → `Workspace` → `Membership` → `User`. One 
 - `POST /api/v1/workspaces/{ws}/invites` (admin only), `POST /api/v1/workspaces/invites/accept`
 - `/api/v1/ws/{workspace_id}/conversations/...` and `/api/v1/ws/{workspace_id}/conversations/{cid}/artifacts/...` — all scoped business endpoints
 
-**Register bootstrap:** `UserManager.on_after_register` auto-creates a personal Organization (`"<email-local-part>'s Org"`), a Workspace (`"Personal"`), and an Admin Membership for the new user in the same session. If any of these fails, the User row is best-effort deleted before the exception propagates so registration appears atomic to the client. The register response returns `{id, email, default_workspace_id}`.
+**Register bootstrap:** `UserManager.on_after_register` is mode-aware (M9):
+- `deployment.mode = multi_tenant` (cloud SaaS): per-user org auto-created (`"<local>'s Org"`) + Personal workspace + workspace-admin membership + `OrganizationMembership(role=owner)`.
+- `deployment.mode = single_tenant` (OSS default): first user is a pending owner (only the User row); they complete `POST /api/v1/system/setup` to name the org and pick a slug. Subsequent users attach to the singleton org as `OrgRole.MEMBER` and get their own Personal workspace + workspace-admin membership. A PostgreSQL advisory lock plus a `user_count > 1 AND org_count == 0` check serialize concurrent first registrations and return 409 `setup_in_progress` for races.
 
-**Known P1 gaps (flagged `TODO(P2-auth)`):**
-- `create_workspace` accepts a client-supplied `org_id` with no org-membership check (P1 has no org-level membership concept yet).
-- `request_context` returns 404 before the role check, so an unauthorized workspace id returns 404 rather than 403. Intentional (avoids enumeration of workspace ids) but worth knowing.
+If any bootstrap step fails the User row is best-effort deleted before the exception propagates so registration appears atomic to the client. Register response returns `{id, email, default_workspace_id}` (empty string in single-tenant pending-owner case).
+
+**Org-level role model (M9):** `OrganizationMembership` (table `organization_memberships`, composite PK `(user_id, org_id)`, `role` from `OrgRole = {OWNER, ADMIN, MEMBER}`). DB-level partial unique index `uq_org_membership_owner ON (org_id) WHERE role = 'owner'` enforces one owner per org. Admin gates (`require_org_admin`, `/admin/me`, cost routes) read this row — distinct from workspace-level `Membership.role`.
+
+**Operator CLI (M9):**
+- `cubebox admin grant-admin <email> [--org-slug X]` promotes a user to org admin. `--org-slug` is required when more than one org exists.
+- `cubebox admin revoke-admin <email> [--org-slug X]` demotes admin → member; refuses to touch owner.
+
+**System info / setup endpoints (M9):**
+- `GET /api/v1/system/info` (public, pre-login) → `{deployment_mode, version, needs_org_setup}` for frontend mode discovery.
+- `POST /api/v1/system/setup` (auth, single_tenant only) accepts `{org_name, slug}` with slug regex `^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$`, length 3..32. Returns 404 in multi_tenant, 409 if org already exists or another setup in flight.
+- Startup check: in single_tenant, the lifespan refuses to boot when DB has more than 1 org.
 
 ## Environment Variables
 
