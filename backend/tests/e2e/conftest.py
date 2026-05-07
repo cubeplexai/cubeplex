@@ -320,6 +320,8 @@ async def _ensure_test_user_membership(
     mem_repo = MembershipRepository(session)
 
     from cubebox.auth.users import _slugify_org_name
+    from cubebox.models import OrgRole
+    from cubebox.repositories import OrganizationMembershipRepository
 
     org_name = f"Org {email}"
     org = await org_repo.create(name=org_name, slug=_slugify_org_name(org_name))
@@ -330,6 +332,9 @@ async def _ensure_test_user_membership(
     manager = UserManager(user_db)
     user = await manager.create(BaseUserCreate(email=email, password=password), safe=False)
     await mem_repo.grant(user_id=user.id, workspace_id=ws.id, role=role)
+    await OrganizationMembershipRepository(session).grant(
+        user_id=user.id, org_id=org.id, role=OrgRole.OWNER
+    )
     return user, ws.id, password
 
 
