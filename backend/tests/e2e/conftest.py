@@ -34,11 +34,7 @@ from cubebox.repositories import (
     WorkspaceRepository,
 )
 from cubebox.sandbox.local import LocalSandbox
-
-
-def _csrf_cookie_name() -> str:
-    """Resolved CSRF cookie name; honours per-worktree env override."""
-    return str(_cubebox_config.get("auth.csrf_cookie_name", "cubebox_csrf"))
+from tests.e2e.helpers import csrf_cookie_name
 
 
 def _auth_cookie_name() -> str:
@@ -238,14 +234,14 @@ async def _ensure_default_user_and_membership() -> None:
 async def _login_and_attach(client: httpx.AsyncClient, email: str, password: str) -> None:
     """Log in and set the CSRF header on the client."""
     await client.get("/api/v1/auth/me")  # obtain CSRF cookie (401 but sets cookie)
-    csrf = client.cookies.get(_csrf_cookie_name()) or ""
+    csrf = client.cookies.get(csrf_cookie_name()) or ""
     r = await client.post(
         "/api/v1/auth/login",
         data={"username": email, "password": password},
         headers={"X-CSRF-Token": csrf},
     )
     assert r.status_code in (200, 204), f"login failed: {r.status_code} {r.text}"
-    client.headers["X-CSRF-Token"] = client.cookies.get(_csrf_cookie_name()) or csrf
+    client.headers["X-CSRF-Token"] = client.cookies.get(csrf_cookie_name()) or csrf
 
 
 @pytest_asyncio.fixture
@@ -261,14 +257,14 @@ async def client() -> AsyncIterator[TestClient]:
     with TestClient(app) as sync_client:
         app.state.deployment_mode = "multi_tenant"
         sync_client.get("/api/v1/auth/me")  # obtain CSRF cookie
-        csrf = sync_client.cookies.get(_csrf_cookie_name()) or ""
+        csrf = sync_client.cookies.get(csrf_cookie_name()) or ""
         r = sync_client.post(
             "/api/v1/auth/login",
             data={"username": DEFAULT_TEST_EMAIL, "password": DEFAULT_TEST_PASSWORD},
             headers={"X-CSRF-Token": csrf},
         )
         assert r.status_code in (200, 204), f"login failed: {r.status_code} {r.text}"
-        sync_client.headers["X-CSRF-Token"] = sync_client.cookies.get(_csrf_cookie_name()) or csrf
+        sync_client.headers["X-CSRF-Token"] = sync_client.cookies.get(csrf_cookie_name()) or csrf
         yield sync_client
 
 

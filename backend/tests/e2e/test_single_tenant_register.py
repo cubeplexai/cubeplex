@@ -7,6 +7,7 @@ import pytest
 from sqlalchemy import select
 
 from cubebox.models import Membership, Organization, OrganizationMembership, User
+from tests.e2e.helpers import csrf_cookie_name
 
 pytestmark = pytest.mark.e2e
 
@@ -15,14 +16,14 @@ async def _login(client: httpx.AsyncClient, email: str, password: str) -> None:
     """Log in on a fresh client; sets auth + CSRF cookies."""
     # GET /me to seed the CSRF cookie (returns 401 but sets cookie)
     await client.get("/api/v1/auth/me")
-    csrf = client.cookies.get("cubebox_csrf") or ""
+    csrf = client.cookies.get(csrf_cookie_name()) or ""
     r = await client.post(
         "/api/v1/auth/login",
         data={"username": email, "password": password},
         headers={"X-CSRF-Token": csrf},
     )
     assert r.status_code in (200, 204), f"login failed: {r.status_code} {r.text}"
-    client.headers["X-CSRF-Token"] = client.cookies.get("cubebox_csrf") or csrf
+    client.headers["X-CSRF-Token"] = client.cookies.get(csrf_cookie_name()) or csrf
 
 
 async def test_first_register_pending_owner(

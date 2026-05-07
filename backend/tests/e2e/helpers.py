@@ -44,3 +44,14 @@ def assert_event_contains(event: AgentEvent, expected_keys: list[str]) -> None:
         assert key in event.data, (
             f"Expected key '{key}' in event data, got keys: {list(event.data.keys())}"
         )
+
+
+def csrf_cookie_name() -> str:
+    """Return the CSRF cookie name from config.
+
+    Handles per-worktree env overrides, so works across both CI (no suffix)
+    and worktree environments (slot-specific suffix).
+    """
+    from cubebox.config import config as _cubebox_config
+
+    return str(_cubebox_config.get("auth.csrf_cookie_name", "cubebox_csrf"))
