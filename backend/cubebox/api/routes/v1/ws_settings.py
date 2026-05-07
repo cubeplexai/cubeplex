@@ -92,36 +92,33 @@ async def list_workspace_skills(
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> WorkspaceSkillsOut:
     install_repo = OrgSkillInstallRepository(session)
-    binding_repo = WorkspaceSkillBindingRepository(
-        session, org_id=ctx.org_id, workspace_id=ctx.workspace_id
-    )
 
-    org_installs = await install_repo.list_for_org(ctx.org_id)
-    ws_private = await install_repo.list_for_workspace_private(ctx.org_id, ctx.workspace_id)
-
-    org_skills = []
-    for install in org_installs:
-        binding = await binding_repo.get_by_install(install.id)
-        enabled = binding.enabled if binding is not None else install.auto_bind
-        org_skills.append(
-            SkillInstallOut(
-                install_id=install.id,
-                skill_id=install.skill_id,
-                installed_version=install.installed_version,
-                enabled=enabled,
-                scope="org",
-            )
+    org_rows = await install_repo.list_org_wide_with_bindings(ctx.org_id, ctx.workspace_id)
+    org_skills = [
+        SkillInstallOut(
+            install_id=install.id,
+            skill_id=install.skill_id,
+            name=skill.name,
+            description=skill.description,
+            installed_version=install.installed_version,
+            enabled=binding.enabled if binding is not None else install.auto_bind,
+            scope="org",
         )
+        for install, binding, skill in org_rows
+    ]
 
+    ws_rows = await install_repo.list_workspace_private_with_skill(ctx.org_id, ctx.workspace_id)
     workspace_skills = [
         SkillInstallOut(
-            install_id=i.id,
-            skill_id=i.skill_id,
-            installed_version=i.installed_version,
+            install_id=install.id,
+            skill_id=install.skill_id,
+            name=skill.name,
+            description=skill.description,
+            installed_version=install.installed_version,
             enabled=True,
             scope="workspace",
         )
-        for i in ws_private
+        for install, skill in ws_rows
     ]
 
     return WorkspaceSkillsOut(org_skills=org_skills, workspace_skills=workspace_skills)

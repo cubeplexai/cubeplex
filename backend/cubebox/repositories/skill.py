@@ -261,6 +261,46 @@ class OrgSkillInstallRepository:
         )
         return list(result.scalars().all())
 
+    async def list_org_wide_with_bindings(
+        self, org_id: str, workspace_id: str
+    ) -> list[tuple[OrgSkillInstall, WorkspaceSkillBinding | None, Skill]]:
+        """Return org-wide installs joined with this workspace's binding (if any) and Skill row.
+
+        Single-query alternative to looping `get_by_install` per row — avoids N+1.
+        """
+        stmt = (
+            select(OrgSkillInstall, WorkspaceSkillBinding, Skill)
+            .join(Skill, Skill.id == OrgSkillInstall.skill_id)  # type: ignore[arg-type]
+            .outerjoin(
+                WorkspaceSkillBinding,
+                (WorkspaceSkillBinding.org_skill_install_id == OrgSkillInstall.id)  # type: ignore[arg-type]
+                & (WorkspaceSkillBinding.workspace_id == workspace_id),
+            )
+            .where(
+                OrgSkillInstall.org_id == org_id,  # type: ignore[arg-type]
+                OrgSkillInstall.workspace_id.is_(None),  # type: ignore[union-attr]
+            )
+            .order_by(Skill.name)
+        )
+        rows = (await self.session.execute(stmt)).all()
+        return [(install, binding, skill) for install, binding, skill in rows]
+
+    async def list_workspace_private_with_skill(
+        self, org_id: str, workspace_id: str
+    ) -> list[tuple[OrgSkillInstall, Skill]]:
+        """Workspace-private installs joined with their Skill row."""
+        stmt = (
+            select(OrgSkillInstall, Skill)
+            .join(Skill, Skill.id == OrgSkillInstall.skill_id)  # type: ignore[arg-type]
+            .where(
+                OrgSkillInstall.org_id == org_id,  # type: ignore[arg-type]
+                OrgSkillInstall.workspace_id == workspace_id,  # type: ignore[arg-type]
+            )
+            .order_by(Skill.name)
+        )
+        rows = (await self.session.execute(stmt)).all()
+        return [(install, skill) for install, skill in rows]
+
     async def get_by_id(self, install_id: str) -> OrgSkillInstall | None:
         result = await self.session.execute(
             select(OrgSkillInstall).where(OrgSkillInstall.id == install_id)  # type: ignore[arg-type]

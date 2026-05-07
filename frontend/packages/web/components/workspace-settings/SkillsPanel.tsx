@@ -54,8 +54,10 @@ export function SkillsPanel({ wsId }: SkillsPanelProps) {
         )}
       >
         <div className="flex-1 min-w-0">
-          <p className="text-[12px] font-medium truncate">{skill.skill_id}</p>
-          <p className="text-[10px] text-muted-foreground/60">{skill.installed_version}</p>
+          <p className="text-[12px] font-medium truncate">{skill.name || skill.skill_id}</p>
+          <p className="text-[10px] text-muted-foreground/60 truncate">
+            {skill.description || skill.installed_version}
+          </p>
         </div>
         <Switch
           checked={skill.enabled}
@@ -165,7 +167,10 @@ export function SkillsPanel({ wsId }: SkillsPanelProps) {
       <div className="flex-1 overflow-y-auto p-8">
         {selected ? (
           <>
-            <h2 className="text-base font-semibold mb-1">{selected.skill_id}</h2>
+            <h2 className="text-base font-semibold mb-1">{selected.name || selected.skill_id}</h2>
+            {selected.description && (
+              <p className="text-sm text-muted-foreground mb-4">{selected.description}</p>
+            )}
             <div className="flex gap-2 mb-6">
               <Badge variant="outline">{selected.installed_version}</Badge>
               <Badge variant={selected.scope === 'workspace' ? 'secondary' : 'outline'}>
@@ -176,6 +181,10 @@ export function SkillsPanel({ wsId }: SkillsPanelProps) {
               </Badge>
             </div>
             <div className="space-y-3 text-sm text-muted-foreground">
+              <div className="flex justify-between py-2 border-b border-border">
+                <span>Skill ID</span>
+                <span className="font-mono text-xs">{selected.skill_id}</span>
+              </div>
               <div className="flex justify-between py-2 border-b border-border">
                 <span>Install ID</span>
                 <span className="font-mono text-xs">{selected.install_id}</span>

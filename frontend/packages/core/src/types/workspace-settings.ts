@@ -5,6 +5,8 @@ export interface AgentConfig {
 export interface SkillInstall {
   install_id: string
   skill_id: string
+  name: string
+  description: string
   installed_version: string
   enabled: boolean
   scope: 'org' | 'workspace'
