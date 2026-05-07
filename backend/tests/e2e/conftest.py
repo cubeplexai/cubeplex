@@ -16,6 +16,7 @@ from fastapi_users.schemas import BaseUserCreate
 from langgraph.checkpoint.memory import MemorySaver
 from PIL import Image
 from redis.asyncio import Redis
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
@@ -258,6 +259,7 @@ async def client() -> AsyncIterator[TestClient]:
     # TestClient as a context manager runs the FastAPI lifespan — required
     # since auth routers are now mounted at lifespan startup (not in create_app).
     with TestClient(app) as sync_client:
+        app.state.deployment_mode = "multi_tenant"
         sync_client.get("/api/v1/auth/me")  # obtain CSRF cookie
         csrf = sync_client.cookies.get(_csrf_cookie_name()) or ""
         r = sync_client.post(
@@ -279,6 +281,7 @@ async def async_client() -> AsyncIterator[httpx.AsyncClient]:
     await _ensure_default_user_and_membership()
     app = _make_test_app()
     async with _lifespan_context(app):
+        app.state.deployment_mode = "multi_tenant"
         transport = httpx.ASGITransport(app=app)
         async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
             await _login_and_attach(c, DEFAULT_TEST_EMAIL, DEFAULT_TEST_PASSWORD)
@@ -292,6 +295,8 @@ async def memory_client() -> AsyncIterator[httpx.AsyncClient]:
     await _ensure_default_user_and_membership()
     app = _make_memory_test_app()
     async with _lifespan_context(app):
+        # Force multi_tenant mode for fixtures that rely on per-user org bootstrap.
+        app.state.deployment_mode = "multi_tenant"
         transport = httpx.ASGITransport(app=app)
         async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
             await _login_and_attach(c, DEFAULT_TEST_EMAIL, DEFAULT_TEST_PASSWORD)
@@ -305,6 +310,8 @@ async def unauthenticated_memory_client() -> AsyncIterator[httpx.AsyncClient]:
     await _ensure_default_user_and_membership()
     app = _make_memory_test_app()
     async with _lifespan_context(app):
+        # Force multi_tenant mode for fixtures that rely on per-user org bootstrap.
+        app.state.deployment_mode = "multi_tenant"
         transport = httpx.ASGITransport(app=app)
         async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
             yield c
@@ -370,6 +377,7 @@ async def authenticated_client() -> AsyncIterator[tuple[httpx.AsyncClient, str]]
     """
     app, email, password, workspace_id = await _make_isolated_user(Role.ADMIN)
     async with _lifespan_context(app):
+        app.state.deployment_mode = "multi_tenant"
         transport = httpx.ASGITransport(app=app)
         async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
             await _login_and_attach(c, email, password)
@@ -389,6 +397,7 @@ async def member_client() -> AsyncIterator[tuple[httpx.AsyncClient, str]]:
     """Fresh client logged in as a brand-new member (not admin) of a brand-new workspace."""
     app, email, password, workspace_id = await _make_isolated_user(Role.MEMBER)
     async with _lifespan_context(app):
+        app.state.deployment_mode = "multi_tenant"
         transport = httpx.ASGITransport(app=app)
         async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
             await _login_and_attach(c, email, password)
@@ -400,6 +409,7 @@ async def member_client_org_a() -> AsyncIterator[tuple[httpx.AsyncClient, str]]:
     """Fresh org A with a member user."""
     app, email, password, workspace_id = await _make_isolated_user(Role.MEMBER)
     async with _lifespan_context(app):
+        app.state.deployment_mode = "multi_tenant"
         transport = httpx.ASGITransport(app=app)
         async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
             await _login_and_attach(c, email, password)
@@ -411,6 +421,7 @@ async def member_client_org_b() -> AsyncIterator[tuple[httpx.AsyncClient, str]]:
     """Fresh org B with a member user — distinct from org A."""
     app, email, password, workspace_id = await _make_isolated_user(Role.MEMBER)
     async with _lifespan_context(app):
+        app.state.deployment_mode = "multi_tenant"
         transport = httpx.ASGITransport(app=app)
         async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
             await _login_and_attach(c, email, password)
@@ -505,6 +516,7 @@ async def member_client_with_artifact() -> AsyncIterator[tuple[httpx.AsyncClient
     app, email, password, workspace_id = await _make_isolated_user(Role.MEMBER)
     artifact_id, _ = await _seed_skill_artifact(workspace_id, skill_md=_VALID_SKILL_MD)
     async with _lifespan_context(app):
+        app.state.deployment_mode = "multi_tenant"
         transport = httpx.ASGITransport(app=app)
         async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
             await _login_and_attach(c, email, password)
@@ -520,6 +532,7 @@ async def member_client_with_bad_artifact() -> AsyncIterator[tuple[httpx.AsyncCl
     app, email, password, workspace_id = await _make_isolated_user(Role.MEMBER)
     artifact_id, _ = await _seed_skill_artifact(workspace_id, skill_md=_INVALID_SKILL_MD)
     async with _lifespan_context(app):
+        app.state.deployment_mode = "multi_tenant"
         transport = httpx.ASGITransport(app=app)
         async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
             await _login_and_attach(c, email, password)
@@ -632,3 +645,29 @@ async def session_factory() -> AsyncIterator[async_sessionmaker[AsyncSession]]:
         yield maker
     finally:
         await test_engine.dispose()
+
+
+@pytest_asyncio.fixture
+async def fresh_db_unauth_client_single_tenant() -> AsyncIterator[httpx.AsyncClient]:
+    """Fresh test DB; deployment.mode=single_tenant; no pre-seeded user."""
+    test_engine = create_async_engine(_build_database_url(), poolclass=NullPool)
+    test_session_maker = async_sessionmaker(
+        test_engine, class_=AsyncSession, expire_on_commit=False
+    )
+    async with test_session_maker() as session:
+        await session.execute(text("TRUNCATE TABLE organization_memberships CASCADE"))
+        await session.execute(text("TRUNCATE TABLE memberships CASCADE"))
+        await session.execute(text("TRUNCATE TABLE workspaces CASCADE"))
+        await session.execute(text("TRUNCATE TABLE organizations CASCADE"))
+        await session.execute(text("TRUNCATE TABLE users CASCADE"))
+        await session.commit()
+    await test_engine.dispose()
+
+    app = _make_memory_test_app()
+    async with _lifespan_context(app):
+        # Override deployment_mode after lifespan startup so the lifespan's
+        # config-based assignment doesn't overwrite our test value.
+        app.state.deployment_mode = "single_tenant"
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
+            yield c
