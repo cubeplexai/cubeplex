@@ -4,7 +4,7 @@
   "private": true,
   "packageManager": "pnpm@10.23.0",
   "scripts": {
-    "dev": "pnpm -r run dev",
+    "dev": "node scripts/with-worktree-env.mjs pnpm -r run dev",
     "build": "pnpm -r run build",
     "type-check": "pnpm -r run type-check",
     "lint": "pnpm -r run lint",
