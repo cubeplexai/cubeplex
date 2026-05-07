@@ -5,6 +5,7 @@ from types import EllipsisType
 from typing import Any, cast
 
 from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cubebox.models import (
@@ -101,6 +102,28 @@ class MCPServerRepository:
             MCPServer.credential_id == credential_id,  # type: ignore[arg-type]
         )
         return list((await self.session.execute(stmt)).scalars().all())
+
+    async def list_org_wide_with_workspace_binding(
+        self, workspace_id: str
+    ) -> list[tuple[MCPServer, WorkspaceMCPBinding | None]]:
+        """Org-wide servers (owner_workspace_id IS NULL) joined with this workspace's binding.
+
+        Single outerjoin replaces a per-row binding lookup.
+        """
+        stmt = (
+            select(MCPServer, WorkspaceMCPBinding)
+            .outerjoin(
+                WorkspaceMCPBinding,
+                (WorkspaceMCPBinding.mcp_server_id == MCPServer.id)  # type: ignore[arg-type]
+                & (WorkspaceMCPBinding.workspace_id == workspace_id),
+            )
+            .where(
+                MCPServer.org_id == self.org_id,  # type: ignore[arg-type]
+                MCPServer.owner_workspace_id.is_(None),  # type: ignore[union-attr]
+            )
+        )
+        rows = (await self.session.execute(stmt)).all()
+        return [(srv, binding) for srv, binding in rows]
 
 
 class WorkspaceMCPCredentialRepository:
@@ -241,6 +264,40 @@ class WorkspaceMCPBindingRepository:
             return
         await self.session.delete(row)
         await self.session.commit()
+
+    async def upsert_binding(
+        self,
+        *,
+        workspace_id: str,
+        mcp_server_id: str,
+        enabled: bool,
+        created_by_user_id: str,
+    ) -> WorkspaceMCPBinding:
+        """Atomically insert-or-update a single workspace binding.
+
+        Uses PostgreSQL INSERT ... ON CONFLICT to avoid the read-then-write
+        race window between two concurrent toggles on the same binding.
+        """
+        stmt = (
+            pg_insert(WorkspaceMCPBinding)
+            .values(
+                org_id=self.org_id,
+                workspace_id=workspace_id,
+                mcp_server_id=mcp_server_id,
+                enabled=enabled,
+                created_by_user_id=created_by_user_id,
+            )
+            .on_conflict_do_update(
+                index_elements=["workspace_id", "mcp_server_id"],
+                set_={"enabled": enabled, "updated_at": datetime.now(UTC)},
+            )
+            .returning(WorkspaceMCPBinding)
+        )
+        result = await self.session.execute(stmt)
+        await self.session.commit()
+        row = result.scalar_one()
+        await self.session.refresh(row)
+        return row
 
     async def upsert_bulk(
         self,

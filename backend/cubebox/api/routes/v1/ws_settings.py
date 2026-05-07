@@ -24,7 +24,7 @@ from cubebox.auth.context import RequestContext
 from cubebox.auth.dependencies import require_member
 from cubebox.db import get_session
 from cubebox.models.agent_config import AgentConfig
-from cubebox.models.mcp import MCPServer, WorkspaceMCPBinding
+from cubebox.repositories.mcp import MCPServerRepository, WorkspaceMCPBindingRepository
 from cubebox.repositories.skill import (
     OrgSkillInstallRepository,
     SkillVersionRepository,
@@ -199,20 +199,9 @@ async def list_workspace_mcp(
     ctx: Annotated[RequestContext, Depends(require_member)],
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> WorkspaceMCPOut:
-    # Org-wide servers (owner_workspace_id IS NULL) with binding state for this workspace
-    org_stmt = (
-        select(MCPServer, WorkspaceMCPBinding)
-        .outerjoin(
-            WorkspaceMCPBinding,
-            (WorkspaceMCPBinding.mcp_server_id == MCPServer.id)
-            & (WorkspaceMCPBinding.workspace_id == ctx.workspace_id),  # type: ignore[arg-type]
-        )
-        .where(
-            MCPServer.org_id == ctx.org_id,
-            MCPServer.owner_workspace_id.is_(None),  # type: ignore[union-attr]
-        )
-    )
-    org_result = await session.execute(org_stmt)
+    server_repo = MCPServerRepository(session, org_id=ctx.org_id)
+
+    org_rows = await server_repo.list_org_wide_with_workspace_binding(ctx.workspace_id)
     org_servers = [
         MCPServerItem(
             server_id=srv.id,
@@ -222,15 +211,9 @@ async def list_workspace_mcp(
             enabled=binding.enabled if binding is not None else False,
             scope="org",
         )
-        for srv, binding in org_result.all()
+        for srv, binding in org_rows
     ]
 
-    # Workspace-private servers (always enabled)
-    ws_stmt = select(MCPServer).where(
-        MCPServer.org_id == ctx.org_id,
-        MCPServer.owner_workspace_id == ctx.workspace_id,
-    )
-    ws_result = await session.execute(ws_stmt)
     workspace_servers = [
         MCPServerItem(
             server_id=srv.id,
@@ -240,7 +223,7 @@ async def list_workspace_mcp(
             enabled=True,
             scope="workspace",
         )
-        for srv in ws_result.scalars().all()
+        for srv in await server_repo.list_for_org(owner_workspace_id=ctx.workspace_id)
     ]
 
     return WorkspaceMCPOut(org_servers=org_servers, workspace_servers=workspace_servers)
@@ -253,27 +236,16 @@ async def toggle_mcp_binding(
     ctx: Annotated[RequestContext, Depends(require_member)],
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> dict[str, object]:
-    srv = await session.get(MCPServer, server_id)
-    if srv is None or srv.org_id != ctx.org_id or srv.owner_workspace_id is not None:
+    server_repo = MCPServerRepository(session, org_id=ctx.org_id)
+    srv = await server_repo.get(server_id)
+    if srv is None or srv.owner_workspace_id is not None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="org MCP server not found")
 
-    binding_result = await session.execute(
-        select(WorkspaceMCPBinding).where(
-            WorkspaceMCPBinding.mcp_server_id == server_id,
-            WorkspaceMCPBinding.workspace_id == ctx.workspace_id,
-        )
+    binding_repo = WorkspaceMCPBindingRepository(session, org_id=ctx.org_id)
+    await binding_repo.upsert_binding(
+        workspace_id=ctx.workspace_id,
+        mcp_server_id=server_id,
+        enabled=body.enabled,
+        created_by_user_id=ctx.user.id,
     )
-    existing = binding_result.scalar_one_or_none()
-    if existing is None:
-        existing = WorkspaceMCPBinding(
-            org_id=ctx.org_id,
-            workspace_id=ctx.workspace_id,
-            mcp_server_id=server_id,
-            enabled=body.enabled,
-            created_by_user_id=ctx.user.id,
-        )
-        session.add(existing)
-    else:
-        existing.enabled = body.enabled
-    await session.commit()
     return {"server_id": server_id, "enabled": body.enabled}
