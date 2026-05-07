@@ -133,13 +133,13 @@ export function Sidebar() {
 
       {/* Footer: avatar popover + settings */}
       <div className="border-t border-border/60 p-2 flex items-center gap-1">
-        <div className="flex-1">
+        <div className="min-w-0 flex-1">
           <AvatarPopover />
         </div>
         {currentWsId && (
           <Link
             href={`/w/${currentWsId}/settings`}
-            className={`p-1.5 rounded-md transition-colors ${
+            className={`shrink-0 p-1.5 rounded-md transition-colors ${
               isSettingsRoute
                 ? 'text-primary bg-primary/10'
                 : 'text-muted-foreground hover:text-foreground hover:bg-accent/60'

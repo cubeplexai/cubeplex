@@ -31,16 +31,13 @@ test.describe('Workspace Settings', () => {
   }) => {
     await registerAndGetWsId(page)
 
-    // force: true bypasses Playwright's hit-target check. CI's headless
-    // Chromium intermittently reports the workspace home page's flex-1
-    // content as "intercepting" the click on the sidebar footer link even
-    // though they don't actually overlap. Visibility is asserted in the
-    // previous test; this test only needs to verify the navigation works.
-    await page.getByRole('link', { name: /workspace settings/i }).click({ force: true })
+    await page.getByRole('link', { name: /workspace settings/i }).click()
     await expect(page).toHaveURL(/\/settings/, { timeout: 10_000 })
 
     // SettingsNav renders "Persona" as a sub-item under the active workspace tab
-    await expect(page.getByText('Persona')).toBeVisible({ timeout: 10_000 })
+    await expect(page.getByRole('link', { name: 'Persona', exact: true })).toBeVisible({
+      timeout: 10_000,
+    })
   })
 
   test('default settings page (workspace tab) renders Persona heading', async ({ page }) => {

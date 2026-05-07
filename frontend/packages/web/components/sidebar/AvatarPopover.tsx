@@ -59,7 +59,7 @@ export function AvatarPopover() {
     <Popover>
       <PopoverTrigger
         aria-label="Account menu"
-        className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-accent/60 transition-colors group"
+        className="w-full min-w-0 flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-accent/60 transition-colors group"
       >
         <div className="size-7 rounded-full bg-gradient-to-br from-primary to-primary/70 text-primary-foreground flex items-center justify-center text-[11px] font-semibold shrink-0 ring-1 ring-primary/20 shadow-sm">
           {initials}
