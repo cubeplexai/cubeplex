@@ -1,5 +1,8 @@
 """E2E tests for workspace settings API (M4)."""
 
+import io
+import zipfile
+
 import httpx
 import pytest
 from fastapi.testclient import TestClient
@@ -63,6 +66,38 @@ class TestSkillsSettings:
         )
         assert resp.status_code == 200
         assert resp.json()["enabled"] is True
+
+    def test_upload_creates_workspace_private_install(self, client: TestClient) -> None:
+        """Upload a zip — Skill row lands in catalog, install row is workspace-private."""
+        import secrets
+
+        slug = f"upload-{secrets.token_hex(3)}"
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w") as z:
+            z.writestr(
+                "SKILL.md",
+                f"---\nname: {slug}\ndescription: workspace private upload\nversion: 1.0.0\n---\n# {slug}\n",
+            )
+
+        resp = client.post(
+            f"/api/v1/ws/{DEFAULT_WS_ID}/settings/skills/upload",
+            files={"file": ("a.zip", buf.getvalue(), "application/zip")},
+        )
+        assert resp.status_code == 201, resp.text
+        data = resp.json()
+        assert data["version"] == "1.0.0"
+        skill_id = data["skill_id"]
+
+        # The new install must show up in workspace_skills (not org_skills).
+        skills_resp = client.get(f"/api/v1/ws/{DEFAULT_WS_ID}/settings/skills")
+        ws = skills_resp.json()["workspace_skills"]
+        assert any(s["skill_id"] == skill_id for s in ws), (
+            f"uploaded skill should be workspace-private, got {ws}"
+        )
+        org = skills_resp.json()["org_skills"]
+        assert not any(s["skill_id"] == skill_id for s in org), (
+            f"uploaded skill must not be org-installed, got {org}"
+        )
 
 
 class TestMCPSettings:

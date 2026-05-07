@@ -6,6 +6,7 @@ import {
   type WorkspaceSkillEntry,
   type WorkspaceSkillFilters,
 } from '@/hooks/useWorkspaceSkillsCatalog'
+import { UploadWorkspaceSkillModal } from './skills/UploadWorkspaceSkillModal'
 import { WorkspaceSkillCard } from './skills/WorkspaceSkillCard'
 import { WorkspaceSkillDetail } from './skills/WorkspaceSkillDetail'
 import { WorkspaceSkillsToolbar } from './skills/WorkspaceSkillsToolbar'
@@ -17,6 +18,7 @@ interface SkillsPanelProps {
 export function SkillsPanel({ wsId }: SkillsPanelProps) {
   const [filters, setFilters] = useState<WorkspaceSkillFilters>({})
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [uploadOpen, setUploadOpen] = useState(false)
   const { skills, loading, error, refresh } = useWorkspaceSkillsCatalog(wsId, filters)
 
   const selected = skills.find((s) => s.id === selectedId) ?? null
@@ -33,7 +35,7 @@ export function SkillsPanel({ wsId }: SkillsPanelProps) {
       <WorkspaceSkillsToolbar
         filters={filters}
         onFiltersChange={setFilters}
-        onAddClick={() => setFilters({ state: 'available' })}
+        onAddClick={() => setUploadOpen(true)}
       />
 
       <div className="flex flex-1 overflow-hidden">
@@ -51,7 +53,8 @@ export function SkillsPanel({ wsId }: SkillsPanelProps) {
             <div className="flex h-full flex-col items-center justify-center gap-1 px-6 text-center">
               <p className="text-sm text-muted-foreground">No skills match these filters</p>
               <p className="text-xs text-muted-foreground/70">
-                Adjust the search or filter, or click &ldquo;Add skill&rdquo;.
+                Adjust the search or filter, or upload a workspace-private skill via &ldquo;Add
+                skill&rdquo;.
               </p>
             </div>
           ) : (
@@ -83,6 +86,13 @@ export function SkillsPanel({ wsId }: SkillsPanelProps) {
           )}
         </section>
       </div>
+
+      <UploadWorkspaceSkillModal
+        wsId={wsId}
+        open={uploadOpen}
+        onOpenChange={setUploadOpen}
+        onUploaded={() => void refresh()}
+      />
     </div>
   )
 }

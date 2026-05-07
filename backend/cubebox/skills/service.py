@@ -245,14 +245,22 @@ class SkillPublishService:
         org_slug: str,
         actor_user_id: str,
         zip_bytes: bytes,
+        workspace_id: str | None = None,
     ) -> SkillVersion:
-        """Extract, validate, upload, insert. Returns the new SkillVersion."""
+        """Extract, validate, upload, insert. Returns the new SkillVersion.
+
+        If ``workspace_id`` is provided, the install row is workspace-private
+        (visible only to that workspace) instead of org-wide. The Skill and
+        SkillVersion rows still land in the org's catalog so future workspaces
+        can install the same skill if desired.
+        """
         files = _extract_zip(zip_bytes)
         return await self._publish_from_files(
             org_id=org_id,
             org_slug=org_slug,
             actor_user_id=actor_user_id,
             files=files,
+            workspace_id=workspace_id,
         )
 
     async def _next_version_for(self, canonical_name: str) -> str:
@@ -282,6 +290,7 @@ class SkillPublishService:
         org_slug: str,
         actor_user_id: str,
         files: dict[str, bytes],
+        workspace_id: str | None = None,
     ) -> SkillVersion:
         if "SKILL.md" not in files:
             raise SkillMdMissingError("zip must contain SKILL.md at root")
@@ -359,13 +368,22 @@ class SkillPublishService:
             entry_file="SKILL.md",
             uploaded_by_user_id=actor_user_id,
         )
-        await installs.upsert(
-            org_id=org_id,
-            skill_id=skill.id,
-            installed_version=fm.version,
-            installed_by_user_id=actor_user_id,
-            auto_bind=False,  # uploaded skills opt-in; admin enables per workspace
-        )
+        if workspace_id is None:
+            await installs.upsert(
+                org_id=org_id,
+                skill_id=skill.id,
+                installed_version=fm.version,
+                installed_by_user_id=actor_user_id,
+                auto_bind=False,  # uploaded skills opt-in; admin enables per workspace
+            )
+        else:
+            await installs.create_for_workspace(
+                org_id=org_id,
+                workspace_id=workspace_id,
+                skill_id=skill.id,
+                installed_version=fm.version,
+                installed_by_user_id=actor_user_id,
+            )
         return sv
 
 
