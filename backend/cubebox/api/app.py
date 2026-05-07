@@ -268,6 +268,25 @@ async def lifespan(_app: FastAPI):  # type: ignore
         _attachment_cleanup_loop(), name="attachment-cleanup"
     )
 
+    # Mode consistency check: refuse single_tenant if DB has >1 orgs
+    mode = getattr(_app.state, "deployment_mode", "single_tenant")
+    if mode == "single_tenant":
+        from sqlalchemy import func, select
+
+        from cubebox.db import async_session_maker
+        from cubebox.models import Organization
+
+        async with async_session_maker() as _session:
+            _count = (
+                await _session.execute(select(func.count()).select_from(Organization))
+            ).scalar_one()
+        if int(_count) > 1:
+            raise RuntimeError(
+                f"single_tenant requires exactly 0 or 1 orgs in DB; found "
+                f"{int(_count)}. Switch to multi_tenant or clean up the DB "
+                "before starting."
+            )
+
     yield
 
     # ==================== Shutdown ====================
