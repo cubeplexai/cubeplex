@@ -4,7 +4,7 @@ import secrets
 
 import httpx
 
-from tests.e2e.conftest import _csrf_cookie_name
+from tests.e2e.helpers import csrf_cookie_name as _csrf_cookie_name
 
 
 async def _seed_csrf(client: httpx.AsyncClient) -> str:
