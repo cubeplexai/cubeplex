@@ -30,15 +30,3 @@ export interface WorkspaceMCP {
   org_servers: MCPServerItem[]
   workspace_servers: MCPServerItem[]
 }
-
-export interface SkillCatalogEntry {
-  id: string
-  name: string
-  description: string
-  source: 'preinstalled' | 'uploaded'
-  current_version: string
-  keywords: string[]
-  install_state: 'installed' | 'uninstalled'
-  installed_version: string | null
-  workspace_bindings_count: number
-}
