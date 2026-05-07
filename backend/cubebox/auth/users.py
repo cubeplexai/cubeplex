@@ -102,6 +102,12 @@ class UserManager(BaseUserManager[User, str]):
             await MembershipRepository(session).grant(
                 user_id=user.id, workspace_id=ws.id, role=Role.ADMIN
             )
+            from cubebox.models import OrgRole
+            from cubebox.repositories import OrganizationMembershipRepository
+
+            await OrganizationMembershipRepository(session).grant(
+                user_id=user.id, org_id=org.id, role=OrgRole.OWNER
+            )
             from cubebox.models.agent_config import AgentConfig
 
             agent_cfg = AgentConfig(org_id=org.id, workspace_id=ws.id)
