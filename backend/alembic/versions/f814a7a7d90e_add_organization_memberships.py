@@ -4,6 +4,18 @@ Revision ID: f814a7a7d90e
 Revises: a2c0009ea3ad
 Create Date: 2026-05-07 17:47:13.094791
 
+Backfill rule:
+- Owner per existing org = the user with the earliest workspace-membership
+  created_at in any workspace of that org.
+- Every other user with a workspace membership in the org = member.
+- Workspace-admin status is NOT carried over to org admin; promote those
+  users via `cubebox admin grant-admin <email>` after migration if needed.
+
+NOTE for operators on populated dev DBs: the "earliest workspace-membership"
+heuristic may pick an unexpected owner. Use `cubebox admin grant-admin /
+revoke-admin` to reconcile, or hand-edit organization_memberships.role
+before relying on org-level admin checks (Task 4 onwards reads this row
+to gate /admin and /admin/me).
 """
 from typing import Sequence, Union
 

@@ -1,6 +1,9 @@
 """OrganizationMembership repository — User × Organization × OrgRole."""
 
-from sqlalchemy import select
+from typing import cast
+
+from sqlalchemy import delete, select, update
+from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cubebox.models import OrganizationMembership, OrgRole
@@ -14,6 +17,7 @@ class OrganizationMembershipRepository:
         m = OrganizationMembership(user_id=user_id, org_id=org_id, role=role.value)
         self.session.add(m)
         await self.session.commit()
+        await self.session.refresh(m)
         return m
 
     async def get_role(self, *, user_id: str, org_id: str) -> OrgRole | None:
@@ -38,25 +42,31 @@ class OrganizationMembershipRepository:
         self, *, user_id: str, org_id: str, role: OrgRole
     ) -> OrganizationMembership | None:
         """Update an existing member's role. Returns updated row or None."""
-        stmt = select(OrganizationMembership).where(
+        stmt = (
+            update(OrganizationMembership)
+            .where(
+                OrganizationMembership.user_id == user_id,  # type: ignore[arg-type]
+                OrganizationMembership.org_id == org_id,  # type: ignore[arg-type]
+            )
+            .values(role=role.value)
+            .execution_options(synchronize_session="fetch")
+        )
+        result = cast(CursorResult[tuple[()]], await self.session.execute(stmt))
+        await self.session.commit()
+        if result.rowcount == 0:
+            return None
+        # SELECT the updated row to return it
+        sel = select(OrganizationMembership).where(
             OrganizationMembership.user_id == user_id,  # type: ignore[arg-type]
             OrganizationMembership.org_id == org_id,  # type: ignore[arg-type]
         )
-        m = (await self.session.execute(stmt)).scalar_one_or_none()
-        if m is None:
-            return None
-        m.role = role.value
-        await self.session.commit()
-        return m
+        return (await self.session.execute(sel)).scalar_one_or_none()
 
     async def revoke(self, *, user_id: str, org_id: str) -> bool:
-        stmt = select(OrganizationMembership).where(
+        stmt = delete(OrganizationMembership).where(
             OrganizationMembership.user_id == user_id,  # type: ignore[arg-type]
             OrganizationMembership.org_id == org_id,  # type: ignore[arg-type]
         )
-        m = (await self.session.execute(stmt)).scalar_one_or_none()
-        if m is None:
-            return False
-        await self.session.delete(m)
+        result = cast(CursorResult[tuple[()]], await self.session.execute(stmt))
         await self.session.commit()
-        return True
+        return result.rowcount > 0
