@@ -14,6 +14,8 @@ class AgentConfigPatch(BaseModel):
 class SkillInstallOut(BaseModel):
     install_id: str
     skill_id: str
+    name: str
+    description: str
     installed_version: str
     enabled: bool
     scope: str  # "org" | "workspace"
