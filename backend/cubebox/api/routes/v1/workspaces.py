@@ -86,16 +86,31 @@ async def create_workspace(
     body: Annotated[WorkspaceCreate, Body()],
     user: Annotated[User, Depends(current_active_user)],
     session: Annotated[AsyncSession, Depends(get_session)],
+    request: Request,
 ) -> dict[str, str]:
-    # TODO(P2-auth): `org_id` comes from the client with no server-side membership
-    # check because P1 has no org-level Membership concept (only workspace-level).
-    # Any authenticated user can plant a workspace under any org id. Acceptable for
-    # M1's single-tenant internal deployment; must be locked down before multi-org.
+    from cubebox.auth.singleton_org import get_singleton_org_id
+    from cubebox.repositories import OrganizationMembershipRepository
+
+    mode = getattr(request.app.state, "deployment_mode", "single_tenant")
+    if mode == "single_tenant":
+        org_id = await get_singleton_org_id(session)
+        if org_id is None:
+            raise HTTPException(status_code=409, detail="setup_required")
+    else:
+        org_id = body.org_id
+        if not await OrganizationMembershipRepository(session).get_role(
+            user_id=user.id, org_id=org_id
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="not a member of this org",
+            )
+
     ws_repo = WorkspaceRepository(session)
     mem_repo = MembershipRepository(session)
-    ws = await ws_repo.create(org_id=body.org_id, name=body.name)
+    ws = await ws_repo.create(org_id=org_id, name=body.name)
     await mem_repo.grant(user_id=user.id, workspace_id=ws.id, role=Role.ADMIN)
-    agent_cfg = AgentConfig(org_id=body.org_id, workspace_id=ws.id)
+    agent_cfg = AgentConfig(org_id=org_id, workspace_id=ws.id)
     session.add(agent_cfg)
     await session.commit()
     return {"id": ws.id, "name": ws.name, "org_id": ws.org_id}
