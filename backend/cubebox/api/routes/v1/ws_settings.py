@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import select
@@ -22,13 +23,24 @@ from cubebox.api.schemas.ws_settings import (
 )
 from cubebox.auth.context import RequestContext
 from cubebox.auth.dependencies import require_member
+from cubebox.config import config as _config
 from cubebox.db import get_session
 from cubebox.models.agent_config import AgentConfig
 from cubebox.repositories.mcp import MCPServerRepository, WorkspaceMCPBindingRepository
+from cubebox.repositories.organization import OrganizationRepository
 from cubebox.repositories.skill import (
     OrgSkillInstallRepository,
     SkillVersionRepository,
     WorkspaceSkillBindingRepository,
+)
+from cubebox.skills.cache import SkillCache
+from cubebox.skills.frontmatter import InvalidFrontmatterError
+from cubebox.skills.service import (
+    FileTooLargeError,
+    InvalidSkillNameError,
+    SkillMdMissingError,
+    SkillPublishService,
+    VersionCollisionError,
 )
 
 router = APIRouter(prefix="/ws/{workspace_id}/settings", tags=["workspace-settings"])
@@ -192,6 +204,60 @@ async def delete_workspace_skill(
     )
     if not deleted:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="workspace skill install not found")
+
+
+def _skills_cache() -> SkillCache:
+    return SkillCache(cache_root=Path(_config.get("skills.cache_root", "skills_cache")))
+
+
+@router.post("/skills/upload", status_code=status.HTTP_201_CREATED)
+async def upload_workspace_skill(
+    file: Annotated[UploadFile, File(...)],
+    ctx: Annotated[RequestContext, Depends(require_member)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> dict[str, str]:
+    """Upload a skill zip and install it as workspace-private.
+
+    The Skill / SkillVersion rows still land in the org catalog (so future
+    workspaces could install the same skill if their members choose to), but
+    the install row is workspace-private — this workspace is the only one
+    seeing it through `/settings/skills`.
+    """
+    org = await OrganizationRepository(session).get(ctx.org_id)
+    if org is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="ORG_NOT_FOUND")
+    zip_bytes = await file.read()
+    publisher = SkillPublishService(session=session, cache=_skills_cache())
+    try:
+        sv = await publisher.publish_from_zip(
+            org_id=ctx.org_id,
+            org_slug=org.slug,
+            actor_user_id=ctx.user.id,
+            zip_bytes=zip_bytes,
+            workspace_id=ctx.workspace_id,
+        )
+    except InvalidFrontmatterError as e:
+        raise HTTPException(
+            status_code=400,
+            detail={"code": "INVALID_FRONTMATTER", "field": e.field, "reason": e.reason},
+        ) from e
+    except InvalidSkillNameError as e:
+        raise HTTPException(
+            status_code=400, detail={"code": "INVALID_SKILL_NAME", "reason": str(e)}
+        ) from e
+    except SkillMdMissingError as e:
+        raise HTTPException(
+            status_code=400, detail={"code": "SKILL_MD_MISSING", "reason": str(e)}
+        ) from e
+    except FileTooLargeError as e:
+        raise HTTPException(
+            status_code=400, detail={"code": "FILE_TOO_LARGE", "reason": str(e)}
+        ) from e
+    except VersionCollisionError as e:
+        raise HTTPException(
+            status_code=409, detail={"code": "VERSION_EXISTS", "reason": str(e)}
+        ) from e
+    return {"skill_version_id": sv.id, "skill_id": sv.skill_id, "version": sv.version}
 
 
 @router.get("/mcp", response_model=WorkspaceMCPOut)
