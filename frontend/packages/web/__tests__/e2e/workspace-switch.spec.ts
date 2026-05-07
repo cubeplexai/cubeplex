@@ -23,6 +23,7 @@ test('workspace switching isolates conversation lists', async ({ page }) => {
   const convInWs1Url = page.url()
 
   await page.goto('/workspaces')
+  await expect(page.getByRole('link', { name: 'Open' })).toBeVisible({ timeout: 10_000 })
   await page.getByPlaceholder('e.g. Side project').fill('Side')
   await page.getByRole('button', { name: /create workspace/i }).click()
   await expect(page).toHaveURL(/\/w\/[^/]+$/)
