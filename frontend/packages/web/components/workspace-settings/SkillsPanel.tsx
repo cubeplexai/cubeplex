@@ -1,29 +1,87 @@
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
-import {
-  createApiClient,
-  installWorkspaceSkill,
-  listSkillCatalog,
-  useWorkspaceSettingsStore,
-} from '@cubebox/core'
-import type { SkillCatalogEntry, SkillInstall } from '@cubebox/core'
-import { Switch } from '@/components/ui/switch'
+import { CheckCircle2, Package, Plus, Sparkles } from 'lucide-react'
+import { createApiClient, useWorkspaceSettingsStore } from '@cubebox/core'
+import type { SkillInstall } from '@cubebox/core'
 import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { Switch } from '@/components/ui/switch'
 import { cn } from '@/lib/utils'
+import { AddSkillModal } from './AddSkillModal'
 
 interface SkillsPanelProps {
   wsId: string
+}
+
+function SkillItemCard({
+  skill,
+  active,
+  toggling,
+  onClick,
+  onToggle,
+}: {
+  skill: SkillInstall
+  active: boolean
+  toggling: boolean
+  onClick: () => void
+  onToggle: (enabled: boolean) => void
+}) {
+  const SourceIcon = skill.scope === 'workspace' ? Package : Sparkles
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-current={active ? 'true' : undefined}
+      className={cn(
+        'group flex w-full flex-col gap-1.5 rounded-lg border p-3 text-left transition-all',
+        active
+          ? 'border-primary/40 bg-primary/5 shadow-sm'
+          : 'border-border/70 bg-card/40 hover:border-border hover:bg-accent/40',
+      )}
+    >
+      <div className="flex items-center gap-2">
+        <SourceIcon
+          className={cn(
+            'size-3.5 shrink-0',
+            skill.scope === 'workspace' ? 'text-muted-foreground' : 'text-primary',
+          )}
+        />
+        <span className="truncate text-sm font-semibold">{skill.name || skill.skill_id}</span>
+        {skill.enabled && (
+          <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-medium text-emerald-600 dark:text-emerald-400">
+            <CheckCircle2 className="size-3" />
+            on
+          </span>
+        )}
+        <Switch
+          checked={skill.enabled}
+          disabled={skill.scope === 'workspace' || toggling}
+          onCheckedChange={onToggle}
+          onClick={(e) => e.stopPropagation()}
+          className="ml-auto shrink-0 scale-75"
+        />
+      </div>
+      {skill.description && (
+        <p className="line-clamp-2 text-xs text-muted-foreground">{skill.description}</p>
+      )}
+      <div className="flex items-center gap-1 pt-0.5">
+        <span className="font-mono text-[10px] text-muted-foreground/80">
+          v{skill.installed_version}
+        </span>
+        <Badge variant="outline" className="px-1.5 text-[10px]">
+          {skill.scope === 'workspace' ? 'workspace' : 'org'}
+        </Badge>
+      </div>
+    </button>
+  )
 }
 
 export function SkillsPanel({ wsId }: SkillsPanelProps) {
   const { skills, loading, loadAll, toggleSkill } = useWorkspaceSettingsStore()
   const [selected, setSelected] = useState<SkillInstall | null>(null)
   const [toggling, setToggling] = useState<string | null>(null)
-  const [showAddForm, setShowAddForm] = useState(false)
-  const [catalog, setCatalog] = useState<SkillCatalogEntry[] | null>(null)
-  const [catalogError, setCatalogError] = useState<string | null>(null)
-  const [installing, setInstalling] = useState<string | null>(null)
+  const [addOpen, setAddOpen] = useState(false)
 
   const client = useCallback(() => {
     const c = createApiClient('')
@@ -36,35 +94,12 @@ export function SkillsPanel({ wsId }: SkillsPanelProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [wsId])
 
-  const openAddForm = async () => {
-    setShowAddForm(true)
-    if (catalog) return
-    try {
-      const entries = await listSkillCatalog(client())
-      setCatalog(entries)
-    } catch (err) {
-      setCatalogError(String(err))
-    }
-  }
-
-  const handleInstall = async (entry: SkillCatalogEntry) => {
-    setInstalling(entry.id)
-    try {
-      await installWorkspaceSkill(client(), entry.id, entry.current_version)
-      await loadAll(client())
-      setShowAddForm(false)
-    } catch (err) {
-      setCatalogError(String(err))
-    } finally {
-      setInstalling(null)
-    }
-  }
-
   const orgSkills = skills?.org_skills ?? []
   const workspaceSkills = skills?.workspace_skills ?? []
   const allSkills = [...orgSkills, ...workspaceSkills]
+  const enabledCount = allSkills.filter((s) => s.enabled).length
 
-  const handleToggle = async (skill: SkillInstall, enabled: boolean) => {
+  async function handleToggle(skill: SkillInstall, enabled: boolean): Promise<void> {
     if (skill.scope === 'workspace') return
     setToggling(skill.install_id)
     try {
@@ -74,155 +109,141 @@ export function SkillsPanel({ wsId }: SkillsPanelProps) {
     }
   }
 
-  const renderSkillItem = (skill: SkillInstall) => (
-    <li key={skill.install_id}>
-      <button
-        onClick={() => setSelected(skill)}
-        className={cn(
-          'w-full flex items-center gap-2 px-2 py-2 rounded-md text-left transition-colors',
-          selected?.install_id === skill.install_id
-            ? 'bg-primary/10 text-primary'
-            : 'text-muted-foreground hover:text-foreground hover:bg-accent/60',
-        )}
-      >
-        <div className="flex-1 min-w-0">
-          <p className="text-[12px] font-medium truncate">{skill.name || skill.skill_id}</p>
-          <p className="text-[10px] text-muted-foreground/60 truncate">
-            {skill.description || skill.installed_version}
+  return (
+    <div className="flex h-full flex-1 flex-col overflow-hidden">
+      <header className="flex items-center justify-between gap-2 border-b border-border/70 px-6 py-4">
+        <div>
+          <h2 className="text-lg font-semibold tracking-tight">Skills</h2>
+          <p className="mt-0.5 text-xs text-muted-foreground">
+            {enabledCount} of {allSkills.length} enabled in this workspace
           </p>
         </div>
-        <Switch
-          checked={skill.enabled}
-          disabled={skill.scope === 'workspace' || toggling === skill.install_id}
-          onCheckedChange={(v) => handleToggle(skill, v)}
-          onClick={(e) => e.stopPropagation()}
-          className="shrink-0 scale-75"
-        />
-      </button>
-    </li>
-  )
+        <Button size="sm" onClick={() => setAddOpen(true)}>
+          <Plus className="size-3.5" />
+          Add skill
+        </Button>
+      </header>
 
-  return (
-    <div className="flex flex-1 overflow-hidden">
-      {/* Col 2: list */}
-      <div className="w-56 shrink-0 border-r border-border overflow-y-auto">
-        <div className="p-3 border-b border-border flex items-start justify-between gap-2">
-          <div>
-            <p className="text-sm font-semibold">Skills</p>
-            <p className="text-xs text-muted-foreground mt-0.5">
-              {allSkills.filter((s) => s.enabled).length} / {allSkills.length} enabled
-            </p>
-          </div>
-          <button
-            onClick={() => (showAddForm ? setShowAddForm(false) : openAddForm())}
-            className="text-[11px] text-muted-foreground hover:text-foreground mt-0.5 shrink-0"
-          >
-            {showAddForm ? 'Cancel' : '+ Add'}
-          </button>
-        </div>
-        {showAddForm && (
-          <div className="p-2 border-b border-border max-h-64 overflow-y-auto">
-            {catalogError ? (
-              <p className="text-xs text-destructive px-2 py-2">Failed to load: {catalogError}</p>
-            ) : !catalog ? (
-              <p className="text-xs text-muted-foreground px-2 py-2">Loading catalog…</p>
-            ) : catalog.length === 0 ? (
-              <p className="text-xs text-muted-foreground px-2 py-2">No skills available</p>
-            ) : (
-              <ul className="space-y-1">
-                {catalog
-                  .filter(
-                    (entry) =>
-                      // Hide ones already installed in this workspace (org or private)
-                      !skills?.org_skills.some((s) => s.skill_id === entry.id) &&
-                      !skills?.workspace_skills.some((s) => s.skill_id === entry.id),
-                  )
-                  .map((entry) => (
-                    <li key={entry.id}>
-                      <button
-                        onClick={() => handleInstall(entry)}
-                        disabled={installing === entry.id}
-                        className="w-full text-left p-2 rounded-md hover:bg-accent/60 disabled:opacity-50"
-                      >
-                        <p className="text-[12px] font-medium truncate">{entry.name}</p>
-                        <p className="text-[10px] text-muted-foreground/70 truncate">
-                          {entry.description || `${entry.source} · ${entry.current_version}`}
-                        </p>
-                      </button>
-                    </li>
-                  ))}
-              </ul>
-            )}
-          </div>
-        )}
-        <div className="p-2">
+      <div className="flex flex-1 overflow-hidden">
+        <aside
+          aria-label="skills-list"
+          className="w-[320px] shrink-0 overflow-y-auto border-r border-border/70 bg-card/20"
+        >
           {loading && !skills ? (
-            <p className="text-xs text-muted-foreground px-2 py-4">Loading…</p>
+            <p className="px-4 py-6 text-center text-xs text-muted-foreground">Loading…</p>
           ) : allSkills.length === 0 ? (
-            <p className="text-xs text-muted-foreground px-2 py-4">No skills available</p>
+            <div className="flex h-full flex-col items-center justify-center gap-1 px-6 text-center">
+              <p className="text-sm text-muted-foreground">No skills yet</p>
+              <p className="text-xs text-muted-foreground/70">
+                Click &ldquo;Add skill&rdquo; to install one.
+              </p>
+            </div>
           ) : (
-            <>
+            <div className="flex flex-col gap-3 p-3">
               {orgSkills.length > 0 && (
-                <div className="mb-2">
-                  <p className="px-2 text-[9px] font-semibold uppercase tracking-widest text-muted-foreground/50 mb-1">
+                <section className="flex flex-col gap-1.5">
+                  <p className="px-1 text-[10px] font-medium uppercase tracking-widest text-muted-foreground/60">
                     Org-installed
                   </p>
-                  <ul className="space-y-0.5">{orgSkills.map(renderSkillItem)}</ul>
-                </div>
+                  <ul className="flex flex-col gap-1.5">
+                    {orgSkills.map((skill) => (
+                      <li key={skill.install_id}>
+                        <SkillItemCard
+                          skill={skill}
+                          active={selected?.install_id === skill.install_id}
+                          toggling={toggling === skill.install_id}
+                          onClick={() => setSelected(skill)}
+                          onToggle={(v) => void handleToggle(skill, v)}
+                        />
+                      </li>
+                    ))}
+                  </ul>
+                </section>
               )}
               {workspaceSkills.length > 0 && (
-                <div className="mb-2">
-                  <p className="px-2 text-[9px] font-semibold uppercase tracking-widest text-muted-foreground/50 mb-1">
-                    Workspace private
+                <section className="flex flex-col gap-1.5">
+                  <p className="px-1 text-[10px] font-medium uppercase tracking-widest text-muted-foreground/60">
+                    Workspace-private
                   </p>
-                  <ul className="space-y-0.5">{workspaceSkills.map(renderSkillItem)}</ul>
-                </div>
+                  <ul className="flex flex-col gap-1.5">
+                    {workspaceSkills.map((skill) => (
+                      <li key={skill.install_id}>
+                        <SkillItemCard
+                          skill={skill}
+                          active={selected?.install_id === skill.install_id}
+                          toggling={toggling === skill.install_id}
+                          onClick={() => setSelected(skill)}
+                          onToggle={(v) => void handleToggle(skill, v)}
+                        />
+                      </li>
+                    ))}
+                  </ul>
+                </section>
               )}
-            </>
+            </div>
           )}
-        </div>
+        </aside>
+
+        <section className="flex flex-1 overflow-y-auto">
+          {selected ? (
+            <div className="flex w-full flex-col gap-4 p-6">
+              <header className="flex flex-col gap-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  <h3 className="text-xl font-semibold tracking-tight">
+                    {selected.name || selected.skill_id}
+                  </h3>
+                  <Badge variant="outline" className="font-mono">
+                    v{selected.installed_version}
+                  </Badge>
+                  <Badge variant={selected.scope === 'workspace' ? 'secondary' : 'default'}>
+                    {selected.scope === 'workspace' ? 'workspace-private' : 'org-installed'}
+                  </Badge>
+                  <Badge
+                    variant="outline"
+                    className={cn(
+                      selected.enabled
+                        ? 'border-emerald-500/40 text-emerald-600'
+                        : 'text-muted-foreground',
+                    )}
+                  >
+                    {selected.enabled ? 'enabled' : 'disabled'}
+                  </Badge>
+                </div>
+                {selected.description && (
+                  <p className="text-sm leading-relaxed text-muted-foreground">
+                    {selected.description}
+                  </p>
+                )}
+              </header>
+
+              <div className="rounded-lg border border-border/70 bg-card/40 p-4">
+                <dl className="grid grid-cols-[140px_1fr] gap-y-2 text-sm">
+                  <dt className="text-muted-foreground">Skill ID</dt>
+                  <dd className="font-mono text-xs">{selected.skill_id}</dd>
+                  <dt className="text-muted-foreground">Install ID</dt>
+                  <dd className="font-mono text-xs">{selected.install_id}</dd>
+                  <dt className="text-muted-foreground">Scope</dt>
+                  <dd>{selected.scope}</dd>
+                  <dt className="text-muted-foreground">Version</dt>
+                  <dd className="font-mono">{selected.installed_version}</dd>
+                </dl>
+              </div>
+            </div>
+          ) : (
+            <div className="flex flex-1 items-center justify-center p-8 text-sm text-muted-foreground">
+              Select a skill to view details
+            </div>
+          )}
+        </section>
       </div>
 
-      {/* Col 3: detail */}
-      <div className="flex-1 overflow-y-auto p-8">
-        {selected ? (
-          <>
-            <h2 className="text-base font-semibold mb-1">{selected.name || selected.skill_id}</h2>
-            {selected.description && (
-              <p className="text-sm text-muted-foreground mb-4">{selected.description}</p>
-            )}
-            <div className="flex gap-2 mb-6">
-              <Badge variant="outline">{selected.installed_version}</Badge>
-              <Badge variant={selected.scope === 'workspace' ? 'secondary' : 'outline'}>
-                {selected.scope === 'workspace' ? 'workspace-private' : 'org-installed'}
-              </Badge>
-              <Badge variant={selected.enabled ? 'default' : 'secondary'}>
-                {selected.enabled ? 'enabled' : 'disabled'}
-              </Badge>
-            </div>
-            <div className="space-y-3 text-sm text-muted-foreground">
-              <div className="flex justify-between py-2 border-b border-border">
-                <span>Skill ID</span>
-                <span className="font-mono text-xs">{selected.skill_id}</span>
-              </div>
-              <div className="flex justify-between py-2 border-b border-border">
-                <span>Install ID</span>
-                <span className="font-mono text-xs">{selected.install_id}</span>
-              </div>
-              <div className="flex justify-between py-2 border-b border-border">
-                <span>Scope</span>
-                <span>{selected.scope}</span>
-              </div>
-              <div className="flex justify-between py-2 border-b border-border">
-                <span>Version</span>
-                <span>{selected.installed_version}</span>
-              </div>
-            </div>
-          </>
-        ) : (
-          <p className="text-sm text-muted-foreground">Select a skill to view details</p>
-        )}
-      </div>
+      <AddSkillModal
+        open={addOpen}
+        onOpenChange={setAddOpen}
+        client={client()}
+        installedSkills={skills}
+        onInstalled={() => void loadAll(client())}
+      />
     </div>
   )
 }
