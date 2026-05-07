@@ -1,8 +1,13 @@
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
-import { createApiClient, installWorkspaceSkill, useWorkspaceSettingsStore } from '@cubebox/core'
-import type { SkillInstall } from '@cubebox/core'
+import {
+  createApiClient,
+  installWorkspaceSkill,
+  listSkillCatalog,
+  useWorkspaceSettingsStore,
+} from '@cubebox/core'
+import type { SkillCatalogEntry, SkillInstall } from '@cubebox/core'
 import { Switch } from '@/components/ui/switch'
 import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'
@@ -16,6 +21,9 @@ export function SkillsPanel({ wsId }: SkillsPanelProps) {
   const [selected, setSelected] = useState<SkillInstall | null>(null)
   const [toggling, setToggling] = useState<string | null>(null)
   const [showAddForm, setShowAddForm] = useState(false)
+  const [catalog, setCatalog] = useState<SkillCatalogEntry[] | null>(null)
+  const [catalogError, setCatalogError] = useState<string | null>(null)
+  const [installing, setInstalling] = useState<string | null>(null)
 
   const client = useCallback(() => {
     const c = createApiClient('')
@@ -27,6 +35,30 @@ export function SkillsPanel({ wsId }: SkillsPanelProps) {
     if (!skills) loadAll(client())
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [wsId])
+
+  const openAddForm = async () => {
+    setShowAddForm(true)
+    if (catalog) return
+    try {
+      const entries = await listSkillCatalog(client())
+      setCatalog(entries)
+    } catch (err) {
+      setCatalogError(String(err))
+    }
+  }
+
+  const handleInstall = async (entry: SkillCatalogEntry) => {
+    setInstalling(entry.id)
+    try {
+      await installWorkspaceSkill(client(), entry.id, entry.current_version)
+      await loadAll(client())
+      setShowAddForm(false)
+    } catch (err) {
+      setCatalogError(String(err))
+    } finally {
+      setInstalling(null)
+    }
+  }
 
   const orgSkills = skills?.org_skills ?? []
   const workspaceSkills = skills?.workspace_skills ?? []
@@ -82,58 +114,46 @@ export function SkillsPanel({ wsId }: SkillsPanelProps) {
             </p>
           </div>
           <button
-            onClick={() => setShowAddForm((v) => !v)}
+            onClick={() => (showAddForm ? setShowAddForm(false) : openAddForm())}
             className="text-[11px] text-muted-foreground hover:text-foreground mt-0.5 shrink-0"
           >
-            + Add
+            {showAddForm ? 'Cancel' : '+ Add'}
           </button>
         </div>
         {showAddForm && (
-          <form
-            className="p-2 border-b border-border space-y-2"
-            onSubmit={async (e) => {
-              e.preventDefault()
-              const fd = new FormData(e.currentTarget)
-              const skillId = fd.get('skill_id') as string
-              const version = fd.get('version') as string
-              if (!skillId || !version) return
-              try {
-                await installWorkspaceSkill(client(), skillId, version)
-                await loadAll(client())
-                setShowAddForm(false)
-              } catch {
-                // ignore for now
-              }
-            }}
-          >
-            <input
-              name="skill_id"
-              placeholder="Skill ID"
-              className="w-full text-xs bg-background border border-border rounded px-2 py-1"
-              required
-            />
-            <input
-              name="version"
-              placeholder="Version (e.g. 1.0.0)"
-              className="w-full text-xs bg-background border border-border rounded px-2 py-1"
-              required
-            />
-            <div className="flex gap-2">
-              <button
-                type="submit"
-                className="text-[11px] bg-primary text-primary-foreground rounded px-2 py-1"
-              >
-                Install
-              </button>
-              <button
-                type="button"
-                onClick={() => setShowAddForm(false)}
-                className="text-[11px] text-muted-foreground rounded px-2 py-1"
-              >
-                Cancel
-              </button>
-            </div>
-          </form>
+          <div className="p-2 border-b border-border max-h-64 overflow-y-auto">
+            {catalogError ? (
+              <p className="text-xs text-destructive px-2 py-2">Failed to load: {catalogError}</p>
+            ) : !catalog ? (
+              <p className="text-xs text-muted-foreground px-2 py-2">Loading catalog…</p>
+            ) : catalog.length === 0 ? (
+              <p className="text-xs text-muted-foreground px-2 py-2">No skills available</p>
+            ) : (
+              <ul className="space-y-1">
+                {catalog
+                  .filter(
+                    (entry) =>
+                      // Hide ones already installed in this workspace (org or private)
+                      !skills?.org_skills.some((s) => s.skill_id === entry.id) &&
+                      !skills?.workspace_skills.some((s) => s.skill_id === entry.id),
+                  )
+                  .map((entry) => (
+                    <li key={entry.id}>
+                      <button
+                        onClick={() => handleInstall(entry)}
+                        disabled={installing === entry.id}
+                        className="w-full text-left p-2 rounded-md hover:bg-accent/60 disabled:opacity-50"
+                      >
+                        <p className="text-[12px] font-medium truncate">{entry.name}</p>
+                        <p className="text-[10px] text-muted-foreground/70 truncate">
+                          {entry.description || `${entry.source} · ${entry.current_version}`}
+                        </p>
+                      </button>
+                    </li>
+                  ))}
+              </ul>
+            )}
+          </div>
         )}
         <div className="p-2">
           {loading && !skills ? (

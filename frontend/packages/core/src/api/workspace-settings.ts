@@ -1,5 +1,10 @@
 import { toApiError, type ApiClient } from './client'
-import type { AgentConfig, WorkspaceMCP, WorkspaceSkills } from '../types/workspace-settings'
+import type {
+  AgentConfig,
+  SkillCatalogEntry,
+  WorkspaceMCP,
+  WorkspaceSkills,
+} from '../types/workspace-settings'
 
 export async function getAgentConfig(client: ApiClient): Promise<AgentConfig> {
   const res = await client.get('/api/v1/settings/agent')
@@ -45,6 +50,14 @@ export async function installWorkspaceSkill(
 export async function deleteWorkspaceSkill(client: ApiClient, installId: string): Promise<void> {
   const res = await client.del(`/api/v1/settings/skills/${installId}`)
   if (!res.ok) throw await toApiError(res)
+}
+
+export async function listSkillCatalog(client: ApiClient): Promise<SkillCatalogEntry[]> {
+  // Backend route lives outside the /settings/ prefix; uses workspace scoping
+  // through ApiClient.setWorkspaceId rewrite of /api/v1/skills/* paths.
+  const res = await client.get('/api/v1/skills?scope=catalog')
+  if (!res.ok) throw await toApiError(res)
+  return (await res.json()) as SkillCatalogEntry[]
 }
 
 export async function listWorkspaceMCP(client: ApiClient): Promise<WorkspaceMCP> {

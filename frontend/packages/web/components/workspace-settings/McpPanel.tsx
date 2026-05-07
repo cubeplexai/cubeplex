@@ -1,5 +1,6 @@
 'use client'
 
+import Link from 'next/link'
 import { useCallback, useEffect, useState } from 'react'
 import { createApiClient, useWorkspaceSettingsStore } from '@cubebox/core'
 import type { MCPServerItem } from '@cubebox/core'
@@ -15,7 +16,6 @@ export function McpPanel({ wsId }: McpPanelProps) {
   const { mcp, loading, loadAll, toggleMCP } = useWorkspaceSettingsStore()
   const [selected, setSelected] = useState<MCPServerItem | null>(null)
   const [toggling, setToggling] = useState<string | null>(null)
-  const [showAddForm, setShowAddForm] = useState(false)
 
   const client = useCallback(() => {
     const c = createApiClient('')
@@ -35,22 +35,6 @@ export function McpPanel({ wsId }: McpPanelProps) {
       await toggleMCP(client(), srv.server_id, enabled)
     } finally {
       setToggling(null)
-    }
-  }
-
-  const handleCreate = async (e: React.FormEvent<HTMLFormElement>) => {
-    e.preventDefault()
-    const fd = new FormData(e.currentTarget)
-    try {
-      await client().post('/mcp/servers', {
-        name: fd.get('name'),
-        server_url: fd.get('server_url'),
-        transport: fd.get('transport') ?? 'sse',
-      })
-      await loadAll(client())
-      setShowAddForm(false)
-    } catch {
-      // ignore for now
     }
   }
 
@@ -96,52 +80,13 @@ export function McpPanel({ wsId }: McpPanelProps) {
       <div className="w-56 shrink-0 border-r border-border overflow-y-auto">
         <div className="p-3 border-b border-border flex items-center justify-between gap-2">
           <p className="text-sm font-semibold">MCP Connectors</p>
-          <button
-            onClick={() => setShowAddForm((v) => !v)}
+          <Link
+            href={`/w/${wsId}/integrations/mcp/new`}
             className="text-[11px] text-muted-foreground hover:text-foreground shrink-0"
           >
             + Add
-          </button>
+          </Link>
         </div>
-        {showAddForm && (
-          <form className="p-2 border-b border-border space-y-2" onSubmit={handleCreate}>
-            <input
-              name="name"
-              placeholder="Name"
-              className="w-full text-xs bg-background border border-border rounded px-2 py-1"
-              required
-            />
-            <input
-              name="server_url"
-              placeholder="Server URL"
-              className="w-full text-xs bg-background border border-border rounded px-2 py-1"
-              required
-            />
-            <select
-              name="transport"
-              defaultValue="sse"
-              className="w-full text-xs bg-background border border-border rounded px-2 py-1"
-            >
-              <option value="sse">sse</option>
-              <option value="stdio">stdio</option>
-            </select>
-            <div className="flex gap-2">
-              <button
-                type="submit"
-                className="text-[11px] bg-primary text-primary-foreground rounded px-2 py-1"
-              >
-                Create
-              </button>
-              <button
-                type="button"
-                onClick={() => setShowAddForm(false)}
-                className="text-[11px] text-muted-foreground rounded px-2 py-1"
-              >
-                Cancel
-              </button>
-            </div>
-          </form>
-        )}
         <div className="p-2">
           {loading && !mcp ? (
             <p className="text-xs text-muted-foreground py-4 px-2">Loading…</p>
