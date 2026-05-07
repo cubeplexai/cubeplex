@@ -10,6 +10,7 @@ export interface MeResult {
   id: string
   email: string
   language: string
+  needs_org_setup?: boolean
 }
 
 export async function registerUser(
