@@ -378,12 +378,14 @@ def create_app(
         artifacts_router,
         attachments_router,
         conversations_router,
+        system,
         workspaces_router,
         ws_mcp,
         ws_settings,
         ws_skills,
     )
 
+    app.include_router(system.router, prefix="/api/v1")
     app.include_router(workspaces_router, prefix="/api/v1")
     app.include_router(conversations_router, prefix="/api/v1")
     app.include_router(artifacts_router, prefix="/api/v1")
