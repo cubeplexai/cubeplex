@@ -13,8 +13,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from cubebox.api.schemas.billing import CostAggregateRow, CostSummaryResponse
 from cubebox.auth.dependencies import current_active_user, resolve_current_org_id
 from cubebox.db import get_session
-from cubebox.models import Role, User
-from cubebox.repositories import BillingRepository, MembershipRepository, WorkspaceRepository
+from cubebox.models import User
+from cubebox.repositories import (
+    BillingRepository,
+    OrganizationMembershipRepository,
+    WorkspaceRepository,
+)
 
 router = APIRouter(prefix="/cost", tags=["cost"])
 
@@ -43,8 +47,8 @@ async def _require_org_admin(
 ) -> tuple[User, str]:
     """Returns (user, org_id) after verifying org-admin access."""
     org_id = await resolve_current_org_id(user, session)
-    is_admin = await MembershipRepository(session).user_has_role_in_org(
-        user_id=user.id, org_id=org_id, role=Role.ADMIN
+    is_admin = await OrganizationMembershipRepository(session).is_admin(
+        user_id=user.id, org_id=org_id
     )
     if not is_admin:
         raise HTTPException(status_code=403, detail="org admin required")

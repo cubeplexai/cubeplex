@@ -332,8 +332,9 @@ async def _ensure_test_user_membership(
     manager = UserManager(user_db)
     user = await manager.create(BaseUserCreate(email=email, password=password), safe=False)
     await mem_repo.grant(user_id=user.id, workspace_id=ws.id, role=role)
+    org_role = OrgRole.OWNER if role == Role.ADMIN else OrgRole.MEMBER
     await OrganizationMembershipRepository(session).grant(
-        user_id=user.id, org_id=org.id, role=OrgRole.OWNER
+        user_id=user.id, org_id=org.id, role=org_role
     )
     return user, ws.id, password
 
