@@ -5,14 +5,9 @@ import secrets
 import httpx
 import pytest
 
-from cubebox.config import config as _cubebox_config
+from tests.e2e.helpers import csrf_cookie_name
 
 pytestmark = pytest.mark.e2e
-
-
-def _csrf_cookie_name() -> str:
-    """Resolved CSRF cookie name; honours per-worktree env override."""
-    return str(_cubebox_config.get("auth.csrf_cookie_name", "cubebox_csrf"))
 
 
 async def _register_pending_owner(client: httpx.AsyncClient, email: str) -> None:
@@ -24,7 +19,7 @@ async def _register_pending_owner(client: httpx.AsyncClient, email: str) -> None
     assert resp.status_code == 201, resp.text
     # GET /me to seed the CSRF cookie (returns 401 but sets cookie)
     await client.get("/api/v1/auth/me")
-    csrf_name = _csrf_cookie_name()
+    csrf_name = csrf_cookie_name()
     csrf = client.cookies.get(csrf_name) or ""
     login = await client.post(
         "/api/v1/auth/login",
