@@ -288,7 +288,7 @@ async def uninstall_skill(
     user: Annotated[User, Depends(require_org_admin)],
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> None:
-    from sqlalchemy import select
+    from sqlalchemy import delete
 
     from cubebox.models import WorkspaceSkillBinding
 
@@ -298,14 +298,18 @@ async def uninstall_skill(
         raise HTTPException(status_code=404, detail="SKILL_NOT_FOUND")
     install = await OrgSkillInstallRepository(session).get(org_id, skill_id)
     if install is not None:
-        result = await session.execute(
-            select(WorkspaceSkillBinding).where(
-                WorkspaceSkillBinding.org_id == org_id,  # type: ignore[arg-type]
-                WorkspaceSkillBinding.org_skill_install_id == install.id,  # type: ignore[arg-type]
+        # Use explicit DELETE + flush to guarantee bindings are removed before
+        # the install row, otherwise the FK from workspace_skill_bindings to
+        # org_skill_installs blocks the install delete. Filtering by
+        # install_id alone (without org_id) is safe because the install_id is
+        # globally unique and each binding row inherently belongs to the same
+        # org as the install it references.
+        await session.execute(
+            delete(WorkspaceSkillBinding).where(
+                WorkspaceSkillBinding.org_skill_install_id == install.id  # type: ignore[arg-type]
             )
         )
-        for binding in result.scalars().all():
-            await session.delete(binding)
+        await session.flush()
         await session.delete(install)
         await session.commit()
 

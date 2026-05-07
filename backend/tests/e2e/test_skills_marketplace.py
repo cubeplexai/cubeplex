@@ -69,6 +69,43 @@ async def test_admin_uninstall_preinstalled_creates_tombstone(
 
 
 @pytest.mark.asyncio
+async def test_admin_uninstall_with_workspace_binding_succeeds(
+    admin_client: tuple[httpx.AsyncClient, str],
+) -> None:
+    """Org uninstall must cascade-delete WorkspaceSkillBinding rows that reference
+    the install, otherwise the FK from workspace_skill_bindings to
+    org_skill_installs blocks the DELETE and the request 500s. Once a workspace
+    member has toggled the skill via PATCH /settings/skills/{install_id} a
+    binding row exists, so this is the realistic uninstall path.
+    """
+    client, workspace_id = admin_client
+
+    list_resp = await client.get("/api/v1/admin/skills?source=preinstalled")
+    skill = next(r for r in list_resp.json() if r["name"] == "git-commit")
+    install_resp = await client.post(
+        f"/api/v1/admin/skills/{skill['id']}/install",
+        json={"version": skill["current_version"]},
+    )
+    assert install_resp.status_code == 200
+    install_id = install_resp.json()["install_id"]
+
+    # Create a workspace binding (off) — same path the settings UI uses.
+    toggle = await client.patch(
+        f"/api/v1/ws/{workspace_id}/settings/skills/{install_id}",
+        json={"enabled": False},
+    )
+    assert toggle.status_code == 200
+
+    # Now uninstall — must succeed despite the lingering binding row.
+    resp = await client.delete(f"/api/v1/admin/skills/{skill['id']}/install")
+    assert resp.status_code == 204, resp.text
+
+    list2 = await client.get("/api/v1/admin/skills")
+    git = next(r for r in list2.json() if r["name"] == "git-commit")
+    assert git["install_state"] == "uninstalled"
+
+
+@pytest.mark.asyncio
 async def test_admin_upgrade_changes_pin(
     admin_client: tuple[httpx.AsyncClient, str],
 ) -> None:
