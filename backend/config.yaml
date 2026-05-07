@@ -3,6 +3,10 @@ default:
   env: default
   debug: false
 
+  # Deployment Configuration
+  deployment:
+    mode: single_tenant
+
   # API Configuration
   api:
     host: "0.0.0.0"

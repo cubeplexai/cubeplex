@@ -325,6 +325,16 @@ def create_app(
     app.state.sandbox_factory = sandbox_factory
     app.state.redis_factory = redis_factory
 
+    # Read deployment mode from config
+    from cubebox.config import config as _cubebox_config
+
+    _mode = str(_cubebox_config.get("deployment.mode", "single_tenant")).lower()
+    if _mode not in ("single_tenant", "multi_tenant"):
+        raise RuntimeError(
+            f"Invalid deployment.mode={_mode!r}; must be 'single_tenant' or 'multi_tenant'"
+        )
+    app.state.deployment_mode = _mode
+
     # Drain state must be created before middleware registration so the
     # DrainMiddleware can capture the same instance the lifespan + signal
     # handlers will write to (add_middleware runs at construction time,

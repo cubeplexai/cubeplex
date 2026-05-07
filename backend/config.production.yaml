@@ -3,8 +3,12 @@
 dynaconf_merge: true
 production:
   env: production
-  
+
   debug: false
+
+  # Deployment Configuration
+  deployment:
+    mode: multi_tenant
   
   api:
     reload: false
