@@ -1,14 +1,14 @@
-"""AgentConfig — 1:1 with Workspace in M1.
+"""AgentConfig — 1:1 with Workspace.
 
-Field-level CRUD lives in P5; P1 only creates the table so that a
-default config can be seeded alongside the default workspace during
-migration.
+Holds the per-workspace persona prompt (and, post-M4, the model selection).
+The skill set and MCP set are *not* stored here — they live in
+WorkspaceSkillBinding and WorkspaceMCPBinding respectively, with
+workspace-private skills/MCP rows on OrgSkillInstall / MCPServer.
 """
 
 from typing import ClassVar
 
 from sqlalchemy import Column, Index, Text, UniqueConstraint
-from sqlalchemy.types import JSON
 from sqlmodel import Field
 
 from cubebox.models.mixins import CubeboxBase, OrgScopedMixin
@@ -26,5 +26,3 @@ class AgentConfig(CubeboxBase, OrgScopedMixin, table=True):
 
     system_prompt: str = Field(default="", sa_column=Column(Text, nullable=False))
     model_id: str = Field(default="", max_length=128)
-    skill_ids: list[str] | None = Field(default=None, sa_column=Column(JSON))
-    mcp_server_ids: list[str] | None = Field(default=None, sa_column=Column(JSON))
