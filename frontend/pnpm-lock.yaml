@@ -11,6 +11,9 @@ importers:
       '@eslint/eslintrc':
         specifier: ^3.2.0
         version: 3.3.5
+      '@eslint/js':
+        specifier: ^9.39.4
+        version: 9.39.4
       '@playwright/test':
         specifier: ^1.58.2
         version: 1.58.2
@@ -29,6 +32,9 @@ importers:
       eslint-config-next:
         specifier: 16.2.1
         version: 16.2.1(@typescript-eslint/parser@8.59.0(eslint@9.39.4(jiti@2.6.1))(typescript@5.9.3))(eslint@9.39.4(jiti@2.6.1))(typescript@5.9.3)
+      globals:
+        specifier: ^16.4.0
+        version: 16.4.0
       prettier:
         specifier: ^3.3.3
         version: 3.8.3

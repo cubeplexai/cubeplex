@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { Dialog as DialogPrimitive } from '@base-ui/react/dialog'
 import type { MCPServer } from '@cubebox/core'
 import { Loader2, X } from 'lucide-react'
@@ -22,12 +22,14 @@ export function MCPPromoteDialog({ server, open, onOpenChange, onConfirm }: MCPP
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  useEffect(() => {
+  const [prevOpen, setPrevOpen] = useState(open)
+  if (prevOpen !== open) {
+    setPrevOpen(open)
     if (open) {
       setShareCredential(canShareCredential)
       setError(null)
     }
-  }, [canShareCredential, open])
+  }
 
   async function handleConfirm(): Promise<void> {
     setSubmitting(true)

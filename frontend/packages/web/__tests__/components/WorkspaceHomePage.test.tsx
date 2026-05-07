@@ -40,11 +40,18 @@ vi.mock('@cubebox/core', () => {
     createApiClient: () => ({
       setWorkspaceId: storeMocks.setWorkspaceId,
     }),
-    renameConversation: storeMocks.renameConversation,
     useAttachmentStore,
     useConversationStore: Object.assign(
-      (selector?: (state: { create: typeof storeMocks.createConversation }) => unknown) => {
-        const state = { create: storeMocks.createConversation }
+      (
+        selector?: (state: {
+          create: typeof storeMocks.createConversation
+          rename: typeof storeMocks.renameConversation
+        }) => unknown,
+      ) => {
+        const state = {
+          create: storeMocks.createConversation,
+          rename: storeMocks.renameConversation,
+        }
         return selector ? selector(state) : state
       },
       { setState: storeMocks.setConversationState },
