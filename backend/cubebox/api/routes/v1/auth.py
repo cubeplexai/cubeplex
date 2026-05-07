@@ -86,8 +86,38 @@ class UserLanguageUpdate(BaseModel):
 
 
 @router.get("/me")
-async def me(user: Annotated[User, Depends(current_active_user)]) -> dict[str, str]:
-    return {"id": user.id, "email": user.email, "language": user.language}
+async def me(
+    user: Annotated[User, Depends(current_active_user)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+    request: Request,
+) -> dict[str, str | bool]:
+    from sqlalchemy import func, select
+
+    from cubebox.models import Organization, OrganizationMembership
+
+    mode = getattr(request.app.state, "deployment_mode", "single_tenant")
+    needs_setup = False
+    if mode == "single_tenant":
+        org_count = (
+            await session.execute(select(func.count()).select_from(Organization))
+        ).scalar_one()
+        if int(org_count) == 0:
+            needs_setup = True
+        else:
+            has_membership = (
+                await session.execute(
+                    select(func.count())
+                    .select_from(OrganizationMembership)
+                    .where(OrganizationMembership.user_id == user.id)  # type: ignore[arg-type]
+                )
+            ).scalar_one()
+            needs_setup = int(has_membership) == 0
+    return {
+        "id": user.id,
+        "email": user.email,
+        "language": user.language,
+        "needs_org_setup": needs_setup,
+    }
 
 
 @router.patch("/me")
@@ -95,12 +125,17 @@ async def patch_me(
     user: Annotated[User, Depends(current_active_user)],
     body: Annotated[UserLanguageUpdate, Body()],
     session: Annotated[AsyncSession, Depends(get_session)],
-) -> dict[str, str]:
+) -> dict[str, str | bool]:
     user.language = body.language
     session.add(user)
     await session.commit()
     await session.refresh(user)
-    return {"id": user.id, "email": user.email, "language": user.language}
+    return {
+        "id": user.id,
+        "email": user.email,
+        "language": user.language,
+        "needs_org_setup": False,
+    }
 
 
 # Include fastapi-users built-in auth routes for /logout. Must stay BELOW our
