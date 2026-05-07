@@ -28,8 +28,8 @@ export function SettingsNav({ wsId }: SettingsNavProps): React.ReactElement {
   const currentSub = searchParams.get('sub') ?? 'persona'
 
   return (
-    <div className="px-2 pt-3 pb-2">
-      <p className="px-2 text-[9px] font-semibold uppercase tracking-widest text-muted-foreground/50 mb-2">
+    <div className="px-2 pt-2 pb-2 border-t border-border/60 bg-muted/20">
+      <p className="px-2 pt-1 pb-1.5 text-[10px] font-medium uppercase tracking-widest text-muted-foreground/60">
         Settings
       </p>
       <nav className="space-y-0.5">
