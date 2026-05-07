@@ -1,0 +1,94 @@
+"""E2E: cubebox admin grant-admin / revoke-admin via subprocess."""
+
+import os
+import secrets
+import subprocess
+
+import pytest
+from sqlalchemy import select
+
+from cubebox.models import Organization, OrganizationMembership, OrgRole, User
+from cubebox.repositories import OrganizationMembershipRepository
+
+pytestmark = pytest.mark.e2e
+
+
+def _run_cli(args: list[str]) -> subprocess.CompletedProcess[str]:
+    env = os.environ.copy()
+    env.setdefault("ENV_FOR_DYNACONF", "test")
+    return subprocess.run(
+        ["uv", "run", "cubebox", *args],
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=os.path.join(os.path.dirname(__file__), "..", ".."),
+        check=False,
+    )
+
+
+async def test_grant_admin_promotes_member(memory_client, session_factory):
+    """Register a fresh user via API; demote to MEMBER; grant-admin should promote to ADMIN."""
+    email = f"member-{secrets.token_hex(4)}@example.com"
+    resp = await memory_client.post(
+        "/api/v1/auth/register",
+        json={"email": email, "password": "password123"},
+    )
+    assert resp.status_code == 201, resp.text
+
+    # The newly registered user is OWNER of their auto-created org.
+    # Demote to MEMBER first so grant-admin has something to promote.
+    slug: str
+    user_id: str
+    org_id: str
+    async with session_factory() as session:
+        user = (await session.execute(select(User).where(User.email == email))).scalar_one()
+        user_id = user.id
+        om = (
+            await session.execute(
+                select(OrganizationMembership).where(OrganizationMembership.user_id == user.id)
+            )
+        ).scalar_one()
+        org_id = om.org_id
+        org = (
+            await session.execute(select(Organization).where(Organization.id == om.org_id))
+        ).scalar_one()
+        slug = org.slug
+        await OrganizationMembershipRepository(session).promote(
+            user_id=user.id, org_id=org.id, role=OrgRole.MEMBER
+        )
+
+    proc = _run_cli(["admin", "grant-admin", email, "--org-slug", slug])
+    assert proc.returncode == 0, f"stdout={proc.stdout!r} stderr={proc.stderr!r}"
+    assert "Promoted" in proc.stdout
+
+    async with session_factory() as session:
+        role = await OrganizationMembershipRepository(session).get_role(
+            user_id=user_id, org_id=org_id
+        )
+        assert role is OrgRole.ADMIN
+
+
+async def test_grant_admin_refuses_to_revoke_owner(memory_client, session_factory):
+    """The default test user is owner of their fixture org; revoke-admin must refuse."""
+    from tests.e2e.conftest import DEFAULT_TEST_EMAIL
+
+    async with session_factory() as session:
+        user = (
+            await session.execute(select(User).where(User.email == DEFAULT_TEST_EMAIL))
+        ).scalar_one()
+        om = (
+            await session.execute(
+                select(OrganizationMembership).where(
+                    OrganizationMembership.user_id == user.id,
+                    OrganizationMembership.role == OrgRole.OWNER.value,
+                )
+            )
+        ).scalar_one()
+        org = (
+            await session.execute(select(Organization).where(Organization.id == om.org_id))
+        ).scalar_one()
+        slug = org.slug
+
+    proc = _run_cli(["admin", "revoke-admin", DEFAULT_TEST_EMAIL, "--org-slug", slug])
+    assert proc.returncode != 0
+    assert "owner" in (proc.stderr.lower() + proc.stdout.lower())
