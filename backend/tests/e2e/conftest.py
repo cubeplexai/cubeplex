@@ -615,3 +615,14 @@ def sample_pdf_bytes() -> bytes:
         b"0000000052 00000 n\n0000000095 00000 n\n"
         b"trailer<</Size 4/Root 1 0 R>>\nstartxref\n145\n%%EOF\n"
     )
+
+
+@pytest_asyncio.fixture
+async def session_factory() -> AsyncIterator[async_sessionmaker[AsyncSession]]:
+    """Yields async_sessionmaker for direct DB access in repo tests."""
+    test_engine = create_async_engine(_build_database_url(), poolclass=NullPool)
+    maker = async_sessionmaker(test_engine, class_=AsyncSession, expire_on_commit=False)
+    try:
+        yield maker
+    finally:
+        await test_engine.dispose()
