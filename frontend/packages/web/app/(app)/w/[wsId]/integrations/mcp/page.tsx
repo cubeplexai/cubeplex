@@ -4,10 +4,13 @@ import { useEffect, useMemo } from 'react'
 import Link from 'next/link'
 import { useParams } from 'next/navigation'
 import { createApiClient, useWorkspaceMcpStore } from '@cubebox/core'
+import { useTranslations } from 'next-intl'
+
 import { buttonVariants } from '@/components/ui/button'
 import { MCPServerList } from '@/components/mcp/MCPServerList'
 
 export default function WorkspaceMcpListPage() {
+  const t = useTranslations('mcp.wsPage')
   const { wsId } = useParams<{ wsId: string }>()
   const client = useMemo(() => {
     const next = createApiClient('')
@@ -24,40 +27,38 @@ export default function WorkspaceMcpListPage() {
     <div className="flex flex-col gap-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-col gap-1">
-          <h1 className="text-2xl font-semibold">Workspace MCP connectors</h1>
-          <p className="text-sm text-muted-foreground">
-            Manage private connectors and credentials for this workspace.
-          </p>
+          <h1 className="text-2xl font-semibold">{t('title')}</h1>
+          <p className="text-sm text-muted-foreground">{t('subtitle')}</p>
         </div>
         <Link
           href={`/w/${wsId}/integrations/mcp/new`}
           className={buttonVariants({ variant: 'default' })}
         >
-          Add server
+          {t('addServer')}
         </Link>
       </div>
 
       {error ? <p className="text-sm text-destructive">{error}</p> : null}
 
       <section className="flex flex-col gap-3">
-        <h2 className="text-base font-medium">Workspace private</h2>
+        <h2 className="text-base font-medium">{t('private')}</h2>
         <MCPServerList
           servers={owned}
           loading={loading}
           detailHrefBase={`/w/${wsId}/integrations/mcp`}
-          emptyTitle="No private MCP servers"
-          emptyDescription="Add a connector that is visible only inside this workspace."
+          emptyTitle={t('privateEmptyTitle')}
+          emptyDescription={t('privateEmptyDesc')}
         />
       </section>
 
       <section className="flex flex-col gap-3">
-        <h2 className="text-base font-medium">Shared from organization</h2>
+        <h2 className="text-base font-medium">{t('shared')}</h2>
         <MCPServerList
           servers={viaBinding}
           loading={loading}
           detailHrefBase={`/w/${wsId}/integrations/mcp`}
-          emptyTitle="No organization connectors shared here"
-          emptyDescription="Organization admins can bind org-level MCP servers to this workspace."
+          emptyTitle={t('sharedEmptyTitle')}
+          emptyDescription={t('sharedEmptyDesc')}
         />
       </section>
     </div>

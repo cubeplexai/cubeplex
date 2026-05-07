@@ -39,6 +39,7 @@ export function WorkspaceBindingsTable({
   autoBind,
 }: WorkspaceBindingsTableProps) {
   const t = useTranslations('adminSkills')
+  const tExtra = useTranslations('adminSkillsExtra')
   const {
     data: workspaces,
     isLoading: wsLoading,
@@ -175,7 +176,7 @@ export function WorkspaceBindingsTable({
                     type="button"
                     className="cursor-pointer rounded p-0.5 text-destructive hover:bg-destructive/10"
                     onClick={() => void disableWs(ws.id)}
-                    aria-label="confirm disable"
+                    aria-label={tExtra('confirmDisable')}
                   >
                     <Check className="size-3.5" />
                   </button>

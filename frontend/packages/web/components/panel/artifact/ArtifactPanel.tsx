@@ -5,6 +5,8 @@ import dynamic from 'next/dynamic'
 import { useArtifactStore, usePanelStore, createApiClient } from '@cubebox/core'
 import type { Artifact, ArtifactVersion } from '@cubebox/core'
 import { X, Download, ChevronDown } from 'lucide-react'
+import { useTranslations } from 'next-intl'
+
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { useWorkspaceContext } from '@/hooks/useWorkspaceContext'
 import { getArtifactIcon } from './artifactIcons'
@@ -29,17 +31,20 @@ function isPdf(artifact: Artifact): boolean {
   return /\.pdf$/i.test(filename)
 }
 
-function formatRelativeTime(dateStr: string): string {
-  const date = new Date(dateStr)
-  const now = new Date()
-  const diffMs = now.getTime() - date.getTime()
-  const diffMin = Math.floor(diffMs / 60000)
-  if (diffMin < 1) return 'just now'
-  if (diffMin < 60) return `${diffMin}m ago`
-  const diffHr = Math.floor(diffMin / 60)
-  if (diffHr < 24) return `${diffHr}h ago`
-  const diffDay = Math.floor(diffHr / 24)
-  return `${diffDay}d ago`
+function useFormatRelativeTime(): (dateStr: string) => string {
+  const t = useTranslations('panel.artifactPanel')
+  return (dateStr: string): string => {
+    const date = new Date(dateStr)
+    const now = new Date()
+    const diffMs = now.getTime() - date.getTime()
+    const diffMin = Math.floor(diffMs / 60000)
+    if (diffMin < 1) return t('justNow')
+    if (diffMin < 60) return t('minutesAgo', { n: diffMin })
+    const diffHr = Math.floor(diffMin / 60)
+    if (diffHr < 24) return t('hoursAgo', { n: diffHr })
+    const diffDay = Math.floor(diffHr / 24)
+    return t('daysAgo', { n: diffDay })
+  }
 }
 
 function VersionPopover({
@@ -53,6 +58,7 @@ function VersionPopover({
   selectedVersion: number | null
   onSelectVersion: (version: number | null) => void
 }) {
+  const formatRelativeTime = useFormatRelativeTime()
   const [open, setOpen] = useState(false)
   const currentVersion = selectedVersion ?? artifact.version
 
@@ -114,6 +120,7 @@ function ArtifactPanelHeader({
   onClose: () => void
   workspaceId: string
 }) {
+  const t = useTranslations('panel.artifactPanel')
   const Icon = getArtifactIcon(artifact)
   const downloadUrl = buildDownloadUrl(artifact, workspaceId, selectedVersion)
 
@@ -132,14 +139,14 @@ function ArtifactPanelHeader({
         <a
           href={downloadUrl}
           className="p-1 rounded hover:bg-muted/50 transition-colors"
-          title="Download"
+          title={t('download')}
         >
           <Download className="size-3.5 text-muted-foreground" />
         </a>
         <button
           onClick={onClose}
           className="p-1 rounded hover:bg-muted/50 transition-colors"
-          title="Close"
+          title={t('close')}
         >
           <X className="size-3.5 text-muted-foreground" />
         </button>

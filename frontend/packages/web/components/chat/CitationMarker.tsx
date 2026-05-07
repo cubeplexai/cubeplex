@@ -4,6 +4,8 @@ import { useState, useCallback, useRef, useEffect } from 'react'
 import { Globe, Calendar } from 'lucide-react'
 import { useCitationStore, usePanelStore, useMessageStore } from '@cubebox/core'
 import type { CitationData } from '@cubebox/core'
+import { useTranslations } from 'next-intl'
+
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover'
 import { getFileVisual } from '@/lib/fileIcons'
 
@@ -173,6 +175,7 @@ function FileSourceHoverContent({
   chunkIndex: number
   onOpenPanel: () => void
 }) {
+  const t = useTranslations('chatExtras')
   const { metadata, chunks } = citation
   const sortedChunks = [...chunks].sort((a, b) => a.chunk_index - b.chunk_index)
   const visual = getFileVisual({ filename: basename(metadata.path), mime_type: metadata.mime })
@@ -213,7 +216,7 @@ function FileSourceHoverContent({
         {range && <span className="rounded bg-muted px-1.5 py-0.5 font-medium">{range}</span>}
         {metadata.truncated && (
           <span className="rounded bg-amber-500/10 px-1.5 py-0.5 font-medium text-amber-700 dark:text-amber-400">
-            Truncated
+            {t('citationTruncated')}
           </span>
         )}
         <span className="ml-auto rounded bg-muted px-1.5 py-0.5 font-medium">file</span>

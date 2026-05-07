@@ -2,6 +2,7 @@
 
 import { useEffect } from 'react'
 import { X } from 'lucide-react'
+import { useTranslations } from 'next-intl'
 
 interface Props {
   src: string
@@ -10,6 +11,7 @@ interface Props {
 }
 
 export function ImageLightbox({ src, alt, onClose }: Props) {
+  const t = useTranslations('chatExtras')
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose()
@@ -22,7 +24,7 @@ export function ImageLightbox({ src, alt, onClose }: Props) {
     <div className="fixed inset-0 z-50 grid place-items-center bg-black/80 p-6" onClick={onClose}>
       <button
         type="button"
-        aria-label="Close"
+        aria-label={t('imageClose')}
         className="absolute top-4 right-4 grid size-9 place-items-center rounded-full bg-background/30 text-white hover:bg-background/50"
         onClick={onClose}
       >

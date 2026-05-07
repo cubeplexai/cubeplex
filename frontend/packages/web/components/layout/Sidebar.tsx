@@ -32,6 +32,7 @@ function formatRelativeTime(
 export function Sidebar() {
   const tSidebar = useTranslations('sidebar')
   const tTime = useTranslations('time')
+  const tShell = useTranslations('shellLayout')
   const { conversations, activeId, remove, setActive } = useConversationStore()
   const pathname = usePathname()
 
@@ -56,7 +57,7 @@ export function Sidebar() {
 
   return (
     <aside
-      aria-label="Sidebar"
+      aria-label={tShell('sidebar')}
       className="w-56 bg-card border-r border-border flex flex-col h-screen shrink-0"
     >
       {/* Brand + new chat */}
@@ -113,7 +114,7 @@ export function Sidebar() {
                   <button
                     onClick={(e) => handleDeleteClick(e, convo.id)}
                     className="opacity-0 group-hover:opacity-40 hover:!opacity-80 transition-opacity shrink-0 p-0.5"
-                    aria-label="Delete conversation"
+                    aria-label={tShell('deleteConversation')}
                   >
                     <Trash2 className="size-3" />
                   </button>
@@ -144,7 +145,7 @@ export function Sidebar() {
                 ? 'text-primary bg-primary/10'
                 : 'text-muted-foreground hover:text-foreground hover:bg-accent/60'
             }`}
-            aria-label="Workspace settings"
+            aria-label={tShell('workspaceSettings')}
           >
             <Settings className="size-4" />
           </Link>

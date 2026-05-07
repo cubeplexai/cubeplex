@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import type { FormEvent } from 'react'
 import { Loader2 } from 'lucide-react'
+import { useTranslations } from 'next-intl'
 import type {
   MCPAuthMethod,
   MCPCredentialScope,
@@ -62,27 +63,15 @@ const DEFAULT_VALUES: MCPServerFormValues = {
   sse_read_timeout: 300,
 }
 
-const scopeCopy: Record<MCPCredentialScope, { title: string; help: string }> = {
-  org: {
-    title: 'Organization shared',
-    help: 'One credential is shared by every enabled workspace in the organization.',
-  },
-  workspace: {
-    title: 'Workspace shared',
-    help: 'One credential is shared by all members of this workspace.',
-  },
-  user: {
-    title: 'Per user',
-    help: 'Each user provides their own credential before using this connector.',
-  },
-  none: {
-    title: 'Cubebox identity passthrough',
-    help: 'No API key is stored. The MCP server receives a short-lived Cubebox identity token.',
-  },
-}
-
 const adminScopes: MCPCredentialScope[] = ['org', 'user', 'none']
 const workspaceScopes: MCPCredentialScope[] = ['workspace', 'user', 'none']
+
+const scopeKey = {
+  org: { title: 'orgTitle', help: 'orgHelp' },
+  workspace: { title: 'workspaceTitle', help: 'workspaceHelp' },
+  user: { title: 'userTitle', help: 'userHelp' },
+  none: { title: 'noneTitle', help: 'noneHelp' },
+} as const satisfies Record<MCPCredentialScope, { title: string; help: string }>
 
 export function MCPServerForm({
   mode,
@@ -91,6 +80,8 @@ export function MCPServerForm({
   onTestConnection,
   onCancel,
 }: MCPServerFormProps) {
+  const t = useTranslations('mcp.form')
+  const tScope = useTranslations('mcp.scopeForm')
   const [values, setValues] = useState<MCPServerFormValues>({
     ...DEFAULT_VALUES,
     credential_scope: mode === 'admin' ? 'org' : 'workspace',
@@ -142,12 +133,12 @@ export function MCPServerForm({
     <form className="flex flex-col gap-6" onSubmit={handleSubmit}>
       <Card>
         <CardHeader>
-          <CardTitle>Basic information</CardTitle>
+          <CardTitle>{t('basicInfo')}</CardTitle>
         </CardHeader>
         <CardContent className="flex flex-col gap-4">
           <div className="flex flex-col gap-1.5">
             <label htmlFor="mcp-name" className="text-sm font-medium">
-              Name *
+              {t('nameLabel')}
             </label>
             <Input
               id="mcp-name"
@@ -159,19 +150,19 @@ export function MCPServerForm({
 
           <div className="flex flex-col gap-1.5">
             <label htmlFor="mcp-url" className="text-sm font-medium">
-              Server URL *
+              {t('serverUrlLabel')}
             </label>
             <Input
               id="mcp-url"
               required
               value={values.server_url}
-              placeholder="https://example.com/mcp or stdio command"
+              placeholder={t('serverUrlPlaceholder')}
               onChange={(event) => set('server_url', event.target.value)}
             />
           </div>
 
           <div className="flex flex-col gap-1.5">
-            <span className="text-sm font-medium">Transport</span>
+            <span className="text-sm font-medium">{t('transport')}</span>
             <Select
               value={values.transport}
               onValueChange={(value) => set('transport', value as MCPTransport)}
@@ -193,7 +184,7 @@ export function MCPServerForm({
 
       <Card>
         <CardHeader>
-          <CardTitle>Credential mode</CardTitle>
+          <CardTitle>{t('credentialMode')}</CardTitle>
         </CardHeader>
         <CardContent className="flex flex-col gap-4">
           <RadioGroup
@@ -209,20 +200,22 @@ export function MCPServerForm({
               >
                 <RadioGroupItem value={scope} id={`mcp-scope-${scope}`} />
                 <span className="flex flex-col gap-1">
-                  <span className="font-medium">{scopeCopy[scope].title}</span>
-                  <span className="text-sm text-muted-foreground">{scopeCopy[scope].help}</span>
+                  <span className="font-medium">{tScope(scopeKey[scope].title)}</span>
+                  <span className="text-sm text-muted-foreground">
+                    {tScope(scopeKey[scope].help)}
+                  </span>
                 </span>
               </label>
             ))}
             <label
               htmlFor="mcp-scope-oauth"
               className="flex cursor-not-allowed items-start gap-3 rounded-lg border p-4 opacity-60"
-              title="Coming soon"
+              title={t('comingSoonTooltip')}
             >
               <RadioGroupItem value="oauth-disabled" disabled id="mcp-scope-oauth" />
               <span className="flex flex-col gap-1">
-                <span className="font-medium">OAuth</span>
-                <span className="text-sm text-muted-foreground">Coming soon.</span>
+                <span className="font-medium">{t('oauth')}</span>
+                <span className="text-sm text-muted-foreground">{t('oauthComingSoon')}</span>
               </span>
             </label>
           </RadioGroup>
@@ -230,14 +223,14 @@ export function MCPServerForm({
           {requiresStoredSecret ? (
             <div className="flex flex-col gap-3">
               <MCPSecretInput
-                label="API key / token"
+                label={t('apiKeyLabel')}
                 hasValue={false}
                 required
                 onChange={(token) => set('credential_plaintext', token)}
               />
               <div className="flex flex-col gap-1.5">
                 <label htmlFor="mcp-credential-name" className="text-sm font-medium">
-                  Credential display name
+                  {t('credentialDisplayName')}
                 </label>
                 <Input
                   id="mcp-credential-name"
@@ -254,14 +247,15 @@ export function MCPServerForm({
       {testResult ? (
         <Alert variant={testResult.success ? 'default' : 'destructive'}>
           <AlertTitle>
-            {testResult.success ? 'Connection succeeded' : 'Connection failed'}
+            {testResult.success ? t('connectionSucceeded') : t('connectionFailed')}
           </AlertTitle>
           <AlertDescription>
             {testResult.success
-              ? `Discovered ${testResult.tools?.length ?? 0} tool(s): ${
-                  testResult.tools?.map((tool) => tool.name).join(', ') || 'none'
-                }`
-              : testResult.error || 'Unknown error'}
+              ? t('discovered', {
+                  count: testResult.tools?.length ?? 0,
+                  names: testResult.tools?.map((tool) => tool.name).join(', ') || t('noToolsName'),
+                })
+              : testResult.error || t('unknownError')}
           </AlertDescription>
         </Alert>
       ) : null}
@@ -274,15 +268,15 @@ export function MCPServerForm({
           onClick={handleTestConnection}
         >
           {testing ? <Loader2 data-icon="inline-start" className="animate-spin" /> : null}
-          Test connection
+          {t('testConnection')}
         </Button>
         <div className="flex items-center gap-2">
           <Button type="button" variant="ghost" onClick={onCancel}>
-            Cancel
+            {t('cancel')}
           </Button>
           <Button type="submit" disabled={submitting}>
             {submitting ? <Loader2 data-icon="inline-start" className="animate-spin" /> : null}
-            Save
+            {t('save')}
           </Button>
         </div>
       </div>

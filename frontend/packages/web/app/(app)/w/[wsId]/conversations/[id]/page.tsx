@@ -7,6 +7,8 @@ import {
   useConversationStore,
   usePanelStore,
 } from '@cubebox/core'
+import { useTranslations } from 'next-intl'
+
 import { AppShell } from '@/components/layout/AppShell'
 import { MessageList } from '@/components/chat/MessageList'
 import { ArtifactGallery } from '@/components/chat/ArtifactGallery'
@@ -14,6 +16,7 @@ import { InputBar } from '@/components/layout/InputBar'
 import { ErrorState } from '@/components/shared/ErrorState'
 
 export default function ChatPage({ params }: { params: Promise<{ wsId: string; id: string }> }) {
+  const t = useTranslations('conversationPage')
   const { wsId, id: conversationId } = use(params)
   const setActive = useConversationStore((s) => s.setActive)
   const conversations = useConversationStore((s) => s.conversations)
@@ -42,20 +45,20 @@ export default function ChatPage({ params }: { params: Promise<{ wsId: string; i
   if (status === 'notfound') {
     return (
       <ErrorState
-        title="Conversation not found"
-        description="It may have been deleted, or it belongs to a different workspace."
+        title={t('notFoundTitle')}
+        description={t('notFoundBody')}
         backHref={`/w/${wsId}`}
-        backLabel="Back to workspace"
+        backLabel={t('notFoundBack')}
       />
     )
   }
   if (status === 'forbidden') {
     return (
       <ErrorState
-        title="No access"
-        description="You are not a member of this workspace."
+        title={t('noAccessTitle')}
+        description={t('noAccessBody')}
         backHref="/workspaces"
-        backLabel="Choose a workspace"
+        backLabel={t('noAccessBack')}
       />
     )
   }

@@ -4,6 +4,8 @@ import { useEffect, useState } from 'react'
 import type { ApiClient, WorkspaceBinding } from '@cubebox/core'
 import { adminGetBindings, adminPutBindings } from '@cubebox/core'
 import { Loader2 } from 'lucide-react'
+import { useTranslations } from 'next-intl'
+
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import {
@@ -40,6 +42,7 @@ function bindingsToMap(bindings: WorkspaceBinding[]): Record<string, boolean> {
 }
 
 export function MCPBindingGrid({ client, serverId, workspaces }: MCPBindingGridProps) {
+  const t = useTranslations('mcp.bindings')
   const [bindings, setBindings] = useState<Record<string, boolean>>({})
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -105,22 +108,20 @@ export function MCPBindingGrid({ client, serverId, workspaces }: MCPBindingGridP
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Workspace bindings</CardTitle>
-        <CardDescription>
-          Enable this organization MCP server for specific workspaces.
-        </CardDescription>
+        <CardTitle>{t('title')}</CardTitle>
+        <CardDescription>{t('description')}</CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-4">
         {error && (
           <Alert variant="destructive">
-            <AlertTitle>Binding update failed</AlertTitle>
+            <AlertTitle>{t('updateFailed')}</AlertTitle>
             <AlertDescription>{error}</AlertDescription>
           </Alert>
         )}
 
         <div className="flex flex-wrap items-center justify-between gap-2">
           <p className="text-sm text-muted-foreground">
-            {enabledCount} of {workspaces.length} workspaces enabled
+            {t('summary', { enabled: enabledCount, total: workspaces.length })}
           </p>
           <div className="flex items-center gap-2">
             <Button
@@ -130,7 +131,7 @@ export function MCPBindingGrid({ client, serverId, workspaces }: MCPBindingGridP
               disabled={loading || saving || workspaces.length === 0}
               onClick={() => setAll(true)}
             >
-              Enable all
+              {t('enableAll')}
             </Button>
             <Button
               type="button"
@@ -139,7 +140,7 @@ export function MCPBindingGrid({ client, serverId, workspaces }: MCPBindingGridP
               disabled={loading || saving || workspaces.length === 0}
               onClick={() => setAll(false)}
             >
-              Disable all
+              {t('disableAll')}
             </Button>
           </div>
         </div>
@@ -148,15 +149,15 @@ export function MCPBindingGrid({ client, serverId, workspaces }: MCPBindingGridP
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Workspace</TableHead>
-                <TableHead className="w-[120px] text-right">Enabled</TableHead>
+                <TableHead>{t('workspace')}</TableHead>
+                <TableHead className="w-[120px] text-right">{t('enabled')}</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {workspaces.length === 0 ? (
                 <TableRow>
                   <TableCell colSpan={2} className="text-muted-foreground">
-                    No workspaces available.
+                    {t('noWorkspaces')}
                   </TableCell>
                 </TableRow>
               ) : (
@@ -170,7 +171,7 @@ export function MCPBindingGrid({ client, serverId, workspaces }: MCPBindingGridP
                     </TableCell>
                     <TableCell className="text-right">
                       <Switch
-                        aria-label={`Toggle ${workspace.name}`}
+                        aria-label={t('toggleAria', { name: workspace.name })}
                         checked={bindings[workspace.id] ?? false}
                         disabled={loading || saving}
                         onCheckedChange={(checked) => toggleWorkspace(workspace.id, checked)}
@@ -190,7 +191,7 @@ export function MCPBindingGrid({ client, serverId, workspaces }: MCPBindingGridP
           onClick={() => void saveBindings()}
         >
           {saving && <Loader2 data-icon="inline-start" className="animate-spin" />}
-          Save bindings
+          {t('save')}
         </Button>
       </CardFooter>
     </Card>

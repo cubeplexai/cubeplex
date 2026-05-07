@@ -1,6 +1,7 @@
 'use client'
 
 import type { MCPToolEntry } from '@cubebox/core'
+import { useTranslations } from 'next-intl'
 
 import {
   Accordion,
@@ -10,12 +11,9 @@ import {
 } from '@/components/ui/accordion'
 
 export function MCPToolsTable({ tools }: { tools: MCPToolEntry[] }) {
+  const t = useTranslations('mcp.tools')
   if (tools.length === 0) {
-    return (
-      <p className="text-sm text-muted-foreground">
-        No tools discovered yet. Refresh tools after the MCP server is reachable.
-      </p>
-    )
+    return <p className="text-sm text-muted-foreground">{t('empty')}</p>
   }
 
   return (

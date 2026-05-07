@@ -77,6 +77,7 @@ function ArtifactGalleryItem({
   artifact: Artifact
   onPreview: () => void
 }) {
+  const tExtras = useTranslations('chatExtras')
   const Icon = getArtifactIcon(artifact)
   const { workspaceId } = useWorkspaceContext()
   const downloadUrl = workspaceId ? buildDownloadUrl(artifact, workspaceId) : '#'
@@ -100,7 +101,7 @@ function ArtifactGalleryItem({
             onPreview()
           }}
           className="p-1 rounded hover:bg-muted transition-colors"
-          title="Preview"
+          title={tExtras('preview')}
         >
           <Eye className="size-3 text-muted-foreground" />
         </button>
@@ -108,7 +109,7 @@ function ArtifactGalleryItem({
           href={downloadUrl}
           onClick={(e) => e.stopPropagation()}
           className="p-1 rounded hover:bg-muted transition-colors"
-          title="Download"
+          title={tExtras('download')}
         >
           <Download className="size-3 text-muted-foreground" />
         </a>

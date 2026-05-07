@@ -2,6 +2,8 @@
 
 import { Plus, Search } from 'lucide-react'
 import type { SkillSource } from '@cubebox/core'
+import { useTranslations } from 'next-intl'
+
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { cn } from '@/lib/utils'
@@ -52,26 +54,27 @@ function PillGroup<T extends string>({
   )
 }
 
-const SOURCE_OPTIONS: { value: SkillSource | 'all'; label: string }[] = [
-  { value: 'all', label: 'All sources' },
-  { value: 'preinstalled', label: 'Preinstalled' },
-  { value: 'uploaded', label: 'Uploaded' },
-]
-
-const STATE_OPTIONS: { value: 'all' | 'enabled' | 'disabled' | 'available'; label: string }[] = [
-  { value: 'all', label: 'All' },
-  { value: 'enabled', label: 'Enabled' },
-  { value: 'disabled', label: 'Disabled' },
-  { value: 'available', label: 'Available' },
-]
-
 export function WorkspaceSkillsToolbar({
   filters,
   onFiltersChange,
   onAddClick,
 }: WorkspaceSkillsToolbarProps) {
+  const t = useTranslations('wsSettings.skillsToolbar')
   const sourceValue: SkillSource | 'all' = filters.source ?? 'all'
   const stateValue = filters.state ?? 'all'
+
+  const sourceOptions: { value: SkillSource | 'all'; label: string }[] = [
+    { value: 'all', label: t('sourceAll') },
+    { value: 'preinstalled', label: t('sourcePreinstalled') },
+    { value: 'uploaded', label: t('sourceUploaded') },
+  ]
+
+  const stateOptions: { value: 'all' | 'enabled' | 'disabled' | 'available'; label: string }[] = [
+    { value: 'all', label: t('stateAll') },
+    { value: 'enabled', label: t('stateEnabled') },
+    { value: 'disabled', label: t('stateDisabled') },
+    { value: 'available', label: t('stateAvailable') },
+  ]
 
   return (
     <div className="flex flex-wrap items-center gap-2 border-b border-border/70 px-4 py-3">
@@ -79,17 +82,17 @@ export function WorkspaceSkillsToolbar({
         <Search className="pointer-events-none absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground/70" />
         <Input
           type="search"
-          placeholder="Search by name or description"
+          placeholder={t('searchPlaceholder')}
           value={filters.q ?? ''}
           onChange={(e) => onFiltersChange({ ...filters, q: e.target.value || undefined })}
           className="pl-7"
-          aria-label="Search skills"
+          aria-label={t('searchAria')}
         />
       </div>
 
       <PillGroup
-        ariaLabel="Filter by source"
-        options={SOURCE_OPTIONS}
+        ariaLabel={t('filterSourceAria')}
+        options={sourceOptions}
         value={sourceValue}
         onChange={(next) =>
           onFiltersChange({ ...filters, source: next === 'all' ? undefined : next })
@@ -97,15 +100,15 @@ export function WorkspaceSkillsToolbar({
       />
 
       <PillGroup
-        ariaLabel="Filter by state"
-        options={STATE_OPTIONS}
+        ariaLabel={t('filterStateAria')}
+        options={stateOptions}
         value={stateValue}
         onChange={(next) => onFiltersChange({ ...filters, state: next })}
       />
 
       <Button size="sm" onClick={onAddClick} className="ml-auto">
         <Plus className="size-3.5" />
-        Add skill
+        {t('addSkill')}
       </Button>
     </div>
   )

@@ -75,6 +75,7 @@ export function ProviderDetail({
   onTestModel,
 }: ProviderDetailProps) {
   const t = useTranslations('adminModels')
+  const tExtra = useTranslations('adminModelsExtra')
   const [editOpen, setEditOpen] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [deleting, setDeleting] = useState(false)
@@ -203,7 +204,7 @@ export function ProviderDetail({
                 className="rounded p-0.5 text-destructive hover:bg-destructive/20"
                 disabled={deleting}
                 onClick={() => void handleDelete()}
-                aria-label="confirm delete provider"
+                aria-label={tExtra('deleteProviderConfirm')}
                 data-testid="provider-delete-confirm"
               >
                 <Check className="size-3.5" />
@@ -212,7 +213,7 @@ export function ProviderDetail({
                 type="button"
                 className="rounded p-0.5 text-muted-foreground hover:bg-muted"
                 onClick={() => setConfirmDelete(false)}
-                aria-label="cancel delete provider"
+                aria-label={tExtra('deleteProviderCancel')}
               >
                 <X className="size-3.5" />
               </button>

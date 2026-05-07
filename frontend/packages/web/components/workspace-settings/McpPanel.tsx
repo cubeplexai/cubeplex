@@ -5,6 +5,8 @@ import { useCallback, useEffect, useState } from 'react'
 import { CheckCircle2, Globe, Plug, Plus } from 'lucide-react'
 import { createApiClient, useWorkspaceSettingsStore } from '@cubebox/core'
 import type { MCPServerItem } from '@cubebox/core'
+import { useTranslations } from 'next-intl'
+
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Switch } from '@/components/ui/switch'
@@ -27,6 +29,7 @@ function McpItemCard({
   onClick: () => void
   onToggle: (enabled: boolean) => void
 }) {
+  const t = useTranslations('mcp.wsPanel')
   const SourceIcon = srv.scope === 'workspace' ? Plug : Globe
   return (
     <button
@@ -51,7 +54,7 @@ function McpItemCard({
         {srv.enabled && (
           <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-medium text-emerald-600 dark:text-emerald-400">
             <CheckCircle2 className="size-3" />
-            on
+            {t('onBadge')}
           </span>
         )}
         <Switch
@@ -68,7 +71,7 @@ function McpItemCard({
           {srv.transport}
         </Badge>
         <Badge variant="outline" className="px-1.5 text-[10px]">
-          {srv.scope === 'workspace' ? 'workspace' : 'org'}
+          {srv.scope === 'workspace' ? t('workspaceLabel') : t('orgLabel')}
         </Badge>
       </div>
     </button>
@@ -76,6 +79,7 @@ function McpItemCard({
 }
 
 export function McpPanel({ wsId }: McpPanelProps) {
+  const t = useTranslations('mcp.wsPanel')
   const { mcp, loading, loadAll, toggleMCP } = useWorkspaceSettingsStore()
   const [selected, setSelected] = useState<MCPServerItem | null>(null)
   const [toggling, setToggling] = useState<string | null>(null)
@@ -110,39 +114,37 @@ export function McpPanel({ wsId }: McpPanelProps) {
     <div className="flex h-full flex-1 flex-col overflow-hidden">
       <header className="flex items-center justify-between gap-2 border-b border-border/70 px-6 py-4">
         <div>
-          <h2 className="text-lg font-semibold tracking-tight">MCP Connectors</h2>
+          <h2 className="text-lg font-semibold tracking-tight">{t('title')}</h2>
           <p className="mt-0.5 text-xs text-muted-foreground">
-            {enabledCount} of {allServers.length} enabled in this workspace
+            {t('summary', { enabled: enabledCount, total: allServers.length })}
           </p>
         </div>
         <Link href={`/w/${wsId}/integrations/mcp/new`}>
           <Button size="sm">
             <Plus className="size-3.5" />
-            Add connector
+            {t('addConnector')}
           </Button>
         </Link>
       </header>
 
       <div className="flex flex-1 overflow-hidden">
         <aside
-          aria-label="mcp-list"
+          aria-label={t('listAria')}
           className="w-[320px] shrink-0 overflow-y-auto border-r border-border/70 bg-card/20"
         >
           {loading && !mcp ? (
-            <p className="px-4 py-6 text-center text-xs text-muted-foreground">Loading…</p>
+            <p className="px-4 py-6 text-center text-xs text-muted-foreground">{t('loading')}</p>
           ) : allServers.length === 0 ? (
             <div className="flex h-full flex-col items-center justify-center gap-1 px-6 text-center">
-              <p className="text-sm text-muted-foreground">No MCP connectors yet</p>
-              <p className="text-xs text-muted-foreground/70">
-                Click &ldquo;Add connector&rdquo; to register one.
-              </p>
+              <p className="text-sm text-muted-foreground">{t('empty')}</p>
+              <p className="text-xs text-muted-foreground/70">{t('emptyHint')}</p>
             </div>
           ) : (
             <div className="flex flex-col gap-3 p-3">
               {orgServers.length > 0 && (
                 <section className="flex flex-col gap-1.5">
                   <p className="px-1 text-[10px] font-medium uppercase tracking-widest text-muted-foreground/60">
-                    Org-wide
+                    {t('orgWide')}
                   </p>
                   <ul className="flex flex-col gap-1.5">
                     {orgServers.map((srv) => (
@@ -162,7 +164,7 @@ export function McpPanel({ wsId }: McpPanelProps) {
               {workspaceServers.length > 0 && (
                 <section className="flex flex-col gap-1.5">
                   <p className="px-1 text-[10px] font-medium uppercase tracking-widest text-muted-foreground/60">
-                    Workspace-private
+                    {t('workspacePrivate')}
                   </p>
                   <ul className="flex flex-col gap-1.5">
                     {workspaceServers.map((srv) => (
@@ -191,7 +193,7 @@ export function McpPanel({ wsId }: McpPanelProps) {
                   <h3 className="text-xl font-semibold tracking-tight">{selected.name}</h3>
                   <Badge variant="outline">{selected.transport}</Badge>
                   <Badge variant={selected.scope === 'workspace' ? 'secondary' : 'default'}>
-                    {selected.scope === 'workspace' ? 'workspace-private' : 'org-wide'}
+                    {selected.scope === 'workspace' ? t('workspaceLabel') : t('orgLabel')}
                   </Badge>
                   <Badge
                     variant="outline"
@@ -201,14 +203,14 @@ export function McpPanel({ wsId }: McpPanelProps) {
                         : 'text-muted-foreground',
                     )}
                   >
-                    {selected.enabled ? 'enabled' : 'disabled'}
+                    {selected.enabled ? t('enabledLabel') : t('disabledLabel')}
                   </Badge>
                   {selected.scope === 'workspace' && (
                     <Link
                       href={`/w/${wsId}/integrations/mcp/${selected.server_id}`}
                       className="ml-auto text-xs text-primary hover:underline"
                     >
-                      Manage →
+                      {t('manage')}
                     </Link>
                   )}
                 </div>
@@ -216,20 +218,20 @@ export function McpPanel({ wsId }: McpPanelProps) {
 
               <div className="rounded-lg border border-border/70 bg-card/40 p-4">
                 <dl className="grid grid-cols-[140px_1fr] gap-y-2 text-sm">
-                  <dt className="text-muted-foreground">Server URL</dt>
+                  <dt className="text-muted-foreground">{t('serverUrl')}</dt>
                   <dd className="break-all font-mono text-xs">{selected.server_url}</dd>
-                  <dt className="text-muted-foreground">Transport</dt>
+                  <dt className="text-muted-foreground">{t('transport')}</dt>
                   <dd>{selected.transport}</dd>
-                  <dt className="text-muted-foreground">Scope</dt>
+                  <dt className="text-muted-foreground">{t('scope')}</dt>
                   <dd>{selected.scope}</dd>
-                  <dt className="text-muted-foreground">Enabled</dt>
-                  <dd>{selected.enabled ? 'Yes' : 'No'}</dd>
+                  <dt className="text-muted-foreground">{t('enabled')}</dt>
+                  <dd>{selected.enabled ? t('yes') : t('no')}</dd>
                 </dl>
               </div>
             </div>
           ) : (
             <div className="flex flex-1 items-center justify-center p-8 text-sm text-muted-foreground">
-              Select a connector to view details
+              {t('selectConnector')}
             </div>
           )}
         </section>

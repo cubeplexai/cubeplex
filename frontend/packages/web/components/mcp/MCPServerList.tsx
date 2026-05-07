@@ -3,6 +3,7 @@
 import Link from 'next/link'
 import { CircleDot, Plug } from 'lucide-react'
 import type { MCPServer } from '@cubebox/core'
+import { useTranslations } from 'next-intl'
 
 import { buttonVariants } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
@@ -33,12 +34,11 @@ export function MCPServerList({
   emptyTitle,
   emptyDescription,
 }: MCPServerListProps) {
+  const t = useTranslations('mcp.list')
   if (loading) {
     return (
       <Card>
-        <CardContent className="p-6 text-sm text-muted-foreground">
-          Loading connectors...
-        </CardContent>
+        <CardContent className="p-6 text-sm text-muted-foreground">{t('loading')}</CardContent>
       </Card>
     )
   }
@@ -60,12 +60,12 @@ export function MCPServerList({
       <Table>
         <TableHeader>
           <TableRow>
-            <TableHead>Name</TableHead>
-            <TableHead>Scope</TableHead>
-            <TableHead>Transport</TableHead>
-            <TableHead>Tools</TableHead>
+            <TableHead>{t('name')}</TableHead>
+            <TableHead>{t('scope')}</TableHead>
+            <TableHead>{t('transport')}</TableHead>
+            <TableHead>{t('tools')}</TableHead>
             <TableHead>
-              <span className="sr-only">Actions</span>
+              <span className="sr-only">{t('actions')}</span>
             </TableHead>
           </TableRow>
         </TableHeader>
@@ -76,7 +76,7 @@ export function MCPServerList({
                 <span className="flex items-center gap-2">
                   <CircleDot
                     className={cn('size-3', server.authed ? 'text-primary' : 'text-destructive')}
-                    aria-label={server.authed ? 'authenticated' : 'connection error'}
+                    aria-label={server.authed ? t('authenticated') : t('connectionError')}
                   />
                   <span className="truncate">{server.name}</span>
                 </span>
@@ -98,7 +98,7 @@ export function MCPServerList({
                   href={`${detailHrefBase}/${server.id}`}
                   className={buttonVariants({ variant: 'ghost', size: 'sm' })}
                 >
-                  Details
+                  {t('details')}
                 </Link>
               </TableCell>
             </TableRow>

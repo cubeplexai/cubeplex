@@ -3,6 +3,8 @@
 import { useRef, useState } from 'react'
 import { Dialog as DialogPrimitive } from '@base-ui/react/dialog'
 import { Upload, X } from 'lucide-react'
+import { useTranslations } from 'next-intl'
+
 import { Button } from '@/components/ui/button'
 import { csrfHeaders, readApiError } from '@/lib/csrf'
 import { cn } from '@/lib/utils'
@@ -20,6 +22,7 @@ export function UploadWorkspaceSkillModal({
   onOpenChange,
   onUploaded,
 }: UploadWorkspaceSkillModalProps) {
+  const t = useTranslations('wsSettings.uploadModal')
   const inputRef = useRef<HTMLInputElement | null>(null)
   const [file, setFile] = useState<File | null>(null)
   const [busy, setBusy] = useState(false)
@@ -42,7 +45,7 @@ export function UploadWorkspaceSkillModal({
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>): Promise<void> {
     e.preventDefault()
     if (!file) {
-      setError('Select a .zip file to upload.')
+      setError(t('selectError'))
       return
     }
     setBusy(true)
@@ -59,7 +62,7 @@ export function UploadWorkspaceSkillModal({
       })
       if (!res.ok) throw new Error(await readApiError(res))
       const data = (await res.json()) as { skill_id: string; version: string }
-      setSuccess(`Installed ${data.skill_id} v${data.version} as workspace-private.`)
+      setSuccess(t('successPattern', { skill: data.skill_id, version: data.version }))
       onUploaded()
       // Auto-close after a short pause so the toast is visible.
       setTimeout(() => {
@@ -86,17 +89,17 @@ export function UploadWorkspaceSkillModal({
           <div className="flex items-start justify-between gap-3">
             <div>
               <DialogPrimitive.Title className="text-base font-semibold">
-                Upload skill (workspace-private)
+                {t('title')}
               </DialogPrimitive.Title>
               <DialogPrimitive.Description className="mt-0.5 text-xs text-muted-foreground">
-                Zip a SKILL.md plus its assets. The skill becomes installed only in this workspace.
+                {t('description')}
               </DialogPrimitive.Description>
             </div>
             <DialogPrimitive.Close
               render={
                 <button
                   type="button"
-                  aria-label="close"
+                  aria-label={t('close')}
                   className="rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
                 >
                   <X className="size-4" />
@@ -114,9 +117,9 @@ export function UploadWorkspaceSkillModal({
               )}
             >
               <Upload className="size-5 text-muted-foreground" />
-              <span className="text-sm font-medium">{file ? file.name : 'Select a .zip file'}</span>
+              <span className="text-sm font-medium">{file ? file.name : t('selectFile')}</span>
               <span className="text-[11px] text-muted-foreground">
-                {file ? `${(file.size / 1024).toFixed(1)} KB` : 'Up to 50 MB total'}
+                {file ? `${(file.size / 1024).toFixed(1)} KB` : t('filesizeHint')}
               </span>
               <input
                 ref={inputRef}
@@ -152,10 +155,10 @@ export function UploadWorkspaceSkillModal({
                 onClick={() => handleOpenChange(false)}
                 disabled={busy}
               >
-                Cancel
+                {t('cancel')}
               </Button>
               <Button type="submit" size="sm" disabled={busy || !file}>
-                {busy ? 'Uploading…' : 'Upload'}
+                {busy ? t('uploading') : t('upload')}
               </Button>
             </div>
           </form>

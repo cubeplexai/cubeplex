@@ -278,5 +278,395 @@
     "saved": "Saved",
     "saveFailed": "Save failed: {message}",
     "discard": "Discard"
+  },
+  "mcp": {
+    "scopeBadge": {
+      "org": "Org shared",
+      "workspace": "Workspace shared",
+      "user": "Per user",
+      "none": "Identity passthrough"
+    },
+    "scopeForm": {
+      "orgTitle": "Organization shared",
+      "orgHelp": "One credential is shared by every enabled workspace in the organization.",
+      "workspaceTitle": "Workspace shared",
+      "workspaceHelp": "One credential is shared by all members of this workspace.",
+      "userTitle": "Per user",
+      "userHelp": "Each user provides their own credential before using this connector.",
+      "noneTitle": "Cubebox identity passthrough",
+      "noneHelp": "No API key is stored. The MCP server receives a short-lived Cubebox identity token."
+    },
+    "list": {
+      "loading": "Loading connectors...",
+      "name": "Name",
+      "scope": "Scope",
+      "transport": "Transport",
+      "tools": "Tools",
+      "actions": "Actions",
+      "details": "Details",
+      "authenticated": "authenticated",
+      "connectionError": "connection error"
+    },
+    "form": {
+      "basicInfo": "Basic information",
+      "nameLabel": "Name *",
+      "serverUrlLabel": "Server URL *",
+      "serverUrlPlaceholder": "https://example.com/mcp or stdio command",
+      "transport": "Transport",
+      "credentialMode": "Credential mode",
+      "oauth": "OAuth",
+      "oauthComingSoon": "Coming soon.",
+      "comingSoonTooltip": "Coming soon",
+      "apiKeyLabel": "API key / token",
+      "credentialDisplayName": "Credential display name",
+      "testConnection": "Test connection",
+      "cancel": "Cancel",
+      "save": "Save",
+      "connectionSucceeded": "Connection succeeded",
+      "connectionFailed": "Connection failed",
+      "discovered": "Discovered {count} tool(s): {names}",
+      "noToolsName": "none",
+      "unknownError": "Unknown error"
+    },
+    "detail": {
+      "notDiscoveredYet": "not discovered yet",
+      "lastDiscoveredLine": "{transport} · last discovered {time}",
+      "refreshTools": "Refresh tools",
+      "shareToOrg": "Share to org",
+      "delete": "Delete",
+      "overview": "Overview",
+      "toolsTab": "Tools ({count})",
+      "workspaces": "Workspaces",
+      "serverDetails": "Server details",
+      "url": "URL",
+      "transport": "Transport",
+      "authMethod": "Auth method",
+      "credentialScope": "Credential scope",
+      "timeout": "Timeout",
+      "timeoutValue": "{timeout}s / SSE {sseTimeout}s"
+    },
+    "promote": {
+      "title": "Promote MCP server",
+      "description": "Move {name} to organization scope so admins can bind it to workspaces.",
+      "close": "Close promote dialog",
+      "failed": "Promotion failed",
+      "share": "Share credential with organization",
+      "shareHelp": "Convert the workspace credential into an organization credential and attach it to the promoted server.",
+      "without": "Promote without credential",
+      "withoutHelp": "Keep credentials workspace-local. Admins can add an organization credential later.",
+      "noCredential": "This server has no workspace credential to share. It will be promoted without an organization credential.",
+      "cancel": "Cancel",
+      "confirm": "Promote server"
+    },
+    "bindings": {
+      "title": "Workspace bindings",
+      "description": "Enable this organization MCP server for specific workspaces.",
+      "updateFailed": "Binding update failed",
+      "summary": "{enabled} of {total} workspaces enabled",
+      "enableAll": "Enable all",
+      "disableAll": "Disable all",
+      "workspace": "Workspace",
+      "enabled": "Enabled",
+      "noWorkspaces": "No workspaces available.",
+      "toggleAria": "Toggle {name}",
+      "save": "Save bindings"
+    },
+    "credential": {
+      "managedTitle": "Credential",
+      "managedBody": "This credential is managed by organization administrators.",
+      "authTitle": "Authentication",
+      "passthroughBody": "This connector uses Cubebox identity passthrough and does not store an API key.",
+      "myCredential": "My credential",
+      "workspaceCredential": "Workspace credential",
+      "loadingStatus": "Loading credential status...",
+      "save": "Save",
+      "clear": "Clear",
+      "missingUser": "Until you add a credential, this connector will not appear in your chat tools.",
+      "missingViaBinding": "This workspace needs its own credential before members can use this shared connector.",
+      "missingWorkspace": "Until a workspace credential is added, this connector will not appear for workspace members."
+    },
+    "secret": {
+      "set": "**** (set)",
+      "replace": "Replace",
+      "cancel": "Cancel",
+      "writeOnly": "The secret is write-only after saving.",
+      "apiKeyPlaceholder": "API key / token"
+    },
+    "tools": {
+      "empty": "No tools discovered yet. Refresh tools after the MCP server is reachable."
+    },
+    "wsPanel": {
+      "title": "MCP Connectors",
+      "summary": "{enabled} of {total} enabled in this workspace",
+      "addConnector": "Add connector",
+      "loading": "Loading…",
+      "empty": "No MCP connectors yet",
+      "emptyHint": "Click \"Add connector\" to register one.",
+      "orgWide": "Org-wide",
+      "workspacePrivate": "Workspace-private",
+      "workspaceLabel": "workspace-private",
+      "orgLabel": "org-wide",
+      "enabledLabel": "enabled",
+      "disabledLabel": "disabled",
+      "manage": "Manage →",
+      "serverUrl": "Server URL",
+      "transport": "Transport",
+      "scope": "Scope",
+      "enabled": "Enabled",
+      "yes": "Yes",
+      "no": "No",
+      "selectConnector": "Select a connector to view details",
+      "listAria": "MCP server list",
+      "onBadge": "on"
+    },
+    "wsPage": {
+      "title": "Workspace MCP connectors",
+      "subtitle": "Manage private connectors and credentials for this workspace.",
+      "addServer": "Add server",
+      "private": "Workspace private",
+      "privateEmptyTitle": "No private MCP servers",
+      "privateEmptyDesc": "Add a connector that is visible only inside this workspace.",
+      "shared": "Shared from organization",
+      "sharedEmptyTitle": "No organization connectors shared here",
+      "sharedEmptyDesc": "Organization admins can bind org-level MCP servers to this workspace.",
+      "addTitle": "Add MCP server",
+      "addSubtitle": "Configure a connector owned by this workspace.",
+      "loadingConnector": "Loading connector...",
+      "deleteConfirm": "Delete {name}?",
+      "scopeError": "Workspace connectors only support workspace, per-user, or passthrough scope."
+    },
+    "adminPage": {
+      "title": "MCP connectors",
+      "subtitle": "Manage organization-level MCP servers and credential scopes.",
+      "addServer": "Add server",
+      "emptyTitle": "No MCP connectors yet",
+      "emptyDesc": "Add a server to expose external MCP tools to Cubebox agents.",
+      "addTitle": "Add MCP server",
+      "addSubtitle": "Configure an organization connector and discover its MCP tools.",
+      "loadingConnector": "Loading connector...",
+      "deleteConfirm": "Delete {name}? Bindings and credentials owned by this connector will also be removed.",
+      "scopeError": "Admin connectors only support organization, per-user, or passthrough scope."
+    }
+  },
+  "wsSettings": {
+    "settingsLabel": "Settings",
+    "navWorkspace": "Workspace Settings",
+    "navPersona": "Persona",
+    "navModel": "Model",
+    "navSkills": "Skills",
+    "navMcp": "MCP Connectors",
+    "soonBadge": "soon",
+    "persona": {
+      "title": "Persona",
+      "description": "Defines the agent's persona for every conversation in this workspace. Appended after the base system prompt.",
+      "loading": "Loading…",
+      "placeholder": "e.g. You are a Python data analysis expert. Always provide runnable code examples.",
+      "charCount": "{count} / 8000 characters",
+      "reset": "Reset",
+      "save": "Save",
+      "saving": "Saving…"
+    },
+    "skillsList": {
+      "title": "Skills",
+      "subtitle": "Browse, enable, and install skills available to this workspace.",
+      "loading": "Loading…",
+      "noMatch": "No skills match these filters",
+      "noMatchHint": "Adjust the search or filter, or upload a workspace-private skill via \"Add skill\".",
+      "selectSkill": "Select a skill to view details",
+      "listAria": "Skills list"
+    },
+    "skillCard": {
+      "enabled": "Enabled",
+      "disabled": "Disabled",
+      "private": "Private",
+      "available": "Available"
+    },
+    "skillDetail": {
+      "stateEnabled": "Enabled",
+      "stateDisabled": "Disabled",
+      "statePrivate": "Workspace-private",
+      "stateAvailable": "Available",
+      "sourcePreinstalled": "Preinstalled",
+      "sourceUploaded": "Org-uploaded",
+      "overview": "Overview",
+      "loadingContent": "Loading content…",
+      "fetchFailed": "fetch failed: {status}",
+      "actionDisable": "Disable in workspace",
+      "actionDisabling": "Disabling…",
+      "actionEnable": "Enable in workspace",
+      "actionEnabling": "Enabling…",
+      "actionRemove": "Remove from workspace",
+      "actionRemoving": "Removing…",
+      "actionInstall": "Install in workspace",
+      "actionInstalling": "Installing…"
+    },
+    "skillsToolbar": {
+      "searchPlaceholder": "Search by name or description",
+      "searchAria": "Search skills",
+      "filterSourceAria": "Filter by source",
+      "filterStateAria": "Filter by state",
+      "sourceAll": "All sources",
+      "sourcePreinstalled": "Preinstalled",
+      "sourceUploaded": "Uploaded",
+      "stateAll": "All",
+      "stateEnabled": "Enabled",
+      "stateDisabled": "Disabled",
+      "stateAvailable": "Available",
+      "addSkill": "Add skill"
+    },
+    "uploadModal": {
+      "title": "Upload skill (workspace-private)",
+      "description": "Zip a SKILL.md plus its assets. The skill becomes installed only in this workspace.",
+      "close": "Close",
+      "selectFile": "Select a .zip file",
+      "filesizeHint": "Up to 50 MB total",
+      "selectError": "Select a .zip file to upload.",
+      "successPattern": "Installed {skill} v{version} as workspace-private.",
+      "cancel": "Cancel",
+      "upload": "Upload",
+      "uploading": "Uploading…"
+    }
+  },
+  "panel": {
+    "header": {
+      "copy": "Copy",
+      "close": "Close"
+    },
+    "skillView": {
+      "labelPrefix": "Skill:",
+      "loaded": "loaded",
+      "failed": "failed"
+    },
+    "attachment": {
+      "download": "Download",
+      "close": "Close",
+      "loading": "Loading…",
+      "loadFailed": "Failed to load: {message}",
+      "tooLarge": "File is too large for inline preview ({size} MB). Please download to view.",
+      "empty": "Empty"
+    },
+    "fileRead": {
+      "untitled": "(untitled)",
+      "chars": "{count} chars",
+      "cells": "{count} cells",
+      "code": "{count} code",
+      "md": "{count} md",
+      "rangePrefix": "Range: {range}",
+      "truncated": "Truncated",
+      "noResult": "No result.",
+      "unsupported": "Unsupported format",
+      "unchanged": "File unchanged since the previous read.",
+      "unknown": "Unknown result kind.",
+      "retryable": "(retryable)"
+    },
+    "search": {
+      "noResults": "No results",
+      "fallbackQuery": "Search",
+      "resultsCount": "{count} results"
+    },
+    "generic": {
+      "copy": "Copy",
+      "request": "Request",
+      "response": "Response"
+    },
+    "artifactPanel": {
+      "download": "Download",
+      "close": "Close",
+      "unknownType": "Unknown type",
+      "justNow": "just now",
+      "minutesAgo": "{n}m ago",
+      "hoursAgo": "{n}h ago",
+      "daysAgo": "{n}d ago"
+    },
+    "fallback": {
+      "unsupported": "This file type does not support preview. Please download to view.",
+      "download": "Download"
+    },
+    "pdf": {
+      "tableOfContents": "Table of contents",
+      "loadFailed": "Failed to load PDF"
+    }
+  },
+  "common": {
+    "loading": "Loading…",
+    "open": "Open",
+    "close": "Close",
+    "preview": "Preview",
+    "download": "Download",
+    "cancel": "Cancel",
+    "delete": "Delete"
+  },
+  "chatExtras": {
+    "imageClose": "Close",
+    "citationTruncated": "Truncated",
+    "uploadDropzone": "Drop to upload",
+    "uploadFormats": "Supports PNG/JPG/PDF/CSV/DOCX/XLSX/Markdown",
+    "preview": "Preview",
+    "download": "Download"
+  },
+  "workspaceCreate": {
+    "nameLabel": "New workspace name",
+    "namePlaceholder": "e.g. Side project",
+    "creating": "Creating…",
+    "submit": "Create workspace"
+  },
+  "workspaceList": {
+    "empty": "You have no workspaces yet.",
+    "open": "Open",
+    "rolePrefix": "Role: {role}",
+    "unknownRole": "unknown"
+  },
+  "workspacesPage": {
+    "title": "Workspaces"
+  },
+  "conversationPage": {
+    "notFoundTitle": "Conversation not found",
+    "notFoundBody": "It may have been deleted, or it belongs to a different workspace.",
+    "notFoundBack": "Back to workspace",
+    "noAccessTitle": "No access",
+    "noAccessBody": "You are not a member of this workspace.",
+    "noAccessBack": "Choose a workspace"
+  },
+  "adminLayout": {
+    "loading": "Loading…",
+    "subNavAria": "Admin sub-nav",
+    "avatarMenuAria": "Admin account menu",
+    "comingSoon": "Not available in this build",
+    "backlogRefPrefix": "Owner: {ref}"
+  },
+  "adminSandbox": {
+    "title": "Sandbox",
+    "subtitle": "Set the default image and resource limits."
+  },
+  "adminWebTools": {
+    "title": "Web Tools",
+    "subtitle": "Manage search-provider config (default plus 1–2 switchable)."
+  },
+  "adminExt": {
+    "loading": "Loading extension…",
+    "unknownTitle": "Unknown extension",
+    "unknownBodyPrefix": "Could not find an extension named"
+  },
+  "adminModelsExtra": {
+    "deleteProviderConfirm": "Confirm delete provider",
+    "deleteProviderCancel": "Cancel delete provider",
+    "deleteModelConfirm": "Confirm delete",
+    "deleteModelCancel": "Cancel delete",
+    "openaiPlaceholder": "OpenAI",
+    "modelIdPlaceholder": "GPT-4o"
+  },
+  "adminSkillsExtra": {
+    "fetchFailed": "fetch failed: {status}",
+    "skillsFetchFailed": "workspace skills fetch failed: {status}",
+    "workspace": "Workspace",
+    "confirmDisable": "Confirm disable"
+  },
+  "shellLayout": {
+    "inputBarAttach": "Attach files",
+    "sidebar": "Sidebar",
+    "deleteConversation": "Delete conversation",
+    "workspaceSettings": "Workspace settings",
+    "accountMenu": "Account menu",
+    "signOut": "Sign out"
   }
 }

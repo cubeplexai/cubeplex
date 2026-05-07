@@ -2,6 +2,8 @@
 
 import { useState } from 'react'
 import { X, Copy, Check } from 'lucide-react'
+import { useTranslations } from 'next-intl'
+
 import { getToolIcon, getParamSummary } from '@/lib/toolIcons'
 
 interface PanelHeaderProps {
@@ -12,6 +14,7 @@ interface PanelHeaderProps {
 }
 
 export function PanelHeader({ toolName, toolArgs, toolResult, onClose }: PanelHeaderProps) {
+  const t = useTranslations('panel.header')
   const [copied, setCopied] = useState(false)
   const Icon = getToolIcon(toolName)
   const summary = getParamSummary(toolName, toolArgs, 40)
@@ -52,7 +55,7 @@ export function PanelHeader({ toolName, toolArgs, toolResult, onClose }: PanelHe
           onClick={handleCopy}
           className="p-1 rounded hover:bg-muted/50
             transition-colors"
-          title="Copy"
+          title={t('copy')}
         >
           {copied ? (
             <Check className="size-3.5 text-emerald-500" />
@@ -67,7 +70,7 @@ export function PanelHeader({ toolName, toolArgs, toolResult, onClose }: PanelHe
           onClick={onClose}
           className="p-1 rounded hover:bg-muted/50
             transition-colors"
-          title="Close"
+          title={t('close')}
         >
           <X className="size-3.5 text-muted-foreground" />
         </button>

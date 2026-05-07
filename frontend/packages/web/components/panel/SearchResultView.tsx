@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react'
 import { Globe, ExternalLink, Search } from 'lucide-react'
+import { useTranslations } from 'next-intl'
 
 interface SearchResult {
   title: string
@@ -21,7 +22,11 @@ interface SearchResultViewProps {
   highlightKey?: number
 }
 
-function parseSearchData(raw: string, args?: Record<string, unknown>): SearchData | null {
+function parseSearchData(
+  raw: string,
+  args: Record<string, unknown> | undefined,
+  fallbackQuery: string,
+): SearchData | null {
   try {
     const parsed = JSON.parse(raw)
     // Direct format: { query, results: [...] }
@@ -31,7 +36,7 @@ function parseSearchData(raw: string, args?: Record<string, unknown>): SearchDat
     // Array of results
     if (Array.isArray(parsed)) {
       return {
-        query: String(args?.query ?? '') || 'Search',
+        query: String(args?.query ?? '') || fallbackQuery,
         results: parsed,
       }
     }
@@ -64,6 +69,7 @@ export function SearchResultView({
   highlightText,
   highlightKey,
 }: SearchResultViewProps) {
+  const t = useTranslations('panel.search')
   const containerRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -84,10 +90,10 @@ export function SearchResultView({
   }, [highlightText, highlightKey])
 
   if (!result) {
-    return <div className="p-6 text-sm text-muted-foreground">No results</div>
+    return <div className="p-6 text-sm text-muted-foreground">{t('noResults')}</div>
   }
 
-  const data = parseSearchData(result, args)
+  const data = parseSearchData(result, args, t('fallbackQuery'))
 
   if (!data) {
     return (
@@ -113,7 +119,7 @@ export function SearchResultView({
           <Search className="size-3.5 text-muted-foreground shrink-0" />
           <span className="font-medium text-foreground">{data.query}</span>
           <span className="text-muted-foreground ml-auto shrink-0">
-            {data.results.length} results
+            {t('resultsCount', { count: data.results.length })}
           </span>
         </div>
       </div>

@@ -417,6 +417,7 @@ function CompareTab({ skillId, versions }: { skillId: string; versions: SkillVer
 
 export function SkillDetailPanel({ skillId, onActionDone }: SkillDetailPanelProps) {
   const t = useTranslations('adminSkills')
+  const tExtra = useTranslations('adminSkillsExtra')
   const { skill, loading, error, refresh } = useAdminSkill(skillId)
 
   const contentKey =
@@ -512,7 +513,7 @@ export function SkillDetailPanel({ skillId, onActionDone }: SkillDetailPanelProp
           </TabsTrigger>
           <TabsTrigger value="workspaces">
             <Network className="size-3.5" />
-            Workspace
+            {tExtra('workspace')}
           </TabsTrigger>
           <TabsTrigger value="versions">
             <History className="size-3.5" />

@@ -1,6 +1,8 @@
 'use client'
 
 import { use } from 'react'
+import { useTranslations } from 'next-intl'
+
 import { useAdminExtensions } from '@/hooks/useAdminExtensions'
 
 interface ExtensionPageProps {
@@ -8,13 +10,14 @@ interface ExtensionPageProps {
 }
 
 export default function ExtensionPage({ params }: ExtensionPageProps) {
+  const t = useTranslations('adminExt')
   const { plugin, path } = use(params)
   const { extensions, loading } = useAdminExtensions()
 
   if (loading) {
     return (
       <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-        Loading extension…
+        {t('loading')}
       </div>
     )
   }
@@ -23,10 +26,10 @@ export default function ExtensionPage({ params }: ExtensionPageProps) {
   if (!ext) {
     return (
       <div className="max-w-2xl mx-auto mt-16 px-6">
-        <h2 className="text-2xl font-semibold tracking-tight mb-2">未知扩展</h2>
+        <h2 className="text-2xl font-semibold tracking-tight mb-2">{t('unknownTitle')}</h2>
         <p className="text-muted-foreground leading-relaxed">
-          找不到名为 <code className="rounded bg-muted px-1.5 py-0.5 text-sm">{plugin}</code> 的插件
-          —— 它可能未安装或已禁用。
+          {t('unknownBodyPrefix')}{' '}
+          <code className="rounded bg-muted px-1.5 py-0.5 text-sm">{plugin}</code>。
         </p>
       </div>
     )

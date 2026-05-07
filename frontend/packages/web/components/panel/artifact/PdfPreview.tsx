@@ -10,6 +10,8 @@ import {
   List,
   ChevronRight as Chevron,
 } from 'lucide-react'
+import { useTranslations } from 'next-intl'
+
 import { PreviewLoading } from './PreviewLoading'
 
 import 'react-pdf/dist/Page/AnnotationLayer.css'
@@ -158,6 +160,7 @@ interface PdfPreviewProps {
 }
 
 export function PdfPreview({ fileUrl }: PdfPreviewProps) {
+  const t = useTranslations('panel.pdf')
   const [loading, setLoading] = useState(true)
   const [numPages, setNumPages] = useState(0)
   const [currentPage, setCurrentPage] = useState(1)
@@ -242,7 +245,7 @@ export function PdfPreview({ fileUrl }: PdfPreviewProps) {
               onClick={() => setTocOpen((v) => !v)}
               className={`p-1 rounded transition-colors
                 ${tocOpen ? 'bg-primary/10 text-primary' : 'hover:bg-muted text-foreground'}`}
-              title="Table of contents"
+              title={t('tableOfContents')}
             >
               <List className="size-4" />
             </button>
@@ -324,7 +327,7 @@ export function PdfPreview({ fileUrl }: PdfPreviewProps) {
             file={fileUrl}
             onLoadSuccess={onDocumentLoadSuccess}
             error={
-              <div className="p-4 text-sm text-destructive text-center">Failed to load PDF</div>
+              <div className="p-4 text-sm text-destructive text-center">{t('loadFailed')}</div>
             }
           >
             <div className="flex flex-col items-center py-4 gap-4">

@@ -39,6 +39,7 @@ function NavItem({ href, label, icon: Icon, active }: NavDef & { active: boolean
 
 export function AdminSubNav() {
   const t = useTranslations('adminNav')
+  const tLayout = useTranslations('adminLayout')
   const pathname = usePathname() ?? ''
   const { extensions } = useAdminExtensions()
 
@@ -62,7 +63,7 @@ export function AdminSubNav() {
 
   return (
     <nav
-      aria-label="Admin sub-nav"
+      aria-label={tLayout('subNavAria')}
       className="w-56 border-r border-border/70 bg-card/40 flex flex-col p-2 overflow-y-auto"
     >
       <ul className="space-y-0.5">

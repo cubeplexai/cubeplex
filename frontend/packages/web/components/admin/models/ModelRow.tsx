@@ -23,6 +23,7 @@ function formatCost(cost: number): string {
 }
 
 export function ModelRow({ model, client, onEdit, onDelete, onTest }: ModelRowProps) {
+  const tExtra = useTranslations('adminModelsExtra')
   const t = useTranslations('adminModels')
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [testing, setTesting] = useState(false)
@@ -155,7 +156,7 @@ export function ModelRow({ model, client, onEdit, onDelete, onTest }: ModelRowPr
                 setConfirmOpen(false)
                 onDelete(model)
               }}
-              aria-label="confirm delete"
+              aria-label={tExtra('deleteModelConfirm')}
               data-testid={`model-row-${model.model_id}-confirm-delete`}
             >
               <Check className="size-3" />
@@ -164,7 +165,7 @@ export function ModelRow({ model, client, onEdit, onDelete, onTest }: ModelRowPr
               type="button"
               className="rounded p-0.5 text-muted-foreground hover:bg-muted"
               onClick={() => setConfirmOpen(false)}
-              aria-label="cancel delete"
+              aria-label={tExtra('deleteModelCancel')}
             >
               <X className="size-3" />
             </button>
