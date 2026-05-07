@@ -689,6 +689,7 @@ source = { editable = "." }
 dependencies = [
     { name = "aioboto3" },
     { name = "alembic" },
+    { name = "click" },
     { name = "cryptography" },
     { name = "dynaconf" },
     { name = "fastapi" },
@@ -742,6 +743,7 @@ dev = [
 requires-dist = [
     { name = "aioboto3", specifier = ">=15.5.0" },
     { name = "alembic", specifier = ">=1.18.4" },
+    { name = "click", specifier = ">=8.3.1" },
     { name = "cryptography", specifier = ">=42.0" },
     { name = "dynaconf", specifier = ">=3.2.11" },
     { name = "fastapi", specifier = ">=0.110.0" },
