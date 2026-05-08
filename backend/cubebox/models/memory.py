@@ -9,7 +9,7 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlmodel import Column, Field
 
 from cubebox.models.mixins import CubeboxBase
-from cubebox.models.public_id import PREFIX_MEMORY, generate_public_id
+from cubebox.models.public_id import PREFIX_MEMORY
 from cubebox.utils.time import utc_isoformat
 
 
@@ -53,13 +53,7 @@ class MemoryItem(CubeboxBase, table=True):
         Index("ix_memory_status", "status"),
     )
 
-    id: str = Field(
-        default_factory=lambda: generate_public_id(PREFIX_MEMORY),
-        primary_key=True,
-        max_length=20,
-    )
-
-    scope: MemoryScope = Field(index=True)
+    scope: MemoryScope = Field()
     org_id: str | None = Field(default=None, foreign_key="organizations.id", max_length=20)
     workspace_id: str | None = Field(default=None, foreign_key="workspaces.id", max_length=20)
     owner_user_id: str | None = Field(default=None, foreign_key="users.id", max_length=20)
@@ -67,7 +61,7 @@ class MemoryItem(CubeboxBase, table=True):
     type: MemoryType
     content: str
     confidence: float = Field(default=0.8, ge=0.0, le=1.0)
-    status: MemoryStatus = Field(default=MemoryStatus.ACTIVE, index=True)
+    status: MemoryStatus = Field(default=MemoryStatus.ACTIVE)
 
     source_type: MemorySourceType = Field(default=MemorySourceType.MANUAL)
     source_conversation_id: str | None = Field(default=None, max_length=20)
