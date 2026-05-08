@@ -7,16 +7,43 @@ Supports OpenAI-compatible models with reasoning content via Chat Completions AP
 import logging
 from typing import Any
 
+from langchain_core.language_models import BaseChatModel
+from langchain_core.messages import SystemMessage
 from langchain_openai import ChatOpenAI
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cubebox.config import config
 from cubebox.credentials.encryption import EncryptionBackend
+from cubebox.llm.cache_markers import ProviderKind, apply_cache_markers, detect_provider
 from cubebox.llm.config import LLMConfig, ModelConfig, ProviderConfig
 from cubebox.llm.openai_compatible import ChatOpenAICompatible
 
 logger = logging.getLogger(__name__)
+
+
+def _wrap_with_cache_markers(model: BaseChatModel, *, provider_kind: ProviderKind) -> BaseChatModel:
+    """Patch the model so every async generation pass-through inserts
+    Anthropic cache_control markers. No-op for OpenAI / unknown providers.
+    """
+    if provider_kind != "anthropic":
+        return model
+
+    original_agenerate = model._agenerate
+
+    async def patched_agenerate(
+        messages: list[Any], stop: Any = None, run_manager: Any = None, **kwargs: Any
+    ) -> Any:  # noqa: E501
+        system_msg = next((m for m in messages if isinstance(m, SystemMessage)), None)
+        body = [m for m in messages if not isinstance(m, SystemMessage)]
+        new_system, new_body = apply_cache_markers(
+            system_message=system_msg, messages=body, provider=provider_kind
+        )
+        new_messages: list[Any] = ([new_system] if new_system else []) + list(new_body)
+        return await original_agenerate(new_messages, stop=stop, run_manager=run_manager, **kwargs)
+
+    model._agenerate = patched_agenerate  # type: ignore[method-assign]
+    return model
 
 
 class LLMFactory:
@@ -434,7 +461,12 @@ class LLMFactory:
             llm._cubebox_provider = provider_name  # type: ignore[attr-defined]
             llm._cubebox_model_id = model_config.id  # type: ignore[attr-defined]
             llm._cubebox_model_cost = model_config.cost  # type: ignore[attr-defined]
-            return llm
+
+            # Memory system: insert Anthropic cache_control markers when applicable.
+            # Today this is a no-op (OpenAI auto-caches); when Anthropic is added it
+            # will activate without any caller-side changes.
+            provider_kind = detect_provider(f"{provider_name}/{model_config.id}")
+            return _wrap_with_cache_markers(llm, provider_kind=provider_kind)
 
         if provider_config.api == "anthropic":
             # TODO: Implement Anthropic support
