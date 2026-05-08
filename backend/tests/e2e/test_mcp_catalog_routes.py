@@ -13,6 +13,22 @@ Covers the public surface added in this phase:
 Tool discovery is monkeypatched to return success without hitting the
 network — the catalog connectors point at real provider URLs that we
 don't want to talk to from CI.
+
+# Why no OAuth E2E in this file (or anywhere under ``tests/e2e/``)
+#
+# OAuth flows for MCP connectors depend on a third-party authorization
+# server (Notion / GitHub / Linear / Asana / Atlassian / Sentry / Intercom
+# / Cloudflare / Slack / Google Workspace, ...). A locally-mocked AS cannot
+# faithfully reproduce real IdP DCR / token / refresh / revocation
+# semantics, so a passing E2E against a mock would not give production
+# confidence. Per spec §11.3, OAuth flow coverage is **unit-test only** —
+# see ``backend/tests/unit/mcp/test_oauth_*.py``. Production verification
+# depends on staging-environment manual testing with real provider
+# accounts; the staging test plan ships with Phase 8 docs.
+#
+# Future maintainers: do **not** add a fake-AS E2E here. If you find an
+# OAuth-shaped behavior worth nailing down, model it as a unit test
+# against the OAuth utility / token-manager modules instead.
 """
 
 from __future__ import annotations
