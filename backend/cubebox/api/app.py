@@ -116,10 +116,8 @@ async def lifespan(_app: FastAPI):  # type: ignore
         len(_reg.get_admin_panel_extensions()),
     )
 
-    # Load MCP tools into the global registry
-    from cubebox.tools import init_mcp_tools
-
-    await init_mcp_tools()
+    # MCP tools are assembled per agent run from DB-backed catalog/installs;
+    # the legacy global registry loader was removed in M2.
 
     redis_client: Redis | None = None
     run_manager = None

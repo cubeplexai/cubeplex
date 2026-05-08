@@ -12,11 +12,13 @@ def build_connection_params(
     *,
     credential_or_token: str | None,
 ) -> dict[str, Any]:
-    """Build MultiServerMCPClient params dict for one server."""
+    """Build MultiServerMCPClient params dict for one server.
+
+    Only HTTP-flavoured transports are supported; stdio was removed in M2 (the
+    server side never invokes third-party processes).
+    """
     if server.transport in _HTTP_TRANSPORTS:
         return _http_params(server, credential_or_token)
-    if server.transport == "stdio":
-        return _stdio_params(server, credential_or_token)
     raise ValueError(f"unsupported transport '{server.transport}'")
 
 
@@ -31,21 +33,4 @@ def _http_params(server: MCPServer, token: str | None) -> dict[str, Any]:
     }
     if headers:
         params["headers"] = headers
-    return params
-
-
-def _stdio_params(server: MCPServer, token: str | None) -> dict[str, Any]:
-    """Use server_url as '<command> [args...]'; token may be injected via env."""
-    command_parts = server.server_url.split()
-    if not command_parts:
-        raise ValueError("stdio server_url must contain command")
-
-    params: dict[str, Any] = {
-        "command": command_parts[0],
-        "args": command_parts[1:],
-        "transport": "stdio",
-    }
-    env_var = server.headers.get("env_var_for_token") if server.headers else None
-    if token and env_var:
-        params["env"] = {env_var: token}
     return params

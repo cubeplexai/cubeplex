@@ -21,8 +21,8 @@ from cubebox.models import Role, User
 from cubebox.repositories.mcp import (
     MCPServerRepository,
     UserMCPCredentialRepository,
-    WorkspaceMCPBindingRepository,
     WorkspaceMCPCredentialRepository,
+    WorkspaceMCPOverrideRepository,
 )
 from cubebox.services.credential import CredentialService
 from cubebox.services.mcp import MCPServerService
@@ -52,7 +52,7 @@ async def get_mcp_service(
         server_repo=MCPServerRepository(session, org_id=ctx.org_id),
         ws_cred_repo=WorkspaceMCPCredentialRepository(session, org_id=ctx.org_id),
         user_cred_repo=UserMCPCredentialRepository(session, org_id=ctx.org_id),
-        binding_repo=WorkspaceMCPBindingRepository(session, org_id=ctx.org_id),
+        override_repo=WorkspaceMCPOverrideRepository(session, org_id=ctx.org_id),
         cred_service=cred_service,
         request_context=ctx,
     )
@@ -81,7 +81,7 @@ async def get_admin_mcp_service(
         server_repo=MCPServerRepository(session, org_id=ctx.org_id),
         ws_cred_repo=WorkspaceMCPCredentialRepository(session, org_id=ctx.org_id),
         user_cred_repo=UserMCPCredentialRepository(session, org_id=ctx.org_id),
-        binding_repo=WorkspaceMCPBindingRepository(session, org_id=ctx.org_id),
+        override_repo=WorkspaceMCPOverrideRepository(session, org_id=ctx.org_id),
         cred_service=cred_service,
         request_context=ctx,
     )

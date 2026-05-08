@@ -2,7 +2,7 @@
 
 Holds the per-workspace persona prompt (and, post-M4, the model selection).
 The skill set and MCP set are *not* stored here — they live in
-WorkspaceSkillBinding and WorkspaceMCPBinding respectively, with
+WorkspaceSkillBinding and WorkspaceMCPOverride respectively, with
 workspace-private skills/MCP rows on OrgSkillInstall / MCPServer.
 """
 

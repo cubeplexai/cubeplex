@@ -1,4 +1,4 @@
-export type MCPTransport = 'streamable_http' | 'sse' | 'stdio'
+export type MCPTransport = 'streamable_http' | 'sse'
 export type MCPAuthMethod = 'static' | 'oauth' | 'none'
 export type MCPCredentialScope = 'org' | 'workspace' | 'user' | 'none'
 

@@ -311,7 +311,7 @@
       "basicInfo": "Basic information",
       "nameLabel": "Name *",
       "serverUrlLabel": "Server URL *",
-      "serverUrlPlaceholder": "https://example.com/mcp or stdio command",
+      "serverUrlPlaceholder": "https://example.com/mcp",
       "transport": "Transport",
       "credentialMode": "Credential mode",
       "oauth": "OAuth",

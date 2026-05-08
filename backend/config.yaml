@@ -134,37 +134,9 @@ default:
     short_term_enabled: true
     long_term_enabled: false
 
-  # MCP Configuration
-  mcp:
-    enabled: false
-    servers: {}
-    # Example with citation support:
-    # servers:
-    #   web-tools:
-    #     transport: streamable_http
-    #     url: "http://localhost:3001/mcp"
-    #     tools:
-    #       - name: web_search
-    #         content_type: text
-    #         citation:
-    #           source_type: web
-    #           content_field: "results"
-    #           mapping:
-    #             url: "link"
-    #             title: "title"
-    #             domain: "domain"
-    #             snippet: "snippet"
-    #             published_at: "date"
-    #       - name: web_fetch
-    #         content_type: text
-    #         citation:
-    #           source_type: web
-    #           content_field: null
-    #           mapping:
-    #             snippet: "content"
-    #           args_mapping:
-    #             url: "url"
-    #             title: "title"
+  # MCP connectors are managed via the DB-backed catalog (mcp_catalog_connectors)
+  # plus per-org/per-workspace installs (mcp_servers). The legacy
+  # `mcp.servers` config block was removed in M2.
 
   langsmith:
     enabled: true

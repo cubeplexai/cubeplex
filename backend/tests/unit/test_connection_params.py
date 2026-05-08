@@ -43,17 +43,11 @@ def test_sse_with_static_token() -> None:
     assert params["headers"]["Authorization"] == "Bearer tok"
 
 
-def test_stdio_credential_passed_via_env() -> None:
-    server = _server(
-        transport="stdio",
-        server_url="mcp-server-cli --foo",
-        headers={"env_var_for_token": "GITHUB_TOKEN"},
-    )
+def test_stdio_transport_rejected() -> None:
+    server = _server(transport="stdio")
 
-    params = build_connection_params(server, credential_or_token="ghp_xxx")
-
-    assert params["transport"] == "stdio"
-    assert params["env"]["GITHUB_TOKEN"] == "ghp_xxx"
+    with pytest.raises(ValueError, match="unsupported transport"):
+        build_connection_params(server, credential_or_token="x")
 
 
 def test_none_scope_no_auth_header() -> None:

@@ -78,16 +78,17 @@ async def test_other_workspace_member_cannot_edit_owned_server(
     assert resp.status_code in (403, 404)
 
 
-async def test_list_returns_owned_and_via_binding(
+async def test_list_returns_owned_and_inherited(
     admin_client: tuple[httpx.AsyncClient, str],
 ) -> None:
+    """Org-wide installs are inherited by every workspace by default."""
     client, workspace_id = admin_client
 
     admin_resp = await client.post(
         "/api/v1/admin/mcp/servers",
         json={
-            "name": "org-wide-bound-mcp",
-            "server_url": "http://127.0.0.1:9/org-wide-bound",
+            "name": "org-wide-inherited-mcp",
+            "server_url": "http://127.0.0.1:9/org-wide-inherited",
             "transport": "streamable_http",
             "auth_method": "none",
             "credential_scope": "none",
@@ -98,14 +99,8 @@ async def test_list_returns_owned_and_via_binding(
     assert admin_resp.status_code == 201, admin_resp.text
     server_id = admin_resp.json()["id"]
 
-    bind_resp = await client.put(
-        f"/api/v1/admin/mcp/servers/{server_id}/bindings",
-        json={"bindings": [{"workspace_id": workspace_id, "enabled": True}]},
-    )
-    assert bind_resp.status_code == 200, bind_resp.text
-
     list_resp = await client.get(f"/api/v1/ws/{workspace_id}/mcp/servers")
     assert list_resp.status_code == 200
     body = list_resp.json()
-    assert any(server["id"] == server_id for server in body["via_binding"])
+    assert any(server["id"] == server_id for server in body["inherited"])
     assert all(server["id"] != server_id for server in body["owned"])

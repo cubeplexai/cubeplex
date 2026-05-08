@@ -26,7 +26,7 @@ from cubebox.auth.dependencies import require_member
 from cubebox.config import config as _config
 from cubebox.db import get_session
 from cubebox.models.agent_config import AgentConfig
-from cubebox.repositories.mcp import MCPServerRepository, WorkspaceMCPBindingRepository
+from cubebox.repositories.mcp import MCPServerRepository, WorkspaceMCPOverrideRepository
 from cubebox.repositories.organization import OrganizationRepository
 from cubebox.repositories.skill import (
     OrgSkillInstallRepository,
@@ -267,17 +267,18 @@ async def list_workspace_mcp(
 ) -> WorkspaceMCPOut:
     server_repo = MCPServerRepository(session, org_id=ctx.org_id)
 
-    org_rows = await server_repo.list_org_wide_with_workspace_binding(ctx.workspace_id)
+    org_rows = await server_repo.list_org_wide_with_workspace_override(ctx.workspace_id)
     org_servers = [
         MCPServerItem(
             server_id=srv.id,
             name=srv.name,
             server_url=srv.server_url,
             transport=srv.transport,
-            enabled=binding.enabled if binding is not None else False,
+            # Inherited by default; explicit override row may turn it off.
+            enabled=override.enabled if override is not None else True,
             scope="org",
         )
-        for srv, binding in org_rows
+        for srv, override in org_rows
     ]
 
     workspace_servers = [
@@ -307,11 +308,19 @@ async def toggle_mcp_binding(
     if srv is None or srv.owner_workspace_id is not None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="org MCP server not found")
 
-    binding_repo = WorkspaceMCPBindingRepository(session, org_id=ctx.org_id)
-    await binding_repo.upsert_binding(
-        workspace_id=ctx.workspace_id,
-        mcp_server_id=server_id,
-        enabled=body.enabled,
-        created_by_user_id=ctx.user.id,
-    )
+    override_repo = WorkspaceMCPOverrideRepository(session, org_id=ctx.org_id)
+    if body.enabled:
+        # Inheriting visibility is the default — drop any explicit disable
+        # override so we don't leave stale rows around.
+        await override_repo.delete(
+            workspace_id=ctx.workspace_id,
+            mcp_server_id=server_id,
+        )
+    else:
+        await override_repo.upsert(
+            workspace_id=ctx.workspace_id,
+            mcp_server_id=server_id,
+            enabled=False,
+            updated_by_user_id=ctx.user.id,
+        )
     return {"server_id": server_id, "enabled": body.enabled}

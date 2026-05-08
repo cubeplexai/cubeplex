@@ -18,25 +18,24 @@ from cubebox.mcp.exceptions import (
     MCPServerURLConflict,
     MCPShareCredentialOnlyForWorkspaceScope,
     MCPUserScopeCredentialForbidden,
-    MCPWorkspaceOwnedNoBinding,
+    MCPWorkspaceOwnedNoOverride,
 )
 from cubebox.models import (
     MCPServer,
     UserMCPCredential,
-    WorkspaceMCPBinding,
     WorkspaceMCPCredential,
 )
 from cubebox.repositories.mcp import (
     MCPServerRepository,
     UserMCPCredentialRepository,
-    WorkspaceMCPBindingRepository,
     WorkspaceMCPCredentialRepository,
+    WorkspaceMCPOverrideRepository,
 )
 from cubebox.services.credential import CredentialService
 
 _VALID_SCOPES = {"org", "workspace", "user", "none"}
 _VALID_METHODS = {"static", "oauth", "none"}
-_VALID_TRANSPORTS = {"streamable_http", "sse", "stdio"}
+_VALID_TRANSPORTS = {"streamable_http", "sse"}
 _CREDENTIAL_KIND_MCP = "mcp_server"
 
 
@@ -53,14 +52,14 @@ class MCPServerService:
         server_repo: MCPServerRepository,
         ws_cred_repo: WorkspaceMCPCredentialRepository,
         user_cred_repo: UserMCPCredentialRepository,
-        binding_repo: WorkspaceMCPBindingRepository,
+        override_repo: WorkspaceMCPOverrideRepository,
         cred_service: CredentialService,
         request_context: RequestContext,
     ) -> None:
         self.server_repo = server_repo
         self.ws_cred_repo = ws_cred_repo
         self.user_cred_repo = user_cred_repo
-        self.binding_repo = binding_repo
+        self.override_repo = override_repo
         self.cred_service = cred_service
         self._ctx = request_context
 
@@ -215,9 +214,9 @@ class MCPServerService:
         if server is None:
             raise MCPServerNotFound(server_id)
 
-        for binding in await self.binding_repo.list_for_server(server_id):
-            await self.binding_repo.delete(
-                workspace_id=binding.workspace_id,
+        for override in await self.override_repo.list_for_server(server_id):
+            await self.override_repo.delete(
+                workspace_id=override.workspace_id,
                 mcp_server_id=server_id,
             )
 
@@ -325,20 +324,14 @@ class MCPServerService:
         server.owner_workspace_id = None
         await self.server_repo.update(server)
 
-        existing_binding = await self.binding_repo.get(
+        # Promotion makes the install visible to every workspace in the org by
+        # default (overrides drive opt-out, not opt-in). Drop any pre-existing
+        # disable-override for the source workspace so the promoter still sees
+        # the connector.
+        await self.override_repo.delete(
             workspace_id=original_workspace_id,
             mcp_server_id=server_id,
         )
-        if existing_binding is None:
-            await self.binding_repo.add(
-                WorkspaceMCPBinding(
-                    org_id=self._ctx.org_id,
-                    workspace_id=original_workspace_id,
-                    mcp_server_id=server_id,
-                    enabled=True,
-                    created_by_user_id=self._ctx.user.id,
-                )
-            )
 
         return await self.server_repo.get(server.id) or server
 
@@ -496,21 +489,36 @@ class MCPServerService:
             )
         ) is not None
 
-    async def replace_bindings(
+    async def set_workspace_override(
         self,
         *,
         server_id: str,
-        bindings: list[tuple[str, bool]],
+        workspace_id: str,
+        enabled: bool,
     ) -> None:
+        """Disable (or re-enable) an org-wide install for a single workspace.
+
+        Workspace-private installs (owner_workspace_id != NULL) cannot be
+        overridden — they are owned by the workspace itself, not inherited.
+        """
         server = await self.server_repo.get(server_id)
         if server is None:
             raise MCPServerNotFound(server_id)
         if server.owner_workspace_id is not None:
-            raise MCPWorkspaceOwnedNoBinding()
-        await self.binding_repo.upsert_bulk(
+            raise MCPWorkspaceOwnedNoOverride()
+        if enabled:
+            # ``enabled=True`` is the implicit default — drop any explicit
+            # disable row so we don't accumulate dead override entries.
+            await self.override_repo.delete(
+                workspace_id=workspace_id,
+                mcp_server_id=server_id,
+            )
+            return
+        await self.override_repo.upsert(
+            workspace_id=workspace_id,
             mcp_server_id=server_id,
-            bindings=bindings,
-            created_by_user_id=self._ctx.user.id,
+            enabled=False,
+            updated_by_user_id=self._ctx.user.id,
         )
 
     async def _ensure_unique_name_and_url(

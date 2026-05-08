@@ -38,7 +38,7 @@ class MCPServerCreateAdmin(BaseModel):
 
     name: str = Field(min_length=1, max_length=64)
     server_url: str = Field(min_length=1, max_length=2048)
-    transport: Literal["streamable_http", "sse", "stdio"]
+    transport: Literal["streamable_http", "sse"]
     auth_method: Literal["static", "oauth", "none"]
     credential_scope: Literal["org", "user", "none"]
     credential_plaintext: str | None = None
@@ -53,7 +53,7 @@ class MCPServerCreateWS(BaseModel):
 
     name: str = Field(min_length=1, max_length=64)
     server_url: str = Field(min_length=1, max_length=2048)
-    transport: Literal["streamable_http", "sse", "stdio"]
+    transport: Literal["streamable_http", "sse"]
     auth_method: Literal["static", "oauth", "none"]
     credential_scope: Literal["workspace", "user", "none"]
     credential_plaintext: str | None = None
@@ -66,7 +66,7 @@ class MCPServerCreateWS(BaseModel):
 class MCPServerPatch(BaseModel):
     name: str | None = None
     server_url: str | None = None
-    transport: Literal["streamable_http", "sse", "stdio"] | None = None
+    transport: Literal["streamable_http", "sse"] | None = None
     credential_plaintext: str | None = None
     headers: dict[str, str] | None = None
     timeout: float | None = None
@@ -75,7 +75,7 @@ class MCPServerPatch(BaseModel):
 
 class MCPTestConnectionRequest(BaseModel):
     server_url: str
-    transport: Literal["streamable_http", "sse", "stdio"]
+    transport: Literal["streamable_http", "sse"]
     auth_method: Literal["static", "oauth", "none"]
     credential_scope: Literal["org", "workspace", "user", "none"]
     credential_plaintext: str | None = None
@@ -90,13 +90,14 @@ class MCPTestConnectionResponse(BaseModel):
     error: str | None = None
 
 
-class WorkspaceBindingItem(BaseModel):
+class WorkspaceOverrideItem(BaseModel):
     workspace_id: str
     enabled: bool
 
 
-class MCPBindingsReplace(BaseModel):
-    bindings: list[WorkspaceBindingItem]
+class MCPOverrideUpdate(BaseModel):
+    workspace_id: str
+    enabled: bool
 
 
 class MCPPromoteRequest(BaseModel):
@@ -113,7 +114,7 @@ class MCPCredentialStatus(BaseModel):
 
 
 class MCPServerListWS(BaseModel):
-    """Workspace GET response: owned servers and org-wide servers via binding."""
+    """Workspace GET response: owned servers and inherited org-wide servers."""
 
     owned: list[MCPServerOut]
-    via_binding: list[MCPServerOut]
+    inherited: list[MCPServerOut]

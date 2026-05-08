@@ -552,7 +552,7 @@ class RunManager:
             from cubebox.agents.graph import create_cubebox_agent
             from cubebox.db.engine import async_session_maker
             from cubebox.llm.factory import LLMFactory
-            from cubebox.middleware.citations import CitationConfig, load_citation_configs
+            from cubebox.middleware.citations import CitationConfig
             from cubebox.tools import get_registry
 
             try:
@@ -592,17 +592,12 @@ class RunManager:
             except Exception as exc:
                 logger.warning("DB MCP tools unavailable for run: {}", exc)
 
+            # Citation configs were previously loaded from the legacy
+            # `mcp.servers` config block. That path was removed in M2; per-tool
+            # citation metadata for catalog connectors is sourced from the
+            # catalog row's `metadata` field at install time (TODO: wire once
+            # catalog runtime ships).
             all_citation_configs: dict[str, CitationConfig] = {}
-            try:
-                from cubebox.config import config as app_config
-
-                mcp_servers = app_config.get("mcp.servers", {})
-                for _server_name, server_cfg in (mcp_servers or {}).items():
-                    tool_defs = server_cfg.get("tools", [])
-                    if tool_defs:
-                        all_citation_configs.update(load_citation_configs(tool_defs))
-            except Exception as exc:
-                logger.debug("Failed to load citation configs: {}", exc)
 
             from sqlmodel import select as sqlmodel_select
 

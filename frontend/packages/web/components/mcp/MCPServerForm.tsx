@@ -174,7 +174,6 @@ export function MCPServerForm({
                 <SelectGroup>
                   <SelectItem value="streamable_http">streamable_http</SelectItem>
                   <SelectItem value="sse">sse</SelectItem>
-                  <SelectItem value="stdio">stdio</SelectItem>
                 </SelectGroup>
               </SelectContent>
             </Select>

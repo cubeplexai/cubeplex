@@ -41,14 +41,16 @@ async def test_promote_alpha_shares_workspace_credential_to_org(
     assert status_resp.status_code == 200
     assert status_resp.json() == {"has_value": False}
 
-    bindings_resp = await client.get(f"/api/v1/admin/mcp/servers/{server_id}/bindings")
-    assert bindings_resp.status_code == 200, bindings_resp.text
-    assert bindings_resp.json() == [{"workspace_id": workspace_id, "enabled": True}]
+    # Promotion no longer creates an explicit binding/override row — the
+    # source workspace inherits the new org-wide install by default.
+    overrides_resp = await client.get(f"/api/v1/admin/mcp/servers/{server_id}/overrides")
+    assert overrides_resp.status_code == 200, overrides_resp.text
+    assert overrides_resp.json() == []
 
     list_resp = await client.get(f"/api/v1/ws/{workspace_id}/mcp/servers")
     assert list_resp.status_code == 200
     body = list_resp.json()
-    assert any(server["id"] == server_id for server in body["via_binding"])
+    assert any(server["id"] == server_id for server in body["inherited"])
     assert all(server["id"] != server_id for server in body["owned"])
 
 
@@ -90,6 +92,6 @@ async def test_promote_beta_keeps_workspace_credential_private(
     assert status_resp.status_code == 200
     assert status_resp.json() == {"has_value": True}
 
-    bindings_resp = await client.get(f"/api/v1/admin/mcp/servers/{server_id}/bindings")
-    assert bindings_resp.status_code == 200, bindings_resp.text
-    assert bindings_resp.json() == [{"workspace_id": workspace_id, "enabled": True}]
+    overrides_resp = await client.get(f"/api/v1/admin/mcp/servers/{server_id}/overrides")
+    assert overrides_resp.status_code == 200, overrides_resp.text
+    assert overrides_resp.json() == []

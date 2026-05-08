@@ -87,10 +87,10 @@ def _next_int() -> int:
 def generate_public_id(prefix: str) -> str:
     """Generate a new public ID with the given table prefix.
 
-    The prefix must be 2–4 lowercase ASCII letters/digits. This is enforced
+    The prefix must be 2–5 lowercase ASCII letters/digits. This is enforced
     once here so misuse from a model definition fails fast at import time.
     """
-    if not (2 <= len(prefix) <= 4) or not prefix.isascii() or not prefix.islower():
+    if not (2 <= len(prefix) <= 5) or not prefix.isascii() or not prefix.islower():
         raise ValueError(f"invalid prefix: {prefix!r}")
     body = _base62_encode(_next_int(), _BODY_LEN)
     return f"{prefix}-{body}"

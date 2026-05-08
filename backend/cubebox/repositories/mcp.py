@@ -4,15 +4,14 @@ from datetime import UTC, datetime
 from types import EllipsisType
 from typing import Any, cast
 
-from sqlalchemy import select
-from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cubebox.models import (
     MCPServer,
     UserMCPCredential,
-    WorkspaceMCPBinding,
     WorkspaceMCPCredential,
+    WorkspaceMCPOverride,
 )
 
 
@@ -41,26 +40,38 @@ class MCPServerRepository:
         return list((await self.session.execute(stmt)).scalars().all())
 
     async def list_for_workspace(self, workspace_id: str) -> list[MCPServer]:
-        owned_stmt = select(MCPServer).where(
-            MCPServer.org_id == self.org_id,  # type: ignore[arg-type]
-            MCPServer.owner_workspace_id == workspace_id,  # type: ignore[arg-type]
-            cast(Any, MCPServer.authed).is_(True),
-        )
-        owned = list((await self.session.execute(owned_stmt)).scalars().all())
+        """Servers visible to ``workspace_id``.
 
-        bound_stmt = (
-            select(MCPServer)
-            .join(WorkspaceMCPBinding, MCPServer.id == WorkspaceMCPBinding.mcp_server_id)  # type: ignore[arg-type]
+        Combines:
+        - workspace-private installs (``owner_workspace_id == workspace_id``,
+          ``authed=true``)
+        - org-wide installs (``owner_workspace_id IS NULL``, ``authed=true``)
+          NOT explicitly disabled by a ``workspace_mcp_overrides`` row
+          for this workspace.
+        """
+        # Sub-select of disabled override server ids for this workspace.
+        disabled_subq = (
+            select(cast(Any, WorkspaceMCPOverride.mcp_server_id))
             .where(
-                MCPServer.org_id == self.org_id,  # type: ignore[arg-type]
-                MCPServer.owner_workspace_id.is_(None),  # type: ignore[union-attr]
-                cast(Any, MCPServer.authed).is_(True),
-                WorkspaceMCPBinding.workspace_id == workspace_id,  # type: ignore[arg-type]
-                cast(Any, WorkspaceMCPBinding.enabled).is_(True),
+                WorkspaceMCPOverride.org_id == self.org_id,  # type: ignore[arg-type]
+                WorkspaceMCPOverride.workspace_id == workspace_id,  # type: ignore[arg-type]
+                cast(Any, WorkspaceMCPOverride.enabled).is_(False),
             )
+            .scalar_subquery()
         )
-        bound = list((await self.session.execute(bound_stmt)).scalars().all())
-        return owned + bound
+
+        stmt = select(MCPServer).where(
+            MCPServer.org_id == self.org_id,  # type: ignore[arg-type]
+            cast(Any, MCPServer.authed).is_(True),
+            or_(
+                MCPServer.owner_workspace_id == workspace_id,  # type: ignore[arg-type]
+                and_(
+                    MCPServer.owner_workspace_id.is_(None),  # type: ignore[union-attr]
+                    cast(Any, MCPServer.id).notin_(disabled_subq),
+                ),
+            ),
+        )
+        return list((await self.session.execute(stmt)).scalars().all())
 
     async def add(self, server: MCPServer) -> MCPServer:
         server.org_id = self.org_id
@@ -103,19 +114,17 @@ class MCPServerRepository:
         )
         return list((await self.session.execute(stmt)).scalars().all())
 
-    async def list_org_wide_with_workspace_binding(
+    async def list_org_wide_with_workspace_override(
         self, workspace_id: str
-    ) -> list[tuple[MCPServer, WorkspaceMCPBinding | None]]:
-        """Org-wide servers (owner_workspace_id IS NULL) joined with this workspace's binding.
-
-        Single outerjoin replaces a per-row binding lookup.
-        """
+    ) -> list[tuple[MCPServer, WorkspaceMCPOverride | None]]:
+        """Org-wide servers (owner_workspace_id IS NULL) joined with this workspace's
+        override row, if any. Replaces the legacy bindings join."""
         stmt = (
-            select(MCPServer, WorkspaceMCPBinding)
+            select(MCPServer, WorkspaceMCPOverride)
             .outerjoin(
-                WorkspaceMCPBinding,
-                (WorkspaceMCPBinding.mcp_server_id == MCPServer.id)  # type: ignore[arg-type]
-                & (WorkspaceMCPBinding.workspace_id == workspace_id),
+                WorkspaceMCPOverride,
+                (WorkspaceMCPOverride.mcp_server_id == MCPServer.id)  # type: ignore[arg-type]
+                & (WorkspaceMCPOverride.workspace_id == workspace_id),
             )
             .where(
                 MCPServer.org_id == self.org_id,  # type: ignore[arg-type]
@@ -123,7 +132,7 @@ class MCPServerRepository:
             )
         )
         rows = (await self.session.execute(stmt)).all()
-        return [(srv, binding) for srv, binding in rows]
+        return [(srv, override) for srv, override in rows]
 
 
 class WorkspaceMCPCredentialRepository:
@@ -224,110 +233,82 @@ class UserMCPCredentialRepository:
         return list((await self.session.execute(stmt)).scalars().all())
 
 
-class WorkspaceMCPBindingRepository:
-    """Org-scoped repository for workspace MCP bindings."""
+class WorkspaceMCPOverrideRepository:
+    """Org-scoped repository for workspace MCP overrides.
+
+    A row exists only when a workspace explicitly disables an inherited
+    org-wide install. Absent row = inherit org-wide default (visible).
+    """
 
     def __init__(self, session: AsyncSession, *, org_id: str) -> None:
         self.session = session
         self.org_id = org_id
 
-    async def get(
+    async def get_for_workspace_and_server(
         self,
         *,
         workspace_id: str,
         mcp_server_id: str,
-    ) -> WorkspaceMCPBinding | None:
-        stmt = select(WorkspaceMCPBinding).where(
-            WorkspaceMCPBinding.org_id == self.org_id,  # type: ignore[arg-type]
-            WorkspaceMCPBinding.workspace_id == workspace_id,  # type: ignore[arg-type]
-            WorkspaceMCPBinding.mcp_server_id == mcp_server_id,  # type: ignore[arg-type]
+    ) -> WorkspaceMCPOverride | None:
+        stmt = select(WorkspaceMCPOverride).where(
+            WorkspaceMCPOverride.org_id == self.org_id,  # type: ignore[arg-type]
+            WorkspaceMCPOverride.workspace_id == workspace_id,  # type: ignore[arg-type]
+            WorkspaceMCPOverride.mcp_server_id == mcp_server_id,  # type: ignore[arg-type]
         )
         return (await self.session.execute(stmt)).scalar_one_or_none()
 
-    async def list_for_server(self, mcp_server_id: str) -> list[WorkspaceMCPBinding]:
-        stmt = select(WorkspaceMCPBinding).where(
-            WorkspaceMCPBinding.org_id == self.org_id,  # type: ignore[arg-type]
-            WorkspaceMCPBinding.mcp_server_id == mcp_server_id,  # type: ignore[arg-type]
+    async def list_for_workspace(self, workspace_id: str) -> list[WorkspaceMCPOverride]:
+        stmt = select(WorkspaceMCPOverride).where(
+            WorkspaceMCPOverride.org_id == self.org_id,  # type: ignore[arg-type]
+            WorkspaceMCPOverride.workspace_id == workspace_id,  # type: ignore[arg-type]
         )
         return list((await self.session.execute(stmt)).scalars().all())
 
-    async def add(self, row: WorkspaceMCPBinding) -> WorkspaceMCPBinding:
-        row.org_id = self.org_id
+    async def list_for_server(self, mcp_server_id: str) -> list[WorkspaceMCPOverride]:
+        stmt = select(WorkspaceMCPOverride).where(
+            WorkspaceMCPOverride.org_id == self.org_id,  # type: ignore[arg-type]
+            WorkspaceMCPOverride.mcp_server_id == mcp_server_id,  # type: ignore[arg-type]
+        )
+        return list((await self.session.execute(stmt)).scalars().all())
+
+    async def upsert(
+        self,
+        *,
+        workspace_id: str,
+        mcp_server_id: str,
+        enabled: bool,
+        updated_by_user_id: str,
+    ) -> WorkspaceMCPOverride:
+        existing = await self.get_for_workspace_and_server(
+            workspace_id=workspace_id,
+            mcp_server_id=mcp_server_id,
+        )
+        if existing is not None:
+            existing.enabled = enabled
+            existing.updated_by_user_id = updated_by_user_id
+            existing.updated_at = datetime.now(UTC)
+            self.session.add(existing)
+            await self.session.commit()
+            await self.session.refresh(existing)
+            return existing
+        row = WorkspaceMCPOverride(
+            org_id=self.org_id,
+            workspace_id=workspace_id,
+            mcp_server_id=mcp_server_id,
+            enabled=enabled,
+            updated_by_user_id=updated_by_user_id,
+        )
         self.session.add(row)
         await self.session.commit()
         await self.session.refresh(row)
         return row
 
     async def delete(self, *, workspace_id: str, mcp_server_id: str) -> None:
-        row = await self.get(workspace_id=workspace_id, mcp_server_id=mcp_server_id)
+        row = await self.get_for_workspace_and_server(
+            workspace_id=workspace_id,
+            mcp_server_id=mcp_server_id,
+        )
         if row is None:
             return
         await self.session.delete(row)
-        await self.session.commit()
-
-    async def upsert_binding(
-        self,
-        *,
-        workspace_id: str,
-        mcp_server_id: str,
-        enabled: bool,
-        created_by_user_id: str,
-    ) -> WorkspaceMCPBinding:
-        """Atomically insert-or-update a single workspace binding.
-
-        Uses PostgreSQL INSERT ... ON CONFLICT to avoid the read-then-write
-        race window between two concurrent toggles on the same binding.
-        """
-        stmt = (
-            pg_insert(WorkspaceMCPBinding)
-            .values(
-                org_id=self.org_id,
-                workspace_id=workspace_id,
-                mcp_server_id=mcp_server_id,
-                enabled=enabled,
-                created_by_user_id=created_by_user_id,
-            )
-            .on_conflict_do_update(
-                index_elements=["workspace_id", "mcp_server_id"],
-                set_={"enabled": enabled, "updated_at": datetime.now(UTC)},
-            )
-            .returning(WorkspaceMCPBinding)
-        )
-        result = await self.session.execute(stmt)
-        await self.session.commit()
-        row = result.scalar_one()
-        await self.session.refresh(row)
-        return row
-
-    async def upsert_bulk(
-        self,
-        *,
-        mcp_server_id: str,
-        bindings: list[tuple[str, bool]],
-        created_by_user_id: str,
-    ) -> None:
-        existing = {row.workspace_id: row for row in await self.list_for_server(mcp_server_id)}
-        incoming = dict(bindings)
-
-        for workspace_id, enabled in incoming.items():
-            row = existing.get(workspace_id)
-            if row is None:
-                self.session.add(
-                    WorkspaceMCPBinding(
-                        org_id=self.org_id,
-                        workspace_id=workspace_id,
-                        mcp_server_id=mcp_server_id,
-                        enabled=enabled,
-                        created_by_user_id=created_by_user_id,
-                    )
-                )
-            else:
-                row.enabled = enabled
-                row.updated_at = datetime.now(UTC)
-                self.session.add(row)
-
-        for workspace_id, row in existing.items():
-            if workspace_id not in incoming:
-                await self.session.delete(row)
-
         await self.session.commit()

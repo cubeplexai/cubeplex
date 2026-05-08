@@ -9,4 +9,4 @@ def test_admin_mcp_routes_are_registered() -> None:
 
     assert "/api/v1/admin/mcp/servers" in paths
     assert "/api/v1/admin/mcp/test-connection" in paths
-    assert "/api/v1/admin/mcp/servers/{server_id}/bindings" in paths
+    assert "/api/v1/admin/mcp/servers/{server_id}/overrides" in paths
