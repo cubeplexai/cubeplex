@@ -122,3 +122,31 @@ async def test_long_conversation_triggers_compaction(
     msgs = r.json()["messages"]
     user_count = sum(1 for m in msgs if m["role"] == "user")
     assert user_count == 4, f"UI history must keep all 4 user turns, got {user_count}"
+
+
+@pytest.mark.asyncio
+async def test_summary_stable_when_boundary_unchanged(
+    compaction_client: tuple[httpx.AsyncClient, Any],
+) -> None:
+    """If a follow-up turn doesn't push the boundary forward, the summary text
+    must not change — guards the "no needless re-compaction" invariant.
+    """
+    client, saver = compaction_client
+    cid = await _create_conversation(client)
+
+    for i in range(4):
+        await _send(client, cid, f"turn {i}: one-line fact, no preamble")
+
+    s1 = _read_state(saver, cid)
+    assert s1.get("compaction"), "expected compaction state populated after 4 turns"
+    summary_v1 = s1["compaction"]["summary"]
+    until_v1 = s1["compaction_until_msg_index"]
+
+    await _send(client, cid, "tiny follow-up")
+
+    s2 = _read_state(saver, cid)
+    summary_v2 = s2["compaction"]["summary"]
+    until_v2 = s2["compaction_until_msg_index"]
+
+    if until_v2 == until_v1:
+        assert summary_v2 == summary_v1, "summary changed without boundary moving"
