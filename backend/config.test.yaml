@@ -8,6 +8,16 @@ test:
   env: test
   debug: true
 
+  # M9: existing E2E + Playwright tests were authored under the v1
+  # one-org-per-user assumption (auto-bootstrapped on register, no /setup
+  # detour). Force multi_tenant in the test profile so the legacy register →
+  # /w/{wsId} flow still works. Tests that need to exercise single_tenant
+  # bootstrap explicitly override `app.state.deployment_mode = "single_tenant"`
+  # on the test app instance (see fresh_db_unauth_client_single_tenant in
+  # tests/e2e/conftest.py).
+  deployment:
+    mode: multi_tenant
+
   api:
     host: "127.0.0.1"
     port: 8001
