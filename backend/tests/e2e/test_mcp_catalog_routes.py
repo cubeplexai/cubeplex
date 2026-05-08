@@ -17,6 +17,7 @@ don't want to talk to from CI.
 
 from __future__ import annotations
 
+import secrets
 from collections.abc import AsyncIterator, Iterator
 from typing import Any
 
@@ -25,8 +26,9 @@ import pytest
 import pytest_asyncio
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from cubebox.models import MCPCatalogConnector
+from cubebox.models import MCPCatalogConnector, MCPServer
 from cubebox.repositories.mcp_catalog import MCPCatalogConnectorRepository
+from tests.e2e.conftest import _csrf_cookie_name
 
 # ---------------------------------------------------------------------------
 # Catalog seeding helpers
@@ -255,7 +257,9 @@ async def test_admin_install_duplicate_returns_409(
         },
     )
     assert dup.status_code == 409
-    assert "install already exists" in dup.json()["detail"]
+    detail = dup.json()["detail"]
+    assert detail["code"] == "mcp_catalog.install_exists"
+    assert "install already exists" in detail["message"]
 
 
 async def test_admin_install_oauth_returns_requires_oauth(
@@ -290,7 +294,9 @@ async def test_admin_install_unsupported_auth_method_returns_400(
         },
     )
     assert resp.status_code == 400, resp.text
-    assert "supported_auth_methods" in resp.json()["detail"]
+    detail = resp.json()["detail"]
+    assert detail["code"] == "mcp_catalog.auth_method_unsupported"
+    assert "supported_auth_methods" in detail["message"]
 
 
 async def test_admin_install_unknown_catalog_returns_404(
@@ -436,6 +442,99 @@ async def test_workspace_install_delete_unknown_returns_404(
     client, workspace_id = member_client
     resp = await client.delete(f"/api/v1/ws/{workspace_id}/mcp/installs/mcp-nope")
     assert resp.status_code == 404
+
+
+async def _seed_csrf(client: httpx.AsyncClient) -> str:
+    await client.get("/api/v1/auth/me")
+    csrf = client.cookies.get(_csrf_cookie_name())
+    assert csrf, "csrf cookie not set after GET /api/v1/auth/me"
+    return csrf
+
+
+async def _login_as(client: httpx.AsyncClient, email: str, password: str) -> str:
+    """Switch the shared client to a different user; returns fresh CSRF token."""
+    client.cookies.clear()
+    csrf = await _seed_csrf(client)
+    r = await client.post(
+        "/api/v1/auth/login",
+        data={"username": email, "password": password},
+        headers={"X-CSRF-Token": csrf},
+    )
+    assert r.status_code in (200, 204), r.text
+    return client.cookies.get(_csrf_cookie_name()) or csrf
+
+
+async def test_workspace_install_delete_non_creator_returns_403(
+    unauthenticated_memory_client: httpx.AsyncClient,
+    catalog_seeded: dict[str, str],
+    db_session: AsyncSession,
+) -> None:
+    """Member B (not the creator, not an admin) cannot delete A's
+    workspace-private install — must return 403 and leave the row intact.
+    """
+    client = unauthenticated_memory_client
+
+    a_email = f"a-{secrets.token_hex(4)}@example.com"
+    b_email = f"b-{secrets.token_hex(4)}@example.com"
+    pw = "passwordpassword"
+
+    for email in (a_email, b_email):
+        r = await client.post("/api/v1/auth/register", json={"email": email, "password": pw})
+        assert r.status_code == 201, r.text
+
+    # --- A: create a shared workspace, invite B as a *member*, install --------
+    csrf_a = await _login_as(client, a_email, pw)
+    r = await client.get("/api/v1/workspaces")
+    assert r.status_code == 200, r.text
+    a_org_id = r.json()[0]["org_id"]
+
+    r = await client.post(
+        "/api/v1/workspaces",
+        json={"name": "Shared MCP", "org_id": a_org_id},
+        headers={"X-CSRF-Token": csrf_a},
+    )
+    assert r.status_code == 201, r.text
+    ws_id = r.json()["id"]
+
+    r = await client.post(
+        f"/api/v1/workspaces/{ws_id}/invites",
+        json={"role": "member"},
+        headers={"X-CSRF-Token": csrf_a},
+    )
+    assert r.status_code == 201, r.text
+    invite_token = r.json()["token"]
+
+    install_resp = await client.post(
+        f"/api/v1/ws/{ws_id}/mcp/catalog/{catalog_seeded['notion']}/install",
+        json={"auth_method": "static", "credential_plaintext": "secret_a"},
+        headers={"X-CSRF-Token": csrf_a},
+    )
+    assert install_resp.status_code == 201, install_resp.text
+    install_id = install_resp.json()["install_id"]
+
+    # --- B: accept invite (real workspace member, role=member, not creator) ---
+    csrf_b = await _login_as(client, b_email, pw)
+    r = await client.post(
+        "/api/v1/workspaces/invites/accept",
+        json={"token": invite_token},
+        headers={"X-CSRF-Token": csrf_b},
+    )
+    assert r.status_code == 200, r.text
+
+    # --- B attempts to delete A's install: 403 --------------------------------
+    delete_resp = await client.delete(
+        f"/api/v1/ws/{ws_id}/mcp/installs/{install_id}",
+        headers={"X-CSRF-Token": csrf_b},
+    )
+    assert delete_resp.status_code == 403, delete_resp.text
+    detail = delete_resp.json()["detail"]
+    assert detail["code"] == "mcp_catalog.permission_denied"
+
+    # Install row must still exist (raw query, no org filter).
+    server = await db_session.get(MCPServer, install_id)
+    assert server is not None
+    assert server.owner_workspace_id == ws_id
+    assert server.created_by_user_id != ""
 
 
 # ---------------------------------------------------------------------------
