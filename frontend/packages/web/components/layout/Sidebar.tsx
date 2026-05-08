@@ -10,7 +10,7 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { AvatarPopover } from '@/components/sidebar/AvatarPopover'
 import { WorkspacesSection } from '@/components/sidebar/WorkspacesSection'
 import { SettingsNav } from '@/components/workspace-settings/SettingsNav'
-import { Box, Plus, Settings, Trash2 } from 'lucide-react'
+import { Box, Brain, Plus, Settings, Trash2 } from 'lucide-react'
 
 function formatRelativeTime(
   dateStr: string,
@@ -78,6 +78,23 @@ export function Sidebar() {
 
       {/* Workspaces */}
       <WorkspacesSection />
+
+      {/* Memory link */}
+      {currentWsId && (
+        <div className="px-2 pt-1 pb-1">
+          <Link
+            href={`/w/${currentWsId}/memory`}
+            className={`flex items-center gap-2 px-2 py-1.5 rounded-md text-xs transition-colors ${
+              pathname?.startsWith('/w/' + currentWsId + '/memory')
+                ? 'text-foreground bg-primary/8 font-medium'
+                : 'text-muted-foreground hover:text-foreground hover:bg-accent/60'
+            }`}
+          >
+            <Brain className="size-3.5 shrink-0" />
+            <span>Memory</span>
+          </Link>
+        </div>
+      )}
 
       {/* Recent conversations — flex-1 so the SettingsNav (when shown) sits
           right above the footer instead of floating in the middle. */}
