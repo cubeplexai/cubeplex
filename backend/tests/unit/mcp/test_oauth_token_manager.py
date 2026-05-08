@@ -558,3 +558,104 @@ async def test_get_valid_access_token_rejects_non_oauth_server(
             await manager.get_valid_access_token(server)
     finally:
         await http.aclose()
+
+
+async def test_malformed_200_user_scope_does_not_flip_server_authed(
+    session: AsyncSession,
+    fake_redis: fakeredis.aioredis.FakeRedis,
+    encryption_backend: FernetBackend,
+) -> None:
+    """User-scope malformed 200: server.authed stays True; user creds purged."""
+    server, user_cred, access_cred, refresh_cred = await _seed_user_oauth_install(
+        session,
+        encryption_backend,
+        expires_at=datetime.now(UTC) - timedelta(seconds=5),
+    )
+    handler = _ScriptedHandler(
+        _metadata_handler(),
+        token_responses=[
+            httpx.Response(
+                200,
+                # Missing access_token => malformed success.
+                json={"token_type": "Bearer", "expires_in": 3600},
+            )
+        ],
+    )
+    manager, http = _make_manager(
+        session=session,
+        fake_redis=fake_redis,
+        backend=encryption_backend,
+        handler=handler,
+    )
+    try:
+        with pytest.raises(OAuthRefreshFailed) as excinfo:
+            await manager.get_valid_access_token(server, user_id=USER_ID)
+    finally:
+        await http.aclose()
+
+    assert excinfo.value.status == 200
+    assert excinfo.value.error == "invalid_response"
+
+    # CRITICAL: server-level authed flag was NOT flipped. Other users on this
+    # user-scope install must keep working.
+    server_repo = MCPServerRepository(session, org_id=ORG_ID)
+    fresh_server = await server_repo.get(server.id)
+    assert fresh_server is not None
+    assert fresh_server.authed is True
+    assert fresh_server.last_error is None
+
+    # The requesting user's credentials were purged by _refresh_user.
+    user_repo = UserMCPCredentialRepository(session, org_id=ORG_ID)
+    fresh_user = await user_repo.get(user_id=USER_ID, mcp_server_id=server.id)
+    assert fresh_user is None
+    cred_repo = CredentialRepository(session, org_id=ORG_ID)
+    assert await cred_repo.get(access_cred.id) is None
+    assert await cred_repo.get(refresh_cred.id) is None
+    # Sanity: row reference unused after purge.
+    assert user_cred.user_id == USER_ID
+
+
+async def test_malformed_200_org_scope_marks_server_unauthed(
+    session: AsyncSession,
+    fake_redis: fakeredis.aioredis.FakeRedis,
+    encryption_backend: FernetBackend,
+) -> None:
+    """Org-scope malformed 200: existing behaviour preserved — server.authed flips False."""
+    server, access_cred, refresh_cred = await _seed_org_oauth_install(
+        session,
+        encryption_backend,
+        expires_at=datetime.now(UTC) - timedelta(seconds=10),
+    )
+    handler = _ScriptedHandler(
+        _metadata_handler(),
+        token_responses=[
+            httpx.Response(
+                200,
+                # Missing access_token => malformed success.
+                json={"token_type": "Bearer"},
+            )
+        ],
+    )
+    manager, http = _make_manager(
+        session=session,
+        fake_redis=fake_redis,
+        backend=encryption_backend,
+        handler=handler,
+    )
+    try:
+        with pytest.raises(OAuthRefreshFailed) as excinfo:
+            await manager.get_valid_access_token(server)
+    finally:
+        await http.aclose()
+
+    assert excinfo.value.status == 200
+    assert excinfo.value.error == "invalid_response"
+
+    server_repo = MCPServerRepository(session, org_id=ORG_ID)
+    fresh = await server_repo.get(server.id)
+    assert fresh is not None
+    assert fresh.authed is False
+    assert fresh.last_error is not None
+    assert "malformed" in fresh.last_error
+    # Sanity: refresh creds row id wasn't lost from the test scope.
+    assert access_cred.id is not None and refresh_cred.id is not None

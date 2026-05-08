@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from unittest.mock import patch
@@ -130,7 +130,7 @@ class _Handler:
 def _credential_service_factory(
     session: AsyncSession,
     backend: FernetBackend,
-):
+) -> Callable[[str | None, str | None], CredentialService]:
     def _factory(org_id: str | None, actor_user_id: str | None) -> CredentialService:
         repo = CredentialRepository(session, org_id=org_id)
         return CredentialService(repo, backend, org_id=org_id, actor_user_id=actor_user_id)
