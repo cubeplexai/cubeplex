@@ -6,7 +6,7 @@ Cubebox needs a memory system that is native to collaborative workspaces, not a
 copy of file-backed personal notes or automatic chat summarization. The system
 should help the agent retain durable user preferences, workspace knowledge,
 organization-level conventions, corrections, and proven operating procedures
-while keeping shared knowledge visible and user-approved.
+while keeping shared knowledge visible, source-linked, and easy to correct.
 
 This design introduces three memory scopes:
 
@@ -14,30 +14,31 @@ This design introduces three memory scopes:
 - Workspace memory: shared inside one workspace.
 - Organization memory: shared across an organization.
 
-The key product rule is asymmetric write friction:
+The key product rule for v1 is scoped ownership with simple write permissions:
 
 - Personal memory may be saved directly by the agent or the user.
-- Workspace and organization memory require inline confirmation from the user
-  who triggered the proposal before they become active.
+- Workspace and organization memory may also be saved directly when the current
+  user has access to that scope.
 
-This keeps personal preference capture low-friction while preventing silent
-pollution of shared team knowledge.
+This keeps the first implementation small. User confirmation, proposal review,
+and admin approval are explicit future governance layers, not v1 requirements.
 
 ## Goals
 
 - Separate personal, workspace, and organization memory from the start.
-- Make shared memory writes synchronous and explicit in the active conversation.
 - Keep every memory item source-linked and editable.
 - Inject only relevant memory into agent context under a token budget.
-- Support direct personal saves and shared-memory proposals through tools.
+- Support direct scoped memory saves through tools and UI.
 - Provide a Memory Center where users can inspect and manage active memory.
-- Preserve room for later automatic extraction, admin approval, embeddings, and
-  external memory providers without requiring them in the first release.
+- Preserve room for later automatic extraction, user confirmation, admin
+  approval, embeddings, and external memory providers without requiring them in
+  the first release.
 
 ## Non-Goals
 
 - Building an external memory-provider plugin system in v1.
 - Requiring workspace or organization admin approval in v1.
+- Requiring inline user confirmation before shared memory is saved in v1.
 - Adding vector search or semantic reranking in v1.
 - Treating LangGraph checkpoints as the long-term memory store.
 - Creating an automatic background summarizer that silently updates shared
@@ -58,14 +59,16 @@ multi-tenant workspace product.
 DeerFlow uses structured memory with summaries and facts, automatic background
 LLM extraction, and a Settings > Memory management UI. Its strength is product
 visibility and automatic learning. Its weakness for Cubebox is that automatic
-shared-memory writes would be risky without real-time confirmation and
-collaboration governance.
+shared-memory extraction would be risky before we have collaboration governance.
+V1 therefore avoids background shared-memory writes and keeps memory creation in
+explicit tool/UI paths.
 
 Cubebox should combine the useful parts but take its own direction:
 
 - Use explicit scopes instead of one global memory file.
 - Use source-linked database rows instead of local JSON or Markdown files.
-- Use inline confirmation for shared memory, not post-hoc cleanup.
+- Keep write paths direct in v1, then add confirmation/proposal governance once
+  the core memory object model is stable.
 - Use memory as an execution aid for workspaces, artifacts, tools, and skills,
   not only as a user-profile summary.
 
@@ -102,8 +105,8 @@ Examples:
 - A particular MCP server is the preferred integration for this workspace.
 - A deployment or sandbox command is known to work.
 
-Workspace memory must be confirmed inline by the triggering user before it is
-saved. Confirmation does not require admin privileges in v1.
+Workspace memory can be saved directly by workspace members in v1. Confirmation
+and stricter approval rules are future governance features.
 
 ### Organization Memory
 
@@ -116,8 +119,8 @@ Examples:
 - Default provider or tool usage policies.
 - Standard operating procedures that apply across projects.
 
-Organization memory also requires inline confirmation from the triggering user.
-Admin approval is a future advanced feature.
+Organization memory can be saved directly by organization members in v1. Inline
+confirmation and admin approval are future advanced features.
 
 ---
 
@@ -162,7 +165,7 @@ Fields:
 - `source_run_id`: nullable.
 - `source_artifact_id`: nullable.
 - `source_message_refs`: JSON list of source message identifiers or offsets.
-- `created_by_user_id`: user who created or confirmed the item.
+- `created_by_user_id`: user who created the item.
 - `updated_by_user_id`: nullable.
 - `created_at`, `updated_at`.
 - `last_used_at`: nullable.
@@ -175,53 +178,27 @@ Invariants:
 - `scope=org` requires both `workspace_id IS NULL` and `owner_user_id IS NULL`.
 - Every item must have at least one source field or `source_type=manual`.
 
-### MemoryProposal
+### Future MemoryProposal and MemoryCandidate
 
-`MemoryProposal` stores a shared-memory write that is waiting for inline user
-confirmation.
-
-Fields:
-
-- `id`: short public id, prefix `mprop`.
-- `org_id`.
-- `workspace_id`: nullable for organization proposals.
-- `proposed_scope`: `workspace | org`.
-- `type`.
-- `content`.
-- `reason`: why the agent believes this should be shared memory.
-- `confidence`.
-- `source_type`.
-- `source_conversation_id`.
-- `source_run_id`.
-- `source_artifact_id`: nullable.
-- `source_message_refs`: JSON list.
-- `proposed_by_user_id`.
-- `status`: `pending | accepted | rejected | saved_personal | expired`.
-- `decision_by_user_id`: nullable.
-- `decision_at`: nullable.
-- `created_at`, `updated_at`.
-- `expires_at`: nullable, default 7 days.
-- `metadata`.
-
-`MemoryProposal` is not the same as a background candidate. It is an active
-conversation proposal that should be resolved in-line whenever possible.
-
-### Future MemoryCandidate
+`MemoryProposal` is reserved for inline confirmation and governance workflows. It
+will store a proposed shared-memory write before it becomes active.
 
 `MemoryCandidate` is reserved for background extraction, batch review, and skill
-candidate workflows. It is not required in v1.
+candidate workflows. Neither model is required in v1.
 
 ---
 
 ## Write Policy
 
-### Direct Personal Save
+### Direct Scoped Save
 
-The agent may directly save personal memory when:
+The agent or user may directly save memory when:
 
-- The memory affects only the current user.
-- The user explicitly says to remember it, or the preference/correction is clear.
-- The content is not sensitive workspace knowledge masquerading as preference.
+- The target scope is allowed for the current user.
+- The user explicitly says to remember it, or the preference/correction/procedure
+  is clear.
+- The content is not sensitive data that should never be persisted.
+- The source conversation, artifact, or tool result can be recorded.
 
 Example:
 
@@ -231,41 +208,11 @@ Agent tool: memory_save(scope="personal", type="preference", ...)
 Agent: 明白，之后我会尽量简洁。
 ```
 
-### Shared Memory Proposal
-
-The agent must propose, not save, workspace or organization memory.
-
-Example:
-
 ```text
 User: 这个 workspace 以后跑 E2E 都用 pnpm test:e2e。
-Agent tool: memory_propose(scope="workspace", type="procedure", ...)
-System event: memory_confirmation
+Agent tool: memory_save(scope="workspace", type="procedure", ...)
+Agent: 记下了，这个 workspace 的 E2E 验证使用 `pnpm test:e2e`。
 ```
-
-The UI renders the confirmation card in the current conversation:
-
-```text
-Save as workspace memory?
-
-This workspace runs E2E verification with `pnpm test:e2e`.
-
-[Save to workspace] [Save only for me] [Edit] [Don't save]
-```
-
-If the model calls `memory_save(scope="workspace" | "org")`, the backend must not
-save directly. It should create a proposal and return
-`confirmation_required`.
-
-### Decision Options
-
-The proposal decision API supports:
-
-- `save_shared`: create a workspace/org `MemoryItem`.
-- `save_personal`: create a personal `MemoryItem` instead.
-- `edit_and_save_shared`: save edited content in the proposed shared scope.
-- `edit_and_save_personal`: save edited content as personal memory.
-- `reject`: reject the proposal.
 
 ---
 
@@ -362,27 +309,15 @@ Query parameters:
 
 Create behavior:
 
-- Creating `personal` memory saves directly.
-- Creating `workspace` or `org` from the normal API can save directly because it
-  is a user-initiated UI action, not an agent-initiated hidden write.
+- Creating `personal`, `workspace`, or `org` memory saves directly after scope
+  permission checks.
 
-### Proposals
-
-```text
-GET  /api/v1/ws/{workspace_id}/memory/proposals
-POST /api/v1/ws/{workspace_id}/memory/proposals
-POST /api/v1/ws/{workspace_id}/memory/proposals/{proposal_id}/decision
-```
-
-The proposal create endpoint is used by tools and by future background
-extractors. The decision endpoint creates the final `MemoryItem` or marks the
-proposal rejected.
-
-### Suggested Request Shape
+### Suggested Create Request Shape
 
 ```json
 {
-  "decision": "edit_and_save_shared",
+  "scope": "workspace",
+  "type": "procedure",
   "content": "Run E2E verification with `pnpm test:e2e` from `frontend/`."
 }
 ```
@@ -391,43 +326,28 @@ proposal rejected.
 
 ## SSE Events
 
-The run stream adds memory-specific events.
+The run stream can add memory-specific informational events.
 
-### `memory_confirmation`
+### `memory_saved`
 
-Emitted when a shared-memory proposal needs user confirmation.
+Emitted after a tool-driven save creates memory.
 
 ```json
 {
-  "type": "memory_confirmation",
+  "type": "memory_saved",
   "timestamp": "2026-05-08T12:00:00Z",
   "data": {
-    "proposal_id": "mprop_xxx",
+    "memory_id": "mem_xxx",
     "scope": "workspace",
     "memory_type": "procedure",
     "content": "Run E2E verification with `pnpm test:e2e`.",
-    "reason": "The user corrected the verification command for this workspace.",
-    "source_conversation_id": "conv_xxx",
-    "choices": [
-      "save_shared",
-      "save_personal",
-      "edit",
-      "reject"
-    ]
+    "source_conversation_id": "conv_xxx"
   }
 }
 ```
 
-### `memory_saved`
-
-Emitted after a proposal decision saves memory.
-
-### `memory_rejected`
-
-Emitted after a proposal is rejected.
-
-These events are part of the run event log so reconnects can replay pending
-confirmation cards.
+This event is optional for UI polish in v1. The authoritative state lives in the
+memory API and database.
 
 ---
 
@@ -435,26 +355,11 @@ confirmation cards.
 
 ### `memory_save`
 
-For personal memory direct writes.
+For direct memory writes.
 
 Inputs:
 
-- `scope`: must be `personal` in v1 for direct save.
-- `type`.
-- `content`.
-- `confidence`.
-- `reason`.
-
-If `scope` is `workspace` or `org`, the tool returns
-`confirmation_required` and creates a proposal instead of saving.
-
-### `memory_propose`
-
-For shared memory.
-
-Inputs:
-
-- `scope`: `workspace | org`.
+- `scope`: `personal | workspace | org`.
 - `type`.
 - `content`.
 - `confidence`.
@@ -464,13 +369,12 @@ Output:
 
 ```json
 {
-  "status": "confirmation_required",
-  "proposal_id": "mprop_xxx"
+  "status": "saved",
+  "memory_id": "mem_xxx"
 }
 ```
 
-The tool should emit enough metadata for the SSE layer to render an inline
-confirmation card.
+The backend validates that the current user can write the requested scope.
 
 ### `memory_search`
 
@@ -508,7 +412,7 @@ Responsibilities:
 - Retrieve relevant personal/workspace/org memory for the current run.
 - Inject it into the model call without mutating persisted user messages.
 - Provide memory tools with request-scoped org/workspace/user context.
-- Emit proposal events into the run event queue.
+- Optionally emit memory-saved events into the run event queue.
 
 ### Run Manager
 
@@ -522,38 +426,9 @@ wire memory service/tool dependencies with:
 - `run_id`
 - `event_queue`
 
-Memory proposal events should be written to the Redis run stream so they replay
-on reconnect.
-
 ---
 
 ## Frontend Design
-
-### Inline Confirmation Card
-
-Chat UI should render `memory_confirmation` events as inline cards in the
-conversation stream.
-
-Card contents:
-
-- Scope badge: Personal fallback, Workspace, or Org.
-- Type badge.
-- Proposed memory content.
-- Short reason.
-- Source link to current conversation if useful.
-- Actions:
-  - Save to workspace/org.
-  - Save only for me.
-  - Edit.
-  - Do not save.
-
-The edit flow can be a small modal or inline expandable textarea.
-
-The card should show final state after decision:
-
-- Saved to workspace.
-- Saved only for me.
-- Not saved.
 
 ### Memory Center
 
@@ -564,11 +439,9 @@ Suggested tabs:
 - Personal
 - Workspace
 - Organization
-- Proposals
 - Archived
 
-V1 can implement the first three active memory tabs and show pending proposals
-that are still unresolved.
+V1 can implement the three active memory tabs and an archived view.
 
 Memory item row/card:
 
@@ -596,8 +469,6 @@ Frontend core should expose:
 - `createMemory`
 - `updateMemory`
 - `archiveMemory`
-- `listMemoryProposals`
-- `decideMemoryProposal`
 
 The web app should use React Query cache updates after mutations.
 
@@ -608,15 +479,16 @@ The web app should use React Query cache updates after mutations.
 V1 keeps permissions simple:
 
 - Personal memory: only owner can read/write.
-- Workspace memory: workspace members can read. Any workspace member can confirm
-  and create workspace memory.
-- Organization memory: org members can read. Any org member can confirm and
-  create org memory in v1.
+- Workspace memory: workspace members can read. Any workspace member can create
+  workspace memory.
+- Organization memory: org members can read. Any org member can create org memory
+  in v1.
 - Delete/archive can follow the same rule in v1, with audit fields preserving
   who changed what.
 
 Future:
 
+- Inline confirmation for agent-initiated shared memory.
 - Admin-only org memory confirmation.
 - Workspace admin approval for shared memory.
 - Proposal notifications for admins.
@@ -627,11 +499,10 @@ Future:
 ## Error Handling
 
 - Tool failure must not crash the run. Return a tool error and continue.
-- Proposal creation failure should be visible in the stream as a normal error
-  event if it prevents rendering the confirmation card.
-- Decision endpoint must return 404 if the proposal does not exist or is outside
-  the current workspace/org scope.
-- Decision endpoint must return 409 if the proposal is already decided.
+- Create/update/delete endpoints must return 404 if the memory item does not
+  exist or is outside the current workspace/org scope.
+- Create/update/delete endpoints must return 403 if the current user cannot
+  access the requested scope.
 - Memory injection failure should be logged and skipped; it must not block the
   conversation.
 
@@ -644,9 +515,8 @@ Future:
 Focused tests:
 
 - Personal memory direct save creates a user-owned item.
-- `memory_save(scope=workspace)` creates a proposal, not an active item.
-- Proposal decision `save_shared` creates workspace/org memory.
-- Proposal decision `save_personal` creates personal memory.
+- `memory_save(scope=workspace)` creates a workspace memory item.
+- `memory_save(scope=org)` creates an organization memory item.
 - Cross-user personal memory is not visible.
 - Workspace memory is visible to another workspace member.
 - Workspace memory is not visible outside the workspace.
@@ -659,12 +529,10 @@ Focused tests:
 
 Focused E2E tests:
 
-- Inline memory confirmation appears from a streamed event.
-- Save to workspace updates the card state.
-- Save only for me updates the card state.
-- Edit and save sends edited content.
-- Reject updates the card state.
 - Memory Center lists personal/workspace/org items with source links.
+- Creating and editing personal memory updates the list.
+- Creating and editing workspace memory updates the list for another workspace
+  member.
 
 ---
 
@@ -674,21 +542,20 @@ Focused E2E tests:
 
 - Add database models and migrations.
 - Add repositories and service.
-- Add memory item and proposal APIs.
+- Add memory item APIs.
 - Add memory tools.
 - Add `MemoryMiddleware` retrieval/injection.
-- Add inline confirmation card.
 - Add basic Memory Center.
 
 ### Phase 2: Background Suggestions
 
 - Add background candidate extraction for low-priority insights.
-- Keep shared-memory extraction proposal-based.
 - Add candidate review surfaces if needed.
 
 ### Phase 3: Smarter Retrieval and Governance
 
 - Add embeddings or hybrid search.
+- Add inline confirmation for agent-initiated shared memory.
 - Add admin approval for org/workspace shared memory.
 - Add audit log UI.
 - Add skill-candidate conversion.
@@ -703,12 +570,8 @@ The first implementation uses these defaults:
   workspace that belongs to that organization.
 - Workspace members can create, edit, and archive workspace memory.
 - Organization members can create, edit, and archive organization memory.
-- Rejected proposals remain in the database but are hidden from the default
-  Memory Center view.
-- Memory confirmation cards are non-blocking. The agent can finish its response
-  while the card waits for a decision.
 
 These defaults intentionally avoid admin workflows in v1. Later releases can add
-admin approval, stricter delete permissions, proposal notifications, and an
-audit-oriented proposal history view without changing the core memory/proposal
-model.
+inline confirmation, admin approval, stricter delete permissions, proposal
+notifications, and an audit-oriented proposal history view without changing the
+core memory item model.
