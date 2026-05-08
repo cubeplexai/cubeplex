@@ -1,0 +1,133 @@
+"""HMAC-signed, redis-backed one-shot OAuth state tokens.
+
+The wire format is::
+
+    state = base64url(payload_json) + "." + base64url(hmac_sha256)
+
+where ``payload_json`` carries ``{install_id, actor_user_id, ts, nonce}``
+and ``hmac_sha256`` is computed over the canonical payload bytes using the
+caller-supplied ``secret_key``.
+
+Lifecycle:
+
+- ``issue`` generates a fresh nonce, signs the payload, writes
+  ``mcp_oauth_state:{state} -> "1"`` to redis with TTL = ``ttl_seconds``,
+  and returns the wire token.
+- ``consume`` verifies the HMAC (constant-time), atomically deletes the
+  redis key (single-shot), and returns the parsed payload. Missing key
+  means TTL elapsed or the token was already consumed.
+
+The module is pure: callers wire in the redis client and the secret key.
+Phase 5 derives the secret key from ``CUBEBOX_AUTH__CSRF_SECRET``.
+"""
+
+from __future__ import annotations
+
+import base64
+import hashlib
+import hmac
+import json
+import secrets
+from dataclasses import dataclass
+from datetime import UTC, datetime
+
+from redis.asyncio import Redis
+
+from cubebox.mcp.exceptions import OAuthStateExpired, OAuthStateInvalid
+
+_REDIS_KEY_PREFIX = "mcp_oauth_state:"
+_NONCE_BYTES = 16
+
+
+@dataclass(frozen=True)
+class OAuthStatePayload:
+    """Decoded OAuth state payload returned by ``OAuthStateStore.consume``."""
+
+    install_id: str
+    actor_user_id: str
+    issued_at: datetime  # UTC
+
+
+def _b64url_encode(data: bytes) -> str:
+    return base64.urlsafe_b64encode(data).rstrip(b"=").decode("ascii")
+
+
+def _b64url_decode(data: str) -> bytes:
+    padding = "=" * (-len(data) % 4)
+    return base64.urlsafe_b64decode(data + padding)
+
+
+class OAuthStateStore:
+    """Issues and consumes HMAC-signed, single-use OAuth state tokens."""
+
+    def __init__(
+        self,
+        *,
+        redis: Redis,
+        secret_key: bytes,
+        ttl_seconds: int = 300,
+    ) -> None:
+        if not secret_key:
+            raise ValueError("secret_key must be non-empty bytes")
+        if ttl_seconds <= 0:
+            raise ValueError("ttl_seconds must be positive")
+        self._redis = redis
+        self._secret_key = secret_key
+        self._ttl_seconds = ttl_seconds
+
+    async def issue(self, *, install_id: str, actor_user_id: str) -> str:
+        """Mint a new state token and persist it for one-shot consumption."""
+        ts_ms = int(datetime.now(tz=UTC).timestamp() * 1000)
+        nonce = secrets.token_hex(_NONCE_BYTES)
+        payload: dict[str, object] = {
+            "install_id": install_id,
+            "actor_user_id": actor_user_id,
+            "ts": ts_ms,
+            "nonce": nonce,
+        }
+        # ``sort_keys`` keeps the canonical bytes deterministic across runs.
+        payload_bytes = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        sig = hmac.new(self._secret_key, payload_bytes, hashlib.sha256).digest()
+        state = f"{_b64url_encode(payload_bytes)}.{_b64url_encode(sig)}"
+        await self._redis.set(_REDIS_KEY_PREFIX + state, "1", ex=self._ttl_seconds)
+        return state
+
+    async def consume(self, state: str) -> OAuthStatePayload:
+        """Verify, atomically delete, and decode a state token.
+
+        Raises:
+            OAuthStateInvalid: format mismatch or HMAC verification failed.
+            OAuthStateExpired: redis key missing (TTL elapsed or already consumed).
+        """
+        payload_bytes = self._verify(state)
+        deleted = await self._redis.delete(_REDIS_KEY_PREFIX + state)
+        if not deleted:
+            raise OAuthStateExpired("OAuth state expired or already consumed")
+        try:
+            payload = json.loads(payload_bytes)
+            install_id = str(payload["install_id"])
+            actor_user_id = str(payload["actor_user_id"])
+            ts_ms = int(payload["ts"])
+        except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
+            raise OAuthStateInvalid("OAuth state payload malformed") from exc
+        issued_at = datetime.fromtimestamp(ts_ms / 1000, tz=UTC)
+        return OAuthStatePayload(
+            install_id=install_id,
+            actor_user_id=actor_user_id,
+            issued_at=issued_at,
+        )
+
+    def _verify(self, state: str) -> bytes:
+        """Decode + HMAC-verify the wire token. Returns canonical payload bytes."""
+        if not isinstance(state, str) or "." not in state:
+            raise OAuthStateInvalid("OAuth state has invalid format")
+        payload_b64, sig_b64 = state.split(".", 1)
+        try:
+            payload_bytes = _b64url_decode(payload_b64)
+            sig = _b64url_decode(sig_b64)
+        except (ValueError, base64.binascii.Error) as exc:  # type: ignore[attr-defined]
+            raise OAuthStateInvalid("OAuth state base64 decode failed") from exc
+        expected = hmac.new(self._secret_key, payload_bytes, hashlib.sha256).digest()
+        if not hmac.compare_digest(expected, sig):
+            raise OAuthStateInvalid("OAuth state HMAC mismatch")
+        return payload_bytes

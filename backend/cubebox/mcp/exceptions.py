@@ -1,6 +1,51 @@
 """MCP domain exceptions. Each maps to a specific HTTP error code in routes."""
 
 
+class OAuthError(Exception):
+    """Base class for MCP OAuth-related failures."""
+
+
+class OAuthStateInvalid(OAuthError):
+    """OAuth state token failed format/HMAC validation (likely tampered)."""
+
+
+class OAuthStateExpired(OAuthError):
+    """OAuth state token TTL elapsed or has already been consumed."""
+
+
+class OAuthMetadataNotFound(OAuthError):
+    """Well-known metadata endpoint 404 or missing required field."""
+
+
+class OAuthMetadataFetchError(OAuthError):
+    """HTTP error while fetching OAuth metadata from a well-known endpoint."""
+
+    def __init__(self, url: str, status: int) -> None:
+        super().__init__(f"OAuth metadata fetch failed for {url}: HTTP {status}")
+        self.url = url
+        self.status = status
+
+
+class DCRError(OAuthError):
+    """Dynamic Client Registration (RFC 7591) request failed."""
+
+    def __init__(
+        self,
+        status: int,
+        error: str | None = None,
+        error_description: str | None = None,
+    ) -> None:
+        msg_parts = [f"DCR failed: HTTP {status}"]
+        if error:
+            msg_parts.append(f"error={error}")
+        if error_description:
+            msg_parts.append(f"error_description={error_description}")
+        super().__init__("; ".join(msg_parts))
+        self.status = status
+        self.error = error
+        self.error_description = error_description
+
+
 class MCPServerNotFound(Exception):
     """MCP server id does not exist or is outside the current org/workspace scope."""
 
