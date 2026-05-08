@@ -183,6 +183,67 @@ async def test_metadata_cache_serves_second_call_from_cache() -> None:
     assert len(handler.calls) == 1
 
 
+def test_join_root_issuer_appends_well_known() -> None:
+    """RFC 8414 §3: a root issuer just gets the well-known suffix appended."""
+    assert (
+        OAuthMetadataDiscovery._join(
+            "https://auth.example.com", "/.well-known/oauth-authorization-server"
+        )
+        == "https://auth.example.com/.well-known/oauth-authorization-server"
+    )
+
+
+def test_join_tenant_issuer_inserts_well_known_before_path() -> None:
+    """RFC 8414 §3: for a path-bearing issuer, well-known is inserted *before* the path."""
+    assert (
+        OAuthMetadataDiscovery._join(
+            "https://auth.example.com/tenant1", "/.well-known/oauth-authorization-server"
+        )
+        == "https://auth.example.com/.well-known/oauth-authorization-server/tenant1"
+    )
+
+
+def test_join_tenant_issuer_with_trailing_slash_is_normalized() -> None:
+    """A trailing slash on the issuer must not change the resulting well-known URL."""
+    assert (
+        OAuthMetadataDiscovery._join(
+            "https://auth.example.com/tenant1/", "/.well-known/oauth-authorization-server"
+        )
+        == "https://auth.example.com/.well-known/oauth-authorization-server/tenant1"
+    )
+
+
+def test_join_protected_resource_path_prefix_root() -> None:
+    """RFC 9728 §3.1: the same insertion rule applies to oauth-protected-resource."""
+    assert (
+        OAuthMetadataDiscovery._join(
+            "https://mcp.example.com", "/.well-known/oauth-protected-resource"
+        )
+        == "https://mcp.example.com/.well-known/oauth-protected-resource"
+    )
+
+
+def test_join_protected_resource_path_prefix_tenant() -> None:
+    """RFC 9728 §3.1: tenant-pathed resource gets the path appended after the well-known."""
+    assert (
+        OAuthMetadataDiscovery._join(
+            "https://mcp.example.com/tenant1", "/.well-known/oauth-protected-resource"
+        )
+        == "https://mcp.example.com/.well-known/oauth-protected-resource/tenant1"
+    )
+
+
+def test_join_nested_tenant_path_is_preserved() -> None:
+    """Multi-segment issuer paths are inserted verbatim after the well-known suffix."""
+    assert (
+        OAuthMetadataDiscovery._join(
+            "https://auth.example.com/region/tenant1",
+            "/.well-known/oauth-authorization-server",
+        )
+        == "https://auth.example.com/.well-known/oauth-authorization-server/region/tenant1"
+    )
+
+
 async def test_discover_for_resource_orchestrates_pr_then_as() -> None:
     handler = _CountingHandler(
         {
