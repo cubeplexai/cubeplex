@@ -3,14 +3,17 @@
 import hashlib
 
 # ``Credential.kind`` value used for plaintext MCP server credentials
-# (Bearer tokens, API keys). System OAuth client secrets use a different
-# kind (see ``catalog_seed._OAUTH_CLIENT_SECRET_KIND``).
+# (Bearer tokens, API keys).
 CREDENTIAL_KIND_MCP = "mcp_server"
 
 # Per-install OAuth tokens are stored in the same credential vault but under
 # distinct kinds so the references can't be cross-fetched by mistake.
+# Confidential-client OAuth client secrets (returned by RFC 7591 DCR or
+# seeded from catalog static config) live under their own kind too — a
+# kind-mismatch guard catches cross-fetch mistakes.
 CREDENTIAL_KIND_MCP_OAUTH_ACCESS_TOKEN = "mcp_oauth_access_token"
 CREDENTIAL_KIND_MCP_OAUTH_REFRESH_TOKEN = "mcp_oauth_refresh_token"
+CREDENTIAL_KIND_MCP_OAUTH_CLIENT_SECRET = "mcp_oauth_client_secret"
 
 
 def server_url_hash(url: str) -> str:

@@ -35,6 +35,7 @@ from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 from redis.asyncio import Redis
 
+from cubebox.mcp._constants import CREDENTIAL_KIND_MCP_OAUTH_CLIENT_SECRET
 from cubebox.mcp.exceptions import (
     MCPCatalogConnectorNotFound,
     MCPServerNotFound,
@@ -53,14 +54,6 @@ CALLBACK_TICKET_REDIS_KEY_PREFIX = "mcp_oauth_callback_ticket:"
 CALLBACK_TICKET_COOKIE_NAME = "cubebox_mcp_oauth_ticket"
 CALLBACK_TICKET_TTL_SECONDS = 600
 PKCE_REDIS_TTL_SECONDS = 300
-
-# Distinct credential kind for per-install OAuth confidential-client
-# secrets returned by RFC 7591 DCR. Kept apart from
-# ``mcp_oauth_access_token`` / ``mcp_oauth_refresh_token`` so a
-# kind-mismatch guard catches cross-fetch mistakes. Static catalog
-# client secrets share this kind; the seeder writes them under it too
-# (``catalog_seed._OAUTH_CLIENT_SECRET_KIND``).
-CREDENTIAL_KIND_MCP_OAUTH_CLIENT_SECRET = "mcp_oauth_client_secret"
 
 
 @dataclass(frozen=True)

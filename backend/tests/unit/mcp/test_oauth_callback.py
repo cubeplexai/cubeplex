@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 from collections.abc import AsyncIterator, Callable
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -17,6 +18,7 @@ from sqlmodel import SQLModel
 from cubebox.credentials.encryption import FernetBackend
 from cubebox.mcp._constants import (
     CREDENTIAL_KIND_MCP_OAUTH_ACCESS_TOKEN,
+    CREDENTIAL_KIND_MCP_OAUTH_CLIENT_SECRET,
     CREDENTIAL_KIND_MCP_OAUTH_REFRESH_TOKEN,
     server_url_hash,
 )
@@ -441,6 +443,87 @@ async def test_handle_callback_unknown_install_raises_invalid_server_state(
             await cb_handler.handle_callback(state=state, code="x")
     finally:
         await http.aclose()
+
+
+async def test_handle_callback_confidential_client_uses_basic_auth(
+    session: AsyncSession,
+    fake_redis: fakeredis.aioredis.FakeRedis,
+    encryption_backend: FernetBackend,
+) -> None:
+    """Confidential clients (DCR or static catalog secret) must HTTP Basic-auth
+    the token-exchange request with the client_secret pulled from the vault.
+
+    Regression guard for the wrong-credential-kind bug: ``callback.py`` used
+    to request the secret with ``kind=MCP_OAUTH_ACCESS_TOKEN``, which always
+    raised ``CredentialKindMismatch`` and broke every confidential-client
+    token exchange.
+    """
+    server = await _seed_oauth_install(
+        session,
+        credential_scope="org",
+        owner_workspace_id=None,
+    )
+
+    # Seed a vault row holding the per-install client_secret under the
+    # right kind. Mirrors what start.py writes after RFC 7591 DCR or
+    # what catalog_seed seeds for static-client connectors.
+    cred_repo = CredentialRepository(session, org_id=ORG_ID)
+    cred_service = CredentialService(
+        cred_repo, encryption_backend, org_id=ORG_ID, actor_user_id=USER_ID
+    )
+    secret_credential_id = await cred_service.create(
+        kind=CREDENTIAL_KIND_MCP_OAUTH_CLIENT_SECRET,
+        name=f"mcp_oauth_client_secret:{server.id}",
+        plaintext="topsecret-shh",
+    )
+    server.oauth_client_config = {
+        "client_id": "client-abc",
+        "client_secret_credential_id": secret_credential_id,
+    }
+    await MCPServerRepository(session, org_id=ORG_ID).update(server)
+
+    state_store = OAuthStateStore(redis=fake_redis, secret_key=STATE_SECRET, ttl_seconds=300)
+    state = await state_store.issue(install_id=server.id, actor_user_id=USER_ID)
+    await fake_redis.set(PKCE_REDIS_KEY_PREFIX + server.id, "verifier-conf")
+
+    handler = _Handler(
+        _metadata_responses(),
+        token_responses=[
+            httpx.Response(
+                200,
+                json={
+                    "access_token": "conf-access",
+                    "refresh_token": "conf-refresh",
+                    "expires_in": 3600,
+                },
+            )
+        ],
+    )
+    http = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    cb_handler = _make_handler(session, fake_redis, encryption_backend, http)
+
+    async def _fake_discover(
+        server: MCPServer, *, credential_or_token: str | None
+    ) -> tuple[bool, list[dict[str, Any]] | None, str | None]:
+        return True, [], None
+
+    with patch("cubebox.mcp.runtime.discover_tools", _fake_discover):
+        try:
+            result = await cb_handler.handle_callback(state=state, code="auth-code-conf")
+        finally:
+            await http.aclose()
+
+    assert result.authed is True
+
+    # Outgoing token request carried Basic auth derived from client_id +
+    # the decrypted vault secret. With the bug present, this assert never
+    # runs because handle_callback raises CredentialKindMismatch.
+    assert len(handler.token_calls) == 1
+    headers = handler.token_calls[0]["headers"]
+    auth_header = headers.get("authorization") or headers.get("Authorization")
+    assert auth_header is not None and auth_header.startswith("Basic ")
+    decoded = base64.b64decode(auth_header.removeprefix("Basic ").encode("ascii")).decode()
+    assert decoded == "client-abc:topsecret-shh"
 
 
 # ---- ensure unused fixtures lint-clean ----

@@ -35,6 +35,7 @@ from redis.asyncio import Redis
 from cubebox.credentials.encryption import EncryptionBackend
 from cubebox.mcp._constants import (
     CREDENTIAL_KIND_MCP_OAUTH_ACCESS_TOKEN,
+    CREDENTIAL_KIND_MCP_OAUTH_CLIENT_SECRET,
     CREDENTIAL_KIND_MCP_OAUTH_REFRESH_TOKEN,
 )
 from cubebox.mcp.exceptions import (
@@ -182,7 +183,7 @@ class OAuthCallbackHandler:
             cred_service = self._cred_service_factory(server.org_id, None)
             client_secret = await cred_service.get_decrypted(
                 credential_id=client_secret_credential_id,
-                requesting_kind=CREDENTIAL_KIND_MCP_OAUTH_ACCESS_TOKEN,
+                requesting_kind=CREDENTIAL_KIND_MCP_OAUTH_CLIENT_SECRET,
             )
             basic = base64.b64encode(f"{client_id}:{client_secret}".encode()).decode("ascii")
             headers["Authorization"] = f"Basic {basic}"
