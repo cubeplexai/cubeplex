@@ -6,10 +6,15 @@ export function buildPreviewUrl(
   version: number | null,
   workspaceId: string,
 ): string {
-  const base =
+  // Version goes in the path (not a query) so relative URLs inside the
+  // served HTML — e.g. `<iframe src="slides/01.html">` — automatically
+  // pick up the same version prefix when the browser resolves them.
+  // Query strings are dropped during relative-URL resolution.
+  const v = version ?? artifact.version
+  return (
     `/api/v1/ws/${workspaceId}/conversations/${artifact.conversation_id}` +
-    `/artifacts/${artifact.id}/preview/${filePath}`
-  return version != null ? `${base}?version=${version}` : base
+    `/artifacts/${artifact.id}/preview/v${v}/${filePath}`
+  )
 }
 
 export function buildDownloadUrl(
@@ -20,5 +25,6 @@ export function buildDownloadUrl(
   const base =
     `/api/v1/ws/${workspaceId}/conversations/${artifact.conversation_id}` +
     `/artifacts/${artifact.id}/download`
-  return version != null ? `${base}?version=${version}` : base
+  const v = version ?? artifact.version
+  return `${base}?version=${v}`
 }

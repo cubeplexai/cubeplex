@@ -148,16 +148,24 @@ async def download_artifact(
         ) from None
 
 
-@router.get("/{artifact_id}/preview/{file_path:path}")
+@router.get("/{artifact_id}/preview/v{version}/{file_path:path}")
 async def preview_artifact_file(
     conversation_id: str,
     artifact_id: str,
+    version: int,
     file_path: str,
     session: Annotated[AsyncSession, Depends(get_session)],
     ctx: Annotated[RequestContext, Depends(require_member)],
-    version: int | None = Query(default=None),
 ) -> Response:
-    """Serve a single file from an artifact for iframe preview."""
+    """Serve a single file from an artifact for iframe preview.
+
+    The version is in the URL *path* (not a query parameter) so that
+    relative URLs inside the served HTML resolve to the same version.
+    Query parameters are not propagated when a browser resolves a
+    relative URL, but path prefixes are — so an ``index.html`` that
+    references ``slides/01.html`` automatically picks up the same
+    version segment.
+    """
     repo = ArtifactRepository(session, org_id=ctx.org_id, workspace_id=ctx.workspace_id)
     artifact = await repo.get_by_id(artifact_id)
     if not artifact or artifact.conversation_id != conversation_id:
@@ -173,8 +181,7 @@ async def preview_artifact_file(
             detail="Invalid file path",
         )
 
-    target_version = version or artifact.version
-    key = f"artifacts/{conversation_id}/{artifact_id}/v{target_version}/{file_path}"
+    key = f"artifacts/{conversation_id}/{artifact_id}/v{version}/{file_path}"
 
     try:
         store = get_objectstore_client()
