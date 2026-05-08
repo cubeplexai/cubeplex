@@ -635,13 +635,20 @@ class RunManager:
 
             from cubebox.db.engine import async_session_maker as _memory_session_maker
             from cubebox.repositories.memory import MemoryRepository as _MemoryRepository
+            from cubebox.services.memory import MemoryService as _MemoryService
 
             def _memory_repo_factory() -> _MemoryRepository:
-                # Each call creates a fresh session; the middleware does its
-                # own commits. Sessions close when garbage collected.
-                _session = _memory_session_maker()
+                # Each call creates a fresh session; sessions close when GC'd.
                 return _MemoryRepository(
-                    _session,
+                    _memory_session_maker(),
+                    user_id=ctx.user_id,
+                    org_id=ctx.org_id,
+                    workspace_id=ctx.workspace_id,
+                )
+
+            def _memory_service_factory() -> _MemoryService:
+                return _MemoryService(
+                    _memory_repo_factory(),
                     user_id=ctx.user_id,
                     org_id=ctx.org_id,
                     workspace_id=ctx.workspace_id,
@@ -661,6 +668,7 @@ class RunManager:
                 citation_configs=all_citation_configs,
                 event_queue=event_q,
                 memory_repo_factory=_memory_repo_factory,
+                memory_service_factory=_memory_service_factory,
             )
             config_dict = {"configurable": {"thread_id": conversation_id}}
             citation_counter._next = await _recover_next_citation_id(agent, conversation_id)

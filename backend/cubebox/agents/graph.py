@@ -29,9 +29,11 @@ from cubebox.middleware.todo import TodoListMiddleware
 from cubebox.prompts.system import BASE_SYSTEM_PROMPT
 from cubebox.repositories.memory import MemoryRepository
 from cubebox.sandbox.base import Sandbox
+from cubebox.services.memory import MemoryService
 from cubebox.skills.cache import SkillCache
 from cubebox.skills.service import SkillCatalogService
 from cubebox.tools.builtin.load_skill import create_load_skill_tool
+from cubebox.tools.builtin.memory import create_memory_tools
 
 
 def create_cubebox_agent(
@@ -50,6 +52,7 @@ def create_cubebox_agent(
     citation_configs: dict[str, CitationConfig] | None = None,
     event_queue: asyncio.Queue[Any] | None = None,
     memory_repo_factory: Callable[[], MemoryRepository] | None = None,
+    memory_service_factory: Callable[[], MemoryService] | None = None,
 ) -> CompiledStateGraph[Any, Any, Any, Any]:
     """Build the cubebox agent with the configured middleware stack.
 
@@ -150,6 +153,14 @@ def create_cubebox_agent(
     # that exercise the agent without a DB).
     if memory_repo_factory is not None:
         middleware.append(MemoryMiddleware(repo_factory=memory_repo_factory))
+
+    # Memory tools — give the agent explicit save/search/update access.
+    if memory_service_factory is not None:
+        memory_tools = create_memory_tools(
+            service_factory=memory_service_factory,
+            conversation_id=conversation_id,
+        )
+        tools = [*tools, *memory_tools]
 
     # Skill catalog wiring — middleware injects available skills into the
     # system prompt; load_skill is registered as a request-scoped tool.
