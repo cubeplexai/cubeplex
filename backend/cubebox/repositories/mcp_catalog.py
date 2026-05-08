@@ -88,7 +88,7 @@ class MCPCatalogConnectorRepository:
                 status=status,
             )
             self.session.add(row)
-            await self.session.commit()
+            await self.session.flush()
             await self.session.refresh(row)
             return row
 
@@ -109,7 +109,7 @@ class MCPCatalogConnectorRepository:
         existing.status = status
         existing.updated_at = datetime.now(UTC)
         self.session.add(existing)
-        await self.session.commit()
+        await self.session.flush()
         await self.session.refresh(existing)
         return existing
 
@@ -135,7 +135,7 @@ class MCPCatalogConnectorRepository:
             self.session.add(row)
             changed.append(row)
         if changed:
-            await self.session.commit()
+            await self.session.flush()
             for row in changed:
                 await self.session.refresh(row)
         return changed

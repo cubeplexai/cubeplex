@@ -1,12 +1,12 @@
 """MCP connector service: CRUD, invariants, credential wiring, and discovery."""
 
-import hashlib
 from contextlib import suppress
 from datetime import UTC, datetime
 from typing import Any
 
 from cubebox.auth.context import RequestContext
 from cubebox.credentials.exceptions import CredentialNotFound
+from cubebox.mcp._constants import CREDENTIAL_KIND_MCP, server_url_hash
 from cubebox.mcp.discovery import discover_tools
 from cubebox.mcp.exceptions import (
     MCPCredentialPathMismatch,
@@ -36,11 +36,6 @@ from cubebox.services.credential import CredentialService
 _VALID_SCOPES = {"org", "workspace", "user", "none"}
 _VALID_METHODS = {"static", "oauth", "none"}
 _VALID_TRANSPORTS = {"streamable_http", "sse"}
-_CREDENTIAL_KIND_MCP = "mcp_server"
-
-
-def _sha256_hex(value: str) -> str:
-    return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
 
 class MCPServerService:
@@ -94,7 +89,7 @@ class MCPServerService:
         credential_id: str | None = None
         if credential_scope == "org":
             credential_id = await self.cred_service.create(
-                kind=_CREDENTIAL_KIND_MCP,
+                kind=CREDENTIAL_KIND_MCP,
                 name=credential_name or f"mcp:{name}:org",
                 plaintext=credential_plaintext or "",
             )
@@ -105,7 +100,7 @@ class MCPServerService:
                 owner_workspace_id=owner_workspace_id,
                 name=name,
                 server_url=server_url,
-                server_url_hash=_sha256_hex(server_url),
+                server_url_hash=server_url_hash(server_url),
                 transport=transport,
                 auth_method=auth_method,
                 credential_scope=credential_scope,
@@ -121,7 +116,7 @@ class MCPServerService:
             if credential_plaintext is None or owner_workspace_id is None:
                 raise MCPCredentialRequired()
             workspace_credential_id = await self.cred_service.create(
-                kind=_CREDENTIAL_KIND_MCP,
+                kind=CREDENTIAL_KIND_MCP,
                 name=credential_name or f"mcp:{name}:ws:{owner_workspace_id}",
                 plaintext=credential_plaintext,
             )
@@ -165,7 +160,7 @@ class MCPServerService:
             server.name = name
 
         if server_url is not None and server_url != server.server_url:
-            new_hash = _sha256_hex(server_url)
+            new_hash = server_url_hash(server_url)
             existing = await self.server_repo.find_by_url_hash(
                 owner_workspace_id=server.owner_workspace_id,
                 server_url_hash=new_hash,
@@ -187,7 +182,7 @@ class MCPServerService:
                 )
             if server.credential_id is None:
                 server.credential_id = await self.cred_service.create(
-                    kind=_CREDENTIAL_KIND_MCP,
+                    kind=CREDENTIAL_KIND_MCP,
                     name=f"mcp:{server.name}:org",
                     plaintext=credential_plaintext,
                 )
@@ -275,7 +270,7 @@ class MCPServerService:
             owner_workspace_id=owner_workspace_id,
             name="__test__",
             server_url=server_url,
-            server_url_hash=_sha256_hex(server_url),
+            server_url_hash=server_url_hash(server_url),
             transport=transport,
             auth_method=auth_method,
             credential_scope=credential_scope,
@@ -363,7 +358,7 @@ class MCPServerService:
             return existing.credential_id
 
         credential_id = await self.cred_service.create(
-            kind=_CREDENTIAL_KIND_MCP,
+            kind=CREDENTIAL_KIND_MCP,
             name=credential_name or f"mcp:{server.name}:ws:{workspace_id}",
             plaintext=plaintext,
         )
@@ -442,7 +437,7 @@ class MCPServerService:
             return existing.credential_id
 
         credential_id = await self.cred_service.create(
-            kind=_CREDENTIAL_KIND_MCP,
+            kind=CREDENTIAL_KIND_MCP,
             name=credential_name or f"mcp:{server.name}:user:{user_id}",
             plaintext=plaintext,
         )
@@ -528,7 +523,7 @@ class MCPServerService:
         server_url: str,
         owner_workspace_id: str | None,
     ) -> None:
-        url_hash = _sha256_hex(server_url)
+        url_hash = server_url_hash(server_url)
         if await self.server_repo.find_by_url_hash(
             owner_workspace_id=owner_workspace_id,
             server_url_hash=url_hash,
@@ -578,7 +573,7 @@ class MCPServerService:
                 raise MCPCredentialRequired()
             token = await self.cred_service.get_decrypted(
                 credential_id=server.credential_id,
-                requesting_kind=_CREDENTIAL_KIND_MCP,
+                requesting_kind=CREDENTIAL_KIND_MCP,
             )
         elif server.credential_scope == "workspace":
             credential_row = await self.ws_cred_repo.get(
@@ -589,7 +584,7 @@ class MCPServerService:
                 return
             token = await self.cred_service.get_decrypted(
                 credential_id=credential_row.credential_id,
-                requesting_kind=_CREDENTIAL_KIND_MCP,
+                requesting_kind=CREDENTIAL_KIND_MCP,
             )
 
         await self._refresh_tools_for_server_with_token(server, credential_or_token=token)

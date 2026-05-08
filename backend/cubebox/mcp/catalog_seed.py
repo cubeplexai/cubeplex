@@ -443,11 +443,11 @@ async def seed_catalog(
 
     deprecated_rows = await repo.mark_deprecated_for_missing_slugs(kept_slugs=active_slugs)
 
-    # Make sure any pending Credential inserts/updates are committed; the
-    # repo upserts already commit but the secret upserts go through flush
-    # only — final commit here keeps everything in one tidy transaction
-    # boundary at the end.
-    await session.commit()
+    # Flush any pending Credential inserts/updates so caller sees a
+    # consistent in-session state. Commit/rollback is the caller's
+    # responsibility — the CLI owns the transaction boundary so
+    # ``--dry-run`` can roll back the whole operation.
+    await session.flush()
 
     return SeedResult(
         upserted=upserted,
