@@ -73,4 +73,8 @@ def downgrade() -> None:
     op.drop_index('ix_memory_personal', table_name='memory_items')
     op.drop_index('ix_memory_org', table_name='memory_items')
     op.drop_table('memory_items')
+    sa.Enum(name="memorysourcetype").drop(op.get_bind(), checkfirst=True)
+    sa.Enum(name="memorystatus").drop(op.get_bind(), checkfirst=True)
+    sa.Enum(name="memorytype").drop(op.get_bind(), checkfirst=True)
+    sa.Enum(name="memoryscope").drop(op.get_bind(), checkfirst=True)
     # ### end Alembic commands ###
