@@ -1,7 +1,6 @@
 """MCP connector service: CRUD, invariants, credential wiring, and discovery."""
 
 from contextlib import suppress
-from datetime import UTC, datetime
 from typing import Any
 
 from cubebox.auth.context import RequestContext
@@ -11,7 +10,6 @@ from cubebox.mcp.discovery import discover_tools
 from cubebox.mcp.exceptions import (
     MCPCredentialPathMismatch,
     MCPCredentialRequired,
-    MCPOAuthNotImplemented,
     MCPServerAlreadyOrgWide,
     MCPServerNameConflict,
     MCPServerNotFound,
@@ -87,11 +85,12 @@ class MCPServerService:
         )
 
         credential_id: str | None = None
-        if credential_scope == "org":
+        if credential_scope == "org" and auth_method == "static":
+            assert credential_plaintext is not None  # invariant guard above
             credential_id = await self.cred_service.create(
                 kind=CREDENTIAL_KIND_MCP,
                 name=credential_name or f"mcp:{name}:org",
-                plaintext=credential_plaintext or "",
+                plaintext=credential_plaintext,
             )
 
         server = await self.server_repo.add(
@@ -545,8 +544,6 @@ class MCPServerService:
         credential_plaintext: str | None,
         owner_workspace_id: str | None,
     ) -> None:
-        if auth_method == "oauth":
-            raise MCPOAuthNotImplemented()
         if auth_method not in _VALID_METHODS:
             raise ValueError(f"unknown auth_method: {auth_method}")
         if credential_scope not in _VALID_SCOPES:
@@ -555,9 +552,16 @@ class MCPServerService:
             raise ValueError(f"unknown transport: {transport}")
         if (auth_method == "none") != (credential_scope == "none"):
             raise ValueError("auth_method=none and credential_scope=none must be set together")
-        if credential_scope in {"org", "workspace"} and not credential_plaintext:
-            raise MCPCredentialRequired()
-        if credential_scope in {"user", "none"} and credential_plaintext:
+        # Plaintext credential is owned by the static path. OAuth installs get
+        # their access/refresh tokens written by the callback handler, not
+        # at create time, so they neither require nor accept it. (auth=none
+        # forbids it via the (none ↔ none) invariant above.)
+        if auth_method == "static":
+            if credential_scope in {"org", "workspace"} and not credential_plaintext:
+                raise MCPCredentialRequired()
+            if credential_scope == "user" and credential_plaintext:
+                raise MCPUserScopeCredentialForbidden()
+        elif credential_plaintext:
             raise MCPUserScopeCredentialForbidden()
         if owner_workspace_id is not None and credential_scope == "org":
             raise ValueError("workspace-private servers cannot use credential_scope=org")
@@ -565,6 +569,11 @@ class MCPServerService:
     async def _refresh_tools_for_server(self, server: MCPServer) -> None:
         """Best-effort discovery; failures mark the server unauthenticated."""
         if server.credential_scope == "user":
+            return
+
+        # OAuth installs have no credential at create-time — the callback
+        # handler writes one and triggers discovery itself. Skip silently.
+        if server.auth_method == "oauth" and server.credential_id is None:
             return
 
         token: str | None = None
@@ -595,12 +604,13 @@ class MCPServerService:
         *,
         credential_or_token: str | None,
     ) -> None:
-        success, tools, error = await discover_tools(
+        # Delegate to the runtime helper so the OAuth callback handler
+        # (which has no MCPServerService) can reuse the same discovery +
+        # persistence logic.
+        from cubebox.mcp.runtime import refresh_tools_for_server_with_token
+
+        await refresh_tools_for_server_with_token(
             server,
+            server_repo=self.server_repo,
             credential_or_token=credential_or_token,
         )
-        server.authed = success
-        server.tools_cache = tools or []
-        server.last_error = None if success else error
-        server.last_discovered_at = datetime.now(UTC)
-        await self.server_repo.update(server)

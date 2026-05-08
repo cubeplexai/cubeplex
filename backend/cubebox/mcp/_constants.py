@@ -7,6 +7,11 @@ import hashlib
 # kind (see ``catalog_seed._OAUTH_CLIENT_SECRET_KIND``).
 CREDENTIAL_KIND_MCP = "mcp_server"
 
+# Per-install OAuth tokens are stored in the same credential vault but under
+# distinct kinds so the references can't be cross-fetched by mistake.
+CREDENTIAL_KIND_MCP_OAUTH_ACCESS_TOKEN = "mcp_oauth_access_token"
+CREDENTIAL_KIND_MCP_OAUTH_REFRESH_TOKEN = "mcp_oauth_refresh_token"
+
 
 def server_url_hash(url: str) -> str:
     """SHA-256 hex digest of an MCP server URL.
