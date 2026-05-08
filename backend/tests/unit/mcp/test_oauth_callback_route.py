@@ -244,8 +244,9 @@ def _assert_cookie_stripped(response: httpx.Response) -> None:
 async def _hit_callback(
     app: FastAPI,
     *,
-    code: str,
+    code: str | None = None,
     state: str,
+    error: str | None = None,
     cookies: dict[str, str] | None = None,
 ) -> httpx.Response:
     transport = httpx.ASGITransport(app=app)
@@ -254,9 +255,14 @@ async def _hit_callback(
         base_url="http://testserver",
         cookies=cookies or {},
     ) as client:
+        params: dict[str, str] = {"state": state}
+        if code is not None:
+            params["code"] = code
+        if error is not None:
+            params["error"] = error
         return await client.get(
             "/api/v1/oauth/mcp/callback",
-            params={"code": code, "state": state},
+            params=params,
         )
 
 
@@ -564,4 +570,97 @@ async def test_callback_actor_mismatch_returns_invalid_server_state(
 
     qs = _parse_redirect(response)
     assert qs["reason"] == ["invalid_server_state"]
+    _assert_cookie_stripped(response)
+
+
+# ---------------- AS-side error (no code) ---------------- #
+
+
+async def test_callback_as_error_access_denied_redirects_user_denied(
+    session: AsyncSession,
+    fake_redis: fakeredis.aioredis.FakeRedis,
+    encryption_backend: FernetBackend,
+) -> None:
+    """RFC 6749 §4.1.2.1: AS may redirect with ?error= and no code.
+
+    User clicking Deny on the consent screen produces ``error=access_denied``.
+    The route must accept the request (code is optional) and redirect to
+    the frontend return page with ``reason=user_denied``, consuming and
+    stripping the ticket cookie either way.
+    """
+    state_store = OAuthStateStore(redis=fake_redis, secret_key=STATE_SECRET, ttl_seconds=300)
+    handler = _Handler(_metadata_responses(), token_responses=[])
+    http = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    cb_handler = _make_callback_handler(
+        session=session,
+        fake_redis=fake_redis,
+        encryption_backend=encryption_backend,
+        http=http,
+        state_store=state_store,
+    )
+    app = _build_app(
+        fake_redis=fake_redis,
+        callback_handler=cb_handler,
+        state_store=state_store,
+    )
+    ticket = "ticket-deny"
+    await fake_redis.set(CALLBACK_TICKET_REDIS_KEY_PREFIX + ticket, USER_ID, ex=600)
+
+    try:
+        response = await _hit_callback(
+            app,
+            code=None,
+            state="any-state-the-handler-wont-consume",
+            error="access_denied",
+            cookies={CALLBACK_TICKET_COOKIE_NAME: ticket},
+        )
+    finally:
+        await http.aclose()
+
+    qs = _parse_redirect(response)
+    assert qs["status"] == ["error"]
+    assert qs["reason"] == ["user_denied"]
+    _assert_cookie_stripped(response)
+    # Ticket key consumed even though we never reached the handler.
+    assert await fake_redis.get(CALLBACK_TICKET_REDIS_KEY_PREFIX + ticket) is None
+
+
+async def test_callback_as_error_other_redirects_provider_error(
+    session: AsyncSession,
+    fake_redis: fakeredis.aioredis.FakeRedis,
+    encryption_backend: FernetBackend,
+) -> None:
+    """Non-access_denied AS errors (server_error, invalid_scope, etc.) → provider_error."""
+    state_store = OAuthStateStore(redis=fake_redis, secret_key=STATE_SECRET, ttl_seconds=300)
+    handler = _Handler(_metadata_responses(), token_responses=[])
+    http = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    cb_handler = _make_callback_handler(
+        session=session,
+        fake_redis=fake_redis,
+        encryption_backend=encryption_backend,
+        http=http,
+        state_store=state_store,
+    )
+    app = _build_app(
+        fake_redis=fake_redis,
+        callback_handler=cb_handler,
+        state_store=state_store,
+    )
+    ticket = "ticket-server-error"
+    await fake_redis.set(CALLBACK_TICKET_REDIS_KEY_PREFIX + ticket, USER_ID, ex=600)
+
+    try:
+        response = await _hit_callback(
+            app,
+            code=None,
+            state="ignored",
+            error="server_error",
+            cookies={CALLBACK_TICKET_COOKIE_NAME: ticket},
+        )
+    finally:
+        await http.aclose()
+
+    qs = _parse_redirect(response)
+    assert qs["status"] == ["error"]
+    assert qs["reason"] == ["provider_error"]
     _assert_cookie_stripped(response)
