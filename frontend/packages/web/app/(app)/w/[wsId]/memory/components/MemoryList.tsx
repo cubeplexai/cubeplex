@@ -1,0 +1,91 @@
+'use client'
+
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { createApiClient, archiveMemory, listMemory } from '@cubebox/core'
+import type { MemoryItem, MemoryScope, MemoryStatus } from '@cubebox/core'
+import { MemoryItemCard } from './MemoryItemCard'
+
+interface MemoryListProps {
+  wsId: string
+  scope?: MemoryScope
+  status?: MemoryStatus
+}
+
+export function MemoryList({ wsId, scope, status = 'active' }: MemoryListProps) {
+  const [items, setItems] = useState<MemoryItem[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const loadingRef = useRef(false)
+
+  const client = useMemo(() => {
+    const c = createApiClient('')
+    c.setWorkspaceId(wsId)
+    return c
+  }, [wsId])
+
+  useEffect(() => {
+    let cancelled = false
+    loadingRef.current = true
+    setLoading(true)
+    setError(null)
+    listMemory(client, { scope, status })
+      .then((data) => {
+        if (!cancelled) setItems(data)
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) setError(err instanceof Error ? err.message : 'Failed to load memories')
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false)
+        loadingRef.current = false
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [client, scope, status])
+
+  const handleArchive = useCallback(
+    async (id: string) => {
+      await archiveMemory(client, id)
+      setItems((prev) => prev.filter((item) => item.id !== id))
+    },
+    [client],
+  )
+
+  if (loading) {
+    return (
+      <div className="flex flex-col gap-3">
+        {[...Array(3)].map((_, i) => (
+          <div key={i} className="h-24 rounded-xl border border-border bg-muted/30 animate-pulse" />
+        ))}
+      </div>
+    )
+  }
+
+  if (error) {
+    return (
+      <div className="rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
+        {error}
+      </div>
+    )
+  }
+
+  if (items.length === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-border py-16 text-center">
+        <p className="text-sm font-medium text-muted-foreground">No memories yet</p>
+        <p className="text-xs text-muted-foreground/60">
+          Memories are saved automatically as you chat.
+        </p>
+      </div>
+    )
+  }
+
+  return (
+    <div className="flex flex-col gap-3">
+      {items.map((item) => (
+        <MemoryItemCard key={item.id} item={item} onArchive={handleArchive} />
+      ))}
+    </div>
+  )
+}
