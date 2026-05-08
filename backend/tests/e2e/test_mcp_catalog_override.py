@@ -8,8 +8,7 @@ deletes the override row (default-on inheritance).
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator, Iterator
-from typing import Any
+from collections.abc import AsyncIterator
 
 import httpx
 import pytest
@@ -38,14 +37,8 @@ async def catalog_id(db_session: AsyncSession) -> AsyncIterator[str]:
     yield row.id
 
 
-@pytest.fixture(autouse=True)
-def _stub_discover_tools(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
-    async def _ok(*_args: object, **_kwargs: object) -> tuple[bool, list[Any], None]:
-        return True, [], None
-
-    monkeypatch.setattr("cubebox.services.mcp_catalog.discover_tools", _ok)
-    monkeypatch.setattr("cubebox.services.mcp.discover_tools", _ok)
-    yield
+# Apply the shared MCP discover-tools stub to every test in this module.
+pytestmark = pytest.mark.usefixtures("stub_discover_tools")
 
 
 async def test_workspace_override_disable_then_reenable(
@@ -57,7 +50,6 @@ async def test_workspace_override_disable_then_reenable(
     install_resp = await client.post(
         f"/api/v1/admin/mcp/catalog/{catalog_id}/install",
         json={
-            "scope": "org",
             "auth_method": "static",
             "credential_plaintext": "ghp_test",
         },

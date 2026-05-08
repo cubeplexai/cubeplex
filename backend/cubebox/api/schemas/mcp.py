@@ -155,9 +155,8 @@ class MCPCatalogListOut(BaseModel):
 
 
 class MCPCatalogInstallIn(BaseModel):
-    """Admin install. ``scope=user`` installs into the admin's active workspace."""
+    """Admin install. Always org-wide — user-scope goes via the workspace endpoint."""
 
-    scope: Literal["org", "user"] = "org"
     auth_method: Literal["oauth", "static", "none"]
     auto_enable_workspaces: bool = True
     credential_plaintext: str | None = None
@@ -177,6 +176,7 @@ class MCPInstallSwitchAuthIn(BaseModel):
 
     auth_method: Literal["oauth", "static", "none"]
     credential_plaintext: str | None = None
+    credential_name: str | None = None
 
 
 class MCPCatalogInstallOut(BaseModel):

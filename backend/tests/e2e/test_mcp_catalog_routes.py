@@ -18,7 +18,7 @@ don't want to talk to from CI.
 from __future__ import annotations
 
 import secrets
-from collections.abc import AsyncIterator, Iterator
+from collections.abc import AsyncIterator
 from typing import Any
 
 import httpx
@@ -114,16 +114,8 @@ async def catalog_seeded(db_session: AsyncSession) -> AsyncIterator[dict[str, st
     yield {"github": github.id, "notion": notion.id, "mslearn": mslearn.id}
 
 
-@pytest.fixture(autouse=True)
-def _stub_discover_tools(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
-    """Make tool discovery return success without hitting the network."""
-
-    async def _ok(*_args: object, **_kwargs: object) -> tuple[bool, list[Any], None]:
-        return True, [], None
-
-    monkeypatch.setattr("cubebox.services.mcp_catalog.discover_tools", _ok)
-    monkeypatch.setattr("cubebox.services.mcp.discover_tools", _ok)
-    yield
+# Apply the shared MCP discover-tools stub to every test in this module.
+pytestmark = pytest.mark.usefixtures("stub_discover_tools")
 
 
 # ---------------------------------------------------------------------------
@@ -184,7 +176,6 @@ async def test_catalog_list_other_org_sees_no_installs(
     install_resp = await client_a.post(
         f"/api/v1/admin/mcp/catalog/{catalog_seeded['github']}/install",
         json={
-            "scope": "org",
             "auth_method": "static",
             "credential_plaintext": "ghp_test",
         },
@@ -214,7 +205,6 @@ async def test_admin_install_static_succeeds(
     resp = await client.post(
         f"/api/v1/admin/mcp/catalog/{catalog_seeded['github']}/install",
         json={
-            "scope": "org",
             "auth_method": "static",
             "credential_plaintext": "ghp_test",
         },
@@ -241,7 +231,6 @@ async def test_admin_install_duplicate_returns_409(
     first = await client.post(
         f"/api/v1/admin/mcp/catalog/{catalog_seeded['github']}/install",
         json={
-            "scope": "org",
             "auth_method": "static",
             "credential_plaintext": "ghp_test",
         },
@@ -251,7 +240,6 @@ async def test_admin_install_duplicate_returns_409(
     dup = await client.post(
         f"/api/v1/admin/mcp/catalog/{catalog_seeded['github']}/install",
         json={
-            "scope": "org",
             "auth_method": "static",
             "credential_plaintext": "ghp_test_2",
         },
@@ -270,7 +258,7 @@ async def test_admin_install_oauth_returns_requires_oauth(
 
     resp = await client.post(
         f"/api/v1/admin/mcp/catalog/{catalog_seeded['github']}/install",
-        json={"scope": "org", "auth_method": "oauth"},
+        json={"auth_method": "oauth"},
     )
     assert resp.status_code == 201, resp.text
     body = resp.json()
@@ -288,7 +276,6 @@ async def test_admin_install_unsupported_auth_method_returns_400(
     resp = await client.post(
         f"/api/v1/admin/mcp/catalog/{catalog_seeded['mslearn']}/install",
         json={
-            "scope": "org",
             "auth_method": "static",
             "credential_plaintext": "noop",
         },
@@ -305,7 +292,7 @@ async def test_admin_install_unknown_catalog_returns_404(
     client, _workspace_id = admin_client
     resp = await client.post(
         "/api/v1/admin/mcp/catalog/mctlg-nonexistent/install",
-        json={"scope": "org", "auth_method": "none"},
+        json={"auth_method": "none"},
     )
     assert resp.status_code == 404
 
@@ -324,7 +311,6 @@ async def test_admin_delete_install_soft_disables(
     install_resp = await client.post(
         f"/api/v1/admin/mcp/catalog/{catalog_seeded['github']}/install",
         json={
-            "scope": "org",
             "auth_method": "static",
             "credential_plaintext": "ghp_test",
         },
@@ -363,7 +349,6 @@ async def test_admin_switch_static_to_oauth(
     install_resp = await client.post(
         f"/api/v1/admin/mcp/catalog/{catalog_seeded['github']}/install",
         json={
-            "scope": "org",
             "auth_method": "static",
             "credential_plaintext": "ghp_test",
         },

@@ -5,11 +5,12 @@ Read path:
   status fields scoped to the calling workspace + user.
 
 Write path (admin):
-- ``install_for_org``: create one ``mcp_servers`` row tied to a catalog
-  connector. Static → write credential and refresh tools. OAuth → leave
-  ``authed=false`` and return ``requires_oauth=True`` so the API layer
-  can hand off to the OAuth start route. None → ``authed=true``
-  immediately.
+- ``install_for_org``: create one org-wide ``mcp_servers`` row tied to a
+  catalog connector. Static → write credential and refresh tools. OAuth
+  → leave ``authed=false`` and return ``requires_oauth=True`` so the API
+  layer can hand off to the OAuth start route. None → ``authed=true``
+  immediately. The admin endpoint is org-wide only — user-scope installs
+  go through ``install_for_workspace``.
 - ``delete_install``: soft-disable (clears credentials, ``authed=false``,
   best-effort OAuth revoke stub). Keeps the row for history.
 - ``switch_auth_method``: re-key flow.
@@ -26,7 +27,6 @@ from __future__ import annotations
 from contextlib import suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Literal
 
 from cubebox.auth.context import RequestContext
 from cubebox.credentials.exceptions import CredentialNotFound
@@ -172,16 +172,16 @@ class MCPCatalogService:
         self,
         *,
         catalog_id: str,
-        scope: Literal["org", "user"],
         auth_method: str,
         credential_plaintext: str | None,
         credential_name: str | None,
         auto_enable_workspaces: bool,
     ) -> InstallResult:
-        """Org admin install. ``scope=org`` makes it visible to all workspaces.
+        """Org admin install — always org-wide (visible to all workspaces).
 
-        ``scope=user`` here is an admin convenience for installing into the
-        admin's own active workspace as a workspace-private user-scope row.
+        User-scope installs go through ``install_for_workspace`` (the
+        ``/api/v1/ws/{ws}/mcp/catalog/{id}/install`` endpoint). The admin
+        endpoint never writes a workspace-private row.
         """
         connector = await self._get_connector_or_raise(catalog_id)
         self._assert_auth_method_supported(connector, auth_method)
@@ -191,17 +191,6 @@ class MCPCatalogService:
         # visible). We accept the flag in the signature so Phase 3 can
         # plumb it from the API; nothing extra to do here today.
         del auto_enable_workspaces
-
-        if scope == "user":
-            # Admin asked to install for themselves. Force the workspace
-            # path with the admin's own user_id.
-            return await self._install_workspace_user(
-                connector=connector,
-                workspace_id=self._ctx.workspace_id,
-                auth_method=auth_method,
-                credential_plaintext=credential_plaintext,
-                credential_name=credential_name,
-            )
 
         return await self._install_org_wide(
             connector=connector,
@@ -286,8 +275,13 @@ class MCPCatalogService:
         install_id: str,
         new_auth_method: str,
         credential_plaintext: str | None,
+        credential_name: str | None = None,
     ) -> InstallResult:
-        """Re-key flow: change a server's auth_method, rewriting credentials."""
+        """Re-key flow: change a server's auth_method, rewriting credentials.
+
+        ``credential_name``, if provided, is used as the new credential's
+        display name; otherwise we auto-generate a scope-keyed name.
+        """
         server = await self.server_repo.get(install_id)
         if server is None:
             raise MCPServerNotFound(install_id)
@@ -311,7 +305,7 @@ class MCPCatalogService:
             if server.credential_scope == "org":
                 cred_id = await self.cred_service.create(
                     kind=CREDENTIAL_KIND_MCP,
-                    name=f"mcp:{server.name}:org",
+                    name=credential_name or f"mcp:{server.name}:org",
                     plaintext=credential_plaintext,
                 )
                 server.credential_id = cred_id
@@ -323,7 +317,7 @@ class MCPCatalogService:
                     )
                 cred_id = await self.cred_service.create(
                     kind=CREDENTIAL_KIND_MCP,
-                    name=f"mcp:{server.name}:ws:{server.owner_workspace_id}",
+                    name=credential_name or f"mcp:{server.name}:ws:{server.owner_workspace_id}",
                     plaintext=credential_plaintext,
                 )
                 # Recreate the workspace_mcp_credentials row.
@@ -339,7 +333,7 @@ class MCPCatalogService:
             elif server.credential_scope == "user":
                 cred_id = await self.cred_service.create(
                     kind=CREDENTIAL_KIND_MCP,
-                    name=f"mcp:{server.name}:user:{self._ctx.user.id}",
+                    name=credential_name or f"mcp:{server.name}:user:{self._ctx.user.id}",
                     plaintext=credential_plaintext,
                 )
                 # Recreate the user_mcp_credentials row.
