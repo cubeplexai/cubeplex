@@ -358,18 +358,15 @@
       "cancel": "取消",
       "confirm": "确认提升"
     },
-    "bindings": {
-      "title": "工作区绑定",
-      "description": "为指定工作区启用这个组织级 MCP 服务。",
-      "updateFailed": "绑定更新失败",
+    "overrides": {
+      "title": "工作区可见性",
+      "description": "组织级 MCP 服务默认对所有工作区可见。如需对特定工作区关闭，请在此调整。",
+      "updateFailed": "可见性更新失败",
       "summary": "已为 {enabled}/{total} 个工作区启用",
-      "enableAll": "全部启用",
-      "disableAll": "全部禁用",
       "workspace": "工作区",
       "enabled": "已启用",
       "noWorkspaces": "暂无可用工作区。",
-      "toggleAria": "切换 {name}",
-      "save": "保存绑定"
+      "toggleAria": "切换 {name}"
     },
     "credential": {
       "managedTitle": "凭证",

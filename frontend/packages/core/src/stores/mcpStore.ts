@@ -3,12 +3,13 @@ import { create } from 'zustand'
 import type { ApiClient } from '../api/client'
 import * as api from '../api/mcp'
 import type {
+  MCPOverrideUpdateBody,
   MCPServer,
   MCPServerCreateAdminBody,
   MCPServerPatchBody,
   MCPTestConnectionBody,
   MCPTestConnectionResult,
-  WorkspaceBinding,
+  WorkspaceOverride,
 } from '../types/mcp'
 
 export interface McpStore {
@@ -21,12 +22,12 @@ export interface McpStore {
   remove(client: ApiClient, id: string): Promise<void>
   refreshTools(client: ApiClient, id: string): Promise<MCPServer>
   testConnection(client: ApiClient, body: MCPTestConnectionBody): Promise<MCPTestConnectionResult>
-  fetchBindings(client: ApiClient, id: string): Promise<WorkspaceBinding[]>
-  saveBindings(
+  fetchOverrides(client: ApiClient, id: string): Promise<WorkspaceOverride[]>
+  saveOverride(
     client: ApiClient,
     id: string,
-    bindings: WorkspaceBinding[],
-  ): Promise<WorkspaceBinding[]>
+    body: MCPOverrideUpdateBody,
+  ): Promise<WorkspaceOverride[]>
   reset(): void
 }
 
@@ -74,12 +75,12 @@ export const useMcpStore = create<McpStore>((set, get) => ({
     return api.adminTestConnection(client, body)
   },
 
-  fetchBindings(client, id) {
-    return api.adminGetBindings(client, id)
+  fetchOverrides(client, id) {
+    return api.adminGetOverrides(client, id)
   },
 
-  saveBindings(client, id, bindings) {
-    return api.adminPutBindings(client, id, bindings)
+  saveOverride(client, id, body) {
+    return api.adminPutOverride(client, id, body)
   },
 
   reset() {

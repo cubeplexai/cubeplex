@@ -358,18 +358,15 @@
       "cancel": "Cancel",
       "confirm": "Promote server"
     },
-    "bindings": {
-      "title": "Workspace bindings",
-      "description": "Enable this organization MCP server for specific workspaces.",
-      "updateFailed": "Binding update failed",
+    "overrides": {
+      "title": "Workspace visibility",
+      "description": "Workspaces inherit this org-wide MCP server by default. Disable it for specific workspaces here.",
+      "updateFailed": "Visibility update failed",
       "summary": "{enabled} of {total} workspaces enabled",
-      "enableAll": "Enable all",
-      "disableAll": "Disable all",
       "workspace": "Workspace",
       "enabled": "Enabled",
       "noWorkspaces": "No workspaces available.",
-      "toggleAria": "Toggle {name}",
-      "save": "Save bindings"
+      "toggleAria": "Toggle {name}"
     },
     "credential": {
       "managedTitle": "Credential",

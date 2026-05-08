@@ -1,6 +1,7 @@
 import type {
   CredentialStatus,
   CredentialUpsertBody,
+  MCPOverrideUpdateBody,
   MCPServer,
   MCPServerCreateAdminBody,
   MCPServerCreateWSBody,
@@ -9,7 +10,7 @@ import type {
   MCPTestConnectionBody,
   MCPTestConnectionResult,
   PromoteBody,
-  WorkspaceBinding,
+  WorkspaceOverride,
 } from '../types/mcp'
 import { toApiError, type ApiClient } from './client'
 
@@ -82,20 +83,23 @@ export async function adminTestConnection(
   return (await res.json()) as MCPTestConnectionResult
 }
 
-export async function adminGetBindings(client: ApiClient, id: string): Promise<WorkspaceBinding[]> {
-  const res = await client.get(`/api/v1/admin/mcp/servers/${id}/bindings`)
-  if (!res.ok) throw await toApiError(res)
-  return (await res.json()) as WorkspaceBinding[]
-}
-
-export async function adminPutBindings(
+export async function adminGetOverrides(
   client: ApiClient,
   id: string,
-  bindings: WorkspaceBinding[],
-): Promise<WorkspaceBinding[]> {
-  const res = await client.put(`/api/v1/admin/mcp/servers/${id}/bindings`, { bindings })
+): Promise<WorkspaceOverride[]> {
+  const res = await client.get(`/api/v1/admin/mcp/servers/${id}/overrides`)
   if (!res.ok) throw await toApiError(res)
-  return (await res.json()) as WorkspaceBinding[]
+  return (await res.json()) as WorkspaceOverride[]
+}
+
+export async function adminPutOverride(
+  client: ApiClient,
+  id: string,
+  body: MCPOverrideUpdateBody,
+): Promise<WorkspaceOverride[]> {
+  const res = await client.put(`/api/v1/admin/mcp/servers/${id}/overrides`, body)
+  if (!res.ok) throw await toApiError(res)
+  return (await res.json()) as WorkspaceOverride[]
 }
 
 export async function wsListServers(client: ApiClient, wsId: string): Promise<MCPServerListWS> {

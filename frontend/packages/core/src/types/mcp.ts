@@ -88,7 +88,12 @@ export interface MCPTestConnectionResult {
   error: string | null
 }
 
-export interface WorkspaceBinding {
+export interface WorkspaceOverride {
+  workspace_id: string
+  enabled: boolean
+}
+
+export interface MCPOverrideUpdateBody {
   workspace_id: string
   enabled: boolean
 }
