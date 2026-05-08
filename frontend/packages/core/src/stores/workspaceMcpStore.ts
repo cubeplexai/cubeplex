@@ -16,7 +16,7 @@ import type {
 
 export interface WorkspaceMcpStore {
   owned: MCPServer[]
-  viaBinding: MCPServer[]
+  inherited: MCPServer[]
   loading: boolean
   error: string | null
   fetchAll(client: ApiClient, wsId: string): Promise<void>
@@ -55,7 +55,7 @@ export interface WorkspaceMcpStore {
 
 export const useWorkspaceMcpStore = create<WorkspaceMcpStore>((set, get) => ({
   owned: [],
-  viaBinding: [],
+  inherited: [],
   loading: false,
   error: null,
 
@@ -63,7 +63,7 @@ export const useWorkspaceMcpStore = create<WorkspaceMcpStore>((set, get) => ({
     set({ loading: true, error: null })
     try {
       const list: MCPServerListWS = await api.wsListServers(client, wsId)
-      set({ owned: list.owned, viaBinding: list.via_binding })
+      set({ owned: list.owned, inherited: list.inherited })
     } catch (err) {
       set({ error: (err as Error).message })
     } finally {
@@ -102,7 +102,7 @@ export const useWorkspaceMcpStore = create<WorkspaceMcpStore>((set, get) => ({
     const promoted = await api.wsPromote(client, wsId, id, body)
     set({
       owned: get().owned.filter((server) => server.id !== id),
-      viaBinding: [...get().viaBinding.filter((server) => server.id !== id), promoted],
+      inherited: [...get().inherited.filter((server) => server.id !== id), promoted],
     })
     return promoted
   },
@@ -132,6 +132,6 @@ export const useWorkspaceMcpStore = create<WorkspaceMcpStore>((set, get) => ({
   },
 
   reset() {
-    set({ owned: [], viaBinding: [], loading: false, error: null })
+    set({ owned: [], inherited: [], loading: false, error: null })
   },
 }))

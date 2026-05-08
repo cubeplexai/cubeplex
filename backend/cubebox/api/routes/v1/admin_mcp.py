@@ -1,4 +1,4 @@
-"""Admin MCP routes: org-wide connector CRUD, bindings, and dry-run checks."""
+"""Admin MCP routes: org-wide connector CRUD, overrides, and dry-run checks."""
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
