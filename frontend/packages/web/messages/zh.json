@@ -445,6 +445,32 @@
       "scopeError": "组织 connector 只支持组织共享、按用户或身份直通。"
     }
   },
+  "mcpCatalog": {
+    "status": {
+      "notInstalled": "未安装",
+      "availableOrgWide": "组织已开通",
+      "installedForYou": "已为你安装"
+    },
+    "emptyTitle": "没有可用的 connector",
+    "empty": "目录为空，请先运行 catalog seeder 填充。",
+    "errorBannerTitle": "加载 catalog 失败",
+    "errorBanner": "{message}",
+    "close": "关闭",
+    "docsLink": "查看官方文档",
+    "authOAuth": "OAuth",
+    "authStatic": "API Token",
+    "authNone": "免授权",
+    "connectWithOAuth": "用 OAuth 授权",
+    "installButton": "安装",
+    "adminOAuthNotice": "这将以组织级别安装该 connector。Token 会颁发到你的账户，并被所有工作区成员共享。一旦你离开组织，需要重新授权。",
+    "workspaceOAuthNotice": "仅在当前工作区为你的账户安装该 connector。",
+    "noneNotice": "此 connector 无需凭证，安装后即可使用。",
+    "showSecret": "显示密钥",
+    "hideSecret": "隐藏密钥",
+    "helperLearnMore": "了解更多",
+    "staticAllFieldsRequired": "请填写所有字段。",
+    "multiFieldUnsupported": "暂不支持多字段静态凭证，请使用 OAuth 方式。"
+  },
   "wsSettings": {
     "settingsLabel": "设置",
     "navWorkspace": "工作区设置",

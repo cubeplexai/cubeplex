@@ -445,6 +445,32 @@
       "scopeError": "Admin connectors only support organization, per-user, or passthrough scope."
     }
   },
+  "mcpCatalog": {
+    "status": {
+      "notInstalled": "Not installed",
+      "availableOrgWide": "Available org-wide",
+      "installedForYou": "Installed for you"
+    },
+    "emptyTitle": "No connectors available",
+    "empty": "The catalog is empty. Run the catalog seeder to populate connectors.",
+    "errorBannerTitle": "Failed to load catalog",
+    "errorBanner": "{message}",
+    "close": "Close",
+    "docsLink": "View provider docs",
+    "authOAuth": "OAuth",
+    "authStatic": "API token",
+    "authNone": "No auth",
+    "connectWithOAuth": "Connect with OAuth",
+    "installButton": "Install",
+    "adminOAuthNotice": "This will install the connector org-wide. The token is issued to your account and shared by every workspace member. If you leave the org, the connector will need to be reauthorized.",
+    "workspaceOAuthNotice": "This will install the connector for your account in this workspace only.",
+    "noneNotice": "This connector requires no credentials. It will be installed and immediately usable.",
+    "showSecret": "Show secret",
+    "hideSecret": "Hide secret",
+    "helperLearnMore": "Learn more",
+    "staticAllFieldsRequired": "All fields are required.",
+    "multiFieldUnsupported": "Multi-field static credentials are not supported yet. Use the OAuth tab instead."
+  },
   "wsSettings": {
     "settingsLabel": "Settings",
     "navWorkspace": "Workspace Settings",
