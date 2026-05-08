@@ -25,7 +25,6 @@ from typing import Sequence, Union
 
 import sqlalchemy as sa
 import sqlmodel
-from sqlalchemy.dialects import postgresql
 
 from alembic import op
 
@@ -208,63 +207,35 @@ def downgrade() -> None:
     op.drop_index(op.f("ix_mcp_servers_catalog_connector_id"), table_name="mcp_servers")
     op.drop_column("mcp_servers", "catalog_connector_id")
 
+    # Recreate workspace_mcp_bindings exactly as defined in
+    # 1984c75dab8d_add_mcp_connector_tables.py: surrogate ``id VARCHAR(36)`` PK
+    # plus a UniqueConstraint on (workspace_id, mcp_server_id). No FKs in the
+    # original revision; later migrations are responsible for adding them.
     op.create_table(
         "workspace_mcp_bindings",
-        sa.Column("org_id", sa.VARCHAR(length=20), autoincrement=False, nullable=False),
+        sa.Column("id", sqlmodel.sql.sqltypes.AutoString(length=36), nullable=False),
+        sa.Column("org_id", sqlmodel.sql.sqltypes.AutoString(length=36), nullable=False),
         sa.Column(
-            "workspace_id", sa.VARCHAR(length=20), autoincrement=False, nullable=False
+            "workspace_id", sqlmodel.sql.sqltypes.AutoString(length=36), nullable=False
         ),
         sa.Column(
-            "mcp_server_id", sa.VARCHAR(length=20), autoincrement=False, nullable=False
+            "mcp_server_id", sqlmodel.sql.sqltypes.AutoString(length=36), nullable=False
         ),
-        sa.Column("enabled", sa.BOOLEAN(), autoincrement=False, nullable=False),
+        sa.Column("enabled", sa.Boolean(), nullable=False),
         sa.Column(
             "created_by_user_id",
-            sa.VARCHAR(length=20),
-            autoincrement=False,
+            sqlmodel.sql.sqltypes.AutoString(length=36),
             nullable=False,
         ),
-        sa.Column(
-            "created_at", postgresql.TIMESTAMP(), autoincrement=False, nullable=False
-        ),
-        sa.Column(
-            "updated_at", postgresql.TIMESTAMP(), autoincrement=False, nullable=False
-        ),
-        sa.ForeignKeyConstraint(
-            ["created_by_user_id"],
-            ["users.id"],
-            name=op.f("workspace_mcp_bindings_created_by_user_id_fkey"),
-        ),
-        sa.ForeignKeyConstraint(
-            ["mcp_server_id"],
-            ["mcp_servers.id"],
-            name=op.f("workspace_mcp_bindings_mcp_server_id_fkey"),
-        ),
-        sa.ForeignKeyConstraint(
-            ["org_id"],
-            ["organizations.id"],
-            name=op.f("workspace_mcp_bindings_org_id_fkey"),
-        ),
-        sa.ForeignKeyConstraint(
-            ["workspace_id"],
-            ["workspaces.id"],
-            name=op.f("workspace_mcp_bindings_workspace_id_fkey"),
-        ),
-        sa.PrimaryKeyConstraint(
-            "workspace_id",
-            "mcp_server_id",
-            name=op.f("workspace_mcp_bindings_pkey"),
-        ),
-        sa.UniqueConstraint(
-            "workspace_id",
-            "mcp_server_id",
-            name=op.f("uq_ws_mcp_binding"),
-        ),
+        sa.Column("created_at", sa.DateTime(), nullable=False),
+        sa.Column("updated_at", sa.DateTime(), nullable=False),
+        sa.PrimaryKeyConstraint("id"),
+        sa.UniqueConstraint("workspace_id", "mcp_server_id", name="uq_ws_mcp_binding"),
     )
     op.create_index(
-        op.f("ix_workspace_mcp_bindings_workspace_id"),
+        op.f("ix_workspace_mcp_bindings_mcp_server_id"),
         "workspace_mcp_bindings",
-        ["workspace_id"],
+        ["mcp_server_id"],
         unique=False,
     )
     op.create_index(
@@ -274,9 +245,9 @@ def downgrade() -> None:
         unique=False,
     )
     op.create_index(
-        op.f("ix_workspace_mcp_bindings_mcp_server_id"),
+        op.f("ix_workspace_mcp_bindings_workspace_id"),
         "workspace_mcp_bindings",
-        ["mcp_server_id"],
+        ["workspace_id"],
         unique=False,
     )
 

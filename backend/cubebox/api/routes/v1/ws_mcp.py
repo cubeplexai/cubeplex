@@ -99,15 +99,10 @@ async def list_servers(
     disabled for this workspace via ``workspace_mcp_overrides``.
     """
     owned = await svc.server_repo.list_for_org(owner_workspace_id=workspace_id)
-    org_wide = await svc.server_repo.list_for_org(owner_workspace_id=None)
-    inherited: list[MCPServer] = []
-    for server in org_wide:
-        override = await svc.override_repo.get_for_workspace_and_server(
-            workspace_id=workspace_id,
-            mcp_server_id=server.id,
-        )
-        if override is None or override.enabled:
-            inherited.append(server)
+    paired = await svc.server_repo.list_org_wide_with_workspace_override(workspace_id)
+    inherited: list[MCPServer] = [
+        srv for srv, override in paired if override is None or override.enabled
+    ]
 
     return MCPServerListWS(
         owned=[_server_to_out(server, include_tools_cache=False) for server in owned],

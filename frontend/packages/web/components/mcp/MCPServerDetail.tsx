@@ -10,7 +10,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { cn } from '@/lib/utils'
 
-import { MCPBindingGrid, type MCPWorkspaceOption } from './MCPBindingGrid'
+import { MCPOverrideGrid, type MCPWorkspaceOption } from './MCPOverrideGrid'
 import { MCPCredentialPanel } from './MCPCredentialPanel'
 import { MCPPromoteDialog } from './MCPPromoteDialog'
 import { MCPScopeBadge } from './MCPScopeBadge'
@@ -50,7 +50,7 @@ export function MCPServerDetail({
   const [refreshing, setRefreshing] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [promoteOpen, setPromoteOpen] = useState(false)
-  const showBindingsTab = mode === 'admin' && server.owner_workspace_id === null
+  const showOverridesTab = mode === 'admin' && server.owner_workspace_id === null
   const showCredentialPanel = (mode === 'ws-owned' || mode === 'ws-readonly') && wsId
   const canRefreshTools = mode !== 'ws-readonly'
 
@@ -150,7 +150,7 @@ export function MCPServerDetail({
           <TabsTrigger value="tools">
             {t('toolsTab', { count: server.tools_cache?.length ?? 0 })}
           </TabsTrigger>
-          {showBindingsTab ? <TabsTrigger value="bindings">{t('workspaces')}</TabsTrigger> : null}
+          {showOverridesTab ? <TabsTrigger value="overrides">{t('workspaces')}</TabsTrigger> : null}
         </TabsList>
 
         <TabsContent value="overview" className="mt-4 flex flex-col gap-4">
@@ -187,9 +187,9 @@ export function MCPServerDetail({
           <MCPToolsTable tools={server.tools_cache ?? []} />
         </TabsContent>
 
-        {showBindingsTab && workspaces ? (
-          <TabsContent value="bindings" className="mt-4">
-            <MCPBindingGrid client={client} serverId={server.id} workspaces={workspaces} />
+        {showOverridesTab && workspaces ? (
+          <TabsContent value="overrides" className="mt-4">
+            <MCPOverrideGrid client={client} serverId={server.id} workspaces={workspaces} />
           </TabsContent>
         ) : null}
       </Tabs>
