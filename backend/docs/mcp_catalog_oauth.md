@@ -61,12 +61,13 @@ existing `mcp_static_token` for non-OAuth installs.
 High-level summary; route bodies live in
 `backend/cubebox/api/routes/v1/`.
 
-- **Catalog (admin):** `GET /api/v1/admin/mcp/catalog` — list active
-  catalog rows with install status (org-wide + per-workspace).
-- **Catalog (workspace):** `GET /api/v1/ws/{ws}/mcp/catalog` — same
-  list, scoped to one workspace's perspective; each entry includes
-  `installed_org_wide`, `installed_workspace_private`, `disabled`,
-  and (for OAuth) `authed`.
+- **Catalog (workspace):** `GET /api/v1/ws/{ws}/mcp/catalog` — the
+  single catalog read endpoint. The catalog is intentionally
+  workspace-scoped (not exposed under `/admin/...`) because each entry
+  carries per-`(workspace, user)` status fields — `installed_org_wide`,
+  `installed_workspace_private`, `disabled`, and (for OAuth) `authed`
+  — that only make sense in workspace context. Org admins use the same
+  endpoint by selecting a workspace.
 - **Static install:** `POST /api/v1/admin/mcp/installs` and
   `POST /api/v1/ws/{ws}/mcp/installs` — create an `mcp_servers` row,
   encrypt the static credential, kick off discovery.
@@ -138,7 +139,7 @@ read / refresh / persist cycle for OAuth-scoped installs. Behavior:
 - On every tool call that needs an OAuth bearer, the runtime asks the
   manager for a "valid for at least 60s" access token.
 - If the cached token is within the safety window of `oauth_expires_at`
-  (default 300s pre-expiry), the manager calls the AS `/token`
+  (default 60s pre-expiry), the manager calls the AS `/token`
   endpoint with `grant_type=refresh_token`, encrypts the new pair, and
   swaps in the new credential ids inside a single DB transaction.
 - If refresh fails (HTTP 4xx, network error, etc.), the manager flips
@@ -217,8 +218,8 @@ would change without committing.
    credentials in env (see env-var convention above).
 3. Deploy the new code.
 4. Run the seeder: `python -m cubebox.cli seed-mcp-catalog`.
-5. Verify `GET /api/v1/admin/mcp/catalog` lists the new connector with
-   `status="active"`.
+5. Verify `GET /api/v1/ws/{ws}/mcp/catalog` (from any workspace) lists
+   the new connector with `status="active"`.
 
 ### Removing a catalog connector
 
@@ -253,9 +254,10 @@ would change without committing.
   AS response. The UI surfaces a "Reauthorize" affordance — clicking
   re-enters the OAuth start route and overwrites the credential.
 - **Tools missing after install**: discovery runs once at install /
-  reauthorize. Re-trigger by hitting the
-  `POST /api/v1/{admin|ws}/mcp/installs/{id}/discover` endpoint or by
-  toggling the override; the tools cache is repopulated from the
+  reauthorize. Re-trigger by hitting
+  `POST /api/v1/admin/mcp/servers/{server_id}/refresh-tools` (org-wide
+  installs) or `POST /api/v1/ws/{ws}/mcp/servers/{server_id}/refresh-tools`
+  (workspace-private installs); the tools cache is repopulated from the
   server's `tools/list` response.
 
 ## Manual staging verification
