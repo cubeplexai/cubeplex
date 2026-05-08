@@ -175,6 +175,39 @@ def create_cubebox_agent(
         tools = [*tools, view_images_tool]
 
     middleware.append(TodoListMiddleware())
+
+    if _config.get("compaction.enabled", False):
+        from cubebox.llm.factory import LLMFactory
+        from cubebox.middleware.compaction import CompactionMiddleware
+
+        try:
+            summary_provider = _config.get("compaction.summary_provider")
+            summary_model_id = _config.get("compaction.summary_model")
+            summary_llm = LLMFactory().create(
+                provider_name=summary_provider,
+                model_id=summary_model_id,
+            )
+            ctx_window = getattr(llm, "context_window", None) or _config.get(
+                "compaction.fallback_context_window", 64000
+            )
+            ratio = float(_config.get("compaction.threshold_ratio", 0.7))
+            middleware.append(
+                CompactionMiddleware(
+                    summary_llm=summary_llm,
+                    max_tokens_before_compact=int(ctx_window * ratio),
+                    keep_recent_messages=int(_config.get("compaction.keep_recent_messages", 8)),
+                    max_summary_tokens=int(_config.get("compaction.max_summary_tokens", 1024)),
+                    min_compact_messages=int(_config.get("compaction.min_compact_messages", 4)),
+                )
+            )
+            logger.info(
+                "CompactionMiddleware enabled (threshold={} tokens, keep_recent={})",
+                int(ctx_window * ratio),
+                _config.get("compaction.keep_recent_messages", 8),
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("CompactionMiddleware not loaded ({}); proceeding without it", exc)
+
     middleware.append(
         SubAgentMiddleware(
             subagents=subagents or [],
