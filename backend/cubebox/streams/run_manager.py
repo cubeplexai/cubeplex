@@ -633,6 +633,20 @@ class RunManager:
             except Exception as exc:
                 logger.warning("Failed to load AgentConfig, using base prompt: {}", exc)
 
+            from cubebox.db.engine import async_session_maker as _memory_session_maker
+            from cubebox.repositories.memory import MemoryRepository as _MemoryRepository
+
+            def _memory_repo_factory() -> _MemoryRepository:
+                # Each call creates a fresh session; the middleware does its
+                # own commits. Sessions close when garbage collected.
+                _session = _memory_session_maker()
+                return _MemoryRepository(
+                    _session,
+                    user_id=ctx.user_id,
+                    org_id=ctx.org_id,
+                    workspace_id=ctx.workspace_id,
+                )
+
             agent = create_cubebox_agent(
                 llm=llm,
                 tools=tools,
@@ -646,6 +660,7 @@ class RunManager:
                 checkpointer=checkpointer,
                 citation_configs=all_citation_configs,
                 event_queue=event_q,
+                memory_repo_factory=_memory_repo_factory,
             )
             config_dict = {"configurable": {"thread_id": conversation_id}}
             citation_counter._next = await _recover_next_citation_id(agent, conversation_id)
