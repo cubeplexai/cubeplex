@@ -397,6 +397,7 @@ def create_app(
         artifacts_router,
         attachments_router,
         conversations_router,
+        memory_router,
         system,
         workspaces_router,
         ws_mcp,
@@ -409,6 +410,7 @@ def create_app(
     app.include_router(conversations_router, prefix="/api/v1")
     app.include_router(artifacts_router, prefix="/api/v1")
     app.include_router(attachments_router, prefix="/api/v1")
+    app.include_router(memory_router, prefix="/api/v1")
     app.include_router(admin_router, prefix="/api/v1")
     app.include_router(admin_mcp.router, prefix="/api/v1")
     app.include_router(admin_skills.router, prefix="/api/v1")
