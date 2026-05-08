@@ -32,7 +32,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from cubebox.models import Credential, MCPServer
 from cubebox.repositories.mcp_catalog import MCPCatalogConnectorRepository
-from tests.e2e.conftest import _csrf_cookie_name
+from tests.e2e.helpers import csrf_cookie_name as _csrf_cookie_name
 
 # ---------------------------------------------------------------------------
 # Local fixtures
