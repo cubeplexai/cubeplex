@@ -9,6 +9,7 @@ import zipfile
 from dataclasses import dataclass
 from pathlib import PurePosixPath
 
+from loguru import logger
 from sqlalchemy import exists, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -254,6 +255,13 @@ class SkillPublishService:
         SkillVersion rows still land in the org's catalog so future workspaces
         can install the same skill if desired.
         """
+        logger.info(
+            "Publishing skill zip: org_id={} org_slug={} workspace_id={} bytes={}",
+            org_id,
+            org_slug,
+            workspace_id,
+            len(zip_bytes),
+        )
         files = _extract_zip(zip_bytes)
         return await self._publish_from_files(
             org_id=org_id,
@@ -293,6 +301,10 @@ class SkillPublishService:
         workspace_id: str | None = None,
     ) -> SkillVersion:
         if "SKILL.md" not in files:
+            logger.warning(
+                "Skill zip missing root SKILL.md after extraction: files={}",
+                _summarize_zip_paths(files),
+            )
             raise SkillMdMissingError("zip must contain SKILL.md at root")
         skill_md_text = files["SKILL.md"].decode("utf-8")
 
@@ -397,6 +409,9 @@ def _extract_zip(zip_bytes: bytes) -> dict[str, bytes]:
                 continue
             if ".." in PurePosixPath(info.filename).parts:
                 raise InvalidZipPathError(f"invalid path in zip: {info.filename!r}")
+            if _is_macos_metadata_path(info.filename):
+                logger.info("Skipping macOS zip metadata path: {}", info.filename)
+                continue
             if info.file_size > MAX_FILE_BYTES:
                 raise FileTooLargeError(
                     f"{info.filename} is {info.file_size} bytes; cap is {MAX_FILE_BYTES}"
@@ -406,12 +421,19 @@ def _extract_zip(zip_bytes: bytes) -> dict[str, bytes]:
                 raise FileTooLargeError(f"bundle exceeds total cap of {MAX_TOTAL_BYTES} bytes")
             with z.open(info) as fp:
                 out[info.filename] = fp.read()
+    logger.info(
+        "Extracted skill zip: file_count={} total_bytes={} files={}",
+        len(out),
+        total,
+        _summarize_zip_paths(out),
+    )
     return _normalize_skill_zip_files(out)
 
 
 def _normalize_skill_zip_files(files: dict[str, bytes]) -> dict[str, bytes]:
     """Strip one enclosing directory when the bundle was zipped as a folder."""
     if "SKILL.md" in files:
+        logger.info("Skill zip contains root SKILL.md; no path normalization needed")
         return files
 
     top_levels = {
@@ -420,16 +442,50 @@ def _normalize_skill_zip_files(files: dict[str, bytes]) -> dict[str, bytes]:
         if len(PurePosixPath(path).parts) > 1
     }
     if len(top_levels) != 1:
+        logger.info(
+            "Skill zip path normalization skipped: top_levels={} files={}",
+            sorted(top_levels),
+            _summarize_zip_paths(files),
+        )
         return files
 
     root = next(iter(top_levels))
     root_prefix = f"{root}/"
     skill_md_path = f"{root_prefix}SKILL.md"
     if skill_md_path not in files:
+        logger.info(
+            "Skill zip path normalization skipped: expected {} not present; files={}",
+            skill_md_path,
+            _summarize_zip_paths(files),
+        )
         return files
 
-    return {
+    normalized = {
         path.removeprefix(root_prefix): data
         for path, data in files.items()
         if path.startswith(root_prefix)
     }
+    logger.info(
+        "Skill zip path normalization applied: stripped_root={} files={}",
+        root,
+        _summarize_zip_paths(normalized),
+    )
+    return normalized
+
+
+def _summarize_zip_paths(files: dict[str, bytes], *, limit: int = 50) -> list[str]:
+    """Return a bounded, sorted list of zip paths for diagnostics."""
+    paths = sorted(files)
+    if len(paths) <= limit:
+        return paths
+    return [*paths[:limit], f"... {len(paths) - limit} more files"]
+
+
+def _is_macos_metadata_path(path: str) -> bool:
+    """Return True for Finder-created zip metadata entries."""
+    parts = PurePosixPath(path).parts
+    if not parts:
+        return False
+    if parts[0] == "__MACOSX":
+        return True
+    return any(part == ".DS_Store" or part.startswith("._") for part in parts)
