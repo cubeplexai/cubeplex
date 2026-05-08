@@ -165,6 +165,8 @@ def _make_memory_test_app() -> FastAPI:
         checkpointer_factory=lambda: memory_saver,
         sandbox_factory=LocalSandbox,
     )
+    # Expose so tests can inspect raw thread state (e.g. compaction E2E).
+    app.state.memory_saver = memory_saver
     app.dependency_overrides[get_session] = override_get_session
     return app
 
