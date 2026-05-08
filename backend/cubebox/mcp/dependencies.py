@@ -24,8 +24,10 @@ from cubebox.repositories.mcp import (
     WorkspaceMCPCredentialRepository,
     WorkspaceMCPOverrideRepository,
 )
+from cubebox.repositories.mcp_catalog import MCPCatalogConnectorRepository
 from cubebox.services.credential import CredentialService
 from cubebox.services.mcp import MCPServerService
+from cubebox.services.mcp_catalog import MCPCatalogService
 
 
 def build_user_token_signer() -> MCPUserTokenSigner:
@@ -78,6 +80,46 @@ async def get_admin_mcp_service(
         actor_user_id=ctx.user.id,
     )
     return MCPServerService(
+        server_repo=MCPServerRepository(session, org_id=ctx.org_id),
+        ws_cred_repo=WorkspaceMCPCredentialRepository(session, org_id=ctx.org_id),
+        user_cred_repo=UserMCPCredentialRepository(session, org_id=ctx.org_id),
+        override_repo=WorkspaceMCPOverrideRepository(session, org_id=ctx.org_id),
+        cred_service=cred_service,
+        request_context=ctx,
+    )
+
+
+async def get_member_catalog_service(
+    session: AsyncSession = Depends(get_session),
+    cred_service: CredentialService = Depends(get_credential_service),
+    ctx: RequestContext = Depends(require_member),
+) -> MCPCatalogService:
+    """Catalog service for member-scoped reads and workspace user installs."""
+    return MCPCatalogService(
+        catalog_repo=MCPCatalogConnectorRepository(session),
+        server_repo=MCPServerRepository(session, org_id=ctx.org_id),
+        ws_cred_repo=WorkspaceMCPCredentialRepository(session, org_id=ctx.org_id),
+        user_cred_repo=UserMCPCredentialRepository(session, org_id=ctx.org_id),
+        override_repo=WorkspaceMCPOverrideRepository(session, org_id=ctx.org_id),
+        cred_service=cred_service,
+        request_context=ctx,
+    )
+
+
+async def get_admin_catalog_service(
+    session: AsyncSession = Depends(get_session),
+    backend: EncryptionBackend = Depends(get_encryption_backend),
+    ctx: RequestContext = Depends(get_admin_request_context),
+) -> MCPCatalogService:
+    """Catalog service for org admin install/delete/switch-auth flows."""
+    cred_service = build_credential_service(
+        session,
+        backend,
+        org_id=ctx.org_id,
+        actor_user_id=ctx.user.id,
+    )
+    return MCPCatalogService(
+        catalog_repo=MCPCatalogConnectorRepository(session),
         server_repo=MCPServerRepository(session, org_id=ctx.org_id),
         ws_cred_repo=WorkspaceMCPCredentialRepository(session, org_id=ctx.org_id),
         user_cred_repo=UserMCPCredentialRepository(session, org_id=ctx.org_id),

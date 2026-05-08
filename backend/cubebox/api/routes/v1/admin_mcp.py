@@ -93,6 +93,15 @@ async def create_server(
     ctx: RequestContext = Depends(get_admin_request_context),
     audit: AuditSink = Depends(get_audit_sink),
 ) -> MCPServerOut:
+    """Handcrafted org-wide MCP install. **Advanced / debug surface.**
+
+    Prefer ``POST /admin/mcp/catalog/{catalog_id}/install`` for production
+    use — it pulls server_url / transport / supported_auth_methods from
+    the system catalog and prevents duplicate installs of the same
+    connector. This route is retained for cases where an operator needs
+    to register a connector that isn't in the catalog yet (M2+ rolls
+    out the official catalog UI in Phase 6).
+    """
     try:
         server = await svc.create(
             name=body.name,
