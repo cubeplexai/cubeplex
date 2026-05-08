@@ -119,7 +119,7 @@ async def test_workspace_override_rejects_workspace_private_install(
         json={"enabled": False},
     )
     assert resp.status_code == 400
-    assert resp.json()["detail"]["code"] == "mcp_workspace_owned_no_override"
+    assert resp.json()["detail"]["code"] == "mcp_catalog.workspace_owned_no_override"
 
 
 async def test_workspace_override_unknown_install_returns_404(

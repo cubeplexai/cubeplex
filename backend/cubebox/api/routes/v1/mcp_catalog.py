@@ -104,23 +104,67 @@ def _install_result_to_out(
 
 
 def _map_install_exception(exc: Exception) -> HTTPException:
-    """Map service-layer exceptions to HTTP responses for install endpoints."""
+    """Map service-layer exceptions to HTTP responses for install endpoints.
+
+    Every catalog HTTPException uses the ``{"code", "message"}`` envelope
+    so the frontend can branch on a stable machine-readable string while
+    still surfacing a human-readable hint.
+    """
     if isinstance(exc, MCPCatalogConnectorNotFound):
-        return HTTPException(404, detail={"code": "mcp_catalog_connector_not_found"})
+        return HTTPException(
+            404,
+            detail={
+                "code": "mcp_catalog.connector_not_found",
+                "message": "Catalog connector not found.",
+            },
+        )
     if isinstance(exc, MCPCatalogAuthMethodUnsupported):
         return HTTPException(
             400,
-            detail=f"auth_method not in supported_auth_methods: {exc}",
+            detail={
+                "code": "mcp_catalog.auth_method_unsupported",
+                "message": f"auth_method not in supported_auth_methods: {exc}",
+            },
         )
     if isinstance(exc, MCPCatalogInstallExists):
-        return HTTPException(409, detail="install already exists for this catalog connector")
+        return HTTPException(
+            409,
+            detail={
+                "code": "mcp_catalog.install_exists",
+                "message": "install already exists for this catalog connector",
+            },
+        )
     if isinstance(exc, MCPCredentialRequired):
-        return HTTPException(400, detail={"code": "mcp_credential_required"})
+        return HTTPException(
+            400,
+            detail={
+                "code": "mcp_catalog.credential_required",
+                "message": "auth_method requires a credential, but none was supplied.",
+            },
+        )
     if isinstance(exc, MCPUserScopeCredentialForbidden):
-        return HTTPException(400, detail={"code": "mcp_user_scope_credential_forbidden"})
+        return HTTPException(
+            400,
+            detail={
+                "code": "mcp_catalog.user_scope_credential_forbidden",
+                "message": "user-scope installs cannot accept a plaintext credential here.",
+            },
+        )
     if isinstance(exc, MCPServerNotFound):
-        return HTTPException(404, detail={"code": "mcp_server_not_found"})
-    return HTTPException(500, detail={"code": "mcp_internal_error"})
+        return HTTPException(
+            404,
+            detail={
+                "code": "mcp_catalog.install_not_found",
+                "message": "MCP install not found.",
+            },
+        )
+    return HTTPException(
+        500,
+        detail={
+            "code": "mcp_catalog.internal_error",
+            "message": "Unexpected internal error in MCP catalog service.",
+        },
+    )
 
 
 async def _server_authed(svc: MCPCatalogService, install_id: str) -> bool:
@@ -138,21 +182,16 @@ async def list_catalog(
     workspace_id: str = Path(..., max_length=20),
     q: str | None = Query(default=None),
     provider: str | None = Query(default=None),
-    status_filter: str | None = Query(default="active", alias="status"),
     svc: MCPCatalogService = Depends(get_member_catalog_service),
 ) -> MCPCatalogListOut:
     """Member-readable catalog with per-(workspace, user) install status.
 
-    ``status_filter`` defaults to ``"active"``; ``list_for_member`` already
-    only emits active connectors, but explicit values let the frontend
-    request other states (e.g. ``"deprecated"``) for an audit / cleanup UI.
+    v1 only surfaces active connectors. Spec §5.1 lists ``status`` as a
+    future query param for an audit / cleanup UI; until that surface
+    exists we don't accept the param at all (rather than ship a stub
+    that silently returns an empty list for any non-``active`` value).
     """
-    if status_filter is None or status_filter == "active":
-        dtos = await svc.list_for_member(workspace_id, q=q, provider=provider)
-    else:
-        # list_for_member hard-codes status='active'; for other states fall
-        # through with an empty list — the v1 frontend never asks for them.
-        dtos = []
+    dtos = await svc.list_for_member(workspace_id, q=q, provider=provider)
     return MCPCatalogListOut(items=[_connector_to_out(dto) for dto in dtos])
 
 
@@ -225,11 +264,23 @@ async def delete_org_install(
     """Soft-disable an org install (keeps row, clears credentials, authed=false)."""
     server = await svc.server_repo.get(install_id)
     if server is None:
-        raise HTTPException(404, detail={"code": "mcp_server_not_found"})
+        raise HTTPException(
+            404,
+            detail={
+                "code": "mcp_catalog.install_not_found",
+                "message": "MCP install not found.",
+            },
+        )
     try:
         await svc.delete_install(install_id)
     except MCPServerNotFound as exc:
-        raise HTTPException(404, detail={"code": "mcp_server_not_found"}) from exc
+        raise HTTPException(
+            404,
+            detail={
+                "code": "mcp_catalog.install_not_found",
+                "message": "MCP install not found.",
+            },
+        ) from exc
 
     await audit.record(
         event="mcp.catalog.deleted",
@@ -359,12 +410,30 @@ async def patch_org_install_override(
     """
     server = await svc.server_repo.get(install_id)
     if server is None:
-        raise HTTPException(404, detail={"code": "mcp_server_not_found"})
+        raise HTTPException(
+            404,
+            detail={
+                "code": "mcp_catalog.install_not_found",
+                "message": "MCP install not found.",
+            },
+        )
     if server.org_id != ctx.org_id:
         # Don't leak existence to other orgs.
-        raise HTTPException(404, detail={"code": "mcp_server_not_found"})
+        raise HTTPException(
+            404,
+            detail={
+                "code": "mcp_catalog.install_not_found",
+                "message": "MCP install not found.",
+            },
+        )
     if server.owner_workspace_id is not None:
-        raise HTTPException(400, detail={"code": "mcp_workspace_owned_no_override"})
+        raise HTTPException(
+            400,
+            detail={
+                "code": "mcp_catalog.workspace_owned_no_override",
+                "message": "Workspace-private installs have no org-level override.",
+            },
+        )
 
     if body.enabled:
         await svc.override_repo.delete(workspace_id=workspace_id, mcp_server_id=install_id)
@@ -400,14 +469,32 @@ async def delete_workspace_install(
     """
     server = await svc.server_repo.get(install_id)
     if server is None or server.owner_workspace_id != workspace_id:
-        raise HTTPException(404, detail={"code": "mcp_server_not_found"})
+        raise HTTPException(
+            404,
+            detail={
+                "code": "mcp_catalog.install_not_found",
+                "message": "MCP install not found.",
+            },
+        )
     if server.created_by_user_id != ctx.user.id:
-        raise HTTPException(403, detail={"code": "mcp_install_not_owned_by_user"})
+        raise HTTPException(
+            403,
+            detail={
+                "code": "mcp_catalog.permission_denied",
+                "message": "Only the install creator may delete this workspace install.",
+            },
+        )
 
     try:
         await svc.delete_install(install_id)
     except MCPServerNotFound as exc:
-        raise HTTPException(404, detail={"code": "mcp_server_not_found"}) from exc
+        raise HTTPException(
+            404,
+            detail={
+                "code": "mcp_catalog.install_not_found",
+                "message": "MCP install not found.",
+            },
+        ) from exc
 
     await audit.record(
         event="mcp.catalog.workspace_deleted",
