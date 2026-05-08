@@ -23,7 +23,6 @@ DTOs are local to this module — Phase 3 owns the API schemas.
 
 from __future__ import annotations
 
-import hashlib
 from contextlib import suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -31,6 +30,7 @@ from typing import Literal
 
 from cubebox.auth.context import RequestContext
 from cubebox.credentials.exceptions import CredentialNotFound
+from cubebox.mcp._constants import CREDENTIAL_KIND_MCP, server_url_hash
 from cubebox.mcp.discovery import discover_tools
 from cubebox.mcp.exceptions import (
     MCPCatalogAuthMethodUnsupported,
@@ -44,6 +44,7 @@ from cubebox.models import (
     MCPCatalogConnector,
     MCPServer,
     UserMCPCredential,
+    WorkspaceMCPCredential,
 )
 from cubebox.repositories.mcp import (
     MCPServerRepository,
@@ -54,12 +55,7 @@ from cubebox.repositories.mcp import (
 from cubebox.repositories.mcp_catalog import MCPCatalogConnectorRepository
 from cubebox.services.credential import CredentialService
 
-_CREDENTIAL_KIND_MCP = "mcp_server"
 _VALID_AUTH_METHODS = {"static", "oauth", "none"}
-
-
-def _sha256_hex(value: str) -> str:
-    return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
 
 @dataclass(frozen=True)
@@ -314,14 +310,35 @@ class MCPCatalogService:
                 raise MCPCredentialRequired()
             if server.credential_scope == "org":
                 cred_id = await self.cred_service.create(
-                    kind=_CREDENTIAL_KIND_MCP,
+                    kind=CREDENTIAL_KIND_MCP,
                     name=f"mcp:{server.name}:org",
                     plaintext=credential_plaintext,
                 )
                 server.credential_id = cred_id
+            elif server.credential_scope == "workspace":
+                if server.owner_workspace_id is None:
+                    raise ValueError(
+                        f"server {server.id} has credential_scope=workspace but no "
+                        f"owner_workspace_id"
+                    )
+                cred_id = await self.cred_service.create(
+                    kind=CREDENTIAL_KIND_MCP,
+                    name=f"mcp:{server.name}:ws:{server.owner_workspace_id}",
+                    plaintext=credential_plaintext,
+                )
+                # Recreate the workspace_mcp_credentials row.
+                await self.ws_cred_repo.add(
+                    WorkspaceMCPCredential(
+                        org_id=self._ctx.org_id,
+                        workspace_id=server.owner_workspace_id,
+                        mcp_server_id=server.id,
+                        credential_id=cred_id,
+                        created_by_user_id=self._ctx.user.id,
+                    )
+                )
             elif server.credential_scope == "user":
                 cred_id = await self.cred_service.create(
-                    kind=_CREDENTIAL_KIND_MCP,
+                    kind=CREDENTIAL_KIND_MCP,
                     name=f"mcp:{server.name}:user:{self._ctx.user.id}",
                     plaintext=credential_plaintext,
                 )
@@ -333,6 +350,11 @@ class MCPCatalogService:
                         mcp_server_id=server.id,
                         credential_id=cred_id,
                     )
+                )
+            else:
+                raise ValueError(
+                    f"unsupported credential_scope {server.credential_scope!r} "
+                    f"for switch_auth_method"
                 )
             await self.server_repo.update(server)
             await self._refresh_tools(server, plaintext=credential_plaintext)
@@ -383,7 +405,7 @@ class MCPCatalogService:
                 catalog_connector_id=connector.id,
                 name=self._compose_name(connector, owner_workspace_id=None),
                 server_url=connector.server_url,
-                server_url_hash=_sha256_hex(connector.server_url),
+                server_url_hash=server_url_hash(connector.server_url),
                 transport=connector.transport,
                 auth_method=auth_method,
                 credential_scope=credential_scope,
@@ -432,7 +454,7 @@ class MCPCatalogService:
                 catalog_connector_id=connector.id,
                 name=self._compose_name(connector, owner_workspace_id=workspace_id),
                 server_url=connector.server_url,
-                server_url_hash=_sha256_hex(connector.server_url),
+                server_url_hash=server_url_hash(connector.server_url),
                 transport=connector.transport,
                 auth_method=auth_method,
                 credential_scope="user",
@@ -447,7 +469,7 @@ class MCPCatalogService:
         if auth_method == "static":
             assert credential_plaintext is not None
             cred_id = await self.cred_service.create(
-                kind=_CREDENTIAL_KIND_MCP,
+                kind=CREDENTIAL_KIND_MCP,
                 name=credential_name or f"mcp:{connector.slug}:user:{self._ctx.user.id}",
                 plaintext=credential_plaintext,
             )
@@ -489,7 +511,7 @@ class MCPCatalogService:
         if not credential_plaintext:
             raise MCPCredentialRequired()
         cred_id = await self.cred_service.create(
-            kind=_CREDENTIAL_KIND_MCP,
+            kind=CREDENTIAL_KIND_MCP,
             name=credential_name or f"mcp:{connector.slug}:org",
             plaintext=credential_plaintext,
         )

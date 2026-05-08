@@ -7,6 +7,7 @@ from loguru import logger
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cubebox.credentials.exceptions import CredentialNotFound
+from cubebox.mcp._constants import CREDENTIAL_KIND_MCP
 from cubebox.mcp.connection_params import build_connection_params
 from cubebox.mcp.discovery import construct_basetools_from_cache
 from cubebox.mcp.user_token import MCPUserTokenSigner
@@ -19,7 +20,6 @@ from cubebox.repositories.mcp import (
 from cubebox.services.credential import CredentialService
 
 _USER_TOKEN_TTL = timedelta(minutes=5)
-_CREDENTIAL_KIND_MCP = "mcp_server"
 
 
 async def load_mcp_tools_for_workspace(
@@ -93,7 +93,7 @@ async def _resolve_token(
             return None
         return await cred_service.get_decrypted(
             credential_id=server.credential_id,
-            requesting_kind=_CREDENTIAL_KIND_MCP,
+            requesting_kind=CREDENTIAL_KIND_MCP,
         )
 
     if server.credential_scope == "workspace":
@@ -105,7 +105,7 @@ async def _resolve_token(
             return None
         return await cred_service.get_decrypted(
             credential_id=workspace_credential.credential_id,
-            requesting_kind=_CREDENTIAL_KIND_MCP,
+            requesting_kind=CREDENTIAL_KIND_MCP,
         )
 
     if server.credential_scope == "user":
@@ -117,7 +117,7 @@ async def _resolve_token(
             return None
         return await cred_service.get_decrypted(
             credential_id=user_credential.credential_id,
-            requesting_kind=_CREDENTIAL_KIND_MCP,
+            requesting_kind=CREDENTIAL_KIND_MCP,
         )
 
     if server.credential_scope == "none":

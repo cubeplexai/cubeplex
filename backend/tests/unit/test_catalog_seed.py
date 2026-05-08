@@ -1,6 +1,6 @@
 """Tests for the v1 MCP catalog seeder."""
 
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 
 import pytest
 from cryptography.fernet import Fernet
@@ -45,7 +45,7 @@ def _full_env() -> dict[str, str]:
     return env
 
 
-def _make_get_env(values: dict[str, str]):
+def _make_get_env(values: dict[str, str]) -> Callable[[str], str | None]:
     def _getter(key: str) -> str | None:
         return values.get(key)
 

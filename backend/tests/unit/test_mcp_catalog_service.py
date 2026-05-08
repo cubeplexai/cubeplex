@@ -14,7 +14,7 @@ from cubebox.mcp.exceptions import (
     MCPCatalogInstallExists,
     MCPCredentialRequired,
 )
-from cubebox.models import MCPCatalogConnector, Role, User
+from cubebox.models import MCPCatalogConnector, MCPServer, Role, User
 from cubebox.repositories.credential import CredentialRepository
 from cubebox.repositories.mcp import (
     MCPServerRepository,
@@ -329,6 +329,59 @@ async def test_list_for_member_filters_by_query_and_provider(
 
     by_provider = await service.list_for_member("ws-test", provider="Notion")
     assert {item.connector.slug for item in by_provider} == {"notion"}
+
+
+async def test_switch_auth_method_to_static_workspace_scope_creates_credential(
+    session: AsyncSession, service: MCPCatalogService
+) -> None:
+    """``credential_scope=workspace`` is reachable via static install paths in
+    ``services/mcp.py``; the catalog seeder doesn't currently emit workspace-
+    scope connectors but ``switch_auth_method`` must still handle pre-existing
+    rows. Construct one directly and assert the workspace branch writes a
+    ``WorkspaceMCPCredential`` row.
+    """
+    connector = await _make_connector(session)
+
+    # Construct a workspace-scope server row directly. Static MCP servers
+    # configured via ``services/mcp.py`` can have credential_scope=workspace,
+    # and the user may later flip auth methods on them.
+    server_repo = service.server_repo
+    server = await server_repo.add(
+        MCPServer(
+            org_id="org-test",
+            owner_workspace_id="ws-test",
+            catalog_connector_id=connector.id,
+            name="catalog:github:ws:ws-test",
+            server_url=connector.server_url,
+            server_url_hash="hash-x",
+            transport=connector.transport,
+            auth_method="oauth",
+            credential_scope="workspace",
+            credential_id=None,
+            headers={},
+            timeout=30.0,
+            sse_read_timeout=300.0,
+            created_by_user_id="u1",
+        )
+    )
+
+    result = await service.switch_auth_method(
+        install_id=server.id,
+        new_auth_method="static",
+        credential_plaintext="ws-token",
+    )
+
+    assert result.requires_oauth is False
+    refreshed = await service.server_repo.get(server.id)
+    assert refreshed is not None
+    assert refreshed.auth_method == "static"
+    assert refreshed.credential_scope == "workspace"
+    # The credential lives on the workspace_mcp_credentials row, not on
+    # the mcp_servers row directly.
+    assert refreshed.credential_id is None
+    ws_cred = await service.ws_cred_repo.get(workspace_id="ws-test", mcp_server_id=server.id)
+    assert ws_cred is not None
+    assert ws_cred.credential_id is not None
 
 
 async def test_delete_install_clears_credentials_and_unauths(
