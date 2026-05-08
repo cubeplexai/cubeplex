@@ -1,6 +1,7 @@
 """Agent graph factory — builds the cubebox agent using create_agent() + middleware."""
 
 import asyncio
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -19,12 +20,14 @@ from cubebox.middleware.artifacts import ArtifactMiddleware
 from cubebox.middleware.attachments import AttachmentHintMiddleware
 from cubebox.middleware.citations import CitationConfig, CitationMiddleware
 from cubebox.middleware.citations.config import load_builtin_citation_configs
+from cubebox.middleware.memory import MemoryMiddleware
 from cubebox.middleware.sandbox import SandboxMiddleware
 from cubebox.middleware.skills import SkillsMiddleware
 from cubebox.middleware.subagents import SubAgent, SubAgentMiddleware
 from cubebox.middleware.timestamps import TimestampMiddleware
 from cubebox.middleware.todo import TodoListMiddleware
 from cubebox.prompts.system import BASE_SYSTEM_PROMPT
+from cubebox.repositories.memory import MemoryRepository
 from cubebox.sandbox.base import Sandbox
 from cubebox.skills.cache import SkillCache
 from cubebox.skills.service import SkillCatalogService
@@ -46,6 +49,7 @@ def create_cubebox_agent(
     checkpointer: Checkpointer | None = None,
     citation_configs: dict[str, CitationConfig] | None = None,
     event_queue: asyncio.Queue[Any] | None = None,
+    memory_repo_factory: Callable[[], MemoryRepository] | None = None,
 ) -> CompiledStateGraph[Any, Any, Any, Any]:
     """Build the cubebox agent with the configured middleware stack.
 
@@ -140,6 +144,12 @@ def create_cubebox_agent(
             conversation_id=conversation_id,
         )
         inherited_subagent_middleware.append(cost_mw)
+
+    # MemoryMiddleware — must run before SkillsMiddleware so skills can read
+    # memory state. Skipped when no repo factory is supplied (e.g. unit tests
+    # that exercise the agent without a DB).
+    if memory_repo_factory is not None:
+        middleware.append(MemoryMiddleware(repo_factory=memory_repo_factory))
 
     # Skill catalog wiring — middleware injects available skills into the
     # system prompt; load_skill is registered as a request-scoped tool.
