@@ -189,3 +189,14 @@ class MCPOrgInstallOverrideIn(BaseModel):
     """Toggle an org-wide install on/off for the calling workspace."""
 
     enabled: bool
+
+
+class MCPOAuthStartIn(BaseModel):
+    """Empty body for ``POST .../oauth/start`` — present for OpenAPI clarity."""
+
+
+class MCPOAuthStartOut(BaseModel):
+    """Response of ``POST .../oauth/start``."""
+
+    authorize_url: str
+    state: str

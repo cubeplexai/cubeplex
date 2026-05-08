@@ -190,6 +190,11 @@ default:
     # Normal runs should be orders of magnitude smaller.
     run_stream_max_events: 1000000
 
+  # Public-facing URLs used by OAuth redirect handling and other features
+  # that mint absolute URLs for browsers / external IdPs.
+  public_base_url: "http://localhost:8000" # ENV: CUBEBOX_PUBLIC_BASE_URL
+  frontend_base_url: "http://localhost:3000" # ENV: CUBEBOX_FRONTEND_BASE_URL
+
   # Auth Configuration (P1)
   auth:
     jwt_secret: "CHANGE_ME_IN_PRODUCTION" # ENV: CUBEBOX_AUTH__JWT_SECRET

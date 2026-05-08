@@ -97,8 +97,16 @@ class OAuthCallbackHandler:
         *,
         state: str,
         code: str,
+        expected_actor_user_id: str | None = None,
     ) -> CallbackResult:
         payload = await self._state_store.consume(state)
+
+        if expected_actor_user_id is not None and payload.actor_user_id != expected_actor_user_id:
+            # The browser cookie ticket and the HMAC-signed state both carry
+            # the actor identity. A mismatch means the cookie was paired with
+            # a state token from a different login session — refuse to
+            # finalize the install.
+            raise OAuthInvalidServerState("OAuth callback actor mismatch between state and ticket")
 
         server = await self._server_repo.get(payload.install_id)
         if server is None or server.auth_method != "oauth":

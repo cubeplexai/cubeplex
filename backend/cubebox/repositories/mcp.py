@@ -16,17 +16,24 @@ from cubebox.models import (
 
 
 class MCPServerRepository:
-    """Org-scoped repository for MCP server rows."""
+    """Org-scoped repository for MCP server rows.
 
-    def __init__(self, session: AsyncSession, *, org_id: str) -> None:
+    ``org_id=None`` is reserved for the OAuth callback path: the GET
+    callback runs unauthenticated, so the org is derived from the install
+    referenced in the (HMAC-verified) state token. Every other call site
+    MUST pass a concrete org_id.
+    """
+
+    def __init__(self, session: AsyncSession, *, org_id: str | None) -> None:
         self.session = session
         self.org_id = org_id
 
     async def get(self, server_id: str) -> MCPServer | None:
         stmt = select(MCPServer).where(
             MCPServer.id == server_id,  # type: ignore[arg-type]
-            MCPServer.org_id == self.org_id,  # type: ignore[arg-type]
         )
+        if self.org_id is not None:
+            stmt = stmt.where(MCPServer.org_id == self.org_id)  # type: ignore[arg-type]
         return (await self.session.execute(stmt)).scalar_one_or_none()
 
     async def list_for_org(
@@ -74,6 +81,8 @@ class MCPServerRepository:
         return list((await self.session.execute(stmt)).scalars().all())
 
     async def add(self, server: MCPServer) -> MCPServer:
+        if self.org_id is None:
+            raise RuntimeError("MCPServerRepository.add requires a concrete org_id")
         server.org_id = self.org_id
         self.session.add(server)
         await self.session.commit()
@@ -185,9 +194,13 @@ class WorkspaceMCPCredentialRepository:
 
 
 class UserMCPCredentialRepository:
-    """Org-scoped repository for user MCP credentials."""
+    """Org-scoped repository for user MCP credentials.
 
-    def __init__(self, session: AsyncSession, *, org_id: str) -> None:
+    ``org_id=None`` is reserved for the OAuth callback path; the row's
+    ``org_id`` is taken from the install row in that case.
+    """
+
+    def __init__(self, session: AsyncSession, *, org_id: str | None) -> None:
         self.session = session
         self.org_id = org_id
 
@@ -198,14 +211,16 @@ class UserMCPCredentialRepository:
         mcp_server_id: str,
     ) -> UserMCPCredential | None:
         stmt = select(UserMCPCredential).where(
-            UserMCPCredential.org_id == self.org_id,  # type: ignore[arg-type]
             UserMCPCredential.user_id == user_id,  # type: ignore[arg-type]
             UserMCPCredential.mcp_server_id == mcp_server_id,  # type: ignore[arg-type]
         )
+        if self.org_id is not None:
+            stmt = stmt.where(UserMCPCredential.org_id == self.org_id)  # type: ignore[arg-type]
         return (await self.session.execute(stmt)).scalar_one_or_none()
 
     async def add(self, row: UserMCPCredential) -> UserMCPCredential:
-        row.org_id = self.org_id
+        if self.org_id is not None:
+            row.org_id = self.org_id
         self.session.add(row)
         await self.session.commit()
         await self.session.refresh(row)
