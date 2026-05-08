@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from urllib.parse import quote_plus
 
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
@@ -68,11 +69,28 @@ async def init_checkpointer() -> AsyncPostgresSaver:
 
 
 async def shutdown_checkpointer() -> None:
-    """Close the shared connection pool. Called from lifespan shutdown."""
+    """Close the shared connection pool. Called from lifespan shutdown.
+
+    Swallows `CancelledError` from the pool's worker shutdown. Under
+    pytest-asyncio per-test fixtures, the finalizer task can be cancelled
+    while `_pool.close()` is mid-flight (sentinels enqueued, some workers
+    still parked on `q.get()`), and the cancellation surfaces from a worker
+    coroutine through `_pool.close()` → `agather` → `wait_for`. We're
+    already unwinding the lifespan; let the pool's own close logic run to
+    completion and don't propagate the cancel to the rest of teardown.
+    Production never triggers this path: real shutdown is uvicorn's signal
+    handler waiting for lifespan, not a peer task cancelling the close.
+    """
     global _pool, _saver
     if _pool is not None:
-        await _pool.close()
-        logger.debug("Checkpointer connection pool closed")
+        try:
+            await _pool.close()
+            logger.debug("Checkpointer connection pool closed")
+        except asyncio.CancelledError:
+            logger.debug(
+                "Checkpointer pool close was cancelled mid-shutdown; "
+                "ignoring (test-fixture teardown race, harmless)"
+            )
     _pool = None
     _saver = None
 
