@@ -15,6 +15,13 @@ from cubebox.models.mcp import (
     WorkspaceMCPCredential,
 )
 from cubebox.models.membership import Membership, Role
+from cubebox.models.memory import (
+    MemoryItem,
+    MemoryScope,
+    MemorySourceType,
+    MemoryStatus,
+    MemoryType,
+)  # noqa: F401
 from cubebox.models.org_provider_override import OrgProviderOverride
 from cubebox.models.org_settings import OrgSettings
 from cubebox.models.organization import Organization
@@ -42,6 +49,11 @@ __all__ = [
     "InviteToken",
     "LlmBillingEvent",
     "MCPServer",
+    "MemoryItem",
+    "MemoryScope",
+    "MemorySourceType",
+    "MemoryStatus",
+    "MemoryType",
     "Membership",
     "Model",
     "OrgPreinstalledTombstone",
