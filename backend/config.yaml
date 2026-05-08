@@ -291,3 +291,14 @@ default:
     graceful_drain_timeout_seconds: 3600
     dev_double_signal_force_exit: true
     stale_run_threshold_seconds: 120
+
+  # Conversation context compaction (default off; opt-in per env)
+  compaction:
+    enabled: false
+    summary_provider: "cubebox"
+    summary_model: "doubao-seed-1.8"
+    threshold_ratio: 0.7
+    keep_recent_messages: 8
+    max_summary_tokens: 1024
+    min_compact_messages: 4
+    fallback_context_window: 64000
