@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+from collections.abc import Awaitable, Callable
 from contextlib import suppress
 from datetime import UTC, datetime, timedelta
 from typing import Any, cast
@@ -264,19 +265,21 @@ class OAuthTokenManager:
         self,
         *,
         lock_key: str,
-        do_refresh: Any,
-        re_read: Any,
+        do_refresh: Callable[[], Awaitable[str]],
+        re_read: Callable[[], Awaitable[str]],
     ) -> str:
         """Acquire a redis lock, run ``do_refresh``; on contention call ``re_read``."""
         acquired = await self._redis.set(lock_key, "1", nx=True, ex=self._lock_ttl)
         if not acquired:
             return await self._wait_then_reread(lock_key=lock_key, re_read=re_read)
         try:
-            return cast(str, await do_refresh())
+            return await do_refresh()
         finally:
             await self._redis.delete(lock_key)
 
-    async def _wait_then_reread(self, *, lock_key: str, re_read: Any) -> str:
+    async def _wait_then_reread(
+        self, *, lock_key: str, re_read: Callable[[], Awaitable[str]]
+    ) -> str:
         deadline = self._lock_ttl + 1
         elapsed = 0.0
         while elapsed < deadline:
@@ -284,8 +287,8 @@ class OAuthTokenManager:
             elapsed += 0.1
             still_held = await self._redis.exists(lock_key)
             if not still_held:
-                return cast(str, await re_read())
-        return cast(str, await re_read())
+                return await re_read()
+        return await re_read()
 
     async def _exchange_refresh_token(
         self,
@@ -329,8 +332,14 @@ class OAuthTokenManager:
         if response.status_code == 200:
             body = response.json()
             if not isinstance(body, dict) or "access_token" not in body:
-                # Malformed success — treat as terminal so we don't loop.
-                await self._mark_server_unauthed(server, "oauth refresh: malformed token response")
+                # Malformed success — treat as terminal so we don't loop. Only
+                # mark the server unauthed for org-scope installs; user-scope
+                # purging is handled by the caller (_refresh_user) so one
+                # user's bad 200 doesn't disable the install for everyone.
+                if server.credential_scope == "org":
+                    await self._mark_server_unauthed(
+                        server, "oauth refresh: malformed token response"
+                    )
                 raise OAuthRefreshFailed(
                     response.status_code,
                     error="invalid_response",
