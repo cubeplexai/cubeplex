@@ -95,7 +95,7 @@ export interface WorkspaceBinding {
 
 export interface MCPServerListWS {
   owned: MCPServer[]
-  via_binding: MCPServer[]
+  inherited: MCPServer[]
 }
 
 export interface PromoteBody {

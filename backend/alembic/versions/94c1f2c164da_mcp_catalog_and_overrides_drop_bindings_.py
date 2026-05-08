@@ -85,7 +85,12 @@ def upgrade() -> None:
             sqlmodel.sql.sqltypes.AutoString(length=256),
             nullable=True,
         ),
-        sa.Column("cred_metadata", sa.JSON(), nullable=True),
+        sa.Column(
+            "cred_metadata",
+            sa.JSON(),
+            nullable=False,
+            server_default=sa.text("'{}'::jsonb"),
+        ),
         sa.Column("status", sqlmodel.sql.sqltypes.AutoString(length=16), nullable=False),
         sa.ForeignKeyConstraint(
             ["oauth_static_client_secret_credential_id"], ["credentials.id"]

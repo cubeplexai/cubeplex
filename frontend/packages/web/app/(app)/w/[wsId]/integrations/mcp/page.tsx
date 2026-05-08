@@ -17,7 +17,7 @@ export default function WorkspaceMcpListPage() {
     next.setWorkspaceId(wsId)
     return next
   }, [wsId])
-  const { owned, viaBinding, loading, error, fetchAll } = useWorkspaceMcpStore()
+  const { owned, inherited, loading, error, fetchAll } = useWorkspaceMcpStore()
 
   useEffect(() => {
     void fetchAll(client, wsId)
@@ -54,7 +54,7 @@ export default function WorkspaceMcpListPage() {
       <section className="flex flex-col gap-3">
         <h2 className="text-base font-medium">{t('shared')}</h2>
         <MCPServerList
-          servers={viaBinding}
+          servers={inherited}
           loading={loading}
           detailHrefBase={`/w/${wsId}/integrations/mcp`}
           emptyTitle={t('sharedEmptyTitle')}

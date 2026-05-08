@@ -3,7 +3,7 @@
 from datetime import datetime
 from typing import Any, ClassVar
 
-from sqlalchemy import JSON, Column, Index, UniqueConstraint
+from sqlalchemy import JSON, Column, Index, UniqueConstraint, text
 from sqlmodel import Field
 
 from cubebox.models.mixins import CubeboxBase, OrgScopedMixin
@@ -45,7 +45,10 @@ class MCPCatalogConnector(CubeboxBase, table=True):
     )
     static_auth_header_template: str | None = Field(default=None, max_length=256)
 
-    cred_metadata: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
+    cred_metadata: dict[str, Any] = Field(
+        default_factory=dict,
+        sa_column=Column(JSON, nullable=False, server_default=text("'{}'")),
+    )
     status: str = Field(default="active", max_length=16)
 
 
