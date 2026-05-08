@@ -19,16 +19,18 @@ def _index_columns(model: type, name: str) -> list[str] | None:
 
 def test_mcp_models_are_registered() -> None:
     from cubebox.models import (
+        MCPCatalogConnector,
         MCPServer,
         UserMCPCredential,
-        WorkspaceMCPBinding,
         WorkspaceMCPCredential,
+        WorkspaceMCPOverride,
     )
 
     assert MCPServer.__tablename__ == "mcp_servers"
     assert WorkspaceMCPCredential.__tablename__ == "workspace_mcp_credentials"
     assert UserMCPCredential.__tablename__ == "user_mcp_credentials"
-    assert WorkspaceMCPBinding.__tablename__ == "workspace_mcp_bindings"
+    assert WorkspaceMCPOverride.__tablename__ == "workspace_mcp_overrides"
+    assert MCPCatalogConnector.__tablename__ == "mcp_catalog_connectors"
 
 
 def test_mcp_server_json_columns_and_constraints() -> None:
@@ -57,8 +59,8 @@ def test_mcp_server_json_columns_and_constraints() -> None:
     ]
 
 
-def test_mcp_credential_and_binding_constraints() -> None:
-    from cubebox.models import UserMCPCredential, WorkspaceMCPBinding, WorkspaceMCPCredential
+def test_mcp_credential_and_override_constraints() -> None:
+    from cubebox.models import UserMCPCredential, WorkspaceMCPCredential, WorkspaceMCPOverride
 
     assert _unique_constraint_columns(WorkspaceMCPCredential, "uq_ws_mcp_cred") == [
         "workspace_id",
@@ -68,7 +70,13 @@ def test_mcp_credential_and_binding_constraints() -> None:
         "user_id",
         "mcp_server_id",
     ]
-    assert _unique_constraint_columns(WorkspaceMCPBinding, "uq_ws_mcp_binding") == [
+    assert _unique_constraint_columns(WorkspaceMCPOverride, "uq_ws_mcp_override") == [
         "workspace_id",
         "mcp_server_id",
     ]
+
+
+def test_mcp_catalog_connector_unique_slug() -> None:
+    from cubebox.models import MCPCatalogConnector
+
+    assert _unique_constraint_columns(MCPCatalogConnector, "uq_mcp_catalog_slug") == ["slug"]

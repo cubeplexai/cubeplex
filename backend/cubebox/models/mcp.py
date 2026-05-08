@@ -4,9 +4,49 @@ from datetime import datetime
 from typing import Any, ClassVar
 
 from sqlalchemy import JSON, Column, Index, UniqueConstraint
-from sqlmodel import Field, SQLModel
+from sqlmodel import Field
 
-from cubebox.models.mixins import CubeboxBase, TimestampMixin
+from cubebox.models.mixins import CubeboxBase, OrgScopedMixin
+
+
+class MCPCatalogConnector(CubeboxBase, table=True):
+    """System-level catalog of installable remote MCP connectors.
+
+    Templates only; no credentials and no runtime tools live here. Installs
+    materialize as ``MCPServer`` rows referencing ``catalog_connector_id``.
+    """
+
+    _PREFIX: ClassVar[str] = "mctlg"
+    __tablename__ = "mcp_catalog_connectors"
+    __table_args__ = (UniqueConstraint("slug", name="uq_mcp_catalog_slug"),)
+
+    slug: str = Field(max_length=64, index=True)
+    name: str = Field(max_length=128)
+    description: str = Field(max_length=2048)
+    provider: str = Field(max_length=64)
+    server_url: str = Field(max_length=2048)
+    transport: str = Field(max_length=16)
+    supported_auth_methods: list[str] = Field(
+        default_factory=list, sa_column=Column(JSON, nullable=False)
+    )
+    default_credential_scope: str = Field(max_length=16)
+
+    # OAuth-specific fields (NULL when 'oauth' is not in supported_auth_methods)
+    oauth_dcr_supported: bool | None = Field(default=None)
+    oauth_default_scope: str | None = Field(default=None, max_length=512)
+    oauth_static_client_id: str | None = Field(default=None, max_length=256)
+    oauth_static_client_secret_credential_id: str | None = Field(
+        default=None, foreign_key="credentials.id", max_length=20
+    )
+
+    # Static-specific fields (NULL when 'static' is not in supported_auth_methods)
+    static_form_fields: list[dict[str, Any]] | None = Field(
+        default=None, sa_column=Column(JSON, nullable=True)
+    )
+    static_auth_header_template: str | None = Field(default=None, max_length=256)
+
+    cred_metadata: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
+    status: str = Field(default="active", max_length=16)
 
 
 class MCPServer(CubeboxBase, table=True):
@@ -24,6 +64,9 @@ class MCPServer(CubeboxBase, table=True):
     org_id: str = Field(foreign_key="organizations.id", max_length=20, index=True)
     owner_workspace_id: str | None = Field(
         default=None, foreign_key="workspaces.id", max_length=20, index=True
+    )
+    catalog_connector_id: str | None = Field(
+        default=None, foreign_key="mcp_catalog_connectors.id", max_length=20, index=True
     )
     name: str = Field(max_length=64)
     server_url: str = Field(max_length=2048)
@@ -74,26 +117,25 @@ class UserMCPCredential(CubeboxBase, table=True):
     oauth_expires_at: datetime | None = None
 
 
-class WorkspaceMCPBinding(SQLModel, TimestampMixin, table=True):
-    """Org-wide server to workspace visibility binding.
+class WorkspaceMCPOverride(CubeboxBase, OrgScopedMixin, table=True):
+    """Workspace-level override of an org-wide install.
 
-    Pure association — composite PK; no public_id."""
+    A row exists only when the workspace explicitly disables an inherited
+    org-wide MCP server. ``enabled=False`` is the only meaningful value
+    today; ``enabled=True`` is reserved for future per-workspace overrides
+    (e.g. enabling a server that's been org-soft-disabled).
+    """
 
-    __tablename__ = "workspace_mcp_bindings"
-    __table_args__ = (UniqueConstraint("workspace_id", "mcp_server_id", name="uq_ws_mcp_binding"),)
+    _PREFIX: ClassVar[str] = "wmov"
+    __tablename__ = "workspace_mcp_overrides"
+    __table_args__ = (UniqueConstraint("workspace_id", "mcp_server_id", name="uq_ws_mcp_override"),)
 
-    org_id: str = Field(foreign_key="organizations.id", max_length=20, index=True)
-    workspace_id: str = Field(
-        primary_key=True, foreign_key="workspaces.id", max_length=20, index=True
-    )
-    mcp_server_id: str = Field(
-        primary_key=True, foreign_key="mcp_servers.id", max_length=20, index=True
-    )
-    enabled: bool = Field(default=True)
-    created_by_user_id: str = Field(foreign_key="users.id", max_length=20)
+    mcp_server_id: str = Field(foreign_key="mcp_servers.id", max_length=20, index=True)
+    enabled: bool = Field(default=False)
+    updated_by_user_id: str = Field(foreign_key="users.id", max_length=20)
 
 
-_MCP_SERVER_TABLE = SQLModel.metadata.tables["mcp_servers"]
+_MCP_SERVER_TABLE = MCPServer.__table__  # type: ignore[attr-defined]
 
 Index(
     "ix_mcp_server_org_wide_name_unique",
@@ -111,3 +153,10 @@ Index(
     postgresql_where=_MCP_SERVER_TABLE.c.owner_workspace_id.is_(None),
     sqlite_where=_MCP_SERVER_TABLE.c.owner_workspace_id.is_(None),
 )
+# NOTE: the uniqueness constraint
+#   (org_id, COALESCE(owner_workspace_id, '_org'), catalog_connector_id)
+# WHERE catalog_connector_id IS NOT NULL
+# is added via a hand-edited alembic migration (see
+# alembic/versions/*_mcp_catalog_*) — SQLAlchemy can't express COALESCE
+# in a standard Index, and we need NULL owner_workspace_id values to
+# collide on the same catalog connector at the org-wide level.

@@ -17,6 +17,7 @@ from cubebox.models import (  # noqa: F401
     Credential,
     InviteToken,
     LlmBillingEvent,
+    MCPCatalogConnector,
     MCPServer,
     Membership,
     MemoryItem,
@@ -33,8 +34,8 @@ from cubebox.models import (  # noqa: F401
     UserMCPCredential,
     UserSandbox,
     Workspace,
-    WorkspaceMCPBinding,
     WorkspaceMCPCredential,
+    WorkspaceMCPOverride,
     WorkspaceSkillBinding,
 )
 

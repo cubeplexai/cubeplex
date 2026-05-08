@@ -311,7 +311,7 @@
       "basicInfo": "基础信息",
       "nameLabel": "名称 *",
       "serverUrlLabel": "服务地址 *",
-      "serverUrlPlaceholder": "https://example.com/mcp 或 stdio 命令",
+      "serverUrlPlaceholder": "https://example.com/mcp",
       "transport": "传输方式",
       "credentialMode": "凭证模式",
       "oauth": "OAuth",

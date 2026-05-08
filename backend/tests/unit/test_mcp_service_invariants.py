@@ -24,8 +24,8 @@ from cubebox.repositories.credential import CredentialRepository
 from cubebox.repositories.mcp import (
     MCPServerRepository,
     UserMCPCredentialRepository,
-    WorkspaceMCPBindingRepository,
     WorkspaceMCPCredentialRepository,
+    WorkspaceMCPOverrideRepository,
 )
 from cubebox.services.credential import CredentialService
 from cubebox.services.mcp import MCPServerService
@@ -88,7 +88,7 @@ def mcp_service(
         server_repo=MCPServerRepository(session, org_id=request_context.org_id),
         ws_cred_repo=WorkspaceMCPCredentialRepository(session, org_id=request_context.org_id),
         user_cred_repo=UserMCPCredentialRepository(session, org_id=request_context.org_id),
-        binding_repo=WorkspaceMCPBindingRepository(session, org_id=request_context.org_id),
+        override_repo=WorkspaceMCPOverrideRepository(session, org_id=request_context.org_id),
         cred_service=cred_service,
         request_context=request_context,
     )
@@ -266,12 +266,13 @@ async def test_promote_alpha_moves_workspace_cred_to_inline(
         )
         is None
     )
-    binding = await mcp_service.binding_repo.get(
+    # Inheritance is the new default — promote no longer creates an enable
+    # row. Visibility is implicit unless the workspace explicitly opts out.
+    override = await mcp_service.override_repo.get_for_workspace_and_server(
         workspace_id="ws-test",
         mcp_server_id=server.id,
     )
-    assert binding is not None
-    assert binding.enabled is True
+    assert override is None
 
 
 async def test_promote_beta_keeps_workspace_cred(
@@ -299,11 +300,13 @@ async def test_promote_beta_keeps_workspace_cred(
         mcp_server_id=server.id,
     )
     assert ws_credential is not None
-    binding = await mcp_service.binding_repo.get(
+    # Promotion drops any pre-existing disable override so the source
+    # workspace still sees the connector by default.
+    override = await mcp_service.override_repo.get_for_workspace_and_server(
         workspace_id="ws-test",
         mcp_server_id=server.id,
     )
-    assert binding is not None
+    assert override is None
 
 
 async def test_promote_already_org_wide_raises(
@@ -321,7 +324,7 @@ async def test_promote_already_org_wide_raises(
         await mcp_service.promote_to_org(server_id=server.id, share_credential=False)
 
 
-async def test_workspace_credential_management_and_bindings(
+async def test_workspace_credential_management_and_overrides(
     mcp_service: MCPServerService,
 ) -> None:
     server = await mcp_service.create(
@@ -349,16 +352,30 @@ async def test_workspace_credential_management_and_bindings(
         is True
     )
 
-    await mcp_service.replace_bindings(
+    # Disable inheritance for ws-2.
+    await mcp_service.set_workspace_override(
         server_id=server.id,
-        bindings=[("ws-test", True), ("ws-2", False)],
+        workspace_id="ws-2",
+        enabled=False,
     )
-    binding = await mcp_service.binding_repo.get(
+    override = await mcp_service.override_repo.get_for_workspace_and_server(
         workspace_id="ws-2",
         mcp_server_id=server.id,
     )
-    assert binding is not None
-    assert binding.enabled is False
+    assert override is not None
+    assert override.enabled is False
+
+    # Re-enable drops the override row entirely.
+    await mcp_service.set_workspace_override(
+        server_id=server.id,
+        workspace_id="ws-2",
+        enabled=True,
+    )
+    cleared = await mcp_service.override_repo.get_for_workspace_and_server(
+        workspace_id="ws-2",
+        mcp_server_id=server.id,
+    )
+    assert cleared is None
 
     await mcp_service.delete_workspace_credential(
         server_id=server.id,

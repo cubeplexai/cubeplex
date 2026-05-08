@@ -61,11 +61,13 @@ async def _get_workspace_visible_server(
     if server.owner_workspace_id == workspace_id:
         return server
     if server.owner_workspace_id is None:
-        binding = await svc.binding_repo.get(
+        # Org-wide install: visible unless this workspace has an explicit
+        # disable override.
+        override = await svc.override_repo.get_for_workspace_and_server(
             workspace_id=workspace_id,
             mcp_server_id=server_id,
         )
-        if binding is not None and binding.enabled:
+        if override is None or override.enabled:
             return server
     raise HTTPException(403, detail={"code": "mcp_server_not_available_to_workspace"})
 
@@ -91,20 +93,25 @@ async def list_servers(
     workspace_id: str,
     svc: MCPServerService = Depends(get_mcp_service),
 ) -> MCPServerListWS:
+    """Return workspace-private installs and inherited org-wide installs.
+
+    Inherited installs include every org-wide row that hasn't been explicitly
+    disabled for this workspace via ``workspace_mcp_overrides``.
+    """
     owned = await svc.server_repo.list_for_org(owner_workspace_id=workspace_id)
     org_wide = await svc.server_repo.list_for_org(owner_workspace_id=None)
-    via_binding: list[MCPServer] = []
+    inherited: list[MCPServer] = []
     for server in org_wide:
-        binding = await svc.binding_repo.get(
+        override = await svc.override_repo.get_for_workspace_and_server(
             workspace_id=workspace_id,
             mcp_server_id=server.id,
         )
-        if binding is not None and binding.enabled:
-            via_binding.append(server)
+        if override is None or override.enabled:
+            inherited.append(server)
 
     return MCPServerListWS(
         owned=[_server_to_out(server, include_tools_cache=False) for server in owned],
-        via_binding=[_server_to_out(server, include_tools_cache=False) for server in via_binding],
+        inherited=[_server_to_out(server, include_tools_cache=False) for server in inherited],
     )
 
 

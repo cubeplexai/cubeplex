@@ -8,9 +8,10 @@ from cubebox.repositories.invite_token import InviteTokenRepository
 from cubebox.repositories.mcp import (
     MCPServerRepository,
     UserMCPCredentialRepository,
-    WorkspaceMCPBindingRepository,
     WorkspaceMCPCredentialRepository,
+    WorkspaceMCPOverrideRepository,
 )
+from cubebox.repositories.mcp_catalog import MCPCatalogConnectorRepository
 from cubebox.repositories.membership import MembershipRepository
 from cubebox.repositories.organization import OrganizationRepository
 from cubebox.repositories.organization_membership import OrganizationMembershipRepository
@@ -32,6 +33,7 @@ __all__ = [
     "ConversationRepository",
     "InviteTokenRepository",
     "MembershipRepository",
+    "MCPCatalogConnectorRepository",
     "MCPServerRepository",
     "OrgPreinstalledTombstoneRepository",
     "OrgSkillInstallRepository",
@@ -43,6 +45,6 @@ __all__ = [
     "UserMCPCredentialRepository",
     "WorkspaceRepository",
     "WorkspaceMCPCredentialRepository",
-    "WorkspaceMCPBindingRepository",
+    "WorkspaceMCPOverrideRepository",
     "WorkspaceSkillBindingRepository",
 ]

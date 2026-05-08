@@ -11,7 +11,7 @@ from cubebox.mcp.exceptions import (
     MCPServerURLConflict,
     MCPShareCredentialOnlyForWorkspaceScope,
     MCPUserScopeCredentialForbidden,
-    MCPWorkspaceOwnedNoBinding,
+    MCPWorkspaceOwnedNoOverride,
 )
 
 
@@ -27,7 +27,7 @@ def test_mcp_domain_exceptions_are_exception_types() -> None:
         MCPServerURLConflict,
         MCPShareCredentialOnlyForWorkspaceScope,
         MCPUserScopeCredentialForbidden,
-        MCPWorkspaceOwnedNoBinding,
+        MCPWorkspaceOwnedNoOverride,
     ]
 
     for exception_type in exception_types:

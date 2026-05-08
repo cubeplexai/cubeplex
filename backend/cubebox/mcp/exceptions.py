@@ -29,8 +29,8 @@ class MCPServerNotOwnedByWorkspace(Exception):
     """Workspace route attempted to mutate a server owned by a different workspace."""
 
 
-class MCPWorkspaceOwnedNoBinding(Exception):
-    """Bindings table only accepts org-wide servers."""
+class MCPWorkspaceOwnedNoOverride(Exception):
+    """Workspace overrides only apply to org-wide installs, not workspace-private ones."""
 
 
 class MCPServerAlreadyOrgWide(Exception):

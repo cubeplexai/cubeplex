@@ -4,13 +4,13 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from cubebox.api.schemas.mcp import (
     CredentialRefOut,
-    MCPBindingsReplace,
+    MCPOverrideUpdate,
     MCPServerCreateAdmin,
     MCPServerOut,
     MCPServerPatch,
     MCPTestConnectionRequest,
     MCPTestConnectionResponse,
-    WorkspaceBindingItem,
+    WorkspaceOverrideItem,
 )
 from cubebox.audit.sink import AuditSink
 from cubebox.auth.context import RequestContext
@@ -26,7 +26,7 @@ from cubebox.mcp.exceptions import (
     MCPServerNotFound,
     MCPServerURLConflict,
     MCPUserScopeCredentialForbidden,
-    MCPWorkspaceOwnedNoBinding,
+    MCPWorkspaceOwnedNoOverride,
 )
 from cubebox.models import MCPServer
 from cubebox.services.mcp import MCPServerService
@@ -241,44 +241,47 @@ async def test_connection(
     return MCPTestConnectionResponse(success=success, tools=tools, error=error)
 
 
-@router.get("/servers/{server_id}/bindings")
-async def get_bindings(
+@router.get("/servers/{server_id}/overrides")
+async def get_overrides(
     server_id: str,
     svc: MCPServerService = Depends(get_admin_mcp_service),
-) -> list[WorkspaceBindingItem]:
+) -> list[WorkspaceOverrideItem]:
+    """List workspaces that have explicitly disabled this org-wide install."""
     server = await svc.server_repo.get(server_id)
     if server is None:
         raise HTTPException(404, detail={"code": "mcp_server_not_found"})
     if server.owner_workspace_id is not None:
-        raise HTTPException(400, detail={"code": "mcp_workspace_owned_no_binding"})
-    bindings = await svc.binding_repo.list_for_server(server_id)
+        raise HTTPException(400, detail={"code": "mcp_workspace_owned_no_override"})
+    overrides = await svc.override_repo.list_for_server(server_id)
     return [
-        WorkspaceBindingItem(workspace_id=binding.workspace_id, enabled=binding.enabled)
-        for binding in bindings
+        WorkspaceOverrideItem(workspace_id=override.workspace_id, enabled=override.enabled)
+        for override in overrides
     ]
 
 
-@router.put("/servers/{server_id}/bindings")
-async def put_bindings(
+@router.put("/servers/{server_id}/overrides")
+async def put_override(
     server_id: str,
-    body: MCPBindingsReplace,
+    body: MCPOverrideUpdate,
     svc: MCPServerService = Depends(get_admin_mcp_service),
-) -> list[WorkspaceBindingItem]:
+) -> list[WorkspaceOverrideItem]:
+    """Disable or re-enable an org-wide install for one workspace."""
     try:
-        await svc.replace_bindings(
+        await svc.set_workspace_override(
             server_id=server_id,
-            bindings=[(binding.workspace_id, binding.enabled) for binding in body.bindings],
+            workspace_id=body.workspace_id,
+            enabled=body.enabled,
         )
     except MCPServerNotFound as exc:
         raise HTTPException(404, detail={"code": "mcp_server_not_found"}) from exc
-    except MCPWorkspaceOwnedNoBinding as exc:
+    except MCPWorkspaceOwnedNoOverride as exc:
         raise HTTPException(
             400,
-            detail={"code": "mcp_workspace_owned_no_binding"},
+            detail={"code": "mcp_workspace_owned_no_override"},
         ) from exc
 
-    bindings = await svc.binding_repo.list_for_server(server_id)
+    overrides = await svc.override_repo.list_for_server(server_id)
     return [
-        WorkspaceBindingItem(workspace_id=binding.workspace_id, enabled=binding.enabled)
-        for binding in bindings
+        WorkspaceOverrideItem(workspace_id=override.workspace_id, enabled=override.enabled)
+        for override in overrides
     ]

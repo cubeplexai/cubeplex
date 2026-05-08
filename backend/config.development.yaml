@@ -25,37 +25,6 @@ development:
   auth:
     cookie_secure: false
 
-  mcp:
-    enabled: true
-    servers:
-      webtools:
-        url: "http://localhost:8020/api/webtools"
-        transport: streamable_http
-        key: "Pu9bKu1h9yGd9slVf9c9ugxCYd7f3f0V=="
-        tools:
-          - name: web_search
-            content_type: json
-            citation:
-              source_type: web
-              content_field: "results"
-              mapping:
-                url: "url"
-                title: "title"
-                snippet: "description"
-                published_at: "date"
-          - name: web_fetch
-            content_type: text
-            citation:
-              source_type: web
-              content_field: null
-              mapping:
-                snippet: "text"
-              args_mapping:
-                url: "url"
-                title: "title"
-
-        enabled: true
-
   # File parsers: local docling-serve (developer runs `docker compose up docling-serve`)
   parsers:
     docling_serve:
