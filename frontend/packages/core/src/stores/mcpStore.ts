@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 
-import { ApiError, type ApiClient } from '../api/client'
+import { type ApiClient } from '../api/client'
 import * as api from '../api/mcp'
 import type {
   MCPCatalogConnector,
@@ -16,18 +16,7 @@ import type {
   MCPTestConnectionResult,
   WorkspaceOverride,
 } from '../types/mcp'
-
-export interface CatalogErrorEnvelope {
-  code: string
-  message: string
-}
-
-function toCatalogError(err: unknown): CatalogErrorEnvelope {
-  if (err instanceof ApiError) {
-    return { code: err.code ?? 'unknown', message: err.message }
-  }
-  return { code: 'unknown', message: (err as Error).message ?? 'Unknown error' }
-}
+import { type CatalogErrorEnvelope, toCatalogError } from './mcpShared'
 
 interface CatalogListParams {
   q?: string
@@ -131,6 +120,16 @@ export const useMcpStore = create<McpStore>((set, get) => ({
     return api.adminPutOverride(client, id, body)
   },
 
+  /**
+   * Fetch the catalog from the workspace-scoped endpoint.
+   *
+   * The catalog API is workspace-scoped because the per-(workspace, user) status
+   * fields (org_install_id, workspace_visible, user_install_id) require a
+   * workspace context. The admin UI presents the catalog from a chosen workspace
+   * lens; pass the active workspaceId here. The mutating admin actions
+   * (install / patch / delete) hit the unscoped admin routes; this method exists
+   * solely to refetch the catalog so post-mutation status flags reflect.
+   */
   async fetchCatalog(client, wsId, params) {
     set({ catalogLoading: true, catalogError: null })
     try {
