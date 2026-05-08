@@ -1,10 +1,14 @@
 import { create } from 'zustand'
 
-import type { ApiClient } from '../api/client'
+import { ApiError, type ApiClient } from '../api/client'
 import * as api from '../api/mcp'
 import type {
   CredentialStatus,
   CredentialUpsertBody,
+  MCPCatalogConnector,
+  MCPCatalogInstallResult,
+  MCPCatalogInstallWsRequest,
+  MCPOAuthStartResult,
   MCPServer,
   MCPServerCreateWSBody,
   MCPServerListWS,
@@ -13,6 +17,23 @@ import type {
   MCPTestConnectionResult,
   PromoteBody,
 } from '../types/mcp'
+
+export interface CatalogErrorEnvelope {
+  code: string
+  message: string
+}
+
+function toCatalogError(err: unknown): CatalogErrorEnvelope {
+  if (err instanceof ApiError) {
+    return { code: err.code ?? 'unknown', message: err.message }
+  }
+  return { code: 'unknown', message: (err as Error).message ?? 'Unknown error' }
+}
+
+interface CatalogListParams {
+  q?: string
+  provider?: string
+}
 
 export interface WorkspaceMcpStore {
   owned: MCPServer[]
@@ -50,6 +71,27 @@ export interface WorkspaceMcpStore {
     body: CredentialUpsertBody,
   ): Promise<CredentialStatus>
   clearWorkspaceCredential(client: ApiClient, wsId: string, id: string): Promise<void>
+  // catalog state
+  catalog: MCPCatalogConnector[]
+  catalogLoading: boolean
+  catalogError: CatalogErrorEnvelope | null
+  pendingOAuthInstallId: string | null
+  fetchCatalog(client: ApiClient, wsId: string, params?: CatalogListParams): Promise<void>
+  installFromCatalog(
+    client: ApiClient,
+    wsId: string,
+    catalogId: string,
+    body: MCPCatalogInstallWsRequest,
+  ): Promise<MCPCatalogInstallResult>
+  deleteInstall(client: ApiClient, wsId: string, installId: string): Promise<void>
+  overrideOrgInstall(
+    client: ApiClient,
+    wsId: string,
+    installId: string,
+    enabled: boolean,
+  ): Promise<void>
+  startOAuth(client: ApiClient, wsId: string, installId: string): Promise<MCPOAuthStartResult>
+  clearPendingOAuth(): void
   reset(): void
 }
 
@@ -58,6 +100,10 @@ export const useWorkspaceMcpStore = create<WorkspaceMcpStore>((set, get) => ({
   inherited: [],
   loading: false,
   error: null,
+  catalog: [],
+  catalogLoading: false,
+  catalogError: null,
+  pendingOAuthInstallId: null,
 
   async fetchAll(client, wsId) {
     set({ loading: true, error: null })
@@ -131,7 +177,85 @@ export const useWorkspaceMcpStore = create<WorkspaceMcpStore>((set, get) => ({
     return api.wsDeleteWorkspaceCredential(client, wsId, id)
   },
 
+  async fetchCatalog(client, wsId, params) {
+    set({ catalogLoading: true, catalogError: null })
+    try {
+      const items = await api.wsCatalogList(client, wsId, params)
+      set({ catalog: items })
+    } catch (err) {
+      set({ catalogError: toCatalogError(err) })
+    } finally {
+      set({ catalogLoading: false })
+    }
+  },
+
+  async installFromCatalog(client, wsId, catalogId, body) {
+    set({ catalogError: null })
+    try {
+      const result = await api.wsCatalogInstall(client, wsId, catalogId, body)
+      if (result.requires_oauth) {
+        set({ pendingOAuthInstallId: result.install_id })
+      }
+      await get().fetchCatalog(client, wsId)
+      return result
+    } catch (err) {
+      const env = toCatalogError(err)
+      set({ catalogError: env })
+      throw err
+    }
+  },
+
+  async deleteInstall(client, wsId, installId) {
+    set({ catalogError: null })
+    try {
+      await api.wsCatalogDeleteInstall(client, wsId, installId)
+      await get().fetchCatalog(client, wsId)
+    } catch (err) {
+      const env = toCatalogError(err)
+      set({ catalogError: env })
+      throw err
+    }
+  },
+
+  async overrideOrgInstall(client, wsId, installId, enabled) {
+    set({ catalogError: null })
+    try {
+      await api.wsCatalogOverrideOrgInstall(client, wsId, installId, { enabled })
+      await get().fetchCatalog(client, wsId)
+    } catch (err) {
+      const env = toCatalogError(err)
+      set({ catalogError: env })
+      throw err
+    }
+  },
+
+  async startOAuth(client, wsId, installId) {
+    set({ catalogError: null })
+    try {
+      const result = await api.wsOAuthStart(client, wsId, installId)
+      set({ pendingOAuthInstallId: installId })
+      return result
+    } catch (err) {
+      const env = toCatalogError(err)
+      set({ catalogError: env })
+      throw err
+    }
+  },
+
+  clearPendingOAuth() {
+    set({ pendingOAuthInstallId: null })
+  },
+
   reset() {
-    set({ owned: [], inherited: [], loading: false, error: null })
+    set({
+      owned: [],
+      inherited: [],
+      loading: false,
+      error: null,
+      catalog: [],
+      catalogLoading: false,
+      catalogError: null,
+      pendingOAuthInstallId: null,
+    })
   },
 }))

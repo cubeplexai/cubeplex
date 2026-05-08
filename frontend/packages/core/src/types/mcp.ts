@@ -115,3 +115,74 @@ export interface CredentialUpsertBody {
 export interface CredentialStatus {
   has_value: boolean
 }
+
+// ---------------- Catalog connector types ---------------- //
+
+export type MCPCatalogStatus = 'active' | 'deprecated' | 'disabled'
+
+export interface MCPCatalogStaticFormField {
+  name: string
+  label: string
+  secret: boolean
+  placeholder?: string
+  helper_url?: string
+}
+
+export interface MCPCatalogConnector {
+  id: string
+  slug: string
+  name: string
+  provider: string
+  description: string
+  server_url: string
+  transport: MCPTransport
+  supported_auth_methods: MCPAuthMethod[]
+  default_credential_scope: MCPCredentialScope
+  oauth_dcr_supported: boolean | null
+  oauth_default_scope: string | null
+  static_form_fields: MCPCatalogStaticFormField[] | null
+  metadata: Record<string, unknown>
+  status: MCPCatalogStatus
+  // per-(workspace, user) install status
+  org_install_id: string | null
+  workspace_visible: boolean
+  user_install_id: string | null
+}
+
+export interface MCPCatalogListResponse {
+  items: MCPCatalogConnector[]
+}
+
+export interface MCPCatalogInstallRequest {
+  auth_method: MCPAuthMethod
+  auto_enable_workspaces?: boolean
+  credential_plaintext?: string
+  credential_name?: string
+}
+
+export interface MCPCatalogInstallWsRequest {
+  auth_method: MCPAuthMethod
+  credential_plaintext?: string
+  credential_name?: string
+}
+
+export interface MCPInstallSwitchAuthRequest {
+  auth_method: MCPAuthMethod
+  credential_plaintext?: string
+  credential_name?: string
+}
+
+export interface MCPCatalogInstallResult {
+  install_id: string
+  requires_oauth: boolean
+  authed: boolean
+}
+
+export interface MCPOrgInstallOverrideRequest {
+  enabled: boolean
+}
+
+export interface MCPOAuthStartResult {
+  authorize_url: string
+  state: string
+}

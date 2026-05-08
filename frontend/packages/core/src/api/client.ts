@@ -153,15 +153,50 @@ export function createApiClient(baseUrl: string): ApiClient {
   return client
 }
 
-export async function toApiError(res: Response): Promise<Error> {
+/**
+ * ApiError — preserves the structured `{code, message}` error envelope the
+ * backend returns under `detail` so callers can branch on the stable `code`.
+ *
+ * Falls back to plain `Error` semantics when the body is not JSON.
+ */
+export class ApiError extends Error {
+  status: number
+  code: string | null
+  detail: unknown
+
+  constructor(message: string, status: number, code: string | null, detail: unknown) {
+    super(message)
+    this.name = 'ApiError'
+    this.status = status
+    this.code = code
+    this.detail = detail
+  }
+}
+
+export async function toApiError(res: Response): Promise<ApiError> {
   const contentType = res.headers.get('content-type')
   if (contentType?.includes('application/json')) {
-    const data = (await res.json()) as { message?: string; detail?: string | { reason?: string } }
-    const detail =
-      typeof data.detail === 'string'
-        ? data.detail
-        : (data.detail as { reason?: string } | undefined)?.reason
-    return new Error(data.message || detail || `HTTP ${res.status}`)
+    let data: {
+      message?: string
+      detail?: string | { code?: string; message?: string; reason?: string }
+    }
+    try {
+      data = (await res.json()) as typeof data
+    } catch {
+      return new ApiError(`HTTP ${res.status}: ${res.statusText}`, res.status, null, null)
+    }
+    let code: string | null = null
+    let message: string | null = null
+    let detailFallback: string | undefined
+    if (typeof data.detail === 'string') {
+      detailFallback = data.detail
+    } else if (data.detail && typeof data.detail === 'object') {
+      code = data.detail.code ?? null
+      message = data.detail.message ?? null
+      detailFallback = data.detail.reason
+    }
+    const finalMessage = data.message || message || detailFallback || `HTTP ${res.status}`
+    return new ApiError(finalMessage, res.status, code, data.detail ?? null)
   }
-  return new Error(`HTTP ${res.status}: ${res.statusText}`)
+  return new ApiError(`HTTP ${res.status}: ${res.statusText}`, res.status, null, null)
 }

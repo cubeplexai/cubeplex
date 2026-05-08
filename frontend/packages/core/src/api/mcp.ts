@@ -1,6 +1,14 @@
 import type {
   CredentialStatus,
   CredentialUpsertBody,
+  MCPCatalogConnector,
+  MCPCatalogInstallRequest,
+  MCPCatalogInstallResult,
+  MCPCatalogInstallWsRequest,
+  MCPCatalogListResponse,
+  MCPInstallSwitchAuthRequest,
+  MCPOAuthStartResult,
+  MCPOrgInstallOverrideRequest,
   MCPOverrideUpdateBody,
   MCPServer,
   MCPServerCreateAdminBody,
@@ -229,4 +237,109 @@ export async function wsDeleteWorkspaceCredential(
 ): Promise<void> {
   const res = await client.del(`/api/v1/ws/${wsId}/mcp/servers/${id}/workspace-credential`)
   if (!res.ok) throw await toApiError(res)
+}
+
+// ---------------- Catalog (workspace member) ---------------- //
+
+interface CatalogListParams {
+  q?: string
+  provider?: string
+}
+
+function catalogQuery(params?: CatalogListParams): string {
+  const qs = new URLSearchParams()
+  if (params?.q) qs.set('q', params.q)
+  if (params?.provider) qs.set('provider', params.provider)
+  const query = qs.toString()
+  return query ? `?${query}` : ''
+}
+
+export async function wsCatalogList(
+  client: ApiClient,
+  wsId: string,
+  params?: CatalogListParams,
+): Promise<MCPCatalogConnector[]> {
+  const res = await client.get(`/api/v1/ws/${wsId}/mcp/catalog${catalogQuery(params)}`)
+  if (!res.ok) throw await toApiError(res)
+  const data = (await res.json()) as MCPCatalogListResponse
+  return data.items
+}
+
+export async function wsCatalogInstall(
+  client: ApiClient,
+  wsId: string,
+  catalogId: string,
+  body: MCPCatalogInstallWsRequest,
+): Promise<MCPCatalogInstallResult> {
+  const res = await client.post(`/api/v1/ws/${wsId}/mcp/catalog/${catalogId}/install`, body)
+  if (!res.ok) throw await toApiError(res)
+  return (await res.json()) as MCPCatalogInstallResult
+}
+
+export async function wsCatalogDeleteInstall(
+  client: ApiClient,
+  wsId: string,
+  installId: string,
+): Promise<void> {
+  const res = await client.del(`/api/v1/ws/${wsId}/mcp/installs/${installId}`)
+  if (!res.ok) throw await toApiError(res)
+}
+
+export async function wsCatalogOverrideOrgInstall(
+  client: ApiClient,
+  wsId: string,
+  installId: string,
+  body: MCPOrgInstallOverrideRequest,
+): Promise<void> {
+  const res = await client.patch(`/api/v1/ws/${wsId}/mcp/org-installs/${installId}/override`, body)
+  if (!res.ok) throw await toApiError(res)
+}
+
+export async function wsOAuthStart(
+  client: ApiClient,
+  wsId: string,
+  installId: string,
+): Promise<MCPOAuthStartResult> {
+  const res = await client.post(`/api/v1/ws/${wsId}/mcp/installs/${installId}/oauth/start`, {})
+  if (!res.ok) throw await toApiError(res)
+  return (await res.json()) as MCPOAuthStartResult
+}
+
+// ---------------- Catalog (admin) ---------------- //
+
+export async function adminCatalogInstall(
+  client: ApiClient,
+  catalogId: string,
+  body: MCPCatalogInstallRequest,
+): Promise<MCPCatalogInstallResult> {
+  const res = await client.post(`/api/v1/admin/mcp/catalog/${catalogId}/install`, body)
+  if (!res.ok) throw await toApiError(res)
+  return (await res.json()) as MCPCatalogInstallResult
+}
+
+export async function adminCatalogDeleteInstall(
+  client: ApiClient,
+  installId: string,
+): Promise<void> {
+  const res = await client.del(`/api/v1/admin/mcp/installs/${installId}`)
+  if (!res.ok) throw await toApiError(res)
+}
+
+export async function adminCatalogPatchInstall(
+  client: ApiClient,
+  installId: string,
+  body: MCPInstallSwitchAuthRequest,
+): Promise<MCPCatalogInstallResult> {
+  const res = await client.patch(`/api/v1/admin/mcp/installs/${installId}`, body)
+  if (!res.ok) throw await toApiError(res)
+  return (await res.json()) as MCPCatalogInstallResult
+}
+
+export async function adminOAuthStart(
+  client: ApiClient,
+  installId: string,
+): Promise<MCPOAuthStartResult> {
+  const res = await client.post(`/api/v1/admin/mcp/installs/${installId}/oauth/start`, {})
+  if (!res.ok) throw await toApiError(res)
+  return (await res.json()) as MCPOAuthStartResult
 }
