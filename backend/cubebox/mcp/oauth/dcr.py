@@ -17,7 +17,7 @@ from cubebox.mcp.exceptions import DCRError
 
 DEFAULT_GRANT_TYPES: list[str] = ["authorization_code", "refresh_token"]
 DEFAULT_RESPONSE_TYPES: list[str] = ["code"]
-DEFAULT_TOKEN_AUTH_METHOD: str = "client_secret_basic"
+DEFAULT_TOKEN_AUTH_METHOD: str = "none"
 
 
 @dataclass(frozen=True)
@@ -71,7 +71,7 @@ class DCRClient:
             json=request.to_json(),
             headers={"Accept": "application/json"},
         )
-        if response.status_code != 201:
+        if response.status_code not in (200, 201):
             error: str | None = None
             error_description: str | None = None
             try:

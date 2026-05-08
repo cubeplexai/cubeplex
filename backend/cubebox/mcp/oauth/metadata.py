@@ -14,6 +14,7 @@ from __future__ import annotations
 import time
 from dataclasses import dataclass
 from typing import Any, TypeVar
+from urllib.parse import urlparse, urlunparse
 
 import httpx
 
@@ -146,7 +147,17 @@ class OAuthMetadataDiscovery:
 
     @staticmethod
     def _join(base_url: str, path: str) -> str:
-        return base_url.rstrip("/") + path
+        """Construct a .well-known URL per RFC 8414 §3 / RFC 9728 §3.1.
+
+        For an issuer with a path component (e.g. https://auth.example.com/tenant1),
+        the well-known suffix is inserted *before* the path, not appended after it.
+        """
+        parsed = urlparse(base_url.rstrip("/"))
+        base_without_path = urlunparse(parsed._replace(path="", query="", fragment=""))
+        issuer_path = parsed.path.lstrip("/")
+        if issuer_path:
+            return f"{base_without_path}{path}/{issuer_path}"
+        return f"{base_without_path}{path}"
 
     def _cache_get(
         self,

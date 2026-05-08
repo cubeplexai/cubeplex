@@ -89,7 +89,51 @@ async def test_register_sends_default_grant_response_and_auth_method() -> None:
     assert body["grant_types"] == DEFAULT_GRANT_TYPES
     assert body["response_types"] == DEFAULT_RESPONSE_TYPES
     assert body["token_endpoint_auth_method"] == DEFAULT_TOKEN_AUTH_METHOD
+    # MCP cubebox is a public client using PKCE → default auth method must be "none"
+    assert DEFAULT_TOKEN_AUTH_METHOD == "none"
+    assert body["token_endpoint_auth_method"] == "none"
     assert "scope" not in body  # not provided => not sent
+
+
+async def test_register_explicit_auth_method_override_flows_through() -> None:
+    """An explicit token_endpoint_auth_method is forwarded; default is just the default."""
+    handler = _RecordingHandler(httpx.Response(201, json={"client_id": "cid"}))
+    async with _client(handler) as http:
+        client = DCRClient(http)
+        await client.register(
+            REGISTRATION_ENDPOINT,
+            DCRRequest(
+                redirect_uris=["https://app.example.com/cb"],
+                client_name="cubebox",
+                token_endpoint_auth_method="client_secret_basic",
+            ),
+        )
+    assert handler.last_body is not None
+    assert handler.last_body["token_endpoint_auth_method"] == "client_secret_basic"
+
+
+async def test_register_accepts_200_ok_in_addition_to_201() -> None:
+    """RFC 7591 says 201 Created, but Keycloak / older Auth0 return 200 OK."""
+    handler = _RecordingHandler(
+        httpx.Response(
+            200,
+            json={
+                "client_id": "cid-200",
+                "client_secret": None,
+            },
+        )
+    )
+    async with _client(handler) as http:
+        client = DCRClient(http)
+        result = await client.register(
+            REGISTRATION_ENDPOINT,
+            DCRRequest(
+                redirect_uris=["https://app.example.com/cb"],
+                client_name="cubebox",
+            ),
+        )
+    assert result.client_id == "cid-200"
+    assert result.client_secret is None
 
 
 async def test_register_includes_scope_when_provided() -> None:
