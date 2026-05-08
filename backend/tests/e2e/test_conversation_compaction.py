@@ -150,3 +150,50 @@ async def test_summary_stable_when_boundary_unchanged(
 
     if until_v2 == until_v1:
         assert summary_v2 == summary_v1, "summary changed without boundary moving"
+
+
+@pytest.mark.asyncio
+async def test_compaction_keeps_tool_pairs_intact(
+    compaction_client: tuple[httpx.AsyncClient, Any],
+) -> None:
+    """When the LLM uses a tool during the conversation and compaction triggers,
+    the kept window must never leave an orphan ToolMessage (one whose parent
+    AIMessage with that tool_call_id was folded into the summary).
+    """
+    from langchain_core.messages import AIMessage, ToolMessage
+
+    client, saver = compaction_client
+    cid = await _create_conversation(client)
+
+    # Encourage at least one tool call: ask twice for the current date via the
+    # datetime tool, plus filler turns to push past the threshold.
+    await _send(client, cid, "use the datetime tool to tell me today's date")
+    await _send(client, cid, "thanks. now use the datetime tool again with include_time")
+    await _send(client, cid, "give me one short fact, no preamble")
+    await _send(client, cid, "another short fact, no preamble")
+
+    state = _read_state(saver, cid)
+    if not state.get("compaction"):
+        pytest.skip("compaction did not trigger in this run; threshold not crossed")
+    boundary = state["compaction_until_msg_index"]
+    assert boundary > 0
+
+    msgs = state["messages"]
+    suffix = msgs[boundary:]
+
+    # Build the set of tool_call_ids declared by AIMessages in the suffix.
+    declared: set[str] = set()
+    for m in suffix:
+        if isinstance(m, AIMessage):
+            for tc in m.tool_calls or []:
+                tc_id = tc.get("id") if isinstance(tc, dict) else getattr(tc, "id", None)
+                if tc_id:
+                    declared.add(tc_id)
+
+    # Every ToolMessage in the suffix must have its parent AIMessage in the suffix.
+    orphans = [
+        m
+        for m in suffix
+        if isinstance(m, ToolMessage) and m.tool_call_id and m.tool_call_id not in declared
+    ]
+    assert not orphans, f"compaction split tool_call/tool_result pair: {orphans}"
