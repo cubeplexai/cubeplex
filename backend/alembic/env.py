@@ -19,6 +19,7 @@ from cubebox.models import (  # noqa: F401
     LlmBillingEvent,
     MCPServer,
     Membership,
+    MemoryItem,
     Model,
     Organization,
     OrgPreinstalledTombstone,
