@@ -118,3 +118,74 @@ class MCPServerListWS(BaseModel):
 
     owned: list[MCPServerOut]
     inherited: list[MCPServerOut]
+
+
+# ---------------- Catalog connector schemas ---------------- #
+
+
+class MCPCatalogConnectorOut(BaseModel):
+    """One catalog connector + per-(workspace, user) install status.
+
+    Secret-bearing fields (``oauth_static_client_id``, the credential
+    reference for the OAuth app secret) are intentionally omitted — the
+    catalog endpoint is member-readable and must not leak them.
+    """
+
+    id: str
+    slug: str
+    name: str
+    provider: str
+    description: str
+    server_url: str
+    transport: str
+    supported_auth_methods: list[str]
+    default_credential_scope: str
+    oauth_dcr_supported: bool | None
+    oauth_default_scope: str | None
+    static_form_fields: list[dict[str, Any]] | None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    status: str
+    org_install_id: str | None
+    workspace_visible: bool
+    user_install_id: str | None
+
+
+class MCPCatalogListOut(BaseModel):
+    items: list[MCPCatalogConnectorOut]
+
+
+class MCPCatalogInstallIn(BaseModel):
+    """Admin install. ``scope=user`` installs into the admin's active workspace."""
+
+    scope: Literal["org", "user"] = "org"
+    auth_method: Literal["oauth", "static", "none"]
+    auto_enable_workspaces: bool = True
+    credential_plaintext: str | None = None
+    credential_name: str | None = None
+
+
+class MCPCatalogInstallWsIn(BaseModel):
+    """Workspace user self-install — scope is forced to ``user`` server-side."""
+
+    auth_method: Literal["oauth", "static", "none"]
+    credential_plaintext: str | None = None
+    credential_name: str | None = None
+
+
+class MCPInstallSwitchAuthIn(BaseModel):
+    """Re-key an existing install with a different auth method."""
+
+    auth_method: Literal["oauth", "static", "none"]
+    credential_plaintext: str | None = None
+
+
+class MCPCatalogInstallOut(BaseModel):
+    install_id: str
+    requires_oauth: bool
+    authed: bool
+
+
+class MCPOrgInstallOverrideIn(BaseModel):
+    """Toggle an org-wide install on/off for the calling workspace."""
+
+    enabled: bool
