@@ -183,13 +183,32 @@ def create_cubebox_agent(
         try:
             summary_provider = _config.get("compaction.summary_provider")
             summary_model_id = _config.get("compaction.summary_model")
-            summary_llm = LLMFactory().create(
+            factory = LLMFactory()
+            summary_llm = factory.create(
                 provider_name=summary_provider,
                 model_id=summary_model_id,
             )
-            ctx_window = getattr(llm, "context_window", None) or _config.get(
-                "compaction.fallback_context_window", 64000
-            )
+            # LLMFactory.create() attaches _cubebox_provider/_cubebox_model_id but
+            # NOT context_window — look up the real window via the model config so
+            # smaller models (16k/32k) don't fall through to the 64k fallback and
+            # silently overflow before compaction triggers.
+            ctx_window: int | None = None
+            main_provider = getattr(llm, "_cubebox_provider", None)
+            main_model_id = getattr(llm, "_cubebox_model_id", None)
+            if main_provider and main_model_id:
+                try:
+                    ctx_window = factory.get_model_config(
+                        main_provider, main_model_id
+                    ).context_window
+                except Exception as cfg_exc:  # noqa: BLE001
+                    logger.debug(
+                        "Could not resolve context_window for {}/{}: {}",
+                        main_provider,
+                        main_model_id,
+                        cfg_exc,
+                    )
+            if not ctx_window:
+                ctx_window = int(_config.get("compaction.fallback_context_window", 64000))
             ratio = float(_config.get("compaction.threshold_ratio", 0.7))
             middleware.append(
                 CompactionMiddleware(
