@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 
-import { ApiError, type ApiClient } from '../api/client'
+import { type ApiClient } from '../api/client'
 import * as api from '../api/mcp'
 import type {
   CredentialStatus,
@@ -17,18 +17,7 @@ import type {
   MCPTestConnectionResult,
   PromoteBody,
 } from '../types/mcp'
-
-export interface CatalogErrorEnvelope {
-  code: string
-  message: string
-}
-
-function toCatalogError(err: unknown): CatalogErrorEnvelope {
-  if (err instanceof ApiError) {
-    return { code: err.code ?? 'unknown', message: err.message }
-  }
-  return { code: 'unknown', message: (err as Error).message ?? 'Unknown error' }
-}
+import { type CatalogErrorEnvelope, toCatalogError } from './mcpShared'
 
 interface CatalogListParams {
   q?: string

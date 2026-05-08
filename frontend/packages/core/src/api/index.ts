@@ -1,4 +1,4 @@
-export { createApiClient, toApiError, type ApiClient } from './client'
+export { createApiClient, toApiError, ApiError, type ApiClient } from './client'
 export { AUTH_COOKIE_NAME, CSRF_COOKIE_NAME } from './cookieNames'
 export * from './attachments'
 export * from './auth'
