@@ -563,6 +563,17 @@ class MCPServerService:
                 raise MCPUserScopeCredentialForbidden()
         elif credential_plaintext:
             raise MCPUserScopeCredentialForbidden()
+        # OAuth grants are bound to an end-user identity, so the meaningful
+        # sharing scopes are "org" (admin's token shared org-wide, per spec
+        # §10) and "user" (per-user installs). "workspace" — one shared
+        # token for everyone in a workspace — has no real-world OAuth
+        # analogue, and the workspace credential row would be created
+        # AFTER the server commit (see create()), leaving an orphan
+        # unauthed server row. Reject up front.
+        if auth_method == "oauth" and credential_scope == "workspace":
+            raise ValueError(
+                "auth_method=oauth requires credential_scope in {org, user}, not workspace"
+            )
         if owner_workspace_id is not None and credential_scope == "org":
             raise ValueError("workspace-private servers cannot use credential_scope=org")
 

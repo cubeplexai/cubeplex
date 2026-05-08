@@ -236,16 +236,22 @@ def _redirect(install_id: str, status: str, reason: str | None = None) -> Redire
 @oauth_callback_router.get("/callback", include_in_schema=True)
 async def oauth_callback(
     request: Request,
-    code: Annotated[str, Query()],
     state: Annotated[str, Query()],
     redis: Annotated[Redis, Depends(get_redis)],
     handler: Annotated[OAuthCallbackHandler, Depends(get_oauth_callback_handler)],
+    code: Annotated[str | None, Query()] = None,
+    error: Annotated[str | None, Query()] = None,
 ) -> RedirectResponse:
     """Authorization-code callback. Always 302s to the frontend return page.
 
     Errors surface as ``status=error&reason=<code>`` in the query string —
     no HTTP error pages, no exception bodies. The cookie is always
     stripped on the way out.
+
+    Per RFC 6749 §4.1.2.1, the AS may redirect back with ``error`` instead
+    of ``code`` when the user denies consent or the AS rejects the request.
+    Both the ticket cookie and the redis-stored expected user are still
+    consumed so the session is cleaned up either way.
     """
     ticket = request.cookies.get(CALLBACK_TICKET_COOKIE_NAME)
     if not ticket:
@@ -256,6 +262,14 @@ async def oauth_callback(
     if expected_user_raw is None:
         return _redirect("", "error", "callback_ticket_expired")
     await redis.delete(ticket_key)
+
+    # AS-side error (user denied consent, scope rejected, AS error). No
+    # code to exchange — surface the provider error code to the frontend.
+    if error is not None or code is None:
+        reason = "user_denied" if error == "access_denied" else "provider_error"
+        logger.warning("OAuth callback rejected by AS: error={}", error or "missing_code")
+        return _redirect("", "error", reason)
+
     expected_user = (
         expected_user_raw.decode("utf-8")
         if isinstance(expected_user_raw, bytes)

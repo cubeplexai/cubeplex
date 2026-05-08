@@ -134,6 +134,31 @@ async def test_create_oauth_with_plaintext_rejected(mcp_service: MCPServerServic
         )
 
 
+async def test_create_oauth_workspace_scope_rejected_before_commit(
+    mcp_service: MCPServerService,
+) -> None:
+    """auth_method=oauth + credential_scope=workspace rejected at validation.
+
+    Before this guard, the workspace credential row was created AFTER the
+    server commit, so an OAuth + workspace request raised
+    ``MCPCredentialRequired`` only after committing an unauthed server row,
+    and the orphan row blocked subsequent retries with the same name/URL.
+    """
+    with pytest.raises(ValueError, match="credential_scope"):
+        await mcp_service.create(
+            name="oauth-ws",
+            server_url="https://oauth-ws.example.com",
+            transport="streamable_http",
+            auth_method="oauth",
+            credential_scope="workspace",
+            credential_plaintext=None,
+            owner_workspace_id="ws-test-1234567890",
+        )
+    # No orphan server row written.
+    listed = await mcp_service.server_repo.list_for_org(owner_workspace_id=None)
+    assert all(s.name != "oauth-ws" for s in listed)
+
+
 async def test_create_oauth_org_scope_persists_without_credential(
     mcp_service: MCPServerService,
 ) -> None:
