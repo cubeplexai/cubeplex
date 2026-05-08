@@ -31,10 +31,9 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cubebox.credentials.encryption import EncryptionBackend
+from cubebox.mcp._constants import CREDENTIAL_KIND_MCP_OAUTH_CLIENT_SECRET
 from cubebox.models import Credential
 from cubebox.repositories.mcp_catalog import MCPCatalogConnectorRepository
-
-_OAUTH_CLIENT_SECRET_KIND = "mcp_oauth_client_secret"
 
 
 @dataclass(frozen=True)
@@ -351,7 +350,7 @@ async def _upsert_oauth_client_secret(
     name = _credential_name_for_slug(slug)
     stmt = select(Credential).where(
         Credential.org_id.is_(None),  # type: ignore[union-attr]
-        Credential.kind == _OAUTH_CLIENT_SECRET_KIND,  # type: ignore[arg-type]
+        Credential.kind == CREDENTIAL_KIND_MCP_OAUTH_CLIENT_SECRET,  # type: ignore[arg-type]
         Credential.name == name,  # type: ignore[arg-type]
     )
     existing = (await session.execute(stmt)).scalar_one_or_none()
@@ -359,7 +358,7 @@ async def _upsert_oauth_client_secret(
     if existing is None:
         row = Credential(
             org_id=None,
-            kind=_OAUTH_CLIENT_SECRET_KIND,
+            kind=CREDENTIAL_KIND_MCP_OAUTH_CLIENT_SECRET,
             name=name,
             value_encrypted=ciphertext,
             cred_metadata={"slug": slug},

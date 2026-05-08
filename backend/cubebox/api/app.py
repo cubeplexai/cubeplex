@@ -306,6 +306,9 @@ async def lifespan(_app: FastAPI):  # type: ignore
         await run_manager.drain(timeout_seconds=float(drain_timeout))
     if redis_client is not None:
         await redis_client.aclose()
+    mcp_oauth_http_client = getattr(_app.state, "_mcp_oauth_http_client", None)
+    if mcp_oauth_http_client is not None:
+        await mcp_oauth_http_client.aclose()
     if cleanup_task:
         cleanup_task.cancel()
         try:

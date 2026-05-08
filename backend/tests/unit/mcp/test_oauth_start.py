@@ -27,14 +27,16 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from sqlmodel import SQLModel
 
 from cubebox.credentials.encryption import FernetBackend
-from cubebox.mcp._constants import server_url_hash
+from cubebox.mcp._constants import (
+    CREDENTIAL_KIND_MCP_OAUTH_CLIENT_SECRET,
+    server_url_hash,
+)
 from cubebox.mcp.exceptions import MCPServerNotFound, OAuthInvalidServerState
 from cubebox.mcp.oauth.callback import PKCE_REDIS_KEY_PREFIX
 from cubebox.mcp.oauth.dcr import DCRClient
 from cubebox.mcp.oauth.metadata import OAuthMetadataDiscovery
 from cubebox.mcp.oauth.start import (
     CALLBACK_TICKET_REDIS_KEY_PREFIX,
-    CREDENTIAL_KIND_MCP_OAUTH_CLIENT_SECRET,
     OAuthStartService,
 )
 from cubebox.mcp.oauth.state import OAuthStateStore
