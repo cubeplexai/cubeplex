@@ -212,11 +212,15 @@ async def install_for_org(
     ctx: RequestContext = Depends(get_admin_request_context),
     audit: AuditSink = Depends(get_audit_sink),
 ) -> MCPCatalogInstallOut:
-    """Org admin installs a catalog connector for the whole org or for self."""
+    """Org admin installs a catalog connector org-wide.
+
+    The admin endpoint is org-wide only — user-scope installs go through
+    the workspace endpoint (``POST /api/v1/ws/{ws}/mcp/catalog/{id}/install``)
+    like any member.
+    """
     try:
         result = await svc.install_for_org(
             catalog_id=catalog_id,
-            scope=body.scope,
             auth_method=body.auth_method,
             credential_plaintext=body.credential_plaintext,
             credential_name=body.credential_name,
@@ -239,7 +243,6 @@ async def install_for_org(
         target_id=result.install_id,
         details={
             "catalog_id": catalog_id,
-            "scope": body.scope,
             "auth_method": body.auth_method,
         },
     )
@@ -262,25 +265,10 @@ async def delete_org_install(
     audit: AuditSink = Depends(get_audit_sink),
 ) -> None:
     """Soft-disable an org install (keeps row, clears credentials, authed=false)."""
-    server = await svc.server_repo.get(install_id)
-    if server is None:
-        raise HTTPException(
-            404,
-            detail={
-                "code": "mcp_catalog.install_not_found",
-                "message": "MCP install not found.",
-            },
-        )
     try:
         await svc.delete_install(install_id)
     except MCPServerNotFound as exc:
-        raise HTTPException(
-            404,
-            detail={
-                "code": "mcp_catalog.install_not_found",
-                "message": "MCP install not found.",
-            },
-        ) from exc
+        raise _map_install_exception(exc) from exc
 
     await audit.record(
         event="mcp.catalog.deleted",
@@ -312,6 +300,7 @@ async def switch_org_install_auth(
             install_id=install_id,
             new_auth_method=body.auth_method,
             credential_plaintext=body.credential_plaintext,
+            credential_name=body.credential_name,
         )
     except (
         MCPServerNotFound,

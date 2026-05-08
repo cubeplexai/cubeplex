@@ -651,6 +651,25 @@ def sample_png_bytes() -> bytes:
 
 
 @pytest.fixture
+def stub_discover_tools(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    """Make MCP tool discovery return success without hitting the network.
+
+    NOT autouse — opt in per test module via
+    ``pytestmark = pytest.mark.usefixtures("stub_discover_tools")``.
+    Keeping it opt-in avoids masking real network calls in unrelated MCP
+    tests that legitimately exercise discovery.
+    """
+    from typing import Any
+
+    async def _ok(*_args: object, **_kwargs: object) -> tuple[bool, list[Any], None]:
+        return True, [], None
+
+    monkeypatch.setattr("cubebox.services.mcp_catalog.discover_tools", _ok)
+    monkeypatch.setattr("cubebox.services.mcp.discover_tools", _ok)
+    yield
+
+
+@pytest.fixture
 def sample_pdf_bytes() -> bytes:
     """Minimal valid PDF (one empty page)."""
     return (

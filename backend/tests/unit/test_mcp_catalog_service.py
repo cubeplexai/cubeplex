@@ -122,7 +122,6 @@ async def test_install_for_org_static_writes_credential_and_authed_true(
 
     result = await service.install_for_org(
         catalog_id=connector.id,
-        scope="org",
         auth_method="static",
         credential_plaintext="ghp_secret",
         credential_name=None,
@@ -147,7 +146,6 @@ async def test_install_for_org_oauth_returns_requires_oauth(
 
     result = await service.install_for_org(
         catalog_id=connector.id,
-        scope="org",
         auth_method="oauth",
         credential_plaintext=None,
         credential_name=None,
@@ -174,7 +172,6 @@ async def test_install_for_org_none_authed_immediately(
 
     result = await service.install_for_org(
         catalog_id=connector.id,
-        scope="org",
         auth_method="none",
         credential_plaintext=None,
         credential_name=None,
@@ -222,7 +219,6 @@ async def test_install_for_org_unsupported_auth_method_raises(
     with pytest.raises(MCPCatalogAuthMethodUnsupported):
         await service.install_for_org(
             catalog_id=connector.id,
-            scope="org",
             auth_method="static",
             credential_plaintext="x",
             credential_name=None,
@@ -238,7 +234,6 @@ async def test_install_for_org_static_requires_credential(
     with pytest.raises(MCPCredentialRequired):
         await service.install_for_org(
             catalog_id=connector.id,
-            scope="org",
             auth_method="static",
             credential_plaintext=None,
             credential_name=None,
@@ -251,7 +246,6 @@ async def test_duplicate_install_raises(session: AsyncSession, service: MCPCatal
 
     await service.install_for_org(
         catalog_id=connector.id,
-        scope="org",
         auth_method="none",
         credential_plaintext=None,
         credential_name=None,
@@ -263,7 +257,6 @@ async def test_duplicate_install_raises(session: AsyncSession, service: MCPCatal
     with pytest.raises(MCPCatalogInstallExists):
         await service.install_for_org(
             catalog_id=connector.id,
-            scope="org",
             auth_method="none",
             credential_plaintext=None,
             credential_name=None,
@@ -285,7 +278,6 @@ async def test_list_for_member_reports_org_install_status(
 
     await service.install_for_org(
         catalog_id=connector.id,
-        scope="org",
         auth_method="static",
         credential_plaintext="t",
         credential_name=None,
@@ -390,7 +382,6 @@ async def test_delete_install_clears_credentials_and_unauths(
     connector = await _make_connector(session)
     result = await service.install_for_org(
         catalog_id=connector.id,
-        scope="org",
         auth_method="static",
         credential_plaintext="t",
         credential_name=None,
