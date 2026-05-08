@@ -21,7 +21,6 @@ from cubebox.mcp.dependencies import (
 )
 from cubebox.mcp.exceptions import (
     MCPCredentialRequired,
-    MCPOAuthNotImplemented,
     MCPServerNameConflict,
     MCPServerNotFound,
     MCPServerURLConflict,
@@ -116,8 +115,6 @@ async def create_server(
             timeout=body.timeout,
             sse_read_timeout=body.sse_read_timeout,
         )
-    except MCPOAuthNotImplemented as exc:
-        raise HTTPException(409, detail={"code": "mcp_oauth_not_implemented"}) from exc
     except MCPServerURLConflict as exc:
         raise HTTPException(409, detail={"code": "mcp_server_url_conflict"}) from exc
     except MCPServerNameConflict as exc:
@@ -238,8 +235,6 @@ async def test_connection(
             timeout=body.timeout,
             sse_read_timeout=body.sse_read_timeout,
         )
-    except MCPOAuthNotImplemented as exc:
-        raise HTTPException(409, detail={"code": "mcp_oauth_not_implemented"}) from exc
     except MCPCredentialRequired as exc:
         raise HTTPException(400, detail={"code": "mcp_credential_required"}) from exc
     except MCPUserScopeCredentialForbidden as exc:

@@ -46,6 +46,58 @@ class DCRError(OAuthError):
         self.error_description = error_description
 
 
+class OAuthRefreshFailed(OAuthError):
+    """Refresh token grant returned a terminal error (caller must reauthorize)."""
+
+    def __init__(
+        self,
+        status: int,
+        error: str | None = None,
+        error_description: str | None = None,
+    ) -> None:
+        msg_parts = [f"OAuth refresh failed: HTTP {status}"]
+        if error:
+            msg_parts.append(f"error={error}")
+        if error_description:
+            msg_parts.append(f"error_description={error_description}")
+        super().__init__("; ".join(msg_parts))
+        self.status = status
+        self.error = error
+        self.error_description = error_description
+
+
+class OAuthRefreshContention(OAuthError):
+    """Another worker is refreshing the same token and didn't finish in time."""
+
+
+class OAuthInvalidServerState(OAuthError):
+    """Server row is not in a state where the OAuth operation makes sense."""
+
+
+class OAuthCallbackError(OAuthError):
+    """Authorization-code token exchange returned a non-2xx response."""
+
+    def __init__(
+        self,
+        status: int,
+        error: str | None = None,
+        error_description: str | None = None,
+    ) -> None:
+        msg_parts = [f"OAuth callback exchange failed: HTTP {status}"]
+        if error:
+            msg_parts.append(f"error={error}")
+        if error_description:
+            msg_parts.append(f"error_description={error_description}")
+        super().__init__("; ".join(msg_parts))
+        self.status = status
+        self.error = error
+        self.error_description = error_description
+
+
+class OAuthPKCEMissing(OAuthError):
+    """PKCE verifier was not found in redis (expired / never written)."""
+
+
 class MCPServerNotFound(Exception):
     """MCP server id does not exist or is outside the current org/workspace scope."""
 
@@ -64,10 +116,6 @@ class MCPCredentialRequired(Exception):
 
 class MCPUserScopeCredentialForbidden(Exception):
     """credential_scope=user/none must not carry plaintext credential."""
-
-
-class MCPOAuthNotImplemented(Exception):
-    """auth_method=oauth is reserved enum but not implemented in v1."""
 
 
 class MCPServerNotOwnedByWorkspace(Exception):

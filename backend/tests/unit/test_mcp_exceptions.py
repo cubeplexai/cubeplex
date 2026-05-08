@@ -3,7 +3,6 @@
 from cubebox.mcp.exceptions import (
     MCPCredentialPathMismatch,
     MCPCredentialRequired,
-    MCPOAuthNotImplemented,
     MCPServerAlreadyOrgWide,
     MCPServerNameConflict,
     MCPServerNotFound,
@@ -19,7 +18,6 @@ def test_mcp_domain_exceptions_are_exception_types() -> None:
     exception_types = [
         MCPCredentialPathMismatch,
         MCPCredentialRequired,
-        MCPOAuthNotImplemented,
         MCPServerAlreadyOrgWide,
         MCPServerNameConflict,
         MCPServerNotFound,

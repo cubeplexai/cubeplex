@@ -21,7 +21,6 @@ from cubebox.mcp.dependencies import get_audit_sink, get_mcp_service
 from cubebox.mcp.exceptions import (
     MCPCredentialPathMismatch,
     MCPCredentialRequired,
-    MCPOAuthNotImplemented,
     MCPServerAlreadyOrgWide,
     MCPServerNameConflict,
     MCPServerNotFound,
@@ -73,8 +72,6 @@ async def _get_workspace_visible_server(
 
 
 def _map_create_error(exc: Exception) -> HTTPException:
-    if isinstance(exc, MCPOAuthNotImplemented):
-        return HTTPException(409, detail={"code": "mcp_oauth_not_implemented"})
     if isinstance(exc, MCPServerURLConflict):
         return HTTPException(409, detail={"code": "mcp_server_url_conflict"})
     if isinstance(exc, MCPServerNameConflict):
@@ -133,7 +130,6 @@ async def create_server(
             sse_read_timeout=body.sse_read_timeout,
         )
     except (
-        MCPOAuthNotImplemented,
         MCPServerURLConflict,
         MCPServerNameConflict,
         MCPCredentialRequired,
@@ -261,7 +257,6 @@ async def test_connection(
             owner_workspace_id=workspace_id,
         )
     except (
-        MCPOAuthNotImplemented,
         MCPCredentialRequired,
         MCPUserScopeCredentialForbidden,
         ValueError,

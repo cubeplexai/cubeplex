@@ -1,6 +1,6 @@
 """Per-(workspace, user) DB MCP tool assembly for agent runs."""
 
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 
 from langchain_core.tools import BaseTool
 from loguru import logger
@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from cubebox.credentials.exceptions import CredentialNotFound
 from cubebox.mcp._constants import CREDENTIAL_KIND_MCP
 from cubebox.mcp.connection_params import build_connection_params
-from cubebox.mcp.discovery import construct_basetools_from_cache
+from cubebox.mcp.discovery import construct_basetools_from_cache, discover_tools
 from cubebox.mcp.user_token import MCPUserTokenSigner
 from cubebox.models import MCPServer
 from cubebox.repositories.mcp import (
@@ -20,6 +20,27 @@ from cubebox.repositories.mcp import (
 from cubebox.services.credential import CredentialService
 
 _USER_TOKEN_TTL = timedelta(minutes=5)
+
+
+async def refresh_tools_for_server_with_token(
+    server: MCPServer,
+    *,
+    server_repo: MCPServerRepository,
+    credential_or_token: str | None,
+) -> None:
+    """Run tool discovery against ``server`` and persist the result.
+
+    Mirrors ``MCPServerService._refresh_tools_for_server_with_token`` so the
+    OAuth callback handler can re-run discovery without instantiating a
+    request-scoped service. Updates ``authed`` / ``tools_cache`` / ``last_error``
+    / ``last_discovered_at`` and commits via the repository.
+    """
+    success, tools, error = await discover_tools(server, credential_or_token=credential_or_token)
+    server.authed = success
+    server.tools_cache = tools or []
+    server.last_error = None if success else error
+    server.last_discovered_at = datetime.now(UTC)
+    await server_repo.update(server)
 
 
 async def load_mcp_tools_for_workspace(

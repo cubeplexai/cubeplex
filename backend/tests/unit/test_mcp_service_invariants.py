@@ -12,7 +12,6 @@ from cubebox.credentials.encryption import FernetBackend
 from cubebox.mcp.exceptions import (
     MCPCredentialPathMismatch,
     MCPCredentialRequired,
-    MCPOAuthNotImplemented,
     MCPServerAlreadyOrgWide,
     MCPServerNameConflict,
     MCPServerNotFound,
@@ -82,7 +81,11 @@ def mcp_service(
     async def _discover_success(*_args: object, **_kwargs: object) -> tuple[bool, list, None]:
         return True, [], None
 
+    # ``services.mcp`` still calls discover_tools directly from
+    # ``test_connection`` (transient path); the persistent refresh path was
+    # moved to ``cubebox.mcp.runtime``. Patch both bindings.
     monkeypatch.setattr("cubebox.services.mcp.discover_tools", _discover_success)
+    monkeypatch.setattr("cubebox.mcp.runtime.discover_tools", _discover_success)
 
     return MCPServerService(
         server_repo=MCPServerRepository(session, org_id=request_context.org_id),
@@ -118,8 +121,9 @@ async def test_create_user_scope_rejects_credential(mcp_service: MCPServerServic
         )
 
 
-async def test_create_oauth_v1_rejected(mcp_service: MCPServerService) -> None:
-    with pytest.raises(MCPOAuthNotImplemented):
+async def test_create_oauth_with_plaintext_rejected(mcp_service: MCPServerService) -> None:
+    """auth_method=oauth never accepts a static credential at create-time."""
+    with pytest.raises(MCPUserScopeCredentialForbidden):
         await mcp_service.create(
             name="x",
             server_url="https://a",
@@ -128,6 +132,28 @@ async def test_create_oauth_v1_rejected(mcp_service: MCPServerService) -> None:
             credential_scope="org",
             credential_plaintext="x",
         )
+
+
+async def test_create_oauth_org_scope_persists_without_credential(
+    mcp_service: MCPServerService,
+) -> None:
+    """auth_method=oauth + credential_scope=org persists with no credential row.
+
+    The OAuth callback handler is the actual writer; create-time leaves
+    ``credential_id=None`` and ``authed=False`` until the dance completes.
+    """
+    server = await mcp_service.create(
+        name="oauth-server",
+        server_url="https://oauth.example.com",
+        transport="streamable_http",
+        auth_method="oauth",
+        credential_scope="org",
+        credential_plaintext=None,
+    )
+    assert server.auth_method == "oauth"
+    assert server.credential_scope == "org"
+    assert server.credential_id is None
+    assert server.authed is False
 
 
 async def test_duplicate_url_in_same_scope_conflicts(mcp_service: MCPServerService) -> None:
