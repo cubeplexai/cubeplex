@@ -601,6 +601,12 @@
     "citationTruncated": "已截断",
     "uploadDropzone": "拖到此处上传",
     "uploadFormats": "支持 PNG/JPG/PDF/CSV/DOCX/XLSX/Markdown",
+    "uploadErrors": {
+      "generic": "上传失败",
+      "invalidMimeType": "不支持此文件类型。",
+      "fileTooLarge": "文件过大。",
+      "quotaExceeded": "附件额度已超出。"
+    },
     "preview": "预览",
     "download": "下载"
   },

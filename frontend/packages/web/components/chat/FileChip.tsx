@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { useTranslations } from 'next-intl'
 import { X } from 'lucide-react'
 import type { UploadingFile } from '@cubebox/core'
 import { getFileVisual } from '@/lib/fileIcons'
@@ -13,6 +14,7 @@ interface Props {
 }
 
 export function FileChip({ item, thumbnailUrl, onCancel }: Props): React.ReactElement {
+  const t = useTranslations('chatExtras.uploadErrors')
   const [mounted, setMounted] = useState(false)
   useEffect(() => {
     requestAnimationFrame(() => setMounted(true))
@@ -21,6 +23,7 @@ export function FileChip({ item, thumbnailUrl, onCancel }: Props): React.ReactEl
   const visual = getFileVisual({ filename: item.filename })
   const isUploading = item.status === 'uploading'
   const isError = item.status === 'error'
+  const errorLabel = isError ? uploadErrorLabel(t, item) : null
   const radius = 18
   const circumference = 2 * Math.PI * radius
   const offset = (1 - item.progress) * circumference
@@ -83,7 +86,7 @@ export function FileChip({ item, thumbnailUrl, onCancel }: Props): React.ReactEl
             isError ? 'text-destructive' : 'text-muted-foreground',
           )}
         >
-          {isError ? 'Upload failed' : visual.label}
+          {errorLabel ?? visual.label}
         </span>
       </div>
       <button
@@ -96,4 +99,14 @@ export function FileChip({ item, thumbnailUrl, onCancel }: Props): React.ReactEl
       </button>
     </div>
   )
+}
+
+function uploadErrorLabel(
+  t: ReturnType<typeof useTranslations<'chatExtras.uploadErrors'>>,
+  item: UploadingFile,
+): string {
+  if (item.errorCode === 'INVALID_MIME_TYPE') return t('invalidMimeType')
+  if (item.errorCode === 'FILE_TOO_LARGE') return t('fileTooLarge')
+  if (item.errorCode === 'QUOTA_EXCEEDED') return t('quotaExceeded')
+  return item.error || t('generic')
 }

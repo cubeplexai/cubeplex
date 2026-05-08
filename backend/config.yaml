@@ -273,6 +273,9 @@ default:
       - application/vnd.openxmlformats-officedocument.spreadsheetml.sheet
       - application/json
       - application/x-yaml
+      - application/zip
+      - application/x-zip-compressed
+
     thumbnail:
       max_long_edge: 256
       format: webp

@@ -601,6 +601,12 @@
     "citationTruncated": "Truncated",
     "uploadDropzone": "Drop to upload",
     "uploadFormats": "Supports PNG/JPG/PDF/CSV/DOCX/XLSX/Markdown",
+    "uploadErrors": {
+      "generic": "Upload failed",
+      "invalidMimeType": "File type is not allowed.",
+      "fileTooLarge": "File is too large.",
+      "quotaExceeded": "Attachment quota exceeded."
+    },
     "preview": "Preview",
     "download": "Download"
   },

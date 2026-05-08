@@ -11,6 +11,7 @@ export interface UploadingFile {
   status: 'uploading' | 'done' | 'error'
   serverFile?: AttachmentDto
   error?: string
+  errorCode?: string
 }
 
 interface AttachmentStoreState {
@@ -81,10 +82,16 @@ export const useAttachmentStore = create<AttachmentStoreState>((set, get) => ({
               return { staging: { ...s.staging, [convId]: list } }
             })
           } else {
+            const uploadError = err as Error & { errorCode?: string }
             set((s) => {
               const list = (s.staging[convId] || []).map((u) =>
                 u.tempId === item.tempId
-                  ? { ...u, status: 'error' as const, error: String(err) }
+                  ? {
+                      ...u,
+                      status: 'error' as const,
+                      error: uploadError.message || String(err),
+                      errorCode: uploadError.errorCode,
+                    }
                   : u,
               )
               return { staging: { ...s.staging, [convId]: list } }

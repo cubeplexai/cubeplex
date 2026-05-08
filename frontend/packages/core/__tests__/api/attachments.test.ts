@@ -51,4 +51,28 @@ describe('uploadAttachment', () => {
     await expect(promise).rejects.toBeDefined()
     vi.unstubAllGlobals()
   })
+
+  it('preserves API error_code from failed upload responses', async () => {
+    const xhr = new FakeXHR()
+    vi.stubGlobal('XMLHttpRequest', function (this: unknown) {
+      return xhr
+    })
+    const client = createApiClient('')
+    const file = new File(['x'], 'a.rar')
+
+    const promise = uploadAttachment(client, 'c1', file)
+    xhr.status = 400
+    xhr.responseText = JSON.stringify({
+      status: 'error',
+      error_code: 'INVALID_MIME_TYPE',
+      message: 'File type is not allowed.',
+    })
+    xhr.onload?.()
+
+    await expect(promise).rejects.toMatchObject({
+      message: 'File type is not allowed.',
+      errorCode: 'INVALID_MIME_TYPE',
+    })
+    vi.unstubAllGlobals()
+  })
 })

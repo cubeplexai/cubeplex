@@ -5,6 +5,16 @@ import type { AttachmentDto, AttachmentListDto, AttachmentStatus } from '../type
 
 const base = (convId: string): string => `/api/v1/conversations/${convId}/attachments`
 
+export interface UploadAttachmentError extends Error {
+  errorCode?: string
+}
+
+function makeUploadError(message: string, errorCode?: string): UploadAttachmentError {
+  const err = new Error(message) as UploadAttachmentError
+  err.errorCode = errorCode
+  return err
+}
+
 export async function uploadAttachment(
   client: ApiClient,
   conversationId: string,
@@ -49,8 +59,14 @@ export async function uploadAttachment(
         }
       } else {
         try {
-          const body = JSON.parse(xhr.responseText)
-          reject(new Error(body.message || body.detail || `HTTP ${xhr.status}`))
+          const body = JSON.parse(xhr.responseText) as {
+            message?: string
+            detail?: string
+            error_code?: string
+          }
+          reject(
+            makeUploadError(body.message || body.detail || `HTTP ${xhr.status}`, body.error_code),
+          )
         } catch {
           reject(new Error(`HTTP ${xhr.status}`))
         }
