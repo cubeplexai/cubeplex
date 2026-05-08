@@ -90,6 +90,40 @@ async def test_publish_from_zip_creates_skill_version_and_install(tmp_path, db_s
 
 
 @pytest.mark.asyncio
+async def test_publish_from_zip_accepts_single_enclosing_directory(
+    tmp_path,
+    db_session,
+) -> None:
+    org_id = f"org-{secrets.token_hex(4)}"
+    org_slug = f"org-{secrets.token_hex(4)}"
+    skill_name = f"folder-skill-{secrets.token_hex(4)}"
+    await _seed_org_and_user(db_session, org_id, "user-folder")
+    zip_bytes = _make_zip(
+        {
+            "folder-skill/SKILL.md": (
+                f"---\nname: {skill_name}\ndescription: from folder\nversion: 0.1.0\n---\n# X\n"
+            ).encode(),
+            "folder-skill/scripts/run.sh": b"#!/bin/sh\n",
+        }
+    )
+
+    publisher = SkillPublishService(
+        session=db_session, cache=SkillCache(cache_root=tmp_path / "cache")
+    )
+    sv = await publisher.publish_from_zip(
+        org_id=org_id,
+        org_slug=org_slug,
+        actor_user_id="user-folder",
+        zip_bytes=zip_bytes,
+    )
+
+    canonical = f"{org_slug}:{skill_name}"
+    skill = await SkillRepository(db_session).find_by_name(canonical)
+    assert skill is not None
+    assert sv.version == "0.1.0"
+
+
+@pytest.mark.asyncio
 async def test_publish_version_collision_raises(tmp_path, db_session) -> None:
     from cubebox.skills.service import VersionCollisionError
 

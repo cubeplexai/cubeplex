@@ -406,4 +406,30 @@ def _extract_zip(zip_bytes: bytes) -> dict[str, bytes]:
                 raise FileTooLargeError(f"bundle exceeds total cap of {MAX_TOTAL_BYTES} bytes")
             with z.open(info) as fp:
                 out[info.filename] = fp.read()
-    return out
+    return _normalize_skill_zip_files(out)
+
+
+def _normalize_skill_zip_files(files: dict[str, bytes]) -> dict[str, bytes]:
+    """Strip one enclosing directory when the bundle was zipped as a folder."""
+    if "SKILL.md" in files:
+        return files
+
+    top_levels = {
+        PurePosixPath(path).parts[0]
+        for path in files
+        if len(PurePosixPath(path).parts) > 1
+    }
+    if len(top_levels) != 1:
+        return files
+
+    root = next(iter(top_levels))
+    root_prefix = f"{root}/"
+    skill_md_path = f"{root_prefix}SKILL.md"
+    if skill_md_path not in files:
+        return files
+
+    return {
+        path.removeprefix(root_prefix): data
+        for path, data in files.items()
+        if path.startswith(root_prefix)
+    }
