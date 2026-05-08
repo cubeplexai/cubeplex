@@ -572,6 +572,8 @@
     "artifactPanel": {
       "download": "下载",
       "close": "关闭",
+      "fullscreen": "全屏",
+      "exitFullscreen": "退出全屏",
       "unknownType": "未知类型",
       "justNow": "刚刚",
       "minutesAgo": "{n} 分钟前",

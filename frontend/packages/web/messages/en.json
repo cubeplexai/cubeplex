@@ -572,6 +572,8 @@
     "artifactPanel": {
       "download": "Download",
       "close": "Close",
+      "fullscreen": "Fullscreen",
+      "exitFullscreen": "Exit fullscreen",
       "unknownType": "Unknown type",
       "justNow": "just now",
       "minutesAgo": "{n}m ago",

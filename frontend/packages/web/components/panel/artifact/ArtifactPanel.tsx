@@ -1,10 +1,10 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import dynamic from 'next/dynamic'
 import { useArtifactStore, usePanelStore, createApiClient } from '@cubebox/core'
 import type { Artifact, ArtifactVersion } from '@cubebox/core'
-import { X, Download, ChevronDown } from 'lucide-react'
+import { X, Download, ChevronDown, Maximize2, Minimize2 } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
@@ -111,6 +111,8 @@ function ArtifactPanelHeader({
   selectedVersion,
   onSelectVersion,
   onClose,
+  onToggleFullscreen,
+  isFullscreen,
   workspaceId,
 }: {
   artifact: Artifact
@@ -118,6 +120,8 @@ function ArtifactPanelHeader({
   selectedVersion: number | null
   onSelectVersion: (version: number | null) => void
   onClose: () => void
+  onToggleFullscreen: () => void
+  isFullscreen: boolean
   workspaceId: string
 }) {
   const t = useTranslations('panel.artifactPanel')
@@ -136,6 +140,17 @@ function ArtifactPanelHeader({
         onSelectVersion={onSelectVersion}
       />
       <span className="flex items-center gap-1">
+        <button
+          onClick={onToggleFullscreen}
+          className="p-1 rounded hover:bg-muted/50 transition-colors"
+          title={isFullscreen ? t('exitFullscreen') : t('fullscreen')}
+        >
+          {isFullscreen ? (
+            <Minimize2 className="size-3.5 text-muted-foreground" />
+          ) : (
+            <Maximize2 className="size-3.5 text-muted-foreground" />
+          )}
+        </button>
         <a
           href={downloadUrl}
           className="p-1 rounded hover:bg-muted/50 transition-colors"
@@ -204,6 +219,8 @@ export function ArtifactPanel() {
   const artifact = conversationId && artifactId ? artifacts[conversationId]?.[artifactId] : null
 
   const { workspaceId } = useWorkspaceContext()
+  const containerRef = useRef<HTMLDivElement | null>(null)
+  const [isFullscreen, setIsFullscreen] = useState(false)
 
   useEffect(() => {
     if (!artifact || artifact.version <= 1 || !conversationId || !artifactId) return
@@ -212,19 +229,39 @@ export function ArtifactPanel() {
     loadVersions(client, conversationId, artifactId)
   }, [artifact, conversationId, artifactId, loadVersions, workspaceId])
 
+  useEffect(() => {
+    const handleChange = (): void => {
+      setIsFullscreen(document.fullscreenElement === containerRef.current)
+    }
+    document.addEventListener('fullscreenchange', handleChange)
+    return () => document.removeEventListener('fullscreenchange', handleChange)
+  }, [])
+
+  const toggleFullscreen = (): void => {
+    const el = containerRef.current
+    if (!el) return
+    if (document.fullscreenElement === el) {
+      void document.exitFullscreen()
+    } else {
+      void el.requestFullscreen()
+    }
+  }
+
   if (view.type !== 'artifact' || !artifact || !workspaceId) return null
 
   const artifactVersions = versions[artifact.id] ?? []
   const currentSelectedVersion = selectedVersion[artifact.id] ?? null
 
   return (
-    <div className="flex flex-col h-full bg-background">
+    <div ref={containerRef} className="flex flex-col h-full bg-background">
       <ArtifactPanelHeader
         artifact={artifact}
         versions={artifactVersions}
         selectedVersion={currentSelectedVersion}
         onSelectVersion={(v) => selectVersion(artifact.id, v)}
         onClose={close}
+        onToggleFullscreen={toggleFullscreen}
+        isFullscreen={isFullscreen}
         workspaceId={workspaceId}
       />
       <div className="flex-1 overflow-hidden">
