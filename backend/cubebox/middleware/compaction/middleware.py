@@ -11,7 +11,7 @@ from langchain_core.messages import AIMessage, AnyMessage, SystemMessage
 from langgraph.runtime import Runtime
 from loguru import logger
 
-from cubebox.agents.state import CompactionSummary
+from cubebox.agents.state import CompactionSummary, CubeboxState
 from cubebox.middleware.compaction.boundary import safe_boundary
 from cubebox.middleware.compaction.summarizer import summarize
 from cubebox.middleware.compaction.tokens import approx_tokens
@@ -42,13 +42,20 @@ def _compressed_view(state: Any) -> list[AnyMessage]:
     return msgs
 
 
-class CompactionMiddleware(AgentMiddleware[Any, Any, Any]):
+class CompactionMiddleware(AgentMiddleware[CubeboxState, Any, Any]):
     """Compress old turns into a persisted CompactionSummary; project compressed view per call.
 
     Two responsibilities split across two hooks:
       abefore_model — decide whether to compact further; if so, write new summary state.
       awrap_model_call — install the compressed view on request.messages just for this call.
+
+    Declares CubeboxState as its state_schema so LangGraph persists the new
+    `compaction` and `compaction_until_msg_index` keys through the checkpointer.
+    Without this, abefore_model returning those keys is treated as ephemeral and
+    silently dropped — no error, just no persistence.
     """
+
+    state_schema = CubeboxState
 
     def __init__(
         self,
