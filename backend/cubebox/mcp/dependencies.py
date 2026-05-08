@@ -163,6 +163,7 @@ def _state_secret_key() -> bytes:
 
 
 _HTTP_CLIENT_KEY = "_mcp_oauth_http_client"
+_OAUTH_METADATA_DISCOVERY_KEY = "_mcp_oauth_metadata_discovery"
 
 
 async def get_oauth_http_client(request: Request) -> httpx.AsyncClient:
@@ -186,9 +187,23 @@ async def get_oauth_state_store(
 
 
 async def get_oauth_metadata_discovery(
+    request: Request,
     http_client: httpx.AsyncClient = Depends(get_oauth_http_client),
 ) -> OAuthMetadataDiscovery:
-    return OAuthMetadataDiscovery(http_client)
+    """Return the app-lifetime ``OAuthMetadataDiscovery`` instance.
+
+    The discovery client carries an in-memory TTL cache for AS / PR
+    well-known documents. Constructing a new instance per request would
+    reset that cache on every call, defeating the cache entirely. We
+    stash a single instance on ``app.state`` (mirroring the
+    ``_HTTP_CLIENT_KEY`` pattern above) so the cache survives across
+    requests for the lifetime of the process.
+    """
+    cached = getattr(request.app.state, _OAUTH_METADATA_DISCOVERY_KEY, None)
+    if cached is None:
+        cached = OAuthMetadataDiscovery(http_client)
+        setattr(request.app.state, _OAUTH_METADATA_DISCOVERY_KEY, cached)
+    return cast(OAuthMetadataDiscovery, cached)
 
 
 async def get_oauth_dcr_client(
