@@ -13,6 +13,7 @@ from langgraph.types import Checkpointer
 from loguru import logger
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from cubebox.agents.state import CubeboxState
 from cubebox.config import config as _config
 from cubebox.middleware.artifacts import ArtifactMiddleware
 from cubebox.middleware.attachments import AttachmentHintMiddleware
@@ -256,6 +257,7 @@ def create_cubebox_agent(
         tools=tools,
         system_prompt=system_prompt,
         middleware=middleware,
+        state_schema=CubeboxState,
         checkpointer=checkpointer,
     )
 
