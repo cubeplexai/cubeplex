@@ -43,3 +43,15 @@ class MCPShareCredentialOnlyForWorkspaceScope(Exception):
 
 class MCPCredentialPathMismatch(Exception):
     """Credential route was used on a server with the wrong credential scope."""
+
+
+class MCPCatalogConnectorNotFound(Exception):
+    """Catalog connector id does not exist (or is deprecated/disabled)."""
+
+
+class MCPCatalogAuthMethodUnsupported(Exception):
+    """Requested auth_method is not in catalog.supported_auth_methods."""
+
+
+class MCPCatalogInstallExists(Exception):
+    """An install for (org, owner_workspace_id, catalog_connector_id) already exists."""
