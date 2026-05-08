@@ -4,7 +4,7 @@ from datetime import datetime
 from enum import StrEnum
 from typing import Any, ClassVar
 
-from sqlalchemy import Index
+from sqlalchemy import JSON, Index
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlmodel import Column, Field
 
@@ -73,7 +73,10 @@ class MemoryItem(CubeboxBase, table=True):
     updated_by_user_id: str | None = Field(default=None, max_length=20)
 
     last_used_at: datetime | None = Field(default=None)
-    item_metadata: dict[str, Any] = Field(default_factory=dict, sa_column=Column("metadata", JSONB))
+    item_metadata: dict[str, Any] = Field(
+        default_factory=dict,
+        sa_column=Column("metadata", JSON().with_variant(JSONB(), "postgresql")),
+    )
 
     def to_dict(self) -> dict[str, object]:
         return {
