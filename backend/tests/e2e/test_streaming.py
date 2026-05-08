@@ -68,14 +68,6 @@ async def test_sse_response_content_type(memory_client: httpx.AsyncClient) -> No
         headers={"Accept": "text/event-stream", "Cache-Control": "no-cache"},
     ) as response:
         assert "text/event-stream" in response.headers["content-type"]
-        # Drain the body so the stream closes cleanly. Exiting the context
-        # manager mid-stream leaves the connection in a half-streaming state,
-        # which races against psycopg_pool's close-timeout in lifespan
-        # teardown and surfaces as `CancelledError` from a pool worker (see
-        # the M9 PR follow-up — pool sends StopWorker sentinels but the
-        # close timeout fires before all workers receive theirs).
-        async for _ in response.aiter_lines():
-            pass
 
 
 @pytest.mark.asyncio
