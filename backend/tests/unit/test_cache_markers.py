@@ -1,12 +1,12 @@
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
-from cubebox.llm.cache_markers import apply_cache_markers, detect_provider
+from cubebox.llm.cache_markers import apply_cache_markers, provider_kind_from_api
 
 
-def test_detect_provider() -> None:
-    assert detect_provider("anthropic/claude-sonnet-4-6") == "anthropic"
-    assert detect_provider("openai/gpt-4o") == "openai"
-    assert detect_provider("vllm/some-local") == "unknown"
+def test_provider_kind_from_api() -> None:
+    assert provider_kind_from_api("anthropic") == "anthropic"
+    assert provider_kind_from_api("openai-completions") == "openai"
+    assert provider_kind_from_api("custom-thing") == "unknown"
 
 
 def test_anthropic_marks_system_and_last_assistant() -> None:
