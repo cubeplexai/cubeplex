@@ -91,13 +91,15 @@ def convert_messages_chunk(
     else:
         msg_type = getattr(msg, "type", "")
 
+    # Extract usage_metadata once; used by both text_delta and UsageEvent below.
+    usage_metadata: dict[str, Any] = (
+        getattr(msg, "usage_metadata", {})
+        if not isinstance(msg, dict)
+        else msg.get("usage_metadata", {})
+    ) or {}
+
     # Text content (only AI messages — skip system/tool/human)
     if content and msg_type in ("ai", "AIMessageChunk"):
-        usage_metadata = (
-            getattr(msg, "usage_metadata", {})
-            if not isinstance(msg, dict)
-            else msg.get("usage_metadata", {})
-        )
         events.append(
             {
                 "type": "text_delta",
@@ -105,9 +107,29 @@ def convert_messages_chunk(
                 "data": {
                     "content": content,
                     "usage": {
-                        "input_tokens": (usage_metadata or {}).get("input_tokens", 0),
-                        "output_tokens": (usage_metadata or {}).get("output_tokens", 0),
+                        "input_tokens": usage_metadata.get("input_tokens", 0),
+                        "output_tokens": usage_metadata.get("output_tokens", 0),
                     },
+                },
+                "agent_id": agent_id,
+            }
+        )
+
+    # UsageEvent — emit once per turn when usage_metadata indicates a
+    # complete tally (non-zero input_tokens). Intermediate streamed chunks
+    # have all-zero usage_metadata and must not produce a UsageEvent.
+    if usage_metadata.get("input_tokens", 0) > 0:
+        details_in = usage_metadata.get("input_token_details") or {}
+        details_out = usage_metadata.get("output_token_details") or {}
+        events.append(
+            {
+                "type": "usage",
+                "timestamp": timestamp,
+                "data": {
+                    "input_tokens": usage_metadata.get("input_tokens", 0),
+                    "output_tokens": usage_metadata.get("output_tokens", 0),
+                    "cache_read_tokens": details_in.get("cache_read", 0),
+                    "cache_write_tokens": details_out.get("cache_write", 0),
                 },
                 "agent_id": agent_id,
             }
