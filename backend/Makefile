@@ -1,4 +1,4 @@
-.PHONY: help install dev-install format lint lint-fix type-check test test-cov test-e2e test-contracts migrate start cleanup-sandboxes check check-ci clean pre-commit-install pre-commit-install-all pre-commit-run
+.PHONY: help install dev-install format lint lint-fix type-check test test-real-llm test-cov test-e2e test-contracts migrate start cleanup-sandboxes check check-ci clean pre-commit-install pre-commit-install-all pre-commit-run
 
 help:
 	@echo "Available commands:"
@@ -7,7 +7,8 @@ help:
 	@echo "  make format            - Format code with ruff"
 	@echo "  make lint              - Run ruff linter"
 	@echo "  make type-check        - Run mypy type checker"
-	@echo "  make test              - Run backend tests"
+	@echo "  make test              - Run backend tests (excludes real_llm)"
+	@echo "  make test-real-llm     - Run real-LLM injection tests"
 	@echo "  make test-cov          - Run backend tests with coverage report"
 	@echo "  make test-e2e          - Run backend E2E tests"
 	@echo "  make test-contracts    - Run plugin contract tests (EE compat)"
@@ -51,8 +52,13 @@ type-check:
 
 test:
 	@echo "Running tests..."
-	uv run pytest -s -v
+	uv run pytest -s -v -m "not real_llm"
 	@echo "✓ Tests passed"
+
+test-real-llm:
+	@echo "Running real-LLM tests..."
+	uv run pytest -s -v -m real_llm tests/e2e/memory/
+	@echo "✓ Real-LLM tests passed"
 
 test-cov:
 	@echo "Running tests with coverage..."
