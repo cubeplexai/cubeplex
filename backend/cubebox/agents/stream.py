@@ -119,8 +119,13 @@ def convert_messages_chunk(
     # complete tally (non-zero input_tokens). Intermediate streamed chunks
     # have all-zero usage_metadata and must not produce a UsageEvent.
     if usage_metadata.get("input_tokens", 0) > 0:
+        # Both cache_read and cache_creation live under input_token_details
+        # in LangChain's normalized usage_metadata (Anthropic's
+        # cache_read_input_tokens and cache_creation_input_tokens both
+        # belong to the input side). The internal field name "cache_write"
+        # mirrors cost.py / billing schema; the source key is
+        # "cache_creation".
         details_in = usage_metadata.get("input_token_details") or {}
-        details_out = usage_metadata.get("output_token_details") or {}
         events.append(
             {
                 "type": "usage",
@@ -129,7 +134,7 @@ def convert_messages_chunk(
                     "input_tokens": usage_metadata.get("input_tokens", 0),
                     "output_tokens": usage_metadata.get("output_tokens", 0),
                     "cache_read_tokens": details_in.get("cache_read", 0),
-                    "cache_write_tokens": details_out.get("cache_write", 0),
+                    "cache_write_tokens": details_in.get("cache_creation", 0),
                 },
                 "agent_id": agent_id,
             }

@@ -5,12 +5,20 @@ memory prefix across N turns must drive cache reuse rate >= 50% by turn 2
 and >= 85% by turn N. The byte-stability invariants are covered by
 tests/unit/test_memory_cache_stability.py and run on every commit.
 
-The endpoint must report cache fields in usage. We probe with a single
-warmup turn; if the endpoint does not report any cache reads even when
-the prefix is repeated, we skip rather than relax the bar.
+Endpoint capability is declared explicitly via
+``CUBEBOX_E2E_LLM_CACHE_CAPABLE=true``. When set, a turn-2 cache_read of 0
+is treated as a regression and FAILS. When unset (the default), it is
+treated as endpoint not honoring cache_control and SKIPS — appropriate
+for proxies that accept the markers but do not pass them through (e.g.
+DeepSeek's Anthropic-compat surface).
+
+This makes the test discriminate "cache capability missing" from "cache
+broken" rather than collapsing both to skip.
 """
 
 from __future__ import annotations
+
+import os
 
 import pytest
 
@@ -62,11 +70,26 @@ async def test_cache_hit_rate_meets_bar(
         second = await send_message_and_collect_usage(client, ws_id, conv_id, PRIMER_USER_TEXT)
     except AgentRunError as exc:
         pytest.skip(f"Turn 2 agent run failed: {exc}")
+    cache_capable = os.environ.get("CUBEBOX_E2E_LLM_CACHE_CAPABLE", "false").lower() == "true"
     if second["cache_read_tokens"] == 0:
-        pytest.skip(
-            f"Endpoint does not report or honor prompt cache: warmup "
+        message = (
+            f"Endpoint reported zero cache_read on turn 2: warmup "
             f"input={warmup['input_tokens']}, turn2 input={second['input_tokens']}, "
-            f"turn2 cache_read=0. Probe negative — strict bar cannot be evaluated."
+            f"turn2 cache_read=0."
+        )
+        if cache_capable:
+            pytest.fail(
+                f"{message} Endpoint declared cache-capable via "
+                f"CUBEBOX_E2E_LLM_CACHE_CAPABLE=true; this is a real "
+                f"regression. Common causes: cache_control markers not "
+                f"applied, dynamic content invalidating the stable prefix. "
+                f"See backend/CLAUDE.md 'Prompt Cache Discipline'."
+            )
+        pytest.skip(
+            f"{message} CUBEBOX_E2E_LLM_CACHE_CAPABLE not set; treating as "
+            f"endpoint not honoring cache_control. Set the env to 'true' on "
+            f"a known-cache-capable endpoint (e.g. Anthropic official) to "
+            f"convert this branch into a hard failure."
         )
 
     # Strict bar — turn 2 must reuse at least half the input.
