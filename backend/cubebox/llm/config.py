@@ -3,9 +3,12 @@
 Defines configuration for different LLM providers matching config.yaml structure.
 """
 
+import logging
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
+
+_log = logging.getLogger(__name__)
 
 
 class ModelCost(BaseModel):
@@ -94,6 +97,35 @@ class LLMConfig(BaseModel):
     providers: dict[str, ProviderConfig] = Field(
         default_factory=dict, description="LLM providers configuration"
     )
+
+    @model_validator(mode="before")
+    @classmethod
+    def _drop_incomplete_providers(cls, values: Any) -> Any:
+        """Remove provider entries that lack a base_url.
+
+        Dynaconf surfaces env-var stubs like CUBEBOX_LLM__PROVIDERS__FOO__API_KEY
+        as partial provider dicts (only api_key, no base_url).  Those entries would
+        fail ProviderConfig validation, so we drop them here rather than raising.
+        """
+        if not isinstance(values, dict):
+            return values
+        raw_providers = values.get("providers") or {}
+        if not isinstance(raw_providers, dict):
+            return values
+        filtered = {}
+        for name, cfg in raw_providers.items():
+            cfg_dict = dict(cfg) if not isinstance(cfg, dict) else cfg
+            if cfg_dict.get("base_url"):
+                filtered[name] = cfg
+            else:
+                _log.debug(
+                    "Skipping incomplete provider '%s' (no base_url) — "
+                    "likely a partial env-var stub",
+                    name,
+                )
+        values = dict(values)
+        values["providers"] = filtered
+        return values
 
     class Config:
         populate_by_name = True
