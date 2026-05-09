@@ -66,8 +66,8 @@ test-cov:
 	@echo "✓ Coverage report generated in htmlcov/"
 
 test-e2e:
-	@echo "Running backend E2E tests..."
-	uv run pytest tests/e2e/ -v
+	@echo "Running backend E2E tests (real_llm tests deselected)..."
+	uv run pytest tests/e2e/ -v -m "not real_llm"
 	@echo "✓ Backend E2E tests passed"
 
 test-contracts:
