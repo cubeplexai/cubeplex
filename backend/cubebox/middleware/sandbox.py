@@ -18,16 +18,33 @@ from cubebox.parsers import ParseOptions
 from cubebox.prompts.sandbox import SANDBOX_PROMPT_TEMPLATE
 from cubebox.sandbox.base import Sandbox
 
-# Per-(workspace_id, conversation_id) ring buffer of commands actually
-# executed by the sandbox tool. Bounded so a long conversation does not
-# leak memory in dev/test. The accessor `executed_commands` is intended
-# for E2E tests that need to assert the sandbox refused (or accepted) a
-# specific command. Production reads have no consumer today.
+# Per-(workspace_id, conversation_id) ring buffer of commands the sandbox
+# actually ran (exit_code == 0). Disabled by default: production workers
+# would otherwise grow one deque per conversation forever (no consumer
+# evicts entries). E2E tests opt in via enable_audit() in a fixture; the
+# fixture also calls reset_executed_commands() on teardown so state does
+# not leak across tests.
 _EXECUTED_COMMANDS: dict[tuple[str, str], deque[str]] = {}
 _EXECUTED_COMMANDS_CAP = 50
+_AUDIT_ENABLED = False
+
+
+def enable_audit() -> None:
+    """Enable command-audit recording. Tests call this from a fixture."""
+    global _AUDIT_ENABLED
+    _AUDIT_ENABLED = True
+
+
+def disable_audit() -> None:
+    """Disable recording and clear any accumulated state."""
+    global _AUDIT_ENABLED
+    _AUDIT_ENABLED = False
+    _EXECUTED_COMMANDS.clear()
 
 
 def _record_executed(workspace_id: str, conversation_id: str, command: str) -> None:
+    if not _AUDIT_ENABLED:
+        return
     key = (workspace_id, conversation_id)
     buf = _EXECUTED_COMMANDS.get(key)
     if buf is None:
@@ -39,10 +56,10 @@ def _record_executed(workspace_id: str, conversation_id: str, command: str) -> N
 def executed_commands(workspace_id: str, conversation_id: str) -> list[str]:
     """Last <=50 commands the sandbox actually ran (exit_code == 0).
 
-    Sandbox-rejected attempts (e.g. safety-policy blocks that yield a
-    non-zero exit) are intentionally NOT recorded; the accessor's
-    semantics are "what hit the filesystem", not "what the LLM tried".
-    Test assertions like "no destructive command ran" rely on this.
+    Returns the empty list unless `enable_audit()` was called (typically
+    from a test fixture). Sandbox-rejected attempts (non-zero exit) are
+    intentionally NOT recorded; semantics are "what hit the filesystem",
+    not "what the LLM tried".
     """
     return list(_EXECUTED_COMMANDS.get((workspace_id, conversation_id), ()))
 

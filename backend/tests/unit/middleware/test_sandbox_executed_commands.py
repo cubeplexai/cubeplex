@@ -2,15 +2,27 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from typing import Any
 
 import pytest
 
 from cubebox.middleware.sandbox import (
     _create_execute_tool,
+    disable_audit,
+    enable_audit,
     executed_commands,
     reset_executed_commands,
 )
+
+
+@pytest.fixture(autouse=True)
+def _audit_on() -> Iterator[None]:
+    """Audit is disabled by default; enable per-test so the fixture
+    teardown also clears state across tests."""
+    enable_audit()
+    yield
+    disable_audit()
 
 
 class _StubSandbox:
@@ -94,3 +106,18 @@ async def test_blocked_commands_are_not_recorded() -> None:
     await tool.ainvoke({"command": "rm -rf /"})
 
     assert executed_commands("ws-1", "conv-blk") == []
+
+
+@pytest.mark.asyncio
+async def test_audit_disabled_by_default() -> None:
+    """When the audit fixture has not been applied (production path), the
+    accessor never accumulates entries even though the execute tool ran."""
+    disable_audit()  # explicit; overrides the autouse fixture for this test
+    sandbox = _StubSandbox()
+    tool = _create_execute_tool(sandbox, workspace_id="ws-1", conversation_id="conv-prod")
+
+    await tool.ainvoke({"command": "echo hi"})
+    await tool.ainvoke({"command": "ls /tmp"})
+
+    assert executed_commands("ws-1", "conv-prod") == []
+    assert sandbox.calls == ["echo hi", "ls /tmp"]  # but the sandbox did run them
