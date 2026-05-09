@@ -89,7 +89,15 @@ async def second_member_client(
 
     Yields ``(client, workspace_id)`` where workspace_id is the primary
     workspace so both clients target the same scope.
+
+    Implementation note: _make_memory_test_app() patches the module-level
+    _cubebox_db.async_session_maker. Creating a second app after member_client
+    is already running would overwrite that patch and break member_client's
+    JWT auth. We save and restore the original patched value so both apps
+    can coexist.
     """
+    import cubebox.db as _cubebox_db
+
     _primary_client, workspace_id = member_client
 
     # Import bootstrap helpers from the top-level e2e conftest.
@@ -99,16 +107,22 @@ async def second_member_client(
         _make_isolated_user,
     )
 
+    # Save the session maker that member_client's app installed.
+    _saved_session_maker = _cubebox_db.async_session_maker
+
     # Create a brand-new isolated user (own org + personal workspace).
+    # This calls _make_memory_test_app() which patches _cubebox_db.async_session_maker.
     app, email, password, _own_workspace_id = await _make_isolated_user(Role.MEMBER)
     app.state.deployment_mode = "multi_tenant"
+
+    # Restore member_client's session maker so its JWT auth continues to work.
+    _cubebox_db.async_session_maker = _saved_session_maker
 
     # Grant the second user membership in the PRIMARY workspace via DB.
     engine = create_async_engine(_build_database_url(), poolclass=NullPool)
     session_maker = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
     try:
         async with session_maker() as session:
-            # Look up the user by email to get their id.
             from sqlalchemy import select
 
             from cubebox.models import User as _User
@@ -121,9 +135,14 @@ async def second_member_client(
     finally:
         await engine.dispose()
 
-    # Boot the app and log in as the second user.
+    # Boot the second app and log in. Its own dependency_overrides handle
+    # session routing for its own requests. The module-level session maker
+    # is restored to member_client's value above, so member_client's auth
+    # is unaffected.
     async with _lifespan_context(app):
         transport = httpx.ASGITransport(app=app)
         async with httpx.AsyncClient(transport=transport, base_url="http://test") as second_client:
             await _login_and_attach(second_client, email, password)
+            # Restore session maker again in case _login_and_attach or lifespan patched it.
+            _cubebox_db.async_session_maker = _saved_session_maker
             yield second_client, workspace_id
