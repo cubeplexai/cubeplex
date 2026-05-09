@@ -186,9 +186,14 @@ class LLMFactory:
         OrgProviderOverride, and config.yaml must NOT reintroduce it.
         """
         config_providers = dict(self.llm_config.providers)
+        # Normalise to lowercase for the exclusion check: Dynaconf uppercases env-var
+        # keys (CUBEBOX_LLM__PROVIDERS__DEEPSEEK__API_KEY → DEEPSEEK) while DB stores
+        # the original lowercase name.  A case-sensitive check would silently include
+        # the partial env-only entry and fail ProviderConfig validation.
+        db_names_lower = {n.lower() for n in db_names}
         merged: dict[str, ProviderConfig] = {}
         for name, cfg in config_providers.items():
-            if name not in db_names:  # Skip if provider exists in DB (even disabled)
+            if name.lower() not in db_names_lower:  # Skip if provider exists in DB
                 merged[name] = cfg  # Only use config when provider not in DB
         for name, db_cfg in db_configs.items():
             merged[name] = ProviderConfig(**db_cfg)  # DB always overrides
