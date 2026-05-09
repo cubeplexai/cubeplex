@@ -4,14 +4,15 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 import pytest
+from click.testing import CliRunner
 from cryptography.fernet import Fernet
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 from sqlmodel import SQLModel
 
-import cubebox.cli.__main__ as cli_module
-from cubebox.cli.__main__ import main as cli_main
+from cubebox.cli import main as cli_main
+from cubebox.cli.seed_mcp_catalog import _run as _run_seed_mcp_catalog
 from cubebox.credentials.encryption import FernetBackend
 from cubebox.mcp.catalog_seed import CATALOG
 from cubebox.models import Credential, MCPCatalogConnector
@@ -36,11 +37,11 @@ async def test_seed_cli_dry_run_exits_zero(
     capsys: pytest.CaptureFixture[str],
     in_memory_session_factory: tuple[async_sessionmaker[AsyncSession], FernetBackend],
 ) -> None:
-    """``main(['seed-mcp-catalog', '--dry-run'])`` returns 0 + prints a summary.
+    """``cubebox seed-mcp-catalog --dry-run`` returns 0 + prints a summary.
 
-    The CLI does its imports lazily inside ``_run_seed_mcp_catalog``, so we
-    pre-import the module once via ``cli_module`` and patch the *names that
-    will be resolved* at execution time.
+    The CLI does its imports lazily inside ``seed_mcp_catalog._run``, so
+    we patch the source modules whose names get resolved at execution
+    time.
     """
     maker, backend = in_memory_session_factory
 
@@ -75,7 +76,7 @@ async def test_seed_cli_dry_run_exits_zero(
         yield
 
     async def _shim_runner() -> int:
-        return await cli_module._run_seed_mcp_catalog(dry_run=True, quiet=False)
+        return await _run_seed_mcp_catalog(dry_run=True, quiet=False)
 
     rc = await _shim_runner()
     captured = capsys.readouterr()
@@ -146,7 +147,7 @@ async def test_seed_cli_dry_run_does_not_persist(
     assert len(pre_catalog) == 0
     assert len(pre_secrets) == 0
 
-    rc = await cli_module._run_seed_mcp_catalog(dry_run=True, quiet=False)
+    rc = await _run_seed_mcp_catalog(dry_run=True, quiet=False)
     captured = capsys.readouterr()
     assert rc == 0, captured.out + captured.err
     assert "upserted=" in captured.out
@@ -177,7 +178,7 @@ async def test_seed_cli_dry_run_does_not_persist(
 
 
 def test_cli_main_unknown_command_returns_nonzero() -> None:
-    """``argparse`` rejects unknown subcommands (exit code != 0)."""
-    with pytest.raises(SystemExit) as exc_info:
-        cli_main(["does-not-exist"])
-    assert exc_info.value.code != 0
+    """``click`` rejects unknown subcommands (exit code != 0)."""
+    runner = CliRunner()
+    result = runner.invoke(cli_main, ["does-not-exist"])
+    assert result.exit_code != 0
