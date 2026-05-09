@@ -2,6 +2,7 @@
 
 import asyncio
 from collections.abc import Callable
+from contextlib import AbstractAsyncContextManager
 from pathlib import Path
 from typing import Any
 
@@ -51,8 +52,8 @@ def create_cubebox_agent(
     checkpointer: Checkpointer | None = None,
     citation_configs: dict[str, CitationConfig] | None = None,
     event_queue: asyncio.Queue[Any] | None = None,
-    memory_repo_factory: Callable[[], MemoryRepository] | None = None,
-    memory_service_factory: Callable[[], MemoryService] | None = None,
+    memory_repo_factory: Callable[[], AbstractAsyncContextManager[MemoryRepository]] | None = None,
+    memory_service_factory: Callable[[], AbstractAsyncContextManager[MemoryService]] | None = None,
 ) -> CompiledStateGraph[Any, Any, Any, Any]:
     """Build the cubebox agent with the configured middleware stack.
 

@@ -633,26 +633,38 @@ class RunManager:
             except Exception as exc:
                 logger.warning("Failed to load AgentConfig, using base prompt: {}", exc)
 
+            from collections.abc import AsyncIterator as _AsyncIterator
+            from contextlib import asynccontextmanager as _asynccontextmanager
+
             from cubebox.db.engine import async_session_maker as _memory_session_maker
             from cubebox.repositories.memory import MemoryRepository as _MemoryRepository
             from cubebox.services.memory import MemoryService as _MemoryService
 
-            def _memory_repo_factory() -> _MemoryRepository:
-                # Each call creates a fresh session; sessions close when GC'd.
-                return _MemoryRepository(
-                    _memory_session_maker(),
-                    user_id=ctx.user_id,
-                    org_id=ctx.org_id,
-                    workspace_id=ctx.workspace_id,
-                )
+            @_asynccontextmanager
+            async def _memory_repo_factory() -> _AsyncIterator[_MemoryRepository]:
+                async with _memory_session_maker() as _session:
+                    yield _MemoryRepository(
+                        _session,
+                        user_id=ctx.user_id,
+                        org_id=ctx.org_id,
+                        workspace_id=ctx.workspace_id,
+                    )
 
-            def _memory_service_factory() -> _MemoryService:
-                return _MemoryService(
-                    _memory_repo_factory(),
-                    user_id=ctx.user_id,
-                    org_id=ctx.org_id,
-                    workspace_id=ctx.workspace_id,
-                )
+            @_asynccontextmanager
+            async def _memory_service_factory() -> _AsyncIterator[_MemoryService]:
+                async with _memory_session_maker() as _session:
+                    _repo = _MemoryRepository(
+                        _session,
+                        user_id=ctx.user_id,
+                        org_id=ctx.org_id,
+                        workspace_id=ctx.workspace_id,
+                    )
+                    yield _MemoryService(
+                        _repo,
+                        user_id=ctx.user_id,
+                        org_id=ctx.org_id,
+                        workspace_id=ctx.workspace_id,
+                    )
 
             agent = create_cubebox_agent(
                 llm=llm,
