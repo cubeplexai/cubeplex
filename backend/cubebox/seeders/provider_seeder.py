@@ -82,6 +82,18 @@ async def seed_system_providers_from_config(
 
     for name, cfg_dict_raw in config_providers.items():
         cfg_dict: dict[str, Any] = dict(cfg_dict_raw)
+
+        # Skip providers with no models declared. Why this guard exists:
+        # in the `test` env, dynaconf may surface a CUBEBOX_LLM__PROVIDERS__<NAME>__*
+        # env var (from operator's local .env) for a provider that the test
+        # yaml does not declare. Dynaconf creates a phantom entry with only
+        # the env-var fields (e.g. just api_key, no models). A Provider row
+        # with zero models is useless downstream and breaks the
+        # seed-idempotency assertion (every Provider must have >=1 Model).
+        if not list(cfg_dict.get("models", [])):
+            logger.debug("Provider '{}' has no models declared -- skipping seed", name)
+            continue
+
         existing = await session.execute(
             select(Provider).where(
                 Provider.org_id.is_(None),  # type: ignore[union-attr]
