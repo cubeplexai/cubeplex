@@ -474,8 +474,30 @@ class LLMFactory:
             return _wrap_with_cache_markers(llm, provider_kind=provider_kind)
 
         if provider_config.api == "anthropic":
-            # TODO: Implement Anthropic support
-            raise NotImplementedError("Anthropic API not yet implemented")
+            from langchain_anthropic import ChatAnthropic
+
+            anthropic_kwargs: dict[str, Any] = {
+                "model": model_config.id,
+                "api_key": provider_config.api_key,
+                "streaming": True,
+                "stream_usage": True,
+                "temperature": kwargs.get("temperature", 0.0),
+                "max_tokens": kwargs.get("max_tokens", model_config.max_tokens or 4096),
+            }
+            if provider_config.base_url:
+                anthropic_kwargs["base_url"] = provider_config.base_url
+            if extra_headers:
+                anthropic_kwargs["default_headers"] = extra_headers
+
+            anthropic_llm = ChatAnthropic(**anthropic_kwargs)
+
+            # Attach cubebox metadata for CostMiddleware to read.
+            anthropic_llm._cubebox_provider = provider_name  # type: ignore[attr-defined]
+            anthropic_llm._cubebox_model_id = model_config.id  # type: ignore[attr-defined]
+            anthropic_llm._cubebox_model_cost = model_config.cost  # type: ignore[attr-defined]
+
+            provider_kind = provider_kind_from_api(provider_config.api)
+            return _wrap_with_cache_markers(anthropic_llm, provider_kind=provider_kind)
 
         raise ValueError(f"Unsupported API type: {provider_config.api}")
 
