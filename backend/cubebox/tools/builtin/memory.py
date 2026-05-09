@@ -1,6 +1,7 @@
 """Built-in memory tools — save, search, update."""
 
 from collections.abc import Callable
+from contextlib import AbstractAsyncContextManager
 from typing import Any
 
 from langchain_core.tools import StructuredTool
@@ -41,67 +42,71 @@ class MemoryUpdateArgs(BaseModel):
 
 def create_memory_tools(
     *,
-    service_factory: Callable[[], MemoryService],
+    service_factory: Callable[[], AbstractAsyncContextManager[MemoryService]],
     conversation_id: str | None = None,
     run_id: str | None = None,
 ) -> list[StructuredTool]:
-    """Build the three memory tools bound to a request-scoped service factory."""
+    """Build the three memory tools bound to a request-scoped service factory.
+
+    `service_factory()` yields an async context manager so the AsyncSession
+    backing the service closes after each tool invocation.
+    """
 
     async def memory_save(args: MemorySaveArgs) -> dict[str, Any]:
-        svc = service_factory()
-        try:
-            item = await svc.create(
-                CreateMemoryInput(
-                    scope=args.scope,
-                    type=args.type,
-                    content=args.content,
-                    confidence=args.confidence,
-                    source_conversation_id=conversation_id,
-                    source_run_id=run_id,
+        async with service_factory() as svc:
+            try:
+                item = await svc.create(
+                    CreateMemoryInput(
+                        scope=args.scope,
+                        type=args.type,
+                        content=args.content,
+                        confidence=args.confidence,
+                        source_conversation_id=conversation_id,
+                        source_run_id=run_id,
+                    )
                 )
-            )
-        except MemoryPermissionError as exc:
-            return {"status": "error", "error": str(exc)}
-        except MemoryScreenError as exc:
-            return {"status": "rejected", "error": str(exc)}
-        return {"status": "saved", "memory_id": item.id}
+            except MemoryPermissionError as exc:
+                return {"status": "error", "error": str(exc)}
+            except MemoryScreenError as exc:
+                return {"status": "rejected", "error": str(exc)}
+            return {"status": "saved", "memory_id": item.id}
 
     async def memory_search(args: MemorySearchArgs) -> dict[str, Any]:
-        svc = service_factory()
-        items = await svc.repo.list(
-            scope=args.scope,
-            type_=args.type,
-            q=args.query,
-            limit=args.limit,
-        )
-        return {
-            "items": [
-                {
-                    "id": i.id,
-                    "scope": i.scope.value,
-                    "type": i.type.value,
-                    "content": i.content,
-                    "confidence": i.confidence,
-                }
-                for i in items
-            ]
-        }
+        async with service_factory() as svc:
+            items = await svc.repo.list(
+                scope=args.scope,
+                type_=args.type,
+                q=args.query,
+                limit=args.limit,
+            )
+            return {
+                "items": [
+                    {
+                        "id": i.id,
+                        "scope": i.scope.value,
+                        "type": i.type.value,
+                        "content": i.content,
+                        "confidence": i.confidence,
+                    }
+                    for i in items
+                ]
+            }
 
     async def memory_update(args: MemoryUpdateArgs) -> dict[str, Any]:
-        svc = service_factory()
-        try:
-            item = await svc.update(
-                args.memory_id,
-                content=args.content,
-                type_=args.type,
-                confidence=args.confidence,
-                status=args.status,
-            )
-        except LookupError as exc:
-            return {"status": "error", "error": str(exc)}
-        except MemoryScreenError as exc:
-            return {"status": "rejected", "error": str(exc)}
-        return {"status": "updated", "memory_id": item.id}
+        async with service_factory() as svc:
+            try:
+                item = await svc.update(
+                    args.memory_id,
+                    content=args.content,
+                    type_=args.type,
+                    confidence=args.confidence,
+                    status=args.status,
+                )
+            except LookupError as exc:
+                return {"status": "error", "error": str(exc)}
+            except MemoryScreenError as exc:
+                return {"status": "rejected", "error": str(exc)}
+            return {"status": "updated", "memory_id": item.id}
 
     return [
         StructuredTool.from_function(

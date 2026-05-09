@@ -18,7 +18,7 @@ test('Memory Center: shows page with all four tabs', async ({ page }) => {
   const wsId = await registerAndLand(page)
   await page.goto(`/w/${wsId}/memory`)
 
-  await expect(page.getByRole('heading', { name: 'Memory Center' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Memory', exact: true })).toBeVisible()
   await expect(page.getByRole('tab', { name: 'Personal' })).toBeVisible()
   await expect(page.getByRole('tab', { name: 'Workspace' })).toBeVisible()
   await expect(page.getByRole('tab', { name: 'Organization' })).toBeVisible()

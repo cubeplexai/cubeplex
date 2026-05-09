@@ -25,6 +25,7 @@ State-flow design notes:
 """
 
 from collections.abc import Awaitable, Callable, Sequence
+from contextlib import AbstractAsyncContextManager
 from datetime import UTC, datetime
 from typing import Any
 
@@ -66,10 +67,13 @@ class MemoryMiddleware(AgentMiddleware[CubeboxState, Any]):
     def __init__(
         self,
         *,
-        repo_factory: Callable[[], MemoryRepository],
+        repo_factory: Callable[[], AbstractAsyncContextManager[MemoryRepository]],
         relevance_token_budget: int = 4000,
     ) -> None:
-        # repo_factory because each request needs a fresh DB session
+        # repo_factory yields a request-scoped repo via async context manager
+        # so the underlying AsyncSession is always closed after each call —
+        # leaving sessions to GC produces SAWarnings and can exhaust the
+        # pool under sustained chat traffic.
         self._repo_factory = repo_factory
         self._budget = relevance_token_budget
 
@@ -92,8 +96,8 @@ class MemoryMiddleware(AgentMiddleware[CubeboxState, Any]):
         if mid in snapshots:
             return None  # replay/resume — keep existing snapshot
 
-        repo = self._repo_factory()
-        snap = await self._capture_current_snapshot(repo, msg)
+        async with self._repo_factory() as repo:
+            snap = await self._capture_current_snapshot(repo, msg)
         if snap is None:
             return None
         return {"memory_snapshots": {mid: snap}}
@@ -103,10 +107,9 @@ class MemoryMiddleware(AgentMiddleware[CubeboxState, Any]):
         request: ModelRequest,
         handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
     ) -> ModelResponse | AIMessage:
-        repo = self._repo_factory()
+        async with self._repo_factory() as repo:
+            pinned_text = await self._render_pinned(repo)
 
-        # 1. Pinned tier into system prompt
-        pinned_text = await self._render_pinned(repo)
         new_system: SystemMessage | None
         if pinned_text:
             new_system = append_to_system_message(
@@ -115,7 +118,7 @@ class MemoryMiddleware(AgentMiddleware[CubeboxState, Any]):
         else:
             new_system = request.system_message
 
-        # 2. Render messages with snapshots from state (set by abefore_model)
+        # Render messages with snapshots from state (set by abefore_model)
         raw_state = request.state.get("memory_snapshots", {}) if request.state else {}
         snapshots: dict[str, dict[str, Any]] = raw_state if isinstance(raw_state, dict) else {}
         new_messages = self._render_messages_with_snapshots(list(request.messages), snapshots)
@@ -155,7 +158,20 @@ class MemoryMiddleware(AgentMiddleware[CubeboxState, Any]):
                 continue
             current = idx == current_idx
             rendered = _render_snapshot_text(snap, current=current)
-            out.append(HumanMessage(content=f"{rendered}\n\n{_msg_text(msg)}", id=msg.id))
+            # Preserve additional_kwargs/response_metadata/name — downstream
+            # middleware (e.g. AttachmentHintMiddleware) reads
+            # additional_kwargs.attachments_meta to render file paths into the
+            # LLM prompt. Dropping these here strips attachments whenever a
+            # memory snapshot is injected.
+            out.append(
+                HumanMessage(
+                    content=f"{rendered}\n\n{_msg_text(msg)}",
+                    id=msg.id,
+                    additional_kwargs=msg.additional_kwargs,
+                    response_metadata=msg.response_metadata,
+                    name=msg.name,
+                )
+            )
         return out
 
     @staticmethod
@@ -177,8 +193,13 @@ class MemoryMiddleware(AgentMiddleware[CubeboxState, Any]):
     async def _capture_current_snapshot(
         self, repo: MemoryRepository, user_msg: HumanMessage
     ) -> dict[str, Any] | None:
-        query = _msg_text(user_msg)
-        items = await repo.list(status=MemoryStatus.ACTIVE, q=query, limit=200)
+        # v1 has no embeddings; substring-matching the entire user prompt
+        # against memory.content almost never hits ("How do I deploy?" never
+        # appears verbatim in "The deploy script lives at scripts/deploy.sh").
+        # List all active relevance items and rely on the deterministic ranking
+        # + token budget below to pick what fits. Embedding-based retrieval
+        # lands in a follow-up.
+        items = await repo.list(status=MemoryStatus.ACTIVE, limit=200)
         relevant = [m for m in items if m.type in RELEVANCE_TYPES]
         if not relevant:
             return None
