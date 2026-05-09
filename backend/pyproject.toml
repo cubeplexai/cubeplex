@@ -38,6 +38,7 @@ dependencies = [
     "pillow>=10.4.0",
     "pyjwt>=2.12.1",
     "click>=8.3.1",
+    "langchain-anthropic>=1.4.3",
 ]
 
 [project.optional-dependencies]
