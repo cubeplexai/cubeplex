@@ -22,18 +22,25 @@ test.describe('Admin MCP page', () => {
     await expect(page.getByText('test-secret-value')).toHaveCount(0)
   })
 
-  test('bindings grid bulk save persists after reload', async ({ page }) => {
+  test('per-row override toggle persists after reload', async ({ page }) => {
+    // Org-wide servers default to enabled in every workspace; clicking the
+    // switch writes a workspace_mcp_overrides row with enabled=false.
+    // No batch "Save bindings" button — each toggle persists immediately.
     await registerAndGetWorkspace(page)
     await createWorkspace(page, 'workspace-A')
-    const server = await createOrgMcpServer(page, 'Binding UI Test')
+    const server = await createOrgMcpServer(page, 'Override UI Test')
 
     await page.goto(`/admin/mcp/${server.id}`)
     await page.getByRole('tab', { name: 'Workspaces' }).click()
-    await page.getByRole('switch', { name: /workspace-A/i }).click()
-    await page.getByRole('button', { name: 'Save bindings' }).click()
+    const toggle = page.getByRole('switch', { name: /workspace-A/i })
+    await expect(toggle).toBeChecked()
+    await toggle.click()
+    // Per-row toggle persists synchronously; wait for the unchecked state.
+    await expect(toggle).not.toBeChecked()
+
     await page.reload()
     await page.getByRole('tab', { name: 'Workspaces' }).click()
 
-    await expect(page.getByRole('switch', { name: /workspace-A/i })).toBeChecked()
+    await expect(page.getByRole('switch', { name: /workspace-A/i })).not.toBeChecked()
   })
 })
