@@ -67,6 +67,7 @@ markers = [
     "sandbox: tests that require a running OpenSandbox service (deselect with '-m \"not sandbox\"')",
     "e2e: end-to-end tests that hit real services (Postgres/Redis/LLM/Sandbox); deselect with '-m \"not e2e\"'",
     "unit: fast unit tests with no external dependencies",
+    "real_llm: tests that require a real LLM endpoint with cache_control honored; deselected by default in CI",
 ]
 
 [tool.hatch.build.targets.wheel]
