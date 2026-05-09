@@ -88,6 +88,7 @@ def create_cubebox_agent(
         sandbox_middleware = SandboxMiddleware(
             sandbox=sandbox,
             conversation_id=conversation_id,
+            workspace_id=workspace_id,
         )
 
     # Citation middleware — chunks tool results and assigns citation IDs.

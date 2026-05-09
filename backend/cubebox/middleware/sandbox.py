@@ -1,5 +1,6 @@
 """SandboxMiddleware — registers the execute tool and injects sandbox context."""
 
+from collections import deque
 from collections.abc import Awaitable, Callable, Sequence
 from typing import Any
 
@@ -17,15 +18,49 @@ from cubebox.parsers import ParseOptions
 from cubebox.prompts.sandbox import SANDBOX_PROMPT_TEMPLATE
 from cubebox.sandbox.base import Sandbox
 
+# Per-(workspace_id, conversation_id) ring buffer of commands actually
+# executed by the sandbox tool. Bounded so a long conversation does not
+# leak memory in dev/test. The accessor `executed_commands` is intended
+# for E2E tests that need to assert the sandbox refused (or accepted) a
+# specific command. Production reads have no consumer today.
+_EXECUTED_COMMANDS: dict[tuple[str, str], deque[str]] = {}
+_EXECUTED_COMMANDS_CAP = 50
+
+
+def _record_executed(workspace_id: str, conversation_id: str, command: str) -> None:
+    key = (workspace_id, conversation_id)
+    buf = _EXECUTED_COMMANDS.get(key)
+    if buf is None:
+        buf = deque(maxlen=_EXECUTED_COMMANDS_CAP)
+        _EXECUTED_COMMANDS[key] = buf
+    buf.append(command)
+
+
+def executed_commands(workspace_id: str, conversation_id: str) -> list[str]:
+    """Return a snapshot of the last <=50 commands the sandbox executed."""
+    return list(_EXECUTED_COMMANDS.get((workspace_id, conversation_id), ()))
+
+
+def reset_executed_commands() -> None:
+    """Clear all recorded commands. Test helper."""
+    _EXECUTED_COMMANDS.clear()
+
 
 class _ExecuteArgs(BaseModel):
     command: str
 
 
-def _create_execute_tool(sandbox: Sandbox) -> BaseTool:
+def _create_execute_tool(
+    sandbox: Sandbox,
+    *,
+    workspace_id: str | None = None,
+    conversation_id: str | None = None,
+) -> BaseTool:
     """Build the execute tool backed by a sandbox instance."""
 
     async def _execute(command: str) -> str:
+        if workspace_id is not None and conversation_id is not None:
+            _record_executed(workspace_id, conversation_id, command)
         result = await sandbox.execute(command)
         output = result.output
         if result.exit_code is not None and result.exit_code != 0:
@@ -237,11 +272,17 @@ class SandboxMiddleware(AgentMiddleware[Any, Any, Any]):
         *,
         sandbox: Sandbox,
         conversation_id: str | None = None,
+        workspace_id: str | None = None,
     ) -> None:
         self.sandbox = sandbox
         self.conversation_id = conversation_id
+        self.workspace_id = workspace_id
         self.tools: Sequence[BaseTool] = [
-            _create_execute_tool(sandbox),
+            _create_execute_tool(
+                sandbox,
+                workspace_id=workspace_id,
+                conversation_id=conversation_id,
+            ),
             _create_write_file_tool(sandbox),
             _create_edit_file_tool(sandbox),
             _create_file_read_tool(sandbox, self.conversation_id),
