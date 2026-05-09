@@ -142,3 +142,21 @@ class CitationEvent(AgentEvent):
             "metadata {source_type, url, title, ...}, tool_call_id"
         )
     )
+
+
+class UsageEvent(AgentEvent):
+    """Per-LLM-call token usage event.
+
+    Emitted once per LLM call in a run, immediately after the final
+    AIMessageChunk for that call. Carries the same dict shape that
+    CostMiddleware computes via _extract_usage so consumers (cost UI,
+    cache regression test) can read it without re-parsing the model
+    response.
+    """
+
+    type: Literal["usage"] = "usage"
+    data: dict[str, Any] = Field(
+        description=(
+            "Usage payload: input_tokens, output_tokens, cache_read_tokens, cache_write_tokens"
+        )
+    )
