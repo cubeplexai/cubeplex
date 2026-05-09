@@ -51,3 +51,32 @@ async def send_message_and_collect_text(
         if isinstance(chunk, str):
             parts.append(chunk)
     return "".join(parts)
+
+
+async def send_message_and_collect_usage(
+    client: httpx.AsyncClient,
+    ws_id: str,
+    conv_id: str,
+    content: str,
+) -> dict[str, int]:
+    """Drive one turn and aggregate per-call UsageEvent payloads.
+
+    Returns a single dict summing every emitted usage event for the turn:
+        {input_tokens, output_tokens, cache_read_tokens, cache_write_tokens}
+    Returns all-zero dict if no usage events were emitted (endpoint did
+    not report usage). The caller decides whether that is "skip" or "fail".
+    """
+    events = await _stream_events(client, ws_id, conv_id, content)
+    totals = {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+    }
+    for evt in events:
+        if evt.get("type") != "usage":
+            continue
+        data = evt.get("data") or {}
+        for k in totals:
+            totals[k] += int(data.get(k) or 0)
+    return totals
