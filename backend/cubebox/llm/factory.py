@@ -15,7 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from cubebox.config import config
 from cubebox.credentials.encryption import EncryptionBackend
-from cubebox.llm.cache_markers import ProviderKind, apply_cache_markers, detect_provider
+from cubebox.llm.cache_markers import ProviderKind, apply_cache_markers, provider_kind_from_api
 from cubebox.llm.config import LLMConfig, ModelConfig, ProviderConfig
 from cubebox.llm.openai_compatible import ChatOpenAICompatible
 
@@ -463,9 +463,9 @@ class LLMFactory:
             llm._cubebox_model_cost = model_config.cost  # type: ignore[attr-defined]
 
             # Memory system: insert Anthropic cache_control markers when applicable.
-            # Today this is a no-op (OpenAI auto-caches); when Anthropic is added it
-            # will activate without any caller-side changes.
-            provider_kind = detect_provider(f"{provider_name}/{model_config.id}")
+            # `provider_config.api` is the authoritative kind (set in config.yaml /
+            # DB provider rows), not a guess from the model id string.
+            provider_kind = provider_kind_from_api(provider_config.api)
             return _wrap_with_cache_markers(llm, provider_kind=provider_kind)
 
         if provider_config.api == "anthropic":

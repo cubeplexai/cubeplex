@@ -17,14 +17,16 @@ from langchain_core.messages import AIMessage, BaseMessage, SystemMessage
 ProviderKind = Literal["anthropic", "openai", "unknown"]
 
 
-def detect_provider(model_id: str) -> ProviderKind:
-    """Best-effort provider detection from a `provider/model-id` string."""
-    if "/" in model_id:
-        prefix = model_id.split("/", 1)[0].lower()
-        if "anthropic" in prefix or "claude" in prefix:
-            return "anthropic"
-        if prefix in {"openai", "azure-openai", "deepseek", "qwen", "groq"}:
-            return "openai"
+def provider_kind_from_api(api: str) -> ProviderKind:
+    """Map a `ProviderConfig.api` value to the cache-marker dispatch kind.
+
+    This is the authoritative path: `api` is set in config.yaml / DB rows
+    and is the same field LLMFactory dispatches on for client construction.
+    """
+    if api == "anthropic":
+        return "anthropic"
+    if api == "openai-completions":
+        return "openai"
     return "unknown"
 
 
