@@ -68,3 +68,29 @@ async def test_ring_buffer_caps_at_50_entries() -> None:
     assert len(history) == 50
     assert history[0] == "cmd-10"
     assert history[-1] == "cmd-59"
+
+
+class _BlockingSandbox:
+    """Sandbox stand-in that simulates a safety-policy block (non-zero exit)."""
+
+    async def execute(self, command: str) -> Any:
+        class _R:
+            output = "blocked by policy"
+            exit_code = 126
+
+        return _R()
+
+
+@pytest.mark.asyncio
+async def test_blocked_commands_are_not_recorded() -> None:
+    """Sandbox-rejected commands (exit_code != 0) must NOT appear in
+    executed_commands. Otherwise the adversarial gate test cannot
+    distinguish 'agent tried it but sandbox refused' from 'sandbox
+    actually ran it'."""
+    sandbox = _BlockingSandbox()
+    reset_executed_commands()
+    tool = _create_execute_tool(sandbox, workspace_id="ws-1", conversation_id="conv-blk")
+
+    await tool.ainvoke({"command": "rm -rf /"})
+
+    assert executed_commands("ws-1", "conv-blk") == []

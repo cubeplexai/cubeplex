@@ -37,7 +37,13 @@ def _record_executed(workspace_id: str, conversation_id: str, command: str) -> N
 
 
 def executed_commands(workspace_id: str, conversation_id: str) -> list[str]:
-    """Return a snapshot of the last <=50 commands the sandbox executed."""
+    """Last <=50 commands the sandbox actually ran (exit_code == 0).
+
+    Sandbox-rejected attempts (e.g. safety-policy blocks that yield a
+    non-zero exit) are intentionally NOT recorded; the accessor's
+    semantics are "what hit the filesystem", not "what the LLM tried".
+    Test assertions like "no destructive command ran" rely on this.
+    """
     return list(_EXECUTED_COMMANDS.get((workspace_id, conversation_id), ()))
 
 
@@ -59,9 +65,9 @@ def _create_execute_tool(
     """Build the execute tool backed by a sandbox instance."""
 
     async def _execute(command: str) -> str:
-        if workspace_id is not None and conversation_id is not None:
-            _record_executed(workspace_id, conversation_id, command)
         result = await sandbox.execute(command)
+        if workspace_id is not None and conversation_id is not None and result.exit_code == 0:
+            _record_executed(workspace_id, conversation_id, command)
         output = result.output
         if result.exit_code is not None and result.exit_code != 0:
             output += f"\n[exit code: {result.exit_code}]"
