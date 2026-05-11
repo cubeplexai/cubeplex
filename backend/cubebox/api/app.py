@@ -247,6 +247,21 @@ async def lifespan(_app: FastAPI):  # type: ignore
     except Exception as e:
         logger.warning("Failed to seed system providers: {}", str(e))
 
+    # Seed MCP catalog connectors (idempotent, lock-guarded).
+    try:
+        from cubebox.db.engine import async_session_maker
+        from cubebox.seeders import seed_mcp_catalog
+
+        async with async_session_maker() as seed_session:
+            await seed_mcp_catalog(
+                db_session=seed_session,
+                backend=_app.state.encryption_backend,
+                redis=redis_client,
+            )
+        logger.info("MCP catalog seed step completed")
+    except Exception as e:
+        logger.warning("Failed to seed MCP catalog: {}", str(e))
+
     # M7: orphan attachment reaper
     from cubebox.config import config
     from cubebox.services.attachments import cleanup_orphan_attachments
