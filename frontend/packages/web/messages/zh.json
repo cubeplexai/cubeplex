@@ -66,7 +66,15 @@
     "artifacts": "产出物",
     "expand": "展开",
     "collapse": "收起",
-    "executing": "正在执行..."
+    "executing": "正在执行...",
+    "tokenUsage": "Token 用量",
+    "turnLabel": "本轮",
+    "sessionLabel": "会话累计",
+    "inputTokens": "输入",
+    "outputTokens": "输出",
+    "cacheHitRate": "缓存命中",
+    "totalTokens": "总 Token",
+    "contextWindow": "Context"
   },
   "subagent": {
     "cluster": "Agent 集群",

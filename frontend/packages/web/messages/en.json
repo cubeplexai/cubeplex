@@ -66,7 +66,15 @@
     "artifacts": "Artifacts",
     "expand": "Expand",
     "collapse": "Collapse",
-    "executing": "Executing..."
+    "executing": "Executing...",
+    "tokenUsage": "Token Usage",
+    "turnLabel": "This Turn",
+    "sessionLabel": "Session Total",
+    "inputTokens": "Input",
+    "outputTokens": "Output",
+    "cacheHitRate": "Cache Hit",
+    "totalTokens": "Total Tokens",
+    "contextWindow": "Context"
   },
   "subagent": {
     "cluster": "Agent cluster",

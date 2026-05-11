@@ -9,6 +9,7 @@ import { UserMessage } from './UserMessage'
 import { AssistantMessage } from './AssistantMessage'
 import { MessageAttachments } from './MessageAttachments'
 import { TaskProgressCard } from './TaskProgressCard'
+import { TokenUsageBar } from './TokenUsageBar'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { useMessages } from '@/hooks/useMessages'
 import { useWorkspaceContext } from '@/hooks/useWorkspaceContext'
@@ -107,6 +108,9 @@ export function MessageList({ conversationId }: MessageListProps) {
     todos,
     error,
     toolResultMap,
+    turnUsage,
+    sessionUsage,
+    contextWindow,
   } = useMessages(conversationId)
   const loadMessages = useMessageStore((s) => s.loadMessages)
   const lastRunStatus = useMessageStore((s) => s.lastRunStatus)
@@ -223,6 +227,21 @@ export function MessageList({ conversationId }: MessageListProps) {
             conversationId={conversationId}
           />
         )}
+
+        {!isStreaming &&
+          (turnUsage || sessionUsage) &&
+          (messages ?? []).some((m) => m.role === 'assistant') && (
+            <div className="flex justify-start gap-2.5">
+              <div className="shrink-0 w-6 h-6" />
+              <div className="flex-1 max-w-[75%]">
+                <TokenUsageBar
+                  turnUsage={turnUsage}
+                  sessionUsage={sessionUsage}
+                  contextWindow={contextWindow}
+                />
+              </div>
+            </div>
+          )}
 
         {!isStreaming && todos.length > 0 && (
           <div className="flex justify-start gap-2.5">
