@@ -92,3 +92,21 @@ export async function listArtifactVersions(
   const data = (await res.json()) as { versions?: ArtifactVersion[] }
   return data.versions || []
 }
+
+export interface PreviewTokenResponse {
+  download_url: string
+  viewer_url: string
+}
+
+export async function requestPreviewToken(
+  client: ApiClient,
+  conversationId: string,
+  artifactId: string,
+  version?: number,
+): Promise<PreviewTokenResponse> {
+  const params = version != null ? `?version=${version}` : ''
+  const url = `/api/v1/conversations/${conversationId}/artifacts/${artifactId}/preview-token${params}`
+  const res = await client.post(url, {})
+  if (!res.ok) throw await toApiError(res)
+  return res.json() as Promise<PreviewTokenResponse>
+}
