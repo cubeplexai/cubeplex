@@ -12,6 +12,7 @@ default:
     host: "0.0.0.0"
     port: 8000
     reload: true
+    public_url: ""
 
   # LLM Configuration
   # Note: For reasoning models, set reasoning config to enable reasoning output
