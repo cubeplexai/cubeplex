@@ -8,7 +8,6 @@ import { AlertCircle } from 'lucide-react'
 import { UserMessage } from './UserMessage'
 import { AssistantMessage } from './AssistantMessage'
 import { MessageAttachments } from './MessageAttachments'
-import { TaskProgressCard } from './TaskProgressCard'
 import { TokenUsageBar } from './TokenUsageBar'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { useMessages } from '@/hooks/useMessages'
@@ -242,15 +241,6 @@ export function MessageList({ conversationId }: MessageListProps) {
               </div>
             </div>
           )}
-
-        {!isStreaming && todos.length > 0 && (
-          <div className="flex justify-start gap-2.5">
-            <div className="shrink-0 w-6 h-6" />
-            <div className="flex-1 max-w-[75%]">
-              <TaskProgressCard todos={todos} isStreaming={false} />
-            </div>
-          </div>
-        )}
 
         {error && (
           <div

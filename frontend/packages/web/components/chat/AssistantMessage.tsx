@@ -405,6 +405,23 @@ function groupBlocks(blocks: ContentBlock[]): (ContentBlock | ContentBlock[])[] 
   return result
 }
 
+function extractTodosFromMessage(msg: Message): TodoItem[] {
+  if (!msg.tool_calls) return []
+  const tc = msg.tool_calls.find((c) => c.name === 'write_todos')
+  if (!tc) return []
+  const raw = Array.isArray(tc.arguments.todos) ? tc.arguments.todos : []
+  const result: TodoItem[] = []
+  for (const item of raw) {
+    if (!item || typeof item !== 'object') continue
+    const t = item as { content?: unknown; status?: unknown }
+    const desc = typeof t.content === 'string' ? t.content.trim() : ''
+    if (!desc) continue
+    const status = t.status === 'in_progress' || t.status === 'completed' ? t.status : 'pending'
+    result.push({ id: null, description: desc, status })
+  }
+  return result
+}
+
 export function AssistantMessage({
   message,
   stream,
@@ -421,6 +438,8 @@ export function AssistantMessage({
   const blocks: ContentBlock[] = stream
     ? stream.blocks
     : (message!.blocks ?? blocksFromMessage(message!))
+
+  const historyTodos = message ? extractTodosFromMessage(message) : []
 
   const msgCreatedAt = message?.created_at
 
@@ -491,6 +510,9 @@ export function AssistantMessage({
         })}
         {isStreaming && todos && todos.length > 0 && (
           <TaskProgressCard todos={todos} isStreaming={true} />
+        )}
+        {!isStreaming && historyTodos.length > 0 && (
+          <TaskProgressCard todos={historyTodos} isStreaming={false} />
         )}
         {isStreaming && (
           <div data-testid="loading-indicator" className="flex items-center gap-1 pl-1 h-6">
