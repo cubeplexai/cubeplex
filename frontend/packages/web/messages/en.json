@@ -644,6 +644,13 @@
       "unsupported": "This file type does not support preview. Please download to view.",
       "download": "Download"
     },
+    "office": {
+      "loading": "Loading document preview…",
+      "error": "Online preview is unavailable",
+      "errorHint": "The file could not be loaded by the external preview service.",
+      "download": "Download file",
+      "retry": "Retry"
+    },
     "pdf": {
       "tableOfContents": "Table of contents",
       "loadFailed": "Failed to load PDF"
