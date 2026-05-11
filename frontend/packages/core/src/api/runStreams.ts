@@ -19,6 +19,10 @@ export interface ConversationBootstrap {
   total: number
   active_run: ActiveRunBootstrap | null
   last_run_status: 'stale' | null
+  usage_summary?: {
+    session: { total_input_tokens: number; total_output_tokens: number }
+    context_window: number
+  }
 }
 
 export interface StartRunResponse {
