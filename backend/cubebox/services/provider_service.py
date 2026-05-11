@@ -315,20 +315,34 @@ class ProviderService:
         """Test reachability of a specific model on a provider using stored credentials."""
         start = time.monotonic()
         provider = await self.get_provider(provider_id)
-        if provider.provider_type != "openai_compat":
-            return TestResultOut(
-                ok=False,
-                error=f"Unsupported provider_type: {provider.provider_type}",
-                latency_ms=0,
-            )
         api_key = await self._resolve_api_key(provider)
         try:
-            llm = ChatOpenAICompatible(
-                base_url=provider.base_url,
-                api_key=api_key or "placeholder",  # type: ignore[arg-type]
-                model=model_id,
-                timeout=15,
-            )
+            from langchain_core.language_models import BaseChatModel
+
+            llm: BaseChatModel
+            if provider.provider_type == "anthropic":
+                from langchain_anthropic import ChatAnthropic
+
+                llm = ChatAnthropic(
+                    model=model_id,  # type: ignore[call-arg]
+                    base_url=provider.base_url,
+                    api_key=api_key or "placeholder",  # type: ignore[arg-type]
+                    max_tokens=32,
+                    timeout=15,
+                )
+            elif provider.provider_type == "openai_compat":
+                llm = ChatOpenAICompatible(
+                    base_url=provider.base_url,
+                    api_key=api_key or "placeholder",  # type: ignore[arg-type]
+                    model=model_id,
+                    timeout=15,
+                )
+            else:
+                return TestResultOut(
+                    ok=False,
+                    error=f"Unsupported provider_type: {provider.provider_type}",
+                    latency_ms=0,
+                )
             await llm.ainvoke([HumanMessage(content="ping")])
             latency_ms = int((time.monotonic() - start) * 1000)
             return TestResultOut(ok=True, error=None, latency_ms=latency_ms)
