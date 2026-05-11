@@ -56,6 +56,7 @@ export type AgentEventType =
   | 'done'
   | 'citation'
   | 'status'
+  | 'usage'
 
 export interface AgentEvent {
   type: AgentEventType
@@ -159,4 +160,22 @@ export type StatusPhase = 'sandbox_creating' | 'sandbox_ready' | 'sandbox_failed
 export interface StatusEvent extends AgentEvent {
   type: 'status'
   data: { phase: StatusPhase; detail?: string }
+}
+
+export interface TurnUsage {
+  input_tokens: number
+  output_tokens: number
+  cache_read_tokens: number
+  cache_write_tokens: number
+}
+
+export interface SessionUsage {
+  total_input_tokens: number
+  total_output_tokens: number
+}
+
+export interface UsageSummary {
+  turn: TurnUsage
+  session: SessionUsage
+  context_window: number
 }
