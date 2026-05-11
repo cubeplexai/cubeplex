@@ -6,6 +6,7 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
+from loguru import logger
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.pool import NullPool
@@ -640,42 +641,76 @@ async def get_conversation_bootstrap(
             "started_at": active_run.started_at,
         }
 
-    # --- Session-level token usage for the usage panel ---
+    # --- Token usage for the usage panel ---
     usage_summary: dict[str, object] = {
         "session": {"total_input_tokens": 0, "total_output_tokens": 0},
         "context_window": 0,
     }
     try:
-        from sqlalchemy import func, select
+        from sqlalchemy import func as sa_func
+        from sqlalchemy import select as sa_select
 
         from cubebox.models.billing import BillingEvent, LlmBillingEvent
 
-        stmt = (
-            select(
-                func.coalesce(func.sum(LlmBillingEvent.input_tokens), 0),
-                func.coalesce(func.sum(LlmBillingEvent.output_tokens), 0),
+        session_stmt = (
+            sa_select(
+                sa_func.coalesce(sa_func.sum(LlmBillingEvent.input_tokens), 0),
+                sa_func.coalesce(sa_func.sum(LlmBillingEvent.output_tokens), 0),
             )
-            .select_from(BillingEvent)
             .join(
-                LlmBillingEvent,
+                BillingEvent,
                 LlmBillingEvent.billing_event_id == BillingEvent.id,  # type: ignore[arg-type]
             )
             .where(BillingEvent.conversation_id == conversation_id)  # type: ignore[arg-type]
         )
-        row = (await session.execute(stmt)).one()
+        row = (await session.execute(session_stmt)).one()
         usage_summary["session"] = {
             "total_input_tokens": int(row[0]),
             "total_output_tokens": int(row[1]),
         }
 
+        # Last turn usage: billing events after the last user message
+        msgs: list[dict[str, Any]] = history["messages"]  # type: ignore[assignment]
+        last_user_ts: str | None = None
+        for msg in reversed(msgs):
+            if isinstance(msg, dict) and msg.get("role") == "user":
+                last_user_ts = msg.get("created_at")
+                break
+        if last_user_ts:
+            from datetime import datetime
+
+            ts_dt = datetime.fromisoformat(last_user_ts)
+            turn_stmt = (
+                sa_select(
+                    sa_func.coalesce(sa_func.sum(LlmBillingEvent.input_tokens), 0),
+                    sa_func.coalesce(sa_func.sum(LlmBillingEvent.output_tokens), 0),
+                    sa_func.coalesce(sa_func.sum(LlmBillingEvent.cache_read_tokens), 0),
+                    sa_func.coalesce(sa_func.sum(LlmBillingEvent.cache_write_tokens), 0),
+                )
+                .join(
+                    BillingEvent,
+                    LlmBillingEvent.billing_event_id == BillingEvent.id,  # type: ignore[arg-type]
+                )
+                .where(
+                    BillingEvent.conversation_id == conversation_id,  # type: ignore[arg-type]
+                    BillingEvent.started_at >= ts_dt,  # type: ignore[arg-type]
+                )
+            )
+            turn_row = (await session.execute(turn_stmt)).one()
+            usage_summary["turn"] = {
+                "input_tokens": int(turn_row[0]),
+                "output_tokens": int(turn_row[1]),
+                "cache_read_tokens": int(turn_row[2]),
+                "cache_write_tokens": int(turn_row[3]),
+            }
+
         from cubebox.llm.factory import LLMFactory
 
         factory = LLMFactory(session=session, org_id=ctx.org_id)
-        provider_name, model_id = await factory.get_default_model()
-        model_cfg = factory.get_model_config(provider_name, model_id)
+        model_cfg = await factory.get_default_model_config()
         usage_summary["context_window"] = model_cfg.context_window
     except Exception:
-        pass  # Non-critical; frontend degrades gracefully
+        logger.warning("Failed to load usage_summary for bootstrap", exc_info=True)
 
     return {
         "messages": history["messages"],

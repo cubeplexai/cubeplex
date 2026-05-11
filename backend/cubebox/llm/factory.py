@@ -284,6 +284,14 @@ class LLMFactory:
             raise ValueError("No default_model configured")
         return self._parse_model_ref(model_ref)
 
+    async def get_default_model_config(self) -> ModelConfig:
+        """Resolve the default model's ModelConfig, merging DB configs if available."""
+        if self._session and self._org_id:
+            db_cfgs, db_names = await self._load_db_provider_configs()
+            self.llm_config = self._build_merged_config(db_cfgs, db_names)
+        provider_name, model_id = await self.get_default_model()
+        return self.get_model_config(provider_name, model_id)
+
     async def create_default(self, **kwargs: Any) -> Any:
         """
         Create an LLM instance using the configured default_model,

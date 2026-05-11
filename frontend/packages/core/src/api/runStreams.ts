@@ -20,6 +20,12 @@ export interface ConversationBootstrap {
   active_run: ActiveRunBootstrap | null
   last_run_status: 'stale' | null
   usage_summary?: {
+    turn?: {
+      input_tokens: number
+      output_tokens: number
+      cache_read_tokens: number
+      cache_write_tokens: number
+    }
     session: { total_input_tokens: number; total_output_tokens: number }
     context_window: number
   }

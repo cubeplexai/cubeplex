@@ -695,18 +695,17 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
       const restoredTodos = restoreTodosFromHistory(messages)
       hydrateCitationsFromHistory(conversationId, messages)
       const usageSummary = bootstrap.usage_summary
-      const newTurnUsage = { ...get().turnUsage }
+      const newTurnUsage = {
+        ...get().turnUsage,
+        [conversationId]: (usageSummary?.turn ?? null) as import('../types').TurnUsage | null,
+      }
       const newSessionUsage = {
         ...get().sessionUsage,
-        [conversationId]: null as import('../types').SessionUsage | null,
+        [conversationId]: (usageSummary?.session ?? null) as import('../types').SessionUsage | null,
       }
       const newContextWindow = {
         ...get().contextWindow,
-        [conversationId]: null as number | null,
-      }
-      if (usageSummary) {
-        newSessionUsage[conversationId] = usageSummary.session
-        newContextWindow[conversationId] = usageSummary.context_window
+        [conversationId]: usageSummary?.context_window ?? null,
       }
       const nextStreamAgents: Record<string, AgentStream> = bootstrap.active_run
         ? { [MAIN_AGENT_KEY]: emptyStream() }
