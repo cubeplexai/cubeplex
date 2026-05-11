@@ -644,6 +644,13 @@
       "unsupported": "此文件类型不支持预览，请下载后查看。",
       "download": "下载"
     },
+    "office": {
+      "loading": "正在加载文档预览…",
+      "error": "在线预览不可用",
+      "errorHint": "外部预览服务无法加载此文件。",
+      "download": "下载文件",
+      "retry": "重试"
+    },
     "pdf": {
       "tableOfContents": "目录",
       "loadFailed": "加载 PDF 失败"
