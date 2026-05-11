@@ -40,6 +40,9 @@ export function useMessages(conversationId: string) {
   const toolResultMap = useMessageStore((s) =>
     s.streamingConversationId === conversationId ? s.toolResultMap : {},
   )
+  const turnUsage = useMessageStore((s) => s.turnUsage[conversationId] ?? null)
+  const sessionUsage = useMessageStore((s) => s.sessionUsage[conversationId] ?? null)
+  const contextWindow = useMessageStore((s) => s.contextWindow[conversationId] ?? null)
 
   // Derive subagent streams with stable reference — only for the streaming conversation
   const rawSubAgents = useMessageStore((s) => {
@@ -62,5 +65,8 @@ export function useMessages(conversationId: string) {
     todos,
     error,
     toolResultMap,
+    turnUsage,
+    sessionUsage,
+    contextWindow,
   }
 }
