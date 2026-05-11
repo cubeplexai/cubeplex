@@ -866,32 +866,19 @@ class RunManager:
                 status="completed",
             )
             # --- Aggregate session-level token totals ---
-            session_usage = {"total_input_tokens": 0, "total_output_tokens": 0}
-            try:
-                from sqlalchemy import func as sa_func
-                from sqlalchemy import select as sa_select
+            from cubebox.services.usage import SessionUsage, get_session_usage
 
+            session_usage: SessionUsage = {
+                "total_input_tokens": 0,
+                "total_output_tokens": 0,
+                "total_cache_read_tokens": 0,
+                "total_cache_write_tokens": 0,
+            }
+            try:
                 from cubebox.db.engine import async_session_maker
-                from cubebox.models.billing import BillingEvent, LlmBillingEvent
 
                 async with async_session_maker() as billing_session:
-                    row = (
-                        await billing_session.execute(
-                            sa_select(
-                                sa_func.coalesce(sa_func.sum(LlmBillingEvent.input_tokens), 0),
-                                sa_func.coalesce(sa_func.sum(LlmBillingEvent.output_tokens), 0),
-                            )
-                            .join(
-                                BillingEvent,
-                                LlmBillingEvent.billing_event_id == BillingEvent.id,  # type: ignore[arg-type]
-                            )
-                            .where(
-                                BillingEvent.conversation_id == conversation_id,  # type: ignore[arg-type]
-                            )
-                        )
-                    ).one()
-                    session_usage["total_input_tokens"] = int(row[0])
-                    session_usage["total_output_tokens"] = int(row[1])
+                    session_usage = await get_session_usage(billing_session, conversation_id)
             except Exception:
                 logger.warning("Failed to query session usage for done event")
 

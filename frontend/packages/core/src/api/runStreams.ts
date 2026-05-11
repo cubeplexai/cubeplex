@@ -26,7 +26,12 @@ export interface ConversationBootstrap {
       cache_read_tokens: number
       cache_write_tokens: number
     }
-    session: { total_input_tokens: number; total_output_tokens: number }
+    session: {
+      total_input_tokens: number
+      total_output_tokens: number
+      total_cache_read_tokens: number
+      total_cache_write_tokens: number
+    }
     context_window: number
   }
 }
