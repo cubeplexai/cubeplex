@@ -92,6 +92,25 @@ async def test_factory_enables_thinking_for_reasoning_model() -> None:
 
 
 @pytest.mark.asyncio
+async def test_factory_drops_temperature_when_thinking_enabled() -> None:
+    factory = LLMFactory(llm_config=_build_config(reasoning=True, max_tokens=12000))
+    llm = factory.create("claude-test", provider_name="anthropic-test", temperature=0.7)
+    assert isinstance(llm, ChatAnthropic)
+    assert llm.thinking is not None
+    # Anthropic requires temperature unset (defaults to 1) with thinking
+    assert llm.temperature is None or llm.temperature == 1
+
+
+@pytest.mark.asyncio
+async def test_factory_skips_thinking_when_max_tokens_too_small() -> None:
+    factory = LLMFactory(llm_config=_build_config(reasoning=True, max_tokens=1024))
+    llm = factory.create("claude-test", provider_name="anthropic-test")
+
+    assert isinstance(llm, ChatAnthropic)
+    assert llm.thinking is None
+
+
+@pytest.mark.asyncio
 async def test_factory_reasoning_config_overrides_auto_thinking() -> None:
     factory = LLMFactory(llm_config=_build_config(reasoning=True))
     custom = {"type": "enabled", "budget_tokens": 500}
