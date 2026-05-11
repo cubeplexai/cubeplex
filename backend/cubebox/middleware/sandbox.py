@@ -1,5 +1,6 @@
 """SandboxMiddleware — registers the execute tool and injects sandbox context."""
 
+from collections import deque
 from collections.abc import Awaitable, Callable, Sequence
 from typing import Any
 
@@ -17,16 +18,73 @@ from cubebox.parsers import ParseOptions
 from cubebox.prompts.sandbox import SANDBOX_PROMPT_TEMPLATE
 from cubebox.sandbox.base import Sandbox
 
+# Per-(workspace_id, conversation_id) ring buffer of commands the sandbox
+# actually ran (exit_code == 0). Disabled by default: production workers
+# would otherwise grow one deque per conversation forever (no consumer
+# evicts entries). E2E tests opt in via enable_audit() in a fixture; the
+# fixture also calls reset_executed_commands() on teardown so state does
+# not leak across tests.
+_EXECUTED_COMMANDS: dict[tuple[str, str], deque[str]] = {}
+_EXECUTED_COMMANDS_CAP = 50
+_AUDIT_ENABLED = False
+
+
+def enable_audit() -> None:
+    """Enable command-audit recording. Tests call this from a fixture."""
+    global _AUDIT_ENABLED
+    _AUDIT_ENABLED = True
+
+
+def disable_audit() -> None:
+    """Disable recording and clear any accumulated state."""
+    global _AUDIT_ENABLED
+    _AUDIT_ENABLED = False
+    _EXECUTED_COMMANDS.clear()
+
+
+def _record_executed(workspace_id: str, conversation_id: str, command: str) -> None:
+    if not _AUDIT_ENABLED:
+        return
+    key = (workspace_id, conversation_id)
+    buf = _EXECUTED_COMMANDS.get(key)
+    if buf is None:
+        buf = deque(maxlen=_EXECUTED_COMMANDS_CAP)
+        _EXECUTED_COMMANDS[key] = buf
+    buf.append(command)
+
+
+def executed_commands(workspace_id: str, conversation_id: str) -> list[str]:
+    """Last <=50 commands the sandbox actually ran (exit_code == 0).
+
+    Returns the empty list unless `enable_audit()` was called (typically
+    from a test fixture). Sandbox-rejected attempts (non-zero exit) are
+    intentionally NOT recorded; semantics are "what hit the filesystem",
+    not "what the LLM tried".
+    """
+    return list(_EXECUTED_COMMANDS.get((workspace_id, conversation_id), ()))
+
+
+def reset_executed_commands() -> None:
+    """Clear all recorded commands. Test helper."""
+    _EXECUTED_COMMANDS.clear()
+
 
 class _ExecuteArgs(BaseModel):
     command: str
 
 
-def _create_execute_tool(sandbox: Sandbox) -> BaseTool:
+def _create_execute_tool(
+    sandbox: Sandbox,
+    *,
+    workspace_id: str | None = None,
+    conversation_id: str | None = None,
+) -> BaseTool:
     """Build the execute tool backed by a sandbox instance."""
 
     async def _execute(command: str) -> str:
         result = await sandbox.execute(command)
+        if workspace_id is not None and conversation_id is not None and result.exit_code == 0:
+            _record_executed(workspace_id, conversation_id, command)
         output = result.output
         if result.exit_code is not None and result.exit_code != 0:
             output += f"\n[exit code: {result.exit_code}]"
@@ -237,11 +295,17 @@ class SandboxMiddleware(AgentMiddleware[Any, Any, Any]):
         *,
         sandbox: Sandbox,
         conversation_id: str | None = None,
+        workspace_id: str | None = None,
     ) -> None:
         self.sandbox = sandbox
         self.conversation_id = conversation_id
+        self.workspace_id = workspace_id
         self.tools: Sequence[BaseTool] = [
-            _create_execute_tool(sandbox),
+            _create_execute_tool(
+                sandbox,
+                workspace_id=workspace_id,
+                conversation_id=conversation_id,
+            ),
             _create_write_file_tool(sandbox),
             _create_edit_file_tool(sandbox),
             _create_file_read_tool(sandbox, self.conversation_id),
