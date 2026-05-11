@@ -446,6 +446,12 @@ class RunManager:
 
         tool_delta_context: dict[tuple[str | None, int], dict[str, Any]] = {}
         citation_buffers: dict[str | None, str] = {}
+        turn_usage: dict[str, int] = {
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "cache_read_tokens": 0,
+            "cache_write_tokens": 0,
+        }
 
         async def emit_status(phase: str, detail: str | None = None) -> None:
             data: dict[str, str] = {"phase": phase}
@@ -500,6 +506,9 @@ class RunManager:
                 return
 
             await flush_citation_buffer(agent_key, sse_event.agent_id)
+            if sse_event.type == "usage":
+                for key in turn_usage:
+                    turn_usage[key] += sse_event.data.get(key, 0)
             await publish_event(sse_event)
 
         try:
@@ -576,6 +585,8 @@ class RunManager:
             except Exception:
                 logger.warning("LLMFactory DB load failed, falling back to config-only")
                 llm = await LLMFactory().create_default()
+            _inner = getattr(llm, "runnable", llm)
+            context_window: int = getattr(_inner, "_cubebox_context_window", 0)
             tools = get_registry().list_tools()
             try:
                 from cubebox.credentials.dependencies import build_credential_service
@@ -854,10 +865,49 @@ class RunManager:
                 run_id=run_id,
                 status="completed",
             )
+            # --- Aggregate session-level token totals ---
+            session_usage = {"total_input_tokens": 0, "total_output_tokens": 0}
+            try:
+                from sqlalchemy import func as sa_func
+                from sqlalchemy import select as sa_select
+
+                from cubebox.db.engine import async_session_maker
+                from cubebox.models.billing import BillingEvent, LlmBillingEvent
+
+                async with async_session_maker() as billing_session:
+                    row = (
+                        await billing_session.execute(
+                            sa_select(
+                                sa_func.coalesce(sa_func.sum(LlmBillingEvent.input_tokens), 0),
+                                sa_func.coalesce(sa_func.sum(LlmBillingEvent.output_tokens), 0),
+                            )
+                            .join(
+                                BillingEvent,
+                                LlmBillingEvent.billing_event_id == BillingEvent.id,  # type: ignore[arg-type]
+                            )
+                            .where(
+                                BillingEvent.conversation_id == conversation_id,  # type: ignore[arg-type]
+                            )
+                        )
+                    ).one()
+                    session_usage["total_input_tokens"] = int(row[0])
+                    session_usage["total_output_tokens"] = int(row[1])
+            except Exception:
+                logger.warning("Failed to query session usage for done event")
+
             await self._append_event(
                 run_id,
                 conversation_id,
-                DoneEvent(timestamp=datetime.now(UTC).isoformat()),
+                DoneEvent(
+                    timestamp=datetime.now(UTC).isoformat(),
+                    data={
+                        "usage": {
+                            "turn": dict(turn_usage),
+                            "session": session_usage,
+                            "context_window": context_window,
+                        }
+                    },
+                ),
             )
         except asyncio.CancelledError:
             await update_run_meta(
