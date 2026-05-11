@@ -489,13 +489,20 @@ class LLMFactory:
                 anthropic_kwargs["base_url"] = provider_config.base_url
             if extra_headers:
                 anthropic_kwargs["default_headers"] = extra_headers
-            if model_config.reasoning and not reasoning_config:
+
+            enable_thinking = False
+            if reasoning_config:
+                anthropic_kwargs["thinking"] = reasoning_config
+                enable_thinking = True
+            elif model_config.reasoning and final_max > 1024:
                 anthropic_kwargs["thinking"] = {
                     "type": "enabled",
-                    "budget_tokens": max(1024, final_max - 1),
+                    "budget_tokens": final_max - 1,
                 }
-            elif reasoning_config:
-                anthropic_kwargs["thinking"] = reasoning_config
+                enable_thinking = True
+
+            if enable_thinking:
+                anthropic_kwargs.pop("temperature", None)
             if extra_body:
                 anthropic_kwargs["model_kwargs"] = {"extra_body": extra_body}
 
