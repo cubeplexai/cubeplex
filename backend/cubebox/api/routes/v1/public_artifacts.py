@@ -14,7 +14,7 @@ from cubebox.objectstore import get_objectstore_client
 router = APIRouter(prefix="/public/artifacts", tags=["public-artifacts"])
 
 
-@router.get("/dl/{token}/{filename}")
+@router.get("/dl/{token}/{filename:path}")
 async def public_download(
     token: str,
     filename: str,
