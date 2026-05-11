@@ -41,6 +41,9 @@ export interface MessageStore {
     string,
     { content: string; receivedAt: number; startedAt?: number; contentType?: string }
   >
+  turnUsage: Record<string, import('../types').TurnUsage | null>
+  sessionUsage: Record<string, import('../types').SessionUsage | null>
+  contextWindow: Record<string, number | null>
 
   loadMessages(client: ApiClient, conversationId: string): Promise<void>
   send(
@@ -616,9 +619,27 @@ async function consumeRunStream(
         })
         break
       } else if (event.type === 'done') {
-        set({
+        const usage = (event.data as Record<string, unknown>).usage as
+          | import('../types').UsageSummary
+          | undefined
+        const usageUpdate: Partial<MessageStore> = {
           lastAppliedEventId: nextEventId(get().lastAppliedEventId, event.event_id),
-        })
+        }
+        if (usage) {
+          usageUpdate.turnUsage = {
+            ...get().turnUsage,
+            [conversationId]: usage.turn,
+          }
+          usageUpdate.sessionUsage = {
+            ...get().sessionUsage,
+            [conversationId]: usage.session,
+          }
+          usageUpdate.contextWindow = {
+            ...get().contextWindow,
+            [conversationId]: usage.context_window,
+          }
+        }
+        set(usageUpdate)
         sawDone = true
         break
       }
@@ -648,6 +669,9 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
   todos: [],
   toolStartedMap: {},
   toolResultMap: {},
+  turnUsage: {},
+  sessionUsage: {},
+  contextWindow: {},
 
   async loadMessages(client: ApiClient, conversationId: string) {
     const state = get()
@@ -670,6 +694,20 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
 
       const restoredTodos = restoreTodosFromHistory(messages)
       hydrateCitationsFromHistory(conversationId, messages)
+      const usageSummary = bootstrap.usage_summary
+      const newTurnUsage = { ...get().turnUsage }
+      const newSessionUsage = {
+        ...get().sessionUsage,
+        [conversationId]: null as import('../types').SessionUsage | null,
+      }
+      const newContextWindow = {
+        ...get().contextWindow,
+        [conversationId]: null as number | null,
+      }
+      if (usageSummary) {
+        newSessionUsage[conversationId] = usageSummary.session
+        newContextWindow[conversationId] = usageSummary.context_window
+      }
       const nextStreamAgents: Record<string, AgentStream> = bootstrap.active_run
         ? { [MAIN_AGENT_KEY]: emptyStream() }
         : {}
@@ -687,6 +725,9 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
         currentRunId: bootstrap.active_run?.run_id ?? null,
         lastAppliedEventId: null,
         statusPhase: null,
+        turnUsage: newTurnUsage,
+        sessionUsage: newSessionUsage,
+        contextWindow: newContextWindow,
       }))
 
       if (bootstrap.active_run) {
@@ -737,6 +778,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
       todos: [],
       toolStartedMap: {},
       toolResultMap: {},
+      turnUsage: { ...state.turnUsage, [conversationId]: null },
     }))
 
     const { batchedSet, flush } = createBatcher(
@@ -767,9 +809,27 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
           })
           break
         } else if (event.type === 'done') {
-          set({
+          const usage = (event.data as Record<string, unknown>).usage as
+            | import('../types').UsageSummary
+            | undefined
+          const usageUpdate: Partial<MessageStore> = {
             lastAppliedEventId: nextEventId(get().lastAppliedEventId, event.event_id),
-          })
+          }
+          if (usage) {
+            usageUpdate.turnUsage = {
+              ...get().turnUsage,
+              [conversationId]: usage.turn,
+            }
+            usageUpdate.sessionUsage = {
+              ...get().sessionUsage,
+              [conversationId]: usage.session,
+            }
+            usageUpdate.contextWindow = {
+              ...get().contextWindow,
+              [conversationId]: usage.context_window,
+            }
+          }
+          set(usageUpdate)
           sawDone = true
           break
         }
