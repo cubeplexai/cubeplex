@@ -87,6 +87,47 @@ def test_system_message_not_emitted_as_text_delta() -> None:
     assert len(text_events) == 0
 
 
+def test_anthropic_thinking_block_emits_reasoning_event() -> None:
+    """ChatAnthropic thinking blocks (list content) produce reasoning events."""
+    msg = AIMessageChunk(
+        content=[{"type": "thinking", "thinking": "Let me think...", "index": 0}],
+    )
+    events = convert_messages_chunk((msg, {}))
+    reasoning = [e for e in events if e["type"] == "reasoning"]
+    text = [e for e in events if e["type"] == "text_delta"]
+    assert len(reasoning) == 1
+    assert reasoning[0]["data"]["content"] == "Let me think..."
+    assert len(text) == 0
+
+
+def test_anthropic_text_block_emits_text_delta() -> None:
+    """ChatAnthropic text blocks (list content) produce text_delta events."""
+    msg = AIMessageChunk(
+        content=[{"type": "text", "text": "Hello!", "index": 1}],
+    )
+    events = convert_messages_chunk((msg, {}))
+    text = [e for e in events if e["type"] == "text_delta"]
+    assert len(text) == 1
+    assert text[0]["data"]["content"] == "Hello!"
+
+
+def test_anthropic_mixed_thinking_and_text_blocks() -> None:
+    """Both thinking and text blocks in one chunk are split correctly."""
+    msg = AIMessageChunk(
+        content=[
+            {"type": "thinking", "thinking": "step 1", "index": 0},
+            {"type": "text", "text": "answer", "index": 1},
+        ],
+    )
+    events = convert_messages_chunk((msg, {}))
+    reasoning = [e for e in events if e["type"] == "reasoning"]
+    text = [e for e in events if e["type"] == "text_delta"]
+    assert len(reasoning) == 1
+    assert reasoning[0]["data"]["content"] == "step 1"
+    assert len(text) == 1
+    assert text[0]["data"]["content"] == "answer"
+
+
 def test_convert_updates_chunk_includes_tool_call_started_at() -> None:
     msg = AIMessage(
         content="",
