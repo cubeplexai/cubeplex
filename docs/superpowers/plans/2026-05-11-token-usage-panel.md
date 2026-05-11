@@ -790,7 +790,9 @@ Destructure new fields from `useMessages`:
 Add the `TokenUsageBar` after the streaming `AssistantMessage` block (after line 225, after `</AssistantMessage>`), inside the same conditional:
 
 ```tsx
-        {!isStreaming && (turnUsage || sessionUsage) && (
+        {!isStreaming &&
+          (turnUsage || sessionUsage) &&
+          (messages ?? []).some((m) => m.role === 'assistant') && (
           <div className="flex justify-start gap-2.5">
             <div className="shrink-0 w-6 h-6" />
             <div className="flex-1 max-w-[75%]">
@@ -804,7 +806,7 @@ Add the `TokenUsageBar` after the streaming `AssistantMessage` block (after line
         )}
 ```
 
-This renders the bar only when streaming is done and there is usage data, aligned with the assistant message's content column (the `w-6` spacer matches the bot icon width).
+This renders the bar only when streaming is done, there is usage data, **and** at least one assistant message exists in history (prevents phantom zero panel on empty conversations after bootstrap). Aligned with the assistant message's content column (the `w-6` spacer matches the bot icon width).
 
 - [ ] **Step 5: Build and type-check**
 
