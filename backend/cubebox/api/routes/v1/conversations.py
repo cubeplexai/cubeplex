@@ -640,11 +640,49 @@ async def get_conversation_bootstrap(
             "started_at": active_run.started_at,
         }
 
+    # --- Session-level token usage for the usage panel ---
+    usage_summary: dict[str, object] = {
+        "session": {"total_input_tokens": 0, "total_output_tokens": 0},
+        "context_window": 0,
+    }
+    try:
+        from sqlalchemy import func, select
+
+        from cubebox.models.billing import BillingEvent, LlmBillingEvent
+
+        stmt = (
+            select(
+                func.coalesce(func.sum(LlmBillingEvent.input_tokens), 0),
+                func.coalesce(func.sum(LlmBillingEvent.output_tokens), 0),
+            )
+            .select_from(BillingEvent)
+            .join(
+                LlmBillingEvent,
+                LlmBillingEvent.billing_event_id == BillingEvent.id,  # type: ignore[arg-type]
+            )
+            .where(BillingEvent.conversation_id == conversation_id)  # type: ignore[arg-type]
+        )
+        row = (await session.execute(stmt)).one()
+        usage_summary["session"] = {
+            "total_input_tokens": int(row[0]),
+            "total_output_tokens": int(row[1]),
+        }
+
+        from cubebox.llm.factory import LLMFactory
+
+        factory = LLMFactory(session=session, org_id=ctx.org_id)
+        provider_name, model_id = await factory.get_default_model()
+        model_cfg = factory.get_model_config(provider_name, model_id)
+        usage_summary["context_window"] = model_cfg.context_window
+    except Exception:
+        pass  # Non-critical; frontend degrades gracefully
+
     return {
         "messages": history["messages"],
         "total": history["total"],
         "active_run": active_run_payload,
         "last_run_status": last_run_status,
+        "usage_summary": usage_summary,
     }
 
 
