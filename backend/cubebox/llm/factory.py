@@ -481,6 +481,7 @@ class LLMFactory:
             llm._cubebox_provider = provider_name  # type: ignore[attr-defined]
             llm._cubebox_model_id = model_config.id  # type: ignore[attr-defined]
             llm._cubebox_model_cost = model_config.cost  # type: ignore[attr-defined]
+            llm._cubebox_context_window = model_config.context_window  # type: ignore[attr-defined]
 
             # Memory system: insert Anthropic cache_control markers when applicable.
             # `provider_config.api` is the authoritative kind (set in config.yaml /
@@ -528,6 +529,7 @@ class LLMFactory:
             anthropic_llm._cubebox_provider = provider_name  # type: ignore[attr-defined]
             anthropic_llm._cubebox_model_id = model_config.id  # type: ignore[attr-defined]
             anthropic_llm._cubebox_model_cost = model_config.cost  # type: ignore[attr-defined]
+            anthropic_llm._cubebox_context_window = model_config.context_window  # type: ignore[attr-defined]
 
             provider_kind = provider_kind_from_api(provider_config.api)
             return _wrap_with_cache_markers(anthropic_llm, provider_kind=provider_kind)
