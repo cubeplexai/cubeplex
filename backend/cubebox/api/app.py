@@ -401,6 +401,7 @@ def create_app(
         mcp_catalog,
         mcp_oauth,
         memory_router,
+        public_artifacts,
         system,
         workspaces_router,
         ws_mcp,
@@ -412,6 +413,7 @@ def create_app(
     app.include_router(workspaces_router, prefix="/api/v1")
     app.include_router(conversations_router, prefix="/api/v1")
     app.include_router(artifacts_router, prefix="/api/v1")
+    app.include_router(public_artifacts.router, prefix="/api/v1")
     app.include_router(attachments_router, prefix="/api/v1")
     app.include_router(memory_router, prefix="/api/v1")
     app.include_router(admin_router, prefix="/api/v1")
