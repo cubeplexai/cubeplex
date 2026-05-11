@@ -21,6 +21,21 @@ from cubebox.llm.openai_compatible import ChatOpenAICompatible
 
 logger = logging.getLogger(__name__)
 
+_PROVIDER_TYPE_TO_API: dict[str, str] = {
+    "openai_compat": "openai-completions",
+    "anthropic": "anthropic",
+}
+
+_API_TO_PROVIDER_TYPE: dict[str, str] = {v: k for k, v in _PROVIDER_TYPE_TO_API.items()}
+
+
+def _provider_type_to_api(provider_type: str) -> str:
+    return _PROVIDER_TYPE_TO_API.get(provider_type, "openai-completions")
+
+
+def api_to_provider_type(api: str) -> str:
+    return _API_TO_PROVIDER_TYPE.get(api, "openai_compat")
+
 
 def _wrap_with_cache_markers(model: BaseChatModel, *, provider_kind: ProviderKind) -> BaseChatModel:
     """Patch the model so every async generation pass-through inserts
@@ -144,7 +159,7 @@ class LLMFactory:
             db_configs[p.name] = {
                 "base_url": p.base_url,
                 "api_key": api_key,
-                "api": "openai-completions",
+                "api": _provider_type_to_api(p.provider_type),
                 "extra_body": p.extra_body,
                 "extra_headers": p.extra_headers,
                 "models": [
