@@ -18,6 +18,7 @@ import { DocumentPreview } from './DocumentPreview'
 import { DataPreview } from './DataPreview'
 import { FallbackPreview } from './FallbackPreview'
 import { SkillArtifactPreview } from './SkillArtifactPreview'
+import { OfficePreview } from './OfficePreview'
 import { buildDownloadUrl, buildPreviewUrl } from './previewUtils'
 
 const PdfPreview = dynamic(() => import('./PdfPreview').then((m) => m.PdfPreview), {
@@ -29,6 +30,14 @@ function isPdf(artifact: Artifact): boolean {
   if (artifact.mime_type === 'application/pdf') return true
   const filename = artifact.entry_file || artifact.path.split('/').pop() || ''
   return /\.pdf$/i.test(filename)
+}
+
+const OFFICE_EXTENSIONS = new Set(['.docx', '.xlsx', '.pptx'])
+
+function isOfficeFile(artifact: Artifact): boolean {
+  const filename = artifact.entry_file || artifact.path.split('/').pop() || ''
+  const ext = filename.slice(filename.lastIndexOf('.')).toLowerCase()
+  return OFFICE_EXTENSIONS.has(ext)
 }
 
 function useFormatRelativeTime(): (dateStr: string) => string {
@@ -183,6 +192,10 @@ function PreviewContent({
     const filename = artifact.entry_file || artifact.path.split('/').pop() || 'file.pdf'
     const fileUrl = buildPreviewUrl(artifact, filename, version, workspaceId)
     return <PdfPreview fileUrl={fileUrl} />
+  }
+
+  if (isOfficeFile(artifact)) {
+    return <OfficePreview artifact={artifact} version={version} workspaceId={workspaceId} />
   }
 
   switch (artifact.artifact_type) {
