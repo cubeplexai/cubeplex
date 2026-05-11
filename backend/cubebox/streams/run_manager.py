@@ -87,6 +87,7 @@ def _dicts_to_sse_events(
         ToolCallDeltaEvent,
         ToolCallEvent,
         ToolResultEvent,
+        UsageEvent,
     )
 
     events: list[AgentEvent] = []
@@ -151,6 +152,15 @@ def _dicts_to_sse_events(
         elif evt_type == "citation":
             events.append(
                 CitationEvent(
+                    timestamp=evt_dict["timestamp"],
+                    data=evt_dict["data"],
+                    agent_id=evt_dict.get("agent_id"),
+                    agent_name=evt_dict.get("agent_name"),
+                )
+            )
+        elif evt_type == "usage":
+            events.append(
+                UsageEvent(
                     timestamp=evt_dict["timestamp"],
                     data=evt_dict["data"],
                     agent_id=evt_dict.get("agent_id"),

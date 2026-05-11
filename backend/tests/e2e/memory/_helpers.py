@@ -34,6 +34,18 @@ async def _stream_events(
     return events
 
 
+class AgentRunError(RuntimeError):
+    """Raised when the SSE stream contains an error event from the agent run.
+
+    This distinguishes LLM/infra failures from zero cache_read (endpoint
+    does not support caching). The test layer converts this to a pytest.skip
+    with the error details so the test infrastructure failure is visible
+    without failing the CI gate.
+    """
+
+    pass
+
+
 async def send_message_and_collect_text(
     client: httpx.AsyncClient,
     ws_id: str,
@@ -51,3 +63,41 @@ async def send_message_and_collect_text(
         if isinstance(chunk, str):
             parts.append(chunk)
     return "".join(parts)
+
+
+async def send_message_and_collect_usage(
+    client: httpx.AsyncClient,
+    ws_id: str,
+    conv_id: str,
+    content: str,
+) -> dict[str, int]:
+    """Drive one turn and aggregate per-call UsageEvent payloads.
+
+    Returns a single dict summing every emitted usage event for the turn:
+        {input_tokens, output_tokens, cache_read_tokens, cache_write_tokens}
+    Returns all-zero dict if no usage events were emitted (endpoint did
+    not report usage). The caller decides whether that is "skip" or "fail".
+
+    Raises:
+        AgentRunError: if the stream contains an error event (LLM or infra
+            failure). The caller should convert this to pytest.skip.
+    """
+    events = await _stream_events(client, ws_id, conv_id, content)
+    # Surface agent errors as a typed exception so the test can skip cleanly.
+    error_events = [e for e in events if e.get("type") == "error"]
+    if error_events:
+        msg = error_events[0].get("data", {}).get("message", "unknown agent error")
+        raise AgentRunError(f"Agent run returned error event: {msg}")
+    totals = {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+    }
+    for evt in events:
+        if evt.get("type") != "usage":
+            continue
+        data = evt.get("data") or {}
+        for k in totals:
+            totals[k] += int(data.get(k) or 0)
+    return totals
