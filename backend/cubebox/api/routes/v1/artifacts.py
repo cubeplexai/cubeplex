@@ -177,7 +177,20 @@ async def create_preview_token(
         )
 
     target_version = version or artifact.version
-    filename = artifact.entry_file or artifact.path.rsplit("/", 1)[-1]
+
+    if version is not None and version != artifact.version:
+        version_repo = ArtifactVersionRepository(
+            session, org_id=ctx.org_id, workspace_id=ctx.workspace_id
+        )
+        av = await version_repo.get_version(artifact_id, version)
+        if not av:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Version {version} not found",
+            )
+        filename = av.entry_file or av.path.rsplit("/", 1)[-1]
+    else:
+        filename = artifact.entry_file or artifact.path.rsplit("/", 1)[-1]
     ext = filename[filename.rfind(".") :].lower() if "." in filename else ""
     if ext not in OFFICE_EXTENSIONS:
         raise HTTPException(
