@@ -6,7 +6,8 @@ All seed functions share these traits:
 - Called from `app.lifespan` via explicit imports.
 """
 
+from cubebox.seeders.mcp_catalog_seeder import seed_mcp_catalog
 from cubebox.seeders.provider_seeder import seed_system_providers_from_config
 from cubebox.seeders.skill_seeder import seed_preinstalled_skills
 
-__all__ = ["seed_preinstalled_skills", "seed_system_providers_from_config"]
+__all__ = ["seed_mcp_catalog", "seed_preinstalled_skills", "seed_system_providers_from_config"]
