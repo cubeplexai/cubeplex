@@ -16,8 +16,7 @@ from cubebox.llm.config import LLMConfig, ModelConfig, ModelCost, ProviderConfig
 from cubebox.llm.factory import LLMFactory
 
 
-def _build_config() -> LLMConfig:
-    """Minimal LLMConfig with a single Anthropic provider."""
+def _build_config(*, reasoning: bool = False, max_tokens: int = 4096) -> LLMConfig:
     return LLMConfig(
         default_model="anthropic-test/claude-test",
         providers={
@@ -29,8 +28,9 @@ def _build_config() -> LLMConfig:
                     ModelConfig(
                         id="claude-test",
                         name="Claude Test",
+                        reasoning=reasoning,
                         context_window=200000,
-                        max_tokens=4096,
+                        max_tokens=max_tokens,
                         cost=ModelCost(
                             input=3.0,
                             output=15.0,
@@ -50,7 +50,6 @@ async def test_factory_builds_chat_anthropic_for_anthropic_api() -> None:
     llm = factory.create("claude-test", provider_name="anthropic-test")
 
     assert isinstance(llm, ChatAnthropic)
-    # Cubebox metadata must round-trip for CostMiddleware
     assert getattr(llm, "_cubebox_provider", None) == "anthropic-test"
     assert getattr(llm, "_cubebox_model_id", None) == "claude-test"
     assert getattr(llm, "_cubebox_model_cost", None) is not None
@@ -61,23 +60,52 @@ async def test_factory_passes_base_url_and_api_key() -> None:
     factory = LLMFactory(llm_config=_build_config())
     llm = factory.create("claude-test", provider_name="anthropic-test")
 
-    # ChatAnthropic stores base_url under different attr names depending on
-    # version; check both.
     base_url: Any = getattr(llm, "anthropic_api_url", None) or getattr(llm, "base_url", None)
     assert base_url and "example.invalid" in str(base_url)
 
 
 @pytest.mark.asyncio
+async def test_factory_forwards_temperature() -> None:
+    factory = LLMFactory(llm_config=_build_config())
+    llm = factory.create("claude-test", provider_name="anthropic-test", temperature=0.5)
+    assert isinstance(llm, ChatAnthropic)
+    assert llm.temperature == 0.5
+
+
+@pytest.mark.asyncio
+async def test_factory_forwards_max_tokens() -> None:
+    factory = LLMFactory(llm_config=_build_config(max_tokens=8192))
+    llm = factory.create("claude-test", provider_name="anthropic-test", max_tokens=2048)
+    assert isinstance(llm, ChatAnthropic)
+    assert llm.max_tokens == 2048
+
+
+@pytest.mark.asyncio
+async def test_factory_enables_thinking_for_reasoning_model() -> None:
+    factory = LLMFactory(llm_config=_build_config(reasoning=True, max_tokens=12000))
+    llm = factory.create("claude-test", provider_name="anthropic-test")
+
+    assert isinstance(llm, ChatAnthropic)
+    assert llm.thinking is not None
+    assert llm.thinking["type"] == "enabled"
+    assert llm.thinking["budget_tokens"] == 11999
+
+
+@pytest.mark.asyncio
+async def test_factory_reasoning_config_overrides_auto_thinking() -> None:
+    factory = LLMFactory(llm_config=_build_config(reasoning=True))
+    custom = {"type": "enabled", "budget_tokens": 500}
+    llm = factory.create("claude-test", provider_name="anthropic-test", reasoning_config=custom)
+    assert isinstance(llm, ChatAnthropic)
+    assert llm.thinking == custom
+
+
+@pytest.mark.asyncio
 async def test_factory_wraps_anthropic_with_cache_markers() -> None:
-    """The Anthropic branch must apply cache_control via _wrap_with_cache_markers."""
     factory = LLMFactory(llm_config=_build_config())
     llm = factory.create("claude-test", provider_name="anthropic-test")
 
-    # _wrap_with_cache_markers patches `_agenerate` in-place. The patched
-    # method's qualname includes "patched_agenerate" or has been replaced.
     agenerate = llm._agenerate  # type: ignore[attr-defined]
-    assert agenerate.__name__ in {"patched_agenerate", "_agenerate"}
-    # If it's still _agenerate, cache markers were not applied.
     assert agenerate.__name__ == "patched_agenerate", (
         "factory must wrap Anthropic models with _wrap_with_cache_markers"
     )

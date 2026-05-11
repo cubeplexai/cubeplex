@@ -476,19 +476,30 @@ class LLMFactory:
         if provider_config.api == "anthropic":
             from langchain_anthropic import ChatAnthropic
 
+            final_max = max_tokens or model_config.max_tokens or 4096
             anthropic_kwargs: dict[str, Any] = {
                 "model": model_config.id,
                 "api_key": provider_config.api_key,
                 "streaming": True,
                 "stream_usage": True,
-                "temperature": kwargs.get("temperature", 0.0),
-                "max_tokens": kwargs.get("max_tokens", model_config.max_tokens or 4096),
+                "temperature": temperature,
+                "max_tokens": final_max,
             }
             if provider_config.base_url:
                 anthropic_kwargs["base_url"] = provider_config.base_url
             if extra_headers:
                 anthropic_kwargs["default_headers"] = extra_headers
+            if model_config.reasoning and not reasoning_config:
+                anthropic_kwargs["thinking"] = {
+                    "type": "enabled",
+                    "budget_tokens": max(1024, final_max - 1),
+                }
+            elif reasoning_config:
+                anthropic_kwargs["thinking"] = reasoning_config
+            if extra_body:
+                anthropic_kwargs["model_kwargs"] = {"extra_body": extra_body}
 
+            anthropic_kwargs.update(kwargs)
             anthropic_llm = ChatAnthropic(**anthropic_kwargs)
 
             # Attach cubebox metadata for CostMiddleware to read.

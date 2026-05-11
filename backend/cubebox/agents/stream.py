@@ -71,7 +71,7 @@ def convert_messages_chunk(
         content = getattr(msg, "content", "") or ""
         additional_kwargs = getattr(msg, "additional_kwargs", {}) or {}
 
-    # Reasoning content
+    # Reasoning content — OpenAI-compatible path puts it in additional_kwargs
     reasoning_content = (additional_kwargs or {}).get("reasoning_content", "")
     if reasoning_content:
         events.append(
@@ -82,6 +82,29 @@ def convert_messages_chunk(
                 "agent_id": agent_id,
             }
         )
+
+    # ChatAnthropic returns content as a list of typed blocks:
+    #   [{"type": "thinking", "thinking": "..."}, {"type": "text", "text": "..."}]
+    # Split into reasoning and text parts before emitting events.
+    text_content: str = ""
+    if isinstance(content, list):
+        for block in content:
+            if not isinstance(block, dict):
+                continue
+            btype = block.get("type", "")
+            if btype == "thinking" and block.get("thinking"):
+                events.append(
+                    {
+                        "type": "reasoning",
+                        "timestamp": timestamp,
+                        "data": {"content": block["thinking"]},
+                        "agent_id": agent_id,
+                    }
+                )
+            elif btype == "text" and block.get("text"):
+                text_content += block["text"]
+    elif isinstance(content, str):
+        text_content = content
 
     # Determine message type so we only emit text from AI responses.
     # SystemMessages injected by middleware (e.g. guard corrections) and
@@ -99,13 +122,13 @@ def convert_messages_chunk(
     ) or {}
 
     # Text content (only AI messages — skip system/tool/human)
-    if content and msg_type in ("ai", "AIMessageChunk"):
+    if text_content and msg_type in ("ai", "AIMessageChunk"):
         events.append(
             {
                 "type": "text_delta",
                 "timestamp": timestamp,
                 "data": {
-                    "content": content,
+                    "content": text_content,
                     "usage": {
                         "input_tokens": usage_metadata.get("input_tokens", 0),
                         "output_tokens": usage_metadata.get("output_tokens", 0),
