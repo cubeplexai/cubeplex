@@ -2,17 +2,22 @@
 
 import io
 import mimetypes
+import secrets
 import tarfile
 from typing import Annotated
+from urllib.parse import quote
 
+import orjson
 from botocore.exceptions import ClientError
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import Response
 from loguru import logger
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cubebox.auth.context import RequestContext
 from cubebox.auth.dependencies import require_member
+from cubebox.cache import RedisHandle, redis_dep
+from cubebox.config import config
 from cubebox.db import get_session
 from cubebox.objectstore import get_objectstore_client
 from cubebox.repositories import ArtifactRepository, ArtifactVersionRepository
@@ -146,6 +151,64 @@ async def download_artifact(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to download artifact",
         ) from None
+
+
+OFFICE_EXTENSIONS = frozenset({".docx", ".xlsx", ".pptx"})
+OTK_TTL_SECONDS = 300
+
+
+@router.post("/{artifact_id}/preview-token")
+async def create_preview_token(
+    conversation_id: str,
+    artifact_id: str,
+    request: Request,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    ctx: Annotated[RequestContext, Depends(require_member)],
+    rh: Annotated[RedisHandle, Depends(redis_dep)],
+    version: int | None = Query(default=None),
+) -> dict[str, str]:
+    """Issue a one-time public download token for Office Online Viewer."""
+    repo = ArtifactRepository(session, org_id=ctx.org_id, workspace_id=ctx.workspace_id)
+    artifact = await repo.get_by_id(artifact_id)
+    if not artifact or artifact.conversation_id != conversation_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Artifact {artifact_id} not found",
+        )
+
+    target_version = version or artifact.version
+    filename = artifact.entry_file or artifact.path.rsplit("/", 1)[-1]
+    ext = filename[filename.rfind(".") :].lower() if "." in filename else ""
+    if ext not in OFFICE_EXTENSIONS:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Office preview not supported for extension '{ext}'",
+        )
+
+    nonce = secrets.token_hex(32)
+    payload = orjson.dumps(
+        {
+            "conversation_id": conversation_id,
+            "artifact_id": artifact_id,
+            "version": target_version,
+            "filename": filename,
+        }
+    )
+    key = f"{rh.key_prefix}:otk:{nonce}"
+    await rh.client.set(key, payload, ex=OTK_TTL_SECONDS)
+
+    public_url = config.get("api.public_url", "")
+    if public_url:
+        base = str(public_url).rstrip("/")
+    else:
+        base = str(request.base_url).rstrip("/")
+
+    download_url = f"{base}/api/v1/public/artifacts/dl/{nonce}/{filename}"
+    viewer_url = (
+        f"https://view.officeapps.live.com/op/embed.aspx?src={quote(download_url, safe='')}"
+    )
+
+    return {"download_url": download_url, "viewer_url": viewer_url}
 
 
 @router.get("/{artifact_id}/preview/v{version}/{file_path:path}")
