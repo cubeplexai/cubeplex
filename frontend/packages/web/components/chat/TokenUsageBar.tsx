@@ -34,10 +34,6 @@ export function TokenUsageBar({ turnUsage, sessionUsage, contextWindow }: TokenU
       ? (turnUsage.cache_read_tokens / turnUsage.input_tokens) * 100
       : null
 
-  const sessionTotal = sessionUsage
-    ? sessionUsage.total_input_tokens + sessionUsage.total_output_tokens
-    : null
-
   const ctxPct =
     sessionUsage && contextWindow && contextWindow > 0
       ? ((sessionUsage.total_input_tokens + sessionUsage.total_output_tokens) / contextWindow) * 100
@@ -90,7 +86,9 @@ export function TokenUsageBar({ turnUsage, sessionUsage, contextWindow }: TokenU
               <div className="grid grid-cols-2 gap-x-4 gap-y-0.5">
                 <span>{t('totalTokens')}</span>
                 <span className="text-right font-mono">
-                  {sessionTotal !== null ? formatTokenCount(sessionTotal) : '—'}
+                  {formatTokenCount(
+                    sessionUsage.total_input_tokens + sessionUsage.total_output_tokens,
+                  )}
                 </span>
               </div>
               {ctxPct !== null && (
