@@ -172,6 +172,8 @@ export interface TurnUsage {
 export interface SessionUsage {
   total_input_tokens: number
   total_output_tokens: number
+  total_cache_read_tokens: number
+  total_cache_write_tokens: number
 }
 
 export interface UsageSummary {

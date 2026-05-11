@@ -1,0 +1,138 @@
+"""Usage aggregation service — centralises billing queries for token usage."""
+
+from __future__ import annotations
+
+from datetime import datetime
+from typing import TypedDict
+
+from loguru import logger
+from sqlalchemy import func as sa_func
+from sqlalchemy import select as sa_select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from cubebox.models.billing import BillingEvent, LlmBillingEvent
+
+
+class TurnUsage(TypedDict):
+    input_tokens: int
+    output_tokens: int
+    cache_read_tokens: int
+    cache_write_tokens: int
+
+
+class SessionUsage(TypedDict):
+    total_input_tokens: int
+    total_output_tokens: int
+    total_cache_read_tokens: int
+    total_cache_write_tokens: int
+
+
+class UsageSummary(TypedDict, total=False):
+    turn: TurnUsage
+    session: SessionUsage
+    context_window: int
+
+
+_ZERO_SESSION: SessionUsage = {
+    "total_input_tokens": 0,
+    "total_output_tokens": 0,
+    "total_cache_read_tokens": 0,
+    "total_cache_write_tokens": 0,
+}
+
+
+async def get_session_usage(
+    session: AsyncSession,
+    conversation_id: str,
+) -> SessionUsage:
+    """Sum all billing tokens for a conversation."""
+    stmt = (
+        sa_select(
+            sa_func.coalesce(sa_func.sum(LlmBillingEvent.input_tokens), 0),
+            sa_func.coalesce(sa_func.sum(LlmBillingEvent.output_tokens), 0),
+            sa_func.coalesce(sa_func.sum(LlmBillingEvent.cache_read_tokens), 0),
+            sa_func.coalesce(sa_func.sum(LlmBillingEvent.cache_write_tokens), 0),
+        )
+        .join(
+            BillingEvent,
+            LlmBillingEvent.billing_event_id == BillingEvent.id,  # type: ignore[arg-type]
+        )
+        .where(
+            BillingEvent.conversation_id == conversation_id,  # type: ignore[arg-type]
+        )
+    )
+    row = (await session.execute(stmt)).one()
+    return {
+        "total_input_tokens": int(row[0]),
+        "total_output_tokens": int(row[1]),
+        "total_cache_read_tokens": int(row[2]),
+        "total_cache_write_tokens": int(row[3]),
+    }
+
+
+async def get_turn_usage(
+    session: AsyncSession,
+    conversation_id: str,
+    *,
+    after: datetime,
+) -> TurnUsage:
+    """Sum billing tokens for one turn (events started at or after *after*)."""
+    stmt = (
+        sa_select(
+            sa_func.coalesce(sa_func.sum(LlmBillingEvent.input_tokens), 0),
+            sa_func.coalesce(sa_func.sum(LlmBillingEvent.output_tokens), 0),
+            sa_func.coalesce(sa_func.sum(LlmBillingEvent.cache_read_tokens), 0),
+            sa_func.coalesce(sa_func.sum(LlmBillingEvent.cache_write_tokens), 0),
+        )
+        .join(
+            BillingEvent,
+            LlmBillingEvent.billing_event_id == BillingEvent.id,  # type: ignore[arg-type]
+        )
+        .where(
+            BillingEvent.conversation_id == conversation_id,  # type: ignore[arg-type]
+            BillingEvent.started_at >= after,  # type: ignore[arg-type]
+        )
+    )
+    row = (await session.execute(stmt)).one()
+    return {
+        "input_tokens": int(row[0]),
+        "output_tokens": int(row[1]),
+        "cache_read_tokens": int(row[2]),
+        "cache_write_tokens": int(row[3]),
+    }
+
+
+async def build_usage_summary(
+    session: AsyncSession,
+    conversation_id: str,
+    *,
+    org_id: str,
+    last_user_message_ts: str | None = None,
+) -> UsageSummary:
+    """Build a complete usage summary for the usage panel.
+
+    Called from both the bootstrap endpoint and RunManager done event.
+    """
+    summary: UsageSummary = {
+        "session": dict(_ZERO_SESSION),  # type: ignore[typeddict-item]
+        "context_window": 0,
+    }
+    try:
+        summary["session"] = await get_session_usage(session, conversation_id)
+
+        if last_user_message_ts:
+            ts_dt = datetime.fromisoformat(last_user_message_ts)
+            summary["turn"] = await get_turn_usage(session, conversation_id, after=ts_dt)
+
+        from cubebox.llm.factory import LLMFactory
+
+        factory = LLMFactory(session=session, org_id=org_id)
+        model_cfg = await factory.get_default_model_config()
+        summary["context_window"] = model_cfg.context_window
+    except Exception:
+        logger.warning(
+            "Failed to build usage summary for conversation %s",
+            conversation_id,
+            exc_info=True,
+        )
+    return summary

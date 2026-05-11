@@ -90,6 +90,12 @@ export function TokenUsageBar({ turnUsage, sessionUsage, contextWindow }: TokenU
                     sessionUsage.total_input_tokens + sessionUsage.total_output_tokens,
                   )}
                 </span>
+                <span>{t('cacheHitRate')}</span>
+                <span className="text-right font-mono">
+                  {sessionUsage.total_input_tokens > 0
+                    ? `${((sessionUsage.total_cache_read_tokens / sessionUsage.total_input_tokens) * 100).toFixed(1)}%`
+                    : '—'}
+                </span>
               </div>
               {ctxPct !== null && (
                 <div className="mt-1.5">
