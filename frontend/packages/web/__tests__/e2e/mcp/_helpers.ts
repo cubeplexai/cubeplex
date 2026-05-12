@@ -32,11 +32,12 @@ export async function createWorkspace(page: Page, name: string): Promise<{ id: s
 }
 
 export async function createOrgMcpServer(page: Page, name: string): Promise<{ id: string }> {
+  const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-')
   const resp = await page.request.post('/api/v1/admin/mcp/servers', {
     headers: { 'X-CSRF-Token': await csrf(page) },
     data: {
       name,
-      server_url: 'http://127.0.0.1:9/mcp',
+      server_url: `http://127.0.0.1:9/${slug}`,
       transport: 'streamable_http',
       auth_method: 'static',
       credential_scope: 'org',
