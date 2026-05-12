@@ -647,7 +647,7 @@
     "office": {
       "loading": "Loading document preview…",
       "error": "Online preview is unavailable",
-      "errorHint": "The file could not be loaded by the external preview service.",
+      "errorHint": "The file could not be loaded by the preview service.",
       "download": "Download file",
       "retry": "Retry"
     },
