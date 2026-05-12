@@ -52,15 +52,21 @@ def create_memory_tools(
     backing the service closes after each tool invocation.
     """
 
-    async def memory_save(args: MemorySaveArgs) -> dict[str, Any]:
+    async def memory_save(
+        scope: MemoryScope,
+        type: MemoryType,
+        content: str,
+        confidence: float = 0.8,
+        reason: str = "",
+    ) -> dict[str, Any]:
         async with service_factory() as svc:
             try:
                 item = await svc.create(
                     CreateMemoryInput(
-                        scope=args.scope,
-                        type=args.type,
-                        content=args.content,
-                        confidence=args.confidence,
+                        scope=scope,
+                        type=type,
+                        content=content,
+                        confidence=confidence,
                         source_conversation_id=conversation_id,
                         source_run_id=run_id,
                     )
@@ -71,13 +77,18 @@ def create_memory_tools(
                 return {"status": "rejected", "error": str(exc)}
             return {"status": "saved", "memory_id": item.id}
 
-    async def memory_search(args: MemorySearchArgs) -> dict[str, Any]:
+    async def memory_search(
+        query: str,
+        scope: MemoryScope | None = None,
+        type: MemoryType | None = None,
+        limit: int = 10,
+    ) -> dict[str, Any]:
         async with service_factory() as svc:
             items = await svc.repo.list(
-                scope=args.scope,
-                type_=args.type,
-                q=args.query,
-                limit=args.limit,
+                scope=scope,
+                type_=type,
+                q=query,
+                limit=limit,
             )
             return {
                 "items": [
@@ -92,15 +103,22 @@ def create_memory_tools(
                 ]
             }
 
-    async def memory_update(args: MemoryUpdateArgs) -> dict[str, Any]:
+    async def memory_update(
+        memory_id: str,
+        content: str | None = None,
+        type: MemoryType | None = None,
+        confidence: float | None = None,
+        status: MemoryStatus | None = None,
+        reason: str = "",
+    ) -> dict[str, Any]:
         async with service_factory() as svc:
             try:
                 item = await svc.update(
-                    args.memory_id,
-                    content=args.content,
-                    type_=args.type,
-                    confidence=args.confidence,
-                    status=args.status,
+                    memory_id,
+                    content=content,
+                    type_=type,
+                    confidence=confidence,
+                    status=status,
                 )
             except LookupError as exc:
                 return {"status": "error", "error": str(exc)}
