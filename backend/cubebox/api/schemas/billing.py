@@ -27,3 +27,28 @@ class CostSummaryResponse(BaseModel):
     by_model: list[CostAggregateRow]
     by_user: list[CostAggregateRow]
     by_day: list[CostAggregateRow]
+
+
+class TimeseriesPoint(BaseModel):
+    date: str  # YYYY-MM-DD (or week-start date if granularity=week)
+    cost_amount_micro: int
+    calls: int
+    input_tokens: int
+    output_tokens: int
+    cache_read_tokens: int
+    cache_write_tokens: int
+
+
+class TimeseriesSeries(BaseModel):
+    bucket: str  # workspace_id | user_id | "provider/model_id" | "__other"
+    points: list[TimeseriesPoint]
+    currency: str
+
+
+class TimeseriesResponse(BaseModel):
+    from_date: date
+    to_date: date
+    granularity: str  # "day" | "week"
+    dimension: str  # "workspace" | "model" | "user"
+    series: list[TimeseriesSeries]
+    currency: str

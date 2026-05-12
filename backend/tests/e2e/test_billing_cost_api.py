@@ -327,3 +327,23 @@ async def test_cost_summary_returns_by_user(async_client: httpx.AsyncClient) -> 
             f"row missing fields: expected {expected_fields}, got {row.keys()}"
         )
         assert row["bucket_type"] == "user"
+
+
+async def test_timeseries_workspace_happy_path(async_client: httpx.AsyncClient) -> None:
+    resp = await async_client.get(
+        "/api/v1/admin/cost/timeseries",
+        params={"dimension": "workspace", "granularity": "day"},
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["dimension"] == "workspace"
+    assert body["granularity"] == "day"
+    assert "series" in body and isinstance(body["series"], list)
+
+
+async def test_timeseries_rejects_invalid_dimension(async_client: httpx.AsyncClient) -> None:
+    resp = await async_client.get(
+        "/api/v1/admin/cost/timeseries",
+        params={"dimension": "skill"},
+    )
+    assert resp.status_code == 422  # FastAPI validation

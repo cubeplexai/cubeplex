@@ -4,13 +4,19 @@ import csv
 import io
 from collections.abc import AsyncGenerator
 from datetime import UTC, date, datetime
-from typing import Annotated
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from cubebox.api.schemas.billing import CostAggregateRow, CostSummaryResponse
+from cubebox.api.schemas.billing import (
+    CostAggregateRow,
+    CostSummaryResponse,
+    TimeseriesPoint,
+    TimeseriesResponse,
+    TimeseriesSeries,
+)
 from cubebox.auth.dependencies import current_active_user, resolve_current_org_id
 from cubebox.db import get_session
 from cubebox.models import User
@@ -104,6 +110,48 @@ async def get_cost_summary(
         by_model=[CostAggregateRow(**r) for r in by_model],
         by_user=[CostAggregateRow(**r) for r in by_user],
         by_day=[CostAggregateRow(**r) for r in by_day],
+    )
+
+
+@router.get("/timeseries", response_model=TimeseriesResponse)
+async def get_cost_timeseries(
+    session: Annotated[AsyncSession, Depends(get_session)],
+    auth: Annotated[tuple[User, str], Depends(_require_org_admin)],
+    dimension: Literal["workspace", "model", "user"] = Query(default="workspace"),
+    granularity: Literal["day", "week"] = Query(default="day"),
+    from_date: str | None = Query(default=None),
+    to_date: str | None = Query(default=None),
+    workspace_ids: str | None = Query(default=None, description="comma-separated"),
+    models: str | None = Query(default=None, description="comma-separated provider/model"),
+) -> TimeseriesResponse:
+    _, org_id = auth
+    since, until = _parse_date_range(from_date, to_date)
+    repo = BillingRepository(session, org_id=org_id)
+    ws_filter = [s for s in (workspace_ids or "").split(",") if s] or None
+    model_filter = [s for s in (models or "").split(",") if s] or None
+    series_raw = await repo.get_timeseries(
+        dimension=dimension,
+        since=since,
+        until=until,
+        granularity=granularity,
+        workspace_ids=ws_filter,
+        models=model_filter,
+    )
+    currency = series_raw[0]["currency"] if series_raw else "USD"
+    return TimeseriesResponse(
+        from_date=since.date(),
+        to_date=until.date(),
+        granularity=granularity,
+        dimension=dimension,
+        currency=currency,
+        series=[
+            TimeseriesSeries(
+                bucket=s["bucket"],
+                currency=s["currency"],
+                points=[TimeseriesPoint(**p) for p in s["points"]],
+            )
+            for s in series_raw
+        ],
     )
 
 
