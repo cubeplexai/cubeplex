@@ -781,5 +781,22 @@
     "workspaceSettings": "Workspace settings",
     "accountMenu": "Account menu",
     "signOut": "Sign out"
+  },
+  "mcpAdmin": {
+    "searchPlaceholder": "Search connectors…",
+    "searchAriaLabel": "Search MCP connectors",
+    "filterByStatus": "Filter by status",
+    "filterAll": "All",
+    "filterInstalled": "Installed",
+    "filterAvailable": "Available",
+    "filterCustom": "Custom",
+    "addCustomButton": "Add Custom",
+    "statusInstalled": "Installed",
+    "statusError": "Error",
+    "statusNotAuthed": "Not authed",
+    "workspaceCount": "{count} workspace(s)",
+    "loading": "Loading…",
+    "noConnectors": "No connectors found",
+    "noConnectorsHint": "Try a different search or filter"
   }
 }

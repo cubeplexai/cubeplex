@@ -781,5 +781,22 @@
     "workspaceSettings": "工作区设置",
     "accountMenu": "账号菜单",
     "signOut": "退出登录"
+  },
+  "mcpAdmin": {
+    "searchPlaceholder": "搜索连接器…",
+    "searchAriaLabel": "搜索 MCP 连接器",
+    "filterByStatus": "按状态筛选",
+    "filterAll": "全部",
+    "filterInstalled": "已安装",
+    "filterAvailable": "可用",
+    "filterCustom": "自定义",
+    "addCustomButton": "添加自定义",
+    "statusInstalled": "已安装",
+    "statusError": "错误",
+    "statusNotAuthed": "未授权",
+    "workspaceCount": "{count} 个工作区",
+    "loading": "加载中…",
+    "noConnectors": "未找到连接器",
+    "noConnectorsHint": "请尝试不同的搜索条件或筛选项"
   }
 }
