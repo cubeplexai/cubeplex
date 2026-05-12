@@ -18,6 +18,7 @@ interface OfficePreviewProps {
 type ViewerState = 'loading' | 'ready' | 'error'
 
 const LOAD_TIMEOUT_MS = 15_000
+const REDIRECT_DETECT_MS = 1_500
 
 export function OfficePreview({ artifact, version, workspaceId }: OfficePreviewProps) {
   const t = useTranslations('panel.office')
@@ -25,10 +26,12 @@ export function OfficePreview({ artifact, version, workspaceId }: OfficePreviewP
   const [state, setState] = useState<ViewerState>('loading')
   const iframeRef = useRef<HTMLIFrameElement>(null)
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const loadCountRef = useRef(0)
 
   const fetchToken = useCallback(async () => {
     setState('loading')
     setViewerUrl(null)
+    loadCountRef.current = 0
     try {
       const client = createApiClient('')
       if (workspaceId) client.setWorkspaceId(workspaceId)
@@ -59,8 +62,17 @@ export function OfficePreview({ artifact, version, workspaceId }: OfficePreviewP
   }, [viewerUrl])
 
   const handleLoad = () => {
+    loadCountRef.current += 1
     if (timerRef.current) clearTimeout(timerRef.current)
-    setState('ready')
+
+    if (loadCountRef.current > 1) {
+      setState('error')
+      return
+    }
+
+    timerRef.current = setTimeout(() => {
+      setState('ready')
+    }, REDIRECT_DETECT_MS)
   }
 
   const handleError = () => {

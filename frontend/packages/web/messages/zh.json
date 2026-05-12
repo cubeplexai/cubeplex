@@ -647,7 +647,7 @@
     "office": {
       "loading": "正在加载文档预览…",
       "error": "在线预览不可用",
-      "errorHint": "外部预览服务无法加载此文件。",
+      "errorHint": "预览服务无法加载此文件。",
       "download": "下载文件",
       "retry": "重试"
     },
