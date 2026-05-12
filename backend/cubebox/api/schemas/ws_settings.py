@@ -42,6 +42,9 @@ class MCPServerItem(BaseModel):
     transport: str
     enabled: bool
     scope: str  # "org" | "workspace"
+    credential_mode: str = "org"  # "org" | "workspace" | "user"
+    credential_source: str | None = None  # "org" | "workspace" | "user" | "needs_setup" | None
+    credential_shared_by: str | None = None  # display name when mode=workspace and cred exists
 
 
 class WorkspaceMCPOut(BaseModel):

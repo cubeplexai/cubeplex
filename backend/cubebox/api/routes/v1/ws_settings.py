@@ -25,8 +25,14 @@ from cubebox.auth.context import RequestContext
 from cubebox.auth.dependencies import require_member
 from cubebox.config import config as _config
 from cubebox.db import get_session
+from cubebox.models import User
 from cubebox.models.agent_config import AgentConfig
-from cubebox.repositories.mcp import MCPServerRepository, WorkspaceMCPOverrideRepository
+from cubebox.repositories.mcp import (
+    MCPServerRepository,
+    UserMCPCredentialRepository,
+    WorkspaceMCPCredentialRepository,
+    WorkspaceMCPOverrideRepository,
+)
 from cubebox.repositories.organization import OrganizationRepository
 from cubebox.repositories.skill import (
     OrgSkillInstallRepository,
@@ -266,21 +272,54 @@ async def list_workspace_mcp(
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> WorkspaceMCPOut:
     server_repo = MCPServerRepository(session, org_id=ctx.org_id)
+    ws_cred_repo = WorkspaceMCPCredentialRepository(session, org_id=ctx.org_id)
+    user_cred_repo = UserMCPCredentialRepository(session, org_id=ctx.org_id)
 
     org_rows = await server_repo.list_org_wide_with_workspace_override(ctx.workspace_id)
-    org_servers = [
-        MCPServerItem(
-            server_id=srv.id,
-            name=srv.name,
-            server_url=srv.server_url,
-            transport=srv.transport,
-            # New semantics: visible only if override row exists and enabled=True.
-            enabled=override is not None and override.enabled,
-            scope="org",
+    org_servers: list[MCPServerItem] = []
+    for srv, override in org_rows:
+        if override is None or not override.enabled:
+            continue
+
+        mode = override.credential_mode or "org"
+        credential_source: str | None = None
+        credential_shared_by: str | None = None
+
+        if srv.auth_method == "none":
+            credential_source = None
+        elif mode == "org":
+            credential_source = "org" if srv.credential_id else "needs_setup"
+        elif mode == "workspace":
+            ws_cred = await ws_cred_repo.get(
+                workspace_id=ctx.workspace_id,
+                mcp_server_id=srv.id,
+            )
+            if ws_cred is not None:
+                credential_source = "workspace"
+                shared_by_user = await session.get(User, ws_cred.created_by_user_id)
+                credential_shared_by = shared_by_user.email if shared_by_user else None
+            else:
+                credential_source = "needs_setup"
+        elif mode == "user":
+            user_cred = await user_cred_repo.get(
+                user_id=ctx.user.id,
+                mcp_server_id=srv.id,
+            )
+            credential_source = "user" if user_cred else "needs_setup"
+
+        org_servers.append(
+            MCPServerItem(
+                server_id=srv.id,
+                name=srv.name,
+                server_url=srv.server_url,
+                transport=srv.transport,
+                enabled=True,
+                scope="org",
+                credential_mode=mode,
+                credential_source=credential_source,
+                credential_shared_by=credential_shared_by,
+            )
         )
-        for srv, override in org_rows
-        if override is not None and override.enabled
-    ]
 
     workspace_servers = [
         MCPServerItem(
