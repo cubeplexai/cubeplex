@@ -51,7 +51,7 @@ export function MCPWorkspacesTab({ serverId, client }: MCPWorkspacesTabProps) {
           .sort((a, b) => a.name.localeCompare(b.name))
           .map((ws) => ({
             ws,
-            enabled: overrideMap.get(ws.id) ?? true,
+            enabled: overrideMap.get(ws.id) ?? false,
             saving: false,
             error: null,
             confirmDisable: false,
@@ -83,7 +83,7 @@ export function MCPWorkspacesTab({ serverId, client }: MCPWorkspacesTabProps) {
       setEntries((prev) =>
         prev.map((e) => ({
           ...e,
-          enabled: overrideMap.get(e.ws.id) ?? true,
+          enabled: overrideMap.get(e.ws.id) ?? false,
           saving: e.ws.id === wsId ? false : e.saving,
         })),
       )
