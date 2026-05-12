@@ -1,4 +1,4 @@
-# Admin Cost Overview Redesign
+# Admin Insights Page (cost sections v1)
 
 **Status:** Draft
 **Date:** 2026-05-12
@@ -8,9 +8,15 @@
 ## Goal
 
 Replace the current bare-bones admin cost page (two summary cards + two tables)
-with a faceted explorer that lets an org admin (a) see total spend at a glance,
-(b) understand spend trend over time, and (c) slice by workspace / model / user
-and inspect cache efficiency, without leaving the page.
+with **Admin Insights** — a long-term home for org-level admin statistics.
+This first iteration lays down the page shell and fills it with cost-related
+sections: a faceted explorer that lets an org admin (a) see total spend at a
+glance, (b) understand spend trend over time, (c) slice by workspace / model /
+user, and (d) inspect cache efficiency, without leaving the page.
+
+The page is named **Insights** rather than **Cost** because subsequent
+iterations will add non-cost sections (active users, agent runs, error rates,
+etc.). Cost is just the first content area.
 
 ## Non-goals
 
@@ -46,12 +52,12 @@ schema/route change.
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
-│  Top bar    Cost overview · May 1 — May 12 · org acme       [📅] [⬇CSV]  │
+│  Top bar    Insights · May 1 — May 12 · org acme            [📅] [⬇CSV]  │
 ├──────────────────┬──────────────────────────────────────────────────────┤
 │  Sidebar         │  KPI row (5 cards)                                   │
 │                  │  ─ Total cost   Total calls   Avg/call   Cache hit  │
 │  Range           │    rate   Active users                              │
-│   [7 12 30 90]   │                                                      │
+│   [7  30  90]    │                                                      │
 │                  │  Section · By workspace                              │
 │  Workspaces      │  ┌─ stacked area chart (workspaces × day) ──────┐    │
 │   ☑ acme-prod    │  └─────────────────────────────────────────────┘    │
@@ -228,8 +234,12 @@ both the cost-per-event and the granularity needed for spreadsheets.
 
 ### Route and shell
 
-- Path stays `/admin/cost`. The page is already inside the admin layout
-  (`app/admin/layout.tsx`).
+- Route moves from `/admin/cost` to `/admin/insights`. The old `/admin/cost`
+  redirects to `/admin/insights` (a one-line `redirect()` in
+  `app/admin/cost/page.tsx`) so existing bookmarks don't 404. The redirect
+  is removed in a later cleanup once links are updated.
+- `AdminSubNav` label changes from "Cost" to "Insights"; the icon stays
+  `BarChart3` (was `CircleDollarSign`).
 - Page-level loading and error states live in `page.tsx`. Lower-level error
   states (per-section "couldn't load this slice") live in the section
   components.
@@ -237,18 +247,24 @@ both the cost-per-event and the granularity needed for spreadsheets.
 ### Component tree
 
 ```
-app/admin/cost/page.tsx
-└── components/admin/cost/
-    ├── CostOverviewShell.tsx           orchestrates filters + data
-    ├── CostFilterSidebar.tsx           sidebar (range, ws, model, granularity)
-    ├── CostKpiRow.tsx                  5 KPI tiles
-    ├── CostStackedSection.tsx          generic stacked area + table
-    │     (props: dimension, title, columns, data)
-    ├── CostCacheSection.tsx            multi-line + cache table
-    ├── CostStackedChart.tsx            recharts wrapper, top-N + Other
-    ├── CostRateChart.tsx               multi-line, y-axis 0–100%
-    └── CostTopBar.tsx                  title + date range button + CSV
+app/admin/insights/page.tsx
+└── components/admin/insights/
+    ├── InsightsShell.tsx               orchestrates filters + data
+    ├── InsightsFilterSidebar.tsx       sidebar (range, ws, model, granularity)
+    ├── InsightsTopBar.tsx              title + date range button + CSV
+    └── cost/                           cost-specific section bundle
+        ├── CostKpiRow.tsx              5 KPI tiles
+        ├── CostStackedSection.tsx      generic stacked area + table
+        │     (props: dimension, title, columns, data)
+        ├── CostCacheSection.tsx        multi-line + cache table
+        ├── CostStackedChart.tsx        recharts wrapper, top-N + Other
+        └── CostRateChart.tsx           multi-line, y-axis 0–100%
 ```
+
+Shell + sidebar + top bar are page-level (will be reused as new section
+families land). The `cost/` subfolder bundles everything that is specifically
+about cost — future additions like `users/` or `agents/` follow the same
+pattern.
 
 `CostStackedSection` is parameterised by `dimension` so the three sections
 share rendering — they differ only in title, color palette, and the table
@@ -320,11 +336,15 @@ work here.
 
 ### i18n
 
-All strings go through `useTranslations('adminCost')`. The existing
-`messages/{en,zh}.json` `adminCost` block gets new keys: `cacheHitRate`,
-`activeUsers`, `avgPerCall`, `byUser`, `cacheEfficiency`, `cacheReads`,
-`cacheWrites`, `uncachedInput`, `hitRate`, `estSavings`, `other`,
-`noData`, `retry`, plus per-section legend labels.
+The i18n namespace becomes `adminInsights`. `messages/{en,zh}.json` gains a
+new `adminInsights` block; the legacy `adminCost` block is dropped (no other
+caller). New keys: `heading` ("Insights"), `cost.byWorkspace`,
+`cost.byModel`, `cost.byUser`, `cost.cacheEfficiency`, `cost.cacheHitRate`,
+`cost.activeUsers`, `cost.avgPerCall`, `cost.cacheReads`, `cost.cacheWrites`,
+`cost.uncachedInput`, `cost.hitRate`, `cost.estSavings`, `cost.other`,
+`cost.noData`, `cost.retry`, plus per-section legend labels. The `cost.*`
+prefix keeps room for future top-level sections (`users.*`, `agents.*`).
+The `AdminSubNav` label key becomes `nav.insights`.
 
 ### Visual tokens
 
@@ -366,17 +386,19 @@ Negative paths:
 
 ### Frontend E2E
 
-`frontend/packages/web/__tests__/e2e/admin-cost.spec.ts` (extends existing):
+Existing `__tests__/e2e/admin-cost.spec.ts` is renamed to
+`__tests__/e2e/admin-insights.spec.ts` and extended:
 
-- Admin lands on `/admin/cost`; KPI row shows 5 tiles with non-zero values
-  for a seeded org
+- Admin lands on `/admin/insights`; KPI row shows 5 tiles with non-zero
+  values for a seeded org
+- Old `/admin/cost` URL redirects to `/admin/insights` (preserves bookmarks)
 - Selecting a workspace chip filters all four sections; URL query updates
 - Switching granularity from `day` to `week` changes x-axis tick count
 - Cache section: hit rate appears as a percentage; "Est. savings" cell
   renders when pricing config is present
 - The CSV export link still produces a download
-- Non-admin (a member user) hitting `/admin/cost` gets redirected (existing
-  behaviour, regression check)
+- Non-admin (a member user) hitting `/admin/insights` gets redirected
+  (existing behaviour, regression check)
 
 ### Unit tests
 
@@ -389,9 +411,10 @@ unit tests for components — the E2E covers the user-visible behaviour.
 - Backend route changes are additive (one new endpoint, one new field). The
   old `/cost/summary` shape gains `by_user`; existing clients tolerate extra
   fields.
-- Frontend ships as a single PR that swaps `app/admin/cost/page.tsx`. No
-  feature flag — the old page has minimal traffic (admin only) and the new
-  page is strictly a superset.
+- Frontend ships as a single PR. New page at `app/admin/insights/page.tsx`;
+  `app/admin/cost/page.tsx` becomes a redirect stub. AdminSubNav swaps the
+  link label and icon. No feature flag — the old page has minimal traffic
+  (admin only) and the new page is strictly a superset.
 
 ## Open questions (deliberately deferred)
 
