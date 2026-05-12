@@ -53,6 +53,7 @@
     "mcp": "MCP Connectors",
     "sandbox": "Sandbox",
     "cost": "Cost",
+    "insights": "Insights",
     "extensions": "Extensions"
   },
   "chat": {
@@ -99,6 +100,58 @@
     "byModel": "By Model",
     "providerModel": "Provider / Model",
     "exportCsv": "Export CSV"
+  },
+  "adminInsights": {
+    "heading": "Insights",
+    "loading": "Loading…",
+    "retry": "Retry",
+    "noData": "No data in this period",
+    "exportOrgCsv": "Export CSV ↓",
+    "kpi": {
+      "totalCost": "Total cost",
+      "totalCalls": "Total calls",
+      "avgPerCall": "Avg / call",
+      "cacheHitRate": "Cache hit rate",
+      "activeUsers": "Active users",
+      "vsPrior": "vs prior {days}d",
+      "unchanged": "unchanged"
+    },
+    "filters": {
+      "range": "Range",
+      "workspaces": "Workspaces",
+      "models": "Models",
+      "granularity": "Granularity",
+      "day": "day",
+      "week": "week"
+    },
+    "cost": {
+      "byWorkspace": "By workspace",
+      "byModel": "By model",
+      "byUser": "By user",
+      "cacheEfficiency": "Cache efficiency",
+      "cacheEfficiencyHint": "Hit rate per day, by model",
+      "columns": {
+        "workspace": "Workspace",
+        "model": "Provider / Model",
+        "user": "User",
+        "calls": "Calls",
+        "input": "Input",
+        "output": "Output",
+        "cacheRw": "Cache R/W",
+        "cacheReads": "Cache reads",
+        "cacheWrites": "Cache writes",
+        "uncachedInput": "Uncached input",
+        "hitRate": "Hit rate",
+        "estSavings": "Est. savings",
+        "cost": "Cost",
+        "share": "Share"
+      },
+      "other": "Other ({count} items)",
+      "showAll": "+{count} more · show all",
+      "showLess": "Show less",
+      "orgTotal": "Org total",
+      "orgAvg": "org avg"
+    }
   },
   "adminSkills": {
     "loading": "Loading…",
