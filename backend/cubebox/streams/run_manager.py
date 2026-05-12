@@ -286,6 +286,40 @@ class RunManager:
         if not self._tasks:
             self._tasks_empty.set()
 
+    def _build_oauth_token_manager(
+        self,
+        session: Any,
+        *,
+        org_id: str,
+    ) -> Any:
+        """Construct an ``OAuthTokenManager`` for the current run session."""
+        import httpx
+
+        from cubebox.mcp.oauth.metadata import OAuthMetadataDiscovery
+        from cubebox.mcp.oauth.token_manager import OAuthTokenManager
+        from cubebox.repositories.credential import CredentialRepository
+        from cubebox.repositories.mcp import MCPServerRepository, UserMCPCredentialRepository
+
+        http_client = getattr(self._app.state, "_mcp_oauth_http_client", None)
+        if http_client is None:
+            http_client = httpx.AsyncClient(timeout=30.0)
+            self._app.state._mcp_oauth_http_client = http_client
+
+        metadata = getattr(self._app.state, "_mcp_oauth_metadata_discovery", None)
+        if metadata is None:
+            metadata = OAuthMetadataDiscovery(http_client)
+            self._app.state._mcp_oauth_metadata_discovery = metadata
+
+        return OAuthTokenManager(
+            http_client=http_client,
+            redis=self._redis,
+            encryption_backend=self._app.state.encryption_backend,
+            credential_repo=CredentialRepository(session, org_id=org_id),
+            server_repo=MCPServerRepository(session, org_id=org_id),
+            user_cred_repo=UserMCPCredentialRepository(session, org_id=org_id),
+            metadata=metadata,
+        )
+
     async def start_run(
         self,
         *,
@@ -600,6 +634,7 @@ class RunManager:
                         org_id=ctx.org_id,
                         actor_user_id=ctx.user_id,
                     )
+                    token_manager = self._build_oauth_token_manager(mcp_session, org_id=ctx.org_id)
                     tools.extend(
                         await load_mcp_tools_for_workspace(
                             org_id=ctx.org_id,
@@ -608,6 +643,7 @@ class RunManager:
                             cred_service=cred_service,
                             signer=self._app.state.mcp_user_token_signer,
                             session=mcp_session,
+                            token_manager=token_manager,
                         )
                     )
             except Exception as exc:

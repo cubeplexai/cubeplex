@@ -1,5 +1,7 @@
 """Per-(workspace, user) DB MCP tool assembly for agent runs."""
 
+from __future__ import annotations
+
 from datetime import UTC, datetime, timedelta
 
 from langchain_core.tools import BaseTool
@@ -7,9 +9,10 @@ from loguru import logger
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cubebox.credentials.exceptions import CredentialNotFound
-from cubebox.mcp._constants import CREDENTIAL_KIND_MCP
+from cubebox.mcp._constants import CREDENTIAL_KIND_MCP, CREDENTIAL_KIND_MCP_OAUTH_ACCESS_TOKEN
 from cubebox.mcp.connection_params import build_connection_params
 from cubebox.mcp.discovery import construct_basetools_from_cache, discover_tools
+from cubebox.mcp.oauth.token_manager import OAuthTokenManager
 from cubebox.mcp.user_token import MCPUserTokenSigner
 from cubebox.models import MCPServer
 from cubebox.repositories.mcp import (
@@ -51,6 +54,7 @@ async def load_mcp_tools_for_workspace(
     cred_service: CredentialService,
     signer: MCPUserTokenSigner,
     session: AsyncSession,
+    token_manager: OAuthTokenManager | None = None,
 ) -> list[BaseTool]:
     """Resolve visible DB MCP servers and build run-scoped LangChain tools."""
     server_repo = MCPServerRepository(session, org_id=org_id)
@@ -68,6 +72,7 @@ async def load_mcp_tools_for_workspace(
                 signer=signer,
                 ws_cred_repo=ws_cred_repo,
                 user_cred_repo=user_cred_repo,
+                token_manager=token_manager,
             )
         except CredentialNotFound:
             logger.warning(
@@ -108,13 +113,27 @@ async def _resolve_token(
     signer: MCPUserTokenSigner,
     ws_cred_repo: WorkspaceMCPCredentialRepository,
     user_cred_repo: UserMCPCredentialRepository,
+    token_manager: OAuthTokenManager | None = None,
 ) -> str | None:
+    # OAuth installs: delegate to OAuthTokenManager which handles expiry
+    # checks and automatic refresh_token grants.
+    if server.auth_method == "oauth" and token_manager is not None:
+        return await token_manager.get_valid_access_token(
+            server, user_id=user_id if server.credential_scope == "user" else None
+        )
+
+    cred_kind = (
+        CREDENTIAL_KIND_MCP_OAUTH_ACCESS_TOKEN
+        if server.auth_method == "oauth"
+        else CREDENTIAL_KIND_MCP
+    )
+
     if server.credential_scope == "org":
         if server.credential_id is None:
             return None
         return await cred_service.get_decrypted(
             credential_id=server.credential_id,
-            requesting_kind=CREDENTIAL_KIND_MCP,
+            requesting_kind=cred_kind,
         )
 
     if server.credential_scope == "workspace":
@@ -126,7 +145,7 @@ async def _resolve_token(
             return None
         return await cred_service.get_decrypted(
             credential_id=workspace_credential.credential_id,
-            requesting_kind=CREDENTIAL_KIND_MCP,
+            requesting_kind=cred_kind,
         )
 
     if server.credential_scope == "user":
@@ -138,7 +157,7 @@ async def _resolve_token(
             return None
         return await cred_service.get_decrypted(
             credential_id=user_credential.credential_id,
-            requesting_kind=CREDENTIAL_KIND_MCP,
+            requesting_kind=cred_kind,
         )
 
     if server.credential_scope == "none":

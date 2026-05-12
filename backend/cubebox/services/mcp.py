@@ -5,7 +5,11 @@ from typing import Any
 
 from cubebox.auth.context import RequestContext
 from cubebox.credentials.exceptions import CredentialNotFound
-from cubebox.mcp._constants import CREDENTIAL_KIND_MCP, server_url_hash
+from cubebox.mcp._constants import (
+    CREDENTIAL_KIND_MCP,
+    CREDENTIAL_KIND_MCP_OAUTH_ACCESS_TOKEN,
+    server_url_hash,
+)
 from cubebox.mcp.discovery import discover_tools
 from cubebox.mcp.exceptions import (
     MCPCredentialPathMismatch,
@@ -587,13 +591,19 @@ class MCPServerService:
         if server.auth_method == "oauth" and server.credential_id is None:
             return
 
+        cred_kind = (
+            CREDENTIAL_KIND_MCP_OAUTH_ACCESS_TOKEN
+            if server.auth_method == "oauth"
+            else CREDENTIAL_KIND_MCP
+        )
+
         token: str | None = None
         if server.credential_scope == "org":
             if server.credential_id is None:
                 raise MCPCredentialRequired()
             token = await self.cred_service.get_decrypted(
                 credential_id=server.credential_id,
-                requesting_kind=CREDENTIAL_KIND_MCP,
+                requesting_kind=cred_kind,
             )
         elif server.credential_scope == "workspace":
             credential_row = await self.ws_cred_repo.get(
@@ -604,7 +614,7 @@ class MCPServerService:
                 return
             token = await self.cred_service.get_decrypted(
                 credential_id=credential_row.credential_id,
-                requesting_kind=CREDENTIAL_KIND_MCP,
+                requesting_kind=cred_kind,
             )
 
         await self._refresh_tools_for_server_with_token(server, credential_or_token=token)
