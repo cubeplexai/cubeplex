@@ -27,6 +27,19 @@ subagent_event_queue: ContextVar[asyncio.Queue[Any] | None] = ContextVar(
 )
 
 
+def _content_to_text(content: Any) -> str:
+    """Extract text from message content (str or Anthropic-style content blocks)."""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts: list[str] = []
+        for block in content:
+            if isinstance(block, dict) and block.get("type") == "text":
+                parts.append(str(block.get("text", "")))
+        return "\n".join(parts) if parts else ""
+    return str(content)
+
+
 class SubAgent(TypedDict, total=False):
     """Specification for a subagent.
 
@@ -172,7 +185,7 @@ def _create_subagent_tool(
                                 c = getattr(msg, "content", "") or ""
                                 msg_name = getattr(msg, "name", None)
                                 if c and not msg_name:
-                                    last_ai_content.append(c)
+                                    last_ai_content.append(_content_to_text(c))
                         elif mode == "updates":
                             evts = convert_updates_chunk(data, agent_id=sa_agent_id)
                             subagent_events.extend(evts)
@@ -191,7 +204,7 @@ def _create_subagent_tool(
                 last = messages[-1] if messages else None
                 if last and hasattr(last, "content"):
                     content = last.content
-                    last_ai_content.append(content if isinstance(content, str) else str(content))
+                    last_ai_content.append(_content_to_text(content))
 
             final_content = "".join(last_ai_content) or "[subagent produced no output]"
 
