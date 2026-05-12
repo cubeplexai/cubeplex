@@ -1,41 +1,36 @@
 import { expect, test } from '@playwright/test'
 
-import { registerAndGetWorkspace } from './_helpers'
+import { createOrgMcpServer, registerAndGetWorkspace } from './_helpers'
 
-test.describe('Workspace MCP', () => {
-  test('member creates workspace-shared MCP', async ({ page }) => {
+test.describe('Workspace MCP settings tab', () => {
+  test('empty state shows when no connectors are enabled', async ({ page }) => {
     const { wsId } = await registerAndGetWorkspace(page)
-    await page.goto(`/w/${wsId}/integrations/mcp/new`)
-    await expect(page.getByRole('heading', { name: 'Add MCP server' })).toBeVisible()
+    await page.goto(`/w/${wsId}/settings?tab=mcp`)
 
-    await page.getByLabel('Name *').fill('MyTool')
-    await page.getByLabel('Server URL *').pressSequentially('http://127.0.0.1:9/mcp')
-    await page.getByText('Workspace shared').click()
-    await page.getByLabel('API key / token').fill('tok')
-    await expect(page.getByRole('button', { name: 'Test connection' })).toBeEnabled()
-    await page.getByRole('button', { name: 'Test connection' }).click()
-
-    await expect(page.getByText('Connection failed').first()).toBeVisible()
-    await page.getByRole('button', { name: 'Save' }).click()
-    await expect(page).toHaveURL(/\/integrations\/mcp\/[^/]+$/, { timeout: 10_000 })
+    await expect(page.getByRole('heading', { name: 'MCP Connectors' })).toBeVisible()
+    await expect(page.getByText('No MCP connectors yet')).toBeVisible()
   })
 
-  test('promote dialog shows share-credential options for workspace scope', async ({ page }) => {
+  test('org server enabled via admin shows in workspace settings', async ({ page }) => {
     const { wsId } = await registerAndGetWorkspace(page)
-    await page.goto(`/w/${wsId}/integrations/mcp/new`)
-    await expect(page.getByRole('heading', { name: 'Add MCP server' })).toBeVisible()
+    const server = await createOrgMcpServer(page, 'Visible Server')
 
-    await page.getByLabel('Name *').fill('PromoteTool')
-    await page.getByLabel('Server URL *').pressSequentially('http://127.0.0.1:9/mcp')
-    await page.getByText('Workspace shared').click()
-    await page.getByLabel('API key / token').fill('tok')
-    await page.getByRole('button', { name: 'Save' }).click()
-    await expect(page).toHaveURL(/\/integrations\/mcp\/[^/]+$/, { timeout: 10_000 })
+    // Enable the server for the workspace via admin overrides API
+    const csrfName = process.env.NEXT_PUBLIC_CSRF_COOKIE_NAME ?? 'cubebox_csrf'
+    const cookies = await page.context().cookies()
+    const csrf = cookies.find((c) => c.name === csrfName)?.value ?? ''
+    await page.request.put(`/api/v1/admin/mcp/servers/${server.id}/overrides`, {
+      headers: { 'X-CSRF-Token': csrf },
+      data: { workspace_id: wsId, enabled: true },
+    })
 
-    await page.getByRole('button', { name: 'Share to org' }).click()
+    await page.goto(`/w/${wsId}/settings?tab=mcp`)
+    await expect(page.getByText('Visible Server')).toBeVisible({ timeout: 10_000 })
+  })
 
-    await expect(page.getByRole('heading', { name: 'Promote MCP server' })).toBeVisible()
-    await expect(page.getByText('Share credential with organization')).toBeVisible()
-    await expect(page.getByText('Promote without credential')).toBeVisible()
+  test('old /integrations/mcp route returns 404', async ({ page }) => {
+    const { wsId } = await registerAndGetWorkspace(page)
+    const resp = await page.goto(`/w/${wsId}/integrations/mcp`)
+    expect(resp?.status()).toBe(404)
   })
 })
