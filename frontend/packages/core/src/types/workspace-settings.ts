@@ -17,6 +17,9 @@ export interface WorkspaceSkills {
   workspace_skills: SkillInstall[]
 }
 
+export type MCPCredentialMode = 'org' | 'workspace' | 'user'
+export type MCPCredentialSource = 'org' | 'workspace' | 'user' | 'needs_setup' | null
+
 export interface MCPServerItem {
   server_id: string
   name: string
@@ -24,6 +27,9 @@ export interface MCPServerItem {
   transport: string
   enabled: boolean
   scope: 'org' | 'workspace'
+  credential_mode: MCPCredentialMode
+  credential_source: MCPCredentialSource
+  credential_shared_by: string | null
 }
 
 export interface WorkspaceMCP {
