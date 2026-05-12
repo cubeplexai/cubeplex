@@ -117,7 +117,7 @@ export function OfficePreview({ artifact, version, workspaceId }: OfficePreviewP
 
   return (
     <div className="relative w-full h-full">
-      {state === 'loading' && (
+      {state === 'loading' && !viewerUrl && (
         <div className="absolute inset-0 z-10">
           <PreviewLoading />
         </div>
