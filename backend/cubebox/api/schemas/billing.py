@@ -1,6 +1,7 @@
 """Pydantic schemas for billing/cost API responses."""
 
 from datetime import date
+from typing import Literal
 
 from pydantic import BaseModel
 
@@ -48,7 +49,7 @@ class TimeseriesSeries(BaseModel):
 class TimeseriesResponse(BaseModel):
     from_date: date
     to_date: date
-    granularity: str  # "day" | "week"
-    dimension: str  # "workspace" | "model" | "user"
+    granularity: Literal["day", "week"]
+    dimension: Literal["workspace", "model", "user"]
     series: list[TimeseriesSeries]
     currency: str
