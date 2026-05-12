@@ -10,4 +10,9 @@ export * from './stream'
 export * from './system'
 export * from './workspace-settings'
 export * from './workspaces'
-export { fetchCostSummary, fetchWorkspaceCost, buildExportUrl } from './billing'
+export {
+  fetchCostSummary,
+  fetchWorkspaceCost,
+  fetchCostTimeseries,
+  buildExportUrl,
+} from './billing'
