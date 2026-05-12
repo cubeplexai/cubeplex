@@ -79,25 +79,43 @@ The MCP management UI has several product-logic and interaction-design issues:
 
 `list_for_member` workspace_visible calculation inverts: currently "no disable row = visible", changes to "has enable row = visible".
 
+### Workspace Credential Mode
+
+Each workspace's override carries a `credential_mode` setting that determines how credentials are resolved for that workspace:
+
+| credential_mode | Meaning |
+|-----------------|---------|
+| `org` (default) | Use the org-level shared credential (`MCPServer.credential_id`) |
+| `workspace` | Workspace admin provides one credential shared by all workspace members |
+| `user` | Each member authenticates individually |
+
+Workspace admin can change this setting per connector. The mode determines which table the runtime reads from, not just whether a row happens to exist.
+
+When `credential_mode = 'workspace'`, `WorkspaceMCPCredential.created_by_user_id` records who provided the shared credential (displayed as "Shared by <name>" in the UI).
+
 ### Credential Resolution Order
 
-When the runtime resolves a credential for a workspace using an org connector:
+Resolution is mode-driven. Read `credential_mode` from the `WorkspaceMCPOverride` row (default `'org'`):
 
-1. Check `WorkspaceMCPCredential` row for this (workspace, server) — if exists, use it (workspace override)
-2. Check `UserMCPCredential` row for this (user, server) — if exists, use it (user-scope self-serve)
-3. Fall back to `MCPServer.credential_id` (org credential, shared reference)
-4. If none found and auth_method != "none" → connector is in "needs setup" state for this workspace
+1. If `credential_mode = 'org'`: use `MCPServer.credential_id` (org credential)
+2. If `credential_mode = 'workspace'`: use `WorkspaceMCPCredential` for this (workspace, server) — shared by one member, used by all
+3. If `credential_mode = 'user'`: use `UserMCPCredential` for this (user, server) — per-user self-serve
+4. If none found at the resolved level and `auth_method != "none"` → `needs_setup`
 
 ### Credential Source States
 
-Each workspace's relationship to a connector's credential can be:
+The API returns two fields per connector:
 
-| State | Meaning | How determined |
-|-------|---------|---------------|
-| `org` | Using shared org credential | No WorkspaceMCPCredential row, org credential exists |
-| `own` | Workspace overrode with own credential | WorkspaceMCPCredential row exists |
-| `needs_setup` | Enabled but no usable credential | No credential at any level, auth_method != "none" |
-| n/a | auth_method = "none", no credential needed | — |
+- `credential_mode`: the workspace's setting (`'org'` | `'workspace'` | `'user'`)
+- `credential_source`: the resolved state for the current user
+
+| credential_source | credential_mode | Meaning |
+|-------------------|-----------------|---------|
+| `org` | org | Using org-level shared credential |
+| `workspace` | workspace | Workspace-shared credential active (includes `shared_by` display name) |
+| `user` | user | Current user has their own credential |
+| `needs_setup` | any | Credential needed at this level but not yet provided |
+| `null` | any | `auth_method = "none"`, no credential needed |
 
 ## Frontend
 
@@ -186,7 +204,10 @@ Enhanced version of current McpPanel. Same master-detail layout.
 Two groups with section headers:
 
 **ORG CONNECTORS** — connectors distributed to this workspace by admin:
-- Card: icon + name + enabled status + credential state ("Active" / "Needs credential" / "Using org credential")
+- Card: icon + name + enabled status + credential state badge:
+  - `org` mode: "Org credential" (primary) or "Org credential missing" (destructive)
+  - `workspace` mode: "Workspace credential — shared by <name>" or "Needs credential"
+  - `user` mode: "Per-user" + current user's status ("Active" / "Needs setup")
 - Toggle switch on card for enable/disable (workspace admin only)
 
 **WORKSPACE PRIVATE** — connectors registered by this workspace:
@@ -197,10 +218,15 @@ Two groups with section headers:
 
 - Read-only info: name, URL, transport, tool count, description
 - Enable/disable toggle (workspace admin)
-- Credential section:
-  - Using org credential: shows label + "Override with own credential" button
-  - Needs self-serve: OAuth authorize button or API key input form
-  - Has own credential: shows status + "Clear" button (reverts to org credential)
+- Credential mode selector (workspace admin): radio group with 3 options:
+  - **Use org credential** (`org`) — default, uses the org-level shared credential
+  - **Workspace credential** (`workspace`) — workspace admin provides one credential shared by all members. Shows "Shared by <name>" when active, or OAuth/API key form when not yet provided. "Clear" button reverts to org mode.
+  - **Per-user** (`user`) — each member authenticates individually. Members see OAuth authorize button or API key input in their own view.
+- Credential state display below the selector:
+  - `org` mode: shows org credential status (active / missing)
+  - `workspace` mode + credential exists: "Active — shared by <name>" + Clear button
+  - `workspace` mode + no credential: OAuth authorize button or API key input form
+  - `user` mode: "Each member authenticates individually" label. Current user's status shown.
 - No Workspaces tab (that's the admin perspective)
 
 #### Detail Panel for Workspace-Private Connector
@@ -214,9 +240,10 @@ Two groups with section headers:
 | Action | Member | Workspace Admin | Org Admin |
 |--------|--------|-----------------|-----------|
 | View connectors | Yes | Yes | Yes |
-| Self-serve user credential | Yes | Yes | Yes |
+| Self-serve user credential (when mode=user) | Yes | Yes | Yes |
 | Enable/disable org connector | No | Yes | Yes |
-| Override org credential | No | Yes | Yes |
+| Change credential mode (org/workspace/user) | No | Yes | Yes |
+| Provide workspace-shared credential | No | Yes | Yes |
 | Register private connector | No | Yes | Yes |
 | Delete private connector | No | Yes | Yes |
 | Promote to org | No | No | Yes |
@@ -242,28 +269,43 @@ After `install_for_org` completes, server row exists and may be authed, but zero
 
 ### Credential Source in Workspace MCP List
 
-The workspace settings MCP list API needs to return a `credential_source` field per connector:
+The workspace settings MCP list API returns `credential_mode` and `credential_source` per connector. Resolution is mode-driven:
 
 ```python
 # For each org connector visible to this workspace:
-ws_cred = await ws_cred_repo.get(workspace_id, server.id)
-if ws_cred is not None:
-    credential_source = "own"
-elif server.credential_id is not None:
-    credential_source = "org"
-elif server.auth_method == "none":
+override = ...  # the WorkspaceMCPOverride row (always exists since enabled=True)
+mode = override.credential_mode  # 'org' | 'workspace' | 'user'
+
+if server.auth_method == "none":
     credential_source = None
-else:
-    credential_source = "needs_setup"
+elif mode == "org":
+    credential_source = "org" if server.credential_id else "needs_setup"
+elif mode == "workspace":
+    ws_cred = await ws_cred_repo.get(workspace_id, server.id)
+    credential_source = "workspace" if ws_cred else "needs_setup"
+    # Also return shared_by display name when ws_cred exists
+elif mode == "user":
+    user_cred = await user_cred_repo.get(user_id, server.id)
+    credential_source = "user" if user_cred else "needs_setup"
 ```
+
+### Schema Change: WorkspaceMCPOverride.credential_mode
+
+Add `credential_mode` column to `workspace_mcp_overrides`:
+
+```python
+credential_mode: str = Field(default="org", max_length=16)
+```
+
+Values: `'org'` (default), `'workspace'`, `'user'`. Alembic migration required (new column with default).
 
 ### Data Migration
 
-No schema migration needed — `WorkspaceMCPOverride` table structure is unchanged. Only logic inversion.
+Override logic inversion: no schema migration for `enabled` — only logic change. The new `credential_mode` column needs an Alembic migration (default `'org'`, so existing rows get the correct value automatically).
 
-If production data exists with the old semantics (no row = visible), a data migration flips existing state: for each org-wide server, create `WorkspaceMCPOverride(enabled=True)` for every workspace that does NOT have a `enabled=False` row. Then delete all `enabled=False` rows (they become the new "no row = not visible" default).
+If production data exists with the old override semantics (no row = visible), a data migration flips existing state: for each org-wide server, create `WorkspaceMCPOverride(enabled=True)` for every workspace that does NOT have a `enabled=False` row. Then delete all `enabled=False` rows (they become the new "no row = not visible" default).
 
-Current stage: no production data, so just change the logic.
+Current stage: no production data, so just change the logic and add the column.
 
 ### API Endpoint Changes
 
@@ -271,10 +313,9 @@ Current stage: no production data, so just change the logic.
 |----------|--------|
 | `PUT /admin/mcp/servers/{id}/overrides` | Semantics unchanged, but default flips |
 | `GET /api/v1/ws/{wsId}/mcp/catalog` | `workspace_visible` calculation inverts |
-| `GET /api/v1/ws/{wsId}/settings/mcp` | Add `credential_source` field to response |
+| `GET /api/v1/ws/{wsId}/settings/mcp` | Add `credential_mode` + `credential_source` fields |
+| `PATCH /api/v1/ws/{wsId}/settings/mcp/{id}` | Accept `credential_mode` in body |
 | Workspace credential PUT/DELETE | Unchanged, already supports override |
-
-No new tables or columns required.
 
 ## UI Fixes (Bundled)
 
