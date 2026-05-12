@@ -407,6 +407,7 @@ def create_app(
     # Register routers
     from cubebox.api.routes.v1 import (
         admin_mcp,
+        admin_members,
         admin_providers,
         admin_router,
         admin_skills,
@@ -432,6 +433,7 @@ def create_app(
     app.include_router(attachments_router, prefix="/api/v1")
     app.include_router(memory_router, prefix="/api/v1")
     app.include_router(admin_router, prefix="/api/v1")
+    app.include_router(admin_members.router, prefix="/api/v1")
     app.include_router(admin_mcp.router, prefix="/api/v1")
     app.include_router(mcp_catalog.catalog_admin_router, prefix="/api/v1")
     app.include_router(mcp_catalog.catalog_member_router, prefix="/api/v1")
