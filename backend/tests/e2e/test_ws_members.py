@@ -157,6 +157,37 @@ async def test_remove_self_returns_400(admin_client):
     assert resp.status_code == 400
 
 
+async def test_cannot_demote_last_admin_self(admin_client):
+    client, ws_id = admin_client
+    me = await client.get("/api/v1/auth/me")
+    my_id = me.json()["id"]
+    resp = await client.patch(
+        f"/api/v1/ws/{ws_id}/members/{my_id}/role",
+        json={"role": "member"},
+    )
+    assert resp.status_code == 400, resp.text
+
+
+async def test_can_demote_self_when_another_admin_exists(admin_client, session_factory):
+    client, ws_id = admin_client
+    org_id = await _get_org_id(client, ws_id)
+    async with session_factory() as session:
+        other = await _create_org_member(session, org_id)
+
+    await client.post(
+        f"/api/v1/ws/{ws_id}/members",
+        json={"user_id": other.id, "role": "admin"},
+    )
+    me = await client.get("/api/v1/auth/me")
+    my_id = me.json()["id"]
+    resp = await client.patch(
+        f"/api/v1/ws/{ws_id}/members/{my_id}/role",
+        json={"role": "member"},
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["role"] == "member"
+
+
 async def test_member_cannot_manage_workspace_members(member_client):
     client, ws_id = member_client
     resp = await client.get(f"/api/v1/ws/{ws_id}/members")

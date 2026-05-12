@@ -127,6 +127,20 @@ async def update_workspace_member_role(
     if current is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Not a member of this workspace")
 
+    demoting_self_admin = (
+        user_id == ctx.user.id and current == Role.ADMIN and body.role != Role.ADMIN.value
+    )
+    if demoting_self_admin:
+        members = await mem_repo.list_workspace_members(ctx.workspace_id)
+        other_admins = [
+            m for m in members if m.user_id != ctx.user.id and m.role == Role.ADMIN.value
+        ]
+        if not other_admins:
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                detail="Cannot demote the last workspace admin",
+            )
+
     stmt = (
         update(Membership)
         .where(
