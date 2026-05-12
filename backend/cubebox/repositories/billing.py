@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 from collections.abc import AsyncGenerator
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, Literal
 
-from sqlalchemy import func, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cubebox.models.billing import BillingEvent, LlmBillingEvent
@@ -209,15 +209,12 @@ class BillingRepository:
     ) -> list[dict[str, Any]]:
         """2D aggregation: (dimension bucket x time bucket).
 
-        Returns one row per (bucket, date) pair. The caller is expected to
-        zero-pad missing dates and apply the top-N + "__other" collapse.
-        Series count is capped at ``max_series`` by total cost; everything
-        below the cap is collapsed to ``bucket="__other"``.
+        The total number of returned series never exceeds ``max_series``. If the
+        underlying data has more than ``max_series`` distinct buckets, the lowest-
+        cost ones are collapsed into a single series with ``bucket="__other"`` so
+        that the total length is ``max_series`` (when more buckets than the cap
+        exist) or ``len(distinct buckets)`` (when fewer).
         """
-        from datetime import timedelta as td
-
-        from sqlalchemy import and_, or_
-
         # Time bucket column
         if granularity == "week":
             time_col = func.date_trunc("week", BillingEvent.started_at).label("time_bucket")
@@ -285,7 +282,7 @@ class BillingRepository:
         # Build series map: bucket -> {date: point}
         series_map: dict[str, dict[str, dict[str, Any]]] = {}
         bucket_totals: dict[str, int] = {}
-        currency = "USD"
+        series_currency: dict[str, str] = {}
         for r in rows:
             bucket = str(r.bucket)
             date_str = (
@@ -303,11 +300,17 @@ class BillingRepository:
                 "cache_write_tokens": int(r.cache_write_tokens or 0),
             }
             bucket_totals[bucket] = bucket_totals.get(bucket, 0) + int(r.cost or 0)
-            currency = r.currency
+            # First currency seen for a bucket wins; multi-currency per bucket is
+            # out of scope (spec assumes a single currency per org).
+            series_currency.setdefault(bucket, r.currency)
 
         # Build full date axis (zero-pad)
-        step = td(days=7) if granularity == "week" else td(days=1)
-        cur = since.date() if granularity == "day" else (since.date() - td(days=since.weekday()))
+        step = timedelta(days=7) if granularity == "week" else timedelta(days=1)
+        cur = (
+            since.date()
+            if granularity == "day"
+            else (since.date() - timedelta(days=since.weekday()))
+        )
         end = until.date()
         date_axis: list[str] = []
         while cur <= end:
@@ -329,6 +332,7 @@ class BillingRepository:
         ranked = sorted(bucket_totals.items(), key=lambda kv: kv[1], reverse=True)
         keep = {b for b, _ in ranked[: max(0, max_series - 1)]}
         other_points: dict[str, dict[str, Any]] = {}
+        other_currency: str | None = None
         result_series: list[dict[str, Any]] = []
         sum_keys = (
             "cost_amount_micro",
@@ -344,9 +348,15 @@ class BillingRepository:
             ]
             if bucket in keep or len(ranked) <= max_series:
                 result_series.append(
-                    {"bucket": bucket, "points": bucket_points, "currency": currency}
+                    {
+                        "bucket": bucket,
+                        "points": bucket_points,
+                        "currency": series_currency.get(bucket, "USD"),
+                    }
                 )
             else:
+                if other_currency is None:
+                    other_currency = series_currency.get(bucket)
                 for bp in bucket_points:
                     bp_typed: dict[str, Any] = bp
                     date_key: str = str(bp_typed["date"])
@@ -358,7 +368,7 @@ class BillingRepository:
                 {
                     "bucket": "__other",
                     "points": [other_points.get(d, _zero_point(d)) for d in date_axis],
-                    "currency": currency,
+                    "currency": other_currency or "USD",
                 }
             )
         return result_series
