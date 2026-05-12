@@ -848,6 +848,42 @@
     "wsEnabled": "已启用",
     "wsDisabled": "未启用",
     "pageTitle": "MCP 连接器",
-    "pageSubtitle": "管理组织级 MCP 连接器、凭证及工作区绑定。"
+    "pageSubtitle": "管理组织级 MCP 连接器、凭证及工作区绑定。",
+
+    "revealSecret": "显示密钥",
+    "hideSecret": "隐藏密钥",
+
+    "catalogInstallTitle": "为组织安装",
+    "catalogInstallError": "安装失败",
+    "catalogAuthOAuth": "OAuth",
+    "catalogAuthStatic": "API Token",
+    "catalogAuthNone": "无需认证",
+    "catalogOAuthNotice": "管理员授权一次后，所有启用的工作区都将共享访问。",
+    "catalogInstallOAuthButton": "使用 OAuth 安装",
+    "catalogInstallStaticButton": "使用 Token 安装",
+    "catalogInstallNoneButton": "安装",
+    "catalogNoneNotice": "该连接器无需凭证。",
+    "catalogStaticTokenLabel": "API Token",
+    "catalogMultiFieldUnsupported": "当前连接器暂不支持多字段凭证表单。",
+
+    "customCreateTitle": "添加自定义 MCP 服务器",
+    "customCreateSubtitle": "为整个组织登记自定义 MCP 服务器，之后可以按工作区开启。",
+    "customSectionServer": "服务器",
+    "customSectionCredential": "凭证",
+    "customFieldName": "名称",
+    "customFieldNamePlaceholder": "例如 internal-search",
+    "customFieldUrl": "服务器 URL",
+    "customFieldTransport": "传输方式",
+    "customFieldAuthMethod": "认证方式",
+    "customFieldTimeout": "连接超时（秒）",
+    "customFieldSseTimeout": "SSE 读取超时（秒）",
+    "customFieldScope": "凭证范围",
+    "customScopeOrg": "组织共享",
+    "customScopeUser": "每个用户",
+    "customScopeNone": "无",
+    "customFieldCredName": "凭证名称（可选）",
+    "customFieldCredNamePlaceholder": "在凭证保险库中显示的标签",
+    "customFieldCredPlaintext": "凭证",
+    "customSubmit": "创建服务器"
   }
 }
