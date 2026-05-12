@@ -196,6 +196,173 @@ class BillingRepository:
             for row in result
         ]
 
+    async def get_timeseries(
+        self,
+        *,
+        dimension: Literal["workspace", "user", "model"],
+        since: datetime,
+        until: datetime,
+        granularity: Literal["day", "week"] = "day",
+        workspace_ids: list[str] | None = None,
+        models: list[str] | None = None,
+        max_series: int = 25,
+    ) -> list[dict[str, Any]]:
+        """2D aggregation: (dimension bucket x time bucket).
+
+        Returns one row per (bucket, date) pair. The caller is expected to
+        zero-pad missing dates and apply the top-N + "__other" collapse.
+        Series count is capped at ``max_series`` by total cost; everything
+        below the cap is collapsed to ``bucket="__other"``.
+        """
+        from datetime import timedelta as td
+
+        from sqlalchemy import and_, or_
+
+        # Time bucket column
+        if granularity == "week":
+            time_col = func.date_trunc("week", BillingEvent.started_at).label("time_bucket")
+        else:
+            time_col = func.date(BillingEvent.started_at).label("time_bucket")
+
+        # Dimension bucket column
+        dim_group: Any
+        if dimension == "workspace":
+            dim_col = BillingEvent.workspace_id.label("bucket")  # type: ignore[attr-defined]
+            dim_group = BillingEvent.workspace_id
+        elif dimension == "user":
+            dim_col = BillingEvent.user_id.label("bucket")  # type: ignore[attr-defined]
+            dim_group = BillingEvent.user_id
+        else:  # model
+            dim_col = (LlmBillingEvent.provider + "/" + LlmBillingEvent.model_id).label(  # type: ignore[attr-defined]
+                "bucket"
+            )
+            dim_group = (LlmBillingEvent.provider, LlmBillingEvent.model_id)
+
+        stmt = (
+            select(  # type: ignore[call-overload]
+                dim_col,
+                time_col,
+                func.sum(BillingEvent.cost_amount_micro).label("cost"),
+                func.count(BillingEvent.id).label("calls"),  # type: ignore[arg-type]
+                func.sum(LlmBillingEvent.input_tokens).label("input_tokens"),
+                func.sum(LlmBillingEvent.output_tokens).label("output_tokens"),
+                func.sum(LlmBillingEvent.cache_read_tokens).label("cache_read_tokens"),
+                func.sum(LlmBillingEvent.cache_write_tokens).label("cache_write_tokens"),
+                BillingEvent.currency,
+            )
+            .join(LlmBillingEvent, LlmBillingEvent.billing_event_id == BillingEvent.id)
+            .where(
+                BillingEvent.org_id == self.org_id,
+                BillingEvent.started_at >= since,
+                BillingEvent.started_at <= until,
+                BillingEvent.event_type == "llm_call",
+            )
+        )
+        if workspace_ids:
+            stmt = stmt.where(BillingEvent.workspace_id.in_(workspace_ids))  # type: ignore[attr-defined]
+        if models:
+            # models arrive as "provider/model_id" strings; rebuild predicate
+            conds: list[Any] = []
+            for m in models:
+                if "/" in m:
+                    p, mid = m.split("/", 1)
+                    conds.append(
+                        and_(
+                            LlmBillingEvent.provider == p,  # type: ignore[arg-type]
+                            LlmBillingEvent.model_id == mid,  # type: ignore[arg-type]
+                        )
+                    )
+            if conds:
+                stmt = stmt.where(or_(*conds))
+
+        if isinstance(dim_group, tuple):
+            stmt = stmt.group_by(*dim_group, time_col, BillingEvent.currency)
+        else:
+            stmt = stmt.group_by(dim_group, time_col, BillingEvent.currency)
+
+        rows = (await self.session.execute(stmt)).all()
+
+        # Build series map: bucket -> {date: point}
+        series_map: dict[str, dict[str, dict[str, Any]]] = {}
+        bucket_totals: dict[str, int] = {}
+        currency = "USD"
+        for r in rows:
+            bucket = str(r.bucket)
+            date_str = (
+                r.time_bucket.isoformat()
+                if hasattr(r.time_bucket, "isoformat")
+                else str(r.time_bucket)
+            )
+            series_map.setdefault(bucket, {})[date_str] = {
+                "date": date_str,
+                "cost_amount_micro": int(r.cost or 0),
+                "calls": int(r.calls or 0),
+                "input_tokens": int(r.input_tokens or 0),
+                "output_tokens": int(r.output_tokens or 0),
+                "cache_read_tokens": int(r.cache_read_tokens or 0),
+                "cache_write_tokens": int(r.cache_write_tokens or 0),
+            }
+            bucket_totals[bucket] = bucket_totals.get(bucket, 0) + int(r.cost or 0)
+            currency = r.currency
+
+        # Build full date axis (zero-pad)
+        step = td(days=7) if granularity == "week" else td(days=1)
+        cur = since.date() if granularity == "day" else (since.date() - td(days=since.weekday()))
+        end = until.date()
+        date_axis: list[str] = []
+        while cur <= end:
+            date_axis.append(cur.isoformat())
+            cur = cur + step
+
+        def _zero_point(d: str) -> dict[str, Any]:
+            return {
+                "date": d,
+                "cost_amount_micro": 0,
+                "calls": 0,
+                "input_tokens": 0,
+                "output_tokens": 0,
+                "cache_read_tokens": 0,
+                "cache_write_tokens": 0,
+            }
+
+        # Top-N + "__other"
+        ranked = sorted(bucket_totals.items(), key=lambda kv: kv[1], reverse=True)
+        keep = {b for b, _ in ranked[: max(0, max_series - 1)]}
+        other_points: dict[str, dict[str, Any]] = {}
+        result_series: list[dict[str, Any]] = []
+        sum_keys = (
+            "cost_amount_micro",
+            "calls",
+            "input_tokens",
+            "output_tokens",
+            "cache_read_tokens",
+            "cache_write_tokens",
+        )
+        for bucket, by_date in series_map.items():
+            bucket_points: list[dict[str, Any]] = [
+                by_date.get(d, _zero_point(d)) for d in date_axis
+            ]
+            if bucket in keep or len(ranked) <= max_series:
+                result_series.append(
+                    {"bucket": bucket, "points": bucket_points, "currency": currency}
+                )
+            else:
+                for bp in bucket_points:
+                    bp_typed: dict[str, Any] = bp
+                    date_key: str = str(bp_typed["date"])
+                    op = other_points.setdefault(date_key, _zero_point(date_key))
+                    for k in sum_keys:
+                        op[k] = int(op[k]) + int(bp_typed[k])
+        if other_points:
+            result_series.append(
+                {
+                    "bucket": "__other",
+                    "points": [other_points.get(d, _zero_point(d)) for d in date_axis],
+                    "currency": currency,
+                }
+            )
+        return result_series
+
     async def stream_events_for_export(
         self,
         *,
