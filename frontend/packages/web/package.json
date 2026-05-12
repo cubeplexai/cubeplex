@@ -32,6 +32,7 @@
     "react-markdown": "^10.1.0",
     "react-pdf": "^10.4.1",
     "react-resizable-panels": "^4.8.0",
+    "recharts": "^2.15.4",
     "rehype-katex": "^7.0.1",
     "remark-gfm": "^4.0.1",
     "remark-math": "^6.0.0",
