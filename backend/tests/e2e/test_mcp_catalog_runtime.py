@@ -137,6 +137,13 @@ async def test_org_install_appears_in_workspace_runtime_with_tools_cache(
     assert body["authed"] is True
     install_id = body["install_id"]
 
+    # New semantics: org install is invisible by default. Enable it first.
+    enable_resp = await client.patch(
+        f"/api/v1/ws/{workspace_id}/mcp/org-installs/{install_id}/override",
+        json={"enabled": True},
+    )
+    assert enable_resp.status_code == 204, enable_resp.text
+
     # Org-wide install must show up in the workspace's inherited list.
     list_resp = await client.get(f"/api/v1/ws/{workspace_id}/mcp/servers")
     assert list_resp.status_code == 200, list_resp.text
@@ -298,14 +305,21 @@ async def test_workspace_override_disable_does_not_affect_other_workspace(
     assert install_resp.status_code == 201, install_resp.text
     install_id = install_resp.json()["install_id"]
 
-    # 3) Both workspaces see the install initially.
+    # 3) Enable for both workspaces (org installs are invisible by default).
+    for ws_id in (workspace_a, workspace_b):
+        enable_resp = await client.patch(
+            f"/api/v1/ws/{ws_id}/mcp/org-installs/{install_id}/override",
+            json={"enabled": True},
+        )
+        assert enable_resp.status_code == 204, enable_resp.text
+
     for ws_id in (workspace_a, workspace_b):
         list_resp = await client.get(f"/api/v1/ws/{ws_id}/mcp/servers")
         assert list_resp.status_code == 200
         inherited = {item["id"] for item in list_resp.json()["inherited"]}
         assert install_id in inherited, f"{ws_id} should inherit org install"
 
-    # 4) Disable in workspace A only.
+    # 4) Disable in workspace A only (deletes the override row).
     disable_resp = await client.patch(
         f"/api/v1/ws/{workspace_a}/mcp/org-installs/{install_id}/override",
         json={"enabled": False},

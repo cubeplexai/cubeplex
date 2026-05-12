@@ -274,11 +274,12 @@ async def list_workspace_mcp(
             name=srv.name,
             server_url=srv.server_url,
             transport=srv.transport,
-            # Inherited by default; explicit override row may turn it off.
-            enabled=override.enabled if override is not None else True,
+            # New semantics: visible only if override row exists and enabled=True.
+            enabled=override is not None and override.enabled,
             scope="org",
         )
         for srv, override in org_rows
+        if override is not None and override.enabled
     ]
 
     workspace_servers = [
@@ -309,18 +310,38 @@ async def toggle_mcp_binding(
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="org MCP server not found")
 
     override_repo = WorkspaceMCPOverrideRepository(session, org_id=ctx.org_id)
-    if body.enabled:
-        # Inheriting visibility is the default — drop any explicit disable
-        # override so we don't leave stale rows around.
-        await override_repo.delete(
+
+    if body.enabled is not None:
+        if body.enabled:
+            await override_repo.upsert(
+                workspace_id=ctx.workspace_id,
+                mcp_server_id=server_id,
+                enabled=True,
+                updated_by_user_id=ctx.user.id,
+            )
+        else:
+            await override_repo.delete(
+                workspace_id=ctx.workspace_id,
+                mcp_server_id=server_id,
+            )
+
+    if body.credential_mode is not None:
+        override = await override_repo.get_for_workspace_and_server(
             workspace_id=ctx.workspace_id,
             mcp_server_id=server_id,
         )
-    else:
-        await override_repo.upsert(
-            workspace_id=ctx.workspace_id,
-            mcp_server_id=server_id,
-            enabled=False,
-            updated_by_user_id=ctx.user.id,
-        )
-    return {"server_id": server_id, "enabled": body.enabled}
+        if override is None:
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                detail="connector must be enabled before setting credential mode",
+            )
+        override.credential_mode = body.credential_mode
+        override.updated_by_user_id = ctx.user.id
+        session.add(override)
+        await session.commit()
+
+    return {
+        "server_id": server_id,
+        "enabled": body.enabled,
+        "credential_mode": body.credential_mode,
+    }

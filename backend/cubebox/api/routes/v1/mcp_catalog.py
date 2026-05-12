@@ -393,9 +393,9 @@ async def patch_org_install_override(
 ) -> None:
     """Toggle visibility of an org-wide install for the calling workspace.
 
-    ``enabled=False`` upserts a disable row; ``enabled=True`` removes any
-    explicit override (default-on inheritance). Workspace-private installs
-    return 400 — there's nothing to override.
+    ``enabled=True`` upserts an enabled row (makes it visible);
+    ``enabled=False`` deletes the override row (default-invisible).
+    Workspace-private installs return 400 — there's nothing to override.
     """
     server = await svc.server_repo.get(install_id)
     if server is None:
@@ -425,14 +425,16 @@ async def patch_org_install_override(
         )
 
     if body.enabled:
-        await svc.override_repo.delete(workspace_id=workspace_id, mcp_server_id=install_id)
-    else:
+        # New semantics: enabled=True creates a visible override row.
         await svc.override_repo.upsert(
             workspace_id=workspace_id,
             mcp_server_id=install_id,
-            enabled=False,
+            enabled=True,
             updated_by_user_id=ctx.user.id,
         )
+    else:
+        # Disabling = delete the override row (no row = invisible).
+        await svc.override_repo.delete(workspace_id=workspace_id, mcp_server_id=install_id)
 
 
 # ---------------------------------------------------------------------------

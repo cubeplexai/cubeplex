@@ -41,34 +41,55 @@ async def test_admin_overrides_control_workspace_visibility(
     assert create_resp.status_code == 201, create_resp.text
     server_id = create_resp.json()["id"]
 
-    # Default: both workspaces inherit the org-wide install.
+    # Default: neither workspace sees the org-wide install (invisible by default).
     list_a_resp = await client.get(f"/api/v1/ws/{workspace_a}/mcp/servers")
     assert list_a_resp.status_code == 200
-    assert any(server["id"] == server_id for server in list_a_resp.json()["inherited"])
+    assert all(server["id"] != server_id for server in list_a_resp.json()["inherited"])
     list_b_resp = await client.get(f"/api/v1/ws/{workspace_b}/mcp/servers")
     assert list_b_resp.status_code == 200
-    assert any(server["id"] == server_id for server in list_b_resp.json()["inherited"])
+    assert all(server["id"] != server_id for server in list_b_resp.json()["inherited"])
 
-    # Disable for workspace_b via override.
+    # Enable for both workspaces via override.
+    enable_a_resp = await client.put(
+        f"/api/v1/admin/mcp/servers/{server_id}/overrides",
+        json={"workspace_id": workspace_a, "enabled": True},
+    )
+    assert enable_a_resp.status_code == 200, enable_a_resp.text
+    enable_b_resp = await client.put(
+        f"/api/v1/admin/mcp/servers/{server_id}/overrides",
+        json={"workspace_id": workspace_b, "enabled": True},
+    )
+    assert enable_b_resp.status_code == 200, enable_b_resp.text
+
+    list_a_enabled = await client.get(f"/api/v1/ws/{workspace_a}/mcp/servers")
+    assert any(server["id"] == server_id for server in list_a_enabled.json()["inherited"])
+    list_b_enabled = await client.get(f"/api/v1/ws/{workspace_b}/mcp/servers")
+    assert any(server["id"] == server_id for server in list_b_enabled.json()["inherited"])
+
+    # Disable for workspace_b via override (deletes the row).
     disable_resp = await client.put(
         f"/api/v1/admin/mcp/servers/{server_id}/overrides",
         json={"workspace_id": workspace_b, "enabled": False},
     )
     assert disable_resp.status_code == 200, disable_resp.text
-    assert _overrides_by_workspace(disable_resp.json()) == {workspace_b: False}
+    # Only workspace_a override remains.
+    assert _overrides_by_workspace(disable_resp.json()) == {workspace_a: True}
 
     list_a_after = await client.get(f"/api/v1/ws/{workspace_a}/mcp/servers")
     assert any(server["id"] == server_id for server in list_a_after.json()["inherited"])
     list_b_after = await client.get(f"/api/v1/ws/{workspace_b}/mcp/servers")
     assert all(server["id"] != server_id for server in list_b_after.json()["inherited"])
 
-    # Re-enable for workspace_b drops the override row entirely.
+    # Re-enable for workspace_b creates the override row again.
     reenable_resp = await client.put(
         f"/api/v1/admin/mcp/servers/{server_id}/overrides",
         json={"workspace_id": workspace_b, "enabled": True},
     )
     assert reenable_resp.status_code == 200, reenable_resp.text
-    assert _overrides_by_workspace(reenable_resp.json()) == {}
+    assert _overrides_by_workspace(reenable_resp.json()) == {
+        workspace_a: True,
+        workspace_b: True,
+    }
     list_b_again = await client.get(f"/api/v1/ws/{workspace_b}/mcp/servers")
     assert any(server["id"] == server_id for server in list_b_again.json()["inherited"])
 

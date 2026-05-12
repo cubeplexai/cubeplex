@@ -60,13 +60,12 @@ async def _get_workspace_visible_server(
     if server.owner_workspace_id == workspace_id:
         return server
     if server.owner_workspace_id is None:
-        # Org-wide install: visible unless this workspace has an explicit
-        # disable override.
+        # New semantics: visible only if an enabled=True override row exists.
         override = await svc.override_repo.get_for_workspace_and_server(
             workspace_id=workspace_id,
             mcp_server_id=server_id,
         )
-        if override is None or override.enabled:
+        if override is not None and override.enabled:
             return server
     raise HTTPException(403, detail={"code": "mcp_server_not_available_to_workspace"})
 
@@ -98,7 +97,7 @@ async def list_servers(
     owned = await svc.server_repo.list_for_org(owner_workspace_id=workspace_id)
     paired = await svc.server_repo.list_org_wide_with_workspace_override(workspace_id)
     inherited: list[MCPServer] = [
-        srv for srv, override in paired if override is None or override.enabled
+        srv for srv, override in paired if override is not None and override.enabled
     ]
 
     return MCPServerListWS(

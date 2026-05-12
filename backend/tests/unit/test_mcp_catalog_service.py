@@ -284,10 +284,24 @@ async def test_list_for_member_reports_org_install_status(
         auto_enable_workspaces=True,
     )
 
+    # Org install exists but is invisible by default (no override row).
     items = await service.list_for_member("ws-test")
     assert items[0].org_install_id is not None
-    assert items[0].workspace_visible is True
+    assert items[0].workspace_visible is False
     assert items[0].user_install_id is None
+
+    # Explicitly enable for this workspace.
+    install_id = items[0].org_install_id
+    assert install_id is not None
+    await service.override_repo.upsert(
+        workspace_id="ws-test",
+        mcp_server_id=install_id,
+        enabled=True,
+        updated_by_user_id="u1",
+    )
+
+    items = await service.list_for_member("ws-test")
+    assert items[0].workspace_visible is True
 
 
 async def test_list_for_member_reports_user_install_status(

@@ -231,11 +231,12 @@ async def test_admin_install_static_succeeds(
     assert body["authed"] is True
     install_id = body["install_id"]
 
-    # Catalog list should now reflect org_install_id + workspace_visible=True.
+    # Catalog list: org_install_id is set, but workspace_visible=False
+    # (org installs are invisible by default until explicitly enabled).
     list_resp = await client.get(f"/api/v1/ws/{workspace_id}/mcp/catalog")
     items = {item["slug"]: item for item in list_resp.json()["items"]}
     assert items["github"]["org_install_id"] == install_id
-    assert items["github"]["workspace_visible"] is True
+    assert items["github"]["workspace_visible"] is False
 
 
 async def test_admin_install_duplicate_returns_409(

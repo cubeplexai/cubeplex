@@ -322,13 +322,14 @@ class MCPServerService:
         server.owner_workspace_id = None
         await self.server_repo.update(server)
 
-        # Promotion makes the install visible to every workspace in the org by
-        # default (overrides drive opt-out, not opt-in). Drop any pre-existing
-        # disable-override for the source workspace so the promoter still sees
-        # the connector.
-        await self.override_repo.delete(
+        # New semantics: org installs are invisible by default. Create an
+        # enabled override for the source workspace so the promoter still
+        # sees the connector immediately after promotion.
+        await self.override_repo.upsert(
             workspace_id=original_workspace_id,
             mcp_server_id=server_id,
+            enabled=True,
+            updated_by_user_id=self._ctx.user.id,
         )
 
         return await self.server_repo.get(server.id) or server
@@ -494,28 +495,29 @@ class MCPServerService:
         workspace_id: str,
         enabled: bool,
     ) -> None:
-        """Disable (or re-enable) an org-wide install for a single workspace.
+        """Enable or disable an org-wide install for a single workspace.
 
-        Workspace-private installs (owner_workspace_id != NULL) cannot be
-        overridden — they are owned by the workspace itself, not inherited.
+        New semantics: no override row = not visible. ``enabled=True`` makes
+        the connector visible to this workspace. ``enabled=False`` (or deleting
+        the row) hides it.
         """
         server = await self.server_repo.get(server_id)
         if server is None:
             raise MCPServerNotFound(server_id)
         if server.owner_workspace_id is not None:
             raise MCPWorkspaceOwnedNoOverride()
-        if enabled:
-            # ``enabled=True`` is the implicit default — drop any explicit
-            # disable row so we don't accumulate dead override entries.
+        if not enabled:
+            # Disabling = delete the override row (no row = invisible).
             await self.override_repo.delete(
                 workspace_id=workspace_id,
                 mcp_server_id=server_id,
             )
             return
+        # Enabling = upsert an enabled=True row.
         await self.override_repo.upsert(
             workspace_id=workspace_id,
             mcp_server_id=server_id,
-            enabled=False,
+            enabled=True,
             updated_by_user_id=self._ctx.user.id,
         )
 
