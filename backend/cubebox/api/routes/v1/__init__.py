@@ -5,6 +5,7 @@ Exports all v1 API routers.
 
 from cubebox.api.routes.v1 import (
     admin_mcp,
+    admin_members,
     admin_skills,
     mcp_catalog,
     mcp_oauth,
@@ -24,6 +25,7 @@ from cubebox.api.routes.v1.workspaces import router as workspaces_router
 __all__ = [
     "admin_router",
     "admin_mcp",
+    "admin_members",
     "admin_skills",
     "mcp_catalog",
     "mcp_oauth",
