@@ -8,5 +8,11 @@ export type * from './memory'
 export type * from './message'
 export type * from './skills'
 export type * from './workspace-settings'
-export type { CostAggregateRow, CostSummaryResponse } from './billing'
+export type {
+  CostAggregateRow,
+  CostSummaryResponse,
+  TimeseriesPoint,
+  TimeseriesSeries,
+  TimeseriesResponse,
+} from './billing'
 export { formatCostUsd } from './billing'

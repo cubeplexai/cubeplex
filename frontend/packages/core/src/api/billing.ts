@@ -1,4 +1,4 @@
-import type { CostAggregateRow, CostSummaryResponse } from '../types/billing'
+import type { CostAggregateRow, CostSummaryResponse, TimeseriesResponse } from '../types/billing'
 import { toApiError, type ApiClient } from './client'
 
 export async function fetchCostSummary(
@@ -37,4 +37,33 @@ export function buildExportUrl(wsId?: string, params: { from?: string; to?: stri
     ? `/api/v1/admin/cost/by-workspace/${wsId}/export.csv`
     : '/api/v1/admin/cost/export.csv'
   return `${base}?${query}`
+}
+
+export interface TimeseriesParams {
+  dimension: 'workspace' | 'model' | 'user'
+  granularity?: 'day' | 'week'
+  from?: string
+  to?: string
+  workspace_ids?: string[]
+  models?: string[]
+}
+
+export async function fetchCostTimeseries(
+  client: ApiClient,
+  params: TimeseriesParams,
+): Promise<TimeseriesResponse> {
+  const query = new URLSearchParams()
+  query.set('dimension', params.dimension)
+  if (params.granularity) query.set('granularity', params.granularity)
+  if (params.from) query.set('from_date', params.from)
+  if (params.to) query.set('to_date', params.to)
+  if (params.workspace_ids && params.workspace_ids.length) {
+    query.set('workspace_ids', params.workspace_ids.join(','))
+  }
+  if (params.models && params.models.length) {
+    query.set('models', params.models.join(','))
+  }
+  const res = await client.get(`/api/v1/admin/cost/timeseries?${query}`)
+  if (!res.ok) throw await toApiError(res)
+  return res.json() as Promise<TimeseriesResponse>
 }
