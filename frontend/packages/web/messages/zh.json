@@ -15,7 +15,11 @@
   "sidebar": {
     "newChat": "新建对话",
     "recentChats": "最近会话",
-    "untitledChat": "新对话"
+    "untitledChat": "新对话",
+    "renameConversation": "重命名",
+    "pinConversation": "置顶",
+    "unpinConversation": "取消置顶",
+    "moreActions": "更多"
   },
   "time": {
     "justNow": "刚刚",

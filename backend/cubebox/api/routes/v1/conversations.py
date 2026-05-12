@@ -17,6 +17,7 @@ from cubebox.auth.dependencies import require_member
 from cubebox.cache import RedisHandle, redis_dep
 from cubebox.db import get_session
 from cubebox.db.engine import _build_database_url, async_session_maker
+from cubebox.models import Conversation
 from cubebox.repositories import ConversationRepository
 from cubebox.streams.run_events import (
     get_active_run,
@@ -31,6 +32,16 @@ from cubebox.streams.run_manager import RunContext
 from cubebox.utils.time import utc_isoformat
 
 router = APIRouter(prefix="/ws/{workspace_id}/conversations", tags=["conversations"])
+
+
+def _serialize_conversation(c: Conversation) -> dict[str, object]:
+    return {
+        "id": c.id,
+        "title": c.title,
+        "is_pinned": c.is_pinned,
+        "created_at": utc_isoformat(c.created_at),
+        "updated_at": utc_isoformat(c.updated_at),
+    }
 
 
 async def _update_conversation_timestamp(
@@ -82,12 +93,7 @@ async def create_conversation(
         user_id=ctx.user.id,
     )
     conversation = await repo.create(title=title, draft=draft)
-    return {
-        "id": conversation.id,
-        "title": conversation.title,
-        "created_at": utc_isoformat(conversation.created_at),
-        "updated_at": utc_isoformat(conversation.updated_at),
-    }
+    return _serialize_conversation(conversation)
 
 
 @router.get("/{conversation_id}")
@@ -109,12 +115,7 @@ async def get_conversation(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Conversation {conversation_id} not found",
         )
-    return {
-        "id": conversation.id,
-        "title": conversation.title,
-        "created_at": utc_isoformat(conversation.created_at),
-        "updated_at": utc_isoformat(conversation.updated_at),
-    }
+    return _serialize_conversation(conversation)
 
 
 @router.get("")
@@ -133,15 +134,7 @@ async def list_conversations(
     )
     conversations, total = await repo.list_all(limit=limit, offset=offset)
     return {
-        "conversations": [
-            {
-                "id": c.id,
-                "title": c.title,
-                "created_at": utc_isoformat(c.created_at),
-                "updated_at": utc_isoformat(c.updated_at),
-            }
-            for c in conversations
-        ],
+        "conversations": [_serialize_conversation(c) for c in conversations],
         "total": total,
         "limit": limit,
         "offset": offset,
@@ -168,12 +161,36 @@ async def update_conversation(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Conversation {conversation_id} not found",
         )
-    return {
-        "id": conversation.id,
-        "title": conversation.title,
-        "created_at": utc_isoformat(conversation.created_at),
-        "updated_at": utc_isoformat(conversation.updated_at),
-    }
+    return _serialize_conversation(conversation)
+
+
+class PinRequest(BaseModel):
+    """Request body for pin endpoint."""
+
+    is_pinned: bool
+
+
+@router.patch("/{conversation_id}/pin")
+async def set_pin(
+    conversation_id: str,
+    body: PinRequest,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    ctx: Annotated[RequestContext, Depends(require_member)],
+) -> dict[str, object]:
+    """Set the pinned state of a conversation (idempotent)."""
+    repo = ConversationRepository(
+        session,
+        org_id=ctx.org_id,
+        workspace_id=ctx.workspace_id,
+        user_id=ctx.user.id,
+    )
+    conversation = await repo.set_pin(conversation_id, body.is_pinned)
+    if not conversation:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Conversation {conversation_id} not found",
+        )
+    return _serialize_conversation(conversation)
 
 
 @router.delete("/{conversation_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -208,6 +225,107 @@ async def delete_conversation(
     if not deleted:
         # Race condition: someone else deleted it between get and delete; treat as success
         pass
+
+
+class GenerateTitleRequest(BaseModel):
+    """Request body for generate-title endpoint."""
+
+    content: str
+
+
+@router.post("/{conversation_id}/generate-title")
+async def generate_title(
+    conversation_id: str,
+    body: GenerateTitleRequest,
+    raw_request: Request,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    ctx: Annotated[RequestContext, Depends(require_member)],
+) -> dict[str, object]:
+    """Generate a short title from the user's first message.
+
+    Called by the frontend at the start of the first turn, in parallel with
+    the main agent stream. Best-effort and idempotent:
+
+    - Skipped server-side once the conversation already has any messages, so a
+      retried/late call after the first turn cannot retitle an active chat.
+    - Only writes when the row's current title still equals what we read at
+      request start, so a concurrent manual rename is never clobbered.
+    """
+    repo = ConversationRepository(
+        session,
+        org_id=ctx.org_id,
+        workspace_id=ctx.workspace_id,
+        user_id=ctx.user.id,
+    )
+    conversation = await repo.get_by_id(conversation_id)
+    if not conversation:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Conversation {conversation_id} not found",
+        )
+
+    # Server-side first-turn guard: once the conversation has any messages,
+    # we never auto-retitle (a manual `PATCH /{id}?title=…` is the way).
+    if conversation.has_messages:
+        return _serialize_conversation(conversation)
+
+    snippet = (body.content or "").strip()[:1000]
+    if not snippet:
+        return _serialize_conversation(conversation)
+
+    original_title = conversation.title
+
+    from cubebox.llm.factory import LLMFactory
+
+    backend = getattr(raw_request.app.state, "encryption_backend", None)
+    factory = LLMFactory(
+        session=session,
+        org_id=ctx.org_id,
+        encryption_backend=backend,
+    )
+    try:
+        llm = await factory.create_default(temperature=0, max_tokens=60)
+    except Exception:
+        # No usable provider/credential — leave the title alone.
+        return _serialize_conversation(conversation)
+
+    from langchain_core.messages import HumanMessage, SystemMessage
+
+    try:
+        result = await llm.ainvoke(
+            [
+                SystemMessage(
+                    content=(
+                        "Write a conversation title for a sidebar list. "
+                        "Strict rules:\n"
+                        "- Match the user's language exactly (Chinese in, "
+                        "  Chinese out; English in, English out).\n"
+                        "- 4-6 English words, OR 6-10 Chinese characters. "
+                        "  Never longer.\n"
+                        "- Front-load the core topic: the first 2-3 words "
+                        "  (first 4-6 Chinese characters) must be enough to "
+                        "  recognise the conversation if the rest is "
+                        "  truncated with an ellipsis.\n"
+                        "- Use a noun phrase. No leading verb like "
+                        "  '帮我'/'询问'/'how to'/'help with'. No punctuation. "
+                        "  No quotes. No trailing period.\n"
+                        "Return ONLY the title text."
+                    ),
+                ),
+                HumanMessage(content=snippet),
+            ]
+        )
+    except Exception:
+        return _serialize_conversation(conversation)
+
+    title = str(result.content).strip().strip('"').strip("'").strip("。 .,").strip()
+    title = title[:255]
+    if title:
+        updated = await repo.update_title_if_current(conversation_id, title, original_title)
+        if updated:
+            conversation = updated
+
+    return _serialize_conversation(conversation)
 
 
 class SendMessageRequest(BaseModel):

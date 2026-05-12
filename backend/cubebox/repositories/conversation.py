@@ -8,7 +8,7 @@ the primary access check is ``creator_user_id``.
 from datetime import UTC, datetime
 from typing import Any, cast
 
-from sqlalchemy import desc, func, select
+from sqlalchemy import case, desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cubebox.models import Conversation
@@ -55,7 +55,13 @@ class ConversationRepository(ScopedRepository[Conversation]):
         stmt = (
             self._scoped_select()
             .where(cast(Any, Conversation.has_messages).is_(True))
-            .order_by(desc(Conversation.updated_at))  # type: ignore[arg-type]
+            .order_by(
+                case(
+                    (cast(Any, Conversation.is_pinned).is_(True), 0),
+                    else_=1,
+                ),
+                desc(Conversation.updated_at),  # type: ignore[arg-type]
+            )
             .limit(limit)
             .offset(offset)
         )
@@ -84,6 +90,26 @@ class ConversationRepository(ScopedRepository[Conversation]):
         await self.session.refresh(conv)
         return conv
 
+    async def update_title_if_current(
+        self, conversation_id: str, new_title: str, expected_title: str
+    ) -> Conversation | None:
+        """Update title only if it still equals expected_title.
+
+        Used by auto-title generation to avoid clobbering a concurrent manual
+        rename: if the title has changed between request start and response,
+        leave it alone and return the current row.
+        """
+        conv = await self.get(conversation_id)
+        if not conv:
+            return None
+        if conv.title != expected_title:
+            return conv
+        conv.title = new_title
+        conv.updated_at = datetime.now(UTC)
+        await self.session.commit()
+        await self.session.refresh(conv)
+        return conv
+
     async def update_timestamp(self, conversation_id: str) -> None:
         conv = await self.get(conversation_id)
         if conv:
@@ -105,6 +131,15 @@ class ConversationRepository(ScopedRepository[Conversation]):
         conv.has_messages = True
         conv.updated_at = datetime.now(UTC)
         await self.session.commit()
+
+    async def set_pin(self, conversation_id: str, is_pinned: bool) -> Conversation | None:
+        conv = await self.get(conversation_id)
+        if not conv:
+            return None
+        conv.is_pinned = is_pinned
+        await self.session.commit()
+        await self.session.refresh(conv)
+        return conv
 
     async def delete_conversation(self, conversation_id: str) -> bool:
         return await self.delete(conversation_id)

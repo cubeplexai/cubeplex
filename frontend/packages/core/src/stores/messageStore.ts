@@ -15,6 +15,7 @@ import type {
 import type { ApiClient } from '../api'
 import { getConversationBootstrap, streamMessages, streamRun } from '../api'
 import { useCitationStore } from './citationStore'
+import { useConversationStore } from './conversationStore'
 
 export interface AgentStream {
   text: string
@@ -753,6 +754,11 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
     attachmentIds?: string[],
     attachments?: import('../types').MessageAttachment[],
   ) {
+    const isFirstTurn = (get().messages[conversationId] ?? []).length === 0
+    if (isFirstTurn && content.trim()) {
+      void useConversationStore.getState().generateTitle(client, conversationId, content)
+    }
+
     const userMessage: Message = {
       id: `temp-${Date.now()}`,
       role: 'user',

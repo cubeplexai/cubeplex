@@ -15,7 +15,11 @@
   "sidebar": {
     "newChat": "New chat",
     "recentChats": "Recent chats",
-    "untitledChat": "New conversation"
+    "untitledChat": "New conversation",
+    "renameConversation": "Rename",
+    "pinConversation": "Pin",
+    "unpinConversation": "Unpin",
+    "moreActions": "More"
   },
   "time": {
     "justNow": "Just now",
