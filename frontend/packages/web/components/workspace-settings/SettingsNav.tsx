@@ -2,14 +2,20 @@
 
 import Link from 'next/link'
 import { useSearchParams } from 'next/navigation'
-import { Bot, Plug, Sparkles } from 'lucide-react'
+import { Bot, Plug, Sparkles, Users } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 
 interface SettingsNavProps {
   wsId: string
 }
 
-type TopLabelKey = 'navWorkspace' | 'navPersona' | 'navModel' | 'navSkills' | 'navMcp'
+type TopLabelKey =
+  | 'navWorkspace'
+  | 'navPersona'
+  | 'navModel'
+  | 'navSkills'
+  | 'navMcp'
+  | 'navMembers'
 
 interface SubItem {
   key: string
@@ -36,6 +42,7 @@ const TOP_LEVEL: TopItem[] = [
   },
   { key: 'skills', labelKey: 'navSkills', icon: Sparkles },
   { key: 'mcp', labelKey: 'navMcp', icon: Plug },
+  { key: 'members', labelKey: 'navMembers', icon: Users },
 ]
 
 export function SettingsNav({ wsId }: SettingsNavProps): React.ReactElement {
