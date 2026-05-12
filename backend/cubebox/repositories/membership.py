@@ -32,6 +32,25 @@ class MembershipRepository:
         stmt = select(Membership).where(Membership.workspace_id == workspace_id)  # type: ignore[arg-type]
         return list((await self.session.execute(stmt)).scalars().all())
 
+    async def remove_user_from_org_workspaces(self, *, user_id: str, org_id: str) -> int:
+        """Delete all workspace memberships for a user within an org. Returns count deleted."""
+        from typing import Any, cast
+
+        from sqlalchemy import delete
+        from sqlalchemy.engine import CursorResult
+
+        ws_ids_subq = (
+            select(cast(Any, Workspace.id))
+            .where(Workspace.org_id == org_id)  # type: ignore[arg-type]
+            .scalar_subquery()
+        )
+        stmt = delete(Membership).where(
+            Membership.user_id == user_id,  # type: ignore[arg-type]
+            cast(Any, Membership.workspace_id).in_(ws_ids_subq),
+        )
+        result = cast(CursorResult[tuple[()]], await self.session.execute(stmt))
+        return result.rowcount
+
     async def user_has_role_in_org(
         self,
         *,
