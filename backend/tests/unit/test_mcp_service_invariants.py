@@ -466,12 +466,14 @@ async def test_user_credential_management_rejects_wrong_scope(
         await mcp_service.set_user_credential(
             server_id=workspace_server.id,
             user_id="u2",
+            workspace_id="ws-test",
             plaintext="user-secret",
         )
 
     credential_id = await mcp_service.set_user_credential(
         server_id=user_server.id,
         user_id="u2",
+        workspace_id="ws-test",
         plaintext="user-secret",
     )
     assert credential_id
@@ -498,6 +500,7 @@ async def test_setting_user_credential_discovers_tools(
     await mcp_service.set_user_credential(
         server_id=server.id,
         user_id="u2",
+        workspace_id="ws-test",
         plaintext="user-secret",
     )
 
@@ -505,3 +508,59 @@ async def test_setting_user_credential_discovers_tools(
     assert updated is not None
     assert updated.authed is True
     assert updated.last_discovered_at is not None
+
+
+async def test_workspace_override_credential_mode_redirects_credential_writes(
+    mcp_service: MCPServerService,
+) -> None:
+    """A workspace override with credential_mode='workspace' should allow
+    set_workspace_credential against an otherwise org-scoped server, and
+    credential_mode='user' should allow set_user_credential."""
+    server = await mcp_service.create(
+        name="org-shared",
+        server_url="https://org-shared",
+        transport="streamable_http",
+        auth_method="static",
+        credential_scope="org",
+        credential_plaintext="org-secret",
+    )
+
+    # Without an override, the workspace path is still gated by server scope.
+    with pytest.raises(MCPCredentialPathMismatch):
+        await mcp_service.set_workspace_credential(
+            server_id=server.id,
+            workspace_id="ws-test",
+            plaintext="ws-secret",
+        )
+
+    # Override declaring credential_mode='workspace' redirects writes there.
+    await mcp_service.override_repo.upsert(
+        workspace_id="ws-test",
+        mcp_server_id=server.id,
+        enabled=True,
+        updated_by_user_id="u1",
+    )
+    override = await mcp_service.override_repo.get_for_workspace_and_server(
+        workspace_id="ws-test", mcp_server_id=server.id
+    )
+    assert override is not None
+    override.credential_mode = "workspace"
+    await mcp_service.override_repo.session.commit()
+
+    cred_id = await mcp_service.set_workspace_credential(
+        server_id=server.id,
+        workspace_id="ws-test",
+        plaintext="ws-secret",
+    )
+    assert cred_id
+
+    # And credential_mode='user' redirects to per-user credentials similarly.
+    override.credential_mode = "user"
+    await mcp_service.override_repo.session.commit()
+    user_cred_id = await mcp_service.set_user_credential(
+        server_id=server.id,
+        user_id="u9",
+        workspace_id="ws-test",
+        plaintext="user-secret",
+    )
+    assert user_cred_id

@@ -19,6 +19,7 @@ from cubebox.repositories.mcp import (
     MCPServerRepository,
     UserMCPCredentialRepository,
     WorkspaceMCPCredentialRepository,
+    WorkspaceMCPOverrideRepository,
 )
 from cubebox.services.credential import CredentialService
 
@@ -60,12 +61,19 @@ async def load_mcp_tools_for_workspace(
     server_repo = MCPServerRepository(session, org_id=org_id)
     ws_cred_repo = WorkspaceMCPCredentialRepository(session, org_id=org_id)
     user_cred_repo = UserMCPCredentialRepository(session, org_id=org_id)
+    override_repo = WorkspaceMCPOverrideRepository(session, org_id=org_id)
 
     tools: list[BaseTool] = []
     for server in await server_repo.list_for_workspace(workspace_id):
         try:
+            effective_mode = await _effective_credential_mode(
+                server=server,
+                workspace_id=workspace_id,
+                override_repo=override_repo,
+            )
             token = await _resolve_token(
                 server,
+                effective_mode=effective_mode,
                 user_id=user_id,
                 workspace_id=workspace_id,
                 cred_service=cred_service,
@@ -88,7 +96,7 @@ async def load_mcp_tools_for_workspace(
             )
             continue
 
-        if token is None and server.credential_scope != "none":
+        if token is None and effective_mode != "none":
             continue
 
         try:
@@ -104,9 +112,34 @@ async def load_mcp_tools_for_workspace(
     return tools
 
 
+async def _effective_credential_mode(
+    *,
+    server: MCPServer,
+    workspace_id: str,
+    override_repo: WorkspaceMCPOverrideRepository,
+) -> str:
+    """Per-workspace effective credential mode for an MCP server.
+
+    Mirrors ``MCPServerService._effective_credential_mode``: a workspace
+    override may declare ``credential_mode`` that takes precedence over the
+    server-level ``credential_scope`` default. Workspace-owned servers always
+    fall back to ``credential_scope``.
+    """
+    if server.owner_workspace_id is not None:
+        return server.credential_scope
+    override = await override_repo.get_for_workspace_and_server(
+        workspace_id=workspace_id,
+        mcp_server_id=server.id,
+    )
+    if override is None or not override.enabled or not override.credential_mode:
+        return server.credential_scope
+    return override.credential_mode
+
+
 async def _resolve_token(
     server: MCPServer,
     *,
+    effective_mode: str,
     user_id: str,
     workspace_id: str,
     cred_service: CredentialService,
@@ -119,7 +152,7 @@ async def _resolve_token(
     # checks and automatic refresh_token grants.
     if server.auth_method == "oauth" and token_manager is not None:
         return await token_manager.get_valid_access_token(
-            server, user_id=user_id if server.credential_scope == "user" else None
+            server, user_id=user_id if effective_mode == "user" else None
         )
 
     cred_kind = (
@@ -128,7 +161,7 @@ async def _resolve_token(
         else CREDENTIAL_KIND_MCP
     )
 
-    if server.credential_scope == "org":
+    if effective_mode == "org":
         if server.credential_id is None:
             return None
         return await cred_service.get_decrypted(
@@ -136,7 +169,7 @@ async def _resolve_token(
             requesting_kind=cred_kind,
         )
 
-    if server.credential_scope == "workspace":
+    if effective_mode == "workspace":
         workspace_credential = await ws_cred_repo.get(
             workspace_id=workspace_id,
             mcp_server_id=server.id,
@@ -148,7 +181,7 @@ async def _resolve_token(
             requesting_kind=cred_kind,
         )
 
-    if server.credential_scope == "user":
+    if effective_mode == "user":
         user_credential = await user_cred_repo.get(
             user_id=user_id,
             mcp_server_id=server.id,
@@ -160,7 +193,7 @@ async def _resolve_token(
             requesting_kind=cred_kind,
         )
 
-    if server.credential_scope == "none":
+    if effective_mode == "none":
         return await signer.sign(
             user_id=user_id,
             org_id=server.org_id,
