@@ -129,9 +129,7 @@
         "cacheWrites": "缓存写入",
         "uncachedInput": "未缓存输入",
         "hitRate": "命中率",
-        "estSavings": "预计节省",
-        "cost": "成本",
-        "share": "占比"
+        "cost": "成本"
       },
       "other": "其他（{count} 项）",
       "showAll": "+{count} 项 · 查看全部",

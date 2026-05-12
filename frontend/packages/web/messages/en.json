@@ -129,9 +129,7 @@
         "cacheWrites": "Cache writes",
         "uncachedInput": "Uncached input",
         "hitRate": "Hit rate",
-        "estSavings": "Est. savings",
-        "cost": "Cost",
-        "share": "Share"
+        "cost": "Cost"
       },
       "other": "Other ({count} items)",
       "showAll": "+{count} more · show all",
