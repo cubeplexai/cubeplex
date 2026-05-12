@@ -186,3 +186,29 @@ export interface MCPOAuthStartResult {
   authorize_url: string
   state: string
 }
+
+// ---------------- Admin unified connector types ---------------- //
+
+export type MCPConnectorFilter = 'all' | 'installed' | 'available' | 'custom'
+
+export interface MCPAdminConnector {
+  kind: 'catalog' | 'custom'
+  id: string
+  name: string
+  provider: string
+  description: string
+  server_url: string
+  transport: MCPTransport
+  // Catalog-specific
+  catalog_id?: string
+  supported_auth_methods?: MCPAuthMethod[]
+  static_form_fields?: MCPCatalogStaticFormField[] | null
+  // Install state
+  installed: boolean
+  server?: MCPServer
+  // Status display
+  authed: boolean
+  tool_count: number
+  workspace_count: number
+  last_error: string | null
+}
