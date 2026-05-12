@@ -1,39 +1,207 @@
 'use client'
 
 import Link from 'next/link'
-import { Suspense } from 'react'
+import { Suspense, useEffect, useRef, useState } from 'react'
 import { usePathname } from 'next/navigation'
 import { useTranslations } from 'next-intl'
-import { createApiClient, useConversationStore } from '@cubebox/core'
+import { type Conversation, createApiClient, useConversationStore } from '@cubebox/core'
 import { Button } from '@/components/ui/button'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { AvatarPopover } from '@/components/sidebar/AvatarPopover'
 import { WorkspacesSection } from '@/components/sidebar/WorkspacesSection'
 import { SettingsNav } from '@/components/workspace-settings/SettingsNav'
-import { Box, Brain, Plus, Settings, Trash2 } from 'lucide-react'
+import {
+  Box,
+  Brain,
+  MoreHorizontal,
+  Pencil,
+  Pin,
+  PinOff,
+  Plus,
+  Settings,
+  Trash2,
+} from 'lucide-react'
 
-function formatRelativeTime(
-  dateStr: string,
-  t: ReturnType<typeof useTranslations<'time'>>,
-): string {
-  const date = new Date(dateStr)
-  const now = new Date()
-  const diffMs = now.getTime() - date.getTime()
-  const diffMins = Math.floor(diffMs / 60000)
-  const diffHours = Math.floor(diffMs / 3600000)
-  const diffDays = Math.floor(diffMs / 86400000)
+type ApiClient = ReturnType<typeof createApiClient>
 
-  if (diffMins < 1) return t('justNow')
-  if (diffMins < 60) return t('minutesAgo', { n: diffMins })
-  if (diffHours < 24) return t('hoursAgo', { n: diffHours })
-  return t('daysAgo', { n: diffDays })
+function buildClient(currentWsId: string | null): ApiClient {
+  const client = createApiClient('')
+  if (currentWsId) client.setWorkspaceId(currentWsId)
+  return client
 }
 
-export function Sidebar() {
+function ConversationRow({
+  convo,
+  isActive,
+  currentWsId,
+}: {
+  convo: Conversation
+  isActive: boolean
+  currentWsId: string | null
+}): React.ReactElement {
   const tSidebar = useTranslations('sidebar')
-  const tTime = useTranslations('time')
   const tShell = useTranslations('shellLayout')
-  const { conversations, activeId, remove, setActive } = useConversationStore()
+  const { remove, rename, setPin, setActive, pinPending } = useConversationStore()
+  const isPinPending = !!pinPending[convo.id]
+
+  const [isEditing, setIsEditing] = useState(false)
+  const [draft, setDraft] = useState(convo.title)
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    if (!isEditing) setDraft(convo.title)
+  }, [convo.title, isEditing])
+
+  useEffect(() => {
+    if (isEditing) {
+      inputRef.current?.focus()
+      inputRef.current?.select()
+    }
+  }, [isEditing])
+
+  const commitEdit = async (): Promise<void> => {
+    const next = draft.trim()
+    setIsEditing(false)
+    if (!next || next === convo.title) return
+    try {
+      await rename(buildClient(currentWsId), convo.id, next)
+    } catch (err) {
+      console.error('Failed to rename conversation:', err)
+    }
+  }
+
+  const cancelEdit = (): void => {
+    setIsEditing(false)
+    setDraft(convo.title)
+  }
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>): void => {
+    if (e.key === 'Enter') {
+      e.preventDefault()
+      void commitEdit()
+    } else if (e.key === 'Escape') {
+      e.preventDefault()
+      cancelEdit()
+    }
+  }
+
+  const stateClass = isActive
+    ? 'text-foreground bg-primary/8'
+    : 'text-muted-foreground hover:text-foreground hover:bg-accent/60'
+  const baseRowClasses =
+    'group relative flex items-center gap-1 pl-2 pr-1 py-1.5 ' +
+    `rounded-md transition-colors ${stateClass}`
+
+  if (isEditing) {
+    return (
+      <li>
+        <div className={baseRowClasses}>
+          {convo.is_pinned && <Pin className="size-3 shrink-0 text-primary/70 fill-primary/30" />}
+          <input
+            ref={inputRef}
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={handleKeyDown}
+            onBlur={() => void commitEdit()}
+            className={
+              'flex-1 min-w-0 bg-background/80 border border-border rounded ' +
+              'px-1.5 py-0.5 text-[12.5px] font-medium leading-none outline-none ' +
+              'focus:border-primary'
+            }
+          />
+        </div>
+      </li>
+    )
+  }
+
+  return (
+    <li>
+      <Link
+        href={currentWsId ? `/w/${currentWsId}/conversations/${convo.id}` : '/'}
+        onClick={() => setActive(convo.id)}
+        className={baseRowClasses}
+      >
+        {isActive && (
+          <div className="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-5 bg-primary rounded-r-full" />
+        )}
+        {convo.is_pinned && <Pin className="size-3 shrink-0 text-primary/70 fill-primary/30" />}
+        <div className="flex-1 min-w-0 truncate text-[12.5px] font-medium leading-tight">
+          {convo.title || tSidebar('untitledChat')}
+        </div>
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            onClick={(e) => {
+              e.preventDefault()
+              e.stopPropagation()
+            }}
+            className={
+              'p-1 rounded hover:bg-accent text-muted-foreground ' +
+              'hover:text-foreground shrink-0 opacity-0 ' +
+              'group-hover:opacity-100 data-[popup-open]:opacity-100 ' +
+              'transition-opacity'
+            }
+            aria-label={tSidebar('moreActions')}
+            title={tSidebar('moreActions')}
+          >
+            <MoreHorizontal className="size-3.5" />
+          </DropdownMenuTrigger>
+          <DropdownMenuContent
+            align="end"
+            side="right"
+            sideOffset={4}
+            className="w-36"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <DropdownMenuItem
+              onSelect={() => {
+                setDraft(convo.title)
+                setIsEditing(true)
+              }}
+            >
+              <Pencil className="size-3.5" />
+              {tSidebar('renameConversation')}
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              disabled={isPinPending}
+              onSelect={() => {
+                void setPin(buildClient(currentWsId), convo.id, !convo.is_pinned).catch((err) =>
+                  console.error('Failed to toggle pin:', err),
+                )
+              }}
+            >
+              {convo.is_pinned ? <PinOff className="size-3.5" /> : <Pin className="size-3.5" />}
+              {convo.is_pinned ? tSidebar('unpinConversation') : tSidebar('pinConversation')}
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              variant="destructive"
+              onSelect={() => {
+                void remove(buildClient(currentWsId), convo.id).catch((err) =>
+                  console.error('Failed to delete conversation:', err),
+                )
+              }}
+            >
+              <Trash2 className="size-3.5" />
+              {tShell('deleteConversation')}
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </Link>
+    </li>
+  )
+}
+
+export function Sidebar(): React.ReactElement {
+  const tSidebar = useTranslations('sidebar')
+  const tShell = useTranslations('shellLayout')
+  const { conversations, activeId } = useConversationStore()
   const pathname = usePathname()
 
   // Current workspace inferred from URL (no WorkspaceContext dependency).
@@ -43,17 +211,6 @@ export function Sidebar() {
   const isSettingsRoute = currentWsId
     ? (pathname?.startsWith('/w/' + currentWsId + '/settings') ?? false)
     : false
-
-  const handleDeleteClick = async (e: React.MouseEvent, id: string) => {
-    e.preventDefault()
-    const client = createApiClient('')
-    if (currentWsId) client.setWorkspaceId(currentWsId)
-    try {
-      await remove(client, id)
-    } catch (err) {
-      console.error('Failed to delete conversation:', err)
-    }
-  }
 
   return (
     <aside
@@ -107,36 +264,12 @@ export function Sidebar() {
         <ScrollArea className="flex-1 px-2">
           <ul className="space-y-0.5">
             {conversations.map((convo) => (
-              <li key={convo.id}>
-                <Link
-                  href={currentWsId ? `/w/${currentWsId}/conversations/${convo.id}` : '/'}
-                  onClick={() => setActive(convo.id)}
-                  className={`group relative flex items-center gap-2 px-2 py-2 rounded-md transition-colors ${
-                    activeId === convo.id
-                      ? 'text-foreground bg-primary/8'
-                      : 'text-muted-foreground hover:text-foreground hover:bg-accent/60'
-                  }`}
-                >
-                  {activeId === convo.id && (
-                    <div className="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-5 bg-primary rounded-r-full" />
-                  )}
-                  <div className="flex-1 min-w-0 pl-1">
-                    <div className="truncate text-[12.5px] font-medium leading-none mb-1">
-                      {convo.title || tSidebar('untitledChat')}
-                    </div>
-                    <div className="text-[10px] text-muted-foreground/50">
-                      {formatRelativeTime(convo.created_at, tTime)}
-                    </div>
-                  </div>
-                  <button
-                    onClick={(e) => handleDeleteClick(e, convo.id)}
-                    className="opacity-0 group-hover:opacity-40 hover:!opacity-80 transition-opacity shrink-0 p-0.5"
-                    aria-label={tShell('deleteConversation')}
-                  >
-                    <Trash2 className="size-3" />
-                  </button>
-                </Link>
-              </li>
+              <ConversationRow
+                key={convo.id}
+                convo={convo}
+                isActive={activeId === convo.id}
+                currentWsId={currentWsId}
+              />
             ))}
           </ul>
         </ScrollArea>

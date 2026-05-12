@@ -18,3 +18,4 @@ class Conversation(CubeboxBase, OrgScopedMixin, table=True):
     creator_user_id: str = Field(foreign_key="users.id", max_length=20)
     title: str = Field(max_length=255)
     has_messages: bool = Field(default=False, index=True)
+    is_pinned: bool = Field(default=False)

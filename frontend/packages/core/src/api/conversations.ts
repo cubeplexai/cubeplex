@@ -57,6 +57,28 @@ export async function renameConversation(
   return res.json() as Promise<Conversation>
 }
 
+export async function setPinConversation(
+  client: ApiClient,
+  id: string,
+  isPinned: boolean,
+): Promise<Conversation> {
+  const res = await client.patch(`/api/v1/conversations/${id}/pin`, {
+    is_pinned: isPinned,
+  })
+  if (!res.ok) throw await toApiError(res)
+  return res.json() as Promise<Conversation>
+}
+
+export async function generateConversationTitle(
+  client: ApiClient,
+  id: string,
+  content: string,
+): Promise<Conversation> {
+  const res = await client.post(`/api/v1/conversations/${id}/generate-title`, { content })
+  if (!res.ok) throw await toApiError(res)
+  return res.json() as Promise<Conversation>
+}
+
 export async function listMessages(
   client: ApiClient,
   conversationId: string,
