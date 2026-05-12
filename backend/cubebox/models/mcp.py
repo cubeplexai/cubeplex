@@ -62,6 +62,14 @@ class MCPServer(CubeboxBase, table=True):
             "org_id", "owner_workspace_id", "server_url_hash", name="uq_mcp_server_url"
         ),
         UniqueConstraint("org_id", "owner_workspace_id", "name", name="uq_mcp_server_name"),
+        Index(
+            "uq_mcp_install_per_catalog",
+            "org_id",
+            text("COALESCE(owner_workspace_id, '_org')"),
+            "catalog_connector_id",
+            unique=True,
+            postgresql_where=text("catalog_connector_id IS NOT NULL"),
+        ),
     )
 
     org_id: str = Field(foreign_key="organizations.id", max_length=20, index=True)
