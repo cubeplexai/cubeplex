@@ -4,12 +4,14 @@ import {
   getAgentConfig,
   listWorkspaceMCP,
   listWorkspaceSkills,
+  patchWorkspaceMCPCredentialMode,
   toggleWorkspaceMCP,
   toggleWorkspaceSkill,
   updateAgentConfig,
 } from '../api/workspace-settings'
 import type {
   AgentConfig,
+  MCPCredentialMode,
   MCPServerItem,
   SkillInstall,
   WorkspaceMCP,
@@ -27,6 +29,11 @@ export interface WorkspaceSettingsStore {
   savePersona: (client: ApiClient, prompt: string) => Promise<void>
   toggleSkill: (client: ApiClient, installId: string, enabled: boolean) => Promise<void>
   toggleMCP: (client: ApiClient, serverId: string, enabled: boolean) => Promise<void>
+  patchMCPCredentialMode: (
+    client: ApiClient,
+    serverId: string,
+    mode: MCPCredentialMode,
+  ) => Promise<void>
 }
 
 export const useWorkspaceSettingsStore = create<WorkspaceSettingsStore>((set, get) => ({
@@ -75,6 +82,24 @@ export const useWorkspaceSettingsStore = create<WorkspaceSettingsStore>((set, ge
     if (!mcp) return
     const update = (list: MCPServerItem[]) =>
       list.map((s) => (s.server_id === serverId ? { ...s, enabled } : s))
+    set({
+      mcp: {
+        org_servers: update(mcp.org_servers),
+        workspace_servers: update(mcp.workspace_servers),
+      },
+    })
+  },
+
+  async patchMCPCredentialMode(client: ApiClient, serverId: string, mode: MCPCredentialMode) {
+    await patchWorkspaceMCPCredentialMode(client, serverId, mode)
+    const mcp = get().mcp
+    if (!mcp) return
+    const update = (list: MCPServerItem[]) =>
+      list.map((s) =>
+        s.server_id === serverId
+          ? { ...s, credential_mode: mode, credential_source: 'needs_setup' as const }
+          : s,
+      )
     set({
       mcp: {
         org_servers: update(mcp.org_servers),

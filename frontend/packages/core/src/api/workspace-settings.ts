@@ -1,5 +1,10 @@
 import { toApiError, type ApiClient } from './client'
-import type { AgentConfig, WorkspaceMCP, WorkspaceSkills } from '../types/workspace-settings'
+import type {
+  AgentConfig,
+  MCPCredentialMode,
+  WorkspaceMCP,
+  WorkspaceSkills,
+} from '../types/workspace-settings'
 
 export async function getAgentConfig(client: ApiClient): Promise<AgentConfig> {
   const res = await client.get('/api/v1/settings/agent')
@@ -61,4 +66,19 @@ export async function toggleWorkspaceMCP(
   const res = await client.patch(`/api/v1/settings/mcp/${serverId}`, { enabled })
   if (!res.ok) throw await toApiError(res)
   return (await res.json()) as { server_id: string; enabled: boolean }
+}
+
+export async function patchWorkspaceMCPCredentialMode(
+  client: ApiClient,
+  serverId: string,
+  credentialMode: MCPCredentialMode,
+): Promise<{ server_id: string; credential_mode: MCPCredentialMode }> {
+  const res = await client.patch(`/api/v1/settings/mcp/${serverId}`, {
+    credential_mode: credentialMode,
+  })
+  if (!res.ok) throw await toApiError(res)
+  return (await res.json()) as {
+    server_id: string
+    credential_mode: MCPCredentialMode
+  }
 }
