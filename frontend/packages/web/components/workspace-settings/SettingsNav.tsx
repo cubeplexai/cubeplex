@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { useSearchParams } from 'next/navigation'
 import { Bot, Plug, Sparkles, Users } from 'lucide-react'
 import { useTranslations } from 'next-intl'
+import { useWorkspaceStore } from '@cubebox/core'
 
 interface SettingsNavProps {
   wsId: string
@@ -30,7 +31,7 @@ interface TopItem {
   sub?: SubItem[]
 }
 
-const TOP_LEVEL: TopItem[] = [
+const BASE_TOP_LEVEL: TopItem[] = [
   {
     key: 'workspace',
     labelKey: 'navWorkspace',
@@ -42,14 +43,17 @@ const TOP_LEVEL: TopItem[] = [
   },
   { key: 'skills', labelKey: 'navSkills', icon: Sparkles },
   { key: 'mcp', labelKey: 'navMcp', icon: Plug },
-  { key: 'members', labelKey: 'navMembers', icon: Users },
 ]
+
+const MEMBERS_ITEM: TopItem = { key: 'members', labelKey: 'navMembers', icon: Users }
 
 export function SettingsNav({ wsId }: SettingsNavProps): React.ReactElement {
   const t = useTranslations('wsSettings')
   const searchParams = useSearchParams()
   const currentTab = searchParams.get('tab') ?? 'workspace'
   const currentSub = searchParams.get('sub') ?? 'persona'
+  const wsRole = useWorkspaceStore((s) => s.workspaces.find((w) => w.id === wsId)?.role)
+  const topLevel = wsRole === 'admin' ? [...BASE_TOP_LEVEL, MEMBERS_ITEM] : BASE_TOP_LEVEL
 
   return (
     <div className="px-2 pt-2 pb-2 border-t border-border/60 bg-muted/20">
@@ -57,7 +61,7 @@ export function SettingsNav({ wsId }: SettingsNavProps): React.ReactElement {
         {t('settingsLabel')}
       </p>
       <nav className="space-y-0.5">
-        {TOP_LEVEL.map((item) => {
+        {topLevel.map((item) => {
           const Icon = item.icon
           const isActive = currentTab === item.key
           return (

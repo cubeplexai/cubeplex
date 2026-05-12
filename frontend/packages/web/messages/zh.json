@@ -713,7 +713,8 @@
       "confirm": "移除",
       "cancel": "取消"
     },
-    "empty": "暂无成员。"
+    "empty": "暂无成员。",
+    "accessDenied": "仅工作区管理员可管理成员。"
   },
   "panel": {
     "header": {

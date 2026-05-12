@@ -713,7 +713,8 @@
       "confirm": "Remove",
       "cancel": "Cancel"
     },
-    "empty": "No members yet."
+    "empty": "No members yet.",
+    "accessDenied": "Only workspace admins can manage members."
   },
   "panel": {
     "header": {
