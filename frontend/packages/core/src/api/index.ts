@@ -10,6 +10,7 @@ export * from './stream'
 export * from './system'
 export * from './workspace-settings'
 export * from './workspaces'
+export * from './members'
 export {
   fetchCostSummary,
   fetchWorkspaceCost,
