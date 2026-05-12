@@ -1,14 +1,12 @@
 'use client'
 
-import Link from 'next/link'
 import { useCallback, useEffect, useState } from 'react'
-import { CheckCircle2, Globe, Plug, Plus } from 'lucide-react'
+import { CheckCircle2, Globe, Plug } from 'lucide-react'
 import { createApiClient, useWorkspaceSettingsStore } from '@cubebox/core'
 import type { MCPServerItem } from '@cubebox/core'
 import { useTranslations } from 'next-intl'
 
 import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
 import { Switch } from '@/components/ui/switch'
 import { cn } from '@/lib/utils'
 
@@ -119,12 +117,6 @@ export function McpPanel({ wsId }: McpPanelProps) {
             {t('summary', { enabled: enabledCount, total: allServers.length })}
           </p>
         </div>
-        <Link href={`/w/${wsId}/integrations/mcp/new`}>
-          <Button size="sm">
-            <Plus className="size-3.5" />
-            {t('addConnector')}
-          </Button>
-        </Link>
       </header>
 
       <div className="flex flex-1 overflow-hidden">
@@ -205,14 +197,6 @@ export function McpPanel({ wsId }: McpPanelProps) {
                   >
                     {selected.enabled ? t('enabledLabel') : t('disabledLabel')}
                   </Badge>
-                  {selected.scope === 'workspace' && (
-                    <Link
-                      href={`/w/${wsId}/integrations/mcp/${selected.server_id}`}
-                      className="ml-auto text-xs text-primary hover:underline"
-                    >
-                      {t('manage')}
-                    </Link>
-                  )}
                 </div>
               </header>
 

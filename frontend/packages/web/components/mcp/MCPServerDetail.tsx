@@ -10,7 +10,6 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { cn } from '@/lib/utils'
 
-import { MCPOverrideGrid, type MCPWorkspaceOption } from './MCPOverrideGrid'
 import { MCPCredentialPanel } from './MCPCredentialPanel'
 import { MCPPromoteDialog } from './MCPPromoteDialog'
 import { MCPScopeBadge } from './MCPScopeBadge'
@@ -21,7 +20,6 @@ export interface MCPServerDetailProps {
   mode: 'admin' | 'ws-owned' | 'ws-readonly'
   client: ApiClient
   wsId?: string
-  workspaces?: MCPWorkspaceOption[]
   onRefresh: () => Promise<void>
   onDelete?: () => Promise<void>
   onPromote?: (shareCredential: boolean) => Promise<void>
@@ -41,7 +39,6 @@ export function MCPServerDetail({
   mode,
   client,
   wsId,
-  workspaces,
   onRefresh,
   onDelete,
   onPromote,
@@ -50,7 +47,6 @@ export function MCPServerDetail({
   const [refreshing, setRefreshing] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [promoteOpen, setPromoteOpen] = useState(false)
-  const showOverridesTab = mode === 'admin' && server.owner_workspace_id === null
   const showCredentialPanel = (mode === 'ws-owned' || mode === 'ws-readonly') && wsId
   const canRefreshTools = mode !== 'ws-readonly'
 
@@ -150,7 +146,6 @@ export function MCPServerDetail({
           <TabsTrigger value="tools">
             {t('toolsTab', { count: server.tools_cache?.length ?? 0 })}
           </TabsTrigger>
-          {showOverridesTab ? <TabsTrigger value="overrides">{t('workspaces')}</TabsTrigger> : null}
         </TabsList>
 
         <TabsContent value="overview" className="mt-4 flex flex-col gap-4">
@@ -186,12 +181,6 @@ export function MCPServerDetail({
         <TabsContent value="tools" className="mt-4">
           <MCPToolsTable tools={server.tools_cache ?? []} />
         </TabsContent>
-
-        {showOverridesTab && workspaces ? (
-          <TabsContent value="overrides" className="mt-4">
-            <MCPOverrideGrid client={client} serverId={server.id} workspaces={workspaces} />
-          </TabsContent>
-        ) : null}
       </Tabs>
 
       {onPromote ? (
