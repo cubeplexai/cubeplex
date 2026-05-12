@@ -1,5 +1,7 @@
 """E2E tests for the redesigned /admin/cost/* surface and timeseries repo."""
 
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -21,10 +23,16 @@ from tests.e2e.conftest import DEFAULT_ORG_ID, DEFAULT_WS_ID
 pytestmark = pytest.mark.e2e
 
 
-async def _direct_session() -> AsyncSession:
+@asynccontextmanager
+async def _db_session() -> AsyncIterator[AsyncSession]:
+    """Create a direct AsyncSession to the test DB (NullPool, no connection sharing)."""
     engine = create_async_engine(_build_database_url(), poolclass=NullPool)
     maker = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-    return maker()
+    try:
+        async with maker() as session:
+            yield session
+    finally:
+        await engine.dispose()
 
 
 async def _ensure_org(session: AsyncSession, org_id: str) -> None:
@@ -120,7 +128,7 @@ async def _seed_events(
     for r in rows:
         ws_id = str(r["workspace_id"])
         user_id = str(r["user_id"])
-        conv_id = str(r.get("conversation_id", f"conv-{org_id}"))
+        conv_id = str(r.get("conversation_id", f"conv-seed-{org_id[:8]}"))
         if ws_id not in seen_ws:
             await _ensure_workspace(session, ws_id=ws_id, org_id=org_id)
             seen_ws.add(ws_id)
@@ -165,8 +173,7 @@ async def _seed_events(
 
 async def test_get_timeseries_workspace_two_workspaces_two_days() -> None:
     """Two workspaces x two days produces 2 series x 2 points each, zero-padded."""
-    session = await _direct_session()
-    try:
+    async with _db_session() as session:
         org = "org-ts-1"
         day1 = datetime(2026, 5, 1, 12, tzinfo=UTC)
         day2 = datetime(2026, 5, 2, 12, tzinfo=UTC)
@@ -220,14 +227,11 @@ async def test_get_timeseries_workspace_two_workspaces_two_days() -> None:
         assert ws_b_points["2026-05-02"]["cost_amount_micro"] == 0
         assert ws_b_points["2026-05-02"]["calls"] == 0
         assert ws_b_points["2026-05-01"]["cost_amount_micro"] == 500_000
-    finally:
-        await session.close()
 
 
 async def test_get_timeseries_top_n_collapses_to_other() -> None:
     """When buckets exceed max_series, smallest collapse into '__other'."""
-    session = await _direct_session()
-    try:
+    async with _db_session() as session:
         org = "org-ts-2"
         day = datetime(2026, 5, 1, 12, tzinfo=UTC)
         rows: list[dict[str, Any]] = []
@@ -257,14 +261,11 @@ async def test_get_timeseries_top_n_collapses_to_other() -> None:
         # totals preserved
         total = sum(p["cost_amount_micro"] for s in series for p in s["points"])
         assert total == sum(r["cost_micro"] for r in rows)
-    finally:
-        await session.close()
 
 
 async def test_cost_summary_returns_by_user(async_client: httpx.AsyncClient) -> None:
     """/admin/cost/summary returns a `by_user` aggregation with the expected fields."""
-    session = await _direct_session()
-    try:
+    async with _db_session() as session:
         day = datetime(2026, 5, 5, 12, tzinfo=UTC)
         await _seed_events(
             session,
@@ -273,7 +274,6 @@ async def test_cost_summary_returns_by_user(async_client: httpx.AsyncClient) -> 
                 {
                     "workspace_id": DEFAULT_WS_ID,
                     "user_id": "usr-by-user-a",
-                    "conversation_id": "conv-byuser-a",
                     "provider": "openai",
                     "model_id": "gpt-4o",
                     "started_at": day,
@@ -286,7 +286,6 @@ async def test_cost_summary_returns_by_user(async_client: httpx.AsyncClient) -> 
                 {
                     "workspace_id": DEFAULT_WS_ID,
                     "user_id": "usr-by-user-b",
-                    "conversation_id": "conv-byuser-b",
                     "provider": "openai",
                     "model_id": "gpt-4o",
                     "started_at": day,
@@ -298,8 +297,6 @@ async def test_cost_summary_returns_by_user(async_client: httpx.AsyncClient) -> 
                 },
             ],
         )
-    finally:
-        await session.close()
 
     resp = await async_client.get(
         "/api/v1/admin/cost/summary",
