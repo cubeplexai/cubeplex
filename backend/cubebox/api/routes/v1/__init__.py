@@ -11,6 +11,7 @@ from cubebox.api.routes.v1 import (
     mcp_oauth,
     public_artifacts,
     ws_mcp,
+    ws_members,
     ws_settings,
     ws_skills,
 )
@@ -37,6 +38,7 @@ __all__ = [
     "public_artifacts",
     "workspaces_router",
     "ws_mcp",
+    "ws_members",
     "ws_settings",
     "ws_skills",
 ]
