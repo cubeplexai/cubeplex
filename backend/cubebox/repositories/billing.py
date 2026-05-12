@@ -285,11 +285,16 @@ class BillingRepository:
         series_currency: dict[str, str] = {}
         for r in rows:
             bucket = str(r.bucket)
-            date_str = (
-                r.time_bucket.isoformat()
-                if hasattr(r.time_bucket, "isoformat")
-                else str(r.time_bucket)
-            )
+            # date_trunc('week', ...) returns a timestamp (datetime); func.date(...)
+            # returns a date. Normalize both to a YYYY-MM-DD string so the key
+            # matches the date_axis used for zero-padding below.
+            tb = r.time_bucket
+            if hasattr(tb, "date"):
+                date_str = tb.date().isoformat()
+            elif hasattr(tb, "isoformat"):
+                date_str = tb.isoformat()
+            else:
+                date_str = str(tb)
             series_map.setdefault(bucket, {})[date_str] = {
                 "date": date_str,
                 "cost_amount_micro": int(r.cost or 0),

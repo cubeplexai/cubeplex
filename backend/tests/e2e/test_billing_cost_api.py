@@ -410,3 +410,55 @@ async def test_timeseries_requires_admin(
         params={"dimension": "workspace"},
     )
     assert resp.status_code == 403, resp.text
+
+
+async def test_get_timeseries_weekly_granularity_aggregates_days() -> None:
+    """Two events 3 days apart in the same week land in a single weekly bucket."""
+    async with _db_session() as session:
+        org = "org-tsweek-1"
+        # Pick a Wednesday and Saturday in 2026-05 — both in the same Monday-anchored week
+        d1 = datetime(2026, 5, 6, 12, tzinfo=UTC)  # Wed
+        d2 = datetime(2026, 5, 9, 12, tzinfo=UTC)  # Sat
+        await _seed_events(
+            session,
+            org_id=org,
+            rows=[
+                {
+                    "workspace_id": "ws-w-a",
+                    "user_id": "usr-w-1",
+                    "provider": "openai",
+                    "model_id": "gpt-4o",
+                    "started_at": d1,
+                    "cost_micro": 1_000_000,
+                    "input": 100,
+                    "output": 20,
+                    "conversation_id": "conv-w-a",
+                },
+                {
+                    "workspace_id": "ws-w-a",
+                    "user_id": "usr-w-1",
+                    "provider": "openai",
+                    "model_id": "gpt-4o",
+                    "started_at": d2,
+                    "cost_micro": 2_000_000,
+                    "input": 200,
+                    "output": 40,
+                    "conversation_id": "conv-w-b",
+                },
+            ],
+        )
+        repo = BillingRepository(session, org_id=org)
+        result = await repo.get_timeseries(
+            dimension="workspace",
+            since=datetime(2026, 5, 4, tzinfo=UTC),  # Mon
+            until=datetime(2026, 5, 10, 23, 59, 59, tzinfo=UTC),  # Sun
+            granularity="week",
+        )
+        assert len(result) == 1
+        series = result[0]
+        assert series["bucket"] == "ws-w-a"
+        # Both events collapse into one point
+        nonzero = [p for p in series["points"] if p["cost_amount_micro"] > 0]
+        assert len(nonzero) == 1
+        assert nonzero[0]["cost_amount_micro"] == 3_000_000
+        assert nonzero[0]["input_tokens"] == 300
