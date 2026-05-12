@@ -206,17 +206,6 @@ export function MCPServerForm({
                 </span>
               </label>
             ))}
-            <label
-              htmlFor="mcp-scope-oauth"
-              className="flex cursor-not-allowed items-start gap-3 rounded-lg border p-4 opacity-60"
-              title={t('comingSoonTooltip')}
-            >
-              <RadioGroupItem value="oauth-disabled" disabled id="mcp-scope-oauth" />
-              <span className="flex flex-col gap-1">
-                <span className="font-medium">{t('oauth')}</span>
-                <span className="text-sm text-muted-foreground">{t('oauthComingSoon')}</span>
-              </span>
-            </label>
           </RadioGroup>
 
           {requiresStoredSecret ? (
