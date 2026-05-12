@@ -413,6 +413,7 @@ async def seed_catalog(
                 logger.warning(msg)
                 warnings.append(msg)
                 skipped += 1
+                active_slugs.append(entry.slug)
                 continue
             client_id = raw_id
             client_secret_credential_id = await _upsert_oauth_client_secret(
