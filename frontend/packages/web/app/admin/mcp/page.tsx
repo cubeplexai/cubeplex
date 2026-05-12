@@ -64,6 +64,16 @@ export default function AdminMcpPage() {
     await deleteServer(client, id, lensWsId)
   }
 
+  function handleInstalled(id: string): void {
+    setSelectedId(id)
+    setMode('detail')
+  }
+
+  function handleCreated(id: string): void {
+    setSelectedId(id)
+    setMode('detail')
+  }
+
   return (
     <div className="flex h-full flex-col">
       <header className="border-b border-border/70 px-6 py-4">
@@ -99,8 +109,11 @@ export default function AdminMcpPage() {
             connector={selected}
             mode={mode}
             client={client}
+            wsId={lensWsId}
             onRefresh={handleRefresh}
             onDelete={handleDelete}
+            onInstalled={handleInstalled}
+            onCreated={handleCreated}
           />
         </section>
       </div>

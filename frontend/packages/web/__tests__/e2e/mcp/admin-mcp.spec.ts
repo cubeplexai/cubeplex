@@ -86,6 +86,36 @@ test.describe('Admin MCP page', () => {
     await expect(page.getByTestId(`ws-override-checkbox-ws-${tag}`)).toBeChecked()
   })
 
+  test('Add Custom shows form and creates a server', async ({ page }) => {
+    const tag = uid()
+    await registerAndGetWorkspace(page)
+
+    await page.goto('/admin/mcp')
+    await expect(page.getByRole('heading', { name: 'MCP Connectors' })).toBeVisible()
+
+    await page.getByRole('button', { name: 'Add Custom' }).click()
+
+    const form = page.getByTestId('mcp-admin-custom-form')
+    await expect(form).toBeVisible()
+    await expect(form.getByRole('heading', { name: 'Add custom MCP server' })).toBeVisible()
+
+    await form.getByLabel('Name', { exact: true }).fill(`Custom-${tag}`)
+    await form.getByLabel('Server URL').fill(`http://127.0.0.1:9/custom-${tag}`)
+    // Default auth_method is "static" + credential_scope "org" → credential is required.
+    await form.getByLabel('Credential', { exact: true }).fill('test-secret-value')
+    await form.getByRole('button', { name: 'Create server' }).click()
+
+    const detail = page.getByTestId('mcp-admin-detail-panel')
+    await expect(detail).toBeVisible({ timeout: 10_000 })
+    await expect(detail.getByRole('heading', { name: `Custom-${tag}` })).toBeVisible()
+
+    // Sidebar reflects the new server.
+    const sidebar = page.getByRole('complementary', { name: 'connector-list' })
+    await expect(
+      sidebar.getByRole('button', { name: new RegExp(`Custom-${tag}`, 'i') }),
+    ).toBeVisible()
+  })
+
   test('search filters connector list', async ({ page }) => {
     const tag = uid()
     await registerAndGetWorkspace(page)

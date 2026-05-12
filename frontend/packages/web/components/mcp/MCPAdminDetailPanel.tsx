@@ -9,6 +9,8 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 
+import { MCPCatalogInstallPanel } from './MCPCatalogInstallPanel'
+import { MCPCustomCreatePanel } from './MCPCustomCreatePanel'
 import { MCPToolsTable } from './MCPToolsTable'
 import { MCPWorkspacesTab } from './MCPWorkspacesTab'
 
@@ -16,8 +18,11 @@ interface MCPAdminDetailPanelProps {
   connector: MCPAdminConnector | null
   mode: 'detail' | 'add_custom' | null
   client: ApiClient
+  wsId: string
   onRefresh: (id: string) => Promise<void>
   onDelete: (id: string) => Promise<void>
+  onInstalled: (id: string) => void
+  onCreated: (id: string) => void
 }
 
 function InfoRow({ label, children }: { label: string; children: React.ReactNode }) {
@@ -36,8 +41,11 @@ export function MCPAdminDetailPanel({
   connector,
   mode,
   client,
+  wsId,
   onRefresh,
   onDelete,
+  onInstalled,
+  onCreated,
 }: MCPAdminDetailPanelProps) {
   const t = useTranslations('mcpAdmin')
 
@@ -60,6 +68,16 @@ export function MCPAdminDetailPanel({
   }
 
   if (connector && !connector.installed) {
+    if (connector.kind === 'catalog') {
+      return (
+        <MCPCatalogInstallPanel
+          connector={connector}
+          client={client}
+          wsId={wsId}
+          onInstalled={onInstalled}
+        />
+      )
+    }
     return (
       <div
         className="flex flex-1 items-center justify-center p-8 text-sm
@@ -71,14 +89,7 @@ export function MCPAdminDetailPanel({
   }
 
   if (mode === 'add_custom' && !connector) {
-    return (
-      <div
-        className="flex flex-1 items-center justify-center p-8 text-sm
-          text-muted-foreground"
-      >
-        {t('addCustomPlaceholder')}
-      </div>
-    )
+    return <MCPCustomCreatePanel client={client} wsId={wsId} onCreated={onCreated} />
   }
 
   // From here, connector is non-null and installed with a server

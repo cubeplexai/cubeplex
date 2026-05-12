@@ -810,6 +810,42 @@
     "wsEnabled": "Enabled",
     "wsDisabled": "Disabled",
     "pageTitle": "MCP Connectors",
-    "pageSubtitle": "Manage organization-level MCP connectors, credentials, and workspace bindings."
+    "pageSubtitle": "Manage organization-level MCP connectors, credentials, and workspace bindings.",
+
+    "revealSecret": "Reveal secret",
+    "hideSecret": "Hide secret",
+
+    "catalogInstallTitle": "Install for organization",
+    "catalogInstallError": "Install failed",
+    "catalogAuthOAuth": "OAuth",
+    "catalogAuthStatic": "API token",
+    "catalogAuthNone": "No auth",
+    "catalogOAuthNotice": "Sign in with the provider — admins approve once, all enabled workspaces inherit access.",
+    "catalogInstallOAuthButton": "Install with OAuth",
+    "catalogInstallStaticButton": "Install with token",
+    "catalogInstallNoneButton": "Install",
+    "catalogNoneNotice": "This connector does not require credentials.",
+    "catalogStaticTokenLabel": "API token",
+    "catalogMultiFieldUnsupported": "Multi-field credential forms aren't supported yet for this connector.",
+
+    "customCreateTitle": "Add custom MCP server",
+    "customCreateSubtitle": "Register a custom MCP server for the entire organization. You can enable it per workspace afterwards.",
+    "customSectionServer": "Server",
+    "customSectionCredential": "Credential",
+    "customFieldName": "Name",
+    "customFieldNamePlaceholder": "e.g. internal-search",
+    "customFieldUrl": "Server URL",
+    "customFieldTransport": "Transport",
+    "customFieldAuthMethod": "Auth method",
+    "customFieldTimeout": "Connect timeout (s)",
+    "customFieldSseTimeout": "SSE read timeout (s)",
+    "customFieldScope": "Credential scope",
+    "customScopeOrg": "Organization-shared",
+    "customScopeUser": "Per user",
+    "customScopeNone": "None",
+    "customFieldCredName": "Credential name (optional)",
+    "customFieldCredNamePlaceholder": "Label shown in the credential vault",
+    "customFieldCredPlaintext": "Credential",
+    "customSubmit": "Create server"
   }
 }
