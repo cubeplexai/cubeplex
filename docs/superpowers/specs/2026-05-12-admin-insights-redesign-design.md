@@ -431,3 +431,21 @@ unit tests for components — the E2E covers the user-visible behaviour.
 - **Real-time refresh**: the page does not auto-refresh. Admins use the
   `📅` button to re-run with the same range and pick up new data. Live
   push (SSE) is out of scope.
+- **Custom date range picker UI**: `useCostData.filters.range` accepts
+  `{from, to}`, but only the `7d / 30d / 90d` preset segmented control is
+  shipped in this iteration. A custom date picker behind the `📅` icon is
+  a follow-up.
+
+## Future optimizations
+
+- **TimescaleDB / continuous aggregates**: not introduced now. Current
+  scale (a single org producing a few thousand `billing_events` per day)
+  is comfortably handled by vanilla PostgreSQL with an
+  `(org_id, started_at)` index on `billing_events`. Worth revisiting if
+  any of the following becomes true: events reach 10M+ rows per org,
+  `get_org_spend` / `get_timeseries` p95 query latency exceeds ~300 ms,
+  or we need scheduled rollups / retention / column compression.
+  Migrating later is a self-contained change: install the extension,
+  convert `billing_events` to a hypertable, materialize the per-day-per-
+  bucket aggregations as continuous aggregates, point the repository at
+  them. The frontend would not see any change.
