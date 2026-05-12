@@ -57,6 +57,7 @@
     "mcp": "MCP 连接器",
     "sandbox": "沙盒",
     "insights": "洞察",
+    "members": "成员",
     "extensions": "扩展"
   },
   "chat": {
@@ -137,6 +138,42 @@
       "orgTotal": "总计",
       "orgAvg": "组织均值"
     }
+  },
+  "adminMembers": {
+    "title": "成员",
+    "subtitle": "管理组织成员及其角色。",
+    "addMember": "添加成员",
+    "email": "邮箱",
+    "role": "角色",
+    "joined": "加入时间",
+    "actions": "操作",
+    "remove": "移除",
+    "owner": "所有者",
+    "admin": "管理员",
+    "member": "成员",
+    "addDialog": {
+      "title": "添加成员",
+      "emailLabel": "邮箱地址",
+      "emailPlaceholder": "user@example.com",
+      "roleLabel": "角色",
+      "cancel": "取消",
+      "add": "添加",
+      "errorNotFound": "未找到该邮箱的用户",
+      "errorDuplicate": "已经是成员"
+    },
+    "roleConfirm": {
+      "title": "更改角色",
+      "message": "将 {email} 的角色更改为 {role}？",
+      "confirm": "更改角色",
+      "cancel": "取消"
+    },
+    "removeConfirm": {
+      "title": "移除成员",
+      "message": "从组织中移除 {email}？该成员将同时失去所有工作区的访问权限。",
+      "confirm": "移除",
+      "cancel": "取消"
+    },
+    "empty": "暂无成员。"
   },
   "adminSkills": {
     "loading": "加载中…",
@@ -570,6 +607,7 @@
     "navPersona": "Persona",
     "navModel": "模型",
     "navSkills": "技能",
+    "navMembers": "成员",
     "navMcp": "MCP Connectors",
     "soonBadge": "即将推出",
     "persona": {
@@ -642,6 +680,40 @@
       "upload": "上传",
       "uploading": "上传中…"
     }
+  },
+  "wsMembers": {
+    "title": "成员",
+    "subtitle": "管理工作区成员及其角色。",
+    "addMember": "添加成员",
+    "email": "邮箱",
+    "role": "角色",
+    "joined": "加入时间",
+    "actions": "操作",
+    "remove": "移除",
+    "admin": "管理员",
+    "member": "成员",
+    "addDialog": {
+      "title": "添加成员",
+      "selectLabel": "选择成员",
+      "selectPlaceholder": "搜索成员...",
+      "roleLabel": "角色",
+      "cancel": "取消",
+      "add": "添加",
+      "noAvailable": "所有组织成员都已在此工作区中。"
+    },
+    "roleConfirm": {
+      "title": "更改角色",
+      "message": "将 {email} 的角色更改为 {role}？",
+      "confirm": "更改角色",
+      "cancel": "取消"
+    },
+    "removeConfirm": {
+      "title": "移除成员",
+      "message": "从此工作区中移除 {email}？",
+      "confirm": "移除",
+      "cancel": "取消"
+    },
+    "empty": "暂无成员。"
   },
   "panel": {
     "header": {

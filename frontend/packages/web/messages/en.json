@@ -57,6 +57,7 @@
     "mcp": "MCP Connectors",
     "sandbox": "Sandbox",
     "insights": "Insights",
+    "members": "Members",
     "extensions": "Extensions"
   },
   "chat": {
@@ -137,6 +138,42 @@
       "orgTotal": "Org total",
       "orgAvg": "org avg"
     }
+  },
+  "adminMembers": {
+    "title": "Members",
+    "subtitle": "Manage organization members and their roles.",
+    "addMember": "Add member",
+    "email": "Email",
+    "role": "Role",
+    "joined": "Joined",
+    "actions": "Actions",
+    "remove": "Remove",
+    "owner": "owner",
+    "admin": "admin",
+    "member": "member",
+    "addDialog": {
+      "title": "Add member",
+      "emailLabel": "Email address",
+      "emailPlaceholder": "user@example.com",
+      "roleLabel": "Role",
+      "cancel": "Cancel",
+      "add": "Add",
+      "errorNotFound": "No user with this email",
+      "errorDuplicate": "Already a member"
+    },
+    "roleConfirm": {
+      "title": "Change role",
+      "message": "Change {email} role to {role}?",
+      "confirm": "Change role",
+      "cancel": "Cancel"
+    },
+    "removeConfirm": {
+      "title": "Remove member",
+      "message": "Remove {email} from the organization? They will also lose access to all workspaces.",
+      "confirm": "Remove",
+      "cancel": "Cancel"
+    },
+    "empty": "No members yet."
   },
   "adminSkills": {
     "loading": "Loading…",
@@ -570,6 +607,7 @@
     "navPersona": "Persona",
     "navModel": "Model",
     "navSkills": "Skills",
+    "navMembers": "Members",
     "navMcp": "MCP Connectors",
     "soonBadge": "soon",
     "persona": {
@@ -642,6 +680,40 @@
       "upload": "Upload",
       "uploading": "Uploading…"
     }
+  },
+  "wsMembers": {
+    "title": "Members",
+    "subtitle": "Manage workspace members and their roles.",
+    "addMember": "Add member",
+    "email": "Email",
+    "role": "Role",
+    "joined": "Joined",
+    "actions": "Actions",
+    "remove": "Remove",
+    "admin": "admin",
+    "member": "member",
+    "addDialog": {
+      "title": "Add member",
+      "selectLabel": "Select member",
+      "selectPlaceholder": "Search members...",
+      "roleLabel": "Role",
+      "cancel": "Cancel",
+      "add": "Add",
+      "noAvailable": "All org members are already in this workspace."
+    },
+    "roleConfirm": {
+      "title": "Change role",
+      "message": "Change {email} role to {role}?",
+      "confirm": "Change role",
+      "cancel": "Cancel"
+    },
+    "removeConfirm": {
+      "title": "Remove member",
+      "message": "Remove {email} from this workspace?",
+      "confirm": "Remove",
+      "cancel": "Cancel"
+    },
+    "empty": "No members yet."
   },
   "panel": {
     "header": {
