@@ -460,7 +460,25 @@
       "no": "否",
       "selectConnector": "选择一个 connector 查看详情",
       "listAria": "MCP 服务列表",
-      "onBadge": "开"
+      "onBadge": "开",
+      "credOrgBadge": "组织凭证",
+      "credWorkspaceBadge": "工作区凭证",
+      "credSharedByBadge": "由 {name} 共享",
+      "credUserActiveBadge": "按用户（已激活）",
+      "credNeedsSetupBadge": "需要配置",
+      "credentialModeTitle": "凭证模式",
+      "credentialModeLabel": "凭证模式",
+      "credentialSourceLabel": "凭证来源",
+      "credMode_org_title": "使用组织凭证",
+      "credMode_org_help": "由组织统一提供，所有工作区共用。",
+      "credMode_workspace_title": "工作区凭证",
+      "credMode_workspace_help": "由一位成员提供凭证，工作区全员共用。",
+      "credMode_user_title": "按用户",
+      "credMode_user_help": "每位成员各自认证。",
+      "credStateOrg": "此 connector 使用组织级凭证。",
+      "credStateWsActive": "已激活 — 由 {name} 共享",
+      "credStateWsNeeded": "需要工作区管理员提供凭证。",
+      "credStateUser": "每位成员各自认证。"
     },
     "wsPage": {
       "title": "工作区 MCP connectors",
@@ -828,6 +846,8 @@
     "wsSaving": "保存中…",
     "wsConfirmDisable": "禁用?",
     "wsEnabled": "已启用",
-    "wsDisabled": "未启用"
+    "wsDisabled": "未启用",
+    "pageTitle": "MCP 连接器",
+    "pageSubtitle": "管理组织级 MCP 连接器、凭证及工作区绑定。"
   }
 }

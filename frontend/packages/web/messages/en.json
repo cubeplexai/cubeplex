@@ -460,7 +460,25 @@
       "no": "No",
       "selectConnector": "Select a connector to view details",
       "listAria": "MCP server list",
-      "onBadge": "on"
+      "onBadge": "on",
+      "credOrgBadge": "Org credential",
+      "credWorkspaceBadge": "Workspace credential",
+      "credSharedByBadge": "Shared by {name}",
+      "credUserActiveBadge": "Per-user (active)",
+      "credNeedsSetupBadge": "Needs setup",
+      "credentialModeTitle": "Credential mode",
+      "credentialModeLabel": "Credential mode",
+      "credentialSourceLabel": "Credential source",
+      "credMode_org_title": "Use org credential",
+      "credMode_org_help": "Shared by the organization for all workspaces.",
+      "credMode_workspace_title": "Workspace credential",
+      "credMode_workspace_help": "One member provides a credential shared by all workspace members.",
+      "credMode_user_title": "Per-user",
+      "credMode_user_help": "Each member authenticates individually.",
+      "credStateOrg": "This connector uses the organization-level credential.",
+      "credStateWsActive": "Active — shared by {name}",
+      "credStateWsNeeded": "A workspace admin needs to provide a credential.",
+      "credStateUser": "Each member authenticates individually."
     },
     "wsPage": {
       "title": "Workspace MCP connectors",
@@ -828,6 +846,8 @@
     "wsSaving": "Saving…",
     "wsConfirmDisable": "Disable?",
     "wsEnabled": "Enabled",
-    "wsDisabled": "Disabled"
+    "wsDisabled": "Disabled",
+    "pageTitle": "MCP Connectors",
+    "pageSubtitle": "Manage organization-level MCP connectors, credentials, and workspace bindings."
   }
 }
