@@ -330,6 +330,39 @@ async def test_cost_summary_returns_by_user(async_client: httpx.AsyncClient) -> 
 
 
 async def test_timeseries_workspace_happy_path(async_client: httpx.AsyncClient) -> None:
+    """Seed two workspaces, verify both appear unfiltered and only one with workspace_ids."""
+    ws_a = "ws-ts-hp-a"
+    ws_b = "ws-ts-hp-b"
+    async with _db_session() as session:
+        day = datetime(2026, 5, 5, 12, tzinfo=UTC)
+        await _seed_events(
+            session,
+            org_id=DEFAULT_ORG_ID,
+            rows=[
+                {
+                    "workspace_id": ws_a,
+                    "user_id": "usr-ts-hp-a",
+                    "provider": "openai",
+                    "model_id": "gpt-4o",
+                    "started_at": day,
+                    "cost_micro": 1_000_000,
+                    "input": 100,
+                    "output": 20,
+                },
+                {
+                    "workspace_id": ws_b,
+                    "user_id": "usr-ts-hp-b",
+                    "provider": "openai",
+                    "model_id": "gpt-4o",
+                    "started_at": day,
+                    "cost_micro": 500_000,
+                    "input": 50,
+                    "output": 10,
+                },
+            ],
+        )
+
+    # 1. Unfiltered: both workspace buckets present
     resp = await async_client.get(
         "/api/v1/admin/cost/timeseries",
         params={"dimension": "workspace", "granularity": "day"},
@@ -339,6 +372,24 @@ async def test_timeseries_workspace_happy_path(async_client: httpx.AsyncClient) 
     assert body["dimension"] == "workspace"
     assert body["granularity"] == "day"
     assert "series" in body and isinstance(body["series"], list)
+    buckets = {s["bucket"] for s in body["series"]}
+    assert {ws_a, ws_b}.issubset(buckets), f"expected both ws buckets, got {buckets}"
+
+    # 2. Filtered by workspace_ids=ws_a: only ws_a bucket appears
+    resp = await async_client.get(
+        "/api/v1/admin/cost/timeseries",
+        params={
+            "dimension": "workspace",
+            "granularity": "day",
+            "workspace_ids": ws_a,
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    filtered_buckets = {s["bucket"] for s in body["series"]}
+    assert filtered_buckets == {ws_a}, (
+        f"expected only {ws_a} bucket after filter, got {filtered_buckets}"
+    )
 
 
 async def test_timeseries_rejects_invalid_dimension(async_client: httpx.AsyncClient) -> None:
@@ -347,3 +398,15 @@ async def test_timeseries_rejects_invalid_dimension(async_client: httpx.AsyncCli
         params={"dimension": "skill"},
     )
     assert resp.status_code == 422  # FastAPI validation
+
+
+async def test_timeseries_requires_admin(
+    member_client: tuple[httpx.AsyncClient, str],
+) -> None:
+    """Non-admin org member is rejected by the admin gate."""
+    client, _ws_id = member_client
+    resp = await client.get(
+        "/api/v1/admin/cost/timeseries",
+        params={"dimension": "workspace"},
+    )
+    assert resp.status_code == 403, resp.text
