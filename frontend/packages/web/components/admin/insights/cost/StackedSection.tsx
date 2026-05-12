@@ -11,7 +11,7 @@ export interface Column {
   key: string
   label: string
   align?: 'left' | 'right'
-  render?: (row: SummaryRow) => React.ReactNode
+  render: (row: SummaryRow) => React.ReactNode
 }
 
 export interface SummaryRow {
@@ -76,19 +76,14 @@ export function StackedSection({
         <tbody>
           {visible.map((row) => (
             <tr key={row.bucket} className="border-b border-border/40 last:border-0">
-              {columns.map((c) => {
-                const content = c.render
-                  ? c.render(row)
-                  : ((row as unknown as Record<string, unknown>)[c.key] as React.ReactNode)
-                return (
-                  <td
-                    key={c.key}
-                    className={c.align === 'right' ? 'text-right px-2 py-1.5' : 'px-2 py-1.5'}
-                  >
-                    {content}
-                  </td>
-                )
-              })}
+              {columns.map((c) => (
+                <td
+                  key={c.key}
+                  className={c.align === 'right' ? 'text-right px-2 py-1.5' : 'px-2 py-1.5'}
+                >
+                  {c.render(row)}
+                </td>
+              ))}
             </tr>
           ))}
           {!showAll && otherCount > 0 && (
@@ -117,4 +112,51 @@ export function StackedSection({
       </table>
     </section>
   )
+}
+
+function fmtUsd(micro: number): string {
+  return `$${(micro / 1_000_000).toFixed(2)}`
+}
+
+export function defaultCostColumns(
+  t: ReturnType<typeof useTranslations>,
+  kind: 'workspace' | 'model' | 'user',
+): Column[] {
+  const base: Column[] = [
+    { key: 'bucket', label: t(`columns.${kind}`), render: (r) => r.bucket },
+    {
+      key: 'call_count',
+      label: t('columns.calls'),
+      align: 'right',
+      render: (r) => r.call_count.toLocaleString(),
+    },
+    {
+      key: 'input_tokens',
+      label: t('columns.input'),
+      align: 'right',
+      render: (r) => r.input_tokens.toLocaleString(),
+    },
+    {
+      key: 'output_tokens',
+      label: t('columns.output'),
+      align: 'right',
+      render: (r) => r.output_tokens.toLocaleString(),
+    },
+  ]
+  if (kind === 'model') {
+    base.push({
+      key: 'cache_rw',
+      label: t('columns.cacheRw'),
+      align: 'right',
+      render: (r) =>
+        `${(r.cache_read_tokens / 1e6).toFixed(2)}M / ${(r.cache_write_tokens / 1e6).toFixed(2)}M`,
+    })
+  }
+  base.push({
+    key: 'cost_amount_micro',
+    label: t('columns.cost'),
+    align: 'right',
+    render: (r) => fmtUsd(r.cost_amount_micro),
+  })
+  return base
 }

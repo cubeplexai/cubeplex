@@ -6,22 +6,10 @@ import { useCostData, type CostFilters } from '@/hooks/useCostData'
 import { InsightsTopBar } from './InsightsTopBar'
 import { InsightsFilterSidebar } from './InsightsFilterSidebar'
 import { KpiRow } from './cost/KpiRow'
-import { StackedSection, type Column, type SummaryRow } from './cost/StackedSection'
+import { StackedSection, defaultCostColumns, type SummaryRow } from './cost/StackedSection'
 import { CacheSection } from './cost/CacheSection'
+import { PALETTE_WORKSPACE, PALETTE_MODEL, PALETTE_USER, PALETTE_CACHE } from './cost/palettes'
 import type { CostAggregateRow, TimeseriesResponse } from '@cubebox/core'
-
-const PALETTE_WORKSPACE = [
-  '#1e40af',
-  '#1d4ed8',
-  '#2563eb',
-  '#3b82f6',
-  '#60a5fa',
-  '#93c5fd',
-  '#bfdbfe',
-]
-const PALETTE_MODEL = ['#166534', '#15803d', '#16a34a', '#22c55e', '#4ade80', '#86efac', '#bbf7d0']
-const PALETTE_USER = ['#6b21a8', '#7e22ce', '#9333ea', '#a855f7', '#c084fc', '#d8b4fe', '#e9d5ff']
-const PALETTE_CACHE = ['#b45309', '#d97706', '#f59e0b', '#fbbf24', '#fcd34d']
 
 /** Server returns up to 25 series; chart caps further to keep visual density sane. */
 function capTimeseries(ts: TimeseriesResponse, n: number): TimeseriesResponse {
@@ -82,53 +70,6 @@ function aggRowToSummaryRow(r: CostAggregateRow): SummaryRow {
     cache_write_tokens: r.cache_write_tokens,
     currency: r.currency,
   }
-}
-
-function fmtUsd(micro: number): string {
-  return `$${(micro / 1_000_000).toFixed(2)}`
-}
-
-function defaultCostColumns(
-  t: ReturnType<typeof useTranslations>,
-  kind: 'workspace' | 'model' | 'user',
-): Column[] {
-  const base: Column[] = [
-    { key: 'bucket', label: t(`columns.${kind}`) },
-    {
-      key: 'call_count',
-      label: t('columns.calls'),
-      align: 'right',
-      render: (r) => r.call_count.toLocaleString(),
-    },
-    {
-      key: 'input_tokens',
-      label: t('columns.input'),
-      align: 'right',
-      render: (r) => r.input_tokens.toLocaleString(),
-    },
-    {
-      key: 'output_tokens',
-      label: t('columns.output'),
-      align: 'right',
-      render: (r) => r.output_tokens.toLocaleString(),
-    },
-  ]
-  if (kind === 'model') {
-    base.push({
-      key: 'cache_rw',
-      label: t('columns.cacheRw'),
-      align: 'right',
-      render: (r) =>
-        `${(r.cache_read_tokens / 1e6).toFixed(2)}M / ${(r.cache_write_tokens / 1e6).toFixed(2)}M`,
-    })
-  }
-  base.push({
-    key: 'cost_amount_micro',
-    label: t('columns.cost'),
-    align: 'right',
-    render: (r) => fmtUsd(r.cost_amount_micro),
-  })
-  return base
 }
 
 export function InsightsShell() {
