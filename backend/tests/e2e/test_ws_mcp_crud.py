@@ -81,7 +81,7 @@ async def test_other_workspace_member_cannot_edit_owned_server(
 async def test_list_returns_owned_and_inherited(
     admin_client: tuple[httpx.AsyncClient, str],
 ) -> None:
-    """Org-wide installs are inherited by every workspace by default."""
+    """Org-wide installs appear in inherited only after explicit enable."""
     client, workspace_id = admin_client
 
     admin_resp = await client.post(
@@ -98,6 +98,18 @@ async def test_list_returns_owned_and_inherited(
     )
     assert admin_resp.status_code == 201, admin_resp.text
     server_id = admin_resp.json()["id"]
+
+    # Org install is invisible by default.
+    list_before = await client.get(f"/api/v1/ws/{workspace_id}/mcp/servers")
+    assert list_before.status_code == 200
+    assert all(s["id"] != server_id for s in list_before.json()["inherited"])
+
+    # Explicitly enable for this workspace.
+    enable_resp = await client.put(
+        f"/api/v1/admin/mcp/servers/{server_id}/overrides",
+        json={"workspace_id": workspace_id, "enabled": True},
+    )
+    assert enable_resp.status_code == 200, enable_resp.text
 
     list_resp = await client.get(f"/api/v1/ws/{workspace_id}/mcp/servers")
     assert list_resp.status_code == 200

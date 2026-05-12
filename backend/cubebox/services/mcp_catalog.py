@@ -123,9 +123,9 @@ class MCPCatalogService:
             else:
                 ws_installs_by_catalog.setdefault(server.catalog_connector_id, []).append(server)
 
-        # Workspace overrides (disable rows) for the active workspace.
+        # Workspace overrides — enabled=True rows make an org install visible.
         ws_overrides = await self.override_repo.list_for_workspace(workspace_id)
-        disabled_server_ids = {row.mcp_server_id for row in ws_overrides if row.enabled is False}
+        enabled_server_ids = {row.mcp_server_id for row in ws_overrides if row.enabled is True}
 
         result: list[CatalogConnectorDTO] = []
         q_lower = q.lower() if q else None
@@ -141,9 +141,12 @@ class MCPCatalogService:
             org_install = org_installs_by_catalog.get(connector.id)
             org_install_id = org_install.id if org_install is not None else None
 
-            workspace_visible = False
-            if org_install is not None and org_install.authed:
-                workspace_visible = org_install.id not in disabled_server_ids
+            # Visible only if explicitly enabled for this workspace.
+            workspace_visible = (
+                org_install is not None
+                and org_install.authed
+                and org_install.id in enabled_server_ids
+            )
 
             user_install_id: str | None = None
             for ws_server in ws_installs_by_catalog.get(connector.id, []):
@@ -186,10 +189,10 @@ class MCPCatalogService:
         connector = await self._get_connector_or_raise(catalog_id)
         self._assert_auth_method_supported(connector, auth_method)
 
-        # NOTE: ``auto_enable_workspaces`` is honored implicitly by the
-        # spec's inheritance model (org-wide install + no override row =
-        # visible). We accept the flag in the signature so Phase 3 can
-        # plumb it from the API; nothing extra to do here today.
+        # NOTE: With inverted semantics (no override row = invisible),
+        # ``auto_enable_workspaces`` would need to create explicit enabled
+        # override rows for each workspace. Deferred to a follow-up task;
+        # for now the flag is accepted but not acted on.
         del auto_enable_workspaces
 
         return await self._install_org_wide(

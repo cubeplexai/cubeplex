@@ -317,13 +317,14 @@ async def test_promote_alpha_moves_workspace_cred_to_inline(
         )
         is None
     )
-    # Inheritance is the new default — promote no longer creates an enable
-    # row. Visibility is implicit unless the workspace explicitly opts out.
+    # Promotion creates an enabled=True override for the source workspace
+    # so the promoter still sees the connector (default-invisible semantics).
     override = await mcp_service.override_repo.get_for_workspace_and_server(
         workspace_id="ws-test",
         mcp_server_id=server.id,
     )
-    assert override is None
+    assert override is not None
+    assert override.enabled is True
 
 
 async def test_promote_beta_keeps_workspace_cred(
@@ -351,13 +352,13 @@ async def test_promote_beta_keeps_workspace_cred(
         mcp_server_id=server.id,
     )
     assert ws_credential is not None
-    # Promotion drops any pre-existing disable override so the source
-    # workspace still sees the connector by default.
+    # Promotion creates an enabled=True override for the source workspace.
     override = await mcp_service.override_repo.get_for_workspace_and_server(
         workspace_id="ws-test",
         mcp_server_id=server.id,
     )
-    assert override is None
+    assert override is not None
+    assert override.enabled is True
 
 
 async def test_promote_already_org_wide_raises(
@@ -403,24 +404,24 @@ async def test_workspace_credential_management_and_overrides(
         is True
     )
 
-    # Disable inheritance for ws-2.
+    # Enable visibility for ws-2 (creates an enabled=True override row).
     await mcp_service.set_workspace_override(
         server_id=server.id,
         workspace_id="ws-2",
-        enabled=False,
+        enabled=True,
     )
     override = await mcp_service.override_repo.get_for_workspace_and_server(
         workspace_id="ws-2",
         mcp_server_id=server.id,
     )
     assert override is not None
-    assert override.enabled is False
+    assert override.enabled is True
 
-    # Re-enable drops the override row entirely.
+    # Disable removes the override row (no row = invisible).
     await mcp_service.set_workspace_override(
         server_id=server.id,
         workspace_id="ws-2",
-        enabled=True,
+        enabled=False,
     )
     cleared = await mcp_service.override_repo.get_for_workspace_and_server(
         workspace_id="ws-2",

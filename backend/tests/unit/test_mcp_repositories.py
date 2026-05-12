@@ -59,7 +59,7 @@ async def test_mcp_server_repository_enforces_org_scope(session: AsyncSession) -
 async def test_mcp_server_repository_lists_visible_for_workspace(
     session: AsyncSession,
 ) -> None:
-    """Inheritance is the default; explicit overrides only opt out."""
+    """Org installs are invisible by default; enabled=True overrides opt in."""
     from cubebox.repositories.mcp import MCPServerRepository, WorkspaceMCPOverrideRepository
 
     servers = MCPServerRepository(session, org_id="org-1")
@@ -69,16 +69,18 @@ async def test_mcp_server_repository_lists_visible_for_workspace(
         _server(name="owned", server_url_hash="owned", owner_workspace_id="ws-1")
     )
     inherited = await servers.add(_server(name="inherited", server_url_hash="inherited"))
-    disabled = await servers.add(_server(name="disabled", server_url_hash="disabled"))
+    not_enabled = await servers.add(_server(name="not-enabled", server_url_hash="not-enabled"))
     await servers.add(_server(name="not-authed", server_url_hash="not-authed", authed=False))
 
-    # Workspace ws-1 explicitly disables the second org-wide install.
+    # Workspace ws-1 explicitly enables the first org-wide install.
     await overrides.upsert(
         workspace_id="ws-1",
-        mcp_server_id=disabled.id,
-        enabled=False,
+        mcp_server_id=inherited.id,
+        enabled=True,
         updated_by_user_id="user-1",
     )
+    # not_enabled has no override row — invisible by default.
+    _ = not_enabled
 
     visible = await servers.list_for_workspace("ws-1")
     assert {server.id for server in visible} == {owned.id, inherited.id}

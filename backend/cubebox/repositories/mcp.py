@@ -53,16 +53,16 @@ class MCPServerRepository:
         - workspace-private installs (``owner_workspace_id == workspace_id``,
           ``authed=true``)
         - org-wide installs (``owner_workspace_id IS NULL``, ``authed=true``)
-          NOT explicitly disabled by a ``workspace_mcp_overrides`` row
-          for this workspace.
+          explicitly enabled by a ``workspace_mcp_overrides`` row with
+          ``enabled=True`` for this workspace.
         """
-        # Sub-select of disabled override server ids for this workspace.
-        disabled_subq = (
+        # Sub-select of enabled override server ids for this workspace.
+        enabled_subq = (
             select(cast(Any, WorkspaceMCPOverride.mcp_server_id))
             .where(
                 WorkspaceMCPOverride.org_id == self.org_id,  # type: ignore[arg-type]
                 WorkspaceMCPOverride.workspace_id == workspace_id,  # type: ignore[arg-type]
-                cast(Any, WorkspaceMCPOverride.enabled).is_(False),
+                cast(Any, WorkspaceMCPOverride.enabled).is_(True),
             )
             .scalar_subquery()
         )
@@ -74,7 +74,7 @@ class MCPServerRepository:
                 MCPServer.owner_workspace_id == workspace_id,  # type: ignore[arg-type]
                 and_(
                     MCPServer.owner_workspace_id.is_(None),  # type: ignore[union-attr]
-                    cast(Any, MCPServer.id).notin_(disabled_subq),
+                    cast(Any, MCPServer.id).in_(enabled_subq),
                 ),
             ),
         )
@@ -251,8 +251,8 @@ class UserMCPCredentialRepository:
 class WorkspaceMCPOverrideRepository:
     """Org-scoped repository for workspace MCP overrides.
 
-    A row exists only when a workspace explicitly disables an inherited
-    org-wide install. Absent row = inherit org-wide default (visible).
+    A row with ``enabled=True`` makes an org-wide install visible to the
+    workspace. No row = not visible (default-invisible semantics).
     """
 
     def __init__(self, session: AsyncSession, *, org_id: str) -> None:

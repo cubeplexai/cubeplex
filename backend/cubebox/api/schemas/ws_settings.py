@@ -50,4 +50,5 @@ class WorkspaceMCPOut(BaseModel):
 
 
 class MCPBindingPatch(BaseModel):
-    enabled: bool
+    enabled: bool | None = None
+    credential_mode: str | None = None

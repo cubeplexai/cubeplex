@@ -121,12 +121,16 @@ class UserMCPCredential(CubeboxBase, table=True):
 
 
 class WorkspaceMCPOverride(CubeboxBase, OrgScopedMixin, table=True):
-    """Workspace-level override of an org-wide install.
+    """Workspace-level visibility and credential override for org-wide MCP installs.
 
-    A row exists only when the workspace explicitly disables an inherited
-    org-wide MCP server. ``enabled=False`` is the only meaningful value
-    today; ``enabled=True`` is reserved for future per-workspace overrides
-    (e.g. enabling a server that's been org-soft-disabled).
+    A row with ``enabled=True`` means this workspace can see and use the
+    connector. No row means the connector is not visible to this workspace
+    (default-invisible semantics).
+
+    ``credential_mode`` controls how credentials resolve for this workspace:
+    - ``org``: use the org-level shared credential (MCPServer.credential_id)
+    - ``workspace``: one member provides a credential shared by all workspace members
+    - ``user``: each member authenticates individually
     """
 
     _PREFIX: ClassVar[str] = "wmov"
@@ -135,6 +139,7 @@ class WorkspaceMCPOverride(CubeboxBase, OrgScopedMixin, table=True):
 
     mcp_server_id: str = Field(foreign_key="mcp_servers.id", max_length=20, index=True)
     enabled: bool = Field(default=False)
+    credential_mode: str = Field(default="org", max_length=16)
     updated_by_user_id: str = Field(foreign_key="users.id", max_length=20)
 
 

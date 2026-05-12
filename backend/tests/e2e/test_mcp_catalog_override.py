@@ -41,7 +41,7 @@ async def catalog_id(db_session: AsyncSession) -> AsyncIterator[str]:
 pytestmark = pytest.mark.usefixtures("stub_discover_tools")
 
 
-async def test_workspace_override_disable_then_reenable(
+async def test_workspace_override_enable_then_disable(
     admin_client: tuple[httpx.AsyncClient, str],
     catalog_id: str,
 ) -> None:
@@ -57,30 +57,19 @@ async def test_workspace_override_disable_then_reenable(
     assert install_resp.status_code == 201, install_resp.text
     install_id = install_resp.json()["install_id"]
 
-    # Default: workspace inherits the org-wide install.
+    # Default: workspace does NOT inherit org-wide install (invisible by default).
     list_resp = await client.get(f"/api/v1/ws/{workspace_id}/mcp/servers")
     assert list_resp.status_code == 200
     inherited_ids = {item["id"] for item in list_resp.json()["inherited"]}
-    assert install_id in inherited_ids
-
-    # Disable for this workspace via the new canonical override URL.
-    disable_resp = await client.patch(
-        f"/api/v1/ws/{workspace_id}/mcp/org-installs/{install_id}/override",
-        json={"enabled": False},
-    )
-    assert disable_resp.status_code == 204, disable_resp.text
-
-    list_after_disable = await client.get(f"/api/v1/ws/{workspace_id}/mcp/servers")
-    inherited_ids = {item["id"] for item in list_after_disable.json()["inherited"]}
     assert install_id not in inherited_ids
 
-    # Catalog list reflects override too.
+    # Catalog list reflects that it's not visible.
     catalog_resp = await client.get(f"/api/v1/ws/{workspace_id}/mcp/catalog")
     items = {item["slug"]: item for item in catalog_resp.json()["items"]}
     assert items["github"]["org_install_id"] == install_id
     assert items["github"]["workspace_visible"] is False
 
-    # Re-enable: deletes the override row, install re-appears.
+    # Enable for this workspace via the canonical override URL.
     enable_resp = await client.patch(
         f"/api/v1/ws/{workspace_id}/mcp/org-installs/{install_id}/override",
         json={"enabled": True},
@@ -90,6 +79,23 @@ async def test_workspace_override_disable_then_reenable(
     list_after_enable = await client.get(f"/api/v1/ws/{workspace_id}/mcp/servers")
     inherited_ids = {item["id"] for item in list_after_enable.json()["inherited"]}
     assert install_id in inherited_ids
+
+    # Catalog list now shows visible.
+    catalog_resp = await client.get(f"/api/v1/ws/{workspace_id}/mcp/catalog")
+    items = {item["slug"]: item for item in catalog_resp.json()["items"]}
+    assert items["github"]["org_install_id"] == install_id
+    assert items["github"]["workspace_visible"] is True
+
+    # Disable: deletes the override row, install disappears.
+    disable_resp = await client.patch(
+        f"/api/v1/ws/{workspace_id}/mcp/org-installs/{install_id}/override",
+        json={"enabled": False},
+    )
+    assert disable_resp.status_code == 204, disable_resp.text
+
+    list_after_disable = await client.get(f"/api/v1/ws/{workspace_id}/mcp/servers")
+    inherited_ids = {item["id"] for item in list_after_disable.json()["inherited"]}
+    assert install_id not in inherited_ids
 
 
 async def test_workspace_override_rejects_workspace_private_install(
