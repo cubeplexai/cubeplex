@@ -55,24 +55,26 @@
 | `frontend/packages/core/src/types/mcp.ts` | Add `credential_source` field, `MCPAdminConnector` union type |
 | `frontend/packages/core/src/stores/mcpStore.ts` | Rewrite: unified admin store for master-detail |
 | `frontend/packages/core/src/types/workspace-settings.ts` | Add `credential_source` to `MCPServerItem` |
+| `backend/cubebox/models/mcp.py` | Add `credential_mode` column to `WorkspaceMCPOverride` + update docstring |
 | `backend/cubebox/services/mcp_catalog.py` | Invert override logic in `list_for_member` |
 | `backend/cubebox/services/mcp.py` | Update `promote_to_org` for new override semantics |
-| `backend/cubebox/api/routes/v1/ws_settings.py` | Add `credential_source` to MCP list response |
+| `backend/cubebox/api/routes/v1/ws_settings.py` | Add `credential_mode` + `credential_source` to MCP list response, accept `credential_mode` in PATCH |
 | `backend/cubebox/api/routes/v1/ws_mcp.py` | Update `_get_workspace_visible_server` for new semantics |
-| `backend/cubebox/api/schemas/ws_settings.py` | Add `credential_source` field to `MCPServerItem` |
+| `backend/cubebox/api/schemas/ws_settings.py` | Add `credential_mode`, `credential_source`, `credential_shared_by` to `MCPServerItem` |
 
 ---
 
-## Task 1: Backend — Invert Override Logic
+## Task 1: Backend — Invert Override Logic + Add credential_mode Column
 
-The core semantic change. After this, org installs are invisible by default; `WorkspaceMCPOverride(enabled=True)` explicitly enables.
+The core semantic change. After this, org installs are invisible by default; `WorkspaceMCPOverride(enabled=True)` explicitly enables. Also adds the `credential_mode` column to `WorkspaceMCPOverride` for workspace-level credential mode control.
 
 **Files:**
+- Modify: `backend/cubebox/models/mcp.py:123-139` (add column + update docstring)
 - Modify: `backend/cubebox/services/mcp_catalog.py:126-146`
 - Modify: `backend/cubebox/services/mcp.py:490-520`
 - Modify: `backend/cubebox/api/routes/v1/ws_settings.py:263-296`
 - Modify: `backend/cubebox/api/routes/v1/ws_mcp.py:51-71`
-- Modify: `backend/cubebox/models/mcp.py:123-130` (docstring only)
+- Create: Alembic migration for `credential_mode` column
 - Test: `backend/tests/e2e/test_mcp_override_inversion.py`
 
 - [ ] **Step 1: Write E2E test for override inversion**
@@ -310,21 +312,43 @@ In `backend/cubebox/services/mcp.py`, method `promote_to_org` (around line 322-3
         return await self.server_repo.get(server.id) or server
 ```
 
-- [ ] **Step 8: Update WorkspaceMCPOverride model docstring**
+- [ ] **Step 8: Update WorkspaceMCPOverride model — docstring + credential_mode column**
 
-In `backend/cubebox/models/mcp.py` (lines 123-130), update the docstring:
+In `backend/cubebox/models/mcp.py` (lines 123-139), update the model:
 
 ```python
 class WorkspaceMCPOverride(CubeboxBase, OrgScopedMixin, table=True):
-    """Workspace-level visibility override for org-wide MCP installs.
+    """Workspace-level visibility and credential override for org-wide MCP installs.
 
     A row with ``enabled=True`` means this workspace can see and use the
     connector. No row means the connector is not visible to this workspace
     (default-invisible semantics).
+
+    ``credential_mode`` controls how credentials resolve for this workspace:
+    - ``org``: use the org-level shared credential (MCPServer.credential_id)
+    - ``workspace``: one member provides a credential shared by all workspace members
+    - ``user``: each member authenticates individually
     """
+
+    _PREFIX: ClassVar[str] = "wmov"
+    __tablename__ = "workspace_mcp_overrides"
+    __table_args__ = (
+        UniqueConstraint("workspace_id", "mcp_server_id", name="uq_ws_mcp_override"),
+    )
+
+    mcp_server_id: str = Field(foreign_key="mcp_servers.id", max_length=20, index=True)
+    enabled: bool = Field(default=False)
+    credential_mode: str = Field(default="org", max_length=16)
+    updated_by_user_id: str = Field(foreign_key="users.id", max_length=20)
 ```
 
-- [ ] **Step 9: Update toggle_mcp_binding in ws_settings.py**
+- [ ] **Step 8b: Generate Alembic migration for credential_mode column**
+
+Run: `cd /home/chris/cubebox/.worktrees/feat/mcp-optimize/backend && alembic revision --autogenerate -m "add credential_mode to workspace_mcp_overrides"`
+
+Then run: `cd /home/chris/cubebox/.worktrees/feat/mcp-optimize/backend && alembic upgrade head`
+
+- [ ] **Step 9: Update toggle_mcp_binding in ws_settings.py to handle enabled + credential_mode**
 
 In `backend/cubebox/api/routes/v1/ws_settings.py`, the `toggle_mcp_binding` function (lines 299-326):
 
@@ -342,21 +366,44 @@ async def toggle_mcp_binding(
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="org MCP server not found")
 
     override_repo = WorkspaceMCPOverrideRepository(session, org_id=ctx.org_id)
-    if body.enabled:
-        # New semantics: enabled=True row makes it visible.
-        await override_repo.upsert(
+
+    if body.enabled is not None:
+        if body.enabled:
+            # New semantics: enabled=True row makes it visible.
+            await override_repo.upsert(
+                workspace_id=ctx.workspace_id,
+                mcp_server_id=server_id,
+                enabled=True,
+                updated_by_user_id=ctx.user.id,
+            )
+        else:
+            # Disabling = delete the row (no row = invisible).
+            await override_repo.delete(
+                workspace_id=ctx.workspace_id,
+                mcp_server_id=server_id,
+            )
+
+    if body.credential_mode is not None:
+        # Update credential_mode on the existing override row.
+        override = await override_repo.get_for_workspace_and_server(
             workspace_id=ctx.workspace_id,
             mcp_server_id=server_id,
-            enabled=True,
-            updated_by_user_id=ctx.user.id,
         )
-    else:
-        # Disabling = delete the row (no row = invisible).
-        await override_repo.delete(
-            workspace_id=ctx.workspace_id,
-            mcp_server_id=server_id,
-        )
-    return {"server_id": server_id, "enabled": body.enabled}
+        if override is None:
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                detail="connector must be enabled before setting credential mode",
+            )
+        override.credential_mode = body.credential_mode
+        override.updated_by_user_id = ctx.user.id
+        session.add(override)
+        await session.commit()
+
+    return {
+        "server_id": server_id,
+        "enabled": body.enabled,
+        "credential_mode": body.credential_mode,
+    }
 ```
 
 - [ ] **Step 10: Run tests**
@@ -389,9 +436,9 @@ EOF
 
 ---
 
-## Task 2: Backend — Add credential_source to Workspace Settings MCP List
+## Task 2: Backend — Add credential_mode + credential_source to Workspace Settings MCP List
 
-The workspace settings MCP list response needs a `credential_source` field per connector so the frontend can display credential state.
+The workspace settings MCP list response needs `credential_mode` and `credential_source` fields per connector so the frontend can display credential state and offer the right actions. The `toggle_mcp_binding` endpoint also needs to accept `credential_mode` changes.
 
 **Files:**
 - Modify: `backend/cubebox/api/schemas/ws_settings.py`
@@ -404,9 +451,9 @@ Run: `find /home/chris/cubebox/.worktrees/feat/mcp-optimize/backend -path "*/sch
 
 Read the file to find the `MCPServerItem` Pydantic model.
 
-- [ ] **Step 2: Add credential_source to schema**
+- [ ] **Step 2: Add credential_mode and credential_source to schema**
 
-In `backend/cubebox/api/schemas/ws_settings.py`, add `credential_source` to `MCPServerItem`:
+In `backend/cubebox/api/schemas/ws_settings.py`, add both fields to `MCPServerItem`:
 
 ```python
 class MCPServerItem(BaseModel):
@@ -416,16 +463,27 @@ class MCPServerItem(BaseModel):
     transport: str
     enabled: bool
     scope: str
-    credential_source: str | None = None  # "org" | "own" | "needs_setup" | None
+    credential_mode: str = "org"  # "org" | "workspace" | "user"
+    credential_source: str | None = None  # "org" | "workspace" | "user" | "needs_setup" | None
+    credential_shared_by: str | None = None  # display name when mode=workspace and cred exists
 ```
 
-- [ ] **Step 3: Compute credential_source in list_workspace_mcp**
+Also add `credential_mode` to `MCPBindingPatch`:
 
-In `backend/cubebox/api/routes/v1/ws_settings.py`, update `list_workspace_mcp` to compute `credential_source`. Add the `WorkspaceMCPCredentialRepository` import and compute per-server:
+```python
+class MCPBindingPatch(BaseModel):
+    enabled: bool | None = None
+    credential_mode: str | None = None  # "org" | "workspace" | "user"
+```
+
+- [ ] **Step 3: Compute credential_mode + credential_source in list_workspace_mcp**
+
+In `backend/cubebox/api/routes/v1/ws_settings.py`, update `list_workspace_mcp` to compute both fields. Resolution is mode-driven:
 
 ```python
 from cubebox.repositories.mcp import (
     MCPServerRepository,
+    UserMCPCredentialRepository,
     WorkspaceMCPCredentialRepository,
     WorkspaceMCPOverrideRepository,
 )
@@ -437,24 +495,40 @@ async def list_workspace_mcp(
 ) -> WorkspaceMCPOut:
     server_repo = MCPServerRepository(session, org_id=ctx.org_id)
     ws_cred_repo = WorkspaceMCPCredentialRepository(session, org_id=ctx.org_id)
+    user_cred_repo = UserMCPCredentialRepository(session, org_id=ctx.org_id)
 
     org_rows = await server_repo.list_org_wide_with_workspace_override(ctx.workspace_id)
     org_servers: list[MCPServerItem] = []
     for srv, override in org_rows:
         if override is None or not override.enabled:
             continue
-        ws_cred = await ws_cred_repo.get(
-            workspace_id=ctx.workspace_id,
-            mcp_server_id=srv.id,
-        )
-        if ws_cred is not None:
-            credential_source = "own"
-        elif srv.credential_id is not None:
-            credential_source = "org"
-        elif srv.auth_method == "none":
+
+        mode = override.credential_mode or "org"
+        credential_source: str | None = None
+        credential_shared_by: str | None = None
+
+        if srv.auth_method == "none":
             credential_source = None
-        else:
-            credential_source = "needs_setup"
+        elif mode == "org":
+            credential_source = "org" if srv.credential_id else "needs_setup"
+        elif mode == "workspace":
+            ws_cred = await ws_cred_repo.get(
+                workspace_id=ctx.workspace_id,
+                mcp_server_id=srv.id,
+            )
+            if ws_cred is not None:
+                credential_source = "workspace"
+                # Look up display name of who shared it
+                shared_by_user = await session.get(User, ws_cred.created_by_user_id)
+                credential_shared_by = shared_by_user.email if shared_by_user else None
+            else:
+                credential_source = "needs_setup"
+        elif mode == "user":
+            user_cred = await user_cred_repo.get(
+                user_id=ctx.user.id,
+                mcp_server_id=srv.id,
+            )
+            credential_source = "user" if user_cred else "needs_setup"
 
         org_servers.append(
             MCPServerItem(
@@ -464,7 +538,9 @@ async def list_workspace_mcp(
                 transport=srv.transport,
                 enabled=True,
                 scope="org",
+                credential_mode=mode,
                 credential_source=credential_source,
+                credential_shared_by=credential_shared_by,
             )
         )
 
@@ -476,7 +552,6 @@ async def list_workspace_mcp(
             transport=srv.transport,
             enabled=True,
             scope="workspace",
-            credential_source=None,
         )
         for srv in await server_repo.list_for_org(owner_workspace_id=ctx.workspace_id)
     ]
@@ -486,10 +561,11 @@ async def list_workspace_mcp(
 
 - [ ] **Step 4: Update frontend type**
 
-In `frontend/packages/core/src/types/workspace-settings.ts`, add `credential_source`:
+In `frontend/packages/core/src/types/workspace-settings.ts`, add `credential_mode`, `credential_source`, and `credential_shared_by`:
 
 ```typescript
-export type MCPCredentialSource = 'org' | 'own' | 'needs_setup' | null
+export type MCPCredentialMode = 'org' | 'workspace' | 'user'
+export type MCPCredentialSource = 'org' | 'workspace' | 'user' | 'needs_setup' | null
 
 export interface MCPServerItem {
   server_id: string
@@ -498,7 +574,9 @@ export interface MCPServerItem {
   transport: string
   enabled: boolean
   scope: 'org' | 'workspace'
+  credential_mode: MCPCredentialMode
   credential_source: MCPCredentialSource
+  credential_shared_by: string | null
 }
 ```
 
@@ -512,11 +590,12 @@ Run: `cd /home/chris/cubebox/.worktrees/feat/mcp-optimize/backend && make lint &
 cd /home/chris/cubebox/.worktrees/feat/mcp-optimize
 git add backend/cubebox/api/schemas/ws_settings.py backend/cubebox/api/routes/v1/ws_settings.py frontend/packages/core/src/types/workspace-settings.ts
 git commit -m "$(cat <<'EOF'
-feat(mcp): add credential_source to workspace settings MCP list
+feat(mcp): add credential_mode + credential_source to workspace MCP list
 
 Each org connector in the workspace settings MCP list now reports
-its credential state: "org" (shared), "own" (workspace override),
-"needs_setup", or null (auth_method=none).
+credential_mode (org/workspace/user) and resolved credential_source.
+Workspace admin can control how credentials work per connector:
+org-shared, workspace-shared (with shared_by tracking), or per-user.
 EOF
 )"
 ```
@@ -1883,20 +1962,21 @@ EOF
 
 ## Task 12: Frontend — Enhance McpPanel (Workspace Settings MCP Tab)
 
-Update the workspace settings MCP tab to show credential source, remove links to deleted routes, and improve the detail panel.
+Update the workspace settings MCP tab to show credential mode + source, add credential_mode selector in detail panel, remove links to deleted routes, and improve the detail panel.
 
 **Files:**
 - Modify: `frontend/packages/web/components/workspace-settings/McpPanel.tsx`
 
-- [ ] **Step 1: Update McpPanel to show credential_source**
+- [ ] **Step 1: Update McpPanel to show credential_mode and credential_source**
 
 Key changes:
 1. Remove `Link` to `/w/${wsId}/integrations/mcp/new` and `/w/${wsId}/integrations/mcp/${id}`
-2. Add credential source badge to `McpItemCard`
-3. Show credential section in detail panel for org connectors (using org/own/needs_setup states)
-4. Replace "Add connector" button with inline-form trigger for workspace admin
+2. Add credential source badge to `McpItemCard` (mode-aware)
+3. Add credential_mode radio selector in detail panel for org connectors (workspace admin only)
+4. Show credential state based on resolved mode+source
+5. Replace "Add connector" button with inline-form trigger for workspace admin
 
-In `McpItemCard`, add the credential source display:
+In `McpItemCard`, add the credential source display (now mode-aware):
 
 ```typescript
 function McpItemCard({
@@ -1960,9 +2040,16 @@ function McpItemCard({
             {t('usingOrgCredential')}
           </Badge>
         )}
-        {srv.scope === 'org' && srv.credential_source === 'own' && (
-          <Badge variant="outline" className="px-1.5 text-[10px] border-amber-500/30 text-amber-600">
-            {t('ownCredential')}
+        {srv.scope === 'org' && srv.credential_source === 'workspace' && (
+          <Badge variant="outline" className="px-1.5 text-[10px] border-blue-500/30 text-blue-600">
+            {srv.credential_shared_by
+              ? t('workspaceCredentialSharedBy', { name: srv.credential_shared_by })
+              : t('workspaceCredential')}
+          </Badge>
+        )}
+        {srv.scope === 'org' && srv.credential_source === 'user' && (
+          <Badge variant="outline" className="px-1.5 text-[10px] border-emerald-500/30 text-emerald-600">
+            {t('perUserActive')}
           </Badge>
         )}
         {srv.scope === 'org' && srv.credential_source === 'needs_setup' && (
@@ -1992,17 +2079,60 @@ In the McpPanel header, remove the Link to integrations/mcp/new:
 In the detail panel section, remove the Link to `/w/${wsId}/integrations/mcp/${id}`:
 
 ```typescript
-{selected.scope === 'workspace' && (
-  <Button
-    size="sm"
-    variant="outline"
-    className="ml-auto"
-    onClick={() => { /* TODO: inline editing */ }}
-  >
-    {t('manage')}
-  </Button>
+In the detail panel for org connectors, add the credential_mode selector (workspace admin only). This is a radio group below the overview info:
+
+```typescript
+{selected.scope === 'org' && isWsAdmin && (
+  <div className="flex flex-col gap-3 rounded-lg border border-border/70 p-4">
+    <h4 className="text-sm font-semibold">{t('credentialMode')}</h4>
+    <RadioGroup
+      value={selected.credential_mode}
+      onValueChange={(mode) => void handleCredentialModeChange(selected.server_id, mode)}
+    >
+      <label className="flex items-start gap-3 rounded-lg border p-3 cursor-pointer hover:bg-accent/40">
+        <RadioGroupItem value="org" />
+        <span className="flex flex-col gap-0.5">
+          <span className="text-sm font-medium">{t('modeOrg')}</span>
+          <span className="text-xs text-muted-foreground">{t('modeOrgDesc')}</span>
+        </span>
+      </label>
+      <label className="flex items-start gap-3 rounded-lg border p-3 cursor-pointer hover:bg-accent/40">
+        <RadioGroupItem value="workspace" />
+        <span className="flex flex-col gap-0.5">
+          <span className="text-sm font-medium">{t('modeWorkspace')}</span>
+          <span className="text-xs text-muted-foreground">{t('modeWorkspaceDesc')}</span>
+        </span>
+      </label>
+      <label className="flex items-start gap-3 rounded-lg border p-3 cursor-pointer hover:bg-accent/40">
+        <RadioGroupItem value="user" />
+        <span className="flex flex-col gap-0.5">
+          <span className="text-sm font-medium">{t('modeUser')}</span>
+          <span className="text-xs text-muted-foreground">{t('modeUserDesc')}</span>
+        </span>
+      </label>
+    </RadioGroup>
+    {/* Credential state below the selector */}
+    {selected.credential_mode === 'workspace' && selected.credential_source === 'workspace' && (
+      <div className="flex items-center gap-2 text-sm">
+        <CheckCircle2 className="size-3.5 text-emerald-600" />
+        <span>{t('sharedBy', { name: selected.credential_shared_by })}</span>
+        <Button size="sm" variant="ghost" className="ml-auto text-destructive"
+          onClick={() => void handleClearWorkspaceCredential(selected.server_id)}>
+          {t('clear')}
+        </Button>
+      </div>
+    )}
+    {selected.credential_mode === 'workspace' && selected.credential_source === 'needs_setup' && (
+      <p className="text-xs text-muted-foreground">{t('workspaceCredNeeded')}</p>
+    )}
+    {selected.credential_mode === 'user' && (
+      <p className="text-xs text-muted-foreground">{t('perUserExplain')}</p>
+    )}
+  </div>
 )}
 ```
+
+The `handleCredentialModeChange` function calls `PATCH /ws/{wsId}/settings/mcp/{serverId}` with `{ credential_mode: mode }` and refreshes the list.
 
 - [ ] **Step 2: Run type check**
 
@@ -2014,10 +2144,12 @@ Run: `cd /home/chris/cubebox/.worktrees/feat/mcp-optimize/frontend && pnpm type-
 cd /home/chris/cubebox/.worktrees/feat/mcp-optimize
 git add frontend/packages/web/components/workspace-settings/McpPanel.tsx
 git commit -m "$(cat <<'EOF'
-feat(mcp): enhance McpPanel with credential source display
+feat(mcp): enhance McpPanel with credential mode selector
 
-Shows credential_source badges (org/own/needs_setup) on org connector
-cards. Removes links to deleted /integrations/mcp routes.
+Workspace admin can choose credential mode per org connector:
+org-shared, workspace-shared (with shared_by tracking), or per-user.
+Shows mode-aware badges and detail panel with radio group selector.
+Removes links to deleted /integrations/mcp routes.
 EOF
 )"
 ```
@@ -2126,7 +2258,7 @@ Add a `mcpAdmin` section with all the keys used by new components:
 }
 ```
 
-- [ ] **Step 3: Add workspace panel credential source keys**
+- [ ] **Step 3: Add workspace panel credential mode + source keys**
 
 Add to the `mcp.wsPanel` namespace:
 
@@ -2135,8 +2267,21 @@ Add to the `mcp.wsPanel` namespace:
   "mcp": {
     "wsPanel": {
       "usingOrgCredential": "Org credential",
-      "ownCredential": "Own credential",
-      "needsSetup": "Needs setup"
+      "workspaceCredential": "Workspace credential",
+      "workspaceCredentialSharedBy": "Shared by {name}",
+      "perUserActive": "Per-user (active)",
+      "needsSetup": "Needs setup",
+      "credentialMode": "Credential Mode",
+      "modeOrg": "Use org credential",
+      "modeOrgDesc": "Use the org-level shared credential for all members",
+      "modeWorkspace": "Workspace credential",
+      "modeWorkspaceDesc": "Provide one credential shared by all workspace members",
+      "modeUser": "Per-user",
+      "modeUserDesc": "Each member authenticates individually",
+      "sharedBy": "Shared by {name}",
+      "clear": "Clear",
+      "workspaceCredNeeded": "A workspace admin needs to provide a credential",
+      "perUserExplain": "Each member will be prompted to authenticate when using this connector"
     }
   }
 }
