@@ -1,6 +1,5 @@
 """Admin cost/billing endpoints. All routes require org-admin access."""
 
-import asyncio
 import csv
 import io
 from collections.abc import AsyncGenerator
@@ -84,12 +83,12 @@ async def get_cost_summary(
     since, until = _parse_date_range(from_date, to_date)
     repo = BillingRepository(session, org_id=org_id)
 
-    by_workspace, by_model, by_user, by_day = await asyncio.gather(
-        repo.get_org_spend(since=since, until=until, group_by="workspace"),
-        repo.get_org_spend(since=since, until=until, group_by="model"),
-        repo.get_org_spend(since=since, until=until, group_by="user"),
-        repo.get_org_spend(since=since, until=until, group_by="day"),
-    )
+    # Each get_org_spend call reuses the same AsyncSession/connection.
+    # Keep sequential — concurrent use on one session is a SQLAlchemy anti-pattern.
+    by_workspace = await repo.get_org_spend(since=since, until=until, group_by="workspace")
+    by_model = await repo.get_org_spend(since=since, until=until, group_by="model")
+    by_user = await repo.get_org_spend(since=since, until=until, group_by="user")
+    by_day = await repo.get_org_spend(since=since, until=until, group_by="day")
 
     currency = by_workspace[0]["currency"] if by_workspace else "USD"
     total_cost = sum(r["cost_amount_micro"] for r in by_workspace if r["currency"] == currency)
