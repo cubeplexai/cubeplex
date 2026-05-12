@@ -377,6 +377,7 @@ async def put_my_credential(
         await svc.set_user_credential(
             server_id=server_id,
             user_id=ctx.user.id,
+            workspace_id=workspace_id,
             plaintext=body.plaintext,
             credential_name=body.name,
         )

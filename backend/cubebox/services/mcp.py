@@ -334,6 +334,29 @@ class MCPServerService:
 
         return await self.server_repo.get(server.id) or server
 
+    async def _effective_credential_mode(
+        self,
+        *,
+        server: MCPServer,
+        workspace_id: str,
+    ) -> str:
+        """Per-workspace effective credential mode.
+
+        A workspace override row may declare ``credential_mode`` (``org`` /
+        ``workspace`` / ``user``) that takes precedence over the server-level
+        ``credential_scope`` default. Workspace-owned servers have no override
+        row and always use ``credential_scope`` directly.
+        """
+        if server.owner_workspace_id is not None:
+            return server.credential_scope
+        override = await self.override_repo.get_for_workspace_and_server(
+            workspace_id=workspace_id,
+            mcp_server_id=server.id,
+        )
+        if override is None or not override.enabled or not override.credential_mode:
+            return server.credential_scope
+        return override.credential_mode
+
     async def set_workspace_credential(
         self,
         *,
@@ -345,9 +368,10 @@ class MCPServerService:
         server = await self.server_repo.get(server_id)
         if server is None:
             raise MCPServerNotFound(server_id)
-        if server.credential_scope != "workspace":
+        effective = await self._effective_credential_mode(server=server, workspace_id=workspace_id)
+        if effective != "workspace":
             raise MCPCredentialPathMismatch(
-                f"server {server_id} has scope={server.credential_scope}, not 'workspace'"
+                f"server {server_id} has effective_mode={effective}, not 'workspace'"
             )
 
         existing = await self.ws_cred_repo.get(
@@ -414,15 +438,17 @@ class MCPServerService:
         *,
         server_id: str,
         user_id: str,
+        workspace_id: str,
         plaintext: str,
         credential_name: str | None = None,
     ) -> str:
         server = await self.server_repo.get(server_id)
         if server is None:
             raise MCPServerNotFound(server_id)
-        if server.credential_scope != "user":
+        effective = await self._effective_credential_mode(server=server, workspace_id=workspace_id)
+        if effective != "user":
             raise MCPCredentialPathMismatch(
-                f"server {server_id} has scope={server.credential_scope}, not 'user'"
+                f"server {server_id} has effective_mode={effective}, not 'user'"
             )
 
         existing = await self.user_cred_repo.get(
