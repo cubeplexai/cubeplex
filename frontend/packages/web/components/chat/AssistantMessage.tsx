@@ -407,7 +407,7 @@ function groupBlocks(blocks: ContentBlock[]): (ContentBlock | ContentBlock[])[] 
 
 function extractTodosFromMessage(msg: Message): TodoItem[] {
   if (!msg.tool_calls) return []
-  const tc = msg.tool_calls.find((c) => c.name === 'write_todos')
+  const tc = msg.tool_calls.findLast((c) => c.name === 'write_todos')
   if (!tc) return []
   const raw = Array.isArray(tc.arguments.todos) ? tc.arguments.todos : []
   const result: TodoItem[] = []
