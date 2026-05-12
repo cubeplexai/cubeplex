@@ -25,4 +25,5 @@ class CostSummaryResponse(BaseModel):
     total_calls: int
     by_workspace: list[CostAggregateRow]
     by_model: list[CostAggregateRow]
+    by_user: list[CostAggregateRow]
     by_day: list[CostAggregateRow]
