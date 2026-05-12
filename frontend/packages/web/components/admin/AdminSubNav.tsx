@@ -3,7 +3,7 @@
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { useTranslations } from 'next-intl'
-import { Box, CircleDollarSign, Cpu, Globe, Plug, Puzzle, Settings, Sparkles } from 'lucide-react'
+import { BarChart3, Box, Cpu, Globe, Plug, Puzzle, Settings, Sparkles } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { Separator } from '@/components/ui/separator'
 import { useAdminExtensions } from '@/hooks/useAdminExtensions'
@@ -50,7 +50,7 @@ export function AdminSubNav() {
     { href: '/admin/skills', label: t('skills'), icon: Sparkles },
     { href: '/admin/mcp', label: t('mcp'), icon: Plug },
     { href: '/admin/sandbox', label: t('sandbox'), icon: Box },
-    { href: '/admin/cost', label: t('cost'), icon: CircleDollarSign },
+    { href: '/admin/insights', label: t('insights'), icon: BarChart3 },
   ]
 
   const extItems: NavDef[] = extensions.flatMap((ext) =>
