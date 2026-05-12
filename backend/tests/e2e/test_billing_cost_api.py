@@ -3,6 +3,7 @@
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+import httpx
 import pytest
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
@@ -15,6 +16,7 @@ from cubebox.models.organization import Organization
 from cubebox.models.user import User
 from cubebox.models.workspace import Workspace
 from cubebox.repositories import BillingRepository
+from tests.e2e.conftest import DEFAULT_ORG_ID, DEFAULT_WS_ID
 
 pytestmark = pytest.mark.e2e
 
@@ -257,3 +259,74 @@ async def test_get_timeseries_top_n_collapses_to_other() -> None:
         assert total == sum(r["cost_micro"] for r in rows)
     finally:
         await session.close()
+
+
+async def test_cost_summary_returns_by_user(async_client: httpx.AsyncClient) -> None:
+    """/admin/cost/summary returns a `by_user` aggregation with the expected fields."""
+    session = await _direct_session()
+    try:
+        day = datetime(2026, 5, 5, 12, tzinfo=UTC)
+        await _seed_events(
+            session,
+            org_id=DEFAULT_ORG_ID,
+            rows=[
+                {
+                    "workspace_id": DEFAULT_WS_ID,
+                    "user_id": "usr-by-user-a",
+                    "conversation_id": "conv-byuser-a",
+                    "provider": "openai",
+                    "model_id": "gpt-4o",
+                    "started_at": day,
+                    "cost_micro": 1_500_000,
+                    "input": 120,
+                    "output": 30,
+                    "cache_read": 5,
+                    "cache_write": 7,
+                },
+                {
+                    "workspace_id": DEFAULT_WS_ID,
+                    "user_id": "usr-by-user-b",
+                    "conversation_id": "conv-byuser-b",
+                    "provider": "openai",
+                    "model_id": "gpt-4o",
+                    "started_at": day,
+                    "cost_micro": 750_000,
+                    "input": 60,
+                    "output": 12,
+                    "cache_read": 2,
+                    "cache_write": 3,
+                },
+            ],
+        )
+    finally:
+        await session.close()
+
+    resp = await async_client.get(
+        "/api/v1/admin/cost/summary",
+        params={"from_date": "2026-05-01", "to_date": "2026-05-31"},
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+
+    assert "by_user" in body, f"missing `by_user` key in response: {body.keys()}"
+    by_user = body["by_user"]
+    assert isinstance(by_user, list)
+    seeded_buckets = {row["bucket"] for row in by_user}
+    assert {"usr-by-user-a", "usr-by-user-b"}.issubset(seeded_buckets)
+
+    expected_fields = {
+        "bucket",
+        "bucket_type",
+        "input_tokens",
+        "output_tokens",
+        "cache_read_tokens",
+        "cache_write_tokens",
+        "cost_amount_micro",
+        "currency",
+        "call_count",
+    }
+    for row in by_user:
+        assert expected_fields.issubset(row.keys()), (
+            f"row missing fields: expected {expected_fields}, got {row.keys()}"
+        )
+        assert row["bucket_type"] == "user"

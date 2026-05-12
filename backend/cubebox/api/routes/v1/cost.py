@@ -85,6 +85,7 @@ async def get_cost_summary(
 
     by_workspace = await repo.get_org_spend(since=since, until=until, group_by="workspace")
     by_model = await repo.get_org_spend(since=since, until=until, group_by="model")
+    by_user = await repo.get_org_spend(since=since, until=until, group_by="user")
     by_day = await repo.get_org_spend(since=since, until=until, group_by="day")
 
     currency = by_workspace[0]["currency"] if by_workspace else "USD"
@@ -99,6 +100,7 @@ async def get_cost_summary(
         total_calls=total_calls,
         by_workspace=[CostAggregateRow(**r) for r in by_workspace],
         by_model=[CostAggregateRow(**r) for r in by_model],
+        by_user=[CostAggregateRow(**r) for r in by_user],
         by_day=[CostAggregateRow(**r) for r in by_day],
     )
 
