@@ -243,14 +243,11 @@ async def generate_title(
 ) -> dict[str, object]:
     """Generate a short title from the user's first message.
 
-    Called by the frontend at the start of the first turn, in parallel with
-    the main agent stream. Best-effort and idempotent:
-
-    - Skipped server-side once the conversation already has any messages, so a
-      retried/late call after the first turn cannot retitle an active chat.
-    - Only writes when the row's current title still equals what we read at
-      request start, so a concurrent manual rename is never clobbered.
+    Thin wrapper — gating, LLM invocation, and atomic compare-and-set live
+    in :mod:`cubebox.services.conversation_title`.
     """
+    from cubebox.services.conversation_title import generate_and_apply_title
+
     repo = ConversationRepository(
         session,
         org_id=ctx.org_id,
@@ -264,67 +261,15 @@ async def generate_title(
             detail=f"Conversation {conversation_id} not found",
         )
 
-    # Server-side first-turn guard: once the conversation has any messages,
-    # we never auto-retitle (a manual `PATCH /{id}?title=…` is the way).
-    if conversation.has_messages:
-        return _serialize_conversation(conversation)
-
-    snippet = (body.content or "").strip()[:1000]
-    if not snippet:
-        return _serialize_conversation(conversation)
-
-    original_title = conversation.title
-
-    from cubebox.llm.factory import LLMFactory
-
     backend = getattr(raw_request.app.state, "encryption_backend", None)
-    factory = LLMFactory(
+    conversation = await generate_and_apply_title(
+        repo=repo,
         session=session,
         org_id=ctx.org_id,
         encryption_backend=backend,
+        conversation=conversation,
+        content=body.content,
     )
-    try:
-        llm = await factory.create_default(temperature=0, max_tokens=60)
-    except Exception:
-        # No usable provider/credential — leave the title alone.
-        return _serialize_conversation(conversation)
-
-    from langchain_core.messages import HumanMessage, SystemMessage
-
-    try:
-        result = await llm.ainvoke(
-            [
-                SystemMessage(
-                    content=(
-                        "Write a conversation title for a sidebar list. "
-                        "Strict rules:\n"
-                        "- Match the user's language exactly (Chinese in, "
-                        "  Chinese out; English in, English out).\n"
-                        "- 4-6 English words, OR 6-10 Chinese characters. "
-                        "  Never longer.\n"
-                        "- Front-load the core topic: the first 2-3 words "
-                        "  (first 4-6 Chinese characters) must be enough to "
-                        "  recognise the conversation if the rest is "
-                        "  truncated with an ellipsis.\n"
-                        "- Use a noun phrase. No leading verb like "
-                        "  '帮我'/'询问'/'how to'/'help with'. No punctuation. "
-                        "  No quotes. No trailing period.\n"
-                        "Return ONLY the title text."
-                    ),
-                ),
-                HumanMessage(content=snippet),
-            ]
-        )
-    except Exception:
-        return _serialize_conversation(conversation)
-
-    title = str(result.content).strip().strip('"').strip("'").strip("。 .,").strip()
-    title = title[:255]
-    if title:
-        updated = await repo.update_title_if_current(conversation_id, title, original_title)
-        if updated:
-            conversation = updated
-
     return _serialize_conversation(conversation)
 
 

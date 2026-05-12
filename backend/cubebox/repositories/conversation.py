@@ -8,7 +8,7 @@ the primary access check is ``creator_user_id``.
 from datetime import UTC, datetime
 from typing import Any, cast
 
-from sqlalchemy import case, desc, func, select
+from sqlalchemy import case, desc, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cubebox.models import Conversation
@@ -93,22 +93,32 @@ class ConversationRepository(ScopedRepository[Conversation]):
     async def update_title_if_current(
         self, conversation_id: str, new_title: str, expected_title: str
     ) -> Conversation | None:
-        """Update title only if it still equals expected_title.
+        """Update title atomically only if it still equals expected_title.
 
         Used by auto-title generation to avoid clobbering a concurrent manual
-        rename: if the title has changed between request start and response,
-        leave it alone and return the current row.
+        rename. Compare-and-set happens in SQL (``UPDATE … WHERE title = ?``)
+        so a stale identity-map copy in this session cannot pass the guard
+        after another transaction has already committed a rename.
+
+        Returns the current row (with whatever title now lives in the DB),
+        or ``None`` if the conversation no longer exists.
         """
-        conv = await self.get(conversation_id)
-        if not conv:
-            return None
-        if conv.title != expected_title:
-            return conv
-        conv.title = new_title
-        conv.updated_at = datetime.now(UTC)
+        now = datetime.now(UTC)
+        stmt = (
+            update(Conversation)
+            .where(
+                Conversation.id == conversation_id,  # type: ignore[arg-type]
+                Conversation.creator_user_id == self.user_id,  # type: ignore[arg-type]
+                Conversation.title == expected_title,  # type: ignore[arg-type]
+            )
+            .values(title=new_title, updated_at=now)
+        )
+        await self.session.execute(stmt)
         await self.session.commit()
-        await self.session.refresh(conv)
-        return conv
+        # Drop any stale identity-map state so the follow-up read reflects
+        # whichever writer won the race.
+        self.session.expire_all()
+        return await self.get(conversation_id)
 
     async def update_timestamp(self, conversation_id: str) -> None:
         conv = await self.get(conversation_id)
