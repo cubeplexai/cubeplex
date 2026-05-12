@@ -55,11 +55,11 @@
   - `InsightsShell.tsx`
   - `InsightsTopBar.tsx`
   - `InsightsFilterSidebar.tsx`
-  - `cost/CostKpiRow.tsx`
-  - `cost/CostStackedSection.tsx`
-  - `cost/CostCacheSection.tsx`
-  - `cost/CostStackedChart.tsx`
-  - `cost/CostRateChart.tsx`
+  - `cost/KpiRow.tsx`
+  - `cost/StackedSection.tsx`
+  - `cost/CacheSection.tsx`
+  - `cost/StackedChart.tsx`
+  - `cost/RateChart.tsx`
 - **Rename** `frontend/packages/web/__tests__/e2e/admin-cost.spec.ts` → `admin-insights.spec.ts`, extend.
 
 ---
@@ -1369,8 +1369,8 @@ git commit -m "feat(insights): useCostData hook with parallel fetch + prior wind
 ### Task 11: Recharts wrappers
 
 **Files:**
-- Create: `frontend/packages/web/components/admin/insights/cost/CostStackedChart.tsx`
-- Create: `frontend/packages/web/components/admin/insights/cost/CostRateChart.tsx`
+- Create: `frontend/packages/web/components/admin/insights/cost/StackedChart.tsx`
+- Create: `frontend/packages/web/components/admin/insights/cost/RateChart.tsx`
 
 - [ ] **Step 11.1: Stacked area chart**
 
@@ -1411,7 +1411,7 @@ function pivot(data: TimeseriesResponse): { rows: PivotRow[]; buckets: string[] 
   return { rows, buckets }
 }
 
-export function CostStackedChart({ data, palette, height = 200, formatValue }: Props) {
+export function StackedChart({ data, palette, height = 200, formatValue }: Props) {
   const { rows, buckets } = pivot(data)
   return (
     <ResponsiveContainer width="100%" height={height}>
@@ -1475,7 +1475,7 @@ interface PivotRow {
   [bucket: string]: number | string | null
 }
 
-export function CostRateChart({ series, orgAvg, height = 200 }: Props) {
+export function RateChart({ series, orgAvg, height = 200 }: Props) {
   const datesSet = new Set<string>()
   series.forEach((s) => s.points.forEach((p) => datesSet.add(p.date)))
   orgAvg?.forEach((p) => datesSet.add(p.date))
@@ -1543,8 +1543,8 @@ cd frontend && pnpm type-check
 - [ ] **Step 11.4: Commit**
 
 ```bash
-git add frontend/packages/web/components/admin/insights/cost/CostStackedChart.tsx \
-        frontend/packages/web/components/admin/insights/cost/CostRateChart.tsx
+git add frontend/packages/web/components/admin/insights/cost/StackedChart.tsx \
+        frontend/packages/web/components/admin/insights/cost/RateChart.tsx
 git commit -m "feat(insights): recharts stacked area + rate line wrappers"
 ```
 
@@ -1740,16 +1740,16 @@ git commit -m "feat(insights): top bar + filter sidebar"
 ### Task 13: KPI row + stacked section + cache section + shell
 
 **Files:**
-- Create: `frontend/packages/web/components/admin/insights/cost/CostKpiRow.tsx`
-- Create: `frontend/packages/web/components/admin/insights/cost/CostStackedSection.tsx`
-- Create: `frontend/packages/web/components/admin/insights/cost/CostCacheSection.tsx`
+- Create: `frontend/packages/web/components/admin/insights/cost/KpiRow.tsx`
+- Create: `frontend/packages/web/components/admin/insights/cost/StackedSection.tsx`
+- Create: `frontend/packages/web/components/admin/insights/cost/CacheSection.tsx`
 - Create: `frontend/packages/web/components/admin/insights/InsightsShell.tsx`
 
 This task is largest. Implement, type-check, commit at the end.
 
 - [ ] **Step 13.1: KPI row**
 
-`components/admin/insights/cost/CostKpiRow.tsx`:
+`components/admin/insights/cost/KpiRow.tsx`:
 
 ```typescript
 'use client'
@@ -1789,7 +1789,7 @@ function hitRate(s: CostSummaryResponse | null): number | null {
   return cr / (cr + inp)
 }
 
-export function CostKpiRow({ summary, priorSummary, rangeDays }: Props) {
+export function KpiRow({ summary, priorSummary, rangeDays }: Props) {
   const t = useTranslations('adminInsights.kpi')
   const cur = {
     cost: summary.total_cost_amount_micro,
@@ -1851,7 +1851,7 @@ export function CostKpiRow({ summary, priorSummary, rangeDays }: Props) {
 
 - [ ] **Step 13.2: Stacked section (generic)**
 
-`components/admin/insights/cost/CostStackedSection.tsx`:
+`components/admin/insights/cost/StackedSection.tsx`:
 
 ```typescript
 'use client'
@@ -1859,7 +1859,7 @@ export function CostKpiRow({ summary, priorSummary, rangeDays }: Props) {
 import { useState } from 'react'
 import { useTranslations } from 'next-intl'
 import type { TimeseriesResponse } from '@cubebox/core'
-import { CostStackedChart } from './CostStackedChart'
+import { StackedChart } from './StackedChart'
 import { topNWithOther } from '@/lib/cost/helpers'
 
 export interface Column {
@@ -1890,7 +1890,7 @@ interface Props {
   showAllInitially?: boolean
 }
 
-export function CostStackedSection({
+export function StackedSection({
   title, timeseries, tableRows, palette, topN, columns, showAllInitially,
 }: Props) {
   const t = useTranslations('adminInsights.cost')
@@ -1907,7 +1907,7 @@ export function CostStackedSection({
         <h2 className="text-sm font-semibold">{title}</h2>
       </div>
       <div className="rounded-md border bg-card p-3">
-        <CostStackedChart data={timeseries} palette={palette} />
+        <StackedChart data={timeseries} palette={palette} />
       </div>
       <table className="w-full text-xs tabular-nums">
         <thead>
@@ -1973,14 +1973,14 @@ export function CostStackedSection({
 
 - [ ] **Step 13.3: Cache section**
 
-`components/admin/insights/cost/CostCacheSection.tsx`:
+`components/admin/insights/cost/CacheSection.tsx`:
 
 ```typescript
 'use client'
 
 import { useTranslations } from 'next-intl'
 import type { CostSummaryResponse, TimeseriesResponse } from '@cubebox/core'
-import { CostRateChart, type RateSeries } from './CostRateChart'
+import { RateChart, type RateSeries } from './RateChart'
 import { computeCacheHitRate, formatPercent } from '@/lib/cost/helpers'
 
 interface Props {
@@ -1989,7 +1989,7 @@ interface Props {
   palette: string[]
 }
 
-export function CostCacheSection({ timeseriesByModel, summary, palette }: Props) {
+export function CacheSection({ timeseriesByModel, summary, palette }: Props) {
   const t = useTranslations('adminInsights.cost')
 
   const series: RateSeries[] = timeseriesByModel.series.slice(0, palette.length).map((s, i) => ({
@@ -2028,7 +2028,7 @@ export function CostCacheSection({ timeseriesByModel, summary, palette }: Props)
         </h2>
       </div>
       <div className="rounded-md border bg-card p-3">
-        <CostRateChart series={series} orgAvg={orgAvg} />
+        <RateChart series={series} orgAvg={orgAvg} />
       </div>
       <table className="w-full text-xs tabular-nums">
         <thead>
@@ -2074,9 +2074,9 @@ import { useTranslations } from 'next-intl'
 import { useCostData, type CostFilters } from '@/hooks/useCostData'
 import { InsightsTopBar } from './InsightsTopBar'
 import { InsightsFilterSidebar } from './InsightsFilterSidebar'
-import { CostKpiRow } from './cost/CostKpiRow'
-import { CostStackedSection, type Column, type SummaryRow } from './cost/CostStackedSection'
-import { CostCacheSection } from './cost/CostCacheSection'
+import { KpiRow } from './cost/KpiRow'
+import { StackedSection, type Column, type SummaryRow } from './cost/StackedSection'
+import { CacheSection } from './cost/CacheSection'
 import type { CostAggregateRow, TimeseriesResponse } from '@cubebox/core'
 
 const PALETTE_WORKSPACE = ['#1e40af', '#1d4ed8', '#2563eb', '#3b82f6', '#60a5fa', '#93c5fd', '#bfdbfe']
@@ -2183,10 +2183,10 @@ export function InsightsShell() {
             </div>
           )}
           {data.summary && (
-            <CostKpiRow summary={data.summary} priorSummary={data.priorSummary} rangeDays={rangeDays} />
+            <KpiRow summary={data.summary} priorSummary={data.priorSummary} rangeDays={rangeDays} />
           )}
           {data.summary && data.byWorkspace && (
-            <CostStackedSection
+            <StackedSection
               title={t('byWorkspace')}
               timeseries={capTimeseries(data.byWorkspace, 10)}
               tableRows={data.summary.by_workspace.map(aggRowToSummaryRow)}
@@ -2196,7 +2196,7 @@ export function InsightsShell() {
             />
           )}
           {data.summary && data.byModel && (
-            <CostStackedSection
+            <StackedSection
               title={t('byModel')}
               timeseries={capTimeseries(data.byModel, 10)}
               tableRows={data.summary.by_model.map(aggRowToSummaryRow)}
@@ -2206,7 +2206,7 @@ export function InsightsShell() {
             />
           )}
           {data.summary && data.byUser && (
-            <CostStackedSection
+            <StackedSection
               title={t('byUser')}
               timeseries={capTimeseries(data.byUser, 8)}
               tableRows={data.summary.by_user.map(aggRowToSummaryRow)}
@@ -2216,7 +2216,7 @@ export function InsightsShell() {
             />
           )}
           {data.summary && data.byModel && (
-            <CostCacheSection
+            <CacheSection
               timeseriesByModel={capTimeseries(data.byModel, 5)}
               summary={data.summary}
               palette={PALETTE_CACHE}
