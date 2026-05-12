@@ -797,6 +797,37 @@
     "workspaceCount": "{count} 个工作区",
     "loading": "加载中…",
     "noConnectors": "未找到连接器",
-    "noConnectorsHint": "请尝试不同的搜索条件或筛选项"
+    "noConnectorsHint": "请尝试不同的搜索条件或筛选项",
+
+    "selectConnector": "选择一个连接器查看详情",
+    "selectInstalledConnector": "选择一个已安装的连接器查看详情",
+    "addCustomPlaceholder": "添加自定义 MCP 服务器",
+
+    "authenticated": "已认证",
+    "notAuthenticated": "未认证",
+    "customBadge": "自定义",
+    "refreshTools": "刷新工具",
+    "deleteButton": "删除",
+    "confirmDeleteLabel": "确认删除?",
+
+    "tabOverview": "概览",
+    "tabTools": "工具 ({count})",
+    "tabWorkspaces": "工作区",
+
+    "overviewServerDetails": "服务器详情",
+    "overviewUrl": "URL",
+    "overviewTransport": "传输方式",
+    "overviewAuthMethod": "认证方式",
+    "overviewCredentialScope": "凭据范围",
+    "overviewOrgCredential": "组织凭据",
+
+    "wsLoading": "加载工作区中…",
+    "wsLoadError": "加载工作区失败：{message}",
+    "wsEmpty": "未找到工作区",
+    "wsSummary": "已启用 {enabled} / {total} 个工作区",
+    "wsSaving": "保存中…",
+    "wsConfirmDisable": "禁用?",
+    "wsEnabled": "已启用",
+    "wsDisabled": "未启用"
   }
 }

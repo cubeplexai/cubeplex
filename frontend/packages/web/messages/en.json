@@ -797,6 +797,37 @@
     "workspaceCount": "{count} workspace(s)",
     "loading": "Loading…",
     "noConnectors": "No connectors found",
-    "noConnectorsHint": "Try a different search or filter"
+    "noConnectorsHint": "Try a different search or filter",
+
+    "selectConnector": "Select a connector to view details",
+    "selectInstalledConnector": "Select an installed connector to view details",
+    "addCustomPlaceholder": "Add a custom MCP server",
+
+    "authenticated": "Authenticated",
+    "notAuthenticated": "Not authenticated",
+    "customBadge": "Custom",
+    "refreshTools": "Refresh Tools",
+    "deleteButton": "Delete",
+    "confirmDeleteLabel": "Delete?",
+
+    "tabOverview": "Overview",
+    "tabTools": "Tools ({count})",
+    "tabWorkspaces": "Workspaces",
+
+    "overviewServerDetails": "Server Details",
+    "overviewUrl": "URL",
+    "overviewTransport": "Transport",
+    "overviewAuthMethod": "Auth Method",
+    "overviewCredentialScope": "Credential Scope",
+    "overviewOrgCredential": "Org Credential",
+
+    "wsLoading": "Loading workspaces…",
+    "wsLoadError": "Failed to load workspaces: {message}",
+    "wsEmpty": "No workspaces found",
+    "wsSummary": "{enabled} of {total} workspaces enabled",
+    "wsSaving": "Saving…",
+    "wsConfirmDisable": "Disable?",
+    "wsEnabled": "Enabled",
+    "wsDisabled": "Disabled"
   }
 }
