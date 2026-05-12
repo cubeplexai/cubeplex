@@ -56,7 +56,6 @@
     "skills": "技能管理",
     "mcp": "MCP 连接器",
     "sandbox": "沙盒",
-    "cost": "成本",
     "insights": "洞察",
     "extensions": "扩展"
   },
@@ -88,22 +87,6 @@
   },
   "home": {
     "subtitle": "AI 智能体系统"
-  },
-  "adminCost": {
-    "loading": "加载中…",
-    "heading": "成本概览",
-    "exportOrgCsv": "导出全 org CSV ↓",
-    "totalCost": "总费用",
-    "totalCalls": "总调用次数",
-    "byWorkspace": "按 Workspace",
-    "callCount": "调用次数",
-    "inputTokens": "Input Tokens",
-    "outputTokens": "Output Tokens",
-    "cost": "花费",
-    "noData": "本月暂无数据",
-    "byModel": "按 Model",
-    "providerModel": "Provider / Model",
-    "exportCsv": "导出 CSV"
   },
   "adminInsights": {
     "heading": "运营洞察",
