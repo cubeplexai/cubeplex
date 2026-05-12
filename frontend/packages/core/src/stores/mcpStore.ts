@@ -3,6 +3,7 @@ import { create } from 'zustand'
 import { type ApiClient } from '../api/client'
 import * as api from '../api/mcp'
 import type {
+  MCPAdminConnector,
   MCPCatalogConnector,
   MCPCatalogInstallRequest,
   MCPCatalogInstallResult,
@@ -18,34 +19,89 @@ import type {
 } from '../types/mcp'
 import { type CatalogErrorEnvelope, toCatalogError } from './mcpShared'
 
-interface CatalogListParams {
-  q?: string
-  provider?: string
+function mergeConnectors(
+  catalog: MCPCatalogConnector[],
+  servers: MCPServer[],
+  overrideCounts: Map<string, number>,
+): MCPAdminConnector[] {
+  const result: MCPAdminConnector[] = []
+  const serverByCatalogId = new Map<string, MCPServer>()
+
+  for (const srv of servers) {
+    if (srv.owner_workspace_id !== null) continue
+    const matched = catalog.find((c) => c.org_install_id === srv.id)
+    if (matched) {
+      serverByCatalogId.set(matched.id, srv)
+      continue
+    }
+    result.push({
+      kind: 'custom',
+      id: srv.id,
+      name: srv.name,
+      provider: '',
+      description: '',
+      server_url: srv.server_url,
+      transport: srv.transport,
+      installed: true,
+      server: srv,
+      authed: srv.authed,
+      tool_count: srv.tools_cache?.length ?? 0,
+      workspace_count: overrideCounts.get(srv.id) ?? 0,
+      last_error: srv.last_error,
+    })
+  }
+
+  for (const cat of catalog) {
+    const srv =
+      serverByCatalogId.get(cat.id) ??
+      (cat.org_install_id ? servers.find((s) => s.id === cat.org_install_id) : undefined)
+    result.push({
+      kind: 'catalog',
+      id: cat.org_install_id ?? cat.id,
+      name: cat.name,
+      provider: cat.provider,
+      description: cat.description,
+      server_url: cat.server_url,
+      transport: cat.transport,
+      catalog_id: cat.id,
+      supported_auth_methods: cat.supported_auth_methods,
+      static_form_fields: cat.static_form_fields,
+      installed: cat.org_install_id !== null,
+      server: srv ?? undefined,
+      authed: srv?.authed ?? false,
+      tool_count: srv?.tools_cache?.length ?? 0,
+      workspace_count: overrideCounts.get(srv?.id ?? '') ?? 0,
+      last_error: srv?.last_error ?? null,
+    })
+  }
+
+  return result
 }
 
 export interface McpStore {
-  servers: MCPServer[]
+  connectors: MCPAdminConnector[]
   loading: boolean
-  error: string | null
-  // catalog state
-  catalog: MCPCatalogConnector[]
-  catalogLoading: boolean
-  catalogError: CatalogErrorEnvelope | null
+  error: CatalogErrorEnvelope | null
+  selectedId: string | null
   pendingOAuthInstallId: string | null
-  fetchAll(client: ApiClient): Promise<void>
-  create(client: ApiClient, body: MCPServerCreateAdminBody): Promise<MCPServer>
-  update(client: ApiClient, id: string, body: MCPServerPatchBody): Promise<MCPServer>
-  remove(client: ApiClient, id: string): Promise<void>
+  overrideCounts: Map<string, number>
+
+  fetchAll(client: ApiClient, wsId: string): Promise<void>
+  setSelectedId(id: string | null): void
+
+  createCustom(client: ApiClient, body: MCPServerCreateAdminBody): Promise<MCPServer>
+  updateServer(client: ApiClient, id: string, body: MCPServerPatchBody): Promise<MCPServer>
+  deleteServer(client: ApiClient, id: string, wsId: string): Promise<void>
   refreshTools(client: ApiClient, id: string): Promise<MCPServer>
   testConnection(client: ApiClient, body: MCPTestConnectionBody): Promise<MCPTestConnectionResult>
+
   fetchOverrides(client: ApiClient, id: string): Promise<WorkspaceOverride[]>
   saveOverride(
     client: ApiClient,
     id: string,
     body: MCPOverrideUpdateBody,
   ): Promise<WorkspaceOverride[]>
-  // catalog actions (admin)
-  fetchCatalog(client: ApiClient, wsId: string, params?: CatalogListParams): Promise<void>
+
   installFromCatalog(
     client: ApiClient,
     wsId: string,
@@ -65,46 +121,111 @@ export interface McpStore {
 }
 
 export const useMcpStore = create<McpStore>((set, get) => ({
-  servers: [],
+  connectors: [],
   loading: false,
   error: null,
-  catalog: [],
-  catalogLoading: false,
-  catalogError: null,
+  selectedId: null,
   pendingOAuthInstallId: null,
+  overrideCounts: new Map(),
 
-  async fetchAll(client) {
+  async fetchAll(client, wsId) {
     set({ loading: true, error: null })
     try {
-      const servers = await api.adminListServers(client)
-      set({ servers })
+      const [servers, catalogItems] = await Promise.all([
+        api.adminListServers(client),
+        api.wsCatalogList(client, wsId).catch(() => [] as MCPCatalogConnector[]),
+      ])
+
+      const overrideCounts = new Map<string, number>()
+      for (const srv of servers) {
+        if (srv.owner_workspace_id !== null) continue
+        try {
+          const overrides = await api.adminGetOverrides(client, srv.id)
+          overrideCounts.set(srv.id, overrides.filter((o) => o.enabled).length)
+        } catch {
+          // ignore
+        }
+      }
+
+      const connectors = mergeConnectors(catalogItems, servers, overrideCounts)
+      set({ connectors, overrideCounts })
     } catch (err) {
-      set({ error: (err as Error).message })
+      set({ error: toCatalogError(err) })
     } finally {
       set({ loading: false })
     }
   },
 
-  async create(client, body) {
+  setSelectedId(id) {
+    set({ selectedId: id })
+  },
+
+  async createCustom(client, body) {
     const created = await api.adminCreateServer(client, body)
-    set({ servers: [...get().servers, created] })
+    const connector: MCPAdminConnector = {
+      kind: 'custom',
+      id: created.id,
+      name: created.name,
+      provider: '',
+      description: '',
+      server_url: created.server_url,
+      transport: created.transport,
+      installed: true,
+      server: created,
+      authed: created.authed,
+      tool_count: created.tools_cache?.length ?? 0,
+      workspace_count: 0,
+      last_error: created.last_error,
+    }
+    set({
+      connectors: [...get().connectors, connector],
+      selectedId: created.id,
+    })
     return created
   },
 
-  async update(client, id, body) {
+  async updateServer(client, id, body) {
     const updated = await api.adminPatchServer(client, id, body)
-    set({ servers: get().servers.map((server) => (server.id === id ? updated : server)) })
+    set({
+      connectors: get().connectors.map((c) =>
+        c.id === id || c.server?.id === id
+          ? {
+              ...c,
+              server: updated,
+              name: updated.name,
+              authed: updated.authed,
+              tool_count: updated.tools_cache?.length ?? 0,
+              last_error: updated.last_error,
+            }
+          : c,
+      ),
+    })
     return updated
   },
 
-  async remove(client, id) {
+  async deleteServer(client, id, _wsId) {
     await api.adminDeleteServer(client, id)
-    set({ servers: get().servers.filter((server) => server.id !== id) })
+    set({
+      connectors: get().connectors.filter((c) => c.id !== id && c.server?.id !== id),
+      selectedId: get().selectedId === id ? null : get().selectedId,
+    })
   },
 
   async refreshTools(client, id) {
     const refreshed = await api.adminRefreshTools(client, id)
-    set({ servers: get().servers.map((server) => (server.id === id ? refreshed : server)) })
+    set({
+      connectors: get().connectors.map((c) =>
+        c.id === id || c.server?.id === id
+          ? {
+              ...c,
+              server: refreshed,
+              authed: refreshed.authed,
+              tool_count: refreshed.tools_cache?.length ?? 0,
+              last_error: refreshed.last_error,
+            }
+          : c,
+      ),
+    })
     return refreshed
   },
 
@@ -120,82 +241,56 @@ export const useMcpStore = create<McpStore>((set, get) => ({
     return api.adminPutOverride(client, id, body)
   },
 
-  /**
-   * Fetch the catalog from the workspace-scoped endpoint.
-   *
-   * The catalog API is workspace-scoped because the per-(workspace, user) status
-   * fields (org_install_id, workspace_visible, user_install_id) require a
-   * workspace context. The admin UI presents the catalog from a chosen workspace
-   * lens; pass the active workspaceId here. The mutating admin actions
-   * (install / patch / delete) hit the unscoped admin routes; this method exists
-   * solely to refetch the catalog so post-mutation status flags reflect.
-   */
-  async fetchCatalog(client, wsId, params) {
-    set({ catalogLoading: true, catalogError: null })
-    try {
-      const items = await api.wsCatalogList(client, wsId, params)
-      set({ catalog: items })
-    } catch (err) {
-      set({ catalogError: toCatalogError(err) })
-    } finally {
-      set({ catalogLoading: false })
-    }
-  },
-
   async installFromCatalog(client, wsId, catalogId, body) {
-    set({ catalogError: null })
+    set({ error: null })
     try {
       const result = await api.adminCatalogInstall(client, catalogId, body)
       if (result.requires_oauth) {
         set({ pendingOAuthInstallId: result.install_id })
       }
-      // refetch so status fields update
-      await get().fetchCatalog(client, wsId)
+      await get().fetchAll(client, wsId)
+      set({ selectedId: result.install_id })
       return result
     } catch (err) {
-      const env = toCatalogError(err)
-      set({ catalogError: env })
+      set({ error: toCatalogError(err) })
       throw err
     }
   },
 
   async patchInstall(client, wsId, installId, body) {
-    set({ catalogError: null })
+    set({ error: null })
     try {
       const result = await api.adminCatalogPatchInstall(client, installId, body)
       if (result.requires_oauth) {
         set({ pendingOAuthInstallId: result.install_id })
       }
-      await get().fetchCatalog(client, wsId)
+      await get().fetchAll(client, wsId)
       return result
     } catch (err) {
-      const env = toCatalogError(err)
-      set({ catalogError: env })
+      set({ error: toCatalogError(err) })
       throw err
     }
   },
 
   async deleteInstall(client, wsId, installId) {
-    set({ catalogError: null })
+    set({ error: null })
     try {
       await api.adminCatalogDeleteInstall(client, installId)
-      await get().fetchCatalog(client, wsId)
+      await get().fetchAll(client, wsId)
     } catch (err) {
-      const env = toCatalogError(err)
-      set({ catalogError: env })
+      set({ error: toCatalogError(err) })
       throw err
     }
   },
 
   async startOAuth(client, installId) {
-    set({ catalogError: null })
+    set({ error: null })
     try {
       const result = await api.adminOAuthStart(client, installId)
       set({ pendingOAuthInstallId: installId })
       return result
     } catch (err) {
-      const env = toCatalogError(err)
-      set({ catalogError: env })
+      set({ error: toCatalogError(err) })
       throw err
     }
   },
@@ -206,13 +301,12 @@ export const useMcpStore = create<McpStore>((set, get) => ({
 
   reset() {
     set({
-      servers: [],
+      connectors: [],
       loading: false,
       error: null,
-      catalog: [],
-      catalogLoading: false,
-      catalogError: null,
+      selectedId: null,
       pendingOAuthInstallId: null,
+      overrideCounts: new Map(),
     })
   },
 }))
