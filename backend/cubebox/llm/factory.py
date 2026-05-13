@@ -600,6 +600,9 @@ class LLMFactory:
         if api == "anthropic":
             from cubepi.providers.anthropic import AnthropicProvider
 
+            # NOTE: cubepi v0.3 AnthropicProvider has no base_url param.
+            # If cubebox needs an Anthropic proxy gateway (uncommon), upstream
+            # this to cubepi as a new constructor arg.
             return AnthropicProvider(
                 api_key=provider_config.api_key,
                 cache_policy=cache_policy,
