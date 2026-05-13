@@ -20,12 +20,40 @@ from cubebox.cache import RedisHandle, redis_dep
 from cubebox.config import config
 from cubebox.db import get_session
 from cubebox.objectstore import get_objectstore_client
-from cubebox.repositories import ArtifactRepository, ArtifactVersionRepository
+from cubebox.repositories import (
+    ArtifactRepository,
+    ArtifactVersionRepository,
+    ConversationRepository,
+)
 
 router = APIRouter(
     prefix="/ws/{workspace_id}/conversations/{conversation_id}/artifacts",
     tags=["artifacts"],
 )
+
+
+async def _require_conversation(
+    session: AsyncSession, ctx: RequestContext, conversation_id: str
+) -> None:
+    """Raise 404 if the parent conversation is missing, foreign, or soft-deleted.
+
+    Mirrors the same check used by ``attachments.py``. Without this, a
+    client holding a stale conversation URL could keep listing or
+    downloading artifacts after the conversation was soft-deleted —
+    ``ArtifactRepository`` only scopes by org/workspace, not by parent
+    conversation state.
+    """
+    conv_repo = ConversationRepository(
+        session,
+        org_id=ctx.org_id,
+        workspace_id=ctx.workspace_id,
+        user_id=ctx.user.id,
+    )
+    if (await conv_repo.get_by_id(conversation_id)) is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Conversation {conversation_id} not found",
+        )
 
 
 @router.get("")
@@ -35,6 +63,7 @@ async def list_artifacts(
     ctx: Annotated[RequestContext, Depends(require_member)],
 ) -> dict[str, object]:
     """List all artifacts for a conversation."""
+    await _require_conversation(session, ctx, conversation_id)
     repo = ArtifactRepository(session, org_id=ctx.org_id, workspace_id=ctx.workspace_id)
     artifacts = await repo.list_by_conversation(conversation_id)
     return {
@@ -51,6 +80,7 @@ async def get_artifact(
     ctx: Annotated[RequestContext, Depends(require_member)],
 ) -> dict[str, object]:
     """Get a single artifact by ID."""
+    await _require_conversation(session, ctx, conversation_id)
     repo = ArtifactRepository(session, org_id=ctx.org_id, workspace_id=ctx.workspace_id)
     artifact = await repo.get_by_id(artifact_id)
     if not artifact or artifact.conversation_id != conversation_id:
@@ -69,6 +99,7 @@ async def list_artifact_versions(
     ctx: Annotated[RequestContext, Depends(require_member)],
 ) -> dict[str, object]:
     """List all versions of an artifact."""
+    await _require_conversation(session, ctx, conversation_id)
     repo = ArtifactRepository(session, org_id=ctx.org_id, workspace_id=ctx.workspace_id)
     artifact = await repo.get_by_id(artifact_id)
     if not artifact or artifact.conversation_id != conversation_id:
@@ -93,6 +124,7 @@ async def download_artifact(
     version: int | None = Query(default=None),
 ) -> Response:
     """Download an artifact from object storage."""
+    await _require_conversation(session, ctx, conversation_id)
     repo = ArtifactRepository(session, org_id=ctx.org_id, workspace_id=ctx.workspace_id)
     artifact = await repo.get_by_id(artifact_id)
     if not artifact or artifact.conversation_id != conversation_id:
@@ -168,6 +200,7 @@ async def create_preview_token(
     version: int | None = Query(default=None),
 ) -> dict[str, str]:
     """Issue a one-time public download token for Office Online Viewer."""
+    await _require_conversation(session, ctx, conversation_id)
     repo = ArtifactRepository(session, org_id=ctx.org_id, workspace_id=ctx.workspace_id)
     artifact = await repo.get_by_id(artifact_id)
     if not artifact or artifact.conversation_id != conversation_id:
@@ -242,6 +275,7 @@ async def preview_artifact_file(
     references ``slides/01.html`` automatically picks up the same
     version segment.
     """
+    await _require_conversation(session, ctx, conversation_id)
     repo = ArtifactRepository(session, org_id=ctx.org_id, workspace_id=ctx.workspace_id)
     artifact = await repo.get_by_id(artifact_id)
     if not artifact or artifact.conversation_id != conversation_id:
