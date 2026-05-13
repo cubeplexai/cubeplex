@@ -1,0 +1,167 @@
+"""Builtin tools ported to cubepi (M2.1) — unit tests."""
+
+from __future__ import annotations
+
+import re
+
+import pytest
+
+from cubebox.tools.builtin.calculator_pi import CalculatorInput, calculator_tool
+from cubebox.tools.builtin.datetime_tool_pi import DateTimeInput, datetime_tool
+from cubebox.tools.builtin.view_images_pi import ViewImagesInput, make_view_images_tool
+
+# ---------------------------------------------------------------------------
+# Calculator
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_calculator_tool_basic_arithmetic() -> None:
+    args = CalculatorInput(expression="2 + 3 * 4")
+    result = await calculator_tool.execute("tc-1", args, signal=None, on_update=None)
+    assert len(result.content) == 1
+    assert "14" in result.content[0].text
+
+
+@pytest.mark.asyncio
+async def test_calculator_tool_division() -> None:
+    args = CalculatorInput(expression="10 / 4")
+    result = await calculator_tool.execute("tc-div", args, signal=None, on_update=None)
+    assert "2.5" in result.content[0].text
+
+
+@pytest.mark.asyncio
+async def test_calculator_tool_zero_division_returns_error_text() -> None:
+    args = CalculatorInput(expression="1 / 0")
+    result = await calculator_tool.execute("tc-zdiv", args, signal=None, on_update=None)
+    assert isinstance(result.content[0].text, str)
+    assert "error" in result.content[0].text.lower()
+
+
+@pytest.mark.asyncio
+async def test_calculator_tool_invalid_expression_returns_error_text() -> None:
+    """Calculator should not raise; it returns an error message in content."""
+    args = CalculatorInput(expression="import os")
+    result = await calculator_tool.execute("tc-2", args, signal=None, on_update=None)
+    assert isinstance(result.content[0].text, str)
+    # Must not propagate as an exception — just a text error.
+
+
+def test_calculator_tool_metadata() -> None:
+    assert calculator_tool.name == "calculator"
+    desc_lower = calculator_tool.description.lower()
+    assert "math" in desc_lower or "calc" in desc_lower
+
+
+def test_calculator_tool_parameters_is_pydantic_model() -> None:
+    from pydantic import BaseModel
+
+    assert issubclass(calculator_tool.parameters, BaseModel)
+
+
+# ---------------------------------------------------------------------------
+# DateTime
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_datetime_tool_returns_date_string() -> None:
+    args = DateTimeInput()
+    result = await datetime_tool.execute("tc-3", args, signal=None, on_update=None)
+    assert len(result.content) >= 1
+    text = result.content[0].text
+    assert re.search(r"\d{4}", text), f"no year in: {text!r}"
+
+
+@pytest.mark.asyncio
+async def test_datetime_tool_with_time_includes_colon() -> None:
+    args = DateTimeInput(include_time=True)
+    result = await datetime_tool.execute("tc-4", args, signal=None, on_update=None)
+    text = result.content[0].text
+    # HH:MM:SS format must be present
+    assert re.search(r"\d{2}:\d{2}:\d{2}", text), f"no time in: {text!r}"
+
+
+@pytest.mark.asyncio
+async def test_datetime_tool_default_omits_time() -> None:
+    args = DateTimeInput(include_time=False)
+    result = await datetime_tool.execute("tc-5", args, signal=None, on_update=None)
+    text = result.content[0].text
+    # Without include_time the strftime has no colons
+    assert ":" not in text, f"unexpected time in: {text!r}"
+
+
+def test_datetime_tool_metadata() -> None:
+    assert datetime_tool.name in ("datetime", "current_datetime", "get_datetime")
+
+
+def test_datetime_tool_parameters_is_pydantic_model() -> None:
+    from pydantic import BaseModel
+
+    assert issubclass(datetime_tool.parameters, BaseModel)
+
+
+# ---------------------------------------------------------------------------
+# view_images — factory shape only (no sandbox needed for shape tests)
+# ---------------------------------------------------------------------------
+
+
+def test_view_images_factory_returns_agent_tool() -> None:
+    """make_view_images_tool returns a properly shaped AgentTool."""
+    from unittest.mock import MagicMock
+
+    from cubepi.agent.types import AgentTool
+
+    mock_objectstore = MagicMock()
+    mock_capabilities = MagicMock()
+    mock_capabilities.supports_image.return_value = True
+
+    tool = make_view_images_tool(
+        org_id="org-1",
+        workspace_id="ws-1",
+        objectstore=mock_objectstore,
+        capabilities=mock_capabilities,
+    )
+
+    assert isinstance(tool, AgentTool)
+    assert tool.name == "view_images"
+    assert "image" in tool.description.lower()
+
+
+def test_view_images_parameters_schema() -> None:
+    from unittest.mock import MagicMock
+
+    from pydantic import BaseModel
+
+    mock_objectstore = MagicMock()
+    mock_capabilities = MagicMock()
+    mock_capabilities.supports_image.return_value = True
+
+    tool = make_view_images_tool(
+        org_id="org-1",
+        workspace_id="ws-1",
+        objectstore=mock_objectstore,
+        capabilities=mock_capabilities,
+    )
+    assert issubclass(tool.parameters, BaseModel)
+    assert tool.parameters is ViewImagesInput
+
+
+@pytest.mark.asyncio
+async def test_view_images_returns_error_when_model_has_no_image_support() -> None:
+    from unittest.mock import MagicMock
+
+    mock_objectstore = MagicMock()
+    mock_capabilities = MagicMock()
+    mock_capabilities.supports_image.return_value = False
+
+    tool = make_view_images_tool(
+        org_id="org-1",
+        workspace_id="ws-1",
+        objectstore=mock_objectstore,
+        capabilities=mock_capabilities,
+    )
+    args = ViewImagesInput(paths=["/sandbox/img.jpg"])
+    result = await tool.execute("tc-vi-1", args, signal=None, on_update=None)
+    assert result.is_error is True
+    assert "not support" in result.content[0].text.lower()
