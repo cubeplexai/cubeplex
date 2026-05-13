@@ -295,6 +295,32 @@ class LLMFactory:
         provider_name, model_id = await self.get_default_model()
         return self.get_model_config(provider_name, model_id)
 
+    async def resolve_default_provider_and_config(
+        self,
+    ) -> tuple[str, str, ProviderConfig]:
+        """Resolve the default provider name, model id, and ProviderConfig.
+
+        Merges DB-stored provider overrides (when session + org_id are present)
+        with the config-file providers, then parses the effective default_model
+        reference.
+
+        Returns:
+            Tuple of (provider_name, model_id, ProviderConfig)
+
+        Raises:
+            ValueError: If default_model is unset, has invalid format, or the
+                provider is not found after merging.
+        """
+        if self._session and self._org_id:
+            db_cfgs, db_names = await self._load_db_provider_configs()
+            self.llm_config = self._build_merged_config(db_cfgs, db_names)
+
+        provider_name, model_id = await self.get_default_model()
+        provider_config = self.llm_config.providers.get(provider_name)
+        if provider_config is None:
+            raise ValueError(f"Default provider '{provider_name}' not found in merged config")
+        return provider_name, model_id, provider_config
+
     async def create_default(self, **kwargs: Any) -> Any:
         """
         Create an LLM instance using the configured default_model,

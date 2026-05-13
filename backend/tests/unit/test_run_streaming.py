@@ -100,6 +100,7 @@ async def test_run_bootstrap_and_stream_replay(monkeypatch: pytest.MonkeyPatch) 
     app.state.redis_key_prefix = "test"
     app.state.checkpointer_factory = lambda: MemorySaver()
     app.state.sandbox_factory = lambda: None
+    app.state.agents_runtime = "langgraph"  # force LangGraph path in unit tests
     app.state.run_manager = RunManager(
         app=app,
         redis=redis,
@@ -214,6 +215,7 @@ async def test_run_recovers_citation_counter_from_history(
     app.state.redis_key_prefix = "test"
     app.state.checkpointer_factory = lambda: MemorySaver()
     app.state.sandbox_factory = lambda: None
+    app.state.agents_runtime = "langgraph"  # force LangGraph path in unit tests
     app.state.run_manager = RunManager(
         app=app,
         redis=redis,
@@ -291,6 +293,7 @@ async def test_run_appends_db_mcp_tools_per_run(monkeypatch: pytest.MonkeyPatch)
     app.state.sandbox_factory = lambda: None
     app.state.encryption_backend = object()
     app.state.mcp_user_token_signer = object()
+    app.state.agents_runtime = "langgraph"  # force LangGraph path in unit tests
     app.state.run_manager = RunManager(
         app=app,
         redis=redis,
