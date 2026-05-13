@@ -199,32 +199,25 @@ async def delete_conversation(
     session: Annotated[AsyncSession, Depends(get_session)],
     ctx: Annotated[RequestContext, Depends(require_member)],
 ) -> None:
-    """Delete a conversation."""
+    """Soft-delete a conversation.
+
+    Stamps ``deleted_at`` and hides the row from subsequent reads. Child
+    rows (billing events for cost audit, artifacts, attachments) are kept
+    so their FK targets stay valid and cost reports survive. A separate
+    GC job is the right place to permanently purge old soft-deleted rows.
+    """
     repo = ConversationRepository(
         session,
         org_id=ctx.org_id,
         workspace_id=ctx.workspace_id,
         user_id=ctx.user.id,
     )
-    if (await repo.get_by_id(conversation_id)) is None:
+    deleted = await repo.delete_conversation(conversation_id)
+    if not deleted:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Conversation {conversation_id} not found",
         )
-
-    # Cascade-delete attachments first (best-effort; service swallows ObjectStore errors)
-    from cubebox.repositories import AttachmentRepository
-    from cubebox.services.attachments import AttachmentService
-
-    att_repo = AttachmentRepository(session, org_id=ctx.org_id, workspace_id=ctx.workspace_id)
-    await AttachmentService(repo=att_repo).delete_for_conversation(
-        conversation_id=conversation_id,
-    )
-
-    deleted = await repo.delete(conversation_id)
-    if not deleted:
-        # Race condition: someone else deleted it between get and delete; treat as success
-        pass
 
 
 class GenerateTitleRequest(BaseModel):
