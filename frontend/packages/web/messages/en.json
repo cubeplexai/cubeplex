@@ -19,7 +19,12 @@
     "renameConversation": "Rename",
     "pinConversation": "Pin",
     "unpinConversation": "Unpin",
-    "moreActions": "More"
+    "moreActions": "More",
+    "skills": "Skills",
+    "mcp": "MCP",
+    "memory": "Memory",
+    "members": "Members",
+    "settings": "Settings"
   },
   "time": {
     "justNow": "Just now",

@@ -19,25 +19,25 @@ async function registerAndGetWsId(page: Page): Promise<string> {
 }
 
 test.describe('Workspace Settings', () => {
-  test('settings gear icon is visible in sidebar footer', async ({ page }) => {
+  test('workspace nav entries are visible in the sidebar', async ({ page }) => {
     await registerAndGetWsId(page)
 
-    const settingsLink = page.getByRole('link', { name: /workspace settings/i })
-    await expect(settingsLink).toBeVisible()
+    // Skills, MCP, Memory, Settings always show; Members is admin-only (the
+    // newly-registered user owns their org, so it should be visible too).
+    await expect(page.getByRole('link', { name: 'Skills', exact: true })).toBeVisible()
+    await expect(page.getByRole('link', { name: 'MCP', exact: true })).toBeVisible()
+    await expect(page.getByRole('link', { name: 'Memory', exact: true })).toBeVisible()
+    await expect(page.getByRole('link', { name: 'Settings', exact: true })).toBeVisible()
   })
 
-  test('clicking settings icon navigates to settings page and shows Persona nav', async ({
-    page,
-  }) => {
+  test('clicking Settings sidebar entry opens workspace settings (Persona)', async ({ page }) => {
     await registerAndGetWsId(page)
 
-    await page.getByRole('link', { name: /workspace settings/i }).click()
+    await page.getByRole('link', { name: 'Settings', exact: true }).click()
     await expect(page).toHaveURL(/\/settings/, { timeout: 10_000 })
 
-    // SettingsNav renders "Persona" as a sub-item under the active workspace tab
-    await expect(page.getByRole('link', { name: 'Persona', exact: true })).toBeVisible({
-      timeout: 10_000,
-    })
+    // PersonaEditor renders <h2>Persona</h2>
+    await expect(page.getByRole('heading', { name: 'Persona' })).toBeVisible({ timeout: 10_000 })
   })
 
   test('default settings page (workspace tab) renders Persona heading', async ({ page }) => {
