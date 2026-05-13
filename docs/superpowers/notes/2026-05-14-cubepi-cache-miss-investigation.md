@@ -1,7 +1,40 @@
 # cubepi Runtime Path — Prompt Cache Miss Investigation
 
 Date: 2026-05-14
-Status: **OPEN — root cause located 2026-05-14, fix pending**
+Status: **RESOLVED 2026-05-14** — cache E2E green on DeepSeek anthropic after fixes below.
+
+## Resolution (2026-05-14)
+
+The cache test (`tests/e2e/memory/test_prompt_cache.py` with
+`CUBEBOX_LLM__DEFAULT_MODEL=deepseek/deepseek-v4-pro` and
+`CUBEBOX_E2E_LLM_CACHE_CAPABLE=true`) now passes against DeepSeek's
+`/anthropic` surface via the cubepi runtime. Required fixes:
+
+1. **cubepi/providers/anthropic.py** — forward `base_url` to
+   `anthropic.AsyncAnthropic`. Without this, DeepSeek's
+   `https://api.deepseek.com/anthropic` was silently ignored and the
+   client connected to `api.anthropic.com` with a DeepSeek key, which
+   failed authentication. Commit `b06aee9` on cubepi
+   `feat/cubebox-readiness`.
+2. **cubepi/providers/anthropic.py** — `await stream.get_final_message()`
+   (was missing `await`, returned a coroutine object that was passed
+   to `_convert_response` and crashed inside the `except BaseException`
+   handler). Commit `2d8a0c6`.
+3. **cubepi/providers/anthropic.py** — forward `Model.temperature` in
+   stream kwargs. Commit `2d8a0c6`.
+4. **cubepi/providers/anthropic.py** — conditional system-prompt
+   wrapping: send plain string when `cache_policy.mark_system()` is
+   False / no cache_control is being applied. Commit `eb9793b`.
+5. **cubebox/llm/factory.py** — pass `provider_config.base_url` when
+   constructing `AnthropicProvider`.
+
+Note: cubebox's `run_manager._dicts_to_sse_events` swallows `error`
+typed dicts from `stream_pi.convert_cubepi_agent_event_to_sse`. This
+masked the failures and surfaced as "no usage event observed". Not
+fixed here; raise as a follow-up (graceful error propagation to the
+SSE client is a separate concern).
+
+Original analysis follows below for reference.
 
 ## Phase 1 + Phase 2 results
 
