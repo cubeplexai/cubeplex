@@ -1,7 +1,75 @@
 # cubepi Runtime Path — Prompt Cache Miss Investigation
 
 Date: 2026-05-14
-Status: **STILL OPEN** — previous "RESOLVED" claim could not be empirically reproduced. Verified 2026-05-14: cache test on arkcode/doubao-seed-2.0-pro under cubepi runtime still reports `cache_read=0` on turn 2 (warmup input=5844, turn2 input=5874). Phase 1 raw HTTP test confirms arkcode DOES cache at raw API level (1848/2043 tokens) — so the runtime path is still adding/removing something the provider's cache key depends on.
+Status: **OPEN — root cause located 2026-05-14, fix pending**
+
+## Phase 1 + Phase 2 results
+
+### Phase 1 raw HTTP cache validation (2026-05-14)
+
+| Provider | Raw HTTP cache hit on turn 2? |
+|---|---|
+| deepseek-v4-pro (anthropic API) | **YES** — 1920/2009 tokens cached |
+| arkcode doubao-seed-2.0-pro (openai-completions) | **YES** — 1848/2043 cached |
+| alicode qwen3.6-plus (openai-completions) | **NO** — provider returns `cached_tokens=None` (provider-level limitation, not migration issue) |
+
+Conclusion: cache is viable at raw API level on 2 of 3 providers → cubepi-runtime cache miss is a request-shape issue, not a provider capability gap.
+
+### Phase 2 runtime HTTP capture + diff
+
+Captured outbound HTTP request bodies for both langgraph and cubepi runtimes against deepseek and arkcode. Compared via `tests/diagnostic/compare_runtimes.py`.
+
+**DeepSeek anthropic diff (langgraph vs cubepi)** — clear root cause:
+
+| Field | langgraph (cache hits) | cubepi (cache misses) |
+|---|---|---|
+| `messages[0].content` | plain string `"Reply with exactly: FIRST"` | **list with `cache_control: ephemeral`**: `[{"cache_control": {"type": "ephemeral"}, "text": "Reply with exactly: FIRST", "type": "text"}]` |
+| `system` | plain string | **list with `cache_control: ephemeral`** wrapping the text in a block |
+| `temperature` | `0.7` | **missing** |
+
+**arkcode openai diff** — only test scaffold artifact, not real divergence:
+
+| Field | langgraph | cubepi |
+|---|---|---|
+| `stream` | `false` | `true` |
+| `stream_options` | (missing) | `{"include_usage": true}` |
+
+This is because the test scaffold used `ainvoke` (non-streaming) for langgraph and `stream()` for cubepi. Not a real cache-relevant diff.
+
+### Diagnosis
+
+cubepi's `AnthropicProvider` puts `cache_control` markers on the USER message (not just system). The Anthropic API spec puts cache markers on system + last completed assistant message; markers on user content are either ignored or invalidate cache. DeepSeek's anthropic-compat endpoint apparently treats them as invalid → cache key changes → miss.
+
+In the capture test scaffold, cubepi was invoked with the default `DefaultCacheMarkerPolicy` (mark last message regardless of role). The cubebox-runtime path uses `CubeboxCacheMarkerPolicy` (walks back to last AIMessage) which would skip marking on a user-only first turn — needs verification with the real cubebox runtime path.
+
+Also: cubepi wraps system prompt in a content-block list even when no marker is applied. langgraph (langchain-anthropic) sends system as a plain string in that case. This wrapping changes the cache hash.
+
+Also: cubepi.AnthropicProvider doesn't forward `temperature` from Model config — confirmed missing in the captured request.
+
+### Fix plan (next session)
+
+1. **cubepi anthropic provider** (cubepi side, `/home/chris/cubepi/cubepi/providers/anthropic.py`):
+   - Forward `temperature` from `Model` in stream kwargs (similar to the openai fix in commit `97b26a5`)
+   - Only wrap content/system in list-of-blocks WHEN `cache_control` is actually being applied to that position; otherwise emit plain string
+   - The current logic always wraps the system prompt in a list-of-blocks when system_prompt is non-empty; should only do that when policy.mark_system() is true. Otherwise: `kwargs["system"] = system_prompt` (plain string)
+
+2. **cubebox CubeboxCacheMarkerPolicy** (already correct):
+   - `mark_system()` returns True
+   - `message_breakpoint_indices` walks back to last `AssistantMessage`; for a user-only first turn returns []
+   - When used in real runtime: this would correctly NOT add cache_control to user message
+   - But there's a question: does the real cubebox runtime even put cache_control on user messages? Need to verify by running e2e cache test + capturing real cubebox-runtime body (not the simplified phase 2 capture)
+
+3. **Verification**:
+   - After fix, re-run capture against DeepSeek; cubepi body should match langgraph's plain-string-system shape (with temperature)
+   - Re-run `test_prompt_cache.py` against DeepSeek under cubepi runtime — expect cache_read ≥ 50% on turn 2
+
+### Outstanding: DeepSeek anthropic probe failure with real runtime
+
+When running the real e2e cache test against cubepi + DeepSeek anthropic, the test fails with "Probe failed: no usage event observed at all". Even though cubepi.AnthropicProvider populates AssistantMessage.usage at the end of streaming, the SSE usage event isn't reaching the test. Either:
+- cubepi.Agent's MessageEndEvent doesn't carry the final usage data populated by `ms.set_result`
+- cubepi.AnthropicProvider's streaming events don't update the partial AssistantMessage's usage along the way (and MessageEndEvent picks up the final usage from elsewhere)
+
+Need to trace why anthropic path's usage isn't flowing through stream_pi → SSE the way openai's does (post-M5.2 fix). Separate from the cache-marker fix above.
 Related PR: cubebox#84 (Draft `feat/integrate-cubepi`), cubepi `feat/cubebox-readiness`
 
 ## Problem
