@@ -13,11 +13,8 @@ export function WorkspaceList() {
     return (
       <div className="op-panel">
         <div className="op-empty">
-          <h4>You haven&apos;t opened any workspaces yet</h4>
-          <p>
-            Workspaces are the namespace for conversations, skills, and credentials. Create one
-            below to get started.
-          </p>
+          <h4>{t('emptyTitle')}</h4>
+          <p>{t('emptyBody')}</p>
         </div>
       </div>
     )
@@ -26,8 +23,8 @@ export function WorkspaceList() {
   return (
     <div className="op-panel">
       <div className="op-panel__head">
-        <h3>Your workspaces</h3>
-        <span className="op-meta">{workspaces.length} total</span>
+        <h3>{t('panelTitle')}</h3>
+        <span className="op-meta">{t('totalSuffix', { count: workspaces.length })}</span>
       </div>
       <ul>
         {workspaces.map((w, idx) => (

@@ -1,4 +1,7 @@
-export default function AuthLayout({ children }: { children: React.ReactNode }) {
+import { getTranslations } from 'next-intl/server'
+
+export default async function AuthLayout({ children }: { children: React.ReactNode }) {
+  const t = await getTranslations('authLayout')
   return (
     <div className="min-h-screen bg-background flex flex-col">
       {/* Top brand strip — restrained, no marketing language */}
@@ -19,8 +22,8 @@ export default function AuthLayout({ children }: { children: React.ReactNode }) 
       </main>
 
       <footer className="px-8 py-4 hairline-t flex items-center justify-between text-[11px] text-muted-foreground font-mono">
-        <span>cubebox · operator</span>
-        <span>secured by session cookie · csrf double-submit</span>
+        <span>{t('footerBrand')}</span>
+        <span>{t('footerSecurity')}</span>
       </footer>
     </div>
   )

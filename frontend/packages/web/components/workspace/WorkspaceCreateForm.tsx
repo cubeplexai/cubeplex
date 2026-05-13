@@ -31,7 +31,7 @@ export function WorkspaceCreateForm() {
   return (
     <form onSubmit={onSubmit} className="op-panel">
       <div className="op-panel__head">
-        <h3>Create a workspace</h3>
+        <h3>{t('panelTitle')}</h3>
       </div>
       <div className="op-panel__body space-y-3">
         <label className="block">
@@ -47,9 +47,7 @@ export function WorkspaceCreateForm() {
             onChange={(e) => setName(e.target.value)}
             placeholder={t('namePlaceholder')}
           />
-          <span className="block mt-1.5 text-[11.5px] text-muted-foreground">
-            Names are visible to teammates. You can rename later from workspace settings.
-          </span>
+          <span className="block mt-1.5 text-[11.5px] text-muted-foreground">{t('nameHint')}</span>
         </label>
         {error && (
           <div className="text-[12.5px] text-destructive border border-destructive/30 bg-destructive/5 rounded-md px-3 py-2">

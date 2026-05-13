@@ -38,7 +38,7 @@ export function RegisterForm() {
   return (
     <div className="op-panel">
       <div className="px-6 pt-6 pb-1">
-        <p className="op-eyebrow mb-2">create account</p>
+        <p className="op-eyebrow mb-2">{t('eyebrowSignUp')}</p>
         <h1 className="text-[22px] font-semibold leading-tight text-foreground">
           {t('signUpTitle')}
         </h1>
@@ -52,7 +52,7 @@ export function RegisterForm() {
             type="email"
             required
             autoComplete="email"
-            placeholder="you@company.com"
+            placeholder={t('emailPlaceholder')}
             className="block w-full rounded-md border border-border bg-card px-3 h-9 text-[13px] text-foreground placeholder:text-muted-foreground/60 outline-none focus:border-primary focus:ring-2 focus:ring-primary/15 transition-shadow"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
@@ -67,14 +67,13 @@ export function RegisterForm() {
             required
             minLength={8}
             autoComplete="new-password"
-            placeholder="at least 8 characters"
+            placeholder={t('passwordPlaceholderRegister')}
             className="block w-full rounded-md border border-border bg-card px-3 h-9 text-[13px] text-foreground placeholder:text-muted-foreground/60 font-mono outline-none focus:border-primary focus:ring-2 focus:ring-primary/15 transition-shadow"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
           />
           <span className="block mt-1.5 text-[11.5px] text-muted-foreground">
-            8+ characters. We don&apos;t enforce complexity rules — pick something you can remember
-            with a password manager.
+            {t('passwordHintRegister')}
           </span>
         </label>
         {error && (

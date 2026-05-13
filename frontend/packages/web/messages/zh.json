@@ -10,7 +10,13 @@
     "creatingAccount": "创建中…",
     "newHere": "还没有账户？",
     "alreadyHaveAccount": "已有账户？",
-    "createAccount": "注册"
+    "createAccount": "注册",
+    "eyebrowSignIn": "登录",
+    "eyebrowSignUp": "创建账户",
+    "emailPlaceholder": "you@company.com",
+    "passwordPlaceholder": "•••••••••",
+    "passwordPlaceholderRegister": "至少 8 个字符",
+    "passwordHintRegister": "8 个字符及以上。我们不强制要求复杂度——选一个你能用密码管理器记住的就好。"
   },
   "sidebar": {
     "newChat": "新建对话",
@@ -92,7 +98,13 @@
     "allDone": "{count} 个任务已完成"
   },
   "home": {
-    "subtitle": "AI 智能体系统"
+    "subtitle": "AI 智能体系统",
+    "eyebrow": "工作区 · 首页",
+    "title": "接下来让智能体做什么？",
+    "lede": "提一个问题，贴一段错误堆栈，或者直接拖一个文件进来。每一次运行的推理、工具调用和结果都会流式回到一个可以随时继续的对话里。",
+    "kbdSend": "发送",
+    "kbdNewline": "换行",
+    "kbdPalette": "命令面板"
   },
   "adminInsights": {
     "heading": "运营洞察",
@@ -817,16 +829,24 @@
     "nameLabel": "新工作区名称",
     "namePlaceholder": "例如：副业项目",
     "creating": "创建中…",
-    "submit": "创建工作区"
+    "submit": "创建工作区",
+    "panelTitle": "创建工作区",
+    "nameHint": "名称对所有成员可见。之后可以从工作区设置里重命名。"
   },
   "workspaceList": {
     "empty": "你还没有工作区。",
     "open": "打开",
     "rolePrefix": "角色：{role}",
-    "unknownRole": "未知"
+    "unknownRole": "未知",
+    "panelTitle": "你的工作区",
+    "totalSuffix": "共 {count} 个",
+    "emptyTitle": "你还没有打开过任何工作区",
+    "emptyBody": "工作区是会话、技能、凭据的命名空间。在下方创建一个开始使用。"
   },
   "workspacesPage": {
-    "title": "工作区"
+    "title": "工作区",
+    "eyebrow": "工作区",
+    "lede": "工作区是会话、技能、MCP 连接和记忆的隔离单元。打开一个已有的工作区，或者新建一个。"
   },
   "conversationPage": {
     "notFoundTitle": "找不到该对话",
@@ -841,7 +861,8 @@
     "subNavAria": "管理后台二级导航",
     "avatarMenuAria": "管理后台账号菜单",
     "comingSoon": "本版本不可用",
-    "backlogRefPrefix": "实现归属：{ref}"
+    "backlogRefPrefix": "实现归属：{ref}",
+    "orgPrefix": "组织 · {name}"
   },
   "adminSandbox": {
     "title": "沙盒",
@@ -876,7 +897,9 @@
     "deleteConversation": "删除对话",
     "workspaceSettings": "工作区设置",
     "accountMenu": "账号菜单",
-    "signOut": "退出登录"
+    "signOut": "退出登录",
+    "conversationEyebrow": "会话",
+    "untitledConversation": "未命名"
   },
   "mcpAdmin": {
     "searchPlaceholder": "搜索连接器…",
@@ -894,29 +917,24 @@
     "loading": "加载中…",
     "noConnectors": "未找到连接器",
     "noConnectorsHint": "请尝试不同的搜索条件或筛选项",
-
     "selectConnector": "选择一个连接器查看详情",
     "selectInstalledConnector": "选择一个已安装的连接器查看详情",
     "addCustomPlaceholder": "添加自定义 MCP 服务器",
-
     "authenticated": "已认证",
     "notAuthenticated": "未认证",
     "customBadge": "自定义",
     "refreshTools": "刷新工具",
     "deleteButton": "删除",
     "confirmDeleteLabel": "确认删除?",
-
     "tabOverview": "概览",
     "tabTools": "工具 ({count})",
     "tabWorkspaces": "工作区",
-
     "overviewServerDetails": "服务器详情",
     "overviewUrl": "URL",
     "overviewTransport": "传输方式",
     "overviewAuthMethod": "认证方式",
     "overviewCredentialScope": "凭据范围",
     "overviewOrgCredential": "组织凭据",
-
     "wsLoading": "加载工作区中…",
     "wsLoadError": "加载工作区失败：{message}",
     "wsEmpty": "未找到工作区",
@@ -927,10 +945,8 @@
     "wsDisabled": "未启用",
     "pageTitle": "MCP 连接器",
     "pageSubtitle": "管理组织级 MCP 连接器、凭证及工作区绑定。",
-
     "revealSecret": "显示密钥",
     "hideSecret": "隐藏密钥",
-
     "catalogInstallTitle": "为组织安装",
     "catalogInstallError": "安装失败",
     "catalogAuthOAuth": "OAuth",
@@ -943,7 +959,6 @@
     "catalogNoneNotice": "该连接器无需凭证。",
     "catalogStaticTokenLabel": "API Token",
     "catalogMultiFieldUnsupported": "当前连接器暂不支持多字段凭证表单。",
-
     "customCreateTitle": "添加自定义 MCP 服务器",
     "customCreateSubtitle": "为整个组织登记自定义 MCP 服务器，之后可以按工作区开启。",
     "customSectionServer": "服务器",
@@ -963,5 +978,19 @@
     "customFieldCredNamePlaceholder": "在凭证保险库中显示的标签",
     "customFieldCredPlaintext": "凭证",
     "customSubmit": "创建服务器"
+  },
+  "authLayout": {
+    "footerBrand": "cubebox · operator",
+    "footerSecurity": "会话 cookie 鉴权 · CSRF 双重提交保护"
+  },
+  "memoryPage": {
+    "eyebrow": "工作区 · 记忆",
+    "title": "记忆",
+    "scopedBy": "按个人 / 工作区 / 组织 分类",
+    "lede": "智能体在不同会话之间记住的内容。条目按范围隔离——个人级跟随你跨工作区，工作区级跟随项目，组织级对所有成员共享。",
+    "tabPersonal": "个人",
+    "tabWorkspace": "工作区",
+    "tabOrg": "组织",
+    "tabArchived": "已归档"
   }
 }

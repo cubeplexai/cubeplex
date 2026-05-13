@@ -2,6 +2,7 @@
 
 import { use, useState, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
+import { useTranslations } from 'next-intl'
 import {
   createApiClient,
   useAttachmentStore,
@@ -15,6 +16,7 @@ export default function WorkspaceHomePage({
 }: {
   params: Promise<{ wsId: string }>
 }): React.ReactElement {
+  const t = useTranslations('home')
   const { wsId } = use(params)
   const router = useRouter()
   const { create: createConversation, rename: renameConversation } = useConversationStore()
@@ -85,13 +87,12 @@ export default function WorkspaceHomePage({
     <div className="flex-1 flex flex-col items-center justify-center px-6">
       <div className="w-full max-w-2xl">
         <div className="mb-7">
-          <p className="op-eyebrow mb-2">workspace · home</p>
+          <p className="op-eyebrow mb-2">{t('eyebrow')}</p>
           <h1 className="text-[26px] font-semibold tracking-tight leading-tight text-foreground">
-            What should the agent do next?
+            {t('title')}
           </h1>
           <p className="mt-2 text-[13.5px] text-muted-foreground max-w-prose leading-relaxed">
-            Drop a question, paste a stack trace, or attach a file. Every run streams reasoning,
-            tool calls, and results back into a conversation you can resume any time.
+            {t('lede')}
           </p>
         </div>
         <InputBar
@@ -101,17 +102,17 @@ export default function WorkspaceHomePage({
         />
         <div className="mt-3 flex items-center gap-3 text-[11.5px] text-muted-foreground font-mono">
           <span>
-            <span className="op-kbd">⏎</span> send
+            <span className="op-kbd">⏎</span> {t('kbdSend')}
           </span>
           <span className="text-border">·</span>
           <span>
             <span className="op-kbd">⇧</span>
-            <span className="op-kbd ml-0.5">⏎</span> newline
+            <span className="op-kbd ml-0.5">⏎</span> {t('kbdNewline')}
           </span>
           <span className="text-border">·</span>
           <span>
             <span className="op-kbd">⌘</span>
-            <span className="op-kbd ml-0.5">K</span> command palette
+            <span className="op-kbd ml-0.5">K</span> {t('kbdPalette')}
           </span>
         </div>
       </div>

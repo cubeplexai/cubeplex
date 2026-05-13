@@ -1,6 +1,7 @@
 'use client'
 
 import { ReactNode } from 'react'
+import { useTranslations } from 'next-intl'
 import { ThemeToggle } from '@/components/ui/theme-toggle'
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from '@/components/ui/resizable'
 import { ToolDetailPanel } from '@/components/panel/ToolDetailPanel'
@@ -14,6 +15,7 @@ interface AppShellProps {
 }
 
 export function AppShell({ children, headerTitle }: AppShellProps) {
+  const t = useTranslations('shellLayout')
   const view = usePanelStore((s) => s.view)
   const panelOpen = view.type !== 'closed'
 
@@ -22,9 +24,9 @@ export function AppShell({ children, headerTitle }: AppShellProps) {
       <ResizablePanel defaultSize={panelOpen ? 50 : 100} minSize={30}>
         <div className="flex flex-col h-full overflow-hidden">
           <header className="h-11 border-b border-border bg-card flex items-center px-4 gap-3 shrink-0">
-            <span className="op-eyebrow">conversation</span>
+            <span className="op-eyebrow">{t('conversationEyebrow')}</span>
             <span className="text-[13px] font-medium text-foreground truncate flex-1 min-w-0">
-              {headerTitle || 'Untitled'}
+              {headerTitle || t('untitledConversation')}
             </span>
             <ThemeToggle />
           </header>

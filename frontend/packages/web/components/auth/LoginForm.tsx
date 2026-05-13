@@ -34,7 +34,7 @@ export function LoginForm({ nextPath = '/' }: { nextPath?: string }) {
   return (
     <div className="op-panel">
       <div className="px-6 pt-6 pb-1">
-        <p className="op-eyebrow mb-2">sign in</p>
+        <p className="op-eyebrow mb-2">{t('eyebrowSignIn')}</p>
         <h1 className="text-[22px] font-semibold leading-tight text-foreground">
           {t('signInTitle')}
         </h1>
@@ -48,7 +48,7 @@ export function LoginForm({ nextPath = '/' }: { nextPath?: string }) {
             type="email"
             required
             autoComplete="email"
-            placeholder="you@company.com"
+            placeholder={t('emailPlaceholder')}
             className="block w-full rounded-md border border-border bg-card px-3 h-9 text-[13px] text-foreground placeholder:text-muted-foreground/60 outline-none focus:border-primary focus:ring-2 focus:ring-primary/15 transition-shadow"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
@@ -62,7 +62,7 @@ export function LoginForm({ nextPath = '/' }: { nextPath?: string }) {
             type="password"
             required
             autoComplete="current-password"
-            placeholder="•••••••••"
+            placeholder={t('passwordPlaceholder')}
             className="block w-full rounded-md border border-border bg-card px-3 h-9 text-[13px] text-foreground placeholder:text-muted-foreground/60 font-mono outline-none focus:border-primary focus:ring-2 focus:ring-primary/15 transition-shadow"
             value={password}
             onChange={(e) => setPassword(e.target.value)}

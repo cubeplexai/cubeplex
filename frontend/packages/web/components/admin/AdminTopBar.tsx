@@ -19,6 +19,7 @@ function handleBackToApp() {
 
 export function AdminTopBar({ orgName }: AdminTopBarProps) {
   const t = useTranslations('admin')
+  const tLayout = useTranslations('adminLayout')
   return (
     <header className="flex items-center gap-3 border-b border-border bg-card px-4 h-12 shrink-0">
       <div className="flex items-center gap-2">
@@ -36,7 +37,9 @@ export function AdminTopBar({ orgName }: AdminTopBarProps) {
       <div className="flex items-center gap-2">
         <span className="op-pill op-pill--accent">{t('title')}</span>
         {orgName && (
-          <span className="text-[12.5px] text-muted-foreground font-mono">org · {orgName}</span>
+          <span className="text-[12.5px] text-muted-foreground font-mono">
+            {tLayout('orgPrefix', { name: orgName })}
+          </span>
         )}
       </div>
 
