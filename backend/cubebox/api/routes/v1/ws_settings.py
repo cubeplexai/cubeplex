@@ -281,7 +281,7 @@ async def list_workspace_mcp(
         if override is None or not override.enabled:
             continue
 
-        mode = override.credential_mode or "org"
+        mode = override.credential_mode or srv.credential_scope
         credential_source: str | None = None
         credential_shared_by: str | None = None
 

@@ -564,3 +564,51 @@ async def test_workspace_override_credential_mode_redirects_credential_writes(
         plaintext="user-secret",
     )
     assert user_cred_id
+
+
+async def test_workspace_override_with_null_credential_mode_inherits_server_scope(
+    mcp_service: MCPServerService,
+) -> None:
+    """An enabled override row with credential_mode=NULL must inherit the
+    server-level ``credential_scope`` rather than silently defaulting to 'org'.
+
+    Regression for the bug where existing override rows backfilled to 'org'
+    by the 09a4503eba8a migration broke user-scope OAuth installs.
+    """
+    server = await mcp_service.create(
+        name="user-scope-server",
+        server_url="https://user-scope",
+        transport="streamable_http",
+        auth_method="static",
+        credential_scope="user",
+    )
+
+    await mcp_service.override_repo.upsert(
+        workspace_id="ws-test",
+        mcp_server_id=server.id,
+        enabled=True,
+        updated_by_user_id="u1",
+    )
+    override = await mcp_service.override_repo.get_for_workspace_and_server(
+        workspace_id="ws-test", mcp_server_id=server.id
+    )
+    assert override is not None
+    assert override.credential_mode is None, "new overrides must inherit, not lock to 'org'"
+
+    # set_user_credential must be allowed because effective_mode falls back to
+    # the server's 'user' scope.
+    user_cred_id = await mcp_service.set_user_credential(
+        server_id=server.id,
+        user_id="u9",
+        workspace_id="ws-test",
+        plaintext="user-secret",
+    )
+    assert user_cred_id
+
+    # And the org write path is still rejected (effective_mode != 'org').
+    with pytest.raises(MCPCredentialPathMismatch):
+        await mcp_service.set_workspace_credential(
+            server_id=server.id,
+            workspace_id="ws-test",
+            plaintext="ws-secret",
+        )

@@ -136,6 +136,7 @@ class WorkspaceMCPOverride(CubeboxBase, OrgScopedMixin, table=True):
     (default-invisible semantics).
 
     ``credential_mode`` controls how credentials resolve for this workspace:
+    - ``None``: inherit ``MCPServer.credential_scope`` (default — no override)
     - ``org``: use the org-level shared credential (MCPServer.credential_id)
     - ``workspace``: one member provides a credential shared by all workspace members
     - ``user``: each member authenticates individually
@@ -147,7 +148,7 @@ class WorkspaceMCPOverride(CubeboxBase, OrgScopedMixin, table=True):
 
     mcp_server_id: str = Field(foreign_key="mcp_servers.id", max_length=20, index=True)
     enabled: bool = Field(default=False)
-    credential_mode: str = Field(default="org", max_length=16)
+    credential_mode: str | None = Field(default=None, max_length=16)
     updated_by_user_id: str = Field(foreign_key="users.id", max_length=20)
 
 
