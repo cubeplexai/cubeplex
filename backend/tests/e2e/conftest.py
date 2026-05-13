@@ -33,7 +33,6 @@ from cubebox.repositories import (
     OrganizationRepository,
     WorkspaceRepository,
 )
-from cubebox.sandbox.local import LocalSandbox
 from tests.e2e.helpers import csrf_cookie_name
 
 
@@ -163,7 +162,7 @@ def _make_memory_test_app() -> FastAPI:
     memory_saver = MemorySaver()
     app = create_app(
         checkpointer_factory=lambda: memory_saver,
-        sandbox_factory=LocalSandbox,
+        sandbox_factory=None,
     )
     # Expose so tests can inspect raw thread state (e.g. compaction E2E).
     app.state.memory_saver = memory_saver

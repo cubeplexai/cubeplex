@@ -45,7 +45,8 @@ test:
         base_url: "@format {env[CUBEBOX_E2E_LLM_BASE_URL]}"
         api_key: "@format {env[CUBEBOX_E2E_LLM_API_KEY]}"
         api: openai-completions
-        extra_body: {}
+        extra_body:
+          user: "cubebox-e2e"
         extra_headers: {}
         models:
           - id: "@format {env[CUBEBOX_E2E_LLM_MODEL_ID]}"

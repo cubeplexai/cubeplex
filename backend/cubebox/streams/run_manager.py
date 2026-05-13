@@ -849,7 +849,8 @@ class RunManager:
             extra_ref_holder["extra"] = agent._extra
 
             def _on_event(evt: Any, _signal: Any = None) -> None:
-                sse_dicts.extend(convert_cubepi_agent_event_to_sse(evt))
+                translated = convert_cubepi_agent_event_to_sse(evt)
+                sse_dicts.extend(translated)
 
             agent.subscribe(_on_event)
 
