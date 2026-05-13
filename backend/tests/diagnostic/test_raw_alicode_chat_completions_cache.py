@@ -34,6 +34,13 @@ pytestmark = [pytest.mark.real_llm, pytest.mark.diagnostic]
 
 
 @pytest.mark.asyncio
+@pytest.mark.xfail(
+    strict=False,
+    reason="alicode (DashScope qwen3.6-plus) does not expose prompt cache "
+    "in the usage object via this endpoint. Confirmed empirically Phase 1: "
+    "cached_tokens=None on both turns. Kept as scaffold to re-verify if "
+    "DashScope adds cache support; do not block CI on it.",
+)
 async def test_alicode_openai_caches_repeated_system_prompt(alicode_api_key: str) -> None:
     """Send two identical system prompts; assert turn 2 has cached_tokens > 0.
 
