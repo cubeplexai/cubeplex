@@ -70,6 +70,7 @@ markers = [
     "e2e: end-to-end tests that hit real services (Postgres/Redis/LLM/Sandbox); deselect with '-m \"not e2e\"'",
     "unit: fast unit tests with no external dependencies",
     "real_llm: tests that require a real LLM endpoint with cache_control honored; deselected by default in CI",
+    "diagnostic: diagnostic scaffold tests (cache investigation etc.); opt-in with '-m diagnostic'",
 ]
 
 [tool.hatch.build.targets.wheel]
