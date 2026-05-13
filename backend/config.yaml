@@ -3,6 +3,16 @@ default:
   env: default
   debug: false
 
+  # Logging Configuration
+  # When `debug: true` the root level is DEBUG, which captures every chatty
+  # third-party logger (botocore/aiobotocore/httpcore/...) via the stdlib
+  # intercept. `third_party_level` caps a known-noisy list at a higher level
+  # by default. Per-module overrides go in `verbose_modules` (full or partial
+  # logger names) for selectively re-enabling DEBUG.
+  logging:
+    third_party_level: "WARNING"
+    verbose_modules: []
+
   # Deployment Configuration
   deployment:
     mode: single_tenant
@@ -111,7 +121,11 @@ default:
     # ttl: Sandbox idle timeout (time since last activity before cleanup)
     #   SandboxManager's background cleanup task periodically checks for sandboxes
     #   that have been inactive (no commands) for this duration and terminates them.
-    ttl: 600 # 10 minutes in seconds
+    #   Activity is refreshed at turn start (get_or_create reuse), turn end (release),
+    #   and during the turn whenever LazySandbox is exercised — throttled by
+    #   `touch_interval` so chatty execute/upload loops don't hammer the DB.
+    ttl: 1800 # 30 minutes in seconds
+    touch_interval: 60 # Min seconds between activity touches from LazySandbox
     cleanup_interval: 60 # Cleanup task interval in seconds
     workdir: "/workspace" # Default working directory for command execution
     # resource: CPU and memory limits for sandbox containers

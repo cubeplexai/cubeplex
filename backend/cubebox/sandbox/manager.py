@@ -14,7 +14,7 @@ versioned paths under ``/.skills/<name>/<version>/``.
 
 import hashlib
 import re
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 
 import opensandbox
 from loguru import logger
@@ -40,8 +40,13 @@ class SandboxManager:
         self._api_key: str | None = config.get("sandbox.api_key", None)
         self._request_timeout: int = config.get("sandbox.request_timeout", 60)
         self._ttl: int = config.get("sandbox.ttl", 600)
+        self._touch_interval: int = config.get("sandbox.touch_interval", 60)
         self._ready_timeout: int = config.get("sandbox.ready_timeout", 60)
         self._use_server_proxy: bool = config.get("sandbox.use_server_proxy", False)
+
+        # In-process cache of (sandbox_id -> last_touch_at) used to throttle
+        # mid-turn activity bumps so chatty tool loops don't hammer the DB.
+        self._touch_cache: dict[str, datetime] = {}
 
         # Sandbox workdir
         self._workdir: str = config.get("sandbox.workdir", "/workspace")
@@ -197,6 +202,30 @@ class SandboxManager:
             repo = UserSandboxRepository(session, org_id=org_id, workspace_id=workspace_id)
             await repo.update_activity_by_sandbox_id(sandbox_id)
             logger.debug("Released sandbox {}", sandbox_id)
+
+    async def touch(
+        self,
+        sandbox_id: str,
+        *,
+        org_id: str,
+        workspace_id: str,
+    ) -> None:
+        """Refresh `last_activity_at` for an in-use sandbox.
+
+        Called from `LazySandbox` before each tool invocation so that
+        cleanup_expired won't kill a sandbox in active use mid-turn.
+        Throttled by `sandbox.touch_interval` to avoid one DB write per
+        execute call.
+        """
+        now = datetime.now(UTC)
+        last = self._touch_cache.get(sandbox_id)
+        if last is not None and (now - last).total_seconds() < self._touch_interval:
+            return
+        self._touch_cache[sandbox_id] = now
+
+        async with self._session_factory() as session:
+            repo = UserSandboxRepository(session, org_id=org_id, workspace_id=workspace_id)
+            await repo.update_activity_by_sandbox_id(sandbox_id)
 
     async def cleanup_expired(self) -> None:
         """Find and terminate sandboxes that exceeded their TTL.

@@ -140,7 +140,6 @@ class LazySandbox(Sandbox):
         """Ensure sandbox, retrying once if the existing one is broken."""
         try:
             sandbox = await self._ensure()
-            return sandbox
         except Exception:
             # First attempt failed — reset and try creating a fresh one
             async with self._lock:
@@ -149,7 +148,19 @@ class LazySandbox(Sandbox):
                 "Lazy sandbox: first attempt failed for user {}, retrying",
                 self._user_id,
             )
-            return await self._ensure()
+            sandbox = await self._ensure()
+
+        # Refresh last_activity so cleanup_expired won't kill an in-use
+        # sandbox mid-turn. Throttled inside the manager.
+        try:
+            await self._manager.touch(
+                sandbox.id,
+                org_id=self._org_id,
+                workspace_id=self._workspace_id,
+            )
+        except Exception:
+            logger.exception("Lazy sandbox: touch failed (non-fatal)")
+        return sandbox
 
     # ------------------------------------------------------------------
     # Sandbox interface
