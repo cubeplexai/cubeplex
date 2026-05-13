@@ -1,7 +1,7 @@
 """add credential_mode to workspace_mcp_overrides
 
 Revision ID: 09a4503eba8a
-Revises: 94c1f2c164da
+Revises: 4be6ed892e02
 Create Date: 2026-05-12 23:07:37.850911
 
 """
@@ -13,7 +13,7 @@ import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision: str = '09a4503eba8a'
-down_revision: Union[str, Sequence[str], None] = '94c1f2c164da'
+down_revision: Union[str, Sequence[str], None] = '4be6ed892e02'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
