@@ -9,9 +9,11 @@ Uses dynaconf for environment-based configuration with support for:
 
 import os
 from pathlib import Path
+from typing import Literal
 
 import dynaconf
 from dotenv import load_dotenv as _load_worktree_dotenv
+from pydantic import BaseModel, Field
 
 # Get the backend directory (where config files are located)
 backend_dir = Path(__file__).parent.parent
@@ -43,3 +45,14 @@ config = dynaconf.Dynaconf(
 if config.langsmith.enabled:
     os.environ["LANGSMITH_TRACING"] = "true"
     os.environ["LANGCHAIN_API_KEY"] = config.langsmith.key
+
+
+class AgentRuntimeConfig(BaseModel):
+    """Which agent runtime to use.
+
+    Set via env CUBEBOX_AGENTS__RUNTIME or config.<env>.yaml ``agents.runtime`` key.
+    Default ``langgraph`` (current production path).
+    ``cubepi`` enables the new cubepi-based runtime (Spec B, in progress).
+    """
+
+    runtime: Literal["langgraph", "cubepi"] = Field(default="langgraph")
