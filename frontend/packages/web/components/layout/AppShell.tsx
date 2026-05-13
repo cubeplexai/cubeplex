@@ -21,9 +21,10 @@ export function AppShell({ children, headerTitle }: AppShellProps) {
     <ResizablePanelGroup orientation="horizontal" className="h-full">
       <ResizablePanel defaultSize={panelOpen ? 50 : 100} minSize={30}>
         <div className="flex flex-col h-full overflow-hidden">
-          <header className="h-11 border-b border-border flex items-center px-4 shrink-0">
-            <span className="text-sm text-muted-foreground truncate flex-1">
-              {headerTitle || ''}
+          <header className="h-11 border-b border-border bg-card flex items-center px-4 gap-3 shrink-0">
+            <span className="op-eyebrow">conversation</span>
+            <span className="text-[13px] font-medium text-foreground truncate flex-1 min-w-0">
+              {headerTitle || 'Untitled'}
             </span>
             <ThemeToggle />
           </header>

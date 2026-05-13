@@ -7,7 +7,6 @@
   flex-grow: 1;
 }
 
-/* Hide scrollbar but keep scrollable */
 @utility scrollbar-none {
   -ms-overflow-style: none;
   scrollbar-width: none;
@@ -16,58 +15,447 @@
   }
 }
 
-/* Use .dark class (not prefers-color-scheme) so dark: variants work with the theme toggle */
 @custom-variant dark (&:where(.dark, .dark *));
 
-/* Default: light mode */
+/* =============================================================
+   cubebox · Operator theme
+   Direction A — Linear / Vercel / Stripe Dashboard lineage.
+   Hairline borders, mono numerals, one accent (#3b5bd9), no
+   gradients, no shadows except modal.
+   ============================================================= */
 @theme {
-  --color-background: hsl(0 0% 100%);
-  --color-foreground: hsl(240 10% 4%);
-  --color-card: hsl(0 0% 100%);
-  --color-card-foreground: hsl(240 10% 4%);
-  /* hsl(210 100% 38%) ≈ #0061C2 — white text on this gives ~6.2:1, passes WCAG AA */
-  --color-primary: hsl(210 100% 38%);
-  --color-primary-foreground: hsl(0 0% 100%);
-  --color-secondary: hsl(240 5% 96%);
-  --color-secondary-foreground: hsl(240 6% 10%);
-  --color-muted: hsl(240 5% 96%);
-  /* hsl(240 5% 38%) ≈ #5c5c66 — on white gives ~5.9:1, passes WCAG AA */
-  --color-muted-foreground: hsl(240 5% 38%);
-  --color-accent: hsl(240 5% 96%);
-  --color-accent-foreground: hsl(240 10% 4%);
-  --color-popover: hsl(0 0% 100%);
-  --color-popover-foreground: hsl(240 10% 4%);
-  --color-border: hsl(240 6% 90%);
-  --color-input: hsl(240 6% 90%);
-  --color-ring: hsl(210 100% 38%);
-  --radius: 0.5rem;
+  /* Operator ink scale (cool grey) */
+  --color-ink-1: #fafafa;
+  --color-ink-3: #f4f4f5;
+  --color-ink-5: #e4e4e7;
+  --color-ink-7: #a1a1aa;
+  --color-ink-9: #52525b;
+  --color-ink-11: #1f1f22;
+  --color-ink-12: #0a0a0b;
+  --color-surface: #ffffff;
+  --color-accent-ink: #1e3aa8;
+  --color-accent-soft: #eef1fe;
+
+  /* shadcn token mapping — light */
+  --color-background: #fafafa; /* ink-1 canvas */
+  --color-foreground: #1f1f22; /* ink-11 body */
+  --color-card: #ffffff;
+  --color-card-foreground: #0a0a0b;
+  --color-primary: #3b5bd9; /* the only accent */
+  --color-primary-foreground: #ffffff;
+  --color-secondary: #f4f4f5;
+  --color-secondary-foreground: #1f1f22;
+  --color-muted: #f4f4f5;
+  --color-muted-foreground: #52525b;
+  --color-accent: #f4f4f5; /* shadcn "accent" = hover */
+  --color-accent-foreground: #0a0a0b;
+  --color-popover: #ffffff;
+  --color-popover-foreground: #0a0a0b;
+  --color-border: #e4e4e7;
+  --color-input: #e4e4e7;
+  --color-ring: #3b5bd9;
+  --color-destructive: #dc2626;
+  --color-destructive-foreground: #ffffff;
+
+  /* Status semantic */
+  --color-ok: #16a34a;
+  --color-warn: #d97706;
+  --color-err: #dc2626;
+
+  /* Hairline radius scale — operator caps at 8 */
+  --radius: 0.375rem; /* 6px — cards */
+  --radius-sm: 0.25rem; /* 4px — buttons */
+  --radius-lg: 0.5rem; /* 8px — panel */
+
+  /* Tailwind requires *literal* values in @theme — var() chains here
+     are not always emitted as CSS variables, so we declare the actual
+     font stacks in @layer base below and only expose Tailwind utilities. */
+  --font-sans: 'InterFallback', ui-sans-serif, system-ui, sans-serif;
+  --font-display: 'InterTightFallback', ui-sans-serif, system-ui, sans-serif;
+  --font-mono: 'JetBrainsMonoFallback', ui-monospace, SFMono-Regular, monospace;
 }
 
 @layer base {
   :root {
-    --color-popover: hsl(0 0% 100%);
-    --color-popover-foreground: hsl(240 10% 4%);
+    --color-popover: #ffffff;
+    --color-popover-foreground: #0a0a0b;
   }
 
+  /* Dark mode — graphite. Borrowed tonally from Direction C but
+     keeps Operator's indigo accent for continuity. */
   .dark {
-    --color-background: hsl(222 20% 7%);
-    --color-foreground: hsl(215 20% 92%);
-    --color-card: hsl(222 18% 10%);
-    --color-card-foreground: hsl(215 20% 92%);
-    /* hsl(210 100% 62%) ≈ #3d9eff — on dark bg gives ~6.8:1, passes WCAG AA */
-    --color-primary: hsl(210 100% 62%);
-    --color-primary-foreground: hsl(222 20% 7%);
-    --color-secondary: hsl(222 18% 13%);
-    --color-secondary-foreground: hsl(215 20% 92%);
-    --color-muted: hsl(222 18% 13%);
-    /* hsl(215 14% 62%) — on dark bg gives ~5.8:1, passes WCAG AA */
-    --color-muted-foreground: hsl(215 14% 62%);
-    --color-accent: hsl(222 18% 14%);
-    --color-accent-foreground: hsl(215 20% 92%);
-    --color-popover: hsl(222 18% 12%);
-    --color-popover-foreground: hsl(215 20% 92%);
-    --color-border: hsl(222 16% 16%);
-    --color-input: hsl(222 16% 14%);
-    --color-ring: hsl(210 100% 62%);
+    --color-background: #0b0d10;
+    --color-foreground: #e6e7e9;
+    --color-card: #111418;
+    --color-card-foreground: #e6e7e9;
+    --color-primary: #6c8bff;
+    --color-primary-foreground: #0b0d10;
+    --color-secondary: #181c22;
+    --color-secondary-foreground: #e6e7e9;
+    --color-muted: #181c22;
+    --color-muted-foreground: #9aa1ab;
+    --color-accent: #181c22;
+    --color-accent-foreground: #f3f4f6;
+    --color-popover: #15181d;
+    --color-popover-foreground: #e6e7e9;
+    --color-border: #232830;
+    --color-input: #1d2128;
+    --color-ring: #6c8bff;
+    --color-destructive: #ef4444;
+  }
+
+  html,
+  body {
+    font-family:
+      var(--font-inter),
+      'Inter',
+      ui-sans-serif,
+      system-ui,
+      -apple-system,
+      BlinkMacSystemFont,
+      'Segoe UI',
+      sans-serif;
+    font-feature-settings: 'cv11', 'ss01', 'cv02', 'ss03';
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  /* Display headings — tighter, Inter Tight */
+  h1,
+  h2,
+  h3,
+  h4 {
+    font-family:
+      var(--font-inter-tight), 'Inter Tight', var(--font-inter), 'Inter', ui-sans-serif, system-ui,
+      sans-serif;
+    letter-spacing: -0.01em;
+  }
+  h1 {
+    letter-spacing: -0.015em;
+  }
+
+  code,
+  pre,
+  kbd,
+  samp {
+    font-family:
+      var(--font-jetbrains-mono), 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas,
+      monospace;
+  }
+
+  /* Tabular numerals globally for mono spans + classed elements.
+     Components that want flowing numerals can opt out with
+     font-variant-numeric: normal. */
+  .font-mono,
+  code,
+  kbd,
+  samp,
+  pre,
+  [class*='tabular'] {
+    font-feature-settings:
+      'tnum' on,
+      'lnum' on;
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Hairline focus — replaces shadcn's default 3px ring with
+     Operator's tighter ring. */
+  :where(.dark, .dark *) :focus-visible {
+    outline: none;
+  }
+}
+
+/* =============================================================
+   Operator primitives — utility classes layered on top of
+   Tailwind/shadcn for things the existing component library
+   doesn't express (kbd hints, status pills, hairline panels).
+   ============================================================= */
+@layer components {
+  .op-kbd {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    font-weight: 500;
+    height: 18px;
+    min-width: 18px;
+    padding: 0 5px;
+    border: 1px solid var(--color-border);
+    border-bottom-width: 2px;
+    border-radius: 4px;
+    background: var(--color-card);
+    color: var(--color-muted-foreground);
+    line-height: 1;
+    letter-spacing: 0;
+  }
+
+  .op-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    height: 20px;
+    padding: 0 8px;
+    border: 1px solid var(--color-border);
+    border-radius: 999px;
+    background: var(--color-card);
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    color: var(--color-muted-foreground);
+    line-height: 1;
+  }
+  .op-pill::before {
+    content: '';
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--color-ink-7, currentColor);
+  }
+  .op-pill--ok {
+    color: var(--color-ok);
+    border-color: rgba(22, 163, 74, 0.25);
+    background: rgba(22, 163, 74, 0.06);
+  }
+  .op-pill--ok::before {
+    background: var(--color-ok);
+  }
+  .op-pill--warn {
+    color: var(--color-warn);
+    border-color: rgba(217, 119, 6, 0.25);
+    background: rgba(217, 119, 6, 0.06);
+  }
+  .op-pill--warn::before {
+    background: var(--color-warn);
+  }
+  .op-pill--err {
+    color: var(--color-err);
+    border-color: rgba(220, 38, 38, 0.25);
+    background: rgba(220, 38, 38, 0.06);
+  }
+  .op-pill--err::before {
+    background: var(--color-err);
+  }
+  .op-pill--accent {
+    color: var(--color-primary);
+    border-color: color-mix(in oklab, var(--color-primary) 30%, transparent);
+    background: color-mix(in oklab, var(--color-primary) 8%, transparent);
+  }
+  .op-pill--accent::before {
+    background: var(--color-primary);
+  }
+
+  /* Page chrome — used by content area headers across pages. */
+  .op-page {
+    width: 100%;
+    max-width: 1280px;
+    margin: 0 auto;
+    padding: 24px clamp(20px, 4vw, 40px) 64px;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+  }
+  .op-page--narrow {
+    max-width: 880px;
+  }
+  .op-page__head {
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+  .op-page__head h1 {
+    font-size: 24px;
+    line-height: 1.2;
+    font-weight: 600;
+    margin: 0;
+    color: var(--color-card-foreground);
+  }
+  .op-page__head .op-meta {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--color-muted-foreground);
+  }
+  .op-page__head .op-push {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .op-page__lede {
+    color: var(--color-muted-foreground);
+    font-size: 14px;
+    line-height: 1.6;
+    max-width: 680px;
+  }
+
+  /* Topbar — used by per-page or layout-level breadcrumbs. */
+  .op-topbar {
+    height: 44px;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 0 16px;
+    background: var(--color-card);
+    border-bottom: 1px solid var(--color-border);
+  }
+  .op-crumb {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
+    color: var(--color-muted-foreground);
+  }
+  .op-crumb__sep {
+    color: var(--color-border);
+  }
+  .op-crumb__current {
+    color: var(--color-card-foreground);
+    font-weight: 500;
+  }
+
+  /* Hairline panel — the operator card. */
+  .op-panel {
+    background: var(--color-card);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-lg);
+    overflow: hidden;
+  }
+  .op-panel__head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--color-border);
+  }
+  .op-panel__head h3 {
+    font-size: 13px;
+    font-weight: 600;
+    margin: 0;
+    color: var(--color-card-foreground);
+    letter-spacing: 0;
+    text-transform: none;
+  }
+  .op-panel__head .op-meta {
+    margin-left: auto;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--color-muted-foreground);
+  }
+  .op-panel__body {
+    padding: 16px;
+  }
+  .op-panel__body--flush {
+    padding: 0;
+  }
+
+  /* Field row — used in settings / forms. */
+  .op-field {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 14px 16px;
+    border-bottom: 1px solid var(--color-border);
+  }
+  .op-field:last-child {
+    border-bottom: 0;
+  }
+  .op-field--row {
+    display: grid;
+    grid-template-columns: 220px 1fr;
+    gap: 32px;
+    align-items: start;
+  }
+  .op-field__label {
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--color-card-foreground);
+  }
+  .op-field__hint {
+    font-size: 12px;
+    color: var(--color-muted-foreground);
+    line-height: 1.55;
+  }
+  .op-field__hint code {
+    font-family: var(--font-mono);
+    background: var(--color-secondary);
+    border: 1px solid var(--color-border);
+    border-radius: 3px;
+    padding: 0 4px;
+    font-size: 11.5px;
+  }
+
+  /* Empty state — the "say something" pattern. */
+  .op-empty {
+    padding: 36px 24px;
+    text-align: center;
+    color: var(--color-muted-foreground);
+  }
+  .op-empty h4 {
+    font-size: 16px;
+    color: var(--color-card-foreground);
+    margin: 0 0 6px;
+    font-weight: 600;
+    letter-spacing: -0.005em;
+  }
+  .op-empty p {
+    margin: 0 auto;
+    max-width: 420px;
+    line-height: 1.6;
+    font-size: 13px;
+  }
+
+  /* Section eyebrow label */
+  .op-eyebrow {
+    font-size: 10.5px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--color-muted-foreground);
+  }
+}
+
+/* =============================================================
+   Tailwind utility shims — small adjustments to defaults so
+   ad-hoc classes in pages match Operator without rewriting.
+   ============================================================= */
+@layer utilities {
+  /* Override Tailwind font utilities so they pick up next/font variables. */
+  .font-sans {
+    font-family:
+      var(--font-inter),
+      'Inter',
+      ui-sans-serif,
+      system-ui,
+      -apple-system,
+      BlinkMacSystemFont,
+      'Segoe UI',
+      sans-serif;
+  }
+  .font-display {
+    font-family:
+      var(--font-inter-tight), 'Inter Tight', var(--font-inter), 'Inter', ui-sans-serif, system-ui,
+      sans-serif;
+    letter-spacing: -0.01em;
+  }
+  .font-mono {
+    font-family:
+      var(--font-jetbrains-mono), 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas,
+      monospace;
+  }
+  .num,
+  .tabular {
+    font-variant-numeric: tabular-nums;
+    font-feature-settings:
+      'tnum' on,
+      'lnum' on;
+  }
+  .hairline {
+    border: 1px solid var(--color-border);
+  }
+  .hairline-b {
+    border-bottom: 1px solid var(--color-border);
+  }
+  .hairline-t {
+    border-top: 1px solid var(--color-border);
   }
 }

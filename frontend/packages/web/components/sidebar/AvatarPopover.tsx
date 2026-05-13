@@ -60,12 +60,17 @@ export function AvatarPopover() {
     <Popover>
       <PopoverTrigger
         aria-label={tShell('accountMenu')}
-        className="w-full min-w-0 flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-accent/60 transition-colors group"
+        className="w-full min-w-0 flex items-center gap-2 px-1.5 py-1.5 rounded-md hover:bg-muted transition-colors group"
       >
-        <div className="size-7 rounded-full bg-gradient-to-br from-primary to-primary/70 text-primary-foreground flex items-center justify-center text-[11px] font-semibold shrink-0 ring-1 ring-primary/20 shadow-sm">
+        <div
+          className={
+            'size-[26px] rounded-full bg-foreground text-background flex items-center ' +
+            'justify-center text-[11px] font-mono font-semibold shrink-0 leading-none'
+          }
+        >
           {initials}
         </div>
-        <span className="text-[12.5px] truncate flex-1 text-left text-foreground/90">
+        <span className="text-[12px] truncate flex-1 text-left text-foreground">
           {user?.email ?? '...'}
         </span>
       </PopoverTrigger>

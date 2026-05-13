@@ -22,7 +22,6 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { AvatarPopover } from '@/components/sidebar/AvatarPopover'
 import { WorkspacesSection } from '@/components/sidebar/WorkspacesSection'
 import {
-  Box,
   Brain,
   type LucideIcon,
   MoreHorizontal,
@@ -305,20 +304,38 @@ export function Sidebar(): React.ReactElement {
   return (
     <aside
       aria-label={tShell('sidebar')}
-      className="w-56 bg-card border-r border-border flex flex-col h-screen shrink-0"
+      className="w-60 bg-card border-r border-border flex flex-col h-screen shrink-0"
     >
-      {/* Brand + new chat */}
-      <div className="px-4 pt-4 pb-3 border-b border-border/60">
-        <div className="flex items-center gap-2 mb-3">
-          <div className="w-6 h-6 rounded-md bg-primary flex items-center justify-center shrink-0 shadow-sm">
-            <Box className="size-3.5 text-primary-foreground" strokeWidth={2.5} />
+      {/* Brand */}
+      <div className="px-3 pt-3.5 pb-3 border-b border-border">
+        <div className="flex items-center gap-2 px-1">
+          <div
+            className={
+              'w-[22px] h-[22px] rounded-[5px] bg-foreground text-background ' +
+              'grid place-items-center font-mono font-semibold text-[11px] tracking-tight ' +
+              'leading-none'
+            }
+            aria-hidden
+          >
+            cb
           </div>
-          <span className="text-sm font-semibold tracking-tight">cubebox</span>
+          <span className="font-display text-[14px] font-semibold tracking-tight text-foreground">
+            cubebox
+          </span>
         </div>
-        <Link href={newChatHref}>
-          <Button variant="outline" size="sm" className="w-full h-7 text-xs gap-1.5">
+        <Link href={newChatHref} className="block mt-3">
+          <Button
+            variant="outline"
+            size="sm"
+            className={
+              'w-full h-7 text-xs gap-1.5 justify-start font-normal ' +
+              'text-muted-foreground hover:text-foreground bg-muted/40 ' +
+              'border-border hover:bg-card'
+            }
+          >
             <Plus className="size-3" />
-            {tSidebar('newChat')}
+            <span className="flex-1 text-left">{tSidebar('newChat')}</span>
+            <span className="op-kbd">N</span>
           </Button>
         </Link>
       </div>

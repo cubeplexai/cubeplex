@@ -2,7 +2,6 @@
 
 import { use, useState, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
-import { useTranslations } from 'next-intl'
 import {
   createApiClient,
   useAttachmentStore,
@@ -10,14 +9,12 @@ import {
   useMessageStore,
 } from '@cubebox/core'
 import { InputBar } from '@/components/layout/InputBar'
-import { Box } from 'lucide-react'
 
 export default function WorkspaceHomePage({
   params,
 }: {
   params: Promise<{ wsId: string }>
 }): React.ReactElement {
-  const t = useTranslations('home')
   const { wsId } = use(params)
   const router = useRouter()
   const { create: createConversation, rename: renameConversation } = useConversationStore()
@@ -85,20 +82,38 @@ export default function WorkspaceHomePage({
   }
 
   return (
-    <div className="flex-1 flex flex-col items-center justify-center">
-      <div className="text-center mb-8">
-        <div className="inline-flex items-center justify-center w-12 h-12 rounded-xl bg-primary/10 border border-primary/20 mb-5">
-          <Box className="size-6 text-primary" strokeWidth={2} />
+    <div className="flex-1 flex flex-col items-center justify-center px-6">
+      <div className="w-full max-w-2xl">
+        <div className="mb-7">
+          <p className="op-eyebrow mb-2">workspace · home</p>
+          <h1 className="text-[26px] font-semibold tracking-tight leading-tight text-foreground">
+            What should the agent do next?
+          </h1>
+          <p className="mt-2 text-[13.5px] text-muted-foreground max-w-prose leading-relaxed">
+            Drop a question, paste a stack trace, or attach a file. Every run streams reasoning,
+            tool calls, and results back into a conversation you can resume any time.
+          </p>
         </div>
-        <h1 className="text-2xl font-semibold tracking-tight mb-1.5">cubebox</h1>
-        <p className="text-sm text-muted-foreground/70">{t('subtitle')}</p>
-      </div>
-      <div className="w-full max-w-2xl px-4">
         <InputBar
           conversationId={draftConvId ?? undefined}
           onCreateConversation={ensureConversation}
           onSubmit={handleSubmit}
         />
+        <div className="mt-3 flex items-center gap-3 text-[11.5px] text-muted-foreground font-mono">
+          <span>
+            <span className="op-kbd">⏎</span> send
+          </span>
+          <span className="text-border">·</span>
+          <span>
+            <span className="op-kbd">⇧</span>
+            <span className="op-kbd ml-0.5">⏎</span> newline
+          </span>
+          <span className="text-border">·</span>
+          <span>
+            <span className="op-kbd">⌘</span>
+            <span className="op-kbd ml-0.5">K</span> command palette
+          </span>
+        </div>
       </div>
     </div>
   )

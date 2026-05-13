@@ -199,7 +199,7 @@ export function InputBar({
         </div>
       )}
       <div
-        className="relative flex cursor-text items-end gap-2 rounded-xl border border-border bg-card px-3 py-2.5 transition-colors focus-within:border-primary/40"
+        className="relative flex cursor-text items-end gap-2 rounded-md border border-border bg-card px-3 py-2.5 transition-shadow focus-within:border-primary focus-within:ring-2 focus-within:ring-primary/15"
         onMouseDown={handleShellMouseDown}
       >
         <button
@@ -207,7 +207,7 @@ export function InputBar({
           aria-label={tShell('inputBarAttach')}
           onClick={() => fileInputRef.current?.click()}
           disabled={!canAttach}
-          className="grid size-7 shrink-0 cursor-pointer place-items-center rounded-lg text-muted-foreground hover:bg-muted disabled:cursor-not-allowed disabled:opacity-30"
+          className="grid size-7 shrink-0 cursor-pointer place-items-center rounded text-muted-foreground hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-30"
         >
           <Paperclip className="size-3.5" />
         </button>
@@ -219,23 +219,22 @@ export function InputBar({
           onKeyDown={handleKeyDown}
           placeholder={t('placeholder')}
           rows={1}
-          className="flex-1 bg-transparent resize-none outline-none text-sm text-foreground placeholder:text-muted-foreground/40 leading-relaxed min-h-7 max-h-[180px] overflow-y-auto py-0.5"
+          className="flex-1 bg-transparent resize-none outline-none text-[13.5px] text-foreground placeholder:text-muted-foreground/60 leading-relaxed min-h-7 max-h-[180px] overflow-y-auto py-0.5"
           disabled={isSubmitting}
         />
         <button
           data-testid="send-button"
           onClick={() => void handleSubmit()}
           disabled={(!content.trim() && stagedFileCount === 0) || isSubmitting || uploadInFlight}
-          className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-primary text-white transition-all hover:bg-primary/80 disabled:cursor-not-allowed disabled:opacity-25"
+          className="flex size-7 shrink-0 items-center justify-center rounded bg-foreground text-background transition-colors hover:bg-foreground/85 disabled:cursor-not-allowed disabled:opacity-20"
         >
           {isSubmitting ? (
             <Loader2 className="size-3.5 animate-spin" />
           ) : (
-            <ArrowUp className="size-3.5" />
+            <ArrowUp className="size-3.5" strokeWidth={2.25} />
           )}
         </button>
       </div>
-      <p className="text-center mt-1 text-[10px] text-muted-foreground/35">{t('hint')}</p>
     </div>
   )
 }
