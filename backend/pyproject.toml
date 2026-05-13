@@ -39,7 +39,7 @@ dependencies = [
     "pyjwt>=2.12.1",
     "click>=8.3.1",
     "langchain-anthropic>=1.4.3",
-    "cubepi[postgres,mcp]",
+    "cubepi[mcp,postgres]",
 ]
 
 [project.optional-dependencies]

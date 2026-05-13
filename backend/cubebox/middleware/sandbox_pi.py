@@ -284,7 +284,7 @@ def _make_file_read_tool(
 
     return AgentTool(
         name="file_read",
-        description=_FILE_READ_DESCRIPTION,
+        description=_FILE_READ_DESCRIPTION.rstrip(),
         parameters=_FileReadArgs,
         execute=_file_read,
     )
