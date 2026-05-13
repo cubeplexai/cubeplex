@@ -1,8 +1,9 @@
-"""cubepi agent factory for cubebox runtime (M1.4).
+"""cubepi agent factory for cubebox runtime (M1.4, extended in M3.f).
 
-Builds a bare cubepi.Agent without cubebox middleware. M3 will add the
-11 middleware ports as opt-in *_pi modules and extend this factory to
-compose them via Agent(middleware=[...]).
+Builds a cubepi.Agent wired with the full cubebox middleware stack.
+Middleware composition is handled by _run_cubepi_path in run_manager.py;
+this factory simply receives the pre-composed list and forwards it to
+Agent(middleware=[...]).
 """
 
 from __future__ import annotations
@@ -11,6 +12,7 @@ from typing import Any
 
 from cubepi import Agent, Model
 from cubepi.agent.types import AgentTool
+from cubepi.middleware.base import Middleware
 from cubepi.providers.base import Provider
 
 
@@ -23,12 +25,21 @@ def create_cubebox_cubepi_agent(
     tools: list[AgentTool[Any]] | None = None,
     checkpointer: Any = None,
     thread_id: str | None = None,
+    middleware: list[Middleware] | None = None,
 ) -> Agent[Any]:
     """Build a cubepi.Agent for cubebox's cubepi runtime path.
 
-    M1: bare agent, no cubebox middleware. M2 will wire tools through
-    cubebox.tools.registry_pi; M3 will compose the 11 cubebox middlewares
-    via the `middleware=[...]` kwarg on Agent.
+    Args:
+        provider: cubepi Provider instance (built by LLMFactory).
+        model_id: Model identifier string (e.g. "claude-3-5-sonnet-20241022").
+        provider_name: Provider label for the Model object (e.g. "anthropic").
+        system_prompt: Base system prompt; middleware may append to it.
+        tools: Tool list assembled by the caller (builtin + MCP + middleware tools).
+        checkpointer: cubepi checkpointer for conversation persistence.
+        thread_id: Conversation ID used as the checkpointer thread key.
+        middleware: Pre-composed list of cubepi.Middleware instances.  When
+            None or empty, the agent runs without any cubebox middleware (bare
+            mode, used in unit tests and subagent spawning without inheritance).
     """
     return Agent(
         provider=provider,
@@ -37,4 +48,5 @@ def create_cubebox_cubepi_agent(
         tools=tools or [],
         checkpointer=checkpointer,
         thread_id=thread_id,
+        middleware=middleware or [],
     )
