@@ -486,6 +486,7 @@ class RunManager:
             TextDeltaEvent,
             ToolCallEvent,
             ToolResultEvent,
+            UsageEvent,
         )
         from cubebox.agents.stream_pi import convert_cubepi_agent_event_to_sse
         from cubebox.db.engine import async_session_maker
@@ -851,7 +852,34 @@ class RunManager:
                 sse_dicts.extend(convert_cubepi_agent_event_to_sse(evt))
 
             agent.subscribe(_on_event)
-            await agent.prompt(content)
+
+            # Compute relevance-memory snapshot before the agent loop starts
+            # and bake it into the UserMessage metadata so MemoryMiddlewarePi
+            # can prepend the rendered snapshot text during transform_context.
+            # This is the cubepi equivalent of the LangGraph path's snapshot
+            # channel injection (M3.b.1 / cache discipline).
+            import time as _time
+
+            from cubepi.providers.base import TextContent as _TextContent
+            from cubepi.providers.base import UserMessage as _UserMessage
+
+            from cubebox.middleware.memory_pi import compute_relevance_snapshot as _compute_snap
+
+            _user_msg_metadata: dict[str, Any] = {}
+            try:
+                async with _mem_repo_factory() as _snap_repo:
+                    _snapshot = await _compute_snap(_snap_repo)
+                if _snapshot is not None:
+                    _user_msg_metadata["memory_snapshot"] = _snapshot
+            except Exception as _snap_exc:
+                logger.warning("Failed to compute relevance snapshot: {}", _snap_exc)
+
+            _user_msg = _UserMessage(
+                content=[_TextContent(text=content)],
+                timestamp=_time.time(),
+                metadata=_user_msg_metadata,
+            )
+            await agent.prompt(_user_msg)
 
         # Translate buffered SSE dicts → typed AgentEvent objects and push through
         # publish_stream_event, which handles citation buffering and turn_usage.
@@ -890,6 +918,16 @@ class RunManager:
                         "name": d.get("name", ""),
                         "content": str(d.get("result", "")),
                         "is_error": d.get("is_error", False),
+                    },
+                )
+            elif t == "usage":
+                sse_event = UsageEvent(
+                    timestamp=ts,
+                    data={
+                        "input_tokens": d.get("input_tokens", 0),
+                        "output_tokens": d.get("output_tokens", 0),
+                        "cache_read_tokens": d.get("cache_read_tokens", 0),
+                        "cache_write_tokens": d.get("cache_write_tokens", 0),
                     },
                 )
             else:

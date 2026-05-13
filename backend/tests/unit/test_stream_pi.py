@@ -1,5 +1,6 @@
 """stream_pi tests — cubepi StreamEvent → cubebox SSE (M1.3)."""
 
+from cubepi.agent.types import MessageEndEvent
 from cubepi.providers.base import (
     AssistantMessage,
     StreamEvent,
@@ -8,7 +9,7 @@ from cubepi.providers.base import (
     Usage,
 )
 
-from cubebox.agents.stream_pi import convert_cubepi_event_to_sse
+from cubebox.agents.stream_pi import convert_cubepi_agent_event_to_sse, convert_cubepi_event_to_sse
 
 
 def _mk_assistant(text: str = "", tool_calls: list[ToolCall] | None = None) -> AssistantMessage:
@@ -95,3 +96,49 @@ def test_silent_events_are_dropped() -> None:
         evt = StreamEvent(type=t)
         out = convert_cubepi_event_to_sse(evt)
         assert out == [], f"event type {t!r} should be silently dropped, got {out!r}"
+
+
+# ---------------------------------------------------------------------------
+# convert_cubepi_agent_event_to_sse — MessageEndEvent → usage
+
+
+def test_message_end_with_usage_emits_usage_event() -> None:
+    """MessageEndEvent carrying AssistantMessage with usage → usage SSE dict."""
+    msg = AssistantMessage(
+        content=[],
+        usage=Usage(
+            input_tokens=10,
+            output_tokens=5,
+            cache_read_tokens=3,
+            cache_write_tokens=2,
+        ),
+    )
+    evt = MessageEndEvent(message=msg)
+    out = convert_cubepi_agent_event_to_sse(evt)
+    assert len(out) == 1
+    assert out[0] == {
+        "type": "usage",
+        "input_tokens": 10,
+        "output_tokens": 5,
+        "cache_read_tokens": 3,
+        "cache_write_tokens": 2,
+    }
+
+
+def test_message_end_with_zero_input_tokens_is_dropped() -> None:
+    """MessageEndEvent with input_tokens=0 produces no usage event (intermediate chunk)."""
+    msg = AssistantMessage(
+        content=[],
+        usage=Usage(input_tokens=0, output_tokens=0),
+    )
+    evt = MessageEndEvent(message=msg)
+    out = convert_cubepi_agent_event_to_sse(evt)
+    assert out == []
+
+
+def test_message_end_with_none_usage_is_dropped() -> None:
+    """MessageEndEvent with usage=None produces no usage event."""
+    msg = AssistantMessage(content=[], usage=None)
+    evt = MessageEndEvent(message=msg)
+    out = convert_cubepi_agent_event_to_sse(evt)
+    assert out == []
