@@ -26,6 +26,8 @@ def create_cubebox_cubepi_agent(
     checkpointer: Any = None,
     thread_id: str | None = None,
     middleware: list[Middleware] | None = None,
+    max_tokens: int = 8192,
+    temperature: float = 0.7,
 ) -> Agent[Any]:
     """Build a cubepi.Agent for cubebox's cubepi runtime path.
 
@@ -40,10 +42,16 @@ def create_cubebox_cubepi_agent(
         middleware: Pre-composed list of cubepi.Middleware instances.  When
             None or empty, the agent runs without any cubebox middleware (bare
             mode, used in unit tests and subagent spawning without inheritance).
+        max_tokens: Maximum output tokens forwarded to the provider (defaults to
+            8192; callers should pass the model's configured max_tokens for
+            byte-parity with the langgraph path).
+        temperature: Sampling temperature forwarded to the provider (default 0.7).
     """
     return Agent(
         provider=provider,
-        model=Model(id=model_id, provider=provider_name),
+        model=Model(
+            id=model_id, provider=provider_name, max_tokens=max_tokens, temperature=temperature
+        ),
         system_prompt=system_prompt,
         tools=tools or [],
         checkpointer=checkpointer,

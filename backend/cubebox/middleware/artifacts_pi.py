@@ -4,9 +4,11 @@ Implements the cubepi Middleware protocol with two hooks:
 
 - ``tools``: exposes ``save_artifact`` as a ``cubepi.AgentTool`` so the
   graph factory can include it in the tool list passed to the agent.
-- ``transform_context``: queries the artifact registry and appends the
-  ARTIFACT_PROMPT + current artifact list to the last UserMessage, mirroring
+- ``transform_system_prompt``: queries the artifact registry and appends the
+  ARTIFACT_PROMPT + current artifact list to the system prompt, mirroring
   what ``ArtifactMiddleware.awrap_model_call`` does in the langgraph path.
+  Using the system prompt (stable prefix) rather than the per-turn user
+  message is critical for prompt-cache correctness.
 
 The core DB logic (``_save_artifact`` body) is copied from ``artifacts.py``
 unchanged; only the LangChain wrapper is replaced with the cubepi execute
@@ -22,7 +24,7 @@ from typing import Any
 
 from cubepi.agent.types import AgentTool, AgentToolResult
 from cubepi.middleware.base import Middleware
-from cubepi.providers.base import Message, TextContent, UserMessage
+from cubepi.providers.base import TextContent
 from loguru import logger
 from pydantic import BaseModel, Field
 
@@ -274,51 +276,18 @@ class ArtifactMiddlewarePi(Middleware):
             )
         return "\n".join(lines) + "\n"
 
-    async def transform_context(
-        self, messages: list[Message], *, signal: object = None
-    ) -> list[Message]:
-        """Append the artifact prompt + registry state to the last UserMessage.
+    async def transform_system_prompt(self, system_prompt: str, *, signal: object = None) -> str:
+        """Append the artifact prompt + registry state to the system prompt.
 
-        Mirrors ``ArtifactMiddleware.awrap_model_call`` which appended the
-        prompt to the system message; here we attach it to the last user
-        message so it travels with the per-turn context and is not confused
-        with the stable system prompt (important for cache discipline).
+        Mirrors ``ArtifactMiddleware.awrap_model_call`` which appends the
+        artifact section to the system message. Using the system prompt
+        (stable prefix) rather than the per-turn user message is critical
+        for prompt-cache correctness: the artifact list changes as artifacts
+        accumulate, but it belongs in the stable prefix because the *schema*
+        (ARTIFACT_PROMPT) is constant and the *list* is conversation-scoped
+        (not turn-scoped). Appending to the user message breaks OpenAI
+        auto-cache because the user message content changes every turn.
         """
         artifact_list = await self._build_artifact_list()
         injection = ARTIFACT_PROMPT + artifact_list
-
-        # Find the last UserMessage and append the artifact context to it.
-        last_user_idx: int | None = None
-        for i in range(len(messages) - 1, -1, -1):
-            if isinstance(messages[i], UserMessage):
-                last_user_idx = i
-                break
-
-        if last_user_idx is None:
-            # No user message yet — return unchanged
-            return list(messages)
-
-        user_msg = messages[last_user_idx]
-        assert isinstance(user_msg, UserMessage)  # guaranteed by the loop above
-        new_content = list(user_msg.content)
-
-        # Append injection to the last TextContent, or add a new one
-        appended = False
-        for i in range(len(new_content) - 1, -1, -1):
-            item = new_content[i]
-            if isinstance(item, TextContent):
-                new_content[i] = TextContent(text=item.text + "\n\n" + injection)
-                appended = True
-                break
-        if not appended:
-            new_content.append(TextContent(text=injection))
-
-        augmented = UserMessage(
-            content=new_content,
-            timestamp=user_msg.timestamp,
-            metadata=dict(user_msg.metadata) if user_msg.metadata else {},
-        )
-
-        out = list(messages)
-        out[last_user_idx] = augmented
-        return out
+        return system_prompt + "\n\n" + injection
