@@ -450,12 +450,15 @@ class RunManager:
         self,
         *,
         ctx: RunContext,
+        run_id: str,
         conversation_id: str,
         content: str,
         effective_system_prompt: str,
         publish_stream_event: Any,
         flush_citation_buffer: Any,
         citation_buffers: dict[str | None, str],
+        skill_catalog: Any | None = None,
+        catalog_session: Any | None = None,
     ) -> None:
         """Execute a single user turn through the cubepi runtime.
 
@@ -465,9 +468,16 @@ class RunManager:
         _execute_run (DoneEvent, update_run_meta, etc.) sees the same turn_usage and
         citation buffers as the LangGraph path.
 
-        This method intentionally omits the cubebox middleware stack (sandbox, subagents,
-        skills) — those will be wired in a later milestone.
+        Tools wired (M2.5):
+          - no-DI builtin tools (calculator, datetime)
+          - view_images (per-request DI: org_id, workspace_id, objectstore, capabilities)
+          - memory CRUD tools (service factory per-request)
+          - load_skill (catalog + workspace/org)
+          - MCP tools (workspace-enabled HTTP MCP servers)
         """
+        from collections.abc import AsyncIterator as _AsyncIterator
+        from contextlib import asynccontextmanager as _asynccontextmanager
+
         from cubebox.agents.checkpointer_pi import init_cubepi_checkpointer
         from cubebox.agents.graph_pi import create_cubebox_cubepi_agent
         from cubebox.agents.schemas import (
@@ -507,6 +517,99 @@ class RunManager:
             provider_config, cache_policy=CubeboxCacheMarkerPolicy()
         )
 
+        # --- Compose tool list (M2.5) ---
+        from cubebox.tools.registry_pi import list_builtin_tools_for_cubepi
+
+        all_tools: list[Any] = list(list_builtin_tools_for_cubepi())
+
+        # view_images — per-request DI: objectstore + LLM capabilities
+        try:
+            from cubebox.llm.capabilities import LLMCapabilities
+            from cubebox.objectstore import get_objectstore_client
+            from cubebox.tools.builtin.view_images_pi import make_view_images_tool
+
+            all_tools.append(
+                make_view_images_tool(
+                    org_id=ctx.org_id,
+                    workspace_id=ctx.workspace_id,
+                    objectstore=get_objectstore_client(),
+                    capabilities=LLMCapabilities(factory.llm_config),
+                )
+            )
+        except Exception as _exc:
+            logger.warning("view_images_pi unavailable for cubepi run: {}", _exc)
+
+        # Memory tools — service factory opened per tool call
+        try:
+            from cubebox.db.engine import async_session_maker as _mem_session_maker
+            from cubebox.repositories.memory import MemoryRepository as _MemoryRepository
+            from cubebox.services.memory import MemoryService as _MemoryService
+            from cubebox.tools.builtin.memory_pi import create_memory_tools_pi
+
+            @_asynccontextmanager
+            async def _memory_service_factory() -> _AsyncIterator[_MemoryService]:
+                async with _mem_session_maker() as _session:
+                    _repo = _MemoryRepository(
+                        _session,
+                        user_id=ctx.user_id,
+                        org_id=ctx.org_id,
+                        workspace_id=ctx.workspace_id,
+                    )
+                    yield _MemoryService(
+                        _repo,
+                        user_id=ctx.user_id,
+                        org_id=ctx.org_id,
+                        workspace_id=ctx.workspace_id,
+                    )
+
+            all_tools.extend(
+                create_memory_tools_pi(
+                    service_factory=_memory_service_factory,
+                    conversation_id=conversation_id,
+                    run_id=run_id,
+                )
+            )
+        except Exception as _exc:
+            logger.warning("memory_pi tools unavailable for cubepi run: {}", _exc)
+
+        # load_skill — requires a non-None catalog (may be absent if DB is down)
+        if skill_catalog is not None:
+            try:
+                from cubebox.tools.builtin.load_skill_pi import create_load_skill_tool_pi
+
+                all_tools.append(
+                    create_load_skill_tool_pi(
+                        catalog=skill_catalog,
+                        workspace_id=ctx.workspace_id,
+                        org_id=ctx.org_id,
+                    )
+                )
+            except Exception as _exc:
+                logger.warning("load_skill_pi unavailable for cubepi run: {}", _exc)
+
+        # MCP tools — per-workspace enabled HTTP MCP servers
+        try:
+            from cubebox.credentials.dependencies import build_credential_service
+            from cubebox.mcp.runtime_pi import load_workspace_mcp_tools_for_cubepi
+
+            async with async_session_maker() as mcp_session:
+                cred_service = build_credential_service(
+                    mcp_session,
+                    self._app.state.encryption_backend,
+                    org_id=ctx.org_id,
+                    actor_user_id=ctx.user_id,
+                )
+                mcp_tools = await load_workspace_mcp_tools_for_cubepi(
+                    session=mcp_session,
+                    workspace_id=ctx.workspace_id,
+                    org_id=ctx.org_id,
+                    user_id=ctx.user_id,
+                    cred_service=cred_service,
+                )
+                all_tools.extend(mcp_tools)
+        except Exception as _exc:
+            logger.warning("MCP tools unavailable for cubepi run: {}", _exc)
+
         # Collect SSE dicts from the cubepi listener before converting to typed events.
         # agent.prompt() is an async method that drives the agent loop and calls
         # synchronous listeners on each AgentEvent as they arrive.  We buffer the
@@ -519,6 +622,7 @@ class RunManager:
                 model_id=model_id,
                 provider_name=provider_name,
                 system_prompt=effective_system_prompt,
+                tools=all_tools,
                 checkpointer=cp,
                 thread_id=conversation_id,
             )
@@ -829,12 +933,15 @@ class RunManager:
                 # --- cubepi runtime path ---
                 await self._run_cubepi_path(
                     ctx=ctx,
+                    run_id=run_id,
                     conversation_id=conversation_id,
                     content=content,
                     effective_system_prompt=effective_system_prompt,
                     publish_stream_event=publish_stream_event,
                     flush_citation_buffer=flush_citation_buffer,
                     citation_buffers=citation_buffers,
+                    skill_catalog=skill_catalog,
+                    catalog_session=catalog_session,
                 )
             else:
                 # --- LangGraph path (default) ---
