@@ -22,10 +22,11 @@ from typing import Any
 
 from cubepi.agent.types import (
     AgentEvent,
+    MessageEndEvent,
     MessageUpdateEvent,
     ToolExecutionEndEvent,
 )
-from cubepi.providers.base import StreamEvent, ToolCall
+from cubepi.providers.base import AssistantMessage, StreamEvent, ToolCall
 
 
 def convert_cubepi_event_to_sse(evt: StreamEvent) -> list[dict[str, Any]]:
@@ -98,8 +99,21 @@ def convert_cubepi_agent_event_to_sse(evt: AgentEvent) -> list[dict[str, Any]]:
             }
         ]
 
+    if isinstance(evt, MessageEndEvent) and isinstance(evt.message, AssistantMessage):
+        msg = evt.message
+        if msg.usage is not None and msg.usage.input_tokens > 0:
+            return [
+                {
+                    "type": "usage",
+                    "input_tokens": msg.usage.input_tokens,
+                    "output_tokens": msg.usage.output_tokens or 0,
+                    "cache_read_tokens": msg.usage.cache_read_tokens or 0,
+                    "cache_write_tokens": msg.usage.cache_write_tokens or 0,
+                }
+            ]
+
     # Silently drop all other AgentEvent types:
     # AgentStartEvent, AgentEndEvent (done is emitted by run_manager with usage),
-    # TurnStartEvent, TurnEndEvent, MessageStartEvent, MessageEndEvent,
+    # TurnStartEvent, TurnEndEvent, MessageStartEvent,
     # ToolExecutionStartEvent, ToolExecutionUpdateEvent
     return []
