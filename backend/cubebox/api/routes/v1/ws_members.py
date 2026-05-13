@@ -19,20 +19,44 @@ router = APIRouter(prefix="/ws/{workspace_id}/members", tags=["workspace-members
 ASSIGNABLE_ROLES = {"admin", "member"}
 
 
-class AddWsMemberBody(BaseModel):
+class AddWsMemberRequest(BaseModel):
     user_id: str
     role: str
 
 
-class ChangeRoleBody(BaseModel):
+class ChangeWsRoleRequest(BaseModel):
     role: str
 
 
-@router.get("")
+class WsMemberOut(BaseModel):
+    user_id: str
+    email: str
+    role: str
+    created_at: str
+
+
+class AvailableOrgMemberOut(BaseModel):
+    user_id: str
+    email: str
+    org_role: str
+
+
+class AddWsMemberResponse(BaseModel):
+    user_id: str
+    email: str
+    role: str
+
+
+class ChangeWsRoleResponse(BaseModel):
+    user_id: str
+    role: str
+
+
+@router.get("", response_model=list[WsMemberOut])
 async def list_workspace_members(
     ctx: Annotated[RequestContext, Depends(require_admin)],
     session: Annotated[AsyncSession, Depends(get_session)],
-) -> list[dict[str, str]]:
+) -> list[WsMemberOut]:
     mem_repo = MembershipRepository(session)
     members = await mem_repo.list_workspace_members(ctx.workspace_id)
 
@@ -43,21 +67,21 @@ async def list_workspace_members(
     users = {u.id: u for u in (await session.execute(stmt)).scalars().all()}
 
     return [
-        {
-            "user_id": m.user_id,
-            "email": users[m.user_id].email if m.user_id in users else "",
-            "role": m.role,
-            "created_at": utc_isoformat(m.created_at),
-        }
+        WsMemberOut(
+            user_id=m.user_id,
+            email=users[m.user_id].email if m.user_id in users else "",
+            role=m.role,
+            created_at=utc_isoformat(m.created_at),
+        )
         for m in members
     ]
 
 
-@router.get("/available")
+@router.get("/available", response_model=list[AvailableOrgMemberOut])
 async def list_available_org_members(
     ctx: Annotated[RequestContext, Depends(require_admin)],
     session: Annotated[AsyncSession, Depends(get_session)],
-) -> list[dict[str, str]]:
+) -> list[AvailableOrgMemberOut]:
     """Org members who are NOT already in this workspace."""
     om_repo = OrganizationMembershipRepository(session)
     org_members = await om_repo.list_org_members(ctx.org_id)
@@ -75,21 +99,21 @@ async def list_available_org_members(
     users = {u.id: u for u in (await session.execute(stmt)).scalars().all()}
 
     return [
-        {
-            "user_id": m.user_id,
-            "email": users[m.user_id].email if m.user_id in users else "",
-            "org_role": m.role,
-        }
+        AvailableOrgMemberOut(
+            user_id=m.user_id,
+            email=users[m.user_id].email if m.user_id in users else "",
+            org_role=m.role,
+        )
         for m in available
     ]
 
 
-@router.post("", status_code=status.HTTP_201_CREATED)
+@router.post("", response_model=AddWsMemberResponse, status_code=status.HTTP_201_CREATED)
 async def add_workspace_member(
-    body: AddWsMemberBody,
+    body: AddWsMemberRequest,
     ctx: Annotated[RequestContext, Depends(require_admin)],
     session: Annotated[AsyncSession, Depends(get_session)],
-) -> dict[str, str]:
+) -> AddWsMemberResponse:
     if body.role not in ASSIGNABLE_ROLES:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="role must be admin or member")
 
@@ -109,16 +133,16 @@ async def add_workspace_member(
 
     target = await session.get(User, body.user_id)
     email = target.email if target else ""
-    return {"user_id": body.user_id, "email": email, "role": body.role}
+    return AddWsMemberResponse(user_id=body.user_id, email=email, role=body.role)
 
 
-@router.patch("/{user_id}/role")
+@router.patch("/{user_id}/role", response_model=ChangeWsRoleResponse)
 async def update_workspace_member_role(
     user_id: str,
-    body: ChangeRoleBody,
+    body: ChangeWsRoleRequest,
     ctx: Annotated[RequestContext, Depends(require_admin)],
     session: Annotated[AsyncSession, Depends(get_session)],
-) -> dict[str, str]:
+) -> ChangeWsRoleResponse:
     if body.role not in ASSIGNABLE_ROLES:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="role must be admin or member")
 
@@ -151,7 +175,7 @@ async def update_workspace_member_role(
     )
     await session.execute(stmt)
     await session.commit()
-    return {"user_id": user_id, "role": body.role}
+    return ChangeWsRoleResponse(user_id=user_id, role=body.role)
 
 
 @router.delete("/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
