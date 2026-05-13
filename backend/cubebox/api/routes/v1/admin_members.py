@@ -18,20 +18,38 @@ router = APIRouter(prefix="/admin/members", tags=["admin-members"])
 ASSIGNABLE_ROLES = {"admin", "member"}
 
 
-class AddMemberBody(BaseModel):
+class AddOrgMemberRequest(BaseModel):
     email: str
     role: str
 
 
-class ChangeRoleBody(BaseModel):
+class ChangeOrgRoleRequest(BaseModel):
     role: str
 
 
-@router.get("")
+class OrgMemberOut(BaseModel):
+    user_id: str
+    email: str
+    role: str
+    created_at: str
+
+
+class AddOrgMemberResponse(BaseModel):
+    user_id: str
+    email: str
+    role: str
+
+
+class ChangeOrgRoleResponse(BaseModel):
+    user_id: str
+    role: str
+
+
+@router.get("", response_model=list[OrgMemberOut])
 async def list_org_members(
     user: Annotated[User, Depends(require_org_admin)],
     session: Annotated[AsyncSession, Depends(get_session)],
-) -> list[dict[str, str]]:
+) -> list[OrgMemberOut]:
     org_id = await resolve_current_org_id(user, session)
     om_repo = OrganizationMembershipRepository(session)
     members = await om_repo.list_org_members(org_id)
@@ -43,22 +61,22 @@ async def list_org_members(
     users = {u.id: u for u in (await session.execute(stmt)).scalars().all()}
 
     return [
-        {
-            "user_id": m.user_id,
-            "email": users[m.user_id].email if m.user_id in users else "",
-            "role": m.role,
-            "created_at": utc_isoformat(m.created_at),
-        }
+        OrgMemberOut(
+            user_id=m.user_id,
+            email=users[m.user_id].email if m.user_id in users else "",
+            role=m.role,
+            created_at=utc_isoformat(m.created_at),
+        )
         for m in members
     ]
 
 
-@router.post("", status_code=status.HTTP_201_CREATED)
+@router.post("", response_model=AddOrgMemberResponse, status_code=status.HTTP_201_CREATED)
 async def add_org_member(
-    body: AddMemberBody,
+    body: AddOrgMemberRequest,
     user: Annotated[User, Depends(require_org_admin)],
     session: Annotated[AsyncSession, Depends(get_session)],
-) -> dict[str, str]:
+) -> AddOrgMemberResponse:
     if body.role not in ASSIGNABLE_ROLES:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="role must be admin or member")
     org_id = await resolve_current_org_id(user, session)
@@ -75,16 +93,16 @@ async def add_org_member(
         raise HTTPException(status.HTTP_409_CONFLICT, detail="Already a member")
 
     await om_repo.grant(user_id=target.id, org_id=org_id, role=OrgRole(body.role))
-    return {"user_id": target.id, "email": target.email, "role": body.role}
+    return AddOrgMemberResponse(user_id=target.id, email=target.email, role=body.role)
 
 
-@router.patch("/{user_id}/role")
+@router.patch("/{user_id}/role", response_model=ChangeOrgRoleResponse)
 async def update_org_member_role(
     user_id: str,
-    body: ChangeRoleBody,
+    body: ChangeOrgRoleRequest,
     user: Annotated[User, Depends(require_org_admin)],
     session: Annotated[AsyncSession, Depends(get_session)],
-) -> dict[str, str]:
+) -> ChangeOrgRoleResponse:
     if body.role not in ASSIGNABLE_ROLES:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="role must be admin or member")
     org_id = await resolve_current_org_id(user, session)
@@ -97,7 +115,7 @@ async def update_org_member_role(
         raise HTTPException(status.HTTP_409_CONFLICT, detail="Cannot change owner role")
 
     await om_repo.promote(user_id=user_id, org_id=org_id, role=OrgRole(body.role))
-    return {"user_id": user_id, "role": body.role}
+    return ChangeOrgRoleResponse(user_id=user_id, role=body.role)
 
 
 @router.delete("/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
