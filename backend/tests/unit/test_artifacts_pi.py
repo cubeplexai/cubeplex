@@ -7,9 +7,13 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from cubepi.agent.types import AgentTool, AgentToolResult
-from cubepi.providers.base import AssistantMessage, TextContent, Usage, UserMessage
+from cubepi.providers.base import TextContent
 
 from cubebox.middleware.artifacts_pi import ArtifactMiddlewarePi, _SaveArtifactArgs
+
+# ---------------------------------------------------------------------------
+# Helpers for transform_system_prompt tests
+# ---------------------------------------------------------------------------
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -27,10 +31,6 @@ def _make_middleware(**kwargs: Any) -> ArtifactMiddlewarePi:
     }
     defaults.update(kwargs)
     return ArtifactMiddlewarePi(**defaults)
-
-
-def _make_user_msg(text: str = "hello") -> UserMessage:
-    return UserMessage(content=[TextContent(text=text)])
 
 
 # ---------------------------------------------------------------------------
@@ -90,109 +90,60 @@ def test_content_type_registered() -> None:
 
 
 # ---------------------------------------------------------------------------
-# transform_context — pass-through cases
+# transform_system_prompt — appends artifact section to system prompt
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
-async def test_no_messages_returns_empty() -> None:
+async def test_artifact_prompt_appended_to_system_prompt() -> None:
     mw = _make_middleware()
-    with patch.object(mw, "_build_artifact_list", new=AsyncMock(return_value="")):
-        out = await mw.transform_context([])
-    assert out == []
-
-
-@pytest.mark.asyncio
-async def test_no_user_message_returns_unchanged() -> None:
-    mw = _make_middleware()
-    msg = AssistantMessage(content=[TextContent(text="hi")], usage=Usage())
-    with patch.object(mw, "_build_artifact_list", new=AsyncMock(return_value="")):
-        out = await mw.transform_context([msg])
-    assert len(out) == 1
-    assert out[0] is msg
-
-
-@pytest.mark.asyncio
-async def test_does_not_mutate_original_user_message() -> None:
-    mw = _make_middleware()
-    msg = _make_user_msg("original text")
-    original_text = msg.content[0].text
-    with patch.object(mw, "_build_artifact_list", new=AsyncMock(return_value="**list**")):
-        await mw.transform_context([msg])
-    assert msg.content[0].text == original_text
-
-
-# ---------------------------------------------------------------------------
-# transform_context — injection into last UserMessage
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.asyncio
-async def test_artifact_prompt_appended_to_last_user_message() -> None:
-    mw = _make_middleware()
-    msg = _make_user_msg("do something")
     artifact_list = "\n**Existing artifacts:** None yet.\n"
     with patch.object(mw, "_build_artifact_list", new=AsyncMock(return_value=artifact_list)):
-        out = await mw.transform_context([msg])
-    text = out[0].content[0].text
-    assert "do something" in text
-    assert "Artifacts" in text  # from ARTIFACT_PROMPT
-    assert "save_artifact" in text  # from ARTIFACT_PROMPT
+        out = await mw.transform_system_prompt("Base system prompt.", signal=None)
+    assert "Base system prompt." in out
+    assert "Artifacts" in out  # from ARTIFACT_PROMPT
+    assert "save_artifact" in out  # from ARTIFACT_PROMPT
+    assert "None yet" in out
 
 
 @pytest.mark.asyncio
 async def test_artifact_list_appended_when_artifacts_exist() -> None:
     mw = _make_middleware()
-    msg = _make_user_msg("hi")
     artifact_list = (
         '\n**Existing artifacts:**\n- id=`art-1` name="site" type=website path=`/out` v1\n'
     )
     with patch.object(mw, "_build_artifact_list", new=AsyncMock(return_value=artifact_list)):
-        out = await mw.transform_context([msg])
-    text = out[0].content[0].text
-    assert "art-1" in text
-    assert "site" in text
+        out = await mw.transform_system_prompt("System.", signal=None)
+    assert "art-1" in out
+    assert "site" in out
 
 
 @pytest.mark.asyncio
-async def test_only_last_user_message_is_modified() -> None:
+async def test_empty_system_prompt_still_injects() -> None:
     mw = _make_middleware()
-    msg1 = _make_user_msg("first")
-    msg2 = _make_user_msg("second")
     artifact_list = "\n**Existing artifacts:** None yet.\n"
     with patch.object(mw, "_build_artifact_list", new=AsyncMock(return_value=artifact_list)):
-        out = await mw.transform_context([msg1, msg2])
-    assert out[0].content[0].text == "first"
-    assert "second" in out[1].content[0].text
-    assert "Artifacts" in out[1].content[0].text
-    assert "Artifacts" not in out[0].content[0].text
+        out = await mw.transform_system_prompt("", signal=None)
+    assert "Artifacts" in out
 
 
 @pytest.mark.asyncio
-async def test_assistant_message_between_user_messages_unchanged() -> None:
+async def test_transform_system_prompt_does_not_mutate_input() -> None:
     mw = _make_middleware()
-    user1 = _make_user_msg("first")
-    assistant = AssistantMessage(content=[TextContent(text="ok")], usage=Usage())
-    user2 = _make_user_msg("second")
-    artifact_list = "\n**Existing artifacts:** None yet.\n"
-    with patch.object(mw, "_build_artifact_list", new=AsyncMock(return_value=artifact_list)):
-        out = await mw.transform_context([user1, assistant, user2])
-    assert out[1] is assistant
-    assert "second" in out[2].content[0].text
-    assert "Artifacts" in out[2].content[0].text
+    original = "Original prompt."
+    with patch.object(mw, "_build_artifact_list", new=AsyncMock(return_value="**list**")):
+        out = await mw.transform_system_prompt(original, signal=None)
+    # Original string is immutable in Python; just verify return is different
+    assert out != original
+    assert original in out
 
 
 @pytest.mark.asyncio
-async def test_user_message_metadata_preserved() -> None:
+async def test_transform_system_prompt_returns_string() -> None:
     mw = _make_middleware()
-    msg = UserMessage(
-        content=[TextContent(text="hi")],
-        metadata={"some_key": "some_value"},
-    )
-    artifact_list = "\n**Existing artifacts:** None yet.\n"
-    with patch.object(mw, "_build_artifact_list", new=AsyncMock(return_value=artifact_list)):
-        out = await mw.transform_context([msg])
-    assert out[0].metadata.get("some_key") == "some_value"
+    with patch.object(mw, "_build_artifact_list", new=AsyncMock(return_value="")):
+        out = await mw.transform_system_prompt("prompt", signal=None)
+    assert isinstance(out, str)
 
 
 # ---------------------------------------------------------------------------

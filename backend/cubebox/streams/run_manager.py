@@ -515,14 +515,45 @@ class RunManager:
                 provider_config,
             ) = await factory.resolve_default_provider_and_config()
 
+        # Resolve model config to extract max_tokens + temperature for byte-parity
+        # with the langgraph path which reads these from ModelConfig.
+        try:
+            _model_config = factory.get_model_config(provider_name, model_id)
+            _model_max_tokens: int = _model_config.max_tokens or 32000
+            _model_temperature: float = 0.7  # langgraph default; ModelConfig has no temperature
+        except Exception:
+            _model_max_tokens = 32000
+            _model_temperature = 0.7
+
         provider = factory.build_cubepi_provider(
             provider_config, cache_policy=CubeboxCacheMarkerPolicy()
         )
 
-        # --- Compose tool list (M2.5) ---
+        # --- Compose tool list (M2.5 / M5.4 byte-parity) ---
+        # Tools are accumulated in separate buckets and merged in the exact
+        # same order as langgraph's create_cubebox_agent to achieve byte-parity:
+        #   sandbox(execute/write_file/edit_file/file_read)
+        #   → save_artifact
+        #   → write_todos
+        #   → subagent
+        #   → calculator/datetime
+        #   → view_images
+        #   → memory_*
+        #   → load_skill
+        #   → mcp_tools
+        #
+        # Middleware that contributes tools writes to _sandbox_tools,
+        # _artifact_tools, _todo_tools, _subagent_tools rather than all_tools.
+        # All other tools accumulate in _builtin_tools.  At the end we merge
+        # them in the correct order.
+
         from cubebox.tools.registry_pi import list_builtin_tools_for_cubepi
 
-        all_tools: list[Any] = list(list_builtin_tools_for_cubepi())
+        _sandbox_tools: list[Any] = []
+        _artifact_tools: list[Any] = []
+        _todo_tools: list[Any] = []
+        _subagent_tools: list[Any] = []
+        _builtin_tools: list[Any] = list(list_builtin_tools_for_cubepi())
 
         # view_images — per-request DI: objectstore + LLM capabilities
         try:
@@ -530,7 +561,7 @@ class RunManager:
             from cubebox.objectstore import get_objectstore_client
             from cubebox.tools.builtin.view_images_pi import make_view_images_tool
 
-            all_tools.append(
+            _builtin_tools.append(
                 make_view_images_tool(
                     org_id=ctx.org_id,
                     workspace_id=ctx.workspace_id,
@@ -564,7 +595,7 @@ class RunManager:
                         workspace_id=ctx.workspace_id,
                     )
 
-            all_tools.extend(
+            _builtin_tools.extend(
                 create_memory_tools_pi(
                     service_factory=_memory_service_factory,
                     conversation_id=conversation_id,
@@ -579,7 +610,7 @@ class RunManager:
             try:
                 from cubebox.tools.builtin.load_skill_pi import create_load_skill_tool_pi
 
-                all_tools.append(
+                _builtin_tools.append(
                     create_load_skill_tool_pi(
                         catalog=skill_catalog,
                         workspace_id=ctx.workspace_id,
@@ -609,7 +640,7 @@ class RunManager:
                     cred_service=cred_service,
                     signer=self._app.state.mcp_user_token_signer,
                 )
-                all_tools.extend(mcp_tools)
+                _builtin_tools.extend(mcp_tools)
         except Exception as _exc:
             logger.warning("MCP tools unavailable for cubepi run: {}", _exc)
 
@@ -654,8 +685,8 @@ class RunManager:
                     workspace_id=ctx.workspace_id,
                 )
                 cubepi_middleware.append(artifact_mw)
-                # Middleware tools (save_artifact) are injected into all_tools
-                all_tools.extend(artifact_mw.tools)
+                # Middleware tools (save_artifact) collected for ordered merge below
+                _artifact_tools.extend(artifact_mw.tools)
             except Exception as _exc:
                 logger.warning("ArtifactMiddlewarePi unavailable: {}", _exc)
 
@@ -746,8 +777,9 @@ class RunManager:
                     workspace_id=ctx.workspace_id,
                 )
                 cubepi_middleware.append(sandbox_mw)
-                # Middleware tools (execute, write_file, edit_file, file_read) go into all_tools
-                all_tools.extend(sandbox_mw.tools)
+                # Middleware tools (execute, write_file, edit_file, file_read) collected for
+                # ordered merge below
+                _sandbox_tools.extend(sandbox_mw.tools)
             except Exception as _exc:
                 logger.warning("SandboxMiddlewarePi unavailable: {}", _exc)
 
@@ -785,11 +817,13 @@ class RunManager:
                 default_provider=provider,
                 default_model_id=model_id,
                 default_provider_name=provider_name,
-                shared_tools=list(all_tools),
+                # Pass all tools (sandbox + artifact + builtin) collected so far
+                # as shared tools for subagent spawning.
+                shared_tools=_sandbox_tools + _artifact_tools + _builtin_tools,
                 inherited_middleware=_cost_mw_for_inherit,
             )
             cubepi_middleware.append(subagent_mw)
-            all_tools.extend(subagent_mw.tools)
+            _subagent_tools.extend(subagent_mw.tools)
         except Exception as _exc:
             logger.warning("SubAgentMiddlewarePi unavailable: {}", _exc)
 
@@ -822,9 +856,17 @@ class RunManager:
 
             todo_mw = TodoListMiddlewarePi(extra_ref=_extra_ref)
             cubepi_middleware.append(todo_mw)
-            all_tools.extend(todo_mw.tools)
+            _todo_tools.extend(todo_mw.tools)
         except Exception as _exc:
             logger.warning("TodoListMiddlewarePi unavailable: {}", _exc)
+
+        # --- Final tool merge (M5.4 byte-parity) ---
+        # Compose in the same order as langgraph's create_cubebox_agent:
+        #   sandbox tools → artifact tools → todo tools → subagent tools
+        #   → builtin tools (calculator/datetime/view_images/memory/load_skill/mcp)
+        all_tools: list[Any] = (
+            _sandbox_tools + _artifact_tools + _todo_tools + _subagent_tools + _builtin_tools
+        )
 
         logger.info(
             "cubepi middleware stack: {} layers, {} total tools",
@@ -842,6 +884,8 @@ class RunManager:
                 checkpointer=cp,
                 thread_id=conversation_id,
                 middleware=cubepi_middleware,
+                max_tokens=_model_max_tokens,
+                temperature=_model_temperature,
             )
 
             # Late-bind extra_ref to the live agent._extra dict so compaction /

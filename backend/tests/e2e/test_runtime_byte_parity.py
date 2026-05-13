@@ -234,14 +234,6 @@ async def test_byte_parity_single_turn(
 
 
 @pytest.mark.asyncio
-@pytest.mark.xfail(
-    reason=(
-        "cubepi runtime multi-turn prefix diverges from langgraph; "
-        "this is the M5.3 cache failure diagnostic (cache_read=0 on turn 2). "
-        "Remove xfail once parity is achieved."
-    ),
-    strict=False,
-)
 async def test_byte_parity_turn1_vs_turn2_cubepi(
     member_client: tuple,  # type: ignore[type-arg]
 ) -> None:
