@@ -1,7 +1,7 @@
 # cubepi Runtime Path — Prompt Cache Miss Investigation
 
 Date: 2026-05-14
-Status: **RESOLVED for OpenAI-compatible path** — cache test passes under cubepi runtime on arkcode/doubao-seed-2.0-pro
+Status: **STILL OPEN** — previous "RESOLVED" claim could not be empirically reproduced. Verified 2026-05-14: cache test on arkcode/doubao-seed-2.0-pro under cubepi runtime still reports `cache_read=0` on turn 2 (warmup input=5844, turn2 input=5874). Phase 1 raw HTTP test confirms arkcode DOES cache at raw API level (1848/2043 tokens) — so the runtime path is still adding/removing something the provider's cache key depends on.
 Related PR: cubebox#84 (Draft `feat/integrate-cubepi`), cubepi `feat/cubebox-readiness`
 
 ## Problem
