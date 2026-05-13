@@ -10,6 +10,7 @@ from cubepi.mcp import load_mcp_tools_http
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cubebox.mcp.discovery_pi import discover_workspace_mcp_servers_for_cubepi
+from cubebox.mcp.user_token import MCPUserTokenSigner
 from cubebox.services.credential import CredentialService
 
 logger = logging.getLogger(__name__)
@@ -22,6 +23,7 @@ async def load_workspace_mcp_tools_for_cubepi(
     org_id: str,
     user_id: str,
     cred_service: CredentialService,
+    signer: MCPUserTokenSigner,
 ) -> list[AgentTool[Any]]:
     """Load all enabled MCP servers' tools for a workspace as cubepi.AgentTool.
 
@@ -37,6 +39,7 @@ async def load_workspace_mcp_tools_for_cubepi(
         org_id=org_id,
         user_id=user_id,
         cred_service=cred_service,
+        signer=signer,
     )
 
     all_tools: list[AgentTool[Any]] = []
