@@ -1,5 +1,8 @@
 from logging.config import fileConfig
 
+from cubepi.checkpointer.postgres.models import (  # noqa: F401
+    cubepi_metadata,
+)
 from sqlalchemy import engine_from_config, pool
 from sqlmodel import SQLModel
 
@@ -52,7 +55,7 @@ if config.config_file_name is not None:
 # for 'autogenerate' support
 # from myapp import mymodel
 # target_metadata = mymodel.Base.metadata
-target_metadata = SQLModel.metadata
+target_metadata = [SQLModel.metadata, cubepi_metadata]
 
 # Tables managed by langgraph-checkpoint-postgres — exclude from autogenerate
 _CHECKPOINT_TABLES = {
