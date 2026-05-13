@@ -2,9 +2,14 @@
 
 import Link from 'next/link'
 import { Suspense, useEffect, useRef, useState } from 'react'
-import { usePathname } from 'next/navigation'
+import { usePathname, useSearchParams } from 'next/navigation'
 import { useTranslations } from 'next-intl'
-import { type Conversation, createApiClient, useConversationStore } from '@cubebox/core'
+import {
+  type Conversation,
+  createApiClient,
+  useConversationStore,
+  useWorkspaceStore,
+} from '@cubebox/core'
 import { Button } from '@/components/ui/button'
 import {
   DropdownMenu,
@@ -16,17 +21,20 @@ import {
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { AvatarPopover } from '@/components/sidebar/AvatarPopover'
 import { WorkspacesSection } from '@/components/sidebar/WorkspacesSection'
-import { SettingsNav } from '@/components/workspace-settings/SettingsNav'
 import {
   Box,
   Brain,
+  type LucideIcon,
   MoreHorizontal,
   Pencil,
   Pin,
   PinOff,
+  Plug,
   Plus,
   Settings,
+  Sparkles,
   Trash2,
+  Users,
 } from 'lucide-react'
 
 type ApiClient = ReturnType<typeof createApiClient>
@@ -198,6 +206,91 @@ function ConversationRow({
   )
 }
 
+interface WorkspaceNavEntry {
+  key: string
+  labelKey: 'skills' | 'mcp' | 'memory' | 'members' | 'settings'
+  icon: LucideIcon
+  href: string
+  isActive: boolean
+}
+
+function WorkspaceNav({ wsId }: { wsId: string }): React.ReactElement {
+  const tSidebar = useTranslations('sidebar')
+  const pathname = usePathname()
+  const searchParams = useSearchParams()
+  const wsRole = useWorkspaceStore((s) => s.workspaces.find((w) => w.id === wsId)?.role)
+  const isAdmin = wsRole === 'admin'
+
+  const settingsPrefix = `/w/${wsId}/settings`
+  const memoryPrefix = `/w/${wsId}/memory`
+  const onSettings = pathname?.startsWith(settingsPrefix) ?? false
+  const onMemory = pathname?.startsWith(memoryPrefix) ?? false
+  const currentTab = searchParams.get('tab') ?? 'workspace'
+
+  const entries: WorkspaceNavEntry[] = [
+    {
+      key: 'skills',
+      labelKey: 'skills',
+      icon: Sparkles,
+      href: `${settingsPrefix}?tab=skills`,
+      isActive: onSettings && currentTab === 'skills',
+    },
+    {
+      key: 'mcp',
+      labelKey: 'mcp',
+      icon: Plug,
+      href: `${settingsPrefix}?tab=mcp`,
+      isActive: onSettings && currentTab === 'mcp',
+    },
+    {
+      key: 'memory',
+      labelKey: 'memory',
+      icon: Brain,
+      href: memoryPrefix,
+      isActive: onMemory,
+    },
+  ]
+  if (isAdmin) {
+    entries.push({
+      key: 'members',
+      labelKey: 'members',
+      icon: Users,
+      href: `${settingsPrefix}?tab=members`,
+      isActive: onSettings && currentTab === 'members',
+    })
+  }
+  entries.push({
+    key: 'settings',
+    labelKey: 'settings',
+    icon: Settings,
+    href: `${settingsPrefix}?tab=workspace`,
+    isActive: onSettings && currentTab === 'workspace',
+  })
+
+  return (
+    <nav className="px-2 pt-1 pb-1 space-y-0.5">
+      {entries.map((entry) => {
+        const Icon = entry.icon
+        return (
+          <Link
+            key={entry.key}
+            href={entry.href}
+            className={`flex items-center gap-2 px-2 py-1.5 rounded-md text-xs transition-colors ${
+              entry.isActive
+                ? 'text-foreground bg-primary/8 font-medium'
+                : 'text-muted-foreground hover:text-foreground hover:bg-accent/60'
+            }`}
+            aria-label={tSidebar(entry.labelKey)}
+          >
+            <Icon className="size-3.5 shrink-0" />
+            <span>{tSidebar(entry.labelKey)}</span>
+          </Link>
+        )
+      })}
+    </nav>
+  )
+}
+
 export function Sidebar(): React.ReactElement {
   const tSidebar = useTranslations('sidebar')
   const tShell = useTranslations('shellLayout')
@@ -208,9 +301,6 @@ export function Sidebar(): React.ReactElement {
   const wsMatch = pathname?.match(/^\/w\/([^/]+)/)
   const currentWsId = wsMatch ? wsMatch[1] : null
   const newChatHref = currentWsId ? `/w/${currentWsId}` : '/'
-  const isSettingsRoute = currentWsId
-    ? (pathname?.startsWith('/w/' + currentWsId + '/settings') ?? false)
-    : false
 
   return (
     <aside
@@ -236,25 +326,14 @@ export function Sidebar(): React.ReactElement {
       {/* Workspaces */}
       <WorkspacesSection />
 
-      {/* Memory link */}
+      {/* Workspace nav: skills, mcp, memory, members, settings */}
       {currentWsId && (
-        <div className="px-2 pt-1 pb-1">
-          <Link
-            href={`/w/${currentWsId}/memory`}
-            className={`flex items-center gap-2 px-2 py-1.5 rounded-md text-xs transition-colors ${
-              pathname?.startsWith('/w/' + currentWsId + '/memory')
-                ? 'text-foreground bg-primary/8 font-medium'
-                : 'text-muted-foreground hover:text-foreground hover:bg-accent/60'
-            }`}
-          >
-            <Brain className="size-3.5 shrink-0" />
-            <span>Memory</span>
-          </Link>
-        </div>
+        <Suspense>
+          <WorkspaceNav wsId={currentWsId} />
+        </Suspense>
       )}
 
-      {/* Recent conversations — flex-1 so the SettingsNav (when shown) sits
-          right above the footer instead of floating in the middle. */}
+      {/* Recent conversations — flex-1 so it stretches to the footer. */}
       <div className="flex-1 flex flex-col min-h-0">
         <div className="px-2 pt-2 pb-1">
           <p className="px-2 text-[10px] font-medium uppercase tracking-widest text-muted-foreground/60">
@@ -275,31 +354,11 @@ export function Sidebar(): React.ReactElement {
         </ScrollArea>
       </div>
 
-      {/* Settings nav — only on settings route, anchored just above the footer. */}
-      {isSettingsRoute && currentWsId && (
-        <Suspense>
-          <SettingsNav wsId={currentWsId} />
-        </Suspense>
-      )}
-
-      {/* Footer: avatar popover + settings */}
+      {/* Footer: avatar popover */}
       <div className="border-t border-border/60 p-2 flex items-center gap-1">
         <div className="min-w-0 flex-1">
           <AvatarPopover />
         </div>
-        {currentWsId && (
-          <Link
-            href={`/w/${currentWsId}/settings`}
-            className={`shrink-0 p-1.5 rounded-md transition-colors ${
-              isSettingsRoute
-                ? 'text-primary bg-primary/10'
-                : 'text-muted-foreground hover:text-foreground hover:bg-accent/60'
-            }`}
-            aria-label={tShell('workspaceSettings')}
-          >
-            <Settings className="size-4" />
-          </Link>
-        )}
       </div>
     </aside>
   )
