@@ -160,7 +160,7 @@ function ConversationRow({
             onClick={(e) => e.stopPropagation()}
           >
             <DropdownMenuItem
-              onSelect={() => {
+              onClick={() => {
                 setDraft(convo.title)
                 setIsEditing(true)
               }}
@@ -170,7 +170,7 @@ function ConversationRow({
             </DropdownMenuItem>
             <DropdownMenuItem
               disabled={isPinPending}
-              onSelect={() => {
+              onClick={() => {
                 void setPin(buildClient(currentWsId), convo.id, !convo.is_pinned).catch((err) =>
                   console.error('Failed to toggle pin:', err),
                 )
@@ -182,7 +182,7 @@ function ConversationRow({
             <DropdownMenuSeparator />
             <DropdownMenuItem
               variant="destructive"
-              onSelect={() => {
+              onClick={() => {
                 void remove(buildClient(currentWsId), convo.id).catch((err) =>
                   console.error('Failed to delete conversation:', err),
                 )
