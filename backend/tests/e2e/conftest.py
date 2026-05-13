@@ -355,6 +355,30 @@ async def _ensure_test_user_membership(
     user_db = SQLAlchemyUserDatabase(session, User)
     manager = UserManager(user_db)
     user = await manager.create(BaseUserCreate(email=email, password=password), safe=False)
+
+    # multi_tenant bootstrap auto-creates a personal org/workspace for the user
+    # and grants them OrgRole.OWNER + workspace-admin there. Tests want the user
+    # scoped to exactly the explicit `org`/`ws` created above, so wipe any
+    # bootstrap-created memberships in other orgs.
+    from sqlalchemy import delete
+
+    from cubebox.models import Membership as MembershipModel
+    from cubebox.models import OrganizationMembership
+
+    await session.execute(
+        delete(OrganizationMembership).where(
+            OrganizationMembership.user_id == user.id,  # type: ignore[arg-type]
+            OrganizationMembership.org_id != org.id,  # type: ignore[arg-type]
+        )
+    )
+    await session.execute(
+        delete(MembershipModel).where(
+            MembershipModel.user_id == user.id,  # type: ignore[arg-type]
+            MembershipModel.workspace_id != ws.id,  # type: ignore[arg-type]
+        )
+    )
+    await session.commit()
+
     await mem_repo.grant(user_id=user.id, workspace_id=ws.id, role=role)
     org_role = OrgRole.OWNER if role == Role.ADMIN else OrgRole.MEMBER
     await OrganizationMembershipRepository(session).grant(

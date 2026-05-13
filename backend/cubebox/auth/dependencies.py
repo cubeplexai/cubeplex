@@ -4,12 +4,12 @@ from collections.abc import Awaitable, Callable
 from typing import Annotated, cast
 
 from fastapi import Depends, HTTPException, Path, Request, status
-from sqlalchemy import select
+from sqlalchemy import case, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cubebox.auth.context import RequestContext
 from cubebox.db import get_session
-from cubebox.models import Membership, Role, User, Workspace
+from cubebox.models import Membership, OrganizationMembership, OrgRole, Role, User, Workspace
 from cubebox.plugins import PermissionChecker, PermissionResource, get_registry
 from cubebox.plugins.defaults.permissions import DefaultPermissionChecker
 from cubebox.repositories import MembershipRepository, WorkspaceRepository
@@ -105,24 +105,38 @@ require_member = require_role(Role.ADMIN, Role.MEMBER)
 
 
 async def resolve_current_org_id(user: User, session: AsyncSession) -> str:
-    """Resolve the user's current org (v1: first workspace's org).
+    """Resolve the user's current org from `organization_memberships`.
 
-    v1 is single-org-per-user (register bootstrap creates one personal org).
-    When multi-org ships, this reads a cookie-set current_org_id and validates
-    that the user is a member of a workspace in that org.
+    A user may belong to multiple orgs once cross-org workspace membership is
+    in play. We prefer the org where the user has the highest role
+    (owner > admin > member), then the oldest membership as a stable tiebreaker.
 
-    Raises 403 if the user has no workspace memberships at all — shouldn't
-    happen for a registered user but guards against edge cases.
+    Falls back to the user's oldest workspace's org (for legacy data where the
+    org_memberships row may be missing) before giving up with 403.
     """
-    stmt = (
+    role_priority = case(
+        (OrganizationMembership.role == OrgRole.OWNER.value, 0),  # type: ignore[arg-type]
+        (OrganizationMembership.role == OrgRole.ADMIN.value, 1),  # type: ignore[arg-type]
+        else_=2,
+    )
+    om_stmt = (
+        select(OrganizationMembership)
+        .where(OrganizationMembership.user_id == user.id)  # type: ignore[arg-type]
+        .order_by(role_priority, OrganizationMembership.created_at)  # type: ignore[arg-type]
+        .limit(1)
+    )
+    om = (await session.execute(om_stmt)).scalars().first()
+    if om is not None:
+        return om.org_id
+
+    ws_stmt = (
         select(Workspace)
         .join(Membership, Membership.workspace_id == Workspace.id)  # type: ignore[arg-type]
         .where(Membership.user_id == user.id)  # type: ignore[arg-type]
         .order_by(Workspace.created_at)  # type: ignore[arg-type]
         .limit(1)
     )
-    result = await session.execute(stmt)
-    workspace = result.scalars().first()
+    workspace = (await session.execute(ws_stmt)).scalars().first()
     if workspace is None:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
