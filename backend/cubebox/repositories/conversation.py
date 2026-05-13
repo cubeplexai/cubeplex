@@ -35,6 +35,7 @@ class ConversationRepository(ScopedRepository[Conversation]):
             ._scoped_select()
             .where(
                 Conversation.creator_user_id == self.user_id,
+                cast(Any, Conversation.deleted_at).is_(None),
             )
         )
 
@@ -75,6 +76,7 @@ class ConversationRepository(ScopedRepository[Conversation]):
                 Conversation.workspace_id == self.workspace_id,  # type: ignore[arg-type]
                 Conversation.creator_user_id == self.user_id,  # type: ignore[arg-type]
                 cast(Any, Conversation.has_messages).is_(True),
+                cast(Any, Conversation.deleted_at).is_(None),
             )
         )
         total = (await self.session.execute(count_stmt)).scalar_one()
@@ -110,6 +112,7 @@ class ConversationRepository(ScopedRepository[Conversation]):
                 Conversation.id == conversation_id,  # type: ignore[arg-type]
                 Conversation.creator_user_id == self.user_id,  # type: ignore[arg-type]
                 Conversation.title == expected_title,  # type: ignore[arg-type]
+                cast(Any, Conversation.deleted_at).is_(None),
             )
             .values(title=new_title, updated_at=now)
         )
@@ -152,4 +155,17 @@ class ConversationRepository(ScopedRepository[Conversation]):
         return conv
 
     async def delete_conversation(self, conversation_id: str) -> bool:
-        return await self.delete(conversation_id)
+        """Soft-delete: stamp ``deleted_at`` so the row stays as a FK target.
+
+        Child tables (billing_events for cost audit, artifacts, attachments)
+        keep referencing a live row; the conversation simply becomes invisible
+        to API reads via the ``deleted_at IS NULL`` filter in ``_scoped_select``.
+        Returns ``False`` if the conversation doesn't exist or is already
+        soft-deleted (the filter hides it).
+        """
+        conv = await self.get(conversation_id)
+        if conv is None:
+            return False
+        conv.deleted_at = datetime.now(UTC)
+        await self.session.commit()
+        return True

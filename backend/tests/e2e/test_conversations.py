@@ -102,6 +102,69 @@ class TestConversationsCRUD:
         response = client.delete(f"/api/v1/ws/{DEFAULT_WS_ID}/conversations/nonexistent-id")
         assert response.status_code == 404
 
+    def test_delete_conversation_with_billing_event(self, client: TestClient) -> None:
+        """Regression: delete must succeed even with billing rows referencing it.
+
+        Before soft delete, the ON DELETE NO ACTION FK on
+        billing_events.conversation_id raised IntegrityError. With soft
+        delete the row stays (deleted_at is stamped), so the FK target
+        remains valid and cost history survives.
+        """
+        import asyncio
+
+        from sqlalchemy import select, text
+
+        from cubebox import db as _cubebox_db
+        from cubebox.models.billing import BillingEvent
+
+        create_resp = client.post(
+            f"/api/v1/ws/{DEFAULT_WS_ID}/conversations", params={"title": "with billing"}
+        )
+        conversation_id = create_resp.json()["id"]
+
+        async def _seed_and_check() -> str:
+            async with _cubebox_db.async_session_maker() as session:
+                user_id = (
+                    await session.execute(
+                        text("SELECT creator_user_id FROM conversations WHERE id=:id"),
+                        {"id": conversation_id},
+                    )  # noqa: E501
+                ).scalar_one()
+                event = BillingEvent(
+                    org_id="org-00000000000000",
+                    workspace_id=DEFAULT_WS_ID,
+                    user_id=user_id,
+                    conversation_id=conversation_id,
+                    event_type="llm_call",
+                    status="success",
+                )
+                session.add(event)
+                await session.commit()
+                return event.id
+
+        event_id = asyncio.get_event_loop().run_until_complete(_seed_and_check())
+
+        delete_resp = client.delete(f"/api/v1/ws/{DEFAULT_WS_ID}/conversations/{conversation_id}")
+        assert delete_resp.status_code == 204
+
+        # Conversation hidden from API
+        assert (
+            client.get(f"/api/v1/ws/{DEFAULT_WS_ID}/conversations/{conversation_id}").status_code
+            == 404
+        )
+
+        async def _verify_billing_intact() -> str | None:
+            async with _cubebox_db.async_session_maker() as session:
+                row = (
+                    await session.execute(select(BillingEvent).where(BillingEvent.id == event_id))
+                ).scalar_one()
+                return row.conversation_id
+
+        retained = asyncio.get_event_loop().run_until_complete(_verify_billing_intact())
+        assert retained == conversation_id, (
+            f"billing_event should still reference the conversation, got {retained!r}"
+        )
+
 
 class TestConversationsMessages:
     """Conversation message listing tests."""
