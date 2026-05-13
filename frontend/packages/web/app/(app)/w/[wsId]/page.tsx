@@ -28,7 +28,7 @@ export default function WorkspaceHomePage({
     if (draftConvId) return draftConvId
     const client = createApiClient('')
     client.setWorkspaceId(wsId)
-    const convo = await createConversation(client, 'New chat', { draft: true })
+    const convo = await createConversation(client, '', { draft: true })
     useConversationStore.setState({ activeId: convo.id })
     setDraftConvId(convo.id)
     return convo.id
@@ -63,10 +63,16 @@ export default function WorkspaceHomePage({
           }
         })
 
-      const title = content.trim() ? content.trim().slice(0, 30) : 'Files'
-      await renameConversation(client, convId, title).catch((err) => {
-        console.error('Failed to set conversation title:', err)
-      })
+      // Only stamp a placeholder title for files-only submissions. When the
+      // user typed text, leave title empty so the backend's generate-title
+      // service can produce an LLM title — preempting it here would trip
+      // the "already-titled" gate in conversation_title.py and silently
+      // skip auto-generation.
+      if (!content.trim() && attachedIds.length > 0) {
+        await renameConversation(client, convId, 'Files').catch((err) => {
+          console.error('Failed to set conversation title:', err)
+        })
+      }
 
       useAttachmentStore.getState().clear(convId)
       send(client, convId, content, attachedIds, optimisticAttachments).catch((err) => {
