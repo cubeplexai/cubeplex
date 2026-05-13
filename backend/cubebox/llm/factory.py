@@ -5,7 +5,10 @@ Supports OpenAI-compatible models with reasoning content via Chat Completions AP
 """
 
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from cubepi.providers.anthropic import CacheMarkerPolicy
 
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import SystemMessage
@@ -567,6 +570,58 @@ class LLMFactory:
                 return model
 
         raise ValueError(f"Model '{model_id}' not found in provider '{provider_name}'")
+
+    def build_cubepi_provider(
+        self,
+        provider_config: ProviderConfig,
+        *,
+        cache_policy: "CacheMarkerPolicy | None" = None,
+    ) -> Any:
+        """Build a cubepi.Provider instance from a ProviderConfig.
+
+        Routes by ``provider_config.api``:
+
+        - ``"anthropic"``          → cubepi AnthropicProvider
+        - ``"openai-completions"`` → cubepi OpenAIProvider
+        - ``"openai-responses"``   → cubepi OpenAIResponsesProvider
+
+        ``cache_policy`` (Anthropic only): forwarded to AnthropicProvider.
+        When ``None``, AnthropicProvider defaults to DefaultCacheMarkerPolicy.
+
+        For OpenAI-compatible endpoints that need reasoning quirks,
+        wrap the returned OpenAIProvider with ``payload_quirks`` after
+        this call; that is not handled here.
+
+        Raises:
+            ValueError: If ``provider_config.api`` is not a recognised value.
+        """
+        api = provider_config.api
+
+        if api == "anthropic":
+            from cubepi.providers.anthropic import AnthropicProvider
+
+            return AnthropicProvider(
+                api_key=provider_config.api_key,
+                cache_policy=cache_policy,
+            )
+
+        if api == "openai-completions":
+            from cubepi.providers.openai import OpenAIProvider
+
+            return OpenAIProvider(
+                api_key=provider_config.api_key,
+                base_url=provider_config.base_url,
+            )
+
+        if api == "openai-responses":
+            from cubepi.providers.openai_responses import OpenAIResponsesProvider
+
+            return OpenAIResponsesProvider(
+                api_key=provider_config.api_key,
+                base_url=provider_config.base_url,
+            )
+
+        raise ValueError(f"unsupported api for cubepi provider: {api!r}")
 
     def list_providers(self) -> list[str]:
         """List all available provider names."""
