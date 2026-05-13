@@ -78,6 +78,45 @@ def json_formatter(record: dict[str, Any]) -> str:
     return formatting
 
 
+# Third-party libraries that emit large volumes of DEBUG output when the root
+# logger is at DEBUG. Capped to `logging.third_party_level` by default; opt
+# back into DEBUG via `logging.verbose_modules`.
+_NOISY_THIRD_PARTY_LOGGERS = (
+    "botocore",
+    "aiobotocore",
+    "boto3",
+    "s3transfer",
+    "urllib3",
+    "httpcore",
+    "httpx",
+    "anthropic",
+    "openai",
+    "opensandbox",
+)
+
+
+def _apply_third_party_log_levels(root_level: int) -> None:
+    """Silence chatty third-party loggers, then re-enable any opted-in modules.
+
+    If `root_level` is already INFO or higher, the silence cap is a no-op
+    (third-party loggers already inherit INFO from root). The opt-in
+    `verbose_modules` list still works at any root level.
+    """
+    third_party_name = str(config.get("logging.third_party_level", "WARNING")).upper()
+    third_party_level = logging.getLevelName(third_party_name)
+    if not isinstance(third_party_level, int):
+        third_party_level = logging.WARNING
+
+    # Only raise the floor — never lower a logger below its natural level.
+    if third_party_level > root_level:
+        for name in _NOISY_THIRD_PARTY_LOGGERS:
+            logging.getLogger(name).setLevel(third_party_level)
+
+    verbose_modules = config.get("logging.verbose_modules", []) or []
+    for name in verbose_modules:
+        logging.getLogger(name).setLevel(logging.DEBUG)
+
+
 class InterceptHandler(logging.Handler):
     """
     Intercept standard logging and redirect to loguru.
@@ -134,6 +173,8 @@ def init(log_path: str | None = None, debug: bool | None = None) -> None:
     logging.basicConfig(handlers=[intercept_handler], level=level, force=True)
     logging.getLogger("uvicorn.access").handlers = [intercept_handler]
     logging.getLogger("uvicorn").handlers = [intercept_handler]
+
+    _apply_third_party_log_levels(level)
 
     diagnose = bool(debug)
     logger.configure(
