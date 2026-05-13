@@ -165,6 +165,60 @@ class TestConversationsCRUD:
             f"billing_event should still reference the conversation, got {retained!r}"
         )
 
+    def test_artifacts_hidden_for_soft_deleted_conversation(self, client: TestClient) -> None:
+        """Regression: artifact routes must 404 once the parent conversation is gone.
+
+        Before this fix, ``ArtifactRepository`` only scoped by org/workspace,
+        so a stale conversation URL kept exposing the child rows through
+        ``GET .../artifacts`` even after the conversation was soft-deleted.
+        """
+        import asyncio
+
+        from cubebox import db as _cubebox_db
+        from cubebox.models.artifact import Artifact
+
+        create_resp = client.post(
+            f"/api/v1/ws/{DEFAULT_WS_ID}/conversations", params={"title": "for artifacts"}
+        )
+        conversation_id = create_resp.json()["id"]
+
+        async def _seed_artifact() -> str:
+            async with _cubebox_db.async_session_maker() as session:
+                art = Artifact(
+                    org_id="org-00000000000000",
+                    workspace_id=DEFAULT_WS_ID,
+                    conversation_id=conversation_id,
+                    name="report",
+                    artifact_type="code",
+                    path="/tmp/report",
+                )
+                session.add(art)
+                await session.commit()
+                return art.id
+
+        artifact_id = asyncio.get_event_loop().run_until_complete(_seed_artifact())
+
+        # Visible before delete
+        list_resp = client.get(
+            f"/api/v1/ws/{DEFAULT_WS_ID}/conversations/{conversation_id}/artifacts"
+        )
+        assert list_resp.status_code == 200
+        assert artifact_id in {a["id"] for a in list_resp.json()["artifacts"]}
+
+        # Soft-delete the parent
+        del_resp = client.delete(f"/api/v1/ws/{DEFAULT_WS_ID}/conversations/{conversation_id}")
+        assert del_resp.status_code == 204
+
+        # Every artifact endpoint now refuses the request
+        for url in (
+            f"/api/v1/ws/{DEFAULT_WS_ID}/conversations/{conversation_id}/artifacts",
+            f"/api/v1/ws/{DEFAULT_WS_ID}/conversations/{conversation_id}/artifacts/{artifact_id}",
+            f"/api/v1/ws/{DEFAULT_WS_ID}/conversations/{conversation_id}/artifacts/{artifact_id}/versions",
+            f"/api/v1/ws/{DEFAULT_WS_ID}/conversations/{conversation_id}/artifacts/{artifact_id}/download",
+        ):
+            resp = client.get(url)
+            assert resp.status_code == 404, f"{url} should 404, got {resp.status_code}"
+
 
 class TestConversationsMessages:
     """Conversation message listing tests."""
