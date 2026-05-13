@@ -640,6 +640,8 @@ class LLMFactory:
             return OpenAIProvider(
                 api_key=provider_config.api_key,
                 base_url=provider_config.base_url,
+                extra_body=provider_config.extra_body or None,
+                extra_headers=provider_config.extra_headers or None,
             )
 
         if api == "openai-responses":
