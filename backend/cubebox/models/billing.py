@@ -3,7 +3,7 @@
 from datetime import UTC, datetime
 from typing import ClassVar
 
-from sqlalchemy import Index
+from sqlalchemy import ForeignKeyConstraint, Index
 from sqlmodel import Field
 
 from cubebox.models.mixins import CubeboxBase, OrgScopedMixin
@@ -15,13 +15,22 @@ class BillingEvent(CubeboxBase, OrgScopedMixin, table=True):
     _PREFIX: ClassVar[str] = "bill"
     __tablename__ = "billing_events"
     __table_args__ = (
+        # SET NULL on conversation delete: billing is an audit/cost log that
+        # must outlive user-driven conversation deletes (org-wide cost reports
+        # still need the row). Per-conversation filters simply stop matching.
+        ForeignKeyConstraint(
+            ["conversation_id"],
+            ["conversations.id"],
+            name="billing_events_conversation_id_fkey",
+            ondelete="SET NULL",
+        ),
         Index("ix_billing_events_org_ws_time", "org_id", "workspace_id", "started_at"),
         Index("ix_billing_events_org_time", "org_id", "started_at"),
         Index("ix_billing_events_conversation", "conversation_id"),
     )
 
     user_id: str = Field(foreign_key="users.id", max_length=20, index=True)
-    conversation_id: str = Field(foreign_key="conversations.id", max_length=20)
+    conversation_id: str | None = Field(default=None, max_length=20)
     event_type: str = Field(max_length=32)  # "llm_call" | "sandbox_compute" | …
     cost_amount_micro: int = Field(default=0)  # amount × 10⁶ in `currency`
     currency: str = Field(default="USD", max_length=3)

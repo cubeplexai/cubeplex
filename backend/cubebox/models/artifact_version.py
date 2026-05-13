@@ -2,7 +2,7 @@
 
 from typing import ClassVar
 
-from sqlalchemy import Index
+from sqlalchemy import ForeignKeyConstraint, Index
 from sqlmodel import Field
 
 from cubebox.models.mixins import CubeboxBase, OrgScopedMixin
@@ -14,9 +14,19 @@ class ArtifactVersion(CubeboxBase, OrgScopedMixin, table=True):
 
     _PREFIX: ClassVar[str] = "artv"
     __tablename__ = "artifact_versions"
-    __table_args__ = (Index("ix_artifact_versions_org_ws", "org_id", "workspace_id"),)
+    __table_args__ = (
+        # CASCADE on artifact delete: versions are part of the artifact's
+        # own history and have no standalone meaning.
+        ForeignKeyConstraint(
+            ["artifact_id"],
+            ["artifacts.id"],
+            name="artifact_versions_artifact_id_fkey",
+            ondelete="CASCADE",
+        ),
+        Index("ix_artifact_versions_org_ws", "org_id", "workspace_id"),
+    )
 
-    artifact_id: str = Field(foreign_key="artifacts.id", max_length=20, index=True)
+    artifact_id: str = Field(max_length=20, index=True)
     version: int
     name: str = Field(max_length=255)
     description: str | None = Field(default=None, max_length=1024)
