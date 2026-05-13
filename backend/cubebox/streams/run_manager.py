@@ -605,6 +605,7 @@ class RunManager:
                     org_id=ctx.org_id,
                     user_id=ctx.user_id,
                     cred_service=cred_service,
+                    signer=self._app.state.mcp_user_token_signer,
                 )
                 all_tools.extend(mcp_tools)
         except Exception as _exc:

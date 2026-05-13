@@ -4,17 +4,21 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
+from datetime import timedelta
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cubebox.credentials.exceptions import CredentialNotFound
 from cubebox.mcp._constants import CREDENTIAL_KIND_MCP, CREDENTIAL_KIND_MCP_OAUTH_ACCESS_TOKEN
+from cubebox.mcp.user_token import MCPUserTokenSigner
 from cubebox.repositories.mcp import (
     MCPServerRepository,
     UserMCPCredentialRepository,
     WorkspaceMCPCredentialRepository,
 )
 from cubebox.services.credential import CredentialService
+
+_USER_TOKEN_TTL = timedelta(minutes=5)
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +40,7 @@ async def discover_workspace_mcp_servers_for_cubepi(
     org_id: str,
     user_id: str,
     cred_service: CredentialService,
+    signer: MCPUserTokenSigner,
 ) -> list[CubepiMCPServerSpec]:
     """Resolve workspace-enabled MCP servers + decrypt credentials → CubepiMCPServerSpec list.
 
@@ -57,6 +62,7 @@ async def discover_workspace_mcp_servers_for_cubepi(
             token = await _resolve_token_for_cubepi(
                 server_id=server.id,
                 server_name=server.name,
+                server_org_id=server.org_id,
                 auth_method=server.auth_method,
                 credential_scope=server.credential_scope,
                 credential_id=server.credential_id,
@@ -65,6 +71,7 @@ async def discover_workspace_mcp_servers_for_cubepi(
                 cred_service=cred_service,
                 ws_cred_repo=ws_cred_repo,
                 user_cred_repo=user_cred_repo,
+                signer=signer,
             )
         except CredentialNotFound:
             logger.warning(
@@ -105,6 +112,7 @@ async def _resolve_token_for_cubepi(
     *,
     server_id: str,
     server_name: str,
+    server_org_id: str,
     auth_method: str,
     credential_scope: str,
     credential_id: str | None,
@@ -113,13 +121,13 @@ async def _resolve_token_for_cubepi(
     cred_service: CredentialService,
     ws_cred_repo: WorkspaceMCPCredentialRepository,
     user_cred_repo: UserMCPCredentialRepository,
+    signer: MCPUserTokenSigner,
 ) -> str | None:
     """Resolve the bearer token/credential for one MCP server.
 
-    Mirrors the logic in runtime._resolve_token but without OAuth token-manager
-    support (which is a runtime concern, not a discovery concern) and without
-    MCPUserTokenSigner (not needed for the cubepi path since cubepi manages its
-    own session model).
+    Mirrors the logic in runtime._resolve_token. For passthrough servers
+    (credential_scope == "none") a short-lived cubebox identity token is signed
+    so the MCP server can enforce tenant scoping even without a user credential.
     """
     cred_kind = (
         CREDENTIAL_KIND_MCP_OAUTH_ACCESS_TOKEN if auth_method == "oauth" else CREDENTIAL_KIND_MCP
@@ -157,5 +165,12 @@ async def _resolve_token_for_cubepi(
             requesting_kind=cred_kind,
         )
 
-    # credential_scope == "none": no bearer token needed.
-    return None
+    # credential_scope == "none": sign a short-lived cubebox identity token so the
+    # passthrough MCP server can enforce tenant scoping.
+    return await signer.sign(
+        user_id=user_id,
+        org_id=server_org_id,
+        workspace_id=workspace_id,
+        mcp_server_id=server_id,
+        ttl=_USER_TOKEN_TTL,
+    )

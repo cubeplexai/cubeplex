@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from unittest.mock import AsyncMock
+
 import pytest
 
 from cubebox.mcp.discovery_pi import CubepiMCPServerSpec
@@ -25,6 +27,7 @@ async def test_load_returns_empty_when_no_servers(monkeypatch: pytest.MonkeyPatc
         org_id="org-1",
         user_id="user-1",
         cred_service=None,  # type: ignore[arg-type]
+        signer=None,  # type: ignore[arg-type]
     )
     assert tools == []
 
@@ -67,6 +70,7 @@ async def test_load_skips_failing_servers(monkeypatch: pytest.MonkeyPatch) -> No
         org_id="org-1",
         user_id="user-1",
         cred_service=None,  # type: ignore[arg-type]
+        signer=None,  # type: ignore[arg-type]
     )
     assert len(tools) == 1
     assert getattr(tools[0], "name", None) == "good_tool"
@@ -113,6 +117,7 @@ async def test_load_aggregates_tools_from_multiple_servers(
         org_id="org-1",
         user_id="user-1",
         cred_service=None,  # type: ignore[arg-type]
+        signer=None,  # type: ignore[arg-type]
     )
     assert len(tools) == 3
     names = {getattr(t, "name", None) for t in tools}
@@ -153,5 +158,41 @@ async def test_load_all_servers_fail_returns_empty(monkeypatch: pytest.MonkeyPat
         org_id="org-1",
         user_id="user-1",
         cred_service=None,  # type: ignore[arg-type]
+        signer=None,  # type: ignore[arg-type]
     )
     assert tools == []
+
+
+@pytest.mark.asyncio
+async def test_credential_scope_none_attaches_signed_identity_token() -> None:
+    """credential_scope=='none' servers get a signed cubebox identity token as Bearer auth."""
+    from datetime import timedelta
+
+    from cubebox.mcp.discovery_pi import _resolve_token_for_cubepi
+
+    fake_signer = AsyncMock()
+    fake_signer.sign = AsyncMock(return_value="fake-token")
+
+    token = await _resolve_token_for_cubepi(
+        server_id="srv-1",
+        server_name="passthrough",
+        server_org_id="org-1",
+        auth_method="none",
+        credential_scope="none",
+        credential_id=None,
+        workspace_id="ws-1",
+        user_id="user-1",
+        cred_service=None,  # type: ignore[arg-type]
+        ws_cred_repo=None,  # type: ignore[arg-type]
+        user_cred_repo=None,  # type: ignore[arg-type]
+        signer=fake_signer,
+    )
+
+    assert token == "fake-token"
+    fake_signer.sign.assert_awaited_once_with(
+        user_id="user-1",
+        org_id="org-1",
+        workspace_id="ws-1",
+        mcp_server_id="srv-1",
+        ttl=timedelta(minutes=5),
+    )
