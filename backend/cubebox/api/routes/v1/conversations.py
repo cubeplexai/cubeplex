@@ -74,9 +74,9 @@ async def _update_conversation_timestamp(
 
 @router.post("", status_code=status.HTTP_201_CREATED)
 async def create_conversation(
-    title: str,
     session: Annotated[AsyncSession, Depends(get_session)],
     ctx: Annotated[RequestContext, Depends(require_member)],
+    title: str = "",
     draft: bool = False,
 ) -> dict[str, object]:
     """Create a new conversation.
