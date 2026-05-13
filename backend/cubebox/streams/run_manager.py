@@ -453,6 +453,7 @@ class RunManager:
         run_id: str,
         conversation_id: str,
         content: str,
+        attachments: list[str],
         effective_system_prompt: str,
         publish_stream_event: Any,
         flush_citation_buffer: Any,
@@ -923,6 +924,21 @@ class RunManager:
             except Exception as _snap_exc:
                 logger.warning("Failed to compute relevance snapshot: {}", _snap_exc)
 
+            # Build attachment metadata blocks and inject into user message so
+            # AttachmentHintMiddlewarePi can render the [Attachments] hint.
+            if attachments:
+                try:
+                    _att_blocks = await _build_attachment_content_blocks(
+                        org_id=ctx.org_id,
+                        workspace_id=ctx.workspace_id,
+                        conversation_id=conversation_id,
+                        attachment_ids=attachments,
+                    )
+                    if _att_blocks:
+                        _user_msg_metadata["attachments"] = _att_blocks
+                except Exception as _att_exc:
+                    logger.warning("Failed to build attachment blocks for cubepi run: {}", _att_exc)
+
             _user_msg = _UserMessage(
                 content=[_TextContent(text=content)],
                 timestamp=_time.time(),
@@ -1243,6 +1259,7 @@ class RunManager:
                     run_id=run_id,
                     conversation_id=conversation_id,
                     content=content,
+                    attachments=attachments,
                     effective_system_prompt=effective_system_prompt,
                     publish_stream_event=publish_stream_event,
                     flush_citation_buffer=flush_citation_buffer,
@@ -1466,12 +1483,6 @@ class RunManager:
                 workspace_id=ctx.workspace_id,
                 user_id=ctx.user_id,
             )
-            await update_run_meta(
-                self._redis,
-                prefix=self._key_prefix,
-                run_id=run_id,
-                status="completed",
-            )
             # --- Aggregate session-level token totals ---
             from cubebox.services.usage import SessionUsage, get_session_usage
 
@@ -1502,6 +1513,15 @@ class RunManager:
                         }
                     },
                 ),
+            )
+            # Mark the run completed AFTER appending DoneEvent so the SSE consumer
+            # cannot observe active_run=None with no more events (which would cause
+            # it to exit before the DoneEvent is in the Redis stream).
+            await update_run_meta(
+                self._redis,
+                prefix=self._key_prefix,
+                run_id=run_id,
+                status="completed",
             )
         except asyncio.CancelledError:
             await update_run_meta(
