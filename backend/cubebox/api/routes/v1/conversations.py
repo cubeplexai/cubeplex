@@ -593,7 +593,20 @@ async def send_message(
 
 
 async def _get_history_messages(raw_request: Request, conversation_id: str) -> dict[str, object]:
-    """Read current conversation history from LangGraph thread state."""
+    """Read conversation history, dispatching on config.agents.runtime."""
+    from cubebox.config import config as _config
+
+    # Allow per-app-state override (M1.5 added app.state.agents_runtime seam for tests)
+    runtime = getattr(raw_request.app.state, "agents_runtime", None) or _config.agents.runtime
+    if runtime == "cubepi":
+        return await _get_history_messages_cubepi(raw_request, conversation_id)
+    return await _get_history_messages_langgraph(raw_request, conversation_id)
+
+
+async def _get_history_messages_langgraph(
+    raw_request: Request, conversation_id: str
+) -> dict[str, object]:
+    """Read langgraph-runtime conversation history."""
     factory = getattr(raw_request.app.state, "checkpointer_factory", None)
     if factory:
         checkpointer = factory()
@@ -614,6 +627,23 @@ async def _get_history_messages(raw_request: Request, conversation_id: str) -> d
 
     lc_messages = checkpoint["channel_values"].get("messages", [])
     messages = convert_to_api_messages(lc_messages)
+    return {"messages": messages, "total": len(messages)}
+
+
+async def _get_history_messages_cubepi(
+    raw_request: Request, conversation_id: str
+) -> dict[str, object]:
+    """Read cubepi-runtime conversation history."""
+    from cubebox.agents.checkpointer_pi import init_cubepi_checkpointer
+    from cubebox.agents.convert_pi import cubepi_message_to_wire
+
+    # Allow test override of checkpointer factory (mirror langgraph path's pattern
+    # if any). For now use the standard init helper.
+    async with init_cubepi_checkpointer() as cp:
+        data = await cp.load(conversation_id)
+    if data is None:
+        return {"messages": [], "total": 0}
+    messages = [cubepi_message_to_wire(m) for m in data.messages]
     return {"messages": messages, "total": len(messages)}
 
 
