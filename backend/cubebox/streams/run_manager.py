@@ -555,24 +555,10 @@ class RunManager:
         _subagent_tools: list[Any] = []
         _builtin_tools: list[Any] = list(list_builtin_tools_for_cubepi())
 
-        # view_images — per-request DI: objectstore + LLM capabilities
-        try:
-            from cubebox.llm.capabilities import LLMCapabilities
-            from cubebox.objectstore import get_objectstore_client
-            from cubebox.tools.builtin.view_images_pi import make_view_images_tool
-
-            _builtin_tools.append(
-                make_view_images_tool(
-                    org_id=ctx.org_id,
-                    workspace_id=ctx.workspace_id,
-                    objectstore=get_objectstore_client(),
-                    capabilities=LLMCapabilities(factory.llm_config),
-                )
-            )
-        except Exception as _exc:
-            logger.warning("view_images_pi unavailable for cubepi run: {}", _exc)
-
         # Memory tools — service factory opened per tool call
+        # Placed before view_images and load_skill to match langgraph tool order:
+        # calculator → datetime → memory_save → memory_search → memory_update
+        # → load_skill → view_images → mcp_tools
         try:
             from cubebox.db.engine import async_session_maker as _mem_session_maker
             from cubebox.repositories.memory import MemoryRepository as _MemoryRepository
@@ -619,6 +605,24 @@ class RunManager:
                 )
             except Exception as _exc:
                 logger.warning("load_skill_pi unavailable for cubepi run: {}", _exc)
+
+        # view_images — per-request DI: objectstore + LLM capabilities
+        # Must come after memory tools and load_skill to match langgraph tool order.
+        try:
+            from cubebox.llm.capabilities import LLMCapabilities
+            from cubebox.objectstore import get_objectstore_client
+            from cubebox.tools.builtin.view_images_pi import make_view_images_tool
+
+            _builtin_tools.append(
+                make_view_images_tool(
+                    org_id=ctx.org_id,
+                    workspace_id=ctx.workspace_id,
+                    objectstore=get_objectstore_client(),
+                    capabilities=LLMCapabilities(factory.llm_config),
+                )
+            )
+        except Exception as _exc:
+            logger.warning("view_images_pi unavailable for cubepi run: {}", _exc)
 
         # MCP tools — per-workspace enabled HTTP MCP servers
         try:

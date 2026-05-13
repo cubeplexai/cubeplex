@@ -10,8 +10,6 @@ from cubebox.tools.builtin.datetime_tool import get_datetime as _get_datetime_im
 
 
 class DateTimeInput(BaseModel):
-    """Input schema for the cubepi datetime tool."""
-
     include_time: bool = Field(
         default=False,
         description=(

@@ -24,7 +24,6 @@ from cubepi.middleware.base import Middleware
 from loguru import logger
 
 from cubebox.middleware.subagents import SubAgent, _SubAgentSchema, subagent_event_queue
-from cubebox.prompts.subagents import SUBAGENT_PROMPT
 
 
 class SubAgentMiddlewarePi(Middleware):
@@ -227,8 +226,7 @@ class SubAgentMiddlewarePi(Middleware):
             description=(
                 f"Delegate a task to a subagent. Available subagent types: {available}. "
                 "Provide a name (short label), role (subagent's expertise), task (what to do), "
-                "and a self-contained prompt — the subagent has no conversation context.\n\n"
-                f"{SUBAGENT_PROMPT}"
+                "and a self-contained prompt — the subagent has no conversation context."
             ),
             parameters=_SubAgentSchema,
             execute=_execute,

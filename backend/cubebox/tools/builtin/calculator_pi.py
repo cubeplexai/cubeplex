@@ -10,8 +10,6 @@ from cubebox.tools.builtin.calculator import calculator as _calculator_impl
 
 
 class CalculatorInput(BaseModel):
-    """Input schema for the cubepi calculator tool."""
-
     expression: str = Field(description="Mathematical expression to evaluate, e.g., '2 + 3 * 4'")
 
 
@@ -31,7 +29,7 @@ async def _execute(
 calculator_tool: AgentTool[CalculatorInput] = AgentTool(
     name="calculator",
     description=(
-        "Execute mathematical calculations safely. "
+        "Execute simple mathematical calculations. "
         "Supports basic arithmetic, trigonometric, and math functions."
     ),
     parameters=CalculatorInput,
