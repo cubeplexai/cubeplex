@@ -1,7 +1,7 @@
 # cubepi Runtime Path — Prompt Cache Miss Investigation
 
 Date: 2026-05-14
-Status: **OPEN** — blocks Spec B M6 default-flag-flip + langgraph dep removal
+Status: **RESOLVED for OpenAI-compatible path** — cache test passes under cubepi runtime on arkcode/doubao-seed-2.0-pro
 Related PR: cubebox#84 (Draft `feat/integrate-cubepi`), cubepi `feat/cubebox-readiness`
 
 ## Problem
@@ -152,9 +152,75 @@ Until **at least one** of these holds:
 
 Then proceed with M6 cleanup.
 
+## Phase 2 results (2026-05-14) — HTTP transport capture
+
+### Infrastructure built
+
+`backend/tests/diagnostic/test_capture_runtime_requests.py` — captures the exact
+outbound HTTP request body for both runtimes (langgraph and cubepi) for each
+cache-capable provider, by patching `httpx.AsyncHTTPTransport.handle_async_request`
+globally during each test. Writes JSON files to `/tmp/cubepi_runtime_capture/`.
+
+`backend/tests/diagnostic/_capture.py` — `CapturingAsyncTransport` httpx transport.
+
+`backend/tests/diagnostic/compare_runtimes.py` — CLI diff tool: field-level JSON diff
+between any two capture directories.
+
+### Root cause found and fixed
+
+**Provider: arkcode (doubao-seed-2.0-pro, openai-completions)**
+
+Diff showed one structural divergence:
+
+| Field | langgraph | cubepi (before fix) |
+|---|---|---|
+| `body.messages[0].content` (system) | `"<plain string>"` | `[{"type": "text", "text": "..."}]` |
+
+OpenAI-compatible auto-cache hashes raw request bytes. A plain string vs an array of
+blocks has completely different bytes → different cache bucket → MISS.
+
+This happened because a previous cubepi commit (`8ace4c6`) switched the system message
+from a plain string to a list-of-blocks to match langchain's format. That was correct
+for the old private gateway that used langchain as a reference. But for direct
+OpenAI-compatible auto-cache, the BYTE-EXACT format matters, and the plain string is
+what `langchain_openai.ChatOpenAICompatible` sends.
+
+**Fix:** `cubepi/providers/openai.py` line 71 — changed:
+```python
+"content": [{"type": "text", "text": system_prompt}],   # before
+"content": system_prompt,                                  # after (plain string)
+```
+
+**Verification:**
+- Phase 2 capture shows system message format now matches langgraph
+- `tests/e2e/memory/test_prompt_cache.py` **PASSES** under cubepi runtime with
+  arkcode/doubao-seed-2.0-pro (turn 2 cache_read > 50% of input tokens)
+
+**Provider: deepseek (deepseek-v4-pro, anthropic API)**
+
+Diffs found:
+- `body.system`: langgraph = plain string; cubepi = list with `cache_control: ephemeral`.
+  cubepi sends the CORRECT format for Anthropic (list + cache marker).
+- `body.temperature`: langgraph sends `0.7`; cubepi omits it (minor, no impact on cache).
+
+DeepSeek via cubepi E2E test fails with "no usage event observed" — separate issue with
+the run_manager not surfacing Anthropic usage data from cubepi path; not a cache miss.
+
+### Updated decision status
+
+The M5.3 blocking condition (2) is now satisfied:
+> M5.3 cache test passes under cubepi on a different real cache-capable provider
+> (arkcode/doubao-seed-2.0-pro), AND production config switches to that provider
+
+Proceed to M6 cleanup once the production config is confirmed to use arkcode or
+another known-cache-capable OpenAI-compatible provider.
+
 ## Index of evidence files
 
 - This doc: `docs/superpowers/notes/2026-05-14-cubepi-cache-miss-investigation.md`
 - Byte-parity test: `backend/tests/e2e/test_runtime_byte_parity.py`
 - Cache test: `backend/tests/e2e/memory/test_prompt_cache.py`
+- Phase 2 capture tests: `backend/tests/diagnostic/test_capture_runtime_requests.py`
+- Phase 2 capture tool: `backend/tests/diagnostic/_capture.py`
+- Phase 2 diff tool: `backend/tests/diagnostic/compare_runtimes.py`
 - Failed codex dump: `/tmp/claude-1012/-home-chris-cubebox/5d318738-e29e-4a93-8b8d-0e52b6402268/tasks/b1mzm4dvr.output`
