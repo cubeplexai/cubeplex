@@ -21,6 +21,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { cn } from '@/lib/utils'
 
 import { MCPCatalogInstallPanel } from './MCPCatalogInstallPanel'
+import { MCPCitationMappingTab } from './MCPCitationMappingTab'
 import { MCPCustomCreatePanel } from './MCPCustomCreatePanel'
 import { MCPWorkspacesTab } from './MCPWorkspacesTab'
 import { OverviewPanel } from './detail/OverviewPanel'
@@ -311,6 +312,7 @@ export function MCPAdminDetailPanel({
               {t('tabWorkspaces')}
             </TabsTrigger>
           )}
+          <TabsTrigger value="citations">{t('tabCitations')}</TabsTrigger>
         </TabsList>
 
         {/* Overview tab */}
@@ -334,6 +336,11 @@ export function MCPAdminDetailPanel({
             <MCPWorkspacesTab serverId={server.id} client={client} />
           </TabsContent>
         )}
+
+        {/* Citation mapping tab */}
+        <TabsContent value="citations" className="mt-4">
+          <MCPCitationMappingTab client={client} workspaceId={wsId} serverId={server.id} canEdit />
+        </TabsContent>
       </Tabs>
     </div>
   )

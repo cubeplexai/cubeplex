@@ -985,6 +985,7 @@
     "tabOverview": "Overview",
     "tabTools": "Tools ({count})",
     "tabWorkspaces": "Workspaces",
+    "tabCitations": "Citation mapping",
 
     "overviewServerDetails": "Server Details",
     "overviewUrl": "URL",
