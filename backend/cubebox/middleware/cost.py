@@ -24,6 +24,7 @@ constructs a new child instance with ``subagent_depth + 1``.
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any
 
@@ -32,9 +33,13 @@ from cubepi.providers.base import AssistantMessage
 from loguru import logger
 
 from cubebox.db.engine import async_session_maker
+from cubebox.llm.config import ModelCost
 from cubebox.models.billing import BillingEvent, LlmBillingEvent
 from cubebox.models.public_id import generate_public_id
 from cubebox.repositories.billing import BillingRepository
+
+# Callable that resolves (provider, model_id) → ModelCost (or None if unknown).
+PriceLookup = Callable[[str, str], ModelCost | None]
 
 
 class CostMiddleware(Middleware):
@@ -54,6 +59,7 @@ class CostMiddleware(Middleware):
         workspace_id: str,
         user_id: str,
         conversation_id: str,
+        price_lookup: PriceLookup | None = None,
         parent_billing_id: str | None = None,
         subagent_depth: int = 0,
     ) -> None:
@@ -61,6 +67,7 @@ class CostMiddleware(Middleware):
         self._workspace_id = workspace_id
         self._user_id = user_id
         self._conversation_id = conversation_id
+        self._price_lookup = price_lookup
         self._parent_billing_id = parent_billing_id
         self._subagent_depth = subagent_depth
         self._last_billing_id: str | None = None
@@ -95,6 +102,13 @@ class CostMiddleware(Middleware):
             model_id = response.model_id or "unknown"
             duration_ms = max(0, int((ended_at - started_at).total_seconds() * 1000))
 
+            cost_amount_micro = _compute_cost_micro(
+                usage=usage,
+                provider=provider,
+                model_id=model_id,
+                price_lookup=self._price_lookup,
+            )
+
             be = BillingEvent(
                 id=run_id,
                 org_id=self._org_id,
@@ -102,7 +116,7 @@ class CostMiddleware(Middleware):
                 user_id=self._user_id,
                 conversation_id=self._conversation_id,
                 event_type="llm_call",
-                cost_amount_micro=0,  # no per-model pricing table yet; future M3.d.x
+                cost_amount_micro=cost_amount_micro,
                 currency="USD",
                 started_at=started_at,
                 ended_at=ended_at,
@@ -128,6 +142,40 @@ class CostMiddleware(Middleware):
 
         except Exception as exc:
             logger.warning("billing write failed (run_id={}): {}", run_id, exc)
+
+
+def _compute_cost_micro(
+    *,
+    usage: dict[str, int],
+    provider: str,
+    model_id: str,
+    price_lookup: PriceLookup | None,
+) -> int:
+    """Compute the per-call cost in micro-dollars.
+
+    ``ModelCost`` values are ``$ / million tokens`` (e.g. 3.0 = $3 per
+    million input tokens).  For ``T`` tokens at price ``P``:
+
+        dollars      = T * P / 1_000_000
+        micro_dollar = dollars * 1_000_000 = T * P
+
+    So summing ``tokens * price`` across the four buckets gives the cost
+    already expressed in micro-dollars.  When no price_lookup is supplied or
+    the lookup returns None (unknown model), we fall back to 0 so billing
+    rows are still written for analytics — same defensive posture as the
+    old hardcoded zero.
+    """
+    if price_lookup is None:
+        return 0
+    price = price_lookup(provider, model_id)
+    if price is None:
+        return 0
+    return int(
+        usage["input_tokens"] * price.input
+        + usage["output_tokens"] * price.output
+        + usage["cache_read_tokens"] * price.cache_read
+        + usage["cache_write_tokens"] * price.cache_write
+    )
 
 
 def _extract_usage(response: AssistantMessage) -> dict[str, int]:

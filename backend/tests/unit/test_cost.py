@@ -19,7 +19,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from cubepi.providers.base import AssistantMessage, TextContent, Usage
 
-from cubebox.middleware.cost import CostMiddleware, _extract_usage
+from cubebox.llm.config import ModelCost
+from cubebox.middleware.cost import CostMiddleware, _compute_cost_micro, _extract_usage
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -329,6 +330,137 @@ def test_extract_usage_none_falls_back_to_zeros() -> None:
         "cache_read_tokens": 0,
         "cache_write_tokens": 0,
     }
+
+
+# ---------------------------------------------------------------------------
+# Price lookup / cost computation (PR #84 review)
+# ---------------------------------------------------------------------------
+
+
+def test_compute_cost_micro_with_lookup_matches_manual_math() -> None:
+    """ModelCost.input is $/million tokens; tokens * cost == micro-dollars."""
+    price = ModelCost(input=3.0, output=15.0, cache_read=0.3, cache_write=3.75)
+    usage = {
+        "input_tokens": 100,
+        "output_tokens": 50,
+        "cache_read_tokens": 200,
+        "cache_write_tokens": 10,
+    }
+    expected = int(100 * 3.0 + 50 * 15.0 + 200 * 0.3 + 10 * 3.75)
+    # Manual sanity check: 300 + 750 + 60 + 37 = 1147 micro-USD.
+    assert expected == 1147
+
+    got = _compute_cost_micro(
+        usage=usage,
+        provider="anthropic",
+        model_id="claude-opus-4-5",
+        price_lookup=lambda _p, _m: price,
+    )
+    assert got == expected
+
+
+def test_compute_cost_micro_no_lookup_returns_zero() -> None:
+    usage = {
+        "input_tokens": 100,
+        "output_tokens": 50,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+    }
+    assert (
+        _compute_cost_micro(
+            usage=usage,
+            provider="anthropic",
+            model_id="claude-opus-4-5",
+            price_lookup=None,
+        )
+        == 0
+    )
+
+
+def test_compute_cost_micro_unknown_model_returns_zero() -> None:
+    usage = {"input_tokens": 1, "output_tokens": 1, "cache_read_tokens": 0, "cache_write_tokens": 0}
+    assert (
+        _compute_cost_micro(
+            usage=usage,
+            provider="anthropic",
+            model_id="unknown-id",
+            price_lookup=lambda _p, _m: None,
+        )
+        == 0
+    )
+
+
+@pytest.mark.asyncio
+async def test_after_model_response_writes_computed_cost() -> None:
+    """With a price_lookup, BillingEvent.cost_amount_micro reflects token * price."""
+    price = ModelCost(input=3.0, output=15.0, cache_read=0.3, cache_write=3.75)
+    mw = CostMiddleware(
+        org_id="org-cost",
+        workspace_id="ws-cost",
+        user_id="usr-cost",
+        conversation_id="conv-cost",
+        price_lookup=lambda _p, _m: price,
+    )
+    response = _make_response(
+        input_tokens=100,
+        output_tokens=50,
+        cache_read_tokens=200,
+        cache_write_tokens=10,
+    )
+    ctx = MagicMock()
+
+    inserted_be: list[Any] = []
+
+    class _FakeRepo:
+        def __init__(self, session: Any, *, org_id: str) -> None:
+            pass
+
+        async def insert_llm_event(self, be: Any, le: Any) -> None:
+            inserted_be.append(be)
+
+    fake_session = AsyncMock()
+    fake_session.__aenter__ = AsyncMock(return_value=fake_session)
+    fake_session.__aexit__ = AsyncMock(return_value=False)
+
+    with (
+        patch("cubebox.middleware.cost.async_session_maker", return_value=fake_session),
+        patch("cubebox.middleware.cost.BillingRepository", _FakeRepo),
+    ):
+        await mw.after_model_response(response, ctx)
+        await asyncio.sleep(0)
+
+    assert inserted_be[0].cost_amount_micro == 1147
+
+
+@pytest.mark.asyncio
+async def test_after_model_response_without_lookup_still_writes_row_with_zero_cost() -> None:
+    """Regression guard: no price_lookup → cost_amount_micro=0 but row still written."""
+    mw = _make_middleware()  # no price_lookup
+    response = _make_response(input_tokens=100, output_tokens=50)
+    ctx = MagicMock()
+
+    inserted_be: list[Any] = []
+
+    class _FakeRepo:
+        def __init__(self, session: Any, *, org_id: str) -> None:
+            pass
+
+        async def insert_llm_event(self, be: Any, le: Any) -> None:
+            inserted_be.append(be)
+
+    fake_session = AsyncMock()
+    fake_session.__aenter__ = AsyncMock(return_value=fake_session)
+    fake_session.__aexit__ = AsyncMock(return_value=False)
+
+    with (
+        patch("cubebox.middleware.cost.async_session_maker", return_value=fake_session),
+        patch("cubebox.middleware.cost.BillingRepository", _FakeRepo),
+    ):
+        await mw.after_model_response(response, ctx)
+        await asyncio.sleep(0)
+
+    assert len(inserted_be) == 1
+    assert inserted_be[0].cost_amount_micro == 0
 
 
 def test_extract_usage_zero_cache_tokens() -> None:

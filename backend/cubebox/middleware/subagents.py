@@ -164,6 +164,9 @@ class SubAgentMiddleware(Middleware):
                         workspace_id=_cost_mw._workspace_id,
                         user_id=_cost_mw._user_id,
                         conversation_id=_cost_mw._conversation_id,
+                        # Forward parent's price_lookup so subagent LLM calls
+                        # bill at the same configured prices rather than 0.
+                        price_lookup=_cost_mw._price_lookup,
                         parent_billing_id=_cost_mw._last_billing_id,
                         subagent_depth=_cost_mw._subagent_depth + 1,
                     )

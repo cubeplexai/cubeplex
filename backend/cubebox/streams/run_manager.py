@@ -842,7 +842,20 @@ class RunManager:
 
         # 9. CostMiddleware — needs org/workspace/user/conversation IDs
         try:
+            from cubebox.llm.config import ModelCost
             from cubebox.middleware.cost import CostMiddleware
+
+            # Resolve ModelCost for any (provider, model_id) the agent reports.
+            # The factory's llm_config holds the merged YAML + DB provider config
+            # so this lookup honors per-org overrides.
+            def _price_lookup(provider: str, model_id: str) -> ModelCost | None:
+                pcfg = factory.llm_config.providers.get(provider)
+                if pcfg is None:
+                    return None
+                for m in pcfg.models:
+                    if m.id == model_id:
+                        return m.cost
+                return None
 
             cubepi_middleware.append(
                 CostMiddleware(
@@ -850,6 +863,7 @@ class RunManager:
                     workspace_id=ctx.workspace_id,
                     user_id=ctx.user_id,
                     conversation_id=conversation_id,
+                    price_lookup=_price_lookup,
                 )
             )
         except Exception as _exc:
