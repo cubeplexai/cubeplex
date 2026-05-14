@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 from datetime import timedelta
+from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -33,6 +34,7 @@ class CubepiMCPServerSpec:
     server_name: str
     url: str
     headers: dict[str, str] = field(default_factory=dict)
+    tool_citations: dict[str, dict[str, Any]] = field(default_factory=dict)
 
 
 async def discover_workspace_mcp_servers_for_cubepi(
@@ -114,6 +116,7 @@ async def discover_workspace_mcp_servers_for_cubepi(
                 server_name=server.name,
                 url=server.server_url,
                 headers=headers,
+                tool_citations=dict(server.tool_citations or {}),
             )
         )
 
