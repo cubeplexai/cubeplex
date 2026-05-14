@@ -6,9 +6,9 @@ import re
 
 import pytest
 
-from cubebox.tools.builtin.calculator_pi import CalculatorInput, calculator_tool
-from cubebox.tools.builtin.datetime_tool_pi import DateTimeInput, datetime_tool
-from cubebox.tools.builtin.view_images_pi import ViewImagesInput, make_view_images_tool
+from cubebox.tools.builtin.calculator import CalculatorInput, calculator_tool
+from cubebox.tools.builtin.datetime_tool import DateTimeInput, datetime_tool
+from cubebox.tools.builtin.view_images import ViewImagesInput, make_view_images_tool
 
 # ---------------------------------------------------------------------------
 # Calculator

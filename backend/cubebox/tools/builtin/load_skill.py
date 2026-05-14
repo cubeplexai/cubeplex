@@ -41,7 +41,7 @@ class LoadSkillOutput(BaseModel):
         return self.model_dump_json()
 
 
-def create_load_skill_tool_pi(
+def create_load_skill_tool(
     *,
     catalog: SkillCatalogService,
     workspace_id: str,

@@ -532,13 +532,13 @@ class RunManager:
         # All other tools accumulate in _builtin_tools.  At the end we merge
         # them in the correct order.
 
-        from cubebox.tools.registry_pi import list_builtin_tools_for_cubepi
+        from cubebox.tools.registry import list_builtin_tools
 
         _sandbox_tools: list[Any] = []
         _artifact_tools: list[Any] = []
         _todo_tools: list[Any] = []
         _subagent_tools: list[Any] = []
-        _builtin_tools: list[Any] = list(list_builtin_tools_for_cubepi())
+        _builtin_tools: list[Any] = list(list_builtin_tools())
 
         # Memory tools — service factory opened per tool call
         # Placed before view_images and load_skill to match langgraph tool order:
@@ -548,7 +548,7 @@ class RunManager:
             from cubebox.db.engine import async_session_maker as _mem_session_maker
             from cubebox.repositories.memory import MemoryRepository as _MemoryRepository
             from cubebox.services.memory import MemoryService as _MemoryService
-            from cubebox.tools.builtin.memory_pi import create_memory_tools_pi
+            from cubebox.tools.builtin.memory import create_memory_tools
 
             @_asynccontextmanager
             async def _memory_service_factory() -> _AsyncIterator[_MemoryService]:
@@ -567,7 +567,7 @@ class RunManager:
                     )
 
             _builtin_tools.extend(
-                create_memory_tools_pi(
+                create_memory_tools(
                     service_factory=_memory_service_factory,
                     conversation_id=conversation_id,
                     run_id=run_id,
@@ -579,10 +579,10 @@ class RunManager:
         # load_skill — requires a non-None catalog (may be absent if DB is down)
         if skill_catalog is not None:
             try:
-                from cubebox.tools.builtin.load_skill_pi import create_load_skill_tool_pi
+                from cubebox.tools.builtin.load_skill import create_load_skill_tool
 
                 _builtin_tools.append(
-                    create_load_skill_tool_pi(
+                    create_load_skill_tool(
                         catalog=skill_catalog,
                         workspace_id=ctx.workspace_id,
                         org_id=ctx.org_id,
@@ -596,7 +596,7 @@ class RunManager:
         try:
             from cubebox.llm.capabilities import LLMCapabilities
             from cubebox.objectstore import get_objectstore_client
-            from cubebox.tools.builtin.view_images_pi import make_view_images_tool
+            from cubebox.tools.builtin.view_images import make_view_images_tool
 
             _builtin_tools.append(
                 make_view_images_tool(
