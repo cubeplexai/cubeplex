@@ -291,11 +291,11 @@ class OAuthCallbackHandler:
         client_config["expires_at"] = expires_at_iso
         if refresh_id is not None:
             client_config["refresh_token_credential_id"] = refresh_id
-        else:
-            # AS dropped the refresh_token this round — clear any stale
-            # pointer so the runtime doesn't try to use a credential whose
-            # ciphertext no longer matches what the AS will accept.
-            client_config.pop("refresh_token_credential_id", None)
+        # If refresh_id is None the AS chose not to rotate the refresh token
+        # this round. Per RFC 6749 §6 the previously issued refresh token
+        # remains valid, so leave the existing pointer alone — clearing it
+        # would orphan a still-usable credential row and force the next
+        # refresh to raise OAuthInvalidServerState.
         server.oauth_client_config = client_config
         server.authed = True
         server.last_error = None
@@ -342,7 +342,12 @@ class OAuthCallbackHandler:
             )
         else:
             existing.credential_id = access_id
-            existing.oauth_refresh_token_credential_id = refresh_id
+            # Same RFC 6749 §6 invariant as _persist_org: only overwrite the
+            # refresh pointer when the AS actually issued a new refresh token
+            # this round. ``refresh_id is None`` means rotation was skipped,
+            # not that the prior refresh token has been invalidated.
+            if refresh_id is not None:
+                existing.oauth_refresh_token_credential_id = refresh_id
             existing.oauth_expires_at = expires_at
             await self._user_cred_repo.session.commit()
             await self._user_cred_repo.session.refresh(existing)
