@@ -25,15 +25,16 @@ function countArgs(schema: unknown): { args: number; required: number } {
 export function ToolList({ tools, selectedName, onSelect }: ToolListProps) {
   const t = useTranslations('mcp.tools')
   const [query, setQuery] = useState('')
+  const trimmed = query.trim()
 
   const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase()
+    const q = trimmed.toLowerCase()
     if (!q) return tools
     return tools.filter(
       (tool) =>
         tool.name.toLowerCase().includes(q) || (tool.description ?? '').toLowerCase().includes(q),
     )
-  }, [tools, query])
+  }, [tools, trimmed])
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-2">
@@ -43,19 +44,23 @@ export function ToolList({ tools, selectedName, onSelect }: ToolListProps) {
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder={t('filterPlaceholder')}
+          aria-label={t('filterPlaceholder')}
           className="h-9 pl-7 text-sm"
         />
       </div>
       <p className="px-1 text-xs text-muted-foreground">
-        {query
+        {trimmed
           ? t('countMatch', { matched: filtered.length, total: tools.length })
           : t('countAll', { count: tools.length })}
       </p>
       <ScrollArea className="min-h-0 flex-1">
-        <ul className="flex flex-col gap-0.5 pr-1">
+        <ul
+          aria-label={t('countAll', { count: tools.length })}
+          className="flex flex-col gap-0.5 pr-1"
+        >
           {filtered.length === 0 ? (
             <li className="px-3 py-6 text-center text-xs text-muted-foreground">
-              {query ? t('emptyMatch', { query }) : t('empty')}
+              {trimmed ? t('emptyMatch', { query: trimmed }) : t('empty')}
             </li>
           ) : (
             filtered.map((tool) => {
@@ -65,9 +70,10 @@ export function ToolList({ tools, selectedName, onSelect }: ToolListProps) {
                 <li key={tool.name}>
                   <button
                     type="button"
+                    aria-pressed={selected}
                     onClick={() => onSelect(tool.name)}
                     className={cn(
-                      'group flex w-full flex-col gap-1 rounded-md border border-transparent px-3 py-2 text-left transition',
+                      'flex w-full flex-col gap-1 rounded-md border border-transparent px-3 py-2 text-left transition',
                       selected ? 'border-l-2 border-l-primary bg-primary/5' : 'hover:bg-muted/60',
                     )}
                   >
