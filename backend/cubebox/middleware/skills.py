@@ -95,7 +95,7 @@ class SkillsMiddleware(Middleware):
         if ctx.is_error or not ctx.result.content:
             return None
 
-        # load_skill_pi returns a single TextContent whose text is the
+        # load_skill returns a single TextContent whose text is the
         # JSON-serialised LoadSkillOutput.
         raw_text: str = ""
         for block in ctx.result.content:

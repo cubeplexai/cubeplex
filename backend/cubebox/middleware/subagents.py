@@ -10,7 +10,7 @@ parent's ``subagent_event_queue`` ContextVar.
 Hooks (per Spec B): ``tools`` only — the middleware injects one AgentTool.
 
 CostMiddleware cloning is handled lazily inside ``_execute``; the import
-guard keeps this module self-contained until M3.d.1 (cost_pi) lands.
+guard keeps this module self-contained.
 """
 
 from __future__ import annotations
@@ -152,8 +152,8 @@ class SubAgentMiddleware(Middleware):
             )
 
             # Clone CostMiddleware for billing depth attribution (M3.d.1).
-            # Lazy import: if cost_pi is not yet defined, the isinstance check
-            # simply finds nothing and cost cloning is skipped.
+            # Lazy import: if CostMiddleware is not present, the isinstance
+            # check simply finds nothing and cost cloning is skipped.
             try:
                 from cubebox.middleware.cost import CostMiddleware  # noqa: PLC0415
 

@@ -44,12 +44,12 @@ from cubebox.middleware.todo import (
     Todo,
     TodoListMiddleware,
     WriteTodosInput,
-    _last_assistant_message_pi,
+    _last_assistant_message,
     _make_write_todos_tool,
-    _non_todo_tool_calls_pi,
-    _pure_text_assistant_response_pi,
-    _submitted_write_todos_calls_pi,
-    _todo_validation_errors_pi_local,
+    _non_todo_tool_calls,
+    _pure_text_assistant_response,
+    _submitted_write_todos_calls,
+    _todo_validation_errors_local,
 )
 
 # ---------------------------------------------------------------------------
@@ -125,51 +125,51 @@ def _make_after_ctx(
 # ---------------------------------------------------------------------------
 
 
-def test_last_assistant_message_pi_empty() -> None:
-    assert _last_assistant_message_pi([]) is None
+def test_last_assistant_message_empty() -> None:
+    assert _last_assistant_message([]) is None
 
 
-def test_last_assistant_message_pi_finds_last() -> None:
+def test_last_assistant_message_finds_last() -> None:
     msg1 = _make_assistant_msg("first")
     msg2 = _make_assistant_msg("second")
     user = UserMessage(content=[TextContent(text="hi")])
-    result = _last_assistant_message_pi([msg1, user, msg2])
+    result = _last_assistant_message([msg1, user, msg2])
     assert result is msg2
 
 
-def test_submitted_write_todos_calls_pi() -> None:
+def test_submitted_write_todos_calls() -> None:
     tc_write = _make_tool_call("write_todos", "tc-1")
     tc_other = _make_tool_call("bash", "tc-2")
     msg = _make_assistant_msg(tool_calls=[tc_write, tc_other])
-    calls = _submitted_write_todos_calls_pi(msg)
+    calls = _submitted_write_todos_calls(msg)
     assert len(calls) == 1
     assert calls[0].name == "write_todos"
 
 
-def test_non_todo_tool_calls_pi() -> None:
+def test_non_todo_tool_calls() -> None:
     tc_write = _make_tool_call("write_todos", "tc-1")
     tc_bash = _make_tool_call("bash", "tc-2")
     msg = _make_assistant_msg(tool_calls=[tc_write, tc_bash])
-    calls = _non_todo_tool_calls_pi(msg)
+    calls = _non_todo_tool_calls(msg)
     assert len(calls) == 1
     assert calls[0].name == "bash"
 
 
-def test_pure_text_assistant_response_pi_true() -> None:
+def test_pure_text_assistant_response_true() -> None:
     msg = _make_assistant_msg("Hello world")
-    assert _pure_text_assistant_response_pi(msg) is True
+    assert _pure_text_assistant_response(msg) is True
 
 
-def test_pure_text_assistant_response_pi_false_has_tool() -> None:
+def test_pure_text_assistant_response_false_has_tool() -> None:
     tc = _make_tool_call("bash")
     msg = _make_assistant_msg("Hello", tool_calls=[tc])
-    assert _pure_text_assistant_response_pi(msg) is False
+    assert _pure_text_assistant_response(msg) is False
 
 
-def test_pure_text_assistant_response_pi_false_no_text() -> None:
+def test_pure_text_assistant_response_false_no_text() -> None:
     tc = _make_tool_call("bash")
     msg = _make_assistant_msg(tool_calls=[tc])
-    assert _pure_text_assistant_response_pi(msg) is False
+    assert _pure_text_assistant_response(msg) is False
 
 
 # ---------------------------------------------------------------------------
@@ -744,7 +744,7 @@ async def test_finalization_correction_stays_when_still_unfinished() -> None:
     # in after_model_response, extra["todos"] is still the old value (in_progress).
     # The validation would fire since there's 1 write_todos call — but the args are valid.
     # Actually the validation checks write_todos args, not what's in extra.
-    # The _todo_validation_errors_pi_local sees 1 write_todos call with valid payload → no error.
+    # The _todo_validation_errors_local sees 1 write_todos call with valid payload → no error.
     # Then: unfinished = _unfinished_todos(extra.get("todos")) = [in_progress item] → True
     # has_write_todos = True
     # The finalization_correction block: if not unfinished(True) or not has_write_todos(True)
@@ -755,13 +755,13 @@ async def test_finalization_correction_stays_when_still_unfinished() -> None:
 
 
 # ---------------------------------------------------------------------------
-# _todo_validation_errors_pi_local (internal helper)
+# _todo_validation_errors_local (internal helper)
 # ---------------------------------------------------------------------------
 
 
 def test_todo_validation_errors_no_calls_returns_empty() -> None:
     msg = _make_assistant_msg("text only")
-    errors = _todo_validation_errors_pi_local(msg, None)
+    errors = _todo_validation_errors_local(msg, None)
     assert errors == []
 
 
@@ -769,7 +769,7 @@ def test_todo_validation_errors_valid_payload_returns_empty() -> None:
     good_todos = [{"content": "Task 1", "status": "in_progress"}]
     tc = _make_tool_call("write_todos", "tc-1", {"todos": good_todos})
     msg = _make_assistant_msg(tool_calls=[tc])
-    errors = _todo_validation_errors_pi_local(msg, None)
+    errors = _todo_validation_errors_local(msg, None)
     assert errors == []
 
 
@@ -778,7 +778,7 @@ def test_todo_validation_errors_multiple_calls_returns_empty() -> None:
     tc1 = _make_tool_call("write_todos", "tc-1", {"todos": []})
     tc2 = _make_tool_call("write_todos", "tc-2", {"todos": []})
     msg = _make_assistant_msg(tool_calls=[tc1, tc2])
-    errors = _todo_validation_errors_pi_local(msg, None)
+    errors = _todo_validation_errors_local(msg, None)
     assert errors == []  # parallel check is upstream
 
 
@@ -786,7 +786,7 @@ def test_todo_validation_errors_bad_status() -> None:
     bad_todos = [{"content": "Task", "status": "unknown_status"}]
     tc = _make_tool_call("write_todos", "tc-1", {"todos": bad_todos})
     msg = _make_assistant_msg(tool_calls=[tc])
-    errors = _todo_validation_errors_pi_local(msg, None)
+    errors = _todo_validation_errors_local(msg, None)
     assert len(errors) == 1
     assert "tool_call_id" in errors[0]
     assert "error" in errors[0]

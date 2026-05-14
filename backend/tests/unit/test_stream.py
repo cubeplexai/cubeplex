@@ -1,4 +1,4 @@
-"""stream_pi tests — cubepi StreamEvent → cubebox SSE (M1.3)."""
+"""stream tests — cubepi StreamEvent → cubebox SSE (M1.3)."""
 
 from cubepi.agent.types import MessageEndEvent
 from cubepi.providers.base import (

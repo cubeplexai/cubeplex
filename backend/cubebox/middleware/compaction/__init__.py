@@ -101,7 +101,7 @@ def _cubepi_approx_tokens(messages: list[Message]) -> int:
     return int(char_token_estimate)
 
 
-def _compressed_view_pi(
+def _compressed_view(
     messages: list[Message],
     summary: CompactionSummary | None,
     boundary: int | None,
@@ -239,7 +239,7 @@ class CompactionMiddleware(Middleware):
         summary = cast("CompactionSummary | None", extra.get("compaction"))
         boundary = cast("int | None", extra.get("compaction_until_msg_index")) or 0
 
-        compressed = _compressed_view_pi(messages, summary, boundary)
+        compressed = _compressed_view(messages, summary, boundary)
 
         if _cubepi_approx_tokens(compressed) < self._max_tokens_before:
             return compressed
@@ -278,4 +278,4 @@ class CompactionMiddleware(Middleware):
         extra["compaction"] = new_summary
         extra["compaction_until_msg_index"] = new_boundary
 
-        return _compressed_view_pi(messages, new_summary, new_boundary)
+        return _compressed_view(messages, new_summary, new_boundary)
