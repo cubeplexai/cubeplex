@@ -3,14 +3,12 @@
 from __future__ import annotations
 
 import asyncio
-import re
 from contextlib import suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import FastAPI
-from langchain_core.messages import HumanMessage
 from loguru import logger
 from redis.asyncio import Redis
 from uuid_utils import uuid7
@@ -25,8 +23,6 @@ from cubebox.streams.run_events import (
     update_run_meta,
 )
 from cubebox.utils.time import utc_isoformat
-
-_CITATION_ID_PATTERN = re.compile(r"【(\d+)-\d+】")
 
 
 @dataclass(slots=True)
@@ -240,47 +236,6 @@ def cubepi_dict_to_agent_event(d: dict[str, Any], timestamp: str) -> AgentEvent 
     return None
 
 
-def _extract_citation_ids(content: Any) -> list[int]:
-    if isinstance(content, str):
-        return [int(match.group(1)) for match in _CITATION_ID_PATTERN.finditer(content)]
-    if isinstance(content, list):
-        list_ids: list[int] = []
-        for item in content:
-            list_ids.extend(_extract_citation_ids(item))
-        return list_ids
-    if isinstance(content, dict):
-        dict_ids: list[int] = []
-        for value in content.values():
-            dict_ids.extend(_extract_citation_ids(value))
-        return dict_ids
-    return []
-
-
-async def _recover_next_citation_id(agent: Any, conversation_id: str) -> int:
-    aget_state = getattr(agent, "aget_state", None)
-    if aget_state is None:
-        return 1
-
-    try:
-        from langchain_core.runnables import RunnableConfig
-
-        state = await aget_state(RunnableConfig(configurable={"thread_id": conversation_id}))
-    except Exception as exc:
-        logger.debug("Could not recover citation counter: {}", exc)
-        return 1
-
-    if not state or not getattr(state, "values", None):
-        return 1
-
-    max_citation_id = 0
-    for message in state.values.get("messages", []):
-        for citation_id in _extract_citation_ids(getattr(message, "content", "")):
-            if citation_id > max_citation_id:
-                max_citation_id = citation_id
-
-    return max_citation_id + 1 if max_citation_id > 0 else 1
-
-
 async def _build_attachment_content_blocks(
     *,
     org_id: str,
@@ -355,40 +310,6 @@ class RunManager:
         self._tasks.pop(run_id, None)
         if not self._tasks:
             self._tasks_empty.set()
-
-    def _build_oauth_token_manager(
-        self,
-        session: Any,
-        *,
-        org_id: str,
-    ) -> Any:
-        """Construct an ``OAuthTokenManager`` for the current run session."""
-        import httpx
-
-        from cubebox.mcp.oauth.metadata import OAuthMetadataDiscovery
-        from cubebox.mcp.oauth.token_manager import OAuthTokenManager
-        from cubebox.repositories.credential import CredentialRepository
-        from cubebox.repositories.mcp import MCPServerRepository, UserMCPCredentialRepository
-
-        http_client = getattr(self._app.state, "_mcp_oauth_http_client", None)
-        if http_client is None:
-            http_client = httpx.AsyncClient(timeout=30.0)
-            self._app.state._mcp_oauth_http_client = http_client
-
-        metadata = getattr(self._app.state, "_mcp_oauth_metadata_discovery", None)
-        if metadata is None:
-            metadata = OAuthMetadataDiscovery(http_client)
-            self._app.state._mcp_oauth_metadata_discovery = metadata
-
-        return OAuthTokenManager(
-            http_client=http_client,
-            redis=self._redis,
-            encryption_backend=self._app.state.encryption_backend,
-            credential_repo=CredentialRepository(session, org_id=org_id),
-            server_repo=MCPServerRepository(session, org_id=org_id),
-            user_cred_repo=UserMCPCredentialRepository(session, org_id=org_id),
-            metadata=metadata,
-        )
 
     async def start_run(
         self,
@@ -1038,7 +959,6 @@ class RunManager:
         )
         from cubebox.middleware.subagents import subagent_event_queue
 
-        checkpointer = None
         sandbox = None
         sandbox_manager = None
         sandbox_create_task: asyncio.Task[Any] | None = None
@@ -1053,7 +973,6 @@ class RunManager:
         cc_token = citation_counter_var.set(citation_counter)
         ce_token = citation_event_queue.set(event_q)
 
-        tool_delta_context: dict[tuple[str | None, int], dict[str, Any]] = {}
         citation_buffers: dict[str | None, str] = {}
         turn_usage: dict[str, int] = {
             "input_tokens": 0,
@@ -1121,14 +1040,6 @@ class RunManager:
             await publish_event(sse_event)
 
         try:
-            factory = getattr(self._app.state, "checkpointer_factory", None)
-            if factory:
-                checkpointer = factory()
-            else:
-                from cubebox.agents.checkpointer import create_checkpointer
-
-                checkpointer = await create_checkpointer()
-
             # Open a long-lived session for the SkillCatalogService — used by
             # both SkillsMiddleware (read prompts) and LazySandbox (push files
             # to sandbox on first use). Same session is fine: skill reads are
@@ -1177,59 +1088,29 @@ class RunManager:
                         logger.warning("Sandbox unavailable, continuing without: {}", exc)
                         await emit_status("sandbox_failed", detail=str(exc))
 
-            from cubebox.agents.graph import create_cubebox_agent
+            # Resolve effective model + context_window for the DoneEvent. The
+            # actual cubepi.Provider construction happens inside _run_cubepi_path.
             from cubebox.db.engine import async_session_maker
             from cubebox.llm.factory import LLMFactory
-            from cubebox.middleware.citations import CitationConfig
-            from cubebox.tools import get_registry
 
+            context_window: int = 0
             try:
-                async with async_session_maker() as llm_session:
-                    llm = await LLMFactory(
-                        session=llm_session,
+                async with async_session_maker() as ctx_session:
+                    ctx_factory = LLMFactory(
+                        session=ctx_session,
                         org_id=ctx.org_id,
                         encryption_backend=self._app.state.encryption_backend,
-                    ).create_default()
-                    await llm_session.commit()
-            except Exception:
-                logger.warning("LLMFactory DB load failed, falling back to config-only")
-                llm = await LLMFactory().create_default()
-            _inner = getattr(llm, "runnable", llm)
-            context_window: int = getattr(_inner, "_cubebox_context_window", 0)
-            tools = get_registry().list_tools()
-            try:
-                from cubebox.credentials.dependencies import build_credential_service
-                from cubebox.db.engine import async_session_maker
-                from cubebox.mcp.runtime import load_mcp_tools_for_workspace
-
-                async with async_session_maker() as mcp_session:
-                    cred_service = build_credential_service(
-                        mcp_session,
-                        self._app.state.encryption_backend,
-                        org_id=ctx.org_id,
-                        actor_user_id=ctx.user_id,
                     )
-                    token_manager = self._build_oauth_token_manager(mcp_session, org_id=ctx.org_id)
-                    tools.extend(
-                        await load_mcp_tools_for_workspace(
-                            org_id=ctx.org_id,
-                            workspace_id=ctx.workspace_id,
-                            user_id=ctx.user_id,
-                            cred_service=cred_service,
-                            signer=self._app.state.mcp_user_token_signer,
-                            session=mcp_session,
-                            token_manager=token_manager,
-                        )
-                    )
+                    (
+                        _ctx_provider,
+                        _ctx_model_id,
+                        _ctx_provider_config,
+                    ) = await ctx_factory.resolve_default_provider_and_config()
+                    await ctx_session.commit()
+                _model_cfg = ctx_factory.get_model_config(_ctx_provider, _ctx_model_id)
+                context_window = int(_model_cfg.context_window or 0)
             except Exception as exc:
-                logger.warning("DB MCP tools unavailable for run: {}", exc)
-
-            # Citation configs were previously loaded from the legacy
-            # `mcp.servers` config block. That path was removed in M2; per-tool
-            # citation metadata for catalog connectors is sourced from the
-            # catalog row's `metadata` field at install time (TODO: wire once
-            # catalog runtime ships).
-            all_citation_configs: dict[str, CitationConfig] = {}
+                logger.debug("Could not resolve context_window for DoneEvent: {}", exc)
 
             from sqlmodel import select as sqlmodel_select
 
@@ -1260,240 +1141,20 @@ class RunManager:
             except Exception as exc:
                 logger.warning("Failed to load AgentConfig, using base prompt: {}", exc)
 
-            # --- Dispatch to cubepi runtime if configured ---
-            # app.state.agents_runtime overrides config (used in unit tests).
-            from cubebox.config import config as _runtime_cfg
-
-            _agents_runtime = getattr(
-                self._app.state,
-                "agents_runtime",
-                _runtime_cfg.get("agents.runtime", "langgraph"),
+            await self._run_cubepi_path(
+                ctx=ctx,
+                run_id=run_id,
+                conversation_id=conversation_id,
+                content=content,
+                attachments=attachments,
+                effective_system_prompt=effective_system_prompt,
+                publish_stream_event=publish_stream_event,
+                flush_citation_buffer=flush_citation_buffer,
+                citation_buffers=citation_buffers,
+                sandbox=sandbox,
+                skill_catalog=skill_catalog,
+                catalog_session=catalog_session,
             )
-            if _agents_runtime == "cubepi":
-                # --- cubepi runtime path ---
-                await self._run_cubepi_path(
-                    ctx=ctx,
-                    run_id=run_id,
-                    conversation_id=conversation_id,
-                    content=content,
-                    attachments=attachments,
-                    effective_system_prompt=effective_system_prompt,
-                    publish_stream_event=publish_stream_event,
-                    flush_citation_buffer=flush_citation_buffer,
-                    citation_buffers=citation_buffers,
-                    sandbox=sandbox,
-                    skill_catalog=skill_catalog,
-                    catalog_session=catalog_session,
-                )
-            else:
-                # --- LangGraph path (default) ---
-                from collections.abc import AsyncIterator as _AsyncIterator
-                from contextlib import asynccontextmanager as _asynccontextmanager
-
-                from cubebox.db.engine import async_session_maker as _memory_session_maker
-                from cubebox.repositories.memory import MemoryRepository as _MemoryRepository
-                from cubebox.services.memory import MemoryService as _MemoryService
-
-                @_asynccontextmanager
-                async def _memory_repo_factory() -> _AsyncIterator[_MemoryRepository]:
-                    async with _memory_session_maker() as _session:
-                        yield _MemoryRepository(
-                            _session,
-                            user_id=ctx.user_id,
-                            org_id=ctx.org_id,
-                            workspace_id=ctx.workspace_id,
-                        )
-
-                @_asynccontextmanager
-                async def _memory_service_factory() -> _AsyncIterator[_MemoryService]:
-                    async with _memory_session_maker() as _session:
-                        _repo = _MemoryRepository(
-                            _session,
-                            user_id=ctx.user_id,
-                            org_id=ctx.org_id,
-                            workspace_id=ctx.workspace_id,
-                        )
-                        yield _MemoryService(
-                            _repo,
-                            user_id=ctx.user_id,
-                            org_id=ctx.org_id,
-                            workspace_id=ctx.workspace_id,
-                        )
-
-                agent = create_cubebox_agent(
-                    llm=llm,
-                    tools=tools,
-                    system_prompt=effective_system_prompt,
-                    sandbox=sandbox,
-                    conversation_id=conversation_id,
-                    org_id=ctx.org_id,
-                    workspace_id=ctx.workspace_id,
-                    catalog_session=catalog_session,
-                    user_id=ctx.user_id,
-                    checkpointer=checkpointer,
-                    citation_configs=all_citation_configs,
-                    event_queue=event_q,
-                    memory_repo_factory=_memory_repo_factory,
-                    memory_service_factory=_memory_service_factory,
-                )
-                config_dict = {"configurable": {"thread_id": conversation_id}}
-                citation_counter._next = await _recover_next_citation_id(agent, conversation_id)
-
-                async def drain_main_stream() -> None:
-                    try:
-                        # M7: hydrate attachments into sandbox + build mixed content
-                        attachment_blocks: list[dict[str, Any]] = []
-                        if attachments:
-                            if sandbox is not None:
-                                from opensandbox.exceptions.sandbox import (
-                                    SandboxReadyTimeoutException,
-                                )
-
-                                from cubebox.agents.hydrator import (
-                                    AttachmentHydrationError,
-                                    AttachmentHydrator,
-                                )
-                                from cubebox.db.engine import async_session_maker
-                                from cubebox.objectstore import get_objectstore_client
-                                from cubebox.repositories import AttachmentRepository
-
-                                try:
-                                    async with async_session_maker() as h_session:
-                                        h_repo = AttachmentRepository(
-                                            h_session,
-                                            org_id=ctx.org_id,
-                                            workspace_id=ctx.workspace_id,
-                                        )
-                                        hydrator = AttachmentHydrator(
-                                            repo=h_repo,
-                                            sandbox=sandbox,
-                                            objectstore=get_objectstore_client(),
-                                        )
-                                        await hydrator.hydrate(
-                                            conversation_id=conversation_id,
-                                            file_ids=attachments,
-                                        )
-                                except (
-                                    AttachmentHydrationError,
-                                    SandboxReadyTimeoutException,
-                                ) as exc:
-                                    # Hydration failure is non-fatal: the run continues
-                                    # without files staged in the sandbox. The LLM still
-                                    # receives the attachment hint text; the sandbox_path
-                                    # references simply won't resolve to real files.
-                                    logger.warning(
-                                        "Attachment hydration failed (run continues): {}", exc
-                                    )
-                                    await emit_status("hydration_failed", detail=str(exc))
-
-                            attachment_blocks = await _build_attachment_content_blocks(
-                                org_id=ctx.org_id,
-                                workspace_id=ctx.workspace_id,
-                                conversation_id=conversation_id,
-                                attachment_ids=attachments,
-                            )
-
-                        # Persist the user-typed text only. AttachmentHintMiddleware
-                        # appends the [Attachments] hint at model-call time so the LLM
-                        # sees sandbox paths, while the checkpoint stays equal to
-                        # what the user wrote.
-                        human_msg = HumanMessage(
-                            content=content,
-                            additional_kwargs=(
-                                {"attachments_meta": attachment_blocks} if attachment_blocks else {}
-                            ),
-                            response_metadata={"created_at": datetime.now(UTC).isoformat()},
-                        )
-
-                        if attachments:
-                            from cubebox.db.engine import async_session_maker
-                            from cubebox.repositories import AttachmentRepository
-
-                            async with async_session_maker() as att_session:
-                                mark_repo = AttachmentRepository(
-                                    att_session,
-                                    org_id=ctx.org_id,
-                                    workspace_id=ctx.workspace_id,
-                                )
-                                await mark_repo.mark_attached_bulk(
-                                    conversation_id=conversation_id,
-                                    attachment_ids=attachments,
-                                )
-
-                        async for event in agent.astream(  # type: ignore[call-overload]
-                            {"messages": [human_msg]},
-                            stream_mode=["messages", "updates"],
-                            stream_subgraphs=True,
-                            config=config_dict,
-                        ):
-                            ns: tuple[Any, ...] = ()
-                            payload = event
-                            if isinstance(event, tuple) and len(event) == 2:
-                                first, second = event
-                                if isinstance(first, tuple):
-                                    ns = first
-                                    payload = second
-                            await event_q.put(("main", ns, payload))
-                    except asyncio.CancelledError:
-                        raise
-                    except Exception as exc:
-                        await event_q.put(("error", None, exc))
-                    finally:
-                        await event_q.put(None)
-
-                from cubebox.agents.stream import convert_messages_chunk, convert_updates_chunk
-
-                stream_task = asyncio.create_task(drain_main_stream())
-
-                while True:
-                    item = await event_q.get()
-                    if item is None:
-                        break
-
-                    kind = item[0]
-                    if kind == "main":
-                        ns, payload = item[1], item[2]
-                        agent_id = _ns_to_agent_id(ns)
-                        if isinstance(payload, tuple) and len(payload) == 2:
-                            mode, data = payload
-                            if mode == "messages":
-                                evts = convert_messages_chunk(data, agent_id=agent_id)
-                            elif mode == "updates":
-                                evts = convert_updates_chunk(data, agent_id=agent_id)
-                            else:
-                                evts = []
-                            for sse_event in _dicts_to_sse_events(evts, tool_delta_context):
-                                await publish_stream_event(sse_event, agent_id)
-                    elif kind == "subagent":
-                        sa_agent_id, payload = item[1], item[2]
-                        if isinstance(payload, tuple) and len(payload) == 2:
-                            mode, data = payload
-                            if mode == "messages":
-                                evts = convert_messages_chunk(data, agent_id=sa_agent_id)
-                            elif mode == "updates":
-                                evts = convert_updates_chunk(data, agent_id=sa_agent_id)
-                            else:
-                                evts = []
-                            for sse_event in _dicts_to_sse_events(evts, tool_delta_context):
-                                await publish_stream_event(sse_event, sa_agent_id)
-                    elif kind == "citation":
-                        from cubebox.agents.schemas import CitationEvent
-
-                        citation_event = CitationEvent(
-                            timestamp=datetime.now(UTC).isoformat(),
-                            data=item[2],
-                            agent_id=item[1],
-                        )
-                        await publish_event(citation_event)
-                    elif kind == "error":
-                        raise item[2]
-
-                for agent_key in list(citation_buffers):
-                    await flush_citation_buffer(agent_key, agent_key)
-
-                if stream_task is not None:
-                    await stream_task
-
             await _update_conversation_timestamp(
                 conversation_id,
                 org_id=ctx.org_id,
