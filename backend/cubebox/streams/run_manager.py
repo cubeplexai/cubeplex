@@ -167,7 +167,7 @@ def _dicts_to_sse_events(
 
 
 def cubepi_dict_to_agent_event(d: dict[str, Any], timestamp: str) -> AgentEvent | None:
-    """Translate a single SSE dict produced by ``convert_cubepi_agent_event_to_sse``
+    """Translate a single SSE dict produced by ``convert_agent_event_to_sse``
     into a typed cubebox ``AgentEvent``.
 
     Returns ``None`` for dicts that should be silently dropped at this layer
@@ -471,9 +471,9 @@ class RunManager:
         from collections.abc import AsyncIterator as _AsyncIterator
         from contextlib import asynccontextmanager as _asynccontextmanager
 
-        from cubebox.agents.checkpointer_pi import init_cubepi_checkpointer
-        from cubebox.agents.graph_pi import create_cubebox_cubepi_agent
-        from cubebox.agents.stream_pi import convert_cubepi_agent_event_to_sse
+        from cubebox.agents.checkpointer import init_checkpointer
+        from cubebox.agents.graph import create_cubebox_agent
+        from cubebox.agents.stream import convert_agent_event_to_sse
         from cubebox.db.engine import async_session_maker
         from cubebox.llm.cache_markers_pi import CubeboxCacheMarkerPolicy
         from cubebox.llm.factory import LLMFactory
@@ -863,8 +863,8 @@ class RunManager:
             len(all_tools),
         )
 
-        async with init_cubepi_checkpointer() as cp:
-            agent = create_cubebox_cubepi_agent(
+        async with init_checkpointer() as cp:
+            agent = create_cubebox_agent(
                 provider=provider,
                 model_id=model_id,
                 provider_name=provider_name,
@@ -882,7 +882,7 @@ class RunManager:
             extra_ref_holder["extra"] = agent._extra
 
             def _on_event(evt: Any, _signal: Any = None) -> None:
-                translated = convert_cubepi_agent_event_to_sse(evt)
+                translated = convert_agent_event_to_sse(evt)
                 sse_dicts.extend(translated)
 
             agent.subscribe(_on_event)

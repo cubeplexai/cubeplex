@@ -8,14 +8,14 @@ worktree should have this from M0.3.
 import pytest
 from cubepi.providers.base import TextContent, UserMessage
 
-from cubebox.agents.checkpointer_pi import _build_dsn, init_cubepi_checkpointer
+from cubebox.agents.checkpointer import _build_dsn, init_checkpointer
 
 
 @pytest.mark.asyncio
 async def test_cubepi_checkpointer_round_trip_against_real_schema() -> None:
     """Connecting cubepi.PostgresCheckpointer to the cubebox dev DB
     must succeed (schema version check passes) and round-trip messages."""
-    async with init_cubepi_checkpointer() as cp:
+    async with init_checkpointer() as cp:
         msg = UserMessage(
             content=[TextContent(text="hello m0-integration")],
             metadata={"test": True},

@@ -2,9 +2,9 @@
 
 Injects a ``subagent`` AgentTool that, when called by the main cubepi
 agent, spawns an ephemeral inner cubepi.Agent (via
-``create_cubebox_cubepi_agent``), subscribes to its event stream, translates
+``create_cubebox_agent``), subscribes to its event stream, translates
 cubepi AgentEvents to cubebox SSE dicts via
-``convert_cubepi_agent_event_to_sse``, and forwards tagged events to the
+``convert_agent_event_to_sse``, and forwards tagged events to the
 parent's ``subagent_event_queue`` ContextVar.
 
 Hooks (per Spec B): ``tools`` only — the middleware injects one AgentTool.
@@ -174,9 +174,9 @@ class SubAgentMiddleware(Middleware):
                 pass  # M3.d.1 not yet landed — skip cost cloning
 
             # Build inner agent
-            from cubebox.agents.graph_pi import create_cubebox_cubepi_agent  # noqa: PLC0415
+            from cubebox.agents.graph import create_cubebox_agent  # noqa: PLC0415
 
-            inner = create_cubebox_cubepi_agent(
+            inner = create_cubebox_agent(
                 provider=provider,
                 model_id=model_id,
                 provider_name=provider_name,
@@ -198,8 +198,8 @@ class SubAgentMiddleware(Middleware):
                 )
 
             # Subscribe to inner agent events; collect + optionally forward
-            from cubebox.agents.stream_pi import (  # noqa: PLC0415
-                convert_cubepi_agent_event_to_sse,
+            from cubebox.agents.stream import (  # noqa: PLC0415
+                convert_agent_event_to_sse,
             )
 
             queue = subagent_event_queue.get(None)
@@ -208,7 +208,7 @@ class SubAgentMiddleware(Middleware):
             last_ai_text: list[str] = []
 
             def _listener(evt: Any, _signal: Any = None) -> None:
-                sse_events = convert_cubepi_agent_event_to_sse(evt)
+                sse_events = convert_agent_event_to_sse(evt)
                 for sse in sse_events:
                     tagged: dict[str, Any] = {**sse, "agent_id": sa_agent_id}
                     subagent_events.append(tagged)

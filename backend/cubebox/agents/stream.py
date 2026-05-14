@@ -2,11 +2,11 @@
 
 Two translation layers:
 
-1. ``convert_cubepi_event_to_sse`` — low-level; translates a single
+1. ``convert_event_to_sse`` — low-level; translates a single
    cubepi ``StreamEvent`` (provider-level) into 0..1 cubebox SSE dicts.
    Used when the caller has direct access to the raw provider stream.
 
-2. ``convert_cubepi_agent_event_to_sse`` — high-level; translates a
+2. ``convert_agent_event_to_sse`` — high-level; translates a
    cubepi ``AgentEvent`` (agent-loop-level) into 0..N cubebox SSE dicts.
    Used by the run_manager cubepi dispatch path (M1.5+), which subscribes
    to the Agent's listener channel and receives AgentEvents.
@@ -29,7 +29,7 @@ from cubepi.agent.types import (
 from cubepi.providers.base import AssistantMessage, StreamEvent, ToolCall
 
 
-def convert_cubepi_event_to_sse(evt: StreamEvent) -> list[dict[str, Any]]:
+def convert_event_to_sse(evt: StreamEvent) -> list[dict[str, Any]]:
     """Translate a single cubepi StreamEvent into 0..1 cubebox SSE event dicts."""
     t = evt.type
 
@@ -70,14 +70,14 @@ def convert_cubepi_event_to_sse(evt: StreamEvent) -> list[dict[str, Any]]:
     return []
 
 
-def convert_cubepi_agent_event_to_sse(evt: AgentEvent) -> list[dict[str, Any]]:
+def convert_agent_event_to_sse(evt: AgentEvent) -> list[dict[str, Any]]:
     """Translate a single cubepi AgentEvent into 0..N cubebox SSE event dicts.
 
     The cubepi Agent exposes AgentEvents via its subscribe() listener channel.
     AgentEvents are higher-level than StreamEvents:
 
     - ``MessageUpdateEvent`` wraps a ``stream_event: StreamEvent`` — we unwrap
-      and delegate to ``convert_cubepi_event_to_sse`` for text/thinking/tool deltas.
+      and delegate to ``convert_event_to_sse`` for text/thinking/tool deltas.
     - ``ToolExecutionEndEvent`` carries the completed tool result — translated to
       a ``tool_result`` SSE dict.
     - ``AgentEndEvent`` emits ``done``.
@@ -86,7 +86,7 @@ def convert_cubepi_agent_event_to_sse(evt: AgentEvent) -> list[dict[str, Any]]:
       that cubebox's frontend currently needs.
     """
     if isinstance(evt, MessageUpdateEvent):
-        return convert_cubepi_event_to_sse(evt.stream_event)
+        return convert_event_to_sse(evt.stream_event)
 
     if isinstance(evt, ToolExecutionEndEvent):
         return [

@@ -1,7 +1,7 @@
 """Unit tests for ``cubepi_dict_to_agent_event`` in run_manager.
 
 Regression gate for the bug discovered during M5.3 diagnosis: error
-dicts emitted by ``convert_cubepi_agent_event_to_sse`` were silently
+dicts emitted by ``convert_agent_event_to_sse`` were silently
 dropped by the cubepi dispatch loop, masking real failures (e.g. an
 auth failure that surfaced only as "no usage event observed" instead
 of a normal SSE error event).

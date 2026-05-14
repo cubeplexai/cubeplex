@@ -594,11 +594,11 @@ async def send_message(
 
 async def _get_history_messages(raw_request: Request, conversation_id: str) -> dict[str, object]:
     """Read cubepi-runtime conversation history."""
-    from cubebox.agents.checkpointer_pi import init_cubepi_checkpointer
-    from cubebox.agents.convert_pi import cubepi_message_to_wire
+    from cubebox.agents.checkpointer import init_checkpointer
+    from cubebox.agents.convert import cubepi_message_to_wire
 
     del raw_request  # checkpointer factory override hook (unused; preserved for future use)
-    async with init_cubepi_checkpointer() as cp:
+    async with init_checkpointer() as cp:
         data = await cp.load(conversation_id)
     if data is None:
         return {"messages": [], "total": 0}
