@@ -230,3 +230,35 @@ async def test_seed_with_custom_catalog(session: AsyncSession, backend: FernetBa
     row = await repo.get_by_slug("testonly")
     assert row is not None
     assert row.supported_auth_methods == ["none"]
+
+
+def test_webtools_entry_has_web_search_and_web_fetch_citations() -> None:
+    """The webtools seed entry must carry citation mappings for both tools."""
+    by_slug = {e.slug: e for e in CATALOG}
+    assert "webtools" in by_slug
+    entry = by_slug["webtools"]
+
+    assert "web_search" in entry.tool_citations
+    web_search = entry.tool_citations["web_search"]
+    assert web_search["content_type"] == "json"
+    assert web_search["source_type"] == "web"
+    assert web_search["content_field"] == "results"
+    assert web_search["mapping"]["snippet"] in {"description", "snippet"}
+
+    assert "web_fetch" in entry.tool_citations
+    web_fetch = entry.tool_citations["web_fetch"]
+    assert web_fetch["content_type"] == "text"
+    assert web_fetch["content_field"] is None
+    assert web_fetch["mapping"]["snippet"] in {"text", "content"}
+
+
+def test_all_seed_tool_citations_are_valid_citation_configs() -> None:
+    """Every tool_citations entry across CATALOG must be a valid CitationConfig."""
+    from cubebox.middleware.citations.config import CitationConfig
+
+    for entry in CATALOG:
+        for tool_name, raw in entry.tool_citations.items():
+            try:
+                CitationConfig(**raw)
+            except Exception as exc:  # noqa: BLE001
+                pytest.fail(f"{entry.slug}.{tool_name}: invalid CitationConfig — {exc}")

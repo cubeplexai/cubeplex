@@ -345,6 +345,25 @@ CATALOG: list[CatalogSeedEntry] = [
         static_form_fields=_TOKEN_FIELD,
         static_auth_header_template=_BEARER_TEMPLATE,
         cred_metadata={},
+        tool_citations={
+            "web_search": {
+                "content_type": "json",
+                "source_type": "web",
+                "content_field": "results",
+                "mapping": {
+                    "url": "url",
+                    "title": "title",
+                    "snippet": "description",
+                },
+            },
+            "web_fetch": {
+                "content_type": "text",
+                "source_type": "web",
+                "content_field": None,
+                "mapping": {"snippet": "text"},
+                "args_mapping": {"url": "url"},
+            },
+        },
     ),
 ]
 
