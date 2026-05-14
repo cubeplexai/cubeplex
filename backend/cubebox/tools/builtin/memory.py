@@ -1,6 +1,6 @@
 """Memory CRUD tools ported to cubepi.AgentTool (M2.2).
 
-Factory: create_memory_tools_pi(service_factory, ...) returns a list of three
+Factory: create_memory_tools(service_factory, ...) returns a list of three
 cubepi.AgentTool instances mirroring the langchain list returned by
 create_memory_tools() in cubebox.tools.builtin.memory.
 
@@ -61,7 +61,7 @@ class MemoryUpdateArgs(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-def create_memory_tools_pi(
+def create_memory_tools(
     *,
     service_factory: Callable[[], AbstractAsyncContextManager[MemoryService]],
     conversation_id: str | None = None,

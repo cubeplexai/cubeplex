@@ -12,11 +12,11 @@ from cubepi.agent.types import AgentTool
 from cubebox.models.memory import MemoryScope, MemoryStatus, MemoryType
 from cubebox.services.memory import MemoryPermissionError
 from cubebox.services.memory_screen import MemoryScreenError
-from cubebox.tools.builtin.memory_pi import (
+from cubebox.tools.builtin.memory import (
     MemorySaveArgs,
     MemorySearchArgs,
     MemoryUpdateArgs,
-    create_memory_tools_pi,
+    create_memory_tools,
 )
 
 # ---------------------------------------------------------------------------
@@ -113,7 +113,7 @@ def test_create_memory_tools_pi_returns_three_agent_tools(
     service_factory: Any,
 ) -> None:
     """Factory returns exactly three cubepi.AgentTool instances."""
-    tools = create_memory_tools_pi(service_factory=service_factory)
+    tools = create_memory_tools(service_factory=service_factory)
     assert len(tools) == 3
     for t in tools:
         assert isinstance(t, AgentTool)
@@ -121,7 +121,7 @@ def test_create_memory_tools_pi_returns_three_agent_tools(
 
 def test_create_memory_tools_pi_tool_names(service_factory: Any) -> None:
     """Tool names match the canonical langchain names."""
-    tools = create_memory_tools_pi(service_factory=service_factory)
+    tools = create_memory_tools(service_factory=service_factory)
     names = {t.name for t in tools}
     assert names == {"memory_save", "memory_search", "memory_update"}
 
@@ -130,7 +130,7 @@ def test_create_memory_tools_pi_parameters_are_pydantic(service_factory: Any) ->
     """Each tool's parameters attribute is a Pydantic BaseModel subclass."""
     from pydantic import BaseModel
 
-    tools = create_memory_tools_pi(service_factory=service_factory)
+    tools = create_memory_tools(service_factory=service_factory)
     for t in tools:
         assert issubclass(t.parameters, BaseModel), f"{t.name} parameters not BaseModel"
 
@@ -146,7 +146,7 @@ async def test_memory_save_writes_to_service(
     fake_svc: _FakeMemoryService,
 ) -> None:
     """memory_save calls service.create and returns a saved status."""
-    tools = create_memory_tools_pi(service_factory=service_factory)
+    tools = create_memory_tools(service_factory=service_factory)
     save_tool = next(t for t in tools if t.name == "memory_save")
 
     args = MemorySaveArgs(
@@ -170,7 +170,7 @@ async def test_memory_save_returns_error_on_permission_error(
 ) -> None:
     """memory_save wraps MemoryPermissionError as an error status payload."""
     fake_svc._raise_on_create = MemoryPermissionError("workspace context required")
-    tools = create_memory_tools_pi(service_factory=service_factory)
+    tools = create_memory_tools(service_factory=service_factory)
     save_tool = next(t for t in tools if t.name == "memory_save")
 
     args = MemorySaveArgs(
@@ -191,7 +191,7 @@ async def test_memory_save_returns_rejected_on_screen_error(
 ) -> None:
     """memory_save wraps MemoryScreenError as a rejected status payload."""
     fake_svc._raise_on_create = MemoryScreenError("content violates policy")
-    tools = create_memory_tools_pi(service_factory=service_factory)
+    tools = create_memory_tools(service_factory=service_factory)
     save_tool = next(t for t in tools if t.name == "memory_save")
 
     args = MemorySaveArgs(
@@ -214,7 +214,7 @@ async def test_memory_save_forwards_conversation_id(
     async def _factory():
         yield fake_svc
 
-    tools = create_memory_tools_pi(
+    tools = create_memory_tools(
         service_factory=_factory,
         conversation_id="conv-xyz",
         run_id="run-abc",
@@ -242,7 +242,7 @@ async def test_memory_search_returns_items(
         _fake_memory_item("mem-1", content="dark mode preference"),
         _fake_memory_item("mem-2", content="light theme"),
     ]
-    tools = create_memory_tools_pi(service_factory=service_factory)
+    tools = create_memory_tools(service_factory=service_factory)
     search_tool = next(t for t in tools if t.name == "memory_search")
 
     args = MemorySearchArgs(query="theme preference")
@@ -262,7 +262,7 @@ async def test_memory_search_empty_result(
 ) -> None:
     """memory_search returns empty items list when repo finds nothing."""
     fake_svc._search_results = []
-    tools = create_memory_tools_pi(service_factory=service_factory)
+    tools = create_memory_tools(service_factory=service_factory)
     search_tool = next(t for t in tools if t.name == "memory_search")
 
     args = MemorySearchArgs(query="nonexistent")
@@ -283,7 +283,7 @@ async def test_memory_update_returns_updated_status(
     fake_svc: _FakeMemoryService,
 ) -> None:
     """memory_update calls service.update and returns updated status."""
-    tools = create_memory_tools_pi(service_factory=service_factory)
+    tools = create_memory_tools(service_factory=service_factory)
     update_tool = next(t for t in tools if t.name == "memory_update")
 
     args = MemoryUpdateArgs(memory_id="mem-1", content="revised content")
@@ -303,7 +303,7 @@ async def test_memory_update_returns_error_on_lookup_error(
 ) -> None:
     """memory_update wraps LookupError as error status payload."""
     fake_svc._raise_on_update = LookupError("memory item not found")
-    tools = create_memory_tools_pi(service_factory=service_factory)
+    tools = create_memory_tools(service_factory=service_factory)
     update_tool = next(t for t in tools if t.name == "memory_update")
 
     args = MemoryUpdateArgs(memory_id="nonexistent")
@@ -321,7 +321,7 @@ async def test_memory_update_returns_rejected_on_screen_error(
 ) -> None:
     """memory_update wraps MemoryScreenError as rejected status payload."""
     fake_svc._raise_on_update = MemoryScreenError("content violates policy")
-    tools = create_memory_tools_pi(service_factory=service_factory)
+    tools = create_memory_tools(service_factory=service_factory)
     update_tool = next(t for t in tools if t.name == "memory_update")
 
     args = MemoryUpdateArgs(memory_id="mem-1", content="bad content")
@@ -337,7 +337,7 @@ async def test_memory_update_archive_status(
     fake_svc: _FakeMemoryService,
 ) -> None:
     """memory_update passes status=archived to service."""
-    tools = create_memory_tools_pi(service_factory=service_factory)
+    tools = create_memory_tools(service_factory=service_factory)
     update_tool = next(t for t in tools if t.name == "memory_update")
 
     args = MemoryUpdateArgs(memory_id="mem-1", status=MemoryStatus.ARCHIVED)

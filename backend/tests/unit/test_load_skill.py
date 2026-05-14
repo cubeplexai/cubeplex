@@ -6,7 +6,7 @@ import json
 
 import pytest
 
-from cubebox.tools.builtin.load_skill_pi import create_load_skill_tool_pi
+from cubebox.tools.builtin.load_skill import create_load_skill_tool
 
 # ---------------------------------------------------------------------------
 # Test doubles
@@ -82,7 +82,7 @@ def catalog() -> _FakeCatalog:
 
 @pytest.mark.asyncio
 async def test_load_skill_returns_content(catalog: _FakeCatalog) -> None:
-    tool = create_load_skill_tool_pi(catalog=catalog, workspace_id="ws-1", org_id="org-1")
+    tool = create_load_skill_tool(catalog=catalog, workspace_id="ws-1", org_id="org-1")
     args = tool.parameters(skill_name="writing")
     result = await tool.execute("tc-1", args, signal=None, on_update=None)
     assert result.is_error in (None, False)
@@ -96,7 +96,7 @@ async def test_load_skill_returns_content(catalog: _FakeCatalog) -> None:
 
 @pytest.mark.asyncio
 async def test_load_skill_second_skill_returns_content(catalog: _FakeCatalog) -> None:
-    tool = create_load_skill_tool_pi(catalog=catalog, workspace_id="ws-1", org_id="org-1")
+    tool = create_load_skill_tool(catalog=catalog, workspace_id="ws-1", org_id="org-1")
     args = tool.parameters(skill_name="math")
     result = await tool.execute("tc-2", args, signal=None, on_update=None)
     assert result.is_error in (None, False)
@@ -108,7 +108,7 @@ async def test_load_skill_second_skill_returns_content(catalog: _FakeCatalog) ->
 
 @pytest.mark.asyncio
 async def test_load_skill_missing_returns_error(catalog: _FakeCatalog) -> None:
-    tool = create_load_skill_tool_pi(catalog=catalog, workspace_id="ws-1", org_id="org-1")
+    tool = create_load_skill_tool(catalog=catalog, workspace_id="ws-1", org_id="org-1")
     args = tool.parameters(skill_name="nonexistent")
     result = await tool.execute("tc-3", args, signal=None, on_update=None)
     assert result.is_error is True
@@ -124,7 +124,7 @@ async def test_load_skill_fetch_failure_returns_error() -> None:
         {"writing": ("1.0.0", "Write clearly.")},
         fetch_raises=OSError("object store unavailable"),
     )
-    tool = create_load_skill_tool_pi(catalog=catalog, workspace_id="ws-1", org_id="org-1")
+    tool = create_load_skill_tool(catalog=catalog, workspace_id="ws-1", org_id="org-1")
     args = tool.parameters(skill_name="writing")
     result = await tool.execute("tc-4", args, signal=None, on_update=None)
     assert result.is_error is True
@@ -134,7 +134,7 @@ async def test_load_skill_fetch_failure_returns_error() -> None:
 
 
 def test_load_skill_tool_metadata() -> None:
-    tool = create_load_skill_tool_pi(catalog=_FakeCatalog({}), workspace_id="ws-1", org_id="org-1")
+    tool = create_load_skill_tool(catalog=_FakeCatalog({}), workspace_id="ws-1", org_id="org-1")
     assert tool.name == "load_skill"
     assert tool.description
     assert "skill" in tool.description.lower()
@@ -143,8 +143,8 @@ def test_load_skill_tool_metadata() -> None:
 def test_load_skill_tool_parameters_schema() -> None:
     from pydantic import BaseModel
 
-    from cubebox.tools.builtin.load_skill_pi import LoadSkillInput
+    from cubebox.tools.builtin.load_skill import LoadSkillInput
 
-    tool = create_load_skill_tool_pi(catalog=_FakeCatalog({}), workspace_id="ws-1", org_id="org-1")
+    tool = create_load_skill_tool(catalog=_FakeCatalog({}), workspace_id="ws-1", org_id="org-1")
     assert issubclass(tool.parameters, BaseModel)
     assert tool.parameters is LoadSkillInput

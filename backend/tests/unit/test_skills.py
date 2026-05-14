@@ -20,7 +20,7 @@ from cubepi.agent.types import AfterToolCallContext, AgentContext, AgentToolResu
 from cubepi.providers.base import AssistantMessage, TextContent, ToolCall
 
 from cubebox.middleware.skills import SkillsMiddleware
-from cubebox.tools.builtin.load_skill_pi import LoadSkillOutput
+from cubebox.tools.builtin.load_skill import LoadSkillOutput
 
 # ---------------------------------------------------------------------------
 # Helpers
