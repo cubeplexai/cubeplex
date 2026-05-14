@@ -61,11 +61,13 @@ function VersionPopover({
   versions,
   selectedVersion,
   onSelectVersion,
+  portalContainer,
 }: {
   artifact: Artifact
   versions: ArtifactVersion[]
   selectedVersion: number | null
   onSelectVersion: (version: number | null) => void
+  portalContainer: HTMLElement | null
 }) {
   const formatRelativeTime = useFormatRelativeTime()
   const [open, setOpen] = useState(false)
@@ -84,7 +86,7 @@ function VersionPopover({
         v{currentVersion}
         <ChevronDown className="size-2.5" />
       </PopoverTrigger>
-      <PopoverContent className="w-56 p-1" align="end">
+      <PopoverContent className="w-56 p-1" align="end" container={portalContainer}>
         <div className="max-h-48 overflow-y-auto">
           {versions.map((v) => (
             <button
@@ -123,6 +125,7 @@ function ArtifactPanelHeader({
   onToggleFullscreen,
   isFullscreen,
   workspaceId,
+  portalContainer,
 }: {
   artifact: Artifact
   versions: ArtifactVersion[]
@@ -132,6 +135,7 @@ function ArtifactPanelHeader({
   onToggleFullscreen: () => void
   isFullscreen: boolean
   workspaceId: string
+  portalContainer: HTMLElement | null
 }) {
   const t = useTranslations('panel.artifactPanel')
   const Icon = getArtifactIcon(artifact)
@@ -147,6 +151,7 @@ function ArtifactPanelHeader({
         versions={versions}
         selectedVersion={selectedVersion}
         onSelectVersion={onSelectVersion}
+        portalContainer={portalContainer}
       />
       <span className="flex items-center gap-1">
         <button
@@ -276,6 +281,7 @@ export function ArtifactPanel() {
         onToggleFullscreen={toggleFullscreen}
         isFullscreen={isFullscreen}
         workspaceId={workspaceId}
+        portalContainer={isFullscreen ? containerRef.current : null}
       />
       <div className="flex-1 overflow-hidden">
         <PreviewContent
