@@ -187,6 +187,32 @@ export interface MCPOAuthStartResult {
   state: string
 }
 
+// ---------------- Tool-citations types ---------------- //
+
+export interface CitationConfigJSON {
+  content_type: 'json' | 'text'
+  source_type: string
+  content_field: string | null
+  mapping: Record<string, string>
+  args_mapping?: Record<string, string> | null
+  discriminator_field?: string | null
+  discriminator_values?: string[] | null
+}
+
+export interface ToolCitationsResponse {
+  server_id: string
+  server_name: string
+  tools_cache: Array<{ name: string; description: string; input_schema: unknown }>
+  tool_citations: Record<string, CitationConfigJSON>
+  catalog_defaults: Record<string, CitationConfigJSON> | null
+  orphan_keys: string[]
+}
+
+export interface CatalogToolCitationsResponse {
+  slug: string
+  tool_citations: Record<string, CitationConfigJSON>
+}
+
 // ---------------- Admin unified connector types ---------------- //
 
 export type MCPConnectorFilter = 'all' | 'installed' | 'available' | 'custom'

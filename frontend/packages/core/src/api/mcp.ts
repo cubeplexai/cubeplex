@@ -1,4 +1,6 @@
 import type {
+  CatalogToolCitationsResponse,
+  CitationConfigJSON,
   CredentialStatus,
   CredentialUpsertBody,
   MCPCatalogConnector,
@@ -18,6 +20,7 @@ import type {
   MCPTestConnectionBody,
   MCPTestConnectionResult,
   PromoteBody,
+  ToolCitationsResponse,
   WorkspaceOverride,
 } from '../types/mcp'
 import { toApiError, type ApiClient } from './client'
@@ -141,6 +144,39 @@ export async function wsPatchServer(
   const res = await client.patch(`/api/v1/ws/${wsId}/mcp/servers/${id}`, body)
   if (!res.ok) throw await toApiError(res)
   return (await res.json()) as MCPServer
+}
+
+export async function wsGetToolCitations(
+  client: ApiClient,
+  wsId: string,
+  serverId: string,
+): Promise<ToolCitationsResponse> {
+  const res = await client.get(`/api/v1/ws/${wsId}/mcp/servers/${serverId}/tool-citations`)
+  if (!res.ok) throw await toApiError(res)
+  return (await res.json()) as ToolCitationsResponse
+}
+
+export async function wsPatchToolCitations(
+  client: ApiClient,
+  wsId: string,
+  serverId: string,
+  toolCitations: Record<string, CitationConfigJSON>,
+): Promise<ToolCitationsResponse> {
+  const res = await client.patch(`/api/v1/ws/${wsId}/mcp/servers/${serverId}/tool-citations`, {
+    tool_citations: toolCitations,
+  })
+  if (!res.ok) throw await toApiError(res)
+  return (await res.json()) as ToolCitationsResponse
+}
+
+export async function wsGetCatalogToolCitations(
+  client: ApiClient,
+  wsId: string,
+  slug: string,
+): Promise<CatalogToolCitationsResponse> {
+  const res = await client.get(`/api/v1/ws/${wsId}/mcp/catalog/${slug}/tool-citations`)
+  if (!res.ok) throw await toApiError(res)
+  return (await res.json()) as CatalogToolCitationsResponse
 }
 
 export async function wsDeleteServer(client: ApiClient, wsId: string, id: string): Promise<void> {
