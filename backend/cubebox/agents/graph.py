@@ -16,7 +16,7 @@ from cubepi.middleware.base import Middleware
 from cubepi.providers.base import Provider
 
 
-def create_cubebox_cubepi_agent(
+def create_cubebox_agent(
     *,
     provider: Provider,
     model_id: str,

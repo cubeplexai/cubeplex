@@ -9,7 +9,7 @@ from cubepi.providers.base import (
     UserMessage,
 )
 
-from cubebox.agents.convert_pi import (
+from cubebox.agents.convert import (
     cubepi_message_to_wire,
     wire_input_to_cubepi_user_message,
 )

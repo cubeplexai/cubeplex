@@ -1,14 +1,14 @@
-"""graph_pi tests — create_cubebox_cubepi_agent (M1.4)."""
+"""graph_pi tests — create_cubebox_agent (M1.4)."""
 
 import pytest
 from cubepi import Agent
 from cubepi.providers.faux import FauxProvider, faux_assistant_message
 
-from cubebox.agents.graph_pi import create_cubebox_cubepi_agent
+from cubebox.agents.graph import create_cubebox_agent
 
 
 def test_returns_cubepi_agent_instance() -> None:
-    agent = create_cubebox_cubepi_agent(
+    agent = create_cubebox_agent(
         provider=FauxProvider(),
         model_id="test-model",
         provider_name="faux",
@@ -18,7 +18,7 @@ def test_returns_cubepi_agent_instance() -> None:
 
 
 def test_agent_carries_system_prompt() -> None:
-    agent = create_cubebox_cubepi_agent(
+    agent = create_cubebox_agent(
         provider=FauxProvider(),
         model_id="test-model",
         provider_name="faux",
@@ -31,7 +31,7 @@ def test_agent_accepts_checkpointer_and_thread_id() -> None:
     from cubepi.checkpointer import MemoryCheckpointer
 
     cp = MemoryCheckpointer()
-    agent = create_cubebox_cubepi_agent(
+    agent = create_cubebox_agent(
         provider=FauxProvider(),
         model_id="test-model",
         provider_name="faux",
@@ -44,7 +44,7 @@ def test_agent_accepts_checkpointer_and_thread_id() -> None:
 
 
 def test_agent_accepts_empty_tools() -> None:
-    agent = create_cubebox_cubepi_agent(
+    agent = create_cubebox_agent(
         provider=FauxProvider(),
         model_id="test-model",
         provider_name="faux",
@@ -59,7 +59,7 @@ async def test_bare_agent_runs_a_turn() -> None:
     """Smoke: bare cubepi agent runs an LLM call against FauxProvider."""
     provider = FauxProvider()
     provider.set_responses([faux_assistant_message("hello back")])
-    agent = create_cubebox_cubepi_agent(
+    agent = create_cubebox_agent(
         provider=provider,
         model_id="test-model",
         provider_name="faux",

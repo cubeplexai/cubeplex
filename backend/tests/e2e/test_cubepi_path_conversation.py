@@ -6,7 +6,7 @@ final done — confirming end-to-end wiring through:
 
   ProviderConfig → cubepi.AnthropicProvider/OpenAIProvider →
   cubepi.Agent (no cubebox middleware in M1) → AgentEvent stream →
-  convert_cubepi_agent_event_to_sse → cubebox SSE.
+  convert_agent_event_to_sse → cubebox SSE.
 
 The test environment (config.test.yaml) already sets agents.runtime = "cubepi"
 so no app.state override is needed here — the route is active for all E2E

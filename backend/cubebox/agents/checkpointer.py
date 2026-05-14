@@ -32,7 +32,7 @@ def _build_dsn() -> str:
 
 
 @asynccontextmanager
-async def init_cubepi_checkpointer(
+async def init_checkpointer(
     dsn: str | None = None,
     *,
     min_pool_size: int = 1,
@@ -41,7 +41,7 @@ async def init_cubepi_checkpointer(
     """Open a cubepi.PostgresCheckpointer for cubebox's DB.
 
     Usage:
-        async with init_cubepi_checkpointer() as cp:
+        async with init_checkpointer() as cp:
             agent = Agent(..., checkpointer=cp)
             ...
 

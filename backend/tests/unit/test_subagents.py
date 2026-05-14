@@ -235,7 +235,7 @@ async def test_error_path_returns_is_error() -> None:
     )
 
     # Patch the factory at its definition site (lazily imported inside _execute)
-    with patch("cubebox.agents.graph_pi.create_cubebox_cubepi_agent") as mock_factory:
+    with patch("cubebox.agents.graph.create_cubebox_agent") as mock_factory:
         mock_agent = AsyncMock()
         mock_agent.subscribe = lambda listener: lambda: None
         mock_agent.prompt = AsyncMock(side_effect=RuntimeError("inner boom"))

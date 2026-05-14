@@ -19,7 +19,7 @@ from typing import Any
 import pytest
 from cubepi.providers.base import AssistantMessage, TextContent, UserMessage
 
-from cubebox.agents.convert_pi import wire_input_to_cubepi_user_message
+from cubebox.agents.convert import wire_input_to_cubepi_user_message
 from cubebox.middleware.memory import (
     MemoryMiddleware,
     _prepend_snapshot_to_user_msg,
