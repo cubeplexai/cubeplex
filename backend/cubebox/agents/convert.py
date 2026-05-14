@@ -29,11 +29,24 @@ def _join_text(content: Sequence[Any]) -> str:
 def cubepi_message_to_wire(msg: Message) -> dict[str, Any]:
     """Convert a cubepi.Message into cubebox's API response dict shape."""
     if isinstance(msg, UserMessage):
-        return {
+        meta = dict(msg.metadata)
+        attachments = meta.pop("attachments", None)
+        wire: dict[str, Any] = {
             "role": "user",
             "content": _join_text(msg.content),
-            "metadata": dict(msg.metadata),
+            "metadata": meta,
         }
+        if attachments:
+            # The persisted metadata uses ``file_id`` (set by the content-block
+            # builder in run_manager); the wire contract surfaces it as ``id``
+            # to match the frontend ``AttachmentDto`` shape.
+            wire["attachments"] = [
+                {**{k: v for k, v in att.items() if k != "file_id"}, "id": att["file_id"]}
+                if isinstance(att, dict) and "file_id" in att
+                else att
+                for att in attachments
+            ]
+        return wire
 
     if isinstance(msg, AssistantMessage):
         tool_calls = [
@@ -41,7 +54,7 @@ def cubepi_message_to_wire(msg: Message) -> dict[str, Any]:
             for c in msg.content
             if isinstance(c, ToolCall)
         ]
-        meta: dict[str, Any] = dict(msg.metadata)
+        meta = dict(msg.metadata)
         if tool_calls:
             meta["tool_calls"] = tool_calls
         meta["usage"] = {
