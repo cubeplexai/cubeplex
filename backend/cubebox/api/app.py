@@ -321,7 +321,6 @@ async def lifespan(_app: FastAPI):  # type: ignore
 
 
 def create_app(
-    checkpointer_factory: Callable[[], Any] | None = None,
     sandbox_factory: Callable[[], Any] | None = None,
     redis_factory: Callable[[], Redis] | None = None,
 ) -> FastAPI:
@@ -329,8 +328,8 @@ def create_app(
     Create and configure the FastAPI application.
 
     Args:
-        checkpointer_factory: Optional factory for dependency injection (testing).
         sandbox_factory: Optional factory for dependency injection (testing).
+        redis_factory: Optional factory for dependency injection (testing).
 
     Returns:
         Configured FastAPI application instance
@@ -343,7 +342,6 @@ def create_app(
     )
 
     # Store DI factories for route handlers
-    app.state.checkpointer_factory = checkpointer_factory
     app.state.sandbox_factory = sandbox_factory
     app.state.redis_factory = redis_factory
 

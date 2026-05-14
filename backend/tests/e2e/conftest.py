@@ -13,7 +13,6 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from fastapi_users.db import SQLAlchemyUserDatabase
 from fastapi_users.schemas import BaseUserCreate
-from langgraph.checkpoint.memory import MemorySaver
 from PIL import Image
 from redis.asyncio import Redis
 from sqlalchemy import text
@@ -145,7 +144,7 @@ def _make_test_app() -> FastAPI:
 
 
 def _make_memory_test_app() -> FastAPI:
-    """Create a test app using MemorySaver and LocalSandbox (no DB needed for agent)."""
+    """Create a test app with NullPool DB + LocalSandbox (no real DB pool)."""
     url = _build_database_url()
     test_engine = create_async_engine(url, poolclass=NullPool)
     test_session_maker = async_sessionmaker(
@@ -159,13 +158,7 @@ def _make_memory_test_app() -> FastAPI:
         async with test_session_maker() as session:
             yield session
 
-    memory_saver = MemorySaver()
-    app = create_app(
-        checkpointer_factory=lambda: memory_saver,
-        sandbox_factory=None,
-    )
-    # Expose so tests can inspect raw thread state (e.g. compaction E2E).
-    app.state.memory_saver = memory_saver
+    app = create_app(sandbox_factory=None)
     app.dependency_overrides[get_session] = override_get_session
     return app
 
@@ -305,7 +298,7 @@ async def async_client() -> AsyncIterator[httpx.AsyncClient]:
 
 @pytest_asyncio.fixture
 async def memory_client() -> AsyncIterator[httpx.AsyncClient]:
-    """Async client using MemorySaver + LocalSandbox, auto-logged-in."""
+    """Async client using NullPool DB + LocalSandbox, auto-logged-in."""
     await _ensure_default_user_and_membership()
     app = _make_memory_test_app()
     # Force multi_tenant mode BEFORE lifespan starts so the startup
