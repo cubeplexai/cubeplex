@@ -51,7 +51,9 @@ export function StackedChart({ data, palette, height = 200, formatValue }: Props
           axisLine={false}
           tickLine={false}
           width={50}
-          tickFormatter={(v) => (typeof v === 'number' ? `$${v.toFixed(0)}` : String(v))}
+          tickFormatter={(v: number | string) =>
+            typeof v === 'number' ? `$${v.toFixed(0)}` : String(v)
+          }
         />
         <Tooltip
           formatter={(v: number) => (formatValue ? formatValue(v * 1_000_000) : `$${v.toFixed(2)}`)}
