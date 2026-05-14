@@ -21,6 +21,7 @@ E2E fixtures that call ``enable_audit()`` still work.
 
 from __future__ import annotations
 
+from collections import deque
 from typing import Any
 
 from cubepi.agent.types import AgentTool, AgentToolResult
@@ -28,12 +29,63 @@ from cubepi.middleware.base import Middleware
 from cubepi.providers.base import TextContent
 from pydantic import BaseModel, Field
 
-from cubebox.middleware.sandbox import (
-    _record_executed,
-)
 from cubebox.parsers import ParseOptions
 from cubebox.prompts.sandbox import SANDBOX_PROMPT_TEMPLATE
 from cubebox.sandbox.base import Sandbox
+
+# ---------------------------------------------------------------------------
+# Per-(workspace_id, conversation_id) ring buffer of commands the sandbox
+# actually ran (exit_code == 0). Disabled by default: production workers
+# would otherwise grow one deque per conversation forever (no consumer
+# evicts entries). E2E tests opt in via enable_audit() in a fixture; the
+# fixture also calls reset_executed_commands() on teardown so state does
+# not leak across tests.
+# ---------------------------------------------------------------------------
+
+_EXECUTED_COMMANDS: dict[tuple[str, str], deque[str]] = {}
+_EXECUTED_COMMANDS_CAP = 50
+_AUDIT_ENABLED = False
+
+
+def enable_audit() -> None:
+    """Enable command-audit recording. Tests call this from a fixture."""
+    global _AUDIT_ENABLED
+    _AUDIT_ENABLED = True
+
+
+def disable_audit() -> None:
+    """Disable recording and clear any accumulated state."""
+    global _AUDIT_ENABLED
+    _AUDIT_ENABLED = False
+    _EXECUTED_COMMANDS.clear()
+
+
+def _record_executed(workspace_id: str, conversation_id: str, command: str) -> None:
+    if not _AUDIT_ENABLED:
+        return
+    key = (workspace_id, conversation_id)
+    buf = _EXECUTED_COMMANDS.get(key)
+    if buf is None:
+        buf = deque(maxlen=_EXECUTED_COMMANDS_CAP)
+        _EXECUTED_COMMANDS[key] = buf
+    buf.append(command)
+
+
+def executed_commands(workspace_id: str, conversation_id: str) -> list[str]:
+    """Last <=50 commands the sandbox actually ran (exit_code == 0).
+
+    Returns the empty list unless ``enable_audit()`` was called (typically
+    from a test fixture). Sandbox-rejected attempts (non-zero exit) are
+    intentionally NOT recorded; semantics are "what hit the filesystem",
+    not "what the LLM tried".
+    """
+    return list(_EXECUTED_COMMANDS.get((workspace_id, conversation_id), ()))
+
+
+def reset_executed_commands() -> None:
+    """Clear all recorded commands. Test helper."""
+    _EXECUTED_COMMANDS.clear()
+
 
 # ---------------------------------------------------------------------------
 # Input schemas — kept byte-identical to the langgraph version's schemas

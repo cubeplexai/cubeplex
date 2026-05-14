@@ -2,11 +2,19 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 from cubepi.agent.types import AgentTool, AgentToolResult
 from cubepi.providers.base import TextContent
 from pydantic import BaseModel, Field
 
-from cubebox.tools.builtin.datetime_tool import get_datetime as _get_datetime_impl
+
+def _get_datetime_impl(include_time: bool = False) -> str:
+    """Return the current UTC date string, optionally including time."""
+    now = datetime.now(UTC)
+    if include_time:
+        return now.strftime("%Y-%m-%d %A %H:%M:%S UTC")
+    return now.strftime("%Y-%m-%d %A")
 
 
 class DateTimeInput(BaseModel):
