@@ -109,7 +109,7 @@ def service_factory(fake_svc: _FakeMemoryService):  # type: ignore[no-untyped-de
 # ---------------------------------------------------------------------------
 
 
-def test_create_memory_tools_pi_returns_three_agent_tools(
+def test_create_memory_tools_returns_three_agent_tools(
     service_factory: Any,
 ) -> None:
     """Factory returns exactly three cubepi.AgentTool instances."""
@@ -119,14 +119,14 @@ def test_create_memory_tools_pi_returns_three_agent_tools(
         assert isinstance(t, AgentTool)
 
 
-def test_create_memory_tools_pi_tool_names(service_factory: Any) -> None:
+def test_create_memory_tools_tool_names(service_factory: Any) -> None:
     """Tool names match the canonical langchain names."""
     tools = create_memory_tools(service_factory=service_factory)
     names = {t.name for t in tools}
     assert names == {"memory_save", "memory_search", "memory_update"}
 
 
-def test_create_memory_tools_pi_parameters_are_pydantic(service_factory: Any) -> None:
+def test_create_memory_tools_parameters_are_pydantic(service_factory: Any) -> None:
     """Each tool's parameters attribute is a Pydantic BaseModel subclass."""
     from pydantic import BaseModel
 

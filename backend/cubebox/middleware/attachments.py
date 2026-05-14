@@ -1,7 +1,7 @@
 """AttachmentHintMiddleware port to cubepi (M3.a.1).
 
 Reads attachments from cubepi.UserMessage.metadata["attachments"] (set by
-wire_input_to_cubepi_user_message in convert_pi.py) and renders them as a
+wire_input_to_cubepi_user_message in convert.py) and renders them as a
 [Attachments] text section appended to that message's text content.
 
 Design note: every UserMessage with attachments is augmented — not just the
