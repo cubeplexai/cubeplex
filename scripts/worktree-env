@@ -590,6 +590,75 @@ def cmd_destroy(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_reseed_db(args: argparse.Namespace) -> int:
+    """Drop + recreate the worktree's dev/test databases and re-run all
+    migrations from scratch.
+
+    Why this exists: after a rebase that pulls in main migrations newer than
+    the cubepi migration on this branch, alembic's stored revision pointer
+    already shows ``head`` (because the worktree's DB had the branch's old
+    head applied), so ``alembic upgrade head`` is a no-op even though the
+    underlying tables are missing the columns those skipped migrations were
+    supposed to add. Symptom: queries against the affected tables 500 with
+    ``UndefinedColumn``. Manually ALTERing the missing columns works but is
+    error-prone and easy to forget.
+
+    This subcommand sidesteps that mess by destroying the worktree's
+    databases and letting alembic re-apply the entire chain from base.
+
+    DATA LOSS: drops every row in the worktree's dev + test databases.
+    Conversations, runs, attachments, MCP installs, billing — all gone.
+    Confirm with --yes or the prompt.
+    """
+    info = current_worktree_info()
+    if info.is_main:
+        print("Refusing to reseed-db on the main worktree.", file=sys.stderr)
+        return 1
+
+    slug = slugify(info.branch)
+    registry = Registry.load(info.main_path / ".worktrees" / "registry.json")
+
+    entry = registry.entries.get(slug)
+    if entry is None:
+        print(
+            f"Refusing to reseed-db: slug {slug!r} is not in the registry. "
+            "Was this worktree created via `scripts/new-worktree`?",
+            file=sys.stderr,
+        )
+        return 1
+    if Path(entry["path"]).resolve() != info.path:
+        print(
+            f"Refusing to reseed-db: registry says slug {slug!r} lives at "
+            f"{entry['path']}, but reseed-db was invoked from {info.path}.",
+            file=sys.stderr,
+        )
+        return 1
+
+    dev = db_dev_schema(slug)
+    test = db_test_schema(slug)
+    if not args.yes:
+        print(
+            f"This will DROP and recreate {dev} + {test}, then run "
+            f"`alembic upgrade head`."
+        )
+        resp = input("Type 'yes' to proceed: ").strip().lower()
+        if resp != "yes":
+            print("Aborted.")
+            return 1
+
+    # Load env so DB creds + worktree DB names are in os.environ. Order mirrors
+    # cmd_destroy / cmd_init: .worktree.env first (setdefault semantics).
+    _load_dotenv_into_environ(env_file_path(info.path))
+    _load_dotenv_into_environ(info.path / "backend" / ".env")
+
+    _drop_schemas(slug)
+    _create_schemas(slug)
+    _alembic_upgrade(info.path)
+
+    print("Done. Worktree databases reseeded from base; alembic at head.")
+    return 0
+
+
 def cmd_doctor(args: argparse.Namespace) -> int:
     info = current_worktree_info()
     slug = slugify(info.branch)
@@ -771,6 +840,16 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("doctor", help="Verify schema, ports, services")
     sub.add_parser("destroy", help="Drop schemas, clear Redis prefix, remove .worktree.env")
     sub.add_parser("clean-orphans", help="Reclaim slots from removed worktrees")
+    reseed_parser = sub.add_parser(
+        "reseed-db",
+        help="Drop + recreate worktree DBs and re-run all migrations from base "
+        "(after a rebase introduces main migrations the alembic state already skipped)",
+    )
+    reseed_parser.add_argument(
+        "--yes",
+        action="store_true",
+        help="Skip the confirmation prompt (still refuses on main worktree)",
+    )
 
     args = parser.parse_args(argv)
     handlers = {
@@ -779,6 +858,7 @@ def main(argv: list[str] | None = None) -> int:
         "doctor": cmd_doctor,
         "destroy": cmd_destroy,
         "clean-orphans": cmd_clean_orphans,
+        "reseed-db": cmd_reseed_db,
     }
     return handlers[args.cmd](args)
 

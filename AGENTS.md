@@ -145,6 +145,24 @@ manually with `curl` or `lsof`.
 - `./scripts/worktree-env doctor` — verify databases exist, ports free, Postgres/Redis reachable, alembic at head
 - `./scripts/worktree-env destroy` — drop databases, clear redis prefix, delete `.worktree.env` (run **before** `git worktree remove`)
 - `./scripts/worktree-env clean-orphans` — interactive cleanup of registry entries and PostgreSQL databases left behind by removed worktrees
+- `./scripts/worktree-env reseed-db` — drop + recreate the worktree's dev/test databases and re-run all migrations from base. **Destructive — wipes every row.** Pass `--yes` to skip the prompt.
+
+### When to use `reseed-db`
+
+After a rebase that pulls in `main` migrations newer than this branch's own
+migrations, alembic's stored revision pointer on the DB already shows
+`head` (because the branch's old head was applied before the rebase), so
+`alembic upgrade head` is a no-op even though tables are still missing
+the columns the skipped migrations were supposed to add.
+
+Symptom: 500s with `psycopg.errors.UndefinedColumn: column X does not
+exist` against tables that landed on `main` while this branch was diverged
+(common offenders: `workspace_mcp_overrides`, `conversations`).
+
+Fix: `./scripts/worktree-env reseed-db` from inside the worktree. This
+drops both databases, recreates them, and re-runs alembic from base —
+clean slate, no manual `ALTER` patching. Costs you all your local
+conversation/run/attachment data, so don't run it on a worktree mid-test.
 
 ### Notes for AI agents
 
