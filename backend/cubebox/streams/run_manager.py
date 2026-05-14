@@ -166,6 +166,26 @@ def _dicts_to_sse_events(
     return events
 
 
+async def _drain_cubepi_sse_queue(
+    queue: asyncio.Queue[dict[str, Any] | None],
+    publish: Any,
+) -> None:
+    """Drain SSE dicts from a queue and forward them as typed AgentEvents.
+
+    Each event is published with a fresh ``datetime.now(UTC)`` timestamp so the
+    SSE consumer sees the time the event was actually streamed, not a fixed
+    value computed once at run start.  Exits when it pops a sentinel ``None``.
+    """
+    while True:
+        d = await queue.get()
+        if d is None:
+            return
+        sse_event = cubepi_dict_to_agent_event(d, datetime.now(UTC).isoformat())
+        if sse_event is None:
+            continue
+        await publish(sse_event, None)
+
+
 def cubepi_dict_to_agent_event(d: dict[str, Any], timestamp: str) -> AgentEvent | None:
     """Translate a single SSE dict produced by ``convert_agent_event_to_sse``
     into a typed cubebox ``AgentEvent``.
@@ -633,11 +653,15 @@ class RunManager:
         except Exception as _exc:
             logger.warning("MCP tools unavailable for cubepi run: {}", _exc)
 
-        # Collect SSE dicts from the cubepi listener before converting to typed events.
-        # agent.prompt() is an async method that drives the agent loop and calls
-        # synchronous listeners on each AgentEvent as they arrive.  We buffer the
-        # translated dicts here and flush after prompt() returns.
-        sse_dicts: list[dict[str, Any]] = []
+        # Bridge the synchronous cubepi listener to the async world via a queue.
+        # agent.prompt() is async and invokes synchronous listeners on each
+        # AgentEvent as they arrive.  Previously we buffered translated dicts
+        # and flushed them after prompt() returned, which made long responses
+        # appear as a single batch dump.  Instead, push each translated dict
+        # onto an asyncio.Queue and have a parallel drain task forward them
+        # through publish_stream_event in real time.  The sentinel ``None``
+        # signals the drainer to exit so we can finish citation flushing.
+        sse_queue: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue()
 
         # --- Build the 11 cubepi middleware (M3.f) ---
         # extra_ref late-binding: compaction, skills, and todo all need access to
@@ -882,10 +906,14 @@ class RunManager:
             extra_ref_holder["extra"] = agent._extra
 
             def _on_event(evt: Any, _signal: Any = None) -> None:
-                translated = convert_agent_event_to_sse(evt)
-                sse_dicts.extend(translated)
+                # Runs on the same event loop as _run_cubepi_path, so
+                # put_nowait is safe.  If we ever invoke the agent from a
+                # background thread, swap to loop.call_soon_threadsafe.
+                for d in convert_agent_event_to_sse(evt):
+                    sse_queue.put_nowait(d)
 
             agent.subscribe(_on_event)
+            drainer = asyncio.create_task(_drain_cubepi_sse_queue(sse_queue, publish_stream_event))
 
             # Compute relevance-memory snapshot before the agent loop starts
             # and bake it into the UserMessage metadata so MemoryMiddleware
@@ -928,16 +956,13 @@ class RunManager:
                 timestamp=_time.time(),
                 metadata=_user_msg_metadata,
             )
-            await agent.prompt(_user_msg)
-
-        # Translate buffered SSE dicts → typed AgentEvent objects and push through
-        # publish_stream_event, which handles citation buffering and turn_usage.
-        ts = datetime.now(UTC).isoformat()
-        for d in sse_dicts:
-            sse_event = cubepi_dict_to_agent_event(d, ts)
-            if sse_event is None:
-                continue
-            await publish_stream_event(sse_event, None)
+            try:
+                await agent.prompt(_user_msg)
+            finally:
+                # Signal drainer and wait for it to flush remaining events so
+                # all SSE dicts are published before citation buffers flush.
+                await sse_queue.put(None)
+                await drainer
 
         for agent_key in list(citation_buffers):
             await flush_citation_buffer(agent_key, agent_key)
