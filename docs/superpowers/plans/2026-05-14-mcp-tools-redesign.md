@@ -2,11 +2,13 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Fix empty `input_schema` from new langchain-mcp-adapters and rebuild `MCPServerDetail` with a documentation-grade master-detail tools browser.
+**Goal:** Rebuild `MCPServerDetail` with a documentation-grade master-detail tools browser.
 
-**Architecture:** A one-line backend serialize fix unblocks correct schema data. The frontend is split into a `ServerHero` + `ServerErrorBanner` + `OverviewPanel` + `ToolsPanel` tree. `ToolsPanel` is a master-detail (`ToolList` left, `ToolDetail` right) with a Schema / Try-it / JSON view switch. `SchemaView` is a recursive renderer over JSON Schema; `TryItView` is a disabled UI shell — backend invoke endpoint is a follow-up.
+**Architecture:** The frontend is split into a `ServerHero` + `ServerErrorBanner` + `OverviewPanel` + `ToolsPanel` tree. `ToolsPanel` is a master-detail (`ToolList` left, `ToolDetail` right) with a Schema / Try-it / JSON view switch. `SchemaView` is a recursive renderer over JSON Schema; `TryItView` is a disabled UI shell — backend invoke endpoint is a follow-up.
 
-**Tech Stack:** Python 3.13 / pytest / langchain-mcp-adapters (backend); Next.js 16 / React 19 / TypeScript / Tailwind 4 / shadcn-ui / next-intl (frontend).
+> The originally-paired backend bug (empty `input_schema` from `langchain-mcp-adapters`) was fixed upstream by PR #95 (replaced `cubebox/mcp/discovery.py` with `cubepi_admin_discovery.py` using the raw `mcp` SDK). Task 1 below is preserved for historical record but was dropped during the rebase onto main.
+
+**Tech Stack:** Next.js 16 / React 19 / TypeScript / Tailwind 4 / shadcn-ui / next-intl.
 
 **Worktree:** `/home/chris/cubebox/.worktrees/feat/mcp-tools-redesign` (slot 19, backend 8019, frontend 3019).
 
@@ -15,10 +17,6 @@
 ---
 
 ## File map
-
-**Backend (modify):**
-- `backend/cubebox/mcp/discovery.py` — `serialize_tool` handles dict `args_schema`
-- `backend/tests/unit/test_discovery_serialize.py` — add dict-schema test
 
 **Frontend (create):**
 - `frontend/packages/web/components/mcp/detail/ServerHero.tsx`
@@ -43,97 +41,11 @@
 
 ---
 
-## Task 1: Backend `serialize_tool` dict-schema fix
+## Task 1: ~~Backend `serialize_tool` dict-schema fix~~ (obsolete)
 
-**Files:**
-- Modify: `backend/cubebox/mcp/discovery.py:44-58`
-- Modify: `backend/tests/unit/test_discovery_serialize.py`
+Superseded by PR #95 — `cubebox/mcp/discovery.py` and `tests/unit/test_discovery_serialize.py` were both removed from main when admin discovery was ported to `cubebox/mcp/cubepi_admin_discovery.py` (raw `mcp` SDK). Nothing to do on this branch.
 
-- [ ] **Step 1: Add a failing test for dict-typed `args_schema`**
-
-Open `backend/tests/unit/test_discovery_serialize.py` and add a new test below `test_serialize_returns_dict_with_required_fields`:
-
-```python
-def test_serialize_passes_through_dict_args_schema() -> None:
-    """Newer langchain-mcp-adapters set args_schema to the raw JSON-Schema dict."""
-    json_schema: dict[str, Any] = {
-        "type": "object",
-        "properties": {
-            "query": {"type": "string", "description": "search term"},
-            "limit": {"type": "integer", "default": 10},
-        },
-        "required": ["query"],
-    }
-
-    class _FakeMcpTool:
-        name = "search"
-        description = "Search the index"
-        args_schema = json_schema
-
-    blob = serialize_tool(_FakeMcpTool())  # type: ignore[arg-type]
-
-    assert blob["name"] == "search"
-    assert blob["description"] == "Search the index"
-    assert blob["input_schema"] == json_schema
-```
-
-- [ ] **Step 2: Run the new test and confirm it fails**
-
-```bash
-cd backend
-uv run pytest tests/unit/test_discovery_serialize.py::test_serialize_passes_through_dict_args_schema -v
-```
-
-Expected: FAIL — `assert {} == {...}` (or similar) because the current code returns `input_schema = {}` for dict `args_schema`.
-
-- [ ] **Step 3: Patch `serialize_tool` to recognize dict `args_schema`**
-
-In `backend/cubebox/mcp/discovery.py`, replace the body of `serialize_tool` (lines 44–58) with:
-
-```python
-def serialize_tool(tool: BaseTool) -> dict[str, Any]:
-    """Extract name, description, and input schema as a JSON-safe dict."""
-    schema: dict[str, Any] = {}
-    args_schema = getattr(tool, "args_schema", None)
-    if isinstance(args_schema, dict):
-        schema = args_schema
-    elif args_schema is not None:
-        if hasattr(args_schema, "model_json_schema"):
-            schema = args_schema.model_json_schema()
-        elif hasattr(args_schema, "schema"):
-            schema = args_schema.schema()
-
-    return {
-        "name": tool.name,
-        "description": tool.description or "",
-        "input_schema": schema,
-    }
-```
-
-- [ ] **Step 4: Run the new and existing tests; confirm both pass**
-
-```bash
-cd backend
-uv run pytest tests/unit/test_discovery_serialize.py -v
-```
-
-Expected: 3 passed.
-
-- [ ] **Step 5: Run backend formatting + lint + type-check**
-
-```bash
-cd backend
-make format && make lint && make type-check
-```
-
-Expected: all green.
-
-- [ ] **Step 6: Commit**
-
-```bash
-git add backend/cubebox/mcp/discovery.py backend/tests/unit/test_discovery_serialize.py
-git commit -m "fix(mcp): serialize dict-typed args_schema from new langchain-mcp-adapters"
-```
+The task commit was auto-dropped as empty during the rebase.
 
 ---
 

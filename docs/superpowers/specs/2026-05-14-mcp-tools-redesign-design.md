@@ -6,83 +6,20 @@ Worktree slot: 19
 
 ## Background
 
-Two issues surfaced after upgrading `langchain-mcp-adapters`:
+The tools tab in `MCPServerDetail` renders an accordion of raw JSON. There is no search, no parameter table, no type / required indicators, and no way to "try it." The server detail page header is also under-designed — the connection status is a tiny dot and the connection-info card is a flat list of grey rows.
 
-1. **Empty parameter schemas.** Every MCP tool's `input_schema` in `tools_cache` is `{}`. Users see no parameters when inspecting an MCP server's tools.
-2. **Tools admin page is bare.** The tools tab in `MCPServerDetail` renders an accordion of raw JSON. There is no search, no parameter table, no type / required indicators, and no way to "try it." The server detail page header is also under-designed — the connection status is a tiny dot and the connection-info card is a flat list of grey rows.
-
-This spec covers both: a one-line backend fix for (1) and a structural redesign of the tools list + server detail page for (2).
+(An originally-paired backend bug — empty `input_schema` from the old `langchain-mcp-adapters`-based discovery — was fixed independently by PR #95, which replaced `cubebox/mcp/discovery.py` with `cubebox/mcp/cubepi_admin_discovery.py` using the raw `mcp` SDK. That path now reads `desc.inputSchema` directly, so no cubebox-side serialization fix is needed.)
 
 ## Goals
 
-- Backend: `serialize_tool` correctly serializes tools whose `args_schema` is a plain JSON-Schema dict (new adapter behavior).
 - Frontend: `MCPServerDetail` becomes a polished admin surface with a strong status hero, clear connection card, and a documentation-grade tools browser (master-detail with schema / try-it / json views).
 - Try-it ships as a UI shell only; the backend invocation endpoint is a follow-up.
 
 ## Non-goals
 
-- No data migration of existing empty `tools_cache` rows. Admins re-discover by clicking Refresh on each affected server.
 - No backend "test invoke" endpoint in this PR.
 - No redesign of any other MCP surface (catalog install, workspace overrides, custom create form) — only `MCPServerDetail` and its children.
 - No new syntax-highlight library; the JSON view uses the existing code-block styling.
-
----
-
-## Backend bug fix
-
-### Root cause
-
-`langchain-mcp-adapters` (current pinned version) returns `BaseTool` instances whose `args_schema` is the raw `inputSchema` dict from the MCP protocol, not a Pydantic class. See `langchain_mcp_adapters/tools.py:429`:
-
-```python
-return StructuredTool(
-    name=lc_tool_name,
-    description=tool.description or "",
-    args_schema=tool.inputSchema,
-    ...
-)
-```
-
-Cubebox's `cubebox/mcp/discovery.py::serialize_tool` only handles Pydantic-class `args_schema`:
-
-```python
-args_schema = getattr(tool, "args_schema", None)
-if args_schema is not None:
-    if hasattr(args_schema, "model_json_schema"):
-        schema = args_schema.model_json_schema()
-    elif hasattr(args_schema, "schema"):
-        schema = args_schema.schema()
-```
-
-A dict has neither attribute, so `schema` stays `{}` and writes through to `tools_cache`.
-
-### Fix
-
-Add a dict branch ahead of the Pydantic branches:
-
-```python
-def serialize_tool(tool: BaseTool) -> dict[str, Any]:
-    schema: dict[str, Any] = {}
-    args_schema = getattr(tool, "args_schema", None)
-    if isinstance(args_schema, dict):
-        schema = args_schema
-    elif args_schema is not None:
-        if hasattr(args_schema, "model_json_schema"):
-            schema = args_schema.model_json_schema()
-        elif hasattr(args_schema, "schema"):
-            schema = args_schema.schema()
-    return {
-        "name": tool.name,
-        "description": tool.description or "",
-        "input_schema": schema,
-    }
-```
-
-Pydantic branches stay for compatibility with older adapter versions and any non-MCP `BaseTool` that gets serialized through this path.
-
-### Migration
-
-None. Existing rows with `input_schema: {}` are repopulated by triggering a Refresh on the server in the admin UI (already wired). The redesigned UI surfaces a Refresh button prominently in the hero, so this is a one-click recovery per server.
 
 ---
 
@@ -229,8 +166,7 @@ Both `en.json` and `zh.json` get the new keys.
 
 ### Backend
 
-- New unit-level test in `backend/tests/mcp/test_discovery.py` (create if absent): construct a fake `BaseTool` whose `args_schema` is a dict `{"type": "object", "properties": {"q": {"type": "string"}}, "required": ["q"]}`, assert `serialize_tool` returns that exact dict under `input_schema`.
-- Keep an existing Pydantic-args case if there is one; otherwise add a minimal Pydantic case to lock in compatibility.
+No backend changes in this PR (see Background — PR #95 ported admin discovery to the raw `mcp` SDK, which already returns `input_schema` correctly).
 
 ### Frontend
 
@@ -246,7 +182,7 @@ Both `en.json` and `zh.json` get the new keys.
 - SchemaView renders correctly for: zero-arg tool, primitive-only tool, enum field, nested object, array of objects, oneOf, $ref.
 - JsonView copies the full schema.
 - Try-it form generates one input per property and disables Run.
-- Refresh after the backend fix repopulates `input_schema` and the UI shows real parameters.
+- Refresh on a server repopulates `input_schema` (via PR #95's discovery path) and the UI shows real parameters.
 
 ---
 
