@@ -81,8 +81,7 @@ RUN npm install -g \
 RUN npm install -g \
     docx \
     pptxgenjs \
-    playwright \
-    && playwright install --with-deps chromium \
+    playwright@1.59.0 \
     && rm -rf /var/lib/apt/lists/*
 
 # Configure vim
@@ -122,7 +121,9 @@ RUN python3 -m venv /opt/venv \
         ipykernel \
         nbformat \
         nbconvert \
-        markitdown
+        markitdown \
+        playwright==1.59.0 \
+    && /opt/venv/bin/playwright install --with-deps chromium
 
 # Create app directory
 RUN mkdir -p /workspace
