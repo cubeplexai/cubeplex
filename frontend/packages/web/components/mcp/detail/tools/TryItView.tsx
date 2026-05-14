@@ -16,7 +16,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { getProperties, getRequired, resolveType, type SchemaNode } from '@/lib/jsonSchemaTypes'
 
 export interface TryItViewProps {
@@ -67,23 +66,16 @@ export function TryItView({ toolName, schema }: TryItViewProps) {
       )}
 
       <div className="flex justify-end">
-        <TooltipProvider>
-          <Tooltip>
-            <TooltipTrigger
-              tabIndex={-1}
-              aria-hidden
-              className="cursor-default border-0 bg-transparent p-0"
-            >
-              <span tabIndex={0} className="inline-flex">
-                <Button type="button" disabled tabIndex={-1}>
-                  <Play data-icon="inline-start" />
-                  {t('run')}
-                </Button>
-              </span>
-            </TooltipTrigger>
-            <TooltipContent>{t('runDisabledTooltip')}</TooltipContent>
-          </Tooltip>
-        </TooltipProvider>
+        <span
+          title={t('runDisabledTooltip')}
+          aria-label={t('runDisabledTooltip')}
+          className="inline-flex"
+        >
+          <Button type="button" disabled>
+            <Play data-icon="inline-start" />
+            {t('run')}
+          </Button>
+        </span>
       </div>
     </div>
   )
