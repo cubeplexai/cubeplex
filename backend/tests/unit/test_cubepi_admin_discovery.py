@@ -32,7 +32,7 @@ def http_server() -> MCPServer:
 
 @pytest.mark.asyncio
 async def test_returns_serialized_tools_on_success(http_server: MCPServer) -> None:
-    fake_tool = MagicMock(name="echo", description="Echo input", inputSchema={"type": "object"})
+    fake_tool = MagicMock()
     fake_tool.name = "echo"
     fake_tool.description = "Echo input"
     fake_tool.inputSchema = {"type": "object", "properties": {"text": {"type": "string"}}}

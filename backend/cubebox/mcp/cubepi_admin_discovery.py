@@ -12,7 +12,6 @@ and does NOT consult this cache; tools_cache is admin-UI metadata.
 
 from __future__ import annotations
 
-import asyncio
 from typing import Any
 
 from loguru import logger
@@ -45,10 +44,12 @@ async def discover_tools_metadata(
         return False, None, "missing or invalid url in connection params"
 
     try:
-        async with sse_client(url, headers=headers, timeout=_TIMEOUT) as streams:
+        async with sse_client(
+            url, headers=headers, timeout=_TIMEOUT, sse_read_timeout=_TIMEOUT
+        ) as streams:
             async with ClientSession(*streams) as session:
-                await asyncio.wait_for(session.initialize(), timeout=_TIMEOUT)
-                resp = await asyncio.wait_for(session.list_tools(), timeout=_TIMEOUT)
+                await session.initialize()
+                resp = await session.list_tools()
     except BaseExceptionGroup as exc:
         causes = "; ".join(str(sub) for sub in exc.exceptions)
         return False, None, f"{exc}; causes: {causes}"
