@@ -38,10 +38,15 @@ export function typeChipClasses(kind: ResolvedType['kind']): string {
   return KIND_TO_CHIP[kind]
 }
 
+function decodePointerToken(token: string): string {
+  // Per RFC 6901: decode `~1` to `/`, then `~0` to `~` (order matters).
+  return token.replace(/~1/g, '/').replace(/~0/g, '~')
+}
+
 export function resolveRef(root: SchemaNode, ref: string): SchemaNode | null {
-  // Supports "#/definitions/Foo" and "#/$defs/Foo"
+  // Supports "#/definitions/Foo" and "#/$defs/Foo", with RFC 6901 token escapes.
   if (!ref.startsWith('#/')) return null
-  const parts = ref.slice(2).split('/')
+  const parts = ref.slice(2).split('/').map(decodePointerToken)
   let node: unknown = root
   for (const p of parts) {
     if (node && typeof node === 'object' && p in (node as Record<string, unknown>)) {
