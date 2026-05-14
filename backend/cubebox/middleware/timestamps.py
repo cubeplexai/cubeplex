@@ -1,4 +1,4 @@
-"""TimestampMiddlewarePi — cubepi port of TimestampMiddleware (M3.d.2).
+"""TimestampMiddleware — cubepi port of TimestampMiddleware (M3.d.2).
 
 Stamps timing data across the full hook surface:
 
@@ -49,7 +49,7 @@ from cubebox.utils.time import utc_isoformat
 _turn_started_at: ContextVar[str | None] = ContextVar("_turn_started_at", default=None)
 
 
-class TimestampMiddlewarePi(Middleware):
+class TimestampMiddleware(Middleware):
     """Stamps timing metadata on messages — never in prompt text.
 
     All timestamps land in out-of-band metadata fields (message.metadata,

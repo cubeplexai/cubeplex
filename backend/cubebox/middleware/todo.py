@@ -1,4 +1,4 @@
-"""TodoListMiddlewarePi — cubepi port of TodoListMiddleware (M3.e).
+"""TodoListMiddleware — cubepi port of TodoListMiddleware (M3.e).
 
 Full hook surface:
     tools                   — write_todos AgentTool
@@ -446,7 +446,7 @@ def _guard_retry_update_extra(
 # ---------------------------------------------------------------------------
 
 
-class TodoListMiddlewarePi(Middleware):
+class TodoListMiddleware(Middleware):
     """cubepi port of TodoListMiddleware (M3.e).
 
     Hooks:

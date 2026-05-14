@@ -1,4 +1,4 @@
-"""SkillsMiddlewarePi — cubepi port of SkillsMiddleware (M3.c.2).
+"""SkillsMiddleware — cubepi port of SkillsMiddleware (M3.c.2).
 
 Watches for ``load_skill`` tool invocations and injects the loaded skill
 content into subsequent system prompts so the model "remembers" the skill
@@ -10,7 +10,7 @@ and is read back via ``extra_ref`` in ``transform_system_prompt``:
     extra["loaded_skills"] → dict[str, str]  — skill_name → content
 
 The ``extra_ref: Callable[[], dict]`` constructor argument follows the
-same pattern as ``CompactionMiddlewarePi`` (M3.b.2): the agent factory
+same pattern as ``CompactionMiddleware`` (M3.b.2): the agent factory
 passes a closure over ``agent._extra`` so the same dict object is both
 written by ``after_tool_call`` and read back by ``transform_system_prompt``
 on every subsequent model call, and persisted by ``save_extra`` at
@@ -46,7 +46,7 @@ _LOADED_SKILLS_KEY = "loaded_skills"
 _SKILLS_SECTION_HEADER = "[Loaded skills]"
 
 
-class SkillsMiddlewarePi(Middleware):
+class SkillsMiddleware(Middleware):
     """cubepi port of SkillsMiddleware (M3.c.2).
 
     Hooks:

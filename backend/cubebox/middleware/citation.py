@@ -1,4 +1,4 @@
-"""CitationMiddlewarePi — cubepi port of CitationMiddleware (M3.a.3).
+"""CitationMiddleware — cubepi port of CitationMiddleware (M3.a.3).
 
 Implements the cubepi ``Middleware`` protocol with a single hook:
 
@@ -50,7 +50,7 @@ def _extract_text_content(content: list[Any]) -> str:
     return "\n".join(texts)
 
 
-class CitationMiddlewarePi(Middleware):
+class CitationMiddleware(Middleware):
     """Intercepts tool results to chunk text and assign citation IDs.
 
     For tools with citation configuration (keyed by tool name in
@@ -104,7 +104,7 @@ class CitationMiddlewarePi(Middleware):
 
         counter = citation_counter_var.get()
         if counter is None:
-            logger.warning("CitationMiddlewarePi: no CitationCounter in context, skipping")
+            logger.warning("CitationMiddleware: no CitationCounter in context, skipping")
             return None
 
         # Prefer direct queue reference; fall back to ContextVar
@@ -122,9 +122,7 @@ class CitationMiddlewarePi(Middleware):
                 # Non-JSON output with no content_field — treat raw text as a single item
                 items = [{"text": raw_content}]
             else:
-                logger.warning(
-                    "CitationMiddlewarePi: failed to parse JSON for tool '{}'", tool_name
-                )
+                logger.warning("CitationMiddleware: failed to parse JSON for tool '{}'", tool_name)
                 return None
 
         all_citations: list[dict[str, Any]] = []
@@ -149,7 +147,7 @@ class CitationMiddlewarePi(Middleware):
                 await queue.put(("citation", None, citation_data))
             else:
                 logger.warning(
-                    "CitationMiddlewarePi: no event queue available for citation_id={}",
+                    "CitationMiddleware: no event queue available for citation_id={}",
                     citation_id,
                 )
 
@@ -159,7 +157,7 @@ class CitationMiddlewarePi(Middleware):
             return None
 
         logger.info(
-            "CitationMiddlewarePi: tool='{}' emitted {} citations",
+            "CitationMiddleware: tool='{}' emitted {} citations",
             tool_name,
             len(all_citations),
         )

@@ -1,4 +1,4 @@
-"""MemoryMiddlewarePi unit tests (M3.b.1).
+"""MemoryMiddleware unit tests (M3.b.1).
 
 Covers:
 - Cache-discipline byte-stability: snapshot rendered_text and pinned render
@@ -20,8 +20,8 @@ import pytest
 from cubepi.providers.base import AssistantMessage, TextContent, UserMessage
 
 from cubebox.agents.convert_pi import wire_input_to_cubepi_user_message
-from cubebox.middleware.memory_pi import (
-    MemoryMiddlewarePi,
+from cubebox.middleware.memory import (
+    MemoryMiddleware,
     _prepend_snapshot_to_user_msg,
     _render_block,
     _render_pinned,
@@ -70,15 +70,15 @@ class _FakeRepo:
         return list(self._items)
 
 
-def _make_middleware(items: list[MemoryItem] | None = None) -> MemoryMiddlewarePi:
-    """Build a MemoryMiddlewarePi backed by a fake repo."""
+def _make_middleware(items: list[MemoryItem] | None = None) -> MemoryMiddleware:
+    """Build a MemoryMiddleware backed by a fake repo."""
     repo = _FakeRepo(items)
 
     @asynccontextmanager
     async def _factory():  # type: ignore[return]
         yield repo
 
-    return MemoryMiddlewarePi(repo_factory=_factory)
+    return MemoryMiddleware(repo_factory=_factory)
 
 
 def _user_msg(text: str, snapshot: dict[str, Any] | None = None) -> UserMessage:

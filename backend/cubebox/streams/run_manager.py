@@ -654,20 +654,20 @@ class RunManager:
 
         cubepi_middleware: list[Any] = []
 
-        # 1. AttachmentHintMiddlewarePi — no deps
+        # 1. AttachmentHintMiddleware — no deps
         try:
-            from cubebox.middleware.attachments_pi import AttachmentHintMiddlewarePi
+            from cubebox.middleware.attachments import AttachmentHintMiddleware
 
-            cubepi_middleware.append(AttachmentHintMiddlewarePi())
+            cubepi_middleware.append(AttachmentHintMiddleware())
         except Exception as _exc:
-            logger.warning("AttachmentHintMiddlewarePi unavailable: {}", _exc)
+            logger.warning("AttachmentHintMiddleware unavailable: {}", _exc)
 
-        # 2. ArtifactMiddlewarePi — needs sandbox
+        # 2. ArtifactMiddleware — needs sandbox
         if sandbox is not None:
             try:
-                from cubebox.middleware.artifacts_pi import ArtifactMiddlewarePi
+                from cubebox.middleware.artifacts import ArtifactMiddleware
 
-                artifact_mw = ArtifactMiddlewarePi(
+                artifact_mw = ArtifactMiddleware(
                     sandbox=sandbox,
                     conversation_id=conversation_id,
                     org_id=ctx.org_id,
@@ -677,29 +677,29 @@ class RunManager:
                 # Middleware tools (save_artifact) collected for ordered merge below
                 _artifact_tools.extend(artifact_mw.tools)
             except Exception as _exc:
-                logger.warning("ArtifactMiddlewarePi unavailable: {}", _exc)
+                logger.warning("ArtifactMiddleware unavailable: {}", _exc)
 
-        # 3. CitationMiddlewarePi — needs citation_configs (empty dict = pass-through)
+        # 3. CitationMiddleware — needs citation_configs (empty dict = pass-through)
         try:
-            from cubebox.middleware.citation_pi import CitationMiddlewarePi
+            from cubebox.middleware.citation import CitationMiddleware
             from cubebox.middleware.citations.counter import citation_event_queue
 
             cubepi_middleware.append(
-                CitationMiddlewarePi(
+                CitationMiddleware(
                     citation_configs={},
                     event_queue=citation_event_queue.get(None),
                 )
             )
         except Exception as _exc:
-            logger.warning("CitationMiddlewarePi unavailable: {}", _exc)
+            logger.warning("CitationMiddleware unavailable: {}", _exc)
 
-        # 4. MemoryMiddlewarePi — needs repo_factory
+        # 4. MemoryMiddleware — needs repo_factory
         try:
             from collections.abc import AsyncIterator as _AsyncIterator2
             from contextlib import asynccontextmanager as _asynccontextmanager2
 
             from cubebox.db.engine import async_session_maker as _mem2_session_maker
-            from cubebox.middleware.memory_pi import MemoryMiddlewarePi
+            from cubebox.middleware.memory import MemoryMiddleware
             from cubebox.repositories.memory import MemoryRepository as _MemRepo2
 
             @_asynccontextmanager2
@@ -712,15 +712,15 @@ class RunManager:
                         workspace_id=ctx.workspace_id,
                     )
 
-            cubepi_middleware.append(MemoryMiddlewarePi(repo_factory=_mem_repo_factory))
+            cubepi_middleware.append(MemoryMiddleware(repo_factory=_mem_repo_factory))
         except Exception as _exc:
-            logger.warning("MemoryMiddlewarePi unavailable: {}", _exc)
+            logger.warning("MemoryMiddleware unavailable: {}", _exc)
 
-        # 5. CompactionMiddlewarePi — needs extra_ref + summary_llm + config
+        # 5. CompactionMiddleware — needs extra_ref + summary_llm + config
         try:
             from cubebox.config import config as _comp_cfg
             from cubebox.llm.factory import LLMFactory as _CompLLMFactory
-            from cubebox.middleware.compaction_pi import CompactionMiddlewarePi
+            from cubebox.middleware.compaction import CompactionMiddleware
 
             if _comp_cfg.get("compaction.enabled", False):
                 _summary_provider = _comp_cfg.get("compaction.summary_provider")
@@ -733,7 +733,7 @@ class RunManager:
                 _ctx_window: int = int(_comp_cfg.get("compaction.fallback_context_window", 64000))
                 _ratio = float(_comp_cfg.get("compaction.threshold_ratio", 0.7))
                 cubepi_middleware.append(
-                    CompactionMiddlewarePi(
+                    CompactionMiddleware(
                         extra_ref=_extra_ref,
                         summary_llm=_summary_llm,
                         max_tokens_before_compact=int(_ctx_window * _ratio),
@@ -749,18 +749,18 @@ class RunManager:
                     )
                 )
                 logger.info(
-                    "CompactionMiddlewarePi enabled (threshold={} tokens)",
+                    "CompactionMiddleware enabled (threshold={} tokens)",
                     int(_ctx_window * _ratio),
                 )
         except Exception as _exc:
-            logger.warning("CompactionMiddlewarePi not loaded: {}", _exc)
+            logger.warning("CompactionMiddleware not loaded: {}", _exc)
 
-        # 6. SandboxMiddlewarePi — needs sandbox
+        # 6. SandboxMiddleware — needs sandbox
         if sandbox is not None:
             try:
-                from cubebox.middleware.sandbox_pi import SandboxMiddlewarePi
+                from cubebox.middleware.sandbox import SandboxMiddleware
 
-                sandbox_mw = SandboxMiddlewarePi(
+                sandbox_mw = SandboxMiddleware(
                     sandbox=sandbox,
                     conversation_id=conversation_id,
                     workspace_id=ctx.workspace_id,
@@ -770,25 +770,25 @@ class RunManager:
                 # ordered merge below
                 _sandbox_tools.extend(sandbox_mw.tools)
             except Exception as _exc:
-                logger.warning("SandboxMiddlewarePi unavailable: {}", _exc)
+                logger.warning("SandboxMiddleware unavailable: {}", _exc)
 
-        # 7. SkillsMiddlewarePi — needs extra_ref
+        # 7. SkillsMiddleware — needs extra_ref
         try:
-            from cubebox.middleware.skills_pi import SkillsMiddlewarePi
+            from cubebox.middleware.skills import SkillsMiddleware
 
-            cubepi_middleware.append(SkillsMiddlewarePi(extra_ref=_extra_ref))
+            cubepi_middleware.append(SkillsMiddleware(extra_ref=_extra_ref))
         except Exception as _exc:
-            logger.warning("SkillsMiddlewarePi unavailable: {}", _exc)
+            logger.warning("SkillsMiddleware unavailable: {}", _exc)
 
-        # 8. SubAgentMiddlewarePi — needs provider + model info + shared tools
+        # 8. SubAgentMiddleware — needs provider + model info + shared tools
         try:
-            from cubebox.middleware.subagents_pi import SubAgentMiddlewarePi
+            from cubebox.middleware.subagents import SubAgentMiddleware
 
             # Cost middleware (if present) is passed as inherited_middleware for depth attribution.
             # Build the cost instance separately so SubAgent can clone it.
             _cost_mw_for_inherit: list[Any] = []
             try:
-                from cubebox.middleware.cost_pi import CostMiddlewarePi as _CostMwPi
+                from cubebox.middleware.cost import CostMiddleware as _CostMwPi
 
                 _cost_mw_for_inherit = [
                     _CostMwPi(
@@ -801,7 +801,7 @@ class RunManager:
             except Exception:
                 pass
 
-            subagent_mw = SubAgentMiddlewarePi(
+            subagent_mw = SubAgentMiddleware(
                 subagent_map={},
                 default_provider=provider,
                 default_model_id=model_id,
@@ -814,14 +814,14 @@ class RunManager:
             cubepi_middleware.append(subagent_mw)
             _subagent_tools.extend(subagent_mw.tools)
         except Exception as _exc:
-            logger.warning("SubAgentMiddlewarePi unavailable: {}", _exc)
+            logger.warning("SubAgentMiddleware unavailable: {}", _exc)
 
-        # 9. CostMiddlewarePi — needs org/workspace/user/conversation IDs
+        # 9. CostMiddleware — needs org/workspace/user/conversation IDs
         try:
-            from cubebox.middleware.cost_pi import CostMiddlewarePi
+            from cubebox.middleware.cost import CostMiddleware
 
             cubepi_middleware.append(
-                CostMiddlewarePi(
+                CostMiddleware(
                     org_id=ctx.org_id,
                     workspace_id=ctx.workspace_id,
                     user_id=ctx.user_id,
@@ -829,25 +829,25 @@ class RunManager:
                 )
             )
         except Exception as _exc:
-            logger.warning("CostMiddlewarePi unavailable: {}", _exc)
+            logger.warning("CostMiddleware unavailable: {}", _exc)
 
-        # 10. TimestampMiddlewarePi — no deps
+        # 10. TimestampMiddleware — no deps
         try:
-            from cubebox.middleware.timestamps_pi import TimestampMiddlewarePi
+            from cubebox.middleware.timestamps import TimestampMiddleware
 
-            cubepi_middleware.append(TimestampMiddlewarePi())
+            cubepi_middleware.append(TimestampMiddleware())
         except Exception as _exc:
-            logger.warning("TimestampMiddlewarePi unavailable: {}", _exc)
+            logger.warning("TimestampMiddleware unavailable: {}", _exc)
 
-        # 11. TodoListMiddlewarePi — needs extra_ref
+        # 11. TodoListMiddleware — needs extra_ref
         try:
-            from cubebox.middleware.todo_pi import TodoListMiddlewarePi
+            from cubebox.middleware.todo import TodoListMiddleware
 
-            todo_mw = TodoListMiddlewarePi(extra_ref=_extra_ref)
+            todo_mw = TodoListMiddleware(extra_ref=_extra_ref)
             cubepi_middleware.append(todo_mw)
             _todo_tools.extend(todo_mw.tools)
         except Exception as _exc:
-            logger.warning("TodoListMiddlewarePi unavailable: {}", _exc)
+            logger.warning("TodoListMiddleware unavailable: {}", _exc)
 
         # --- Final tool merge (M5.4 byte-parity) ---
         # Compose in the same order as langgraph's create_cubebox_agent:
@@ -888,7 +888,7 @@ class RunManager:
             agent.subscribe(_on_event)
 
             # Compute relevance-memory snapshot before the agent loop starts
-            # and bake it into the UserMessage metadata so MemoryMiddlewarePi
+            # and bake it into the UserMessage metadata so MemoryMiddleware
             # can prepend the rendered snapshot text during transform_context.
             # This is the cubepi equivalent of the LangGraph path's snapshot
             # channel injection (M3.b.1 / cache discipline).
@@ -897,7 +897,7 @@ class RunManager:
             from cubepi.providers.base import TextContent as _TextContent
             from cubepi.providers.base import UserMessage as _UserMessage
 
-            from cubebox.middleware.memory_pi import compute_relevance_snapshot as _compute_snap
+            from cubebox.middleware.memory import compute_relevance_snapshot as _compute_snap
 
             _user_msg_metadata: dict[str, Any] = {}
             try:
@@ -909,7 +909,7 @@ class RunManager:
                 logger.warning("Failed to compute relevance snapshot: {}", _snap_exc)
 
             # Build attachment metadata blocks and inject into user message so
-            # AttachmentHintMiddlewarePi can render the [Attachments] hint.
+            # AttachmentHintMiddleware can render the [Attachments] hint.
             if attachments:
                 try:
                     _att_blocks = await _build_attachment_content_blocks(
@@ -957,7 +957,7 @@ class RunManager:
             citation_counter_var,
             citation_event_queue,
         )
-        from cubebox.middleware.subagents_pi import subagent_event_queue
+        from cubebox.middleware.subagents import subagent_event_queue
 
         sandbox = None
         sandbox_manager = None
