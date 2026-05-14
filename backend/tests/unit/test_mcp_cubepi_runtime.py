@@ -2,12 +2,20 @@
 
 from __future__ import annotations
 
+import dataclasses
 from unittest.mock import AsyncMock
 
 import pytest
 
 from cubebox.mcp.cubepi_discovery import CubepiMCPServerSpec
 from cubebox.mcp.cubepi_runtime import load_workspace_mcp_tools_for_cubepi
+
+
+@dataclasses.dataclass
+class _FakeTool:
+    """Minimal dataclass-compatible stand-in for cubepi.AgentTool in unit tests."""
+
+    name: str
 
 
 @pytest.mark.asyncio
@@ -21,7 +29,7 @@ async def test_load_returns_empty_when_no_servers(monkeypatch: pytest.MonkeyPatc
         "cubebox.mcp.cubepi_runtime.discover_workspace_mcp_servers_for_cubepi",
         _fake_discover,
     )
-    tools = await load_workspace_mcp_tools_for_cubepi(
+    tools, _citation_configs = await load_workspace_mcp_tools_for_cubepi(
         session=None,  # type: ignore[arg-type]
         workspace_id="ws-1",
         org_id="org-1",
@@ -43,7 +51,7 @@ async def test_load_skips_failing_servers(monkeypatch: pytest.MonkeyPatch) -> No
     async def _fake_discover(**kw: object) -> list[CubepiMCPServerSpec]:
         return specs
 
-    fake_tool = type("T", (), {"name": "good_tool"})()
+    fake_tool = _FakeTool(name="good_tool")
 
     async def _fake_loader(
         url: str,
@@ -64,7 +72,7 @@ async def test_load_skips_failing_servers(monkeypatch: pytest.MonkeyPatch) -> No
         _fake_loader,
     )
 
-    tools = await load_workspace_mcp_tools_for_cubepi(
+    tools, _citation_configs = await load_workspace_mcp_tools_for_cubepi(
         session=None,  # type: ignore[arg-type]
         workspace_id="ws-1",
         org_id="org-1",
@@ -73,7 +81,8 @@ async def test_load_skips_failing_servers(monkeypatch: pytest.MonkeyPatch) -> No
         signer=None,  # type: ignore[arg-type]
     )
     assert len(tools) == 1
-    assert getattr(tools[0], "name", None) == "good_tool"
+    # Tools are namespaced as "{server_name}__{bare_name}" after Task 6.
+    assert getattr(tools[0], "name", None) == "good__good_tool"
 
 
 @pytest.mark.asyncio
@@ -90,7 +99,7 @@ async def test_load_aggregates_tools_from_multiple_servers(
         return specs
 
     def _make_tool(name: str) -> object:
-        return type("T", (), {"name": name})()
+        return _FakeTool(name=name)
 
     async def _fake_loader(
         url: str,
@@ -111,7 +120,7 @@ async def test_load_aggregates_tools_from_multiple_servers(
         _fake_loader,
     )
 
-    tools = await load_workspace_mcp_tools_for_cubepi(
+    tools, _citation_configs = await load_workspace_mcp_tools_for_cubepi(
         session=None,  # type: ignore[arg-type]
         workspace_id="ws-1",
         org_id="org-1",
@@ -120,8 +129,9 @@ async def test_load_aggregates_tools_from_multiple_servers(
         signer=None,  # type: ignore[arg-type]
     )
     assert len(tools) == 3
+    # Tools are namespaced as "{server_name}__{bare_name}" after Task 6.
     names = {getattr(t, "name", None) for t in tools}
-    assert names == {"tool_a", "tool_b", "tool_c"}
+    assert names == {"srv1__tool_a", "srv1__tool_b", "srv2__tool_c"}
 
 
 @pytest.mark.asyncio
@@ -152,7 +162,7 @@ async def test_load_all_servers_fail_returns_empty(monkeypatch: pytest.MonkeyPat
         _fake_loader,
     )
 
-    tools = await load_workspace_mcp_tools_for_cubepi(
+    tools, _citation_configs = await load_workspace_mcp_tools_for_cubepi(
         session=None,  # type: ignore[arg-type]
         workspace_id="ws-1",
         org_id="org-1",
