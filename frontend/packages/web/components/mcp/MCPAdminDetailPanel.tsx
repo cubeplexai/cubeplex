@@ -22,8 +22,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 
 import { MCPCatalogInstallPanel } from './MCPCatalogInstallPanel'
 import { MCPCustomCreatePanel } from './MCPCustomCreatePanel'
-import { MCPToolsTable } from './MCPToolsTable'
 import { MCPWorkspacesTab } from './MCPWorkspacesTab'
+import { ToolsPanel } from './detail/tools/ToolsPanel'
 
 const OAUTH_ORIGIN_KEY = 'mcp_oauth_origin'
 
@@ -341,7 +341,7 @@ export function MCPAdminDetailPanel({
 
         {/* Tools tab */}
         <TabsContent value="tools" className="mt-4">
-          <MCPToolsTable tools={server.tools_cache ?? []} />
+          <ToolsPanel tools={server.tools_cache ?? []} />
         </TabsContent>
 
         {/* Workspaces tab (org-wide only) */}
