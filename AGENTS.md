@@ -4,7 +4,7 @@ Guidance for AI agent work in this repository.
 
 ## Project Overview
 - `cubebox` is a full-stack system with:
-  - FastAPI + LangGraph backend (streaming agent execution, SSE events)
+  - FastAPI + cubepi backend (streaming agent execution, SSE events)
   - Next.js frontend monorepo with shared TypeScript core package
 - Backend and frontend each have additional detailed instructions:
   - `backend/CLAUDE.md`
@@ -55,12 +55,12 @@ cubebox/
   - `make dev-install`, `make format`, `make lint`, `make lint-fix`
   - `make type-check`, `make test`, `make test-cov`, `make check`
 - Core runtime flow:
-  - API route posts stream to `create_cubebox_agent()` and LangGraph `astream(...)`
-  - SSE event stream includes `text_delta`, `reasoning`, `tool_call`, `tool_result`, `error`, `done`
+  - API route streams via `RunManager._run_cubepi_path` → `cubepi.Agent` listener → SSE translator
+  - SSE event stream includes `text_delta`, `reasoning`, `tool_call`, `tool_result`, `usage`, `error`, `done`
 - Architecture to remember:
-  - Agent factory: `cubebox/agents/graph.py`
-  - Middleware stack: sandbox / subagents / skills
-  - Message history stored in LangGraph checkpointer thread state (no separate messages table)
+  - Agent factory: `cubebox/agents/graph.py::create_cubebox_agent`
+  - Middleware stack: sandbox / subagents / skills / memory / compaction / cost / timestamps / todo / artifacts / citation / attachment-hint
+  - Message history persisted by cubepi `PostgresCheckpointer` (HASH-partitioned 64 ways on `thread_id`)
   - Identity model: Organization → Workspace → Membership → User, with `OrgScopedMixin` enforcement
   - All business routes are workspace-scoped via `/api/v1/ws/{workspace_id}/...`
 - E2E caveat:
