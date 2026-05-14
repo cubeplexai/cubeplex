@@ -603,6 +603,26 @@
       "loadingConnector": "加载 connector 中…",
       "deleteConfirm": "确认删除 {name}？该服务的绑定与凭证将一并删除。",
       "scopeError": "组织 connector 只支持组织共享、按用户或身份直通。"
+    },
+    "serverDetail": {
+      "citations": {
+        "loading": "加载引用映射中…",
+        "disable": "禁用",
+        "resetToCatalogDefault": "恢复目录默认值",
+        "copyFromPeer": "从…复制",
+        "sourceType": "来源类型",
+        "contentType": "内容类型",
+        "resultLocation": "结果位置",
+        "wholeResponseIsOneItem": "整个响应为单一条目",
+        "contentFieldPlaceholder": "例如 results",
+        "metadataMapping": "元数据映射",
+        "addField": "添加字段",
+        "noSampleHint": "无工具样本 — 请手动输入输出字段路径。",
+        "unsavedChanges": "有未保存的更改，确认放弃？",
+        "saveChanges": "保存更改",
+        "saving": "保存中…",
+        "remove": "移除"
+      }
     }
   },
   "mcpCatalog": {
