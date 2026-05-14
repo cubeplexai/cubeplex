@@ -530,6 +530,12 @@ class RunManager:
             _model_max_tokens = 32000
             _model_temperature = 0.7
 
+        # TODO(PR #84 review - fallback chains TBD): the langgraph path
+        # used LangChain.with_fallbacks() to chain ModelConfig.fallback_models
+        # for transient retries. cubepi v0.3.0 has no equivalent, so resolved
+        # fallbacks are currently ignored on this path. Tracked as a follow-up
+        # once either cubepi upstream supports fallback chains or we wrap the
+        # provider on cubebox's side.
         provider = factory.build_cubepi_provider(
             provider_config, cache_policy=CubeboxCacheMarkerPolicy()
         )
