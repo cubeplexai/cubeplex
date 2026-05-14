@@ -19,7 +19,10 @@ Routers (mounted with ``/api/v1`` prefix in ``api/app.py``):
 
 from __future__ import annotations
 
+from typing import Any
+
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
+from pydantic import BaseModel
 
 from cubebox.api.schemas.mcp import (
     MCPCatalogConnectorOut,
@@ -193,6 +196,43 @@ async def list_catalog(
     """
     dtos = await svc.list_for_member(workspace_id, q=q, provider=provider)
     return MCPCatalogListOut(items=[_connector_to_out(dto) for dto in dtos])
+
+
+# ---------------------------------------------------------------------------
+# 3.1b — GET /api/v1/ws/{workspace_id}/mcp/catalog/{slug}/tool-citations
+# ---------------------------------------------------------------------------
+
+
+class CatalogToolCitationsResponse(BaseModel):
+    slug: str
+    tool_citations: dict[str, dict[str, Any]]
+
+
+@catalog_member_router.get("/catalog/{slug}/tool-citations")
+async def get_catalog_tool_citations(
+    slug: str,
+    workspace_id: str = Path(..., max_length=20),
+    svc: MCPCatalogService = Depends(get_member_catalog_service),
+) -> CatalogToolCitationsResponse:
+    """Return the catalog connector's default tool_citations for a given slug.
+
+    Used by the frontend editor's "Reset to catalog default" button. The
+    catalog is org-agnostic but the route lives under /ws/{workspace_id}/
+    so workspace-member auth is enforced by ``get_member_catalog_service``.
+    """
+    row = await svc.catalog_repo.get_by_slug(slug)
+    if row is None:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "code": "mcp_catalog.connector_not_found",
+                "message": "Catalog connector not found.",
+            },
+        )
+    return CatalogToolCitationsResponse(
+        slug=row.slug,
+        tool_citations=dict(row.tool_citations or {}),
+    )
 
 
 # ---------------------------------------------------------------------------
