@@ -272,6 +272,89 @@ async def test_handle_callback_org_scope_writes_vault_and_flips_authed(
     ).decode() == "fresh-refresh"
 
 
+async def test_handle_callback_org_scope_re_oauth_rotates_existing_credentials(
+    session: AsyncSession,
+    fake_redis: fakeredis.aioredis.FakeRedis,
+    encryption_backend: FernetBackend,
+) -> None:
+    """A second OAuth callback for an already-authorized install must
+    rotate the vault rows in place, not insert duplicates.
+
+    Regression: before the fix, ``_persist_org`` always called
+    ``cred_service.create`` with a fixed ``(kind, name)``, and the
+    second callback crashed with ``UniqueViolation`` on
+    ``uq_credential_org_kind_name``. The admin Re-authenticate flow
+    landed exactly on this path.
+    """
+    server = await _seed_oauth_install(
+        session,
+        credential_scope="org",
+        owner_workspace_id=None,
+    )
+
+    async def _fake_discover(
+        _server: MCPServer, *, credential_or_token: str | None
+    ) -> tuple[bool, list[dict[str, Any]] | None, str | None]:
+        return True, [], None
+
+    async def _run_callback(token_payload: dict[str, Any]) -> CallbackResult:
+        state_store = OAuthStateStore(redis=fake_redis, secret_key=STATE_SECRET, ttl_seconds=300)
+        state = await state_store.issue(install_id=server.id, actor_user_id=USER_ID)
+        await fake_redis.set(PKCE_REDIS_KEY_PREFIX + server.id, "verifier-x")
+        handler = _Handler(
+            _metadata_responses(), token_responses=[httpx.Response(200, json=token_payload)]
+        )
+        http = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+        cb_handler = _make_handler(session, fake_redis, encryption_backend, http)
+        try:
+            with patch("cubebox.mcp.runtime.discover_tools", _fake_discover):
+                return await cb_handler.handle_callback(state=state, code="code")
+        finally:
+            await http.aclose()
+
+    await _run_callback(
+        {
+            "access_token": "access-v1",
+            "refresh_token": "refresh-v1",
+            "expires_in": 3600,
+        }
+    )
+
+    server_repo = MCPServerRepository(session, org_id=ORG_ID)
+    after_first = await server_repo.get(server.id)
+    assert after_first is not None
+    first_access_id = after_first.credential_id
+    first_refresh_id = after_first.oauth_client_config["refresh_token_credential_id"]
+    assert first_access_id is not None
+    assert first_refresh_id is not None
+
+    # Re-authenticate. The AS issues new tokens; the callback runs again.
+    result = await _run_callback(
+        {
+            "access_token": "access-v2",
+            "refresh_token": "refresh-v2",
+            "expires_in": 3600,
+        }
+    )
+    assert result.authed is True
+
+    after_second = await server_repo.get(server.id)
+    assert after_second is not None
+    assert after_second.credential_id == first_access_id, (
+        "access credential row must be rotated, not duplicated"
+    )
+    assert after_second.oauth_client_config["refresh_token_credential_id"] == first_refresh_id, (
+        "refresh credential row must be rotated, not duplicated"
+    )
+
+    cred_repo = CredentialRepository(session, org_id=ORG_ID)
+    access_cred = await cred_repo.get(first_access_id)
+    refresh_cred = await cred_repo.get(first_refresh_id)
+    assert access_cred is not None and refresh_cred is not None
+    assert (await encryption_backend.decrypt(access_cred.value_encrypted)).decode() == "access-v2"
+    assert (await encryption_backend.decrypt(refresh_cred.value_encrypted)).decode() == "refresh-v2"
+
+
 async def test_handle_callback_user_scope_writes_user_credential_row(
     session: AsyncSession,
     fake_redis: fakeredis.aioredis.FakeRedis,

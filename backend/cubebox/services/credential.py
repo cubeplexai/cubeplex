@@ -78,6 +78,32 @@ class CredentialService:
             cred.cred_metadata = metadata
         await self._repo.update(cred)
 
+    async def upsert_by_kind_name(
+        self,
+        *,
+        kind: str,
+        name: str,
+        plaintext: str,
+        metadata: dict[str, Any] | None = None,
+    ) -> str:
+        """Rotate an existing ``(kind, name)`` row in scope, or create one.
+
+        The credentials table has a partial unique constraint on
+        ``(org_id, kind, name)``; on re-OAuth, blindly calling ``create``
+        with the same name a second time hits ``uq_credential_org_kind_name``
+        and the whole callback fails. Callers that legitimately re-issue a
+        named credential (OAuth access/refresh rotation) should use this
+        method instead of ``create``.
+        """
+        existing = await self._repo.get_by_kind_name(kind=kind, name=name)
+        if existing is None:
+            return await self.create(kind=kind, name=name, plaintext=plaintext, metadata=metadata)
+        existing.value_encrypted = await self._backend.encrypt(plaintext.encode("utf-8"))
+        if metadata is not None:
+            existing.cred_metadata = metadata
+        await self._repo.update(existing)
+        return existing.id
+
     async def delete(self, *, credential_id: str) -> None:
         cred = await self._repo.get(credential_id)
         if cred is None:

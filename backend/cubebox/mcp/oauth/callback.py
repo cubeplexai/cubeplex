@@ -270,14 +270,18 @@ class OAuthCallbackHandler:
         expires_at_iso: str,
     ) -> None:
         cred_service = self._cred_service_factory(server.org_id, actor_user_id)
-        access_id = await cred_service.create(
+        # Upsert: re-OAuth (admin Re-authenticate, refresh_token expiry) hits
+        # this path with the same (kind, name) tuple, and the unique index
+        # ``uq_credential_org_kind_name`` would 500 the callback if we always
+        # created a new row.
+        access_id = await cred_service.upsert_by_kind_name(
             kind=CREDENTIAL_KIND_MCP_OAUTH_ACCESS_TOKEN,
             name=f"mcp:{server.name}:org:access",
             plaintext=access_token,
         )
         refresh_id: str | None = None
         if refresh_token is not None:
-            refresh_id = await cred_service.create(
+            refresh_id = await cred_service.upsert_by_kind_name(
                 kind=CREDENTIAL_KIND_MCP_OAUTH_REFRESH_TOKEN,
                 name=f"mcp:{server.name}:org:refresh",
                 plaintext=refresh_token,
@@ -287,6 +291,11 @@ class OAuthCallbackHandler:
         client_config["expires_at"] = expires_at_iso
         if refresh_id is not None:
             client_config["refresh_token_credential_id"] = refresh_id
+        else:
+            # AS dropped the refresh_token this round — clear any stale
+            # pointer so the runtime doesn't try to use a credential whose
+            # ciphertext no longer matches what the AS will accept.
+            client_config.pop("refresh_token_credential_id", None)
         server.oauth_client_config = client_config
         server.authed = True
         server.last_error = None
@@ -302,14 +311,15 @@ class OAuthCallbackHandler:
         expires_at: Any,
     ) -> None:
         cred_service = self._cred_service_factory(server.org_id, actor_user_id)
-        access_id = await cred_service.create(
+        # Upsert mirrors the org path — see _persist_org for the rationale.
+        access_id = await cred_service.upsert_by_kind_name(
             kind=CREDENTIAL_KIND_MCP_OAUTH_ACCESS_TOKEN,
             name=f"mcp:{server.name}:user:{actor_user_id}:access",
             plaintext=access_token,
         )
         refresh_id: str | None = None
         if refresh_token is not None:
-            refresh_id = await cred_service.create(
+            refresh_id = await cred_service.upsert_by_kind_name(
                 kind=CREDENTIAL_KIND_MCP_OAUTH_REFRESH_TOKEN,
                 name=f"mcp:{server.name}:user:{actor_user_id}:refresh",
                 plaintext=refresh_token,

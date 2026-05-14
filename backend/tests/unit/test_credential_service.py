@@ -105,3 +105,52 @@ async def test_credential_service_update_and_delete(
 
     with pytest.raises(CredentialNotFound):
         await service.get_decrypted(credential_id=credential_id, requesting_kind="mcp_server")
+
+
+async def test_credential_service_upsert_by_kind_name_rotates_existing(
+    session: AsyncSession, backend: FernetBackend
+) -> None:
+    """Re-OAuth must rotate the existing (org, kind, name) row in place
+    rather than insert a duplicate that violates ``uq_credential_org_kind_name``.
+
+    Regression for the bug where ``OAuthCallbackHandler._persist_org``
+    blindly called ``create`` on every callback, so re-authorizing an
+    install whose tokens were already in the vault crashed with a
+    psycopg ``UniqueViolation``.
+    """
+    from cubebox.services.credential import CredentialService
+
+    service = CredentialService(
+        CredentialRepository(session, org_id="org-1"),
+        backend,
+        org_id="org-1",
+        actor_user_id="user-1",
+    )
+
+    first_id = await service.upsert_by_kind_name(
+        kind="mcp_oauth_access_token",
+        name="mcp:catalog:notion:org:access",
+        plaintext="token-v1",
+    )
+    second_id = await service.upsert_by_kind_name(
+        kind="mcp_oauth_access_token",
+        name="mcp:catalog:notion:org:access",
+        plaintext="token-v2",
+    )
+
+    assert first_id == second_id, "upsert must rotate the same row, not insert a duplicate"
+    assert (
+        await service.get_decrypted(
+            credential_id=first_id,
+            requesting_kind="mcp_oauth_access_token",
+        )
+        == "token-v2"
+    )
+
+    # A different (kind, name) tuple is a separate row.
+    other_id = await service.upsert_by_kind_name(
+        kind="mcp_oauth_refresh_token",
+        name="mcp:catalog:notion:org:refresh",
+        plaintext="refresh-v1",
+    )
+    assert other_id != first_id
