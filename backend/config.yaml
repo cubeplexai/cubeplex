@@ -267,6 +267,9 @@ default:
       - application/x-yaml
       - application/zip
       - application/x-zip-compressed
+      - application/x-tar
+      - application/x-bzip2
+      - application/gzip
 
     thumbnail:
       max_long_edge: 256
