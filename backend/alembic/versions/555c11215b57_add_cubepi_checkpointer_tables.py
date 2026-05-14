@@ -1,7 +1,7 @@
 """add cubepi checkpointer tables
 
 Revision ID: 555c11215b57
-Revises: 4be6ed892e02
+Revises: 2b4e5bebbc7f
 Create Date: 2026-05-13 11:36:24.961848
 
 """
@@ -13,7 +13,10 @@ from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
 revision: str = '555c11215b57'
-down_revision: Union[str, Sequence[str], None] = '4be6ed892e02'
+# Re-parented during rebase onto main: main's soft-delete migration
+# (2b4e5bebbc7f) landed between this and the previous parent
+# (4be6ed892e02), so chain after it to keep a single head.
+down_revision: Union[str, Sequence[str], None] = '2b4e5bebbc7f'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
