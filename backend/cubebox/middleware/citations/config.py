@@ -4,10 +4,8 @@ Parses per-tool citation config from config.yaml and provides
 methods to extract metadata and text from tool output.
 """
 
-from collections.abc import Sequence
 from typing import Any
 
-from langchain_core.tools import BaseTool
 from pydantic import BaseModel
 
 _SNIPPET_KEY = "snippet"
@@ -96,22 +94,6 @@ def load_citation_configs(
             continue
         name = td.get("name")
         citation = td.get("citation")
-        if name and isinstance(citation, dict):
-            configs[str(name)] = CitationConfig(**citation)
-    return configs
-
-
-def load_builtin_citation_configs(
-    tools: Sequence[BaseTool],
-) -> dict[str, CitationConfig]:
-    """Build tool_name -> CitationConfig from each tool's metadata['citation']."""
-    configs: dict[str, CitationConfig] = {}
-    for t in tools:
-        meta = getattr(t, "metadata", None)
-        if not isinstance(meta, dict):
-            continue
-        citation = meta.get("citation")
-        name = getattr(t, "name", None)
         if name and isinstance(citation, dict):
             configs[str(name)] = CitationConfig(**citation)
     return configs
