@@ -2,8 +2,19 @@
 
 import { useState } from 'react'
 import { useTranslations } from 'next-intl'
-import { Check, FileText, Loader2, Network, RefreshCw, Trash2, Wrench, X } from 'lucide-react'
+import {
+  Check,
+  FileText,
+  KeyRound,
+  Loader2,
+  Network,
+  RefreshCw,
+  Trash2,
+  Wrench,
+  X,
+} from 'lucide-react'
 import type { ApiClient, MCPAdminConnector } from '@cubebox/core'
+import { useMcpStore } from '@cubebox/core'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -13,6 +24,20 @@ import { MCPCatalogInstallPanel } from './MCPCatalogInstallPanel'
 import { MCPCustomCreatePanel } from './MCPCustomCreatePanel'
 import { MCPToolsTable } from './MCPToolsTable'
 import { MCPWorkspacesTab } from './MCPWorkspacesTab'
+
+const OAUTH_ORIGIN_KEY = 'mcp_oauth_origin'
+
+function persistOAuthOrigin(): void {
+  if (typeof window === 'undefined') return
+  try {
+    window.sessionStorage.setItem(
+      OAUTH_ORIGIN_KEY,
+      window.location.pathname + window.location.search,
+    )
+  } catch {
+    // sessionStorage may be unavailable; non-fatal.
+  }
+}
 
 interface MCPAdminDetailPanelProps {
   connector: MCPAdminConnector | null
@@ -52,7 +77,9 @@ export function MCPAdminDetailPanel({
   const [refreshing, setRefreshing] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [deleting, setDeleting] = useState(false)
+  const [reauthorizing, setReauthorizing] = useState(false)
   const [actionError, setActionError] = useState<string | null>(null)
+  const startOAuth = useMcpStore((s) => s.startOAuth)
 
   // ── Placeholder states ──────────────────────────────────────────────
 
@@ -135,6 +162,21 @@ export function MCPAdminDetailPanel({
     }
   }
 
+  async function handleReauthorize(): Promise<void> {
+    setReauthorizing(true)
+    setActionError(null)
+    try {
+      const result = await startOAuth(client, server!.id)
+      persistOAuthOrigin()
+      window.location.href = result.authorize_url
+    } catch (err) {
+      setActionError((err as Error).message)
+      setReauthorizing(false)
+    }
+  }
+
+  const needsReauth = server.auth_method === 'oauth' && !c.authed
+
   return (
     <div className="flex w-full flex-col gap-4 p-6" data-testid="mcp-admin-detail-panel">
       {/* ── Header ─────────────────────────────────────────────────── */}
@@ -166,11 +208,28 @@ export function MCPAdminDetailPanel({
 
           {/* Spacer + action buttons */}
           <div className="ml-auto flex items-center gap-2">
+            {needsReauth && (
+              <Button
+                type="button"
+                variant="default"
+                size="sm"
+                disabled={refreshing || deleting || reauthorizing}
+                onClick={() => void handleReauthorize()}
+                data-testid="mcp-admin-reauthorize-button"
+              >
+                {reauthorizing ? (
+                  <Loader2 data-icon="inline-start" className="animate-spin" />
+                ) : (
+                  <KeyRound data-icon="inline-start" />
+                )}
+                {t('reauthorize')}
+              </Button>
+            )}
             <Button
               type="button"
               variant="outline"
               size="sm"
-              disabled={refreshing || deleting}
+              disabled={refreshing || deleting || reauthorizing}
               onClick={() => void handleRefresh()}
             >
               {refreshing ? (
@@ -188,7 +247,7 @@ export function MCPAdminDetailPanel({
                 size="sm"
                 className="text-destructive hover:bg-destructive/10
                   hover:text-destructive"
-                disabled={refreshing || deleting}
+                disabled={refreshing || deleting || reauthorizing}
                 onClick={() => setConfirmDelete(true)}
               >
                 <Trash2 data-icon="inline-start" />

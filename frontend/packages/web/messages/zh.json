@@ -903,6 +903,7 @@
     "notAuthenticated": "未认证",
     "customBadge": "自定义",
     "refreshTools": "刷新工具",
+    "reauthorize": "重新认证",
     "deleteButton": "删除",
     "confirmDeleteLabel": "确认删除?",
 

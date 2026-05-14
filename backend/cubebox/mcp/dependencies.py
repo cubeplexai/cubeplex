@@ -23,8 +23,10 @@ from cubebox.mcp.oauth.dcr import DCRClient
 from cubebox.mcp.oauth.metadata import OAuthMetadataDiscovery
 from cubebox.mcp.oauth.start import OAuthStartService
 from cubebox.mcp.oauth.state import OAuthStateStore
+from cubebox.mcp.oauth.token_manager import OAuthTokenManager
 from cubebox.mcp.user_token import HS256Signer, MCPUserTokenSigner
 from cubebox.models import Role, User
+from cubebox.repositories.credential import CredentialRepository
 from cubebox.repositories.mcp import (
     MCPServerRepository,
     UserMCPCredentialRepository,
@@ -52,11 +54,94 @@ async def get_audit_sink(request: Request) -> AuditSink:
     return cast(AuditSink, request.app.state.audit_sink)
 
 
+# ---------------- OAuth wiring (must precede services that depend on it) ---------------- #
+
+
+async def get_redis(request: Request) -> Redis:
+    """Return the shared async Redis client established at lifespan."""
+    return cast(Redis, request.app.state.redis)
+
+
+_HTTP_CLIENT_KEY = "_mcp_oauth_http_client"
+_OAUTH_METADATA_DISCOVERY_KEY = "_mcp_oauth_metadata_discovery"
+
+
+async def get_oauth_http_client(request: Request) -> httpx.AsyncClient:
+    """Lazy-initialize a shared ``httpx.AsyncClient`` for OAuth IO.
+
+    We don't open a global pool from app lifespan — only routes that
+    actually need it pay for the connection. The client is cached on
+    ``app.state`` so subsequent requests reuse a single pool.
+    """
+    client = getattr(request.app.state, _HTTP_CLIENT_KEY, None)
+    if client is None:
+        client = httpx.AsyncClient(timeout=30.0)
+        setattr(request.app.state, _HTTP_CLIENT_KEY, client)
+    return cast(httpx.AsyncClient, client)
+
+
+async def get_oauth_metadata_discovery(
+    request: Request,
+    http_client: httpx.AsyncClient = Depends(get_oauth_http_client),
+) -> OAuthMetadataDiscovery:
+    """Return the app-lifetime ``OAuthMetadataDiscovery`` instance.
+
+    The discovery client carries an in-memory TTL cache for AS / PR
+    well-known documents. Constructing a new instance per request would
+    reset that cache on every call, defeating the cache entirely. We
+    stash a single instance on ``app.state`` (mirroring the
+    ``_HTTP_CLIENT_KEY`` pattern above) so the cache survives across
+    requests for the lifetime of the process.
+    """
+    cached = getattr(request.app.state, _OAUTH_METADATA_DISCOVERY_KEY, None)
+    if cached is None:
+        cached = OAuthMetadataDiscovery(http_client)
+        setattr(request.app.state, _OAUTH_METADATA_DISCOVERY_KEY, cached)
+    return cast(OAuthMetadataDiscovery, cached)
+
+
+def _build_token_manager_for_org(
+    *,
+    session: AsyncSession,
+    backend: EncryptionBackend,
+    redis: Redis,
+    http_client: httpx.AsyncClient,
+    metadata: OAuthMetadataDiscovery,
+    org_id: str,
+) -> OAuthTokenManager:
+    """Construct an ``OAuthTokenManager`` scoped to ``org_id``.
+
+    Mirrors the wiring in ``streams.run_manager._build_oauth_token_manager``
+    so admin sync-tools and agent runtime use the same refresh logic.
+    """
+    return OAuthTokenManager(
+        http_client=http_client,
+        redis=redis,
+        encryption_backend=backend,
+        credential_repo=CredentialRepository(session, org_id=org_id),
+        server_repo=MCPServerRepository(session, org_id=org_id),
+        user_cred_repo=UserMCPCredentialRepository(session, org_id=org_id),
+        metadata=metadata,
+    )
+
+
 async def get_mcp_service(
     session: AsyncSession = Depends(get_session),
+    backend: EncryptionBackend = Depends(get_encryption_backend),
     cred_service: CredentialService = Depends(get_credential_service),
+    redis: Redis = Depends(get_redis),
+    http_client: httpx.AsyncClient = Depends(get_oauth_http_client),
+    metadata: OAuthMetadataDiscovery = Depends(get_oauth_metadata_discovery),
     ctx: RequestContext = Depends(require_member),
 ) -> MCPServerService:
+    token_manager = _build_token_manager_for_org(
+        session=session,
+        backend=backend,
+        redis=redis,
+        http_client=http_client,
+        metadata=metadata,
+        org_id=ctx.org_id,
+    )
     return MCPServerService(
         server_repo=MCPServerRepository(session, org_id=ctx.org_id),
         ws_cred_repo=WorkspaceMCPCredentialRepository(session, org_id=ctx.org_id),
@@ -64,6 +149,7 @@ async def get_mcp_service(
         override_repo=WorkspaceMCPOverrideRepository(session, org_id=ctx.org_id),
         cred_service=cred_service,
         request_context=ctx,
+        token_manager=token_manager,
     )
 
 
@@ -78,6 +164,9 @@ async def get_admin_request_context(
 async def get_admin_mcp_service(
     session: AsyncSession = Depends(get_session),
     backend: EncryptionBackend = Depends(get_encryption_backend),
+    redis: Redis = Depends(get_redis),
+    http_client: httpx.AsyncClient = Depends(get_oauth_http_client),
+    metadata: OAuthMetadataDiscovery = Depends(get_oauth_metadata_discovery),
     ctx: RequestContext = Depends(get_admin_request_context),
 ) -> MCPServerService:
     cred_service = build_credential_service(
@@ -86,6 +175,14 @@ async def get_admin_mcp_service(
         org_id=ctx.org_id,
         actor_user_id=ctx.user.id,
     )
+    token_manager = _build_token_manager_for_org(
+        session=session,
+        backend=backend,
+        redis=redis,
+        http_client=http_client,
+        metadata=metadata,
+        org_id=ctx.org_id,
+    )
     return MCPServerService(
         server_repo=MCPServerRepository(session, org_id=ctx.org_id),
         ws_cred_repo=WorkspaceMCPCredentialRepository(session, org_id=ctx.org_id),
@@ -93,6 +190,7 @@ async def get_admin_mcp_service(
         override_repo=WorkspaceMCPOverrideRepository(session, org_id=ctx.org_id),
         cred_service=cred_service,
         request_context=ctx,
+        token_manager=token_manager,
     )
 
 
@@ -136,12 +234,7 @@ async def get_admin_catalog_service(
     )
 
 
-# ---------------- OAuth wiring ---------------- #
-
-
-async def get_redis(request: Request) -> Redis:
-    """Return the shared async Redis client established at lifespan."""
-    return cast(Redis, request.app.state.redis)
+# ---------------- OAuth start/callback wiring ---------------- #
 
 
 def _oauth_redirect_uri() -> str:
@@ -162,48 +255,10 @@ def _state_secret_key() -> bytes:
     return str(secret).encode("utf-8")
 
 
-_HTTP_CLIENT_KEY = "_mcp_oauth_http_client"
-_OAUTH_METADATA_DISCOVERY_KEY = "_mcp_oauth_metadata_discovery"
-
-
-async def get_oauth_http_client(request: Request) -> httpx.AsyncClient:
-    """Lazy-initialize a shared ``httpx.AsyncClient`` for OAuth IO.
-
-    We don't open a global pool from app lifespan — only routes that
-    actually need it pay for the connection. The client is cached on
-    ``app.state`` so subsequent requests reuse a single pool.
-    """
-    client = getattr(request.app.state, _HTTP_CLIENT_KEY, None)
-    if client is None:
-        client = httpx.AsyncClient(timeout=30.0)
-        setattr(request.app.state, _HTTP_CLIENT_KEY, client)
-    return cast(httpx.AsyncClient, client)
-
-
 async def get_oauth_state_store(
     redis: Redis = Depends(get_redis),
 ) -> OAuthStateStore:
     return OAuthStateStore(redis=redis, secret_key=_state_secret_key())
-
-
-async def get_oauth_metadata_discovery(
-    request: Request,
-    http_client: httpx.AsyncClient = Depends(get_oauth_http_client),
-) -> OAuthMetadataDiscovery:
-    """Return the app-lifetime ``OAuthMetadataDiscovery`` instance.
-
-    The discovery client carries an in-memory TTL cache for AS / PR
-    well-known documents. Constructing a new instance per request would
-    reset that cache on every call, defeating the cache entirely. We
-    stash a single instance on ``app.state`` (mirroring the
-    ``_HTTP_CLIENT_KEY`` pattern above) so the cache survives across
-    requests for the lifetime of the process.
-    """
-    cached = getattr(request.app.state, _OAUTH_METADATA_DISCOVERY_KEY, None)
-    if cached is None:
-        cached = OAuthMetadataDiscovery(http_client)
-        setattr(request.app.state, _OAUTH_METADATA_DISCOVERY_KEY, cached)
-    return cast(OAuthMetadataDiscovery, cached)
 
 
 async def get_oauth_dcr_client(
