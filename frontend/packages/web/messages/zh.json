@@ -519,6 +519,7 @@
           "itemShape": "元素结构",
           "variantLabel": "变体 {n}",
           "unresolvedRef": "$ref",
+          "cycleRef": "递归引用 — 已停止展开以避免无限循环",
           "malformed": "无法渲染 schema，请切到 JSON 标签查看。"
         },
         "tryit": {

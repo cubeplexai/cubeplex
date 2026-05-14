@@ -519,6 +519,7 @@
           "itemShape": "Item shape",
           "variantLabel": "Variant {n}",
           "unresolvedRef": "$ref",
+          "cycleRef": "Recursive reference — not expanded to avoid an infinite loop",
           "malformed": "Unable to render schema. Use the JSON tab to inspect."
         },
         "tryit": {
