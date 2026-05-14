@@ -985,6 +985,7 @@
     "tabOverview": "概览",
     "tabTools": "工具 ({count})",
     "tabWorkspaces": "工作区",
+    "tabCitations": "引用映射",
 
     "overviewServerDetails": "服务器详情",
     "overviewUrl": "URL",
