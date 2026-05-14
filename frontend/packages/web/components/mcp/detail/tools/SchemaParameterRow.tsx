@@ -79,21 +79,33 @@ export function SchemaParameterRow({
   const [activeVariant, setActiveVariant] = useState(0)
   const [expanded, setExpanded] = useState(depth < MAX_AUTO_EXPAND_DEPTH)
 
-  const effective: SchemaNode = variants ? (variants[activeVariant] ?? resolved) : resolved
+  const childVisited = extendVisited(visitedRefs, refKey)
+
+  const rawEffective: SchemaNode = variants ? (variants[activeVariant] ?? resolved) : resolved
+  const variantResolved = variants ? resolveNode(rawEffective, root, childVisited) : null
+  const effective: SchemaNode = variantResolved ? variantResolved.resolved : rawEffective
+  const effectiveCycle = variantResolved?.cycleRef ?? cycleRef
+  const effectiveChildVisited =
+    variantResolved && variantResolved.refKey
+      ? extendVisited(childVisited, variantResolved.refKey)
+      : childVisited
+
   const typeInfo = resolveType(effective)
   const description = typeof resolved.description === 'string' ? resolved.description : null
   const defaultValue = resolved.default
   const enumValues = Array.isArray(effective.enum) ? (effective.enum as unknown[]) : null
 
-  const childVisited = extendVisited(visitedRefs, refKey)
-
   const hasNestedObject =
-    !cycleRef && typeInfo.kind === 'object' && Object.keys(getProperties(effective)).length > 0
+    !effectiveCycle &&
+    typeInfo.kind === 'object' &&
+    Object.keys(getProperties(effective)).length > 0
   const rawArrayItems =
-    !cycleRef && typeInfo.kind === 'array' && typeof effective.items === 'object'
+    !effectiveCycle && typeInfo.kind === 'array' && typeof effective.items === 'object'
       ? (effective.items as SchemaNode)
       : null
-  const arrayItemResolved = rawArrayItems ? resolveNode(rawArrayItems, root, childVisited) : null
+  const arrayItemResolved = rawArrayItems
+    ? resolveNode(rawArrayItems, root, effectiveChildVisited)
+    : null
   const arrayItems = arrayItemResolved ? arrayItemResolved.resolved : null
   const arrayHasObjectItems =
     arrayItemResolved !== null &&
@@ -104,8 +116,8 @@ export function SchemaParameterRow({
     arrayItems && arrayHasObjectItems ? `array<${resolveType(arrayItems).label}>` : typeInfo.label
 
   const arrayChildVisited = arrayItemResolved
-    ? extendVisited(childVisited, arrayItemResolved.refKey)
-    : childVisited
+    ? extendVisited(effectiveChildVisited, arrayItemResolved.refKey)
+    : effectiveChildVisited
 
   const expandable = hasNestedObject || arrayHasObjectItems
 
@@ -149,12 +161,12 @@ export function SchemaParameterRow({
               </code>
             </span>
           ) : null}
-          {cycleRef ? (
+          {effectiveCycle ? (
             <code
               className="rounded bg-muted px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground"
               title={t('cycleRef')}
             >
-              ↻ {cycleRef}
+              ↻ {effectiveCycle}
             </code>
           ) : null}
           {unresolvedRef ? (
@@ -203,7 +215,9 @@ export function SchemaParameterRow({
 
       {expandable && expanded ? (
         <div className="ml-4 border-l border-border/60 pl-2">
-          {hasNestedObject ? renderNestedObject(effective, root, depth + 1, childVisited) : null}
+          {hasNestedObject
+            ? renderNestedObject(effective, root, depth + 1, effectiveChildVisited)
+            : null}
           {arrayHasObjectItems && arrayItems
             ? renderArrayItems(arrayItems, root, depth + 1, t('itemShape'), arrayChildVisited)
             : null}
