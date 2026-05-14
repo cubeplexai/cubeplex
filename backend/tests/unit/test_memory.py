@@ -120,7 +120,7 @@ def test_create_memory_tools_returns_three_agent_tools(
 
 
 def test_create_memory_tools_tool_names(service_factory: Any) -> None:
-    """Tool names match the canonical langchain names."""
+    """Tool names are stable across the cubepi migration (prompt-cache contract)."""
     tools = create_memory_tools(service_factory=service_factory)
     names = {t.name for t in tools}
     assert names == {"memory_save", "memory_search", "memory_update"}

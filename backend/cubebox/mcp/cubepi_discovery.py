@@ -52,7 +52,7 @@ async def discover_workspace_mcp_servers_for_cubepi(
 
     Only HTTP/SSE transports are supported (stdio was removed; this mirrors cubebox's current
     production stance). Servers requiring a user credential (scope='user') without a resolved
-    token are excluded — same semantics as the langchain runtime.
+    token are excluded.
     """
     server_repo = MCPServerRepository(session, org_id=org_id)
     ws_cred_repo = WorkspaceMCPCredentialRepository(session, org_id=org_id)
@@ -65,7 +65,7 @@ async def discover_workspace_mcp_servers_for_cubepi(
             # Resolve the per-workspace effective credential mode first.  A
             # workspace override may flip the server's default credential_scope
             # (e.g. shared org server promoted to per-user, or any server
-            # downgraded to passthrough).  This mirrors langgraph runtime.py.
+            # downgraded to passthrough).
             effective_scope = await _effective_credential_mode(
                 server=server,
                 workspace_id=workspace_id,
@@ -128,10 +128,9 @@ async def _effective_credential_mode(
 ) -> str:
     """Per-workspace effective credential mode for an MCP server.
 
-    Mirrors ``cubebox.mcp.runtime._effective_credential_mode``: a workspace
-    override may declare ``credential_mode`` that takes precedence over the
-    server-level ``credential_scope`` default. Workspace-owned servers always
-    fall back to their declared scope (no overrides apply).
+    A workspace override may declare ``credential_mode`` that takes precedence
+    over the server-level ``credential_scope`` default. Workspace-owned servers
+    always fall back to their declared scope (no overrides apply).
     """
     if server.owner_workspace_id is not None:
         return server.credential_scope

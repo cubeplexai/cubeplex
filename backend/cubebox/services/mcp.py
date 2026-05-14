@@ -10,7 +10,7 @@ from cubebox.mcp._constants import (
     CREDENTIAL_KIND_MCP_OAUTH_ACCESS_TOKEN,
     server_url_hash,
 )
-from cubebox.mcp.discovery import discover_tools
+from cubebox.mcp.cubepi_admin_discovery import discover_tools_metadata as discover_tools
 from cubebox.mcp.exceptions import (
     MCPCredentialPathMismatch,
     MCPCredentialRequired,
@@ -689,7 +689,7 @@ class MCPServerService:
         # Delegate to the runtime helper so the OAuth callback handler
         # (which has no MCPServerService) can reuse the same discovery +
         # persistence logic.
-        from cubebox.mcp.runtime import refresh_tools_for_server_with_token
+        from cubebox.mcp.cubepi_admin_refresh import refresh_tools_for_server_with_token
 
         await refresh_tools_for_server_with_token(
             server,

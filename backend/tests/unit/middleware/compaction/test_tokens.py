@@ -1,30 +1,48 @@
-"""Tests for approx_tokens — should count tokens across all message types."""
+"""Unit tests for approx_tokens (cubepi-native)."""
 
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
+from __future__ import annotations
+
+from cubepi.providers.base import (
+    AssistantMessage,
+    TextContent,
+    ToolResultMessage,
+    Usage,
+    UserMessage,
+)
 
 from cubebox.middleware.compaction.tokens import approx_tokens
 
 
-def test_empty_messages_zero():
+def test_empty_returns_zero() -> None:
     assert approx_tokens([]) == 0
 
 
-def test_counts_text_content():
-    msgs = [HumanMessage(content="hello world"), AIMessage(content="hi there")]
-    n = approx_tokens(msgs)
-    assert n > 0
-    assert n < 50
+def test_text_chars_divided_by_chars_per_token() -> None:
+    # 200 chars / 2.0 = 100 tokens
+    msgs = [UserMessage(content=[TextContent(text="x" * 200)])]
+    assert approx_tokens(msgs) == 100
 
 
-def test_counts_tool_message_content():
-    msgs = [ToolMessage(content="big tool output " * 100, tool_call_id="t1")]
-    assert approx_tokens(msgs) > 100
+def test_usage_metadata_scales_up_when_assistant_has_input_tokens() -> None:
+    # 1000 chars across messages; assistant reports input_tokens=400.
+    # raw_factor = 1000 / (400 * 2.0) = 1.25 → clamped to [1.0, 1.25] → 1.25.
+    # final estimate = (1000 / 2.0) * 1.25 = 625.
+    msgs = [
+        UserMessage(content=[TextContent(text="x" * 900)]),
+        AssistantMessage(
+            content=[TextContent(text="y" * 100)],
+            usage=Usage(input_tokens=400, output_tokens=10),
+        ),
+    ]
+    assert approx_tokens(msgs) == 625
 
 
-def test_counts_system_message():
-    assert approx_tokens([SystemMessage(content="you are a helpful assistant")]) > 0
-
-
-def test_handles_list_content_blocks():
-    msg = HumanMessage(content=[{"type": "text", "text": "block one"}])
-    assert approx_tokens([msg]) > 0
+def test_tool_result_text_counted() -> None:
+    msgs = [
+        ToolResultMessage(
+            tool_call_id="c1",
+            tool_name="t",
+            content=[TextContent(text="x" * 200)],
+        ),
+    ]
+    assert approx_tokens(msgs) == 100

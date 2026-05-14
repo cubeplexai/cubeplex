@@ -43,8 +43,7 @@ def create_cubebox_agent(
             None or empty, the agent runs without any cubebox middleware (bare
             mode, used in unit tests and subagent spawning without inheritance).
         max_tokens: Maximum output tokens forwarded to the provider (defaults to
-            8192; callers should pass the model's configured max_tokens for
-            byte-parity with the langgraph path).
+            8192; callers should pass the model's configured max_tokens).
         temperature: Sampling temperature forwarded to the provider (default 0.7).
     """
     return Agent(

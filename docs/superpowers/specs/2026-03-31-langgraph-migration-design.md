@@ -1,5 +1,7 @@
 # LangGraph Migration Design
 
+> **SUPERSEDED (2026-05-14):** The LangGraph runtime designed here was fully replaced by cubepi. See `docs/superpowers/specs/2026-05-13-cubepi-main-agent-migration-design.md` for the current architecture.
+
 Replace `deepagents` dependency with `langchain.agents.create_agent()` + custom middleware, simplify sandbox to execute-only, use thread state as single source of truth for messages, and simplify frontend state management.
 
 ## Key Insight

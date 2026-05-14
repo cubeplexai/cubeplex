@@ -18,7 +18,7 @@ on every subsequent model call, and persisted by ``save_extra`` at
 
 Rendering:
     Sorted by skill name for deterministic output (cache discipline).
-    Format mirrors the langgraph ``SkillsMiddleware``::
+    Format::
 
         [Loaded skills]
 

@@ -477,9 +477,9 @@ class RunManager:
 
         Builds a cubepi.Provider + cubepi.Agent, subscribes an event listener, then
         awaits agent.prompt(). Each AgentEvent is translated into a cubebox AgentEvent
-        schema object and forwarded to ``publish_stream_event`` so the rest of
-        _execute_run (DoneEvent, update_run_meta, etc.) sees the same turn_usage and
-        citation buffers as the LangGraph path.
+        schema object and forwarded to ``publish_stream_event``; the rest of
+        _execute_run (DoneEvent, update_run_meta, etc.) consumes the resulting
+        turn_usage and citation buffers.
 
         Tools wired (M2.5):
           - no-DI builtin tools (calculator, datetime)
@@ -520,29 +520,28 @@ class RunManager:
                 provider_config,
             ) = await factory.resolve_default_provider_and_config()
 
-        # Resolve model config to extract max_tokens + temperature for byte-parity
-        # with the langgraph path which reads these from ModelConfig.
+        # Resolve model config to extract max_tokens forwarded to the provider.
         try:
             _model_config = factory.get_model_config(provider_name, model_id)
             _model_max_tokens: int = _model_config.max_tokens or 32000
-            _model_temperature: float = 0.7  # langgraph default; ModelConfig has no temperature
+            _model_temperature: float = 0.7  # ModelConfig has no temperature field
         except Exception:
             _model_max_tokens = 32000
             _model_temperature = 0.7
 
-        # TODO(PR #84 review - fallback chains TBD): the langgraph path
-        # used LangChain.with_fallbacks() to chain ModelConfig.fallback_models
-        # for transient retries. cubepi v0.3.0 has no equivalent, so resolved
-        # fallbacks are currently ignored on this path. Tracked as a follow-up
-        # once either cubepi upstream supports fallback chains or we wrap the
-        # provider on cubebox's side.
+        # TODO(PR #84 review - fallback chains TBD): no fallback chain
+        # implementation yet. cubepi v0.3.0 has no equivalent of
+        # with_fallbacks(), so resolved ModelConfig.fallback_models are
+        # currently ignored. Tracked as a follow-up once either cubepi
+        # upstream supports fallback chains or we wrap the provider on
+        # cubebox's side.
         provider = factory.build_cubepi_provider(
             provider_config, cache_policy=CubeboxCacheMarkerPolicy()
         )
 
-        # --- Compose tool list (M2.5 / M5.4 byte-parity) ---
-        # Tools are accumulated in separate buckets and merged in the exact
-        # same order as langgraph's create_cubebox_agent to achieve byte-parity:
+        # --- Compose tool list ---
+        # Tool registration order is deliberately stable — changes invalidate
+        # the prompt cache prefix. The intended order is:
         #   sandbox(execute/write_file/edit_file/file_read)
         #   → save_artifact
         #   → write_todos
@@ -566,10 +565,10 @@ class RunManager:
         _subagent_tools: list[Any] = []
         _builtin_tools: list[Any] = list(list_builtin_tools())
 
-        # Memory tools — service factory opened per tool call
-        # Placed before view_images and load_skill to match langgraph tool order:
-        # calculator → datetime → memory_save → memory_search → memory_update
-        # → load_skill → view_images → mcp_tools
+        # Memory tools — service factory opened per tool call.
+        # Placed before view_images and load_skill to keep the cache-prefix
+        # tool order: calculator → datetime → memory_save → memory_search
+        # → memory_update → load_skill → view_images → mcp_tools
         try:
             from cubebox.db.engine import async_session_maker as _mem_session_maker
             from cubebox.repositories.memory import MemoryRepository as _MemoryRepository
@@ -617,8 +616,9 @@ class RunManager:
             except Exception as _exc:
                 logger.warning("load_skill unavailable for cubepi run: {}", _exc)
 
-        # view_images — per-request DI: objectstore + LLM capabilities
-        # Must come after memory tools and load_skill to match langgraph tool order.
+        # view_images — per-request DI: objectstore + LLM capabilities.
+        # Must come after memory tools and load_skill to preserve the
+        # cache-prefix tool order.
         try:
             from cubebox.llm.capabilities import LLMCapabilities
             from cubebox.objectstore import get_objectstore_client
@@ -748,17 +748,24 @@ class RunManager:
 
         # 5. CompactionMiddleware — needs extra_ref + summary_llm + config
         try:
+            from cubepi import Model as _CompModel
+
             from cubebox.config import config as _comp_cfg
             from cubebox.llm.factory import LLMFactory as _CompLLMFactory
+            from cubebox.llm.oneshot import OneShotLLM as _CompOneShot
             from cubebox.middleware.compaction import CompactionMiddleware
 
             if _comp_cfg.get("compaction.enabled", False):
                 _summary_provider = _comp_cfg.get("compaction.summary_provider")
                 _summary_model_id = _comp_cfg.get("compaction.summary_model")
                 _comp_factory = _CompLLMFactory()
-                _summary_llm = _comp_factory.create(
-                    provider_name=_summary_provider,
-                    model_id=_summary_model_id,
+                _summary_provider_config = _comp_factory.llm_config.providers[_summary_provider]
+                _summary_provider_inst = _comp_factory.build_cubepi_provider(
+                    _summary_provider_config, cache_policy=None
+                )
+                _summary_llm = _CompOneShot(
+                    _summary_provider_inst,
+                    _CompModel(id=_summary_model_id, provider=_summary_provider),
                 )
                 _ctx_window: int = int(_comp_cfg.get("compaction.fallback_context_window", 64000))
                 _ratio = float(_comp_cfg.get("compaction.threshold_ratio", 0.7))
@@ -893,8 +900,8 @@ class RunManager:
         except Exception as _exc:
             logger.warning("TodoListMiddleware unavailable: {}", _exc)
 
-        # --- Final tool merge (M5.4 byte-parity) ---
-        # Compose in the same order as langgraph's create_cubebox_agent:
+        # --- Final tool merge ---
+        # Stable composition order — changes invalidate the prompt cache prefix:
         #   sandbox tools → artifact tools → todo tools → subagent tools
         #   → builtin tools (calculator/datetime/view_images/memory/load_skill/mcp)
         all_tools: list[Any] = (
@@ -938,8 +945,9 @@ class RunManager:
             # Compute relevance-memory snapshot before the agent loop starts
             # and bake it into the UserMessage metadata so MemoryMiddleware
             # can prepend the rendered snapshot text during transform_context.
-            # This is the cubepi equivalent of the LangGraph path's snapshot
-            # channel injection (M3.b.1 / cache discipline).
+            # Baking the snapshot at append-time (rather than re-deriving it
+            # on replay) is what keeps the historical prefix byte-stable for
+            # prompt caching — see backend/CLAUDE.md "Prompt Cache Discipline".
             import time as _time
 
             from cubepi.providers.base import TextContent as _TextContent

@@ -1,12 +1,8 @@
 """cubepi-backed Postgres checkpointer for cubebox.
 
-Thin wrapper around cubepi.PostgresCheckpointer. Owns the connection
+Thin wrapper around ``cubepi.PostgresCheckpointer``. Owns the connection
 pool lifecycle and exposes a context-manager init for use in cubebox's
-agent factory (M1+).
-
-This module is invoked when config.agents.runtime == "cubepi". For
-runtime == "langgraph", cubebox/agents/checkpointer.py (the existing
-LangGraph AsyncPostgresSaver wrapper) is used instead.
+agent factory.
 """
 
 from __future__ import annotations

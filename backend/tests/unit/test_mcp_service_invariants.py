@@ -81,11 +81,14 @@ def mcp_service(
     async def _discover_success(*_args: object, **_kwargs: object) -> tuple[bool, list, None]:
         return True, [], None
 
-    # ``services.mcp`` still calls discover_tools directly from
-    # ``test_connection`` (transient path); the persistent refresh path was
-    # moved to ``cubebox.mcp.runtime``. Patch both bindings.
+    # ``services.mcp`` calls discover_tools directly from ``test_connection``
+    # (transient path); the persistent refresh path delegates to
+    # ``cubebox.mcp.cubepi_admin_refresh`` which imports
+    # ``discover_tools_metadata`` directly. Patch both bindings.
     monkeypatch.setattr("cubebox.services.mcp.discover_tools", _discover_success)
-    monkeypatch.setattr("cubebox.mcp.runtime.discover_tools", _discover_success)
+    monkeypatch.setattr(
+        "cubebox.mcp.cubepi_admin_refresh.discover_tools_metadata", _discover_success
+    )
 
     return MCPServerService(
         server_repo=MCPServerRepository(session, org_id=request_context.org_id),
@@ -638,7 +641,9 @@ async def test_refresh_tools_for_oauth_server_uses_token_manager(
         return True, [], None
 
     monkeypatch.setattr("cubebox.services.mcp.discover_tools", _discover_success)
-    monkeypatch.setattr("cubebox.mcp.runtime.discover_tools", _discover_success)
+    monkeypatch.setattr(
+        "cubebox.mcp.cubepi_admin_refresh.discover_tools_metadata", _discover_success
+    )
 
     class StubTokenManager:
         def __init__(self) -> None:
@@ -714,7 +719,10 @@ async def test_refresh_tools_marks_unauthed_when_oauth_state_unusable(
         raise AssertionError("discovery must not run when refresh is impossible")
 
     monkeypatch.setattr("cubebox.services.mcp.discover_tools", _discover_should_not_run)
-    monkeypatch.setattr("cubebox.mcp.runtime.discover_tools", _discover_should_not_run)
+    monkeypatch.setattr(
+        "cubebox.mcp.cubepi_admin_refresh.discover_tools_metadata",
+        _discover_should_not_run,
+    )
 
     class StubTokenManager:
         async def get_valid_access_token(self, server: object, **_kwargs: object) -> str:

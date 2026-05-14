@@ -1,18 +1,13 @@
-"""ArtifactMiddleware — cubepi port of ArtifactMiddleware (M3.a.2).
+"""ArtifactMiddleware.
 
 Implements the cubepi Middleware protocol with two hooks:
 
 - ``tools``: exposes ``save_artifact`` as a ``cubepi.AgentTool`` so the
   graph factory can include it in the tool list passed to the agent.
 - ``transform_system_prompt``: queries the artifact registry and appends the
-  ARTIFACT_PROMPT + current artifact list to the system prompt, mirroring
-  what ``ArtifactMiddleware.awrap_model_call`` does in the langgraph path.
-  Using the system prompt (stable prefix) rather than the per-turn user
-  message is critical for prompt-cache correctness.
-
-The core DB logic (``_save_artifact`` body) is copied from ``artifacts.py``
-unchanged; only the LangChain wrapper is replaced with the cubepi execute
-signature ``(tool_call_id, args, *, signal, on_update) -> AgentToolResult``.
+  ARTIFACT_PROMPT + current artifact list to the system prompt. Using the
+  system prompt (stable prefix) rather than the per-turn user message is
+  critical for prompt-cache correctness.
 """
 
 from __future__ import annotations
@@ -32,7 +27,7 @@ from cubebox.prompts.artifacts import ARTIFACT_PROMPT
 from cubebox.sandbox.base import Sandbox
 
 # ---------------------------------------------------------------------------
-# Input schema — kept byte-identical to the langgraph version's _SaveArtifactArgs
+# Input schema for save_artifact
 # ---------------------------------------------------------------------------
 
 
@@ -54,7 +49,7 @@ class _SaveArtifactArgs(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Pure helper — same logic as the langgraph version, no framework dependency
+# Pure helper — no framework dependency
 # ---------------------------------------------------------------------------
 
 

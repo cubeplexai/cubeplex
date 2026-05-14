@@ -57,7 +57,7 @@ if config.config_file_name is not None:
 # target_metadata = mymodel.Base.metadata
 target_metadata = [SQLModel.metadata, cubepi_metadata]
 
-# Tables managed by langgraph-checkpoint-postgres — exclude from autogenerate
+# Tables managed by cubepi PostgresCheckpointer — exclude from autogenerate
 _CHECKPOINT_TABLES = {
     "checkpoint_migrations",
     "checkpoints",

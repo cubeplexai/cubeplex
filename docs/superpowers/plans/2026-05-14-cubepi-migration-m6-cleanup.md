@@ -1,5 +1,7 @@
 # cubepi Migration M6 — Cleanup Implementation Plan
 
+> **Follow-up (2026-05-14):** M6.5 and M6.7 were finished in `docs/superpowers/plans/2026-05-14-cubepi-cleanup-followup.md`. The M6.7 commit landed in this plan only dropped the umbrella `langchain` / `langgraph` packages; the sub-packages (`langchain-core`, `langchain-openai`, `langchain-anthropic`, `langchain-mcp-adapters`) were dropped in the follow-up. M6.5 also left `cubebox/mcp/runtime.py` and `discovery.py` in place; the follow-up replaced them with `cubepi_admin_discovery.py` / `cubepi_admin_refresh.py` and migrated all admin/OAuth callers.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development.
 
 **Status: BLOCKED on M5.3 (prompt cache hit). Do NOT execute until cache gate cleared.**

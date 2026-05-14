@@ -4,8 +4,6 @@ from __future__ import annotations
 
 import time
 
-from langchain_core.messages import HumanMessage
-from langchain_openai import ChatOpenAI
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cubebox.api.schemas.provider import (
@@ -289,15 +287,31 @@ class ProviderService:
                 error=f"Unsupported provider_type: {data.provider_type}",
                 latency_ms=0,
             )
+
+        from cubepi import Model
+        from cubepi.providers.base import TextContent, UserMessage
+
+        from cubebox.llm.config import ProviderConfig
+        from cubebox.llm.factory import LLMFactory
+        from cubebox.llm.oneshot import OneShotLLM
+
+        provider_cfg = ProviderConfig(
+            api="openai-completions",
+            api_key=data.api_key or "placeholder",
+            base_url=data.base_url or "",
+            models=[],
+        )
         try:
-            if data.provider_type == "openai_compat":
-                llm = ChatOpenAI(
-                    base_url=data.base_url,
-                    api_key=data.api_key or "placeholder",  # type: ignore[arg-type]
-                    model="ping",
-                    timeout=15,
-                )
-                await llm.ainvoke([HumanMessage(content="ping")])
+            cubepi_provider = LLMFactory().build_cubepi_provider(provider_cfg, cache_policy=None)
+            oneshot = OneShotLLM(
+                cubepi_provider,
+                Model(id="ping", provider="_test", max_tokens=8),
+            )
+            await oneshot.generate_once(
+                system="",
+                messages=[UserMessage(content=[TextContent(text="ping")])],
+                max_output_tokens=8,
+            )
             latency_ms = int((time.monotonic() - start) * 1000)
             return TestResultOut(ok=False, error="Unexpected success", latency_ms=latency_ms)
         except Exception as e:
@@ -316,34 +330,42 @@ class ProviderService:
         start = time.monotonic()
         provider = await self.get_provider(provider_id)
         api_key = await self._resolve_api_key(provider)
+
+        from cubepi import Model
+        from cubepi.providers.base import TextContent, UserMessage
+
+        from cubebox.llm.config import ProviderConfig
+        from cubebox.llm.factory import LLMFactory
+        from cubebox.llm.oneshot import OneShotLLM
+
+        if provider.provider_type == "anthropic":
+            api = "anthropic"
+        elif provider.provider_type == "openai_compat":
+            api = "openai-completions"
+        else:
+            return TestResultOut(
+                ok=False,
+                error=f"Unsupported provider_type: {provider.provider_type}",
+                latency_ms=0,
+            )
+
+        provider_cfg = ProviderConfig(
+            api=api,
+            api_key=api_key or "placeholder",
+            base_url=provider.base_url or "",
+            models=[],
+        )
         try:
-            from langchain_core.language_models import BaseChatModel
-
-            llm: BaseChatModel
-            if provider.provider_type == "anthropic":
-                from langchain_anthropic import ChatAnthropic
-
-                llm = ChatAnthropic(
-                    model=model_id,  # type: ignore[call-arg]
-                    base_url=provider.base_url,
-                    api_key=api_key or "placeholder",  # type: ignore[arg-type]
-                    max_tokens=32,
-                    timeout=15,
-                )
-            elif provider.provider_type == "openai_compat":
-                llm = ChatOpenAI(
-                    base_url=provider.base_url,
-                    api_key=api_key or "placeholder",  # type: ignore[arg-type]
-                    model=model_id,
-                    timeout=15,
-                )
-            else:
-                return TestResultOut(
-                    ok=False,
-                    error=f"Unsupported provider_type: {provider.provider_type}",
-                    latency_ms=0,
-                )
-            await llm.ainvoke([HumanMessage(content="ping")])
+            cubepi_provider = LLMFactory().build_cubepi_provider(provider_cfg, cache_policy=None)
+            oneshot = OneShotLLM(
+                cubepi_provider,
+                Model(id=model_id, provider="_test", max_tokens=32),
+            )
+            await oneshot.generate_once(
+                system="",
+                messages=[UserMessage(content=[TextContent(text="ping")])],
+                max_output_tokens=32,
+            )
             latency_ms = int((time.monotonic() - start) * 1000)
             return TestResultOut(ok=True, error=None, latency_ms=latency_ms)
         except Exception as e:

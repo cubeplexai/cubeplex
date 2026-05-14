@@ -1,4 +1,4 @@
-"""CitationMiddleware — cubepi port of CitationMiddleware (M3.a.3).
+"""CitationMiddleware.
 
 Implements the cubepi ``Middleware`` protocol with a single hook:
 
@@ -6,8 +6,8 @@ Implements the cubepi ``Middleware`` protocol with a single hook:
   for citation patterns per ``CitationConfig``, then returns an
   ``AfterToolCallResult`` carrying extracted citation data in ``details``.
 
-The pure helpers (``chunk_text``, ``CitationCounter``, ``CitationConfig``,
-``_extract_text_content``) are re-used unchanged from the LangChain path.
+Pure helpers (``chunk_text``, ``CitationCounter``, ``CitationConfig``,
+``_extract_text_content``) live alongside the middleware.
 
 Citations land at ``AfterToolCallResult.details["citations"]`` (a list of
 citation dicts).  The cubepi agent loop merges this into the final
@@ -34,8 +34,7 @@ def _extract_text_content(content: list[Any]) -> str:
     """Extract plain text from a cubepi ``Content`` list.
 
     cubepi content items are ``TextContent(text=...)`` objects (or dicts with
-    ``type="text"`` from MCP adapters).  The function mirrors the behaviour of
-    the langchain helper of the same name in ``citations/middleware.py``.
+    ``type="text"`` from MCP adapters).
     """
     texts: list[str] = []
     for block in content:

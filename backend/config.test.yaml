@@ -73,10 +73,6 @@ test:
   redis:
     url: "redis://127.0.0.1:6379/0"
 
-  # LangSmith: e2e 不上报
-  langsmith:
-    enabled: false
-
   logging:
     path: "/tmp/backend.log"
 

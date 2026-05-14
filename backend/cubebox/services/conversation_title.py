@@ -37,8 +37,8 @@ MAX_SNIPPET_CHARS: int = 1000
 MAX_TITLE_CHARS: int = 80
 # Big enough for reasoning models to finish a chain-of-thought and still
 # produce the actual title text, small enough to stay under the
-# ``> 1024`` threshold in ``LLMFactory.create`` that would otherwise
-# allocate the entire budget to ``thinking.budget_tokens``.
+# ``> 1024`` threshold that would otherwise allocate the entire budget to
+# ``thinking.budget_tokens`` on Anthropic reasoning models.
 LLM_MAX_TOKENS: int = 1024
 
 # Strip wrapping quotes (English + Chinese pairs), a leading "Title:" marker

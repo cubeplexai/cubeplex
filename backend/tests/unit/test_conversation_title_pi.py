@@ -1,8 +1,9 @@
-"""Unit tests for _generate_title (M4.2).
+"""Unit tests for _generate_title.
 
-Tests the cubepi path of conversation_title.py by monkeypatching LLMFactory
-to return a FauxProvider.  The langgraph path is unchanged and already
-covered by existing tests.
+Exercises ``conversation_title._generate_title`` by monkeypatching
+``LLMFactory`` to return a ``FauxProvider``, verifying the cubepi
+one-shot title-generation path (prompt shape, message ordering, output
+trimming, and error handling).
 """
 
 from __future__ import annotations
