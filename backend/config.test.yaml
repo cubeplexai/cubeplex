@@ -119,7 +119,3 @@ test:
   lifecycle:
     graceful_drain_timeout_seconds: 5
     dev_double_signal_force_exit: false
-
-  # Agent runtime selection (M0.4): CI exercises cubepi path as it's built out in M1+
-  agents:
-    runtime: "cubepi"

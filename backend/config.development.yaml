@@ -29,7 +29,3 @@ development:
   parsers:
     docling_serve:
       base_url: "http://localhost:5001"
-
-  # Agent runtime selection (M0.4)
-  agents:
-    runtime: "cubepi"

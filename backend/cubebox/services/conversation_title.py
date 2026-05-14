@@ -15,16 +15,14 @@ with the first user message. This service:
   manual rename is never clobbered.
 - Swallows LLM/provider errors and returns the conversation unchanged.
 
-When ``config.agents.runtime == "cubepi"`` the LLM call is dispatched via
-``cubepi.Provider.stream`` directly (no agent loop — it's a one-shot call).
-The langgraph path is used for all other runtime values.
+The LLM call is dispatched via ``cubepi.Provider.stream`` directly — title
+generation is a single-turn request, so no agent loop is needed.
 """
 
 import logging
 import re
 from typing import Any
 
-from langchain_core.messages import HumanMessage
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cubebox.credentials.encryption import EncryptionBackend
@@ -60,10 +58,10 @@ _TRAILING_PUNCT = "。.,，;；:：!！?？ \t\r\n"
 
 
 def _extract_text(content: Any) -> str:
-    """Pull plain-text content out of a LangChain AIMessage payload.
+    """Pull plain-text content out of a provider response payload.
 
     Reasoning-capable providers (e.g. DeepSeek's anthropic-compatible
-    endpoint) return ``content`` as a list of blocks like
+    endpoint) may return ``content`` as a list of blocks like
     ``["", {"type": "thinking", "thinking": "..."}, {"type": "text",
     "text": "Real answer"}]``. Stringifying the list would treat the
     thinking block as the title; instead, collect only string elements
@@ -129,22 +127,10 @@ def _build_prompt(snippet: str) -> str:
     return TITLE_GENERATION_PROMPT.replace(TITLE_PROMPT_PLACEHOLDER, snippet)
 
 
-async def _generate_title_langgraph(factory: LLMFactory, full_prompt: str) -> str:
-    """One-shot title generation via LangChain/LangGraph path."""
-    llm = await factory.create_default(temperature=0, max_tokens=LLM_MAX_TOKENS)
-    # Single user message instead of system+human: prevents the "echo
-    # the first chunk of the input as the title" failure we observed
-    # with several OpenAI-compatible providers when the system block
-    # was long and the user content was long.
-    result = await llm.ainvoke([HumanMessage(content=full_prompt)])
-    return _extract_text(result.content)
-
-
-async def _generate_title_cubepi(factory: LLMFactory, full_prompt: str) -> str:
+async def _generate_title(factory: LLMFactory, full_prompt: str) -> str:
     """One-shot title generation via cubepi.Provider direct call.
 
     No agent loop needed — title generation is a single-turn request.
-    The cubepi path is selected when ``config.agents.runtime == "cubepi"``.
     """
     from cubepi import Model
     from cubepi.providers.base import TextContent, UserMessage
@@ -185,13 +171,7 @@ async def generate_and_apply_title(
     """Generate and persist an auto-title for ``conversation``.
 
     Best-effort and idempotent. Returns the (possibly updated) conversation.
-
-    Dispatches on ``config.agents.runtime``:
-    - ``"cubepi"`` → :func:`_generate_title_cubepi` (direct provider stream)
-    - any other value → :func:`_generate_title_langgraph` (LangChain ainvoke)
     """
-    from cubebox.config import config as _config
-
     original_title = conversation.title
 
     # Durable first-turn gate. The frontend already restricts the call to
@@ -214,13 +194,9 @@ async def generate_and_apply_title(
     )
 
     full_prompt = _build_prompt(snippet)
-    runtime = _config.agents.runtime
 
     try:
-        if runtime == "cubepi":
-            raw_title = await _generate_title_cubepi(factory, full_prompt)
-        else:
-            raw_title = await _generate_title_langgraph(factory, full_prompt)
+        raw_title = await _generate_title(factory, full_prompt)
     except Exception:
         logger.warning("Auto-title skipped: LLM call failed", exc_info=True)
         return conversation
