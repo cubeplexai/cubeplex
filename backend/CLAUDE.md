@@ -4,7 +4,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-cubebox is an AI Agent System Backend built on native LangGraph with LangChain. The backend exposes a streaming SSE API for executing agent tasks, using LangGraph checkpointer thread state as the single source of truth for message history.
+cubebox is an AI Agent System Backend built on cubepi, a Python-native
+agent runtime. The backend exposes a streaming SSE API for executing
+agent tasks; message history is persisted via cubepi's append-only
+``PostgresCheckpointer`` (one row per message + a snapshot channel for
+per-turn relevance memory).
 
 ## Repository Structure
 
@@ -95,17 +99,45 @@ error event instead of normal output).
 
 ## Architecture
 
-**Request flow:** `POST /api/v1/ws/{workspace_id}/conversations/{id}/messages` → `create_cubebox_agent()` → LangGraph `astream(stream_mode="messages", stream_subgraphs=True)` → SSE stream of typed events (`text_delta`, `reasoning`, `tool_call`, `tool_result`, `error`, `done`)
+**Request flow:** ``POST /api/v1/ws/{workspace_id}/conversations/{id}/messages``
+→ ``RunManager._run_cubepi_path`` builds a ``cubepi.Agent`` via
+``create_cubebox_agent`` → subscribes to the agent's ``AgentEvent``
+listener channel → translates each event via
+``cubebox/agents/stream.py::convert_agent_event_to_sse`` →
+``run_manager.cubepi_dict_to_agent_event`` emits typed
+``TextDeltaEvent`` / ``ReasoningEvent`` / ``ToolCallEvent`` /
+``ToolResultEvent`` / ``UsageEvent`` / ``ErrorEvent`` / ``DoneEvent``
+SSE events to the client.
 
 **Key components:**
-- `create_cubebox_agent` (`cubebox/agents/graph.py`) — factory that wires LLM, tools, and middleware (sandbox, subagents, skills) into a LangGraph CompiledStateGraph via `langchain.agents.create_agent()`
-- Middleware stack (`cubebox/middleware/`) — `SandboxMiddleware`, `SubAgentMiddleware`, `SkillsMiddleware` each implement `AgentMiddleware` with `tools` and `awrap_model_call()`
-- Prompts (`cubebox/prompts/`) — modular system prompts injected by middleware
-- `LLMFactory` (`cubebox/llm/factory.py`) — reads `config.yaml` `llm.providers`, supports OpenAI and OpenAI-compatible endpoints
-- `ToolRegistry` (`cubebox/tools/registry.py`) — registers `BaseTool` instances (supports built-in `StructuredTool` and MCP tools)
-- `MCPManager` (`cubebox/mcp/client.py`) — connects to MCP servers via `langchain-mcp-adapters`, loads tools at startup
-- Message history: stored in LangGraph checkpointer thread state (no messages table)
-- Config via dynaconf: `ENV_FOR_DYNACONF=development|production`, env var prefix `CUBEBOX_`, e.g. `CUBEBOX_LLM__PROVIDER`
+- ``create_cubebox_agent`` (``cubebox/agents/graph.py``) — factory that
+  wires the cubepi Provider, tools, and middleware stack into a
+  ``cubepi.Agent``.
+- Middleware stack (``cubebox/middleware/``) — ``SandboxMiddleware``,
+  ``SubAgentMiddleware``, ``SkillsMiddleware``, ``MemoryMiddleware``,
+  ``CompactionMiddleware``, ``CostMiddleware``, ``TimestampMiddleware``,
+  ``TodoListMiddleware``, ``ArtifactMiddleware``, ``CitationMiddleware``,
+  ``AttachmentHintMiddleware``. Each implements ``cubepi.Middleware``
+  with ``transform_context`` / ``transform_response`` /
+  ``after_model_response`` hooks. State that needs to survive across
+  steps lives in ``ctx.extra`` and is mutated through the
+  ``extra_ref`` callback pattern.
+- Prompts (``cubebox/prompts/``) — modular system prompts injected by
+  middleware.
+- ``LLMFactory`` (``cubebox/llm/factory.py``) — reads ``config.yaml``
+  ``llm.providers``; ``build_cubepi_provider`` constructs the
+  ``cubepi.Provider`` (Anthropic or OpenAI-compat).
+- Tool registry (``cubebox/tools/registry.py``) — registers
+  ``cubepi.AgentTool`` instances for builtins and MCP tools.
+- MCP integration: per-run discovery via
+  ``cubebox.mcp.cubepi_runtime.load_workspace_mcp_tools_for_cubepi``;
+  admin/OAuth tool-refresh paths (``cubebox/mcp/runtime.py`` +
+  ``discovery.py``) still use ``langchain-mcp-adapters`` (port pending).
+- Message history: persisted by cubepi's ``PostgresCheckpointer``
+  (HASH-partitioned 64 ways on ``thread_id``) — see
+  ``cubebox/agents/checkpointer.py``.
+- Config via dynaconf: ``ENV_FOR_DYNACONF=development|production``,
+  env var prefix ``CUBEBOX_``, e.g. ``CUBEBOX_LLM__PROVIDERS__<NAME>__API_KEY``.
 
 ## Auth & RBAC
 
@@ -181,7 +213,7 @@ revisions.
 Memory and agent costs depend on prompt-cache stability. Several
 disciplines must hold across **all** backend changes that touch the LLM
 call path. Breaking them quietly inflates token bills; the cache E2E
-test (`tests/e2e/test_prompt_cache.py`) is the regression gate.
+test (`tests/e2e/memory/test_prompt_cache.py`) is the regression gate.
 
 ### Stable prefix (cache-eligible region)
 
@@ -205,11 +237,13 @@ message tail (after the cache breakpoint), not the system prompt.
 
 ### Per-turn relevance memory and the snapshot channel
 
-Relevance memory is captured per turn as an immutable `MemorySnapshot`
-in a dedicated LangGraph checkpoint channel (separate from `messages`).
-On replay, the middleware interleaves snapshots with messages so the
-byte stream of past turns is reproduced exactly across subsequent
-requests.
+Relevance memory is captured per turn as an immutable ``MemorySnapshot``
+and stored in the ``UserMessage.metadata["memory_snapshot"]`` slot of
+the persisted message (cubepi's checkpointer treats message metadata
+as immutable per row). On replay, ``MemoryMiddleware`` reads each
+historical user message's metadata and prepends the rendered snapshot
+text during ``transform_context`` so the byte stream of past turns is
+reproduced exactly across subsequent requests.
 
 **Do not:**
 
@@ -225,18 +259,21 @@ requests.
 
 ### Provider adapters own cache markers
 
-`cubebox/llm/` is the only place that knows about provider-specific
-cache mechanics:
+cubepi's provider adapters know about provider-specific cache
+mechanics; cubebox supplies a ``CacheMarkerPolicy`` via
+``cubebox/llm/cache_markers.py::CubeboxCacheMarkerPolicy``:
 
-- **Anthropic adapter**: insert `cache_control: ephemeral` on the
-  system-prompt boundary and on the last completed assistant message
-  (max 4 breakpoints; see Anthropic docs).
-- **OpenAI / OpenAI-compatible**: no markers; auto-cache hits whenever
-  the byte stream is stable.
+- **Anthropic adapter** (``cubepi.providers.anthropic``): insert
+  ``cache_control: ephemeral`` on the system-prompt boundary and on
+  the last completed assistant message (max 4 breakpoints; see
+  Anthropic docs). The policy is forwarded via
+  ``LLMFactory.build_cubepi_provider(..., cache_policy=...)``.
+- **OpenAI / OpenAI-compatible** (``cubepi.providers.openai``): no
+  markers — auto-cache hits whenever the byte prefix is stable.
 
-`MemoryMiddleware` and other middleware produce a provider-neutral
-logical request structure. Putting `cache_control` logic anywhere
-upstream of the adapter is a layering violation.
+Middleware produces a provider-neutral logical request structure;
+inserting ``cache_control`` anywhere upstream of the cubepi adapter is
+a layering violation.
 
 ### Why baking R into the snapshot, not request-time only
 
