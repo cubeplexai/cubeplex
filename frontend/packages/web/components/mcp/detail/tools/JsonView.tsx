@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import { Copy, Check } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 
@@ -13,12 +13,16 @@ export interface JsonViewProps {
 export function JsonView({ schema }: JsonViewProps) {
   const t = useTranslations('mcp.tools.detail.json')
   const [copied, setCopied] = useState(false)
-  const pretty = JSON.stringify(schema ?? {}, null, 2)
+  const pretty = useMemo(() => JSON.stringify(schema ?? {}, null, 2), [schema])
 
   async function handleCopy(): Promise<void> {
-    await navigator.clipboard.writeText(pretty)
-    setCopied(true)
-    setTimeout(() => setCopied(false), 1500)
+    try {
+      await navigator.clipboard.writeText(pretty)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1500)
+    } catch {
+      // clipboard unavailable (non-secure context or permission denied)
+    }
   }
 
   return (
