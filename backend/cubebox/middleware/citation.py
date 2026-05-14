@@ -113,16 +113,21 @@ class CitationMiddleware(Middleware):
 
         raw_content = _extract_text_content(ctx.result.content)
 
-        try:
-            parsed = json.loads(raw_content)
-            items = config.extract_items(parsed)
-        except (json.JSONDecodeError, TypeError):
-            if config.content_field is None and raw_content.strip():
-                # Non-JSON output with no content_field — treat raw text as a single item
-                items = [{"text": raw_content}]
-            else:
-                logger.warning("CitationMiddleware: failed to parse JSON for tool '{}'", tool_name)
-                return None
+        if config.content_type == "text":
+            items = [{"text": raw_content}] if raw_content.strip() else []
+        else:
+            try:
+                parsed = json.loads(raw_content)
+                items = config.extract_items(parsed)
+            except (json.JSONDecodeError, TypeError):
+                if config.content_field is None and raw_content.strip():
+                    # Non-JSON output with no content_field — treat raw text as a single item
+                    items = [{"text": raw_content}]
+                else:
+                    logger.warning(
+                        "CitationMiddleware: failed to parse JSON for tool '{}'", tool_name
+                    )
+                    return None
 
         all_citations: list[dict[str, Any]] = []
 
