@@ -689,3 +689,74 @@ async def test_refresh_tools_for_oauth_server_uses_token_manager(
     assert captured["token"] == "fresh-access-token", (
         "discovery must receive the refreshed token, not the stored stale one"
     )
+
+
+async def test_refresh_tools_marks_unauthed_when_oauth_state_unusable(
+    monkeypatch: pytest.MonkeyPatch,
+    session: AsyncSession,
+    cred_service: CredentialService,
+    request_context: RequestContext,
+) -> None:
+    """If the token manager raises ``OAuthInvalidServerState`` (e.g. expired
+    access token + missing refresh_token metadata), the service must flip
+    ``authed=False`` and write a descriptive ``last_error`` so the admin UI
+    can show the Re-authenticate button. Letting the exception propagate
+    would surface as a 500 and leave the server stuck in its old
+    ``authed=true`` state.
+    """
+    from cubebox.mcp._constants import server_url_hash
+    from cubebox.mcp.exceptions import OAuthInvalidServerState
+    from cubebox.models import MCPServer
+
+    async def _discover_should_not_run(
+        _server: object, *, credential_or_token: str | None
+    ) -> tuple[bool, list, None]:
+        raise AssertionError("discovery must not run when refresh is impossible")
+
+    monkeypatch.setattr("cubebox.services.mcp.discover_tools", _discover_should_not_run)
+    monkeypatch.setattr("cubebox.mcp.runtime.discover_tools", _discover_should_not_run)
+
+    class StubTokenManager:
+        async def get_valid_access_token(self, server: object, **_kwargs: object) -> str:
+            raise OAuthInvalidServerState(
+                f"server {getattr(server, 'id', '?')} has no refresh_token_credential_id"
+            )
+
+    svc = MCPServerService(
+        server_repo=MCPServerRepository(session, org_id=request_context.org_id),
+        ws_cred_repo=WorkspaceMCPCredentialRepository(session, org_id=request_context.org_id),
+        user_cred_repo=UserMCPCredentialRepository(session, org_id=request_context.org_id),
+        override_repo=WorkspaceMCPOverrideRepository(session, org_id=request_context.org_id),
+        cred_service=cred_service,
+        request_context=request_context,
+        token_manager=StubTokenManager(),  # type: ignore[arg-type]
+    )
+
+    cred_id = await cred_service.create(
+        kind="mcp_oauth_access_token",
+        name="mcp:notion:org:access",
+        plaintext="stale-token",
+    )
+    saved = await svc.server_repo.add(
+        MCPServer(
+            org_id=request_context.org_id,
+            name="catalog:notion",
+            server_url="https://mcp.notion.com/mcp",
+            server_url_hash=server_url_hash("https://mcp.notion.com/mcp"),
+            transport="streamable_http",
+            auth_method="oauth",
+            credential_scope="org",
+            credential_id=cred_id,
+            authed=True,  # was previously usable; now refresh impossible
+            created_by_user_id=request_context.user.id,
+        )
+    )
+
+    # Must NOT raise — service translates the exception into a soft failure.
+    await svc.refresh_tools(server_id=saved.id)
+
+    refreshed = await svc.server_repo.get(saved.id)
+    assert refreshed is not None
+    assert refreshed.authed is False, "must flip authed=False so UI shows Re-authenticate"
+    assert refreshed.last_error is not None
+    assert "OAuth re-authentication required" in refreshed.last_error
