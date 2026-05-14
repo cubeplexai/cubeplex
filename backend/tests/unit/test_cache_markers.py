@@ -10,7 +10,7 @@ from cubepi.providers.base import (
     UserMessage,
 )
 
-from cubebox.llm.cache_markers_pi import CubeboxCacheMarkerPolicy
+from cubebox.llm.cache_markers import CubeboxCacheMarkerPolicy
 
 
 def _user(text: str) -> UserMessage:
