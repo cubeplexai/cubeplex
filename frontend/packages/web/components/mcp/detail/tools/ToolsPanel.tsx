@@ -1,7 +1,7 @@
 'use client'
 
 import type { MCPToolEntry } from '@cubebox/core'
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { useTranslations } from 'next-intl'
 
 import { ToolDetail, type ToolDetailView } from './ToolDetail'
@@ -18,17 +18,14 @@ export function ToolsPanel({ tools }: ToolsPanelProps) {
   )
   const [view, setView] = useState<ToolDetailView>('schema')
 
-  useEffect(() => {
-    if (tools.length === 0) {
-      setSelectedName(null)
-      return
-    }
-    if (!selectedName || !tools.some((tool) => tool.name === selectedName)) {
-      setSelectedName(tools[0].name)
-    }
-  }, [tools, selectedName])
+  const effectiveSelected: string | null =
+    selectedName && tools.some((tool) => tool.name === selectedName)
+      ? selectedName
+      : tools.length > 0
+        ? tools[0].name
+        : null
 
-  const selected = tools.find((tool) => tool.name === selectedName) ?? null
+  const selected = tools.find((tool) => tool.name === effectiveSelected) ?? null
 
   if (tools.length === 0) {
     return (
@@ -41,7 +38,7 @@ export function ToolsPanel({ tools }: ToolsPanelProps) {
   return (
     <div className="grid min-h-[420px] grid-cols-[280px_minmax(0,1fr)] gap-6">
       <aside className="min-h-0 border-r border-border/60 pr-4">
-        <ToolList tools={tools} selectedName={selectedName} onSelect={setSelectedName} />
+        <ToolList tools={tools} selectedName={effectiveSelected} onSelect={setSelectedName} />
       </aside>
       <section className="min-h-0">
         {selected ? <ToolDetail tool={selected} view={view} onViewChange={setView} /> : null}
