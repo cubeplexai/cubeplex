@@ -24,6 +24,7 @@ DTOs are local to this module — Phase 3 owns the API schemas.
 
 from __future__ import annotations
 
+import copy
 from contextlib import suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -410,7 +411,7 @@ class MCPCatalogService:
                 headers={},
                 timeout=30.0,
                 sse_read_timeout=300.0,
-                tool_citations=dict(connector.tool_citations or {}),
+                tool_citations=copy.deepcopy(connector.tool_citations or {}),
                 created_by_user_id=self._ctx.user.id,
             )
         )
@@ -460,7 +461,7 @@ class MCPCatalogService:
                 headers={},
                 timeout=30.0,
                 sse_read_timeout=300.0,
-                tool_citations=dict(connector.tool_citations or {}),
+                tool_citations=copy.deepcopy(connector.tool_citations or {}),
                 created_by_user_id=self._ctx.user.id,
             )
         )

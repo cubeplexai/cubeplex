@@ -211,3 +211,37 @@ async def test_install_for_workspace_empty_citations_gives_empty_dict(
     server = await service.server_repo.get(result.install_id)
     assert server is not None
     assert server.tool_citations == {}
+
+
+@pytest.mark.asyncio
+async def test_install_for_org_deep_copies_tool_citations(
+    session: AsyncSession,
+    service: MCPCatalogService,
+) -> None:
+    """Mutating the server's inner dict must not bleed back into the catalog."""
+    inner: dict[str, Any] = {"snippet": "description"}
+    catalog = await _seed_catalog_with_citations(
+        session,
+        slug="t-deep",
+        tool_citations={
+            "foo": {
+                "content_type": "json",
+                "source_type": "web",
+                "content_field": "results",
+                "mapping": inner,
+            }
+        },
+    )
+    result = await service.install_for_org(
+        catalog_id=catalog.id,
+        auth_method="static",
+        credential_plaintext="x",
+        credential_name=None,
+        auto_enable_workspaces=True,
+    )
+
+    server = await service.server_repo.get(result.install_id)
+    assert server is not None
+    # Mutate the inner dict on the server; the catalog row must remain unchanged.
+    server.tool_citations["foo"]["mapping"]["snippet"] = "MUTATED"
+    assert catalog.tool_citations["foo"]["mapping"]["snippet"] == "description"
