@@ -424,6 +424,7 @@
       "delete": "Delete",
       "overview": "Overview",
       "toolsTab": "Tools ({count})",
+      "citationsTab": "Citation mapping",
       "workspaces": "Workspaces",
       "serverDetails": "Server details",
       "url": "URL",

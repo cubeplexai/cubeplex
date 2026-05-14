@@ -6,6 +6,7 @@ import { useTranslations } from 'next-intl'
 
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 
+import { MCPCitationMappingTab } from './MCPCitationMappingTab'
 import { MCPPromoteDialog } from './MCPPromoteDialog'
 import { OverviewPanel } from './detail/OverviewPanel'
 import { ServerErrorBanner } from './detail/ServerErrorBanner'
@@ -80,6 +81,7 @@ export function MCPServerDetail({
         <TabsList variant="line" className="w-full justify-start border-b border-border/60 pb-0">
           <TabsTrigger value="overview">{t('overview')}</TabsTrigger>
           <TabsTrigger value="tools">{t('toolsTab', { count: tools.length })}</TabsTrigger>
+          <TabsTrigger value="citations">{t('citationsTab')}</TabsTrigger>
         </TabsList>
 
         <TabsContent value="overview" className="mt-4">
@@ -94,6 +96,15 @@ export function MCPServerDetail({
 
         <TabsContent value="tools" className="mt-4">
           <ToolsPanel tools={tools} />
+        </TabsContent>
+
+        <TabsContent value="citations" className="mt-4">
+          <MCPCitationMappingTab
+            client={client}
+            workspaceId={wsId ?? ''}
+            serverId={server.id}
+            canEdit={canRefreshTools}
+          />
         </TabsContent>
       </Tabs>
 

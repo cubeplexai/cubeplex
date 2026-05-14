@@ -424,6 +424,7 @@
       "delete": "删除",
       "overview": "概览",
       "toolsTab": "工具 ({count})",
+      "citationsTab": "引用映射",
       "workspaces": "工作区",
       "serverDetails": "服务详情",
       "url": "URL",
