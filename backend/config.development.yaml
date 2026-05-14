@@ -32,4 +32,4 @@ development:
 
   # Agent runtime selection (M0.4)
   agents:
-    runtime: "langgraph"
+    runtime: "cubepi"
