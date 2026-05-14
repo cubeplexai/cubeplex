@@ -16,7 +16,7 @@ from cubepi.middleware.base import Middleware
 from cubepi.providers.base import Message, TextContent, UserMessage
 
 
-class AttachmentHintMiddlewarePi(Middleware):
+class AttachmentHintMiddleware(Middleware):
     """Inject [Attachments] hint into UserMessages before the LLM sees them."""
 
     async def transform_context(

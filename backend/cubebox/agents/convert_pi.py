@@ -83,7 +83,7 @@ def wire_input_to_cubepi_user_message(
     memory snapshot is frozen onto ``metadata["memory_snapshot"]``.  The
     snapshot is computed once at append time by ``compute_relevance_snapshot``
     (never re-derived from the live MemoryItem table) so
-    ``MemoryMiddlewarePi.transform_context`` can replay it byte-identically
+    ``MemoryMiddleware.transform_context`` can replay it byte-identically
     on subsequent turns.
     """
     metadata: dict[str, Any] = {}

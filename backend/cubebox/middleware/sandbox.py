@@ -1,4 +1,4 @@
-"""SandboxMiddlewarePi — cubepi port of SandboxMiddleware (M3.c.1).
+"""SandboxMiddleware — cubepi port of SandboxMiddleware (M3.c.1).
 
 Implements the cubepi ``Middleware`` protocol with two hooks:
 
@@ -347,12 +347,12 @@ def _make_file_read_tool(
 # ---------------------------------------------------------------------------
 
 
-class SandboxMiddlewarePi(Middleware):
+class SandboxMiddleware(Middleware):
     """Registers sandbox tools and injects sandbox capability section into system prompt.
 
     Usage::
 
-        mw = SandboxMiddlewarePi(
+        mw = SandboxMiddleware(
             sandbox=sandbox,
             conversation_id=conversation_id,
             workspace_id=workspace_id,

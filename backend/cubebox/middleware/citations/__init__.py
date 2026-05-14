@@ -2,7 +2,7 @@
 
 The langgraph ``CitationMiddleware`` was removed in M6; only the
 shared chunker/config/counter helpers remain here and are consumed by
-``cubebox.middleware.citation_pi.CitationMiddlewarePi``.
+``cubebox.middleware.citation.CitationMiddleware``.
 """
 
 from cubebox.middleware.citations.config import CitationConfig, load_citation_configs

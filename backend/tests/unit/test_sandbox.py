@@ -1,4 +1,4 @@
-"""Unit tests for SandboxMiddlewarePi (M3.c.1)."""
+"""Unit tests for SandboxMiddleware (M3.c.1)."""
 
 from __future__ import annotations
 
@@ -10,8 +10,8 @@ import pytest
 from cubepi.agent.types import AgentTool, AgentToolResult
 from cubepi.providers.base import TextContent
 
-from cubebox.middleware.sandbox_pi import (
-    SandboxMiddlewarePi,
+from cubebox.middleware.sandbox import (
+    SandboxMiddleware,
     _EditFileArgs,
     _ExecuteArgs,
     _FileReadArgs,
@@ -37,15 +37,15 @@ def _make_sandbox(workdir: str = "/sandbox/work") -> MagicMock:
     return sandbox
 
 
-def _make_middleware(**kwargs: Any) -> SandboxMiddlewarePi:
-    """Build a SandboxMiddlewarePi with minimal mock dependencies."""
+def _make_middleware(**kwargs: Any) -> SandboxMiddleware:
+    """Build a SandboxMiddleware with minimal mock dependencies."""
     defaults: dict[str, Any] = {
         "sandbox": _make_sandbox(),
         "conversation_id": "conv-test",
         "workspace_id": "ws-test",
     }
     defaults.update(kwargs)
-    return SandboxMiddlewarePi(**defaults)
+    return SandboxMiddleware(**defaults)
 
 
 def _text(result: AgentToolResult) -> str:
@@ -348,9 +348,9 @@ async def test_file_read_passes_page_and_line_ranges() -> None:
 
 
 def test_constructor_without_optional_ids() -> None:
-    """SandboxMiddlewarePi with only sandbox= should work fine."""
+    """SandboxMiddleware with only sandbox= should work fine."""
     sandbox = _make_sandbox()
-    mw = SandboxMiddlewarePi(sandbox=sandbox)
+    mw = SandboxMiddleware(sandbox=sandbox)
     assert len(mw.tools) == 4
     names = {t.name for t in mw.tools}
     assert names == _EXPECTED_TOOL_NAMES

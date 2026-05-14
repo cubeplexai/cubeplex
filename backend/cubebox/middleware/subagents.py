@@ -1,4 +1,4 @@
-"""SubAgentMiddlewarePi — cubepi port of SubAgentMiddleware (M3.c.3).
+"""SubAgentMiddleware — cubepi port of SubAgentMiddleware (M3.c.3).
 
 Injects a ``subagent`` AgentTool that, when called by the main cubepi
 agent, spawns an ephemeral inner cubepi.Agent (via
@@ -9,7 +9,7 @@ parent's ``subagent_event_queue`` ContextVar.
 
 Hooks (per Spec B): ``tools`` only — the middleware injects one AgentTool.
 
-CostMiddlewarePi cloning is handled lazily inside ``_execute``; the import
+CostMiddleware cloning is handled lazily inside ``_execute``; the import
 guard keeps this module self-contained until M3.d.1 (cost_pi) lands.
 """
 
@@ -56,7 +56,7 @@ class _SubAgentSchema(BaseModel):
     subagent_type: str = "general-purpose"
 
 
-class SubAgentMiddlewarePi(Middleware):
+class SubAgentMiddleware(Middleware):
     """cubepi port of SubAgentMiddleware (M3.c.3).
 
     Hooks:
@@ -79,7 +79,7 @@ class SubAgentMiddlewarePi(Middleware):
             Tools shared from the parent agent (excluding ``subagent`` and
             ``load_skill`` to prevent recursive spawning).
         inherited_middleware:
-            Middleware list from the parent; CostMiddlewarePi entries are
+            Middleware list from the parent; CostMiddleware entries are
             cloned with incremented depth for billing attribution.
     """
 
@@ -151,15 +151,15 @@ class SubAgentMiddlewarePi(Middleware):
                 spec.get("middleware", [])
             )
 
-            # Clone CostMiddlewarePi for billing depth attribution (M3.d.1).
+            # Clone CostMiddleware for billing depth attribution (M3.d.1).
             # Lazy import: if cost_pi is not yet defined, the isinstance check
             # simply finds nothing and cost cloning is skipped.
             try:
-                from cubebox.middleware.cost_pi import CostMiddlewarePi  # noqa: PLC0415
+                from cubebox.middleware.cost import CostMiddleware  # noqa: PLC0415
 
-                _cost_mw = next((m for m in middleware if isinstance(m, CostMiddlewarePi)), None)
+                _cost_mw = next((m for m in middleware if isinstance(m, CostMiddleware)), None)
                 if _cost_mw is not None:
-                    child_cost = CostMiddlewarePi(
+                    child_cost = CostMiddleware(
                         org_id=_cost_mw._org_id,
                         workspace_id=_cost_mw._workspace_id,
                         user_id=_cost_mw._user_id,
@@ -167,7 +167,7 @@ class SubAgentMiddlewarePi(Middleware):
                         parent_billing_id=_cost_mw._last_billing_id,
                         subagent_depth=_cost_mw._subagent_depth + 1,
                     )
-                    middleware = [m for m in middleware if not isinstance(m, CostMiddlewarePi)] + [
+                    middleware = [m for m in middleware if not isinstance(m, CostMiddleware)] + [
                         child_cost
                     ]
             except ImportError:

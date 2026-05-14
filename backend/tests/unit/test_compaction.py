@@ -1,4 +1,4 @@
-"""CompactionMiddlewarePi unit tests (M3.b.2).
+"""CompactionMiddleware unit tests (M3.b.2).
 
 Covers:
 - No compaction when compressed view is under the token threshold.
@@ -17,13 +17,13 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from cubepi.providers.base import AssistantMessage, TextContent, ToolResultMessage, UserMessage
 
-from cubebox.middleware.compaction.summarizer import CompactionSummary
-from cubebox.middleware.compaction_pi import (
-    CompactionMiddlewarePi,
+from cubebox.middleware.compaction import (
+    CompactionMiddleware,
     _compressed_view_pi,
     _cubepi_approx_tokens,
     _to_langchain_messages,
 )
+from cubebox.middleware.compaction.summarizer import CompactionSummary
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -51,8 +51,8 @@ def _make_middleware(
     max_tokens_before: int = 1000,
     summarizer_result: CompactionSummary | None = None,
     summarizer_raises: Exception | None = None,
-) -> CompactionMiddlewarePi:
-    """Build a CompactionMiddlewarePi with a mock summarizer LLM."""
+) -> CompactionMiddleware:
+    """Build a CompactionMiddleware with a mock summarizer LLM."""
     mock_llm = MagicMock()
 
     # Build a mock summarize that the middleware will call via summarize()
@@ -66,7 +66,7 @@ def _make_middleware(
         fake_response.content = summary_text
         mock_llm.bind.return_value.ainvoke = AsyncMock(return_value=fake_response)
 
-    return CompactionMiddlewarePi(
+    return CompactionMiddleware(
         extra_ref=lambda: extra,
         summary_llm=mock_llm,
         max_tokens_before_compact=max_tokens_before,

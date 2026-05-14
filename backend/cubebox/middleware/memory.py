@@ -96,7 +96,7 @@ def _render_snapshot_text(snap: dict[str, Any], *, current: bool) -> str:
     )
 
 
-class MemoryMiddlewarePi(Middleware):
+class MemoryMiddleware(Middleware):
     """cubepi port of MemoryMiddleware.
 
     Args:
@@ -278,7 +278,7 @@ def _prepend_snapshot_to_user_msg(msg: UserMessage, snapshot_text: str) -> UserM
     HumanMessage.content string as ``"{snapshot}\n\n{original_text}"``.
 
     ``metadata`` is shallow-copied so the persisted snapshot key is
-    visible to downstream middleware (e.g. AttachmentHintMiddlewarePi
+    visible to downstream middleware (e.g. AttachmentHintMiddleware
     which reads ``metadata["attachments"]``).
     """
     new_content = [TextContent(text=snapshot_text + "\n\n")] + list(msg.content)

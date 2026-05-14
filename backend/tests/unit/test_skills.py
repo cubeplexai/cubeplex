@@ -1,4 +1,4 @@
-"""Unit tests for SkillsMiddlewarePi (M3.c.2).
+"""Unit tests for SkillsMiddleware (M3.c.2).
 
 Covers:
 - after_tool_call ignores non-load_skill tools.
@@ -19,7 +19,7 @@ import pytest
 from cubepi.agent.types import AfterToolCallContext, AgentContext, AgentToolResult
 from cubepi.providers.base import AssistantMessage, TextContent, ToolCall
 
-from cubebox.middleware.skills_pi import SkillsMiddlewarePi
+from cubebox.middleware.skills import SkillsMiddleware
 from cubebox.tools.builtin.load_skill_pi import LoadSkillOutput
 
 # ---------------------------------------------------------------------------
@@ -31,9 +31,9 @@ def _make_extra(**kwargs: Any) -> dict[str, Any]:
     return dict(kwargs)
 
 
-def _make_middleware(extra: dict[str, Any]) -> SkillsMiddlewarePi:
-    """Build a SkillsMiddlewarePi with a closure over the given extra dict."""
-    return SkillsMiddlewarePi(extra_ref=lambda: extra)
+def _make_middleware(extra: dict[str, Any]) -> SkillsMiddleware:
+    """Build a SkillsMiddleware with a closure over the given extra dict."""
+    return SkillsMiddleware(extra_ref=lambda: extra)
 
 
 def _make_tool_call(name: str = "load_skill", tool_id: str = "tc-1") -> ToolCall:

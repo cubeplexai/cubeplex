@@ -1,4 +1,4 @@
-"""Unit tests for SubAgentMiddlewarePi (M3.c.3).
+"""Unit tests for SubAgentMiddleware (M3.c.3).
 
 Covers:
 - Middleware exposes exactly one tool named 'subagent'.
@@ -16,7 +16,7 @@ from typing import Any
 import pytest
 from cubepi.providers.faux import FauxProvider, faux_assistant_message
 
-from cubebox.middleware.subagents_pi import SubAgent, SubAgentMiddlewarePi, subagent_event_queue
+from cubebox.middleware.subagents import SubAgent, SubAgentMiddleware, subagent_event_queue
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -27,7 +27,7 @@ def _make_mw(
     subagent_map: dict[str, SubAgent] | None = None,
     *,
     provider: FauxProvider | None = None,
-) -> SubAgentMiddlewarePi:
+) -> SubAgentMiddleware:
     if provider is None:
         provider = FauxProvider()
     if subagent_map is None:
@@ -38,7 +38,7 @@ def _make_mw(
                 system_prompt="You are a sub.",
             )
         }
-    return SubAgentMiddlewarePi(
+    return SubAgentMiddleware(
         subagent_map=subagent_map,
         default_provider=provider,
         default_model_id="test-model",
@@ -68,7 +68,7 @@ def test_subagent_tool_has_parameters_schema() -> None:
 
 def test_general_purpose_fallback_auto_registered() -> None:
     """Middleware with no general-purpose key auto-adds it."""
-    mw = SubAgentMiddlewarePi(
+    mw = SubAgentMiddleware(
         subagent_map={
             "specialist": SubAgent(
                 name="specialist",
@@ -103,7 +103,7 @@ def test_shared_tools_excludes_subagent_and_load_skill() -> None:
         name="load_skill", description="skill", parameters=_NoArgs, execute=_noop
     )
 
-    mw = SubAgentMiddlewarePi(
+    mw = SubAgentMiddleware(
         subagent_map={},
         default_provider=FauxProvider(),
         default_model_id="test-model",

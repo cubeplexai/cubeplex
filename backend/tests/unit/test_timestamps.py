@@ -1,4 +1,4 @@
-"""Unit tests for TimestampMiddlewarePi (M3.d.2).
+"""Unit tests for TimestampMiddleware (M3.d.2).
 
 Covers:
 - transform_context returns messages byte-identical (cache discipline).
@@ -31,7 +31,7 @@ from cubepi.agent.types import (
 )
 from cubepi.providers.base import AssistantMessage, TextContent, ToolCall, UserMessage
 
-from cubebox.middleware.timestamps_pi import TimestampMiddlewarePi, _turn_started_at
+from cubebox.middleware.timestamps import TimestampMiddleware, _turn_started_at
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -93,7 +93,7 @@ def _make_after_ctx(
 @pytest.mark.asyncio
 async def test_transform_context_returns_messages_unchanged() -> None:
     """Messages returned byte-identical; no content modification."""
-    mw = TimestampMiddlewarePi()
+    mw = TimestampMiddleware()
     msgs = [_make_user_message("turn 1"), _make_user_message("turn 2")]
     original_content = [m.model_dump() for m in msgs]
 
@@ -107,7 +107,7 @@ async def test_transform_context_returns_messages_unchanged() -> None:
 @pytest.mark.asyncio
 async def test_transform_context_does_not_modify_content() -> None:
     """Strict check: content field of each message is untouched."""
-    mw = TimestampMiddlewarePi()
+    mw = TimestampMiddleware()
     msg = _make_user_message("do not touch me")
     await mw.transform_context([msg])
     assert msg.content[0].text == "do not touch me"
@@ -116,7 +116,7 @@ async def test_transform_context_does_not_modify_content() -> None:
 @pytest.mark.asyncio
 async def test_transform_context_no_timestamp_in_message_metadata() -> None:
     """transform_context must not inject timestamps into message.metadata."""
-    mw = TimestampMiddlewarePi()
+    mw = TimestampMiddleware()
     msg = _make_user_message("cache probe")
     await mw.transform_context([msg])
     # metadata should be empty — no timestamp injected
@@ -131,7 +131,7 @@ async def test_transform_context_no_timestamp_in_message_metadata() -> None:
 @pytest.mark.asyncio
 async def test_transform_context_sets_turn_started_at_contextvar() -> None:
     """After transform_context, _turn_started_at ContextVar holds an ISO timestamp."""
-    mw = TimestampMiddlewarePi()
+    mw = TimestampMiddleware()
     _turn_started_at.set(None)  # reset
 
     await mw.transform_context([])
@@ -151,7 +151,7 @@ async def test_transform_context_sets_turn_started_at_contextvar() -> None:
 @pytest.mark.asyncio
 async def test_before_tool_call_returns_none() -> None:
     """before_tool_call does not block — returns None."""
-    mw = TimestampMiddlewarePi()
+    mw = TimestampMiddleware()
     ctx = _make_before_ctx("tc-42")
     result = await mw.before_tool_call(ctx)
     assert result is None
@@ -160,7 +160,7 @@ async def test_before_tool_call_returns_none() -> None:
 @pytest.mark.asyncio
 async def test_before_tool_call_stashes_start_time() -> None:
     """before_tool_call populates _tool_started_at keyed by tool_call.id."""
-    mw = TimestampMiddlewarePi()
+    mw = TimestampMiddleware()
     ctx = _make_before_ctx("tc-99")
     await mw.before_tool_call(ctx)
     assert "tc-99" in mw._tool_started_at
@@ -172,7 +172,7 @@ async def test_before_tool_call_stashes_start_time() -> None:
 @pytest.mark.asyncio
 async def test_before_tool_call_separate_ids_stored_independently() -> None:
     """Two parallel tool calls get separate start times."""
-    mw = TimestampMiddlewarePi()
+    mw = TimestampMiddleware()
     await mw.before_tool_call(_make_before_ctx("tc-a"))
     await mw.before_tool_call(_make_before_ctx("tc-b"))
 
@@ -188,7 +188,7 @@ async def test_before_tool_call_separate_ids_stored_independently() -> None:
 @pytest.mark.asyncio
 async def test_after_tool_call_writes_timing_to_details() -> None:
     """after_tool_call returns AfterToolCallResult with timing in details."""
-    mw = TimestampMiddlewarePi()
+    mw = TimestampMiddleware()
     # Stash a start time first
     mw._tool_started_at["tc-1"] = "2024-01-01T00:00:00+00:00"
 
@@ -205,7 +205,7 @@ async def test_after_tool_call_writes_timing_to_details() -> None:
 @pytest.mark.asyncio
 async def test_after_tool_call_consumes_start_time() -> None:
     """after_tool_call removes the stashed start time (no memory leak)."""
-    mw = TimestampMiddlewarePi()
+    mw = TimestampMiddleware()
     mw._tool_started_at["tc-7"] = "2024-01-01T00:00:00+00:00"
 
     ctx = _make_after_ctx("tc-7")
@@ -217,7 +217,7 @@ async def test_after_tool_call_consumes_start_time() -> None:
 @pytest.mark.asyncio
 async def test_after_tool_call_merges_with_existing_dict_details() -> None:
     """Timing is merged with existing dict details; original keys preserved."""
-    mw = TimestampMiddlewarePi()
+    mw = TimestampMiddleware()
     mw._tool_started_at["tc-2"] = "2024-01-01T00:00:00+00:00"
 
     ctx = _make_after_ctx("tc-2", existing_details={"exit_code": 0, "output": "hello"})
@@ -233,7 +233,7 @@ async def test_after_tool_call_merges_with_existing_dict_details() -> None:
 @pytest.mark.asyncio
 async def test_after_tool_call_handles_non_dict_details() -> None:
     """Non-dict existing details are preserved under '_details' key."""
-    mw = TimestampMiddlewarePi()
+    mw = TimestampMiddleware()
     mw._tool_started_at["tc-3"] = "2024-01-01T00:00:00+00:00"
 
     ctx = _make_after_ctx("tc-3", existing_details="plain string")
@@ -248,7 +248,7 @@ async def test_after_tool_call_handles_non_dict_details() -> None:
 @pytest.mark.asyncio
 async def test_after_tool_call_returns_none_if_no_start_time() -> None:
     """If before_tool_call was not called (or id missing), returns None."""
-    mw = TimestampMiddlewarePi()
+    mw = TimestampMiddleware()
     ctx = _make_after_ctx("tc-unknown")
     result = await mw.after_tool_call(ctx)
     assert result is None
@@ -262,7 +262,7 @@ async def test_after_tool_call_returns_none_if_no_start_time() -> None:
 @pytest.mark.asyncio
 async def test_after_model_response_writes_created_at() -> None:
     """after_model_response stamps created_at on response.metadata."""
-    mw = TimestampMiddlewarePi()
+    mw = TimestampMiddleware()
     response = _make_assistant_message()
     ctx = MagicMock()
 
@@ -275,7 +275,7 @@ async def test_after_model_response_writes_created_at() -> None:
 @pytest.mark.asyncio
 async def test_after_model_response_writes_turn_started_at_from_contextvar() -> None:
     """after_model_response copies turn_started_at from the ContextVar."""
-    mw = TimestampMiddlewarePi()
+    mw = TimestampMiddleware()
     _turn_started_at.set("2024-06-15T12:00:00+00:00")
 
     response = _make_assistant_message()
@@ -287,7 +287,7 @@ async def test_after_model_response_writes_turn_started_at_from_contextvar() -> 
 @pytest.mark.asyncio
 async def test_after_model_response_returns_none() -> None:
     """after_model_response returns None — no response mutation via TurnAction."""
-    mw = TimestampMiddlewarePi()
+    mw = TimestampMiddleware()
     response = _make_assistant_message()
     result = await mw.after_model_response(response, MagicMock())
     assert result is None
@@ -296,7 +296,7 @@ async def test_after_model_response_returns_none() -> None:
 @pytest.mark.asyncio
 async def test_after_model_response_does_not_overwrite_existing_created_at() -> None:
     """setdefault semantics: existing created_at is preserved."""
-    mw = TimestampMiddlewarePi()
+    mw = TimestampMiddleware()
     response = _make_assistant_message()
     response.metadata["created_at"] = "2020-01-01T00:00:00+00:00"
 
@@ -308,7 +308,7 @@ async def test_after_model_response_does_not_overwrite_existing_created_at() -> 
 @pytest.mark.asyncio
 async def test_after_model_response_leaves_reasoning_duration_ms_untouched() -> None:
     """reasoning_duration_ms pre-set by LLM adapter is never overwritten."""
-    mw = TimestampMiddlewarePi()
+    mw = TimestampMiddleware()
     response = _make_assistant_message()
     response.metadata["reasoning_duration_ms"] = 1234
 
@@ -320,7 +320,7 @@ async def test_after_model_response_leaves_reasoning_duration_ms_untouched() -> 
 @pytest.mark.asyncio
 async def test_after_model_response_turn_started_at_absent_when_contextvar_none() -> None:
     """turn_started_at is not written when transform_context was not called."""
-    mw = TimestampMiddlewarePi()
+    mw = TimestampMiddleware()
     _turn_started_at.set(None)
 
     response = _make_assistant_message()
@@ -337,7 +337,7 @@ async def test_after_model_response_turn_started_at_absent_when_contextvar_none(
 @pytest.mark.asyncio
 async def test_timestamps_never_in_message_content() -> None:
     """Full round trip — timestamps appear only in out-of-band metadata."""
-    mw = TimestampMiddlewarePi()
+    mw = TimestampMiddleware()
     user_msg = _make_user_message("what time is it?")
 
     # transform_context
@@ -379,7 +379,7 @@ async def test_timestamps_never_in_message_content() -> None:
 @pytest.mark.asyncio
 async def test_full_turn_round_trip() -> None:
     """Simulate a complete turn: transform_context → before → after → amr."""
-    mw = TimestampMiddlewarePi()
+    mw = TimestampMiddleware()
     _turn_started_at.set(None)
 
     # 1. Turn starts — transform_context sets turn-start

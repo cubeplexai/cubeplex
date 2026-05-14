@@ -1,4 +1,4 @@
-"""Unit tests for ArtifactMiddlewarePi (M3.a.2)."""
+"""Unit tests for ArtifactMiddleware (M3.a.2)."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ import pytest
 from cubepi.agent.types import AgentTool, AgentToolResult
 from cubepi.providers.base import TextContent
 
-from cubebox.middleware.artifacts_pi import ArtifactMiddlewarePi, _SaveArtifactArgs
+from cubebox.middleware.artifacts import ArtifactMiddleware, _SaveArtifactArgs
 
 # ---------------------------------------------------------------------------
 # Helpers for transform_system_prompt tests
@@ -20,8 +20,8 @@ from cubebox.middleware.artifacts_pi import ArtifactMiddlewarePi, _SaveArtifactA
 # ---------------------------------------------------------------------------
 
 
-def _make_middleware(**kwargs: Any) -> ArtifactMiddlewarePi:
-    """Build an ArtifactMiddlewarePi with minimal mock dependencies."""
+def _make_middleware(**kwargs: Any) -> ArtifactMiddleware:
+    """Build an ArtifactMiddleware with minimal mock dependencies."""
     sandbox = MagicMock()
     defaults = {
         "sandbox": sandbox,
@@ -30,7 +30,7 @@ def _make_middleware(**kwargs: Any) -> ArtifactMiddlewarePi:
         "workspace_id": "ws-test",
     }
     defaults.update(kwargs)
-    return ArtifactMiddlewarePi(**defaults)
+    return ArtifactMiddleware(**defaults)
 
 
 # ---------------------------------------------------------------------------
@@ -151,7 +151,7 @@ async def test_tool_execute_path_not_found_returns_error() -> None:
     exec_result.exit_code = 1
     sandbox.execute = AsyncMock(return_value=exec_result)
 
-    mw = ArtifactMiddlewarePi(
+    mw = ArtifactMiddleware(
         sandbox=sandbox,
         conversation_id="conv-1",
         org_id="org-1",
@@ -217,7 +217,7 @@ async def test_tool_execute_creates_artifact_in_db() -> None:
             side_effect=RuntimeError("no objectstore in unit test"),
         ),
     ):
-        mw = ArtifactMiddlewarePi(
+        mw = ArtifactMiddleware(
             sandbox=sandbox,
             conversation_id="conv-1",
             org_id="org-1",
@@ -281,7 +281,7 @@ async def test_tool_execute_updates_existing_artifact() -> None:
             side_effect=RuntimeError("no objectstore"),
         ),
     ):
-        mw = ArtifactMiddlewarePi(
+        mw = ArtifactMiddleware(
             sandbox=sandbox,
             conversation_id="conv-1",
             org_id="org-1",

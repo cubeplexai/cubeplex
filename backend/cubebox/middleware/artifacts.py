@@ -1,4 +1,4 @@
-"""ArtifactMiddlewarePi — cubepi port of ArtifactMiddleware (M3.a.2).
+"""ArtifactMiddleware — cubepi port of ArtifactMiddleware (M3.a.2).
 
 Implements the cubepi Middleware protocol with two hooks:
 
@@ -215,12 +215,12 @@ def _make_save_artifact_tool(
 # ---------------------------------------------------------------------------
 
 
-class ArtifactMiddlewarePi(Middleware):
+class ArtifactMiddleware(Middleware):
     """Registers save_artifact tool and injects artifact prompt into messages.
 
     Usage::
 
-        mw = ArtifactMiddlewarePi(
+        mw = ArtifactMiddleware(
             sandbox=sandbox,
             conversation_id=conversation_id,
             org_id=org_id,

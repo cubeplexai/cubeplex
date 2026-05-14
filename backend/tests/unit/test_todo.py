@@ -1,4 +1,4 @@
-"""Unit tests for TodoListMiddlewarePi (M3.e).
+"""Unit tests for TodoListMiddleware (M3.e).
 
 Covers ALL guard branches and hook behaviors:
 - Tool injection (write_todos in mw.tools)
@@ -39,10 +39,10 @@ from cubepi.providers.base import (
     UserMessage,
 )
 
-from cubebox.middleware.todo_pi import (
+from cubebox.middleware.todo import (
     STALE_REMINDER_THRESHOLD,
     Todo,
-    TodoListMiddlewarePi,
+    TodoListMiddleware,
     WriteTodosInput,
     _last_assistant_message_pi,
     _make_write_todos_tool,
@@ -61,10 +61,10 @@ def _make_extra(**kwargs: Any) -> dict[str, Any]:
     return dict(kwargs)
 
 
-def _make_middleware(extra: dict[str, Any] | None = None) -> TodoListMiddlewarePi:
+def _make_middleware(extra: dict[str, Any] | None = None) -> TodoListMiddleware:
     if extra is None:
         extra = {}
-    return TodoListMiddlewarePi(extra_ref=lambda: extra)
+    return TodoListMiddleware(extra_ref=lambda: extra)
 
 
 def _make_assistant_msg(

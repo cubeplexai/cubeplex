@@ -1,14 +1,14 @@
-"""Unit tests for AttachmentHintMiddlewarePi (M3.a.1)."""
+"""Unit tests for AttachmentHintMiddleware (M3.a.1)."""
 
 import pytest
 from cubepi.providers.base import AssistantMessage, TextContent, Usage, UserMessage
 
-from cubebox.middleware.attachments_pi import AttachmentHintMiddlewarePi
+from cubebox.middleware.attachments import AttachmentHintMiddleware
 
 
 @pytest.mark.asyncio
 async def test_user_msg_with_no_attachments_passes_through() -> None:
-    mw = AttachmentHintMiddlewarePi()
+    mw = AttachmentHintMiddleware()
     msg = UserMessage(content=[TextContent(text="hi")])
     out = await mw.transform_context([msg])
     assert len(out) == 1
@@ -17,7 +17,7 @@ async def test_user_msg_with_no_attachments_passes_through() -> None:
 
 @pytest.mark.asyncio
 async def test_user_msg_with_empty_attachments_list_passes_through() -> None:
-    mw = AttachmentHintMiddlewarePi()
+    mw = AttachmentHintMiddleware()
     msg = UserMessage(content=[TextContent(text="hi")], metadata={"attachments": []})
     out = await mw.transform_context([msg])
     assert len(out) == 1
@@ -26,7 +26,7 @@ async def test_user_msg_with_empty_attachments_list_passes_through() -> None:
 
 @pytest.mark.asyncio
 async def test_user_msg_with_attachments_gets_hint_appended() -> None:
-    mw = AttachmentHintMiddlewarePi()
+    mw = AttachmentHintMiddleware()
     msg = UserMessage(
         content=[TextContent(text="look")],
         metadata={
@@ -49,7 +49,7 @@ async def test_user_msg_with_attachments_gets_hint_appended() -> None:
 
 @pytest.mark.asyncio
 async def test_image_attachment_includes_view_images_hint() -> None:
-    mw = AttachmentHintMiddlewarePi()
+    mw = AttachmentHintMiddleware()
     msg = UserMessage(
         content=[TextContent(text="q")],
         metadata={
@@ -73,7 +73,7 @@ async def test_image_attachment_includes_view_images_hint() -> None:
 
 @pytest.mark.asyncio
 async def test_document_attachment_includes_file_read_hint() -> None:
-    mw = AttachmentHintMiddlewarePi()
+    mw = AttachmentHintMiddleware()
     msg = UserMessage(
         content=[TextContent(text="q")],
         metadata={
@@ -95,7 +95,7 @@ async def test_document_attachment_includes_file_read_hint() -> None:
 
 @pytest.mark.asyncio
 async def test_assistant_message_unchanged() -> None:
-    mw = AttachmentHintMiddlewarePi()
+    mw = AttachmentHintMiddleware()
     msg = AssistantMessage(content=[TextContent(text="ok")], usage=Usage())
     out = await mw.transform_context([msg])
     assert out[0] is msg or out[0].content[0].text == "ok"
@@ -103,7 +103,7 @@ async def test_assistant_message_unchanged() -> None:
 
 @pytest.mark.asyncio
 async def test_multiple_messages_only_attachments_user_modified() -> None:
-    mw = AttachmentHintMiddlewarePi()
+    mw = AttachmentHintMiddleware()
     msgs: list = [
         UserMessage(content=[TextContent(text="first")]),
         UserMessage(
@@ -131,7 +131,7 @@ async def test_multiple_messages_only_attachments_user_modified() -> None:
 @pytest.mark.asyncio
 async def test_original_message_not_mutated() -> None:
     """transform_context must not mutate the input message."""
-    mw = AttachmentHintMiddlewarePi()
+    mw = AttachmentHintMiddleware()
     msg = UserMessage(
         content=[TextContent(text="original")],
         metadata={
@@ -152,7 +152,7 @@ async def test_original_message_not_mutated() -> None:
 
 @pytest.mark.asyncio
 async def test_metadata_preserved_on_augmented_message() -> None:
-    mw = AttachmentHintMiddlewarePi()
+    mw = AttachmentHintMiddleware()
     msg = UserMessage(
         content=[TextContent(text="hi")],
         metadata={
@@ -177,7 +177,7 @@ async def test_no_text_content_appends_new_block() -> None:
     """When there is no existing TextContent, a new one is appended."""
     from cubepi.providers.base import ImageContent
 
-    mw = AttachmentHintMiddlewarePi()
+    mw = AttachmentHintMiddleware()
     msg = UserMessage(
         content=[ImageContent(source="data:image/png;base64,abc", media_type="image/png")],
         metadata={

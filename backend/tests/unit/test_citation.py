@@ -1,4 +1,4 @@
-"""Unit tests for CitationMiddlewarePi (M3.a.3)."""
+"""Unit tests for CitationMiddleware (M3.a.3)."""
 
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ from cubepi.agent.types import (
 )
 from cubepi.providers.base import AssistantMessage, TextContent, ToolCall, Usage
 
-from cubebox.middleware.citation_pi import CitationMiddlewarePi, _extract_text_content
+from cubebox.middleware.citation import CitationMiddleware, _extract_text_content
 from cubebox.middleware.citations.config import CitationConfig
 from cubebox.middleware.citations.counter import (
     CitationCounter,
@@ -43,8 +43,8 @@ _PLAIN_CONFIG = CitationConfig(
 def _make_middleware(
     configs: dict[str, CitationConfig] | None = None,
     event_queue: asyncio.Queue[Any] | None = None,
-) -> CitationMiddlewarePi:
-    return CitationMiddlewarePi(
+) -> CitationMiddleware:
+    return CitationMiddleware(
         citation_configs=configs or {"web_search": _WEB_CONFIG},
         event_queue=event_queue,
     )

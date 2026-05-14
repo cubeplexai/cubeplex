@@ -1,4 +1,4 @@
-"""CostMiddlewarePi — cubepi port of CostMiddleware (M3.d.1).
+"""CostMiddleware — cubepi port of CostMiddleware (M3.d.1).
 
 Records per-LLM-call billing events after each model response.
 
@@ -16,8 +16,8 @@ Attribution fields:
     ``_subagent_depth`` — billing hierarchy depth (0 = top-level agent)
     ``_last_billing_id`` — updated after each write so child subagents can chain
 
-Subagent cloning (M3.c.3): ``SubAgentMiddlewarePi`` reads ``_last_billing_id``
-and ``_subagent_depth`` from the parent ``CostMiddlewarePi`` instance and
+Subagent cloning (M3.c.3): ``SubAgentMiddleware`` reads ``_last_billing_id``
+and ``_subagent_depth`` from the parent ``CostMiddleware`` instance and
 constructs a new child instance with ``subagent_depth + 1``.
 """
 
@@ -37,7 +37,7 @@ from cubebox.models.public_id import generate_public_id
 from cubebox.repositories.billing import BillingRepository
 
 
-class CostMiddlewarePi(Middleware):
+class CostMiddleware(Middleware):
     """Records one billing_events + billing_llm_events row per LLM call.
 
     Hooks:
