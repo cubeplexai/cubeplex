@@ -256,3 +256,59 @@ async def test_patch_forbidden_for_member(
     )
     # The member is not in this workspace at all, so the workspace check fires first → 403.
     assert resp.status_code in (401, 403), resp.text
+
+
+# ---------------------------------------------------------------------------
+# Catalog tool-citations endpoint tests
+# ---------------------------------------------------------------------------
+
+
+async def test_get_catalog_tool_citations_returns_defaults(
+    admin_client: tuple[httpx.AsyncClient, str],
+    db_session: AsyncSession,
+) -> None:
+    """The catalog endpoint returns the seeded tool_citations for a slug."""
+    from cubebox.repositories.mcp_catalog import MCPCatalogConnectorRepository
+
+    client, workspace_id = admin_client
+
+    expected: dict[str, Any] = {
+        "web_search": {
+            "content_type": "json",
+            "source_type": "web",
+            "content_field": "results",
+            "mapping": {"snippet": "description"},
+        },
+    }
+    repo = MCPCatalogConnectorRepository(db_session)
+    await repo.upsert_by_slug(
+        slug="webtools-citation-test",
+        name="WebTools Test",
+        description="t",
+        provider="x",
+        server_url="http://example.com/mcp",
+        transport="streamable_http",
+        supported_auth_methods=["static"],
+        default_credential_scope="org",
+        tool_citations=expected,
+    )
+    await db_session.commit()
+
+    resp = await client.get(
+        f"/api/v1/ws/{workspace_id}/mcp/catalog/webtools-citation-test/tool-citations"
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["slug"] == "webtools-citation-test"
+    assert body["tool_citations"] == expected
+
+
+async def test_get_catalog_tool_citations_404_for_unknown_slug(
+    admin_client: tuple[httpx.AsyncClient, str],
+) -> None:
+    """Unknown catalog slug returns 404."""
+    client, workspace_id = admin_client
+    resp = await client.get(
+        f"/api/v1/ws/{workspace_id}/mcp/catalog/does-not-exist-9999/tool-citations"
+    )
+    assert resp.status_code == 404
