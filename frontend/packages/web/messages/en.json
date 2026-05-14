@@ -418,8 +418,8 @@
     },
     "detail": {
       "notDiscoveredYet": "not discovered yet",
-      "lastDiscoveredLine": "{transport} · last discovered {time}",
-      "refreshTools": "Refresh tools",
+      "lastDiscoveredLine": "{transport} · last synced {time}",
+      "refreshTools": "Refresh",
       "shareToOrg": "Share to org",
       "delete": "Delete",
       "overview": "Overview",
@@ -431,7 +431,28 @@
       "authMethod": "Auth method",
       "credentialScope": "Credential scope",
       "timeout": "Timeout",
-      "timeoutValue": "{timeout}s / SSE {sseTimeout}s"
+      "timeoutValue": "{timeout}s / SSE {sseTimeout}s",
+      "statusConnected": "Connected",
+      "statusDisconnected": "Disconnected",
+      "toolsCount": "{count, plural, one {# tool} other {# tools}}",
+      "metaLine": "Last synced {time} · {tools}",
+      "metaLineNever": "Never synced · {tools}",
+      "copy": "Copy",
+      "copied": "Copied",
+      "connectionCard": {
+        "title": "Connection",
+        "url": "URL",
+        "transport": "Transport",
+        "authMethod": "Auth method",
+        "scope": "Scope",
+        "timeouts": "Timeouts",
+        "timeoutsValue": "Request {timeout}s · SSE {sseTimeout}s"
+      },
+      "errorBanner": {
+        "title": "Last discovery failed",
+        "expand": "Show details",
+        "collapse": "Hide details"
+      }
     },
     "promote": {
       "title": "Promote MCP server",
@@ -478,7 +499,39 @@
       "apiKeyPlaceholder": "API key / token"
     },
     "tools": {
-      "empty": "No tools discovered yet. Refresh tools after the MCP server is reachable."
+      "empty": "No tools discovered yet — click Refresh in the header.",
+      "emptyMatch": "No tools match \"{query}\".",
+      "filterPlaceholder": "Filter tools…",
+      "countAll": "{count, plural, one {# tool} other {# tools}}",
+      "countMatch": "{matched} of {total} match",
+      "argsSummary": "{count, plural, one {# arg} other {# args}}",
+      "requiredSummary": "{count} required",
+      "detail": {
+        "viewSchema": "Schema",
+        "viewTryIt": "Try it",
+        "viewJson": "JSON",
+        "schema": {
+          "noParams": "This tool takes no parameters.",
+          "parameters": "Parameters",
+          "required": "Required",
+          "defaultLabel": "default:",
+          "allowed": "Allowed:",
+          "itemShape": "Item shape",
+          "variantLabel": "Variant {n}",
+          "unresolvedRef": "$ref",
+          "malformed": "Unable to render schema. Use the JSON tab to inspect."
+        },
+        "tryit": {
+          "banner": "Run this tool with custom arguments. Coming soon — backend in next PR.",
+          "run": "Run",
+          "runDisabledTooltip": "Try-it backend not yet available",
+          "jsonHint": "Enter JSON"
+        },
+        "json": {
+          "copy": "Copy JSON",
+          "copied": "Schema copied"
+        }
+      }
     },
     "wsPanel": {
       "title": "MCP Connectors",

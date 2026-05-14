@@ -418,8 +418,8 @@
     },
     "detail": {
       "notDiscoveredYet": "尚未发现",
-      "lastDiscoveredLine": "{transport} · 上次发现 {time}",
-      "refreshTools": "刷新工具",
+      "lastDiscoveredLine": "{transport} · 上次同步 {time}",
+      "refreshTools": "刷新",
       "shareToOrg": "共享到组织",
       "delete": "删除",
       "overview": "概览",
@@ -431,7 +431,28 @@
       "authMethod": "认证方式",
       "credentialScope": "凭证作用域",
       "timeout": "超时",
-      "timeoutValue": "{timeout} 秒 / SSE {sseTimeout} 秒"
+      "timeoutValue": "{timeout} 秒 / SSE {sseTimeout} 秒",
+      "statusConnected": "已连接",
+      "statusDisconnected": "未连接",
+      "toolsCount": "{count} 个工具",
+      "metaLine": "上次同步 {time} · {tools}",
+      "metaLineNever": "尚未同步 · {tools}",
+      "copy": "复制",
+      "copied": "已复制",
+      "connectionCard": {
+        "title": "连接信息",
+        "url": "URL",
+        "transport": "传输方式",
+        "authMethod": "认证方式",
+        "scope": "作用域",
+        "timeouts": "超时",
+        "timeoutsValue": "请求 {timeout} 秒 · SSE {sseTimeout} 秒"
+      },
+      "errorBanner": {
+        "title": "上次发现失败",
+        "expand": "展开详情",
+        "collapse": "收起详情"
+      }
     },
     "promote": {
       "title": "提升为组织级 MCP",
@@ -478,7 +499,39 @@
       "apiKeyPlaceholder": "API key / token"
     },
     "tools": {
-      "empty": "尚未发现任何工具。MCP 服务可达后请刷新工具。"
+      "empty": "尚未发现任何工具 — 请在顶部点击 \"刷新\"。",
+      "emptyMatch": "没有匹配 \"{query}\" 的工具。",
+      "filterPlaceholder": "搜索工具…",
+      "countAll": "{count} 个工具",
+      "countMatch": "{matched} / {total} 匹配",
+      "argsSummary": "{count} 个参数",
+      "requiredSummary": "{count} 个必填",
+      "detail": {
+        "viewSchema": "Schema",
+        "viewTryIt": "试运行",
+        "viewJson": "JSON",
+        "schema": {
+          "noParams": "该工具不需要参数。",
+          "parameters": "参数",
+          "required": "必填",
+          "defaultLabel": "默认:",
+          "allowed": "允许值:",
+          "itemShape": "元素结构",
+          "variantLabel": "变体 {n}",
+          "unresolvedRef": "$ref",
+          "malformed": "无法渲染 schema，请切到 JSON 标签查看。"
+        },
+        "tryit": {
+          "banner": "用自定义参数调用该工具。即将上线 —— 后端将在下个 PR 提供。",
+          "run": "运行",
+          "runDisabledTooltip": "Try-it 后端尚未上线",
+          "jsonHint": "输入 JSON"
+        },
+        "json": {
+          "copy": "复制 JSON",
+          "copied": "已复制 Schema"
+        }
+      }
     },
     "wsPanel": {
       "title": "MCP Connectors",
