@@ -247,7 +247,7 @@ class CompactionMiddleware(Middleware):
         # Need to compact further.
         boundary = boundary or 0
         new_boundary = safe_boundary(
-            _to_langchain_messages(messages),
+            messages,
             keep_recent=self._keep_recent,
             min_compact=max(self._min_compact, boundary + 1),
         )

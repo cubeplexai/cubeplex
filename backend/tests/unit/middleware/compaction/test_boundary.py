@@ -1,81 +1,80 @@
-"""Tests for safe_boundary."""
+"""Unit tests for safe_boundary — operates on cubepi messages."""
 
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
+from __future__ import annotations
+
+from cubepi.providers.base import (
+    AssistantMessage,
+    Message,
+    TextContent,
+    ToolCall,
+    ToolResultMessage,
+    UserMessage,
+)
 
 from cubebox.middleware.compaction.boundary import safe_boundary
 
 
-def _h(text: str) -> HumanMessage:
-    return HumanMessage(content=text)
+def _user(text: str) -> UserMessage:
+    return UserMessage(content=[TextContent(text=text)])
 
 
-def _a(text: str = "", tool_calls: list[dict] | None = None) -> AIMessage:
-    return AIMessage(content=text, tool_calls=tool_calls or [])
+def _assistant(text: str = "", tool_calls: list[ToolCall] | None = None) -> AssistantMessage:
+    content: list = []
+    if text:
+        content.append(TextContent(text=text))
+    if tool_calls:
+        content.extend(tool_calls)
+    return AssistantMessage(content=content)
 
 
-def _t(call_id: str, text: str = "ok") -> ToolMessage:
-    return ToolMessage(content=text, tool_call_id=call_id, name="x")
+def _tool_result(call_id: str, text: str = "ok") -> ToolResultMessage:
+    return ToolResultMessage(
+        tool_call_id=call_id,
+        tool_name="t",
+        content=[TextContent(text=text)],
+    )
 
 
-def test_keeps_recent_window_when_history_short():
-    msgs = [_h("h1"), _a("a1")]
-    # keep_recent=4, so nothing to compact; boundary is None
-    assert safe_boundary(msgs, keep_recent=4) is None
+def test_returns_none_when_too_few_messages() -> None:
+    msgs: list[Message] = [_user("hi"), _assistant("hello")]
+    assert safe_boundary(msgs, keep_recent=4, min_compact=1) is None
 
 
-def test_basic_boundary_lands_on_humanmessage():
-    msgs = [_h("h1"), _a("a1"), _h("h2"), _a("a2"), _h("h3"), _a("a3")]
-    # keep_recent=2 → tentative boundary = 4 → msgs[4] = _h("h3") ✓
-    assert safe_boundary(msgs, keep_recent=2) == 4
-
-
-def test_walks_back_to_humanmessage():
-    msgs = [_h("h1"), _a("a1"), _h("h2"), _a("a2"), _h("h3"), _a("a3")]
-    # keep_recent=3 → tentative boundary = 3 → msgs[3] = _a, walk back to msgs[2] = _h
-    assert safe_boundary(msgs, keep_recent=3) == 2
-
-
-def test_does_not_split_tool_call_pair():
-    # h1 → a1(tool_calls=[t1]) → tool t1 → h2 → a2
-    msgs = [
-        _h("h1"),
-        _a(tool_calls=[{"id": "t1", "name": "x", "args": {}}]),
-        _t("t1"),
-        _h("h2"),
-        _a("a2"),
+def test_returns_boundary_at_human_message_start() -> None:
+    msgs: list[Message] = [
+        _user("q1"),
+        _assistant("a1"),
+        _user("q2"),
+        _assistant("a2"),
+        _user("q3"),
+        _assistant("a3"),
     ]
-    # keep_recent=2 → tentative boundary = 3 → msgs[3] = _h("h2") — suffix [_h, _a] has
-    # no orphan ToolMessage, safe.
-    assert safe_boundary(msgs, keep_recent=2) == 3
+    # keep_recent=2 → candidate idx=4 (UserMessage) ✓
+    assert safe_boundary(msgs, keep_recent=2, min_compact=1) == 4
 
 
-def test_orphan_tool_message_walks_back():
-    # If keep_recent=3, tentative boundary = 2 → msgs[2] = _t("t1") (orphan).
-    # Must walk to msgs[1] = _a (not Human), then msgs[0] = _h. boundary=0 → None.
-    msgs = [
-        _h("h1"),
-        _a(tool_calls=[{"id": "t1", "name": "x", "args": {}}]),
-        _t("t1"),
-        _h("h2"),
-        _a("a2"),
+def test_skips_orphan_tool_results_in_suffix() -> None:
+    tc = ToolCall(id="c1", name="f", arguments={})
+    msgs: list[Message] = [
+        _user("q1"),
+        _assistant("", [tc]),
+        _tool_result("c1"),
+        _user("q2"),
+        _tool_result("orphan"),  # orphan: no matching tool_call in suffix from idx=3
+        _assistant("done"),
     ]
-    assert safe_boundary(msgs, keep_recent=3) is None
+    # candidate=4 not a UserMessage; candidate=3 UserMessage but suffix has orphan tool_result
+    # candidate=2 not a UserMessage; candidate=1 not a UserMessage; candidate=0 not allowed (no prefix)
+    assert safe_boundary(msgs, keep_recent=2, min_compact=1) is None
 
 
-def test_skips_system_messages_in_search():
-    msgs = [SystemMessage(content="sys"), _h("h1"), _a("a1"), _h("h2"), _a("a2")]
-    # keep_recent=2 → tentative boundary = 3 → msgs[3] = _h("h2")
-    assert safe_boundary(msgs, keep_recent=2) == 3
-
-
-def test_walks_back_when_initial_message_not_human():
-    msgs = [_a("a1"), _a("a2"), _h("h1"), _a("a3")]
-    # keep_recent=1 → tentative boundary = 3, msgs[3]=_a, walk back to msgs[2]=_h ✓
-    assert safe_boundary(msgs, keep_recent=1) == 2
-
-
-def test_min_compact_size_too_small_returns_none():
-    msgs = [_h("h1"), _a("a1"), _h("h2"), _a("a2")]
-    # keep_recent=2, tentative boundary=2, msgs[2]=_h ✓ — but only 2 msgs in prefix.
-    # min_compact=4 demands more, so refuse.
-    assert safe_boundary(msgs, keep_recent=2, min_compact=4) is None
+def test_min_compact_enforced() -> None:
+    msgs: list[Message] = [
+        _user("q1"),
+        _assistant("a1"),
+        _user("q2"),
+        _assistant("a2"),
+    ]
+    # candidate=2 is UserMessage with self-contained suffix; min_compact=3 → None
+    assert safe_boundary(msgs, keep_recent=2, min_compact=3) is None
+    assert safe_boundary(msgs, keep_recent=2, min_compact=1) == 2

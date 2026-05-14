@@ -1,12 +1,21 @@
-"""Boundary selection for compaction — picks a safe split point."""
+"""Boundary selection for compaction — picks a safe split point.
+
+Operates on cubepi message types from cubepi.providers.base.
+"""
 
 from __future__ import annotations
 
-from langchain_core.messages import AIMessage, AnyMessage, HumanMessage, ToolMessage
+from cubepi.providers.base import (
+    AssistantMessage,
+    Message,
+    ToolCall,
+    ToolResultMessage,
+    UserMessage,
+)
 
 
 def safe_boundary(
-    messages: list[AnyMessage],
+    messages: list[Message],
     *,
     keep_recent: int,
     min_compact: int = 1,
@@ -15,9 +24,9 @@ def safe_boundary(
 
     Constraints:
       1. messages[b:] must contain >= keep_recent items.
-      2. messages[b] must be a HumanMessage (start of a turn).
-      3. messages[b:] must not contain a ToolMessage whose tool_call_id has no
-         matching AIMessage.tool_calls within messages[b:].
+      2. messages[b] must be a UserMessage (start of a turn).
+      3. messages[b:] must not contain a ToolResultMessage whose tool_call_id
+         has no matching ToolCall in an AssistantMessage within messages[b:].
       4. If no boundary satisfies all and leaves at least min_compact messages
          in the prefix, return None (caller skips compaction this round).
     """
@@ -28,7 +37,7 @@ def safe_boundary(
     candidate = n - keep_recent
     while candidate > 0:
         msg = messages[candidate]
-        if not isinstance(msg, HumanMessage):
+        if not isinstance(msg, UserMessage):
             candidate -= 1
             continue
         if not _suffix_is_self_contained(messages[candidate:]):
@@ -41,16 +50,15 @@ def safe_boundary(
     return None
 
 
-def _suffix_is_self_contained(suffix: list[AnyMessage]) -> bool:
-    """Every ToolMessage in the suffix must have its parent AIMessage in the suffix."""
+def _suffix_is_self_contained(suffix: list[Message]) -> bool:
+    """Every ToolResultMessage in the suffix must have its parent ToolCall in the suffix."""
     available_call_ids: set[str] = set()
     for msg in suffix:
-        if isinstance(msg, AIMessage):
-            for tc in msg.tool_calls or []:
-                tc_id = tc.get("id") if isinstance(tc, dict) else getattr(tc, "id", None)
-                if tc_id:
-                    available_call_ids.add(tc_id)
-        elif isinstance(msg, ToolMessage):
+        if isinstance(msg, AssistantMessage):
+            for block in msg.content:
+                if isinstance(block, ToolCall) and block.id:
+                    available_call_ids.add(block.id)
+        elif isinstance(msg, ToolResultMessage):
             if msg.tool_call_id and msg.tool_call_id not in available_call_ids:
                 return False
     return True
