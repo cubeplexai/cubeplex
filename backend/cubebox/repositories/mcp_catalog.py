@@ -108,7 +108,8 @@ class MCPCatalogConnectorRepository:
         existing.static_form_fields = static_form_fields
         existing.static_auth_header_template = static_auth_header_template
         existing.cred_metadata = cred_metadata or {}
-        existing.tool_citations = tool_citations or {}
+        if tool_citations is not None:
+            existing.tool_citations = tool_citations
         existing.status = status
         existing.updated_at = datetime.now(UTC)
         self.session.add(existing)
