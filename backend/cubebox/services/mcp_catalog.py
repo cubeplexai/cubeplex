@@ -410,6 +410,7 @@ class MCPCatalogService:
                 headers={},
                 timeout=30.0,
                 sse_read_timeout=300.0,
+                tool_citations=dict(connector.tool_citations or {}),
                 created_by_user_id=self._ctx.user.id,
             )
         )
@@ -459,6 +460,7 @@ class MCPCatalogService:
                 headers={},
                 timeout=30.0,
                 sse_read_timeout=300.0,
+                tool_citations=dict(connector.tool_citations or {}),
                 created_by_user_id=self._ctx.user.id,
             )
         )
