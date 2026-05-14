@@ -2,10 +2,25 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass, field
+
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AnyMessage, HumanMessage, SystemMessage
 
-from cubebox.agents.state import CompactionSummary
+
+@dataclass
+class CompactionSummary:
+    """Persisted running summary of a conversation's older turns.
+
+    Stored on cubepi ``ctx.extra["compaction"]`` between turns. Three-field
+    shape mirrors the canonical "running summary" pattern: the text, which
+    messages it covers, and where the rolling window currently ends.
+    """
+
+    summary: str
+    summarized_message_ids: list[str] = field(default_factory=list)
+    last_summarized_message_id: str | None = None
+
 
 SUMMARIZER_SYSTEM_PROMPT = """\
 You compress a chat transcript into a brief, faithful narrative for an AI assistant

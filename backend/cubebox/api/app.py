@@ -183,16 +183,6 @@ async def lifespan(_app: FastAPI):  # type: ignore
         logger.error("Failed to initialize parser registry: {}", str(e))
         raise
 
-    # Initialize LangGraph checkpointer (creates pool + setup tables)
-    try:
-        from cubebox.agents.checkpointer import init_checkpointer
-
-        await init_checkpointer()
-        logger.info("LangGraph checkpointer initialized")
-    except Exception as e:
-        logger.error("Failed to initialize LangGraph checkpointer: {}", str(e))
-        raise
-
     # Initialize SandboxManager and start cleanup loop
     cleanup_task = None
     try:
@@ -304,9 +294,6 @@ async def lifespan(_app: FastAPI):  # type: ignore
 
     # ==================== Shutdown ====================
     logger.info("Application shutting down")
-    from cubebox.agents.checkpointer import shutdown_checkpointer
-
-    await shutdown_checkpointer()
     if _attachment_cleanup_task is not None:
         _attachment_cleanup_task.cancel()
         try:

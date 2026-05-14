@@ -1,4 +1,9 @@
-"""Citation middleware for inline reference tracking."""
+"""Citation utilities shared by citation_pi middleware.
+
+The langgraph ``CitationMiddleware`` was removed in M6; only the
+shared chunker/config/counter helpers remain here and are consumed by
+``cubebox.middleware.citation_pi.CitationMiddlewarePi``.
+"""
 
 from cubebox.middleware.citations.config import CitationConfig, load_citation_configs
 from cubebox.middleware.citations.counter import (
@@ -6,12 +11,10 @@ from cubebox.middleware.citations.counter import (
     citation_counter_var,
     citation_event_queue,
 )
-from cubebox.middleware.citations.middleware import CitationMiddleware
 
 __all__ = [
     "CitationConfig",
     "CitationCounter",
-    "CitationMiddleware",
     "citation_counter_var",
     "citation_event_queue",
     "load_citation_configs",

@@ -247,11 +247,6 @@ class ArtifactMiddlewarePi(Middleware):
             sandbox, conversation_id, org_id, workspace_id
         )
 
-        # Register content_type so stream.py can label tool results
-        from cubebox.tools import get_registry
-
-        get_registry().register_content_type("save_artifact", "artifact")
-
     @property
     def tools(self) -> list[AgentTool[Any]]:
         """Return the cubepi.AgentTool list for this middleware."""

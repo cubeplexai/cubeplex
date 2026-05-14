@@ -170,12 +170,15 @@ async def test_system_provider_not_deletable(
 async def test_config_fallback(
     admin_client: tuple[AsyncClient, str],
 ) -> None:
-    """LLMFactory.create_default() works from config when DB has providers."""
+    """LLMFactory resolves the default provider/model from config when DB
+    has providers."""
     from cubebox.llm.factory import LLMFactory
 
     factory = LLMFactory()
-    llm = await factory.create_default()
-    assert llm is not None
+    provider_name, model_id, provider_config = await factory.resolve_default_provider_and_config()
+    assert provider_name
+    assert model_id
+    assert provider_config is not None
 
 
 async def test_test_connection_endpoint(

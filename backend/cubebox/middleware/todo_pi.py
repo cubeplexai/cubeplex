@@ -27,30 +27,216 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable
-from typing import Any, cast
+from typing import Any, Literal, TypedDict, cast
 
 from cubepi.agent.types import AfterToolCallContext, AfterToolCallResult, AgentTool, AgentToolResult
 from cubepi.middleware.base import Middleware, TurnAction
 from cubepi.providers.base import AssistantMessage, TextContent, ToolCall, UserMessage
 from pydantic import BaseModel
 
-from cubebox.middleware.todo import (
-    _STALE_REMINDER_TEXT,
-    STALE_REMINDER_INTERVAL,
-    STALE_REMINDER_THRESHOLD,
-    WRITE_TODOS_SYSTEM_PROMPT,
-    WRITE_TODOS_TOOL_DESCRIPTION,
-    Todo,
-    TodoGuardBlocked,
-    TodoGuardType,
-    _blocked_todo_guard_message,
-    _guard_error_message,
-    _reset_guard_retries,
-    _unfinished_todos,
-    _validated_write_todos_payload,
-    _write_todos_empty_payload_error,
-    _write_todos_payload_error,
+# ---------------------------------------------------------------------------
+# Tool description + system prompt (provider-neutral constants previously
+# colocated with the langgraph TodoListMiddleware).
+# ---------------------------------------------------------------------------
+
+WRITE_TODOS_TOOL_DESCRIPTION = """Use this tool to create and manage a structured task list for your current work session. This helps you track progress, organize complex tasks, and demonstrate thoroughness to the user.
+
+Only use this tool if you think it will be helpful in staying organized. If the user's request is trivial and takes less than 3 steps, it is better to NOT use this tool and just do the task directly.
+
+## When to Use This Tool
+Use this tool in these scenarios:
+
+1. Complex multi-step tasks - When a task requires 3 or more distinct steps or actions
+2. Non-trivial and complex tasks - Tasks that require careful planning or multiple operations
+3. User explicitly requests todo list - When the user directly asks you to use the todo list
+4. User provides multiple tasks - When users provide a list of things to be done (numbered or comma-separated)
+5. The plan may need future revisions or updates based on results from the first few steps
+
+## How to Use This Tool
+1. When you start working on a task - Mark it as in_progress BEFORE beginning work.
+2. After completing a task - Mark it as completed and add any new follow-up tasks discovered during implementation.
+3. You can also update future tasks, such as deleting them if they are no longer necessary, or adding new tasks that are necessary. Don't change previously completed tasks.
+4. You can make several updates to the todo list at once. For example, when you complete a task, you can mark the next task you need to start as in_progress.
+
+## When NOT to Use This Tool
+It is important to skip using this tool when:
+1. There is only a single, straightforward task
+2. The task is trivial and tracking it provides no benefit
+3. The task can be completed in less than 3 trivial steps
+4. The task is purely conversational or informational
+
+## Task States and Management
+
+1. **Task States**: Use these states to track progress:
+   - pending: Task not yet started
+   - in_progress: Currently working on (unless all tasks are completed, only one task should be in_progress)
+   - completed: Task finished successfully
+
+2. **Task Management**:
+   - Update task status in real-time as you work
+   - Mark tasks complete IMMEDIATELY after finishing (don't batch completions)
+   - Complete current tasks before starting new ones
+   - Remove tasks that are no longer relevant from the list entirely
+   - IMPORTANT: When you write this todo list, you should mark your first task as in_progress immediately!.
+   - IMPORTANT: Unless all tasks are completed, only one task should be in_progress.
+
+3. **Task Completion Requirements**:
+   - ONLY mark a task as completed when you have FULLY accomplished it
+   - If you encounter errors, blockers, or cannot finish, keep the task as in_progress
+   - When blocked, create a new task describing what needs to be resolved
+   - Never mark a task as completed if:
+     - There are unresolved issues or errors
+     - Work is partial or incomplete
+     - You encountered blockers that prevent completion
+     - You couldn't find necessary resources or dependencies
+     - Quality standards haven't been met
+
+4. **Task Breakdown**:
+   - Create specific, actionable items
+   - Break complex tasks into smaller, manageable steps
+   - Use clear, descriptive task names
+
+Being proactive with task management demonstrates attentiveness and ensures you complete all requirements successfully
+Remember: If you only need to make a few tool calls to complete a task, and it is clear what you need to do, it is better to just do the task directly and NOT call this tool at all."""  # noqa: E501
+
+WRITE_TODOS_SYSTEM_PROMPT = """## `write_todos`
+
+You have access to the `write_todos` tool to help you manage and plan complex objectives.
+Use this tool for complex objectives to ensure that you are tracking each necessary step and giving the user visibility into your progress.
+This tool is very helpful for planning complex objectives, and for breaking down these larger complex objectives into smaller steps.
+
+It is critical that you mark todos as completed as soon as you are done with a step. Do not batch up multiple steps before marking them as completed.
+For simple objectives that only require a few steps, it is better to just complete the objective directly and NOT use this tool.
+Writing todos takes time and tokens, use it when it is helpful for managing complex many-step problems! But not for simple few-step requests.
+- Unless all tasks are completed, only one task should be in_progress.
+
+## Important To-Do List Usage Notes to Remember
+- The `write_todos` tool should never be called multiple times in parallel.
+- Don't be afraid to revise the To-Do list as you go. New information may reveal new tasks that need to be done, or old tasks that are irrelevant."""  # noqa: E501
+
+
+class Todo(TypedDict):
+    """A single todo item with content and status."""
+
+    content: str
+    status: Literal["pending", "in_progress", "completed"]
+
+
+type TodoGuardType = Literal["finalization"]
+
+# Number of consecutive tool-call iterations (without write_todos) before
+# injecting a soft stale-todo reminder. The model is free to ignore the
+# reminder; it is never a hard block.
+STALE_REMINDER_THRESHOLD = 5
+# Minimum iterations between successive stale reminders.
+STALE_REMINDER_INTERVAL = 5
+
+
+class TodoGuardBlocked(TypedDict):
+    """A guard escalation payload carried across the forced end turn."""
+
+    guard_type: TodoGuardType
+    message: str
+
+
+_STALE_REMINDER_TEXT = (
+    "The todo list has not been updated for several iterations. "
+    "If you have completed the current task or started a new one, "
+    "consider calling write_todos to keep the checklist in sync. "
+    "Ignore this if the current work is still part of the active task."
 )
+
+
+def _guard_error_message(guard_type: TodoGuardType) -> str:
+    return (
+        "The todo list still has unfinished items. Call write_todos to update the "
+        "remaining items. Your detailed response was already delivered to the user — "
+        "after updating the list, give only a brief one-sentence closing. "
+        "Do not repeat or re-summarize your earlier response."
+    )
+
+
+def _reset_guard_retries() -> dict[TodoGuardType, int]:
+    return {}
+
+
+def _blocked_todo_guard_message(blocked: TodoGuardBlocked) -> str:
+    return (
+        "Todo synchronization is already blocked. Do not call any tools. "
+        "Respond to the user with a plain-text explanation that the run could "
+        f"not continue safely because: {blocked['message']}"
+    )
+
+
+def _unfinished_todos(todos: list[Todo] | None) -> list[Todo]:
+    return [todo for todo in (todos or []) if todo["status"] != "completed"]
+
+
+def _write_todos_payload_error(todos: list[Todo]) -> str | None:
+    if any(not todo["content"].strip() for todo in todos):
+        return "Error: Todo content cannot be empty."
+
+    in_progress_count = sum(1 for todo in todos if todo["status"] == "in_progress")
+    if in_progress_count == 0 and any(todo["status"] != "completed" for todo in todos):
+        return "Error: Unless all tasks are completed, exactly one todo must be in_progress."
+    if in_progress_count > 1:
+        return "Error: Unless all tasks are completed, exactly one todo must be in_progress."
+
+    return None
+
+
+def _write_todos_empty_payload_error(
+    todos: list[Todo],
+    prior_todos: list[Todo] | None,
+) -> str | None:
+    if todos:
+        return None
+    if any(todo["status"] != "completed" for todo in (prior_todos or [])):
+        return (
+            "Error: Cannot replace unfinished todos with an empty list. "
+            "Update the active items first."
+        )
+    return None
+
+
+def _validated_write_todos_payload(
+    tool_call: dict[str, Any],
+) -> tuple[list[Todo] | None, str | None]:
+    args = tool_call.get("args")
+    if not isinstance(args, dict):
+        return (
+            None,
+            "Error: Received invalid `write_todos` payload. "
+            "Call the tool again with a `todos` list.",
+        )
+
+    todos = args.get("todos")
+    if not isinstance(todos, list):
+        return (
+            None,
+            "Error: Received invalid `write_todos` payload. "
+            "Call the tool again with a `todos` list.",
+        )
+
+    for todo in todos:
+        if not isinstance(todo, dict):
+            return None, (
+                "Error: Received invalid `write_todos` payload. Each todo must include "
+                "`content` and `status` fields."
+            )
+        if not isinstance(todo.get("content"), str) or not isinstance(todo.get("status"), str):
+            return None, (
+                "Error: Received invalid `write_todos` payload. Each todo must include "
+                "`content` and `status` fields."
+            )
+        if todo["status"] not in {"pending", "in_progress", "completed"}:
+            return None, (
+                "Error: Received invalid `write_todos` payload. Todo status must be one of "
+                "`pending`, `in_progress`, or `completed`."
+            )
+
+    return cast("list[Todo]", todos), None
+
 
 # ---------------------------------------------------------------------------
 # Write_todos input schema

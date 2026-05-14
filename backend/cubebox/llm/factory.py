@@ -2,6 +2,15 @@
 
 Creates LLM instances based on configuration.
 Supports OpenAI-compatible models with reasoning content via Chat Completions API.
+
+After the M6 cubepi migration the factory's primary surface is:
+
+- ``resolve_default_provider_and_config`` → resolves the active provider/model
+- ``build_cubepi_provider`` → constructs a ``cubepi.Provider`` for the agent loop
+- ``create`` → still used by the compaction-summarizer LLM path; returns a
+  langchain ``BaseChatModel``. Once compaction's summary LLM goes through
+  cubepi this method can be deleted (and with it the remaining langchain
+  imports).
 """
 
 import logging
@@ -10,17 +19,13 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from cubepi.providers.anthropic import CacheMarkerPolicy
 
-from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import SystemMessage
 from langchain_openai import ChatOpenAI
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cubebox.config import config
 from cubebox.credentials.encryption import EncryptionBackend
-from cubebox.llm.cache_markers import ProviderKind, apply_cache_markers, provider_kind_from_api
 from cubebox.llm.config import LLMConfig, ModelConfig, ProviderConfig
-from cubebox.llm.openai_compatible import ChatOpenAICompatible
 
 logger = logging.getLogger(__name__)
 
@@ -38,30 +43,6 @@ def _provider_type_to_api(provider_type: str) -> str:
 
 def api_to_provider_type(api: str) -> str:
     return _API_TO_PROVIDER_TYPE.get(api, "openai_compat")
-
-
-def _wrap_with_cache_markers(model: BaseChatModel, *, provider_kind: ProviderKind) -> BaseChatModel:
-    """Patch the model so every async generation pass-through inserts
-    Anthropic cache_control markers. No-op for OpenAI / unknown providers.
-    """
-    if provider_kind != "anthropic":
-        return model
-
-    original_agenerate = model._agenerate
-
-    async def patched_agenerate(
-        messages: list[Any], stop: Any = None, run_manager: Any = None, **kwargs: Any
-    ) -> Any:  # noqa: E501
-        system_msg = next((m for m in messages if isinstance(m, SystemMessage)), None)
-        body = [m for m in messages if not isinstance(m, SystemMessage)]
-        new_system, new_body = apply_cache_markers(
-            system_message=system_msg, messages=body, provider=provider_kind
-        )
-        new_messages: list[Any] = ([new_system] if new_system else []) + list(new_body)
-        return await original_agenerate(new_messages, stop=stop, run_manager=run_manager, **kwargs)
-
-    model._agenerate = patched_agenerate  # type: ignore[method-assign]
-    return model
 
 
 class LLMFactory:
@@ -321,53 +302,6 @@ class LLMFactory:
             raise ValueError(f"Default provider '{provider_name}' not found in merged config")
         return provider_name, model_id, provider_config
 
-    async def create_default(self, **kwargs: Any) -> Any:
-        """
-        Create an LLM instance using the configured default_model,
-        with fallback models chained via with_fallbacks() if configured.
-
-        With session+org_id: loads from DB, merges with config fallback.
-        Without session: pure config.yaml (startup/CI compatibility).
-
-        Args:
-            **kwargs: Additional kwargs passed to create()
-
-        Returns:
-            LLM instance (with fallbacks if configured)
-        """
-        if self._session and self._org_id:
-            db_cfgs, db_names = await self._load_db_provider_configs()
-            self.llm_config = self._build_merged_config(db_cfgs, db_names)
-
-        provider_name, model_id = await self.get_default_model()
-        llm = self.create(model_id=model_id, provider_name=provider_name, **kwargs)
-
-        fallback_refs = await self._get_org_fallback_models()
-        if not fallback_refs:
-            fallback_refs = self.llm_config.fallback_models
-        if not fallback_refs:
-            return llm
-
-        fallbacks = []
-        for model_ref in fallback_refs:
-            try:
-                fb_provider, fb_model_id = self._parse_model_ref(model_ref)
-                fallbacks.append(
-                    self.create(model_id=fb_model_id, provider_name=fb_provider, **kwargs),
-                )
-            except ValueError:
-                logger.warning("Skipping invalid fallback model: '%s'", model_ref)
-
-        if not fallbacks:
-            return llm
-
-        logger.info(
-            "LLM fallback chain: %s -> %s",
-            self.llm_config.default_model,
-            list(fallback_refs),
-        )
-        return llm.with_fallbacks(fallbacks)
-
     def _find_model(
         self, model_id: str, provider_name: str | None = None
     ) -> tuple[str, ProviderConfig, ModelConfig]:
@@ -438,7 +372,7 @@ class LLMFactory:
         - Example: reasoning_config={'effort': 'medium', 'summary': 'auto'}
 
         For OpenAI-compatible endpoints (DeepSeek, DouBao, Qwen, etc.):
-        - Uses ChatOpenAICompatible to extract reasoning_content from Chat Completions
+        - Uses ChatOpenAI; reasoning_content extraction is no longer wired here
         - Automatically used for custom base_url endpoints
 
         Args:
@@ -451,7 +385,7 @@ class LLMFactory:
             **kwargs: Additional kwargs passed to LLM constructor
 
         Returns:
-            LLM instance (ChatOpenAI or ChatOpenAICompatible)
+            LLM instance (ChatOpenAI or ChatAnthropic, depending on provider api)
 
         Raises:
             ValueError: If provider or model not found, or API type not supported
@@ -501,18 +435,15 @@ class LLMFactory:
                 not provider_config.base_url or "api.openai.com" in provider_config.base_url
             )
 
-            # Build the llm instance
-            if is_official_openai:
-                # Official OpenAI API - use ChatOpenAI with Responses API for reasoning
-                if reasoning_config:
-                    llm_kwargs["reasoning"] = reasoning_config
-                elif use_responses_api:
-                    llm_kwargs["use_responses_api"] = True
-                llm = ChatOpenAI(**llm_kwargs)
-            else:
-                # Custom OpenAI-compatible endpoint - use ChatOpenAICompatible
-                # This supports reasoning_content extraction from Chat Completions API
-                llm = ChatOpenAICompatible(**llm_kwargs)
+            # Build the llm instance. After M6 the langchain factory path is
+            # only used by the compaction summarizer (one-shot text generation),
+            # so reasoning_content extraction is not wired here — both official
+            # OpenAI and OpenAI-compatible endpoints flow through ChatOpenAI.
+            if reasoning_config:
+                llm_kwargs["reasoning"] = reasoning_config
+            elif is_official_openai and use_responses_api:
+                llm_kwargs["use_responses_api"] = True
+            llm = ChatOpenAI(**llm_kwargs)
 
             # Attach cubebox metadata for CostMiddleware to read
             llm._cubebox_provider = provider_name  # type: ignore[attr-defined]
@@ -520,11 +451,7 @@ class LLMFactory:
             llm._cubebox_model_cost = model_config.cost  # type: ignore[attr-defined]
             llm._cubebox_context_window = model_config.context_window  # type: ignore[attr-defined]
 
-            # Memory system: insert Anthropic cache_control markers when applicable.
-            # `provider_config.api` is the authoritative kind (set in config.yaml /
-            # DB provider rows), not a guess from the model id string.
-            provider_kind = provider_kind_from_api(provider_config.api)
-            return _wrap_with_cache_markers(llm, provider_kind=provider_kind)
+            return llm
 
         if provider_config.api == "anthropic":
             from langchain_anthropic import ChatAnthropic
@@ -568,8 +495,7 @@ class LLMFactory:
             anthropic_llm._cubebox_model_cost = model_config.cost  # type: ignore[attr-defined]
             anthropic_llm._cubebox_context_window = model_config.context_window  # type: ignore[attr-defined]
 
-            provider_kind = provider_kind_from_api(provider_config.api)
-            return _wrap_with_cache_markers(anthropic_llm, provider_kind=provider_kind)
+            return anthropic_llm
 
         raise ValueError(f"Unsupported API type: {provider_config.api}")
 
