@@ -46,7 +46,6 @@ from cubebox.mcp.exceptions import (
 from cubebox.mcp.oauth.metadata import OAuthMetadataDiscovery
 from cubebox.mcp.oauth.state import OAuthStateStore
 from cubebox.mcp.oauth.token_manager import _compute_expires_at
-from cubebox.mcp.runtime import refresh_tools_for_server_with_token
 from cubebox.models import MCPServer, UserMCPCredential
 from cubebox.repositories.mcp import MCPServerRepository, UserMCPCredentialRepository
 from cubebox.services.credential import CredentialService
@@ -252,6 +251,10 @@ class OAuthCallbackHandler:
                 f"server {server.id} has unsupported credential_scope="
                 f"{server.credential_scope!r} for OAuth"
             )
+
+        # Deferred import to break the cubebox.mcp.runtime ↔ oauth.callback
+        # circular import (runtime imports OAuthTokenManager via this package).
+        from cubebox.mcp.runtime import refresh_tools_for_server_with_token
 
         await refresh_tools_for_server_with_token(
             server,
