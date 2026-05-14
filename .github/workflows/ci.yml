@@ -1,19 +1,6 @@
 name: CI
 
 on:
-  pull_request:
-    paths-ignore:
-      - 'docs/**'
-      - '**.md'
-      - '.gitignore'
-      - 'LICENSE'
-  push:
-    branches: [main]
-    paths-ignore:
-      - 'docs/**'
-      - '**.md'
-      - '.gitignore'
-      - 'LICENSE'
   workflow_dispatch:
 
 concurrency:
