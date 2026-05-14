@@ -60,6 +60,7 @@ class MCPCatalogConnectorRepository:
         static_form_fields: list[dict[str, Any]] | None = None,
         static_auth_header_template: str | None = None,
         cred_metadata: dict[str, Any] | None = None,
+        tool_citations: dict[str, dict[str, Any]] | None = None,
         status: str = "active",
     ) -> MCPCatalogConnector:
         """Idempotent upsert keyed by ``slug``.
@@ -85,6 +86,7 @@ class MCPCatalogConnectorRepository:
                 static_form_fields=static_form_fields,
                 static_auth_header_template=static_auth_header_template,
                 cred_metadata=cred_metadata or {},
+                tool_citations=tool_citations or {},
                 status=status,
             )
             self.session.add(row)
@@ -106,6 +108,7 @@ class MCPCatalogConnectorRepository:
         existing.static_form_fields = static_form_fields
         existing.static_auth_header_template = static_auth_header_template
         existing.cred_metadata = cred_metadata or {}
+        existing.tool_citations = tool_citations or {}
         existing.status = status
         existing.updated_at = datetime.now(UTC)
         self.session.add(existing)
