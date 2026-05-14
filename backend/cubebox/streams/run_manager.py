@@ -748,17 +748,24 @@ class RunManager:
 
         # 5. CompactionMiddleware — needs extra_ref + summary_llm + config
         try:
+            from cubepi import Model as _CompModel
+
             from cubebox.config import config as _comp_cfg
             from cubebox.llm.factory import LLMFactory as _CompLLMFactory
+            from cubebox.llm.oneshot import OneShotLLM as _CompOneShot
             from cubebox.middleware.compaction import CompactionMiddleware
 
             if _comp_cfg.get("compaction.enabled", False):
                 _summary_provider = _comp_cfg.get("compaction.summary_provider")
                 _summary_model_id = _comp_cfg.get("compaction.summary_model")
                 _comp_factory = _CompLLMFactory()
-                _summary_llm = _comp_factory.create(
-                    provider_name=_summary_provider,
-                    model_id=_summary_model_id,
+                _summary_provider_config = _comp_factory.llm_config.providers[_summary_provider]
+                _summary_provider_inst = _comp_factory.build_cubepi_provider(
+                    _summary_provider_config, cache_policy=None
+                )
+                _summary_llm = _CompOneShot(
+                    _summary_provider_inst,
+                    _CompModel(id=_summary_model_id, provider=_summary_provider),
                 )
                 _ctx_window: int = int(_comp_cfg.get("compaction.fallback_context_window", 64000))
                 _ratio = float(_comp_cfg.get("compaction.threshold_ratio", 0.7))

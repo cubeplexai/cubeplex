@@ -16,89 +16,37 @@ object that ``Agent._create_context_snapshot`` passes as
 ``AgentContext.extra`` — so mutations are visible to the checkpointer's
 ``save_extra`` call at ``agent_end``.
 
-Summarizer is the same async ``summarize()`` from
-``cubebox.middleware.compaction.summarizer``; it requires a
-``langchain_core.language_models.BaseChatModel``.  The boundary helper
-``safe_boundary`` and the ``CompactionSummary`` dataclass are likewise
-re-used unchanged from the LangGraph version.
+Summarizer is the async ``summarize()`` from
+``cubebox.middleware.compaction.summarizer``; it accepts any object
+satisfying the ``_OneShotProvider`` Protocol (duck-typed: an async
+``generate_once(*, system, messages, max_output_tokens) -> str``).
+Production wires ``cubebox.llm.oneshot.OneShotLLM`` over a real
+``cubepi.Provider``; tests pass in fakes implementing the same surface.
 
-Token counting: ``approx_tokens`` works on LangChain message types, so
-this module uses a lightweight cubepi-compatible estimator
-(``_cubepi_approx_tokens``) that applies the same ``_CHARS_PER_TOKEN``
-conservative constant and checks ``usage.input_tokens`` from
-``AssistantMessage.usage`` for self-scaling — matching the semantics of
-the LangGraph version.
+Token counting is now native to cubepi: ``tokens.approx_tokens`` walks
+``UserMessage`` / ``AssistantMessage`` / ``ToolResultMessage`` content
+directly and self-scales off ``AssistantMessage.usage.input_tokens``
+when available. No LangChain bridge involved.
 """
 
 from __future__ import annotations
 
-import json
 from collections.abc import Callable
 from typing import Any, cast
 
 from cubepi.middleware.base import Middleware
-from cubepi.providers.base import AssistantMessage, Message, TextContent, UserMessage
-from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import AIMessage as LCAssistantMessage
-from langchain_core.messages import AnyMessage, HumanMessage, ToolMessage
+from cubepi.providers.base import Message, TextContent, UserMessage
 from loguru import logger
 
 from cubebox.middleware.compaction.boundary import safe_boundary
-from cubebox.middleware.compaction.summarizer import CompactionSummary, summarize
-from cubebox.middleware.compaction.tokens import _CHARS_PER_TOKEN
+from cubebox.middleware.compaction.summarizer import (
+    CompactionSummary,
+    _OneShotProvider,
+    summarize,
+)
+from cubebox.middleware.compaction.tokens import approx_tokens
 
 SUMMARY_PREFIX = "[Conversation summary so far]\n"
-
-# Minimum token count before we start trusting usage_metadata scaling.
-# Below this we rely solely on the chars-per-token estimate.
-_SCALE_MIN_TOKENS = 100
-
-
-def _cubepi_approx_tokens(messages: list[Message]) -> int:
-    """Approximate token count for a cubepi message list.
-
-    Uses the same conservative ``_CHARS_PER_TOKEN`` constant as the
-    LangGraph ``approx_tokens``.  For ``AssistantMessage`` objects that
-    carry ``usage.input_tokens > 0``, applies a usage-metadata scaling
-    factor (clamped to [1.0, 1.25]) to self-calibrate against the first
-    assistant turn that has real token counts.
-    """
-    if not messages:
-        return 0
-
-    total_chars = 0
-    scale_factor: float | None = None
-
-    for msg in messages:
-        if isinstance(msg, UserMessage):
-            for ub in msg.content:
-                if hasattr(ub, "text"):
-                    total_chars += len(ub.text)
-        elif isinstance(msg, AssistantMessage):
-            for ab in msg.content:
-                if hasattr(ab, "text"):
-                    total_chars += len(ab.text)
-                elif hasattr(ab, "arguments"):
-                    # ToolCall
-                    total_chars += len(json.dumps(getattr(ab, "arguments", {})))
-            # Self-scaling: if this assistant message has real usage data,
-            # derive a chars-per-token factor (clamped to avoid overcorrection).
-            usage = msg.usage
-            if usage and usage.input_tokens >= _SCALE_MIN_TOKENS and scale_factor is None:
-                chars_estimate = usage.input_tokens * _CHARS_PER_TOKEN
-                if chars_estimate > 0:
-                    raw_factor = total_chars / chars_estimate
-                    scale_factor = max(1.0, min(raw_factor, 1.25))
-        else:
-            # ToolResultMessage — count content text
-            for tb in getattr(msg, "content", []):
-                if hasattr(tb, "text"):
-                    total_chars += len(tb.text)
-
-    char_token_estimate = total_chars / _CHARS_PER_TOKEN
-    if scale_factor is not None:
-        return int(char_token_estimate * scale_factor)
-    return int(char_token_estimate)
 
 
 def _compressed_view(
@@ -123,53 +71,6 @@ def _compressed_view(
     return list(messages)
 
 
-def _to_langchain_messages(messages: list[Message]) -> list[AnyMessage]:
-    """Convert cubepi messages to LangChain messages for the summarizer.
-
-    The summarizer (``cubebox.middleware.compaction.summarizer.summarize``)
-    requires LangChain message objects.  This function produces a minimal
-    faithful conversion — enough for the summarizer to read ``.content``
-    and ``.__class__.__name__``.
-    """
-    lc: list[AnyMessage] = []
-    for msg in messages:
-        if isinstance(msg, UserMessage):
-            text_parts = [block.text for block in msg.content if hasattr(block, "text")]
-            lc.append(HumanMessage(content="\n".join(text_parts)))
-        elif isinstance(msg, AssistantMessage):
-            text_parts = []
-            tool_calls = []
-            for block in msg.content:
-                if hasattr(block, "text"):
-                    text_parts.append(block.text)
-                elif hasattr(block, "name") and hasattr(block, "arguments"):
-                    # ToolCall
-                    tool_calls.append(
-                        {
-                            "id": getattr(block, "id", ""),
-                            "name": block.name,
-                            "args": block.arguments,
-                            "type": "tool_call",
-                        }
-                    )
-            ai_msg = LCAssistantMessage(content="\n".join(text_parts))
-            if tool_calls:
-                ai_msg.tool_calls = tool_calls  # type: ignore[assignment]
-            lc.append(ai_msg)
-        else:
-            # ToolResultMessage
-            text_parts = [
-                block.text for block in getattr(msg, "content", []) if hasattr(block, "text")
-            ]
-            lc.append(
-                ToolMessage(
-                    content="\n".join(text_parts),
-                    tool_call_id=getattr(msg, "tool_call_id", ""),
-                )
-            )
-    return lc
-
-
 class CompactionMiddleware(Middleware):
     """cubepi port of CompactionMiddleware (M3.b.2).
 
@@ -184,16 +85,17 @@ class CompactionMiddleware(Middleware):
             ``agent._extra`` so mutations persist via ``save_extra`` at
             ``agent_end``.
         summary_llm:
-            A ``BaseChatModel`` used to generate / update the running
-            summary.
+            Any object satisfying the ``_OneShotProvider`` Protocol
+            (async ``generate_once``).  Production wires
+            ``cubebox.llm.oneshot.OneShotLLM``.
         max_tokens_before_compact:
             Token threshold for the compressed view.  When
-            ``_cubepi_approx_tokens`` of the current compressed view
-            exceeds this value, a new summary is generated.
+            ``approx_tokens`` of the current compressed view exceeds
+            this value, a new summary is generated.
         keep_recent_messages:
             Minimum number of messages to keep verbatim (not summarized).
         max_summary_tokens:
-            ``max_tokens`` passed to the summarizer LLM.
+            ``max_output_tokens`` passed to the summarizer LLM.
         min_compact_messages:
             Minimum number of messages that must be in the prefix before
             compaction fires.
@@ -203,7 +105,7 @@ class CompactionMiddleware(Middleware):
         self,
         *,
         extra_ref: Callable[[], dict[str, Any]],
-        summary_llm: BaseChatModel,
+        summary_llm: _OneShotProvider,
         max_tokens_before_compact: int,
         keep_recent_messages: int = 8,
         max_summary_tokens: int = 1024,
@@ -227,7 +129,7 @@ class CompactionMiddleware(Middleware):
         1. Read ``compaction`` and ``compaction_until_msg_index`` from
            the live ``extra`` dict.
         2. Compute the compressed view (summary + messages[boundary:]).
-        3. If ``_cubepi_approx_tokens(compressed_view) < threshold``,
+        3. If ``approx_tokens(compressed_view) < threshold``,
            return the compressed view unchanged.
         4. Otherwise run the summarizer over unsummarized turns, write
            the new summary + boundary back to ``extra``, and return the
@@ -241,7 +143,7 @@ class CompactionMiddleware(Middleware):
 
         compressed = _compressed_view(messages, summary, boundary)
 
-        if _cubepi_approx_tokens(compressed) < self._max_tokens_before:
+        if approx_tokens(compressed) < self._max_tokens_before:
             return compressed
 
         # Need to compact further.
@@ -255,11 +157,11 @@ class CompactionMiddleware(Middleware):
             # Cannot advance the boundary — return what we have.
             return compressed
 
-        to_summarize_lc = _to_langchain_messages(messages)[boundary:new_boundary]
+        to_summarize = messages[boundary:new_boundary]
         try:
             new_summary = await summarize(
-                model=self._summary_llm,
-                messages_to_summarize=to_summarize_lc,
+                provider=self._summary_llm,
+                messages_to_summarize=to_summarize,
                 existing=summary,
                 max_summary_tokens=self._max_summary_tokens,
             )
@@ -271,7 +173,7 @@ class CompactionMiddleware(Middleware):
             "CompactionMiddleware: compacted msgs[{}:{}] ({} msgs)",
             boundary,
             new_boundary,
-            len(to_summarize_lc),
+            len(to_summarize),
         )
 
         # Write new state back to the live extra dict.
