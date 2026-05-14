@@ -1,6 +1,9 @@
 """Workspace MCP routes: member-managed private connectors and credentials."""
 
+from typing import Any
+
 from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import BaseModel, ValidationError
 
 from cubebox.api.routes.v1.admin_mcp import _server_to_out
 from cubebox.api.schemas.mcp import (
@@ -16,7 +19,7 @@ from cubebox.api.schemas.mcp import (
 )
 from cubebox.audit.sink import AuditSink
 from cubebox.auth.context import RequestContext
-from cubebox.auth.dependencies import require_member
+from cubebox.auth.dependencies import require_admin, require_member
 from cubebox.mcp.dependencies import get_audit_sink, get_mcp_service
 from cubebox.mcp.exceptions import (
     MCPCredentialPathMismatch,
@@ -28,8 +31,23 @@ from cubebox.mcp.exceptions import (
     MCPShareCredentialOnlyForWorkspaceScope,
     MCPUserScopeCredentialForbidden,
 )
+from cubebox.middleware.citations.config import CitationConfig
 from cubebox.models import MCPServer
 from cubebox.services.mcp import MCPServerService
+
+
+class ToolCitationsResponse(BaseModel):
+    server_id: str
+    server_name: str
+    tools_cache: list[dict[str, Any]]
+    tool_citations: dict[str, dict[str, Any]]
+    catalog_defaults: dict[str, dict[str, Any]] | None
+    orphan_keys: list[str]
+
+
+class ToolCitationsPatch(BaseModel):
+    tool_citations: dict[str, dict[str, Any]]
+
 
 router = APIRouter(prefix="/ws/{workspace_id}/mcp", tags=["workspace-mcp"])
 
@@ -397,3 +415,105 @@ async def delete_my_credential(
 ) -> None:
     await _get_workspace_visible_server(svc=svc, server_id=server_id, workspace_id=workspace_id)
     await svc.delete_user_credential(server_id=server_id, user_id=ctx.user.id)
+
+
+async def _build_catalog_defaults(
+    server: MCPServer,
+    session: Any,
+) -> dict[str, dict[str, Any]] | None:
+    """Return the catalog connector's tool_citations, or None if server is not catalog-backed."""
+    if server.catalog_connector_id is None:
+        return None
+    from cubebox.repositories.mcp_catalog import MCPCatalogConnectorRepository
+
+    catalog_repo = MCPCatalogConnectorRepository(session)
+    catalog = await catalog_repo.get_by_id(server.catalog_connector_id)
+    if catalog is None:
+        return None
+    return dict(catalog.tool_citations or {})
+
+
+@router.get("/servers/{server_id}/tool-citations")
+async def get_tool_citations(
+    workspace_id: str,
+    server_id: str,
+    svc: MCPServerService = Depends(get_mcp_service),
+) -> ToolCitationsResponse:
+    """Return the current tool-citations config for a server, plus catalogue defaults."""
+    server = await _get_workspace_visible_server(
+        svc=svc,
+        server_id=server_id,
+        workspace_id=workspace_id,
+    )
+    tools_cache = list(server.tools_cache or [])
+    known_names = {t["name"] for t in tools_cache}
+    citations = dict(server.tool_citations or {})
+    orphan_keys = sorted(k for k in citations if k not in known_names)
+    catalog_defaults = await _build_catalog_defaults(server, svc.server_repo.session)
+    return ToolCitationsResponse(
+        server_id=server.id,
+        server_name=server.name,
+        tools_cache=tools_cache,
+        tool_citations=citations,
+        catalog_defaults=catalog_defaults,
+        orphan_keys=orphan_keys,
+    )
+
+
+@router.patch("/servers/{server_id}/tool-citations")
+async def patch_tool_citations(
+    workspace_id: str,
+    server_id: str,
+    body: ToolCitationsPatch,
+    svc: MCPServerService = Depends(get_mcp_service),
+    ctx: RequestContext = Depends(require_admin),
+    audit: AuditSink = Depends(get_audit_sink),
+) -> ToolCitationsResponse:
+    """Replace the tool-citations config for a server (admin only).
+
+    Each key must match a tool name present in tools_cache, and each value must
+    be a valid CitationConfig. Returns 422 if either invariant is violated.
+    """
+    server = await _get_workspace_owned_server(
+        svc=svc,
+        server_id=server_id,
+        workspace_id=workspace_id,
+    )
+    known_names = {t["name"] for t in (server.tools_cache or [])}
+
+    errors: list[dict[str, Any]] = []
+    parsed: dict[str, dict[str, Any]] = {}
+    for tool_name, raw in body.tool_citations.items():
+        if tool_name not in known_names:
+            errors.append({"tool": tool_name, "msg": "tool not in tools_cache"})
+            continue
+        try:
+            CitationConfig(**raw)
+        except ValidationError as exc:
+            errors.append({"tool": tool_name, "msg": str(exc)})
+            continue
+        parsed[tool_name] = raw
+
+    if errors:
+        raise HTTPException(status_code=422, detail=errors)
+
+    server.tool_citations = parsed
+    await svc.server_repo.update(server)
+
+    await audit.record(
+        event="mcp.tool_citations.patch",
+        actor_user_id=ctx.user.id,
+        org_id=ctx.org_id,
+        target_id=server_id,
+        details={"workspace_id": workspace_id},
+    )
+
+    catalog_defaults = await _build_catalog_defaults(server, svc.server_repo.session)
+    return ToolCitationsResponse(
+        server_id=server.id,
+        server_name=server.name,
+        tools_cache=list(server.tools_cache or []),
+        tool_citations=dict(server.tool_citations or {}),
+        catalog_defaults=catalog_defaults,
+        orphan_keys=[],
+    )
