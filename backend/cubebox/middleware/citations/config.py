@@ -4,7 +4,7 @@ Parses per-tool citation config from config.yaml and provides
 methods to extract metadata and text from tool output.
 """
 
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel
 
@@ -15,6 +15,9 @@ class CitationConfig(BaseModel):
     """Per-tool citation configuration.
 
     Attributes:
+        content_type: How the tool output is encoded. "json" runs the
+                      response through JSON parsing; "text" treats it as
+                      a single text blob (used by e.g. web_fetch).
         source_type: Citation source type (e.g., "web", "file").
         content_field: JSON path to result array in tool output.
                        None means the entire output is a single result.
@@ -29,6 +32,7 @@ class CitationConfig(BaseModel):
                               Results with other values are skipped.
     """
 
+    content_type: Literal["json", "text"] = "json"
     source_type: str
     content_field: str | None
     mapping: dict[str, str]

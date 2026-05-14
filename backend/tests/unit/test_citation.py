@@ -421,3 +421,39 @@ async def test_result_details_contain_citations_key() -> None:
     assert out is not None
     assert "citations" in out.details
     assert isinstance(out.details["citations"], list)
+
+
+# ---------------------------------------------------------------------------
+# CitationConfig.content_type round-trip tests
+# ---------------------------------------------------------------------------
+
+
+def test_citation_config_content_type_defaults_to_json() -> None:
+    from cubebox.middleware.citations.config import CitationConfig
+
+    cfg = CitationConfig(source_type="web", content_field="results", mapping={"snippet": "snippet"})
+    assert cfg.content_type == "json"
+
+
+def test_citation_config_content_type_text_round_trip() -> None:
+    from cubebox.middleware.citations.config import CitationConfig
+
+    raw = {
+        "content_type": "text",
+        "source_type": "web",
+        "content_field": None,
+        "mapping": {"snippet": "text"},
+    }
+    cfg = CitationConfig(**raw)
+    assert cfg.content_type == "text"
+    assert cfg.model_dump(exclude_none=True)["content_type"] == "text"
+
+
+def test_citation_config_rejects_unknown_content_type() -> None:
+    import pytest
+    from pydantic import ValidationError
+
+    from cubebox.middleware.citations.config import CitationConfig
+
+    with pytest.raises(ValidationError):
+        CitationConfig(content_type="binary", source_type="web", content_field=None, mapping={})  # type: ignore[arg-type]
