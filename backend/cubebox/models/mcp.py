@@ -49,6 +49,10 @@ class MCPCatalogConnector(CubeboxBase, table=True):
         default_factory=dict,
         sa_column=Column(JSON, nullable=False, server_default=text("'{}'")),
     )
+    tool_citations: dict[str, dict[str, Any]] = Field(
+        default_factory=dict,
+        sa_column=Column(JSON, nullable=False, server_default=text("'{}'")),
+    )
     status: str = Field(default="active", max_length=16)
 
 
@@ -89,6 +93,10 @@ class MCPServer(CubeboxBase, table=True):
     oauth_client_config: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
     headers: dict[str, str] = Field(default_factory=dict, sa_column=Column(JSON))
     tools_cache: list[dict[str, Any]] = Field(default_factory=list, sa_column=Column(JSON))
+    tool_citations: dict[str, dict[str, Any]] = Field(
+        default_factory=dict,
+        sa_column=Column(JSON, nullable=False, server_default=text("'{}'")),
+    )
     authed: bool = Field(default=False)
     last_error: str | None = Field(default=None, max_length=2048)
     last_discovered_at: datetime | None = None
