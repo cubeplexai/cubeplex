@@ -299,10 +299,8 @@ def _todo_validation_errors_local(
 ) -> list[dict[str, Any]]:
     """Return validation error payloads for write_todos calls in the message.
 
-    Returns a list of dicts with ``tool_call_id`` and ``error`` keys.
-    Unlike the LangGraph version (which returns ToolMessage objects), this
-    returns plain dicts so the caller can build cubepi-compatible inject
-    messages.
+    Returns a list of dicts with ``tool_call_id`` and ``error`` keys; the
+    caller turns these into cubepi-compatible inject messages.
     """
     write_todos_calls = _submitted_write_todos_calls(last_assistant_msg)
     # Zero calls: nothing to validate.
@@ -354,9 +352,8 @@ def _make_write_todos_tool(extra_ref: Callable[[], dict[str, Any]]) -> AgentTool
 
     The tool:
     1. Validates the todos payload.
-    2. On success, writes ``todos`` to ``extra["todos"]`` and returns
-       the standard JSON ToolMessage content (same payload as the LangGraph
-       version's ``_build_todo_tool_message``).
+    2. On success, writes ``todos`` to ``extra["todos"]`` and returns the
+       standard JSON tool-result content built by ``_build_todo_tool_message``.
     3. On validation failure, returns an error result.
     """
 
@@ -402,7 +399,8 @@ def _make_write_todos_tool(extra_ref: Callable[[], dict[str, Any]]) -> AgentTool
                 is_error=True,
             )
 
-        # Write to extra — this is the cubepi equivalent of LangGraph Command(update={"todos": ...})
+        # Persist validated todos onto the per-agent ``extra`` dict so the
+        # checkpointer's ``save_extra`` call at agent_end picks them up.
         extra_ref()["todos"] = validated_todos
 
         # Build the JSON content identical to _build_todo_tool_message
@@ -503,11 +501,9 @@ class TodoListMiddleware(Middleware):
     ) -> list[Any]:
         """Inject current todo state as a UserMessage suffix when todos exist.
 
-        The LangGraph version relies on the ToolMessage in conversation
-        history to keep the model aware of the current todo list.  In
-        cubepi, where we do not rely on persisted ToolResultMessages being
-        visible on replay, we inject a lightweight reminder at the end of
-        the context so the model always sees the current state.
+        We do not rely on persisted ToolResultMessages being visible on
+        replay, so a lightweight reminder is injected at the end of the
+        context to ensure the model always sees the current todo list.
 
         When no todos are set, messages are returned unchanged (no injection).
         """
@@ -606,9 +602,9 @@ class TodoListMiddleware(Middleware):
     ) -> TurnAction | None:
         """Guard state machine.
 
-        Mirrors ``_after_model_impl`` from the LangGraph version, adapted
-        for cubepi types and the ``extra`` dict instead of LangGraph state
-        channels.
+        Inspects the latest assistant message, transitions the blocked /
+        stale-iteration state stored in ``extra``, and returns a
+        ``TurnAction`` when the loop needs an injected nudge or hard stop.
         """
         del signal  # not used
         extra = self._extra_ref()

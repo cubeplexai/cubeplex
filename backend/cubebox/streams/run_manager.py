@@ -477,9 +477,9 @@ class RunManager:
 
         Builds a cubepi.Provider + cubepi.Agent, subscribes an event listener, then
         awaits agent.prompt(). Each AgentEvent is translated into a cubebox AgentEvent
-        schema object and forwarded to ``publish_stream_event`` so the rest of
-        _execute_run (DoneEvent, update_run_meta, etc.) sees the same turn_usage and
-        citation buffers as the LangGraph path.
+        schema object and forwarded to ``publish_stream_event``; the rest of
+        _execute_run (DoneEvent, update_run_meta, etc.) consumes the resulting
+        turn_usage and citation buffers.
 
         Tools wired (M2.5):
           - no-DI builtin tools (calculator, datetime)
@@ -945,8 +945,9 @@ class RunManager:
             # Compute relevance-memory snapshot before the agent loop starts
             # and bake it into the UserMessage metadata so MemoryMiddleware
             # can prepend the rendered snapshot text during transform_context.
-            # This is the cubepi equivalent of the LangGraph path's snapshot
-            # channel injection (M3.b.1 / cache discipline).
+            # Baking the snapshot at append-time (rather than re-deriving it
+            # on replay) is what keeps the historical prefix byte-stable for
+            # prompt caching — see backend/CLAUDE.md "Prompt Cache Discipline".
             import time as _time
 
             from cubepi.providers.base import TextContent as _TextContent

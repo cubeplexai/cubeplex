@@ -358,7 +358,7 @@ def _build_run_streaming_response(
 
 
 def _ns_to_agent_id(ns: tuple[Any, ...]) -> str | None:
-    """Convert LangGraph namespace tuple to agent_id string."""
+    """Convert cubepi namespace tuple to agent_id string."""
     if not ns:
         return None
     return ":".join(str(part) for part in ns)
@@ -613,7 +613,7 @@ async def list_messages(
     session: Annotated[AsyncSession, Depends(get_session)],
     ctx: Annotated[RequestContext, Depends(require_member)],
 ) -> dict[str, object]:
-    """List messages in a conversation, read from LangGraph thread state."""
+    """List messages in a conversation, read from cubepi PostgresCheckpointer state."""
     conv_repo = ConversationRepository(
         session,
         org_id=ctx.org_id,

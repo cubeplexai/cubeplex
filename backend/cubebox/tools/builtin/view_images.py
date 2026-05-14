@@ -56,8 +56,8 @@ def make_view_images_tool(
 ) -> AgentTool[ViewImagesInput]:
     """Build the view_images cubepi.AgentTool with bound dependencies.
 
-    A fresh DB session is opened per call (same as the LangChain version).
-    org_id / workspace_id are bound at construction (run-scoped).
+    A fresh DB session is opened per call. org_id / workspace_id are
+    bound at construction (run-scoped).
     """
 
     async def _execute(

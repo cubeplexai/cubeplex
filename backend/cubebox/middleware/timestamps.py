@@ -23,10 +23,9 @@ content.**  They land exclusively in:
 - ``AssistantMessage.metadata`` (out-of-band, never converted to LLM payload)
 - ``AfterToolCallResult.details`` (tool result details dict, not in content)
 
-This matches the LangGraph version, which placed timestamps on
-``AIMessage.response_metadata`` and ``ToolMessage.response_metadata`` —
-both out-of-band fields that the checkpointer stores but the LLM never
-sees as prompt tokens.
+These are all out-of-band fields that the checkpointer stores but the
+LLM never sees as prompt tokens, which keeps the cache-eligible prefix
+free of per-turn dynamic content.
 """
 
 from __future__ import annotations

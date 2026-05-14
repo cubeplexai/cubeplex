@@ -71,8 +71,14 @@ def test_tools_returns_agent_tool_instances() -> None:
         assert isinstance(tool, AgentTool)
 
 
-def test_tool_names_match_langgraph_version() -> None:
-    """Tool names must be identical to those in the langgraph SandboxMiddleware."""
+def test_tool_names_are_stable() -> None:
+    """Sandbox tool names are part of a stable prompt-cache-prefix contract.
+
+    The set of registered tool names contributes to the cache-eligible
+    prefix of every model call; changing or reordering these names
+    invalidates prompt caches across all existing conversations, so this
+    set should not change without an explicit migration plan.
+    """
     mw = _make_middleware()
     names = {t.name for t in mw.tools}
     assert names == _EXPECTED_TOOL_NAMES

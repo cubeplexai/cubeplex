@@ -17,11 +17,11 @@ from cubepi.providers.base import (
 class CompactionSummary:
     """Persisted running summary of a conversation's older turns.
 
-    Stored on cubepi ``ctx.extra["compaction"]`` between turns. Three-field
-    shape preserved from the LangGraph-era schema so existing checkpoints
-    round-trip. ``summarized_message_ids`` is effectively empty on the cubepi
-    path (cubepi messages don't carry an explicit id field) — the field is
-    retained to keep serialized state stable across the migration.
+    Stored on cubepi ``ctx.extra["compaction"]`` between turns. The
+    three-field shape is preserved for checkpoint compatibility so existing
+    checkpoints round-trip. ``summarized_message_ids`` is effectively empty
+    in practice (cubepi messages don't carry an explicit id field) — the
+    field is retained to keep serialized state stable.
     """
 
     summary: str

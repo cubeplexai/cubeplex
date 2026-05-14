@@ -1,8 +1,9 @@
-"""cubepi.Message ↔ cubebox API wire format conversion (M1.2).
+"""cubepi.Message ↔ cubebox API wire format conversion.
 
-Mirrors cubebox/agents/convert.py (LangChain version). Used by the
-cubepi-runtime path; M3 will extend with attachment rendering, citations,
-etc. once those middlewares are ported.
+Converts between cubepi's typed message objects
+(``UserMessage`` / ``AssistantMessage`` / ``ToolResultMessage`` and their
+content blocks) and the JSON-serializable shape the cubebox API exposes
+over SSE and the conversations REST endpoints.
 """
 
 from __future__ import annotations

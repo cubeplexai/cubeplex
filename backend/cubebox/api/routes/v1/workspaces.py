@@ -51,7 +51,7 @@ async def list_my_workspaces(
             pairs.append((m.role, ws))
 
     # Aggregate max(Conversation.updated_at) per workspace — cubebox has no
-    # Message table (history lives in LangGraph checkpointer), but
+    # Message table (history lives in cubepi PostgresCheckpointer), but
     # ConversationRepository.update_timestamp() bumps updated_at on every
     # message round-trip, so this is an accurate "last activity" signal.
     activity_map: dict[str, datetime] = {}

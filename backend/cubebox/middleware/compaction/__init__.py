@@ -1,9 +1,9 @@
-"""CompactionMiddleware — cubepi port of CompactionMiddleware (M3.b.2).
+"""CompactionMiddleware.
 
 Keeps long conversation history within the model's context window by
 maintaining a running summary of older turns.
 
-State lives in ``ctx.extra`` instead of LangGraph channels:
+State lives in ``ctx.extra`` (cubepi's per-agent dict):
     - ``ctx.extra["compaction"]``                  → CompactionSummary | None
     - ``ctx.extra["compaction_until_msg_index"]``  → int (boundary)
 
@@ -23,10 +23,10 @@ satisfying the ``_OneShotProvider`` Protocol (duck-typed: an async
 Production wires ``cubebox.llm.oneshot.OneShotLLM`` over a real
 ``cubepi.Provider``; tests pass in fakes implementing the same surface.
 
-Token counting is now native to cubepi: ``tokens.approx_tokens`` walks
+Token counting is native to cubepi: ``tokens.approx_tokens`` walks
 ``UserMessage`` / ``AssistantMessage`` / ``ToolResultMessage`` content
 directly and self-scales off ``AssistantMessage.usage.input_tokens``
-when available. No LangChain bridge involved.
+when available.
 """
 
 from __future__ import annotations

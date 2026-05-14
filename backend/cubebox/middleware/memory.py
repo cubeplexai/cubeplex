@@ -1,6 +1,6 @@
-"""MemoryMiddleware ported to cubepi (M3.b.1).
+"""MemoryMiddleware.
 
-Two responsibilities, matching the LangGraph version:
+Two responsibilities:
 
 Pinned tier (preference + correction):
     ``transform_system_prompt`` appends the pinned-memory block to the
@@ -153,8 +153,7 @@ class MemoryMiddleware(Middleware):
         Reads ``metadata["memory_snapshot"]`` from each UserMessage.  If
         present, the pre-rendered ``rendered_text`` from the snapshot dict
         is prepended as a new TextContent block (or merged into the first
-        existing TextContent) — exactly as the LangGraph version prepends
-        to HumanMessage.content.
+        existing TextContent).
 
         Messages without a snapshot are passed through unchanged (identity).
         """
@@ -274,8 +273,7 @@ def _prepend_snapshot_to_user_msg(msg: UserMessage, snapshot_text: str) -> UserM
     Builds a new ``UserMessage`` (never mutates the persisted original) with
     the snapshot text as a leading TextContent block, followed by the
     original content blocks.  This preserves existing content structure
-    (images, etc.) and mirrors the LangGraph version which prepends to
-    HumanMessage.content string as ``"{snapshot}\n\n{original_text}"``.
+    (images, etc.); the rendered form is ``"{snapshot}\n\n{original_text}"``.
 
     ``metadata`` is shallow-copied so the persisted snapshot key is
     visible to downstream middleware (e.g. AttachmentHintMiddleware
