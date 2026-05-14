@@ -131,8 +131,7 @@ SSE events to the client.
   ``cubepi.AgentTool`` instances for builtins and MCP tools.
 - MCP integration: per-run discovery via
   ``cubebox.mcp.cubepi_runtime.load_workspace_mcp_tools_for_cubepi``;
-  admin/OAuth tool-refresh paths (``cubebox/mcp/runtime.py`` +
-  ``discovery.py``) still use ``langchain-mcp-adapters`` (port pending).
+  admin tool refresh via ``cubebox.mcp.cubepi_admin_refresh``.
 - Message history: persisted by cubepi's ``PostgresCheckpointer``
   (HASH-partitioned 64 ways on ``thread_id``) — see
   ``cubebox/agents/checkpointer.py``.
