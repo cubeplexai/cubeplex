@@ -119,12 +119,7 @@ async def test_factory_reasoning_config_overrides_auto_thinking() -> None:
     assert llm.thinking == custom
 
 
-@pytest.mark.asyncio
-async def test_factory_wraps_anthropic_with_cache_markers() -> None:
-    factory = LLMFactory(llm_config=_build_config())
-    llm = factory.create("claude-test", provider_name="anthropic-test")
-
-    agenerate = llm._agenerate  # type: ignore[attr-defined]
-    assert agenerate.__name__ == "patched_agenerate", (
-        "factory must wrap Anthropic models with _wrap_with_cache_markers"
-    )
+# test_factory_wraps_anthropic_with_cache_markers removed in M6:
+# _wrap_with_cache_markers was deleted alongside the langgraph stack. Cache
+# markers are now injected by cubepi's AnthropicProvider (CacheMarkerPolicy)
+# at request time rather than by patching the langchain client.

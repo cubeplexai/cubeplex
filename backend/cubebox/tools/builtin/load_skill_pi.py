@@ -16,9 +16,29 @@ from __future__ import annotations
 
 from cubepi.agent.types import AgentTool, AgentToolResult
 from cubepi.providers.base import TextContent
+from pydantic import BaseModel, Field
 
 from cubebox.skills.service import SkillCatalogService
-from cubebox.tools.builtin.load_skill import LoadSkillInput, LoadSkillOutput
+
+
+class LoadSkillInput(BaseModel):
+    skill_name: str = Field(
+        description=(
+            "Name of the skill to load. Use the canonical name from your"
+            " 'Available skills' list (e.g. 'deep-research' or 'acme:my-skill')."
+        )
+    )
+
+
+class LoadSkillOutput(BaseModel):
+    skill_name: str
+    content: str
+    version: str
+    loaded: bool
+    error: str | None = None
+
+    def __str__(self) -> str:
+        return self.model_dump_json()
 
 
 def create_load_skill_tool_pi(

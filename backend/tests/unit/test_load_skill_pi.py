@@ -143,7 +143,7 @@ def test_load_skill_tool_metadata() -> None:
 def test_load_skill_tool_parameters_schema() -> None:
     from pydantic import BaseModel
 
-    from cubebox.tools.builtin.load_skill import LoadSkillInput
+    from cubebox.tools.builtin.load_skill_pi import LoadSkillInput
 
     tool = create_load_skill_tool_pi(catalog=_FakeCatalog({}), workspace_id="ws-1", org_id="org-1")
     assert issubclass(tool.parameters, BaseModel)

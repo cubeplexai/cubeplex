@@ -39,8 +39,9 @@ from cubepi.providers.base import (
     UserMessage,
 )
 
-from cubebox.middleware.todo import STALE_REMINDER_THRESHOLD, Todo
 from cubebox.middleware.todo_pi import (
+    STALE_REMINDER_THRESHOLD,
+    Todo,
     TodoListMiddlewarePi,
     WriteTodosInput,
     _last_assistant_message_pi,

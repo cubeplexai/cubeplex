@@ -40,7 +40,7 @@ from typing import Any
 from cubepi.agent.types import AfterToolCallContext
 from cubepi.middleware.base import Middleware
 
-from cubebox.tools.builtin.load_skill import LoadSkillOutput
+from cubebox.tools.builtin.load_skill_pi import LoadSkillOutput
 
 _LOADED_SKILLS_KEY = "loaded_skills"
 _SKILLS_SECTION_HEADER = "[Loaded skills]"

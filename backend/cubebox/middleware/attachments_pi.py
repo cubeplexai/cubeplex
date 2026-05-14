@@ -34,18 +34,55 @@ class AttachmentHintMiddlewarePi(Middleware):
         return out
 
 
+def _format_size(n: int) -> str:
+    if n < 1024:
+        return f"{n}B"
+    if n < 1024 * 1024:
+        return f"{n / 1024:.1f}KB"
+    return f"{n / (1024 * 1024):.1f}MB"
+
+
+def render_attachments_hint(blocks: list[dict[str, object]]) -> str:
+    """Render file_attachment blocks as an [Attachments] text section.
+
+    Inlined from the deleted cubebox.agents.convert module (M6) since the
+    cubepi runtime is the only consumer of this helper.
+    """
+    if not blocks:
+        return ""
+    lines = ["", "[Attachments]"]
+    for b in blocks:
+        kind = b.get("kind")
+        filename = b.get("filename", "(unnamed)")
+        size_raw = b.get("size_bytes", 0)
+        size = int(size_raw) if isinstance(size_raw, int | float) else 0
+        path = b.get("sandbox_path", "")
+        if kind == "image":
+            w = b.get("width")
+            h = b.get("height")
+            lines.append(
+                f"- {filename} (image, {w}x{h}, {_format_size(size)})\n"
+                f"  path: {path}\n"
+                f"  hint: call view_images(paths=[...]) to inspect"
+            )
+        elif kind == "document":
+            lines.append(
+                f"- {filename} (document, {_format_size(size)})\n"
+                f"  path: {path}\n"
+                f"  hint: call file_read(path) to inspect"
+            )
+        else:
+            lines.append(f"- {filename} ({_format_size(size)})\n  path: {path}")
+    return "\n".join(lines)
+
+
 def _augment_with_hint(msg: UserMessage, attachments: list[dict[str, object]]) -> UserMessage:
     """Return a fresh UserMessage with the [Attachments] hint appended.
 
     Builds a new object rather than mutating the original so that the
     persisted message history is never contaminated with the ephemeral hint.
-    The hint is appended to the last TextContent block when one exists,
-    matching the behaviour of the langgraph version which does
-    ``base + render_attachments_hint(meta)`` on the string content.
+    The hint is appended to the last TextContent block when one exists.
     """
-    # Lazy import avoids a potential circular-import path through agents/__init__
-    from cubebox.agents.convert import render_attachments_hint
-
     rendered = render_attachments_hint(attachments)
     if not rendered:
         return msg

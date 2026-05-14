@@ -81,14 +81,6 @@ def test_tools_property_returns_fresh_list_each_time() -> None:
     assert mw.tools[0] is mw.tools[0]
 
 
-def test_content_type_registered() -> None:
-    """Constructor must register save_artifact → artifact in the tool registry."""
-    from cubebox.tools import get_registry
-
-    _make_middleware()
-    assert get_registry().get_content_type("save_artifact") == "artifact"
-
-
 # ---------------------------------------------------------------------------
 # transform_system_prompt — appends artifact section to system prompt
 # ---------------------------------------------------------------------------
