@@ -35,7 +35,8 @@ export function AdminTopBar({ orgName }: AdminTopBarProps) {
       </div>
       <span className="h-4 w-px bg-border" aria-hidden />
       <div className="flex items-center gap-2">
-        <span className="op-pill op-pill--accent">{t('title')}</span>
+        {/* h1 (not span) so e2e specs can find the section via getByRole('heading'). */}
+        <h1 className="op-pill op-pill--accent !text-[10.5px] m-0">{t('title')}</h1>
         {orgName && (
           <span className="text-[12.5px] text-muted-foreground font-mono">
             {tLayout('orgPrefix', { name: orgName })}

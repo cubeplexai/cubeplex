@@ -13,7 +13,10 @@ test('register → auto-login → land in personal workspace', async ({ page }) 
   await page.getByLabel('Password').fill(PASSWORD)
   await page.getByRole('button', { name: /create account/i }).click()
   await expect(page).toHaveURL(/\/w\/[^/]+$/, { timeout: 10_000 })
-  await expect(page.getByRole('heading', { name: 'cubebox' })).toBeVisible()
+  // Workspace home is the page that exposes the chat composer; assert via
+  // the composer's testid rather than a marketing heading (the redesign
+  // dropped the standalone "cubebox" h1 on this view).
+  await expect(page.getByTestId('chat-input')).toBeVisible()
 })
 
 test('login → redirect to workspace; logout → redirect to login', async ({ page, context }) => {
