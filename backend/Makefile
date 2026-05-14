@@ -97,7 +97,7 @@ check-ci:
 	CUBEBOX_SANDBOX__DOMAIN=dummy:9000 \
 	CUBEBOX_SANDBOX__IMAGE=dummy:image \
 	CUBEBOX_SANDBOX__API_KEY=dummy \
-		uv run pytest --ignore=tests/e2e -m "not sandbox and not e2e" --cov-report=xml
+		uv run pytest --ignore=tests/e2e --ignore=tests/diagnostic -m "not sandbox and not e2e and not real_llm and not diagnostic" --cov-report=xml
 	@echo "✓ CI-equivalent checks passed"
 
 clean:
