@@ -328,6 +328,23 @@ CATALOG: list[CatalogSeedEntry] = [
         static_auth_header_template=None,
         cred_metadata={"docs_url": "https://learn.microsoft.com/"},
     ),
+    CatalogSeedEntry(
+        slug="webtools",
+        name="WebTools",
+        provider="Cubebox",
+        description="Self-hosted WebTools MCP server: web_search and web_fetch.",
+        server_url="http://localhost:8020/api/webtools",
+        transport="streamable_http",
+        supported_auth_methods=["static"],
+        default_credential_scope="org",
+        oauth_dcr_supported=None,
+        oauth_default_scope=None,
+        oauth_static_client_id_env=None,
+        oauth_static_client_secret_env=None,
+        static_form_fields=_TOKEN_FIELD,
+        static_auth_header_template=_BEARER_TEMPLATE,
+        cred_metadata={},
+    ),
 ]
 
 
