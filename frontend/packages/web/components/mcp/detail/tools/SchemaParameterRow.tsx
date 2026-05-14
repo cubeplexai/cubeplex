@@ -8,9 +8,11 @@ import { cn } from '@/lib/utils'
 import {
   getProperties,
   getRequired,
+  isObjectSchema,
   resolveRef,
   resolveType,
   typeChipClasses,
+  type ResolvedType,
   type SchemaNode,
 } from '@/lib/jsonSchemaTypes'
 
@@ -61,6 +63,16 @@ function extendVisited(
   return next
 }
 
+// A schema with `properties` but no explicit `type: "object"` is still an object
+// per JSON Schema. Treat it as one for chip display and expansion decisions.
+function inferTypeInfo(node: SchemaNode): ResolvedType {
+  const t = resolveType(node)
+  if (t.kind === 'any' && isObjectSchema(node)) {
+    return { kind: 'object', label: 'object' }
+  }
+  return t
+}
+
 export function SchemaParameterRow({
   name,
   node,
@@ -90,7 +102,7 @@ export function SchemaParameterRow({
       ? extendVisited(childVisited, variantResolved.refKey)
       : childVisited
 
-  const typeInfo = resolveType(effective)
+  const typeInfo = inferTypeInfo(effective)
   const description = typeof resolved.description === 'string' ? resolved.description : null
   const defaultValue = resolved.default
   const enumValues = Array.isArray(effective.enum) ? (effective.enum as unknown[]) : null
@@ -111,9 +123,9 @@ export function SchemaParameterRow({
     arrayItemResolved !== null &&
     !arrayItemResolved.cycleRef &&
     arrayItems !== null &&
-    (arrayItems.type === 'object' || typeof arrayItems.properties === 'object')
+    isObjectSchema(arrayItems)
   const typeLabel =
-    arrayItems && arrayHasObjectItems ? `array<${resolveType(arrayItems).label}>` : typeInfo.label
+    arrayItems && arrayHasObjectItems ? `array<${inferTypeInfo(arrayItems).label}>` : typeInfo.label
 
   const arrayChildVisited = arrayItemResolved
     ? extendVisited(effectiveChildVisited, arrayItemResolved.refKey)
