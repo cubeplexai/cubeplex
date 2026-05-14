@@ -21,7 +21,10 @@ from cubebox.mcp.exceptions import (
     MCPShareCredentialOnlyForWorkspaceScope,
     MCPUserScopeCredentialForbidden,
     MCPWorkspaceOwnedNoOverride,
+    OAuthRefreshContention,
+    OAuthRefreshFailed,
 )
+from cubebox.mcp.oauth.token_manager import OAuthTokenManager
 from cubebox.models import (
     MCPServer,
     UserMCPCredential,
@@ -52,6 +55,7 @@ class MCPServerService:
         override_repo: WorkspaceMCPOverrideRepository,
         cred_service: CredentialService,
         request_context: RequestContext,
+        token_manager: OAuthTokenManager | None = None,
     ) -> None:
         self.server_repo = server_repo
         self.ws_cred_repo = ws_cred_repo
@@ -59,6 +63,7 @@ class MCPServerService:
         self.override_repo = override_repo
         self.cred_service = cred_service
         self._ctx = request_context
+        self._token_manager = token_manager
 
     async def create(
         self,
@@ -617,6 +622,23 @@ class MCPServerService:
         # OAuth installs have no credential at create-time — the callback
         # handler writes one and triggers discovery itself. Skip silently.
         if server.auth_method == "oauth" and server.credential_id is None:
+            return
+
+        # OAuth tokens have short TTLs (Notion: 1h). Reading the stored
+        # access token directly here would let it go stale and surface as
+        # a 401 even when a refresh_token is sitting in the vault. Route
+        # OAuth through OAuthTokenManager so it auto-refreshes on the
+        # admin sync-tools path the same way the agent runtime does.
+        if server.auth_method == "oauth" and self._token_manager is not None:
+            try:
+                refreshed = await self._token_manager.get_valid_access_token(server)
+            except OAuthRefreshFailed:
+                # Token manager already wrote authed=False + last_error.
+                return
+            except OAuthRefreshContention:
+                # Another worker is mid-refresh; let them finish.
+                return
+            await self._refresh_tools_for_server_with_token(server, credential_or_token=refreshed)
             return
 
         cred_kind = (

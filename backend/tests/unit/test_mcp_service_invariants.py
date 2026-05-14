@@ -612,3 +612,80 @@ async def test_workspace_override_with_null_credential_mode_inherits_server_scop
             workspace_id="ws-test",
             plaintext="ws-secret",
         )
+
+
+async def test_refresh_tools_for_oauth_server_uses_token_manager(
+    monkeypatch: pytest.MonkeyPatch,
+    session: AsyncSession,
+    cred_service: CredentialService,
+    request_context: RequestContext,
+) -> None:
+    """``refresh_tools`` on an OAuth server must route through the token
+    manager so an expired access token gets refreshed before discovery
+    rather than blindly producing a 401.
+
+    Regression for the case where Notion's stored access_token expired
+    overnight, sync-tools kept feeding the dead token into discovery,
+    and the UI showed ``Error / Not authenticated`` even though a usable
+    refresh_token was sitting in the vault.
+    """
+    captured: dict[str, object] = {}
+
+    async def _discover_success(
+        _server: object, *, credential_or_token: str | None
+    ) -> tuple[bool, list, None]:
+        captured["token"] = credential_or_token
+        return True, [], None
+
+    monkeypatch.setattr("cubebox.services.mcp.discover_tools", _discover_success)
+    monkeypatch.setattr("cubebox.mcp.runtime.discover_tools", _discover_success)
+
+    class StubTokenManager:
+        def __init__(self) -> None:
+            self.calls: list[str] = []
+
+        async def get_valid_access_token(self, server: object, **_kwargs: object) -> str:
+            self.calls.append(getattr(server, "id", "?"))
+            return "fresh-access-token"
+
+    stub = StubTokenManager()
+
+    svc = MCPServerService(
+        server_repo=MCPServerRepository(session, org_id=request_context.org_id),
+        ws_cred_repo=WorkspaceMCPCredentialRepository(session, org_id=request_context.org_id),
+        user_cred_repo=UserMCPCredentialRepository(session, org_id=request_context.org_id),
+        override_repo=WorkspaceMCPOverrideRepository(session, org_id=request_context.org_id),
+        cred_service=cred_service,
+        request_context=request_context,
+        token_manager=stub,  # type: ignore[arg-type]
+    )
+
+    # Seed an OAuth+org server with a stale-looking access_token credential.
+    cred_id = await cred_service.create(
+        kind="mcp_oauth_access_token",
+        name="mcp:notion:org:access",
+        plaintext="stale-token",
+    )
+    from cubebox.mcp._constants import server_url_hash
+    from cubebox.models import MCPServer
+
+    server_repo = svc.server_repo
+    server = MCPServer(
+        org_id=request_context.org_id,
+        name="catalog:notion",
+        server_url="https://mcp.notion.com/mcp",
+        server_url_hash=server_url_hash("https://mcp.notion.com/mcp"),
+        transport="streamable_http",
+        auth_method="oauth",
+        credential_scope="org",
+        credential_id=cred_id,
+        created_by_user_id=request_context.user.id,
+    )
+    saved = await server_repo.add(server)
+
+    await svc.refresh_tools(server_id=saved.id)
+
+    assert stub.calls == [saved.id], "token manager must be consulted for OAuth servers"
+    assert captured["token"] == "fresh-access-token", (
+        "discovery must receive the refreshed token, not the stored stale one"
+    )

@@ -903,6 +903,7 @@
     "notAuthenticated": "Not authenticated",
     "customBadge": "Custom",
     "refreshTools": "Refresh Tools",
+    "reauthorize": "Re-authenticate",
     "deleteButton": "Delete",
     "confirmDeleteLabel": "Delete?",
 
