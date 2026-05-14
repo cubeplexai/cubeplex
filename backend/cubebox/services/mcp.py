@@ -21,6 +21,7 @@ from cubebox.mcp.exceptions import (
     MCPShareCredentialOnlyForWorkspaceScope,
     MCPUserScopeCredentialForbidden,
     MCPWorkspaceOwnedNoOverride,
+    OAuthInvalidServerState,
     OAuthRefreshContention,
     OAuthRefreshFailed,
 )
@@ -637,6 +638,16 @@ class MCPServerService:
                 return
             except OAuthRefreshContention:
                 # Another worker is mid-refresh; let them finish.
+                return
+            except OAuthInvalidServerState as exc:
+                # Access token expired but no refresh_token metadata to rotate
+                # with — e.g. AS never returned a refresh_token on install, or
+                # the refresh credential row was purged. Token manager doesn't
+                # touch ``authed`` in that case, so we flip it here so the UI
+                # surfaces the Re-authenticate button instead of a 500.
+                server.authed = False
+                server.last_error = f"OAuth re-authentication required: {exc}"[:2048]
+                await self.server_repo.update(server)
                 return
             await self._refresh_tools_for_server_with_token(server, credential_or_token=refreshed)
             return
