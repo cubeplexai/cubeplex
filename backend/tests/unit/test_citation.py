@@ -429,15 +429,11 @@ async def test_result_details_contain_citations_key() -> None:
 
 
 def test_citation_config_content_type_defaults_to_json() -> None:
-    from cubebox.middleware.citations.config import CitationConfig
-
     cfg = CitationConfig(source_type="web", content_field="results", mapping={"snippet": "snippet"})
     assert cfg.content_type == "json"
 
 
 def test_citation_config_content_type_text_round_trip() -> None:
-    from cubebox.middleware.citations.config import CitationConfig
-
     raw = {
         "content_type": "text",
         "source_type": "web",
@@ -446,14 +442,58 @@ def test_citation_config_content_type_text_round_trip() -> None:
     }
     cfg = CitationConfig(**raw)
     assert cfg.content_type == "text"
-    assert cfg.model_dump(exclude_none=True)["content_type"] == "text"
+
+    # Round-trip through serialize → deserialize.
+    dumped = cfg.model_dump()
+    assert dumped["content_type"] == "text"
+    restored = CitationConfig.model_validate(dumped)
+    assert restored == cfg
 
 
 def test_citation_config_rejects_unknown_content_type() -> None:
-    import pytest
     from pydantic import ValidationError
-
-    from cubebox.middleware.citations.config import CitationConfig
 
     with pytest.raises(ValidationError):
         CitationConfig(content_type="binary", source_type="web", content_field=None, mapping={})  # type: ignore[arg-type]
+
+
+# ---------------------------------------------------------------------------
+# content_type="text" takes the fast path (no JSON parse)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_citation_middleware_uses_text_path_when_content_type_is_text() -> None:
+    """content_type='text' skips JSON parse and treats raw output as one item."""
+    cfg = CitationConfig(
+        content_type="text",
+        source_type="web",
+        content_field=None,
+        mapping={"snippet": "text"},
+        args_mapping={"url": "url"},
+    )
+    mw = _make_middleware(configs={"web_fetch": cfg})
+    _set_counter(start=1)
+
+    q: asyncio.Queue[Any] = asyncio.Queue()
+    citation_event_queue.set(q)
+    try:
+        tool_call = _make_tool_call(name="web_fetch", args={"url": "https://example.com/x"})
+        result = _make_result("plain text content from the fetched URL " * 6)
+        ctx = _make_context(tool_call, result)
+
+        out = await mw.after_tool_call(ctx)
+
+        assert out is not None
+        citations = out.details["citations"]
+        assert len(citations) == 1
+        assert citations[0]["metadata"]["url"] == "https://example.com/x"
+        assert any("plain text content" in chunk["content"] for chunk in citations[0]["chunks"])
+
+        # Citation was also pushed to the event queue
+        assert not q.empty()
+        kind, _agent_id, payload = q.get_nowait()
+        assert kind == "citation"
+        assert payload["metadata"]["url"] == "https://example.com/x"
+    finally:
+        citation_event_queue.set(None)
