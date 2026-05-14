@@ -31,7 +31,7 @@ from datetime import UTC, datetime
 from cubebox.auth.context import RequestContext
 from cubebox.credentials.exceptions import CredentialNotFound
 from cubebox.mcp._constants import CREDENTIAL_KIND_MCP, server_url_hash
-from cubebox.mcp.discovery import discover_tools
+from cubebox.mcp.cubepi_admin_discovery import discover_tools_metadata as discover_tools
 from cubebox.mcp.exceptions import (
     MCPCatalogAuthMethodUnsupported,
     MCPCatalogConnectorNotFound,
