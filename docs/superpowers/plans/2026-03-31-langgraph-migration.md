@@ -1,5 +1,7 @@
 # LangGraph Migration Implementation Plan
 
+> **SUPERSEDED (2026-05-14):** The LangGraph runtime described here was fully replaced by cubepi. See `docs/superpowers/specs/2026-05-13-cubepi-main-agent-migration-design.md` and the M0–M6 cubepi-migration plans (plus the 2026-05-14 cleanup follow-up) for the current state.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Replace `deepagents` with `langchain.agents.create_agent()` + custom middleware, simplify sandbox to execute-only, use LangGraph thread state as the single source of truth for messages, and simplify frontend state management.
