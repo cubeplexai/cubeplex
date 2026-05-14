@@ -957,7 +957,7 @@ class RunManager:
             citation_counter_var,
             citation_event_queue,
         )
-        from cubebox.middleware.subagents import subagent_event_queue
+        from cubebox.middleware.subagents_pi import subagent_event_queue
 
         sandbox = None
         sandbox_manager = None

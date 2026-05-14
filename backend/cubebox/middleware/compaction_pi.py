@@ -43,9 +43,8 @@ from langchain_core.messages import AIMessage as LCAssistantMessage
 from langchain_core.messages import AnyMessage, HumanMessage, ToolMessage
 from loguru import logger
 
-from cubebox.agents.state import CompactionSummary
 from cubebox.middleware.compaction.boundary import safe_boundary
-from cubebox.middleware.compaction.summarizer import summarize
+from cubebox.middleware.compaction.summarizer import CompactionSummary, summarize
 from cubebox.middleware.compaction.tokens import _CHARS_PER_TOKEN
 
 SUMMARY_PREFIX = "[Conversation summary so far]\n"

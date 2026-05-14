@@ -5,6 +5,7 @@ from __future__ import annotations
 import time
 
 from langchain_core.messages import HumanMessage
+from langchain_openai import ChatOpenAI
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cubebox.api.schemas.provider import (
@@ -18,7 +19,6 @@ from cubebox.api.schemas.provider import (
     TestResultOut,
 )
 from cubebox.credentials.exceptions import CredentialNotFound
-from cubebox.llm.openai_compatible import ChatOpenAICompatible
 from cubebox.models.org_provider_override import OrgProviderOverride
 from cubebox.models.provider import Model, Provider
 from cubebox.repositories.model import ModelRepository
@@ -291,7 +291,7 @@ class ProviderService:
             )
         try:
             if data.provider_type == "openai_compat":
-                llm = ChatOpenAICompatible(
+                llm = ChatOpenAI(
                     base_url=data.base_url,
                     api_key=data.api_key or "placeholder",  # type: ignore[arg-type]
                     model="ping",
@@ -331,7 +331,7 @@ class ProviderService:
                     timeout=15,
                 )
             elif provider.provider_type == "openai_compat":
-                llm = ChatOpenAICompatible(
+                llm = ChatOpenAI(
                     base_url=provider.base_url,
                     api_key=api_key or "placeholder",  # type: ignore[arg-type]
                     model=model_id,

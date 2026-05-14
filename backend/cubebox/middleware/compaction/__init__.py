@@ -1,5 +1,6 @@
-"""Conversation compaction middleware package."""
+"""Conversation compaction shared helpers.
 
-from cubebox.middleware.compaction.middleware import CompactionMiddleware
-
-__all__ = ["CompactionMiddleware"]
+The langgraph ``CompactionMiddleware`` was removed in M6; the
+``boundary``/``summarizer``/``tokens`` helpers remain here and are
+consumed by ``cubebox.middleware.compaction_pi.CompactionMiddlewarePi``.
+"""

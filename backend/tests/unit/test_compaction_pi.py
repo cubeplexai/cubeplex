@@ -17,7 +17,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from cubepi.providers.base import AssistantMessage, TextContent, ToolResultMessage, UserMessage
 
-from cubebox.agents.state import CompactionSummary
+from cubebox.middleware.compaction.summarizer import CompactionSummary
 from cubebox.middleware.compaction_pi import (
     CompactionMiddlewarePi,
     _compressed_view_pi,

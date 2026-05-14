@@ -39,15 +39,61 @@ from typing import Any
 from cubepi.middleware.base import Middleware
 from cubepi.providers.base import Message, TextContent, UserMessage
 
-from cubebox.middleware.memory import (
-    PINNED_TYPES,
-    RELEVANCE_TYPES,
-    _render_block,
-    _render_snapshot_text,
+from cubebox.models.memory import (
+    MemoryItem,
+    MemoryScope,
+    MemoryStatus,
+    MemoryType,
 )
-from cubebox.models.memory import MemoryItem, MemoryStatus
 from cubebox.prompts.memory import MEMORY_PROMPT_HEADER
 from cubebox.repositories.memory import MemoryRepository
+
+PINNED_TYPES = {MemoryType.PREFERENCE, MemoryType.CORRECTION}
+RELEVANCE_TYPES = {
+    MemoryType.PROJECT_FACT,
+    MemoryType.PROCEDURE,
+    MemoryType.DECISION,
+    MemoryType.ORG_POLICY,
+}
+
+
+def _render_block(items: list[MemoryItem]) -> str:
+    """Render a sorted memory block. Deterministic (cache-stable)."""
+    if not items:
+        return ""
+    lines: list[str] = []
+    by_scope: dict[MemoryScope, list[MemoryItem]] = {}
+    for m in items:
+        by_scope.setdefault(m.scope, []).append(m)
+    for scope in (MemoryScope.ORG, MemoryScope.WORKSPACE, MemoryScope.PERSONAL):
+        bucket = by_scope.get(scope, [])
+        if not bucket:
+            continue
+        tag = scope.value
+        attrs = ""
+        if scope in (MemoryScope.WORKSPACE, MemoryScope.ORG):
+            attrs = ' trust="user-contributed"'
+        lines.append(f"<{tag}_memory{attrs}>")
+        bucket.sort(
+            key=lambda m: (
+                0 if m.type == MemoryType.CORRECTION else 1,
+                m.type.value,
+                m.created_at,
+            )
+        )
+        for m in bucket:
+            lines.append(f"- [{m.type.value}] {m.content}")
+        lines.append(f"</{tag}_memory>")
+    return "\n".join(lines)
+
+
+def _render_snapshot_text(snap: dict[str, Any], *, current: bool) -> str:
+    if current:
+        return f'<memory_block current="true">\n{snap["rendered_text"]}\n</memory_block>'
+    return (
+        f'<memory_snapshot turn captured_at="{snap["captured_at"]}">\n'
+        f"{snap['rendered_text']}\n</memory_snapshot>"
+    )
 
 
 class MemoryMiddlewarePi(Middleware):

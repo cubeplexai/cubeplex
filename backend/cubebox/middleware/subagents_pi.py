@@ -17,13 +17,43 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Sequence
-from typing import Any, cast
+from contextvars import ContextVar
+from typing import Any, TypedDict, cast
 
 from cubepi import AgentTool, AgentToolResult, TextContent
 from cubepi.middleware.base import Middleware
 from loguru import logger
+from pydantic import BaseModel
 
-from cubebox.middleware.subagents import SubAgent, _SubAgentSchema, subagent_event_queue
+# Queue for forwarding subagent streaming events to the SSE generator.
+# Set per-request in the run-manager; read inside the subagent tool's
+# ``execute`` body to forward translated events back to the parent stream.
+subagent_event_queue: ContextVar[asyncio.Queue[Any] | None] = ContextVar(
+    "subagent_event_queue", default=None
+)
+
+
+class SubAgent(TypedDict, total=False):
+    """Specification for a subagent.
+
+    Required keys: name, description, system_prompt
+    Optional keys: tools, model, middleware
+    """
+
+    name: str  # required
+    description: str  # required
+    system_prompt: str  # required
+    tools: list[Any]
+    model: Any
+    middleware: list[Any]
+
+
+class _SubAgentSchema(BaseModel):
+    name: str
+    role: str
+    task: str
+    prompt: str
+    subagent_type: str = "general-purpose"
 
 
 class SubAgentMiddlewarePi(Middleware):

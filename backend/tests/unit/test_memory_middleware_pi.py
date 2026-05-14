@@ -20,11 +20,12 @@ import pytest
 from cubepi.providers.base import AssistantMessage, TextContent, UserMessage
 
 from cubebox.agents.convert_pi import wire_input_to_cubepi_user_message
-from cubebox.middleware.memory import _render_block, _render_snapshot_text
 from cubebox.middleware.memory_pi import (
     MemoryMiddlewarePi,
     _prepend_snapshot_to_user_msg,
+    _render_block,
     _render_pinned,
+    _render_snapshot_text,
     compute_relevance_snapshot,
 )
 from cubebox.models.memory import MemoryItem, MemoryScope, MemoryStatus, MemoryType

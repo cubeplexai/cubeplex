@@ -7,7 +7,6 @@ from cubebox.llm.config import (
     ProviderConfig,
 )
 from cubebox.llm.factory import LLMFactory
-from cubebox.llm.openai_compatible import ChatOpenAICompatible
 
 __all__ = [
     "LLMConfig",
@@ -15,5 +14,4 @@ __all__ = [
     "ModelCost",
     "ProviderConfig",
     "LLMFactory",
-    "ChatOpenAICompatible",
 ]

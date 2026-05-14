@@ -16,8 +16,7 @@ from typing import Any
 import pytest
 from cubepi.providers.faux import FauxProvider, faux_assistant_message
 
-from cubebox.middleware.subagents import SubAgent, subagent_event_queue
-from cubebox.middleware.subagents_pi import SubAgentMiddlewarePi
+from cubebox.middleware.subagents_pi import SubAgent, SubAgentMiddlewarePi, subagent_event_queue
 
 # ---------------------------------------------------------------------------
 # Helpers
