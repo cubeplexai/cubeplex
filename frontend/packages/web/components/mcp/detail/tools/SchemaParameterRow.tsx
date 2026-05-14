@@ -64,13 +64,16 @@ export function SchemaParameterRow({
 
   const hasNestedObject =
     typeInfo.kind === 'object' && Object.keys(getProperties(effective)).length > 0
-  const arrayItems =
+  const rawArrayItems =
     typeInfo.kind === 'array' && typeof effective.items === 'object'
       ? (effective.items as SchemaNode)
       : null
+  const arrayItems = rawArrayItems ? resolveNode(rawArrayItems, root).resolved : null
   const arrayHasObjectItems =
     arrayItems !== null &&
     (arrayItems.type === 'object' || typeof arrayItems.properties === 'object')
+  const typeLabel =
+    arrayItems && arrayHasObjectItems ? `array<${resolveType(arrayItems).label}>` : typeInfo.label
 
   const expandable = hasNestedObject || arrayHasObjectItems
 
@@ -99,7 +102,7 @@ export function SchemaParameterRow({
               typeChipClasses(typeInfo.kind),
             )}
           >
-            {typeInfo.label}
+            {typeLabel}
           </span>
           {required ? (
             <span className="rounded-md bg-destructive/15 px-1.5 py-0.5 text-[11px] font-medium leading-none text-destructive">
