@@ -228,7 +228,7 @@ async def test_handle_callback_org_scope_writes_vault_and_flips_authed(
     ) -> tuple[bool, list[dict[str, Any]] | None, str | None]:
         return True, [{"name": "search", "description": "", "input_schema": {}}], None
 
-    with patch("cubebox.mcp.runtime.discover_tools", _fake_discover):
+    with patch("cubebox.mcp.cubepi_admin_refresh.discover_tools_metadata", _fake_discover):
         try:
             result = await cb_handler.handle_callback(state=state, code="auth-code-1")
         finally:
@@ -307,7 +307,7 @@ async def test_handle_callback_org_scope_re_oauth_rotates_existing_credentials(
         http = httpx.AsyncClient(transport=httpx.MockTransport(handler))
         cb_handler = _make_handler(session, fake_redis, encryption_backend, http)
         try:
-            with patch("cubebox.mcp.runtime.discover_tools", _fake_discover):
+            with patch("cubebox.mcp.cubepi_admin_refresh.discover_tools_metadata", _fake_discover):
                 return await cb_handler.handle_callback(state=state, code="code")
         finally:
             await http.aclose()
@@ -388,7 +388,7 @@ async def test_handle_callback_preserves_existing_refresh_token_when_as_omits_it
         http = httpx.AsyncClient(transport=httpx.MockTransport(handler))
         cb_handler = _make_handler(session, fake_redis, encryption_backend, http)
         try:
-            with patch("cubebox.mcp.runtime.discover_tools", _fake_discover):
+            with patch("cubebox.mcp.cubepi_admin_refresh.discover_tools_metadata", _fake_discover):
                 await cb_handler.handle_callback(state=state, code="code")
         finally:
             await http.aclose()
@@ -457,7 +457,7 @@ async def test_handle_callback_user_scope_writes_user_credential_row(
     ) -> tuple[bool, list[dict[str, Any]] | None, str | None]:
         return True, [], None
 
-    with patch("cubebox.mcp.runtime.discover_tools", _fake_discover):
+    with patch("cubebox.mcp.cubepi_admin_refresh.discover_tools_metadata", _fake_discover):
         try:
             result = await cb_handler.handle_callback(state=state, code="auth-code-u")
         finally:
@@ -656,7 +656,7 @@ async def test_handle_callback_confidential_client_uses_basic_auth(
     ) -> tuple[bool, list[dict[str, Any]] | None, str | None]:
         return True, [], None
 
-    with patch("cubebox.mcp.runtime.discover_tools", _fake_discover):
+    with patch("cubebox.mcp.cubepi_admin_refresh.discover_tools_metadata", _fake_discover):
         try:
             result = await cb_handler.handle_callback(state=state, code="auth-code-conf")
         finally:

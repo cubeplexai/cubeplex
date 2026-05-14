@@ -252,9 +252,10 @@ class OAuthCallbackHandler:
                 f"{server.credential_scope!r} for OAuth"
             )
 
-        # Deferred import to break the cubebox.mcp.runtime ↔ oauth.callback
-        # circular import (runtime imports OAuthTokenManager via this package).
-        from cubebox.mcp.runtime import refresh_tools_for_server_with_token
+        # Deferred import to break the cubebox.mcp.cubepi_admin_refresh ↔
+        # oauth.callback circular import (the refresh module pulls in
+        # repositories/models that may import OAuthTokenManager via this package).
+        from cubebox.mcp.cubepi_admin_refresh import refresh_tools_for_server_with_token
 
         await refresh_tools_for_server_with_token(
             server,

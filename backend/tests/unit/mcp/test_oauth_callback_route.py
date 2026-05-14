@@ -315,7 +315,7 @@ async def test_callback_happy_path_redirects_ok_and_strips_cookie(
         return True, [], None
 
     try:
-        with patch("cubebox.mcp.runtime.discover_tools", _fake_discover):
+        with patch("cubebox.mcp.cubepi_admin_refresh.discover_tools_metadata", _fake_discover):
             response = await _hit_callback(
                 app, code="auth-code", state=state, cookies={CALLBACK_TICKET_COOKIE_NAME: ticket}
             )
