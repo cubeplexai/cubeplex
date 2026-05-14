@@ -7,15 +7,9 @@ os.environ.setdefault(
     "Nmu-K8QhP_uhdjmwbaiNmgxVQHbGeCkMOCz8RKp1LMM=",
 )
 
-from cubebox.config import config
-
-if config.langsmith.enabled:
-    print("setup langsmith")
-    os.environ["LANGSMITH_TRACING"] = "true"
-    os.environ["LANGSMITH_API_KEY"] = config.langsmith.key
-
 import pytest
 
+from cubebox.config import config  # noqa: F401  -- ensures dynaconf is initialised pre-import
 from cubebox.plugins import ensure_registry_bound, reset_registry_for_tests
 
 

@@ -54,6 +54,6 @@ class LlmBillingEvent(CubeboxBase, table=True):
     price_cache_write_per_mtok_micro: int = Field(default=0)
     parent_run_id: str | None = Field(
         default=None, max_length=64
-    )  # LangSmith external UUID, not our DB row
+    )  # External trace UUID for parent run; populated by the runtime if available
     subagent_depth: int = Field(default=0)
     error_class: str | None = Field(default=None, max_length=128)

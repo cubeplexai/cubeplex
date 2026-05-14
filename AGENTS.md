@@ -45,7 +45,6 @@ cubebox/
   - `CUBEBOX_SANDBOX__DOMAIN`
   - `CUBEBOX_SANDBOX__IMAGE`
   - `CUBEBOX_SANDBOX__API_KEY`
-  - `CUBEBOX_LANGSMITH__KEY`
 - 测试环境（当前项目）: `config.test.yaml` 使用
   - `CUBEBOX_E2E_LLM_BASE_URL`
   - `CUBEBOX_E2E_LLM_API_KEY`

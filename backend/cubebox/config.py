@@ -39,7 +39,3 @@ config = dynaconf.Dynaconf(
     settings_files=settings_files,
     load_dotenv=True,
 )
-
-if config.langsmith.enabled:
-    os.environ["LANGSMITH_TRACING"] = "true"
-    os.environ["LANGCHAIN_API_KEY"] = config.langsmith.key

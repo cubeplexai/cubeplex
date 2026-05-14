@@ -153,10 +153,6 @@ default:
   # plus per-org/per-workspace installs (mcp_servers). The legacy
   # `mcp.servers` config block was removed in M2.
 
-  langsmith:
-    enabled: false
-    key: "@format {env[CUBEBOX_LANGSMITH__KEY]}"
-
   # Object Storage Configuration (S3-compatible)
   objectstore:
     provider: "oss" # "oss" or "s3"
