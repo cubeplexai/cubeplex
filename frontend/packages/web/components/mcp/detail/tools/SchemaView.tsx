@@ -17,16 +17,18 @@ export function SchemaView({ schema }: SchemaViewProps) {
     return <p className="px-4 py-6 text-sm text-muted-foreground">{t('noParams')}</p>
   }
 
-  if (!isObjectSchema(schema)) {
-    return <p className="px-4 py-6 text-sm text-muted-foreground">{t('malformed')}</p>
-  }
-
   const properties = getProperties(schema)
   const required = new Set(getRequired(schema))
   const entries = Object.entries(properties)
 
+  // Empty object / no properties: treat as a zero-arg tool, not malformed.
+  // This covers both `{}` and `{type: 'object', properties: {}}`.
   if (entries.length === 0) {
     return <p className="px-4 py-6 text-sm text-muted-foreground">{t('noParams')}</p>
+  }
+
+  if (!isObjectSchema(schema)) {
+    return <p className="px-4 py-6 text-sm text-muted-foreground">{t('malformed')}</p>
   }
 
   return (
