@@ -170,6 +170,76 @@ def _dicts_to_sse_events(
     return events
 
 
+def cubepi_dict_to_agent_event(d: dict[str, Any], timestamp: str) -> AgentEvent | None:
+    """Translate a single SSE dict produced by ``convert_cubepi_agent_event_to_sse``
+    into a typed cubebox ``AgentEvent``.
+
+    Returns ``None`` for dicts that should be silently dropped at this layer
+    (tool_call_delta — frontend only consumes complete tool_call; done — the
+    caller emits done with usage data; unknown types).
+    """
+    from cubebox.agents.schemas import (
+        ErrorEvent,
+        ReasoningEvent,
+        TextDeltaEvent,
+        ToolCallEvent,
+        ToolResultEvent,
+        UsageEvent,
+    )
+
+    t = d.get("type")
+    if t == "text_delta":
+        return TextDeltaEvent(
+            timestamp=timestamp,
+            data={"content": d.get("delta", ""), "usage": {}},
+        )
+    if t == "reasoning":
+        return ReasoningEvent(
+            timestamp=timestamp,
+            data={"content": d.get("delta", "")},
+        )
+    if t == "tool_call":
+        return ToolCallEvent(
+            timestamp=timestamp,
+            data={
+                "tool_call_id": d.get("id", ""),
+                "name": d.get("name", ""),
+                "arguments": d.get("arguments", ""),
+            },
+        )
+    if t == "tool_result":
+        return ToolResultEvent(
+            timestamp=timestamp,
+            data={
+                "tool_call_id": d.get("tool_call_id", ""),
+                "name": d.get("name", ""),
+                "content": str(d.get("result", "")),
+                "is_error": d.get("is_error", False),
+            },
+        )
+    if t == "usage":
+        return UsageEvent(
+            timestamp=timestamp,
+            data={
+                "input_tokens": d.get("input_tokens", 0),
+                "output_tokens": d.get("output_tokens", 0),
+                "cache_read_tokens": d.get("cache_read_tokens", 0),
+                "cache_write_tokens": d.get("cache_write_tokens", 0),
+            },
+        )
+    if t == "error":
+        err_msg = d.get("error") or "unknown agent error"
+        return ErrorEvent(
+            timestamp=timestamp,
+            data={
+                "error_code": "run_error",
+                "message": err_msg,
+                "details": err_msg,
+            },
+        )
+    return None
+
+
 def _extract_citation_ids(content: Any) -> list[int]:
     if isinstance(content, str):
         return [int(match.group(1)) for match in _CITATION_ID_PATTERN.finditer(content)]
@@ -482,13 +552,6 @@ class RunManager:
 
         from cubebox.agents.checkpointer_pi import init_cubepi_checkpointer
         from cubebox.agents.graph_pi import create_cubebox_cubepi_agent
-        from cubebox.agents.schemas import (
-            ReasoningEvent,
-            TextDeltaEvent,
-            ToolCallEvent,
-            ToolResultEvent,
-            UsageEvent,
-        )
         from cubebox.agents.stream_pi import convert_cubepi_agent_event_to_sse
         from cubebox.db.engine import async_session_maker
         from cubebox.llm.cache_markers_pi import CubeboxCacheMarkerPolicy
@@ -950,54 +1013,8 @@ class RunManager:
         # publish_stream_event, which handles citation buffering and turn_usage.
         ts = datetime.now(UTC).isoformat()
         for d in sse_dicts:
-            t = d.get("type")
-            sse_event: Any
-            if t == "text_delta":
-                sse_event = TextDeltaEvent(
-                    timestamp=ts,
-                    data={"content": d.get("delta", ""), "usage": {}},
-                )
-            elif t == "reasoning":
-                sse_event = ReasoningEvent(
-                    timestamp=ts,
-                    data={"content": d.get("delta", "")},
-                )
-            elif t == "tool_call":
-                sse_event = ToolCallEvent(
-                    timestamp=ts,
-                    data={
-                        "tool_call_id": d.get("id", ""),
-                        "name": d.get("name", ""),
-                        "arguments": d.get("arguments", ""),
-                    },
-                )
-            elif t == "tool_call_delta":
-                # tool_call_delta dicts are dropped for now — the frontend only
-                # needs the complete tool_call once the toolcall_end arrives.
-                continue
-            elif t == "tool_result":
-                sse_event = ToolResultEvent(
-                    timestamp=ts,
-                    data={
-                        "tool_call_id": d.get("tool_call_id", ""),
-                        "name": d.get("name", ""),
-                        "content": str(d.get("result", "")),
-                        "is_error": d.get("is_error", False),
-                    },
-                )
-            elif t == "usage":
-                sse_event = UsageEvent(
-                    timestamp=ts,
-                    data={
-                        "input_tokens": d.get("input_tokens", 0),
-                        "output_tokens": d.get("output_tokens", 0),
-                        "cache_read_tokens": d.get("cache_read_tokens", 0),
-                        "cache_write_tokens": d.get("cache_write_tokens", 0),
-                    },
-                )
-            else:
-                # error, done, and unrecognised types are silently skipped here;
-                # done is emitted with usage data by the caller (_execute_run).
+            sse_event = cubepi_dict_to_agent_event(d, ts)
+            if sse_event is None:
                 continue
             await publish_stream_event(sse_event, None)
 
