@@ -1,5 +1,6 @@
 """Tests for the v1 MCP catalog seeder."""
 
+import dataclasses
 from collections.abc import AsyncIterator, Callable
 
 import pytest
@@ -151,7 +152,15 @@ async def test_seed_is_idempotent(session: AsyncSession, backend: FernetBackend)
 
 
 async def test_seed_persists_tool_citations(session: AsyncSession, backend: FernetBackend) -> None:
-    """tool_citations on a CatalogSeedEntry round-trips through upsert."""
+    """tool_citations on a CatalogSeedEntry round-trips through upsert; update overwrites."""
+    initial_citations = {
+        "web_search": {
+            "content_type": "json",
+            "source_type": "web",
+            "content_field": "results",
+            "mapping": {"url": "url", "snippet": "description"},
+        },
+    }
     catalog = [
         CatalogSeedEntry(
             slug="webtools-test",
@@ -169,27 +178,30 @@ async def test_seed_persists_tool_citations(session: AsyncSession, backend: Fern
             static_form_fields=None,
             static_auth_header_template=None,
             cred_metadata={},
-            tool_citations={
-                "web_search": {
-                    "content_type": "json",
-                    "source_type": "web",
-                    "content_field": "results",
-                    "mapping": {"url": "url", "snippet": "description"},
-                },
-            },
+            tool_citations=initial_citations,
         )
     ]
-    result = await seed_catalog(
-        session,
-        backend,
-        get_env=lambda _k: None,
-        catalog=catalog,
-    )
+    result = await seed_catalog(session, backend, get_env=lambda _k: None, catalog=catalog)
     assert result.skipped == 0
     repo = MCPCatalogConnectorRepository(session)
     row = await repo.get_by_slug("webtools-test")
     assert row is not None
-    assert row.tool_citations == catalog[0].tool_citations
+    assert row.tool_citations == initial_citations
+
+    # Update path: re-seed with a different mapping → DB row updated.
+    updated_citations = {
+        "web_search": {
+            "content_type": "json",
+            "source_type": "web",
+            "content_field": "data",
+            "mapping": {"url": "url", "snippet": "summary"},
+        },
+    }
+    updated_catalog = [dataclasses.replace(catalog[0], tool_citations=updated_citations)]
+    await seed_catalog(session, backend, get_env=lambda _k: None, catalog=updated_catalog)
+    row = await repo.get_by_slug("webtools-test")
+    assert row is not None
+    assert row.tool_citations == updated_citations
 
 
 async def test_seed_with_custom_catalog(session: AsyncSession, backend: FernetBackend) -> None:
