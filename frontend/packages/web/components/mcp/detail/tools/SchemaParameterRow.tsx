@@ -20,23 +20,45 @@ export interface SchemaParameterRowProps {
   required: boolean
   root: SchemaNode
   depth?: number
+  visitedRefs?: ReadonlySet<string>
 }
 
 const MAX_AUTO_EXPAND_DEPTH = 1
+const EMPTY_VISITED: ReadonlySet<string> = new Set<string>()
+
+interface ResolvedRef {
+  resolved: SchemaNode
+  unresolvedRef: string | null
+  cycleRef: string | null
+  refKey: string | null
+}
 
 function resolveNode(
   node: SchemaNode,
   root: SchemaNode,
-): {
-  resolved: SchemaNode
-  unresolvedRef: string | null
-} {
+  visitedRefs: ReadonlySet<string>,
+): ResolvedRef {
   if (typeof node.$ref === 'string') {
+    if (visitedRefs.has(node.$ref)) {
+      return { resolved: node, unresolvedRef: null, cycleRef: node.$ref, refKey: node.$ref }
+    }
     const target = resolveRef(root, node.$ref)
-    if (target) return { resolved: target, unresolvedRef: null }
-    return { resolved: node, unresolvedRef: node.$ref }
+    if (target) {
+      return { resolved: target, unresolvedRef: null, cycleRef: null, refKey: node.$ref }
+    }
+    return { resolved: node, unresolvedRef: node.$ref, cycleRef: null, refKey: null }
   }
-  return { resolved: node, unresolvedRef: null }
+  return { resolved: node, unresolvedRef: null, cycleRef: null, refKey: null }
+}
+
+function extendVisited(
+  visitedRefs: ReadonlySet<string>,
+  refKey: string | null,
+): ReadonlySet<string> {
+  if (!refKey) return visitedRefs
+  const next = new Set(visitedRefs)
+  next.add(refKey)
+  return next
 }
 
 export function SchemaParameterRow({
@@ -45,9 +67,10 @@ export function SchemaParameterRow({
   required,
   root,
   depth = 0,
+  visitedRefs = EMPTY_VISITED,
 }: SchemaParameterRowProps) {
   const t = useTranslations('mcp.tools.detail.schema')
-  const { resolved, unresolvedRef } = resolveNode(node, root)
+  const { resolved, unresolvedRef, cycleRef, refKey } = resolveNode(node, root, visitedRefs)
   const variants = Array.isArray(resolved.oneOf)
     ? (resolved.oneOf as SchemaNode[])
     : Array.isArray(resolved.anyOf)
@@ -62,18 +85,27 @@ export function SchemaParameterRow({
   const defaultValue = resolved.default
   const enumValues = Array.isArray(effective.enum) ? (effective.enum as unknown[]) : null
 
+  const childVisited = extendVisited(visitedRefs, refKey)
+
   const hasNestedObject =
-    typeInfo.kind === 'object' && Object.keys(getProperties(effective)).length > 0
+    !cycleRef && typeInfo.kind === 'object' && Object.keys(getProperties(effective)).length > 0
   const rawArrayItems =
-    typeInfo.kind === 'array' && typeof effective.items === 'object'
+    !cycleRef && typeInfo.kind === 'array' && typeof effective.items === 'object'
       ? (effective.items as SchemaNode)
       : null
-  const arrayItems = rawArrayItems ? resolveNode(rawArrayItems, root).resolved : null
+  const arrayItemResolved = rawArrayItems ? resolveNode(rawArrayItems, root, childVisited) : null
+  const arrayItems = arrayItemResolved ? arrayItemResolved.resolved : null
   const arrayHasObjectItems =
+    arrayItemResolved !== null &&
+    !arrayItemResolved.cycleRef &&
     arrayItems !== null &&
     (arrayItems.type === 'object' || typeof arrayItems.properties === 'object')
   const typeLabel =
     arrayItems && arrayHasObjectItems ? `array<${resolveType(arrayItems).label}>` : typeInfo.label
+
+  const arrayChildVisited = arrayItemResolved
+    ? extendVisited(childVisited, arrayItemResolved.refKey)
+    : childVisited
 
   const expandable = hasNestedObject || arrayHasObjectItems
 
@@ -116,6 +148,14 @@ export function SchemaParameterRow({
                 {JSON.stringify(defaultValue)}
               </code>
             </span>
+          ) : null}
+          {cycleRef ? (
+            <code
+              className="rounded bg-muted px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground"
+              title={t('cycleRef')}
+            >
+              ↻ {cycleRef}
+            </code>
           ) : null}
           {unresolvedRef ? (
             <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-[11px]">
@@ -163,9 +203,9 @@ export function SchemaParameterRow({
 
       {expandable && expanded ? (
         <div className="ml-4 border-l border-border/60 pl-2">
-          {hasNestedObject ? renderNestedObject(effective, root, depth + 1) : null}
+          {hasNestedObject ? renderNestedObject(effective, root, depth + 1, childVisited) : null}
           {arrayHasObjectItems && arrayItems
-            ? renderArrayItems(arrayItems, root, depth + 1, t('itemShape'))
+            ? renderArrayItems(arrayItems, root, depth + 1, t('itemShape'), arrayChildVisited)
             : null}
         </div>
       ) : null}
@@ -173,7 +213,12 @@ export function SchemaParameterRow({
   )
 }
 
-function renderNestedObject(node: SchemaNode, root: SchemaNode, depth: number) {
+function renderNestedObject(
+  node: SchemaNode,
+  root: SchemaNode,
+  depth: number,
+  visitedRefs: ReadonlySet<string>,
+) {
   const props = getProperties(node)
   const req = new Set(getRequired(node))
   return Object.entries(props).map(([childName, childNode]) => (
@@ -184,17 +229,24 @@ function renderNestedObject(node: SchemaNode, root: SchemaNode, depth: number) {
       required={req.has(childName)}
       root={root}
       depth={depth}
+      visitedRefs={visitedRefs}
     />
   ))
 }
 
-function renderArrayItems(items: SchemaNode, root: SchemaNode, depth: number, label: string) {
+function renderArrayItems(
+  items: SchemaNode,
+  root: SchemaNode,
+  depth: number,
+  label: string,
+  visitedRefs: ReadonlySet<string>,
+) {
   return (
     <div>
       <div className="px-4 py-2 text-[11px] uppercase tracking-wide text-muted-foreground">
         {label}
       </div>
-      {renderNestedObject(items, root, depth)}
+      {renderNestedObject(items, root, depth, visitedRefs)}
     </div>
   )
 }
