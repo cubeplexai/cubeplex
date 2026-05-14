@@ -58,6 +58,16 @@ export function MCPCitationMappingTab({
     }
   }, [client, workspaceId, serverId])
 
+  useEffect(() => {
+    if (!dirty) return
+    const h = (e: BeforeUnloadEvent) => {
+      e.preventDefault()
+      e.returnValue = ''
+    }
+    window.addEventListener('beforeunload', h)
+    return () => window.removeEventListener('beforeunload', h)
+  }, [dirty])
+
   const knownToolNames = useMemo(
     () => new Set((state?.tools_cache ?? []).map((c) => c.name)),
     [state],

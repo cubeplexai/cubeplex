@@ -29,6 +29,17 @@ function basename(path?: string): string {
   return i >= 0 ? path.slice(i + 1) : path
 }
 
+/**
+ * Splits a namespaced MCP tool name (e.g. "webtools__web_search") into its
+ * display portion ("web_search") and optional server prefix ("webtools").
+ * Non-namespaced names are returned as-is with server = null.
+ */
+export function splitNamespacedToolName(name: string): { display: string; server: string | null } {
+  const idx = name.indexOf('__')
+  if (idx < 0) return { display: name, server: null }
+  return { display: name.slice(idx + 2), server: name.slice(0, idx) }
+}
+
 function CitationHoverContent({
   citation,
   chunkIndex,
@@ -131,12 +142,20 @@ function WebSourceHoverContent({
             </span>
           </>
         )}
-        <span
-          className="ml-auto text-[10px] font-medium text-muted-foreground/60
-            bg-muted px-1.5 py-0.5 rounded shrink-0"
-        >
-          {metadata.source_type}
-        </span>
+        {(() => {
+          const { display: stDisplay, server: stServer } = splitNamespacedToolName(
+            metadata.source_type,
+          )
+          return (
+            <span
+              className="ml-auto text-[10px] font-medium text-muted-foreground/60
+                bg-muted px-1.5 py-0.5 rounded shrink-0"
+              title={stServer ? `${stDisplay} from ${stServer}` : stDisplay}
+            >
+              {stServer ? `${stDisplay} (${stServer})` : stDisplay}
+            </span>
+          )
+        })()}
       </div>
 
       {/* Chunk list with active highlight */}
