@@ -140,10 +140,8 @@ class SubAgentMiddleware(Middleware):
             provider_name: str = cast(str, spec.get("provider_name") or self._default_provider_name)
             system_prompt: str = spec.get("system_prompt") or ""
 
-            # SubAgent.tools are BaseTool (langgraph); shared_tools are AgentTool (cubepi).
-            # For the cubepi path only AgentTools are used — spec-level tools may be
-            # AgentTool already (caller's responsibility) or absent.  Cast to Any to
-            # keep mypy happy while cross-runtime tools lists evolve in M3.f.
+            # spec["tools"] is typed list[Any] on SubAgent; callers are responsible
+            # for passing AgentTool instances. Cast keeps mypy happy.
             tools: list[AgentTool[Any]] = list(self._shared_tools) + cast(
                 list[AgentTool[Any]], list(spec.get("tools", []))
             )

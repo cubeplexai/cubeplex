@@ -164,7 +164,7 @@ class MemoryMiddleware(Middleware):
             return messages
 
         # Determine index of the last UserMessage so we can flag it as
-        # "current" in the snapshot XML tag (matches langgraph behaviour).
+        # "current" in the snapshot XML tag.
         last_user_idx = _last_user_idx(messages)
 
         out: list[Message] = []

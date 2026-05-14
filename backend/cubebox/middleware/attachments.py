@@ -5,9 +5,10 @@ wire_input_to_cubepi_user_message in convert.py) and renders them as a
 [Attachments] text section appended to that message's text content.
 
 Design note: every UserMessage with attachments is augmented — not just the
-last one — mirroring the langgraph version which walks all HumanMessages.
-The hint is appended in-place on a fresh TextContent block (or merged into
-the last existing TextContent) so the original UserMessage is never mutated.
+last one — so every historical turn's hint is reproduced byte-identically
+on replay. The hint is appended in-place on a fresh TextContent block (or
+merged into the last existing TextContent) so the original UserMessage is
+never mutated.
 """
 
 from __future__ import annotations

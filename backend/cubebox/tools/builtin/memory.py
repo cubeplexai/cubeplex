@@ -1,11 +1,9 @@
-"""Memory CRUD tools ported to cubepi.AgentTool (M2.2).
+"""Memory CRUD tools as cubepi.AgentTool instances.
 
-Factory: create_memory_tools(service_factory, ...) returns a list of three
-cubepi.AgentTool instances mirroring the langchain list returned by
-create_memory_tools() in cubebox.tools.builtin.memory.
-
-Tool names and schemas are kept byte-identical to the langchain originals so
-that M3 MemoryMiddleware can identify them by name.
+Factory: ``create_memory_tools(service_factory, ...)`` returns three
+``cubepi.AgentTool`` instances (save / search / update). MemoryMiddleware
+identifies them by name, so the tool names and schemas are part of the
+public contract.
 """
 
 from __future__ import annotations

@@ -34,8 +34,7 @@ def _extract_text_content(content: list[Any]) -> str:
     """Extract plain text from a cubepi ``Content`` list.
 
     cubepi content items are ``TextContent(text=...)`` objects (or dicts with
-    ``type="text"`` from MCP adapters).  The function mirrors the behaviour of
-    the langchain helper of the same name in ``citations/middleware.py``.
+    ``type="text"`` from MCP adapters).
     """
     texts: list[str] = []
     for block in content:

@@ -28,7 +28,6 @@ async def load_workspace_mcp_tools_for_cubepi(
     """Load all enabled MCP servers' tools for a workspace as cubepi.AgentTool.
 
     Per-server failures are caught and logged, never aborting the load.
-    Mirrors the langchain runtime.py behavior.
 
     Only HTTP/SSE transports are supported — stdio was dropped; this aligns with
     cubebox's current production stance and cubepi.mcp.load_mcp_tools_http scope.

@@ -1,22 +1,16 @@
-"""SandboxMiddleware — cubepi port of SandboxMiddleware (M3.c.1).
+"""SandboxMiddleware.
 
 Implements the cubepi ``Middleware`` protocol with two hooks:
 
 - ``tools``: exposes ``execute``, ``write_file``, ``edit_file``, and
   ``file_read`` as ``cubepi.AgentTool`` instances.
 - ``transform_system_prompt``: appends the sandbox capability section
-  (SANDBOX_PROMPT_TEMPLATE) to the system prompt, mirroring what
-  ``SandboxMiddleware.awrap_model_call`` did in the langgraph path.
+  (SANDBOX_PROMPT_TEMPLATE) to the system prompt.
 
-The core execution bodies are reused from ``sandbox.py`` unchanged; only
-the LangChain ``StructuredTool`` wrappers are replaced with the cubepi
-``AgentTool`` execute signature:
-``(tool_call_id, args, *, signal, on_update) -> AgentToolResult``.
-
-The audit helpers (``enable_audit``, ``disable_audit``, ``executed_commands``,
-``reset_executed_commands``, ``_record_executed``) are also re-imported from
-``sandbox.py`` — this module reuses the same global state so existing
-E2E fixtures that call ``enable_audit()`` still work.
+Audit helpers (``enable_audit``, ``disable_audit``, ``executed_commands``,
+``reset_executed_commands``, ``_record_executed``) live in module-global
+state so existing E2E fixtures that call ``enable_audit()`` can observe
+command execution.
 """
 
 from __future__ import annotations
@@ -88,7 +82,7 @@ def reset_executed_commands() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Input schemas — kept byte-identical to the langgraph version's schemas
+# Input schemas for sandbox tools
 # ---------------------------------------------------------------------------
 
 

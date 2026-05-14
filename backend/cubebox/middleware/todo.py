@@ -33,8 +33,7 @@ from cubepi.providers.base import AssistantMessage, TextContent, ToolCall, UserM
 from pydantic import BaseModel
 
 # ---------------------------------------------------------------------------
-# Tool description + system prompt (provider-neutral constants previously
-# colocated with the langgraph TodoListMiddleware).
+# Tool description + system prompt (provider-neutral constants).
 # ---------------------------------------------------------------------------
 
 WRITE_TODOS_TOOL_DESCRIPTION = """Use this tool to create and manage a structured task list for your current work session. This helps you track progress, organize complex tasks, and demonstrate thoroughness to the user.
