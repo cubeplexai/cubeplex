@@ -6,7 +6,7 @@ Covers:
 - New summary is generated and written to extra when over threshold.
 - Summarizer failure → falls back to current compressed view (no crash).
 - _cubepi_approx_tokens: basic token estimation.
-- _compressed_view_pi: boundary=0 / None → passthrough.
+- _compressed_view: boundary=0 / None → passthrough.
 """
 
 from __future__ import annotations
@@ -19,7 +19,7 @@ from cubepi.providers.base import AssistantMessage, TextContent, ToolResultMessa
 
 from cubebox.middleware.compaction import (
     CompactionMiddleware,
-    _compressed_view_pi,
+    _compressed_view,
     _cubepi_approx_tokens,
     _to_langchain_messages,
 )
@@ -100,27 +100,27 @@ def test_approx_tokens_multiple_messages() -> None:
 
 
 # ---------------------------------------------------------------------------
-# _compressed_view_pi
+# _compressed_view
 # ---------------------------------------------------------------------------
 
 
 def test_compressed_view_no_summary_returns_original() -> None:
     msgs = [_user("hi"), _assistant("hello")]
-    result = _compressed_view_pi(msgs, None, None)
+    result = _compressed_view(msgs, None, None)
     assert result == msgs
 
 
 def test_compressed_view_boundary_zero_returns_original() -> None:
     msgs = [_user("hi"), _assistant("hello")]
     summary = CompactionSummary(summary="prev summary")
-    result = _compressed_view_pi(msgs, summary, 0)
+    result = _compressed_view(msgs, summary, 0)
     assert result == msgs
 
 
 def test_compressed_view_with_summary_and_boundary() -> None:
     msgs = [_user("turn 1"), _assistant("reply 1"), _user("turn 2"), _assistant("reply 2")]
     summary = CompactionSummary(summary="old turns summary")
-    result = _compressed_view_pi(msgs, summary, 2)
+    result = _compressed_view(msgs, summary, 2)
     assert len(result) == 3  # summary_msg + 2 recent
     assert isinstance(result[0], UserMessage)
     assert "old turns summary" in result[0].content[0].text  # type: ignore[union-attr]

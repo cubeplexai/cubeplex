@@ -574,7 +574,7 @@ class RunManager:
                 )
             )
         except Exception as _exc:
-            logger.warning("memory_pi tools unavailable for cubepi run: {}", _exc)
+            logger.warning("memory tools unavailable for cubepi run: {}", _exc)
 
         # load_skill — requires a non-None catalog (may be absent if DB is down)
         if skill_catalog is not None:
@@ -589,7 +589,7 @@ class RunManager:
                     )
                 )
             except Exception as _exc:
-                logger.warning("load_skill_pi unavailable for cubepi run: {}", _exc)
+                logger.warning("load_skill unavailable for cubepi run: {}", _exc)
 
         # view_images — per-request DI: objectstore + LLM capabilities
         # Must come after memory tools and load_skill to match langgraph tool order.
@@ -607,7 +607,7 @@ class RunManager:
                 )
             )
         except Exception as _exc:
-            logger.warning("view_images_pi unavailable for cubepi run: {}", _exc)
+            logger.warning("view_images unavailable for cubepi run: {}", _exc)
 
         # MCP tools — per-workspace enabled HTTP MCP servers
         try:

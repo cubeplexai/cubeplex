@@ -133,7 +133,7 @@ def make_view_images_tool(
                 except Exception as exc:  # noqa: BLE001
                     from loguru import logger
 
-                    logger.exception("view_images_pi failed for {}", path)
+                    logger.exception("view_images failed for {}", path)
                     content_blocks.append(TextContent(text=f"[{idx}] {path}: error — {exc}"))
 
         return AgentToolResult(content=content_blocks)

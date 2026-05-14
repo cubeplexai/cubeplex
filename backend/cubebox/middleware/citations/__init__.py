@@ -1,7 +1,6 @@
-"""Citation utilities shared by citation_pi middleware.
+"""Citation utilities shared by the citation middleware.
 
-The langgraph ``CitationMiddleware`` was removed in M6; only the
-shared chunker/config/counter helpers remain here and are consumed by
+Shared chunker/config/counter helpers consumed by
 ``cubebox.middleware.citation.CitationMiddleware``.
 """
 

@@ -1,4 +1,4 @@
-"""convert_pi tests — cubepi.Message ↔ cubebox wire format (M1.2)."""
+"""convert tests — cubepi.Message ↔ cubebox wire format (M1.2)."""
 
 from cubepi.providers.base import (
     AssistantMessage,

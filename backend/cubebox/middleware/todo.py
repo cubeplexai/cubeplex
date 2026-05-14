@@ -8,7 +8,7 @@ Full hook surface:
     after_model_response    — guard state machine + TurnAction control flow
 
 All 6 PlanningState channels live in ctx.extra and are mutated via the
-``extra_ref`` callback pattern shared with compaction_pi / skills_pi:
+``extra_ref`` callback pattern shared with compaction / skills:
 
     extra["todos"]                       list[Todo] | None
     extra["todo_guard_retries"]          dict[TodoGuardType, int]
@@ -17,10 +17,8 @@ All 6 PlanningState channels live in ctx.extra and are mutated via the
     extra["todo_stale_iterations"]       int
     extra["todo_finalization_correction"] bool | None
 
-Validation helpers are re-used from the LangGraph version (todo.py);
-message-inspection helpers are rewritten for cubepi AssistantMessage /
-ToolResultMessage types so no langgraph conversion is needed in the hot
-path.
+Validation helpers and message-inspection helpers operate on cubepi
+AssistantMessage / ToolResultMessage types directly.
 """
 
 from __future__ import annotations
@@ -254,7 +252,7 @@ class WriteTodosInput(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-def _last_assistant_message_pi(
+def _last_assistant_message(
     messages: list[Any],
 ) -> AssistantMessage | None:
     """Return the last AssistantMessage from a cubepi message list."""
@@ -264,7 +262,7 @@ def _last_assistant_message_pi(
     )
 
 
-def _submitted_write_todos_calls_pi(
+def _submitted_write_todos_calls(
     last_assistant_msg: AssistantMessage,
 ) -> list[ToolCall]:
     """Return all write_todos ToolCall objects in the AssistantMessage content."""
@@ -275,7 +273,7 @@ def _submitted_write_todos_calls_pi(
     ]
 
 
-def _non_todo_tool_calls_pi(
+def _non_todo_tool_calls(
     last_assistant_msg: AssistantMessage,
 ) -> list[ToolCall]:
     """Return all non-write_todos ToolCall objects in the AssistantMessage content."""
@@ -286,7 +284,7 @@ def _non_todo_tool_calls_pi(
     ]
 
 
-def _pure_text_assistant_response_pi(last_assistant_msg: AssistantMessage) -> bool:
+def _pure_text_assistant_response(last_assistant_msg: AssistantMessage) -> bool:
     """True if the message has text content and no tool calls of any kind."""
     has_text = any(
         isinstance(block, TextContent) and block.text.strip()
@@ -296,7 +294,7 @@ def _pure_text_assistant_response_pi(last_assistant_msg: AssistantMessage) -> bo
     return has_text and not has_tool_calls
 
 
-def _todo_validation_errors_pi_local(
+def _todo_validation_errors_local(
     last_assistant_msg: AssistantMessage,
     prior_todos: list[Todo] | None,
 ) -> list[dict[str, Any]]:
@@ -307,7 +305,7 @@ def _todo_validation_errors_pi_local(
     returns plain dicts so the caller can build cubepi-compatible inject
     messages.
     """
-    write_todos_calls = _submitted_write_todos_calls_pi(last_assistant_msg)
+    write_todos_calls = _submitted_write_todos_calls(last_assistant_msg)
     # Zero calls: nothing to validate.
     # More than one call: handled by parallel-write_todos check upstream.
     if len(write_todos_calls) != 1:
@@ -552,12 +550,12 @@ class TodoListMiddleware(Middleware):
     # after_model_response — full guard state machine
     # ------------------------------------------------------------------
 
-    def _parallel_write_todos_error_pi(
+    def _parallel_write_todos_error(
         self,
         last_assistant_msg: AssistantMessage,
     ) -> list[UserMessage] | None:
         """Detect parallel write_todos calls; return error UserMessages if found."""
-        write_todos_calls = _submitted_write_todos_calls_pi(last_assistant_msg)
+        write_todos_calls = _submitted_write_todos_calls(last_assistant_msg)
         if len(write_todos_calls) <= 1:
             return None
         error_text = (
@@ -567,7 +565,7 @@ class TodoListMiddleware(Middleware):
         )
         return [_make_user_message(error_text) for _ in write_todos_calls]
 
-    def _guard_response_pi(
+    def _guard_response(
         self,
         extra: dict[str, Any],
         guard_type: TodoGuardType,
@@ -621,14 +619,14 @@ class TodoListMiddleware(Middleware):
         agent_ctx_messages: list[Any] = getattr(ctx, "messages", [])
 
         # Find last assistant message; if none, there's nothing to guard against.
-        last_assistant_msg = _last_assistant_message_pi(agent_ctx_messages + [response])
+        last_assistant_msg = _last_assistant_message(agent_ctx_messages + [response])
         if last_assistant_msg is None:
             return None
 
         # --- blocked-guard state machine (finalization escalation) ----------
         blocked_guard: TodoGuardBlocked | None = extra.get("todo_guard_blocked")
         if blocked_guard:
-            if _pure_text_assistant_response_pi(last_assistant_msg):
+            if _pure_text_assistant_response(last_assistant_msg):
                 # The blocked state resolved: model gave a plain-text explanation.
                 extra["todo_guard_blocked"] = None
                 extra["todo_guard_retries"] = _reset_guard_retries()
@@ -645,7 +643,7 @@ class TodoListMiddleware(Middleware):
             )
 
         # --- suppression after escalation ----------------------------------
-        write_todos_calls = _submitted_write_todos_calls_pi(last_assistant_msg)
+        write_todos_calls = _submitted_write_todos_calls(last_assistant_msg)
         if extra.get("todo_guard_suppressed") and not write_todos_calls:
             extra["todo_guard_retries"] = _reset_guard_retries()
             extra["todo_guard_suppressed"] = True
@@ -654,11 +652,11 @@ class TodoListMiddleware(Middleware):
             return None
 
         # --- payload validation (parallel calls, schema, invariants) --------
-        parallel_errors = self._parallel_write_todos_error_pi(last_assistant_msg)
+        parallel_errors = self._parallel_write_todos_error(last_assistant_msg)
         if parallel_errors is not None:
             return TurnAction(inject_messages=cast("list[Any]", parallel_errors))
 
-        validation_errors = _todo_validation_errors_pi_local(
+        validation_errors = _todo_validation_errors_local(
             last_assistant_msg,
             extra.get("todos"),
         )
@@ -669,7 +667,7 @@ class TodoListMiddleware(Middleware):
         # --- stale-todo soft reminder ---------------------------------------
         unfinished = _unfinished_todos(extra.get("todos"))
         has_write_todos = bool(write_todos_calls)
-        has_non_todo_tools = bool(_non_todo_tool_calls_pi(last_assistant_msg))
+        has_non_todo_tools = bool(_non_todo_tool_calls(last_assistant_msg))
 
         # Compute stale counter update (deferred write until we know no hard guard fires)
         stale_count_new: int | None = None
@@ -691,10 +689,10 @@ class TodoListMiddleware(Middleware):
                 clear_finalization_correction = True
 
         # --- finalization hard guard ----------------------------------------
-        # NOTE: _guard_response_pi reads extra["todo_guard_retries"] directly, so
+        # NOTE: _guard_response reads extra["todo_guard_retries"] directly, so
         # we must call it BEFORE resetting retries in the clean-pass section below.
-        if unfinished and _pure_text_assistant_response_pi(last_assistant_msg):
-            return self._guard_response_pi(extra, "finalization")
+        if unfinished and _pure_text_assistant_response(last_assistant_msg):
+            return self._guard_response(extra, "finalization")
 
         # --- clean pass: commit deferred state updates ----------------------
         extra["todo_guard_retries"] = _reset_guard_retries()
