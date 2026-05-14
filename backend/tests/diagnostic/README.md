@@ -1,5 +1,13 @@
 # tests/diagnostic/
 
+> **Archive note:** This directory documents the closed Phase 1/2 prompt-cache
+> investigation run during the cubepi migration. References to "langgraph"
+> below point at the now-removed dual-runtime path; they are preserved
+> verbatim because the comparative findings are the substantive output of
+> the investigation. The raw Phase 1 cache smoke tests are still useful as
+> standalone provider probes; the Phase 2 runtime-comparison tools are
+> historical (one runtime now).
+
 Diagnostic scaffold for the cubepi cache migration investigation.
 
 ## Purpose
