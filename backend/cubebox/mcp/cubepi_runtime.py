@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import dataclasses
 import logging
 from typing import Any
 
@@ -55,6 +57,8 @@ async def load_workspace_mcp_tools_for_cubepi(
                 headers=spec.headers or None,
                 timeout=30.0,
             )
+        except asyncio.CancelledError:
+            raise
         except Exception as exc:  # noqa: BLE001
             logger.warning(
                 "Failed to load MCP server %s (%s): %s",
@@ -67,13 +71,13 @@ async def load_workspace_mcp_tools_for_cubepi(
         prefix = f"{spec.server_name}__"
         for tool in tools:
             bare_name = tool.name
-            tool.name = f"{prefix}{bare_name}"
-            all_tools.append(tool)
-            raw = (spec.tool_citations or {}).get(bare_name)
+            namespaced = dataclasses.replace(tool, name=f"{prefix}{bare_name}")
+            all_tools.append(namespaced)
+            raw = spec.tool_citations.get(bare_name)
             if raw is None:
                 continue
             try:
-                all_citations[tool.name] = CitationConfig(**raw)
+                all_citations[namespaced.name] = CitationConfig(**raw)
             except ValidationError as exc:
                 logger.warning(
                     "Bad tool_citations on %s/%s: %s — skipping",

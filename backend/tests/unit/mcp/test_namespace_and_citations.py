@@ -140,6 +140,7 @@ async def test_loader_skips_invalid_citation_config_with_warning(
     assert {t.name for t in tools} == {"webtools__bad_tool", "webtools__good_tool"}
     # Only the valid one ends up in citation_configs.
     assert set(citation_configs.keys()) == {"webtools__good_tool"}
+    assert "Bad tool_citations" in caplog.text
 
 
 @pytest.mark.asyncio
