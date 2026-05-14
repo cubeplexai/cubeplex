@@ -2,7 +2,6 @@
 
 import type { MCPToolEntry } from '@cubebox/core'
 import { Search } from 'lucide-react'
-import { useMemo, useState } from 'react'
 import { useTranslations } from 'next-intl'
 
 import { Input } from '@/components/ui/input'
@@ -12,6 +11,9 @@ import { getProperties, getRequired, type SchemaNode } from '@/lib/jsonSchemaTyp
 
 export interface ToolListProps {
   tools: MCPToolEntry[]
+  filtered: MCPToolEntry[]
+  query: string
+  onQueryChange: (query: string) => void
   selectedName: string | null
   onSelect: (name: string) => void
 }
@@ -22,19 +24,16 @@ function countArgs(schema: unknown): { args: number; required: number } {
   return { args: Object.keys(getProperties(node)).length, required: getRequired(node).length }
 }
 
-export function ToolList({ tools, selectedName, onSelect }: ToolListProps) {
+export function ToolList({
+  tools,
+  filtered,
+  query,
+  onQueryChange,
+  selectedName,
+  onSelect,
+}: ToolListProps) {
   const t = useTranslations('mcp.tools')
-  const [query, setQuery] = useState('')
   const trimmed = query.trim()
-
-  const filtered = useMemo(() => {
-    const q = trimmed.toLowerCase()
-    if (!q) return tools
-    return tools.filter(
-      (tool) =>
-        tool.name.toLowerCase().includes(q) || (tool.description ?? '').toLowerCase().includes(q),
-    )
-  }, [tools, trimmed])
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-2">
@@ -42,7 +41,7 @@ export function ToolList({ tools, selectedName, onSelect }: ToolListProps) {
         <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
         <Input
           value={query}
-          onChange={(e) => setQuery(e.target.value)}
+          onChange={(e) => onQueryChange(e.target.value)}
           placeholder={t('filterPlaceholder')}
           aria-label={t('filterPlaceholder')}
           className="h-9 pl-7 text-sm"
