@@ -603,6 +603,26 @@
       "loadingConnector": "Loading connector...",
       "deleteConfirm": "Delete {name}? Bindings and credentials owned by this connector will also be removed.",
       "scopeError": "Admin connectors only support organization, per-user, or passthrough scope."
+    },
+    "serverDetail": {
+      "citations": {
+        "loading": "Loading citation mappings…",
+        "disable": "Disable",
+        "resetToCatalogDefault": "Reset to catalog default",
+        "copyFromPeer": "Copy from…",
+        "sourceType": "Source type",
+        "contentType": "Content type",
+        "resultLocation": "Result location",
+        "wholeResponseIsOneItem": "Whole response is one item",
+        "contentFieldPlaceholder": "e.g. results",
+        "metadataMapping": "Metadata mapping",
+        "addField": "Add field",
+        "noSampleHint": "No tool sample available — enter output field paths manually.",
+        "unsavedChanges": "You have unsaved changes. Discard them?",
+        "saveChanges": "Save changes",
+        "saving": "Saving…",
+        "remove": "Remove"
+      }
     }
   },
   "mcpCatalog": {
