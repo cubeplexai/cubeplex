@@ -57,6 +57,7 @@ class CatalogSeedEntry:
     static_form_fields: list[dict[str, Any]] | None
     static_auth_header_template: str | None
     cred_metadata: dict[str, Any] = field(default_factory=dict)
+    tool_citations: dict[str, dict[str, Any]] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -453,6 +454,7 @@ async def seed_catalog(
             static_form_fields=entry.static_form_fields,
             static_auth_header_template=entry.static_auth_header_template,
             cred_metadata=dict(entry.cred_metadata),
+            tool_citations=dict(entry.tool_citations),
             status="active",
         )
         upserted += 1

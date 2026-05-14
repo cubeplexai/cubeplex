@@ -150,6 +150,48 @@ async def test_seed_is_idempotent(session: AsyncSession, backend: FernetBackend)
     assert len(rows1) == len(CATALOG)
 
 
+async def test_seed_persists_tool_citations(session: AsyncSession, backend: FernetBackend) -> None:
+    """tool_citations on a CatalogSeedEntry round-trips through upsert."""
+    catalog = [
+        CatalogSeedEntry(
+            slug="webtools-test",
+            name="WebTools Test",
+            provider="Cubebox",
+            description="test entry",
+            server_url="http://example.com/mcp",
+            transport="streamable_http",
+            supported_auth_methods=["static"],
+            default_credential_scope="org",
+            oauth_dcr_supported=None,
+            oauth_default_scope=None,
+            oauth_static_client_id_env=None,
+            oauth_static_client_secret_env=None,
+            static_form_fields=None,
+            static_auth_header_template=None,
+            cred_metadata={},
+            tool_citations={
+                "web_search": {
+                    "content_type": "json",
+                    "source_type": "web",
+                    "content_field": "results",
+                    "mapping": {"url": "url", "snippet": "description"},
+                },
+            },
+        )
+    ]
+    result = await seed_catalog(
+        session,
+        backend,
+        get_env=lambda _k: None,
+        catalog=catalog,
+    )
+    assert result.skipped == 0
+    repo = MCPCatalogConnectorRepository(session)
+    row = await repo.get_by_slug("webtools-test")
+    assert row is not None
+    assert row.tool_citations == catalog[0].tool_citations
+
+
 async def test_seed_with_custom_catalog(session: AsyncSession, backend: FernetBackend) -> None:
     """The seeder accepts an injected catalog list — handy for tests."""
     custom = [
