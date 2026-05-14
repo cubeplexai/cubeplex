@@ -226,23 +226,24 @@ collision (which by namespacing should now be impossible across MCP
 servers; only a builtin and an MCP namespaced-tool can share a name,
 which won't happen given the `__` separator convention).
 
-### Legacy langchain path (`cubebox/mcp/discovery.py`)
+### Admin discovery path
 
-The admin/OAuth sync-tools path still uses `langchain-mcp-adapters`. To
-keep tool names consistent across paths (so the frontend tools tab and
-the agent see the same names), `_build_basetool_for_entry` also
-namespaces:
+`cubepi_admin_discovery.py::discover_tools_metadata` (introduced by PR
+#95) only returns serialized tool dicts that the
+`cubepi_admin_refresh.py` writer persists into `tools_cache`. It does
+**not** construct any `AgentTool` — that responsibility belongs solely
+to the per-run path above. The admin path stays untouched by this
+spec: `tools_cache` already holds bare protocol names, which is exactly
+what the citation editor needs as its editing key.
 
-```python
-StructuredTool.from_function(
-    ...,
-    name=f"{server.name}__{entry['name']}",
-    ...
-)
-```
+### Citation panel display (frontend)
 
-The bare name remains in `tools_cache[i].name` (that's the protocol-level
-name and remains the editing key for `tool_citations`).
+When the frontend renders a citation chip whose `tool_name` is the
+namespaced form (`webtools__web_search`), it splits on the first `__`
+and shows just the tool half, with the server name available as a
+secondary detail (tooltip or sublabel). This keeps the citation panel
+readable while preserving disambiguation when two servers ship the same
+tool name.
 
 ## API
 
@@ -489,29 +490,30 @@ Backend:
    citation configs, change return signature.
 8. `backend/cubebox/mcp/cubepi_discovery.py` — surface `tool_citations` on
    `ServerSpec` if not already present.
-9. `backend/cubebox/mcp/discovery.py` — namespace
-   `_build_basetool_for_entry` to match.
-10. `backend/cubebox/streams/run_manager.py:712-720` — replace
-    `citation_configs={}` with the loader's emitted dict.
-11. `backend/cubebox/api/routes/v1/ws_mcp.py` — add the two
+9. `backend/cubebox/streams/run_manager.py:712-720` — replace
+   `citation_configs={}` with the loader's emitted dict.
+10. `backend/cubebox/api/routes/v1/ws_mcp.py` — add the two
     per-server endpoints (`GET` + `PATCH`
     `/ws/{wsId}/mcp/servers/{serverId}/tool-citations`).
-12. `backend/cubebox/api/routes/v1/mcp_catalog.py` — add the catalog
+11. `backend/cubebox/api/routes/v1/mcp_catalog.py` — add the catalog
     read endpoint
     (`GET /ws/{wsId}/mcp/catalog/{slug}/tool-citations`) on the existing
     `catalog_member_router`.
 
 Frontend:
 
-13. `frontend/packages/core/src/types/mcp.ts` — add
+12. `frontend/packages/core/src/types/mcp.ts` — add
     `ToolCitationsResponse`, `CitationConfig` JSON shape.
-14. `frontend/packages/core/src/api/mcp.ts` — add `getToolCitations`,
+13. `frontend/packages/core/src/api/mcp.ts` — add `getToolCitations`,
     `patchToolCitations`, `getCatalogToolCitations`.
-15. `frontend/packages/web/components/mcp/MCPCitationMappingTab.tsx` — new.
-16. `frontend/packages/web/components/mcp/MCPCitationEditor.tsx` — new.
-17. `frontend/packages/web/components/mcp/MCPCitationFieldRow.tsx` — new.
-18. `frontend/packages/web/components/mcp/MCPServerDetail.tsx` — register
+14. `frontend/packages/web/components/mcp/MCPCitationMappingTab.tsx` — new.
+15. `frontend/packages/web/components/mcp/MCPCitationEditor.tsx` — new.
+16. `frontend/packages/web/components/mcp/MCPCitationFieldRow.tsx` — new.
+17. `frontend/packages/web/components/mcp/MCPServerDetail.tsx` — register
     the new tab.
+18. The chat citation-panel component (wherever it lives in
+    `frontend/packages/web/components/`) — split `tool_name` on `__`
+    for display.
 19. `frontend/packages/web/__tests__/e2e/mcp/citation-mapping.spec.ts` — new.
 20. i18n message files — add `mcp.serverDetail.citations.*`.
 
