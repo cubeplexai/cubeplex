@@ -636,6 +636,9 @@ class RunManager:
             logger.warning("view_images unavailable for cubepi run: {}", _exc)
 
         # MCP tools — per-workspace enabled HTTP MCP servers
+        from cubebox.middleware.citations.config import CitationConfig
+
+        mcp_citation_configs: dict[str, CitationConfig] = {}
         try:
             from cubebox.credentials.dependencies import build_credential_service
             from cubebox.mcp.cubepi_runtime import load_workspace_mcp_tools_for_cubepi
@@ -647,7 +650,7 @@ class RunManager:
                     org_id=ctx.org_id,
                     actor_user_id=ctx.user_id,
                 )
-                mcp_tools = await load_workspace_mcp_tools_for_cubepi(
+                mcp_tools, mcp_citation_configs = await load_workspace_mcp_tools_for_cubepi(
                     session=mcp_session,
                     workspace_id=ctx.workspace_id,
                     org_id=ctx.org_id,
@@ -716,7 +719,7 @@ class RunManager:
 
             cubepi_middleware.append(
                 CitationMiddleware(
-                    citation_configs={},
+                    citation_configs=mcp_citation_configs,
                     event_queue=citation_event_queue.get(None),
                 )
             )
