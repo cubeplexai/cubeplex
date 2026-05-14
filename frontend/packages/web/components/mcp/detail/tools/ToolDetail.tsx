@@ -41,7 +41,7 @@ export function ToolDetail({ tool, view, onViewChange }: ToolDetailProps) {
           <SchemaView schema={schema} />
         </TabsContent>
         <TabsContent value="tryit" className="mt-4">
-          <TryItView toolName={tool.name} schema={schema} />
+          <TryItView key={tool.name} toolName={tool.name} schema={schema} />
         </TabsContent>
         <TabsContent value="json" className="mt-4">
           <JsonView schema={schema} />
