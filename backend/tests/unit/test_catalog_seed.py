@@ -243,13 +243,17 @@ def test_webtools_entry_has_web_search_and_web_fetch_citations() -> None:
     assert web_search["content_type"] == "json"
     assert web_search["source_type"] == "web"
     assert web_search["content_field"] == "results"
-    assert web_search["mapping"]["snippet"] in {"description", "snippet"}
+    assert web_search["mapping"]["url"] == "url"
+    assert web_search["mapping"]["title"] == "title"
+    assert web_search["mapping"]["snippet"] == "description"
 
     assert "web_fetch" in entry.tool_citations
     web_fetch = entry.tool_citations["web_fetch"]
     assert web_fetch["content_type"] == "text"
+    assert web_fetch["source_type"] == "web"
     assert web_fetch["content_field"] is None
-    assert web_fetch["mapping"]["snippet"] in {"text", "content"}
+    assert web_fetch["mapping"]["snippet"] == "text"
+    assert web_fetch["args_mapping"]["url"] == "url"
 
 
 def test_all_seed_tool_citations_are_valid_citation_configs() -> None:
