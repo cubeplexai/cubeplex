@@ -303,6 +303,75 @@ async def test_get_catalog_tool_citations_returns_defaults(
     assert body["tool_citations"] == expected
 
 
+async def test_patch_tool_citations_works_on_org_wide_server(
+    admin_client: tuple[httpx.AsyncClient, str],
+    db_session: AsyncSession,
+) -> None:
+    """Admin can PATCH tool-citations on an org-wide server (owner_workspace_id=None)
+    that is visible to the workspace via an enabled override.
+    """
+    from sqlalchemy import select as sa_select
+
+    from cubebox.models import MCPServer, Membership, Workspace, WorkspaceMCPOverride
+
+    client, workspace_id = admin_client
+
+    # Resolve org_id and a valid user_id from the workspace's membership.
+    ws_row = await db_session.get(Workspace, workspace_id)
+    assert ws_row is not None
+    org_id = ws_row.org_id
+
+    mem_stmt = sa_select(Membership).where(Membership.workspace_id == workspace_id)
+    mem_row = (await db_session.execute(mem_stmt)).scalars().first()
+    assert mem_row is not None
+    user_id = str(mem_row.user_id)
+
+    # Seed an org-wide server directly in the DB.
+    server = MCPServer(
+        org_id=org_id,
+        owner_workspace_id=None,  # ← org-wide
+        name="org-wide-citation-test",
+        server_url="http://localhost:9999/org-wide",
+        server_url_hash="hash-org-wide-citation-test",
+        transport="streamable_http",
+        auth_method="none",
+        credential_scope="none",
+        tools_cache=[{"name": "web_search", "description": "", "input_schema": {}}],
+        tool_citations={},
+        created_by_user_id=user_id,
+    )
+    db_session.add(server)
+    await db_session.flush()
+
+    # Add an enabled workspace override so the server is visible to this workspace.
+    db_session.add(
+        WorkspaceMCPOverride(
+            org_id=org_id,
+            workspace_id=workspace_id,
+            mcp_server_id=server.id,
+            enabled=True,
+            updated_by_user_id=user_id,
+        )
+    )
+    await db_session.commit()
+
+    # PATCH must succeed (not 403) for an admin on a visible org-wide server.
+    new_citations: dict[str, Any] = {
+        "web_search": {
+            "content_type": "json",
+            "source_type": "web",
+            "content_field": "results",
+            "mapping": {"snippet": "description"},
+        }
+    }
+    resp = await client.patch(
+        f"/api/v1/ws/{workspace_id}/mcp/servers/{server.id}/tool-citations",
+        json={"tool_citations": new_citations},
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["tool_citations"] == new_citations
+
+
 async def test_get_catalog_tool_citations_404_for_unknown_slug(
     admin_client: tuple[httpx.AsyncClient, str],
 ) -> None:

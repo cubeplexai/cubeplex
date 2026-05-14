@@ -474,7 +474,7 @@ async def patch_tool_citations(
     Each key must match a tool name present in tools_cache, and each value must
     be a valid CitationConfig. Returns 422 if either invariant is violated.
     """
-    server = await _get_workspace_owned_server(
+    server = await _get_workspace_visible_server(
         svc=svc,
         server_id=server_id,
         workspace_id=workspace_id,
