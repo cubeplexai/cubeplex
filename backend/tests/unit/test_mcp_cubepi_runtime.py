@@ -6,8 +6,8 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from cubebox.mcp.discovery_pi import CubepiMCPServerSpec
-from cubebox.mcp.runtime_pi import load_workspace_mcp_tools_for_cubepi
+from cubebox.mcp.cubepi_discovery import CubepiMCPServerSpec
+from cubebox.mcp.cubepi_runtime import load_workspace_mcp_tools_for_cubepi
 
 
 @pytest.mark.asyncio
@@ -18,7 +18,7 @@ async def test_load_returns_empty_when_no_servers(monkeypatch: pytest.MonkeyPatc
         return []
 
     monkeypatch.setattr(
-        "cubebox.mcp.runtime_pi.discover_workspace_mcp_servers_for_cubepi",
+        "cubebox.mcp.cubepi_runtime.discover_workspace_mcp_servers_for_cubepi",
         _fake_discover,
     )
     tools = await load_workspace_mcp_tools_for_cubepi(
@@ -56,11 +56,11 @@ async def test_load_skips_failing_servers(monkeypatch: pytest.MonkeyPatch) -> No
         return [fake_tool]
 
     monkeypatch.setattr(
-        "cubebox.mcp.runtime_pi.discover_workspace_mcp_servers_for_cubepi",
+        "cubebox.mcp.cubepi_runtime.discover_workspace_mcp_servers_for_cubepi",
         _fake_discover,
     )
     monkeypatch.setattr(
-        "cubebox.mcp.runtime_pi.load_mcp_tools_http",
+        "cubebox.mcp.cubepi_runtime.load_mcp_tools_http",
         _fake_loader,
     )
 
@@ -103,11 +103,11 @@ async def test_load_aggregates_tools_from_multiple_servers(
         return [_make_tool("tool_c")]
 
     monkeypatch.setattr(
-        "cubebox.mcp.runtime_pi.discover_workspace_mcp_servers_for_cubepi",
+        "cubebox.mcp.cubepi_runtime.discover_workspace_mcp_servers_for_cubepi",
         _fake_discover,
     )
     monkeypatch.setattr(
-        "cubebox.mcp.runtime_pi.load_mcp_tools_http",
+        "cubebox.mcp.cubepi_runtime.load_mcp_tools_http",
         _fake_loader,
     )
 
@@ -144,11 +144,11 @@ async def test_load_all_servers_fail_returns_empty(monkeypatch: pytest.MonkeyPat
         raise ConnectionError("unreachable")
 
     monkeypatch.setattr(
-        "cubebox.mcp.runtime_pi.discover_workspace_mcp_servers_for_cubepi",
+        "cubebox.mcp.cubepi_runtime.discover_workspace_mcp_servers_for_cubepi",
         _fake_discover,
     )
     monkeypatch.setattr(
-        "cubebox.mcp.runtime_pi.load_mcp_tools_http",
+        "cubebox.mcp.cubepi_runtime.load_mcp_tools_http",
         _fake_loader,
     )
 
@@ -168,7 +168,7 @@ async def test_credential_scope_none_attaches_signed_identity_token() -> None:
     """credential_scope=='none' servers get a signed cubebox identity token as Bearer auth."""
     from datetime import timedelta
 
-    from cubebox.mcp.discovery_pi import _resolve_token_for_cubepi
+    from cubebox.mcp.cubepi_discovery import _resolve_token_for_cubepi
 
     fake_signer = AsyncMock()
     fake_signer.sign = AsyncMock(return_value="fake-token")

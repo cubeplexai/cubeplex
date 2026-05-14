@@ -9,7 +9,7 @@ from cubepi.agent.types import AgentTool
 from cubepi.mcp import load_mcp_tools_http
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from cubebox.mcp.discovery_pi import discover_workspace_mcp_servers_for_cubepi
+from cubebox.mcp.cubepi_discovery import discover_workspace_mcp_servers_for_cubepi
 from cubebox.mcp.user_token import MCPUserTokenSigner
 from cubebox.services.credential import CredentialService
 

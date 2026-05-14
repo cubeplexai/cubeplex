@@ -612,7 +612,7 @@ class RunManager:
         # MCP tools — per-workspace enabled HTTP MCP servers
         try:
             from cubebox.credentials.dependencies import build_credential_service
-            from cubebox.mcp.runtime_pi import load_workspace_mcp_tools_for_cubepi
+            from cubebox.mcp.cubepi_runtime import load_workspace_mcp_tools_for_cubepi
 
             async with async_session_maker() as mcp_session:
                 cred_service = build_credential_service(
