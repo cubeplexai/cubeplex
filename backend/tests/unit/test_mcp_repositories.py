@@ -186,3 +186,79 @@ async def test_workspace_mcp_override_scoped_by_org(session: AsyncSession) -> No
 # Sanity: keep ``WorkspaceMCPOverride`` importable from the model module.
 def test_override_model_importable() -> None:
     assert WorkspaceMCPOverride.__tablename__ == "workspace_mcp_overrides"
+
+
+# ---------------------------------------------------------------------------
+# Four-layer repository contracts.
+# ---------------------------------------------------------------------------
+
+
+async def test_connector_template_repository_upserts_by_slug(session: AsyncSession) -> None:
+    from cubebox.repositories.mcp import MCPConnectorTemplateRepository
+
+    repo = MCPConnectorTemplateRepository(session)
+    row = await repo.upsert_by_slug(
+        slug="github",
+        name="GitHub",
+        description="GitHub MCP server.",
+        provider="GitHub",
+        server_url="https://github.example.com/mcp",
+        transport="streamable_http",
+        supported_auth_methods=["oauth", "static"],
+        default_credential_policy="user",
+    )
+
+    assert row.slug == "github"
+    assert row.default_credential_policy == "user"
+
+    # Idempotent: re-upserting the same slug returns the existing row id.
+    row2 = await repo.upsert_by_slug(
+        slug="github",
+        name="GitHub (renamed)",
+        description="updated",
+        provider="GitHub",
+        server_url="https://github.example.com/mcp",
+        transport="streamable_http",
+        supported_auth_methods=["oauth"],
+        default_credential_policy="user",
+    )
+    assert row2.id == row.id
+    assert row2.name == "GitHub (renamed)"
+
+
+async def test_credential_grant_repository_scopes_user_grants(
+    session: AsyncSession,
+) -> None:
+    from cubebox.models import MCPCredentialGrant
+    from cubebox.repositories.mcp import MCPCredentialGrantRepository
+
+    repo = MCPCredentialGrantRepository(session, org_id="org-1")
+    await repo.add(
+        MCPCredentialGrant(
+            org_id="org-1",
+            install_id="mcins-1",
+            grant_scope="user",
+            workspace_id="ws-1",
+            user_id="user-1",
+            credential_id="cred-1",
+            created_by_user_id="user-1",
+        )
+    )
+
+    assert (
+        await repo.get_user_grant(install_id="mcins-1", user_id="user-1", workspace_id="ws-1")
+        is not None
+    )
+    # No workspace filter still finds the grant by (install, user).
+    assert await repo.get_user_grant(install_id="mcins-1", user_id="user-1") is not None
+    # Different user → no grant.
+    assert await repo.get_user_grant(install_id="mcins-1", user_id="user-2") is None
+    # Different workspace → no grant when the filter is applied.
+    assert (
+        await repo.get_user_grant(install_id="mcins-1", user_id="user-1", workspace_id="ws-other")
+        is None
+    )
+
+    # Cross-org repo can't see this grant.
+    other = MCPCredentialGrantRepository(session, org_id="org-2")
+    assert await other.get_user_grant(install_id="mcins-1", user_id="user-1") is None

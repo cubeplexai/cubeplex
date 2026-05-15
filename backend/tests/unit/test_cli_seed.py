@@ -1,4 +1,4 @@
-"""Smoke test for the seed-mcp-catalog CLI command."""
+"""Smoke test for the seed-mcp-templates CLI command."""
 
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -12,10 +12,10 @@ from sqlalchemy.pool import StaticPool
 from sqlmodel import SQLModel
 
 from cubebox.cli import main as cli_main
-from cubebox.cli.seed_mcp_catalog import _run as _run_seed_mcp_catalog
+from cubebox.cli.seed_mcp_templates import _run as _run_seed_mcp_templates
 from cubebox.credentials.encryption import FernetBackend
-from cubebox.mcp.catalog_seed import CATALOG
-from cubebox.models import Credential, MCPCatalogConnector
+from cubebox.mcp.template_seed import CATALOG
+from cubebox.models import Credential, MCPConnectorTemplate
 
 
 @pytest.fixture
@@ -37,16 +37,16 @@ async def test_seed_cli_dry_run_exits_zero(
     capsys: pytest.CaptureFixture[str],
     in_memory_session_factory: tuple[async_sessionmaker[AsyncSession], FernetBackend],
 ) -> None:
-    """``cubebox seed-mcp-catalog --dry-run`` returns 0 + prints a summary.
+    """``cubebox seed-mcp-templates --dry-run`` returns 0 + prints a summary.
 
-    The CLI does its imports lazily inside ``seed_mcp_catalog._run``, so
+    The CLI does its imports lazily inside ``seed_mcp_templates._run``, so
     we patch the source modules whose names get resolved at execution
     time.
     """
     maker, backend = in_memory_session_factory
 
     # The CLI imports these lazily; patch the source modules so the
-    # local imports inside ``_run_seed_mcp_catalog`` see the test
+    # local imports inside ``_run_seed_mcp_templates`` see the test
     # session factory and a deterministic backend.
     #
     # NOTE: ``import cubebox.db.engine as m`` resolves ``m`` to the
@@ -76,13 +76,13 @@ async def test_seed_cli_dry_run_exits_zero(
         yield
 
     async def _shim_runner() -> int:
-        return await _run_seed_mcp_catalog(dry_run=True, quiet=False)
+        return await _run_seed_mcp_templates(dry_run=True, quiet=False)
 
     rc = await _shim_runner()
     captured = capsys.readouterr()
 
     assert rc == 0, captured.out + captured.err
-    assert "seed-mcp-catalog: upserted=" in captured.out
+    assert "seed-mcp-templates: upserted=" in captured.out
     assert "dry run, rolled back" in captured.out
 
 
@@ -131,7 +131,7 @@ async def test_seed_cli_dry_run_does_not_persist(
 
     # Sanity: DB is empty before the run.
     async with maker() as pre_session:
-        pre_catalog = (await pre_session.execute(select(MCPCatalogConnector))).scalars().all()
+        pre_catalog = (await pre_session.execute(select(MCPConnectorTemplate))).scalars().all()
         pre_secrets = (
             (
                 await pre_session.execute(
@@ -147,7 +147,7 @@ async def test_seed_cli_dry_run_does_not_persist(
     assert len(pre_catalog) == 0
     assert len(pre_secrets) == 0
 
-    rc = await _run_seed_mcp_catalog(dry_run=True, quiet=False)
+    rc = await _run_seed_mcp_templates(dry_run=True, quiet=False)
     captured = capsys.readouterr()
     assert rc == 0, captured.out + captured.err
     assert "upserted=" in captured.out
@@ -157,7 +157,7 @@ async def test_seed_cli_dry_run_does_not_persist(
 
     # Post-run: zero catalog rows, zero client-secret credentials.
     async with maker() as post_session:
-        post_catalog = (await post_session.execute(select(MCPCatalogConnector))).scalars().all()
+        post_catalog = (await post_session.execute(select(MCPConnectorTemplate))).scalars().all()
         post_secrets = (
             (
                 await post_session.execute(
@@ -171,7 +171,7 @@ async def test_seed_cli_dry_run_does_not_persist(
             .all()
         )
 
-    assert len(post_catalog) == 0, "dry-run leaked catalog rows into the DB"
+    assert len(post_catalog) == 0, "dry-run leaked connector template rows into the DB"
     assert len(post_secrets) == 0, "dry-run leaked OAuth client_secret credentials"
 
     await engine.dispose()
