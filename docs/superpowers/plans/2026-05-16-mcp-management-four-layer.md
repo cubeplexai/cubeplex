@@ -618,7 +618,14 @@ Create `backend/cubebox/services/mcp_installs.py`. The module exposes:
     user_id=None, name=None)` — stores the secret in the vault via
     `CredentialService.create(kind=CREDENTIAL_KIND_MCP, ...)`, then writes the
     grant row pointing at the vault id. Validates scope-vs-fk combination
-    (`workspace` ⇒ `workspace_id`, `user` ⇒ `user_id`).
+    matching the DB check constraint exactly:
+    - `org` ⇒ `workspace_id` and `user_id` MUST both be `None`.
+    - `workspace` ⇒ `workspace_id` MUST be set, `user_id` MUST be `None`.
+    - `user` ⇒ **both** `workspace_id` AND `user_id` MUST be set (user grants
+      are scoped per workspace, so the workspace context is recorded on the
+      grant row to prevent cross-workspace reuse — the `/grants/me` route
+      passes the current `workspace_id` from the path).
+    Wrong shape → `ValueError` before any vault or DB write.
   - `disconnect_grant(*, install_id, grant_scope, workspace_id=None, user_id=None)`
     — deletes the grant row (and OAuth-side revoke when available). Does **not**
     touch install or workspace state.
@@ -633,15 +640,28 @@ not just an absence of code.
 
 - [ ] **Step 4: Add dependency providers**
 
-In `backend/cubebox/mcp/dependencies.py`, add two FastAPI dependency providers
-following the patterns already in that file:
+In `backend/cubebox/mcp/dependencies.py`, add the FastAPI dependency providers
+needed for the workspace and admin route surfaces. The split is necessary
+because admin routes are org-scoped (no `workspace_id` in the path) and use
+`get_admin_request_context` / `require_org_admin`; workspace routes use
+`request_context` / `require_member`. Reusing a member-scoped provider on
+admin routes would either reject the call or scope through an arbitrary
+workspace membership.
 
-- `get_connector_template_service(session) -> MCPConnectorTemplateService` — global,
-  no org scope.
-- `get_connector_install_service(session, cred_service, ctx) ->
-  MCPConnectorInstallService` — `ctx` from the existing `require_member` /
-  `request_context` dependency; instantiate the three repos (install, state, grant)
-  with `org_id=ctx.org_id`, pass `actor_user_id=ctx.user.id`.
+Providers:
+
+- `get_connector_template_service(session) -> MCPConnectorTemplateService` —
+  global, no org scope; used by both admin and workspace routes.
+- `get_ws_install_service(session, cred_service, ctx=Depends(request_context))
+  -> MCPConnectorInstallService` — used by workspace routes. Instantiates the
+  three repos with `org_id=ctx.org_id` from workspace membership, passes
+  `actor_user_id=ctx.user.id`.
+- `get_admin_install_service(session, cred_service,
+  ctx=Depends(get_admin_request_context)) -> MCPConnectorInstallService` —
+  used by admin routes. Same construction but `org_id` comes from the admin
+  context (no workspace), and the underlying calls into the service that
+  involve workspace fan-out get an explicit `workspace_ids` list from the
+  request body, not from `ctx`.
 
 Remove old `get_*catalog*` / `get_*override*` providers from the same module.
 
@@ -1117,16 +1137,21 @@ implementation could pass Step 2a but break the `install_scope="org"` +
 
 - [ ] **Step 3: User-policy scope isolation (spec test #3)**
 
-Two assertions in one test:
+Two assertions in one test (reason strings must be the spec's scope-specific
+values, not the generic `credential_missing` — collapsing reasons here would
+let the implementation pass while regressing the diagnostic matrix Task 5
+protects):
 
 1. Org admin installs static template with `credential_policy="org"` + org-grant
    plaintext. Workspace admin (`admin_client`) flips state to
    `credential_policy="user"`. Without any user grant, both users see
-   `credential_availability="missing"` and `usable=false`. The pre-existing
-   org grant must **not** satisfy a user-policy row.
+   `credential_availability="missing"`, `usable=false`, and
+   `reason="user_needs_connection"`. The pre-existing org grant must **not**
+   satisfy a user-policy row.
 2. User A (`admin_client`'s user) POSTs `/grants/me` with their token. User A
-   then sees `usable=true`; user B (`member_client`) still sees
-   `credential_availability="missing"` and `usable=false` for the same install.
+   then sees `usable=true`, `reason="usable"`; user B (`member_client`) still
+   sees `credential_availability="missing"`, `usable=false`,
+   `reason="user_needs_connection"` for the same install.
 
 - [ ] **Step 4: Policy change drops the previous scope's grant from runtime
   (spec test #4)**
@@ -1134,14 +1159,16 @@ Two assertions in one test:
 - Org install with `credential_policy="org"` and a valid org grant.
 - Workspace flips `credential_policy` to `"workspace"` via PATCH state.
 - GET `/connectors` shows `credential_source` is no longer `org`; without a
-  workspace grant, `usable=false`, reason `credential_missing`.
+  workspace grant, `usable=false`, `reason="missing_workspace_grant"`.
 
 - [ ] **Step 5: Disconnect keeps install/state (spec test #5)**
 
 - After Step 4's setup, DELETE the org grant.
 - Install row still exists with `install_state="active"`; `WorkspaceConnectorState`
   row still has `enabled=true`. Effective state for that workspace returns
-  `usable=false`, reason `credential_missing`. Re-POSTing a grant immediately
+  `usable=false`, `reason="missing_org_grant"` (assuming the original setup was
+  org-policy; replace with `missing_workspace_grant` / `user_needs_connection`
+  if the test variant flipped policy first). Re-POSTing a grant immediately
   flips back to usable without re-install.
 
 - [ ] **Step 6: Uninstall then reinstall same template (spec test #6)**
@@ -1274,13 +1301,16 @@ export async function wsCreateInstall(client: ApiClient, wsId: string, body: unk
   return (await res.json()) as MCPConnectorInstall
 }
 
-export async function wsPatchInstallState(
+export async function wsPatchConnectorState(
   client: ApiClient,
   wsId: string,
   installId: string,
   body: Partial<MCPWorkspaceConnectorState>,
 ) {
-  const res = await client.patch(`/api/v1/ws/${wsId}/mcp/installs/${installId}/state`, body)
+  const res = await client.patch(
+    `/api/v1/ws/${wsId}/mcp/connectors/${installId}/state`,
+    body,
+  )
   if (!res.ok) throw await toApiError(res)
   return (await res.json()) as MCPWorkspaceConnectorState
 }
