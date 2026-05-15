@@ -429,3 +429,161 @@ async def test_credential_scope_none_attaches_signed_identity_token() -> None:
         mcp_server_id="srv-1",
         ttl=timedelta(minutes=5),
     )
+
+
+# ---------------------------------------------------------------------------
+# Four-layer loader (Task 5 Step 4).
+#
+# Exercises ``load_workspace_mcp_tools_from_effective`` with a stubbed
+# :class:`MCPEffectiveConnectorService`. The legacy path keeps its existing
+# tests above; these confirm the new path resolves the no-auth identity
+# branch and the OAuth-grant branch.
+# ---------------------------------------------------------------------------
+
+
+def _make_runtime_spec(
+    *,
+    install_id: str = "mcins-1",
+    name: str = "demo",
+    auth_method: str = "none",
+    credential_id: str | None = None,
+    grant_scope: str | None = None,
+    tool_citations: dict[str, dict[str, object]] | None = None,
+):
+    """Build an MCPRuntimeConnectorSpec the loader can consume."""
+    from cubebox.mcp.effective import MCPRuntimeConnectorSpec
+
+    return MCPRuntimeConnectorSpec(
+        install_id=install_id,
+        name=name,
+        server_url=f"https://mcp.example/{install_id}",
+        transport="streamable_http",
+        auth_method=auth_method,
+        grant_scope=grant_scope,
+        credential_id=credential_id,
+        refresh_credential_id=None,
+        tool_citations=tool_citations or {},
+        headers={},
+        timeout=30.0,
+        sse_read_timeout=300.0,
+        template_id=None,
+        org_id="org-1",
+        workspace_id="ws-1",
+    )
+
+
+class _StubEffectiveService:
+    """Drop-in for MCPEffectiveConnectorService.list_runtime_specs in tests."""
+
+    def __init__(self, specs):
+        self._specs = specs
+
+    async def list_runtime_specs(self, workspace_id: str, user_id: str):
+        assert workspace_id == "ws-1"
+        assert user_id == "user-1"
+        return self._specs
+
+
+@pytest.mark.asyncio
+async def test_effective_loader_no_auth_signs_identity_token(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``auth_method='none'`` branch signs a cubebox identity token and uses it."""
+    from cubebox.mcp.cubepi_runtime import load_workspace_mcp_tools_from_effective
+
+    spec = _make_runtime_spec(install_id="mcins-passthru", name="srv", auth_method="none")
+
+    captured_headers: dict[str, str] = {}
+
+    async def _fake_loader(
+        url: str,
+        *,
+        headers: dict[str, str] | None,
+        timeout: float,
+        transport: str,
+    ):
+        captured_headers.update(headers or {})
+        return [_FakeTool(name="ping")]
+
+    monkeypatch.setattr(
+        "cubebox.mcp.cubepi_runtime.load_mcp_tools_http",
+        _fake_loader,
+    )
+
+    fake_signer = AsyncMock()
+    fake_signer.sign = AsyncMock(return_value="signed-jwt")
+
+    tools, _ = await load_workspace_mcp_tools_from_effective(
+        effective_service=_StubEffectiveService([spec]),  # type: ignore[arg-type]
+        token_manager=None,  # type: ignore[arg-type]
+        workspace_id="ws-1",
+        org_id="org-1",
+        user_id="user-1",
+        cred_service=None,  # type: ignore[arg-type]
+        signer=fake_signer,
+    )
+
+    assert len(tools) == 1
+    assert getattr(tools[0], "name", "") == "srv__ping"
+    assert captured_headers.get("Authorization") == "Bearer signed-jwt"
+    fake_signer.sign.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_effective_loader_oauth_reads_grant_credential(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """OAuth branch decrypts the access-token credential and injects Bearer auth.
+
+    The four-layer effective service is responsible for filtering expired
+    grants; the loader's only job is to translate ``credential_id`` into a
+    bearer header via the credential service. (The legacy
+    ``OAuthTokenManager.get_access_token`` API takes an MCPServer instance
+    that doesn't exist in the four-layer schema; refresh integration is
+    queued for Task 9.)
+    """
+    from cubebox.mcp.cubepi_runtime import load_workspace_mcp_tools_from_effective
+
+    spec = _make_runtime_spec(
+        install_id="mcins-oauth",
+        name="oauth-srv",
+        auth_method="oauth",
+        credential_id="cred-access",
+        grant_scope="org",
+    )
+
+    async def _fake_loader(
+        url: str,
+        *,
+        headers: dict[str, str] | None,
+        timeout: float,
+        transport: str,
+    ):
+        assert (headers or {}).get("Authorization") == "Bearer the-access-token"
+        return [_FakeTool(name="search")]
+
+    monkeypatch.setattr(
+        "cubebox.mcp.cubepi_runtime.load_mcp_tools_http",
+        _fake_loader,
+    )
+
+    fake_cred_service = AsyncMock()
+    fake_cred_service.get_decrypted = AsyncMock(return_value="the-access-token")
+
+    fake_token_manager = AsyncMock()  # exists but is not consulted yet
+
+    tools, _ = await load_workspace_mcp_tools_from_effective(
+        effective_service=_StubEffectiveService([spec]),  # type: ignore[arg-type]
+        token_manager=fake_token_manager,
+        workspace_id="ws-1",
+        org_id="org-1",
+        user_id="user-1",
+        cred_service=fake_cred_service,
+        signer=AsyncMock(),
+    )
+
+    assert len(tools) == 1
+    assert getattr(tools[0], "name", "") == "oauth_srv__search"
+    fake_cred_service.get_decrypted.assert_awaited_once()
+    args = fake_cred_service.get_decrypted.await_args
+    assert args.kwargs["credential_id"] == "cred-access"
