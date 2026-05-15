@@ -100,19 +100,6 @@ class TestSkillsSettings:
         )
 
 
-class TestMCPSettings:
-    """Workspace MCP settings routes."""
-
-    def test_list_mcp(self, client: TestClient) -> None:
-        resp = client.get(f"/api/v1/ws/{DEFAULT_WS_ID}/settings/mcp")
-        assert resp.status_code == 200
-        data = resp.json()
-        assert "org_servers" in data
-        assert "workspace_servers" in data
-        assert isinstance(data["org_servers"], list)
-        assert isinstance(data["workspace_servers"], list)
-
-
 class TestSettingsScoping:
     """Settings are scoped per workspace — non-members cannot read workspace data."""
 
@@ -126,13 +113,10 @@ class TestSettingsScoping:
         assert resp.status_code == 200
         assert "system_prompt" in resp.json()
 
-    def test_skills_and_mcp_both_return_lists(self, client: TestClient) -> None:
+    def test_skills_returns_lists(self, client: TestClient) -> None:
         skills_resp = client.get(f"/api/v1/ws/{DEFAULT_WS_ID}/settings/skills")
-        mcp_resp = client.get(f"/api/v1/ws/{DEFAULT_WS_ID}/settings/mcp")
         assert skills_resp.status_code == 200
-        assert mcp_resp.status_code == 200
         assert isinstance(skills_resp.json()["org_skills"], list)
-        assert isinstance(mcp_resp.json()["org_servers"], list)
 
 
 class TestPersonaRuntimeApplied:

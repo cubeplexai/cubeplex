@@ -2,7 +2,6 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
-import { useMcpStore } from '@cubebox/core'
 import { CheckCircle2, AlertTriangle } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 
@@ -72,8 +71,6 @@ export default function MCPOAuthReturnPage() {
   const reason = searchParams.get('reason')
   const status: Status = rawStatus === 'ok' ? 'ok' : rawStatus === 'error' ? 'error' : 'unknown'
 
-  const clearAdmin = useMcpStore((s) => s.clearPendingOAuth)
-
   // Read sessionStorage exactly once on mount and stash for both render + redirect.
   const consumedRef = useRef(false)
   const [origin, setOrigin] = useState<string | null>(null)
@@ -83,9 +80,7 @@ export default function MCPOAuthReturnPage() {
     consumedRef.current = true
     const value = readOriginAndClear()
     setOrigin(isSafeReturnPath(value) ? value : null)
-    // Always clear the store's pendingOAuthInstallId on mount, regardless of outcome.
-    clearAdmin()
-  }, [clearAdmin])
+  }, [])
 
   const fallbackHref = useMemo(() => '/', [])
   const returnHref = origin ?? fallbackHref

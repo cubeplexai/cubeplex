@@ -52,7 +52,7 @@ export function MCPWorkspacesTab({ installId, client: _client }: MCPWorkspacesTa
             )
             return {
               ws,
-              enabled: match?.workspace_state.enabled ?? false,
+              enabled: match?.workspace_state?.enabled ?? false,
               saving: false,
               error: null,
             } satisfies WsRow

@@ -4,8 +4,10 @@ The wire format is::
 
     state = base64url(payload_json) + "." + base64url(hmac_sha256)
 
-where ``payload_json`` carries ``{install_id, actor_user_id, ts, nonce}``
-and ``hmac_sha256`` is computed over the canonical payload bytes using the
+where ``payload_json`` carries ``{install_id, actor_user_id, ts, nonce,
+grant_scope, workspace_id, user_id}`` (the last three honor the four-layer
+grant shape — workspace_id and user_id are nullable per grant_scope) and
+``hmac_sha256`` is computed over the canonical payload bytes using the
 caller-supplied ``secret_key``.
 
 Lifecycle:
@@ -18,7 +20,6 @@ Lifecycle:
   means TTL elapsed or the token was already consumed.
 
 The module is pure: callers wire in the redis client and the secret key.
-Phase 5 derives the secret key from ``CUBEBOX_AUTH__CSRF_SECRET``.
 """
 
 from __future__ import annotations
@@ -43,21 +44,14 @@ _NONCE_BYTES = 16
 class OAuthStatePayload:
     """Decoded OAuth state payload returned by ``OAuthStateStore.consume``.
 
-    The base fields (``install_id``, ``actor_user_id``, ``issued_at``) are
-    the legacy contract used by the ``MCPServer``-based OAuth flow.
-
-    Four-layer-aware callers (Task 4 of the MCP management plan) may set
-    ``target="four_layer_grant"`` along with ``grant_scope`` and the scope-
-    shaped ``workspace_id`` / ``user_id``. The callback dispatches on
-    ``target``: legacy state tokens (no target field) keep flowing through
-    the existing ``MCPServer`` path; four-layer state tokens are routed to
-    the ``MCPCredentialGrant`` writer.
+    Four-layer grant fields: ``grant_scope`` is one of
+    ``{"org", "workspace", "user"}``; ``workspace_id`` and ``user_id`` are
+    populated per the grant scope.
     """
 
     install_id: str
     actor_user_id: str
     issued_at: datetime  # UTC
-    target: str | None = None
     grant_scope: str | None = None
     workspace_id: str | None = None
     user_id: str | None = None
@@ -95,21 +89,11 @@ class OAuthStateStore:
         *,
         install_id: str,
         actor_user_id: str,
-        target: str | None = None,
         grant_scope: str | None = None,
         workspace_id: str | None = None,
         user_id: str | None = None,
     ) -> str:
-        """Mint a new state token and persist it for one-shot consumption.
-
-        Legacy callers pass only ``install_id`` and ``actor_user_id``; the
-        payload is byte-identical to the pre-four-layer wire format so
-        outstanding tokens still verify after this upgrade.
-
-        Four-layer callers (Task 4 of the MCP management plan) set
-        ``target="four_layer_grant"`` plus the scope-shaped fields. The
-        callback dispatches on ``target``.
-        """
+        """Mint a new state token and persist it for one-shot consumption."""
         ts_ms = int(datetime.now(tz=UTC).timestamp() * 1000)
         nonce = secrets.token_hex(_NONCE_BYTES)
         payload: dict[str, object] = {
@@ -118,10 +102,6 @@ class OAuthStateStore:
             "ts": ts_ms,
             "nonce": nonce,
         }
-        # Only include the four-layer fields when set; legacy issuance keeps
-        # the same canonical bytes.
-        if target is not None:
-            payload["target"] = target
         if grant_scope is not None:
             payload["grant_scope"] = grant_scope
         if workspace_id is not None:
@@ -154,8 +134,6 @@ class OAuthStateStore:
         except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
             raise OAuthStateInvalid("OAuth state payload malformed") from exc
         issued_at = datetime.fromtimestamp(ts_ms / 1000, tz=UTC)
-        # Optional four-layer fields: never required for legacy tokens.
-        raw_target = payload.get("target") if isinstance(payload, dict) else None
         raw_grant_scope = payload.get("grant_scope") if isinstance(payload, dict) else None
         raw_ws_id = payload.get("workspace_id") if isinstance(payload, dict) else None
         raw_user_id = payload.get("user_id") if isinstance(payload, dict) else None
@@ -163,7 +141,6 @@ class OAuthStateStore:
             install_id=install_id,
             actor_user_id=actor_user_id,
             issued_at=issued_at,
-            target=str(raw_target) if raw_target is not None else None,
             grant_scope=str(raw_grant_scope) if raw_grant_scope is not None else None,
             workspace_id=str(raw_ws_id) if raw_ws_id is not None else None,
             user_id=str(raw_user_id) if raw_user_id is not None else None,

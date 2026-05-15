@@ -693,21 +693,15 @@ def sample_png_bytes() -> bytes:
 
 
 @pytest.fixture
-def stub_discover_tools(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
-    """Make MCP tool discovery return success without hitting the network.
+def stub_discover_tools() -> Iterator[None]:
+    """No-op MCP discovery stub.
 
-    NOT autouse — opt in per test module via
-    ``pytestmark = pytest.mark.usefixtures("stub_discover_tools")``.
-    Keeping it opt-in avoids masking real network calls in unrelated MCP
-    tests that legitimately exercise discovery.
+    The four-layer install service doesn't run synchronous discovery on
+    create — discovery happens in the agent runtime via the effective
+    service. This fixture is kept as a marker for tests that document
+    "this run does not hit the network", but it no longer needs to patch
+    anything.
     """
-    from typing import Any
-
-    async def _ok(*_args: object, **_kwargs: object) -> tuple[bool, list[Any], None]:
-        return True, [], None
-
-    monkeypatch.setattr("cubebox.services.mcp_catalog.discover_tools", _ok)
-    monkeypatch.setattr("cubebox.services.mcp.discover_tools", _ok)
     yield
 
 
@@ -764,13 +758,11 @@ async def fresh_db_unauth_client_single_tenant() -> AsyncIterator[httpx.AsyncCli
 
 
 # ---------------------------------------------------------------------------
-# Four-layer MCP fixtures (Task 6 of the MCP management plan).
+# Four-layer MCP fixtures.
 # ---------------------------------------------------------------------------
 #
 # These fixtures seed connector templates and provide a same-workspace
-# admin+member client pair used by the four-layer route E2E tests. They
-# coexist with the legacy MCP fixtures above; nothing here touches the
-# legacy ``MCPServer`` tables.
+# admin+member client pair used by the four-layer route E2E tests.
 
 
 async def _seed_four_layer_template(

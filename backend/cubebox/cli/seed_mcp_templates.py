@@ -49,13 +49,6 @@ def seed_mcp_templates(dry_run: bool, quiet: bool) -> None:
     sys.exit(exit_code)
 
 
-# Backwards-compatible alias so any caller still importing
-# ``seed_mcp_catalog`` keeps working until plan Task 9 cleans up the
-# legacy surface. The CLI command also exposes the old ``seed-mcp-catalog``
-# name via :mod:`cubebox.cli.__init__`.
-seed_mcp_catalog = seed_mcp_templates
-
-
 async def _run(*, dry_run: bool, quiet: bool) -> int:
     # Local imports keep CLI startup snappy and avoid pulling FastAPI
     # into the import graph for a one-shot DB script.

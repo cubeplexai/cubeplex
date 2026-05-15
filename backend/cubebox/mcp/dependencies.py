@@ -1,4 +1,4 @@
-"""FastAPI DI providers for DB-backed MCP services."""
+"""FastAPI DI providers for DB-backed MCP services (four-layer only)."""
 
 from typing import cast
 
@@ -11,7 +11,6 @@ from cubebox.audit.sink import AuditSink
 from cubebox.auth.context import RequestContext
 from cubebox.auth.dependencies import (
     request_context,
-    require_member,
     require_org_admin,
     resolve_current_org_id,
 )
@@ -24,30 +23,18 @@ from cubebox.credentials.dependencies import (
 from cubebox.credentials.encryption import EncryptionBackend
 from cubebox.db.session import get_session
 from cubebox.mcp.effective import MCPEffectiveConnectorService
-from cubebox.mcp.oauth.callback import CredentialServiceFactory, OAuthCallbackHandler
-from cubebox.mcp.oauth.dcr import DCRClient
 from cubebox.mcp.oauth.metadata import OAuthMetadataDiscovery
-from cubebox.mcp.oauth.start import OAuthStartService
 from cubebox.mcp.oauth.state import OAuthStateStore
-from cubebox.mcp.oauth.token_manager import OAuthTokenManager
 from cubebox.mcp.user_token import HS256Signer, MCPUserTokenSigner
 from cubebox.models import Role, User
-from cubebox.repositories.credential import CredentialRepository
 from cubebox.repositories.mcp import (
     MCPConnectorInstallRepository,
     MCPConnectorTemplateRepository,
     MCPCredentialGrantRepository,
-    MCPServerRepository,
     MCPWorkspaceConnectorStateRepository,
-    UserMCPCredentialRepository,
-    WorkspaceMCPCredentialRepository,
-    WorkspaceMCPOverrideRepository,
 )
-from cubebox.repositories.mcp_catalog import MCPCatalogConnectorRepository
 from cubebox.repositories.workspace import WorkspaceRepository
 from cubebox.services.credential import CredentialService
-from cubebox.services.mcp import MCPServerService
-from cubebox.services.mcp_catalog import MCPCatalogService
 from cubebox.services.mcp_installs import MCPConnectorInstallService
 from cubebox.services.mcp_templates import MCPConnectorTemplateService
 
@@ -113,59 +100,6 @@ async def get_oauth_metadata_discovery(
     return cast(OAuthMetadataDiscovery, cached)
 
 
-def _build_token_manager_for_org(
-    *,
-    session: AsyncSession,
-    backend: EncryptionBackend,
-    redis: Redis,
-    http_client: httpx.AsyncClient,
-    metadata: OAuthMetadataDiscovery,
-    org_id: str,
-) -> OAuthTokenManager:
-    """Construct an ``OAuthTokenManager`` scoped to ``org_id``.
-
-    Mirrors the wiring in ``streams.run_manager._build_oauth_token_manager``
-    so admin sync-tools and agent runtime use the same refresh logic.
-    """
-    return OAuthTokenManager(
-        http_client=http_client,
-        redis=redis,
-        encryption_backend=backend,
-        credential_repo=CredentialRepository(session, org_id=org_id),
-        server_repo=MCPServerRepository(session, org_id=org_id),
-        user_cred_repo=UserMCPCredentialRepository(session, org_id=org_id),
-        metadata=metadata,
-    )
-
-
-async def get_mcp_service(
-    session: AsyncSession = Depends(get_session),
-    backend: EncryptionBackend = Depends(get_encryption_backend),
-    cred_service: CredentialService = Depends(get_credential_service),
-    redis: Redis = Depends(get_redis),
-    http_client: httpx.AsyncClient = Depends(get_oauth_http_client),
-    metadata: OAuthMetadataDiscovery = Depends(get_oauth_metadata_discovery),
-    ctx: RequestContext = Depends(require_member),
-) -> MCPServerService:
-    token_manager = _build_token_manager_for_org(
-        session=session,
-        backend=backend,
-        redis=redis,
-        http_client=http_client,
-        metadata=metadata,
-        org_id=ctx.org_id,
-    )
-    return MCPServerService(
-        server_repo=MCPServerRepository(session, org_id=ctx.org_id),
-        ws_cred_repo=WorkspaceMCPCredentialRepository(session, org_id=ctx.org_id),
-        user_cred_repo=UserMCPCredentialRepository(session, org_id=ctx.org_id),
-        override_repo=WorkspaceMCPOverrideRepository(session, org_id=ctx.org_id),
-        cred_service=cred_service,
-        request_context=ctx,
-        token_manager=token_manager,
-    )
-
-
 async def get_admin_request_context(
     session: AsyncSession = Depends(get_session),
     user: User = Depends(require_org_admin),
@@ -174,91 +108,7 @@ async def get_admin_request_context(
     return RequestContext(user=user, org_id=org_id, workspace_id="", role=Role.ADMIN)
 
 
-async def get_admin_mcp_service(
-    session: AsyncSession = Depends(get_session),
-    backend: EncryptionBackend = Depends(get_encryption_backend),
-    redis: Redis = Depends(get_redis),
-    http_client: httpx.AsyncClient = Depends(get_oauth_http_client),
-    metadata: OAuthMetadataDiscovery = Depends(get_oauth_metadata_discovery),
-    ctx: RequestContext = Depends(get_admin_request_context),
-) -> MCPServerService:
-    cred_service = build_credential_service(
-        session,
-        backend,
-        org_id=ctx.org_id,
-        actor_user_id=ctx.user.id,
-    )
-    token_manager = _build_token_manager_for_org(
-        session=session,
-        backend=backend,
-        redis=redis,
-        http_client=http_client,
-        metadata=metadata,
-        org_id=ctx.org_id,
-    )
-    return MCPServerService(
-        server_repo=MCPServerRepository(session, org_id=ctx.org_id),
-        ws_cred_repo=WorkspaceMCPCredentialRepository(session, org_id=ctx.org_id),
-        user_cred_repo=UserMCPCredentialRepository(session, org_id=ctx.org_id),
-        override_repo=WorkspaceMCPOverrideRepository(session, org_id=ctx.org_id),
-        cred_service=cred_service,
-        request_context=ctx,
-        token_manager=token_manager,
-    )
-
-
-async def get_member_catalog_service(
-    session: AsyncSession = Depends(get_session),
-    cred_service: CredentialService = Depends(get_credential_service),
-    ctx: RequestContext = Depends(require_member),
-) -> MCPCatalogService:
-    """Catalog service for member-scoped reads and workspace user installs."""
-    return MCPCatalogService(
-        catalog_repo=MCPCatalogConnectorRepository(session),
-        server_repo=MCPServerRepository(session, org_id=ctx.org_id),
-        ws_cred_repo=WorkspaceMCPCredentialRepository(session, org_id=ctx.org_id),
-        user_cred_repo=UserMCPCredentialRepository(session, org_id=ctx.org_id),
-        override_repo=WorkspaceMCPOverrideRepository(session, org_id=ctx.org_id),
-        cred_service=cred_service,
-        request_context=ctx,
-    )
-
-
-async def get_admin_catalog_service(
-    session: AsyncSession = Depends(get_session),
-    backend: EncryptionBackend = Depends(get_encryption_backend),
-    ctx: RequestContext = Depends(get_admin_request_context),
-) -> MCPCatalogService:
-    """Catalog service for org admin install/delete/switch-auth flows."""
-    cred_service = build_credential_service(
-        session,
-        backend,
-        org_id=ctx.org_id,
-        actor_user_id=ctx.user.id,
-    )
-    return MCPCatalogService(
-        catalog_repo=MCPCatalogConnectorRepository(session),
-        server_repo=MCPServerRepository(session, org_id=ctx.org_id),
-        ws_cred_repo=WorkspaceMCPCredentialRepository(session, org_id=ctx.org_id),
-        user_cred_repo=UserMCPCredentialRepository(session, org_id=ctx.org_id),
-        override_repo=WorkspaceMCPOverrideRepository(session, org_id=ctx.org_id),
-        cred_service=cred_service,
-        request_context=ctx,
-    )
-
-
-# ---------------- OAuth start/callback wiring ---------------- #
-
-
-def _oauth_redirect_uri() -> str:
-    """The fixed callback URI minted from ``public_base_url``.
-
-    Per spec §9 the callback path is fixed. We honor public_base_url
-    so OAuth deployments behind a reverse proxy advertise the
-    externally-reachable URL to the AS rather than the bind address.
-    """
-    base = str(config.get("public_base_url", "http://localhost:8000")).rstrip("/")
-    return f"{base}/api/v1/oauth/mcp/callback"
+# ---------------- OAuth state store ---------------- #
 
 
 def _state_secret_key() -> bytes:
@@ -274,119 +124,7 @@ async def get_oauth_state_store(
     return OAuthStateStore(redis=redis, secret_key=_state_secret_key())
 
 
-async def get_oauth_dcr_client(
-    http_client: httpx.AsyncClient = Depends(get_oauth_http_client),
-) -> DCRClient:
-    return DCRClient(http_client)
-
-
-def _credential_service_factory_for_session(
-    session: AsyncSession,
-    backend: EncryptionBackend,
-) -> CredentialServiceFactory:
-    """Build a ``(org_id, actor_user_id) -> CredentialService`` factory bound to ``session``."""
-
-    def factory(org_id: str | None, actor_user_id: str | None) -> CredentialService:
-        return build_credential_service(
-            session,
-            backend,
-            org_id=org_id,
-            actor_user_id=actor_user_id,
-        )
-
-    return factory
-
-
-async def get_oauth_start_service_admin(
-    session: AsyncSession = Depends(get_session),
-    backend: EncryptionBackend = Depends(get_encryption_backend),
-    redis: Redis = Depends(get_redis),
-    metadata: OAuthMetadataDiscovery = Depends(get_oauth_metadata_discovery),
-    dcr_client: DCRClient = Depends(get_oauth_dcr_client),
-    state_store: OAuthStateStore = Depends(get_oauth_state_store),
-    ctx: RequestContext = Depends(get_admin_request_context),
-) -> OAuthStartService:
-    cred_service = build_credential_service(
-        session,
-        backend,
-        org_id=ctx.org_id,
-        actor_user_id=ctx.user.id,
-    )
-    return OAuthStartService(
-        server_repo=MCPServerRepository(session, org_id=ctx.org_id),
-        catalog_repo=MCPCatalogConnectorRepository(session),
-        metadata=metadata,
-        dcr_client=dcr_client,
-        state_store=state_store,
-        credential_service=cred_service,
-        redis=redis,
-        redirect_uri=_oauth_redirect_uri(),
-        org_id=ctx.org_id,
-    )
-
-
-async def get_oauth_start_service_member(
-    session: AsyncSession = Depends(get_session),
-    cred_service: CredentialService = Depends(get_credential_service),
-    redis: Redis = Depends(get_redis),
-    metadata: OAuthMetadataDiscovery = Depends(get_oauth_metadata_discovery),
-    dcr_client: DCRClient = Depends(get_oauth_dcr_client),
-    state_store: OAuthStateStore = Depends(get_oauth_state_store),
-    ctx: RequestContext = Depends(require_member),
-) -> OAuthStartService:
-    return OAuthStartService(
-        server_repo=MCPServerRepository(session, org_id=ctx.org_id),
-        catalog_repo=MCPCatalogConnectorRepository(session),
-        metadata=metadata,
-        dcr_client=dcr_client,
-        state_store=state_store,
-        credential_service=cred_service,
-        redis=redis,
-        redirect_uri=_oauth_redirect_uri(),
-        org_id=ctx.org_id,
-    )
-
-
-async def get_oauth_callback_handler(
-    session: AsyncSession = Depends(get_session),
-    backend: EncryptionBackend = Depends(get_encryption_backend),
-    redis: Redis = Depends(get_redis),
-    metadata: OAuthMetadataDiscovery = Depends(get_oauth_metadata_discovery),
-    state_store: OAuthStateStore = Depends(get_oauth_state_store),
-    http_client: httpx.AsyncClient = Depends(get_oauth_http_client),
-) -> OAuthCallbackHandler:
-    """Callback handler runs on an unauthenticated GET — no RequestContext.
-
-    Repos use ``org_id=None`` because the callback derives the org from
-    the install referenced in the (HMAC-verified) state token.
-    """
-    return OAuthCallbackHandler(
-        http_client=http_client,
-        redis=redis,
-        state_store=state_store,
-        metadata=metadata,
-        encryption_backend=backend,
-        credential_service_factory=_credential_service_factory_for_session(session, backend),
-        server_repo=MCPServerRepository(session, org_id=None),
-        user_cred_repo=UserMCPCredentialRepository(session, org_id=None),
-        redirect_uri=_oauth_redirect_uri(),
-    )
-
-
 # ---------------- Four-layer (template / install / state / grant) providers ---------------- #
-#
-# These coexist with the legacy ``get_mcp_service`` / ``get_*catalog*`` providers
-# above; Task 9 of the four-layer plan removes the legacy ones once the
-# admin and workspace routes have fully migrated. Do not delete the legacy
-# providers here.
-#
-# The split between ``get_ws_install_service`` and ``get_admin_install_service``
-# is structural, not cosmetic: admin routes are org-scoped and use
-# ``get_admin_request_context`` (no ``workspace_id`` in the path), while
-# workspace routes use ``request_context`` (workspace_id is a path param). A
-# member-scoped provider would either reject admin calls outright or pin them
-# to whichever workspace the admin happens to belong to, which is wrong for
-# org-wide install fan-out.
 
 
 async def get_connector_template_service(

@@ -237,20 +237,20 @@ async def lifespan(_app: FastAPI):  # type: ignore
     except Exception as e:
         logger.warning("Failed to seed system providers: {}", str(e))
 
-    # Seed MCP catalog connectors (idempotent, lock-guarded).
+    # Seed MCP connector templates (idempotent, lock-guarded).
     try:
         from cubebox.db.engine import async_session_maker
-        from cubebox.seeders import seed_mcp_catalog
+        from cubebox.seeders import seed_mcp_templates
 
         async with async_session_maker() as seed_session:
-            await seed_mcp_catalog(
+            await seed_mcp_templates(
                 db_session=seed_session,
                 backend=_app.state.encryption_backend,
                 redis=redis_client,
             )
-        logger.info("MCP catalog seed step completed")
+        logger.info("MCP template seed step completed")
     except Exception as e:
-        logger.warning("Failed to seed MCP catalog: {}", str(e))
+        logger.warning("Failed to seed MCP templates: {}", str(e))
 
     # M7: orphan attachment reaper
     from cubebox.config import config
@@ -399,7 +399,6 @@ def create_app(
         artifacts_router,
         attachments_router,
         conversations_router,
-        mcp_catalog,
         mcp_oauth,
         memory_router,
         public_artifacts,
@@ -421,13 +420,8 @@ def create_app(
     app.include_router(admin_router, prefix="/api/v1")
     app.include_router(admin_members.router, prefix="/api/v1")
     app.include_router(admin_mcp.router, prefix="/api/v1")
-    # Four-layer plan Task 4: public template list (authenticated, not org-admin
-    # gated). Coexists with the admin_mcp.router above.
+    # Public template list (authenticated, not org-admin gated).
     app.include_router(admin_mcp.public_templates_router, prefix="/api/v1")
-    app.include_router(mcp_catalog.catalog_admin_router, prefix="/api/v1")
-    app.include_router(mcp_catalog.catalog_member_router, prefix="/api/v1")
-    app.include_router(mcp_oauth.oauth_admin_router, prefix="/api/v1")
-    app.include_router(mcp_oauth.oauth_member_router, prefix="/api/v1")
     app.include_router(mcp_oauth.oauth_callback_router, prefix="/api/v1")
     app.include_router(admin_skills.router, prefix="/api/v1")
     app.include_router(admin_skills.bindings_router, prefix="/api/v1")

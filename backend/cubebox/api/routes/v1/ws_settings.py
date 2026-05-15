@@ -1,4 +1,9 @@
-"""Workspace settings routes: agent config, skill bindings, MCP bindings."""
+"""Workspace settings routes: agent config + skill bindings.
+
+MCP connector management lives on the dedicated four-layer surface under
+``/ws/{workspace_id}/mcp/{templates,connectors,installs,...}`` — see
+``routes/v1/ws_mcp.py``.
+"""
 
 from __future__ import annotations
 
@@ -13,26 +18,16 @@ from sqlmodel import select
 from cubebox.api.schemas.ws_settings import (
     AgentConfigOut,
     AgentConfigPatch,
-    MCPBindingPatch,
-    MCPServerItem,
     SkillBindingPatch,
     SkillInstallCreate,
     SkillInstallOut,
-    WorkspaceMCPOut,
     WorkspaceSkillsOut,
 )
 from cubebox.auth.context import RequestContext
 from cubebox.auth.dependencies import require_member
 from cubebox.config import config as _config
 from cubebox.db import get_session
-from cubebox.models import User
 from cubebox.models.agent_config import AgentConfig
-from cubebox.repositories.mcp import (
-    MCPServerRepository,
-    UserMCPCredentialRepository,
-    WorkspaceMCPCredentialRepository,
-    WorkspaceMCPOverrideRepository,
-)
 from cubebox.repositories.organization import OrganizationRepository
 from cubebox.repositories.skill import (
     OrgSkillInstallRepository,
@@ -264,123 +259,3 @@ async def upload_workspace_skill(
             status_code=409, detail={"code": "VERSION_EXISTS", "reason": str(e)}
         ) from e
     return {"skill_version_id": sv.id, "skill_id": sv.skill_id, "version": sv.version}
-
-
-@router.get("/mcp", response_model=WorkspaceMCPOut)
-async def list_workspace_mcp(
-    ctx: Annotated[RequestContext, Depends(require_member)],
-    session: Annotated[AsyncSession, Depends(get_session)],
-) -> WorkspaceMCPOut:
-    server_repo = MCPServerRepository(session, org_id=ctx.org_id)
-    ws_cred_repo = WorkspaceMCPCredentialRepository(session, org_id=ctx.org_id)
-    user_cred_repo = UserMCPCredentialRepository(session, org_id=ctx.org_id)
-
-    org_rows = await server_repo.list_org_wide_with_workspace_override(ctx.workspace_id)
-    org_servers: list[MCPServerItem] = []
-    for srv, override in org_rows:
-        if override is None or not override.enabled:
-            continue
-
-        mode = override.credential_mode or srv.credential_scope
-        credential_source: str | None = None
-        credential_shared_by: str | None = None
-
-        if srv.auth_method == "none":
-            credential_source = None
-        elif mode == "org":
-            credential_source = "org" if srv.credential_id else "needs_setup"
-        elif mode == "workspace":
-            ws_cred = await ws_cred_repo.get(
-                workspace_id=ctx.workspace_id,
-                mcp_server_id=srv.id,
-            )
-            if ws_cred is not None:
-                credential_source = "workspace"
-                shared_by_user = await session.get(User, ws_cred.created_by_user_id)
-                credential_shared_by = shared_by_user.email if shared_by_user else None
-            else:
-                credential_source = "needs_setup"
-        elif mode == "user":
-            user_cred = await user_cred_repo.get(
-                user_id=ctx.user.id,
-                mcp_server_id=srv.id,
-            )
-            credential_source = "user" if user_cred else "needs_setup"
-
-        org_servers.append(
-            MCPServerItem(
-                server_id=srv.id,
-                name=srv.name,
-                server_url=srv.server_url,
-                transport=srv.transport,
-                enabled=True,
-                scope="org",
-                credential_mode=mode,
-                credential_source=credential_source,
-                credential_shared_by=credential_shared_by,
-            )
-        )
-
-    workspace_servers = [
-        MCPServerItem(
-            server_id=srv.id,
-            name=srv.name,
-            server_url=srv.server_url,
-            transport=srv.transport,
-            enabled=True,
-            scope="workspace",
-        )
-        for srv in await server_repo.list_for_org(owner_workspace_id=ctx.workspace_id)
-    ]
-
-    return WorkspaceMCPOut(org_servers=org_servers, workspace_servers=workspace_servers)
-
-
-@router.patch("/mcp/{server_id}")
-async def toggle_mcp_binding(
-    server_id: str,
-    body: MCPBindingPatch,
-    ctx: Annotated[RequestContext, Depends(require_member)],
-    session: Annotated[AsyncSession, Depends(get_session)],
-) -> dict[str, object]:
-    server_repo = MCPServerRepository(session, org_id=ctx.org_id)
-    srv = await server_repo.get(server_id)
-    if srv is None or srv.owner_workspace_id is not None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="org MCP server not found")
-
-    override_repo = WorkspaceMCPOverrideRepository(session, org_id=ctx.org_id)
-
-    if body.enabled is not None:
-        if body.enabled:
-            await override_repo.upsert(
-                workspace_id=ctx.workspace_id,
-                mcp_server_id=server_id,
-                enabled=True,
-                updated_by_user_id=ctx.user.id,
-            )
-        else:
-            await override_repo.delete(
-                workspace_id=ctx.workspace_id,
-                mcp_server_id=server_id,
-            )
-
-    if body.credential_mode is not None:
-        override = await override_repo.get_for_workspace_and_server(
-            workspace_id=ctx.workspace_id,
-            mcp_server_id=server_id,
-        )
-        if override is None:
-            raise HTTPException(
-                status.HTTP_409_CONFLICT,
-                detail="connector must be enabled before setting credential mode",
-            )
-        override.credential_mode = body.credential_mode
-        override.updated_by_user_id = ctx.user.id
-        session.add(override)
-        await session.commit()
-
-    return {
-        "server_id": server_id,
-        "enabled": body.enabled,
-        "credential_mode": body.credential_mode,
-    }

@@ -1,20 +1,10 @@
-"""Bootstrap helpers for inheriting org-wide MCP installs into new workspaces.
+"""Bootstrap helpers for inheriting org-scope MCP installs into new workspaces.
 
-When a workspace is created, any org-wide MCP server in the same org whose
-``auto_enroll_new_workspaces`` flag is True **and** whose ``authed`` is True
-gets a ``WorkspaceMCPOverride`` row with ``enabled=True`` so the new
-workspace can see the connector out of the box.
-
-The ``authed`` filter matters: ``delete_install`` is a soft delete that
-flips ``authed`` to False but leaves ``auto_enroll_new_workspaces``
-untouched (the flag captures the admin's policy intent, not the install's
-live state). Without this filter, soft-deleted installs would zombie back
-into every newly created workspace as "needs_setup" entries. Pending-OAuth
-installs (authed=False, never completed) are also skipped here — those
-get backfilled at install time on workspaces that exist *at* install time,
-which is the only moment we have a fresh "spread to all workspaces" signal
-from the admin. A workspace created during the brief OAuth window can opt
-in manually via the override toggle once the install lands.
+When a workspace is created, any active org-scope ``MCPConnectorInstall``
+in the same org whose ``auto_enroll_new_workspaces`` flag is True gets a
+``MCPWorkspaceConnectorState`` row with ``enabled=True`` and
+``enablement_source="org_auto_enroll"`` so the new workspace can see the
+connector out of the box.
 
 Called from workspace-creation paths (register bootstrap + ``POST /workspaces``).
 """
@@ -26,8 +16,8 @@ from typing import Any, cast
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from cubebox.models import MCPServer
-from cubebox.repositories.mcp import WorkspaceMCPOverrideRepository
+from cubebox.models import MCPConnectorInstall
+from cubebox.repositories.mcp import MCPWorkspaceConnectorStateRepository
 
 
 async def enroll_workspace_in_org_wide_mcp(
@@ -37,28 +27,30 @@ async def enroll_workspace_in_org_wide_mcp(
     workspace_id: str,
     actor_user_id: str,
 ) -> None:
-    """Upsert enabled overrides for every authed auto-enroll org-wide install.
+    """Upsert enabled connector states for every active auto-enroll org install.
 
-    Iterates org-wide ``mcp_servers`` rows (``owner_workspace_id IS NULL``)
-    whose ``auto_enroll_new_workspaces`` AND ``authed`` are both True;
-    idempotent against repeat invocation (the override repo's upsert flips
+    Iterates org-scope ``mcp_connector_installs`` rows (``workspace_id IS NULL``
+    and ``install_state='active'``) whose ``auto_enroll_new_workspaces`` is
+    True; idempotent against repeat invocation (the state repo's upsert flips
     an existing row rather than duplicating it).
     """
-    stmt = select(MCPServer).where(
-        MCPServer.org_id == org_id,  # type: ignore[arg-type]
-        MCPServer.owner_workspace_id.is_(None),  # type: ignore[union-attr]
-        cast(Any, MCPServer.auto_enroll_new_workspaces).is_(True),
-        cast(Any, MCPServer.authed).is_(True),
+    stmt = select(MCPConnectorInstall).where(
+        MCPConnectorInstall.org_id == org_id,  # type: ignore[arg-type]
+        MCPConnectorInstall.workspace_id.is_(None),  # type: ignore[union-attr]
+        MCPConnectorInstall.install_state == "active",  # type: ignore[arg-type]
+        cast(Any, MCPConnectorInstall.auto_enroll_new_workspaces).is_(True),
     )
-    servers = list((await session.execute(stmt)).scalars().all())
-    if not servers:
+    installs = list((await session.execute(stmt)).scalars().all())
+    if not installs:
         return
 
-    override_repo = WorkspaceMCPOverrideRepository(session, org_id=org_id)
-    for server in servers:
-        await override_repo.upsert(
+    state_repo = MCPWorkspaceConnectorStateRepository(session, org_id=org_id)
+    for install in installs:
+        await state_repo.upsert(
             workspace_id=workspace_id,
-            mcp_server_id=server.id,
+            install_id=install.id,
             enabled=True,
+            credential_policy=install.default_credential_policy,
+            enablement_source="org_auto_enroll",
             updated_by_user_id=actor_user_id,
         )

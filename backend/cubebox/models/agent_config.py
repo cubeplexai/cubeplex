@@ -1,9 +1,9 @@
 """AgentConfig — 1:1 with Workspace.
 
 Holds the per-workspace persona prompt (and, post-M4, the model selection).
-The skill set and MCP set are *not* stored here — they live in
-WorkspaceSkillBinding and WorkspaceMCPOverride respectively, with
-workspace-private skills/MCP rows on OrgSkillInstall / MCPServer.
+The skill set and MCP connector set are *not* stored here — skills live in
+WorkspaceSkillBinding / OrgSkillInstall, and MCP connectors live in the
+four-layer ``MCPConnectorInstall`` + ``MCPWorkspaceConnectorState`` rows.
 """
 
 from typing import ClassVar

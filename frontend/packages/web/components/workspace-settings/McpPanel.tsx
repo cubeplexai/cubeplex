@@ -27,7 +27,7 @@ type RowStatus = 'ready' | 'needsCredential' | 'pendingOAuth' | 'workspaceDisabl
 
 function statusOf(c: MCPEffectiveConnector): RowStatus {
   if (c.install.install_state === 'uninstalled') return 'uninstalled'
-  if (!c.workspace_state.enabled) return 'workspaceDisabled'
+  if (!c.workspace_state?.enabled) return 'workspaceDisabled'
   if (c.reason === 'pending_oauth' || c.install.auth_status === 'pending_oauth') {
     return 'pendingOAuth'
   }
@@ -182,7 +182,7 @@ function ConnectorDetail({
     setSaving(true)
     setError(null)
     try {
-      await wsPatchConnectorState(client, wsId, installId, { enabled: !wsState.enabled })
+      await wsPatchConnectorState(client, wsId, installId, { enabled: !wsState?.enabled })
       await onChanged()
     } catch (err) {
       setError((err as Error).message)
@@ -221,14 +221,14 @@ function ConnectorDetail({
       <div className="rounded-lg border border-border/70 bg-card/40 p-4">
         <h4 className="mb-3 text-sm font-semibold">{t('workspaceState')}</h4>
         <div className="flex items-center justify-between gap-3 text-sm">
-          <span>{wsState.enabled ? t('wsEnabled') : t('wsDisabled')}</span>
+          <span>{wsState?.enabled ? t('wsEnabled') : t('wsDisabled')}</span>
           <Button
             size="sm"
-            variant={wsState.enabled ? 'outline' : 'default'}
+            variant={wsState?.enabled ? 'outline' : 'default'}
             disabled={saving}
             onClick={() => void toggle()}
           >
-            {wsState.enabled ? 'Disconnect' : 'Connect'}
+            {wsState?.enabled ? 'Disconnect' : 'Connect'}
           </Button>
         </div>
         {error && <p className="mt-2 text-xs text-destructive">{error}</p>}
@@ -365,7 +365,7 @@ export function McpPanel({ wsId }: McpPanelProps) {
     }
   }
 
-  const enabledCount = connectors.filter((c) => c.workspace_state.enabled).length
+  const enabledCount = connectors.filter((c) => c.workspace_state?.enabled).length
 
   return (
     <div className="flex h-full flex-1 flex-col overflow-hidden">

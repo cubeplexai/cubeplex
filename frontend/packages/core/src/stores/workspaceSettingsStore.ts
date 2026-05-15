@@ -1,33 +1,22 @@
 import { create } from 'zustand'
+
 import type { ApiClient } from '../api/client'
 import {
   getAgentConfig,
-  listWorkspaceMCP,
   listWorkspaceMCPConnectors,
   listWorkspaceSkills,
-  patchWorkspaceMCPCredentialMode,
-  toggleWorkspaceMCP,
   toggleWorkspaceSkill,
   updateAgentConfig,
 } from '../api/workspace-settings'
-import type {
-  AgentConfig,
-  MCPCredentialMode,
-  MCPServerItem,
-  SkillInstall,
-  WorkspaceMCP,
-  WorkspaceSkills,
-} from '../types/workspace-settings'
 import type { MCPEffectiveConnector } from '../types/mcp'
+import type { AgentConfig, SkillInstall, WorkspaceSkills } from '../types/workspace-settings'
 
 export interface WorkspaceSettingsStore {
   agentConfig: AgentConfig | null
   skills: WorkspaceSkills | null
-  mcp: WorkspaceMCP | null
   /**
    * Four-layer effective connector list for the currently-loaded workspace.
-   * Populated lazily by `loadMcpEffectiveConnectors`; coexists with `mcp`
-   * (legacy `MCPServerItem` projection) until Task 8 retires the old UI.
+   * Populated lazily by `loadMcpEffectiveConnectors`.
    */
   mcpEffectiveConnectors: MCPEffectiveConnector[] | null
   loading: boolean
@@ -37,18 +26,11 @@ export interface WorkspaceSettingsStore {
   loadMcpEffectiveConnectors: (client: ApiClient, wsId: string) => Promise<void>
   savePersona: (client: ApiClient, prompt: string) => Promise<void>
   toggleSkill: (client: ApiClient, installId: string, enabled: boolean) => Promise<void>
-  toggleMCP: (client: ApiClient, serverId: string, enabled: boolean) => Promise<void>
-  patchMCPCredentialMode: (
-    client: ApiClient,
-    serverId: string,
-    mode: MCPCredentialMode,
-  ) => Promise<void>
 }
 
 export const useWorkspaceSettingsStore = create<WorkspaceSettingsStore>((set, get) => ({
   agentConfig: null,
   skills: null,
-  mcp: null,
   mcpEffectiveConnectors: null,
   loading: false,
   error: null,
@@ -56,12 +38,11 @@ export const useWorkspaceSettingsStore = create<WorkspaceSettingsStore>((set, ge
   async loadAll(client: ApiClient) {
     set({ loading: true, error: null })
     try {
-      const [agentConfig, skills, mcp] = await Promise.all([
+      const [agentConfig, skills] = await Promise.all([
         getAgentConfig(client),
         listWorkspaceSkills(client),
-        listWorkspaceMCP(client),
       ])
-      set({ agentConfig, skills, mcp, loading: false })
+      set({ agentConfig, skills, loading: false })
     } catch (e) {
       set({ loading: false, error: String(e) })
     }
@@ -91,38 +72,6 @@ export const useWorkspaceSettingsStore = create<WorkspaceSettingsStore>((set, ge
       skills: {
         org_skills: update(skills.org_skills),
         workspace_skills: update(skills.workspace_skills),
-      },
-    })
-  },
-
-  async toggleMCP(client: ApiClient, serverId: string, enabled: boolean) {
-    await toggleWorkspaceMCP(client, serverId, enabled)
-    const mcp = get().mcp
-    if (!mcp) return
-    const update = (list: MCPServerItem[]) =>
-      list.map((s) => (s.server_id === serverId ? { ...s, enabled } : s))
-    set({
-      mcp: {
-        org_servers: update(mcp.org_servers),
-        workspace_servers: update(mcp.workspace_servers),
-      },
-    })
-  },
-
-  async patchMCPCredentialMode(client: ApiClient, serverId: string, mode: MCPCredentialMode) {
-    await patchWorkspaceMCPCredentialMode(client, serverId, mode)
-    const mcp = get().mcp
-    if (!mcp) return
-    const update = (list: MCPServerItem[]) =>
-      list.map((s) =>
-        s.server_id === serverId
-          ? { ...s, credential_mode: mode, credential_source: 'needs_setup' as const }
-          : s,
-      )
-    set({
-      mcp: {
-        org_servers: update(mcp.org_servers),
-        workspace_servers: update(mcp.workspace_servers),
       },
     })
   },

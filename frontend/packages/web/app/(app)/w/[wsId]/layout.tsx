@@ -29,7 +29,7 @@ export default function WorkspaceLayout({
     useWorkspaceSettingsStore.setState({
       agentConfig: null,
       skills: null,
-      mcp: null,
+      mcpEffectiveConnectors: null,
       loading: false,
       error: null,
     })

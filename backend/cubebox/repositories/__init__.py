@@ -6,12 +6,11 @@ from cubebox.repositories.billing import BillingRepository
 from cubebox.repositories.conversation import ConversationRepository
 from cubebox.repositories.invite_token import InviteTokenRepository
 from cubebox.repositories.mcp import (
-    MCPServerRepository,
-    UserMCPCredentialRepository,
-    WorkspaceMCPCredentialRepository,
-    WorkspaceMCPOverrideRepository,
+    MCPConnectorInstallRepository,
+    MCPConnectorTemplateRepository,
+    MCPCredentialGrantRepository,
+    MCPWorkspaceConnectorStateRepository,
 )
-from cubebox.repositories.mcp_catalog import MCPCatalogConnectorRepository
 from cubebox.repositories.membership import MembershipRepository
 from cubebox.repositories.organization import OrganizationRepository
 from cubebox.repositories.organization_membership import OrganizationMembershipRepository
@@ -33,8 +32,10 @@ __all__ = [
     "ConversationRepository",
     "InviteTokenRepository",
     "MembershipRepository",
-    "MCPCatalogConnectorRepository",
-    "MCPServerRepository",
+    "MCPConnectorInstallRepository",
+    "MCPConnectorTemplateRepository",
+    "MCPCredentialGrantRepository",
+    "MCPWorkspaceConnectorStateRepository",
     "OrgPreinstalledTombstoneRepository",
     "OrgSkillInstallRepository",
     "OrganizationMembershipRepository",
@@ -42,9 +43,6 @@ __all__ = [
     "SkillRepository",
     "SkillVersionRepository",
     "UserSandboxRepository",
-    "UserMCPCredentialRepository",
     "WorkspaceRepository",
-    "WorkspaceMCPCredentialRepository",
-    "WorkspaceMCPOverrideRepository",
     "WorkspaceSkillBindingRepository",
 ]

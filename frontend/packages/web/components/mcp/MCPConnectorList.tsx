@@ -69,7 +69,7 @@ function StatusPill({ connector }: StatusPillProps) {
     )
   }
 
-  if (!ws.enabled) {
+  if (!ws?.enabled) {
     return (
       <span className="inline-flex items-center gap-1 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
         <PauseCircle className="size-3" />

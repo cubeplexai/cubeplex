@@ -1,25 +1,26 @@
-"""OAuth access-token lifecycle manager.
+"""OAuth access-token lifecycle manager (four-layer grants).
 
-Returns a valid access token for a given ``MCPServer`` install (org-scope) or
-``(server, user_id)`` pair (user-scope). When the cached token is within the
-refresh buffer of expiry, the manager performs an RFC 6749 refresh grant under
-a redis lock so concurrent runtime requests collapse to a single token endpoint
-hit. New refresh tokens (RFC 6749 §6 rotation) replace the previous one in the
-vault in place.
+Returns a valid access token for a given ``MCPCredentialGrant`` row.
+When the cached token is within the refresh buffer of expiry, the manager
+performs an RFC 6749 refresh grant under a redis lock so concurrent
+runtime requests collapse to a single token endpoint hit. New refresh
+tokens (RFC 6749 §6 rotation) replace the previous one in the vault in
+place.
 
 Failure modes:
 
-- ``OAuthRefreshFailed`` — terminal: AS rejected the grant (401 / invalid_grant).
-  Server is marked ``authed=False`` (org) or the user_cred row is cleared
-  (user). UI is expected to surface "Reauthorize required".
-- ``OAuthRefreshContention`` — transient: another worker is mid-refresh and
-  didn't finish within the lock window. Caller should retry shortly.
-- ``OAuthInvalidServerState`` — programmer error: the caller asked for a token
-  on a server whose ``auth_method`` is not ``"oauth"``.
+- ``OAuthRefreshFailed`` — terminal: AS rejected the grant (401 /
+  invalid_grant). The grant row's ``grant_status`` is flipped to
+  ``"expired"`` so ``compute_effective_state`` surfaces ``grant_expired``
+  and the connector is dropped from the runtime.
+- ``OAuthRefreshContention`` — transient: another worker is mid-refresh
+  and didn't finish within the lock window. Caller should retry shortly.
+- ``OAuthInvalidServerState`` — programmer error: the grant row is in an
+  inconsistent state (missing client_id / refresh_credential_id, etc.).
 
 This module is pure async + injectable. The redis lock TTL is intentionally
-short (default 5s) so a crashed worker can't park the lock; the polling waiter
-sleeps in 100ms increments up to the same window before giving up.
+short (default 5s) so a crashed worker can't park the lock; the polling
+waiter sleeps in 100ms increments up to the same window before giving up.
 """
 
 from __future__ import annotations
@@ -35,7 +36,6 @@ import httpx
 from redis.asyncio import Redis
 
 from cubebox.credentials.encryption import EncryptionBackend
-from cubebox.credentials.exceptions import CredentialNotFound
 from cubebox.mcp._constants import (
     CREDENTIAL_KIND_MCP_OAUTH_ACCESS_TOKEN,
     CREDENTIAL_KIND_MCP_OAUTH_REFRESH_TOKEN,
@@ -46,20 +46,15 @@ from cubebox.mcp.exceptions import (
     OAuthRefreshFailed,
 )
 from cubebox.mcp.oauth.metadata import OAuthMetadataDiscovery
-from cubebox.models import MCPCredentialGrant, MCPServer, UserMCPCredential
+from cubebox.models import MCPCredentialGrant
 from cubebox.repositories.credential import CredentialRepository
-from cubebox.repositories.mcp import (
-    MCPCredentialGrantRepository,
-    MCPServerRepository,
-    UserMCPCredentialRepository,
-)
-from cubebox.utils.time import utc_isoformat
+from cubebox.repositories.mcp import MCPCredentialGrantRepository
 
 REFRESH_LOCK_KEY_PREFIX = "mcp_oauth_refresh:"
 
 
 class OAuthTokenManager:
-    """Reads + refreshes OAuth tokens for an MCPServer install."""
+    """Reads + refreshes OAuth tokens for an MCPCredentialGrant row."""
 
     def __init__(
         self,
@@ -68,8 +63,6 @@ class OAuthTokenManager:
         redis: Redis,
         encryption_backend: EncryptionBackend,
         credential_repo: CredentialRepository,
-        server_repo: MCPServerRepository,
-        user_cred_repo: UserMCPCredentialRepository,
         metadata: OAuthMetadataDiscovery,
         refresh_buffer_seconds: int = 60,
         lock_ttl_seconds: int = 5,
@@ -78,38 +71,9 @@ class OAuthTokenManager:
         self._redis = redis
         self._backend = encryption_backend
         self._credential_repo = credential_repo
-        self._server_repo = server_repo
-        self._user_cred_repo = user_cred_repo
         self._metadata = metadata
         self._refresh_buffer = refresh_buffer_seconds
         self._lock_ttl = lock_ttl_seconds
-
-    async def get_valid_access_token(
-        self,
-        server: MCPServer,
-        *,
-        user_id: str | None = None,
-    ) -> str:
-        """Return a valid access token, refreshing it if near expiry."""
-        if server.auth_method != "oauth":
-            raise OAuthInvalidServerState(
-                f"server {server.id} has auth_method={server.auth_method!r}, not 'oauth'"
-            )
-
-        scope = server.credential_scope
-        if scope == "user":
-            if user_id is None:
-                raise OAuthInvalidServerState(
-                    f"server {server.id} has credential_scope=user but no user_id was supplied"
-                )
-            return await self._get_user_token(server=server, user_id=user_id)
-        if scope == "org":
-            return await self._get_org_token(server=server)
-        raise OAuthInvalidServerState(
-            f"server {server.id} has unsupported credential_scope={scope!r} for OAuth"
-        )
-
-    # ---------------- four-layer grant entry point ---------------- #
 
     async def get_access_token_for_grant(
         self,
@@ -120,9 +84,6 @@ class OAuthTokenManager:
         oauth_client_config: dict[str, Any],
     ) -> str:
         """Return a valid access token for a four-layer OAuth grant.
-
-        Mirrors :meth:`get_valid_access_token` but reads / rotates the
-        ``MCPCredentialGrant`` row instead of the legacy ``MCPServer`` row.
 
         Caller contract:
 
@@ -255,160 +216,6 @@ class OAuthTokenManager:
             )
         return None
 
-    # ---------------- org scope ---------------- #
-
-    async def _get_org_token(self, *, server: MCPServer) -> str:
-        access_credential_id = server.credential_id
-        if access_credential_id is None:
-            raise OAuthInvalidServerState(
-                f"server {server.id} has no access_token credential — install incomplete"
-            )
-        expires_at = _read_iso(server.oauth_client_config.get("expires_at"))
-        if not self._needs_refresh(expires_at):
-            return await self._read_credential(access_credential_id)
-
-        # Lock on the access-token credential id — that's the row we'll rotate.
-        return await self._refresh_with_lock(
-            lock_key=REFRESH_LOCK_KEY_PREFIX + access_credential_id,
-            do_refresh=lambda: self._refresh_org(server),
-            re_read=lambda: self._read_org_after_lock(server),
-        )
-
-    async def _read_org_after_lock(self, server: MCPServer) -> str:
-        """Re-read DB inside the contention waiter to see another worker's result."""
-        fresh = await self._server_repo.get(server.id)
-        if fresh is None or fresh.credential_id is None:
-            raise OAuthInvalidServerState(f"server {server.id} disappeared during refresh")
-        expires_at = _read_iso(fresh.oauth_client_config.get("expires_at"))
-        if self._needs_refresh(expires_at):
-            raise OAuthRefreshContention(
-                f"refresh on {server.id} did not complete within lock window"
-            )
-        return await self._read_credential(fresh.credential_id)
-
-    async def _refresh_org(self, server: MCPServer) -> str:
-        # Re-read inside the lock so we don't double-refresh if another worker
-        # just won.
-        fresh = await self._server_repo.get(server.id)
-        if fresh is None or fresh.credential_id is None:
-            raise OAuthInvalidServerState(f"server {server.id} disappeared during refresh")
-        expires_at = _read_iso(fresh.oauth_client_config.get("expires_at"))
-        if not self._needs_refresh(expires_at):
-            return await self._read_credential(fresh.credential_id)
-
-        client_config = dict(fresh.oauth_client_config or {})
-        refresh_credential_id = client_config.get("refresh_token_credential_id")
-        if not isinstance(refresh_credential_id, str):
-            raise OAuthInvalidServerState(
-                f"server {fresh.id} has no refresh_token_credential_id in oauth_client_config"
-            )
-        refresh_token = await self._read_credential(refresh_credential_id)
-
-        token_response = await self._exchange_refresh_token(
-            server=fresh,
-            client_config=client_config,
-            refresh_token=refresh_token,
-        )
-
-        new_access = str(token_response["access_token"])
-        new_refresh = str(token_response.get("refresh_token", refresh_token))
-        new_expires_at = _compute_expires_at(token_response.get("expires_in"))
-
-        await self._update_credential(fresh.credential_id, new_access)
-        await self._update_credential(refresh_credential_id, new_refresh)
-
-        client_config["expires_at"] = utc_isoformat(new_expires_at)
-        fresh.oauth_client_config = client_config
-        fresh.authed = True
-        fresh.last_error = None
-        await self._server_repo.update(fresh)
-        return new_access
-
-    # ---------------- user scope ---------------- #
-
-    async def _get_user_token(self, *, server: MCPServer, user_id: str) -> str:
-        user_cred = await self._user_cred_repo.get(
-            user_id=user_id,
-            mcp_server_id=server.id,
-        )
-        if user_cred is None or user_cred.oauth_refresh_token_credential_id is None:
-            raise OAuthInvalidServerState(
-                f"user {user_id} has no OAuth credential for server {server.id}"
-            )
-        if not self._needs_refresh(user_cred.oauth_expires_at):
-            return await self._read_credential(user_cred.credential_id)
-
-        return await self._refresh_with_lock(
-            lock_key=REFRESH_LOCK_KEY_PREFIX + user_cred.credential_id,
-            do_refresh=lambda: self._refresh_user(server=server, user_id=user_id),
-            re_read=lambda: self._read_user_after_lock(server=server, user_id=user_id),
-        )
-
-    async def _read_user_after_lock(self, *, server: MCPServer, user_id: str) -> str:
-        fresh = await self._user_cred_repo.get(user_id=user_id, mcp_server_id=server.id)
-        if fresh is None:
-            raise OAuthInvalidServerState(
-                f"user_mcp_credential disappeared for user={user_id} server={server.id}"
-            )
-        if self._needs_refresh(fresh.oauth_expires_at):
-            raise OAuthRefreshContention(
-                f"refresh on (user={user_id}, server={server.id}) did not complete in lock window"
-            )
-        return await self._read_credential(fresh.credential_id)
-
-    async def _refresh_user(self, *, server: MCPServer, user_id: str) -> str:
-        fresh_server = await self._server_repo.get(server.id)
-        if fresh_server is None:
-            raise OAuthInvalidServerState(f"server {server.id} disappeared during refresh")
-        user_cred = await self._user_cred_repo.get(user_id=user_id, mcp_server_id=server.id)
-        if user_cred is None or user_cred.oauth_refresh_token_credential_id is None:
-            raise OAuthInvalidServerState(
-                f"user_mcp_credential row gone for user={user_id} server={server.id}"
-            )
-        if not self._needs_refresh(user_cred.oauth_expires_at):
-            return await self._read_credential(user_cred.credential_id)
-
-        client_config = dict(fresh_server.oauth_client_config or {})
-        refresh_token = await self._read_credential(user_cred.oauth_refresh_token_credential_id)
-
-        try:
-            token_response = await self._exchange_refresh_token(
-                server=fresh_server,
-                client_config=client_config,
-                refresh_token=refresh_token,
-            )
-        except OAuthRefreshFailed:
-            await self._purge_user_credentials(user_cred)
-            raise
-
-        new_access = str(token_response["access_token"])
-        new_refresh = str(token_response.get("refresh_token", refresh_token))
-        new_expires_at = _compute_expires_at(token_response.get("expires_in"))
-
-        await self._update_credential(user_cred.credential_id, new_access)
-        await self._update_credential(
-            user_cred.oauth_refresh_token_credential_id,
-            new_refresh,
-        )
-        user_cred.oauth_expires_at = new_expires_at
-        await self._user_cred_repo.session.commit()
-        await self._user_cred_repo.session.refresh(user_cred)
-        return new_access
-
-    async def _purge_user_credentials(self, user_cred: UserMCPCredential) -> None:
-        for cred_id in (
-            user_cred.credential_id,
-            user_cred.oauth_refresh_token_credential_id,
-        ):
-            if cred_id is None:
-                continue
-            with suppress(CredentialNotFound):
-                await self._credential_repo.delete(cred_id)
-        await self._user_cred_repo.delete(
-            user_id=user_cred.user_id,
-            mcp_server_id=user_cred.mcp_server_id,
-        )
-
     # ---------------- shared mechanics ---------------- #
 
     async def _refresh_with_lock(
@@ -440,40 +247,6 @@ class OAuthTokenManager:
                 return await re_read()
         return await re_read()
 
-    async def _exchange_refresh_token(
-        self,
-        *,
-        server: MCPServer,
-        client_config: dict[str, Any],
-        refresh_token: str,
-    ) -> dict[str, Any]:
-        """POST grant_type=refresh_token, return parsed JSON or raise.
-
-        Legacy ``MCPServer`` path. Side effects (server marked unauthed,
-        credentials purged) live here; the wire-level exchange is delegated
-        to :meth:`_post_refresh_grant_endpoint` so the four-layer grant
-        path can share the same HTTP logic without dragging in
-        server-scoped fallout.
-        """
-        try:
-            return await self._post_refresh_grant_endpoint(
-                server_url=server.server_url,
-                client_config=client_config,
-                refresh_token=refresh_token,
-                state_context=f"server {server.id}",
-            )
-        except OAuthRefreshFailed as exc:
-            if server.credential_scope == "org":
-                # Preserve legacy unauthed-reason strings: malformed 200 vs.
-                # non-2xx surface differently in ``last_error`` for ops triage.
-                if exc.error == "invalid_response":
-                    reason = "oauth refresh: malformed token response"
-                else:
-                    reason = f"oauth refresh failed: {exc.error or exc.status}"
-                await self._mark_server_unauthed(server, reason)
-                await self._purge_org_credentials(server)
-            raise
-
     async def _post_refresh_grant_endpoint(
         self,
         *,
@@ -489,8 +262,7 @@ class OAuthTokenManager:
         success. Raises :class:`OAuthInvalidServerState` if the client
         configuration is incomplete; raises :class:`OAuthRefreshFailed` on
         non-2xx or a malformed 200 body. Callers are responsible for any
-        scope-specific fallout (marking servers unauthed, purging
-        credentials, flipping grant status).
+        scope-specific fallout (flipping grant status, etc.).
         """
         client_id = client_config.get("client_id")
         if not isinstance(client_id, str):
@@ -547,31 +319,6 @@ class OAuthTokenManager:
             error_description=error_description,
         )
 
-    async def _mark_server_unauthed(self, server: MCPServer, reason: str) -> None:
-        fresh = await self._server_repo.get(server.id)
-        if fresh is None:
-            return
-        fresh.authed = False
-        fresh.last_error = reason[:2048]
-        await self._server_repo.update(fresh)
-
-    async def _purge_org_credentials(self, server: MCPServer) -> None:
-        fresh = await self._server_repo.get(server.id)
-        if fresh is None:
-            return
-        access_id = fresh.credential_id
-        refresh_id = (fresh.oauth_client_config or {}).get("refresh_token_credential_id")
-        for cred_id in (access_id, refresh_id):
-            if isinstance(cred_id, str):
-                with suppress(CredentialNotFound):
-                    await self._credential_repo.delete(cred_id)
-        fresh.credential_id = None
-        client_config = dict(fresh.oauth_client_config or {})
-        client_config.pop("refresh_token_credential_id", None)
-        client_config.pop("expires_at", None)
-        fresh.oauth_client_config = client_config
-        await self._server_repo.update(fresh)
-
     async def _read_credential(self, credential_id: str) -> str:
         cred = await self._credential_repo.get(credential_id)
         if cred is None:
@@ -593,19 +340,6 @@ class OAuthTokenManager:
             expires_at = expires_at.replace(tzinfo=UTC)
         delta = (expires_at - datetime.now(UTC)).total_seconds()
         return delta <= self._refresh_buffer
-
-
-def _read_iso(value: Any) -> datetime | None:
-    if value is None:
-        return None
-    if isinstance(value, datetime):
-        return value if value.tzinfo else value.replace(tzinfo=UTC)
-    if not isinstance(value, str):
-        return None
-    try:
-        return datetime.fromisoformat(value)
-    except ValueError:
-        return None
 
 
 def _compute_expires_at(expires_in: Any) -> datetime:

@@ -12,14 +12,9 @@ export { useToolDetailStore, type ToolDetailStore } from './toolDetailStore'
 export { useAuthStore, type AuthStore } from './authStore'
 export { useWorkspaceStore, type WorkspaceStore } from './workspaceStore'
 export { useAttachmentStore, type UploadingFile } from './attachmentStore'
-export { useMcpStore, type McpStore } from './mcpStore'
 export { type CatalogErrorEnvelope, toCatalogError } from './mcpShared'
 export { useProvidersStore } from './providersStore'
 export { useModelsStore } from './modelsStore'
 export { useOrgModelSettingsStore } from './orgModelSettingsStore'
 export { useWorkspaceSettingsStore, type WorkspaceSettingsStore } from './workspaceSettingsStore'
-export {
-  useWorkspaceMcpCatalogStore,
-  type WorkspaceMcpCatalogStore,
-} from './workspaceMcpCatalogStore'
 export { useMemberStore } from './memberStore'

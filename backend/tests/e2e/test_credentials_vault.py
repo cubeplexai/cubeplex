@@ -13,9 +13,12 @@ from cubebox.credentials.exceptions import (
     CredentialKindMismatch,
     CredentialNotFound,
 )
-from cubebox.models import MCPServer
+from cubebox.models import MCPConnectorInstall, MCPCredentialGrant
 from cubebox.repositories.credential import CredentialRepository
-from cubebox.repositories.mcp import MCPServerRepository
+from cubebox.repositories.mcp import (
+    MCPConnectorInstallRepository,
+    MCPCredentialGrantRepository,
+)
 from cubebox.services.credential import CredentialService
 
 # All org IDs used across vault tests. Each needs an organizations row so the
@@ -179,7 +182,7 @@ async def test_delete_removes_row(db_session: AsyncSession, backend: FernetBacke
         await service.get_decrypted(credential_id=credential_id, requesting_kind="mcp_server")
 
 
-async def test_delete_credential_referenced_by_mcp_server_raises(
+async def test_delete_credential_referenced_by_mcp_grant_raises(
     db_session: AsyncSession,
     backend: FernetBackend,
 ) -> None:
@@ -194,15 +197,30 @@ async def test_delete_credential_referenced_by_mcp_server_raises(
         name=_name("mcp-ref"),
         plaintext="secret",
     )
-    await MCPServerRepository(db_session, org_id="org-vault-mcp-ref").add(
-        MCPServer(
+    install_repo = MCPConnectorInstallRepository(db_session, org_id="org-vault-mcp-ref")
+    install = await install_repo.add(
+        MCPConnectorInstall(
             org_id="org-vault-mcp-ref",
-            name=_name("srv"),
+            workspace_id=None,
+            install_scope="org",
+            template_id=None,
+            name=_name("ins"),
             server_url="https://mcp-ref",
             server_url_hash=_name("mcp-ref-hash"),
             transport="streamable_http",
             auth_method="static",
-            credential_scope="org",
+            default_credential_policy="org",
+            created_by_user_id="user-1",
+        )
+    )
+    grant_repo = MCPCredentialGrantRepository(db_session, org_id="org-vault-mcp-ref")
+    await grant_repo.add(
+        MCPCredentialGrant(
+            org_id="org-vault-mcp-ref",
+            install_id=install.id,
+            grant_scope="org",
+            workspace_id=None,
+            user_id=None,
             credential_id=credential_id,
             created_by_user_id="user-1",
         )
