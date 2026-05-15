@@ -92,6 +92,7 @@ _NOISY_THIRD_PARTY_LOGGERS = (
     "anthropic",
     "openai",
     "opensandbox",
+    "mcp.client.streamable_http",
 )
 
 
