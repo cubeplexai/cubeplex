@@ -4,6 +4,7 @@ import { useState, useRef, useEffect } from 'react'
 import { useTranslations } from 'next-intl'
 import { useMessageStore, useAttachmentStore, createApiClient } from '@cubebox/core'
 import { ArrowUp, Loader2, Paperclip, X } from 'lucide-react'
+import { cn } from '@/lib/utils'
 import { useWorkspaceContext } from '@/hooks/useWorkspaceContext'
 import { AttachmentChips } from '@/components/chat/AttachmentChips'
 import { UploadDropzone } from '@/components/chat/UploadDropzone'
@@ -32,6 +33,7 @@ export function InputBar({
   const [pendingFiles, setPendingFiles] = useState<File[]>([])
   const [isHandlingSubmit, setIsHandlingSubmit] = useState(false)
   const send = useMessageStore((s) => s.send)
+  const cancelStream = useMessageStore((s) => s.cancelStream)
   const { workspaceId } = useWorkspaceContext()
   const messageIsStreaming =
     useMessageStore((s) =>
@@ -158,6 +160,14 @@ export function InputBar({
   }
 
   const canAttach = Boolean(conversationId || onSubmit) && !isSubmitting
+  const canCancel = messageIsStreaming && Boolean(conversationId)
+
+  const handleCancel = async (): Promise<void> => {
+    if (!conversationId) return
+    const client = createApiClient('')
+    if (workspaceId) client.setWorkspaceId(workspaceId)
+    await cancelStream(client, conversationId)
+  }
 
   return (
     <div className="w-full max-w-3xl mx-auto">
@@ -222,18 +232,34 @@ export function InputBar({
           className="flex-1 bg-transparent resize-none outline-none text-sm text-foreground placeholder:text-muted-foreground/40 leading-relaxed min-h-7 max-h-[180px] overflow-y-auto py-0.5"
           disabled={isSubmitting}
         />
-        <button
-          data-testid="send-button"
-          onClick={() => void handleSubmit()}
-          disabled={(!content.trim() && stagedFileCount === 0) || isSubmitting || uploadInFlight}
-          className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-primary text-white transition-all hover:bg-primary/80 disabled:cursor-not-allowed disabled:opacity-25"
-        >
-          {isSubmitting ? (
-            <Loader2 className="size-3.5 animate-spin" />
-          ) : (
-            <ArrowUp className="size-3.5" />
-          )}
-        </button>
+        {canCancel ? (
+          <button
+            data-testid="stop-button"
+            type="button"
+            onClick={() => void handleCancel()}
+            aria-label={tShell('inputBarStop')}
+            className="group relative flex size-7 shrink-0 items-center justify-center rounded-lg bg-primary text-white transition-all hover:bg-primary/80"
+          >
+            <Loader2 className="absolute inset-0 m-auto size-5 animate-spin opacity-90" />
+            <span className="relative size-2 rounded-[2px] bg-white transition-transform group-hover:scale-110" />
+          </button>
+        ) : (
+          <button
+            data-testid="send-button"
+            onClick={() => void handleSubmit()}
+            disabled={(!content.trim() && stagedFileCount === 0) || isSubmitting || uploadInFlight}
+            className={cn(
+              'flex size-7 shrink-0 items-center justify-center rounded-lg bg-primary text-white transition-all hover:bg-primary/80',
+              'disabled:cursor-not-allowed disabled:opacity-25',
+            )}
+          >
+            {isSubmitting ? (
+              <Loader2 className="size-3.5 animate-spin" />
+            ) : (
+              <ArrowUp className="size-3.5" />
+            )}
+          </button>
+        )}
       </div>
       <p className="text-center mt-1 text-[10px] text-muted-foreground/35">{t('hint')}</p>
     </div>

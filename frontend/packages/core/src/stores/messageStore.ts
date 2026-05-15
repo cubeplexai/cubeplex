@@ -13,7 +13,7 @@ import type {
   ToolResultEvent,
 } from '../types'
 import type { ApiClient } from '../api'
-import { getConversationBootstrap, streamMessages, streamRun } from '../api'
+import { cancelActiveRun, getConversationBootstrap, streamMessages, streamRun } from '../api'
 import { useCitationStore } from './citationStore'
 import { useConversationStore } from './conversationStore'
 
@@ -54,9 +54,12 @@ export interface MessageStore {
     attachmentIds?: string[],
     attachments?: import('../types').MessageAttachment[],
   ): Promise<void>
+  cancelStream(client: ApiClient, conversationId: string): Promise<void>
   clearStream(): void
   clearLastRunStatus(): void
 }
+
+let activeStreamController: AbortController | null = null
 
 const MAIN_AGENT_KEY = 'main'
 
@@ -790,9 +793,18 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
       set as (updater: (s: MessageStore) => Partial<MessageStore>) => void,
     )
     let sawDone = false
+    activeStreamController?.abort()
+    const controller = new AbortController()
+    activeStreamController = controller
 
     try {
-      for await (const event of streamMessages(client, conversationId, content, attachmentIds)) {
+      for await (const event of streamMessages(
+        client,
+        conversationId,
+        content,
+        attachmentIds,
+        controller.signal,
+      )) {
         if (event.event_id && get().lastAppliedEventId) {
           if (compareEventIds(event.event_id, get().lastAppliedEventId!) <= 0) continue
         }
@@ -810,6 +822,10 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
           const errData = event.data as { message: string; details?: string }
           set({
             error: errData.details || errData.message,
+            isStreaming: false,
+            streamingConversationId: null,
+            currentRunId: null,
+            statusPhase: null,
             lastAppliedEventId: nextEventId(get().lastAppliedEventId, event.event_id),
           })
           break
@@ -851,6 +867,9 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
       return
     } finally {
       flush()
+      if (activeStreamController === controller) {
+        activeStreamController = null
+      }
     }
 
     if (sawDone) {
@@ -858,6 +877,27 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
       if (!lastState.error) {
         await finalizeCompletedStream(get, set, conversationId)
       }
+    }
+  },
+
+  async cancelStream(client, conversationId) {
+    const state = get()
+    if (!state.isStreaming || state.streamingConversationId !== conversationId) return
+
+    set({
+      isStreaming: false,
+      streamingConversationId: null,
+      currentRunId: null,
+      statusPhase: null,
+    })
+
+    activeStreamController?.abort()
+    activeStreamController = null
+
+    try {
+      await cancelActiveRun(client, conversationId)
+    } catch (err) {
+      console.error('Failed to cancel run:', err)
     }
   },
 
