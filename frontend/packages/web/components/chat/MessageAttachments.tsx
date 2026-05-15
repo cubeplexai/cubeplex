@@ -45,7 +45,10 @@ export function MessageAttachments({
     return attachments.map((a) => ({
       ...a,
       thumbnail_url: a.thumbnail_url ? fix(a.thumbnail_url) : null,
-      download_url: fix(a.download_url ?? `./attachments/${a.file_id}`),
+      // /attachments/{id} is the metadata endpoint; bytes live under /content.
+      // Historical messages reloaded from cubepi only carry file_id, so we
+      // build the URL ourselves when download_url isn't pre-filled.
+      download_url: fix(a.download_url ?? `./attachments/${a.file_id}/content`),
     }))
   }, [attachments, conversationId, workspaceId])
 

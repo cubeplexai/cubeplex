@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useCallback, useMemo } from 'react'
 import { useTranslations } from 'next-intl'
-import { useMessageStore, createApiClient, getTextContent } from '@cubebox/core'
+import { useMessageStore, createApiClient, getTextContent, getSubagentSummary } from '@cubebox/core'
 import type { Message, SubagentSummary } from '@cubebox/core'
 import { AlertCircle } from 'lucide-react'
 import { UserMessage } from './UserMessage'
@@ -28,11 +28,9 @@ function msgTimestampMs(msg: Message): number {
 function buildSubagentDataMap(messages: Message[]): Record<string, SubagentSummary> {
   const map: Record<string, SubagentSummary> = {}
   for (const msg of messages) {
-    if (msg.role !== 'tool') continue
-    const summary = msg.metadata?.subagent_events
-    if (msg.tool_name === 'subagent' && msg.tool_call_id && summary) {
-      map[`subagent:${msg.tool_call_id}`] = summary
-    }
+    if (msg.role !== 'tool' || msg.tool_name !== 'subagent' || !msg.tool_call_id) continue
+    const summary = getSubagentSummary(msg)
+    if (summary) map[`subagent:${msg.tool_call_id}`] = summary
   }
   return map
 }
@@ -76,8 +74,8 @@ function buildHistoricalToolResultMap(
       startedAt: toolCallStartMap[msg.tool_call_id],
     }
     // Index subagent inner tool results so their previews/citations work
-    const summary = msg.metadata?.subagent_events
-    if (msg.tool_name === 'subagent' && summary?.tool_results) {
+    const summary = msg.tool_name === 'subagent' ? getSubagentSummary(msg) : null
+    if (summary?.tool_results) {
       const saToolCallStartMap: Record<string, number> = {}
       for (const tc of summary.tool_calls ?? []) {
         if (tc.id && tc.started_at) {
