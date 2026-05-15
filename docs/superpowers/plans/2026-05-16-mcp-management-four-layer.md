@@ -26,18 +26,28 @@
 - Keep `backend/cubebox/models/mcp.py` as the MCP model module, but replace the model
   classes inside it with the four final MCP-prefixed nouns.
 
+**Plan granularity:**
+
+This plan describes design points, key steps, and core logic — not full source.
+Subagents fill in actual SQLModel definitions, schema bodies, route handlers,
+and service code by following existing patterns in the codebase (cubepi conventions,
+`OrgScopedMixin` style, the `mcp_oauth` module's existing handlers, etc.). Test
+snippets and field/route inventories are **contracts** the implementation must
+satisfy; they are not boilerplate to be pasted verbatim.
+
 ---
 
 ## File Structure
 
 **Backend — create:**
 
-- `backend/alembic/versions/f2a6c7d8e901_normalize_mcp_four_layer_tables.py`
+- `backend/alembic/versions/<autogen-hash>_normalize_mcp_four_layer_tables.py`
+  (produced by `alembic revision --autogenerate`; do not hard-code the hash)
 - `backend/cubebox/mcp/effective.py`
 - `backend/cubebox/services/mcp_templates.py`
 - `backend/cubebox/services/mcp_installs.py`
-- `backend/tests/unit/mcp/test_effective_state.py`
-- `backend/tests/unit/mcp/test_effective_service.py`
+- `backend/tests/unit/test_mcp_effective_state.py`
+- `backend/tests/unit/test_mcp_effective_service.py`
 - `backend/tests/e2e/test_mcp_four_layer_routes.py`
 - `backend/tests/e2e/test_mcp_four_layer_runtime.py`
 
@@ -53,8 +63,11 @@
   `backend/cubebox/cli/seed_mcp_templates.py`.
 - `backend/cubebox/mcp/dependencies.py` — new template/install/effective providers.
 - `backend/cubebox/api/schemas/mcp.py` — template/install/state/grant schemas.
-- `backend/cubebox/api/routes/v1/admin_mcp.py` — admin template/install/grant routes.
+- `backend/cubebox/api/routes/v1/admin_mcp.py` — admin template/install/grant routes
+  (and the public `GET /api/v1/mcp/templates` route, mounted unscoped).
 - `backend/cubebox/api/routes/v1/ws_mcp.py` — workspace template/install/state/grant routes.
+- `backend/cubebox/api/routes/v1/mcp_oauth.py` — align start/callback to new grant table
+  + new oauth/start paths.
 - `backend/cubebox/api/app.py` — stop mounting old catalog router.
 - `backend/cubebox/mcp/cubepi_discovery.py` — use effective runtime specs.
 - `backend/cubebox/mcp/cubepi_runtime.py` — load only usable effective connectors.
@@ -94,7 +107,8 @@
 
 **Files:**
 
-- Create: `backend/alembic/versions/f2a6c7d8e901_normalize_mcp_four_layer_tables.py`
+- Create: `backend/alembic/versions/<autogen-hash>_normalize_mcp_four_layer_tables.py`
+  (via `alembic revision --autogenerate`)
 - Modify: `backend/cubebox/models/mcp.py`
 - Modify: `backend/tests/unit/test_mcp_models.py`
 
@@ -156,238 +170,134 @@ Expected: FAIL because the four final model classes are not exported.
 
 - [ ] **Step 3: Replace MCP model classes**
 
-Edit `backend/cubebox/models/mcp.py` so it defines these final classes:
+Rewrite `backend/cubebox/models/mcp.py` with four SQLModel `table=True` classes.
+Follow existing conventions (`CubeboxBase`, `_PREFIX`, `Field(foreign_key=...)`,
+JSON columns via `sa_column=Column(JSON, ...)`). Do **not** inherit `OrgScopedMixin`
+on any of these — installs/grants have nullable `workspace_id` and grants have
+nullable `user_id`, which `OrgScopedMixin`'s NOT NULL contract forbids. Each model
+declares its own `org_id`/`workspace_id` fields explicitly.
 
-```python
-"""MCP connector management models."""
+Required shape per model:
 
-from datetime import datetime
-from typing import Any, ClassVar
+**`MCPConnectorTemplate`** (`mctpl`, table `mcp_connector_templates`, global — no `org_id`):
 
-from sqlalchemy import JSON, Column, Index, UniqueConstraint, text
-from sqlmodel import Field
+- Identifying: `slug` (unique, indexed), `name`, `description`, `provider`.
+- Runtime defaults: `server_url`, `transport`, `supported_auth_methods` (JSON list),
+  `default_credential_policy`.
+- OAuth metadata (nullable): `oauth_dcr_supported`, `oauth_default_scope`,
+  `oauth_static_client_id`, `oauth_static_client_secret_credential_id`
+  (FK → `credentials.id`; points at a system credential row with `org_id IS NULL`
+  per the existing vault scope-model pattern).
+- Static auth metadata (nullable): `static_form_schema` (JSON), `static_auth_header_template`.
+- Free-form metadata (JSON, non-null, default `{}`): `template_metadata`,
+  `tool_citation_defaults`.
+- Lifecycle: `status` (`active` | `deprecated` | `disabled`, default `active`).
+- Unique constraint on `slug`.
 
-from cubebox.models.mixins import CubeboxBase
+**`MCPConnectorInstall`** (`mcins`, table `mcp_connector_installs`):
 
+- Scope: `org_id` (FK, indexed, required), `workspace_id` (FK, indexed, **nullable** —
+  required iff `install_scope=workspace`), `install_scope` (`org` | `workspace`),
+  `template_id` (FK, nullable — `NULL` means custom install).
+- Identity: `name`, `server_url`, `server_url_hash` (64-char), `transport`.
+- Auth: `auth_method` (`oauth` | `static` | `none`), `default_credential_policy`
+  (`org` | `workspace` | `user` | `none`).
+- State: `auth_status` (`not_required` | `pending` | `authorized` | `disconnected` | `error`),
+  `discovery_status` (`not_run` | `success` | `error`), `install_state`
+  (`active` | `uninstalled`, server_default `'active'`).
+- Caches/config (JSON): `oauth_client_config`, `headers`, `tools_cache`, `tool_citations`.
+- Diagnostics: `last_error`, `last_discovered_at`, `timeout`, `sse_read_timeout`.
+- Distribution: `auto_enroll_new_workspaces` (bool, server_default `true`) —
+  flips `WorkspaceConnectorState` auto-creation when a new workspace lands in the org.
+- Audit: `created_by_user_id` (FK).
+- Constraints:
+  - `UniqueConstraint(org_id, workspace_id, server_url_hash)` — duplicate-URL guard.
+  - `UniqueConstraint(org_id, workspace_id, name)` — name uniqueness inside scope.
+  - Partial unique index `uq_mcp_connector_install_per_template` on
+    `(org_id, COALESCE(workspace_id, '_org'), template_id)` where
+    `template_id IS NOT NULL AND install_state = 'active'` — at most one active
+    install per template per scope, but uninstalled rows must not block reinstall.
+  - Check constraints (`ck_*`): `install_scope IN ('org','workspace')`,
+    `auth_method IN ('oauth','static','none')`.
 
-class MCPConnectorTemplate(CubeboxBase, table=True):
-    _PREFIX: ClassVar[str] = "mctpl"
-    __tablename__ = "mcp_connector_templates"
-    __table_args__ = (UniqueConstraint("slug", name="uq_mcp_connector_template_slug"),)
+**`MCPWorkspaceConnectorState`** (`mcwcs`, table `mcp_workspace_connector_states`):
 
-    slug: str = Field(max_length=64, index=True)
-    name: str = Field(max_length=128)
-    description: str = Field(max_length=2048)
-    provider: str = Field(max_length=64)
-    server_url: str = Field(max_length=2048)
-    transport: str = Field(max_length=16)
-    supported_auth_methods: list[str] = Field(
-        default_factory=list,
-        sa_column=Column(JSON, nullable=False),
-    )
-    default_credential_policy: str = Field(default="user", max_length=16)
-    oauth_dcr_supported: bool | None = Field(default=None)
-    oauth_default_scope: str | None = Field(default=None, max_length=512)
-    oauth_static_client_id: str | None = Field(default=None, max_length=256)
-    oauth_static_client_secret_credential_id: str | None = Field(
-        default=None,
-        foreign_key="credentials.id",
-        max_length=20,
-    )
-    static_form_schema: list[dict[str, Any]] | None = Field(
-        default=None,
-        sa_column=Column(JSON, nullable=True),
-    )
-    static_auth_header_template: str | None = Field(default=None, max_length=256)
-    template_metadata: dict[str, Any] = Field(
-        default_factory=dict,
-        sa_column=Column(JSON, nullable=False, server_default=text("'{}'")),
-    )
-    tool_citation_defaults: dict[str, dict[str, Any]] = Field(
-        default_factory=dict,
-        sa_column=Column(JSON, nullable=False, server_default=text("'{}'")),
-    )
-    status: str = Field(default="active", max_length=16)
+- `org_id` (FK, indexed), `workspace_id` (FK, indexed, required),
+  `install_id` (FK, indexed, required).
+- `enabled` (bool, default `true`), `credential_policy`
+  (`org` | `workspace` | `user` | `none`), `enablement_source`
+  (`admin_auto` | `admin_manual` | `workspace_manual`), `updated_by_user_id` (FK).
+- Unique on `(workspace_id, install_id)`.
+- Check: `credential_policy IN ('org','workspace','user','none')`.
 
+**`MCPCredentialGrant`** (`mcgrn`, table `mcp_credential_grants`):
 
-class MCPConnectorInstall(CubeboxBase, table=True):
-    _PREFIX: ClassVar[str] = "mcins"
-    __tablename__ = "mcp_connector_installs"
-    __table_args__ = (
-        UniqueConstraint(
-            "org_id",
-            "workspace_id",
-            "server_url_hash",
-            name="uq_mcp_connector_install_url",
-        ),
-        UniqueConstraint(
-            "org_id",
-            "workspace_id",
-            "name",
-            name="uq_mcp_connector_install_name",
-        ),
-        Index(
-            "uq_mcp_connector_install_per_template",
-            "org_id",
-            text("COALESCE(workspace_id, '_org')"),
-            "template_id",
-            unique=True,
-            postgresql_where=text("template_id IS NOT NULL AND install_state = 'active'"),
-        ),
-    )
+- `org_id` (FK, indexed), `install_id` (FK, indexed), `grant_scope`
+  (`org` | `workspace` | `user`).
+- `workspace_id` (FK, indexed, nullable — required iff `grant_scope=workspace` or
+  `=user`), `user_id` (FK, indexed, nullable — required iff `grant_scope=user`).
+- `credential_id` (FK → `credentials.id`, required, max_length 20),
+  `refresh_credential_id` (FK → `credentials.id`, nullable, max_length 20).
+- `expires_at` (nullable, OAuth access-token expiry), `grant_status`
+  (`valid` | `missing` | `expired` | `revoked` | `error`, default `valid`),
+  `created_by_user_id` (FK).
+- Unique on `(install_id, grant_scope, workspace_id, user_id)`.
+- Check: `grant_scope IN ('org','workspace','user')`.
 
-    org_id: str = Field(foreign_key="organizations.id", max_length=20, index=True)
-    template_id: str | None = Field(
-        default=None,
-        foreign_key="mcp_connector_templates.id",
-        max_length=20,
-        index=True,
-    )
-    install_scope: str = Field(default="org", max_length=16)
-    workspace_id: str | None = Field(
-        default=None,
-        foreign_key="workspaces.id",
-        max_length=20,
-        index=True,
-    )
-    name: str = Field(max_length=64)
-    server_url: str = Field(max_length=2048)
-    server_url_hash: str = Field(max_length=64)
-    transport: str = Field(max_length=16)
-    auth_method: str = Field(max_length=16)
-    default_credential_policy: str = Field(max_length=16)
-    auth_status: str = Field(default="pending", max_length=16)
-    discovery_status: str = Field(default="not_run", max_length=16)
-    install_state: str = Field(
-        default="active",
-        max_length=16,
-        sa_column_kwargs={"server_default": text("'active'")},
-    )
-    oauth_client_config: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
-    headers: dict[str, str] = Field(default_factory=dict, sa_column=Column(JSON))
-    tools_cache: list[dict[str, Any]] = Field(default_factory=list, sa_column=Column(JSON))
-    tool_citations: dict[str, dict[str, Any]] = Field(
-        default_factory=dict,
-        sa_column=Column(JSON, nullable=False, server_default=text("'{}'")),
-    )
-    last_error: str | None = Field(default=None, max_length=2048)
-    last_discovered_at: datetime | None = None
-    timeout: float = Field(default=30.0)
-    sse_read_timeout: float = Field(default=300.0)
-    auto_enroll_new_workspaces: bool = Field(
-        default=True,
-        sa_column_kwargs={"server_default": text("true")},
-    )
-    created_by_user_id: str = Field(foreign_key="users.id", max_length=20)
+Update `backend/cubebox/models/__init__.py` to export the four classes and remove
+old MCP model exports.
 
+- [ ] **Step 4: Generate the migration via Alembic autogenerate, then patch what autogen can't see**
 
-class MCPWorkspaceConnectorState(CubeboxBase, table=True):
-    _PREFIX: ClassVar[str] = "mcwcs"
-    __tablename__ = "mcp_workspace_connector_states"
-    __table_args__ = (
-        UniqueConstraint("workspace_id", "install_id", name="uq_mcp_workspace_connector_state"),
-    )
+Per repo convention (`backend/CLAUDE.md`, "After modifying SQLModel schemas, use
+auto-generation"), do not hand-write the table create/drop. Run:
 
-    org_id: str = Field(foreign_key="organizations.id", max_length=20, index=True)
-    workspace_id: str = Field(foreign_key="workspaces.id", max_length=20, index=True)
-    install_id: str = Field(foreign_key="mcp_connector_installs.id", max_length=20, index=True)
-    enabled: bool = Field(default=True)
-    credential_policy: str = Field(max_length=16)
-    enablement_source: str = Field(default="workspace_manual", max_length=32)
-    updated_by_user_id: str = Field(foreign_key="users.id", max_length=20)
-
-
-class MCPCredentialGrant(CubeboxBase, table=True):
-    _PREFIX: ClassVar[str] = "mcgrn"
-    __tablename__ = "mcp_credential_grants"
-    __table_args__ = (
-        UniqueConstraint(
-            "install_id",
-            "grant_scope",
-            "workspace_id",
-            "user_id",
-            name="uq_mcp_credential_grant_scope",
-        ),
-    )
-
-    org_id: str = Field(foreign_key="organizations.id", max_length=20, index=True)
-    install_id: str = Field(foreign_key="mcp_connector_installs.id", max_length=20, index=True)
-    grant_scope: str = Field(max_length=16)
-    workspace_id: str | None = Field(
-        default=None,
-        foreign_key="workspaces.id",
-        max_length=20,
-        index=True,
-    )
-    user_id: str | None = Field(
-        default=None,
-        foreign_key="users.id",
-        max_length=20,
-        index=True,
-    )
-    credential_id: str = Field(foreign_key="credentials.id", max_length=20)
-    refresh_credential_id: str | None = Field(default=None, foreign_key="credentials.id")
-    expires_at: datetime | None = None
-    grant_status: str = Field(default="valid", max_length=16)
-    created_by_user_id: str = Field(foreign_key="users.id", max_length=20)
+```bash
+cd backend
+uv run alembic revision --autogenerate -m "normalize mcp four-layer tables"
 ```
 
-Update `backend/cubebox/models/__init__.py` to export the four classes and remove old
-MCP model exports.
+Alembic will emit a new file under `backend/alembic/versions/<hash>_normalize_mcp_four_layer_tables.py`
+containing:
 
-- [ ] **Step 4: Add destructive migration to target tables**
+- `op.drop_table(...)` for `user_mcp_credentials`, `workspace_mcp_credentials`,
+  `workspace_mcp_overrides`, `mcp_servers`, `mcp_catalog_connectors`.
+- `op.create_table(...)` for the four new tables with columns, FKs, plain
+  `UniqueConstraint`s, and indexes reflected off the SQLModel classes.
 
-Create `backend/alembic/versions/f2a6c7d8e901_normalize_mcp_four_layer_tables.py`.
+Then open the generated file and manually add what autogenerate cannot infer:
 
-Use revision id `f2a6c7d8e901` and set `down_revision` to the current head before this
-branch. The migration should:
+1. **Partial unique index** on installs (autogen does not produce `postgresql_where`):
 
-```python
-def upgrade() -> None:
-    op.drop_table("user_mcp_credentials")
-    op.drop_table("workspace_mcp_credentials")
-    op.drop_table("workspace_mcp_overrides")
-    op.drop_table("mcp_servers")
-    op.drop_table("mcp_catalog_connectors")
+   ```python
+   op.create_index(
+       "uq_mcp_connector_install_per_template",
+       "mcp_connector_installs",
+       ["org_id", sa.text("COALESCE(workspace_id, '_org')"), "template_id"],
+       unique=True,
+       postgresql_where=sa.text(
+           "template_id IS NOT NULL AND install_state = 'active'"
+       ),
+   )
+   ```
 
-    # Create mcp_connector_templates, mcp_connector_installs,
-    # mcp_workspace_connector_states, and mcp_credential_grants with the
-    # columns defined in backend/cubebox/models/mcp.py.
-```
+2. **Four `CHECK` constraints** (autogen ignores `CheckConstraint` produced by SQLModel
+   in some versions; verify and add as needed):
 
-Create the four tables with the columns from `backend/cubebox/models/mcp.py`. Keep these
-constraints:
+   - `ck_mcp_connector_installs_scope`: `install_scope IN ('org','workspace')`
+   - `ck_mcp_connector_installs_auth_method`: `auth_method IN ('oauth','static','none')`
+   - `ck_mcp_workspace_connector_states_policy`:
+     `credential_policy IN ('org','workspace','user','none')`
+   - `ck_mcp_credential_grants_scope`: `grant_scope IN ('org','workspace','user')`
 
-```python
-op.create_check_constraint(
-    "ck_mcp_connector_installs_scope",
-    "mcp_connector_installs",
-    "install_scope IN ('org', 'workspace')",
-)
-op.create_check_constraint(
-    "ck_mcp_connector_installs_auth_method",
-    "mcp_connector_installs",
-    "auth_method IN ('oauth', 'static', 'none')",
-)
-op.create_check_constraint(
-    "ck_mcp_workspace_connector_states_policy",
-    "mcp_workspace_connector_states",
-    "credential_policy IN ('org', 'workspace', 'user', 'none')",
-)
-op.create_check_constraint(
-    "ck_mcp_credential_grants_scope",
-    "mcp_credential_grants",
-    "grant_scope IN ('org', 'workspace', 'user')",
-)
-```
+3. **Downgrade**: destructive migration is not reversible. Replace the autogenerated
+   `downgrade()` body with:
 
-For `downgrade()`, drop the four target tables and recreate the old MCP tables only if
-the repository convention requires reversible migrations. If reversible migrations are not
-required for destructive internal changes, raise:
+   ```python
+   raise RuntimeError("Destructive MCP four-layer migration is not reversible")
+   ```
 
-```python
-raise RuntimeError("Destructive MCP four-layer migration is not reversible")
-```
+Do not hard-code the revision hash anywhere; trust whatever Alembic generated.
 
 - [ ] **Step 5: Run migration and model tests**
 
@@ -407,7 +317,7 @@ Expected: migration succeeds and tests pass.
 ```bash
 git add backend/cubebox/models/mcp.py \
         backend/cubebox/models/__init__.py \
-        backend/alembic/versions/f2a6c7d8e901_normalize_mcp_four_layer_tables.py \
+        backend/alembic/versions/*_normalize_mcp_four_layer_tables.py \
         backend/tests/unit/test_mcp_models.py
 git commit -m "feat(mcp): add four-layer connector schema"
 ```
@@ -519,8 +429,14 @@ Edit `backend/cubebox/repositories/mcp.py` so it exports these concrete methods:
 - `MCPCredentialGrantRepository.delete_scope(install_id: str, grant_scope: str,
   workspace_id: str | None, user_id: str | None) -> None`
 
-Use the existing org-scoped repository pattern: every non-template repository receives
-`org_id` in `__init__` and filters by it in every query.
+**Repository scoping note.** The existing `ScopedRepository[T]` (in
+`backend/cubebox/repositories/base.py`) requires `OrgScopedMixin`, which the new MCP
+models cannot use (installs/grants have nullable `workspace_id`; templates have no
+`org_id` at all). Introduce a *new* lightweight org-only base instead — every
+non-template repo takes `org_id` in `__init__`, every query filters by `org_id`,
+and `add()` force-sets `org_id` to defend against cross-org writes. `MCPConnectorTemplate`
+has no org scope. Document the deviation from `ScopedRepository` in a short module
+docstring so future engineers don't try to inherit it.
 
 - [ ] **Step 4: Create template service**
 
@@ -651,163 +567,57 @@ Expected: FAIL because `cubebox.services.mcp_installs` does not exist.
 
 - [ ] **Step 3: Create install service primitives**
 
-Create `backend/cubebox/services/mcp_installs.py`:
+Create `backend/cubebox/services/mcp_installs.py`. The module exposes:
 
-```python
-"""Connector install, workspace state, and grant service."""
+- A frozen dataclass `MCPInstallDefaults(auth_status: str, credential_policy: str)`.
+- A pure function `install_defaults_for_auth_method(auth_method, requested_policy)
+  -> MCPInstallDefaults` with these invariants (the existing unit tests are the contract):
+  - `auth_method=="none"` → `auth_status="not_required"`, `credential_policy="none"`
+    (regardless of what was requested — "none" must never become user-scope).
+  - Otherwise → `auth_status="pending"`, `credential_policy=requested_policy`.
+- A class `MCPConnectorInstallService(install_repo, state_repo, grant_repo,
+  cred_service, *, org_id, actor_user_id)` with these methods:
+  - `create_from_template_for_workspace(*, template, workspace_id, auth_method,
+    credential_policy)` — writes one install with `install_scope="workspace"`,
+    copies `tool_citation_defaults → tool_citations`, hashes the server URL
+    (reuse `cubebox.mcp._constants.server_url_hash`), then upserts a
+    `WorkspaceConnectorState(enabled=True, enablement_source="workspace_manual")`
+    in the same transaction (atomically — failure rolls both back).
+  - `create_from_template_for_org(*, template, auth_method, credential_policy,
+    distribution)` — analogous to above but `install_scope="org"`,
+    `workspace_id=None`; if `distribution.mode == "auto"` (all current workspaces)
+    or `"selected"` (list of `workspace_ids`), create `WorkspaceConnectorState`
+    rows with `enablement_source="admin_auto"`/`"admin_manual"` accordingly.
+  - `create_static_grant(*, install_id, grant_scope, plaintext, workspace_id=None,
+    user_id=None, name=None)` — stores the secret in the vault via
+    `CredentialService.create(kind=CREDENTIAL_KIND_MCP, ...)`, then writes the
+    grant row pointing at the vault id. Validates scope-vs-fk combination
+    (`workspace` ⇒ `workspace_id`, `user` ⇒ `user_id`).
+  - `disconnect_grant(*, install_id, grant_scope, workspace_id=None, user_id=None)`
+    — deletes the grant row (and OAuth-side revoke when available). Does **not**
+    touch install or workspace state.
+  - `uninstall(install_id)` — flips `install_state="uninstalled"`,
+    `auth_status="disconnected"`, bumps `updated_at`. Does not delete workspace
+    state rows (the effective-state service treats `install_state != "active"`
+    as unusable, per the spec's reason matrix).
 
-from dataclasses import dataclass
-from datetime import UTC, datetime
-
-from cubebox.mcp._constants import CREDENTIAL_KIND_MCP
-from cubebox.mcp._constants import server_url_hash
-from cubebox.models import (
-    MCPConnectorInstall,
-    MCPConnectorTemplate,
-    MCPCredentialGrant,
-    MCPWorkspaceConnectorState,
-)
-from cubebox.repositories.mcp import (
-    MCPConnectorInstallRepository,
-    MCPCredentialGrantRepository,
-    MCPWorkspaceConnectorStateRepository,
-)
-from cubebox.services.credential import CredentialService
-
-
-@dataclass(frozen=True, slots=True)
-class MCPInstallDefaults:
-    auth_status: str
-    credential_policy: str
-
-
-def install_defaults_for_auth_method(
-    auth_method: str,
-    requested_policy: str,
-) -> MCPInstallDefaults:
-    if auth_method == "none":
-        return MCPInstallDefaults(auth_status="not_required", credential_policy="none")
-    return MCPInstallDefaults(auth_status="pending", credential_policy=requested_policy)
-
-
-class MCPConnectorInstallService:
-    def __init__(
-        self,
-        *,
-        install_repo: MCPConnectorInstallRepository,
-        state_repo: MCPWorkspaceConnectorStateRepository,
-        grant_repo: MCPCredentialGrantRepository,
-        cred_service: CredentialService,
-        org_id: str,
-        actor_user_id: str,
-    ) -> None:
-        self._install_repo = install_repo
-        self._state_repo = state_repo
-        self._grant_repo = grant_repo
-        self._cred_service = cred_service
-        self._org_id = org_id
-        self._actor_user_id = actor_user_id
-
-    async def create_from_template_for_workspace(
-        self,
-        *,
-        template: MCPConnectorTemplate,
-        workspace_id: str,
-        auth_method: str,
-        credential_policy: str,
-    ) -> MCPConnectorInstall:
-        defaults = install_defaults_for_auth_method(auth_method, credential_policy)
-        install = await self._install_repo.add(
-            MCPConnectorInstall(
-                org_id=self._org_id,
-                template_id=template.id,
-                install_scope="workspace",
-                workspace_id=workspace_id,
-                name=template.name,
-                server_url=template.server_url,
-                server_url_hash=server_url_hash(template.server_url),
-                transport=template.transport,
-                auth_method=auth_method,
-                default_credential_policy=defaults.credential_policy,
-                auth_status=defaults.auth_status,
-                discovery_status="not_run",
-                tool_citations=dict(template.tool_citation_defaults or {}),
-                created_by_user_id=self._actor_user_id,
-            )
-        )
-        await self._state_repo.upsert(
-            workspace_id=workspace_id,
-            install_id=install.id,
-            enabled=True,
-            credential_policy=defaults.credential_policy,
-            enablement_source="workspace_manual",
-            updated_by_user_id=self._actor_user_id,
-        )
-        return install
-
-    async def create_static_grant(
-        self,
-        *,
-        install_id: str,
-        grant_scope: str,
-        plaintext: str,
-        workspace_id: str | None = None,
-        user_id: str | None = None,
-        name: str | None = None,
-    ) -> MCPCredentialGrant:
-        credential_id = await self._cred_service.create(
-            kind=CREDENTIAL_KIND_MCP,
-            name=name or f"mcp:{install_id}:{grant_scope}",
-            plaintext=plaintext,
-        )
-        return await self._grant_repo.add(
-            MCPCredentialGrant(
-                org_id=self._org_id,
-                install_id=install_id,
-                grant_scope=grant_scope,
-                workspace_id=workspace_id,
-                user_id=user_id,
-                credential_id=credential_id,
-                grant_status="valid",
-                created_by_user_id=self._actor_user_id,
-            )
-        )
-
-    async def uninstall(self, install_id: str) -> MCPConnectorInstall:
-        install = await self._install_repo.get(install_id)
-        if install is None:
-            raise ValueError("connector_install_not_found")
-        install.install_state = "uninstalled"
-        install.auth_status = "disconnected"
-        install.updated_at = datetime.now(UTC)
-        return await self._install_repo.update(install)
-```
+No fall-back fan-out: a `credential_policy=user` request must never write or read
+an `org`-scope grant; enforce this at the service boundary as a positive assertion,
+not just an absence of code.
 
 - [ ] **Step 4: Add dependency providers**
 
-Edit `backend/cubebox/mcp/dependencies.py` and add:
+In `backend/cubebox/mcp/dependencies.py`, add two FastAPI dependency providers
+following the patterns already in that file:
 
-```python
-async def get_connector_template_service(
-    session: AsyncSession = Depends(get_session),
-) -> MCPConnectorTemplateService:
-    return MCPConnectorTemplateService(MCPConnectorTemplateRepository(session))
+- `get_connector_template_service(session) -> MCPConnectorTemplateService` — global,
+  no org scope.
+- `get_connector_install_service(session, cred_service, ctx) ->
+  MCPConnectorInstallService` — `ctx` from the existing `require_member` /
+  `request_context` dependency; instantiate the three repos (install, state, grant)
+  with `org_id=ctx.org_id`, pass `actor_user_id=ctx.user.id`.
 
-
-async def get_connector_install_service(
-    session: AsyncSession = Depends(get_session),
-    cred_service: CredentialService = Depends(get_credential_service),
-    ctx: RequestContext = Depends(require_member),
-) -> MCPConnectorInstallService:
-    return MCPConnectorInstallService(
-        install_repo=MCPConnectorInstallRepository(session, org_id=ctx.org_id),
-        state_repo=MCPWorkspaceConnectorStateRepository(session, org_id=ctx.org_id),
-        grant_repo=MCPCredentialGrantRepository(session, org_id=ctx.org_id),
-        cred_service=cred_service,
-        org_id=ctx.org_id,
-        actor_user_id=ctx.user.id,
-    )
-```
+Remove old `get_*catalog*` / `get_*override*` providers from the same module.
 
 - [ ] **Step 5: Run service tests**
 
@@ -831,13 +641,14 @@ git commit -m "feat(mcp): add install state and grant services"
 
 ---
 
-## Task 4: Final API Routes Only
+## Task 4: Final API Routes (Including OAuth Alignment)
 
 **Files:**
 
 - Modify: `backend/cubebox/api/schemas/mcp.py`
 - Modify: `backend/cubebox/api/routes/v1/admin_mcp.py`
 - Modify: `backend/cubebox/api/routes/v1/ws_mcp.py`
+- Modify: `backend/cubebox/api/routes/v1/mcp_oauth.py`
 - Modify: `backend/cubebox/api/app.py`
 - Delete: `backend/cubebox/api/routes/v1/mcp_catalog.py`
 - Modify: `backend/tests/unit/test_admin_mcp_routes.py`
@@ -846,42 +657,51 @@ git commit -m "feat(mcp): add install state and grant services"
 
 - [ ] **Step 1: Add route registration tests**
 
-Replace the MCP route assertions in `backend/tests/unit/test_ws_mcp_routes.py` with:
+Replace the MCP route assertions in `backend/tests/unit/test_ws_mcp_routes.py` with
+the workspace-side contract. The test must assert each of the following is registered:
 
-```python
-def test_workspace_mcp_four_layer_routes_are_registered() -> None:
-    from cubebox.api.app import create_app
+- `GET    /api/v1/ws/{workspace_id}/mcp/templates`
+- `GET    /api/v1/ws/{workspace_id}/mcp/connectors`
+- `POST   /api/v1/ws/{workspace_id}/mcp/installs`
+- `DELETE /api/v1/ws/{workspace_id}/mcp/installs/{install_id}`  (workspace-local uninstall)
+- `PATCH  /api/v1/ws/{workspace_id}/mcp/installs/{install_id}/state`
+- `POST   /api/v1/ws/{workspace_id}/mcp/installs/{install_id}/grants/me`
+- `DELETE /api/v1/ws/{workspace_id}/mcp/installs/{install_id}/grants/me`
+- `POST   /api/v1/ws/{workspace_id}/mcp/installs/{install_id}/grants/me/oauth/start`
+- `POST   /api/v1/ws/{workspace_id}/mcp/installs/{install_id}/grants/workspace`
+- `DELETE /api/v1/ws/{workspace_id}/mcp/installs/{install_id}/grants/workspace`
+- `POST   /api/v1/ws/{workspace_id}/mcp/installs/{install_id}/grants/workspace/oauth/start`
 
-    app = create_app()
-    paths = {route.path for route in app.routes}
+And negative assertions that `/mcp/catalog`, `/mcp/org-installs/.../override`, and
+any `/mcp/servers/...` are absent.
 
-    assert "/api/v1/ws/{workspace_id}/mcp/templates" in paths
-    assert "/api/v1/ws/{workspace_id}/mcp/installs" in paths
-    assert "/api/v1/ws/{workspace_id}/mcp/installs/{install_id}/state" in paths
-    assert "/api/v1/ws/{workspace_id}/mcp/installs/{install_id}/grants/me" in paths
-    assert "/api/v1/ws/{workspace_id}/mcp/installs/{install_id}/grants/workspace" in paths
-    assert "/api/v1/ws/{workspace_id}/mcp/connectors" in paths
-    assert "/api/v1/ws/{workspace_id}/mcp/catalog" not in paths
-    assert "/api/v1/ws/{workspace_id}/mcp/org-installs/{install_id}/override" not in paths
-```
+Replace the MCP route assertions in `backend/tests/unit/test_admin_mcp_routes.py`
+with the admin-side contract. Required:
 
-Replace the MCP route assertions in `backend/tests/unit/test_admin_mcp_routes.py` with:
+- `GET    /api/v1/admin/mcp/templates`                  (template library)
+- `GET    /api/v1/admin/mcp/installs`                   (list org installs)
+- `POST   /api/v1/admin/mcp/installs`                   (create org install, with optional
+   `template_id` and `auto_enable` distribution payload)
+- `GET    /api/v1/admin/mcp/installs/{install_id}`      (detail)
+- `PATCH  /api/v1/admin/mcp/installs/{install_id}`      (edit default_credential_policy,
+   auto_enroll_new_workspaces, headers, etc.)
+- `DELETE /api/v1/admin/mcp/installs/{install_id}`      (uninstall)
+- `POST   /api/v1/admin/mcp/installs/{install_id}/grants/org`
+- `DELETE /api/v1/admin/mcp/installs/{install_id}/grants/org`
+- `POST   /api/v1/admin/mcp/installs/{install_id}/grants/org/oauth/start`
 
-```python
-def test_admin_mcp_four_layer_routes_are_registered() -> None:
-    from cubebox.api.app import create_app
+Plus a public route:
 
-    app = create_app()
-    paths = {route.path for route in app.routes}
+- `GET    /api/v1/mcp/templates`  (authenticated, but not workspace-scoped — used
+   by the template library / global picker; may attach `install_summary` for the
+   caller's current org when present).
 
-    assert "/api/v1/admin/mcp/templates" in paths
-    assert "/api/v1/admin/mcp/templates/{template_id}/installs" in paths
-    assert "/api/v1/admin/mcp/installs" in paths
-    assert "/api/v1/admin/mcp/installs/{install_id}" in paths
-    assert "/api/v1/admin/mcp/installs/{install_id}/grants/org" in paths
-    assert "/api/v1/admin/mcp/catalog/{catalog_id}/install" not in paths
-    assert "/api/v1/admin/mcp/servers/{server_id}/overrides" not in paths
-```
+And negative assertions: no `/admin/mcp/catalog/...`, no `/admin/mcp/servers/...`,
+no `/admin/mcp/.../overrides`.
+
+Methods are part of the contract: do **not** use `PUT` for grant create. POST creates
+or replaces a scoped grant; DELETE disconnects it. This matches the spec's API
+shape and lets the same body shape be reused for replace-on-rotation.
 
 - [ ] **Step 2: Run route tests and confirm old route names still exist**
 
@@ -896,47 +716,78 @@ Expected: FAIL because current routes still expose old MCP paths.
 
 - [ ] **Step 3: Replace MCP schemas**
 
-Edit `backend/cubebox/api/schemas/mcp.py` so public schemas use final names.
-Use `Literal["org", "workspace", "user", "none"]` for credential policy fields and
-`Literal["oauth", "static", "none"]` for auth method fields.
-
-The response schemas must include these fields:
+Rewrite `backend/cubebox/api/schemas/mcp.py` using final nouns. Use
+`Literal["org","workspace","user","none"]` for credential policies,
+`Literal["oauth","static","none"]` for auth methods. The contracts (one Pydantic
+model per item; subagent decides field order, base class, etc.):
 
 - `MCPConnectorTemplateOut`: `template_id`, `slug`, `name`, `provider`, `description`,
   `server_url`, `transport`, `supported_auth_methods`, `default_credential_policy`,
   `static_form_schema`, `status`.
 - `MCPConnectorInstallOut`: `install_id`, `template_id`, `install_scope`, `workspace_id`,
   `name`, `server_url`, `transport`, `auth_method`, `default_credential_policy`,
-  `auth_status`, `discovery_status`, `install_state`, `tool_count`, `last_error`.
+  `auth_status`, `discovery_status`, `install_state`, `tool_count` (derived: `len(tools_cache)`),
+  `last_error`, `auto_enroll_new_workspaces`.
 - `MCPWorkspaceConnectorStateOut`: `workspace_id`, `install_id`, `enabled`,
   `credential_policy`, `enablement_source`.
 - `MCPCredentialGrantStatusOut`: `install_id`, `grant_scope`, `workspace_id`, `user_id`,
-  `grant_status`, `has_value`, `expires_at`.
-- `MCPEffectiveConnectorOut`: `template`, `install`, `workspace_state`, `credential_policy`,
-  `credential_availability`, `credential_source`, `usable`, `reason`.
+  `grant_status`, `has_value` (true iff vault still holds the credential),
+  `expires_at`.
+- `MCPEffectiveConnectorOut` (per spec §API Shape example): `template` (nullable for
+  custom installs), `install`, `workspace_state`, `credential_policy`,
+  `required_grant_scope`, `credential_availability`
+  (`available` | `missing` | `not_required`), `credential_source` (`org` | `workspace` |
+  `user` | `null`), `usable`, `reason`.
+
+Request schemas should also exist for:
+
+- `AdminCreateInstallIn`: `template_id?`, `install_scope` (`org`),
+  `auth_method`, `default_credential_policy`, `auto_enable?: {mode: "all"|"selected"|"none",
+  workspace_ids?: list[str]}`, optional `server_url`/`transport`/`headers` for custom.
+- `PatchInstallIn`: subset of mutable install fields (`default_credential_policy`,
+  `auto_enroll_new_workspaces`, `headers`, `name`, ...). Reject any unknown key.
+- `PatchWorkspaceStateIn`: `enabled?`, `credential_policy?`.
+- `CreateGrantIn` (three flavors for org / workspace / me): `credential_plaintext`
+  for static, `oauth_callback_state` for OAuth resolution, or empty body for OAuth-start.
 
 - [ ] **Step 4: Replace admin routes**
 
-Edit `backend/cubebox/api/routes/v1/admin_mcp.py` to expose these routes:
+Rewrite `backend/cubebox/api/routes/v1/admin_mcp.py` to expose the admin contract
+from Step 1 (template list, install CRUD, grant POST/DELETE, oauth/start). Each
+handler delegates to `MCPConnectorInstallService` / `MCPConnectorTemplateService`;
+no DB queries inline.
 
-- `GET /api/v1/admin/mcp/templates`
-- `POST /api/v1/admin/mcp/templates/{template_id}/installs`
-- `GET /api/v1/admin/mcp/installs`
-- `DELETE /api/v1/admin/mcp/installs/{install_id}`
-- `PUT /api/v1/admin/mcp/installs/{install_id}/grants/org`
+Also register the public template route:
 
-Remove server/override route handlers from this module.
+- `GET /api/v1/mcp/templates` — authenticated; returns templates plus an optional
+  `install_summary` (count of active installs for the caller's org) for each row.
+
+Existing `mcp_oauth.py` start/callback handlers must be **aligned** in this task:
+
+- The OAuth start endpoints now live at `…/grants/<scope>/oauth/start`; the
+  callback writes an `MCPCredentialGrant` whose `grant_scope`, `workspace_id`,
+  and `user_id` are recovered from the OAuth state token (not from session state).
+- The callback must not write to `mcp_servers` or `workspace_mcp_credentials`
+  (those tables are gone). Update its imports/repositories accordingly.
+- The callback updates the install's `auth_status` from `pending` → `authorized`
+  only when the grant being created has `grant_scope` matching
+  `install.default_credential_policy`'s required scope; otherwise leave
+  `auth_status` alone — the install can have multiple per-user grants without
+  the install itself becoming "authorized".
+
+Remove server/override/catalog handlers from this module.
 
 - [ ] **Step 5: Replace workspace routes**
 
-Edit `backend/cubebox/api/routes/v1/ws_mcp.py` to expose these routes:
+Rewrite `backend/cubebox/api/routes/v1/ws_mcp.py` to expose the workspace contract
+from Step 1. Authorization rules from spec §User Roles And Permissions:
 
-- `GET /api/v1/ws/{workspace_id}/mcp/templates`
-- `POST /api/v1/ws/{workspace_id}/mcp/installs`
-- `PATCH /api/v1/ws/{workspace_id}/mcp/installs/{install_id}/state`
-- `PUT /api/v1/ws/{workspace_id}/mcp/installs/{install_id}/grants/me`
-- `PUT /api/v1/ws/{workspace_id}/mcp/installs/{install_id}/grants/workspace`
-- `GET /api/v1/ws/{workspace_id}/mcp/connectors`
+- All routes require workspace membership (`require_member`).
+- `POST /installs`, `DELETE /installs/{id}`, `PATCH /installs/{id}/state`, and
+  the workspace-scope grant routes require `role=admin` on the workspace.
+- `*/grants/me*` routes are open to any member.
+- A workspace member cannot delete a workspace-local install they did not create
+  unless they are workspace admin.
 
 Remove old server/catalog/org-install override handlers from this module.
 
@@ -968,6 +819,7 @@ Expected: all tests pass.
 git add backend/cubebox/api/schemas/mcp.py \
         backend/cubebox/api/routes/v1/admin_mcp.py \
         backend/cubebox/api/routes/v1/ws_mcp.py \
+        backend/cubebox/api/routes/v1/mcp_oauth.py \
         backend/cubebox/api/app.py \
         backend/tests/unit/test_admin_mcp_routes.py \
         backend/tests/unit/test_ws_mcp_routes.py
@@ -984,13 +836,13 @@ git commit -m "feat(mcp): replace catalog routes with four-layer API"
 - Modify: `backend/cubebox/mcp/cubepi_discovery.py`
 - Modify: `backend/cubebox/mcp/cubepi_runtime.py`
 - Modify: `backend/cubebox/streams/run_manager.py`
-- Create: `backend/tests/unit/mcp/test_effective_state.py`
-- Create: `backend/tests/unit/mcp/test_effective_service.py`
+- Create: `backend/tests/unit/test_mcp_effective_state.py`
+- Create: `backend/tests/unit/test_mcp_effective_service.py`
 - Modify: `backend/tests/unit/test_mcp_cubepi_runtime.py`
 
 - [ ] **Step 1: Add effective state tests**
 
-Create `backend/tests/unit/mcp/test_effective_state.py`:
+Create `backend/tests/unit/test_mcp_effective_state.py`:
 
 ```python
 from cubebox.mcp.effective import MCPEffectiveInput, MCPGrantInput, compute_effective_state
@@ -1112,52 +964,81 @@ def compute_effective_state(value: MCPEffectiveInput) -> MCPEffectiveResult:
 
 - [ ] **Step 3: Add DB-backed effective service**
 
-Extend `backend/cubebox/mcp/effective.py` with `MCPEffectiveConnectorService`.
+Extend `backend/cubebox/mcp/effective.py` with `MCPEffectiveConnectorService`. This
+is the **only** place in the codebase that joins template + install + workspace state
++ grant to decide runtime usability. Two public methods:
 
-It should:
+- `list_for_workspace_user(workspace_id, user_id, *, include_unusable: bool=True)
+  -> list[MCPEffectiveConnectorDTO]` — for UI/admin/diagnostics. Returns every
+  install visible to the workspace (org installs that have a `WorkspaceConnectorState`
+  row, plus all workspace-local installs in the same workspace). When
+  `include_unusable=False`, drop rows whose `compute_effective_state` returns
+  `usable=False`.
+- `list_runtime_specs(workspace_id, user_id) -> list[MCPRuntimeConnectorSpec]` —
+  for the agent runtime. Returns only `usable=True` rows with the minimum fields
+  the loader needs (`install_id`, `server_url`, `transport`, `auth_method`,
+  resolved `grant_scope`, `credential_id` reference, `tool_citations`,
+  `tools_cache`).
 
-- load active org installs plus workspace installs;
-- load `MCPWorkspaceConnectorState` for each install and workspace;
-- load the required grant from `MCPCredentialGrantRepository`;
-- return unusable rows when `include_unusable=True`;
-- return only usable rows to runtime.
+Algorithm (sequential reads OK; everything is per-request and small):
 
-The service exposes two methods:
+1. Resolve the caller's `org_id` from workspace membership.
+2. Load active workspace-local installs for this workspace and all active org
+   installs in this org. Skip rows where `install_state != "active"`.
+3. For each install, look up its `WorkspaceConnectorState` for `(workspace_id, install_id)`.
+   Missing state for an org install ⇒ `enabled=False` (don't synthesize a row).
+   Missing state for a workspace install ⇒ defect — log + treat as `enabled=False`.
+4. Resolve the **required grant** by combining `state.credential_policy` (if state
+   exists) else `install.default_credential_policy`:
+   - `none` ⇒ no grant fetch; `credential_availability="not_required"`.
+   - `org` ⇒ fetch `(install_id, grant_scope='org')`.
+   - `workspace` ⇒ fetch `(install_id, 'workspace', workspace_id)`.
+   - `user` ⇒ fetch `(install_id, 'user', workspace_id, user_id)`.
+   No fall-back across scopes. The presence of an org grant must not flip a
+   user-policy row to usable.
+5. Load template by `install.template_id` (if any). Custom installs (template_id
+   `NULL`) get `template_status=None`; `compute_effective_state` must treat
+   `None` as "no template gate" (already implemented in the pure function).
+6. For OAuth grants that look expired (`expires_at < now`), call
+   `OAuthTokenManager.get_access_token(...)` — it refreshes via the
+   `refresh_credential_id` and updates the grant in place. If refresh fails,
+   set `grant_status="expired"` and let `compute_effective_state` mark unusable
+   with reason `grant_expired`.
+7. Hand off to `compute_effective_state` per row and assemble the DTO list.
 
-- `list_for_workspace_user(workspace_id: str, user_id: str, include_unusable: bool)
-  -> list[MCPEffectiveConnectorDTO]`
-- `list_runtime_specs(workspace_id: str, user_id: str) -> list[MCPRuntimeConnectorSpec]`
+Performance: one round-trip per layer (templates, installs, states, grants) using
+`IN (...)` filters keyed by the install id set; do not N+1 per install.
 
-- [ ] **Step 4: Wire OAuth refresh in runtime token resolution**
+- [ ] **Step 4: Wire credential resolution in the runtime loader**
 
-Edit `backend/cubebox/mcp/cubepi_runtime.py` so `load_workspace_mcp_tools_for_cubepi`
-accepts:
+`backend/cubebox/mcp/cubepi_runtime.py::load_workspace_mcp_tools_for_cubepi` should
+take `effective_service: MCPEffectiveConnectorService` and a non-optional
+`token_manager: OAuthTokenManager`. For each `MCPRuntimeConnectorSpec` from
+`list_runtime_specs(...)`, resolve the connection credential by `auth_method`:
 
-```python
-effective_service: MCPEffectiveConnectorService
-token_manager: OAuthTokenManager | None
-```
+- `oauth` → `token_manager.get_access_token(install_id, grant_scope, workspace_id,
+  user_id)`; the token manager handles refresh + persistence already.
+- `static` → fetch the vault row by `spec.credential_id` via `CredentialService`,
+  decrypt, inject into the configured header template.
+- `none` → mint a short-lived cubebox identity token via the existing
+  `cubebox.mcp.user_token` helper (the same one `mcp_oauth` already uses for
+  identity flow); do **not** look for a grant.
 
-For OAuth grants, call:
-
-```python
-token = await token_manager.get_access_token(
-    install_id=spec.install_id,
-    grant_scope=spec.grant_scope,
-    workspace_id=workspace_id,
-    user_id=user_id,
-)
-```
-
-For static grants, decrypt `spec.credential_id` through `CredentialService`.
-For no-auth connectors, sign the short-lived Cubebox identity token.
+Discovery/refresh failures should not crash the loader — log + skip + continue,
+matching the current behavior.
 
 - [ ] **Step 5: Wire run manager**
 
-Edit `backend/cubebox/streams/run_manager.py` to construct `MCPEffectiveConnectorService`
-inside the MCP tools block and pass it to `load_workspace_mcp_tools_for_cubepi`.
-Construct `OAuthTokenManager` using the same `_build_token_manager_for_org` helper used by
-admin MCP dependencies.
+In `backend/cubebox/streams/run_manager.py`, inside the per-run MCP tools block:
+
+- Build `MCPEffectiveConnectorService` for the current `(org_id, workspace_id, user_id)`.
+- Build `OAuthTokenManager` via the existing
+  `cubebox.mcp.dependencies._build_token_manager_for_org` helper (confirmed to
+  exist; if private, expose a thin wrapper rather than reaching into the
+  underscore name).
+- Pass both into `load_workspace_mcp_tools_for_cubepi`.
+
+Remove any references to old install/server tables from this block.
 
 - [ ] **Step 6: Run effective and runtime tests**
 
@@ -1179,8 +1060,8 @@ git add backend/cubebox/mcp/effective.py \
         backend/cubebox/mcp/cubepi_discovery.py \
         backend/cubebox/mcp/cubepi_runtime.py \
         backend/cubebox/streams/run_manager.py \
-        backend/tests/unit/mcp/test_effective_state.py \
-        backend/tests/unit/mcp/test_effective_service.py \
+        backend/tests/unit/test_mcp_effective_state.py \
+        backend/tests/unit/test_mcp_effective_service.py \
         backend/tests/unit/test_mcp_cubepi_runtime.py
 git commit -m "feat(mcp): derive runtime connectors from effective state"
 ```
@@ -1195,114 +1076,103 @@ git commit -m "feat(mcp): derive runtime connectors from effective state"
 - Create: `backend/tests/e2e/test_mcp_four_layer_runtime.py`
 - Modify: `backend/tests/e2e/conftest.py`
 
-- [ ] **Step 1: Add template fixtures**
+**Goal:** every numbered flow in spec §Testing Strategy lands as an E2E test.
 
-Append to `backend/tests/e2e/conftest.py`:
+- [ ] **Step 1: Add fixtures**
 
-```python
-@pytest_asyncio.fixture
-async def noauth_template_id(db_session: AsyncSession) -> AsyncIterator[str]:
-    from cubebox.repositories.mcp import MCPConnectorTemplateRepository
+In `backend/tests/e2e/conftest.py`, add the fixtures the tests below need.
+Reuse the existing E2E plumbing (the auth/client/workspace fixtures already in this
+file — do not invent new auth flow). Required new fixtures:
 
-    row = await MCPConnectorTemplateRepository(db_session).upsert_by_slug(
-        slug="noauth-e2e",
-        name="NoAuth E2E",
-        description="No auth connector.",
-        provider="Cubebox",
-        server_url="https://noauth-e2e.example.com/mcp",
-        transport="streamable_http",
-        supported_auth_methods=["none"],
-        default_credential_policy="none",
-    )
-    await db_session.commit()
-    yield row.id
-```
+- `noauth_template_id` — seeds a `slug="noauth-e2e"` template with
+  `supported_auth_methods=["none"]`, `default_credential_policy="none"`.
+- `static_template_id` — seeds a `slug="static-e2e"` template with
+  `supported_auth_methods=["static"]`, `default_credential_policy="user"`.
+- `oauth_template_id` — seeds a template with `supported_auth_methods=["oauth"]`
+  and minimal OAuth metadata. Used by the OAuth-refresh test.
+- `admin_client` and `member_client` — workspace clients whose membership role
+  is `admin` and `member` respectively, sharing the same workspace. Used by the
+  user-isolation test (one as admin doing the install, the other as a second
+  user member). If a two-user fixture pattern doesn't yet exist in the file,
+  add the minimum scaffolding (register second user, accept invite) reusing the
+  existing helpers.
 
-- [ ] **Step 2: Add no-auth route E2E**
+- [ ] **Step 2: No-auth happy path (spec test #1, #5-no-auth variant)**
 
-Create `backend/tests/e2e/test_mcp_four_layer_routes.py`:
+Test `test_workspace_installs_noauth_template_and_gets_usable_connector` in
+`backend/tests/e2e/test_mcp_four_layer_routes.py`:
 
-```python
-import httpx
-import pytest
+- Workspace admin POSTs `/installs` with the no-auth template id.
+- GET `/connectors` returns a row whose `enabled=true`, `credential_policy="none"`,
+  `credential_availability="not_required"`, `usable=true`.
+- Runtime smoke (in the runtime-side test file): `list_runtime_specs(...)`
+  returns the connector and no grant lookup is performed.
 
+- [ ] **Step 3: User-policy scope isolation (spec test #3)**
 
-@pytest.mark.usefixtures("stub_discover_tools")
-async def test_workspace_installs_noauth_template_and_gets_usable_connector(
-    client: httpx.AsyncClient,
-    workspace_id: str,
-    noauth_template_id: str,
-) -> None:
-    install = await client.post(
-        f"/api/v1/ws/{workspace_id}/mcp/installs",
-        json={"template_id": noauth_template_id, "auth_method": "none"},
-    )
-    assert install.status_code == 201, install.text
+Two assertions in one test:
 
-    connectors = await client.get(f"/api/v1/ws/{workspace_id}/mcp/connectors")
-    assert connectors.status_code == 200, connectors.text
-    row = next(
-        item
-        for item in connectors.json()["items"]
-        if item["install"]["install_id"] == install.json()["install_id"]
-    )
-    assert row["workspace_state"]["enabled"] is True
-    assert row["credential_policy"] == "none"
-    assert row["credential_availability"] == "not_required"
-    assert row["usable"] is True
-```
+1. Org admin installs static template with `credential_policy="org"` + org-grant
+   plaintext. Workspace admin (`admin_client`) flips state to
+   `credential_policy="user"`. Without any user grant, both users see
+   `credential_availability="missing"` and `usable=false`. The pre-existing
+   org grant must **not** satisfy a user-policy row.
+2. User A (`admin_client`'s user) POSTs `/grants/me` with their token. User A
+   then sees `usable=true`; user B (`member_client`) still sees
+   `credential_availability="missing"` and `usable=false` for the same install.
 
-- [ ] **Step 3: Add user grant isolation E2E**
+- [ ] **Step 4: Policy change drops the previous scope's grant from runtime
+  (spec test #4)**
 
-Append to `backend/tests/e2e/test_mcp_four_layer_routes.py`:
+- Org install with `credential_policy="org"` and a valid org grant.
+- Workspace flips `credential_policy` to `"workspace"` via PATCH state.
+- GET `/connectors` shows `credential_source` is no longer `org`; without a
+  workspace grant, `usable=false`, reason `credential_missing`.
 
-```python
-@pytest.mark.usefixtures("stub_discover_tools")
-async def test_user_grant_policy_does_not_fall_back_to_org_grant(
-    admin_client: tuple[httpx.AsyncClient, str],
-    github_template_id: str,
-) -> None:
-    client, workspace_id = admin_client
-    install = await client.post(
-        f"/api/v1/admin/mcp/templates/{github_template_id}/installs",
-        json={
-            "auth_method": "static",
-            "credential_policy": "org",
-            "credential_plaintext": "org-token",
-        },
-    )
-    assert install.status_code == 201, install.text
-    install_id = install.json()["install_id"]
+- [ ] **Step 5: Disconnect keeps install/state (spec test #5)**
 
-    state = await client.patch(
-        f"/api/v1/ws/{workspace_id}/mcp/installs/{install_id}/state",
-        json={"enabled": True, "credential_policy": "user"},
-    )
-    assert state.status_code == 200, state.text
+- After Step 4's setup, DELETE the org grant.
+- Install row still exists with `install_state="active"`; `WorkspaceConnectorState`
+  row still has `enabled=true`. Effective state for that workspace returns
+  `usable=false`, reason `credential_missing`. Re-POSTing a grant immediately
+  flips back to usable without re-install.
 
-    connectors = await client.get(f"/api/v1/ws/{workspace_id}/mcp/connectors")
-    row = next(
-        item
-        for item in connectors.json()["items"]
-        if item["install"]["install_id"] == install_id
-    )
-    assert row["credential_policy"] == "user"
-    assert row["credential_availability"] == "missing"
-    assert row["usable"] is False
-```
+- [ ] **Step 6: Uninstall then reinstall same template (spec test #6)**
 
-- [ ] **Step 4: Run backend E2E tests**
+- DELETE the install. Verify `install_state="uninstalled"`,
+  `WorkspaceConnectorState` rows are no longer returned by `GET /connectors`.
+- POST a new install from the same template — should succeed (partial unique
+  index ignores uninstalled rows).
 
-Run:
+- [ ] **Step 7: OAuth refresh before runtime returns usable (spec test #7)**
+
+In `backend/tests/e2e/test_mcp_four_layer_runtime.py`, stub `OAuthTokenManager`'s
+HTTP refresh call (the existing OAuth tests already monkeypatch the provider
+endpoint — reuse that fixture). Insert a user grant with `expires_at` in the
+past and a fake refresh-credential. `list_runtime_specs(...)` should:
+
+1. Trigger a refresh call (assert the mock got hit exactly once).
+2. Return the connector as usable with the freshly-rotated `credential_id`
+   stored on the grant row.
+3. Leave `grant_status="valid"`.
+
+- [ ] **Step 8: Invalid credential policy is rejected at API boundary
+  (spec test #8)**
+
+POST `/installs` with `credential_policy="bogus"` returns 422 with a field
+error pointing at `credential_policy`; no rows are written.
+
+- [ ] **Step 9: Run backend E2E tests**
 
 ```bash
 cd backend
-uv run pytest -q tests/e2e/test_mcp_four_layer_routes.py
+uv run pytest -q tests/e2e/test_mcp_four_layer_routes.py \
+                 tests/e2e/test_mcp_four_layer_runtime.py
 ```
 
 Expected: all tests pass.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 10: Commit**
 
 ```bash
 git add backend/tests/e2e/conftest.py \
@@ -1514,35 +1384,33 @@ Ready
 
 Remove visible UI copy containing `Catalog`, `Override`, `catalog`, or `override`.
 
-- [ ] **Step 3: Add message keys**
+- [ ] **Step 3: Replace message keys (both locales together — i18n parity check is in CI)**
 
-Add to `frontend/packages/web/messages/en.json` under `mcp`:
+Add the new keys (English / 简体中文) to `frontend/packages/web/messages/en.json` and
+`frontend/packages/web/messages/zh.json` under `mcp`:
 
-```json
-"templates": "Connector templates",
-"installs": "Connector installs",
-"workspaceState": "Workspace state",
-"credentialPolicy": "Credential policy",
-"orgGrant": "Org grant",
-"workspaceGrant": "Workspace grant",
-"myGrant": "My grant",
-"needsCredential": "Needs your credential",
-"ready": "Ready"
+| Key | en | zh |
+| --- | --- | --- |
+| `templates` | Connector templates | 连接器模板 |
+| `installs` | Connector installs | 连接器安装 |
+| `workspaceState` | Workspace state | 工作区状态 |
+| `credentialPolicy` | Credential policy | 凭证策略 |
+| `orgGrant` | Org grant | 组织授权 |
+| `workspaceGrant` | Workspace grant | 工作区授权 |
+| `myGrant` | My grant | 我的授权 |
+| `needsCredential` | Needs your credential | 需要你的凭证 |
+| `ready` | Ready | 可用 |
+
+In the same edit, **remove every key whose path starts with `mcpCatalog.*` or
+`mcpOverride*`** from both files — the i18n parity check (added in commit
+`884920a0`) will fail CI if the two locales diverge. After editing, run:
+
+```bash
+cd frontend
+pnpm --filter @cubebox/web i18n:check  # or whatever the parity script is named
 ```
 
-Add to `frontend/packages/web/messages/zh.json` under `mcp`:
-
-```json
-"templates": "连接器模板",
-"installs": "连接器安装",
-"workspaceState": "工作区状态",
-"credentialPolicy": "凭证策略",
-"orgGrant": "组织授权",
-"workspaceGrant": "工作区授权",
-"myGrant": "我的授权",
-"needsCredential": "需要你的凭证",
-"ready": "可用"
-```
+to confirm no orphan keys remain.
 
 - [ ] **Step 4: Add E2E copy assertions**
 
