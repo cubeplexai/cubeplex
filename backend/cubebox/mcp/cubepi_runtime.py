@@ -6,6 +6,7 @@ import asyncio
 import dataclasses
 import logging
 import re
+from collections import Counter
 from typing import Any
 
 from cubepi.agent.types import AgentTool
@@ -13,7 +14,10 @@ from cubepi.mcp import load_mcp_tools_http
 from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from cubebox.mcp.cubepi_discovery import discover_workspace_mcp_servers_for_cubepi
+from cubebox.mcp.cubepi_discovery import (
+    CubepiMCPServerSpec,
+    discover_workspace_mcp_servers_for_cubepi,
+)
 from cubebox.mcp.user_token import MCPUserTokenSigner
 from cubebox.middleware.citations.config import CitationConfig
 from cubebox.services.credential import CredentialService
@@ -34,18 +38,43 @@ def _slugify_for_namespace(server_name: str) -> str:
     return slug or "mcp"
 
 
-def _build_namespaced_name(server_name: str, tool_name: str) -> str:
-    """Return ``{slug}__{tool_name}`` with total length <= 64."""
-    slug = _slugify_for_namespace(server_name)
-    combined = f"{slug}__{tool_name}"
+def _server_id_suffix(server_id: str, length: int = 4) -> str:
+    """Derive a stable function-name-safe suffix from an MCP server id.
+
+    server.id is shaped like "mcp-V1StGXR8Z5jdHi"; we take the last ``length``
+    characters after stripping hyphens. Unique enough for the rare case of two
+    installs sharing the same display name without bloating the namespaced tool name.
+    """
+    safe = server_id.replace("-", "")
+    return safe[-length:] if len(safe) >= length else safe
+
+
+def _build_namespaced_name_with_prefix(prefix: str, tool_name: str) -> str:
+    """Combine an already-slugified prefix and tool name with length cap."""
+    combined = f"{prefix}__{tool_name}"
     if len(combined) <= _NS_MAX_LEN:
         return combined
-    # Truncate the slug; preserve full tool name. If tool name itself is too
-    # long, truncate that as a last resort (logged + audited via the parent loop).
     budget = _NS_MAX_LEN - len(tool_name) - 2  # 2 for "__"
     if budget < 1:
         return tool_name[:_NS_MAX_LEN]
-    return f"{slug[:budget]}__{tool_name}"
+    return f"{prefix[:budget]}__{tool_name}"
+
+
+def _build_namespaced_name(server_name: str, tool_name: str) -> str:
+    """Return ``{slug}__{tool_name}`` with total length <= 64."""
+    return _build_namespaced_name_with_prefix(_slugify_for_namespace(server_name), tool_name)
+
+
+def _compute_prefix_for(
+    spec: CubepiMCPServerSpec,
+    slug_counts: Counter[str],
+    proposed_slugs: dict[str, str],
+) -> str:
+    """Return the namespace prefix for a spec, appending an id-suffix on collision."""
+    slug = proposed_slugs[spec.server_id]
+    if slug_counts[slug] > 1:
+        return f"{slug}_{_server_id_suffix(spec.server_id)}"
+    return slug
 
 
 async def load_workspace_mcp_tools_for_cubepi(
@@ -64,6 +93,11 @@ async def load_workspace_mcp_tools_for_cubepi(
     agent's tool list. The returned ``CitationConfig`` dict uses the same
     namespaced keys.
 
+    When two servers produce the same slug (e.g. two installs both named
+    "WebTools"), a short id-derived suffix is appended to each colliding
+    prefix so names remain unique. The suffix is only added when there is
+    an actual collision; the common case produces clean names.
+
     Per-server failures are caught and logged, never aborting the load.
     Only HTTP/SSE transports are supported.
     """
@@ -75,6 +109,12 @@ async def load_workspace_mcp_tools_for_cubepi(
         cred_service=cred_service,
         signer=signer,
     )
+
+    # Pre-compute every spec's proposed slug; detect collisions across the load.
+    proposed_slugs: dict[str, str] = {
+        spec.server_id: _slugify_for_namespace(spec.server_name) for spec in servers
+    }
+    slug_counts: Counter[str] = Counter(proposed_slugs.values())
 
     all_tools: list[AgentTool[Any]] = []
     all_citations: dict[str, CitationConfig] = {}
@@ -96,9 +136,10 @@ async def load_workspace_mcp_tools_for_cubepi(
             )
             continue
 
+        slug_prefix = _compute_prefix_for(spec, slug_counts, proposed_slugs)
         for tool in tools:
             bare_name = tool.name
-            namespaced_name = _build_namespaced_name(spec.server_name, bare_name)
+            namespaced_name = _build_namespaced_name_with_prefix(slug_prefix, bare_name)
             namespaced = dataclasses.replace(tool, name=namespaced_name)
             all_tools.append(namespaced)
             raw = spec.tool_citations.get(bare_name)

@@ -273,3 +273,101 @@ async def test_loader_truncates_long_namespaced_names() -> None:
     assert len(tools) == 1
     assert len(tools[0].name) <= 64
     assert tools[0].name.endswith("__ping")
+
+
+@pytest.mark.asyncio
+async def test_loader_disambiguates_collision_with_id_suffix() -> None:
+    """Two servers with the same slug get distinct namespaces via id-suffix."""
+    from cubebox.mcp.cubepi_discovery import CubepiMCPServerSpec
+    from cubebox.mcp.cubepi_runtime import load_workspace_mcp_tools_for_cubepi
+
+    specs = [
+        CubepiMCPServerSpec(
+            server_id="mcp-1234567890aaaa",
+            server_name="WebTools",
+            url="http://example.com/mcp",
+            headers={},
+            tool_citations={},
+        ),
+        CubepiMCPServerSpec(
+            server_id="mcp-1234567890bbbb",
+            server_name="WebTools",  # same display name, different scope (org-wide vs ws-owned)
+            url="http://other.example.com/mcp",
+            headers={},
+            tool_citations={},
+        ),
+    ]
+    with (
+        patch(
+            "cubebox.mcp.cubepi_runtime.discover_workspace_mcp_servers_for_cubepi",
+            new=AsyncMock(return_value=specs),
+        ),
+        patch(
+            "cubebox.mcp.cubepi_runtime.load_mcp_tools_http",
+            new=AsyncMock(
+                side_effect=[
+                    [_fake_tool("web_search")],
+                    [_fake_tool("web_search")],
+                ]
+            ),
+        ),
+    ):
+        tools, _ = await load_workspace_mcp_tools_for_cubepi(
+            session=None,  # type: ignore[arg-type]
+            workspace_id="ws-x",
+            org_id="org-x",
+            user_id="usr-x",
+            cred_service=None,  # type: ignore[arg-type]
+            signer=None,  # type: ignore[arg-type]
+        )
+
+    names = {t.name for t in tools}
+    assert len(names) == 2  # Two DISTINCT names, not collapsed
+    # Each name should end with its id-derived suffix followed by __web_search
+    assert any(n.endswith("aaaa__web_search") for n in names)
+    assert any(n.endswith("bbbb__web_search") for n in names)
+
+
+@pytest.mark.asyncio
+async def test_loader_keeps_clean_name_when_no_collision() -> None:
+    """The id-suffix is only appended on collision; unique names stay clean."""
+    from cubebox.mcp.cubepi_discovery import CubepiMCPServerSpec
+    from cubebox.mcp.cubepi_runtime import load_workspace_mcp_tools_for_cubepi
+
+    specs = [
+        CubepiMCPServerSpec(
+            server_id="mcp-aaa",
+            server_name="Alpha",
+            url="http://a/mcp",
+            headers={},
+            tool_citations={},
+        ),
+        CubepiMCPServerSpec(
+            server_id="mcp-bbb",
+            server_name="Beta",
+            url="http://b/mcp",
+            headers={},
+            tool_citations={},
+        ),
+    ]
+    with (
+        patch(
+            "cubebox.mcp.cubepi_runtime.discover_workspace_mcp_servers_for_cubepi",
+            new=AsyncMock(return_value=specs),
+        ),
+        patch(
+            "cubebox.mcp.cubepi_runtime.load_mcp_tools_http",
+            new=AsyncMock(side_effect=[[_fake_tool("ping")], [_fake_tool("pong")]]),
+        ),
+    ):
+        tools, _ = await load_workspace_mcp_tools_for_cubepi(
+            session=None,  # type: ignore[arg-type]
+            workspace_id="ws-x",
+            org_id="org-x",
+            user_id="usr-x",
+            cred_service=None,  # type: ignore[arg-type]
+            signer=None,  # type: ignore[arg-type]
+        )
+
+    names = {t.name for t in tools}
+    assert names == {"Alpha__ping", "Beta__pong"}
