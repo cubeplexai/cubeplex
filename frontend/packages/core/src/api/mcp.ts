@@ -384,6 +384,18 @@ export async function adminOAuthStart(
   return (await res.json()) as MCPOAuthStartResult
 }
 
+export async function adminListInstalls(
+  client: ApiClient,
+): Promise<{ items: MCPConnectorInstall[] }> {
+  // Admin-scoped install list. The workspace effective-connector view only
+  // surfaces org installs that have a workspace state row, which hides org
+  // installs with `auto_enable.mode='none'` or scoped to a different
+  // workspace; admins need the full inventory to manage them.
+  const res = await client.get('/api/v1/admin/mcp/installs')
+  if (!res.ok) throw await toApiError(res)
+  return (await res.json()) as { items: MCPConnectorInstall[] }
+}
+
 // ---------------- Four-layer connector API (templates / installs / state / connectors) ---------------- //
 //
 // These helpers wrap the workspace-scoped four-layer endpoints introduced by

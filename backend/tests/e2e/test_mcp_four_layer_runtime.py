@@ -82,7 +82,7 @@ async def test_noauth_runtime_spec_returns_install_without_grant_lookup(
         f"/api/v1/ws/{workspace_id}/mcp/installs",
         json={
             "template_id": noauth_template_id,
-            "install_scope": "org",  # route forces workspace scope
+            "install_scope": "workspace",
             "auth_method": "none",
             "default_credential_policy": "none",
         },

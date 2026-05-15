@@ -344,6 +344,40 @@ class AdminCreateInstallIn(BaseModel):
         return self
 
 
+class WorkspaceCreateInstallIn(BaseModel):
+    """Body of POST /api/v1/ws/{workspace_id}/mcp/installs.
+
+    Mirrors :class:`AdminCreateInstallIn` but pins ``install_scope`` to
+    ``"workspace"`` so the workspace install handler distinguishes its
+    request shape from the admin shape at the schema layer. The
+    ``credential_policy='none'`` cross-field validator is kept in sync.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    template_id: str | None = None
+    install_scope: Literal["workspace"] = "workspace"
+    auth_method: AuthMethodLiteral
+    default_credential_policy: CredentialPolicyLiteral
+
+    # Custom-install fields (used when template_id is None or to override the
+    # template). Optional in both cases.
+    name: str | None = Field(default=None, min_length=1, max_length=64)
+    server_url: str | None = Field(default=None, min_length=1, max_length=2048)
+    transport: Literal["streamable_http", "sse"] | None = None
+    headers: dict[str, str] | None = None
+
+    @model_validator(mode="after")
+    def _validate_policy_vs_auth(self) -> "WorkspaceCreateInstallIn":
+        if self.default_credential_policy == "none" and self.auth_method != "none":
+            raise ValueError(
+                "default_credential_policy='none' is only valid when auth_method='none'"
+            )
+        if self.auth_method == "none" and self.default_credential_policy != "none":
+            raise ValueError("auth_method='none' requires default_credential_policy='none'")
+        return self
+
+
 class PatchInstallIn(BaseModel):
     """Body of PATCH /api/v1/admin/mcp/installs/{install_id}.
 

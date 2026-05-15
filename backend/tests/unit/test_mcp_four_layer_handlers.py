@@ -21,7 +21,11 @@ from fastapi.testclient import TestClient
 
 from cubebox.api.app import create_app
 from cubebox.api.routes.v1.admin_mcp import _validate_install_policy_pairing
-from cubebox.api.schemas.mcp import AdminCreateInstallIn, PatchInstallIn
+from cubebox.api.schemas.mcp import (
+    AdminCreateInstallIn,
+    PatchInstallIn,
+    WorkspaceCreateInstallIn,
+)
 from cubebox.audit.sink import NoOpAuditSink
 from cubebox.mcp.dependencies import (
     get_admin_install_service,
@@ -464,3 +468,286 @@ def test_patch_admin_install_none_policy_on_static_install_returns_422() -> None
     detail = res.json()["detail"]
     # The field error must point at the offending field.
     assert any(d.get("loc") == ["body", "default_credential_policy"] for d in detail), detail
+
+
+# ---------------------------------------------------------------------------
+# Workspace install schema: WorkspaceCreateInstallIn
+# ---------------------------------------------------------------------------
+
+
+def test_workspace_create_install_defaults_install_scope_to_workspace() -> None:
+    """``install_scope`` is optional — defaults to ``"workspace"``."""
+    body = WorkspaceCreateInstallIn(
+        template_id="mctpl-x",
+        auth_method="none",
+        default_credential_policy="none",
+    )
+    assert body.install_scope == "workspace"
+
+
+def test_workspace_create_install_rejects_install_scope_org() -> None:
+    """The workspace schema must reject ``install_scope: "org"`` outright."""
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        WorkspaceCreateInstallIn(  # type: ignore[call-arg]
+            template_id="mctpl-x",
+            install_scope="org",  # type: ignore[arg-type]
+            auth_method="none",
+            default_credential_policy="none",
+        )
+
+
+def test_workspace_create_install_static_with_none_policy_rejected() -> None:
+    """Cross-field validator mirrors the admin schema for the workspace shape."""
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        WorkspaceCreateInstallIn(
+            template_id="mctpl-x",
+            auth_method="static",
+            default_credential_policy="none",
+        )
+
+
+def test_workspace_create_install_forbids_unknown_keys() -> None:
+    """``extra='forbid'`` keeps the contract narrow."""
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        WorkspaceCreateInstallIn(  # type: ignore[call-arg]
+            template_id="mctpl-x",
+            auth_method="none",
+            default_credential_policy="none",
+            unknown_field="oops",
+        )
+
+
+def _make_fake_install_for_workspace(template_id: str, workspace_id: str) -> Any:
+    """Stand-in MCPConnectorInstall row with the surface ``_install_to_out`` reads."""
+
+    class _Row:
+        def __init__(self) -> None:
+            self.id = "mcins-ws-1"
+            self.template_id = template_id
+            self.install_scope = "workspace"
+            self.workspace_id = workspace_id
+            self.name = "test-install"
+            self.server_url = "https://example.com/mcp"
+            self.server_url_hash = "hash"
+            self.transport = "streamable_http"
+            self.auth_method = "none"
+            self.default_credential_policy = "none"
+            self.auth_status = "not_required"
+            self.discovery_status = "pending"
+            self.install_state = "active"
+            self.tools_cache: list[Any] = []
+            self.last_error: str | None = None
+            self.auto_enroll_new_workspaces = False
+            self.headers: dict[str, str] = {}
+
+    return _Row()
+
+
+def test_post_workspace_install_with_workspace_scope_returns_201() -> None:
+    """Happy path: explicit ``install_scope: "workspace"`` passes the route."""
+    from cubebox.auth.context import RequestContext
+    from cubebox.models import Role, User
+
+    workspace_id = "ws-1"
+    template_id = "mctpl-x"
+    fake_install = _make_fake_install_for_workspace(template_id, workspace_id)
+
+    async def _fake_admin_ctx() -> RequestContext:
+        user = User(id="usr-1", email="x@example.com", hashed_password="x")
+        return RequestContext(user=user, org_id="org-1", workspace_id=workspace_id, role=Role.ADMIN)
+
+    async def _fake_template_svc() -> Any:
+        class _S:
+            async def get_active(self, tid: str) -> Any:
+                class _T:
+                    id = tid
+
+                return _T()
+
+        return _S()
+
+    captured: dict[str, Any] = {}
+
+    async def _fake_install_svc() -> Any:
+        class _S:
+            async def create_from_template_for_workspace(self, **kwargs: Any) -> Any:
+                captured.update(kwargs)
+                return fake_install
+
+        return _S()
+
+    from cubebox.auth.dependencies import require_admin
+
+    app = _make_app_with_overrides(
+        {
+            require_admin: _fake_admin_ctx,
+            get_connector_template_service: _fake_template_svc,
+            get_ws_install_service: _fake_install_svc,
+        }
+    )
+
+    client = TestClient(app)
+    res = client.post(
+        f"/api/v1/ws/{workspace_id}/mcp/installs",
+        json={
+            "template_id": template_id,
+            "install_scope": "workspace",
+            "auth_method": "none",
+            "default_credential_policy": "none",
+        },
+    )
+    assert res.status_code == 201, res.text
+    body = res.json()
+    assert body["install_scope"] == "workspace"
+    assert body["workspace_id"] == workspace_id
+    assert captured["workspace_id"] == workspace_id
+
+
+def test_post_workspace_install_omitting_install_scope_returns_201() -> None:
+    """``install_scope`` defaults to ``"workspace"`` so an omitted field still works."""
+    from cubebox.auth.context import RequestContext
+    from cubebox.auth.dependencies import require_admin
+    from cubebox.models import Role, User
+
+    workspace_id = "ws-1"
+    template_id = "mctpl-x"
+    fake_install = _make_fake_install_for_workspace(template_id, workspace_id)
+
+    async def _fake_admin_ctx() -> RequestContext:
+        user = User(id="usr-1", email="x@example.com", hashed_password="x")
+        return RequestContext(user=user, org_id="org-1", workspace_id=workspace_id, role=Role.ADMIN)
+
+    async def _fake_template_svc() -> Any:
+        class _S:
+            async def get_active(self, tid: str) -> Any:
+                class _T:
+                    id = tid
+
+                return _T()
+
+        return _S()
+
+    async def _fake_install_svc() -> Any:
+        class _S:
+            async def create_from_template_for_workspace(self, **kwargs: Any) -> Any:  # noqa: ARG002
+                return fake_install
+
+        return _S()
+
+    app = _make_app_with_overrides(
+        {
+            require_admin: _fake_admin_ctx,
+            get_connector_template_service: _fake_template_svc,
+            get_ws_install_service: _fake_install_svc,
+        }
+    )
+
+    client = TestClient(app)
+    res = client.post(
+        f"/api/v1/ws/{workspace_id}/mcp/installs",
+        json={
+            "template_id": template_id,
+            "auth_method": "none",
+            "default_credential_policy": "none",
+        },
+    )
+    assert res.status_code == 201, res.text
+
+
+def test_post_workspace_install_with_org_scope_returns_422() -> None:
+    """A workspace POST that smuggles ``install_scope: "org"`` is rejected by the schema."""
+    from cubebox.auth.context import RequestContext
+    from cubebox.auth.dependencies import require_admin
+    from cubebox.models import Role, User
+
+    workspace_id = "ws-1"
+
+    async def _fake_admin_ctx() -> RequestContext:
+        user = User(id="usr-1", email="x@example.com", hashed_password="x")
+        return RequestContext(user=user, org_id="org-1", workspace_id=workspace_id, role=Role.ADMIN)
+
+    async def _fake_template_svc() -> Any:
+        class _S:
+            async def get_active(self, tid: str) -> Any:  # noqa: ARG002
+                raise AssertionError("schema-layer 422 should fire before service is called")
+
+        return _S()
+
+    async def _fake_install_svc() -> Any:
+        class _S:
+            async def create_from_template_for_workspace(self, **kwargs: Any) -> Any:  # noqa: ARG002
+                raise AssertionError("schema-layer 422 should fire before service is called")
+
+        return _S()
+
+    app = _make_app_with_overrides(
+        {
+            require_admin: _fake_admin_ctx,
+            get_connector_template_service: _fake_template_svc,
+            get_ws_install_service: _fake_install_svc,
+        }
+    )
+
+    client = TestClient(app)
+    res = client.post(
+        f"/api/v1/ws/{workspace_id}/mcp/installs",
+        json={
+            "template_id": "mctpl-x",
+            "install_scope": "org",
+            "auth_method": "none",
+            "default_credential_policy": "none",
+        },
+    )
+    assert res.status_code == 422, res.text
+
+
+def test_post_workspace_install_static_with_none_policy_returns_422() -> None:
+    """Static auth + ``credential_policy="none"`` is rejected at the schema layer."""
+    from cubebox.auth.context import RequestContext
+    from cubebox.auth.dependencies import require_admin
+    from cubebox.models import Role, User
+
+    workspace_id = "ws-1"
+
+    async def _fake_admin_ctx() -> RequestContext:
+        user = User(id="usr-1", email="x@example.com", hashed_password="x")
+        return RequestContext(user=user, org_id="org-1", workspace_id=workspace_id, role=Role.ADMIN)
+
+    async def _fake_template_svc() -> Any:
+        class _S:
+            async def get_active(self, tid: str) -> Any:  # noqa: ARG002
+                raise AssertionError("schema-layer 422 should fire before service is called")
+
+        return _S()
+
+    async def _fake_install_svc() -> Any:
+        class _S:
+            async def create_from_template_for_workspace(self, **kwargs: Any) -> Any:  # noqa: ARG002
+                raise AssertionError("schema-layer 422 should fire before service is called")
+
+        return _S()
+
+    app = _make_app_with_overrides(
+        {
+            require_admin: _fake_admin_ctx,
+            get_connector_template_service: _fake_template_svc,
+            get_ws_install_service: _fake_install_svc,
+        }
+    )
+
+    client = TestClient(app)
+    res = client.post(
+        f"/api/v1/ws/{workspace_id}/mcp/installs",
+        json={
+            "template_id": "mctpl-x",
+            "auth_method": "static",
+            "default_credential_policy": "none",
+        },
+    )
+    assert res.status_code == 422, res.text

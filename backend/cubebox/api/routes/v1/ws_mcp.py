@@ -23,7 +23,6 @@ from cubebox.api.routes.v1.admin_mcp import (
     _validate_install_policy_pairing,
 )
 from cubebox.api.schemas.mcp import (
-    AdminCreateInstallIn,
     CreateGrantIn,
     MCPConnectorInstallOut,
     MCPConnectorTemplateListOut,
@@ -44,6 +43,7 @@ from cubebox.api.schemas.mcp import (
     MCPTestConnectionResponse,
     MCPWorkspaceConnectorStateOut,
     PatchWorkspaceStateIn,
+    WorkspaceCreateInstallIn,
 )
 from cubebox.audit.sink import AuditSink
 from cubebox.auth.context import RequestContext
@@ -706,7 +706,7 @@ async def list_workspace_connectors(
 )
 async def create_workspace_install(
     workspace_id: str,
-    body: AdminCreateInstallIn,
+    body: WorkspaceCreateInstallIn,
     svc: Annotated[MCPConnectorInstallService, Depends(get_ws_install_service)],
     template_svc: Annotated[MCPConnectorTemplateService, Depends(get_connector_template_service)],
     ctx: Annotated[RequestContext, Depends(require_admin)],
@@ -714,9 +714,11 @@ async def create_workspace_install(
 ) -> MCPConnectorInstallOut:
     """Workspace-local install creation. Admin-only.
 
-    Reuses ``AdminCreateInstallIn``'s shape but forces workspace scope —
-    distribution is ignored here (workspace installs are always
-    workspace-local).
+    Uses :class:`WorkspaceCreateInstallIn` — ``install_scope`` is pinned
+    to ``"workspace"`` at the schema layer so attempts to POST an
+    ``install_scope: "org"`` body to this route are rejected with 422
+    before reaching the handler. The org-scope path lives under
+    ``POST /api/v1/admin/mcp/installs``.
     """
     if body.template_id is None:
         raise HTTPException(
