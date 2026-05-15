@@ -12,10 +12,12 @@ from tests.e2e.middleware._helpers import (
     EVT_DONE,
     EVT_ERROR,
     TOOL_SUBAGENT_SPAWN,
+    assistant_text,
     create_conversation,
     events_of_type,
     post_turn,
     tool_call_names,
+    tool_result_contents,
 )
 
 pytestmark = pytest.mark.real_llm
@@ -42,3 +44,14 @@ async def test_subagent_dispatch_real_llm(member_client: tuple) -> None:  # type
     assert events[-1].get("type") == EVT_DONE
     tools = tool_call_names(events)
     assert TOOL_SUBAGENT_SPAWN in tools, f"expected {TOOL_SUBAGENT_SPAWN} call, got {tools}"
+
+    results = tool_result_contents(events)
+    assert any(r.strip() for r in results), f"all tool_result contents empty: {results!r}"
+    assert any("cubebox" in r.lower() for r in results), (
+        f"expected 'cubebox' in some tool_result; got: {results!r}"
+    )
+    outer_text = assistant_text(events)
+    assert outer_text.strip() != "", "outer agent produced no text reply"
+    assert "cubebox" in outer_text.lower(), (
+        f"expected 'cubebox' in outer reply; got: {outer_text!r}"
+    )
