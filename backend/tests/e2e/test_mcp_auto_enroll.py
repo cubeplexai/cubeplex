@@ -172,3 +172,61 @@ async def test_new_workspace_does_not_inherit_when_auto_enroll_false(
     assert item["workspace_visible"] is False, (
         "new workspace must not inherit enabled override when auto_enroll=false"
     )
+
+
+async def test_delete_install_clears_workspace_overrides(
+    admin_client: tuple[httpx.AsyncClient, str],
+    catalog_one: str,
+) -> None:
+    """Admin delete-install mirrors the auto_enable backfill: wipe overrides."""
+    client, workspace_id = admin_client
+
+    install_resp = await client.post(
+        f"/api/v1/admin/mcp/catalog/{catalog_one}/install",
+        json={"auth_method": "static", "credential_plaintext": "ghp_test"},
+    )
+    assert install_resp.status_code == 201, install_resp.text
+    install_id = install_resp.json()["install_id"]
+
+    # Workspace inherits the auto-enable override.
+    item = await _catalog_item(client, workspace_id, "github-ae")
+    assert item["workspace_visible"] is True
+
+    delete_resp = await client.delete(f"/api/v1/admin/mcp/installs/{install_id}")
+    assert delete_resp.status_code == 204, delete_resp.text
+
+    # After delete: install row survives but unauthed, and the override is gone
+    # so workspace surfaces don't show a misleading "needs_setup" entry.
+    item = await _catalog_item(client, workspace_id, "github-ae")
+    assert item["org_install_id"] == install_id
+    assert item["workspace_visible"] is False
+
+
+async def test_switch_auth_method_preserves_workspace_overrides(
+    admin_client: tuple[httpx.AsyncClient, str],
+    catalog_one: str,
+) -> None:
+    """Rekey calls delete_install internally but must keep workspace visibility."""
+    client, workspace_id = admin_client
+
+    install_resp = await client.post(
+        f"/api/v1/admin/mcp/catalog/{catalog_one}/install",
+        json={"auth_method": "static", "credential_plaintext": "ghp_test"},
+    )
+    assert install_resp.status_code == 201, install_resp.text
+    install_id = install_resp.json()["install_id"]
+
+    item = await _catalog_item(client, workspace_id, "github-ae")
+    assert item["workspace_visible"] is True
+
+    patch_resp = await client.patch(
+        f"/api/v1/admin/mcp/installs/{install_id}",
+        json={"auth_method": "static", "credential_plaintext": "ghp_rekeyed"},
+    )
+    assert patch_resp.status_code == 200, patch_resp.text
+
+    # Override survives the rekey.
+    item = await _catalog_item(client, workspace_id, "github-ae")
+    assert item["workspace_visible"] is True, (
+        "switch_auth_method must not revoke workspace visibility"
+    )
