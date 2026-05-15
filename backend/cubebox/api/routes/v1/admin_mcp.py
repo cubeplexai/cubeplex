@@ -531,8 +531,21 @@ async def patch_admin_install(
         install.headers = body.headers
     if body.name is not None:
         install.name = body.name
-    if body.server_url is not None:
+    if body.server_url is not None and body.server_url != install.server_url:
+        # ``server_url_hash`` is the indexed half of the partial unique
+        # constraints on org-scope / workspace-scope installs. If we
+        # update ``server_url`` without recomputing the hash, the row
+        # would survive into a state where two installs with different
+        # URLs could share the same hash (and conversely, the same URL
+        # could appear twice with different hashes), breaking the
+        # uniqueness guarantee the indexes are supposed to provide.
+        # Derive the hash here from the new URL — any client-supplied
+        # hash on the body is ignored on purpose so a tampered or
+        # half-formed patch can't desync the two fields.
+        from cubebox.mcp._constants import server_url_hash
+
         install.server_url = body.server_url
+        install.server_url_hash = server_url_hash(body.server_url)
     if body.transport is not None:
         install.transport = body.transport
 

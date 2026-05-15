@@ -245,6 +245,186 @@ def test_patch_workspace_state_from_non_admin_returns_403() -> None:
     assert res.status_code == 403, res.text
 
 
+class _FullFakeInstall:
+    """Stand-in MCPConnectorInstall with every attribute ``_install_to_out`` reads.
+
+    Used by the server_url_hash recompute test: the handler now calls
+    ``server_url_hash(body.server_url)`` and writes it back to
+    ``install.server_url_hash`` on the row, so the test needs to assert
+    on the persisted value. Mirroring the model surface (rather than
+    monkey-patching attributes ad-hoc) keeps the test resistant to
+    future cosmetic field additions on the response DTO.
+    """
+
+    def __init__(self, *, install_id: str, server_url: str, server_url_hash: str) -> None:
+        self.id = install_id
+        self.template_id = "mctpl-x"
+        self.install_scope = "org"
+        self.workspace_id: str | None = None
+        self.name = "test-install"
+        self.server_url = server_url
+        self.server_url_hash = server_url_hash
+        self.transport = "streamable_http"
+        self.auth_method = "static"
+        self.default_credential_policy = "org"
+        self.auth_status = "pending"
+        self.discovery_status = "pending"
+        self.install_state = "active"
+        self.tools_cache: list[Any] = []
+        self.last_error: str | None = None
+        self.auto_enroll_new_workspaces = False
+        self.headers: dict[str, str] = {}
+
+
+def test_patch_admin_install_server_url_change_recomputes_hash() -> None:
+    """PATCH that mutates ``server_url`` must recompute ``server_url_hash``.
+
+    The two columns back the partial unique indexes on
+    ``mcp_connector_installs`` — letting ``server_url`` drift away from
+    ``server_url_hash`` would mean the dedup check could be bypassed by
+    "change the URL, hash stays". The handler derives the hash from the
+    new URL inside the route so the persisted row stays internally
+    consistent; client-supplied ``server_url_hash`` values (if any are
+    ever added to the schema) MUST be ignored.
+
+    The fake repo records the row passed to ``update`` so the test can
+    inspect the persisted state — this is the pattern the rest of the
+    file uses for handler-level assertions without a real DB session.
+    """
+    from cubebox.auth.context import RequestContext
+    from cubebox.mcp._constants import server_url_hash
+    from cubebox.models import Role, User
+
+    async def _fake_admin_ctx() -> RequestContext:
+        user = User(id="usr-1", email="x@example.com", hashed_password="x")
+        return RequestContext(user=user, org_id="org-1", workspace_id="", role=Role.ADMIN)
+
+    original_url = "https://old.example.com/mcp"
+    new_url = "https://new.example.com/mcp"
+    original_hash = server_url_hash(original_url)
+
+    fake_install = _FullFakeInstall(
+        install_id="mcins-1",
+        server_url=original_url,
+        server_url_hash=original_hash,
+    )
+
+    class _Repo:
+        def __init__(self) -> None:
+            self.updated_rows: list[Any] = []
+
+        async def get(self, install_id: str) -> Any:  # noqa: ARG002
+            return fake_install
+
+        async def update(self, install: Any) -> Any:
+            self.updated_rows.append(install)
+            return install
+
+    repo = _Repo()
+
+    class _Svc:
+        def __init__(self) -> None:
+            self._install_repo = repo
+
+    async def _fake_install_svc() -> Any:
+        return _Svc()
+
+    app = _make_app_with_overrides(
+        {
+            get_admin_request_context: _fake_admin_ctx,
+            get_admin_install_service: _fake_install_svc,
+        }
+    )
+
+    client = TestClient(app)
+    res = client.patch(
+        "/api/v1/admin/mcp/installs/mcins-1",
+        json={"server_url": new_url},
+    )
+    assert res.status_code == 200, res.text
+
+    # The handler must have called update once with the new URL AND the
+    # newly-derived hash, not the original.
+    assert len(repo.updated_rows) == 1
+    persisted = repo.updated_rows[0]
+    assert persisted.server_url == new_url
+    assert persisted.server_url_hash == server_url_hash(new_url)
+    assert persisted.server_url_hash != original_hash
+
+
+def test_patch_admin_install_server_url_unchanged_keeps_hash() -> None:
+    """If the body ``server_url`` matches the row, do nothing to the hash.
+
+    Guards against the recompute path getting eagerly triggered on
+    every PATCH (which would be harmless arithmetically — the hash is
+    deterministic — but obscures intent and makes audit-log diffing
+    noisier than it needs to be).
+    """
+    from cubebox.auth.context import RequestContext
+    from cubebox.mcp._constants import server_url_hash
+    from cubebox.models import Role, User
+
+    async def _fake_admin_ctx() -> RequestContext:
+        user = User(id="usr-1", email="x@example.com", hashed_password="x")
+        return RequestContext(user=user, org_id="org-1", workspace_id="", role=Role.ADMIN)
+
+    url = "https://stable.example.com/mcp"
+    original_hash = server_url_hash(url)
+    # Inject a deliberately wrong hash so we can prove the handler did
+    # not touch the field. If the recompute logic fires unconditionally,
+    # this would get overwritten to ``server_url_hash(url)`` and the
+    # assertion below would fail.
+    fake_install = _FullFakeInstall(
+        install_id="mcins-1",
+        server_url=url,
+        server_url_hash="sentinel-not-recomputed",
+    )
+
+    class _Repo:
+        def __init__(self) -> None:
+            self.updated_rows: list[Any] = []
+
+        async def get(self, install_id: str) -> Any:  # noqa: ARG002
+            return fake_install
+
+        async def update(self, install: Any) -> Any:
+            self.updated_rows.append(install)
+            return install
+
+    repo = _Repo()
+
+    class _Svc:
+        def __init__(self) -> None:
+            self._install_repo = repo
+
+    async def _fake_install_svc() -> Any:
+        return _Svc()
+
+    app = _make_app_with_overrides(
+        {
+            get_admin_request_context: _fake_admin_ctx,
+            get_admin_install_service: _fake_install_svc,
+        }
+    )
+
+    client = TestClient(app)
+    # PATCH carries the SAME url already on the row — recompute must not fire.
+    res = client.patch(
+        "/api/v1/admin/mcp/installs/mcins-1",
+        json={"server_url": url, "name": "renamed"},
+    )
+    assert res.status_code == 200, res.text
+    assert len(repo.updated_rows) == 1
+    persisted = repo.updated_rows[0]
+    assert persisted.server_url == url
+    # Hash field is untouched (still the sentinel we seeded with).
+    assert persisted.server_url_hash == "sentinel-not-recomputed"
+    # ``server_url_hash(url)`` would be different; sanity check that
+    # the test's premise (a sentinel that does NOT match the real hash)
+    # holds.
+    assert original_hash != "sentinel-not-recomputed"
+
+
 def test_patch_admin_install_none_policy_on_static_install_returns_422() -> None:
     """PATCH path re-validates against the loaded row when body lacks auth_method."""
     from cubebox.auth.context import RequestContext
