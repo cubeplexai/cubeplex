@@ -598,7 +598,8 @@
         "installTitle": "为本工作区安装",
         "actionEnable": "在本工作区启用",
         "actionDisable": "在本工作区停用",
-        "actionUninstall": "卸载"
+        "actionUninstall": "卸载",
+        "actionResumeOAuth": "继续设置"
       }
     },
     "wsPage": {
