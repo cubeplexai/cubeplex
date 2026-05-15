@@ -480,7 +480,12 @@ async def create_admin_install(
             distribution=body.auto_enable.model_dump(),
         )
     except ValueError as exc:
-        raise HTTPException(400, detail={"code": "invalid_distribution", "msg": str(exc)}) from exc
+        # Service-side guards raise ValueError with a canonical code as the
+        # message (e.g. ``auth_method_not_supported_by_template``,
+        # ``workspace_not_in_org``, ``unknown distribution mode: ...``). Map
+        # to 400 with the message as ``code`` so the frontend can parse
+        # uniformly across admin and workspace install routes.
+        raise HTTPException(400, detail={"code": str(exc)}) from exc
 
     await audit.record(
         event="mcp.install.created",

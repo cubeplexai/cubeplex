@@ -737,12 +737,20 @@ async def create_workspace_install(
     except ValueError as exc:
         raise HTTPException(404, detail={"code": "connector_template_not_found"}) from exc
 
-    install = await svc.create_from_template_for_workspace(
-        template=template,
-        workspace_id=workspace_id,
-        auth_method=body.auth_method,
-        credential_policy=body.default_credential_policy,
-    )
+    try:
+        install = await svc.create_from_template_for_workspace(
+            template=template,
+            workspace_id=workspace_id,
+            auth_method=body.auth_method,
+            credential_policy=body.default_credential_policy,
+        )
+    except ValueError as exc:
+        # Service-side guards (e.g. ``auth_method_not_supported_by_template``)
+        # surface as ValueError. Map to 400 with the ValueError message as the
+        # canonical ``code`` so the frontend can parse uniformly across admin
+        # and workspace install routes.
+        raise HTTPException(400, detail={"code": str(exc)}) from exc
+
     await audit.record(
         event="mcp.install.created",
         actor_user_id=ctx.user.id,
