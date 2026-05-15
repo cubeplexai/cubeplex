@@ -1,12 +1,12 @@
-"""``cubebox seed-mcp-catalog`` — idempotently upsert the v1 MCP catalog.
+"""``cubebox seed-mcp-templates`` — idempotently upsert the v1 MCP templates.
 
-Reads the static catalog list in ``cubebox.mcp.catalog_seed``, ingests
+Reads the static template list in ``cubebox.mcp.template_seed``, ingests
 static OAuth client_id / client_secret pairs from environment variables
 for connectors that don't support DCR
 (``CUBEBOX_MCP_OAUTH__<SLUG>__CLIENT_ID`` and
 ``CUBEBOX_MCP_OAUTH__<SLUG>__CLIENT_SECRET``), encrypts the secrets into
 system-level credential rows, and upserts each connector into
-``mcp_catalog_connectors``. Slugs absent from the in-process catalog
+``mcp_connector_templates``. Slugs absent from the in-process template
 list are marked ``status='deprecated'`` (rows are kept so installs
 remain referencable).
 
@@ -30,7 +30,7 @@ from loguru import logger
 from cubebox.config import config  # noqa: F401  (side effects)
 
 
-@click.command(name="seed-mcp-catalog")
+@click.command(name="seed-mcp-templates")
 @click.option(
     "--dry-run",
     is_flag=True,
@@ -43,10 +43,17 @@ from cubebox.config import config  # noqa: F401  (side effects)
     default=False,
     help="Reduce log output (warnings + summary only).",
 )
-def seed_mcp_catalog(dry_run: bool, quiet: bool) -> None:
-    """Idempotently upsert the v1 MCP catalog into the database."""
+def seed_mcp_templates(dry_run: bool, quiet: bool) -> None:
+    """Idempotently upsert the v1 MCP connector templates into the database."""
     exit_code = asyncio.run(_run(dry_run=dry_run, quiet=quiet))
     sys.exit(exit_code)
+
+
+# Backwards-compatible alias so any caller still importing
+# ``seed_mcp_catalog`` keeps working until plan Task 9 cleans up the
+# legacy surface. The CLI command also exposes the old ``seed-mcp-catalog``
+# name via :mod:`cubebox.cli.__init__`.
+seed_mcp_catalog = seed_mcp_templates
 
 
 async def _run(*, dry_run: bool, quiet: bool) -> int:
@@ -54,7 +61,7 @@ async def _run(*, dry_run: bool, quiet: bool) -> int:
     # into the import graph for a one-shot DB script.
     from cubebox.api.app import _build_encryption_backend
     from cubebox.db.engine import async_session_maker
-    from cubebox.mcp.catalog_seed import seed_catalog
+    from cubebox.mcp.template_seed import seed_templates
 
     if quiet:
         logger.remove()
@@ -64,10 +71,10 @@ async def _run(*, dry_run: bool, quiet: bool) -> int:
 
     async with async_session_maker() as session:
         try:
-            result = await seed_catalog(session, backend, get_env=os.getenv)
+            result = await seed_templates(session, backend, get_env=os.getenv)
         except Exception:  # noqa: BLE001 — single failure path
             await session.rollback()
-            logger.exception("seed-mcp-catalog failed")
+            logger.exception("seed-mcp-templates failed")
             return 1
 
         if dry_run:
@@ -78,7 +85,7 @@ async def _run(*, dry_run: bool, quiet: bool) -> int:
 
     suffix = " (dry run, rolled back)" if dry_run else ""
     click.echo(
-        f"seed-mcp-catalog: upserted={result.upserted} "
+        f"seed-mcp-templates: upserted={result.upserted} "
         f"skipped={result.skipped} deprecated={result.deprecated}{suffix}"
     )
     for warning in result.warnings:

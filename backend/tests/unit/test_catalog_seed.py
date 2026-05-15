@@ -1,4 +1,4 @@
-"""Tests for the v1 MCP catalog seeder."""
+"""Tests for the v1 MCP connector template seeder."""
 
 import dataclasses
 from collections.abc import AsyncIterator, Callable
@@ -10,13 +10,13 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from sqlmodel import SQLModel
 
 from cubebox.credentials.encryption import FernetBackend
-from cubebox.mcp.catalog_seed import (
+from cubebox.mcp.template_seed import (
     CATALOG,
-    CatalogSeedEntry,
-    seed_catalog,
+    MCPConnectorTemplateSeedEntry,
+    seed_templates,
 )
-from cubebox.models import Credential, MCPCatalogConnector
-from cubebox.repositories.mcp_catalog import MCPCatalogConnectorRepository
+from cubebox.models import Credential, MCPConnectorTemplate
+from cubebox.repositories.mcp import MCPConnectorTemplateRepository
 
 
 @pytest.fixture
@@ -53,18 +53,18 @@ def _make_get_env(values: dict[str, str]) -> Callable[[str], str | None]:
     return _getter
 
 
-async def test_seed_with_full_env_writes_catalog_and_credentials(
+async def test_seed_with_full_env_writes_templates_and_credentials(
     session: AsyncSession, backend: FernetBackend
 ) -> None:
     env = _full_env()
-    result = await seed_catalog(session, backend, get_env=_make_get_env(env))
+    result = await seed_templates(session, backend, get_env=_make_get_env(env))
 
     assert result.skipped == 0
     assert result.upserted == len(CATALOG)
     assert result.deprecated == 0
     assert result.warnings == []
 
-    repo = MCPCatalogConnectorRepository(session)
+    repo = MCPConnectorTemplateRepository(session)
     rows = await repo.list_active()
     assert {row.slug for row in rows} == {entry.slug for entry in CATALOG}
 
@@ -87,7 +87,7 @@ async def test_seed_with_full_env_writes_catalog_and_credentials(
     )
     assert {row.cred_metadata.get("slug") for row in cred_rows} == expected_secret_slugs
 
-    # Catalog rows for those slugs link the credential id.
+    # Template rows for those slugs link the credential id.
     rows_by_slug = {row.slug: row for row in rows}
     for slug in expected_secret_slugs:
         row = rows_by_slug[slug]
@@ -107,13 +107,13 @@ async def test_seed_skips_static_oauth_connector_when_env_missing(
     env = _full_env()
     env.pop("CUBEBOX_MCP_OAUTH__GITHUB__CLIENT_SECRET")
 
-    result = await seed_catalog(session, backend, get_env=_make_get_env(env))
+    result = await seed_templates(session, backend, get_env=_make_get_env(env))
 
     assert result.skipped == 1
     assert any("github" in w.lower() for w in result.warnings)
     assert result.upserted == len(CATALOG) - 1
 
-    repo = MCPCatalogConnectorRepository(session)
+    repo = MCPConnectorTemplateRepository(session)
     slugs = {row.slug for row in await repo.list_active()}
     assert "github" not in slugs
     # Other connectors still made it through.
@@ -125,15 +125,15 @@ async def test_seed_marks_removed_slugs_as_deprecated(
     session: AsyncSession, backend: FernetBackend
 ) -> None:
     env = _full_env()
-    await seed_catalog(session, backend, get_env=_make_get_env(env))
+    await seed_templates(session, backend, get_env=_make_get_env(env))
 
     # Re-run with one connector dropped. Its row should flip to
     # deprecated rather than being deleted (preserves install FK refs).
     pruned = [entry for entry in CATALOG if entry.slug != "mslearn"]
-    second = await seed_catalog(session, backend, get_env=_make_get_env(env), catalog=pruned)
+    second = await seed_templates(session, backend, get_env=_make_get_env(env), catalog=pruned)
 
     assert second.deprecated == 1
-    repo = MCPCatalogConnectorRepository(session)
+    repo = MCPConnectorTemplateRepository(session)
     deprecated_row = await repo.get_by_slug("mslearn")
     assert deprecated_row is not None
     assert deprecated_row.status == "deprecated"
@@ -141,18 +141,20 @@ async def test_seed_marks_removed_slugs_as_deprecated(
 
 async def test_seed_is_idempotent(session: AsyncSession, backend: FernetBackend) -> None:
     env = _full_env()
-    first = await seed_catalog(session, backend, get_env=_make_get_env(env))
-    second = await seed_catalog(session, backend, get_env=_make_get_env(env))
+    first = await seed_templates(session, backend, get_env=_make_get_env(env))
+    second = await seed_templates(session, backend, get_env=_make_get_env(env))
 
     assert first.upserted == second.upserted
     assert second.deprecated == 0
 
-    rows1 = (await session.execute(select(MCPCatalogConnector))).scalars().all()
+    rows1 = (await session.execute(select(MCPConnectorTemplate))).scalars().all()
     assert len(rows1) == len(CATALOG)
 
 
-async def test_seed_persists_tool_citations(session: AsyncSession, backend: FernetBackend) -> None:
-    """tool_citations on a CatalogSeedEntry round-trips through upsert; update overwrites."""
+async def test_seed_persists_tool_citation_defaults(
+    session: AsyncSession, backend: FernetBackend
+) -> None:
+    """tool_citation_defaults on a seed entry round-trips through upsert; update overwrites."""
     initial_citations = {
         "web_search": {
             "content_type": "json",
@@ -162,7 +164,7 @@ async def test_seed_persists_tool_citations(session: AsyncSession, backend: Fern
         },
     }
     catalog = [
-        CatalogSeedEntry(
+        MCPConnectorTemplateSeedEntry(
             slug="webtools-test",
             name="WebTools Test",
             provider="Cubebox",
@@ -170,23 +172,23 @@ async def test_seed_persists_tool_citations(session: AsyncSession, backend: Fern
             server_url="http://example.com/mcp",
             transport="streamable_http",
             supported_auth_methods=["static"],
-            default_credential_scope="org",
+            default_credential_policy="org",
             oauth_dcr_supported=None,
             oauth_default_scope=None,
             oauth_static_client_id_env=None,
             oauth_static_client_secret_env=None,
-            static_form_fields=None,
+            static_form_schema=None,
             static_auth_header_template=None,
-            cred_metadata={},
-            tool_citations=initial_citations,
+            template_metadata={},
+            tool_citation_defaults=initial_citations,
         )
     ]
-    result = await seed_catalog(session, backend, get_env=lambda _k: None, catalog=catalog)
+    result = await seed_templates(session, backend, get_env=lambda _k: None, catalog=catalog)
     assert result.skipped == 0
-    repo = MCPCatalogConnectorRepository(session)
+    repo = MCPConnectorTemplateRepository(session)
     row = await repo.get_by_slug("webtools-test")
     assert row is not None
-    assert row.tool_citations == initial_citations
+    assert row.tool_citation_defaults == initial_citations
 
     # Update path: re-seed with a different mapping → DB row updated.
     updated_citations = {
@@ -197,17 +199,17 @@ async def test_seed_persists_tool_citations(session: AsyncSession, backend: Fern
             "mapping": {"url": "url", "snippet": "summary"},
         },
     }
-    updated_catalog = [dataclasses.replace(catalog[0], tool_citations=updated_citations)]
-    await seed_catalog(session, backend, get_env=lambda _k: None, catalog=updated_catalog)
+    updated_catalog = [dataclasses.replace(catalog[0], tool_citation_defaults=updated_citations)]
+    await seed_templates(session, backend, get_env=lambda _k: None, catalog=updated_catalog)
     row = await repo.get_by_slug("webtools-test")
     assert row is not None
-    assert row.tool_citations == updated_citations
+    assert row.tool_citation_defaults == updated_citations
 
 
 async def test_seed_with_custom_catalog(session: AsyncSession, backend: FernetBackend) -> None:
     """The seeder accepts an injected catalog list — handy for tests."""
     custom = [
-        CatalogSeedEntry(
+        MCPConnectorTemplateSeedEntry(
             slug="testonly",
             name="Test Only",
             provider="Test",
@@ -215,18 +217,18 @@ async def test_seed_with_custom_catalog(session: AsyncSession, backend: FernetBa
             server_url="https://example.com/mcp",
             transport="streamable_http",
             supported_auth_methods=["none"],
-            default_credential_scope="none",
+            default_credential_policy="none",
             oauth_dcr_supported=None,
             oauth_default_scope=None,
             oauth_static_client_id_env=None,
             oauth_static_client_secret_env=None,
-            static_form_fields=None,
+            static_form_schema=None,
             static_auth_header_template=None,
         )
     ]
-    result = await seed_catalog(session, backend, get_env=lambda _k: None, catalog=custom)
+    result = await seed_templates(session, backend, get_env=lambda _k: None, catalog=custom)
     assert result.upserted == 1
-    repo = MCPCatalogConnectorRepository(session)
+    repo = MCPConnectorTemplateRepository(session)
     row = await repo.get_by_slug("testonly")
     assert row is not None
     assert row.supported_auth_methods == ["none"]
@@ -238,8 +240,8 @@ def test_webtools_entry_has_web_search_and_web_fetch_citations() -> None:
     assert "webtools" in by_slug
     entry = by_slug["webtools"]
 
-    assert "web_search" in entry.tool_citations
-    web_search = entry.tool_citations["web_search"]
+    assert "web_search" in entry.tool_citation_defaults
+    web_search = entry.tool_citation_defaults["web_search"]
     assert web_search["content_type"] == "json"
     assert web_search["source_type"] == "web"
     assert web_search["content_field"] == "results"
@@ -247,8 +249,8 @@ def test_webtools_entry_has_web_search_and_web_fetch_citations() -> None:
     assert web_search["mapping"]["title"] == "title"
     assert web_search["mapping"]["snippet"] == "description"
 
-    assert "web_fetch" in entry.tool_citations
-    web_fetch = entry.tool_citations["web_fetch"]
+    assert "web_fetch" in entry.tool_citation_defaults
+    web_fetch = entry.tool_citation_defaults["web_fetch"]
     assert web_fetch["content_type"] == "text"
     assert web_fetch["source_type"] == "web"
     assert web_fetch["content_field"] is None
@@ -257,11 +259,11 @@ def test_webtools_entry_has_web_search_and_web_fetch_citations() -> None:
 
 
 def test_all_seed_tool_citations_are_valid_citation_configs() -> None:
-    """Every tool_citations entry across CATALOG must be a valid CitationConfig."""
+    """Every tool_citation_defaults entry across CATALOG must be a valid CitationConfig."""
     from cubebox.middleware.citations.config import CitationConfig
 
     for entry in CATALOG:
-        for tool_name, raw in entry.tool_citations.items():
+        for tool_name, raw in entry.tool_citation_defaults.items():
             try:
                 CitationConfig(**raw)
             except Exception as exc:  # noqa: BLE001
