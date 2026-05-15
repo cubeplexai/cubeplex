@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useTranslations } from 'next-intl'
 import {
-  adminCatalogDeleteInstall,
+  adminDeleteInstall,
   adminListInstalls,
   createApiClient,
   useWorkspaceStore,
@@ -57,7 +57,7 @@ export default function AdminMcpPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [search, setSearch] = useState('')
   const [filter, setFilter] = useState<MCPConnectorFilter>('all')
-  const [mode, setMode] = useState<'detail' | 'add_custom' | 'install_template' | null>(null)
+  const [mode, setMode] = useState<'detail' | 'install_template' | null>(null)
   const [installTemplate, setInstallTemplate] = useState<MCPConnectorTemplate | null>(null)
 
   const lensWsId = workspaces[0]?.id ?? ''
@@ -136,18 +136,12 @@ export default function AdminMcpPage() {
     setMode('detail')
   }
 
-  function handleAddCustom(): void {
-    setSelectedId(null)
-    setInstallTemplate(null)
-    setMode('add_custom')
-  }
-
   async function handleRefresh(): Promise<void> {
     await load()
   }
 
   async function handleDelete(installId: string): Promise<void> {
-    await adminCatalogDeleteInstall(client, installId)
+    await adminDeleteInstall(client, installId)
     await load()
     setSelectedId(null)
     setMode(null)
@@ -158,14 +152,6 @@ export default function AdminMcpPage() {
     setSelectedId(installId)
     setMode('detail')
     void load()
-  }
-
-  function handleCreated(_serverId: string): void {
-    // Legacy custom-create panel still talks to the legacy MCPServer API; just
-    // reload everything and let the new four-layer surface re-show the result
-    // if/when it appears as an install.
-    void load()
-    setMode(null)
   }
 
   const availableTemplates = useMemo(() => {
@@ -205,7 +191,6 @@ export default function AdminMcpPage() {
         onSearchChange={setSearch}
         filter={filter}
         onFilterChange={setFilter}
-        onAddCustom={handleAddCustom}
       />
 
       <div className="flex flex-1 overflow-hidden">
@@ -265,7 +250,6 @@ export default function AdminMcpPage() {
             onRefresh={handleRefresh}
             onDelete={handleDelete}
             onInstalled={handleInstalled}
-            onCreated={handleCreated}
           />
         </section>
       </div>

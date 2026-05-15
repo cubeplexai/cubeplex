@@ -1,117 +1,16 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+
 import { createApiClient } from '../../src/api/client'
 import {
+  adminCreateInstall,
   adminListInstalls,
-  wsGetToolCitations,
-  wsPatchToolCitations,
-  wsGetCatalogToolCitations,
+  adminListTemplates,
+  wsCreateInstall,
+  wsCreateMyGrant,
+  wsListEffectiveConnectors,
   wsListTemplates,
+  wsPatchConnectorState,
 } from '../../src/api/mcp'
-import type { CitationConfigJSON, ToolCitationsResponse } from '../../src/types/mcp'
-
-describe('MCP tool-citations API', () => {
-  let fetchMock: ReturnType<typeof vi.fn>
-  beforeEach(() => {
-    fetchMock = vi.fn()
-    globalThis.fetch = fetchMock as unknown as typeof fetch
-  })
-  afterEach(() => vi.restoreAllMocks())
-
-  it('wsGetToolCitations GETs the right URL and returns the shape', async () => {
-    const sample: ToolCitationsResponse = {
-      server_id: 'mcp-1',
-      server_name: 'webtools',
-      tools_cache: [{ name: 'web_search', description: '', input_schema: {} }],
-      tool_citations: {
-        web_search: {
-          content_type: 'json',
-          source_type: 'web',
-          content_field: 'results',
-          mapping: { snippet: 'description' },
-        },
-      },
-      catalog_defaults: null,
-      orphan_keys: [],
-    }
-    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify(sample), { status: 200 }))
-    const client = createApiClient('')
-    const out = await wsGetToolCitations(client, 'ws-x', 'mcp-1')
-    expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/ws/ws-x/mcp/servers/mcp-1/tool-citations')
-    expect(out).toEqual(sample)
-  })
-
-  it('wsPatchToolCitations sends the full dict in the body', async () => {
-    fetchMock.mockResolvedValueOnce(
-      new Response(
-        JSON.stringify({
-          server_id: 'mcp-1',
-          server_name: 'webtools',
-          tools_cache: [],
-          tool_citations: {},
-          catalog_defaults: null,
-          orphan_keys: [],
-        }),
-        { status: 200 },
-      ),
-    )
-    const client = createApiClient('')
-    const payload: Record<string, CitationConfigJSON> = {
-      web_search: {
-        content_type: 'json',
-        source_type: 'web',
-        content_field: 'results',
-        mapping: {},
-      },
-    }
-    await wsPatchToolCitations(client, 'ws-x', 'mcp-1', payload)
-    const [url, init] = fetchMock.mock.calls[0]
-    expect(url).toBe('/api/v1/ws/ws-x/mcp/servers/mcp-1/tool-citations')
-    expect((init as RequestInit).method).toBe('PATCH')
-    expect(JSON.parse(String((init as RequestInit).body))).toEqual({ tool_citations: payload })
-  })
-
-  it('wsGetCatalogToolCitations uses the catalog URL', async () => {
-    fetchMock.mockResolvedValueOnce(
-      new Response(
-        JSON.stringify({
-          slug: 'webtools',
-          tool_citations: {
-            web_search: {
-              content_type: 'json',
-              source_type: 'web',
-              content_field: null,
-              mapping: {},
-            },
-          },
-        }),
-        { status: 200 },
-      ),
-    )
-    const client = createApiClient('')
-    const out = await wsGetCatalogToolCitations(client, 'ws-x', 'webtools')
-    expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/ws/ws-x/mcp/catalog/webtools/tool-citations')
-    expect(out.slug).toBe('webtools')
-  })
-
-  it('wsPatchToolCitations throws on non-OK response', async () => {
-    fetchMock.mockResolvedValueOnce(
-      new Response(JSON.stringify({ detail: [{ tool: 'ghost', msg: 'unknown' }] }), {
-        status: 422,
-      }),
-    )
-    const client = createApiClient('')
-    await expect(
-      wsPatchToolCitations(client, 'ws-x', 'mcp-1', {
-        ghost: {
-          content_type: 'json',
-          source_type: 'web',
-          content_field: null,
-          mapping: {},
-        },
-      }),
-    ).rejects.toThrow()
-  })
-})
 
 describe('MCP four-layer API', () => {
   let fetchMock: ReturnType<typeof vi.fn>
@@ -128,33 +27,59 @@ describe('MCP four-layer API', () => {
     expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/ws/ws-x/mcp/templates')
   })
 
-  it('adminListInstalls GETs the admin scope', async () => {
-    // Admin page needs the full org install inventory, not the workspace
-    // effective lens — verify the helper hits the admin endpoint.
+  it('adminListTemplates and adminListInstalls hit the admin scope', async () => {
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ items: [] }), { status: 200 }))
     fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ items: [] }), { status: 200 }))
     const client = createApiClient('')
+    await adminListTemplates(client)
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/admin/mcp/templates')
     const out = await adminListInstalls(client)
-    expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/admin/mcp/installs')
+    expect(fetchMock.mock.calls[1][0]).toBe('/api/v1/admin/mcp/installs')
     expect(out).toEqual({ items: [] })
   })
 
-  it('does not use catalog or override paths', async () => {
-    // Coexist policy: legacy MCPCatalog* helpers still live in this module
-    // until Task 8 migrates the React components, so a blanket
-    // `every export name lacks Catalog/Override` assertion would fail
-    // (and rightly so). Instead, assert the four-layer helpers introduced
-    // by this task don't accidentally carry the legacy substrings.
-    const source = await import('../../src/api/mcp')
-    const fourLayerNames = [
-      'wsListTemplates',
-      'wsCreateInstall',
-      'wsPatchConnectorState',
-      'wsListEffectiveConnectors',
-    ]
-    for (const name of fourLayerNames) {
-      expect(typeof (source as Record<string, unknown>)[name]).toBe('function')
-      expect(name.includes('Catalog')).toBe(false)
-      expect(name.includes('Override')).toBe(false)
-    }
+  it('wsCreateInstall POSTs to workspace install endpoint', async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ install_id: 'mcins-1' }), { status: 201 }),
+    )
+    const client = createApiClient('')
+    await wsCreateInstall(client, 'ws-x', { template_id: 'mctpl-1' })
+    const [url, init] = fetchMock.mock.calls[0]
+    expect(url).toBe('/api/v1/ws/ws-x/mcp/installs')
+    expect((init as RequestInit).method).toBe('POST')
+  })
+
+  it('adminCreateInstall POSTs to admin install endpoint', async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ install_id: 'mcins-1' }), { status: 201 }),
+    )
+    const client = createApiClient('')
+    await adminCreateInstall(client, { template_id: 'mctpl-1' })
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/admin/mcp/installs')
+  })
+
+  it('wsListEffectiveConnectors GETs the workspace connectors endpoint', async () => {
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ items: [] }), { status: 200 }))
+    const client = createApiClient('')
+    await wsListEffectiveConnectors(client, 'ws-x')
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/ws/ws-x/mcp/connectors')
+  })
+
+  it('wsPatchConnectorState PATCHes the connector state', async () => {
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({}), { status: 200 }))
+    const client = createApiClient('')
+    await wsPatchConnectorState(client, 'ws-x', 'mcins-1', { enabled: false })
+    const [url, init] = fetchMock.mock.calls[0]
+    expect(url).toBe('/api/v1/ws/ws-x/mcp/connectors/mcins-1/state')
+    expect((init as RequestInit).method).toBe('PATCH')
+  })
+
+  it('wsCreateMyGrant posts to the per-user grant endpoint', async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ install_id: 'mcins-1' }), { status: 201 }),
+    )
+    const client = createApiClient('')
+    await wsCreateMyGrant(client, 'ws-x', 'mcins-1', { credential_plaintext: 'tok' })
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/ws/ws-x/mcp/installs/mcins-1/grants/me')
   })
 })

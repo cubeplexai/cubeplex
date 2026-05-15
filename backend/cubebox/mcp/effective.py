@@ -7,9 +7,6 @@ the runtime / UI / admin contract for "is this connector usable, and if not,
 why not"; :class:`MCPEffectiveConnectorService` is the production caller that
 loads the four layers from Postgres and feeds them through the pure rule set.
 
-Coexists with the legacy :mod:`cubebox.mcp.cubepi_discovery` / ``MCPServer``
-runtime. Task 9 of the four-layer plan will retire the legacy path; until then
-nothing here touches the legacy tables.
 """
 
 from __future__ import annotations
@@ -246,10 +243,6 @@ class MCPEffectiveConnectorService:
     The single read path that joins template + install + workspace state +
     grant. Loads each layer in one round-trip (``IN (...)`` style), so the
     cost is O(layers) round-trips per request rather than O(installs).
-
-    Coexists with the legacy ``MCPServerRepository.list_for_workspace`` —
-    Task 9 of the four-layer plan removes the legacy path. Until then nothing
-    in this service touches ``MCPServer`` / ``WorkspaceMCPOverride`` / etc.
     """
 
     def __init__(
@@ -497,19 +490,43 @@ class MCPEffectiveConnectorService:
             and grant.expires_at is not None
             and _is_expired(grant.expires_at)
             and self._token_manager is not None
+            and grant.refresh_credential_id is not None
         ):
             # Attempt refresh via the OAuth manager. The manager mutates the
-            # grant row in place on success; on failure we leave grant_status
-            # as the manager set it (``"expired"``) so the pure rule emits
-            # ``grant_expired``. The legacy token manager API takes an
-            # MCPServer instance, not an install — until the manager is
-            # ported to the four-layer schema we skip the refresh attempt
-            # rather than synthesize a fake server row. The pure rule set
-            # still correctly surfaces ``grant_expired`` whenever
-            # ``has_refresh`` is False.
-            pass
+            # grant row in place on success; on failure it sets
+            # ``grant_status='expired'`` so the pure rule emits
+            # ``grant_expired``.
+            try:
+                await self._token_manager.get_access_token_for_grant(
+                    grant=grant,
+                    grant_repo=self._grant_repo,
+                    server_url=install.server_url,
+                    oauth_client_config=dict(install.oauth_client_config or {}),
+                )
+                # Re-read so the caller sees the manager's mutations.
+                refreshed = await self._reread_grant(grant, workspace_id, user_id)
+                if refreshed is not None:
+                    return refreshed
+            except Exception:  # noqa: BLE001 — non-fatal; effective state stays as 'expired'
+                pass
 
         return grant
+
+    async def _reread_grant(
+        self,
+        grant: MCPCredentialGrant,
+        workspace_id: str,
+        user_id: str,
+    ) -> MCPCredentialGrant | None:
+        if grant.grant_scope == "org":
+            return await self._grant_repo.get_org_grant(grant.install_id)
+        if grant.grant_scope == "workspace":
+            return await self._grant_repo.get_workspace_grant(grant.install_id, workspace_id)
+        if grant.grant_scope == "user":
+            return await self._grant_repo.get_user_grant(
+                grant.install_id, user_id, workspace_id=workspace_id
+            )
+        return None
 
 
 def _is_expired(when: datetime) -> bool:

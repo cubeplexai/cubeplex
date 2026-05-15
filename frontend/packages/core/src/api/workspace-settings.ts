@@ -1,12 +1,7 @@
-import { toApiError, type ApiClient } from './client'
-import type {
-  AgentConfig,
-  MCPCredentialMode,
-  WorkspaceMCP,
-  WorkspaceSkills,
-} from '../types/workspace-settings'
-import { wsListEffectiveConnectors } from './mcp'
 import type { MCPEffectiveConnector } from '../types/mcp'
+import type { AgentConfig, WorkspaceSkills } from '../types/workspace-settings'
+import { toApiError, type ApiClient } from './client'
+import { wsListEffectiveConnectors } from './mcp'
 
 export async function getAgentConfig(client: ApiClient): Promise<AgentConfig> {
   const res = await client.get('/api/v1/settings/agent')
@@ -54,28 +49,8 @@ export async function deleteWorkspaceSkill(client: ApiClient, installId: string)
   if (!res.ok) throw await toApiError(res)
 }
 
-export async function listWorkspaceMCP(client: ApiClient): Promise<WorkspaceMCP> {
-  const res = await client.get('/api/v1/settings/mcp')
-  if (!res.ok) throw await toApiError(res)
-  return (await res.json()) as WorkspaceMCP
-}
-
-export async function toggleWorkspaceMCP(
-  client: ApiClient,
-  serverId: string,
-  enabled: boolean,
-): Promise<{ server_id: string; enabled: boolean }> {
-  const res = await client.patch(`/api/v1/settings/mcp/${serverId}`, { enabled })
-  if (!res.ok) throw await toApiError(res)
-  return (await res.json()) as { server_id: string; enabled: boolean }
-}
-
 /**
- * Four-layer effective connector list for a workspace. Wraps
- * `wsListEffectiveConnectors` for callers that already live on the
- * workspace-settings API surface (e.g. settings store). The shape returned
- * here is the effective row (template + install + state + credential
- * availability), not the legacy `MCPServerItem` projection.
+ * Four-layer effective connector list for a workspace.
  */
 export async function listWorkspaceMCPConnectors(
   client: ApiClient,
@@ -83,19 +58,4 @@ export async function listWorkspaceMCPConnectors(
 ): Promise<MCPEffectiveConnector[]> {
   const data = await wsListEffectiveConnectors(client, wsId)
   return data.items
-}
-
-export async function patchWorkspaceMCPCredentialMode(
-  client: ApiClient,
-  serverId: string,
-  credentialMode: MCPCredentialMode,
-): Promise<{ server_id: string; credential_mode: MCPCredentialMode }> {
-  const res = await client.patch(`/api/v1/settings/mcp/${serverId}`, {
-    credential_mode: credentialMode,
-  })
-  if (!res.ok) throw await toApiError(res)
-  return (await res.json()) as {
-    server_id: string
-    credential_mode: MCPCredentialMode
-  }
 }

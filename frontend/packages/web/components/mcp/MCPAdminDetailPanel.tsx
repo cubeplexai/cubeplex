@@ -4,7 +4,7 @@ import { useState } from 'react'
 import { useTranslations } from 'next-intl'
 import { Check, FileText, Loader2, Network, Trash2, X } from 'lucide-react'
 import {
-  adminCatalogDeleteInstall,
+  adminDeleteInstall,
   wsListTemplates,
   type ApiClient,
   type MCPConnectorTemplate,
@@ -15,20 +15,18 @@ import { Button } from '@/components/ui/button'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { cn } from '@/lib/utils'
 
-import { MCPCustomCreatePanel } from './MCPCustomCreatePanel'
 import { MCPTemplateInstallPanel } from './MCPTemplateInstallPanel'
 import { MCPWorkspacesTab } from './MCPWorkspacesTab'
 
 interface MCPAdminDetailPanelProps {
   connector: MCPEffectiveConnector | null
-  mode: 'detail' | 'add_custom' | 'install_template' | null
+  mode: 'detail' | 'install_template' | null
   installTemplate: MCPConnectorTemplate | null
   client: ApiClient
   wsId: string
   onRefresh: () => Promise<void>
   onDelete: (installId: string) => Promise<void>
   onInstalled: (installId: string) => void
-  onCreated: (serverId: string) => void
 }
 
 export function MCPAdminDetailPanel({
@@ -40,7 +38,6 @@ export function MCPAdminDetailPanel({
   onRefresh,
   onDelete,
   onInstalled,
-  onCreated,
 }: MCPAdminDetailPanelProps) {
   const t = useTranslations('mcpAdmin')
 
@@ -58,10 +55,6 @@ export function MCPAdminDetailPanel({
         onInstalled={onInstalled}
       />
     )
-  }
-
-  if (mode === 'add_custom' && !connector) {
-    return <MCPCustomCreatePanel client={client} wsId={wsId} onCreated={onCreated} />
   }
 
   if (!connector) {
@@ -220,7 +213,7 @@ export function MCPAdminDetailPanel({
               <dt className="text-muted-foreground">{t('credentialPolicy')}</dt>
               <dd>{connector.credential_policy}</dd>
               <dt className="text-muted-foreground">{t('workspaceState')}</dt>
-              <dd>{ws.enabled ? t('wsEnabled') : t('wsDisabled')}</dd>
+              <dd>{ws?.enabled ? t('wsEnabled') : t('wsDisabled')}</dd>
               <dt className="text-muted-foreground">{t('authStatus')}</dt>
               <dd>{install.auth_status}</dd>
               <dt className="text-muted-foreground">{t('discoveryStatus')}</dt>
@@ -259,4 +252,4 @@ export async function loadTemplates(
 
 // Reference imports used by the admin page when wiring uninstall. Kept here so
 // callers don't have to duplicate the import map.
-export { adminCatalogDeleteInstall }
+export { adminDeleteInstall }

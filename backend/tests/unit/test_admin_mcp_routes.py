@@ -1,9 +1,4 @@
-"""Unit tests for admin MCP route registration.
-
-Covers both the legacy ``/admin/mcp/servers/...`` surface (which remains
-mounted until Task 9 of the four-layer plan) and the new four-layer
-routes added in Task 4.
-"""
+"""Unit tests for admin MCP route registration (four-layer surface only)."""
 
 from cubebox.api.app import create_app
 
@@ -19,16 +14,6 @@ def _route_pairs(app: object) -> set[tuple[str, str]]:
         for method in methods:
             pairs.add((method.upper(), path))
     return pairs
-
-
-def test_admin_mcp_legacy_routes_are_registered() -> None:
-    app = create_app()
-    paths = {route.path for route in app.routes}
-
-    # Legacy surface — keep until Task 9.
-    assert "/api/v1/admin/mcp/servers" in paths
-    assert "/api/v1/admin/mcp/test-connection" in paths
-    assert "/api/v1/admin/mcp/servers/{server_id}/overrides" in paths
 
 
 def test_admin_mcp_four_layer_routes_are_registered() -> None:

@@ -20,11 +20,9 @@ from cubebox.models import (  # noqa: F401
     Credential,
     InviteToken,
     LlmBillingEvent,
-    MCPCatalogConnector,
     MCPConnectorInstall,
     MCPConnectorTemplate,
     MCPCredentialGrant,
-    MCPServer,
     MCPWorkspaceConnectorState,
     Membership,
     MemoryItem,
@@ -38,11 +36,8 @@ from cubebox.models import (  # noqa: F401
     Skill,
     SkillVersion,
     User,
-    UserMCPCredential,
     UserSandbox,
     Workspace,
-    WorkspaceMCPCredential,
-    WorkspaceMCPOverride,
     WorkspaceSkillBinding,
 )
 
@@ -67,6 +62,8 @@ _CHECKPOINT_TABLES = {
     "checkpoints",
     "checkpoint_blobs",
     "checkpoint_writes",
+    "cubepi_messages",
+    "cubepi_schema_version",
 }
 
 
@@ -77,9 +74,12 @@ def include_object(
     reflected: bool,
     compare_to: object,
 ) -> bool:
-    """Exclude checkpoint tables from autogenerate."""
-    if type_ == "table" and name in _CHECKPOINT_TABLES:
-        return False
+    """Exclude cubepi-checkpointer-owned tables from autogenerate."""
+    if type_ == "table" and name is not None:
+        if name in _CHECKPOINT_TABLES:
+            return False
+        if name.startswith("cubepi_messages_p"):
+            return False
     return True
 
 

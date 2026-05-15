@@ -9,15 +9,10 @@ from cubebox.models.conversation import Conversation
 from cubebox.models.credential import Credential
 from cubebox.models.invite_token import InviteToken
 from cubebox.models.mcp import (
-    MCPCatalogConnector,
     MCPConnectorInstall,
     MCPConnectorTemplate,
     MCPCredentialGrant,
-    MCPServer,
     MCPWorkspaceConnectorState,
-    UserMCPCredential,
-    WorkspaceMCPCredential,
-    WorkspaceMCPOverride,
 )
 from cubebox.models.membership import Membership, Role
 from cubebox.models.memory import (
@@ -53,11 +48,9 @@ __all__ = [
     "Credential",
     "InviteToken",
     "LlmBillingEvent",
-    "MCPCatalogConnector",
     "MCPConnectorInstall",
     "MCPConnectorTemplate",
     "MCPCredentialGrant",
-    "MCPServer",
     "MCPWorkspaceConnectorState",
     "MemoryItem",
     "MemoryScope",
@@ -78,10 +71,7 @@ __all__ = [
     "Skill",
     "SkillVersion",
     "User",
-    "UserMCPCredential",
     "UserSandbox",
     "Workspace",
-    "WorkspaceMCPCredential",
-    "WorkspaceMCPOverride",
     "WorkspaceSkillBinding",
 ]

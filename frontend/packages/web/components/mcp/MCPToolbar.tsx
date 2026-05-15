@@ -1,9 +1,8 @@
 'use client'
 
-import { Plus, Search } from 'lucide-react'
+import { Search } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 import type { MCPConnectorFilter } from '@cubebox/core'
-import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { cn } from '@/lib/utils'
 
@@ -12,7 +11,6 @@ interface MCPToolbarProps {
   onSearchChange: (value: string) => void
   filter: MCPConnectorFilter
   onFilterChange: (value: MCPConnectorFilter) => void
-  onAddCustom: () => void
 }
 
 function PillGroup<T extends string>({
@@ -54,13 +52,7 @@ function PillGroup<T extends string>({
   )
 }
 
-export function MCPToolbar({
-  search,
-  onSearchChange,
-  filter,
-  onFilterChange,
-  onAddCustom,
-}: MCPToolbarProps) {
+export function MCPToolbar({ search, onSearchChange, filter, onFilterChange }: MCPToolbarProps) {
   const t = useTranslations('mcpAdmin')
 
   const FILTER_OPTIONS: { value: MCPConnectorFilter; label: string }[] = [
@@ -90,11 +82,6 @@ export function MCPToolbar({
         value={filter}
         onChange={onFilterChange}
       />
-
-      <Button size="sm" onClick={onAddCustom} className="ml-auto">
-        <Plus className="size-3.5" />
-        {t('addCustomButton')}
-      </Button>
     </div>
   )
 }

@@ -113,30 +113,34 @@ class CredentialService:
 
     async def _guard_references(self, credential_id: str) -> None:
         """Refuse deletion while other rows still reference the credential."""
-        from sqlalchemy import select
+        from sqlalchemy import or_, select
 
+        from cubebox.models import MCPCredentialGrant
         from cubebox.models.provider import Provider
-        from cubebox.repositories.mcp import (
-            MCPServerRepository,
-            UserMCPCredentialRepository,
-            WorkspaceMCPCredentialRepository,
-        )
 
         session = self._repo.session
         if self._org_id is not None:
-            for repo_class in (
-                MCPServerRepository,
-                WorkspaceMCPCredentialRepository,
-                UserMCPCredentialRepository,
-            ):
-                repo = repo_class(session, org_id=self._org_id)
-                references = await repo.find_by_credential_id(credential_id)
-                if references:
-                    reference_ids = [getattr(reference, "id", "?") for reference in references]
-                    raise CredentialInUseError(
-                        f"credential {credential_id} referenced by "
-                        f"{repo_class.__name__}: {reference_ids}"
+            grant_refs = (
+                (
+                    await session.execute(
+                        select(MCPCredentialGrant).where(
+                            MCPCredentialGrant.org_id == self._org_id,  # type: ignore[arg-type]
+                            or_(
+                                MCPCredentialGrant.credential_id == credential_id,  # type: ignore[arg-type]
+                                MCPCredentialGrant.refresh_credential_id  # type: ignore[arg-type]
+                                == credential_id,
+                            ),
+                        )
                     )
+                )
+                .scalars()
+                .all()
+            )
+            if grant_refs:
+                reference_ids = [grant.id for grant in grant_refs]
+                raise CredentialInUseError(
+                    f"credential {credential_id} referenced by MCPCredentialGrant: {reference_ids}"
+                )
         provider_refs = (
             (
                 await session.execute(

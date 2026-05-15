@@ -1,4 +1,4 @@
-"""MCP domain exceptions. Each maps to a specific HTTP error code in routes."""
+"""MCP OAuth domain exceptions."""
 
 
 class OAuthError(Exception):
@@ -71,7 +71,7 @@ class OAuthRefreshContention(OAuthError):
 
 
 class OAuthInvalidServerState(OAuthError):
-    """Server row is not in a state where the OAuth operation makes sense."""
+    """Install row is not in a state where the OAuth operation makes sense."""
 
 
 class OAuthCallbackError(OAuthError):
@@ -96,55 +96,3 @@ class OAuthCallbackError(OAuthError):
 
 class OAuthPKCEMissing(OAuthError):
     """PKCE verifier was not found in redis (expired / never written)."""
-
-
-class MCPServerNotFound(Exception):
-    """MCP server id does not exist or is outside the current org/workspace scope."""
-
-
-class MCPServerURLConflict(Exception):
-    """MCP server URL hash conflicts with an existing server in the same scope."""
-
-
-class MCPServerNameConflict(Exception):
-    """MCP server name conflicts with an existing server in the same scope."""
-
-
-class MCPCredentialRequired(Exception):
-    """credential_scope=org/workspace requires plaintext credential."""
-
-
-class MCPUserScopeCredentialForbidden(Exception):
-    """credential_scope=user/none must not carry plaintext credential."""
-
-
-class MCPServerNotOwnedByWorkspace(Exception):
-    """Workspace route attempted to mutate a server owned by a different workspace."""
-
-
-class MCPWorkspaceOwnedNoOverride(Exception):
-    """Workspace overrides only apply to org-wide installs, not workspace-private ones."""
-
-
-class MCPServerAlreadyOrgWide(Exception):
-    """Promote was called on a server that is already org-wide."""
-
-
-class MCPShareCredentialOnlyForWorkspaceScope(Exception):
-    """share_credential is only meaningful for credential_scope=workspace."""
-
-
-class MCPCredentialPathMismatch(Exception):
-    """Credential route was used on a server with the wrong credential scope."""
-
-
-class MCPCatalogConnectorNotFound(Exception):
-    """Catalog connector id does not exist (or is deprecated/disabled)."""
-
-
-class MCPCatalogAuthMethodUnsupported(Exception):
-    """Requested auth_method is not in catalog.supported_auth_methods."""
-
-
-class MCPCatalogInstallExists(Exception):
-    """An install for (org, owner_workspace_id, catalog_connector_id) already exists."""

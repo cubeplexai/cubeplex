@@ -1,14 +1,7 @@
-"""MCP tool loading for the cubepi runtime (M2.4).
+"""MCP tool loading for the cubepi runtime (four-layer only).
 
-Two loaders coexist here during the four-layer migration:
-
-* :func:`load_workspace_mcp_tools_for_cubepi` — the legacy path, reads from
-  ``mcp_servers`` / ``workspace_mcp_overrides`` / ``user_mcp_credentials``.
-  Kept until Task 9 of the four-layer plan removes the legacy tables.
-* :func:`load_workspace_mcp_tools_from_effective` — the new path, reads from
-  the four-layer model via :class:`MCPEffectiveConnectorService`. The run
-  manager calls this when an :class:`MCPEffectiveConnectorService` is
-  available; the legacy path remains the fallback while routes migrate.
+Consumes :class:`MCPRuntimeConnectorSpec` from the effective service and
+produces a list of :class:`cubepi.AgentTool` plus citation configs.
 """
 
 from __future__ import annotations
@@ -19,23 +12,16 @@ import logging
 import re
 from collections import Counter
 from datetime import timedelta
-from typing import Any, cast
+from typing import Any, Literal, cast
 
 from cubepi.agent.types import AgentTool
 from cubepi.mcp import load_mcp_tools_http
 from pydantic import ValidationError
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from cubebox.credentials.exceptions import CredentialNotFound
 from cubebox.mcp._constants import (
     CREDENTIAL_KIND_MCP,
     CREDENTIAL_KIND_MCP_OAUTH_ACCESS_TOKEN,
-)
-from cubebox.mcp.cubepi_discovery import (
-    _VALID_TRANSPORTS,
-    CubepiMCPServerSpec,
-    MCPTransport,
-    discover_workspace_mcp_servers_for_cubepi,
 )
 from cubebox.mcp.effective import MCPEffectiveConnectorService, MCPRuntimeConnectorSpec
 from cubebox.mcp.exceptions import (
@@ -51,6 +37,9 @@ from cubebox.services.credential import CredentialService
 
 _USER_TOKEN_TTL = timedelta(minutes=5)
 
+MCPTransport = Literal["sse", "streamable_http"]
+_VALID_TRANSPORTS: frozenset[str] = frozenset({"sse", "streamable_http"})
+
 logger = logging.getLogger(__name__)
 
 _NS_SLUG_RE = re.compile(r"[^a-zA-Z0-9]+")
@@ -64,32 +53,13 @@ length cap can otherwise collapse them to the same final prefix.
 
 
 def _slugify_for_namespace(server_name: str) -> str:
-    """Produce a function-name-safe slug from an MCP server's display name.
-
-    Replaces runs of non-[A-Za-z0-9] with underscore; strips leading/trailing
-    underscores; falls back to "mcp" if empty.
-    """
+    """Produce a function-name-safe slug from an MCP install's display name."""
     slug = _NS_SLUG_RE.sub("_", server_name).strip("_")
     return slug or "mcp"
 
 
-def _server_id_suffix(server_id: str, length: int = 4) -> str:
-    """Derive a stable function-name-safe suffix from an MCP server id.
-
-    server.id is shaped like "mcp-V1StGXR8Z5jdHi"; we take the last ``length``
-    characters after stripping hyphens. Unique enough for the rare case of two
-    installs sharing the same display name without bloating the namespaced tool name.
-    """
-    safe = server_id.replace("-", "")
-    return safe[-length:] if len(safe) >= length else safe
-
-
 def _build_namespaced_name_with_prefix(prefix: str, tool_name: str, suffix: str = "") -> str:
-    """Combine ``{prefix}{suffix}__{tool_name}`` capped at ``_NS_MAX_LEN``.
-
-    If the combined name overflows, only ``prefix`` is truncated; ``suffix``
-    (the collision disambiguator) and the full tool name are preserved.
-    """
+    """Combine ``{prefix}{suffix}__{tool_name}`` capped at ``_NS_MAX_LEN``."""
     combined = f"{prefix}{suffix}__{tool_name}"
     if len(combined) <= _NS_MAX_LEN:
         return combined
@@ -104,111 +74,7 @@ def _build_namespaced_name(server_name: str, tool_name: str) -> str:
     return _build_namespaced_name_with_prefix(_slugify_for_namespace(server_name), tool_name)
 
 
-def _compute_slug_and_suffix_for(
-    spec: CubepiMCPServerSpec,
-    slug_counts: Counter[str],
-    proposed_slugs: dict[str, str],
-) -> tuple[str, str]:
-    """Return ``(slug, suffix)`` for a spec.
-
-    On collision the suffix carries the id-derived disambiguator (e.g. ``_aaaa``);
-    on a clean name the suffix is empty. Keeping them separate lets the truncation
-    path in ``_build_namespaced_name_with_prefix`` preserve the suffix even when
-    the slug must be shortened.
-    """
-    slug = proposed_slugs[spec.server_id]
-    explicit_collision = slug_counts[slug] > 1
-    risky_truncation = len(slug) > _NS_LENGTH_DEFENCE
-    if explicit_collision or risky_truncation:
-        return slug, f"_{_server_id_suffix(spec.server_id)}"
-    return slug, ""
-
-
 async def load_workspace_mcp_tools_for_cubepi(
-    *,
-    session: AsyncSession,
-    workspace_id: str,
-    org_id: str,
-    user_id: str,
-    cred_service: CredentialService,
-    signer: MCPUserTokenSigner,
-) -> tuple[list[AgentTool[Any]], dict[str, CitationConfig]]:
-    """Load all enabled MCP servers' tools for a workspace as cubepi.AgentTool.
-
-    Tool names are namespaced as ``{server_name}__{tool_name}`` so two MCP
-    servers can ship the same bare tool name without colliding in the
-    agent's tool list. The returned ``CitationConfig`` dict uses the same
-    namespaced keys.
-
-    When two servers produce the same slug (e.g. two installs both named
-    "WebTools"), a short id-derived suffix is appended to each colliding
-    prefix so names remain unique. The suffix is only added when there is
-    an actual collision; the common case produces clean names.
-
-    Per-server failures are caught and logged, never aborting the load.
-    Each server's transport (``sse`` or ``streamable_http``) is forwarded
-    to cubepi's loader so the per-run path matches whatever wire format
-    the server actually speaks.
-    """
-    servers = await discover_workspace_mcp_servers_for_cubepi(
-        session=session,
-        workspace_id=workspace_id,
-        org_id=org_id,
-        user_id=user_id,
-        cred_service=cred_service,
-        signer=signer,
-    )
-
-    # Pre-compute every spec's proposed slug; detect collisions across the load.
-    proposed_slugs: dict[str, str] = {
-        spec.server_id: _slugify_for_namespace(spec.server_name) for spec in servers
-    }
-    slug_counts: Counter[str] = Counter(proposed_slugs.values())
-
-    all_tools: list[AgentTool[Any]] = []
-    all_citations: dict[str, CitationConfig] = {}
-    for spec in servers:
-        try:
-            tools = await load_mcp_tools_http(
-                spec.url,
-                headers=spec.headers or None,
-                timeout=30.0,
-                transport=spec.transport,
-            )
-        except asyncio.CancelledError:
-            raise
-        except Exception as exc:  # noqa: BLE001
-            logger.warning(
-                "Failed to load MCP server %s (%s): %s",
-                spec.server_name,
-                spec.server_id,
-                exc,
-            )
-            continue
-
-        slug, suffix = _compute_slug_and_suffix_for(spec, slug_counts, proposed_slugs)
-        for tool in tools:
-            bare_name = tool.name
-            namespaced_name = _build_namespaced_name_with_prefix(slug, bare_name, suffix=suffix)
-            namespaced = dataclasses.replace(tool, name=namespaced_name)
-            all_tools.append(namespaced)
-            raw = spec.tool_citations.get(bare_name)
-            if raw is None:
-                continue
-            try:
-                all_citations[namespaced.name] = CitationConfig(**raw)
-            except ValidationError as exc:
-                logger.warning(
-                    "Bad tool_citations on %s/%s: %s — skipping",
-                    spec.server_name,
-                    bare_name,
-                    exc,
-                )
-
-    return all_tools, all_citations
-
-
-async def load_workspace_mcp_tools_from_effective(
     *,
     effective_service: MCPEffectiveConnectorService,
     token_manager: OAuthTokenManager,
@@ -221,11 +87,8 @@ async def load_workspace_mcp_tools_from_effective(
 ) -> tuple[list[AgentTool[Any]], dict[str, CitationConfig]]:
     """Four-layer loader: derive runtime specs from effective state, load tools.
 
-    Mirrors :func:`load_workspace_mcp_tools_for_cubepi` but consumes
-    :class:`MCPRuntimeConnectorSpec` instead of legacy
-    :class:`CubepiMCPServerSpec`. Per-server failures (discovery, refresh,
-    decrypt) are caught + logged + skipped exactly as before — one bad
-    install must never crash the whole run's tool list.
+    Per-server failures (discovery, refresh, decrypt) are caught + logged
+    + skipped — one bad install must never crash the whole run's tool list.
 
     Auth method dispatch:
 
@@ -240,8 +103,8 @@ async def load_workspace_mcp_tools_from_effective(
     * ``static`` → fetch the vault row by ``spec.credential_id``, decrypt,
       build the Authorization header.
     * ``none`` → mint a short-lived cubebox identity JWT via
-      :class:`MCPUserTokenSigner` (same helper the legacy passthrough
-      branch already uses).
+      :class:`MCPUserTokenSigner` so the MCP server can enforce tenant
+      scoping.
     """
     specs = await effective_service.list_runtime_specs(workspace_id, user_id)
 
@@ -312,8 +175,6 @@ async def load_workspace_mcp_tools_from_effective(
             )
             continue
 
-        # Slug + collision suffix logic mirrors the legacy loader so the
-        # cache-prefix tool name format stays identical across paths.
         slug = proposed_slugs[spec.install_id]
         explicit_collision = slug_counts[slug] > 1
         risky_truncation = len(slug) > _NS_LENGTH_DEFENCE
@@ -410,27 +271,7 @@ async def _resolve_oauth_access_token(
     token_manager: OAuthTokenManager,
     grant_repo: MCPCredentialGrantRepository | None,
 ) -> str:
-    """Return a usable access token for a four-layer OAuth grant.
-
-    Fast path: ``spec.grant`` is present, has a refresh credential, and the
-    token manager + grant repo are both wired → ask the manager for a
-    refreshed token. The manager only hits the AS when the cached token is
-    within its refresh buffer; otherwise it returns the cached value.
-
-    Fall back to a direct vault read in three cases:
-      1. The grant has no ``refresh_credential_id`` — refresh is impossible;
-         use whatever is cached (the effective service has already filtered
-         out unrefreshable expired grants via rule 8, so the runtime should
-         only see still-usable tokens here).
-      2. ``grant_repo`` is None — the caller wired the loader without the
-         grant repo (legacy tests, no-refresh deployments). Use the cached
-         token as a degraded fallback.
-      3. The refresh attempt fails terminally — the manager has already
-         marked the grant ``status='expired'``; we still return the cached
-         token for this in-flight request so the run can attempt the call
-         (the MCP server will 401, the agent moves on) and the next run
-         will see the grant filtered out by the effective service.
-    """
+    """Return a usable access token for a four-layer OAuth grant."""
     assert spec.credential_id is not None  # caller checked
 
     can_refresh = (
