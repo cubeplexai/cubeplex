@@ -927,7 +927,8 @@ reasons):
 | --- | --- | --- |
 | no template, no install | `install_state="active"` but no install row for this template in org/ws | `not_installed` |
 | install uninstalled | `install_state="uninstalled"` | `install_uninstalled` |
-| template deprecated, install still active | `template_status="deprecated"` | `template_deprecated` |
+| template disabled | `template_status="disabled"` | `template_deprecated` (hard block) |
+| template deprecated, install still active | `template_status="deprecated"`, otherwise authorized | `usable` — deprecation surfaces via the DTO's `template_status` field but does NOT block runtime |
 | workspace state missing/disabled | `workspace_enabled=False` | `not_enabled_in_workspace` |
 | unsupported transport | `transport="stdio"` | (skipped — spec doesn't include this; replace with `server_unreachable` if needed) |
 | no-auth happy path | `auth_method="none"`, `credential_policy="none"`, no grant | `usable` |
@@ -973,7 +974,13 @@ Decision order in `compute_effective_state` (first match wins):
 
 1. `install_present=False` → `not_installed`.
 2. `install_state == "uninstalled"` → `install_uninstalled`.
-3. `template_status` is set and not `active` → `template_deprecated`.
+3. `template_status == "disabled"` → `template_deprecated` (treated as a hard
+   block — disabled means the template can no longer ship). `deprecated` is
+   **not** a block: per the spec, "Template can be deprecated without breaking
+   existing installs." Surface `template_status="deprecated"` in the DTO as a
+   warning, but continue evaluating the remaining rules; the install can still
+   be `usable=true`. Templates that are `None` (custom installs) skip this
+   rule entirely.
 4. `workspace_state_present=False` or `workspace_enabled=False` →
    `not_enabled_in_workspace`.
 5. `auth_method == "none"` → `usable`, `credential_availability="not_required"`.
@@ -1088,8 +1095,8 @@ Run:
 
 ```bash
 cd backend
-uv run pytest -q tests/unit/mcp/test_effective_state.py \
-                 tests/unit/mcp/test_effective_service.py \
+uv run pytest -q tests/unit/test_mcp_effective_state.py \
+                 tests/unit/test_mcp_effective_service.py \
                  tests/unit/test_mcp_cubepi_runtime.py
 ```
 
