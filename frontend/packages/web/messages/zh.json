@@ -608,6 +608,12 @@
     "serverDetail": {
       "citations": {
         "loading": "加载引用映射中…",
+        "filterPlaceholder": "搜索工具…",
+        "countAll": "{count} 个工具",
+        "countMatch": "{matched} / {total} 匹配",
+        "emptyTools": "尚未发现任何工具。",
+        "emptyToolsMatch": "没有匹配 \"{query}\" 的工具。",
+        "orphanLabel": "孤立映射",
         "disable": "禁用",
         "resetToCatalogDefault": "恢复目录默认值",
         "copyFromPeer": "从…复制",
