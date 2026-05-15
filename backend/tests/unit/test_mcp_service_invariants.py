@@ -999,6 +999,61 @@ async def test_create_static_grant_tombstoned_install_rejects_as_not_active() ->
     assert grant_stub.added == []
 
 
+async def test_create_static_grant_oauth_install_rejects_before_vault_write() -> None:
+    """Static grants on OAuth installs must reject BEFORE vault write.
+
+    The runtime OAuth branch decrypts vault rows expecting
+    ``CREDENTIAL_KIND_MCP_OAUTH_ACCESS_TOKEN``. A static grant (kind
+    ``CREDENTIAL_KIND_MCP``) landing on an OAuth install would make the
+    effective-state report "valid grant" while the runtime silently
+    kind-mismatches and skips the connector — UI says connected, runs
+    have no tool.
+    """
+    from types import SimpleNamespace
+
+    oauth_install = SimpleNamespace(org_id="org-test", install_state="active", auth_method="oauth")
+    install_stub = _StubInstallRepo(install=oauth_install)
+    svc, cred_stub, grant_stub, _ = _make_install_service_with_stubs(install_repo=install_stub)
+
+    with pytest.raises(ValueError, match="static_grant_only_valid_for_static_auth"):
+        await svc.create_static_grant(
+            install_id="mcins-oauth",
+            grant_scope="org",
+            plaintext="x",
+            workspace_id=None,
+            user_id=None,
+        )
+
+    assert cred_stub.create_calls == [], "vault must not be touched when auth_method != 'static'"
+    assert grant_stub.added == []
+
+
+async def test_create_static_grant_none_install_rejects_before_vault_write() -> None:
+    """Same guard applies to ``auth_method='none'`` installs.
+
+    A no-auth install has no grants by construction; a static-shaped
+    grant against it must be rejected before any vault write so the
+    credentials table does not accumulate orphan encrypted rows.
+    """
+    from types import SimpleNamespace
+
+    none_install = SimpleNamespace(org_id="org-test", install_state="active", auth_method="none")
+    install_stub = _StubInstallRepo(install=none_install)
+    svc, cred_stub, grant_stub, _ = _make_install_service_with_stubs(install_repo=install_stub)
+
+    with pytest.raises(ValueError, match="static_grant_only_valid_for_static_auth"):
+        await svc.create_static_grant(
+            install_id="mcins-none",
+            grant_scope="org",
+            plaintext="x",
+            workspace_id=None,
+            user_id=None,
+        )
+
+    assert cred_stub.create_calls == [], "vault must not be touched when auth_method != 'static'"
+    assert grant_stub.added == []
+
+
 # ---------------------------------------------------------------------------
 # create_from_template_for_org distribution validation
 # ---------------------------------------------------------------------------

@@ -352,6 +352,16 @@ class MCPConnectorInstallService:
             raise ValueError("connector_install_not_found")
         if install.install_state != "active":
             raise ValueError("connector_install_not_active")
+        if install.auth_method != "static":
+            # Static grants are stored as ``CREDENTIAL_KIND_MCP``; the OAuth
+            # runtime branch decrypts vault rows expecting
+            # ``CREDENTIAL_KIND_MCP_OAUTH_ACCESS_TOKEN``. A static-shaped
+            # grant on an OAuth (or ``auth_method='none'``) install would
+            # report "valid grant" via effective-state while the runtime
+            # silently kind-mismatches and skips the connector — UI says
+            # connected, runs have no tool. Reject before any vault write
+            # so this failure mode cannot land in the DB.
+            raise ValueError("static_grant_only_valid_for_static_auth")
 
         credential_name = name or f"mcp:{install_id}:{grant_scope}"
         credential_id = await self._cred_service.create(
