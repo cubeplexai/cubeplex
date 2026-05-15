@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { createApiClient } from '../../src/api/client'
 import {
+  adminListInstalls,
   wsGetToolCitations,
   wsPatchToolCitations,
   wsGetCatalogToolCitations,
@@ -125,6 +126,16 @@ describe('MCP four-layer API', () => {
     const client = createApiClient('')
     await wsListTemplates(client, 'ws-x')
     expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/ws/ws-x/mcp/templates')
+  })
+
+  it('adminListInstalls GETs the admin scope', async () => {
+    // Admin page needs the full org install inventory, not the workspace
+    // effective lens — verify the helper hits the admin endpoint.
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ items: [] }), { status: 200 }))
+    const client = createApiClient('')
+    const out = await adminListInstalls(client)
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/admin/mcp/installs')
+    expect(out).toEqual({ items: [] })
   })
 
   it('does not use catalog or override paths', async () => {

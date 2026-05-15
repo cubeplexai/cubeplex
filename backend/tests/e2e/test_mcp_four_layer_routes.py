@@ -83,7 +83,7 @@ async def test_workspace_local_noauth_install_renders_usable(
         f"/api/v1/ws/{workspace_id}/mcp/installs",
         json={
             "template_id": noauth_template_id,
-            "install_scope": "org",  # body shape; route forces workspace scope
+            "install_scope": "workspace",
             "auth_method": "none",
             "default_credential_policy": "none",
         },
