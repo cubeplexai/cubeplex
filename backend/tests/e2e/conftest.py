@@ -234,6 +234,31 @@ async def _ensure_default_user_and_membership() -> None:
             om_role = await om_repo.get_role(user_id=user.id, org_id=DEFAULT_ORG_ID)
             if om_role is None:
                 await om_repo.grant(user_id=user.id, org_id=DEFAULT_ORG_ID, role=OrgRole.OWNER)
+
+            # Wipe the multi_tenant bootstrap's auto-created personal org/workspace
+            # memberships so resolve_current_org_id (which prefers highest role then
+            # oldest created_at) deterministically resolves to DEFAULT_ORG_ID.
+            # Both memberships are OWNER, and the personal org is created first,
+            # so without this it wins the tiebreaker and /admin/cost queries the
+            # wrong org.
+            from sqlalchemy import delete
+
+            from cubebox.models import Membership as MembershipModel
+            from cubebox.models import OrganizationMembership
+
+            await session.execute(
+                delete(OrganizationMembership).where(
+                    OrganizationMembership.user_id == user.id,  # type: ignore[arg-type]
+                    OrganizationMembership.org_id != DEFAULT_ORG_ID,  # type: ignore[arg-type]
+                )
+            )
+            await session.execute(
+                delete(MembershipModel).where(
+                    MembershipModel.user_id == user.id,  # type: ignore[arg-type]
+                    MembershipModel.workspace_id != DEFAULT_WS_ID,  # type: ignore[arg-type]
+                )
+            )
+            await session.commit()
     finally:
         await test_engine.dispose()
 

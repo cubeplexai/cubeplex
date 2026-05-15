@@ -75,12 +75,11 @@ test.describe('Citation mapping tab', () => {
     // Loading state resolves (the i18n loading text disappears)
     await expect(page.getByText('Loading citation mappings…')).toHaveCount(0, { timeout: 8_000 })
 
-    // No error message shown (error renders via text-destructive but has no test-id;
-    // we verify the panel loaded correctly by confirming the save button is present)
-    const saveBtn = page.getByRole('button', { name: /save changes/i })
-    await expect(saveBtn).toBeVisible()
-    // Save button is disabled when there are no unsaved changes
-    await expect(saveBtn).toBeDisabled()
+    // No error message shown — verify the panel loaded by confirming the empty-tools
+    // placeholder appears (this server has no tools_cache, so no tool is selected
+    // and the right-pane editor + Save button intentionally don't render).
+    await expect(page.getByText('No tools discovered yet.').first()).toBeVisible()
+    await expect(page.getByRole('button', { name: /save changes/i })).toHaveCount(0)
   })
 
   test('Citation mapping tab shows empty tool list when tools_cache is empty', async ({ page }) => {
