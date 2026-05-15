@@ -80,3 +80,42 @@ def test_mcp_catalog_connector_unique_slug() -> None:
     from cubebox.models import MCPCatalogConnector
 
     assert _unique_constraint_columns(MCPCatalogConnector, "uq_mcp_catalog_slug") == ["slug"]
+
+
+def test_mcp_four_layer_table_names() -> None:
+    from cubebox.models import (
+        MCPConnectorInstall,
+        MCPConnectorTemplate,
+        MCPCredentialGrant,
+        MCPWorkspaceConnectorState,
+    )
+
+    assert MCPConnectorTemplate.__tablename__ == "mcp_connector_templates"
+    assert MCPConnectorInstall.__tablename__ == "mcp_connector_installs"
+    assert MCPWorkspaceConnectorState.__tablename__ == "mcp_workspace_connector_states"
+    assert MCPCredentialGrant.__tablename__ == "mcp_credential_grants"
+    assert MCPConnectorTemplate._PREFIX == "mctpl"
+    assert MCPConnectorInstall._PREFIX == "mcins"
+    assert MCPWorkspaceConnectorState._PREFIX == "mcwcs"
+    assert MCPCredentialGrant._PREFIX == "mcgrn"
+
+
+def test_no_auth_install_defaults_to_none_policy() -> None:
+    from cubebox.models import MCPConnectorInstall
+
+    row = MCPConnectorInstall(
+        org_id="org-1",
+        name="NoAuth",
+        server_url="https://noauth.example.com/mcp",
+        server_url_hash="hash",
+        transport="streamable_http",
+        auth_method="none",
+        default_credential_policy="none",
+        created_by_user_id="user-1",
+    )
+
+    assert row.auth_method == "none"
+    assert row.default_credential_policy == "none"
+    assert row.install_state == "active"
+    assert row.auth_status == "not_required"
+    assert row.discovery_status == "not_run"
