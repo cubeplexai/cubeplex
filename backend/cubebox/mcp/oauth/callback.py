@@ -108,6 +108,18 @@ class OAuthCallbackHandler:
             # finalize the install.
             raise OAuthInvalidServerState("OAuth callback actor mismatch between state and ticket")
 
+        # Four-layer discriminator (Task 4 of the MCP management plan):
+        # state tokens minted by the new ``/grants/<scope>/oauth/start``
+        # endpoints carry ``target="four_layer_grant"`` plus the scope-shaped
+        # fields. Routing to the ``MCPCredentialGrant`` writer is reserved
+        # for plan Task 6 (start-side AS handshake also lands there); for
+        # now we refuse the callback cleanly so the legacy path never
+        # accidentally touches ``mcp_servers`` with four-layer payload.
+        if payload.target == "four_layer_grant":
+            raise OAuthInvalidServerState(
+                "four-layer OAuth callback path not yet wired (see plan Task 6)"
+            )
+
         server = await self._server_repo.get(payload.install_id)
         if server is None or server.auth_method != "oauth":
             raise OAuthInvalidServerState(f"install {payload.install_id} is not an OAuth install")

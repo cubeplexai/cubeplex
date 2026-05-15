@@ -41,11 +41,26 @@ _NONCE_BYTES = 16
 
 @dataclass(frozen=True)
 class OAuthStatePayload:
-    """Decoded OAuth state payload returned by ``OAuthStateStore.consume``."""
+    """Decoded OAuth state payload returned by ``OAuthStateStore.consume``.
+
+    The base fields (``install_id``, ``actor_user_id``, ``issued_at``) are
+    the legacy contract used by the ``MCPServer``-based OAuth flow.
+
+    Four-layer-aware callers (Task 4 of the MCP management plan) may set
+    ``target="four_layer_grant"`` along with ``grant_scope`` and the scope-
+    shaped ``workspace_id`` / ``user_id``. The callback dispatches on
+    ``target``: legacy state tokens (no target field) keep flowing through
+    the existing ``MCPServer`` path; four-layer state tokens are routed to
+    the ``MCPCredentialGrant`` writer.
+    """
 
     install_id: str
     actor_user_id: str
     issued_at: datetime  # UTC
+    target: str | None = None
+    grant_scope: str | None = None
+    workspace_id: str | None = None
+    user_id: str | None = None
 
 
 def _b64url_encode(data: bytes) -> str:
@@ -75,8 +90,26 @@ class OAuthStateStore:
         self._secret_key = secret_key
         self._ttl_seconds = ttl_seconds
 
-    async def issue(self, *, install_id: str, actor_user_id: str) -> str:
-        """Mint a new state token and persist it for one-shot consumption."""
+    async def issue(
+        self,
+        *,
+        install_id: str,
+        actor_user_id: str,
+        target: str | None = None,
+        grant_scope: str | None = None,
+        workspace_id: str | None = None,
+        user_id: str | None = None,
+    ) -> str:
+        """Mint a new state token and persist it for one-shot consumption.
+
+        Legacy callers pass only ``install_id`` and ``actor_user_id``; the
+        payload is byte-identical to the pre-four-layer wire format so
+        outstanding tokens still verify after this upgrade.
+
+        Four-layer callers (Task 4 of the MCP management plan) set
+        ``target="four_layer_grant"`` plus the scope-shaped fields. The
+        callback dispatches on ``target``.
+        """
         ts_ms = int(datetime.now(tz=UTC).timestamp() * 1000)
         nonce = secrets.token_hex(_NONCE_BYTES)
         payload: dict[str, object] = {
@@ -85,6 +118,16 @@ class OAuthStateStore:
             "ts": ts_ms,
             "nonce": nonce,
         }
+        # Only include the four-layer fields when set; legacy issuance keeps
+        # the same canonical bytes.
+        if target is not None:
+            payload["target"] = target
+        if grant_scope is not None:
+            payload["grant_scope"] = grant_scope
+        if workspace_id is not None:
+            payload["workspace_id"] = workspace_id
+        if user_id is not None:
+            payload["user_id"] = user_id
         # ``sort_keys`` keeps the canonical bytes deterministic across runs.
         payload_bytes = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
         sig = hmac.new(self._secret_key, payload_bytes, hashlib.sha256).digest()
@@ -111,10 +154,19 @@ class OAuthStateStore:
         except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
             raise OAuthStateInvalid("OAuth state payload malformed") from exc
         issued_at = datetime.fromtimestamp(ts_ms / 1000, tz=UTC)
+        # Optional four-layer fields: never required for legacy tokens.
+        raw_target = payload.get("target") if isinstance(payload, dict) else None
+        raw_grant_scope = payload.get("grant_scope") if isinstance(payload, dict) else None
+        raw_ws_id = payload.get("workspace_id") if isinstance(payload, dict) else None
+        raw_user_id = payload.get("user_id") if isinstance(payload, dict) else None
         return OAuthStatePayload(
             install_id=install_id,
             actor_user_id=actor_user_id,
             issued_at=issued_at,
+            target=str(raw_target) if raw_target is not None else None,
+            grant_scope=str(raw_grant_scope) if raw_grant_scope is not None else None,
+            workspace_id=str(raw_ws_id) if raw_ws_id is not None else None,
+            user_id=str(raw_user_id) if raw_user_id is not None else None,
         )
 
     def _verify(self, state: str) -> bytes:

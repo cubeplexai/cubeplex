@@ -421,6 +421,9 @@ def create_app(
     app.include_router(admin_router, prefix="/api/v1")
     app.include_router(admin_members.router, prefix="/api/v1")
     app.include_router(admin_mcp.router, prefix="/api/v1")
+    # Four-layer plan Task 4: public template list (authenticated, not org-admin
+    # gated). Coexists with the admin_mcp.router above.
+    app.include_router(admin_mcp.public_templates_router, prefix="/api/v1")
     app.include_router(mcp_catalog.catalog_admin_router, prefix="/api/v1")
     app.include_router(mcp_catalog.catalog_member_router, prefix="/api/v1")
     app.include_router(mcp_oauth.oauth_admin_router, prefix="/api/v1")

@@ -23,6 +23,7 @@ from cubebox.credentials.dependencies import (
 )
 from cubebox.credentials.encryption import EncryptionBackend
 from cubebox.db.session import get_session
+from cubebox.mcp.effective import MCPEffectiveConnectorService
 from cubebox.mcp.oauth.callback import CredentialServiceFactory, OAuthCallbackHandler
 from cubebox.mcp.oauth.dcr import DCRClient
 from cubebox.mcp.oauth.metadata import OAuthMetadataDiscovery
@@ -422,6 +423,25 @@ async def get_ws_install_service(
         org_id=ctx.org_id,
         actor_user_id=ctx.user.id,
         workspace_repo=WorkspaceRepository(session),
+    )
+
+
+async def get_ws_effective_service(
+    session: AsyncSession = Depends(get_session),
+    ctx: RequestContext = Depends(request_context),
+) -> MCPEffectiveConnectorService:
+    """Effective connector service for workspace ``GET /connectors``.
+
+    Wires the four repos with the caller's org. Token manager is deferred
+    here (UI surface), so we leave it as ``None``; the runtime path that
+    needs OAuth refresh builds its own service in ``streams.run_manager``.
+    """
+    return MCPEffectiveConnectorService(
+        template_repo=MCPConnectorTemplateRepository(session),
+        install_repo=MCPConnectorInstallRepository(session, org_id=ctx.org_id),
+        state_repo=MCPWorkspaceConnectorStateRepository(session, org_id=ctx.org_id),
+        grant_repo=MCPCredentialGrantRepository(session, org_id=ctx.org_id),
+        org_id=ctx.org_id,
     )
 
 
