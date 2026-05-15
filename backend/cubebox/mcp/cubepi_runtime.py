@@ -26,6 +26,12 @@ logger = logging.getLogger(__name__)
 
 _NS_SLUG_RE = re.compile(r"[^a-zA-Z0-9]+")
 _NS_MAX_LEN = 64  # OpenAI strict function-name max length
+_NS_LENGTH_DEFENCE = 32
+"""Slug length threshold above which we always append an id-disambiguator,
+even without an explicit slug collision. Defends against post-truncation
+collisions when two long, distinct slugs share initial characters: the
+length cap can otherwise collapse them to the same final prefix.
+"""
 
 
 def _slugify_for_namespace(server_name: str) -> str:
@@ -82,7 +88,9 @@ def _compute_slug_and_suffix_for(
     the slug must be shortened.
     """
     slug = proposed_slugs[spec.server_id]
-    if slug_counts[slug] > 1:
+    explicit_collision = slug_counts[slug] > 1
+    risky_truncation = len(slug) > _NS_LENGTH_DEFENCE
+    if explicit_collision or risky_truncation:
         return slug, f"_{_server_id_suffix(spec.server_id)}"
     return slug, ""
 

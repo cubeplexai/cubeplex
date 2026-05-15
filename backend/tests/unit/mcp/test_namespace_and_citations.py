@@ -388,6 +388,68 @@ async def test_loader_preserves_collision_suffix_when_truncating() -> None:
 
 
 @pytest.mark.asyncio
+async def test_loader_disambiguates_long_distinct_slugs_with_shared_prefix() -> None:
+    """Two servers with different but long display names sharing initial chars
+    must NOT collide after truncation: the length-defence triggers id-suffix.
+    """
+    from cubebox.mcp.cubepi_discovery import CubepiMCPServerSpec
+    from cubebox.mcp.cubepi_runtime import load_workspace_mcp_tools_for_cubepi
+
+    # Both slugs share the first 50 chars; differ only at the tail.
+    shared = "X" * 50
+    name_a = f"{shared}_AAAAAA_versionone"
+    name_b = f"{shared}_AAAAAA_versiontwo"
+
+    specs = [
+        CubepiMCPServerSpec(
+            server_id="mcp-1234567890aaaa",
+            server_name=name_a,
+            url="http://example.com/mcp",
+            headers={},
+            tool_citations={},
+        ),
+        CubepiMCPServerSpec(
+            server_id="mcp-1234567890bbbb",
+            server_name=name_b,
+            url="http://other/mcp",
+            headers={},
+            tool_citations={},
+        ),
+    ]
+    with (
+        patch(
+            "cubebox.mcp.cubepi_runtime.discover_workspace_mcp_servers_for_cubepi",
+            new=AsyncMock(return_value=specs),
+        ),
+        patch(
+            "cubebox.mcp.cubepi_runtime.load_mcp_tools_http",
+            new=AsyncMock(
+                side_effect=[
+                    [_fake_tool("web_search")],
+                    [_fake_tool("web_search")],
+                ]
+            ),
+        ),
+    ):
+        tools, _ = await load_workspace_mcp_tools_for_cubepi(
+            session=None,
+            workspace_id="ws-x",
+            org_id="org-x",
+            user_id="usr-x",
+            cred_service=None,  # type: ignore[arg-type]
+            signer=None,  # type: ignore[arg-type]
+        )
+
+    names = [t.name for t in tools]
+    assert len(set(names)) == 2, f"Names collided after truncation: {names}"
+    for n in names:
+        assert len(n) <= 64
+        assert n.endswith("__web_search")
+        # Disambiguator suffix must be present despite no explicit slug collision
+        assert "_aaaa__" in n or "_bbbb__" in n
+
+
+@pytest.mark.asyncio
 async def test_loader_keeps_clean_name_when_no_collision() -> None:
     """The id-suffix is only appended on collision; unique names stay clean."""
     from cubebox.mcp.cubepi_discovery import CubepiMCPServerSpec
