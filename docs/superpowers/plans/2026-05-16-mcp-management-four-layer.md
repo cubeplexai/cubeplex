@@ -796,6 +796,17 @@ endpoints can otherwise accept impossible combinations):
   effective-state decision order (rule 5 keys on `auth_method`, not policy),
   but request-side validation is the user-facing gate.
 
+- For PATCH endpoints whose body carries `credential_policy` without
+  `auth_method` (`PATCH /admin/mcp/installs/{id}` setting
+  `default_credential_policy`, `PATCH /ws/{ws}/mcp/connectors/{id}/state`
+  setting `credential_policy`), schema-only validation can't enforce the
+  pairing because the request body lacks `auth_method`. The **service layer**
+  must load the install row first and reject any patch that sets
+  `credential_policy="none"` on a row whose `auth_method != "none"` (and vice
+  versa: cannot raise a non-`none` policy on an `auth_method="none"` install).
+  Return 422 with the same field error shape the schema validator would have
+  emitted.
+
 Request schemas should also exist for:
 
 - `AdminCreateInstallIn`: `template_id?`, `install_scope` (`org`),
@@ -971,9 +982,14 @@ Decision order in `compute_effective_state` (first match wins):
    (a credentialed connector cannot run without a credential), and the API
    layer must reject `credential_policy="none"` whenever `auth_method != "none"`
    so it can never reach this branch.
-6. `auth_method == "oauth"` AND `auth_status == "pending"` AND grant absent →
-   `pending_oauth`. Static installs are not "pending OAuth"; their missing
-   grant must be reported by rule 7 instead.
+6. `auth_method == "oauth"` AND `credential_policy IN {"org", "workspace"}` AND
+   `auth_status == "pending"` AND grant absent → `pending_oauth`. `pending_oauth`
+   is an *install-scoped* state ("admin / workspace has not finished the OAuth
+   handshake"); it must not mask per-user state. For
+   `credential_policy == "user"`, every member has their own OAuth flow, so a
+   missing user grant always falls through to rule 7 and reports
+   `user_needs_connection` — even when the install row's `auth_status` is still
+   `pending` from an earlier abandoned admin flow.
 7. Grant absent → scope-specific missing reason
    (`missing_org_grant` / `missing_workspace_grant` / `user_needs_connection`
    based on `credential_policy`).
