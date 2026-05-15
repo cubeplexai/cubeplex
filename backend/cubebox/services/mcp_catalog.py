@@ -230,11 +230,21 @@ class MCPCatalogService:
             credential_name=credential_name,
         )
 
-    async def delete_install(self, install_id: str) -> None:
+    async def delete_install(
+        self, install_id: str, *, purge_workspace_overrides: bool = True
+    ) -> None:
         """Soft disable: clear credentials, mark unauthed, keep the row.
 
         Does NOT call OAuth revoke — that's a Phase 5 concern. The TODO
         notes the entry point so the OAuth route can wire it in later.
+
+        ``purge_workspace_overrides`` (default True) controls whether any
+        ``WorkspaceMCPOverride`` rows pointing at this install get deleted.
+        The admin "Delete install" path wants the purge — it mirrors the
+        ``auto_enable_workspaces`` backfill on install (all-on ↔ all-off).
+        Callers that delete-install only to clear credentials before rewriting
+        them (``switch_auth_method``) pass ``False`` so workspace visibility
+        survives the rekey.
         """
         server = await self.server_repo.get(install_id)
         if server is None:
@@ -280,6 +290,21 @@ class MCPCatalogService:
         server.last_discovered_at = datetime.now(UTC)
         await self.server_repo.update(server)
 
+        # Drop every workspace override pointing at this install. Mirrors the
+        # auto_enable_workspaces backfill on install: admin install ≈ "all
+        # workspaces on by default", admin delete ≈ "all workspaces off". Stale
+        # enabled-overrides on top of an unauthed server otherwise show as
+        # "needs_setup" in workspace settings and as "Available" in the
+        # workspace catalog page — both misleading. Workspaces that genuinely
+        # want it back must re-enable via the override endpoint after the admin
+        # rekeys the install.
+        if purge_workspace_overrides and server.owner_workspace_id is None:
+            for override in await self.override_repo.list_for_server(server.id):
+                await self.override_repo.delete(
+                    workspace_id=override.workspace_id,
+                    mcp_server_id=server.id,
+                )
+
     async def switch_auth_method(
         self,
         *,
@@ -304,7 +329,8 @@ class MCPCatalogService:
         self._assert_auth_method_supported(connector, new_auth_method)
 
         # Clear out existing creds first (best-effort; mirror delete_install).
-        await self.delete_install(install_id)
+        # Re-key is "same install, different auth" — workspace overrides survive.
+        await self.delete_install(install_id, purge_workspace_overrides=False)
         # delete_install set authed=False; refresh server reference.
         server = await self.server_repo.get(install_id)
         assert server is not None  # re-fetched above
