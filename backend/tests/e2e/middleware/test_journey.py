@@ -21,10 +21,12 @@ from tests.e2e.middleware._helpers import (
     TOOL_CALCULATOR,
     TOOL_SANDBOX,
     TOOL_TODO,
+    assistant_text,
     create_conversation,
     events_of_type,
     post_turn,
     tool_call_names,
+    tool_result_contents,
 )
 
 pytestmark = pytest.mark.real_llm
@@ -47,6 +49,12 @@ async def test_full_middleware_journey(member_client: tuple) -> None:  # type: i
     assert events_of_type(t1, EVT_USAGE), "no usage event (cost middleware silent)"
     t1_tools = tool_call_names(t1)
     assert TOOL_CALCULATOR in t1_tools, f"expected calculator call, got {t1_tools}"
+    t1_results = tool_result_contents(t1)
+    assert any("304" in c for c in t1_results), (
+        f"expected '304' in calculator tool_result; got: {t1_results}"
+    )
+    t1_text = assistant_text(t1)
+    assert "304" in t1_text, f"expected '304' in assistant reply; got: {t1_text!r}"
 
     # Turn 2: todo list → write_todos
     t2 = await post_turn(
@@ -59,6 +67,13 @@ async def test_full_middleware_journey(member_client: tuple) -> None:  # type: i
     assert t2[-1].get("type") == EVT_DONE
     t2_tools = tool_call_names(t2)
     assert TOOL_TODO in t2_tools, f"expected {TOOL_TODO} call, got {t2_tools}"
+    t2_results = tool_result_contents(t2)
+    assert len(t2_results) >= 1, f"expected at least one tool_result in t2; got: {t2_results}"
+    assert any(c.strip() for c in t2_results), (
+        f"expected non-empty tool_result content in t2; got: {t2_results}"
+    )
+    t2_text = assistant_text(t2)
+    assert t2_text.strip() != "", f"expected non-empty assistant reply in t2; got: {t2_text!r}"
 
     # Turn 3: sandbox → execute
     t3 = await post_turn(
@@ -71,6 +86,12 @@ async def test_full_middleware_journey(member_client: tuple) -> None:  # type: i
     assert t3[-1].get("type") == EVT_DONE
     t3_tools = tool_call_names(t3)
     assert TOOL_SANDBOX in t3_tools, f"expected {TOOL_SANDBOX} call, got {t3_tools}"
+    t3_results = tool_result_contents(t3)
+    assert any("55" in c for c in t3_results), (
+        f"expected '55' in execute tool_result; got: {t3_results}"
+    )
+    t3_text = assistant_text(t3)
+    assert "55" in t3_text, f"expected '55' in assistant reply; got: {t3_text!r}"
 
     # Whole-conversation union check
     all_types = {e.get("type") for e in (t1 + t2 + t3)}
