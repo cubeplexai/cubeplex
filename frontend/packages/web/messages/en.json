@@ -608,6 +608,12 @@
     "serverDetail": {
       "citations": {
         "loading": "Loading citation mappings…",
+        "filterPlaceholder": "Filter tools…",
+        "countAll": "{count, plural, one {# tool} other {# tools}}",
+        "countMatch": "{matched} of {total} match",
+        "emptyTools": "No tools discovered yet.",
+        "emptyToolsMatch": "No tools match \"{query}\".",
+        "orphanLabel": "Orphaned mappings",
         "disable": "Disable",
         "resetToCatalogDefault": "Reset to catalog default",
         "copyFromPeer": "Copy from…",

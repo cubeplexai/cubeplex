@@ -71,20 +71,17 @@ export function MCPCitationEditor({
 
   return (
     <div className="space-y-4">
-      <header className="flex items-center justify-between gap-2">
-        <h3 className="text-lg font-medium">{toolName}</h3>
-        <div className="flex gap-2">
-          {!readOnly && (
-            <Button variant="outline" size="sm" onClick={() => onChange(null)}>
-              {t('disable')}
-            </Button>
-          )}
-          {!readOnly && defaultFromCatalog && (
+      {!readOnly && (
+        <div className="flex flex-wrap gap-2">
+          <Button variant="outline" size="sm" onClick={() => onChange(null)}>
+            {t('disable')}
+          </Button>
+          {defaultFromCatalog && (
             <Button variant="outline" size="sm" onClick={() => onChange({ ...defaultFromCatalog })}>
               {t('resetToCatalogDefault')}
             </Button>
           )}
-          {!readOnly && peerMappings.length > 0 && onCopyFromPeer && (
+          {peerMappings.length > 0 && onCopyFromPeer && (
             <select
               className="rounded-md border px-2 py-1 text-sm"
               defaultValue=""
@@ -104,7 +101,7 @@ export function MCPCitationEditor({
             </select>
           )}
         </div>
-      </header>
+      )}
 
       <div className="grid grid-cols-2 gap-4">
         <div>

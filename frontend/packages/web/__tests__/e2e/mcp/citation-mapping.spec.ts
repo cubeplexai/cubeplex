@@ -94,9 +94,10 @@ test.describe('Citation mapping tab', () => {
     // Wait for loading to resolve
     await expect(page.getByText('Loading citation mappings…')).toHaveCount(0, { timeout: 8_000 })
 
-    // The aside (tool list) renders but is empty — no tool-select buttons
-    // Org server with no tools yet: tools_cache = [], so no ✓ or ○ buttons
-    const toolButtons = page.locator('button').filter({ hasText: /^[✓○]/ })
+    // The left panel renders but is empty — no tool-select buttons
+    // Org server with no tools yet: tools_cache = [], so no tool buttons appear
+    // (Status icons are aria-hidden and not part of accessible names)
+    const toolButtons = page.locator('aside button[aria-pressed]')
     await expect(toolButtons).toHaveCount(0)
   })
 
