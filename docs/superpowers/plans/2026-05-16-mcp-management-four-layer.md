@@ -787,6 +787,15 @@ model per item; subagent decides field order, base class, etc.):
   (`available` | `missing` | `not_required`), `credential_source` (`org` | `workspace` |
   `user` | `null`), `usable`, `reason`.
 
+Cross-field validation that must live in the request schemas (the install/state
+endpoints can otherwise accept impossible combinations):
+
+- `credential_policy="none"` is allowed **only** when `auth_method="none"`. The
+  API rejects `credential_policy="none"` for OAuth or static installs with a
+  422 pointing at `credential_policy`. The DB layer is also defended by the
+  effective-state decision order (rule 5 keys on `auth_method`, not policy),
+  but request-side validation is the user-facing gate.
+
 Request schemas should also exist for:
 
 - `AdminCreateInstallIn`: `template_id?`, `install_scope` (`org`),
@@ -831,11 +840,17 @@ Rewrite `backend/cubebox/api/routes/v1/ws_mcp.py` to expose the workspace contra
 from Step 1. Authorization rules from spec §User Roles And Permissions:
 
 - All routes require workspace membership (`require_member`).
-- `POST /installs`, `DELETE /installs/{id}`, `PATCH /installs/{id}/state`, and
-  the workspace-scope grant routes require `role=admin` on the workspace.
+- `POST /installs`, `DELETE /installs/{id}`, `PATCH /connectors/{id}/state`,
+  and the workspace-scope grant routes (`POST`/`DELETE`/`oauth/start` under
+  `/installs/{id}/grants/workspace`) require `role=admin` on the workspace.
 - `*/grants/me*` routes are open to any member.
 - A workspace member cannot delete a workspace-local install they did not create
   unless they are workspace admin.
+
+Pay attention to the route prefixes when wiring the admin guard: the state edit
+lives under `/connectors`, not `/installs`. A handler registered without the
+workspace-admin dependency would let ordinary members enable/disable connectors
+or change credential policy.
 
 Remove old server/catalog/org-install override handlers from this module.
 
@@ -950,9 +965,15 @@ Decision order in `compute_effective_state` (first match wins):
 3. `template_status` is set and not `active` → `template_deprecated`.
 4. `workspace_state_present=False` or `workspace_enabled=False` →
    `not_enabled_in_workspace`.
-5. `auth_method == "none"` OR `credential_policy == "none"` → `usable`,
-   `credential_availability="not_required"`.
-6. `auth_status == "pending"` AND grant absent → `pending_oauth`.
+5. `auth_method == "none"` → `usable`, `credential_availability="not_required"`.
+   Do **not** key this branch on `credential_policy == "none"` alone — an OAuth
+   or static install with `credential_policy="none"` is a configuration bug
+   (a credentialed connector cannot run without a credential), and the API
+   layer must reject `credential_policy="none"` whenever `auth_method != "none"`
+   so it can never reach this branch.
+6. `auth_method == "oauth"` AND `auth_status == "pending"` AND grant absent →
+   `pending_oauth`. Static installs are not "pending OAuth"; their missing
+   grant must be reported by rule 7 instead.
 7. Grant absent → scope-specific missing reason
    (`missing_org_grant` / `missing_workspace_grant` / `user_needs_connection`
    based on `credential_policy`).
