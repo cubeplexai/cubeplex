@@ -33,4 +33,17 @@ test.describe('Workspace MCP settings tab', () => {
     const resp = await page.goto(`/w/${wsId}/integrations/mcp`)
     expect(resp?.status()).toBe(404)
   })
+
+  test('workspace MCP panel uses connector template labels and hides legacy copy', async ({
+    page,
+  }) => {
+    const { wsId } = await registerAndGetWorkspace(page)
+    await page.goto(`/w/${wsId}/settings?tab=mcp`)
+
+    await expect(page.getByText('Connector templates')).toBeVisible()
+    await expect(page.getByText('Workspace state')).toBeVisible()
+    await expect(page.getByText('Credential policy')).toBeVisible()
+    await expect(page.getByText('Override')).toHaveCount(0)
+    await expect(page.getByText('Catalog')).toHaveCount(0)
+  })
 })

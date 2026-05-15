@@ -1,134 +1,100 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
-import {
-  AlertTriangle,
-  CheckCircle2,
-  ExternalLink,
-  Eye,
-  EyeOff,
-  Globe,
-  Loader2,
-  Plug,
-} from 'lucide-react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { AlertTriangle, CheckCircle2, Loader2, PauseCircle, Plug } from 'lucide-react'
+import { useTranslations } from 'next-intl'
 import {
   createApiClient,
-  useWorkspaceMcpCatalogStore,
-  useWorkspaceSettingsStore,
-  wsOAuthStart,
+  wsCreateInstall,
+  wsListEffectiveConnectors,
+  wsListTemplates,
+  wsPatchConnectorState,
+  type MCPConnectorTemplate,
+  type MCPCredentialScope,
+  type MCPEffectiveConnector,
 } from '@cubebox/core'
-import type {
-  MCPAuthMethod,
-  MCPCatalogConnector,
-  MCPCatalogStaticFormField,
-  MCPCredentialMode,
-  MCPServerItem,
-} from '@cubebox/core'
-import { useTranslations } from 'next-intl'
 
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 import { cn } from '@/lib/utils'
-
-const OAUTH_ORIGIN_KEY = 'mcp_oauth_origin'
-
-const AUTH_METHOD_LABEL_KEY = {
-  oauth: 'authOAuth',
-  static: 'authStatic',
-  none: 'authNone',
-} as const satisfies Record<MCPAuthMethod, string>
 
 interface McpPanelProps {
   wsId: string
 }
 
-type ConnectorStatus = 'enabled' | 'available' | 'needsSetup' | 'notInstalled'
+type RowStatus = 'ready' | 'needsCredential' | 'pendingOAuth' | 'workspaceDisabled' | 'uninstalled'
 
-function statusOf(c: MCPCatalogConnector): ConnectorStatus {
-  if (c.user_install_id) return c.workspace_visible ? 'enabled' : 'needsSetup'
-  if (c.org_install_id) return c.workspace_visible ? 'enabled' : 'available'
-  return 'notInstalled'
-}
-
-function defaultAuthMethod(supported: MCPAuthMethod[]): MCPAuthMethod {
-  if (supported.includes('oauth')) return 'oauth'
-  if (supported.includes('static')) return 'static'
-  return 'none'
-}
-
-function persistOAuthOrigin(): void {
-  if (typeof window === 'undefined') return
-  try {
-    window.sessionStorage.setItem(
-      OAUTH_ORIGIN_KEY,
-      window.location.pathname + window.location.search,
-    )
-  } catch {
-    // sessionStorage may be unavailable; non-fatal.
+function statusOf(c: MCPEffectiveConnector): RowStatus {
+  if (c.install.install_state === 'uninstalled') return 'uninstalled'
+  if (!c.workspace_state.enabled) return 'workspaceDisabled'
+  if (c.reason === 'pending_oauth' || c.install.auth_status === 'pending_oauth') {
+    return 'pendingOAuth'
   }
+  if (c.credential_availability === 'missing') return 'needsCredential'
+  return 'ready'
 }
 
-function StatusChip({ status }: { status: ConnectorStatus }) {
-  const t = useTranslations('mcp.wsPanel.catalog')
-
-  if (status === 'enabled') {
+function StatusPill({ status }: { status: RowStatus }) {
+  const t = useTranslations('mcpAdmin')
+  if (status === 'ready') {
     return (
-      <span
-        className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10
-          px-1.5 py-0.5 text-[10px] font-medium text-emerald-600
-          dark:text-emerald-400"
-      >
+      <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-medium text-emerald-600 dark:text-emerald-400">
         <CheckCircle2 className="size-3" />
-        {t('statusEnabled')}
+        {t('ready')}
       </span>
     )
   }
-  if (status === 'available') {
+  if (status === 'needsCredential') {
     return (
-      <span
-        className="inline-flex items-center gap-1 rounded-full bg-muted
-          px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground"
-      >
-        <Plug className="size-3" />
-        {t('statusAvailable')}
-      </span>
-    )
-  }
-  if (status === 'needsSetup') {
-    return (
-      <span
-        className="inline-flex items-center gap-1 rounded-full bg-amber-500/10
-          px-1.5 py-0.5 text-[10px] font-medium text-amber-600
-          dark:text-amber-400"
-      >
+      <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-600 dark:text-amber-400">
         <AlertTriangle className="size-3" />
-        {t('statusNeedsSetup')}
+        {t('needsCredential')}
       </span>
     )
   }
-  return null
+  if (status === 'pendingOAuth') {
+    return (
+      <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-600 dark:text-amber-400">
+        <AlertTriangle className="size-3" />
+        {t('statusPendingOAuth')}
+      </span>
+    )
+  }
+  if (status === 'workspaceDisabled') {
+    return (
+      <span className="inline-flex items-center gap-1 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+        <PauseCircle className="size-3" />
+        {t('statusWorkspaceDisabled')}
+      </span>
+    )
+  }
+  return (
+    <span className="inline-flex items-center gap-1 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+      <PauseCircle className="size-3" />
+      {t('statusUninstalled')}
+    </span>
+  )
 }
 
-function ConnectorCard({
+function ConnectorRow({
   connector,
   active,
   onClick,
 }: {
-  connector: MCPCatalogConnector
+  connector: MCPEffectiveConnector
   active: boolean
   onClick: () => void
 }) {
-  const status = statusOf(connector)
-  const ScopeIcon = connector.org_install_id ? Globe : Plug
+  const t = useTranslations('mcpAdmin')
+  const name = connector.install.name || connector.template?.name || connector.install.install_id
+  const provider = connector.template?.provider ?? ''
   return (
     <button
       type="button"
       onClick={onClick}
       aria-current={active ? 'true' : undefined}
-      data-testid={`ws-catalog-card-${connector.slug}`}
+      data-testid={`ws-connector-row-${connector.install.install_id}`}
       className={cn(
         'group flex w-full flex-col gap-1.5 rounded-lg border p-3 text-left transition-all',
         active
@@ -137,339 +103,74 @@ function ConnectorCard({
       )}
     >
       <div className="flex items-center gap-2">
-        <ScopeIcon
-          className={cn(
-            'size-3.5 shrink-0',
-            connector.org_install_id ? 'text-primary' : 'text-muted-foreground',
-          )}
-        />
-        <span className="truncate text-sm font-semibold">{connector.name}</span>
+        <Plug className="size-3.5 shrink-0 text-muted-foreground" />
+        <span className="truncate text-sm font-semibold">{name}</span>
         <span className="ml-auto shrink-0">
-          <StatusChip status={status} />
+          <StatusPill status={statusOf(connector)} />
         </span>
       </div>
-      {connector.provider && (
-        <p className="truncate text-xs text-muted-foreground">{connector.provider}</p>
-      )}
+      {provider && <p className="truncate text-xs text-muted-foreground">{provider}</p>}
       <div className="flex flex-wrap items-center gap-1 pt-0.5">
         <Badge variant="outline" className="px-1.5 text-[10px]">
-          {connector.transport === 'streamable_http' ? 'HTTP' : 'SSE'}
+          {connector.install.install_scope === 'org' ? t('scopeOrg') : t('scopeWorkspace')}
         </Badge>
-        {connector.supported_auth_methods.map((m) => (
-          <Badge key={m} variant="outline" className="px-1.5 text-[10px]">
-            {m}
-          </Badge>
-        ))}
+        <Badge variant="outline" className="px-1.5 text-[10px]">
+          {connector.credential_policy}
+        </Badge>
       </div>
     </button>
   )
 }
 
-function StaticFieldRow({
-  field,
-  value,
-  onChange,
+function TemplateRow({
+  template,
+  installing,
+  onInstall,
 }: {
-  field: MCPCatalogStaticFormField
-  value: string
-  onChange: (next: string) => void
+  template: MCPConnectorTemplate
+  installing: boolean
+  onInstall: () => void
 }) {
-  const t = useTranslations('mcpCatalog')
-  const [reveal, setReveal] = useState(false)
-  const inputType = field.secret && !reveal ? 'password' : 'text'
-
   return (
-    <div className="flex flex-col gap-1.5">
-      <Label htmlFor={`ws-catalog-static-${field.name}`}>
-        {field.label}
-        <span className="ml-0.5 text-destructive">*</span>
-      </Label>
-      <div className="flex gap-2">
-        <Input
-          id={`ws-catalog-static-${field.name}`}
-          type={inputType}
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          placeholder={field.placeholder}
-          autoComplete={field.secret ? 'new-password' : 'off'}
-          required
-        />
-        {field.secret && (
-          <Button
-            type="button"
-            variant="outline"
-            size="icon"
-            onClick={() => setReveal((r) => !r)}
-            aria-label={reveal ? t('hideSecret') : t('showSecret')}
-          >
-            {reveal ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
-          </Button>
+    <div
+      className="flex items-center justify-between gap-2 rounded-lg border border-border/70 bg-card/40 p-3"
+      data-testid={`ws-template-row-${template.slug}`}
+    >
+      <div className="flex min-w-0 flex-col gap-0.5">
+        <div className="flex items-center gap-2">
+          <span className="truncate text-sm font-semibold">{template.name}</span>
+          {template.provider && (
+            <Badge variant="outline" className="text-[10px]">
+              {template.provider}
+            </Badge>
+          )}
+        </div>
+        {template.description && (
+          <p className="line-clamp-1 text-xs text-muted-foreground">{template.description}</p>
         )}
       </div>
-      {field.helper_url && (
-        <a
-          href={field.helper_url}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="inline-flex items-center gap-1 text-xs text-primary hover:underline"
-        >
-          <ExternalLink className="size-3" />
-          {t('helperLearnMore')}
-        </a>
-      )}
-    </div>
-  )
-}
-
-function InstallForm({ connector, wsId }: { connector: MCPCatalogConnector; wsId: string }) {
-  const t = useTranslations('mcp.wsPanel.catalog')
-  const tc = useTranslations('mcpCatalog')
-  const installForWorkspace = useWorkspaceMcpCatalogStore((s) => s.installForWorkspace)
-
-  const supported = useMemo(() => connector.supported_auth_methods, [connector])
-  const staticFields = useMemo(() => connector.static_form_fields ?? [], [connector])
-
-  const [authMethod, setAuthMethod] = useState<MCPAuthMethod>(() => defaultAuthMethod(supported))
-  const [values, setValues] = useState<Record<string, string>>(() =>
-    Object.fromEntries(staticFields.map((f) => [f.name, ''])),
-  )
-  const [submitting, setSubmitting] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-
-  useEffect(() => {
-    setAuthMethod(defaultAuthMethod(supported))
-    setValues(Object.fromEntries(staticFields.map((f) => [f.name, ''])))
-    setError(null)
-  }, [connector.id, supported, staticFields])
-
-  const allStaticFilled = staticFields.every((f) => (values[f.name] ?? '').trim().length > 0)
-  const multiField = staticFields.length > 1
-
-  const client = useMemo(() => {
-    const c = createApiClient('')
-    c.setWorkspaceId(wsId)
-    return c
-  }, [wsId])
-
-  async function handleStatic(): Promise<void> {
-    if (multiField) {
-      setError(tc('multiFieldUnsupported'))
-      return
-    }
-    if (!allStaticFilled) return
-    setSubmitting(true)
-    setError(null)
-    try {
-      const fieldName = staticFields[0]?.name ?? 'token'
-      await installForWorkspace(client, wsId, connector.id, {
-        auth_method: 'static',
-        credential_plaintext: (values[fieldName] ?? '').trim(),
-      })
-    } catch (err) {
-      setError((err as Error).message)
-    } finally {
-      setSubmitting(false)
-    }
-  }
-
-  async function handleOAuth(): Promise<void> {
-    setSubmitting(true)
-    setError(null)
-    try {
-      await installForWorkspace(client, wsId, connector.id, { auth_method: 'oauth' })
-      // The fresh state may already include the new user_install_id; fetch the
-      // fresh row to get the install id for the OAuth start call.
-      const after = useWorkspaceMcpCatalogStore
-        .getState()
-        .connectors.find((c) => c.id === connector.id)
-      const installId = after?.user_install_id
-      if (!installId) {
-        throw new Error('install id not found after install')
-      }
-      persistOAuthOrigin()
-      const oauth = await wsOAuthStart(client, wsId, installId)
-      if (typeof window !== 'undefined') {
-        window.location.href = oauth.authorize_url
-      }
-    } catch (err) {
-      setError((err as Error).message)
-      setSubmitting(false)
-    }
-  }
-
-  async function handleNone(): Promise<void> {
-    setSubmitting(true)
-    setError(null)
-    try {
-      await installForWorkspace(client, wsId, connector.id, { auth_method: 'none' })
-    } catch (err) {
-      setError((err as Error).message)
-    } finally {
-      setSubmitting(false)
-    }
-  }
-
-  return (
-    <div className="flex flex-col gap-4 rounded-lg border border-border/70 bg-card/40 p-4">
-      <div className="flex flex-col gap-1">
-        <h4 className="text-sm font-semibold">{t('installTitle')}</h4>
-        <p className="text-xs text-muted-foreground">{tc('workspaceOAuthNotice')}</p>
-      </div>
-
-      {supported.length > 1 && (
-        <div className="flex gap-2">
-          {supported.map((m) => (
-            <Button
-              key={m}
-              type="button"
-              size="sm"
-              variant={authMethod === m ? 'default' : 'outline'}
-              onClick={() => setAuthMethod(m)}
-            >
-              {tc(AUTH_METHOD_LABEL_KEY[m])}
-            </Button>
-          ))}
-        </div>
-      )}
-
-      {authMethod === 'static' && staticFields.length > 0 && (
-        <div className="flex flex-col gap-3">
-          {staticFields.map((f) => (
-            <StaticFieldRow
-              key={f.name}
-              field={f}
-              value={values[f.name] ?? ''}
-              onChange={(next) => setValues((v) => ({ ...v, [f.name]: next }))}
-            />
-          ))}
-        </div>
-      )}
-
-      {authMethod === 'none' && <p className="text-xs text-muted-foreground">{tc('noneNotice')}</p>}
-
-      {error && <p className="text-xs text-destructive">{error}</p>}
-
-      <div className="flex justify-end">
-        <Button
-          type="button"
-          onClick={() => {
-            if (authMethod === 'oauth') void handleOAuth()
-            else if (authMethod === 'static') void handleStatic()
-            else void handleNone()
-          }}
-          disabled={submitting || (authMethod === 'static' && (!allStaticFilled || multiField))}
-        >
-          {submitting && <Loader2 className="mr-2 size-4 animate-spin" />}
-          {authMethod === 'oauth' ? tc('connectWithOAuth') : tc('installButton')}
-        </Button>
-      </div>
-    </div>
-  )
-}
-
-function ActionPanel({ connector, wsId }: { connector: MCPCatalogConnector; wsId: string }) {
-  const t = useTranslations('mcp.wsPanel.catalog')
-  const enableOrgInstall = useWorkspaceMcpCatalogStore((s) => s.enableOrgInstall)
-  const disableOrgInstall = useWorkspaceMcpCatalogStore((s) => s.disableOrgInstall)
-  const uninstallWorkspacePrivate = useWorkspaceMcpCatalogStore((s) => s.uninstallWorkspacePrivate)
-  const [busy, setBusy] = useState(false)
-  const [resumeError, setResumeError] = useState<string | null>(null)
-
-  const client = useMemo(() => {
-    const c = createApiClient('')
-    c.setWorkspaceId(wsId)
-    return c
-  }, [wsId])
-
-  async function withBusy(fn: () => Promise<void>): Promise<void> {
-    setBusy(true)
-    try {
-      await fn()
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  if (connector.user_install_id) {
-    // Workspace-private install. If it's already authed (workspace_visible),
-    // only Uninstall is relevant. If it's unauthed and the catalog supports
-    // OAuth, the user likely hit an interrupted callback — offer Resume so
-    // they don't have to delete+recreate the install to retry the dance.
-    const installId = connector.user_install_id
-    const showResume =
-      !connector.workspace_visible && connector.supported_auth_methods.includes('oauth')
-
-    async function handleResume(): Promise<void> {
-      setResumeError(null)
-      setBusy(true)
-      try {
-        persistOAuthOrigin()
-        const oauth = await wsOAuthStart(client, wsId, installId)
-        if (typeof window !== 'undefined') {
-          window.location.href = oauth.authorize_url
-        }
-      } catch (err) {
-        setResumeError((err as Error).message)
-        setBusy(false)
-      }
-    }
-
-    return (
-      <div className="flex flex-col gap-2">
-        {showResume && (
-          <Button disabled={busy} onClick={() => void handleResume()}>
-            {busy && <Loader2 className="mr-2 size-4 animate-spin" />}
-            {t('actionResumeOAuth')}
-          </Button>
-        )}
-        {resumeError && <p className="text-xs text-destructive">{resumeError}</p>}
-        <Button
-          variant={showResume ? 'outline' : 'destructive'}
-          disabled={busy}
-          onClick={() => withBusy(() => uninstallWorkspacePrivate(client, wsId, installId))}
-        >
-          {busy && <Loader2 className="mr-2 size-4 animate-spin" />}
-          {t('actionUninstall')}
-        </Button>
-      </div>
-    )
-  }
-
-  if (connector.org_install_id) {
-    const installId = connector.org_install_id
-    if (connector.workspace_visible) {
-      return (
-        <Button
-          variant="outline"
-          disabled={busy}
-          onClick={() => withBusy(() => disableOrgInstall(client, wsId, installId))}
-        >
-          {busy && <Loader2 className="mr-2 size-4 animate-spin" />}
-          {t('actionDisable')}
-        </Button>
-      )
-    }
-    return (
-      <Button
-        disabled={busy}
-        onClick={() => withBusy(() => enableOrgInstall(client, wsId, installId))}
-      >
-        {busy && <Loader2 className="mr-2 size-4 animate-spin" />}
-        {t('actionEnable')}
+      <Button size="sm" disabled={installing} onClick={onInstall}>
+        {installing && <Loader2 className="mr-2 size-3.5 animate-spin" />}
+        Connect
       </Button>
-    )
-  }
-
-  return <InstallForm connector={connector} wsId={wsId} />
+    </div>
+  )
 }
 
-const CREDENTIAL_MODES: MCPCredentialMode[] = ['org', 'workspace', 'user']
-
-function CredentialModeSection({ server, wsId }: { server: MCPServerItem; wsId: string }) {
-  const t = useTranslations('mcp.wsPanel')
-  const patchMCPCredentialMode = useWorkspaceSettingsStore((s) => s.patchMCPCredentialMode)
-  const reloadSettings = useWorkspaceSettingsStore((s) => s.loadAll)
+function ConnectorDetail({
+  connector,
+  wsId,
+  onChanged,
+}: {
+  connector: MCPEffectiveConnector
+  wsId: string
+  onChanged: () => Promise<void>
+}) {
+  const t = useTranslations('mcpAdmin')
   const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const wsState = connector.workspace_state
+  const installId = connector.install.install_id
 
   const client = useMemo(() => {
     const c = createApiClient('')
@@ -477,139 +178,94 @@ function CredentialModeSection({ server, wsId }: { server: MCPServerItem; wsId: 
     return c
   }, [wsId])
 
-  async function handleModeChange(mode: string): Promise<void> {
+  async function toggle(): Promise<void> {
     setSaving(true)
+    setError(null)
     try {
-      await patchMCPCredentialMode(client, server.server_id, mode as MCPCredentialMode)
-      // Reload so credential_source picks up the new mode's resolved state.
-      await reloadSettings(client)
+      await wsPatchConnectorState(client, wsId, installId, { enabled: !wsState.enabled })
+      await onChanged()
+    } catch (err) {
+      setError((err as Error).message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function changePolicy(next: MCPCredentialScope): Promise<void> {
+    setSaving(true)
+    setError(null)
+    try {
+      await wsPatchConnectorState(client, wsId, installId, { credential_policy: next })
+      await onChanged()
+    } catch (err) {
+      setError((err as Error).message)
     } finally {
       setSaving(false)
     }
   }
 
   return (
-    <div className="rounded-lg border border-border/70 bg-card/40 p-4">
-      <h4 className="mb-3 text-sm font-semibold">{t('credentialModeTitle')}</h4>
-      <RadioGroup
-        value={server.credential_mode}
-        onValueChange={(v) => void handleModeChange(v)}
-        disabled={saving}
-        className="flex flex-col gap-3"
-      >
-        {CREDENTIAL_MODES.map((mode) => (
-          <label
-            key={mode}
-            htmlFor={`cred-mode-${mode}`}
-            className={cn(
-              'flex cursor-pointer items-start gap-3 rounded-lg border p-3',
-              'transition-colors hover:bg-accent/40',
-              server.credential_mode === mode
-                ? 'border-primary/40 bg-primary/5'
-                : 'border-border/70',
-            )}
-          >
-            <RadioGroupItem value={mode} id={`cred-mode-${mode}`} disabled={saving} />
-            <span className="flex flex-col gap-0.5">
-              <span className="text-sm font-medium">{t(`credMode_${mode}_title`)}</span>
-              <span className="text-xs text-muted-foreground">{t(`credMode_${mode}_help`)}</span>
-            </span>
-          </label>
-        ))}
-      </RadioGroup>
-
-      <div className="mt-3 rounded-md bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
-        <CredentialStateDescription server={server} />
-      </div>
-    </div>
-  )
-}
-
-function CredentialStateDescription({ server }: { server: MCPServerItem }) {
-  const t = useTranslations('mcp.wsPanel')
-  switch (server.credential_mode) {
-    case 'org':
-      return <span>{t('credStateOrg')}</span>
-    case 'workspace':
-      if (server.credential_source === 'workspace' && server.credential_shared_by) {
-        return <span>{t('credStateWsActive', { name: server.credential_shared_by })}</span>
-      }
-      return <span>{t('credStateWsNeeded')}</span>
-    case 'user':
-      return <span>{t('credStateUser')}</span>
-    default:
-      return null
-  }
-}
-
-function ConnectorDetail({
-  connector,
-  wsId,
-  orgServerItem,
-}: {
-  connector: MCPCatalogConnector
-  wsId: string
-  orgServerItem: MCPServerItem | null
-}) {
-  const t = useTranslations('mcp.wsPanel.catalog')
-  const status = statusOf(connector)
-
-  return (
     <div className="flex w-full flex-col gap-4 p-6">
       <header className="flex flex-col gap-2">
         <div className="flex flex-wrap items-center gap-2">
-          <h3 className="text-xl font-semibold tracking-tight">{connector.name}</h3>
-          <StatusChip status={status} />
+          <h3 className="text-xl font-semibold tracking-tight">
+            {connector.install.name || connector.template?.name || installId}
+          </h3>
+          <StatusPill status={statusOf(connector)} />
         </div>
-        {connector.description && (
-          <p className="text-sm text-muted-foreground">{connector.description}</p>
+        {connector.template?.description && (
+          <p className="text-sm text-muted-foreground">{connector.template.description}</p>
         )}
       </header>
 
       <div className="rounded-lg border border-border/70 bg-card/40 p-4">
-        <dl className="grid grid-cols-[140px_1fr] gap-y-2 text-sm">
-          <dt className="text-muted-foreground">{t('provider')}</dt>
-          <dd>{connector.provider || '-'}</dd>
-          <dt className="text-muted-foreground">{t('serverUrl')}</dt>
-          <dd className="break-all font-mono text-xs">{connector.server_url}</dd>
-          <dt className="text-muted-foreground">{t('transport')}</dt>
-          <dd>{connector.transport}</dd>
-          <dt className="text-muted-foreground">{t('authMethods')}</dt>
-          <dd>{connector.supported_auth_methods.join(', ')}</dd>
-          {connector.org_install_id && (
-            <>
-              <dt className="text-muted-foreground">{t('scope')}</dt>
-              <dd>{t('scopeOrgWide')}</dd>
-            </>
-          )}
-          {connector.user_install_id && (
-            <>
-              <dt className="text-muted-foreground">{t('scope')}</dt>
-              <dd>{t('scopeWorkspacePrivate')}</dd>
-            </>
-          )}
-        </dl>
+        <h4 className="mb-3 text-sm font-semibold">{t('workspaceState')}</h4>
+        <div className="flex items-center justify-between gap-3 text-sm">
+          <span>{wsState.enabled ? t('wsEnabled') : t('wsDisabled')}</span>
+          <Button
+            size="sm"
+            variant={wsState.enabled ? 'outline' : 'default'}
+            disabled={saving}
+            onClick={() => void toggle()}
+          >
+            {wsState.enabled ? 'Disconnect' : 'Connect'}
+          </Button>
+        </div>
+        {error && <p className="mt-2 text-xs text-destructive">{error}</p>}
       </div>
 
-      <ActionPanel connector={connector} wsId={wsId} />
-      {orgServerItem && <CredentialModeSection server={orgServerItem} wsId={wsId} />}
+      <div className="rounded-lg border border-border/70 bg-card/40 p-4">
+        <h4 className="mb-3 text-sm font-semibold">{t('credentialPolicy')}</h4>
+        <div className="flex flex-wrap gap-2">
+          {(['org', 'workspace', 'user', 'none'] as MCPCredentialScope[]).map((p) => (
+            <Button
+              key={p}
+              size="sm"
+              variant={connector.credential_policy === p ? 'default' : 'outline'}
+              disabled={saving}
+              onClick={() => void changePolicy(p)}
+            >
+              {p}
+            </Button>
+          ))}
+        </div>
+        <p className="mt-2 text-xs text-muted-foreground">
+          {t('credentialAvailability')}: {connector.credential_availability}
+          {connector.credential_source ? ` (${connector.credential_source})` : ''}
+        </p>
+      </div>
     </div>
   )
 }
 
 export function McpPanel({ wsId }: McpPanelProps) {
-  const t = useTranslations('mcp.wsPanel.catalog')
-  const connectors = useWorkspaceMcpCatalogStore((s) => s.connectors)
-  const loading = useWorkspaceMcpCatalogStore((s) => s.loading)
-  const error = useWorkspaceMcpCatalogStore((s) => s.error)
-  const selectedSlug = useWorkspaceMcpCatalogStore((s) => s.selectedSlug)
-  const selectSlug = useWorkspaceMcpCatalogStore((s) => s.selectSlug)
-  const load = useWorkspaceMcpCatalogStore((s) => s.load)
-  // Workspace settings store carries credential_mode/source for each org install,
-  // joined by mcp_server_id; the catalog endpoint doesn't expose those.
-  const settingsMcp = useWorkspaceSettingsStore((s) => s.mcp)
-  const loadSettings = useWorkspaceSettingsStore((s) => s.loadAll)
-
+  const t = useTranslations('mcpAdmin')
+  const [connectors, setConnectors] = useState<MCPEffectiveConnector[]>([])
+  const [templates, setTemplates] = useState<MCPConnectorTemplate[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [installing, setInstalling] = useState<string | null>(null)
   const [search, setSearch] = useState('')
 
   const client = useMemo(() => {
@@ -618,54 +274,100 @@ export function McpPanel({ wsId }: McpPanelProps) {
     return c
   }, [wsId])
 
-  useEffect(() => {
-    void load(client, wsId)
-    void loadSettings(client)
-  }, [client, wsId, load, loadSettings])
+  const load = useCallback(async () => {
+    setLoading(true)
+    setError(null)
+    try {
+      const [eff, tpl] = await Promise.all([
+        wsListEffectiveConnectors(client, wsId),
+        wsListTemplates(client, wsId),
+      ])
+      setConnectors(eff.items)
+      setTemplates(tpl.items)
+    } catch (err) {
+      setError((err as Error).message)
+    } finally {
+      setLoading(false)
+    }
+  }, [client, wsId])
 
-  const filtered = useMemo(() => {
+  useEffect(() => {
+    void load()
+  }, [load])
+
+  const filteredConnectors = useMemo(() => {
     const q = search.trim().toLowerCase()
     return connectors
       .filter((c) => {
         if (!q) return true
-        return `${c.name} ${c.provider} ${c.description}`.toLowerCase().includes(q)
+        const name = c.install.name || c.template?.name || ''
+        return `${name} ${c.template?.provider ?? ''} ${c.template?.description ?? ''}`
+          .toLowerCase()
+          .includes(q)
       })
       .sort((a, b) => {
-        const order: Record<ConnectorStatus, number> = {
-          enabled: 0,
-          needsSetup: 1,
-          available: 2,
-          notInstalled: 3,
-        }
-        const oa = order[statusOf(a)]
-        const ob = order[statusOf(b)]
-        if (oa !== ob) return oa - ob
-        return a.name.localeCompare(b.name)
+        const an = a.install.name || a.template?.name || a.install.install_id
+        const bn = b.install.name || b.template?.name || b.install.install_id
+        return an.localeCompare(bn)
       })
   }, [connectors, search])
 
+  const filteredTemplates = useMemo(() => {
+    const installedTemplateIds = new Set(
+      connectors.map((c) => c.template?.template_id).filter((v): v is string => Boolean(v)),
+    )
+    const q = search.trim().toLowerCase()
+    return templates
+      .filter((tpl) => !installedTemplateIds.has(tpl.template_id))
+      .filter((tpl) => {
+        if (!q) return true
+        return `${tpl.name} ${tpl.provider} ${tpl.description}`.toLowerCase().includes(q)
+      })
+      .sort((a, b) => a.name.localeCompare(b.name))
+  }, [templates, connectors, search])
+
   const selected = useMemo(
-    () => connectors.find((c) => c.slug === selectedSlug) ?? null,
-    [connectors, selectedSlug],
+    () => connectors.find((c) => c.install.install_id === selectedId) ?? null,
+    [connectors, selectedId],
   )
 
-  const selectedOrgServerItem = useMemo<MCPServerItem | null>(() => {
-    if (!selected?.org_install_id || !settingsMcp) return null
-    return settingsMcp.org_servers.find((s) => s.server_id === selected.org_install_id) ?? null
-  }, [selected, settingsMcp])
+  async function installTemplate(template: MCPConnectorTemplate): Promise<void> {
+    setInstalling(template.template_id)
+    try {
+      const method =
+        template.supported_auth_methods.find((m) => m === 'static') ??
+        template.supported_auth_methods.find((m) => m === 'none') ??
+        template.supported_auth_methods[0]
+      const policy: MCPCredentialScope =
+        method === 'none'
+          ? 'none'
+          : template.default_credential_policy === 'none'
+            ? 'user'
+            : template.default_credential_policy
+      const result = await wsCreateInstall(client, wsId, {
+        template_id: template.template_id,
+        install_scope: 'workspace',
+        auth_method: method,
+        default_credential_policy: policy,
+      })
+      await load()
+      setSelectedId(result.install_id)
+    } catch (err) {
+      setError((err as Error).message)
+    } finally {
+      setInstalling(null)
+    }
+  }
 
-  const enabledCount = connectors.filter((c) => c.workspace_visible).length
+  const enabledCount = connectors.filter((c) => c.workspace_state.enabled).length
 
   return (
     <div className="flex h-full flex-1 flex-col overflow-hidden">
-      <header
-        className="flex items-center justify-between gap-2 border-b border-border/70
-          px-6 py-4"
-      >
+      <header className="flex items-center justify-between gap-2 border-b border-border/70 px-6 py-4">
         <div>
-          <h2 className="text-lg font-semibold tracking-tight">{t('title')}</h2>
+          <h2 className="text-lg font-semibold tracking-tight">MCP Connectors</h2>
           <p className="mt-0.5 text-xs text-muted-foreground">
-            {t('summary', { enabled: enabledCount, total: connectors.length })}
+            {t('workspaceStateSummary', { enabled: enabledCount, total: connectors.length })}
           </p>
         </div>
         <Input
@@ -679,48 +381,61 @@ export function McpPanel({ wsId }: McpPanelProps) {
 
       <div className="flex flex-1 overflow-hidden">
         <aside
-          aria-label={t('listAria')}
-          className="w-[340px] shrink-0 overflow-y-auto border-r
-            border-border/70 bg-card/20"
+          aria-label="MCP connector list"
+          className="w-[340px] shrink-0 overflow-y-auto border-r border-border/70 bg-card/20"
         >
           {loading && connectors.length === 0 ? (
             <p className="px-4 py-6 text-center text-xs text-muted-foreground">{t('loading')}</p>
           ) : error ? (
             <p className="px-4 py-6 text-center text-xs text-destructive">{error}</p>
-          ) : filtered.length === 0 ? (
-            <div
-              className="flex h-full flex-col items-center justify-center gap-1
-                px-6 text-center"
-            >
-              <p className="text-sm text-muted-foreground">{t('empty')}</p>
-              <p className="text-xs text-muted-foreground/70">{t('emptyHint')}</p>
-            </div>
           ) : (
-            <div className="flex flex-col gap-1.5 p-3">
-              {filtered.map((c) => (
-                <ConnectorCard
-                  key={c.slug}
-                  connector={c}
-                  active={c.slug === selectedSlug}
-                  onClick={() => selectSlug(c.slug)}
-                />
-              ))}
+            <div className="flex flex-col gap-4 p-3">
+              <section>
+                <h3 className="mb-2 px-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                  {t('installs')}
+                </h3>
+                {filteredConnectors.length === 0 ? (
+                  <p className="px-1 text-xs text-muted-foreground">{t('noConnectors')}</p>
+                ) : (
+                  <div className="flex flex-col gap-1.5">
+                    {filteredConnectors.map((c) => (
+                      <ConnectorRow
+                        key={c.install.install_id}
+                        connector={c}
+                        active={c.install.install_id === selectedId}
+                        onClick={() => setSelectedId(c.install.install_id)}
+                      />
+                    ))}
+                  </div>
+                )}
+              </section>
+
+              {filteredTemplates.length > 0 && (
+                <section>
+                  <h3 className="mb-2 px-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                    {t('templates')}
+                  </h3>
+                  <div className="flex flex-col gap-1.5">
+                    {filteredTemplates.map((tpl) => (
+                      <TemplateRow
+                        key={tpl.template_id}
+                        template={tpl}
+                        installing={installing === tpl.template_id}
+                        onInstall={() => void installTemplate(tpl)}
+                      />
+                    ))}
+                  </div>
+                </section>
+              )}
             </div>
           )}
         </aside>
 
         <section className="flex flex-1 overflow-y-auto">
           {selected ? (
-            <ConnectorDetail
-              connector={selected}
-              wsId={wsId}
-              orgServerItem={selectedOrgServerItem}
-            />
+            <ConnectorDetail connector={selected} wsId={wsId} onChanged={load} />
           ) : (
-            <div
-              className="flex flex-1 items-center justify-center p-8 text-sm
-                text-muted-foreground"
-            >
+            <div className="flex flex-1 items-center justify-center p-8 text-sm text-muted-foreground">
               {t('selectConnector')}
             </div>
           )}

@@ -116,6 +116,16 @@ test.describe('Admin MCP page', () => {
     ).toBeVisible()
   })
 
+  test('admin MCP page uses connector install labels and hides legacy copy', async ({ page }) => {
+    await registerAndGetWorkspace(page)
+    await page.goto('/admin/mcp')
+
+    await expect(page.getByText('Connector installs')).toBeVisible()
+    await expect(page.getByText('Org grant')).toBeVisible()
+    await expect(page.getByText('Override')).toHaveCount(0)
+    await expect(page.getByText('Catalog')).toHaveCount(0)
+  })
+
   test('search filters connector list', async ({ page }) => {
     const tag = uid()
     await registerAndGetWorkspace(page)
