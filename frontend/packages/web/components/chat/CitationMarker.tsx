@@ -2,7 +2,13 @@
 
 import { useState, useCallback, useRef, useEffect } from 'react'
 import { Globe, Calendar } from 'lucide-react'
-import { useCitationStore, usePanelStore, useMessageStore, bareToolName } from '@cubebox/core'
+import {
+  useCitationStore,
+  usePanelStore,
+  useMessageStore,
+  bareToolName,
+  getSubagentSummary,
+} from '@cubebox/core'
 import type { CitationData } from '@cubebox/core'
 import { useTranslations } from 'next-intl'
 
@@ -299,8 +305,9 @@ export function CitationMarker({ citationId, chunkIndex, conversationId }: Citat
             break outer
           }
           // Search subagent inner tool results
-          const subagent = m.role === 'tool' ? m.metadata?.subagent_events : undefined
-          if (m.role === 'tool' && m.tool_name === 'subagent' && subagent?.tool_results) {
+          const subagent =
+            m.role === 'tool' && m.tool_name === 'subagent' ? getSubagentSummary(m) : null
+          if (subagent?.tool_results) {
             const inner = subagent.tool_results.find(
               (tr: { tool_call_id: string }) => tr.tool_call_id === citation.tool_call_id,
             )
@@ -327,8 +334,9 @@ export function CitationMarker({ citationId, chunkIndex, conversationId }: Citat
             }
           }
         }
-        const subagent = m.role === 'tool' ? m.metadata?.subagent_events : undefined
-        if (m.role === 'tool' && m.tool_name === 'subagent' && subagent?.tool_calls) {
+        const subagent =
+          m.role === 'tool' && m.tool_name === 'subagent' ? getSubagentSummary(m) : null
+        if (subagent?.tool_calls) {
           const tc = subagent.tool_calls.find(
             (t: { id?: string }) => t.id === citation.tool_call_id,
           )

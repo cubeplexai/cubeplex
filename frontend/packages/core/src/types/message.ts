@@ -87,6 +87,9 @@ export interface ToolResultMessage extends MessageBase {
   tool_name: string
   content: ContentBlock[]
   is_error?: boolean
+  // cubepi.ToolResultMessage.details: middleware-attached payload (e.g. the
+  // raw SSE event array a subagent tool result carries). Shape is per-tool.
+  details?: unknown
 }
 
 export type Message = UserMessage | AssistantMessage | ToolResultMessage
@@ -113,4 +116,57 @@ export function getToolCalls(
   return msg.content.filter(
     (b): b is Extract<ContentBlock, { type: 'tool_call' }> => b.type === 'tool_call',
   )
+}
+
+/**
+ * Extract a SubagentSummary for a tool result message, handling both shapes:
+ *
+ *   - in-memory after live finalization: `metadata.subagent_events` already
+ *     holds a normalized `SubagentSummary`
+ *   - reloaded from cubepi: `details.subagent_events` holds the raw SSE event
+ *     list collected by `SubAgentMiddleware` — we replay it into a summary
+ *
+ * Returns null when neither shape is present.
+ */
+export function getSubagentSummary(msg: ToolResultMessage): SubagentSummary | null {
+  const fromMeta = msg.metadata?.subagent_events
+  if (fromMeta && !Array.isArray(fromMeta)) return fromMeta as SubagentSummary
+
+  const details = msg.details as { subagent_events?: unknown } | null | undefined
+  const events = details?.subagent_events
+  if (!Array.isArray(events)) return null
+
+  const summary: SubagentSummary = {
+    text: '',
+    tool_calls: [],
+    tool_results: [],
+    thinking: '',
+  }
+  for (const evt of events) {
+    if (!evt || typeof evt !== 'object') continue
+    const e = evt as Record<string, unknown>
+    switch (e.type) {
+      case 'text_delta':
+        summary.text += typeof e.delta === 'string' ? e.delta : ''
+        break
+      case 'reasoning':
+        summary.thinking += typeof e.delta === 'string' ? e.delta : ''
+        break
+      case 'tool_call':
+        summary.tool_calls.push({
+          id: typeof e.id === 'string' ? e.id : undefined,
+          name: typeof e.name === 'string' ? e.name : '',
+          arguments: (e.arguments as Record<string, unknown>) ?? {},
+        })
+        break
+      case 'tool_result':
+        summary.tool_results!.push({
+          tool_name: typeof e.name === 'string' ? e.name : '',
+          tool_call_id: typeof e.tool_call_id === 'string' ? e.tool_call_id : '',
+          content: typeof e.result === 'string' ? e.result : String(e.result ?? ''),
+        })
+        break
+    }
+  }
+  return summary
 }
