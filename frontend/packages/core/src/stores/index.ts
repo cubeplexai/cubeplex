@@ -18,4 +18,8 @@ export { useProvidersStore } from './providersStore'
 export { useModelsStore } from './modelsStore'
 export { useOrgModelSettingsStore } from './orgModelSettingsStore'
 export { useWorkspaceSettingsStore, type WorkspaceSettingsStore } from './workspaceSettingsStore'
+export {
+  useWorkspaceMcpCatalogStore,
+  type WorkspaceMcpCatalogStore,
+} from './workspaceMcpCatalogStore'
 export { useMemberStore } from './memberStore'
