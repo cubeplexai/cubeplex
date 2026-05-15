@@ -202,6 +202,45 @@ async def test_delete_install_clears_workspace_overrides(
     assert item["workspace_visible"] is False
 
 
+async def test_deleted_install_does_not_zombie_into_new_workspaces(
+    admin_client: tuple[httpx.AsyncClient, str],
+    catalog_one: str,
+) -> None:
+    """Soft-deleted org install must not seep into workspaces created after delete.
+
+    ``delete_install`` clears authed but keeps ``auto_enroll_new_workspaces=true``
+    on the row (the flag is policy intent, not live state). The bootstrap helper
+    therefore must gate by ``authed=true`` as well; otherwise the deleted
+    install zombies back as a ``needs_setup`` entry in every fresh workspace.
+    """
+    client, original_ws_id = admin_client
+
+    install_resp = await client.post(
+        f"/api/v1/admin/mcp/catalog/{catalog_one}/install",
+        json={"auth_method": "static", "credential_plaintext": "ghp_test"},
+    )
+    assert install_resp.status_code == 201, install_resp.text
+    install_id = install_resp.json()["install_id"]
+
+    # Soft-delete the install.
+    delete_resp = await client.delete(f"/api/v1/admin/mcp/installs/{install_id}")
+    assert delete_resp.status_code == 204, delete_resp.text
+
+    org_id = await _org_id_for(client, original_ws_id)
+
+    create_resp = await client.post(
+        "/api/v1/workspaces",
+        json={"name": "fourth-ws", "org_id": org_id},
+    )
+    assert create_resp.status_code == 201, create_resp.text
+    new_ws_id = create_resp.json()["id"]
+
+    item = await _catalog_item(client, new_ws_id, "github-ae")
+    assert item["workspace_visible"] is False, (
+        "deleted-then-bootstrapped install must not appear as visible"
+    )
+
+
 async def test_switch_auth_method_preserves_workspace_overrides(
     admin_client: tuple[httpx.AsyncClient, str],
     catalog_one: str,
