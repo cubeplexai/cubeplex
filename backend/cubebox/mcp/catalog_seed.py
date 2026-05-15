@@ -26,7 +26,6 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
-from loguru import logger
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -447,7 +446,6 @@ async def seed_catalog(
             raw_secret = (get_env(secret_env) or "").strip()
             if not raw_id or not raw_secret:
                 msg = f"Skipping catalog connector '{entry.slug}': missing {id_env} or {secret_env}"
-                logger.warning(msg)
                 warnings.append(msg)
                 skipped += 1
                 active_slugs.append(entry.slug)
