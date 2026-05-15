@@ -469,7 +469,7 @@ Admin install create supports:
 
 ```json
 {
-  "template_id": "ctpl-example",
+  "template_id": "mctpl-example",
   "install_scope": "org",
   "auth_method": "oauth",
   "auto_enable": {
@@ -496,7 +496,7 @@ Example:
 ```json
 {
   "template_slug": "github",
-  "install_id": "cins-example",
+  "install_id": "mcins-example",
   "install_scope": "org",
   "enabled": true,
   "credential_policy": "user",
@@ -631,12 +631,12 @@ Implementation naming uses one explicit MCP prefix:
 - Product copy can still use the shorter nouns: template, install, workspace state,
   and grant.
 
-| Concept | Python Model | Target Table |
-| --- | --- | --- |
-| `ConnectorTemplate` | `MCPConnectorTemplate` | `mcp_connector_templates` |
-| `ConnectorInstall` | `MCPConnectorInstall` | `mcp_connector_installs` |
-| `WorkspaceConnectorState` | `MCPWorkspaceConnectorState` | `mcp_workspace_connector_states` |
-| `CredentialGrant` | `MCPCredentialGrant` | `mcp_credential_grants` |
+| Concept | Python Model | ID Prefix | Target Table |
+| --- | --- | --- | --- |
+| `ConnectorTemplate` | `MCPConnectorTemplate` | `mctpl` | `mcp_connector_templates` |
+| `ConnectorInstall` | `MCPConnectorInstall` | `mcins` | `mcp_connector_installs` |
+| `WorkspaceConnectorState` | `MCPWorkspaceConnectorState` | `mcwcs` | `mcp_workspace_connector_states` |
+| `CredentialGrant` | `MCPCredentialGrant` | `mcgrn` | `mcp_credential_grants` |
 
 Existing MCP tables (`mcp_catalog_connectors`, `mcp_servers`,
 `workspace_mcp_overrides`, `workspace_mcp_credentials`, `user_mcp_credentials`) are

@@ -18,6 +18,8 @@
 - Use target table names now:
   `mcp_connector_templates`, `mcp_connector_installs`, `mcp_workspace_connector_states`,
   `mcp_credential_grants`.
+- Use MCP-specific public ID prefixes now:
+  `mctpl`, `mcins`, `mcwcs`, `mcgrn`.
 - Existing local MCP data can be dropped by migration. The product has no released
   external contract.
 - Keep the credential vault table; grant rows point to vault credential ids.
@@ -113,6 +115,10 @@ def test_mcp_four_layer_table_names() -> None:
     assert MCPConnectorInstall.__tablename__ == "mcp_connector_installs"
     assert MCPWorkspaceConnectorState.__tablename__ == "mcp_workspace_connector_states"
     assert MCPCredentialGrant.__tablename__ == "mcp_credential_grants"
+    assert MCPConnectorTemplate._PREFIX == "mctpl"
+    assert MCPConnectorInstall._PREFIX == "mcins"
+    assert MCPWorkspaceConnectorState._PREFIX == "mcwcs"
+    assert MCPCredentialGrant._PREFIX == "mcgrn"
 
 
 def test_no_auth_install_defaults_to_none_policy() -> None:
@@ -165,7 +171,7 @@ from cubebox.models.mixins import CubeboxBase
 
 
 class MCPConnectorTemplate(CubeboxBase, table=True):
-    _PREFIX: ClassVar[str] = "ctpl"
+    _PREFIX: ClassVar[str] = "mctpl"
     __tablename__ = "mcp_connector_templates"
     __table_args__ = (UniqueConstraint("slug", name="uq_mcp_connector_template_slug"),)
 
@@ -205,7 +211,7 @@ class MCPConnectorTemplate(CubeboxBase, table=True):
 
 
 class MCPConnectorInstall(CubeboxBase, table=True):
-    _PREFIX: ClassVar[str] = "cins"
+    _PREFIX: ClassVar[str] = "mcins"
     __tablename__ = "mcp_connector_installs"
     __table_args__ = (
         UniqueConstraint(
@@ -276,7 +282,7 @@ class MCPConnectorInstall(CubeboxBase, table=True):
 
 
 class MCPWorkspaceConnectorState(CubeboxBase, table=True):
-    _PREFIX: ClassVar[str] = "wcst"
+    _PREFIX: ClassVar[str] = "mcwcs"
     __tablename__ = "mcp_workspace_connector_states"
     __table_args__ = (
         UniqueConstraint("workspace_id", "install_id", name="uq_mcp_workspace_connector_state"),
@@ -292,7 +298,7 @@ class MCPWorkspaceConnectorState(CubeboxBase, table=True):
 
 
 class MCPCredentialGrant(CubeboxBase, table=True):
-    _PREFIX: ClassVar[str] = "cgrn"
+    _PREFIX: ClassVar[str] = "mcgrn"
     __tablename__ = "mcp_credential_grants"
     __table_args__ = (
         UniqueConstraint(
@@ -457,7 +463,7 @@ async def test_credential_grant_repository_scopes_user_grants(
     await repo.add(
         MCPCredentialGrant(
             org_id="org-1",
-            install_id="cins-1",
+            install_id="mcins-1",
             grant_scope="user",
             user_id="user-1",
             credential_id="cred-1",
@@ -465,8 +471,8 @@ async def test_credential_grant_repository_scopes_user_grants(
         )
     )
 
-    assert await repo.get_user_grant(install_id="cins-1", user_id="user-1") is not None
-    assert await repo.get_user_grant(install_id="cins-1", user_id="user-2") is None
+    assert await repo.get_user_grant(install_id="mcins-1", user_id="user-1") is not None
+    assert await repo.get_user_grant(install_id="mcins-1", user_id="user-2") is None
 ```
 
 - [ ] **Step 2: Run tests and confirm missing repositories**
