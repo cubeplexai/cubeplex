@@ -2,7 +2,7 @@
 
 import { useState, useCallback, useRef, useEffect } from 'react'
 import { Globe, Calendar } from 'lucide-react'
-import { useCitationStore, usePanelStore, useMessageStore } from '@cubebox/core'
+import { useCitationStore, usePanelStore, useMessageStore, bareToolName } from '@cubebox/core'
 import type { CitationData } from '@cubebox/core'
 import { useTranslations } from 'next-intl'
 
@@ -33,11 +33,12 @@ function basename(path?: string): string {
  * Splits a namespaced MCP tool name (e.g. "webtools__web_search") into its
  * display portion ("web_search") and optional server prefix ("webtools").
  * Non-namespaced names are returned as-is with server = null.
+ * The display half delegates to bareToolName for consistent stripping.
  */
 export function splitNamespacedToolName(name: string): { display: string; server: string | null } {
   const idx = name.indexOf('__')
-  if (idx < 0) return { display: name, server: null }
-  return { display: name.slice(idx + 2), server: name.slice(0, idx) }
+  if (idx < 0) return { display: bareToolName(name), server: null }
+  return { display: bareToolName(name), server: name.slice(0, idx) }
 }
 
 function CitationHoverContent({

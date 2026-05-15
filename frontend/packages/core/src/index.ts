@@ -1,6 +1,7 @@
 export * from './types'
 export * from './api'
 export * from './stores'
+export { bareToolName } from './lib/toolName'
 export type * from './types/provider'
 export * from './api/providers'
 export { useProvidersStore } from './stores/providersStore'
