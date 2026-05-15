@@ -710,6 +710,7 @@ class RunManager:
                     metadata=_metadata,
                     org_id=ctx.org_id,
                 )
+                _grant_repo = MCPCredentialGrantRepository(effective_session, org_id=ctx.org_id)
                 _effective_service = MCPEffectiveConnectorService(
                     template_repo=MCPConnectorTemplateRepository(effective_session),
                     install_repo=MCPConnectorInstallRepository(
@@ -718,7 +719,7 @@ class RunManager:
                     state_repo=MCPWorkspaceConnectorStateRepository(
                         effective_session, org_id=ctx.org_id
                     ),
-                    grant_repo=MCPCredentialGrantRepository(effective_session, org_id=ctx.org_id),
+                    grant_repo=_grant_repo,
                     org_id=ctx.org_id,
                     token_manager=_token_manager,
                 )
@@ -733,6 +734,7 @@ class RunManager:
                     user_id=ctx.user_id,
                     cred_service=effective_cred_service,
                     signer=self._app.state.mcp_user_token_signer,
+                    grant_repo=_grant_repo,
                 )
                 _builtin_tools.extend(_new_tools)
                 mcp_citation_configs.update(_new_citations)

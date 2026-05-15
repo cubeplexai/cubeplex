@@ -587,3 +587,254 @@ async def test_effective_loader_oauth_reads_grant_credential(
     fake_cred_service.get_decrypted.assert_awaited_once()
     args = fake_cred_service.get_decrypted.await_args
     assert args.kwargs["credential_id"] == "cred-access"
+
+
+# ---------------------------------------------------------------------------
+# OAuth refresh wiring on the four-layer loader (Codex P2 fix).
+#
+# When a spec carries a still-live grant (with refresh credential), the loader
+# routes through ``OAuthTokenManager.get_access_token_for_grant`` so a
+# near-expiry token is rotated before being sent as Bearer. The manager
+# decides cached-vs-refresh based on ``grant.expires_at`` — the loader just
+# trusts whatever string the manager returns.
+# ---------------------------------------------------------------------------
+
+
+def _make_oauth_runtime_spec(*, grant, oauth_client_config: dict[str, object] | None = None):
+    """Build an MCPRuntimeConnectorSpec for an OAuth grant."""
+    from cubebox.mcp.effective import MCPRuntimeConnectorSpec
+
+    return MCPRuntimeConnectorSpec(
+        install_id="mcins-oauth",
+        name="oauth-srv",
+        server_url="https://mcp.example/oauth",
+        transport="streamable_http",
+        auth_method="oauth",
+        grant_scope=grant.grant_scope,
+        credential_id=grant.credential_id,
+        refresh_credential_id=grant.refresh_credential_id,
+        tool_citations={},
+        headers={},
+        timeout=30.0,
+        sse_read_timeout=300.0,
+        template_id=None,
+        org_id="org-1",
+        workspace_id="ws-1",
+        grant=grant,
+        oauth_client_config=oauth_client_config or {"client_id": "client-abc"},
+    )
+
+
+@pytest.mark.asyncio
+async def test_effective_loader_oauth_refreshes_via_token_manager(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An OAuth grant with a refresh credential routes through the token manager."""
+    from datetime import UTC, datetime, timedelta
+
+    from cubebox.mcp.cubepi_runtime import load_workspace_mcp_tools_from_effective
+    from cubebox.models import MCPCredentialGrant
+
+    grant = MCPCredentialGrant(
+        org_id="org-1",
+        install_id="mcins-oauth",
+        grant_scope="org",
+        workspace_id=None,
+        user_id=None,
+        credential_id="cred-access",
+        refresh_credential_id="cred-refresh",
+        expires_at=datetime.now(UTC) - timedelta(seconds=10),
+        grant_status="valid",
+        created_by_user_id="user-1",
+    )
+    spec = _make_oauth_runtime_spec(grant=grant)
+
+    captured_auth: dict[str, str] = {}
+
+    async def _fake_loader(
+        url: str,
+        *,
+        headers: dict[str, str] | None,
+        timeout: float,
+        transport: str,
+    ):
+        captured_auth["Authorization"] = (headers or {}).get("Authorization", "")
+        return [_FakeTool(name="search")]
+
+    monkeypatch.setattr(
+        "cubebox.mcp.cubepi_runtime.load_mcp_tools_http",
+        _fake_loader,
+    )
+
+    fake_cred_service = AsyncMock()
+    fake_cred_service.get_decrypted = AsyncMock(return_value="should-not-be-used")
+
+    fake_token_manager = AsyncMock()
+    fake_token_manager.get_access_token_for_grant = AsyncMock(return_value="rotated-access")
+
+    fake_grant_repo = AsyncMock()
+
+    tools, _ = await load_workspace_mcp_tools_from_effective(
+        effective_service=_StubEffectiveService([spec]),  # type: ignore[arg-type]
+        token_manager=fake_token_manager,
+        workspace_id="ws-1",
+        org_id="org-1",
+        user_id="user-1",
+        cred_service=fake_cred_service,
+        signer=AsyncMock(),
+        grant_repo=fake_grant_repo,
+    )
+
+    assert len(tools) == 1
+    assert captured_auth["Authorization"] == "Bearer rotated-access"
+    fake_token_manager.get_access_token_for_grant.assert_awaited_once()
+    call_kwargs = fake_token_manager.get_access_token_for_grant.await_args.kwargs
+    assert call_kwargs["grant"] is grant
+    assert call_kwargs["grant_repo"] is fake_grant_repo
+    assert call_kwargs["server_url"] == spec.server_url
+    assert call_kwargs["oauth_client_config"] == {"client_id": "client-abc"}
+    # The cached-credential fall-through must NOT fire when refresh succeeds.
+    fake_cred_service.get_decrypted.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_effective_loader_oauth_no_refresh_cred_falls_back_to_cached(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """No refresh credential → loader skips the manager and uses the cached access token.
+
+    Effective-state rule 8 will eventually filter out such grants when they
+    expire, but until expiry the cached token is still usable. The runtime
+    must not try to refresh a grant that has no refresh credential.
+    """
+    from datetime import UTC, datetime, timedelta
+
+    from cubebox.mcp.cubepi_runtime import load_workspace_mcp_tools_from_effective
+    from cubebox.models import MCPCredentialGrant
+
+    grant = MCPCredentialGrant(
+        org_id="org-1",
+        install_id="mcins-oauth",
+        grant_scope="org",
+        workspace_id=None,
+        user_id=None,
+        credential_id="cred-access",
+        refresh_credential_id=None,  # ← no refresh available
+        expires_at=datetime.now(UTC) + timedelta(hours=1),
+        grant_status="valid",
+        created_by_user_id="user-1",
+    )
+    spec = _make_oauth_runtime_spec(grant=grant)
+
+    captured_auth: dict[str, str] = {}
+
+    async def _fake_loader(
+        url: str,
+        *,
+        headers: dict[str, str] | None,
+        timeout: float,
+        transport: str,
+    ):
+        captured_auth["Authorization"] = (headers or {}).get("Authorization", "")
+        return [_FakeTool(name="search")]
+
+    monkeypatch.setattr(
+        "cubebox.mcp.cubepi_runtime.load_mcp_tools_http",
+        _fake_loader,
+    )
+
+    fake_cred_service = AsyncMock()
+    fake_cred_service.get_decrypted = AsyncMock(return_value="cached-token")
+    fake_token_manager = AsyncMock()
+    fake_token_manager.get_access_token_for_grant = AsyncMock(return_value="should-not-be-used")
+
+    tools, _ = await load_workspace_mcp_tools_from_effective(
+        effective_service=_StubEffectiveService([spec]),  # type: ignore[arg-type]
+        token_manager=fake_token_manager,
+        workspace_id="ws-1",
+        org_id="org-1",
+        user_id="user-1",
+        cred_service=fake_cred_service,
+        signer=AsyncMock(),
+        grant_repo=AsyncMock(),
+    )
+
+    assert len(tools) == 1
+    assert captured_auth["Authorization"] == "Bearer cached-token"
+    fake_token_manager.get_access_token_for_grant.assert_not_awaited()
+    fake_cred_service.get_decrypted.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_effective_loader_oauth_refresh_failure_falls_back_to_cached(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Refresh failure → grant marked expired by the manager; loader uses cached token.
+
+    The manager has already set ``grant.grant_status='expired'`` on the row;
+    the next request's effective-state pass will surface ``grant_expired``
+    and drop the connector. For this in-flight request we still attempt the
+    call with the cached token (the MCP server will 401, the agent moves on).
+    """
+    from datetime import UTC, datetime, timedelta
+
+    from cubebox.mcp.cubepi_runtime import load_workspace_mcp_tools_from_effective
+    from cubebox.mcp.exceptions import OAuthRefreshFailed
+    from cubebox.models import MCPCredentialGrant
+
+    grant = MCPCredentialGrant(
+        org_id="org-1",
+        install_id="mcins-oauth",
+        grant_scope="org",
+        workspace_id=None,
+        user_id=None,
+        credential_id="cred-access",
+        refresh_credential_id="cred-refresh",
+        expires_at=datetime.now(UTC) - timedelta(seconds=10),
+        grant_status="valid",
+        created_by_user_id="user-1",
+    )
+    spec = _make_oauth_runtime_spec(grant=grant)
+
+    captured_auth: dict[str, str] = {}
+
+    async def _fake_loader(
+        url: str,
+        *,
+        headers: dict[str, str] | None,
+        timeout: float,
+        transport: str,
+    ):
+        captured_auth["Authorization"] = (headers or {}).get("Authorization", "")
+        return [_FakeTool(name="search")]
+
+    monkeypatch.setattr(
+        "cubebox.mcp.cubepi_runtime.load_mcp_tools_http",
+        _fake_loader,
+    )
+
+    fake_cred_service = AsyncMock()
+    fake_cred_service.get_decrypted = AsyncMock(return_value="stale-cached")
+
+    fake_token_manager = AsyncMock()
+    fake_token_manager.get_access_token_for_grant = AsyncMock(
+        side_effect=OAuthRefreshFailed(401, error="invalid_grant")
+    )
+
+    tools, _ = await load_workspace_mcp_tools_from_effective(
+        effective_service=_StubEffectiveService([spec]),  # type: ignore[arg-type]
+        token_manager=fake_token_manager,
+        workspace_id="ws-1",
+        org_id="org-1",
+        user_id="user-1",
+        cred_service=fake_cred_service,
+        signer=AsyncMock(),
+        grant_repo=AsyncMock(),
+    )
+
+    # The tool still loads (with the stale token) — the next run will see
+    # ``grant_status='expired'`` and drop the connector entirely.
+    assert len(tools) == 1
+    assert captured_auth["Authorization"] == "Bearer stale-cached"
+    fake_token_manager.get_access_token_for_grant.assert_awaited_once()
+    fake_cred_service.get_decrypted.assert_awaited_once()
