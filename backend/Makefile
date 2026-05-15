@@ -57,7 +57,7 @@ test:
 
 test-real-llm:
 	@echo "Running real-LLM tests..."
-	uv run pytest -s -v -m real_llm tests/e2e/memory/
+	uv run pytest -s -v -m real_llm tests/e2e/memory/ tests/e2e/middleware/
 	@echo "✓ Real-LLM tests passed"
 
 test-cov:
