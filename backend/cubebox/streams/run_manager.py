@@ -386,6 +386,14 @@ class RunManager:
             with suppress(asyncio.CancelledError):
                 await task
 
+    async def cancel_run(self, run_id: str) -> bool:
+        """Cancel a single in-flight run. Returns True if the task was found."""
+        task = self._tasks.get(run_id)
+        if task is None or task.done():
+            return False
+        task.cancel()
+        return True
+
     async def drain(self, timeout_seconds: float) -> None:
         """Wait for in-flight runs to finish, then return.
 

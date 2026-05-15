@@ -978,6 +978,7 @@
   },
   "shellLayout": {
     "inputBarAttach": "Attach files",
+    "inputBarStop": "Stop generating",
     "sidebar": "Sidebar",
     "deleteConversation": "Delete conversation",
     "workspaceSettings": "Workspace settings",

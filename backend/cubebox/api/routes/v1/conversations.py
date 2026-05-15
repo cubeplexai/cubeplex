@@ -785,3 +785,38 @@ async def stream_run(
         run_id=run_id,
         redis_handle=rds,
     )
+
+
+@router.post("/{conversation_id}/cancel", status_code=status.HTTP_202_ACCEPTED)
+async def cancel_active_run(
+    conversation_id: str,
+    raw_request: Request,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    ctx: Annotated[RequestContext, Depends(require_member)],
+    rds: Annotated[RedisHandle, Depends(redis_dep)],
+) -> dict[str, object]:
+    """Cancel the conversation's active run, if any."""
+    conv_repo = ConversationRepository(
+        session,
+        org_id=ctx.org_id,
+        workspace_id=ctx.workspace_id,
+        user_id=ctx.user.id,
+    )
+    conversation = await conv_repo.get_by_id(conversation_id)
+    if not conversation:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Conversation {conversation_id} not found",
+        )
+
+    active_run = await get_active_run(
+        rds.client,
+        prefix=rds.key_prefix,
+        conversation_id=conversation_id,
+    )
+    if active_run is None or active_run.status != "running":
+        return {"cancelled": False, "run_id": None}
+
+    run_manager = raw_request.app.state.run_manager
+    cancelled = await run_manager.cancel_run(active_run.run_id)
+    return {"cancelled": cancelled, "run_id": active_run.run_id}
