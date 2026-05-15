@@ -291,14 +291,18 @@ export function CitationMarker({ citationId, chunkIndex, conversationId }: Citat
       outer: for (const msgs of Object.values(state.messages)) {
         for (const m of msgs) {
           if (m.role === 'tool' && m.tool_call_id === citation.tool_call_id) {
-            toolName = m.name ?? 'web_search'
+            toolName = m.tool_name || 'web_search'
             content = m.content
+              .filter((b): b is { type: 'text'; text: string } => b.type === 'text')
+              .map((b) => b.text)
+              .join('')
             break outer
           }
           // Search subagent inner tool results
-          if (m.role === 'tool' && m.name === 'subagent' && m.subagent_events?.tool_results) {
-            const inner = m.subagent_events.tool_results.find(
-              (tr) => tr.tool_call_id === citation.tool_call_id,
+          const subagent = m.role === 'tool' ? m.metadata?.subagent_events : undefined
+          if (m.role === 'tool' && m.tool_name === 'subagent' && subagent?.tool_results) {
+            const inner = subagent.tool_results.find(
+              (tr: { tool_call_id: string }) => tr.tool_call_id === citation.tool_call_id,
             )
             if (inner) {
               toolName = inner.tool_name || 'web_search'
@@ -314,19 +318,19 @@ export function CitationMarker({ citationId, chunkIndex, conversationId }: Citat
     // Find tool call arguments (url, etc.) from assistant messages or streaming blocks
     outer2: for (const msgs of Object.values(state.messages)) {
       for (const m of msgs) {
-        // Check assistant tool_calls
-        if (m.role === 'assistant' && m.tool_calls) {
-          const tc = m.tool_calls.find((t) => t.tool_call_id === citation.tool_call_id)
-          if (tc) {
-            toolName = tc.name
-            toolArgs = tc.arguments
-            break outer2
+        if (m.role === 'assistant') {
+          for (const block of m.content) {
+            if (block.type === 'tool_call' && block.id === citation.tool_call_id) {
+              toolName = block.name
+              toolArgs = block.arguments
+              break outer2
+            }
           }
         }
-        // Check subagent inner tool calls
-        if (m.role === 'tool' && m.name === 'subagent' && m.subagent_events?.tool_calls) {
-          const tc = m.subagent_events.tool_calls.find(
-            (t) => t.tool_call_id === citation.tool_call_id,
+        const subagent = m.role === 'tool' ? m.metadata?.subagent_events : undefined
+        if (m.role === 'tool' && m.tool_name === 'subagent' && subagent?.tool_calls) {
+          const tc = subagent.tool_calls.find(
+            (t: { id?: string }) => t.id === citation.tool_call_id,
           )
           if (tc) {
             toolName = tc.name
@@ -340,7 +344,7 @@ export function CitationMarker({ citationId, chunkIndex, conversationId }: Citat
     if (Object.keys(toolArgs).length === 0) {
       for (const agent of Object.values(state.streamAgents)) {
         for (const block of agent.blocks) {
-          if (block.type === 'tool_call' && block.tool_call_id === citation.tool_call_id) {
+          if (block.type === 'tool_call' && block.id === citation.tool_call_id) {
             toolName = block.name
             toolArgs = block.arguments
             break

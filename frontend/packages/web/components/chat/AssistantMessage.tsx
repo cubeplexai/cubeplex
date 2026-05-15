@@ -2,7 +2,12 @@
 
 import { useState, useEffect, useRef } from 'react'
 import { useTranslations } from 'next-intl'
-import type { Message, ContentBlock, SubagentSummary, TodoItem } from '@cubebox/core'
+import type {
+  AssistantMessage as AssistantMessageType,
+  ContentBlock,
+  SubagentSummary,
+  TodoItem,
+} from '@cubebox/core'
 import type { AgentStream } from '@cubebox/core'
 import { useArtifactStore } from '@cubebox/core'
 import { Bot, ChevronDown, ChevronRight, Brain } from 'lucide-react'
@@ -16,7 +21,7 @@ import { getWriteFileSummary } from '@/lib/writeFilePreview'
 import { MarkdownWithCitations } from '@/components/shared/MarkdownWithCitations'
 
 interface ReasoningBlockProps {
-  reasoning: string
+  thinking: string
   isStreaming: boolean
   startedAt?: number
   durationMs?: number
@@ -31,7 +36,7 @@ function formatDuration(ms: number): string {
   return s > 0 ? `${m}m${s}s` : `${m}m`
 }
 
-function ReasoningBlock({ reasoning, isStreaming, startedAt, durationMs }: ReasoningBlockProps) {
+function ReasoningBlock({ thinking, isStreaming, startedAt, durationMs }: ReasoningBlockProps) {
   const t = useTranslations('chat')
   const [isExpanded, setIsExpanded] = useState(false)
   const [elapsed, setElapsed] = useState(0)
@@ -60,7 +65,7 @@ function ReasoningBlock({ reasoning, isStreaming, startedAt, durationMs }: Reaso
     if (isStreaming && scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight
     }
-  }, [reasoning, isStreaming])
+  }, [thinking, isStreaming])
 
   const displayTime = durationMs ?? (isStreaming && startedAt ? elapsed : null)
 
@@ -115,7 +120,7 @@ function ReasoningBlock({ reasoning, isStreaming, startedAt, durationMs }: Reaso
                 ' rgba(0,0,0,0.45) 85%, transparent 100%)',
             }}
           >
-            <span className="text-muted-foreground/70">{reasoning}</span>
+            <span className="text-muted-foreground/70">{thinking}</span>
           </div>
         </div>
       )}
@@ -127,7 +132,7 @@ function ReasoningBlock({ reasoning, isStreaming, startedAt, durationMs }: Reaso
             className="text-xs text-muted-foreground/70 leading-relaxed whitespace-pre-wrap
             italic"
           >
-            {reasoning}
+            {thinking}
           </p>
         </div>
       )}
@@ -136,7 +141,7 @@ function ReasoningBlock({ reasoning, isStreaming, startedAt, durationMs }: Reaso
 }
 
 interface HistoryProps {
-  message: Message
+  message: AssistantMessageType
   subagentDataMap?: Record<string, SubagentSummary>
   toolResultMap: Record<string, { content: string; receivedAt: number }>
   conversationId?: string
@@ -163,30 +168,6 @@ type AssistantMessageProps = HistoryProps | StreamingProps
 
 import { proseClasses } from '@/lib/utils'
 
-/** Build ordered blocks from legacy flat Message fields (for messages without blocks) */
-function blocksFromMessage(msg: Message): ContentBlock[] {
-  const result: ContentBlock[] = []
-  if (msg.reasoning) {
-    result.push({
-      type: 'reasoning',
-      content: msg.reasoning,
-      duration_ms: msg.reasoning_duration_ms ?? undefined,
-    })
-  }
-  if (msg.tool_calls) {
-    for (const tc of msg.tool_calls) {
-      result.push({
-        type: 'tool_call',
-        name: tc.name,
-        arguments: tc.arguments,
-        tool_call_id: tc.tool_call_id ?? '',
-      })
-    }
-  }
-  if (msg.content) result.push({ type: 'text', content: msg.content })
-  return result
-}
-
 /** Convert a consolidated SubagentSummary to an AgentStream for SubAgentCard */
 function subagentSummaryToStream(summary: SubagentSummary): AgentStream {
   return {
@@ -195,7 +176,7 @@ function subagentSummaryToStream(summary: SubagentSummary): AgentStream {
       type: 'tool_call' as const,
       timestamp: '',
       data: {
-        tool_call_id: tc.tool_call_id ?? `hist-${i}`,
+        tool_call_id: tc.id ?? `hist-${i}`,
         name: tc.name,
         arguments: tc.arguments,
       },
@@ -203,7 +184,7 @@ function subagentSummaryToStream(summary: SubagentSummary): AgentStream {
       agent_name: null,
     })),
     toolResults: [],
-    reasoning: summary.reasoning,
+    thinking: summary.thinking,
     blocks: [],
     name: null,
   }
@@ -234,11 +215,11 @@ function ContentBlockRenderer({
   agentId?: string | null
   conversationId?: string
 }) {
-  if (block.type === 'reasoning') {
+  if (block.type === 'thinking') {
     return (
       <div className="bg-card border border-border rounded-xl px-3 py-2.5">
         <ReasoningBlock
-          reasoning={block.content}
+          thinking={block.thinking}
           isStreaming={isStreaming && isLast}
           startedAt={block.started_at}
           durationMs={block.duration_ms}
@@ -247,7 +228,7 @@ function ContentBlockRenderer({
     )
   }
   if (block.type === 'tool_call' && block.name === 'subagent') {
-    const agentKey = `subagent:${block.tool_call_id}`
+    const agentKey = `subagent:${block.id}`
     const stream = subAgentStreams?.[agentKey]
     const historicalStream =
       !stream && subagentDataMap?.[agentKey]
@@ -266,7 +247,7 @@ function ContentBlockRenderer({
         index={subagentIndex ?? 1}
         agentId={agentKey}
         stream={stream ?? historicalStream}
-        isRunning={isStreaming && !!stream && !toolResultMap[block.tool_call_id]}
+        isRunning={isStreaming && !!stream && !toolResultMap[block.id]}
         toolResultMap={toolResultMap}
         conversationId={conversationId}
       />
@@ -275,7 +256,7 @@ function ContentBlockRenderer({
   if (block.type === 'tool_call' && block.name === 'save_artifact') {
     const args = block.arguments as { name?: string; artifact_id?: string }
     // Look up artifact from store by parsing the tool result
-    const toolResult = toolResultMap[block.tool_call_id]
+    const toolResult = toolResultMap[block.id]
     let artifact = null
     if (toolResult?.content) {
       try {
@@ -367,7 +348,7 @@ function ContentBlockRenderer({
   if (block.type === 'text') {
     return (
       <MarkdownWithCitations className={proseClasses} conversationId={conversationId}>
-        {block.content}
+        {block.text}
       </MarkdownWithCitations>
     )
   }
@@ -405,9 +386,11 @@ function groupBlocks(blocks: ContentBlock[]): (ContentBlock | ContentBlock[])[] 
   return result
 }
 
-function extractTodosFromMessage(msg: Message): TodoItem[] {
-  if (!msg.tool_calls) return []
-  const tc = msg.tool_calls.findLast((c) => c.name === 'write_todos')
+function extractTodosFromMessage(msg: AssistantMessageType): TodoItem[] {
+  const toolCalls = msg.content.filter(
+    (b): b is Extract<ContentBlock, { type: 'tool_call' }> => b.type === 'tool_call',
+  )
+  const tc = toolCalls.findLast((c) => c.name === 'write_todos')
   if (!tc) return []
   const raw = Array.isArray(tc.arguments.todos) ? tc.arguments.todos : []
   const result: TodoItem[] = []
@@ -435,13 +418,13 @@ export function AssistantMessage({
 }: AssistantMessageProps) {
   const t = useTranslations('chat')
   const streamAgentId = stream ? 'main' : undefined
-  const blocks: ContentBlock[] = stream
-    ? stream.blocks
-    : (message!.blocks ?? blocksFromMessage(message!))
+  const blocks: ContentBlock[] = stream ? stream.blocks : message!.content
 
   const historyTodos = message ? extractTodosFromMessage(message) : []
 
-  const msgCreatedAt = message?.created_at
+  const msgCreatedAt = message?.timestamp
+    ? new Date(message.timestamp * 1000).toISOString()
+    : undefined
 
   const _hasContent = blocks.length > 0
   const grouped = groupBlocks(blocks)

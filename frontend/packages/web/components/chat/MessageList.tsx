@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useCallback, useMemo } from 'react'
 import { useTranslations } from 'next-intl'
-import { useMessageStore, createApiClient } from '@cubebox/core'
+import { useMessageStore, createApiClient, getTextContent } from '@cubebox/core'
 import type { Message, SubagentSummary } from '@cubebox/core'
 import { AlertCircle } from 'lucide-react'
 import { UserMessage } from './UserMessage'
@@ -17,15 +17,21 @@ interface MessageListProps {
   conversationId: string
 }
 
+function msgTimestampMs(msg: Message): number {
+  return msg.timestamp != null ? msg.timestamp * 1000 : 0
+}
+
 /**
  * Build a map from tool_call_id -> SubagentSummary by scanning tool messages
- * that follow each assistant message.
+ * with tool_name === 'subagent'. Subagent summaries ride inside metadata.
  */
 function buildSubagentDataMap(messages: Message[]): Record<string, SubagentSummary> {
   const map: Record<string, SubagentSummary> = {}
   for (const msg of messages) {
-    if (msg.role === 'tool' && msg.name === 'subagent' && msg.tool_call_id && msg.subagent_events) {
-      map[`subagent:${msg.tool_call_id}`] = msg.subagent_events
+    if (msg.role !== 'tool') continue
+    const summary = msg.metadata?.subagent_events
+    if (msg.tool_name === 'subagent' && msg.tool_call_id && summary) {
+      map[`subagent:${msg.tool_call_id}`] = summary
     }
   }
   return map
@@ -47,48 +53,47 @@ function buildHistoricalToolResultMap(
       contentType?: string
     }
   > = {}
-  // Build a map of tool_call_id → authoritative tool start time from history.
+  // Build a map of tool_call_id → authoritative tool start time from the
+  // assistant message that issued the call (its timestamp is our best proxy).
   const toolCallStartMap: Record<string, number> = {}
   for (const msg of messages) {
-    if (msg.role === 'assistant' && msg.tool_calls) {
-      for (const tc of msg.tool_calls) {
-        if (!tc.tool_call_id) continue
-        const rawStart = tc.started_at ?? msg.created_at
-        if (!rawStart) continue
-        toolCallStartMap[tc.tool_call_id] = new Date(rawStart).getTime()
+    if (msg.role !== 'assistant') continue
+    const ts = msgTimestampMs(msg)
+    if (!ts) continue
+    for (const block of msg.content) {
+      if (block.type === 'tool_call') {
+        toolCallStartMap[block.id] = ts
       }
     }
   }
+
   for (const msg of messages) {
-    if (msg.role === 'tool' && msg.tool_call_id) {
-      const fallbackStartedAt = msg.started_at ? new Date(msg.started_at).getTime() : undefined
-      map[msg.tool_call_id] = {
-        content: msg.content ?? '',
-        receivedAt: new Date(msg.created_at ?? 0).getTime(),
-        startedAt: toolCallStartMap[msg.tool_call_id] ?? fallbackStartedAt,
-      }
-      // Also index subagent inner tool results so their previews/citations work
-      if (msg.name === 'subagent' && msg.subagent_events?.tool_results) {
-        // Build a started_at map from subagent tool_calls
-        const saToolCallStartMap: Record<string, number> = {}
-        for (const tc of msg.subagent_events.tool_calls ?? []) {
-          if (tc.tool_call_id && tc.started_at) {
-            saToolCallStartMap[tc.tool_call_id] = new Date(tc.started_at).getTime()
-          }
+    if (msg.role !== 'tool' || !msg.tool_call_id) continue
+    const receivedAt = msgTimestampMs(msg)
+    map[msg.tool_call_id] = {
+      content: getTextContent(msg),
+      receivedAt: receivedAt || Date.now(),
+      startedAt: toolCallStartMap[msg.tool_call_id],
+    }
+    // Index subagent inner tool results so their previews/citations work
+    const summary = msg.metadata?.subagent_events
+    if (msg.tool_name === 'subagent' && summary?.tool_results) {
+      const saToolCallStartMap: Record<string, number> = {}
+      for (const tc of summary.tool_calls ?? []) {
+        if (tc.id && tc.started_at) {
+          saToolCallStartMap[tc.id] = new Date(tc.started_at).getTime()
         }
-        const fallbackTs = new Date(msg.created_at ?? 0).getTime()
-        for (const tr of msg.subagent_events.tool_results) {
-          if (tr.tool_call_id) {
-            const startedAt = tr.started_at
-              ? new Date(tr.started_at).getTime()
-              : (saToolCallStartMap[tr.tool_call_id] ?? undefined)
-            map[tr.tool_call_id] = {
-              content: tr.content,
-              receivedAt: tr.completed_at ? new Date(tr.completed_at).getTime() : fallbackTs,
-              startedAt,
-              contentType: tr.content_type ?? undefined,
-            }
-          }
+      }
+      for (const tr of summary.tool_results) {
+        if (!tr.tool_call_id) continue
+        const startedAt = tr.started_at
+          ? new Date(tr.started_at).getTime()
+          : saToolCallStartMap[tr.tool_call_id]
+        map[tr.tool_call_id] = {
+          content: tr.content,
+          receivedAt: tr.completed_at ? new Date(tr.completed_at).getTime() : receivedAt,
+          startedAt,
+          contentType: tr.content_type ?? undefined,
         }
       }
     }
@@ -195,13 +200,13 @@ export function MessageList({ conversationId }: MessageListProps) {
           <div key={msg.id}>
             {msg.role === 'user' && (
               <>
-                {msg.attachments && msg.attachments.length > 0 && (
+                {msg.metadata?.attachments && msg.metadata.attachments.length > 0 && (
                   <MessageAttachments
-                    attachments={msg.attachments}
+                    attachments={msg.metadata.attachments}
                     conversationId={conversationId}
                   />
                 )}
-                <UserMessage content={msg.content ?? ''} />
+                <UserMessage content={getTextContent(msg)} />
               </>
             )}
             {msg.role === 'assistant' && msg.id !== lastAssistantId && (

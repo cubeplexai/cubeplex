@@ -1,8 +1,15 @@
 // frontend/packages/core/src/stores/messageStore.ts
+//
+// All persisted Message values mirror cubepi's pydantic dump shape — content is
+// always a list of typed blocks (text / thinking / tool_call), and cubebox-
+// specific extras (attachments, memory snapshots, citations, subagent_events)
+// ride inside `metadata`. The store builds the same shape on the streaming
+// path so the in-memory view matches what bootstrap returns.
 import { create } from 'zustand'
 import type {
   AgentEvent,
   ArtifactEventData,
+  AssistantMessage as AssistantMessageType,
   ContentBlock,
   Message,
   ReasoningEvent,
@@ -11,7 +18,10 @@ import type {
   ToolCallDeltaEvent,
   ToolCallEvent,
   ToolResultEvent,
+  ToolResultMessage as ToolResultMessageType,
+  UserMessage as UserMessageType,
 } from '../types'
+import { getTextContent } from '../types'
 import type { ApiClient } from '../api'
 import { getConversationBootstrap, streamMessages, streamRun } from '../api'
 import { useCitationStore } from './citationStore'
@@ -21,14 +31,14 @@ export interface AgentStream {
   text: string
   toolCalls: ToolCallEvent[]
   toolResults: ToolResultEvent[]
-  reasoning: string
+  thinking: string
   blocks: ContentBlock[]
   name: string | null
 }
 
 export interface MessageStore {
   messages: Record<string, Message[]>
-  streamAgents: Record<string, AgentStream> // "main" or "task:xxx"
+  streamAgents: Record<string, AgentStream> // "main" or "subagent:xxx"
   isStreaming: boolean
   streamingConversationId: string | null
   currentRunId: string | null
@@ -61,7 +71,7 @@ export interface MessageStore {
 const MAIN_AGENT_KEY = 'main'
 
 function emptyStream(name: string | null = null): AgentStream {
-  return { text: '', toolCalls: [], toolResults: [], reasoning: '', blocks: [], name }
+  return { text: '', toolCalls: [], toolResults: [], thinking: '', blocks: [], name }
 }
 
 function timestampToMs(timestamp?: string): number {
@@ -81,10 +91,45 @@ function nextEventId(current: string | null, next?: string): string | null {
   return compareEventIds(next, current) > 0 ? next : current
 }
 
-/** Finalize the last reasoning block's duration if switching to a different block type */
-function finalizeLastReasoning(blocks: ContentBlock[]): ContentBlock[] {
+let _idCounter = 0
+function nextMessageId(prefix: string): string {
+  _idCounter += 1
+  return `${prefix}-${Date.now()}-${_idCounter}`
+}
+
+/**
+ * cubepi stores thinking timing as `started_at` in epoch seconds + `duration_ms`.
+ * In-memory we normalize started_at to milliseconds so the renderer's
+ * Date.now() math works without unit gymnastics. Idempotent: already-ms values
+ * (anything > 1e12) pass through.
+ */
+function normalizeThinkingTiming(blocks: ContentBlock[]): ContentBlock[] {
+  return blocks.map((b) => {
+    if (b.type !== 'thinking' || b.started_at == null) return b
+    const ms = b.started_at < 1e12 ? b.started_at * 1000 : b.started_at
+    return { ...b, started_at: ms }
+  })
+}
+
+function normalizeMessages(messages: Message[]): Message[] {
+  return messages.map((msg) => {
+    // Some legacy fixtures may omit `id`; synthesize one for React keys.
+    const withId = msg.id ? msg : { ...msg, id: nextMessageId(msg.role) }
+    if (
+      withId.role !== 'tool' &&
+      Array.isArray(withId.content) &&
+      withId.content.some((b) => b.type === 'thinking')
+    ) {
+      return { ...withId, content: normalizeThinkingTiming(withId.content) } as Message
+    }
+    return withId
+  })
+}
+
+/** Finalize the last thinking block's duration if switching to a different block type */
+function finalizeLastThinking(blocks: ContentBlock[]): ContentBlock[] {
   const last = blocks[blocks.length - 1]
-  if (last?.type === 'reasoning' && last.started_at && !last.duration_ms) {
+  if (last?.type === 'thinking' && last.started_at && !last.duration_ms) {
     const updated = [...blocks]
     updated[updated.length - 1] = { ...last, duration_ms: Date.now() - last.started_at }
     return updated
@@ -92,24 +137,32 @@ function finalizeLastReasoning(blocks: ContentBlock[]): ContentBlock[] {
   return blocks
 }
 
-/** Append content to blocks, merging with the last block if same type, or creating new block */
-function appendBlock(
+/** Append content to blocks, merging with the last block of the same type. */
+function appendThinkingBlock(
   blocks: ContentBlock[],
-  type: 'reasoning' | 'text',
-  content: string,
-  timestampMs?: number,
+  delta: string,
+  startedAt: number,
 ): ContentBlock[] {
   const last = blocks[blocks.length - 1]
-  if (last && last.type === type) {
+  if (last && last.type === 'thinking') {
     const updated = [...blocks]
-    updated[updated.length - 1] = { ...last, content: last.content + content }
+    updated[updated.length - 1] = { ...last, thinking: last.thinking + delta }
     return updated
   }
-  const finalized = finalizeLastReasoning(blocks)
-  if (type === 'reasoning') {
-    return [...finalized, { type, content, started_at: timestampMs ?? Date.now() }]
+  return [
+    ...finalizeLastThinking(blocks),
+    { type: 'thinking', thinking: delta, started_at: startedAt },
+  ]
+}
+
+function appendTextBlock(blocks: ContentBlock[], delta: string): ContentBlock[] {
+  const last = blocks[blocks.length - 1]
+  if (last && last.type === 'text') {
+    const updated = [...blocks]
+    updated[updated.length - 1] = { ...last, text: last.text + delta }
+    return updated
   }
-  return [...finalized, { type, content }]
+  return [...finalizeLastThinking(blocks), { type: 'text', text: delta }]
 }
 
 function appendToolCallBlock(
@@ -118,7 +171,7 @@ function appendToolCallBlock(
   args: Record<string, unknown>,
   toolCallId: string,
 ): ContentBlock[] {
-  const finalized = finalizeLastReasoning(blocks)
+  const finalized = finalizeLastThinking(blocks)
   const exactMatchIndex = finalized.findIndex(
     (block) => block.type === 'tool_call_streaming' && block.tool_call_id === toolCallId,
   )
@@ -138,7 +191,7 @@ function appendToolCallBlock(
   const nextBlocks =
     matchIndex >= 0 ? finalized.filter((_, index) => index !== matchIndex) : finalized
 
-  return [...nextBlocks, { type: 'tool_call', name, arguments: args, tool_call_id: toolCallId }]
+  return [...nextBlocks, { type: 'tool_call', id: toolCallId, name, arguments: args }]
 }
 
 function normalizeTodoStatus(status: unknown): TodoItem['status'] {
@@ -164,28 +217,26 @@ function parseTodosFromToolCall(args: Record<string, unknown>): TodoItem[] {
   return todos
 }
 
-function buildPendingUserMessage(runId: string, content: string): Message {
+function buildPendingUserMessage(runId: string, content: string): UserMessageType {
   return {
     id: `pending-${runId}`,
     role: 'user',
-    content,
-    created_at: new Date().toISOString(),
+    content: [{ type: 'text', text: content }],
+    timestamp: Date.now() / 1000,
+    metadata: {},
   }
 }
 
 /**
- * History returned by `/bootstrap` may contain checkpoints from the active run
- * (e.g. an AIMessage with tool calls saved between LangGraph nodes). The stream
- * replay re-emits all of that content, so anything after the active run's user
- * message would render twice. Trim history to end at that user message — or
- * append a pending placeholder if the run is so early that the user message
- * has not been checkpointed yet.
+ * History returned by `/bootstrap` may contain checkpoints from the active run.
+ * The stream replay re-emits all of that content, so anything after the active
+ * run's user message would render twice. Trim history to end at that user
+ * message — or append a pending placeholder if the run is so early that the
+ * user message has not been checkpointed yet.
  *
- * `startedAt` disambiguates a same-content user message from a prior turn:
- * only consider history entries created at or after the run was claimed.
- * Without it, a repeated prompt + a refresh during the brief window before
- * the new user message lands in the checkpoint would bind to the prior
- * turn's user message and silently drop the previous assistant reply.
+ * `startedAt` (ISO from the run record) disambiguates a same-content user
+ * message from a prior turn; we only bind to a history entry created at or
+ * after the run was claimed.
  */
 function trimHistoryForActiveRun(
   messages: Message[],
@@ -197,15 +248,11 @@ function trimHistoryForActiveRun(
   for (let i = messages.length - 1; i >= 0; i--) {
     const msg = messages[i]
     if (msg.role !== 'user') continue
-    const msgMs = msg.created_at ? Date.parse(msg.created_at) : NaN
+    const msgMs = msg.timestamp != null ? msg.timestamp * 1000 : NaN
     if (Number.isFinite(startedAtMs) && Number.isFinite(msgMs) && msgMs < startedAtMs) {
-      // This user message predates the active run — it belongs to a prior
-      // completed turn. Keep walking back? No: every earlier user message
-      // is also older. Bail out and treat the active run's user message
-      // as not-yet-checkpointed.
       break
     }
-    if (msg.content === content) return messages.slice(0, i + 1)
+    if (getTextContent(msg) === content) return messages.slice(0, i + 1)
     break
   }
   return [...messages, buildPendingUserMessage(runId, content)]
@@ -214,17 +261,22 @@ function trimHistoryForActiveRun(
 function restoreTodosFromHistory(messages: Message[]): TodoItem[] {
   for (let i = messages.length - 1; i >= 0; i--) {
     const msg = messages[i]
-    if (msg.role !== 'assistant' || !msg.tool_calls) continue
-    const tc = msg.tool_calls.find((toolCall) => toolCall.name === 'write_todos')
-    if (tc) return parseTodosFromToolCall(tc.arguments)
+    if (msg.role !== 'assistant') continue
+    for (const block of msg.content) {
+      if (block.type === 'tool_call' && block.name === 'write_todos') {
+        return parseTodosFromToolCall(block.arguments)
+      }
+    }
   }
   return []
 }
 
 function hydrateCitationsFromHistory(conversationId: string, messages: Message[]): void {
   for (const msg of messages) {
-    if (msg.role === 'tool' && msg.citations?.length) {
-      useCitationStore.getState().loadCitations(conversationId, msg.citations)
+    if (msg.role !== 'tool') continue
+    const citations = msg.metadata?.citations
+    if (citations && citations.length > 0) {
+      useCitationStore.getState().loadCitations(conversationId, citations)
     }
   }
 }
@@ -287,12 +339,14 @@ function applyStreamEvent(state: MessageStore, event: AgentEvent): Partial<Messa
         [agentKey]: {
           ...prev,
           text: prev.text + e.data.content,
-          blocks: appendBlock(prev.blocks, 'text', e.data.content, timestampToMs(event.timestamp)),
+          blocks: appendTextBlock(prev.blocks, e.data.content),
         },
       },
     }
   }
 
+  // SSE event name stays `reasoning` for backend protocol compatibility; we map
+  // it into a `thinking` block to match cubepi's ThinkingContent.
   if (event.type === 'reasoning') {
     const e = event as ReasoningEvent
     const prev = state.streamAgents[agentKey] ?? emptyStream(event.agent_name)
@@ -302,13 +356,8 @@ function applyStreamEvent(state: MessageStore, event: AgentEvent): Partial<Messa
         ...state.streamAgents,
         [agentKey]: {
           ...prev,
-          reasoning: prev.reasoning + e.data.content,
-          blocks: appendBlock(
-            prev.blocks,
-            'reasoning',
-            e.data.content,
-            timestampToMs(event.timestamp),
-          ),
+          thinking: prev.thinking + e.data.content,
+          blocks: appendThinkingBlock(prev.blocks, e.data.content, timestampToMs(event.timestamp)),
         },
       },
     }
@@ -380,7 +429,7 @@ function applyStreamEvent(state: MessageStore, event: AgentEvent): Partial<Messa
       }
     }
 
-    const finalized = finalizeLastReasoning(blocks)
+    const finalized = finalizeLastThinking(blocks)
     finalized.push({
       type: 'tool_call_streaming',
       name: e.data.name ?? '',
@@ -458,67 +507,57 @@ async function finalizeCompletedStream(
     return
   }
 
-  const finalBlocks = finalizeLastReasoning(mainStream.blocks)
-    .filter((block) => block.type !== 'tool_call_streaming')
-    .map((block) => {
-      if (block.type === 'reasoning') {
-        const { started_at: _startedAt, ...rest } = block
-        return rest
-      }
-      return block
-    })
+  const finalBlocks = finalizeLastThinking(mainStream.blocks).filter(
+    (block) => block.type !== 'tool_call_streaming',
+  )
 
-  const assistantMessage: Message = {
-    id: `assistant-${Date.now()}`,
+  const usage = get().turnUsage[conversationId]
+  const assistantMessage: AssistantMessageType = {
+    id: nextMessageId('assistant'),
     role: 'assistant',
-    content: mainStream.text || null,
-    tool_calls:
-      mainStream.toolCalls.length > 0
-        ? mainStream.toolCalls.map((tc) => ({
-            name: tc.data.name,
-            arguments: tc.data.arguments,
-            tool_call_id: tc.data.tool_call_id,
-            started_at: tc.data.started_at ?? null,
-          }))
-        : null,
-    reasoning: mainStream.reasoning || null,
-    blocks: finalBlocks.length > 0 ? finalBlocks : null,
-    created_at: new Date().toISOString(),
+    content: finalBlocks,
+    stop_reason: 'stop',
+    usage: usage
+      ? {
+          input_tokens: usage.input_tokens,
+          output_tokens: usage.output_tokens,
+          cache_read_tokens: usage.cache_read_tokens,
+          cache_write_tokens: usage.cache_write_tokens,
+        }
+      : null,
+    timestamp: Date.now() / 1000,
+    metadata: {},
   }
 
-  const toolMessages: Message[] = []
+  const toolMessages: ToolResultMessageType[] = []
+
+  // Collect subagent args so we can attach role/task to each subagent tool message.
   const subagentArgs: Record<string, { role?: string; task?: string }> = {}
   for (const block of finalBlocks) {
     if (block.type === 'tool_call' && block.name === 'subagent') {
       const args = block.arguments as { role?: string; task?: string }
-      subagentArgs[`subagent:${block.tool_call_id}`] = args
+      subagentArgs[`subagent:${block.id}`] = args
     }
   }
 
   // Persist main-agent tool results into history so the just-finished message
-  // remains interactive after streamingConversationId clears. Without this,
-  // useMessages drops the in-memory toolResultMap and the historical builder
-  // finds no role='tool' rows for top-level tool calls, so cards turn dead
-  // until the next page refresh repopulates from the backend.
-  // Skip subagent tool results — those get richer messages from the loop below.
+  // remains interactive after streamingConversationId clears. Skip subagent
+  // tool results — those get richer messages from the loop below.
   const mainToolResultMap = get().toolResultMap
   for (const tr of mainStream.toolResults) {
     const tcId = tr.data.tool_call_id
     if (!tcId || tr.data.tool_name === 'subagent') continue
     const mapEntry = mainToolResultMap[tcId]
-    const startedAtIso =
-      tr.data.started_at ??
-      (mapEntry?.startedAt ? new Date(mapEntry.startedAt).toISOString() : null)
     const receivedAtMs =
       mapEntry?.receivedAt ?? (tr.timestamp ? new Date(tr.timestamp).getTime() : Date.now())
     toolMessages.push({
-      id: `tool-${tcId}-${Date.now()}`,
+      id: nextMessageId('tool'),
       role: 'tool',
-      content: tr.data.content ?? mapEntry?.content ?? '',
-      name: tr.data.tool_name ?? null,
+      content: [{ type: 'text', text: tr.data.content ?? mapEntry?.content ?? '' }],
       tool_call_id: tcId,
-      started_at: startedAtIso,
-      created_at: new Date(receivedAtMs).toISOString(),
+      tool_name: tr.data.tool_name ?? '',
+      timestamp: receivedAtMs / 1000,
+      metadata: {},
     })
   }
 
@@ -528,37 +567,39 @@ async function finalizeCompletedStream(
     const args = subagentArgs[key]
     const currentToolResultMap = get().toolResultMap
     toolMessages.push({
-      id: `tool-${toolCallId}-${Date.now()}`,
+      id: nextMessageId('tool'),
       role: 'tool',
-      content: agentStream.text || null,
-      name: 'subagent',
+      content: [{ type: 'text', text: agentStream.text || '' }],
       tool_call_id: toolCallId,
-      subagent_events: {
-        text: agentStream.text,
-        tool_calls: agentStream.toolCalls.map((tc) => ({
-          name: tc.data.name,
-          arguments: tc.data.arguments,
-          tool_call_id: tc.data.tool_call_id,
-          started_at: tc.data.started_at ?? (tc.timestamp || null),
-        })),
-        tool_results: agentStream.toolResults
-          .map((tr) => {
-            const mapEntry = currentToolResultMap[tr.data.tool_call_id ?? '']
-            return {
-              tool_name: tr.data.tool_name ?? '',
-              tool_call_id: tr.data.tool_call_id ?? '',
-              content: tr.data.content ?? '',
-              content_type: tr.data.content_type ?? mapEntry?.contentType ?? null,
-              started_at: tr.data.started_at ?? null,
-              completed_at: tr.timestamp || null,
-            }
-          })
-          .filter((tr) => tr.tool_call_id),
-        reasoning: agentStream.reasoning,
-        role: args?.role,
-        task: args?.task,
+      tool_name: 'subagent',
+      timestamp: Date.now() / 1000,
+      metadata: {
+        subagent_events: {
+          text: agentStream.text,
+          tool_calls: agentStream.toolCalls.map((tc) => ({
+            name: tc.data.name,
+            arguments: tc.data.arguments,
+            id: tc.data.tool_call_id,
+            started_at: tc.data.started_at ?? (tc.timestamp || null),
+          })),
+          tool_results: agentStream.toolResults
+            .map((tr) => {
+              const mapEntry = currentToolResultMap[tr.data.tool_call_id ?? '']
+              return {
+                tool_name: tr.data.tool_name ?? '',
+                tool_call_id: tr.data.tool_call_id ?? '',
+                content: tr.data.content ?? '',
+                content_type: tr.data.content_type ?? mapEntry?.contentType ?? null,
+                started_at: tr.data.started_at ?? null,
+                completed_at: tr.timestamp || null,
+              }
+            })
+            .filter((tr) => tr.tool_call_id),
+          thinking: agentStream.thinking,
+          role: args?.role,
+          task: args?.task,
+        },
       },
-      created_at: new Date().toISOString(),
     })
   }
 
@@ -683,7 +724,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
       const current = get()
       if (current.isStreaming && current.streamingConversationId === conversationId) return
 
-      let messages = bootstrap.messages ?? []
+      let messages = normalizeMessages(bootstrap.messages ?? [])
       if (bootstrap.active_run?.user_message) {
         messages = trimHistoryForActiveRun(
           messages,
@@ -759,12 +800,12 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
       void useConversationStore.getState().generateTitle(client, conversationId, content)
     }
 
-    const userMessage: Message = {
-      id: `temp-${Date.now()}`,
+    const userMessage: UserMessageType = {
+      id: nextMessageId('user-temp'),
       role: 'user',
-      content,
-      created_at: new Date().toISOString(),
-      attachments: attachments && attachments.length > 0 ? attachments : null,
+      content: [{ type: 'text', text: content }],
+      timestamp: Date.now() / 1000,
+      metadata: attachments && attachments.length > 0 ? { attachments } : {},
     }
 
     set((state) => ({

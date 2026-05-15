@@ -1,18 +1,21 @@
 // frontend/packages/core/src/types/events.ts
 import type { CitationData } from './citation'
+// Mirrors cubepi's content-block union (cubepi/providers/base.py): TextContent,
+// ThinkingContent, ToolCall. `tool_call_streaming` is a frontend-only block used
+// during live SSE to render partial tool-call args before the full call lands.
 export type ContentBlock =
+  | { type: 'text'; text: string }
   | {
-      type: 'reasoning'
-      content: string
-      started_at?: number
+      type: 'thinking'
+      thinking: string
+      started_at?: number // milliseconds since epoch (live) / cubepi seconds * 1000 (bootstrap)
       duration_ms?: number
     }
-  | { type: 'text'; content: string }
   | {
       type: 'tool_call'
+      id: string
       name: string
       arguments: Record<string, unknown>
-      tool_call_id: string
     }
   | {
       type: 'tool_call_streaming'

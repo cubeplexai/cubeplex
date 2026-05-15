@@ -1,4 +1,12 @@
 // frontend/packages/core/src/types/message.ts
+//
+// Messages mirror cubepi's wire shape (cubepi/providers/base.py:Message). The
+// backend returns `m.model_dump(mode="json")` directly; no cubebox-specific
+// conversion layer.
+//
+// cubebox-specific data (attachments, memory snapshots, citations, subagent
+// payloads) lives inside `metadata` — cubepi treats metadata as opaque and
+// round-trips it through the checkpointer unchanged.
 import type { CitationData } from './citation'
 import type { ContentBlock } from './events'
 
@@ -16,46 +24,93 @@ export interface SubagentSummary {
   tool_calls: {
     name: string
     arguments: Record<string, unknown>
-    tool_call_id?: string
+    id?: string
     started_at?: string | null
   }[]
   tool_results?: SubagentToolResult[]
-  reasoning: string
+  thinking: string
   role?: string
   task?: string
 }
 
 export interface MessageAttachment {
-  id: string
+  // Persisted as `file_id` in cubepi UserMessage.metadata.attachments.
+  file_id: string
   filename: string
   kind: 'image' | 'document' | 'other'
   size_bytes: number
   width?: number | null
   height?: number | null
   thumbnail_url?: string | null
-  download_url: string
+  download_url?: string | null
 }
 
-export interface Message {
+// Usage matches cubepi.providers.base.Usage.
+export interface MessageUsage {
+  input_tokens: number
+  output_tokens: number
+  cache_read_tokens?: number
+  cache_write_tokens?: number
+}
+
+interface MessageBase {
+  // Synthesized client-side for React keys; never sent to the backend.
   id: string
-  role: 'user' | 'assistant' | 'tool'
-  content: string | null
-  tool_calls?:
-    | {
-        name: string
-        arguments: Record<string, unknown>
-        tool_call_id?: string
-        started_at?: string | null
-      }[]
-    | null
-  reasoning?: string | null
-  reasoning_duration_ms?: number | null // from backend: estimated reasoning duration
-  blocks?: ContentBlock[] | null // ordered content blocks preserving temporal order
-  name?: string | null // for tool messages
-  tool_call_id?: string | null // for tool messages: which tool_call this responds to
-  started_at?: string | null
-  citations?: CitationData[] | null // for tool messages: citation data from this tool result
-  subagent_events?: SubagentSummary | null // consolidated subagent data for tool messages
-  created_at?: string
-  attachments?: MessageAttachment[] | null // for user messages: uploaded file attachments
+  timestamp?: number | null // epoch seconds (cubepi convention)
+  metadata?: Record<string, unknown> & {
+    attachments?: MessageAttachment[]
+    memory_snapshot?: unknown
+    citations?: CitationData[]
+    subagent_events?: SubagentSummary
+  }
+}
+
+export interface UserMessage extends MessageBase {
+  role: 'user'
+  content: ContentBlock[]
+}
+
+export interface AssistantMessage extends MessageBase {
+  role: 'assistant'
+  content: ContentBlock[]
+  stop_reason?: string
+  error_message?: string | null
+  usage?: MessageUsage | null
+  provider_id?: string
+  model_id?: string
+  response_id?: string | null
+}
+
+export interface ToolResultMessage extends MessageBase {
+  role: 'tool'
+  tool_call_id: string
+  tool_name: string
+  content: ContentBlock[]
+  is_error?: boolean
+}
+
+export type Message = UserMessage | AssistantMessage | ToolResultMessage
+
+// --- Helpers (frontend ergonomics over the block-list shape) ---
+
+export function getTextContent(msg: Message): string {
+  return msg.content
+    .filter((b): b is Extract<ContentBlock, { type: 'text' }> => b.type === 'text')
+    .map((b) => b.text)
+    .join('')
+}
+
+export function getThinking(msg: AssistantMessage): string {
+  return msg.content
+    .filter((b): b is Extract<ContentBlock, { type: 'thinking' }> => b.type === 'thinking')
+    .map((b) => b.thinking)
+    .join('')
+}
+
+export function getToolCalls(
+  msg: AssistantMessage,
+): Extract<ContentBlock, { type: 'tool_call' }>[] {
+  return msg.content.filter(
+    (b): b is Extract<ContentBlock, { type: 'tool_call' }> => b.type === 'tool_call',
+  )
 }
