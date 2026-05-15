@@ -42,3 +42,17 @@ async def test_cubepi_history_round_trip(member_client) -> None:
     roles = [m.get("role") for m in messages]
     assert "user" in roles, f"no user message in history: {roles}"
     assert "assistant" in roles, f"no assistant message in history: {roles}"
+
+    # 4. Wire-shape contract: every message uses cubepi's native pydantic dump.
+    # `content` is a list of typed blocks, not a flat string; assistant carries
+    # `usage` and `stop_reason` at the top level.
+    for msg in messages:
+        assert isinstance(msg.get("content"), list), (
+            f"content must be a block list, got {type(msg.get('content')).__name__}: {msg!r}"
+        )
+        for block in msg["content"]:
+            assert "type" in block, f"content block missing type discriminator: {block!r}"
+
+    assistant_msg = next(m for m in messages if m["role"] == "assistant")
+    assert "usage" in assistant_msg, f"assistant message missing usage: {assistant_msg!r}"
+    assert "stop_reason" in assistant_msg, f"assistant missing stop_reason: {assistant_msg!r}"
