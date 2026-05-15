@@ -1,4 +1,4 @@
-.PHONY: help install build-core build lint type-check format format-check test-unit test-e2e test-e2e-ci install-browsers check-ci
+.PHONY: help install build-core build lint type-check format format-check test-unit test-e2e test-e2e-ci install-browsers check-i18n check-ci
 
 help:
 	@echo "Available commands:"
@@ -13,6 +13,7 @@ help:
 	@echo "  make test-e2e          - Run Playwright E2E tests"
 	@echo "  make test-e2e-ci       - Run Playwright E2E tests with CI output"
 	@echo "  make install-browsers  - Install Playwright Chromium browser"
+	@echo "  make check-i18n        - Check i18n locale parity + dynamic t() calls"
 	@echo "  make check-ci          - Run frontend CI checks"
 
 install:
@@ -48,4 +49,7 @@ test-e2e-ci:
 install-browsers:
 	pnpm exec playwright install --with-deps chromium
 
-check-ci: build-core lint format-check type-check test-unit build
+check-i18n:
+	node scripts/check-i18n-keys.mjs
+
+check-ci: build-core lint format-check check-i18n type-check test-unit build

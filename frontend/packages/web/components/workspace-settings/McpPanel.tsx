@@ -35,6 +35,12 @@ import { cn } from '@/lib/utils'
 
 const OAUTH_ORIGIN_KEY = 'mcp_oauth_origin'
 
+const AUTH_METHOD_LABEL_KEY = {
+  oauth: 'authOAuth',
+  static: 'authStatic',
+  none: 'authNone',
+} as const satisfies Record<MCPAuthMethod, string>
+
 interface McpPanelProps {
   wsId: string
 }
@@ -320,7 +326,7 @@ function InstallForm({ connector, wsId }: { connector: MCPCatalogConnector; wsId
               variant={authMethod === m ? 'default' : 'outline'}
               onClick={() => setAuthMethod(m)}
             >
-              {tc(`auth${m.charAt(0).toUpperCase() + m.slice(1)}` as 'authOAuth')}
+              {tc(AUTH_METHOD_LABEL_KEY[m])}
             </Button>
           ))}
         </div>

@@ -52,6 +52,17 @@ repos:
         files: ^frontend/.*\.(ts|tsx|js|jsx|json|md|yaml|yml|css|scss)$
         exclude: ^frontend/(node_modules|.*/dist|.*/\.next|pnpm-lock\.yaml|test-results|playwright-report)/
         pass_filenames: false
+      # Locale parity + `as`-cast detection. Catches `messages/<locale>.json`
+      # drifting from en.json, and `t('x' as 'y')` casts that bypass
+      # next-intl's typed-key check (the bug that produced
+      # `mcpCatalog.authOauth`).
+      - id: i18n-key-check
+        name: i18n key parity (frontend)
+        entry: bash -c 'cd frontend && node scripts/check-i18n-keys.mjs'
+        language: system
+        files: ^frontend/packages/web/(messages/.*\.json|.*\.(ts|tsx))$
+        exclude: ^frontend/(node_modules|.*/dist|.*/\.next|test-results|playwright-report)/
+        pass_filenames: false
 
   # Pre-push: 跑 CI 等价检查
   - repo: local
