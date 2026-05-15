@@ -18,9 +18,13 @@ from tests.e2e.conftest import collect_sse_events
 TOOL_CALCULATOR = "calculator"
 # cubebox/middleware/todo.py:418
 TOOL_TODO = "write_todos"
-# memory middleware does not register an AgentTool; it is a prompt-injection
-# middleware only (transform_system_prompt / transform_context). No write tool.
-TOOL_MEMORY_WRITE: str | None = None
+# MemoryMiddleware itself is prompt-injection only (transform_system_prompt /
+# transform_context). The memory *tools* live separately in
+# cubebox/tools/builtin/memory.py and are registered into every cubepi run's
+# tool list via run_manager.py (lines 594-600). Three tools are exposed:
+TOOL_MEMORY_SAVE = "memory_save"
+TOOL_MEMORY_SEARCH = "memory_search"
+TOOL_MEMORY_UPDATE = "memory_update"
 # cubebox/middleware/sandbox.py:154 — primary code-execution tool
 TOOL_SANDBOX = "execute"
 # cubebox/middleware/subagents.py:256
