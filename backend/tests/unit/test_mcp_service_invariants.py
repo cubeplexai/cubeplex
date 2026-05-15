@@ -1,6 +1,7 @@
 """Unit tests for MCPServerService invariant enforcement."""
 
 from collections.abc import AsyncIterator
+from typing import Any, cast
 
 import pytest
 from cryptography.fernet import Fernet
@@ -768,3 +769,130 @@ async def test_refresh_tools_marks_unauthed_when_oauth_state_unusable(
     assert refreshed.authed is False, "must flip authed=False so UI shows Re-authenticate"
     assert refreshed.last_error is not None
     assert "OAuth re-authentication required" in refreshed.last_error
+
+
+# ---------------------------------------------------------------------------
+# Four-layer install service invariants (cubebox.services.mcp_installs)
+#
+# These tests cover the **pure** invariants of the install service: the
+# auth_method short-circuit on defaults, and the scope-vs-fk validation on
+# create_static_grant. They use mocked repos / credential service so they
+# stay independent of SQLModel / async session fixtures — the contract is
+# what the service computes BEFORE any I/O.
+# ---------------------------------------------------------------------------
+
+
+def test_auth_method_none_resolves_not_required_defaults() -> None:
+    from cubebox.services.mcp_installs import install_defaults_for_auth_method
+
+    defaults = install_defaults_for_auth_method("none", "user")
+
+    assert defaults.auth_status == "not_required"
+    assert defaults.credential_policy == "none"
+
+
+def test_static_auth_uses_requested_policy() -> None:
+    from cubebox.services.mcp_installs import install_defaults_for_auth_method
+
+    defaults = install_defaults_for_auth_method("static", "workspace")
+
+    assert defaults.auth_status == "pending"
+    assert defaults.credential_policy == "workspace"
+
+
+class _StubCredService:
+    """Records vault create calls so the test can assert it was NOT invoked.
+
+    The scope-vs-fk validation MUST run before any vault write — a vault
+    write on a wrongly shaped grant would orphan an encrypted secret in
+    the credentials table with no grant row pointing at it.
+    """
+
+    def __init__(self) -> None:
+        self.create_calls: list[dict[str, Any]] = []
+
+    async def create(self, *, kind: str, name: str, plaintext: str) -> str:
+        self.create_calls.append({"kind": kind, "name": name, "plaintext": plaintext})
+        return "cred-stub"
+
+
+class _StubGrantRepo:
+    def __init__(self) -> None:
+        self.added: list[Any] = []
+
+    async def add(self, grant: Any) -> Any:
+        self.added.append(grant)
+        return grant
+
+
+def _make_install_service_with_stubs() -> tuple[Any, _StubCredService, _StubGrantRepo]:
+    from cubebox.services.mcp_installs import MCPConnectorInstallService
+
+    cred_stub = _StubCredService()
+    grant_stub = _StubGrantRepo()
+    svc = MCPConnectorInstallService(
+        install_repo=cast(Any, object()),
+        state_repo=cast(Any, object()),
+        grant_repo=cast(Any, grant_stub),
+        cred_service=cast(Any, cred_stub),
+        org_id="org-test",
+        actor_user_id="u1",
+    )
+    return svc, cred_stub, grant_stub
+
+
+async def test_create_static_grant_org_scope_rejects_workspace_id() -> None:
+    """grant_scope='org' with workspace_id set must raise BEFORE vault write."""
+    svc, cred_stub, grant_stub = _make_install_service_with_stubs()
+
+    with pytest.raises(ValueError, match="grant_scope='org'"):
+        await svc.create_static_grant(
+            install_id="mcins-x",
+            grant_scope="org",
+            plaintext="secret",
+            workspace_id="ws-1",
+            user_id=None,
+        )
+
+    assert cred_stub.create_calls == [], "vault must not be touched on shape mismatch"
+    assert grant_stub.added == [], "grant must not be persisted on shape mismatch"
+
+
+async def test_create_static_grant_workspace_scope_requires_workspace_id() -> None:
+    """grant_scope='workspace' without workspace_id must raise BEFORE vault write."""
+    svc, cred_stub, grant_stub = _make_install_service_with_stubs()
+
+    with pytest.raises(ValueError, match="grant_scope='workspace'"):
+        await svc.create_static_grant(
+            install_id="mcins-x",
+            grant_scope="workspace",
+            plaintext="secret",
+            workspace_id=None,
+            user_id=None,
+        )
+
+    assert cred_stub.create_calls == []
+    assert grant_stub.added == []
+
+
+async def test_create_static_grant_user_scope_requires_user_id() -> None:
+    """grant_scope='user' must carry BOTH workspace_id and user_id.
+
+    User grants are scoped per-workspace by the DB check constraint;
+    a user-scope request without user_id (or without workspace_id)
+    must reject before any vault write so a misrouted call from
+    ``/grants/me`` can't silently degrade into a workspace-scope grant.
+    """
+    svc, cred_stub, grant_stub = _make_install_service_with_stubs()
+
+    with pytest.raises(ValueError, match="grant_scope='user'"):
+        await svc.create_static_grant(
+            install_id="mcins-x",
+            grant_scope="user",
+            plaintext="secret",
+            workspace_id="ws-1",
+            user_id=None,
+        )
+
+    assert cred_stub.create_calls == []
+    assert grant_stub.added == []

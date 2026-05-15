@@ -9,7 +9,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from cubebox.audit.sink import AuditSink
 from cubebox.auth.context import RequestContext
-from cubebox.auth.dependencies import require_member, require_org_admin, resolve_current_org_id
+from cubebox.auth.dependencies import (
+    request_context,
+    require_member,
+    require_org_admin,
+    resolve_current_org_id,
+)
 from cubebox.config import config
 from cubebox.credentials.dependencies import (
     build_credential_service,
@@ -28,15 +33,22 @@ from cubebox.mcp.user_token import HS256Signer, MCPUserTokenSigner
 from cubebox.models import Role, User
 from cubebox.repositories.credential import CredentialRepository
 from cubebox.repositories.mcp import (
+    MCPConnectorInstallRepository,
+    MCPConnectorTemplateRepository,
+    MCPCredentialGrantRepository,
     MCPServerRepository,
+    MCPWorkspaceConnectorStateRepository,
     UserMCPCredentialRepository,
     WorkspaceMCPCredentialRepository,
     WorkspaceMCPOverrideRepository,
 )
 from cubebox.repositories.mcp_catalog import MCPCatalogConnectorRepository
+from cubebox.repositories.workspace import WorkspaceRepository
 from cubebox.services.credential import CredentialService
 from cubebox.services.mcp import MCPServerService
 from cubebox.services.mcp_catalog import MCPCatalogService
+from cubebox.services.mcp_installs import MCPConnectorInstallService
+from cubebox.services.mcp_templates import MCPConnectorTemplateService
 
 
 def build_user_token_signer() -> MCPUserTokenSigner:
@@ -357,4 +369,86 @@ async def get_oauth_callback_handler(
         server_repo=MCPServerRepository(session, org_id=None),
         user_cred_repo=UserMCPCredentialRepository(session, org_id=None),
         redirect_uri=_oauth_redirect_uri(),
+    )
+
+
+# ---------------- Four-layer (template / install / state / grant) providers ---------------- #
+#
+# These coexist with the legacy ``get_mcp_service`` / ``get_*catalog*`` providers
+# above; Task 9 of the four-layer plan removes the legacy ones once the
+# admin and workspace routes have fully migrated. Do not delete the legacy
+# providers here.
+#
+# The split between ``get_ws_install_service`` and ``get_admin_install_service``
+# is structural, not cosmetic: admin routes are org-scoped and use
+# ``get_admin_request_context`` (no ``workspace_id`` in the path), while
+# workspace routes use ``request_context`` (workspace_id is a path param). A
+# member-scoped provider would either reject admin calls outright or pin them
+# to whichever workspace the admin happens to belong to, which is wrong for
+# org-wide install fan-out.
+
+
+async def get_connector_template_service(
+    session: AsyncSession = Depends(get_session),
+) -> MCPConnectorTemplateService:
+    """Global, no-org-scope view over the connector template catalog.
+
+    Used by both admin (``/admin/mcp/templates``) and workspace
+    (``/ws/{ws}/mcp/templates``) routes. Templates carry no ``org_id``
+    so the repo and service take no scope arguments.
+    """
+    return MCPConnectorTemplateService(MCPConnectorTemplateRepository(session))
+
+
+async def get_ws_install_service(
+    session: AsyncSession = Depends(get_session),
+    cred_service: CredentialService = Depends(get_credential_service),
+    ctx: RequestContext = Depends(request_context),
+) -> MCPConnectorInstallService:
+    """Install service bound to the caller's workspace membership org.
+
+    Workspace routes construct the three org-scoped repos with the
+    org_id resolved from membership; the actor user id is stamped on
+    install / state / grant rows for audit. ``workspace_repo`` is
+    wired in even though workspace routes never call the ``mode='all'``
+    fan-out — keeping the wiring uniform across both providers lets
+    the service code stay free of "is this admin or member" branching.
+    """
+    return MCPConnectorInstallService(
+        install_repo=MCPConnectorInstallRepository(session, org_id=ctx.org_id),
+        state_repo=MCPWorkspaceConnectorStateRepository(session, org_id=ctx.org_id),
+        grant_repo=MCPCredentialGrantRepository(session, org_id=ctx.org_id),
+        cred_service=cred_service,
+        org_id=ctx.org_id,
+        actor_user_id=ctx.user.id,
+        workspace_repo=WorkspaceRepository(session),
+    )
+
+
+async def get_admin_install_service(
+    session: AsyncSession = Depends(get_session),
+    backend: EncryptionBackend = Depends(get_encryption_backend),
+    ctx: RequestContext = Depends(get_admin_request_context),
+) -> MCPConnectorInstallService:
+    """Install service for org admin routes.
+
+    Admin routes don't carry a ``workspace_id`` in the path, so we
+    can't use ``get_credential_service`` (which depends on
+    ``request_context``); we build the credential service inline with
+    the admin context's ``org_id`` and ``actor_user_id``.
+    """
+    cred_service = build_credential_service(
+        session,
+        backend,
+        org_id=ctx.org_id,
+        actor_user_id=ctx.user.id,
+    )
+    return MCPConnectorInstallService(
+        install_repo=MCPConnectorInstallRepository(session, org_id=ctx.org_id),
+        state_repo=MCPWorkspaceConnectorStateRepository(session, org_id=ctx.org_id),
+        grant_repo=MCPCredentialGrantRepository(session, org_id=ctx.org_id),
+        cred_service=cred_service,
+        org_id=ctx.org_id,
+        actor_user_id=ctx.user.id,
+        workspace_repo=WorkspaceRepository(session),
     )
