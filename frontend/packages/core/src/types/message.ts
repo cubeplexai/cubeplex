@@ -82,7 +82,8 @@ export interface AssistantMessage extends MessageBase {
 }
 
 export interface ToolResultMessage extends MessageBase {
-  role: 'tool'
+  // Mirrors cubepi.ToolResultMessage.role (= "tool_result"). Not "tool".
+  role: 'tool_result'
   tool_call_id: string
   tool_name: string
   content: ContentBlock[]

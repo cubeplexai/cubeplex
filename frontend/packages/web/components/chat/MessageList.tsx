@@ -28,7 +28,7 @@ function msgTimestampMs(msg: Message): number {
 function buildSubagentDataMap(messages: Message[]): Record<string, SubagentSummary> {
   const map: Record<string, SubagentSummary> = {}
   for (const msg of messages) {
-    if (msg.role !== 'tool' || msg.tool_name !== 'subagent' || !msg.tool_call_id) continue
+    if (msg.role !== 'tool_result' || msg.tool_name !== 'subagent' || !msg.tool_call_id) continue
     const summary = getSubagentSummary(msg)
     if (summary) map[`subagent:${msg.tool_call_id}`] = summary
   }
@@ -66,7 +66,7 @@ function buildHistoricalToolResultMap(
   }
 
   for (const msg of messages) {
-    if (msg.role !== 'tool' || !msg.tool_call_id) continue
+    if (msg.role !== 'tool_result' || !msg.tool_call_id) continue
     const receivedAt = msgTimestampMs(msg)
     map[msg.tool_call_id] = {
       content: getTextContent(msg),
