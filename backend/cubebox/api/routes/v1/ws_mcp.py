@@ -473,12 +473,29 @@ async def patch_tool_citations(
 
     Each key must match a tool name present in tools_cache, and each value must
     be a valid CitationConfig. Returns 422 if either invariant is violated.
+
+    For org-wide servers (owner_workspace_id is None), org-admin role is required —
+    otherwise a workspace admin in one workspace could mutate shared state that
+    affects other workspaces with the override enabled.
     """
+    from cubebox.repositories.organization_membership import OrganizationMembershipRepository
+
     server = await _get_workspace_visible_server(
         svc=svc,
         server_id=server_id,
         workspace_id=workspace_id,
     )
+
+    if server.owner_workspace_id is None:
+        is_org_admin = await OrganizationMembershipRepository(svc.server_repo.session).is_admin(
+            user_id=ctx.user.id, org_id=ctx.org_id
+        )
+        if not is_org_admin:
+            raise HTTPException(
+                status_code=403,
+                detail={"code": "mcp_org_wide_citations_require_org_admin"},
+            )
+
     known_names = {t["name"] for t in (server.tools_cache or [])}
 
     errors: list[dict[str, Any]] = []

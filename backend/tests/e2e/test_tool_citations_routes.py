@@ -2,13 +2,19 @@
 
 from __future__ import annotations
 
+import secrets
+from collections.abc import AsyncIterator
 from typing import Any
 
 import httpx
+import pytest
 import pytest_asyncio
-from sqlalchemy.ext.asyncio import AsyncSession
+from fastapi_users.db import SQLAlchemyUserDatabase
+from fastapi_users.schemas import BaseUserCreate
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.pool import NullPool
 
-from cubebox.models import MCPServer
+from cubebox.models import MCPServer, OrgRole, Role
 
 # The directory-based e2e marker is applied automatically by the conftest hook;
 # no explicit pytestmark is needed.
@@ -381,3 +387,160 @@ async def test_get_catalog_tool_citations_404_for_unknown_slug(
         f"/api/v1/ws/{workspace_id}/mcp/catalog/does-not-exist-9999/tool-citations"
     )
     assert resp.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# Org-admin guard for org-wide server PATCH
+# ---------------------------------------------------------------------------
+
+
+@pytest_asyncio.fixture
+async def ws_admin_not_org_admin() -> AsyncIterator[tuple[httpx.AsyncClient, str]]:
+    """A workspace admin who has only OrgRole.MEMBER at the org level.
+
+    This fixture seeds a user with Role.ADMIN on their workspace but only
+    OrgRole.MEMBER on their org — allowing us to verify the org-wide PATCH
+    guard rejects them with 403.
+    """
+    from cubebox.auth.users import UserManager, _slugify_org_name
+    from cubebox.db.engine import _build_database_url
+    from cubebox.repositories import (
+        MembershipRepository,
+        OrganizationMembershipRepository,
+        OrganizationRepository,
+        WorkspaceRepository,
+    )
+    from tests.e2e.conftest import _lifespan_context, _login_and_attach, _make_test_app
+
+    test_engine = create_async_engine(_build_database_url(), poolclass=NullPool)
+    test_session_maker = async_sessionmaker(
+        test_engine, class_=AsyncSession, expire_on_commit=False
+    )
+    email = f"ws-admin-only-{secrets.token_hex(4)}@example.com"
+    password = secrets.token_urlsafe(16)
+    workspace_id: str
+    try:
+        async with test_session_maker() as session:
+            org_repo = OrganizationRepository(session)
+            ws_repo = WorkspaceRepository(session)
+            mem_repo = MembershipRepository(session)
+            om_repo = OrganizationMembershipRepository(session)
+
+            org_name = f"Org {email}"
+            org = await org_repo.create(name=org_name, slug=_slugify_org_name(org_name))
+            ws = await ws_repo.create(org_id=org.id, name=f"WS {email}")
+            workspace_id = ws.id
+
+            from cubebox.models import User
+
+            user_db = SQLAlchemyUserDatabase(session, User)
+            manager = UserManager(user_db)
+            user = await manager.create(BaseUserCreate(email=email, password=password), safe=False)
+
+            # Clean up bootstrap memberships from on_after_register.
+            from sqlalchemy import delete as sa_delete
+
+            from cubebox.models import Membership as MembershipModel
+            from cubebox.models import OrganizationMembership
+
+            await session.execute(
+                sa_delete(OrganizationMembership).where(
+                    OrganizationMembership.user_id == user.id,  # type: ignore[arg-type]
+                )
+            )
+            await session.execute(
+                sa_delete(MembershipModel).where(
+                    MembershipModel.user_id == user.id,  # type: ignore[arg-type]
+                    MembershipModel.workspace_id != ws.id,  # type: ignore[arg-type]
+                )
+            )
+            await session.commit()
+
+            # Grant workspace admin, but only OrgRole.MEMBER (not admin/owner).
+            await mem_repo.grant(user_id=user.id, workspace_id=ws.id, role=Role.ADMIN)
+            await om_repo.grant(user_id=user.id, org_id=org.id, role=OrgRole.MEMBER)
+    finally:
+        await test_engine.dispose()
+
+    app = _make_test_app()
+    app.state.deployment_mode = "multi_tenant"
+    async with _lifespan_context(app):
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
+            await _login_and_attach(c, email, password)
+            yield c, workspace_id
+
+
+@pytest.mark.asyncio
+async def test_patch_tool_citations_org_wide_requires_org_admin(
+    admin_client: tuple[httpx.AsyncClient, str],
+    db_session: AsyncSession,
+    ws_admin_not_org_admin: tuple[httpx.AsyncClient, str],
+) -> None:
+    """A workspace admin (not org admin) cannot PATCH tool_citations on an org-wide server.
+
+    The org-wide server must be visible to the ws-admin's workspace (via an enabled
+    override) for the org-admin check to be reached. We seed the server + override
+    via the admin_client's org, then share it to the ws-admin's workspace.
+    """
+    from sqlalchemy import select as sa_select
+
+    from cubebox.models import Membership, Workspace, WorkspaceMCPOverride
+
+    ws_admin_http, ws_admin_workspace_id = ws_admin_not_org_admin
+
+    # Resolve the ws-admin's org so we can seed the org-wide server there.
+    ws_row = await db_session.get(Workspace, ws_admin_workspace_id)
+    assert ws_row is not None
+    org_id = ws_row.org_id
+
+    mem_stmt = sa_select(Membership).where(Membership.workspace_id == ws_admin_workspace_id)
+    mem_row = (await db_session.execute(mem_stmt)).scalars().first()
+    assert mem_row is not None
+    user_id = str(mem_row.user_id)
+
+    # Seed an org-wide server in the ws-admin's org.
+    server = MCPServer(
+        org_id=org_id,
+        owner_workspace_id=None,  # org-wide
+        name="org-wide-403-guard-test",
+        server_url="http://localhost:9999/org-wide-403",
+        server_url_hash="hash-org-wide-403-guard-test",
+        transport="streamable_http",
+        auth_method="none",
+        credential_scope="none",
+        tools_cache=[{"name": "list_workers", "description": "", "input_schema": {}}],
+        tool_citations={},
+        created_by_user_id=user_id,
+    )
+    db_session.add(server)
+    await db_session.flush()
+
+    # Enable an override so the server is visible to the ws-admin's workspace.
+    db_session.add(
+        WorkspaceMCPOverride(
+            org_id=org_id,
+            workspace_id=ws_admin_workspace_id,
+            mcp_server_id=server.id,
+            enabled=True,
+            updated_by_user_id=user_id,
+        )
+    )
+    await db_session.commit()
+
+    # PATCH by a workspace admin who is NOT org-admin must be rejected with 403.
+    resp = await ws_admin_http.patch(
+        f"/api/v1/ws/{ws_admin_workspace_id}/mcp/servers/{server.id}/tool-citations",
+        json={
+            "tool_citations": {
+                "list_workers": {
+                    "content_type": "json",
+                    "source_type": "web",
+                    "content_field": "results",
+                    "mapping": {},
+                }
+            }
+        },
+    )
+    assert resp.status_code == 403, resp.text
+    assert resp.json()["detail"]["code"] == "mcp_org_wide_citations_require_org_admin"
