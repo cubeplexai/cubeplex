@@ -49,15 +49,19 @@ def _server_id_suffix(server_id: str, length: int = 4) -> str:
     return safe[-length:] if len(safe) >= length else safe
 
 
-def _build_namespaced_name_with_prefix(prefix: str, tool_name: str) -> str:
-    """Combine an already-slugified prefix and tool name with length cap."""
-    combined = f"{prefix}__{tool_name}"
+def _build_namespaced_name_with_prefix(prefix: str, tool_name: str, suffix: str = "") -> str:
+    """Combine ``{prefix}{suffix}__{tool_name}`` capped at ``_NS_MAX_LEN``.
+
+    If the combined name overflows, only ``prefix`` is truncated; ``suffix``
+    (the collision disambiguator) and the full tool name are preserved.
+    """
+    combined = f"{prefix}{suffix}__{tool_name}"
     if len(combined) <= _NS_MAX_LEN:
         return combined
-    budget = _NS_MAX_LEN - len(tool_name) - 2  # 2 for "__"
+    budget = _NS_MAX_LEN - len(tool_name) - len(suffix) - 2  # 2 for "__"
     if budget < 1:
         return tool_name[:_NS_MAX_LEN]
-    return f"{prefix[:budget]}__{tool_name}"
+    return f"{prefix[:budget]}{suffix}__{tool_name}"
 
 
 def _build_namespaced_name(server_name: str, tool_name: str) -> str:
@@ -65,16 +69,22 @@ def _build_namespaced_name(server_name: str, tool_name: str) -> str:
     return _build_namespaced_name_with_prefix(_slugify_for_namespace(server_name), tool_name)
 
 
-def _compute_prefix_for(
+def _compute_slug_and_suffix_for(
     spec: CubepiMCPServerSpec,
     slug_counts: Counter[str],
     proposed_slugs: dict[str, str],
-) -> str:
-    """Return the namespace prefix for a spec, appending an id-suffix on collision."""
+) -> tuple[str, str]:
+    """Return ``(slug, suffix)`` for a spec.
+
+    On collision the suffix carries the id-derived disambiguator (e.g. ``_aaaa``);
+    on a clean name the suffix is empty. Keeping them separate lets the truncation
+    path in ``_build_namespaced_name_with_prefix`` preserve the suffix even when
+    the slug must be shortened.
+    """
     slug = proposed_slugs[spec.server_id]
     if slug_counts[slug] > 1:
-        return f"{slug}_{_server_id_suffix(spec.server_id)}"
-    return slug
+        return slug, f"_{_server_id_suffix(spec.server_id)}"
+    return slug, ""
 
 
 async def load_workspace_mcp_tools_for_cubepi(
@@ -136,10 +146,10 @@ async def load_workspace_mcp_tools_for_cubepi(
             )
             continue
 
-        slug_prefix = _compute_prefix_for(spec, slug_counts, proposed_slugs)
+        slug, suffix = _compute_slug_and_suffix_for(spec, slug_counts, proposed_slugs)
         for tool in tools:
             bare_name = tool.name
-            namespaced_name = _build_namespaced_name_with_prefix(slug_prefix, bare_name)
+            namespaced_name = _build_namespaced_name_with_prefix(slug, bare_name, suffix=suffix)
             namespaced = dataclasses.replace(tool, name=namespaced_name)
             all_tools.append(namespaced)
             raw = spec.tool_citations.get(bare_name)
