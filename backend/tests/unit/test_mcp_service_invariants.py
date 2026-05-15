@@ -1132,6 +1132,7 @@ async def test_create_from_template_for_org_selected_rejects_foreign_workspace_i
         name="t",
         server_url="https://example.com/mcp",
         transport="http",
+        supported_auth_methods=["none"],
         tool_citation_defaults={},
     )
 
@@ -1163,6 +1164,7 @@ async def test_create_from_template_for_org_selected_accepts_valid_workspace_ids
         name="t",
         server_url="https://example.com/mcp",
         transport="http",
+        supported_auth_methods=["none"],
         tool_citation_defaults={},
     )
 
@@ -1177,3 +1179,109 @@ async def test_create_from_template_for_org_selected_accepts_valid_workspace_ids
     assert len(state_repo.upserts) == 1
     assert state_repo.upserts[0]["workspace_id"] == "ws-1"
     assert ws_repo.calls == ["org-test"]
+
+
+# ---------------------------------------------------------------------------
+# auth_method must be in template.supported_auth_methods (both create paths)
+# ---------------------------------------------------------------------------
+
+
+async def test_create_from_template_for_workspace_rejects_unsupported_auth_method() -> None:
+    """A static-only template installed via the workspace path must reject
+    ``auth_method='none'``.
+
+    Routes already validate against the broader "globally valid auth
+    methods" enum, so without this guard a direct API call could install
+    a static-only template as no-auth — runtime credential resolution
+    would then have nothing to bind, and the install would be
+    permanently unusable. Failing here keeps the only legal cross-product
+    of ``(template, auth_method)`` as the one the template's catalog
+    entry declares.
+    """
+    from types import SimpleNamespace
+
+    from cubebox.services.mcp_installs import MCPConnectorInstallService
+
+    install_repo = _StubAddOnlyInstallRepo()
+    state_repo = _StubStateRepo()
+    svc = MCPConnectorInstallService(
+        install_repo=cast(Any, install_repo),
+        state_repo=cast(Any, state_repo),
+        grant_repo=cast(Any, object()),
+        cred_service=cast(Any, object()),
+        org_id="org-test",
+        actor_user_id="u1",
+    )
+    template = SimpleNamespace(
+        id="mctpl-static-only",
+        name="t",
+        server_url="https://example.com/mcp",
+        transport="http",
+        supported_auth_methods=["static"],
+        tool_citation_defaults={},
+    )
+
+    with pytest.raises(ValueError, match="auth_method_not_supported_by_template"):
+        await svc.create_from_template_for_workspace(
+            template=cast(Any, template),
+            workspace_id="ws-1",
+            auth_method="none",
+            credential_policy="none",
+        )
+
+    assert install_repo.added == [], "install row must NOT be written on unsupported auth_method"
+    assert state_repo.upserts == [], "state rows must NOT be written either"
+
+
+async def test_create_from_template_for_org_rejects_unsupported_auth_method() -> None:
+    """Same guard on the org-scope path: an oauth-only template must reject
+    ``auth_method='static'`` before any DB write."""
+    from types import SimpleNamespace
+
+    svc, install_repo, state_repo, _ws_repo = _make_org_install_service(workspace_ids=["ws-1"])
+    template = SimpleNamespace(
+        id="mctpl-oauth-only",
+        name="t",
+        server_url="https://example.com/mcp",
+        transport="http",
+        supported_auth_methods=["oauth"],
+        tool_citation_defaults={},
+    )
+
+    with pytest.raises(ValueError, match="auth_method_not_supported_by_template"):
+        await svc.create_from_template_for_org(
+            template=cast(Any, template),
+            auth_method="static",
+            credential_policy="org",
+            distribution={"mode": "none"},
+        )
+
+    assert install_repo.added == []
+    assert state_repo.upserts == []
+
+
+async def test_create_from_template_for_org_accepts_supported_multi_auth_method() -> None:
+    """Sanity: a multi-auth template + a member of supported_auth_methods
+    proceeds through the install row write."""
+    from types import SimpleNamespace
+
+    svc, install_repo, state_repo, _ws_repo = _make_org_install_service(workspace_ids=["ws-1"])
+    template = SimpleNamespace(
+        id="mctpl-multi",
+        name="t",
+        server_url="https://example.com/mcp",
+        transport="http",
+        supported_auth_methods=["static", "oauth", "none"],
+        tool_citation_defaults={},
+    )
+
+    await svc.create_from_template_for_org(
+        template=cast(Any, template),
+        auth_method="oauth",
+        credential_policy="org",
+        distribution={"mode": "none"},
+    )
+
+    assert len(install_repo.added) == 1
+    # mode='none' means no state rows.
+    assert state_repo.upserts == []

@@ -148,7 +148,16 @@ class MCPConnectorInstallService:
         ``async with session.begin()`` block is the right home for true
         atomicity; the spec calls that out as a follow-up and the
         plan accepts the looser guarantee here.
+
+        ``auth_method`` is cross-checked against
+        ``template.supported_auth_methods`` — a direct API call that picks
+        e.g. ``auth_method='none'`` against a static-only template would
+        otherwise produce an install whose runtime credential resolution
+        is unreachable. ``ValueError("auth_method_not_supported_by_template")``
+        is raised before any DB write.
         """
+        if auth_method not in template.supported_auth_methods:
+            raise ValueError("auth_method_not_supported_by_template")
         defaults = install_defaults_for_auth_method(auth_method, credential_policy)
         install = MCPConnectorInstall(
             org_id=self._org_id,
@@ -203,7 +212,16 @@ class MCPConnectorInstallService:
         persisted — a bad id raises ``ValueError("workspace_not_in_org")``
         with zero rows written, so a typo cannot leave behind a phantom
         install with no state rows.
+
+        ``auth_method`` is cross-checked against
+        ``template.supported_auth_methods`` — a direct API call that picks
+        e.g. ``auth_method='none'`` against a static-only template would
+        otherwise produce an install whose runtime credential resolution
+        is unreachable. ``ValueError("auth_method_not_supported_by_template")``
+        is raised before any DB write.
         """
+        if auth_method not in template.supported_auth_methods:
+            raise ValueError("auth_method_not_supported_by_template")
         mode = distribution.get("mode")
         if mode not in {"all", "selected", "none"}:
             raise ValueError(f"unknown distribution mode: {mode!r}")
