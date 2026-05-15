@@ -210,13 +210,28 @@ Required shape per model:
 - Distribution: `auto_enroll_new_workspaces` (bool, server_default `true`) —
   flips `WorkspaceConnectorState` auto-creation when a new workspace lands in the org.
 - Audit: `created_by_user_id` (FK).
-- Constraints:
-  - `UniqueConstraint(org_id, workspace_id, server_url_hash)` — duplicate-URL guard.
-  - `UniqueConstraint(org_id, workspace_id, name)` — name uniqueness inside scope.
-  - Partial unique index `uq_mcp_connector_install_per_template` on
-    `(org_id, COALESCE(workspace_id, '_org'), template_id)` where
-    `template_id IS NOT NULL AND install_state = 'active'` — at most one active
-    install per template per scope, but uninstalled rows must not block reinstall.
+- Constraints (Postgres treats NULL as distinct for plain `UNIQUE`, so use
+  partial unique indexes per scope rather than multi-column `UniqueConstraint`
+  with nullable columns — otherwise two org-scope installs with the same URL
+  both pass uniqueness):
+  - Partial index `uq_mcp_connector_install_url_org` on `(org_id, server_url_hash)`
+    where `workspace_id IS NULL AND install_state = 'active'`.
+  - Partial index `uq_mcp_connector_install_url_ws` on
+    `(org_id, workspace_id, server_url_hash)` where
+    `workspace_id IS NOT NULL AND install_state = 'active'`.
+  - Partial index `uq_mcp_connector_install_name_org` on `(org_id, name)` where
+    `workspace_id IS NULL AND install_state = 'active'`.
+  - Partial index `uq_mcp_connector_install_name_ws` on
+    `(org_id, workspace_id, name)` where
+    `workspace_id IS NOT NULL AND install_state = 'active'`.
+  - Partial index `uq_mcp_connector_install_per_template_org` on
+    `(org_id, template_id)` where
+    `workspace_id IS NULL AND template_id IS NOT NULL AND install_state = 'active'`.
+  - Partial index `uq_mcp_connector_install_per_template_ws` on
+    `(org_id, workspace_id, template_id)` where
+    `workspace_id IS NOT NULL AND template_id IS NOT NULL AND install_state = 'active'`.
+  - All install_state-gated indexes intentionally exclude `uninstalled` rows so
+    a tombstoned install does not block reinstalling the same template/URL/name.
   - Check constraints (`ck_*`): `install_scope IN ('org','workspace')`,
     `auth_method IN ('oauth','static','none')`.
 
@@ -241,8 +256,21 @@ Required shape per model:
 - `expires_at` (nullable, OAuth access-token expiry), `grant_status`
   (`valid` | `missing` | `expired` | `revoked` | `error`, default `valid`),
   `created_by_user_id` (FK).
-- Unique on `(install_id, grant_scope, workspace_id, user_id)`.
-- Check: `grant_scope IN ('org','workspace','user')`.
+- Uniqueness — same NULL-distinct issue as installs; replace the single
+  multi-column `UniqueConstraint` with three partial unique indexes, one per
+  scope, so org grants can't be duplicated under NULL `workspace_id`/`user_id`:
+  - `uq_mcp_credential_grant_org` on `(install_id)` where `grant_scope = 'org'`.
+  - `uq_mcp_credential_grant_workspace` on `(install_id, workspace_id)` where
+    `grant_scope = 'workspace'`.
+  - `uq_mcp_credential_grant_user` on `(install_id, workspace_id, user_id)` where
+    `grant_scope = 'user'`.
+- Check: `grant_scope IN ('org','workspace','user')`, plus row-level guards
+  enforced at the service layer (`workspace_id` non-null iff scope ∈
+  `{workspace,user}`; `user_id` non-null iff scope = `user`). The check
+  constraint version of the row-level guards (`(grant_scope='org' AND
+  workspace_id IS NULL AND user_id IS NULL) OR ...`) should also be added —
+  it costs nothing and turns a programming bug into a DB error before the
+  partial unique index sees it.
 
 Update `backend/cubebox/models/__init__.py` to export the four classes and remove
 old MCP model exports.
@@ -267,28 +295,26 @@ containing:
 
 Then open the generated file and manually add what autogenerate cannot infer:
 
-1. **Partial unique index** on installs (autogen does not produce `postgresql_where`):
+1. **All partial unique indexes** — autogen cannot produce `postgresql_where`,
+   so every entry from the Step 3 partial-index list lands here as an explicit
+   `op.create_index(..., unique=True, postgresql_where=sa.text(...))`. That covers
+   the six install indexes (URL × org/ws, name × org/ws, template × org/ws) and
+   the three grant scope indexes (`org`, `workspace`, `user`). All install indexes
+   that exclude `install_state='uninstalled'` must include that predicate in their
+   `postgresql_where` so uninstalled rows do not block reinstall.
 
-   ```python
-   op.create_index(
-       "uq_mcp_connector_install_per_template",
-       "mcp_connector_installs",
-       ["org_id", sa.text("COALESCE(workspace_id, '_org')"), "template_id"],
-       unique=True,
-       postgresql_where=sa.text(
-           "template_id IS NOT NULL AND install_state = 'active'"
-       ),
-   )
-   ```
-
-2. **Four `CHECK` constraints** (autogen ignores `CheckConstraint` produced by SQLModel
-   in some versions; verify and add as needed):
+2. **Check constraints** (autogen sometimes drops `CheckConstraint` produced by
+   SQLModel; verify the generated file and add any that are missing):
 
    - `ck_mcp_connector_installs_scope`: `install_scope IN ('org','workspace')`
    - `ck_mcp_connector_installs_auth_method`: `auth_method IN ('oauth','static','none')`
    - `ck_mcp_workspace_connector_states_policy`:
      `credential_policy IN ('org','workspace','user','none')`
    - `ck_mcp_credential_grants_scope`: `grant_scope IN ('org','workspace','user')`
+   - `ck_mcp_credential_grants_scope_columns`:
+     `(grant_scope='org' AND workspace_id IS NULL AND user_id IS NULL)
+      OR (grant_scope='workspace' AND workspace_id IS NOT NULL AND user_id IS NULL)
+      OR (grant_scope='user' AND workspace_id IS NOT NULL AND user_id IS NOT NULL)`
 
 3. **Downgrade**: destructive migration is not reversible. Replace the autogenerated
    `downgrade()` body with:
@@ -662,9 +688,11 @@ the workspace-side contract. The test must assert each of the following is regis
 
 - `GET    /api/v1/ws/{workspace_id}/mcp/templates`
 - `GET    /api/v1/ws/{workspace_id}/mcp/connectors`
-- `POST   /api/v1/ws/{workspace_id}/mcp/installs`
+- `POST   /api/v1/ws/{workspace_id}/mcp/installs`  (workspace-local install create)
 - `DELETE /api/v1/ws/{workspace_id}/mcp/installs/{install_id}`  (workspace-local uninstall)
-- `PATCH  /api/v1/ws/{workspace_id}/mcp/installs/{install_id}/state`
+- `PATCH  /api/v1/ws/{workspace_id}/mcp/connectors/{install_id}/state`
+  (matches spec §API Shape — workspace state edit lives under `/connectors`, not
+  `/installs`; the install path is reserved for install-lifecycle operations)
 - `POST   /api/v1/ws/{workspace_id}/mcp/installs/{install_id}/grants/me`
 - `DELETE /api/v1/ws/{workspace_id}/mcp/installs/{install_id}/grants/me`
 - `POST   /api/v1/ws/{workspace_id}/mcp/installs/{install_id}/grants/me/oauth/start`
@@ -840,127 +868,84 @@ git commit -m "feat(mcp): replace catalog routes with four-layer API"
 - Create: `backend/tests/unit/test_mcp_effective_service.py`
 - Modify: `backend/tests/unit/test_mcp_cubepi_runtime.py`
 
-- [ ] **Step 1: Add effective state tests**
+- [ ] **Step 1: Add effective state tests (full reason matrix)**
 
-Create `backend/tests/unit/test_mcp_effective_state.py`:
+`backend/tests/unit/test_mcp_effective_state.py` is the contract for the pure
+function. Cover **every** terminal reason in the spec's reason table — the
+function should never collapse "user vs workspace vs org grant missing" into a
+single `credential_missing`, otherwise UI/admin cannot diagnose the connector.
+Concrete test cases (subagent writes one test per row, names map to spec
+reasons):
 
-```python
-from cubebox.mcp.effective import MCPEffectiveInput, MCPGrantInput, compute_effective_state
+| Test case | Input shape | Expected `reason` |
+| --- | --- | --- |
+| no template, no install | `install_state="active"` but no install row for this template in org/ws | `not_installed` |
+| install uninstalled | `install_state="uninstalled"` | `install_uninstalled` |
+| template deprecated, install still active | `template_status="deprecated"` | `template_deprecated` |
+| workspace state missing/disabled | `workspace_enabled=False` | `not_enabled_in_workspace` |
+| unsupported transport | `transport="stdio"` | (skipped — spec doesn't include this; replace with `server_unreachable` if needed) |
+| no-auth happy path | `auth_method="none"`, `credential_policy="none"`, no grant | `usable` |
+| pending OAuth at org scope | `auth_status="pending"`, `credential_policy="org"`, no grant | `pending_oauth` |
+| missing org grant | `auth_status="authorized"` but no row with `grant_scope="org"` | `missing_org_grant` |
+| missing workspace grant | `credential_policy="workspace"`, no row at workspace scope | `missing_workspace_grant` |
+| user needs to connect | `credential_policy="user"`, no row for current `user_id` | `user_needs_connection` |
+| grant expired (refresh failed) | grant `status="expired"` and no refresh credential | `grant_expired` |
+| discovery failed | `discovery_status="error"`, otherwise authorized | `discovery_failed` |
+| valid user grant | `credential_policy="user"`, grant `scope="user" status="valid"` | `usable` |
 
-
-def test_no_auth_connector_is_usable_without_grant() -> None:
-    result = compute_effective_state(
-        MCPEffectiveInput(
-            template_status="active",
-            install_state="active",
-            workspace_enabled=True,
-            auth_method="none",
-            credential_policy="none",
-            grant=None,
-            transport="streamable_http",
-        )
-    )
-
-    assert result.usable is True
-    assert result.reason == "usable"
-    assert result.credential_availability == "not_required"
-
-
-def test_user_policy_requires_user_grant() -> None:
-    result = compute_effective_state(
-        MCPEffectiveInput(
-            template_status="active",
-            install_state="active",
-            workspace_enabled=True,
-            auth_method="static",
-            credential_policy="user",
-            grant=None,
-            transport="streamable_http",
-        )
-    )
-
-    assert result.usable is False
-    assert result.reason == "credential_missing"
-
-
-def test_valid_user_grant_makes_user_policy_usable() -> None:
-    result = compute_effective_state(
-        MCPEffectiveInput(
-            template_status="active",
-            install_state="active",
-            workspace_enabled=True,
-            auth_method="static",
-            credential_policy="user",
-            grant=MCPGrantInput(scope="user", status="valid"),
-            transport="streamable_http",
-        )
-    )
-
-    assert result.usable is True
-    assert result.reason == "usable"
-```
+The "user_needs_connection" / scope-specific reasons distinguish *which scope's*
+grant is missing — runtime/UI consumers branch on this string.
 
 - [ ] **Step 2: Implement pure effective-state model**
 
-Create `backend/cubebox/mcp/effective.py`:
+Create `backend/cubebox/mcp/effective.py`. The module exports:
 
-```python
-from dataclasses import dataclass
-from typing import Literal
+- `CredentialPolicy = Literal["org","workspace","user","none"]`.
+- `MCPEffectiveReason` — a `Literal` covering every spec reason
+  (`usable`, `not_installed`, `not_enabled_in_workspace`, `install_uninstalled`,
+  `template_deprecated`, `pending_oauth`, `missing_org_grant`,
+  `missing_workspace_grant`, `user_needs_connection`, `grant_expired`,
+  `discovery_failed`, `server_unreachable`).
+- `MCPGrantInput(scope: str, status: str, has_refresh: bool)` — the runtime's
+  view of the resolved grant row.
+- `MCPEffectiveInput` — frozen dataclass with at least these fields:
+  - `template_status: str | None` (None ⇒ custom install with no template)
+  - `install_present: bool` (False ⇒ caller decided "not installed")
+  - `install_state: str`
+  - `workspace_state_present: bool`
+  - `workspace_enabled: bool`
+  - `auth_method: str`
+  - `auth_status: str`
+  - `discovery_status: str`
+  - `credential_policy: CredentialPolicy`
+  - `grant: MCPGrantInput | None`
+  - `transport: str`
+- `MCPEffectiveResult(usable: bool, reason: MCPEffectiveReason,
+  credential_availability: Literal["available","missing","not_required"])`.
 
-CredentialPolicy = Literal["org", "workspace", "user", "none"]
-MCPEffectiveReason = Literal[
-    "usable",
-    "template_inactive",
-    "install_uninstalled",
-    "workspace_disabled",
-    "credential_missing",
-    "credential_invalid",
-    "unsupported_transport",
-]
+Decision order in `compute_effective_state` (first match wins):
 
+1. `install_present=False` → `not_installed`.
+2. `install_state == "uninstalled"` → `install_uninstalled`.
+3. `template_status` is set and not `active` → `template_deprecated`.
+4. `workspace_state_present=False` or `workspace_enabled=False` →
+   `not_enabled_in_workspace`.
+5. `auth_method == "none"` OR `credential_policy == "none"` → `usable`,
+   `credential_availability="not_required"`.
+6. `auth_status == "pending"` AND grant absent → `pending_oauth`.
+7. Grant absent → scope-specific missing reason
+   (`missing_org_grant` / `missing_workspace_grant` / `user_needs_connection`
+   based on `credential_policy`).
+8. Grant present but `status == "expired"` and `has_refresh=False` →
+   `grant_expired`.
+9. Grant present but `scope != credential_policy` → treat as missing for that
+   scope (no cross-scope fallback).
+10. `discovery_status == "error"` → `discovery_failed`.
+11. Otherwise → `usable`, `credential_availability="available"`.
 
-@dataclass(frozen=True, slots=True)
-class MCPGrantInput:
-    scope: str
-    status: str
-
-
-@dataclass(frozen=True, slots=True)
-class MCPEffectiveInput:
-    template_status: str | None
-    install_state: str
-    workspace_enabled: bool
-    auth_method: str
-    credential_policy: CredentialPolicy
-    grant: MCPGrantInput | None
-    transport: str
-
-
-@dataclass(frozen=True, slots=True)
-class MCPEffectiveResult:
-    usable: bool
-    reason: MCPEffectiveReason
-    credential_availability: str
-
-
-def compute_effective_state(value: MCPEffectiveInput) -> MCPEffectiveResult:
-    if value.template_status is not None and value.template_status != "active":
-        return MCPEffectiveResult(False, "template_inactive", "missing")
-    if value.install_state != "active":
-        return MCPEffectiveResult(False, "install_uninstalled", "missing")
-    if value.transport not in {"streamable_http", "sse"}:
-        return MCPEffectiveResult(False, "unsupported_transport", "missing")
-    if not value.workspace_enabled:
-        return MCPEffectiveResult(False, "workspace_disabled", "missing")
-    if value.auth_method == "none" or value.credential_policy == "none":
-        return MCPEffectiveResult(True, "usable", "not_required")
-    if value.grant is None:
-        return MCPEffectiveResult(False, "credential_missing", "missing")
-    if value.grant.status != "valid" or value.grant.scope != value.credential_policy:
-        return MCPEffectiveResult(False, "credential_invalid", "missing")
-    return MCPEffectiveResult(True, "usable", "available")
-```
+The order matters: `discovery_failed` only blocks usability after all auth
+gates pass, because discovery is only attempted once the connector is
+authorized.
 
 - [ ] **Step 3: Add DB-backed effective service**
 
@@ -1097,16 +1082,38 @@ file — do not invent new auth flow). Required new fixtures:
   add the minimum scaffolding (register second user, accept invite) reusing the
   existing helpers.
 
-- [ ] **Step 2: No-auth happy path (spec test #1, #5-no-auth variant)**
+- [ ] **Step 2a: Workspace-local no-auth happy path (spec test #2)**
 
-Test `test_workspace_installs_noauth_template_and_gets_usable_connector` in
+`test_workspace_local_noauth_install_renders_usable` in
 `backend/tests/e2e/test_mcp_four_layer_routes.py`:
 
-- Workspace admin POSTs `/installs` with the no-auth template id.
-- GET `/connectors` returns a row whose `enabled=true`, `credential_policy="none"`,
+- Workspace admin POSTs `/ws/{ws}/mcp/installs` with the no-auth template id.
+- GET `/ws/{ws}/mcp/connectors` returns a row whose `install_scope="workspace"`,
+  `enabled=true`, `credential_policy="none"`,
   `credential_availability="not_required"`, `usable=true`.
-- Runtime smoke (in the runtime-side test file): `list_runtime_specs(...)`
+- Runtime smoke (in `test_mcp_four_layer_runtime.py`): `list_runtime_specs(...)`
   returns the connector and no grant lookup is performed.
+
+- [ ] **Step 2b: Org admin no-auth install + distribution (spec test #1)**
+
+`test_org_admin_noauth_install_distributed_to_workspace_renders_usable` in
+the same file. This is the dedicated org-path test — without it, an
+implementation could pass Step 2a but break the `install_scope="org"` +
+`WorkspaceConnectorState` codepath:
+
+- Org admin POSTs `/admin/mcp/installs` with `template_id=noauth_template_id`,
+  `install_scope="org"`, `auth_method="none"`, and
+  `auto_enable={"mode":"selected","workspace_ids":[workspace_id]}`.
+- Assert the install row is `install_scope="org"`, `workspace_id IS NULL`,
+  `auth_status="not_required"`.
+- Assert a `WorkspaceConnectorState` row was created for the target workspace
+  with `enablement_source="admin_manual"` and `enabled=true`.
+- GET `/ws/{ws}/mcp/connectors` returns the same install with
+  `install_scope="org"`, `credential_availability="not_required"`,
+  `usable=true`. A non-targeted workspace in the same org must NOT see this
+  install as enabled.
+- Runtime smoke: `list_runtime_specs(ws, user)` for the targeted workspace
+  returns the connector; for a non-targeted workspace it does not.
 
 - [ ] **Step 3: User-policy scope isolation (spec test #3)**
 
