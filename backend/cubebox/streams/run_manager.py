@@ -387,11 +387,19 @@ class RunManager:
                 await task
 
     async def cancel_run(self, run_id: str) -> bool:
-        """Cancel a single in-flight run. Returns True if the task was found."""
+        """Cancel a single in-flight run and wait for cleanup to finish.
+
+        Awaiting the task keeps the caller blocked until ``_execute_run``'s
+        finally block has cleared the Redis active-run key. Without this, a
+        client that clicks Stop and immediately re-sends would race against
+        cleanup and get a 409 from ``start_run``.
+        """
         task = self._tasks.get(run_id)
         if task is None or task.done():
             return False
         task.cancel()
+        with suppress(asyncio.CancelledError):
+            await task
         return True
 
     async def drain(self, timeout_seconds: float) -> None:
