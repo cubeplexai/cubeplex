@@ -101,7 +101,7 @@ export async function* streamMessages(
     }
 
     const body = (await res.json()) as { run_id: string }
-    for await (const event of streamRun(client, conversationId, body.run_id)) {
+    for await (const event of streamRun(client, conversationId, body.run_id, undefined, signal)) {
       yield event
     }
   } catch (err) {

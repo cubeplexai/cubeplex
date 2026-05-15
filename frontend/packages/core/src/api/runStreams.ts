@@ -89,6 +89,7 @@ export async function* streamRun(
   conversationId: string,
   runId: string,
   lastEventId?: string,
+  signal?: AbortSignal,
 ): AsyncGenerator<AgentEvent> {
   const headers: Record<string, string> = {
     Accept: 'text/event-stream',
@@ -99,12 +100,19 @@ export async function* streamRun(
   if (csrf) headers['X-CSRF-Token'] = csrf
 
   const path = client.resolvePath(`/api/v1/conversations/${conversationId}/runs/${runId}/stream`)
-  const res = await fetch(`${client.baseUrl}${path}`, {
-    method: 'GET',
-    credentials: 'include',
-    headers,
-    cache: 'no-store',
-  })
+  let res: Response
+  try {
+    res = await fetch(`${client.baseUrl}${path}`, {
+      method: 'GET',
+      credentials: 'include',
+      headers,
+      cache: 'no-store',
+      signal,
+    })
+  } catch (err) {
+    if ((err as Error).name === 'AbortError') return
+    throw err
+  }
 
   if (!res.ok || !res.body) {
     throw await toApiError(res)
@@ -120,6 +128,8 @@ export async function* streamRun(
         // Ignore malformed lines and keep the stream alive.
       }
     }
+  } catch (err) {
+    if ((err as Error).name !== 'AbortError') throw err
   } finally {
     reader.releaseLock()
   }
