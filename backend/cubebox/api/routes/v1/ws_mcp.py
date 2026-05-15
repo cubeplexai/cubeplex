@@ -433,18 +433,80 @@ async def _build_catalog_defaults(
     return dict(catalog.tool_citations or {})
 
 
+async def _get_server_for_citation_admin(
+    *,
+    svc: MCPServerService,
+    server_id: str,
+    workspace_id: str,
+    actor_user_id: str,
+    actor_org_id: str,
+) -> MCPServer:
+    """Resolve a server for citation read/write with the citation-specific access policy.
+
+    - 404 if no such server exists in the actor's org.
+    - Workspace-owned by ``workspace_id`` → allowed (workspace admin dependency enforced
+      at the route level).
+    - Org-wide (owner_workspace_id is None) → org-admin role required.
+    - Owned by a different workspace → 403.
+
+    This helper is intentionally broader than ``_get_workspace_visible_server``: it
+    does NOT require an enabled override row, so org-admins can manage citations on
+    org-wide installs that haven't yet been enabled for any workspace.
+    """
+    from cubebox.repositories.organization_membership import OrganizationMembershipRepository
+
+    server = await svc.server_repo.get(server_id)
+    if server is None or server.org_id != actor_org_id:
+        raise HTTPException(404, detail={"code": "mcp_server_not_found"})
+
+    if server.owner_workspace_id == workspace_id:
+        return server
+
+    if server.owner_workspace_id is None:
+        is_org_admin = await OrganizationMembershipRepository(svc.server_repo.session).is_admin(
+            user_id=actor_user_id, org_id=actor_org_id
+        )
+        if not is_org_admin:
+            raise HTTPException(
+                status_code=403,
+                detail={"code": "mcp_org_wide_citations_require_org_admin"},
+            )
+        return server
+
+    raise HTTPException(403, detail={"code": "mcp_server_not_owned_by_workspace"})
+
+
 @router.get("/servers/{server_id}/tool-citations")
 async def get_tool_citations(
     workspace_id: str,
     server_id: str,
     svc: MCPServerService = Depends(get_mcp_service),
+    ctx: RequestContext = Depends(require_member),
 ) -> ToolCitationsResponse:
-    """Return the current tool-citations config for a server, plus catalogue defaults."""
-    server = await _get_workspace_visible_server(
-        svc=svc,
-        server_id=server_id,
-        workspace_id=workspace_id,
-    )
+    """Return the current tool-citations config for a server, plus catalogue defaults.
+
+    Fast path: server is visible via the workspace (ws-owned or org-wide with an
+    enabled override). Fallback: org-admins can also view org-wide installs that
+    have no enabled override yet (admin-panel citation tab scenario).
+    """
+    try:
+        server = await _get_workspace_visible_server(
+            svc=svc,
+            server_id=server_id,
+            workspace_id=workspace_id,
+        )
+    except HTTPException as exc:
+        if exc.status_code != 403:
+            raise
+        # Fallback: org-admins may view org-wide installs without an enabled override.
+        server = await _get_server_for_citation_admin(
+            svc=svc,
+            server_id=server_id,
+            workspace_id=workspace_id,
+            actor_user_id=ctx.user.id,
+            actor_org_id=ctx.org_id,
+        )
+
     tools_cache = list(server.tools_cache or [])
     known_names = {t["name"] for t in tools_cache}
     citations = dict(server.tool_citations or {})
@@ -476,25 +538,17 @@ async def patch_tool_citations(
 
     For org-wide servers (owner_workspace_id is None), org-admin role is required —
     otherwise a workspace admin in one workspace could mutate shared state that
-    affects other workspaces with the override enabled.
+    affects other workspaces with the override enabled.  The server does NOT need
+    to have an enabled workspace override to be editable by an org-admin (admin
+    panel scenario where the server was installed org-wide but not yet enabled).
     """
-    from cubebox.repositories.organization_membership import OrganizationMembershipRepository
-
-    server = await _get_workspace_visible_server(
+    server = await _get_server_for_citation_admin(
         svc=svc,
         server_id=server_id,
         workspace_id=workspace_id,
+        actor_user_id=ctx.user.id,
+        actor_org_id=ctx.org_id,
     )
-
-    if server.owner_workspace_id is None:
-        is_org_admin = await OrganizationMembershipRepository(svc.server_repo.session).is_admin(
-            user_id=ctx.user.id, org_id=ctx.org_id
-        )
-        if not is_org_admin:
-            raise HTTPException(
-                status_code=403,
-                detail={"code": "mcp_org_wide_citations_require_org_admin"},
-            )
 
     known_names = {t["name"] for t in (server.tools_cache or [])}
 
