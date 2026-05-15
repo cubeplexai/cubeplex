@@ -707,6 +707,66 @@ def test_post_workspace_install_with_org_scope_returns_422() -> None:
     assert res.status_code == 422, res.text
 
 
+def test_post_workspace_install_unsupported_auth_method_returns_400() -> None:
+    """Service ValueError must surface as 400 with the message as ``code``.
+
+    The schema accepts ``auth_method="none"`` + ``credential_policy="none"`` on
+    its own (the cross-field validator only cares about the policy/auth pair).
+    But the service additionally cross-checks the requested ``auth_method``
+    against the template's ``supported_auth_methods``; mismatches raise
+    ``ValueError("auth_method_not_supported_by_template")`` which the route
+    must catch and map to 400 instead of letting it propagate as a 500.
+    """
+    from cubebox.auth.context import RequestContext
+    from cubebox.auth.dependencies import require_admin
+    from cubebox.models import Role, User
+
+    workspace_id = "ws-1"
+    template_id = "mctpl-static-only"
+
+    async def _fake_admin_ctx() -> RequestContext:
+        user = User(id="usr-1", email="x@example.com", hashed_password="x")
+        return RequestContext(user=user, org_id="org-1", workspace_id=workspace_id, role=Role.ADMIN)
+
+    async def _fake_template_svc() -> Any:
+        class _S:
+            async def get_active(self, tid: str) -> Any:
+                class _T:
+                    id = tid
+
+                return _T()
+
+        return _S()
+
+    async def _fake_install_svc() -> Any:
+        class _S:
+            async def create_from_template_for_workspace(self, **kwargs: Any) -> Any:  # noqa: ARG002
+                raise ValueError("auth_method_not_supported_by_template")
+
+        return _S()
+
+    app = _make_app_with_overrides(
+        {
+            require_admin: _fake_admin_ctx,
+            get_connector_template_service: _fake_template_svc,
+            get_ws_install_service: _fake_install_svc,
+        }
+    )
+
+    client = TestClient(app)
+    res = client.post(
+        f"/api/v1/ws/{workspace_id}/mcp/installs",
+        json={
+            "template_id": template_id,
+            "auth_method": "none",
+            "default_credential_policy": "none",
+        },
+    )
+    assert res.status_code == 400, res.text
+    detail = res.json()["detail"]
+    assert detail == {"code": "auth_method_not_supported_by_template"}, detail
+
+
 def test_post_workspace_install_static_with_none_policy_returns_422() -> None:
     """Static auth + ``credential_policy="none"`` is rejected at the schema layer."""
     from cubebox.auth.context import RequestContext
