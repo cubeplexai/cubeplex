@@ -296,7 +296,7 @@ export function CitationMarker({ citationId, chunkIndex, conversationId }: Citat
       // Find tool result from history messages (top-level or inside subagent_events)
       outer: for (const msgs of Object.values(state.messages)) {
         for (const m of msgs) {
-          if (m.role === 'tool' && m.tool_call_id === citation.tool_call_id) {
+          if (m.role === 'tool_result' && m.tool_call_id === citation.tool_call_id) {
             toolName = m.tool_name || 'web_search'
             content = m.content
               .filter((b): b is { type: 'text'; text: string } => b.type === 'text')
@@ -306,7 +306,7 @@ export function CitationMarker({ citationId, chunkIndex, conversationId }: Citat
           }
           // Search subagent inner tool results
           const subagent =
-            m.role === 'tool' && m.tool_name === 'subagent' ? getSubagentSummary(m) : null
+            m.role === 'tool_result' && m.tool_name === 'subagent' ? getSubagentSummary(m) : null
           if (subagent?.tool_results) {
             const inner = subagent.tool_results.find(
               (tr: { tool_call_id: string }) => tr.tool_call_id === citation.tool_call_id,
@@ -335,7 +335,7 @@ export function CitationMarker({ citationId, chunkIndex, conversationId }: Citat
           }
         }
         const subagent =
-          m.role === 'tool' && m.tool_name === 'subagent' ? getSubagentSummary(m) : null
+          m.role === 'tool_result' && m.tool_name === 'subagent' ? getSubagentSummary(m) : null
         if (subagent?.tool_calls) {
           const tc = subagent.tool_calls.find(
             (t: { id?: string }) => t.id === citation.tool_call_id,

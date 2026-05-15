@@ -116,7 +116,7 @@ function normalizeMessages(messages: Message[]): Message[] {
     // Some legacy fixtures may omit `id`; synthesize one for React keys.
     const withId = msg.id ? msg : { ...msg, id: nextMessageId(msg.role) }
     if (
-      withId.role !== 'tool' &&
+      withId.role !== 'tool_result' &&
       Array.isArray(withId.content) &&
       withId.content.some((b) => b.type === 'thinking')
     ) {
@@ -273,7 +273,7 @@ function restoreTodosFromHistory(messages: Message[]): TodoItem[] {
 
 function hydrateCitationsFromHistory(conversationId: string, messages: Message[]): void {
   for (const msg of messages) {
-    if (msg.role !== 'tool') continue
+    if (msg.role !== 'tool_result') continue
     const citations = msg.metadata?.citations
     if (citations && citations.length > 0) {
       useCitationStore.getState().loadCitations(conversationId, citations)
@@ -552,7 +552,7 @@ async function finalizeCompletedStream(
       mapEntry?.receivedAt ?? (tr.timestamp ? new Date(tr.timestamp).getTime() : Date.now())
     toolMessages.push({
       id: nextMessageId('tool'),
-      role: 'tool',
+      role: 'tool_result',
       content: [{ type: 'text', text: tr.data.content ?? mapEntry?.content ?? '' }],
       tool_call_id: tcId,
       tool_name: tr.data.tool_name ?? '',
@@ -568,7 +568,7 @@ async function finalizeCompletedStream(
     const currentToolResultMap = get().toolResultMap
     toolMessages.push({
       id: nextMessageId('tool'),
-      role: 'tool',
+      role: 'tool_result',
       content: [{ type: 'text', text: agentStream.text || '' }],
       tool_call_id: toolCallId,
       tool_name: 'subagent',
