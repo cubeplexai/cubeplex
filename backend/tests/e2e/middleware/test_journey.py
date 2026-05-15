@@ -3,8 +3,10 @@
 Turn 1 → timestamps, cost, calculator (builtin tool).
 Turn 2 → todo (write_todos tool).
 Turn 3 → sandbox (execute tool).
-Loaded-but-quiet middleware (memory/skills/citation/attachments/artifacts)
-covered by zero-error assertions. See design doc 2026-05-15.
+Turn 4 → memory_save (builtin tool backed by MemoryService).
+Loaded-but-quiet middleware (skills/citation/attachments/artifacts) covered
+by zero-error assertions. MemoryMiddleware's read path (transform_context
+injection) runs implicitly on every turn. See design doc 2026-05-15.
 """
 
 from __future__ import annotations
@@ -19,6 +21,7 @@ from tests.e2e.middleware._helpers import (
     EVT_TOOL_RESULT,
     EVT_USAGE,
     TOOL_CALCULATOR,
+    TOOL_MEMORY_SAVE,
     TOOL_SANDBOX,
     TOOL_TODO,
     assistant_text,
@@ -93,6 +96,27 @@ async def test_full_middleware_journey(member_client: tuple) -> None:  # type: i
     t3_text = assistant_text(t3)
     assert "55" in t3_text, f"expected '55' in assistant reply; got: {t3_text!r}"
 
+    # Turn 4: memory_save → builtin memory tool
+    t4 = await post_turn(
+        client,
+        ws_id,
+        conv_id,
+        "你必须用 memory_save 工具把我的偏好记下来。参数：scope='personal'，"
+        "type='preference'，content='我做数据处理偏好用 Python + pandas'。"
+        "保存成功后用一句话确认。",
+    )
+    assert events_of_type(t4, EVT_ERROR) == [], f"errors in t4: {t4}"
+    assert t4[-1].get("type") == EVT_DONE
+    t4_tools = tool_call_names(t4)
+    assert TOOL_MEMORY_SAVE in t4_tools, f"expected {TOOL_MEMORY_SAVE} call, got {t4_tools}"
+    # memory_save returns JSON like {"status": "saved", "memory_id": "..."}
+    t4_results = tool_result_contents(t4)
+    assert any("saved" in c for c in t4_results), (
+        f"expected 'saved' in memory_save tool_result; got: {t4_results}"
+    )
+    t4_text = assistant_text(t4)
+    assert t4_text.strip() != "", f"expected non-empty assistant reply in t4; got: {t4_text!r}"
+
     # Whole-conversation union check
-    all_types = {e.get("type") for e in (t1 + t2 + t3)}
+    all_types = {e.get("type") for e in (t1 + t2 + t3 + t4)}
     assert {EVT_TEXT_DELTA, EVT_TOOL_CALL, EVT_TOOL_RESULT, EVT_USAGE, EVT_DONE} <= all_types
