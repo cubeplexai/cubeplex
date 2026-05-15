@@ -72,27 +72,48 @@ export default function AdminMcpPage() {
     try {
       const wsClient = createApiClient('')
       wsClient.setWorkspaceId(lensWsId)
-      // Admin install list is the source of truth for the left rail —
+      // Admin install list (``/admin/mcp/installs`` → ``list_org_installs``)
+      // is the source of truth for org-scope rows in the left rail —
       // wsListEffectiveConnectors only surfaces org installs with a
       // workspace_state row, so org installs with auto_enable.mode='none'
       // or scoped to a sibling workspace would otherwise be hidden from
       // the admin. The effective list still feeds per-workspace state
       // (enabled flag, credential availability) for the lens workspace.
+      //
+      // However ``list_org_installs`` omits workspace-scope installs
+      // entirely, so a connector freshly created via
+      // ``MCPTemplateInstallPanel`` (which posts ``install_scope:'workspace'``)
+      // would vanish from the admin page right after creation. To cover
+      // those, also append any workspace-scope effective rows that the
+      // admin endpoint omits.
       const [adminInstalls, eff, tpl] = await Promise.all([
         adminListInstalls(client),
         wsListEffectiveConnectors(wsClient, lensWsId),
         wsListTemplates(wsClient, lensWsId),
       ])
       const effByInstallId = new Map(eff.items.map((c) => [c.install.install_id, c]))
-      const merged: MCPEffectiveConnector[] = adminInstalls.items.map((install) => {
+      const merged: MCPEffectiveConnector[] = []
+      const seen = new Set<string>()
+      for (const install of adminInstalls.items) {
+        if (seen.has(install.install_id)) continue
+        seen.add(install.install_id)
         const existing = effByInstallId.get(install.install_id)
-        if (existing) return existing
-        // Synthesize a stub effective row so the admin can still see and
-        // manage org installs that have no workspace_state row in the
-        // lens workspace. Enabled=false reflects the fact that the
-        // install is not active in this workspace.
-        return synthesizeStubEffective(install, lensWsId)
-      })
+        if (existing) {
+          merged.push(existing)
+        } else {
+          // Synthesize a stub effective row so the admin can still see
+          // and manage org installs that have no workspace_state row in
+          // the lens workspace. Enabled=false reflects the fact that the
+          // install is not active in this workspace.
+          merged.push(synthesizeStubEffective(install, lensWsId))
+        }
+      }
+      for (const effRow of eff.items) {
+        if (seen.has(effRow.install.install_id)) continue
+        if (effRow.install.install_scope !== 'workspace') continue
+        seen.add(effRow.install.install_id)
+        merged.push(effRow)
+      }
       setConnectors(merged)
       setTemplates(tpl.items)
     } finally {
