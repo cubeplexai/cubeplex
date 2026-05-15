@@ -54,6 +54,7 @@ from cubebox.repositories.mcp import (
     WorkspaceMCPOverrideRepository,
 )
 from cubebox.repositories.mcp_catalog import MCPCatalogConnectorRepository
+from cubebox.repositories.workspace import WorkspaceRepository
 from cubebox.services.credential import CredentialService
 
 _VALID_AUTH_METHODS = {"static", "oauth", "none"}
@@ -90,6 +91,7 @@ class MCPCatalogService:
         override_repo: WorkspaceMCPOverrideRepository,
         cred_service: CredentialService,
         request_context: RequestContext,
+        workspace_repo: WorkspaceRepository | None = None,
     ) -> None:
         self.catalog_repo = catalog_repo
         self.server_repo = server_repo
@@ -98,6 +100,7 @@ class MCPCatalogService:
         self.override_repo = override_repo
         self.cred_service = cred_service
         self._ctx = request_context
+        self.workspace_repo = workspace_repo or WorkspaceRepository(server_repo.session)
 
     # ---------------- read path ---------------- #
 
@@ -190,18 +193,22 @@ class MCPCatalogService:
         connector = await self._get_connector_or_raise(catalog_id)
         self._assert_auth_method_supported(connector, auth_method)
 
-        # NOTE: With inverted semantics (no override row = invisible),
-        # ``auto_enable_workspaces`` would need to create explicit enabled
-        # override rows for each workspace. Deferred to a follow-up task;
-        # for now the flag is accepted but not acted on.
-        del auto_enable_workspaces
-
-        return await self._install_org_wide(
+        result = await self._install_org_wide(
             connector=connector,
             auth_method=auth_method,
             credential_plaintext=credential_plaintext,
             credential_name=credential_name,
+            auto_enroll_new_workspaces=auto_enable_workspaces,
         )
+
+        # Backfill enabled overrides for every existing workspace in the org.
+        # Eager: we do this regardless of authed state — workspace UIs surface
+        # an explicit "needs setup" state, which is more useful than hiding the
+        # connector entirely while OAuth is mid-flight.
+        if auto_enable_workspaces:
+            await self._enable_for_existing_workspaces(server_id=result.install_id)
+
+        return result
 
     async def install_for_workspace(
         self,
@@ -382,6 +389,7 @@ class MCPCatalogService:
         auth_method: str,
         credential_plaintext: str | None,
         credential_name: str | None,
+        auto_enroll_new_workspaces: bool = True,
     ) -> InstallResult:
         await self._reject_duplicate(
             connector_id=connector.id,
@@ -412,6 +420,7 @@ class MCPCatalogService:
                 timeout=30.0,
                 sse_read_timeout=300.0,
                 tool_citations=copy.deepcopy(connector.tool_citations or {}),
+                auto_enroll_new_workspaces=auto_enroll_new_workspaces,
                 created_by_user_id=self._ctx.user.id,
             )
         )
@@ -421,6 +430,22 @@ class MCPCatalogService:
             auth_method=auth_method,
             credential_plaintext=credential_plaintext,
         )
+
+    async def _enable_for_existing_workspaces(self, *, server_id: str) -> None:
+        """Upsert enabled overrides for every workspace in the org.
+
+        Idempotent: workspaces that already have an enabled override get a
+        no-op flip; disabled overrides get re-enabled (admin install intent
+        wins over a prior per-workspace opt-out).
+        """
+        workspaces = await self.workspace_repo.list_for_org(self._ctx.org_id)
+        for ws in workspaces:
+            await self.override_repo.upsert(
+                workspace_id=ws.id,
+                mcp_server_id=server_id,
+                enabled=True,
+                updated_by_user_id=self._ctx.user.id,
+            )
 
     async def _install_workspace_user(
         self,

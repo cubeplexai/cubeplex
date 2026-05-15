@@ -137,7 +137,9 @@ async def test_org_install_appears_in_workspace_runtime_with_tools_cache(
     assert body["authed"] is True
     install_id = body["install_id"]
 
-    # New semantics: org install is invisible by default. Enable it first.
+    # auto_enable defaults to True so an enabled override is created at install
+    # time — re-PATCHing here is idempotent and asserts the canonical override
+    # surface still works regardless of how the row got there.
     enable_resp = await client.patch(
         f"/api/v1/ws/{workspace_id}/mcp/org-installs/{install_id}/override",
         json={"enabled": True},
@@ -305,7 +307,8 @@ async def test_workspace_override_disable_does_not_affect_other_workspace(
     assert install_resp.status_code == 201, install_resp.text
     install_id = install_resp.json()["install_id"]
 
-    # 3) Enable for both workspaces (org installs are invisible by default).
+    # 3) Both workspaces already have enabled overrides from auto_enable=true
+    #    backfill; PATCH again is idempotent and asserts the canonical surface.
     for ws_id in (workspace_a, workspace_b):
         enable_resp = await client.patch(
             f"/api/v1/ws/{ws_id}/mcp/org-installs/{install_id}/override",

@@ -106,12 +106,17 @@ async def create_workspace(
                 detail="not a member of this org",
             )
 
+    from cubebox.mcp.workspace_bootstrap import enroll_workspace_in_org_wide_mcp
+
     ws_repo = WorkspaceRepository(session)
     mem_repo = MembershipRepository(session)
     ws = await ws_repo.create(org_id=org_id, name=body.name)
     await mem_repo.grant(user_id=user.id, workspace_id=ws.id, role=Role.ADMIN)
     agent_cfg = AgentConfig(org_id=org_id, workspace_id=ws.id)
     session.add(agent_cfg)
+    await enroll_workspace_in_org_wide_mcp(
+        session, org_id=org_id, workspace_id=ws.id, actor_user_id=user.id
+    )
     await session.commit()
     return {"id": ws.id, "name": ws.name, "org_id": ws.org_id}
 
