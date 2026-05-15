@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 from datetime import timedelta
-from typing import Any
+from typing import Any, Literal, cast
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -23,6 +23,9 @@ from cubebox.services.credential import CredentialService
 
 _USER_TOKEN_TTL = timedelta(minutes=5)
 
+MCPTransport = Literal["sse", "streamable_http"]
+_VALID_TRANSPORTS: frozenset[str] = frozenset({"sse", "streamable_http"})
+
 logger = logging.getLogger(__name__)
 
 
@@ -33,6 +36,7 @@ class CubepiMCPServerSpec:
     server_id: str
     server_name: str
     url: str
+    transport: MCPTransport
     headers: dict[str, str] = field(default_factory=dict)
     tool_citations: dict[str, dict[str, Any]] = field(default_factory=dict)
 
@@ -63,6 +67,13 @@ async def discover_workspace_mcp_servers_for_cubepi(
 
     specs: list[CubepiMCPServerSpec] = []
     for server in await server_repo.list_for_workspace(workspace_id):
+        if server.transport not in _VALID_TRANSPORTS:
+            logger.warning(
+                "MCP server '%s' has unsupported transport %r; skipping",
+                server.name,
+                server.transport,
+            )
+            continue
         try:
             # Resolve the per-workspace effective credential mode first.  A
             # workspace override may flip the server's default credential_scope
@@ -115,6 +126,7 @@ async def discover_workspace_mcp_servers_for_cubepi(
                 server_id=server.id,
                 server_name=server.name,
                 url=server.server_url,
+                transport=cast(MCPTransport, server.transport),
                 headers=headers,
                 tool_citations=dict(server.tool_citations or {}),
             )

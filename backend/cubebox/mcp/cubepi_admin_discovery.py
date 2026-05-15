@@ -8,9 +8,9 @@ cubebox.mcp.discovery module. Uses the raw `mcp` SDK to call
 
 Dispatches by ``MCPServer.transport``: ``sse`` opens an SSE stream,
 ``streamable_http`` opens a streamable-HTTP connection. The cubepi per-run
-path (``cubepi.mcp.load_mcp_tools_http``) is currently SSE-only; matching
-both transports here keeps the admin UI's tool listing correct for
-streamable_http servers even before the per-run path is updated upstream.
+path (``cubepi.mcp.load_mcp_tools_http``) now takes the same ``transport``
+parameter, so admin and per-run discovery exercise the same wire format
+for any given server.
 """
 
 from __future__ import annotations
