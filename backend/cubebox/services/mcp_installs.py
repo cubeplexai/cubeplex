@@ -197,10 +197,52 @@ class MCPConnectorInstallService:
 
         Unknown modes raise ``ValueError`` so a typo in the route layer
         surfaces as a 400 rather than a silently-empty fan-out.
+
+        For ``mode='selected'`` every requested workspace id is validated
+        against the org's actual workspaces BEFORE the install row is
+        persisted — a bad id raises ``ValueError("workspace_not_in_org")``
+        with zero rows written, so a typo cannot leave behind a phantom
+        install with no state rows.
         """
         mode = distribution.get("mode")
         if mode not in {"all", "selected", "none"}:
             raise ValueError(f"unknown distribution mode: {mode!r}")
+
+        # Pre-resolve workspace_ids BEFORE writing the install row so that a
+        # bad id in ``distribution.workspace_ids`` cannot leave behind a
+        # phantom install with no state rows. For ``mode='all'`` the lookup
+        # is the authoritative list (no client input to validate); for
+        # ``mode='selected'`` we cross-check every requested id against the
+        # org's actual workspaces.
+        workspace_ids: list[str] = []
+        enablement_source = ""
+        if mode == "all":
+            if self._workspace_repo is None:
+                raise RuntimeError(
+                    "create_from_template_for_org(mode='all') requires workspace_repo"
+                )
+            workspaces = await self._workspace_repo.list_for_org(self._org_id)
+            workspace_ids = [ws.id for ws in workspaces]
+            enablement_source = "admin_auto"
+        elif mode == "selected":
+            raw_ids = distribution.get("workspace_ids") or []
+            if not isinstance(raw_ids, list):
+                raise ValueError("distribution.workspace_ids must be a list")
+            requested = [str(wid) for wid in raw_ids]
+            if requested:
+                if self._workspace_repo is None:
+                    raise RuntimeError(
+                        "create_from_template_for_org(mode='selected') requires workspace_repo"
+                    )
+                valid_ws = await self._workspace_repo.list_for_org(self._org_id)
+                valid_ids = {ws.id for ws in valid_ws}
+                unknown = [wid for wid in requested if wid not in valid_ids]
+                if unknown:
+                    # Reject the entire call BEFORE the install row is written so a
+                    # typo'd id can't leave the org with a half-distributed install.
+                    raise ValueError("workspace_not_in_org")
+            workspace_ids = requested
+            enablement_source = "admin_manual"
 
         defaults = install_defaults_for_auth_method(auth_method, credential_policy)
         install = MCPConnectorInstall(
@@ -222,21 +264,6 @@ class MCPConnectorInstallService:
 
         if mode == "none":
             return saved
-
-        if mode == "all":
-            if self._workspace_repo is None:
-                raise RuntimeError(
-                    "create_from_template_for_org(mode='all') requires workspace_repo"
-                )
-            workspaces = await self._workspace_repo.list_for_org(self._org_id)
-            workspace_ids: list[str] = [ws.id for ws in workspaces]
-            enablement_source = "admin_auto"
-        else:
-            raw_ids = distribution.get("workspace_ids") or []
-            if not isinstance(raw_ids, list):
-                raise ValueError("distribution.workspace_ids must be a list")
-            workspace_ids = [str(wid) for wid in raw_ids]
-            enablement_source = "admin_manual"
 
         for ws_id in workspace_ids:
             await self._state_repo.upsert(

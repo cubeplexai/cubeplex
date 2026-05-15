@@ -21,7 +21,9 @@ from cubebox.api.schemas.mcp import (
     AdminCreateInstallIn,
     CreateGrantIn,
     CredentialRefOut,
+    MCPConnectorInstallListOut,
     MCPConnectorInstallOut,
+    MCPConnectorTemplateListOut,
     MCPConnectorTemplateOut,
     MCPCredentialGrantStatusOut,
     MCPOAuthStartIn,
@@ -415,23 +417,25 @@ async def put_override(
 # stays in ``api/app.py`` until Task 9 of the four-layer plan.
 
 
-@router.get("/templates", response_model=list[MCPConnectorTemplateOut])
+@router.get("/templates", response_model=MCPConnectorTemplateListOut)
 async def list_admin_templates(
     svc: Annotated[MCPConnectorTemplateService, Depends(get_connector_template_service)],
     _ctx: Annotated[RequestContext, Depends(get_admin_request_context)],
-) -> list[MCPConnectorTemplateOut]:
+) -> MCPConnectorTemplateListOut:
     """Admin view over the global connector template catalog."""
     templates = await svc.list_active()
-    return [_template_to_out(t) for t in templates]
+    return MCPConnectorTemplateListOut(items=[_template_to_out(t) for t in templates])
 
 
-@router.get("/installs", response_model=list[MCPConnectorInstallOut])
+@router.get("/installs", response_model=MCPConnectorInstallListOut)
 async def list_admin_installs(
     svc: Annotated[MCPConnectorInstallService, Depends(get_admin_install_service)],
-) -> list[MCPConnectorInstallOut]:
+) -> MCPConnectorInstallListOut:
     """List every org-scope install in the admin's current org."""
     org_rows = await svc._install_repo.list_org_installs()
-    return [_install_to_out(install) for install in org_rows]
+    return MCPConnectorInstallListOut(
+        items=[_install_to_out(install) for install in org_rows],
+    )
 
 
 @router.post(
@@ -689,12 +693,12 @@ async def admin_org_grant_oauth_start(
 
 @public_templates_router.get(
     "/templates",
-    response_model=list[MCPConnectorTemplateOut],
+    response_model=MCPConnectorTemplateListOut,
 )
 async def list_public_templates(
     svc: Annotated[MCPConnectorTemplateService, Depends(get_connector_template_service)],
     _user: Annotated[User, Depends(current_active_user)],
-) -> list[MCPConnectorTemplateOut]:
+) -> MCPConnectorTemplateListOut:
     """Public template list — authenticated, not org-scoped."""
     templates = await svc.list_active()
-    return [_template_to_out(t) for t in templates]
+    return MCPConnectorTemplateListOut(items=[_template_to_out(t) for t in templates])

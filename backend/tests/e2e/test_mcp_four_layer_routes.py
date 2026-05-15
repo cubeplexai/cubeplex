@@ -52,9 +52,15 @@ async def db_maker() -> AsyncIterator[async_sessionmaker[AsyncSession]]:
 
 
 async def _find_connector(
-    rows: list[dict],  # type: ignore[type-arg]
+    payload: dict | list,  # type: ignore[type-arg]
     install_id: str,
 ) -> dict | None:  # type: ignore[type-arg]
+    # GET /connectors returns ``{items: [...]}``; tolerate a bare list too so the
+    # helper still works if someone reaches for it from a different surface.
+    if isinstance(payload, dict):
+        rows = payload.get("items", [])
+    else:
+        rows = payload
     for row in rows:
         if row["install"]["install_id"] == install_id:
             return row
