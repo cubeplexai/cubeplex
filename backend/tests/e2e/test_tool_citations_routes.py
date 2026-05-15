@@ -472,6 +472,117 @@ async def ws_admin_not_org_admin() -> AsyncIterator[tuple[httpx.AsyncClient, str
 
 
 @pytest.mark.asyncio
+async def test_patch_tool_citations_org_admin_on_org_wide_without_override(
+    admin_client: tuple[httpx.AsyncClient, str],
+    db_session: AsyncSession,
+) -> None:
+    """An org admin can PATCH tool-citations on an org-wide server even when
+    that server has NO workspace override enabled (admin panel scenario).
+    """
+    from sqlalchemy import select as sa_select
+
+    from cubebox.models import MCPServer, Membership, Workspace
+
+    client, workspace_id = admin_client
+    ws_row = await db_session.get(Workspace, workspace_id)
+    assert ws_row is not None
+    org_id = ws_row.org_id
+
+    mem_stmt = sa_select(Membership).where(Membership.workspace_id == workspace_id)
+    mem_row = (await db_session.execute(mem_stmt)).scalars().first()
+    assert mem_row is not None
+    user_id = str(mem_row.user_id)
+
+    server = MCPServer(
+        org_id=org_id,
+        owner_workspace_id=None,  # org-wide
+        name="org-wide-no-override",
+        server_url="http://localhost:9999/no-override",
+        server_url_hash="hash-no-override-patch",
+        transport="streamable_http",
+        auth_method="none",
+        credential_scope="none",
+        tools_cache=[{"name": "web_search", "description": "", "input_schema": {}}],
+        tool_citations={},
+        created_by_user_id=user_id,
+    )
+    db_session.add(server)
+    await db_session.commit()
+    # NOTE: no WorkspaceMCPOverride created — server is invisible via override path.
+
+    new_dict: dict[str, Any] = {
+        "web_search": {
+            "content_type": "json",
+            "source_type": "web",
+            "content_field": "results",
+            "mapping": {"snippet": "description"},
+        }
+    }
+    resp = await client.patch(
+        f"/api/v1/ws/{workspace_id}/mcp/servers/{server.id}/tool-citations",
+        json={"tool_citations": new_dict},
+    )
+    # admin_client is the org owner → counts as org-admin → should be 200
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["tool_citations"] == new_dict
+
+
+@pytest.mark.asyncio
+async def test_get_tool_citations_org_admin_on_org_wide_without_override(
+    admin_client: tuple[httpx.AsyncClient, str],
+    db_session: AsyncSession,
+) -> None:
+    """An org admin can GET tool-citations on an org-wide server even when
+    that server has NO workspace override enabled (admin panel scenario).
+    """
+    from sqlalchemy import select as sa_select
+
+    from cubebox.models import MCPServer, Membership, Workspace
+
+    client, workspace_id = admin_client
+    ws_row = await db_session.get(Workspace, workspace_id)
+    assert ws_row is not None
+    org_id = ws_row.org_id
+
+    mem_stmt = sa_select(Membership).where(Membership.workspace_id == workspace_id)
+    mem_row = (await db_session.execute(mem_stmt)).scalars().first()
+    assert mem_row is not None
+    user_id = str(mem_row.user_id)
+
+    seeded_citations: dict[str, Any] = {
+        "list_items": {
+            "content_type": "json",
+            "source_type": "web",
+            "content_field": "items",
+            "mapping": {"url": "link"},
+        }
+    }
+    server = MCPServer(
+        org_id=org_id,
+        owner_workspace_id=None,  # org-wide
+        name="org-wide-no-override-get",
+        server_url="http://localhost:9999/no-override-get",
+        server_url_hash="hash-no-override-get",
+        transport="streamable_http",
+        auth_method="none",
+        credential_scope="none",
+        tools_cache=[{"name": "list_items", "description": "", "input_schema": {}}],
+        tool_citations=seeded_citations,
+        created_by_user_id=user_id,
+    )
+    db_session.add(server)
+    await db_session.commit()
+    # NOTE: no WorkspaceMCPOverride created — server is invisible via override path.
+
+    resp = await client.get(f"/api/v1/ws/{workspace_id}/mcp/servers/{server.id}/tool-citations")
+    # org-admin fallback should return 200 with the seeded citations
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["server_id"] == server.id
+    assert body["tool_citations"] == seeded_citations
+
+
+@pytest.mark.asyncio
 async def test_patch_tool_citations_org_wide_requires_org_admin(
     admin_client: tuple[httpx.AsyncClient, str],
     db_session: AsyncSession,
