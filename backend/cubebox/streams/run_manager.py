@@ -651,8 +651,97 @@ class RunManager:
         except Exception as _exc:
             logger.warning("view_images unavailable for cubepi run: {}", _exc)
 
-        # MCP tools — per-workspace enabled HTTP MCP servers
+        # MCP tools — per-workspace enabled HTTP MCP servers.
+        #
+        # Coexist policy (four-layer plan Task 5 / 9):
+        #   * Four-layer path runs first via MCPEffectiveConnectorService
+        #     against the new mcp_connector_installs / states / grants
+        #     tables. Tools from this path are appended to the run's tool
+        #     list.
+        #   * Legacy path runs second against the unchanged mcp_servers /
+        #     workspace_mcp_overrides tables. Tools accumulate alongside.
+        # Task 9 retires the legacy block once admin and workspace routes
+        # have fully migrated. Both paths can be active in the same run
+        # while migrations are in flight; install ids never collide
+        # across schemas (different ID prefixes) so namespacing is safe.
         mcp_citation_configs: dict[str, Any] = {}
+
+        # Four-layer loader.
+        try:
+            from cubebox.credentials.dependencies import build_credential_service
+            from cubebox.mcp.cubepi_runtime import load_workspace_mcp_tools_from_effective
+            from cubebox.mcp.dependencies import _build_token_manager_for_org
+            from cubebox.mcp.effective import MCPEffectiveConnectorService
+            from cubebox.mcp.oauth.metadata import OAuthMetadataDiscovery
+            from cubebox.repositories.mcp import (
+                MCPConnectorInstallRepository,
+                MCPConnectorTemplateRepository,
+                MCPCredentialGrantRepository,
+                MCPWorkspaceConnectorStateRepository,
+            )
+
+            async with async_session_maker() as effective_session:
+                effective_cred_service = build_credential_service(
+                    effective_session,
+                    self._app.state.encryption_backend,
+                    org_id=ctx.org_id,
+                    actor_user_id=ctx.user_id,
+                )
+                # Reuse the shared OAuth metadata cache + httpx client if the
+                # app already has them (the request-scoped DI providers stash
+                # one on app.state). When absent (first ever MCP run) build a
+                # short-lived pair — the next request-scoped consumer will
+                # promote them onto app.state.
+                _http_client = getattr(self._app.state, "_mcp_oauth_http_client", None)
+                if _http_client is None:
+                    import httpx as _httpx
+
+                    _http_client = _httpx.AsyncClient(timeout=30.0)
+                    self._app.state._mcp_oauth_http_client = _http_client
+                _metadata = getattr(self._app.state, "_mcp_oauth_metadata_discovery", None)
+                if _metadata is None:
+                    _metadata = OAuthMetadataDiscovery(_http_client)
+                    self._app.state._mcp_oauth_metadata_discovery = _metadata
+                _token_manager = _build_token_manager_for_org(
+                    session=effective_session,
+                    backend=self._app.state.encryption_backend,
+                    redis=self._redis,
+                    http_client=_http_client,
+                    metadata=_metadata,
+                    org_id=ctx.org_id,
+                )
+                _effective_service = MCPEffectiveConnectorService(
+                    template_repo=MCPConnectorTemplateRepository(effective_session),
+                    install_repo=MCPConnectorInstallRepository(
+                        effective_session, org_id=ctx.org_id
+                    ),
+                    state_repo=MCPWorkspaceConnectorStateRepository(
+                        effective_session, org_id=ctx.org_id
+                    ),
+                    grant_repo=MCPCredentialGrantRepository(effective_session, org_id=ctx.org_id),
+                    org_id=ctx.org_id,
+                    token_manager=_token_manager,
+                )
+                (
+                    _new_tools,
+                    _new_citations,
+                ) = await load_workspace_mcp_tools_from_effective(
+                    effective_service=_effective_service,
+                    token_manager=_token_manager,
+                    workspace_id=ctx.workspace_id,
+                    org_id=ctx.org_id,
+                    user_id=ctx.user_id,
+                    cred_service=effective_cred_service,
+                    signer=self._app.state.mcp_user_token_signer,
+                )
+                _builtin_tools.extend(_new_tools)
+                mcp_citation_configs.update(_new_citations)
+        except Exception as _exc:
+            logger.warning("MCP four-layer tools unavailable for cubepi run: {}", _exc)
+
+        # Legacy loader (mcp_servers / workspace_mcp_overrides). Coexists
+        # with the four-layer loader above; Task 9 of the four-layer plan
+        # removes this block.
         try:
             from cubebox.credentials.dependencies import build_credential_service
             from cubebox.mcp.cubepi_runtime import load_workspace_mcp_tools_for_cubepi
@@ -664,7 +753,7 @@ class RunManager:
                     org_id=ctx.org_id,
                     actor_user_id=ctx.user_id,
                 )
-                mcp_tools, mcp_citation_configs = await load_workspace_mcp_tools_for_cubepi(
+                mcp_tools, _legacy_citations = await load_workspace_mcp_tools_for_cubepi(
                     session=mcp_session,
                     workspace_id=ctx.workspace_id,
                     org_id=ctx.org_id,
@@ -673,6 +762,7 @@ class RunManager:
                     signer=self._app.state.mcp_user_token_signer,
                 )
                 _builtin_tools.extend(mcp_tools)
+                mcp_citation_configs.update(_legacy_citations)
         except Exception as _exc:
             logger.warning("MCP tools unavailable for cubepi run: {}", _exc)
 

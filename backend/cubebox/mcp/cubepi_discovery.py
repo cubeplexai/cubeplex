@@ -229,3 +229,44 @@ async def _resolve_token_for_cubepi(
         )
 
     return None
+
+
+async def discover_workspace_mcp_servers_from_effective(
+    *,
+    effective_service: Any,
+    workspace_id: str,
+    user_id: str,
+) -> list[CubepiMCPServerSpec]:
+    """Four-layer discovery: walk effective specs → :class:`CubepiMCPServerSpec`.
+
+    Provides a spec-shaped view of the four-layer runtime for callers that
+    already speak :class:`CubepiMCPServerSpec`. Credentials are NOT resolved
+    here — the four-layer runtime loader does that inline via
+    :func:`cubebox.mcp.cubepi_runtime.load_workspace_mcp_tools_from_effective`.
+    This is intentionally just a name/url/transport projection so the
+    legacy and four-layer discovery shapes can interop.
+
+    Coexists with the legacy :func:`discover_workspace_mcp_servers_for_cubepi`;
+    Task 9 of the four-layer plan deletes the legacy variant.
+    """
+    runtime_specs = await effective_service.list_runtime_specs(workspace_id, user_id)
+    specs: list[CubepiMCPServerSpec] = []
+    for rspec in runtime_specs:
+        if rspec.transport not in _VALID_TRANSPORTS:
+            logger.warning(
+                "MCP install '%s' has unsupported transport %r; skipping",
+                rspec.name,
+                rspec.transport,
+            )
+            continue
+        specs.append(
+            CubepiMCPServerSpec(
+                server_id=rspec.install_id,
+                server_name=rspec.name,
+                url=rspec.server_url,
+                transport=cast(MCPTransport, rspec.transport),
+                headers=dict(rspec.headers or {}),
+                tool_citations=dict(rspec.tool_citations or {}),
+            )
+        )
+    return specs
