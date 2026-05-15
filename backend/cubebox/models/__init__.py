@@ -10,7 +10,11 @@ from cubebox.models.credential import Credential
 from cubebox.models.invite_token import InviteToken
 from cubebox.models.mcp import (
     MCPCatalogConnector,
+    MCPConnectorInstall,
+    MCPConnectorTemplate,
+    MCPCredentialGrant,
     MCPServer,
+    MCPWorkspaceConnectorState,
     UserMCPCredential,
     WorkspaceMCPCredential,
     WorkspaceMCPOverride,
@@ -50,7 +54,11 @@ __all__ = [
     "InviteToken",
     "LlmBillingEvent",
     "MCPCatalogConnector",
+    "MCPConnectorInstall",
+    "MCPConnectorTemplate",
+    "MCPCredentialGrant",
     "MCPServer",
+    "MCPWorkspaceConnectorState",
     "MemoryItem",
     "MemoryScope",
     "MemorySourceType",
