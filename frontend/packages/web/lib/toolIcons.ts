@@ -9,6 +9,7 @@ import {
   Wrench,
   type LucideIcon,
 } from 'lucide-react'
+import { bareToolName } from '@cubebox/core'
 
 const iconMap: Record<string, LucideIcon> = {
   execute: Terminal,
@@ -26,7 +27,7 @@ const iconMap: Record<string, LucideIcon> = {
 }
 
 export function getToolIcon(toolName: string): LucideIcon {
-  return iconMap[toolName] ?? Wrench
+  return iconMap[bareToolName(toolName)] ?? Wrench
 }
 
 /**
@@ -38,16 +39,17 @@ export function getParamSummary(
   args: Record<string, unknown>,
   maxLen = 60,
 ): string {
+  const bare = bareToolName(toolName)
   let value = ''
-  if (toolName === 'execute') {
+  if (bare === 'execute') {
     value = String(args.command ?? args.cmd ?? '')
-  } else if (toolName === 'write_file' || toolName === 'edit_file') {
+  } else if (bare === 'write_file' || bare === 'edit_file') {
     value = String(args.file_path ?? args.file_name ?? '')
-  } else if (toolName === 'web_search' || toolName === 'search') {
+  } else if (bare === 'web_search' || bare === 'search') {
     value = String(args.query ?? args.q ?? '')
-  } else if (toolName === 'web_fetch' || toolName === 'fetch') {
+  } else if (bare === 'web_fetch' || bare === 'fetch') {
     value = String(args.url ?? '')
-  } else if (toolName === 'load_skill') {
+  } else if (bare === 'load_skill') {
     value = String(args.skill_name ?? '')
   } else {
     const firstVal = Object.values(args).find((v) => typeof v === 'string')

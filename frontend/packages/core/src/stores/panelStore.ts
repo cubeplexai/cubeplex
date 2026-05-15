@@ -1,27 +1,29 @@
 // frontend/packages/core/src/stores/panelStore.ts
 import { create } from 'zustand'
 import type { PanelContentType, ToolCallRef } from '../types'
+import { bareToolName } from '../lib/toolName'
 
 /** Map tool name + optional backend content_type to a PanelContentType. */
 function mapContentType(toolName: string, backendContentType?: string): PanelContentType {
-  if (toolName === 'load_skill') return 'skill'
-  if (toolName === 'execute') return 'terminal'
-  if (toolName === 'write_file') return 'write_file'
-  if (toolName === 'code_execute' || toolName === 'python') return 'code_execute'
-  if (toolName === 'file_read') return 'file_read'
+  const bare = bareToolName(toolName)
+  if (bare === 'load_skill') return 'skill'
+  if (bare === 'execute') return 'terminal'
+  if (bare === 'write_file') return 'write_file'
+  if (bare === 'code_execute' || bare === 'python') return 'code_execute'
+  if (bare === 'file_read') return 'file_read'
   if (backendContentType === 'file_read') return 'file_read'
 
   if (backendContentType === 'json') {
-    if (toolName === 'web_search' || toolName === 'search') return 'search'
+    if (bare === 'web_search' || bare === 'search') return 'search'
     return 'generic'
   }
   if (backendContentType === 'text') {
-    if (toolName === 'web_fetch' || toolName === 'fetch') return 'web_fetch'
+    if (bare === 'web_fetch' || bare === 'fetch') return 'web_fetch'
     return 'generic'
   }
 
-  if (toolName === 'web_search' || toolName === 'search') return 'search'
-  if (toolName === 'web_fetch' || toolName === 'fetch') return 'web_fetch'
+  if (bare === 'web_search' || bare === 'search') return 'search'
+  if (bare === 'web_fetch' || bare === 'fetch') return 'web_fetch'
   return 'generic'
 }
 
