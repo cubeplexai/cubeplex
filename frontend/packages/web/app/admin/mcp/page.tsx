@@ -172,8 +172,16 @@ export default function AdminMcpPage() {
     // Prefer ``install.template_id`` because synthesized stubs (admin
     // installs without a workspace effective row) don't carry the
     // hydrated ``template`` payload but still know the template id.
+    //
+    // Only ACTIVE installs mask their template from the install dialog —
+    // tombstoned (uninstalled) rows are kept around so a reinstall can
+    // re-attach the same shape (see ``MCPConnectorInstallService.uninstall``),
+    // but they must NOT block the admin from re-launching the install
+    // flow for the same template. Without this filter, "uninstall" is a
+    // one-shot operation per template.
     const installedTemplateIds = new Set(
       connectors
+        .filter((c) => c.install.install_state === 'active')
         .map((c) => c.template?.template_id ?? c.install.template_id)
         .filter((v): v is string => Boolean(v)),
     )

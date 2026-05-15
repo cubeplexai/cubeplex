@@ -313,8 +313,14 @@ export function McpPanel({ wsId }: McpPanelProps) {
   }, [connectors, search])
 
   const filteredTemplates = useMemo(() => {
+    // Only ACTIVE installs mask their template — tombstoned (uninstalled)
+    // rows must not block reinstalling, otherwise "Disconnect" turns into
+    // a one-shot per template from the workspace settings panel.
     const installedTemplateIds = new Set(
-      connectors.map((c) => c.template?.template_id).filter((v): v is string => Boolean(v)),
+      connectors
+        .filter((c) => c.install.install_state === 'active')
+        .map((c) => c.template?.template_id)
+        .filter((v): v is string => Boolean(v)),
     )
     const q = search.trim().toLowerCase()
     return templates
