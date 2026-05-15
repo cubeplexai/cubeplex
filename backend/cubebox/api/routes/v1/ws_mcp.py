@@ -1,14 +1,38 @@
-"""Workspace MCP routes: member-managed private connectors and credentials."""
+"""Workspace MCP routes: member-managed private connectors and credentials.
 
-from typing import Any
+Hosts both:
+
+* **Legacy** routes under ``/ws/{ws}/mcp/servers/...`` operating on
+  ``MCPServer`` rows.
+* **Four-layer** routes added in Task 4 of the MCP management plan
+  (``/templates``, ``/connectors``, ``/installs``, ``/installs/{id}/grants/...``).
+
+Both surfaces share the same router (``/ws/{workspace_id}/mcp`` prefix). The
+legacy mount stays until Task 9.
+"""
+
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, ValidationError
 
-from cubebox.api.routes.v1.admin_mcp import _server_to_out
+from cubebox.api.routes.v1.admin_mcp import (
+    _install_to_out,
+    _server_to_out,
+    _template_to_out,
+    _validate_install_policy_pairing,
+)
 from cubebox.api.schemas.mcp import (
+    AdminCreateInstallIn,
+    CreateGrantIn,
+    MCPConnectorInstallOut,
+    MCPConnectorTemplateOut,
+    MCPCredentialGrantStatusOut,
     MCPCredentialStatus,
     MCPCredentialUpsert,
+    MCPEffectiveConnectorOut,
+    MCPOAuthStartIn,
+    MCPOAuthStartOut,
     MCPPromoteRequest,
     MCPServerCreateWS,
     MCPServerListWS,
@@ -16,11 +40,23 @@ from cubebox.api.schemas.mcp import (
     MCPServerPatch,
     MCPTestConnectionRequest,
     MCPTestConnectionResponse,
+    MCPWorkspaceConnectorStateOut,
+    PatchWorkspaceStateIn,
 )
 from cubebox.audit.sink import AuditSink
 from cubebox.auth.context import RequestContext
 from cubebox.auth.dependencies import require_admin, require_member
-from cubebox.mcp.dependencies import get_audit_sink, get_mcp_service
+from cubebox.mcp.dependencies import (
+    get_audit_sink,
+    get_connector_template_service,
+    get_mcp_service,
+    get_ws_effective_service,
+    get_ws_install_service,
+)
+from cubebox.mcp.effective import (
+    MCPEffectiveConnectorDTO,
+    MCPEffectiveConnectorService,
+)
 from cubebox.mcp.exceptions import (
     MCPCredentialPathMismatch,
     MCPCredentialRequired,
@@ -34,6 +70,8 @@ from cubebox.mcp.exceptions import (
 from cubebox.middleware.citations.config import CitationConfig
 from cubebox.models import MCPServer
 from cubebox.services.mcp import MCPServerService
+from cubebox.services.mcp_installs import MCPConnectorInstallService
+from cubebox.services.mcp_templates import MCPConnectorTemplateService
 
 
 class ToolCitationsResponse(BaseModel):
@@ -587,4 +625,425 @@ async def patch_tool_citations(
         tool_citations=dict(server.tool_citations or {}),
         catalog_defaults=catalog_defaults,
         orphan_keys=[],
+    )
+
+
+# ---------------------------------------------------------------------------
+# Four-layer workspace routes (templates / connectors / installs / grants).
+# ---------------------------------------------------------------------------
+#
+# Coexist with the legacy ``/ws/{ws}/mcp/servers/...`` routes above; the
+# legacy mount stays until Task 9 of the MCP management plan.
+#
+# Authorization recap (per spec §User Roles And Permissions):
+# - All routes require workspace membership (``require_member``).
+# - ``POST /installs``, ``DELETE /installs/{id}``, ``PATCH /connectors/{id}/state``,
+#   and the workspace-scope grant routes require workspace admin
+#   (``require_admin``).
+# - ``*/grants/me*`` routes are open to any member.
+
+
+def _dto_to_effective_out(dto: MCPEffectiveConnectorDTO) -> MCPEffectiveConnectorOut:
+    template_out: MCPConnectorTemplateOut | None = None
+    if dto.template is not None:
+        template_out = _template_to_out(dto.template)
+    state_out: MCPWorkspaceConnectorStateOut | None = None
+    if dto.workspace_state is not None:
+        state_out = MCPWorkspaceConnectorStateOut(
+            workspace_id=dto.workspace_state.workspace_id,
+            install_id=dto.workspace_state.install_id,
+            enabled=dto.workspace_state.enabled,
+            credential_policy=dto.workspace_state.credential_policy,  # type: ignore[arg-type]
+            enablement_source=dto.workspace_state.enablement_source,
+        )
+    return MCPEffectiveConnectorOut(
+        template=template_out,
+        install=_install_to_out(dto.install),
+        workspace_state=state_out,
+        credential_policy=dto.credential_policy,
+        required_grant_scope=dto.required_grant_scope,
+        credential_availability=dto.credential_availability,
+        credential_source=(dto.credential_source if dto.credential_source != "none" else None),
+        usable=dto.usable,
+        reason=dto.reason,
+    )
+
+
+@router.get("/templates", response_model=list[MCPConnectorTemplateOut])
+async def list_workspace_templates(
+    workspace_id: str,  # noqa: ARG001 — path param, future workspace-scoped filtering
+    svc: Annotated[MCPConnectorTemplateService, Depends(get_connector_template_service)],
+    _ctx: Annotated[RequestContext, Depends(require_member)],
+) -> list[MCPConnectorTemplateOut]:
+    """Workspace view over the global connector template catalog."""
+    templates = await svc.list_active()
+    return [_template_to_out(t) for t in templates]
+
+
+@router.get("/connectors", response_model=list[MCPEffectiveConnectorOut])
+async def list_workspace_connectors(
+    workspace_id: str,
+    ctx: Annotated[RequestContext, Depends(require_member)],
+    effective_svc: Annotated[MCPEffectiveConnectorService, Depends(get_ws_effective_service)],
+) -> list[MCPEffectiveConnectorOut]:
+    """Effective connector list for the workspace + current user."""
+    dtos = await effective_svc.list_for_workspace_user(
+        workspace_id,
+        ctx.user.id,
+        include_unusable=True,
+    )
+    return [_dto_to_effective_out(dto) for dto in dtos]
+
+
+@router.post(
+    "/installs",
+    status_code=status.HTTP_201_CREATED,
+    response_model=MCPConnectorInstallOut,
+)
+async def create_workspace_install(
+    workspace_id: str,
+    body: AdminCreateInstallIn,
+    svc: Annotated[MCPConnectorInstallService, Depends(get_ws_install_service)],
+    template_svc: Annotated[MCPConnectorTemplateService, Depends(get_connector_template_service)],
+    ctx: Annotated[RequestContext, Depends(require_admin)],
+    audit: Annotated[AuditSink, Depends(get_audit_sink)],
+) -> MCPConnectorInstallOut:
+    """Workspace-local install creation. Admin-only.
+
+    Reuses ``AdminCreateInstallIn``'s shape but forces workspace scope —
+    distribution is ignored here (workspace installs are always
+    workspace-local).
+    """
+    if body.template_id is None:
+        raise HTTPException(
+            422,
+            detail=[
+                {
+                    "type": "value_error",
+                    "loc": ["body", "template_id"],
+                    "msg": "template_id is required for workspace installs in Task 4",
+                    "input": None,
+                }
+            ],
+        )
+    try:
+        template = await template_svc.get_active(body.template_id)
+    except ValueError as exc:
+        raise HTTPException(404, detail={"code": "connector_template_not_found"}) from exc
+
+    install = await svc.create_from_template_for_workspace(
+        template=template,
+        workspace_id=workspace_id,
+        auth_method=body.auth_method,
+        credential_policy=body.default_credential_policy,
+    )
+    await audit.record(
+        event="mcp.install.created",
+        actor_user_id=ctx.user.id,
+        org_id=ctx.org_id,
+        target_id=install.id,
+        details={"scope": "workspace", "workspace_id": workspace_id},
+    )
+    return _install_to_out(install)
+
+
+@router.delete(
+    "/installs/{install_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def delete_workspace_install(
+    workspace_id: str,
+    install_id: str,
+    svc: Annotated[MCPConnectorInstallService, Depends(get_ws_install_service)],
+    ctx: Annotated[RequestContext, Depends(require_admin)],
+    audit: Annotated[AuditSink, Depends(get_audit_sink)],
+) -> None:
+    install = await svc._install_repo.get(install_id)
+    if install is None or install.workspace_id != workspace_id:
+        raise HTTPException(404, detail={"code": "mcp_install_not_found"})
+    try:
+        await svc.uninstall(install_id)
+    except ValueError as exc:
+        raise HTTPException(404, detail={"code": "mcp_install_not_found"}) from exc
+    await audit.record(
+        event="mcp.install.uninstalled",
+        actor_user_id=ctx.user.id,
+        org_id=ctx.org_id,
+        target_id=install_id,
+        details={"workspace_id": workspace_id},
+    )
+
+
+@router.patch(
+    "/connectors/{install_id}/state",
+    response_model=MCPWorkspaceConnectorStateOut,
+)
+async def patch_workspace_connector_state(
+    workspace_id: str,
+    install_id: str,
+    body: PatchWorkspaceStateIn,
+    svc: Annotated[MCPConnectorInstallService, Depends(get_ws_install_service)],
+    ctx: Annotated[RequestContext, Depends(require_admin)],
+    audit: Annotated[AuditSink, Depends(get_audit_sink)],
+) -> MCPWorkspaceConnectorStateOut:
+    """Workspace-admin-only enablement / credential-policy edit.
+
+    The path lives under ``/connectors`` (not ``/installs``) by design —
+    per spec, install-lifecycle operations stay under ``/installs`` while
+    per-workspace state edits sit under the effective-connector view.
+    """
+    install = await svc._install_repo.get(install_id)
+    if install is None:
+        raise HTTPException(404, detail={"code": "mcp_install_not_found"})
+
+    current = await svc._state_repo.get(workspace_id, install_id)
+    if current is None:
+        # No existing state row: for workspace-local installs it should have
+        # been created at install time; for org installs the admin distribution
+        # must have set one. Either way a PATCH against a missing row is 404.
+        raise HTTPException(404, detail={"code": "mcp_workspace_state_not_found"})
+
+    new_policy = (
+        body.credential_policy if body.credential_policy is not None else current.credential_policy
+    )
+    if body.credential_policy is not None:
+        _validate_install_policy_pairing(
+            install=install,
+            requested_policy=new_policy,
+            field="credential_policy",
+        )
+    new_enabled = body.enabled if body.enabled is not None else current.enabled
+
+    saved = await svc._state_repo.upsert(
+        workspace_id=workspace_id,
+        install_id=install_id,
+        enabled=new_enabled,
+        credential_policy=new_policy,
+        enablement_source=current.enablement_source,
+        updated_by_user_id=ctx.user.id,
+    )
+    await audit.record(
+        event="mcp.workspace_state.patched",
+        actor_user_id=ctx.user.id,
+        org_id=ctx.org_id,
+        target_id=install_id,
+        details={"workspace_id": workspace_id},
+    )
+    return MCPWorkspaceConnectorStateOut(
+        workspace_id=saved.workspace_id,
+        install_id=saved.install_id,
+        enabled=saved.enabled,
+        credential_policy=saved.credential_policy,  # type: ignore[arg-type]
+        enablement_source=saved.enablement_source,
+    )
+
+
+# ---------------- workspace + user grants ---------------- #
+
+
+@router.post(
+    "/installs/{install_id}/grants/me",
+    response_model=MCPCredentialGrantStatusOut,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_my_user_grant(
+    workspace_id: str,
+    install_id: str,
+    body: CreateGrantIn,
+    svc: Annotated[MCPConnectorInstallService, Depends(get_ws_install_service)],
+    ctx: Annotated[RequestContext, Depends(require_member)],
+    audit: Annotated[AuditSink, Depends(get_audit_sink)],
+) -> MCPCredentialGrantStatusOut:
+    if body.credential_plaintext is None:
+        raise HTTPException(
+            422,
+            detail=[
+                {
+                    "type": "value_error",
+                    "loc": ["body", "credential_plaintext"],
+                    "msg": "credential_plaintext required for static user grants",
+                    "input": None,
+                }
+            ],
+        )
+    try:
+        grant = await svc.create_static_grant(
+            install_id=install_id,
+            grant_scope="user",
+            plaintext=body.credential_plaintext,
+            workspace_id=workspace_id,
+            user_id=ctx.user.id,
+            name=body.name,
+        )
+    except ValueError as exc:
+        raise HTTPException(400, detail={"code": "invalid_grant", "msg": str(exc)}) from exc
+    await audit.record(
+        event="mcp.grant.created",
+        actor_user_id=ctx.user.id,
+        org_id=ctx.org_id,
+        target_id=install_id,
+        details={"scope": "user", "workspace_id": workspace_id},
+    )
+    return MCPCredentialGrantStatusOut(
+        install_id=install_id,
+        grant_scope="user",
+        workspace_id=workspace_id,
+        user_id=ctx.user.id,
+        grant_status=grant.grant_status,
+        has_value=True,
+        expires_at=grant.expires_at,
+    )
+
+
+@router.delete(
+    "/installs/{install_id}/grants/me",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def delete_my_user_grant(
+    workspace_id: str,
+    install_id: str,
+    svc: Annotated[MCPConnectorInstallService, Depends(get_ws_install_service)],
+    ctx: Annotated[RequestContext, Depends(require_member)],
+    audit: Annotated[AuditSink, Depends(get_audit_sink)],
+) -> None:
+    await svc.disconnect_grant(
+        install_id=install_id,
+        grant_scope="user",
+        workspace_id=workspace_id,
+        user_id=ctx.user.id,
+    )
+    await audit.record(
+        event="mcp.grant.deleted",
+        actor_user_id=ctx.user.id,
+        org_id=ctx.org_id,
+        target_id=install_id,
+        details={"scope": "user", "workspace_id": workspace_id},
+    )
+
+
+@router.post(
+    "/installs/{install_id}/grants/me/oauth/start",
+    response_model=MCPOAuthStartOut,
+)
+async def my_user_grant_oauth_start(
+    workspace_id: str,
+    install_id: str,
+    body: MCPOAuthStartIn,  # noqa: ARG001 — present for OpenAPI clarity
+    _ctx: Annotated[RequestContext, Depends(require_member)],
+) -> MCPOAuthStartOut:
+    """Start an OAuth flow that produces a user-scope grant."""
+    raise HTTPException(
+        status_code=501,
+        detail={
+            "code": "mcp_oauth.four_layer_start_not_yet_wired",
+            "message": (
+                "Four-layer OAuth start is registered but the AS handshake"
+                " wiring lands in plan Task 6."
+            ),
+            "install_id": install_id,
+            "workspace_id": workspace_id,
+        },
+    )
+
+
+@router.post(
+    "/installs/{install_id}/grants/workspace",
+    response_model=MCPCredentialGrantStatusOut,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_workspace_grant(
+    workspace_id: str,
+    install_id: str,
+    body: CreateGrantIn,
+    svc: Annotated[MCPConnectorInstallService, Depends(get_ws_install_service)],
+    ctx: Annotated[RequestContext, Depends(require_admin)],
+    audit: Annotated[AuditSink, Depends(get_audit_sink)],
+) -> MCPCredentialGrantStatusOut:
+    if body.credential_plaintext is None:
+        raise HTTPException(
+            422,
+            detail=[
+                {
+                    "type": "value_error",
+                    "loc": ["body", "credential_plaintext"],
+                    "msg": "credential_plaintext required for static workspace grants",
+                    "input": None,
+                }
+            ],
+        )
+    try:
+        grant = await svc.create_static_grant(
+            install_id=install_id,
+            grant_scope="workspace",
+            plaintext=body.credential_plaintext,
+            workspace_id=workspace_id,
+            name=body.name,
+        )
+    except ValueError as exc:
+        raise HTTPException(400, detail={"code": "invalid_grant", "msg": str(exc)}) from exc
+    await audit.record(
+        event="mcp.grant.created",
+        actor_user_id=ctx.user.id,
+        org_id=ctx.org_id,
+        target_id=install_id,
+        details={"scope": "workspace", "workspace_id": workspace_id},
+    )
+    return MCPCredentialGrantStatusOut(
+        install_id=install_id,
+        grant_scope="workspace",
+        workspace_id=workspace_id,
+        user_id=None,
+        grant_status=grant.grant_status,
+        has_value=True,
+        expires_at=grant.expires_at,
+    )
+
+
+@router.delete(
+    "/installs/{install_id}/grants/workspace",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def delete_workspace_grant(
+    workspace_id: str,
+    install_id: str,
+    svc: Annotated[MCPConnectorInstallService, Depends(get_ws_install_service)],
+    ctx: Annotated[RequestContext, Depends(require_admin)],
+    audit: Annotated[AuditSink, Depends(get_audit_sink)],
+) -> None:
+    await svc.disconnect_grant(
+        install_id=install_id,
+        grant_scope="workspace",
+        workspace_id=workspace_id,
+    )
+    await audit.record(
+        event="mcp.grant.deleted",
+        actor_user_id=ctx.user.id,
+        org_id=ctx.org_id,
+        target_id=install_id,
+        details={"scope": "workspace", "workspace_id": workspace_id},
+    )
+
+
+@router.post(
+    "/installs/{install_id}/grants/workspace/oauth/start",
+    response_model=MCPOAuthStartOut,
+)
+async def workspace_grant_oauth_start(
+    workspace_id: str,
+    install_id: str,
+    body: MCPOAuthStartIn,  # noqa: ARG001 — present for OpenAPI clarity
+    _ctx: Annotated[RequestContext, Depends(require_admin)],
+) -> MCPOAuthStartOut:
+    """Start an OAuth flow that produces a workspace-scope grant."""
+    raise HTTPException(
+        status_code=501,
+        detail={
+            "code": "mcp_oauth.four_layer_start_not_yet_wired",
+            "message": (
+                "Four-layer OAuth start is registered but the AS handshake"
+                " wiring lands in plan Task 6."
+            ),
+            "install_id": install_id,
+            "workspace_id": workspace_id,
+        },
     )
