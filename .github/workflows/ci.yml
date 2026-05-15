@@ -2,18 +2,71 @@ name: CI
 
 on:
   workflow_dispatch:
+  issue_comment:
+    types: [created]
 
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
+  group: ci-${{ github.workflow }}-${{ github.event.issue.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
+  gate:
+    name: Gate (/ci comment or workflow_dispatch)
+    if: |
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'issue_comment' &&
+       github.event.issue.pull_request != null &&
+       startsWith(github.event.comment.body, '/ci'))
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+      checks: write
+    outputs:
+      sha: ${{ steps.resolve.outputs.sha }}
+      check_run_id: ${{ steps.check.outputs.id }}
+    steps:
+      - name: Resolve target SHA
+        id: resolve
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if [[ "${{ github.event_name }}" == "issue_comment" ]]; then
+            SHA=$(gh api repos/${{ github.repository }}/pulls/${{ github.event.issue.number }} -q .head.sha)
+          else
+            SHA="${{ github.sha }}"
+          fi
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+      - name: React to /ci comment
+        if: github.event_name == 'issue_comment'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh api -X POST \
+            repos/${{ github.repository }}/issues/comments/${{ github.event.comment.id }}/reactions \
+            -f content=rocket
+      - name: Create in-progress check run
+        id: check
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          ID=$(gh api -X POST repos/${{ github.repository }}/check-runs \
+            -f name="CI" \
+            -f head_sha="${{ steps.resolve.outputs.sha }}" \
+            -f status=in_progress \
+            -f "details_url=$RUN_URL" \
+            -q .id)
+          echo "id=$ID" >> "$GITHUB_OUTPUT"
+
   backend-check:
     name: Backend Check (ruff + mypy + pytest unit)
+    needs: gate
     runs-on: ubuntu-latest
     timeout-minutes: 8
     steps:
       - uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.gate.outputs.sha }}
       - uses: astral-sh/setup-uv@v6
         with:
           python-version: "3.12"
@@ -43,12 +96,23 @@ jobs:
           name: backend-coverage
           path: backend/coverage.xml
 
+      - name: Upload coverage to Codecov
+        if: always()
+        uses: codecov/codecov-action@v6
+        with:
+          files: backend/coverage.xml
+          token: ${{ secrets.CODECOV_TOKEN }}
+          fail_ci_if_error: false
+
   frontend-check:
     name: Frontend Check (eslint + prettier + type-check + vitest + build)
+    needs: gate
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.gate.outputs.sha }}
       - uses: pnpm/action-setup@v4
         with:
           package_json_file: frontend/package.json
@@ -64,6 +128,7 @@ jobs:
 
   backend-e2e:
     name: Backend E2E (pytest)
+    needs: gate
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
@@ -99,6 +164,8 @@ jobs:
           --health-retries=5
     steps:
       - uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.gate.outputs.sha }}
       - uses: astral-sh/setup-uv@v6
         with:
           python-version: "3.12"
@@ -152,6 +219,7 @@ jobs:
 
   frontend-e2e:
     name: Frontend E2E (playwright)
+    needs: gate
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
@@ -189,6 +257,8 @@ jobs:
           --health-retries=5
     steps:
       - uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.gate.outputs.sha }}
       - uses: astral-sh/setup-uv@v6
         with:
           python-version: "3.12"
@@ -289,9 +359,11 @@ jobs:
     name: EE Compat (Layer 1 contract tests)
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    needs: [backend-check]
+    needs: [gate, backend-check]
     steps:
       - uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.gate.outputs.sha }}
       - uses: astral-sh/setup-uv@v6
         with:
           python-version: "3.12"
@@ -314,11 +386,14 @@ jobs:
     name: EE Compat Cross-Repo (Layer 2 placeholder)
     # Enable once cubebox-ee repo exists and has integration tests.
     if: false
+    needs: gate
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v5
-        with: { path: cubebox }
+        with:
+          path: cubebox
+          ref: ${{ needs.gate.outputs.sha }}
       - uses: actions/checkout@v5
         with:
           repository: cubebox/cubebox-ee
@@ -333,3 +408,37 @@ jobs:
       - name: Run EE smoke tests
         working-directory: cubebox-ee
         run: uv run pytest
+
+  report:
+    name: Finalize CI check run
+    if: always() && needs.gate.result == 'success'
+    needs: [gate, backend-check, frontend-check, backend-e2e, frontend-e2e, test-ee-compat]
+    runs-on: ubuntu-latest
+    permissions:
+      checks: write
+    steps:
+      - name: Compute conclusion and update check run
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BACKEND_CHECK: ${{ needs.backend-check.result }}
+          FRONTEND_CHECK: ${{ needs.frontend-check.result }}
+          BACKEND_E2E: ${{ needs.backend-e2e.result }}
+          FRONTEND_E2E: ${{ needs.frontend-e2e.result }}
+          EE_COMPAT: ${{ needs.test-ee-compat.result }}
+          CHECK_ID: ${{ needs.gate.outputs.check_run_id }}
+        run: |
+          conclusion=success
+          for r in "$BACKEND_CHECK" "$FRONTEND_CHECK" "$BACKEND_E2E" "$FRONTEND_E2E" "$EE_COMPAT"; do
+            case "$r" in
+              failure|cancelled|timed_out)
+                conclusion=failure
+                ;;
+            esac
+          done
+          summary="backend-check=$BACKEND_CHECK, frontend-check=$FRONTEND_CHECK, backend-e2e=$BACKEND_E2E, frontend-e2e=$FRONTEND_E2E, ee-compat=$EE_COMPAT"
+          echo "Conclusion: $conclusion ($summary)"
+          gh api -X PATCH repos/${{ github.repository }}/check-runs/$CHECK_ID \
+            -f status=completed \
+            -f conclusion=$conclusion \
+            -f "output[title]=CI ($conclusion)" \
+            -f "output[summary]=$summary"
