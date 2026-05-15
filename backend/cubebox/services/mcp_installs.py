@@ -292,14 +292,40 @@ class MCPConnectorInstallService:
     ) -> MCPCredentialGrant:
         """Encrypt a static credential and bind it to an install at a scope.
 
-        Order matters: scope validation runs BEFORE the vault write so
-        an org-scope misroute can't leave behind an encrypted secret
-        with no grant pointing at it. The validation is a strict
-        positive check rather than "skip the wrong scope branch" so
-        a future refactor can't accidentally turn a user-scope request
-        into a no-op that returns ``None``.
+        Order matters and is enforced step-by-step:
+
+        1. **Scope-vs-FK shape validation** (re-implements the DB check
+           constraint). A wrongly shaped row would be rejected by Postgres
+           anyway, but only after we'd already encrypted and persisted a
+           credential — so we fail fast.
+        2. **Install row lookup + org match + active state**. The install
+           id is a client-supplied FK; we MUST confirm it (a) exists,
+           (b) belongs to this org, and (c) is still ``active`` before
+           writing a credential. The repository ``get`` already filters
+           on ``org_id``, so a cross-org id returns ``None`` here, but we
+           still defensively re-check ``install.org_id`` in case the
+           repo's filter ever regresses. The cross-org case is collapsed
+           into the same ``connector_install_not_found`` ValueError as
+           the truly missing case so the route layer can't be used as an
+           org-existence oracle. Tombstoned installs (``install_state ==
+           "uninstalled"``) raise ``connector_install_not_active`` so the
+           caller can distinguish from "never existed" and surface a
+           "this install was uninstalled — reinstall first" message.
+        3. **Vault write + grant row**. Only reached after (1) and (2)
+           pass, so a misroute can't leave behind an encrypted secret
+           with no grant pointing at it.
         """
         self._validate_grant_scope_shape(grant_scope, workspace_id, user_id)
+
+        install = await self._install_repo.get(install_id)
+        if install is None or install.org_id != self._org_id:
+            # Cross-org and truly-missing collapse to the same error so
+            # ``create_static_grant`` cannot be used to probe which ids
+            # exist in other orgs.
+            raise ValueError("connector_install_not_found")
+        if install.install_state != "active":
+            raise ValueError("connector_install_not_active")
+
         credential_name = name or f"mcp:{install_id}:{grant_scope}"
         credential_id = await self._cred_service.create(
             kind=CREDENTIAL_KIND_MCP,

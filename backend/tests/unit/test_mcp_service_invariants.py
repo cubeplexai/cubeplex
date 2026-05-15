@@ -825,25 +825,46 @@ class _StubGrantRepo:
         return grant
 
 
-def _make_install_service_with_stubs() -> tuple[Any, _StubCredService, _StubGrantRepo]:
+class _StubInstallRepo:
+    """Records ``get`` calls and returns a configurable install row.
+
+    Used to assert that the install FK / org / state checks run BEFORE
+    the credential vault is touched: tests inject a repo that returns
+    ``None`` (or a cross-org / tombstoned row) and then check that
+    ``cred_service.create`` was never called.
+    """
+
+    def __init__(self, *, install: Any = None) -> None:
+        self._install = install
+        self.calls: list[str] = []
+
+    async def get(self, install_id: str) -> Any:
+        self.calls.append(install_id)
+        return self._install
+
+
+def _make_install_service_with_stubs(
+    *, install_repo: Any = None
+) -> tuple[Any, _StubCredService, _StubGrantRepo, _StubInstallRepo]:
     from cubebox.services.mcp_installs import MCPConnectorInstallService
 
     cred_stub = _StubCredService()
     grant_stub = _StubGrantRepo()
+    install_stub = install_repo if install_repo is not None else _StubInstallRepo(install=None)
     svc = MCPConnectorInstallService(
-        install_repo=cast(Any, object()),
+        install_repo=cast(Any, install_stub),
         state_repo=cast(Any, object()),
         grant_repo=cast(Any, grant_stub),
         cred_service=cast(Any, cred_stub),
         org_id="org-test",
         actor_user_id="u1",
     )
-    return svc, cred_stub, grant_stub
+    return svc, cred_stub, grant_stub, install_stub
 
 
 async def test_create_static_grant_org_scope_rejects_workspace_id() -> None:
     """grant_scope='org' with workspace_id set must raise BEFORE vault write."""
-    svc, cred_stub, grant_stub = _make_install_service_with_stubs()
+    svc, cred_stub, grant_stub, _install_stub = _make_install_service_with_stubs()
 
     with pytest.raises(ValueError, match="grant_scope='org'"):
         await svc.create_static_grant(
@@ -860,7 +881,7 @@ async def test_create_static_grant_org_scope_rejects_workspace_id() -> None:
 
 async def test_create_static_grant_workspace_scope_requires_workspace_id() -> None:
     """grant_scope='workspace' without workspace_id must raise BEFORE vault write."""
-    svc, cred_stub, grant_stub = _make_install_service_with_stubs()
+    svc, cred_stub, grant_stub, _install_stub = _make_install_service_with_stubs()
 
     with pytest.raises(ValueError, match="grant_scope='workspace'"):
         await svc.create_static_grant(
@@ -883,7 +904,7 @@ async def test_create_static_grant_user_scope_requires_user_id() -> None:
     must reject before any vault write so a misrouted call from
     ``/grants/me`` can't silently degrade into a workspace-scope grant.
     """
-    svc, cred_stub, grant_stub = _make_install_service_with_stubs()
+    svc, cred_stub, grant_stub, _install_stub = _make_install_service_with_stubs()
 
     with pytest.raises(ValueError, match="grant_scope='user'"):
         await svc.create_static_grant(
@@ -892,6 +913,86 @@ async def test_create_static_grant_user_scope_requires_user_id() -> None:
             plaintext="secret",
             workspace_id="ws-1",
             user_id=None,
+        )
+
+    assert cred_stub.create_calls == []
+    assert grant_stub.added == []
+
+
+async def test_create_static_grant_missing_install_rejects_before_vault_write() -> None:
+    """Unknown ``install_id`` must raise BEFORE the vault is touched.
+
+    The install id is a client-supplied FK on the grant write — a typo
+    or a stale id from a stale page must not result in an encrypted
+    credential floating in the credentials table with no grant row
+    pointing at it. The install repo (returning None) is the only thing
+    that distinguishes "valid call" from "garbage FK" at this layer.
+    """
+    install_stub = _StubInstallRepo(install=None)
+    svc, cred_stub, grant_stub, _ = _make_install_service_with_stubs(install_repo=install_stub)
+
+    with pytest.raises(ValueError, match="connector_install_not_found"):
+        await svc.create_static_grant(
+            install_id="missing",
+            grant_scope="org",
+            plaintext="secret",
+            workspace_id=None,
+            user_id=None,
+        )
+
+    assert install_stub.calls == ["missing"], "service must consult install_repo.get"
+    assert cred_stub.create_calls == [], (
+        "cred_service.create must NOT be invoked when the install FK is unknown"
+    )
+    assert grant_stub.added == [], "grant row must not be persisted on missing install"
+
+
+async def test_create_static_grant_cross_org_install_rejects_as_not_found() -> None:
+    """Cross-org install ids must collapse to ``connector_install_not_found``.
+
+    Surfacing "exists in another org" would let an attacker probe
+    foreign org id-spaces via grant-create error messages. The repo's
+    own ``org_id`` filter normally returns ``None`` for cross-org ids,
+    but the service still defends against a hypothetical repo
+    regression by re-checking ``install.org_id``.
+    """
+    from types import SimpleNamespace
+
+    foreign = SimpleNamespace(org_id="org-OTHER", install_state="active")
+    install_stub = _StubInstallRepo(install=foreign)
+    svc, cred_stub, grant_stub, _ = _make_install_service_with_stubs(install_repo=install_stub)
+
+    with pytest.raises(ValueError, match="connector_install_not_found"):
+        await svc.create_static_grant(
+            install_id="mcins-foreign",
+            grant_scope="org",
+            plaintext="secret",
+        )
+
+    assert cred_stub.create_calls == []
+    assert grant_stub.added == []
+
+
+async def test_create_static_grant_tombstoned_install_rejects_as_not_active() -> None:
+    """Uninstalled installs must surface a distinct error.
+
+    Tombstoned rows are intentionally kept around so reinstalls can
+    re-attach the same shape (see ``uninstall``); but writing a fresh
+    grant against a tombstone would resurrect credential plumbing for
+    an install the runtime no longer considers visible. Distinct error
+    so the UI can suggest "reinstall first".
+    """
+    from types import SimpleNamespace
+
+    tombstoned = SimpleNamespace(org_id="org-test", install_state="uninstalled")
+    install_stub = _StubInstallRepo(install=tombstoned)
+    svc, cred_stub, grant_stub, _ = _make_install_service_with_stubs(install_repo=install_stub)
+
+    with pytest.raises(ValueError, match="connector_install_not_active"):
+        await svc.create_static_grant(
+            install_id="mcins-tomb",
+            grant_scope="org",
+            plaintext="secret",
         )
 
     assert cred_stub.create_calls == []
