@@ -117,7 +117,9 @@ async def load_workspace_mcp_tools_for_cubepi(
     an actual collision; the common case produces clean names.
 
     Per-server failures are caught and logged, never aborting the load.
-    Only HTTP/SSE transports are supported.
+    Each server's transport (``sse`` or ``streamable_http``) is forwarded
+    to cubepi's loader so the per-run path matches whatever wire format
+    the server actually speaks.
     """
     servers = await discover_workspace_mcp_servers_for_cubepi(
         session=session,
@@ -142,6 +144,7 @@ async def load_workspace_mcp_tools_for_cubepi(
                 spec.url,
                 headers=spec.headers or None,
                 timeout=30.0,
+                transport=spec.transport,
             )
         except asyncio.CancelledError:
             raise

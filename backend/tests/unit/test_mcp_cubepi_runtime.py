@@ -44,8 +44,12 @@ async def test_load_returns_empty_when_no_servers(monkeypatch: pytest.MonkeyPatc
 async def test_load_skips_failing_servers(monkeypatch: pytest.MonkeyPatch) -> None:
     """A server that raises during load_mcp_tools_http doesn't kill the whole loader."""
     specs = [
-        CubepiMCPServerSpec(server_id="s1", server_name="good", url="http://good", headers={}),
-        CubepiMCPServerSpec(server_id="s2", server_name="bad", url="http://bad", headers={}),
+        CubepiMCPServerSpec(
+            server_id="s1", server_name="good", url="http://good", transport="sse", headers={}
+        ),
+        CubepiMCPServerSpec(
+            server_id="s2", server_name="bad", url="http://bad", transport="sse", headers={}
+        ),
     ]
 
     async def _fake_discover(**kw: object) -> list[CubepiMCPServerSpec]:
@@ -58,6 +62,7 @@ async def test_load_skips_failing_servers(monkeypatch: pytest.MonkeyPatch) -> No
         *,
         headers: dict[str, str] | None,
         timeout: float,
+        transport: str,
     ) -> list[object]:
         if url == "http://bad":
             raise RuntimeError("nope")
@@ -91,8 +96,12 @@ async def test_load_aggregates_tools_from_multiple_servers(
 ) -> None:
     """Tools from multiple successful servers are concatenated."""
     specs = [
-        CubepiMCPServerSpec(server_id="s1", server_name="srv1", url="http://srv1", headers={}),
-        CubepiMCPServerSpec(server_id="s2", server_name="srv2", url="http://srv2", headers={}),
+        CubepiMCPServerSpec(
+            server_id="s1", server_name="srv1", url="http://srv1", transport="sse", headers={}
+        ),
+        CubepiMCPServerSpec(
+            server_id="s2", server_name="srv2", url="http://srv2", transport="sse", headers={}
+        ),
     ]
 
     async def _fake_discover(**kw: object) -> list[CubepiMCPServerSpec]:
@@ -106,6 +115,7 @@ async def test_load_aggregates_tools_from_multiple_servers(
         *,
         headers: dict[str, str] | None,
         timeout: float,
+        transport: str,
     ) -> list[object]:
         if url == "http://srv1":
             return [_make_tool("tool_a"), _make_tool("tool_b")]
@@ -138,8 +148,12 @@ async def test_load_aggregates_tools_from_multiple_servers(
 async def test_load_all_servers_fail_returns_empty(monkeypatch: pytest.MonkeyPatch) -> None:
     """When all servers fail to load, an empty list is returned rather than raising."""
     specs = [
-        CubepiMCPServerSpec(server_id="s1", server_name="bad1", url="http://bad1", headers={}),
-        CubepiMCPServerSpec(server_id="s2", server_name="bad2", url="http://bad2", headers={}),
+        CubepiMCPServerSpec(
+            server_id="s1", server_name="bad1", url="http://bad1", transport="sse", headers={}
+        ),
+        CubepiMCPServerSpec(
+            server_id="s2", server_name="bad2", url="http://bad2", transport="sse", headers={}
+        ),
     ]
 
     async def _fake_discover(**kw: object) -> list[CubepiMCPServerSpec]:
@@ -150,6 +164,7 @@ async def test_load_all_servers_fail_returns_empty(monkeypatch: pytest.MonkeyPat
         *,
         headers: dict[str, str] | None,
         timeout: float,
+        transport: str,
     ) -> list[object]:
         raise ConnectionError("unreachable")
 
