@@ -71,6 +71,54 @@ def tool_call_names(events: list[dict[str, Any]]) -> list[str]:
     return names
 
 
+def _flatten_content(evt: dict[str, Any]) -> str:
+    """Extract plain text from a tool_result/text_delta event.
+
+    The SSE envelope nests content under 'data.content' (or 'data.result'
+    for tool_result). Handles structured list-of-blocks shapes returned by
+    some providers. Mirrors the helper in test_cubepi_path_tools.py.
+    """
+
+    def _from_value(c: object) -> str | None:
+        if isinstance(c, str):
+            return c
+        if isinstance(c, list):
+            parts: list[str] = []
+            for block in c:
+                if isinstance(block, dict) and "text" in block:
+                    parts.append(str(block["text"]))
+                elif isinstance(block, str):
+                    parts.append(block)
+            return "".join(parts)
+        return None
+
+    data = evt.get("data")
+    if isinstance(data, dict):
+        v = _from_value(data.get("content"))
+        if v is not None:
+            return v
+        v = _from_value(data.get("result"))
+        if v is not None:
+            return v
+    v = _from_value(evt.get("content"))
+    if v is not None:
+        return v
+    v = _from_value(evt.get("result"))
+    if v is not None:
+        return v
+    return ""
+
+
+def tool_result_contents(events: list[dict[str, Any]]) -> list[str]:
+    """Return flattened content strings for every tool_result event."""
+    return [_flatten_content(e) for e in events_of_type(events, EVT_TOOL_RESULT)]
+
+
+def assistant_text(events: list[dict[str, Any]]) -> str:
+    """Concatenate the content of every text_delta event into the full reply."""
+    return "".join(_flatten_content(e) for e in events_of_type(events, EVT_TEXT_DELTA))
+
+
 # ---------------------------------------------------------------------------
 # HTTP helpers — mirror test_cubepi_path_tools.py exactly
 # ---------------------------------------------------------------------------
