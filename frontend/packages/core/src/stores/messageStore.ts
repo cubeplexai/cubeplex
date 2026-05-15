@@ -636,6 +636,7 @@ async function consumeRunStream(
   lastEventId: string | undefined,
   set: (partial: Partial<MessageStore> | ((state: MessageStore) => Partial<MessageStore>)) => void,
   get: () => MessageStore,
+  signal?: AbortSignal,
 ): Promise<void> {
   const { batchedSet, flush } = createBatcher(
     set as (updater: (s: MessageStore) => Partial<MessageStore>) => void,
@@ -644,7 +645,7 @@ async function consumeRunStream(
   let sawDone = false
 
   try {
-    for await (const event of streamRun(client, conversationId, runId, lastEventId)) {
+    for await (const event of streamRun(client, conversationId, runId, lastEventId, signal)) {
       const state = get()
       if (state.currentRunId !== runId) {
         shouldFinalize = false
@@ -667,6 +668,10 @@ async function consumeRunStream(
         const errData = event.data as { message: string; details?: string }
         set({
           error: errData.details || errData.message,
+          isStreaming: false,
+          streamingConversationId: null,
+          currentRunId: null,
+          statusPhase: null,
           lastAppliedEventId: nextEventId(get().lastAppliedEventId, event.event_id),
         })
         break
@@ -782,15 +787,24 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
       }))
 
       if (bootstrap.active_run) {
+        activeStreamController?.abort()
+        const controller = new AbortController()
+        activeStreamController = controller
+        const runId = bootstrap.active_run.run_id
         queueMicrotask(() => {
           void consumeRunStream(
             client,
             conversationId,
-            bootstrap.active_run!.run_id,
+            runId,
             undefined,
             set,
             get,
-          )
+            controller.signal,
+          ).finally(() => {
+            if (activeStreamController === controller) {
+              activeStreamController = null
+            }
+          })
         })
       }
     } catch (err) {
