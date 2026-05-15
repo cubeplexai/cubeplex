@@ -5,6 +5,7 @@ import secrets
 from collections.abc import AsyncIterator, Iterator
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Any
 
 import httpx
 import pytest
@@ -760,3 +761,230 @@ async def fresh_db_unauth_client_single_tenant() -> AsyncIterator[httpx.AsyncCli
         transport = httpx.ASGITransport(app=app)
         async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
             yield c
+
+
+# ---------------------------------------------------------------------------
+# Four-layer MCP fixtures (Task 6 of the MCP management plan).
+# ---------------------------------------------------------------------------
+#
+# These fixtures seed connector templates and provide a same-workspace
+# admin+member client pair used by the four-layer route E2E tests. They
+# coexist with the legacy MCP fixtures above; nothing here touches the
+# legacy ``MCPServer`` tables.
+
+
+async def _seed_four_layer_template(
+    *,
+    slug: str,
+    name: str,
+    supported_auth_methods: list[str],
+    default_credential_policy: str,
+    template_metadata: dict[str, Any] | None = None,
+    static_form_schema: list[dict[str, Any]] | None = None,
+) -> str:
+    """Idempotent template upsert for E2E setup. Returns the template id."""
+    from cubebox.repositories.mcp import MCPConnectorTemplateRepository
+
+    test_engine = create_async_engine(_build_database_url(), poolclass=NullPool)
+    maker = async_sessionmaker(test_engine, class_=AsyncSession, expire_on_commit=False)
+    try:
+        async with maker() as session:
+            repo = MCPConnectorTemplateRepository(session)
+            tpl = await repo.upsert_by_slug(
+                slug=slug,
+                name=name,
+                description=f"E2E template '{slug}' for four-layer MCP tests.",
+                provider="e2e",
+                server_url=f"https://{slug}.example.com/mcp",
+                transport="streamable_http",
+                supported_auth_methods=supported_auth_methods,
+                default_credential_policy=default_credential_policy,
+                static_form_schema=static_form_schema,
+                template_metadata=template_metadata or {},
+                status="active",
+            )
+            await session.commit()
+            return tpl.id
+    finally:
+        await test_engine.dispose()
+
+
+@pytest_asyncio.fixture
+async def noauth_template_id() -> str:
+    """Template with no-auth method + ``credential_policy='none'``."""
+    return await _seed_four_layer_template(
+        slug="noauth-e2e",
+        name="No-Auth E2E Connector",
+        supported_auth_methods=["none"],
+        default_credential_policy="none",
+    )
+
+
+@pytest_asyncio.fixture
+async def static_template_id() -> str:
+    """Template with static auth + ``credential_policy='user'`` default."""
+    return await _seed_four_layer_template(
+        slug="static-e2e",
+        name="Static E2E Connector",
+        supported_auth_methods=["static"],
+        default_credential_policy="user",
+        static_form_schema=[
+            {"name": "token", "label": "API Token", "type": "password", "required": True}
+        ],
+    )
+
+
+@pytest_asyncio.fixture
+async def oauth_template_id() -> str:
+    """Template advertising OAuth — used by the OAuth-refresh test (currently skipped)."""
+    return await _seed_four_layer_template(
+        slug="oauth-e2e",
+        name="OAuth E2E Connector",
+        supported_auth_methods=["oauth"],
+        default_credential_policy="user",
+        template_metadata={
+            "oauth": {
+                "authorization_endpoint": "https://oauth-e2e.example.com/authorize",
+                "token_endpoint": "https://oauth-e2e.example.com/token",
+                "scopes": ["read"],
+            },
+        },
+    )
+
+
+async def _seed_same_ws_admin_and_member(
+    role_for_b: Role = Role.MEMBER,
+) -> tuple[FastAPI, str, str, str, str, str]:
+    """Seed two users in the same workspace.
+
+    Returns ``(app, admin_email, admin_password, member_email, member_password,
+    workspace_id)``.
+
+    User A is the workspace admin (and org owner); user B is added to the same
+    workspace with ``role_for_b`` (default ``Role.MEMBER``). Both users keep their
+    auto-bootstrap personal org/workspace deleted so ``resolve_current_org_id``
+    deterministically picks the shared org for each.
+    """
+    test_engine = create_async_engine(_build_database_url(), poolclass=NullPool)
+    test_session_maker = async_sessionmaker(
+        test_engine, class_=AsyncSession, expire_on_commit=False
+    )
+    try:
+        async with test_session_maker() as session:
+            admin_email = f"4l-admin-{secrets.token_hex(4)}@example.com"
+            _admin, workspace_id, admin_password = await _ensure_test_user_membership(
+                session, email=admin_email, role=Role.ADMIN
+            )
+
+            # Add user B to the SAME workspace + org as a member.
+            from sqlalchemy import delete
+            from sqlalchemy import select as sa_select
+
+            from cubebox.models import Membership as MembershipModel
+            from cubebox.models import OrganizationMembership, OrgRole, Workspace
+
+            ws = await session.get(Workspace, workspace_id)
+            assert ws is not None
+            org_id = ws.org_id
+
+            member_email = f"4l-member-{secrets.token_hex(4)}@example.com"
+            member_password = secrets.token_urlsafe(16)
+            user_db = SQLAlchemyUserDatabase(session, User)
+            manager = UserManager(user_db)
+            member_user = await manager.create(
+                BaseUserCreate(email=member_email, password=member_password),
+                safe=False,
+            )
+
+            # Wipe member's bootstrap personal org + workspace memberships so
+            # resolve_current_org_id picks our shared org for them.
+            await session.execute(
+                delete(OrganizationMembership).where(
+                    OrganizationMembership.user_id == member_user.id,  # type: ignore[arg-type]
+                    OrganizationMembership.org_id != org_id,  # type: ignore[arg-type]
+                )
+            )
+            await session.execute(
+                delete(MembershipModel).where(
+                    MembershipModel.user_id == member_user.id,  # type: ignore[arg-type]
+                    MembershipModel.workspace_id != workspace_id,  # type: ignore[arg-type]
+                )
+            )
+            await session.commit()
+
+            mem_repo = MembershipRepository(session)
+            await mem_repo.grant(user_id=member_user.id, workspace_id=workspace_id, role=role_for_b)
+            from cubebox.repositories import OrganizationMembershipRepository
+
+            om_repo = OrganizationMembershipRepository(session)
+            existing_om = await om_repo.get_role(user_id=member_user.id, org_id=org_id)
+            if existing_om is None:
+                await om_repo.grant(user_id=member_user.id, org_id=org_id, role=OrgRole.MEMBER)
+            # Sanity: confirm membership rows exist.
+            stmt = sa_select(MembershipModel).where(
+                MembershipModel.user_id == member_user.id,  # type: ignore[arg-type]
+                MembershipModel.workspace_id == workspace_id,  # type: ignore[arg-type]
+            )
+            assert (await session.execute(stmt)).scalars().first() is not None
+            await session.commit()
+    finally:
+        await test_engine.dispose()
+
+    app = _make_memory_test_app()
+    return app, admin_email, admin_password, member_email, member_password, workspace_id
+
+
+@pytest_asyncio.fixture
+async def four_layer_admin_and_member() -> AsyncIterator[
+    tuple[
+        tuple[httpx.AsyncClient, str, str],
+        tuple[httpx.AsyncClient, str, str],
+    ]
+]:
+    """Two clients in the SAME workspace.
+
+    Yields ``((admin_client, workspace_id, admin_user_id),
+    (member_client, workspace_id, member_user_id))``. The admin holds workspace
+    ``Role.ADMIN`` + org ``OrgRole.OWNER``; the member is workspace ``Role.MEMBER`` +
+    org ``OrgRole.MEMBER``. Both share the same workspace and org, which is the
+    setup required by the user-policy isolation E2E (spec test #3) — the existing
+    ``admin_client`` / ``member_client`` fixtures live in *different* workspaces
+    and can't express this scenario.
+    """
+    (
+        app,
+        admin_email,
+        admin_password,
+        member_email,
+        member_password,
+        workspace_id,
+    ) = await _seed_same_ws_admin_and_member()
+
+    # Force multi_tenant mode BEFORE lifespan starts so the startup
+    # mode-consistency check sees the correct value.
+    app.state.deployment_mode = "multi_tenant"
+    async with _lifespan_context(app):
+        transport_a = httpx.ASGITransport(app=app)
+        transport_b = httpx.ASGITransport(app=app)
+        async with (
+            httpx.AsyncClient(transport=transport_a, base_url="http://test") as admin_c,
+            httpx.AsyncClient(transport=transport_b, base_url="http://test") as member_c,
+        ):
+            await _login_and_attach(admin_c, admin_email, admin_password)
+            await _login_and_attach(member_c, member_email, member_password)
+
+            admin_me = await admin_c.get("/api/v1/auth/me")
+            assert admin_me.status_code == 200, admin_me.text
+            admin_user_id = admin_me.json()["id"]
+            member_me = await member_c.get("/api/v1/auth/me")
+            assert member_me.status_code == 200, member_me.text
+            member_user_id = member_me.json()["id"]
+
+            yield (
+                (admin_c, workspace_id, admin_user_id),
+                (
+                    member_c,
+                    workspace_id,
+                    member_user_id,
+                ),
+            )
