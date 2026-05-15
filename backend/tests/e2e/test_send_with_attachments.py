@@ -99,8 +99,9 @@ async def test_send_with_image_attachment_marks_attached_and_returns_history(
     user_msgs = [m for m in history["messages"] if m.get("role") == "user"]
     assert user_msgs, history
     last = user_msgs[-1]
-    assert "attachments" in last
-    assert any(a.get("id") == fid for a in last["attachments"])
+    attachments = last.get("metadata", {}).get("attachments") or []
+    assert attachments, last
+    assert any(a.get("file_id") == fid for a in attachments)
 
 
 async def test_send_rejects_attachment_from_other_conversation(
