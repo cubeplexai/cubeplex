@@ -659,3 +659,296 @@ async def test_malformed_200_org_scope_marks_server_unauthed(
     assert "malformed" in fresh.last_error
     # Sanity: refresh creds row id wasn't lost from the test scope.
     assert access_cred.id is not None and refresh_cred.id is not None
+
+
+# ---------------------------------------------------------------------------
+# Four-layer grant path: get_access_token_for_grant.
+#
+# The legacy ``MCPServer`` row is irrelevant here — the manager reads + rotates
+# an ``MCPCredentialGrant`` row instead. These tests exercise the cached-token
+# fast path, the refresh-on-near-expiry path, and the terminal-failure path
+# that flips ``grant_status`` to ``"expired"`` so the runtime drops the
+# connector on the next request.
+# ---------------------------------------------------------------------------
+
+
+async def _seed_four_layer_oauth_grant(
+    session: AsyncSession,
+    encryption_backend: FernetBackend,
+    *,
+    expires_at: datetime,
+    access_plaintext: str = "fl-access",
+    refresh_plaintext: str = "fl-refresh",
+    refresh_present: bool = True,
+):
+    """Seed an install + grant row in the four-layer schema for refresh tests."""
+    from cubebox.models import MCPConnectorInstall, MCPCredentialGrant
+    from cubebox.repositories.mcp import (
+        MCPConnectorInstallRepository,
+        MCPCredentialGrantRepository,
+    )
+
+    cred_repo = CredentialRepository(session, org_id=ORG_ID)
+    access_cred = await cred_repo.add(
+        Credential(
+            org_id=ORG_ID,
+            kind=CREDENTIAL_KIND_MCP_OAUTH_ACCESS_TOKEN,
+            name="mcp:fl:access",
+            value_encrypted=await encryption_backend.encrypt(access_plaintext.encode("utf-8")),
+            cred_metadata={},
+        )
+    )
+    refresh_cred = None
+    if refresh_present:
+        refresh_cred = await cred_repo.add(
+            Credential(
+                org_id=ORG_ID,
+                kind=CREDENTIAL_KIND_MCP_OAUTH_REFRESH_TOKEN,
+                name="mcp:fl:refresh",
+                value_encrypted=await encryption_backend.encrypt(refresh_plaintext.encode("utf-8")),
+                cred_metadata={},
+            )
+        )
+
+    install_repo = MCPConnectorInstallRepository(session, org_id=ORG_ID)
+    install = await install_repo.add(
+        MCPConnectorInstall(
+            org_id=ORG_ID,
+            workspace_id=None,
+            install_scope="org",
+            template_id=None,
+            name="fl-install",
+            server_url=SERVER_URL,
+            server_url_hash=server_url_hash(SERVER_URL),
+            transport="streamable_http",
+            auth_method="oauth",
+            default_credential_policy="org",
+            auth_status="authorized",
+            oauth_client_config={"client_id": "fl-client-abc"},
+            created_by_user_id=USER_ID,
+        )
+    )
+
+    grant_repo = MCPCredentialGrantRepository(session, org_id=ORG_ID)
+    grant = await grant_repo.add(
+        MCPCredentialGrant(
+            org_id=ORG_ID,
+            install_id=install.id,
+            grant_scope="org",
+            workspace_id=None,
+            user_id=None,
+            credential_id=access_cred.id,
+            refresh_credential_id=refresh_cred.id if refresh_cred else None,
+            expires_at=expires_at,
+            grant_status="valid",
+            created_by_user_id=USER_ID,
+        )
+    )
+    return install, grant, access_cred, refresh_cred, grant_repo
+
+
+async def test_grant_token_no_refresh_when_far_from_expiry(
+    session: AsyncSession,
+    fake_redis: fakeredis.aioredis.FakeRedis,
+    encryption_backend: FernetBackend,
+) -> None:
+    """Cached path: still-valid grant returns the cached access token; AS not hit."""
+    install, grant, _access, _refresh, grant_repo = await _seed_four_layer_oauth_grant(
+        session,
+        encryption_backend,
+        expires_at=datetime.now(UTC) + timedelta(hours=1),
+        access_plaintext="cached-fl-access",
+    )
+    handler = _ScriptedHandler(_metadata_handler(), token_responses=[])
+    manager, http = _make_manager(
+        session=session,
+        fake_redis=fake_redis,
+        backend=encryption_backend,
+        handler=handler,
+    )
+    try:
+        token = await manager.get_access_token_for_grant(
+            grant=grant,
+            grant_repo=grant_repo,
+            server_url=install.server_url,
+            oauth_client_config=install.oauth_client_config,
+        )
+    finally:
+        await http.aclose()
+
+    assert token == "cached-fl-access"
+    assert handler.token_calls == []  # no AS hit
+
+
+async def test_grant_token_refreshes_when_expired_and_rotates_credentials(
+    session: AsyncSession,
+    fake_redis: fakeredis.aioredis.FakeRedis,
+    encryption_backend: FernetBackend,
+) -> None:
+    """Expired grant with a refresh credential: AS hit once, credentials + grant rotate."""
+    install, grant, access_cred, refresh_cred, grant_repo = await _seed_four_layer_oauth_grant(
+        session,
+        encryption_backend,
+        expires_at=datetime.now(UTC) - timedelta(seconds=30),
+        access_plaintext="old-fl-access",
+        refresh_plaintext="old-fl-refresh",
+    )
+    handler = _ScriptedHandler(
+        _metadata_handler(),
+        token_responses=[
+            httpx.Response(
+                200,
+                json={
+                    "access_token": "rot-fl-access",
+                    "refresh_token": "rot-fl-refresh",
+                    "expires_in": 3600,
+                    "token_type": "Bearer",
+                },
+            )
+        ],
+    )
+    manager, http = _make_manager(
+        session=session,
+        fake_redis=fake_redis,
+        backend=encryption_backend,
+        handler=handler,
+    )
+    try:
+        token = await manager.get_access_token_for_grant(
+            grant=grant,
+            grant_repo=grant_repo,
+            server_url=install.server_url,
+            oauth_client_config=install.oauth_client_config,
+        )
+    finally:
+        await http.aclose()
+
+    assert token == "rot-fl-access"
+    assert len(handler.token_calls) == 1
+    body = handler.token_calls[0]["body"]
+    assert "grant_type=refresh_token" in body
+    assert "refresh_token=old-fl-refresh" in body
+    assert "client_id=fl-client-abc" in body
+
+    # Vault rows rotated in place.
+    assert refresh_cred is not None
+    cred_repo = CredentialRepository(session, org_id=ORG_ID)
+    fresh_access = await cred_repo.get(access_cred.id)
+    fresh_refresh = await cred_repo.get(refresh_cred.id)
+    assert fresh_access is not None and fresh_refresh is not None
+    assert (
+        await encryption_backend.decrypt(fresh_access.value_encrypted)
+    ).decode() == "rot-fl-access"
+    assert (
+        await encryption_backend.decrypt(fresh_refresh.value_encrypted)
+    ).decode() == "rot-fl-refresh"
+
+    # Grant row's expires_at advanced and status reset to valid.
+    from cubebox.repositories.mcp import MCPCredentialGrantRepository
+
+    fresh_grant_repo = MCPCredentialGrantRepository(session, org_id=ORG_ID)
+    fresh_grant = await fresh_grant_repo.get_org_grant(install.id)
+    assert fresh_grant is not None
+    assert fresh_grant.grant_status == "valid"
+    assert fresh_grant.expires_at is not None
+    # sqlite-aiosqlite strips tz on roundtrip — compare as naive UTC.
+    stored_expiry = fresh_grant.expires_at
+    if stored_expiry.tzinfo is None:
+        ref_now = datetime.now(UTC).replace(tzinfo=None)
+    else:
+        ref_now = datetime.now(UTC)
+    # AS said ``expires_in=3600``; allow generous slack for db roundtrip.
+    assert stored_expiry - ref_now > timedelta(minutes=30)
+
+
+async def test_grant_token_no_refresh_credential_raises_invalid_state(
+    session: AsyncSession,
+    fake_redis: fakeredis.aioredis.FakeRedis,
+    encryption_backend: FernetBackend,
+) -> None:
+    """Grant with no refresh credential: caller cannot refresh — raises InvalidServerState."""
+    install, grant, _access, _refresh, grant_repo = await _seed_four_layer_oauth_grant(
+        session,
+        encryption_backend,
+        expires_at=datetime.now(UTC) - timedelta(seconds=30),
+        refresh_present=False,
+    )
+    handler = _ScriptedHandler(_metadata_handler(), token_responses=[])
+    manager, http = _make_manager(
+        session=session,
+        fake_redis=fake_redis,
+        backend=encryption_backend,
+        handler=handler,
+    )
+    try:
+        with pytest.raises(OAuthInvalidServerState):
+            await manager.get_access_token_for_grant(
+                grant=grant,
+                grant_repo=grant_repo,
+                server_url=install.server_url,
+                oauth_client_config=install.oauth_client_config,
+            )
+    finally:
+        await http.aclose()
+    # AS must not have been hit.
+    assert handler.token_calls == []
+
+
+async def test_grant_token_terminal_failure_marks_grant_expired(
+    session: AsyncSession,
+    fake_redis: fakeredis.aioredis.FakeRedis,
+    encryption_backend: FernetBackend,
+) -> None:
+    """Refresh-grant rejected by AS → grant.grant_status flipped to ``expired``."""
+    install, grant, access_cred, refresh_cred, grant_repo = await _seed_four_layer_oauth_grant(
+        session,
+        encryption_backend,
+        expires_at=datetime.now(UTC) - timedelta(seconds=30),
+    )
+    handler = _ScriptedHandler(
+        _metadata_handler(),
+        token_responses=[
+            httpx.Response(
+                401,
+                json={
+                    "error": "invalid_grant",
+                    "error_description": "refresh token revoked",
+                },
+            )
+        ],
+    )
+    manager, http = _make_manager(
+        session=session,
+        fake_redis=fake_redis,
+        backend=encryption_backend,
+        handler=handler,
+    )
+    try:
+        with pytest.raises(OAuthRefreshFailed) as excinfo:
+            await manager.get_access_token_for_grant(
+                grant=grant,
+                grant_repo=grant_repo,
+                server_url=install.server_url,
+                oauth_client_config=install.oauth_client_config,
+            )
+    finally:
+        await http.aclose()
+
+    assert excinfo.value.status == 401
+    assert excinfo.value.error == "invalid_grant"
+
+    # The grant row was flipped to ``expired`` so the next effective-state
+    # pass surfaces ``grant_expired`` and the runtime drops the connector.
+    from cubebox.repositories.mcp import MCPCredentialGrantRepository
+
+    fresh_grant_repo = MCPCredentialGrantRepository(session, org_id=ORG_ID)
+    fresh_grant = await fresh_grant_repo.get_org_grant(install.id)
+    assert fresh_grant is not None
+    assert fresh_grant.grant_status == "expired"
+
+    # Vault rows are intact on the four-layer path (refresh credential may
+    # still be needed for a manual reauthorize flow).
+    cred_repo = CredentialRepository(session, org_id=ORG_ID)
+    assert refresh_cred is not None
+    assert await cred_repo.get(access_cred.id) is not None
+    assert await cred_repo.get(refresh_cred.id) is not None

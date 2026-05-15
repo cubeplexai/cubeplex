@@ -38,9 +38,15 @@ from cubebox.mcp.cubepi_discovery import (
     discover_workspace_mcp_servers_for_cubepi,
 )
 from cubebox.mcp.effective import MCPEffectiveConnectorService, MCPRuntimeConnectorSpec
+from cubebox.mcp.exceptions import (
+    OAuthInvalidServerState,
+    OAuthRefreshContention,
+    OAuthRefreshFailed,
+)
 from cubebox.mcp.oauth.token_manager import OAuthTokenManager
 from cubebox.mcp.user_token import MCPUserTokenSigner
 from cubebox.middleware.citations.config import CitationConfig
+from cubebox.repositories.mcp import MCPCredentialGrantRepository
 from cubebox.services.credential import CredentialService
 
 _USER_TOKEN_TTL = timedelta(minutes=5)
@@ -211,6 +217,7 @@ async def load_workspace_mcp_tools_from_effective(
     user_id: str,
     cred_service: CredentialService,
     signer: MCPUserTokenSigner,
+    grant_repo: MCPCredentialGrantRepository | None = None,
 ) -> tuple[list[AgentTool[Any]], dict[str, CitationConfig]]:
     """Four-layer loader: derive runtime specs from effective state, load tools.
 
@@ -222,12 +229,14 @@ async def load_workspace_mcp_tools_from_effective(
 
     Auth method dispatch:
 
-    * ``oauth`` → no-op for now (the legacy ``OAuthTokenManager`` takes an
-      ``MCPServer`` row, not a four-layer install; once Task 9 ports the
-      manager to ``MCPCredentialGrant``, this branch calls
-      ``token_manager.get_access_token(...)``). Until then we fall back to
-      reading the access-token credential directly out of the grant row,
-      which is enough for non-refresh flows.
+    * ``oauth`` → if ``expires_at`` is within the manager's refresh buffer,
+      ask ``OAuthTokenManager.get_access_token_for_grant`` for a fresh
+      access token; the manager rotates both the access-token and
+      refresh-token vault rows in place and advances ``grant.expires_at``.
+      Otherwise read the cached access-token credential directly. A grant
+      without a ``refresh_credential_id`` falls back to the cached token
+      — the effective service's pre-filter has already dropped grants
+      that are both expired and unrefreshable.
     * ``static`` → fetch the vault row by ``spec.credential_id``, decrypt,
       build the Authorization header.
     * ``none`` → mint a short-lived cubebox identity JWT via
@@ -255,6 +264,7 @@ async def load_workspace_mcp_tools_from_effective(
                 cred_service=cred_service,
                 signer=signer,
                 token_manager=token_manager,
+                grant_repo=grant_repo,
             )
         except CredentialNotFound:
             logger.warning(
@@ -343,6 +353,7 @@ async def _resolve_headers_from_spec(
     cred_service: CredentialService,
     signer: MCPUserTokenSigner,
     token_manager: OAuthTokenManager,
+    grant_repo: MCPCredentialGrantRepository | None = None,
 ) -> dict[str, str] | None:
     """Resolve the auth header for a runtime spec by ``auth_method``.
 
@@ -375,18 +386,13 @@ async def _resolve_headers_from_spec(
         return headers
 
     if spec.auth_method == "oauth":
-        # Token manager refresh integration with the four-layer schema is
-        # tracked as part of Task 9; for now we read the access-token
-        # credential directly. The effective service has already filtered
-        # out grants whose status is "expired" with no refresh credential,
-        # so the worst case here is a near-expiry token — acceptable for
-        # the first cut of the four-layer runtime path.
-        del token_manager  # tracked for future refresh wiring
-        plaintext = await cred_service.get_decrypted(
-            credential_id=spec.credential_id,
-            requesting_kind=CREDENTIAL_KIND_MCP_OAUTH_ACCESS_TOKEN,
+        access_token = await _resolve_oauth_access_token(
+            spec=spec,
+            cred_service=cred_service,
+            token_manager=token_manager,
+            grant_repo=grant_repo,
         )
-        headers["Authorization"] = f"Bearer {plaintext}"
+        headers["Authorization"] = f"Bearer {access_token}"
         return headers
 
     logger.warning(
@@ -395,3 +401,74 @@ async def _resolve_headers_from_spec(
         spec.auth_method,
     )
     return None
+
+
+async def _resolve_oauth_access_token(
+    *,
+    spec: MCPRuntimeConnectorSpec,
+    cred_service: CredentialService,
+    token_manager: OAuthTokenManager,
+    grant_repo: MCPCredentialGrantRepository | None,
+) -> str:
+    """Return a usable access token for a four-layer OAuth grant.
+
+    Fast path: ``spec.grant`` is present, has a refresh credential, and the
+    token manager + grant repo are both wired → ask the manager for a
+    refreshed token. The manager only hits the AS when the cached token is
+    within its refresh buffer; otherwise it returns the cached value.
+
+    Fall back to a direct vault read in three cases:
+      1. The grant has no ``refresh_credential_id`` — refresh is impossible;
+         use whatever is cached (the effective service has already filtered
+         out unrefreshable expired grants via rule 8, so the runtime should
+         only see still-usable tokens here).
+      2. ``grant_repo`` is None — the caller wired the loader without the
+         grant repo (legacy tests, no-refresh deployments). Use the cached
+         token as a degraded fallback.
+      3. The refresh attempt fails terminally — the manager has already
+         marked the grant ``status='expired'``; we still return the cached
+         token for this in-flight request so the run can attempt the call
+         (the MCP server will 401, the agent moves on) and the next run
+         will see the grant filtered out by the effective service.
+    """
+    assert spec.credential_id is not None  # caller checked
+
+    can_refresh = (
+        spec.grant is not None
+        and spec.grant.refresh_credential_id is not None
+        and grant_repo is not None
+        and token_manager is not None
+    )
+    if can_refresh:
+        assert spec.grant is not None and grant_repo is not None
+        try:
+            return await token_manager.get_access_token_for_grant(
+                grant=spec.grant,
+                grant_repo=grant_repo,
+                server_url=spec.server_url,
+                oauth_client_config=spec.oauth_client_config,
+            )
+        except OAuthRefreshContention:
+            logger.warning(
+                "MCP install '%s' OAuth refresh contention; using cached access token",
+                spec.name,
+            )
+        except OAuthRefreshFailed as exc:
+            logger.warning(
+                "MCP install '%s' OAuth refresh failed (status=%s error=%s); "
+                "grant marked expired, falling back to cached token for this run",
+                spec.name,
+                exc.status,
+                exc.error,
+            )
+        except OAuthInvalidServerState as exc:
+            logger.warning(
+                "MCP install '%s' OAuth refresh aborted: %s; using cached access token",
+                spec.name,
+                exc,
+            )
+
+    return await cred_service.get_decrypted(
+        credential_id=spec.credential_id,
+        requesting_kind=CREDENTIAL_KIND_MCP_OAUTH_ACCESS_TOKEN,
+    )

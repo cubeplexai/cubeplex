@@ -232,6 +232,12 @@ class MCPRuntimeConnectorSpec:
     template_id: str | None = None
     org_id: str = ""
     workspace_id: str = ""
+    # OAuth-only: payload the runtime loader needs to invoke
+    # ``OAuthTokenManager.get_access_token_for_grant`` without re-reading
+    # the install / grant rows. ``grant`` is the live SQLModel row so the
+    # token manager can rotate it in place via ``grant_repo.update``.
+    grant: MCPCredentialGrant | None = None
+    oauth_client_config: dict[str, Any] = field(default_factory=dict)
 
 
 class MCPEffectiveConnectorService:
@@ -328,6 +334,8 @@ class MCPEffectiveConnectorService:
                     template_id=install.template_id,
                     org_id=install.org_id,
                     workspace_id=workspace_id,
+                    grant=row.grant,
+                    oauth_client_config=dict(install.oauth_client_config or {}),
                 )
             )
         return specs

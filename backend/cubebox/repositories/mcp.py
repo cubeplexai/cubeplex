@@ -654,6 +654,18 @@ class MCPCredentialGrantRepository:
         await self.session.refresh(grant)
         return grant
 
+    async def update(self, grant: MCPCredentialGrant) -> MCPCredentialGrant:
+        """Persist edits to an existing grant row (e.g. status / expiry rotation)."""
+        if grant.org_id != self.org_id:
+            raise RuntimeError(
+                "MCPCredentialGrantRepository.update: grant belongs to a different org"
+            )
+        grant.updated_at = datetime.now(UTC)
+        self.session.add(grant)
+        await self.session.commit()
+        await self.session.refresh(grant)
+        return grant
+
     async def get_org_grant(self, install_id: str) -> MCPCredentialGrant | None:
         stmt = select(MCPCredentialGrant).where(
             MCPCredentialGrant.org_id == self.org_id,  # type: ignore[arg-type]
