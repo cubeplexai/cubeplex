@@ -812,10 +812,55 @@ async def patch_workspace_connector_state(
 
     current = await svc._state_repo.get(workspace_id, install_id)
     if current is None:
-        # No existing state row: for workspace-local installs it should have
-        # been created at install time; for org installs the admin distribution
-        # must have set one. Either way a PATCH against a missing row is 404.
-        raise HTTPException(404, detail={"code": "mcp_workspace_state_not_found"})
+        # No state row exists. For org-scope installs in the caller's org this
+        # is the normal shape when ``auto_enable.mode`` was ``none`` or only
+        # distributed to other workspaces — the admin UI surfaces the install
+        # as "disabled" and this PATCH is the path to selectively enable it.
+        # Upsert in that case using the body (or the install's default policy
+        # when ``credential_policy`` is omitted), with
+        # ``enablement_source='workspace_manual'``. For workspace-scope installs
+        # a missing state row is an internal inconsistency (the install-create
+        # flow writes it) — keep 404 there.
+        if install.install_scope != "org":
+            raise HTTPException(404, detail={"code": "mcp_workspace_state_not_found"})
+        # Repository scoping already guarantees this, but assert explicitly so
+        # a future refactor can't quietly cross orgs.
+        assert install.org_id == ctx.org_id, "install.org_id must match request context org"
+
+        new_policy = (
+            body.credential_policy
+            if body.credential_policy is not None
+            else install.default_credential_policy
+        )
+        _validate_install_policy_pairing(
+            install=install,
+            requested_policy=new_policy,
+            field="credential_policy",
+        )
+        new_enabled = body.enabled if body.enabled is not None else True
+
+        saved = await svc._state_repo.upsert(
+            workspace_id=workspace_id,
+            install_id=install_id,
+            enabled=new_enabled,
+            credential_policy=new_policy,
+            enablement_source="workspace_manual",
+            updated_by_user_id=ctx.user.id,
+        )
+        await audit.record(
+            event="mcp.workspace_state.patched",
+            actor_user_id=ctx.user.id,
+            org_id=ctx.org_id,
+            target_id=install_id,
+            details={"workspace_id": workspace_id, "created": True},
+        )
+        return MCPWorkspaceConnectorStateOut(
+            workspace_id=saved.workspace_id,
+            install_id=saved.install_id,
+            enabled=saved.enabled,
+            credential_policy=saved.credential_policy,  # type: ignore[arg-type]
+            enablement_source=saved.enablement_source,
+        )
 
     new_policy = (
         body.credential_policy if body.credential_policy is not None else current.credential_policy

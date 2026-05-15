@@ -572,3 +572,113 @@ async def test_invalid_credential_policy_rejected_at_api_boundary(
         },
     )
     assert inconsistent_resp.status_code == 422, inconsistent_resp.text
+
+
+# ---------------------------------------------------------------------------
+# Scenario #9 — PATCH connector state upserts for org installs in same org
+# ---------------------------------------------------------------------------
+
+
+async def test_patch_state_upserts_for_org_install_with_no_state_row(
+    admin_client: tuple[httpx.AsyncClient, str],
+    static_template_id: str,
+    db_maker: async_sessionmaker[AsyncSession],
+) -> None:
+    """An org install created with ``auto_enable.mode='none'`` has no state row
+    in any workspace by design. The admin Workspaces tab UI renders such an
+    install as "disabled" and lets the admin toggle a checkbox to enable it.
+    That checkbox calls PATCH /ws/{ws}/mcp/connectors/{install_id}/state, so
+    that handler must UPSERT — not 404 — for org-scope installs in the same
+    org. The second PATCH must update the row, not duplicate it.
+    """
+    from sqlalchemy import select
+
+    from cubebox.models import MCPWorkspaceConnectorState
+
+    client, workspace_id = admin_client
+
+    install_resp = await client.post(
+        "/api/v1/admin/mcp/installs",
+        json={
+            "template_id": static_template_id,
+            "install_scope": "org",
+            "auth_method": "static",
+            "default_credential_policy": "org",
+            "auto_enable": {"mode": "none"},
+        },
+    )
+    assert install_resp.status_code == 201, install_resp.text
+    install_id = install_resp.json()["install_id"]
+
+    # No state rows exist anywhere for this install yet.
+    async with db_maker() as session:
+        rows = (
+            (
+                await session.execute(
+                    select(MCPWorkspaceConnectorState).where(
+                        MCPWorkspaceConnectorState.install_id == install_id  # type: ignore[arg-type]
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert rows == [], f"expected no state rows pre-PATCH, got {rows}"
+
+    # First PATCH: enable + set credential_policy. Must create the row.
+    first = await client.patch(
+        f"/api/v1/ws/{workspace_id}/mcp/connectors/{install_id}/state",
+        json={"enabled": True, "credential_policy": "org"},
+    )
+    assert first.status_code == 200, first.text
+    body = first.json()
+    assert body["enabled"] is True
+    assert body["credential_policy"] == "org"
+    assert body["enablement_source"] == "workspace_manual"
+
+    async with db_maker() as session:
+        rows = (
+            (
+                await session.execute(
+                    select(MCPWorkspaceConnectorState).where(
+                        MCPWorkspaceConnectorState.install_id == install_id  # type: ignore[arg-type]
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert len(rows) == 1, f"expected exactly one state row, got {rows}"
+        assert rows[0].workspace_id == workspace_id
+        assert rows[0].enabled is True
+        assert rows[0].credential_policy == "org"
+        assert rows[0].enablement_source == "workspace_manual"
+
+    # Second PATCH in the same workspace: must UPDATE the existing row, not
+    # insert a duplicate (the unique constraint
+    # uq_mcp_workspace_connector_state would 500 if we double-inserted).
+    second = await client.patch(
+        f"/api/v1/ws/{workspace_id}/mcp/connectors/{install_id}/state",
+        json={"enabled": False},
+    )
+    assert second.status_code == 200, second.text
+    body2 = second.json()
+    assert body2["enabled"] is False
+    # Policy unchanged from the previous row, not reset to the install default.
+    assert body2["credential_policy"] == "org"
+
+    async with db_maker() as session:
+        rows = (
+            (
+                await session.execute(
+                    select(MCPWorkspaceConnectorState).where(
+                        MCPWorkspaceConnectorState.install_id == install_id  # type: ignore[arg-type]
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert len(rows) == 1, f"second PATCH must update, not insert; got {rows}"
+        assert rows[0].enabled is False
+        assert rows[0].credential_policy == "org"
