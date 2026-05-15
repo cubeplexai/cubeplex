@@ -1,5 +1,5 @@
 import { act } from '@testing-library/react'
-import { useMessageStore } from '@cubebox/core/stores'
+import { useMessageStore, getTextContent } from '@cubebox/core'
 
 const CONV_ID = 'conv-1'
 
@@ -57,7 +57,7 @@ describe('messageStore.send', () => {
     })
 
     const msgs = useMessageStore.getState().messages[CONV_ID] ?? []
-    expect(msgs.some((m) => m.role === 'user' && m.content === 'hello')).toBe(true)
+    expect(msgs.some((m) => m.role === 'user' && getTextContent(m) === 'hello')).toBe(true)
   })
 
   it('accumulates text_delta events into assistant message', async () => {
@@ -90,7 +90,7 @@ describe('messageStore.send', () => {
 
     const msgs = useMessageStore.getState().messages[CONV_ID] ?? []
     const assistantMsg = msgs.find((m) => m.role === 'assistant')
-    expect(assistantMsg?.content).toBe('Hello world')
+    expect(assistantMsg && getTextContent(assistantMsg)).toBe('Hello world')
   })
 
   it('sets error on error event', async () => {
@@ -198,7 +198,8 @@ describe('messageStore.send', () => {
     const state = useMessageStore.getState()
     const msgs = state.messages[CONV_ID] ?? []
     expect(msgs).toHaveLength(1)
-    expect(msgs[0]).toMatchObject({ role: 'user', content: 'resume me' })
+    expect(msgs[0].role).toBe('user')
+    expect(msgs[0] && getTextContent(msgs[0])).toBe('resume me')
     expect(msgs.some((m) => m.role === 'assistant')).toBe(false)
     expect(state.currentRunId).toBe('run-1')
     expect(state.isStreaming).toBe(true)
@@ -213,17 +214,19 @@ describe('messageStore.send', () => {
             {
               id: 'user-1',
               role: 'user',
-              content: 'resume me',
-              created_at: '2026-04-25T00:00:00Z',
+              content: [{ type: 'text', text: 'resume me' }],
+              timestamp: Date.parse('2026-04-25T00:00:00Z') / 1000,
+              metadata: {},
             },
             {
               id: 'assistant-1',
               role: 'assistant',
-              content: 'partial...',
-              tool_calls: [
-                { name: 'read_file', arguments: {}, tool_call_id: 'tc-1', started_at: null },
+              content: [
+                { type: 'text', text: 'partial...' },
+                { type: 'tool_call', id: 'tc-1', name: 'read_file', arguments: {} },
               ],
-              created_at: '2026-04-25T00:00:01Z',
+              timestamp: Date.parse('2026-04-25T00:00:01Z') / 1000,
+              metadata: {},
             },
           ],
           total: 2,
@@ -252,7 +255,8 @@ describe('messageStore.send', () => {
     const msgs = useMessageStore.getState().messages[CONV_ID] ?? []
     const userMsgs = msgs.filter((m) => m.role === 'user')
     expect(userMsgs).toHaveLength(1)
-    expect(userMsgs[0]).toMatchObject({ id: 'user-1', content: 'resume me' })
+    expect(userMsgs[0].id).toBe('user-1')
+    expect(getTextContent(userMsgs[0])).toBe('resume me')
     // Partial assistant checkpoint must be trimmed — the stream replay will
     // re-emit it, so leaving it in history would render the response twice.
     expect(msgs.some((m) => m.role === 'assistant')).toBe(false)
@@ -271,14 +275,16 @@ describe('messageStore.send', () => {
             {
               id: 'user-1',
               role: 'user',
-              content: 'hi',
-              created_at: '2026-04-25T00:00:00Z',
+              content: [{ type: 'text', text: 'hi' }],
+              timestamp: Date.parse('2026-04-25T00:00:00Z') / 1000,
+              metadata: {},
             },
             {
               id: 'assistant-1',
               role: 'assistant',
-              content: 'hello',
-              created_at: '2026-04-25T00:00:01Z',
+              content: [{ type: 'text', text: 'hello' }],
+              timestamp: Date.parse('2026-04-25T00:00:01Z') / 1000,
+              metadata: {},
             },
           ],
           total: 2,
@@ -310,11 +316,9 @@ describe('messageStore.send', () => {
     expect(msgs.some((m) => m.id === 'assistant-1')).toBe(true)
     // A pending placeholder is appended for the active run since its user
     // message has not been checkpointed yet.
-    expect(msgs[msgs.length - 1]).toMatchObject({
-      id: 'pending-run-2',
-      role: 'user',
-      content: 'hi',
-    })
+    expect(msgs[msgs.length - 1].id).toBe('pending-run-2')
+    expect(msgs[msgs.length - 1].role).toBe('user')
+    expect(getTextContent(msgs[msgs.length - 1])).toBe('hi')
   })
 
   it('renders todos from write_todos batch payload', async () => {
@@ -460,12 +464,12 @@ describe('messageStore.send', () => {
 
     const msgs = useMessageStore.getState().messages[CONV_ID] ?? []
     const assistantMsg = msgs.find((m) => m.role === 'assistant')
-    expect(assistantMsg?.blocks).toEqual([
+    expect(assistantMsg?.content).toEqual([
       {
         type: 'tool_call',
+        id: 'call-1',
         name: 'execute',
         arguments: { cmd: 'echo hello' },
-        tool_call_id: 'call-1',
       },
     ])
   })
@@ -498,7 +502,8 @@ describe('messageStore.send', () => {
 
     const msgs = useMessageStore.getState().messages[CONV_ID] ?? []
     const assistantMsg = msgs.find((m) => m.role === 'assistant')
-    expect(assistantMsg?.blocks).toBeNull()
+    // tool_call_streaming blocks are filtered out; no finalized tool_call arrives.
+    expect(assistantMsg?.content).toEqual([])
   })
 
   // TODO(#ci-baseline): flaky — actual Date.now() call count diverged from the mock's

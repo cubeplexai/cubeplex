@@ -7,7 +7,7 @@ import { ImageLightbox } from './ImageLightbox'
 import { MessageFileChip } from './MessageFileChip'
 
 export interface MessageAttachmentDto {
-  id: string
+  file_id: string
   filename: string
   kind: 'image' | 'document' | 'other'
   mime_type?: string
@@ -15,7 +15,7 @@ export interface MessageAttachmentDto {
   width?: number | null
   height?: number | null
   thumbnail_url?: string | null
-  download_url: string
+  download_url?: string | null
 }
 
 interface Props {
@@ -45,7 +45,7 @@ export function MessageAttachments({
     return attachments.map((a) => ({
       ...a,
       thumbnail_url: a.thumbnail_url ? fix(a.thumbnail_url) : null,
-      download_url: fix(a.download_url),
+      download_url: fix(a.download_url ?? `./attachments/${a.file_id}`),
     }))
   }, [attachments, conversationId, workspaceId])
 
@@ -60,7 +60,7 @@ export function MessageAttachments({
         if (a.kind === 'image' && a.thumbnail_url) {
           return (
             <button
-              key={a.id}
+              key={a.file_id}
               type="button"
               onClick={() => setOpenSrc({ src: a.download_url, alt: a.filename })}
               className="group relative overflow-hidden rounded-lg border border-border"
@@ -79,8 +79,8 @@ export function MessageAttachments({
         }
         return (
           <MessageFileChip
-            key={a.id}
-            attachmentId={a.id}
+            key={a.file_id}
+            attachmentId={a.file_id}
             filename={a.filename}
             mimeType={a.mime_type ?? ''}
             sizeBytes={a.size_bytes}

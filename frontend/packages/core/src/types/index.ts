@@ -5,7 +5,7 @@ export type * from './conversation'
 export type * from './events'
 export type * from './mcp'
 export type * from './memory'
-export type * from './message'
+export * from './message'
 export type * from './skills'
 export type * from './workspace-settings'
 export type {

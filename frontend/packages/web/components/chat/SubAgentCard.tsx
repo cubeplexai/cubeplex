@@ -86,7 +86,7 @@ export const SubAgentCard = memo(function SubAgentCard({
           type: 'tool_call' as const,
           name: tc.data.name,
           arguments: tc.data.arguments,
-          tool_call_id: tc.data.tool_call_id,
+          id: tc.data.tool_call_id,
         }))
   const completedCount = toolCalls.filter((tc) => toolResultMap[tc.data.tool_call_id]).length
   const pendingTc = toolCalls.find((tc) => !toolResultMap[tc.data.tool_call_id])
@@ -124,19 +124,19 @@ export const SubAgentCard = memo(function SubAgentCard({
       )
     }
 
-    const result = toolResultMap[block.tool_call_id] ?? null
+    const result = toolResultMap[block.id] ?? null
     return (
       <ToolCallItem
-        key={block.tool_call_id || i}
+        key={block.id || i}
         name={block.name}
         arguments={block.arguments}
-        toolCallId={block.tool_call_id}
+        toolCallId={block.id}
         contentTypeOverride={block.name === 'write_file' ? 'write_file' : undefined}
         toolRef={
           block.name === 'write_file'
             ? ({
                 agent_id: agentId ?? null,
-                tool_call_id: block.tool_call_id,
+                tool_call_id: block.id,
                 index: null,
               } satisfies ToolCallRef)
             : undefined

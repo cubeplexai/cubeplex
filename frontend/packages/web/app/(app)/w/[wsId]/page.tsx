@@ -52,7 +52,7 @@ export default function WorkspaceHomePage({
         .map((u) => {
           const f = u.serverFile!
           return {
-            id: f.id,
+            file_id: f.id,
             filename: f.filename,
             kind: f.kind,
             size_bytes: f.size_bytes,

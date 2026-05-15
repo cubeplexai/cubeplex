@@ -103,7 +103,7 @@ export function resolveLiveWriteFile(
   for (let i = blocks.length - 1; i >= 0; i--) {
     const block = blocks[i]
     if (block.type === 'tool_call' && block.name === 'write_file') {
-      if (toolRef.tool_call_id && block.tool_call_id === toolRef.tool_call_id) {
+      if (toolRef.tool_call_id && block.id === toolRef.tool_call_id) {
         return {
           filePath: readFilePath(block.arguments),
           content: readStringArg(block.arguments, 'content'),
