@@ -2,6 +2,7 @@
 
 import json
 from collections.abc import AsyncIterator
+from datetime import UTC, datetime
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -593,16 +594,20 @@ async def send_message(
 
 
 async def _get_history_messages(raw_request: Request, conversation_id: str) -> dict[str, object]:
-    """Read cubepi-runtime conversation history."""
+    """Read cubepi-runtime conversation history.
+
+    Messages are returned in cubepi's native shape (UserMessage / AssistantMessage /
+    ToolResultMessage as pydantic dumps). The frontend consumes this shape directly;
+    no cubebox-specific wire conversion layer.
+    """
     from cubebox.agents.checkpointer import init_checkpointer
-    from cubebox.agents.convert import cubepi_message_to_wire
 
     del raw_request  # checkpointer factory override hook (unused; preserved for future use)
     async with init_checkpointer() as cp:
         data = await cp.load(conversation_id)
     if data is None:
         return {"messages": [], "total": 0}
-    messages = [cubepi_message_to_wire(m) for m in data.messages]
+    messages = [m.model_dump(mode="json") for m in data.messages]
     return {"messages": messages, "total": len(messages)}
 
 
@@ -690,7 +695,9 @@ async def get_conversation_bootstrap(
     last_user_ts: str | None = None
     for msg in reversed(msgs):
         if isinstance(msg, dict) and msg.get("role") == "user":
-            last_user_ts = msg.get("created_at")
+            ts = msg.get("timestamp")
+            if isinstance(ts, (int, float)):
+                last_user_ts = datetime.fromtimestamp(ts, tz=UTC).isoformat()
             break
 
     from cubebox.services.usage import build_usage_summary

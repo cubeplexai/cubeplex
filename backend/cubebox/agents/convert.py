@@ -1,84 +1,17 @@
-"""cubepi.Message ↔ cubebox API wire format conversion.
+"""cubebox request DTO → cubepi.UserMessage builder.
 
-Converts between cubepi's typed message objects
-(``UserMessage`` / ``AssistantMessage`` / ``ToolResultMessage`` and their
-content blocks) and the JSON-serializable shape the cubebox API exposes
-over SSE and the conversations REST endpoints.
+The API response side returns cubepi's native message shape directly
+(``Message.model_dump(mode="json")``) — there is no cubebox-specific wire
+format. This module only handles the request-body → cubepi conversion,
+which has a meaningfully different shape (text + attachment ids) from
+the persisted message.
 """
 
 from __future__ import annotations
 
-from collections.abc import Sequence
 from typing import Any
 
-from cubepi.providers.base import (
-    AssistantMessage,
-    Message,
-    TextContent,
-    ToolCall,
-    ToolResultMessage,
-    UserMessage,
-)
-
-
-def _join_text(content: Sequence[Any]) -> str:
-    """Concatenate all TextContent text values; ignore non-text blocks."""
-    parts = [c.text for c in content if isinstance(c, TextContent)]
-    return "".join(parts)
-
-
-def cubepi_message_to_wire(msg: Message) -> dict[str, Any]:
-    """Convert a cubepi.Message into cubebox's API response dict shape."""
-    if isinstance(msg, UserMessage):
-        meta = dict(msg.metadata)
-        attachments = meta.pop("attachments", None)
-        wire: dict[str, Any] = {
-            "role": "user",
-            "content": _join_text(msg.content),
-            "metadata": meta,
-        }
-        if attachments:
-            # The persisted metadata uses ``file_id`` (set by the content-block
-            # builder in run_manager); the wire contract surfaces it as ``id``
-            # to match the frontend ``AttachmentDto`` shape.
-            wire["attachments"] = [
-                {**{k: v for k, v in att.items() if k != "file_id"}, "id": att["file_id"]}
-                if isinstance(att, dict) and "file_id" in att
-                else att
-                for att in attachments
-            ]
-        return wire
-
-    if isinstance(msg, AssistantMessage):
-        tool_calls = [
-            {"id": c.id, "name": c.name, "arguments": c.arguments}
-            for c in msg.content
-            if isinstance(c, ToolCall)
-        ]
-        meta = dict(msg.metadata)
-        if tool_calls:
-            meta["tool_calls"] = tool_calls
-        meta["usage"] = {
-            "input_tokens": msg.usage.input_tokens if msg.usage else 0,
-            "output_tokens": msg.usage.output_tokens if msg.usage else 0,
-        }
-        return {
-            "role": "assistant",
-            "content": _join_text(msg.content),
-            "metadata": meta,
-        }
-
-    if isinstance(msg, ToolResultMessage):
-        meta = dict(msg.metadata)
-        meta["tool_call_id"] = msg.tool_call_id
-        meta["tool_name"] = msg.tool_name
-        return {
-            "role": "tool",
-            "content": _join_text(msg.content),
-            "metadata": meta,
-        }
-
-    raise TypeError(f"unknown cubepi Message type: {type(msg).__name__}")
+from cubepi.providers.base import TextContent, UserMessage
 
 
 def wire_input_to_cubepi_user_message(
