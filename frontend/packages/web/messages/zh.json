@@ -575,7 +575,31 @@
       "credStateOrg": "此 connector 使用组织级凭证。",
       "credStateWsActive": "已激活 — 由 {name} 共享",
       "credStateWsNeeded": "需要工作区管理员提供凭证。",
-      "credStateUser": "每位成员各自认证。"
+      "credStateUser": "每位成员各自认证。",
+      "catalog": {
+        "title": "MCP Connectors",
+        "summary": "本工作区已启用 {enabled} / {total}",
+        "searchPlaceholder": "搜索 connector…",
+        "loading": "加载中…",
+        "empty": "未匹配到 connector",
+        "emptyHint": "尝试其他关键词。",
+        "listAria": "MCP connector 列表",
+        "selectConnector": "选择一个 connector 查看详情",
+        "statusEnabled": "已启用",
+        "statusAvailable": "可启用",
+        "statusNeedsSetup": "待配置",
+        "provider": "提供方",
+        "serverUrl": "服务器 URL",
+        "transport": "传输协议",
+        "authMethods": "认证方式",
+        "scope": "范围",
+        "scopeOrgWide": "组织级安装",
+        "scopeWorkspacePrivate": "工作区私有安装",
+        "installTitle": "为本工作区安装",
+        "actionEnable": "在本工作区启用",
+        "actionDisable": "在本工作区停用",
+        "actionUninstall": "卸载"
+      }
     },
     "wsPage": {
       "title": "工作区 MCP connectors",
@@ -1026,6 +1050,8 @@
     "catalogNoneNotice": "该连接器无需凭证。",
     "catalogStaticTokenLabel": "API Token",
     "catalogMultiFieldUnsupported": "当前连接器暂不支持多字段凭证表单。",
+    "catalogAutoEnableLabel": "对所有工作区启用",
+    "catalogAutoEnableHelp": "勾选后，组织内现有工作区立即可见此连接器，之后新建的工作区也会默认继承。取消勾选则每个工作区需手动启用。",
 
     "customCreateTitle": "添加自定义 MCP 服务器",
     "customCreateSubtitle": "为整个组织登记自定义 MCP 服务器，之后可以按工作区开启。",

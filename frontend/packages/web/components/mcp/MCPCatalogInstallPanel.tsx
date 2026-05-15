@@ -14,6 +14,7 @@ import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -132,11 +133,18 @@ export function MCPCatalogInstallPanel({
   const [values, setValues] = useState<Record<string, string>>(() =>
     Object.fromEntries(staticFields.map((f) => [f.name, ''])),
   )
+  // auto_enable_workspaces: controls whether the install (a) backfills enabled
+  // overrides for every existing workspace in the org now, and (b) persists
+  // ``auto_enroll_new_workspaces=True`` on the install so future workspaces
+  // inherit by default. Defaults checked — opt-out for connectors the admin
+  // wants to gate workspace-by-workspace.
+  const [autoEnable, setAutoEnable] = useState(true)
 
   useEffect(() => {
     setActiveMethod(defaultAuthMethod(supported))
     setValues(Object.fromEntries(staticFields.map((f) => [f.name, ''])))
     setError(null)
+    setAutoEnable(true)
   }, [connector.id, supported, staticFields])
 
   const allStaticFilled = staticFields.every((f) => (values[f.name] ?? '').trim().length > 0)
@@ -149,6 +157,7 @@ export function MCPCatalogInstallPanel({
     try {
       const result = await installFromCatalog(client, wsId, connector.catalog_id, {
         auth_method: 'oauth',
+        auto_enable_workspaces: autoEnable,
       })
       persistOAuthOrigin()
       const oauth = await startOAuth(client, result.install_id)
@@ -176,6 +185,7 @@ export function MCPCatalogInstallPanel({
       const result = await installFromCatalog(client, wsId, connector.catalog_id, {
         auth_method: 'static',
         credential_plaintext: credentialPlaintext,
+        auto_enable_workspaces: autoEnable,
       })
       onInstalled(result.install_id)
     } catch (err) {
@@ -192,6 +202,7 @@ export function MCPCatalogInstallPanel({
     try {
       const result = await installFromCatalog(client, wsId, connector.catalog_id, {
         auth_method: 'none',
+        auto_enable_workspaces: autoEnable,
       })
       onInstalled(result.install_id)
     } catch (err) {
@@ -331,6 +342,23 @@ export function MCPCatalogInstallPanel({
               </TabsContent>
             )}
           </Tabs>
+
+          <div className="mt-4 flex items-start gap-2 border-t border-border/70 pt-4">
+            <Checkbox
+              id="catalog-install-auto-enable"
+              checked={autoEnable}
+              onCheckedChange={(v: boolean | 'indeterminate') => setAutoEnable(v === true)}
+              disabled={submitting}
+              className="mt-0.5"
+            />
+            <Label
+              htmlFor="catalog-install-auto-enable"
+              className="flex flex-col gap-0.5 text-sm font-normal"
+            >
+              <span>{t('catalogAutoEnableLabel')}</span>
+              <span className="text-xs text-muted-foreground">{t('catalogAutoEnableHelp')}</span>
+            </Label>
+          </div>
         </CardContent>
       </Card>
     </div>
