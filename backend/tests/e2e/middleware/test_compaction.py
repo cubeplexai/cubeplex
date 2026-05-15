@@ -23,6 +23,7 @@ import pytest
 from tests.e2e.middleware._helpers import (
     EVT_DONE,
     EVT_ERROR,
+    assistant_text,
     create_conversation,
     events_of_type,
     post_turn,
@@ -54,6 +55,8 @@ async def test_compaction_middleware_does_not_crash_stream(
         assert evts[-1].get("type") == EVT_DONE, (
             f"filler turn {i} did not terminate cleanly; last event: {evts[-1]}"
         )
+        text = assistant_text(evts)
+        assert text.strip() != "", f"filler turn {i} produced empty reply"
 
     final = await post_turn(
         client,
@@ -65,3 +68,6 @@ async def test_compaction_middleware_does_not_crash_stream(
     assert final[-1].get("type") == EVT_DONE, (
         f"final turn did not terminate cleanly; last event: {final[-1]}"
     )
+    final_text = assistant_text(final)
+    assert final_text.strip() != "", "final summary turn produced empty reply"
+    assert len(final_text.strip()) >= 5, f"final reply too short to be a summary: {final_text!r}"
