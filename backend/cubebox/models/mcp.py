@@ -98,6 +98,11 @@ class MCPServer(CubeboxBase, table=True):
         sa_column=Column(JSON, nullable=False, server_default=text("'{}'")),
     )
     authed: bool = Field(default=False)
+    # Org-wide installs only: when True, new workspaces auto-inherit an enabled
+    # WorkspaceMCPOverride. Ignored for workspace-private installs.
+    auto_enroll_new_workspaces: bool = Field(
+        default=True, sa_column_kwargs={"server_default": text("true")}
+    )
     last_error: str | None = Field(default=None, max_length=2048)
     last_discovered_at: datetime | None = None
     timeout: float = Field(default=30.0)

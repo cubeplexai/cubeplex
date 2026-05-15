@@ -145,10 +145,14 @@ class UserManager(BaseUserManager[User, str]):
             await MembershipRepository(session).grant(
                 user_id=user.id, workspace_id=ws.id, role=Role.ADMIN
             )
+            from cubebox.mcp.workspace_bootstrap import enroll_workspace_in_org_wide_mcp
             from cubebox.models.agent_config import AgentConfig
 
             agent_cfg = AgentConfig(org_id=org.id, workspace_id=ws.id)
             session.add(agent_cfg)
+            await enroll_workspace_in_org_wide_mcp(
+                session, org_id=org.id, workspace_id=ws.id, actor_user_id=user.id
+            )
             await session.flush()
         except Exception as exc:
             logger.exception(
@@ -236,10 +240,17 @@ class UserManager(BaseUserManager[User, str]):
             await MembershipRepository(session).grant(
                 user_id=user.id, workspace_id=ws.id, role=Role.ADMIN
             )
+            from cubebox.mcp.workspace_bootstrap import enroll_workspace_in_org_wide_mcp
             from cubebox.models.agent_config import AgentConfig
 
             agent_cfg = AgentConfig(org_id=singleton_org_id, workspace_id=ws.id)
             session.add(agent_cfg)
+            await enroll_workspace_in_org_wide_mcp(
+                session,
+                org_id=singleton_org_id,
+                workspace_id=ws.id,
+                actor_user_id=user.id,
+            )
             await session.flush()
         except Exception as exc:
             await self._best_effort_cleanup_register(user=user, org=None, session=session)

@@ -47,17 +47,20 @@ async def test_workspace_override_enable_then_disable(
 ) -> None:
     client, workspace_id = admin_client
 
+    # auto_enable_workspaces=False so this test can exercise the explicit
+    # enable/disable transition without the install's auto-backfill noise.
     install_resp = await client.post(
         f"/api/v1/admin/mcp/catalog/{catalog_id}/install",
         json={
             "auth_method": "static",
             "credential_plaintext": "ghp_test",
+            "auto_enable_workspaces": False,
         },
     )
     assert install_resp.status_code == 201, install_resp.text
     install_id = install_resp.json()["install_id"]
 
-    # Default: workspace does NOT inherit org-wide install (invisible by default).
+    # With auto_enable=false the workspace starts without an override.
     list_resp = await client.get(f"/api/v1/ws/{workspace_id}/mcp/servers")
     assert list_resp.status_code == 200
     inherited_ids = {item["id"] for item in list_resp.json()["inherited"]}
