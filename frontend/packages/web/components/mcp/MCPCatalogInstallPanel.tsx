@@ -240,6 +240,28 @@ export function MCPCatalogInstallPanel({
           <CardTitle>{t('catalogInstallTitle')}</CardTitle>
         </CardHeader>
         <CardContent>
+          <div className="relative mb-4 flex items-start gap-2 rounded-md bg-muted/40 p-3">
+            {/* Wrap the checkbox so shadcn's ``after:absolute`` hit-target
+                (``after:-inset-x-3 after:-inset-y-2``) positions against this
+                wrapper instead of escaping up the DOM and intercepting the
+                Install button below. */}
+            <span className="relative mt-0.5 inline-flex">
+              <Checkbox
+                id="catalog-install-auto-enable"
+                checked={autoEnable}
+                onCheckedChange={(v: boolean | 'indeterminate') => setAutoEnable(v === true)}
+                disabled={submitting}
+              />
+            </span>
+            <Label
+              htmlFor="catalog-install-auto-enable"
+              className="flex flex-col gap-0.5 text-sm font-normal"
+            >
+              <span>{t('catalogAutoEnableLabel')}</span>
+              <span className="text-xs text-muted-foreground">{t('catalogAutoEnableHelp')}</span>
+            </Label>
+          </div>
+
           <Tabs
             value={activeMethod}
             onValueChange={(value: unknown) => setActiveMethod(value as MCPAuthMethod)}
@@ -342,23 +364,6 @@ export function MCPCatalogInstallPanel({
               </TabsContent>
             )}
           </Tabs>
-
-          <div className="mt-4 flex items-start gap-2 border-t border-border/70 pt-4">
-            <Checkbox
-              id="catalog-install-auto-enable"
-              checked={autoEnable}
-              onCheckedChange={(v: boolean | 'indeterminate') => setAutoEnable(v === true)}
-              disabled={submitting}
-              className="mt-0.5"
-            />
-            <Label
-              htmlFor="catalog-install-auto-enable"
-              className="flex flex-col gap-0.5 text-sm font-normal"
-            >
-              <span>{t('catalogAutoEnableLabel')}</span>
-              <span className="text-xs text-muted-foreground">{t('catalogAutoEnableHelp')}</span>
-            </Label>
-          </div>
         </CardContent>
       </Card>
     </div>
