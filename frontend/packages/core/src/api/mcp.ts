@@ -8,6 +8,9 @@ import type {
   MCPCatalogInstallResult,
   MCPCatalogInstallWsRequest,
   MCPCatalogListResponse,
+  MCPConnectorInstall,
+  MCPConnectorTemplate,
+  MCPEffectiveConnector,
   MCPInstallSwitchAuthRequest,
   MCPOAuthStartResult,
   MCPOrgInstallOverrideRequest,
@@ -19,6 +22,7 @@ import type {
   MCPServerPatchBody,
   MCPTestConnectionBody,
   MCPTestConnectionResult,
+  MCPWorkspaceConnectorState,
   PromoteBody,
   ToolCitationsResponse,
   WorkspaceOverride,
@@ -378,4 +382,51 @@ export async function adminOAuthStart(
   const res = await client.post(`/api/v1/admin/mcp/installs/${installId}/oauth/start`, {})
   if (!res.ok) throw await toApiError(res)
   return (await res.json()) as MCPOAuthStartResult
+}
+
+// ---------------- Four-layer connector API (templates / installs / state / connectors) ---------------- //
+//
+// These helpers wrap the workspace-scoped four-layer endpoints introduced by
+// the MCP management spec. They coexist with the legacy `wsCatalog*` /
+// `wsCatalogOverrideOrgInstall` helpers above until Task 8 migrates the
+// React components; do not remove the legacy helpers from this file until
+// every caller has switched over.
+
+export async function wsListTemplates(
+  client: ApiClient,
+  wsId: string,
+): Promise<{ items: MCPConnectorTemplate[] }> {
+  const res = await client.get(`/api/v1/ws/${wsId}/mcp/templates`)
+  if (!res.ok) throw await toApiError(res)
+  return (await res.json()) as { items: MCPConnectorTemplate[] }
+}
+
+export async function wsCreateInstall(
+  client: ApiClient,
+  wsId: string,
+  body: unknown,
+): Promise<MCPConnectorInstall> {
+  const res = await client.post(`/api/v1/ws/${wsId}/mcp/installs`, body)
+  if (!res.ok) throw await toApiError(res)
+  return (await res.json()) as MCPConnectorInstall
+}
+
+export async function wsPatchConnectorState(
+  client: ApiClient,
+  wsId: string,
+  installId: string,
+  body: Partial<MCPWorkspaceConnectorState>,
+): Promise<MCPWorkspaceConnectorState> {
+  const res = await client.patch(`/api/v1/ws/${wsId}/mcp/connectors/${installId}/state`, body)
+  if (!res.ok) throw await toApiError(res)
+  return (await res.json()) as MCPWorkspaceConnectorState
+}
+
+export async function wsListEffectiveConnectors(
+  client: ApiClient,
+  wsId: string,
+): Promise<{ items: MCPEffectiveConnector[] }> {
+  const res = await client.get(`/api/v1/ws/${wsId}/mcp/connectors`)
+  if (!res.ok) throw await toApiError(res)
+  return (await res.json()) as { items: MCPEffectiveConnector[] }
 }
