@@ -997,3 +997,128 @@ async def test_create_static_grant_tombstoned_install_rejects_as_not_active() ->
 
     assert cred_stub.create_calls == []
     assert grant_stub.added == []
+
+
+# ---------------------------------------------------------------------------
+# create_from_template_for_org distribution validation
+# ---------------------------------------------------------------------------
+
+
+class _StubAddOnlyInstallRepo:
+    """Records ``add`` calls so a test can assert the install row was NOT written."""
+
+    def __init__(self) -> None:
+        self.added: list[Any] = []
+
+    async def add(self, install: Any) -> Any:
+        self.added.append(install)
+        return install
+
+
+class _StubStateRepo:
+    def __init__(self) -> None:
+        self.upserts: list[dict[str, Any]] = []
+
+    async def upsert(self, **kwargs: Any) -> Any:
+        self.upserts.append(kwargs)
+        return None
+
+
+class _StubWorkspaceRepo:
+    """Returns a fixed list of org workspaces for ``list_for_org``."""
+
+    def __init__(self, workspace_ids: list[str]) -> None:
+        from types import SimpleNamespace
+
+        self._rows = [SimpleNamespace(id=wid) for wid in workspace_ids]
+        self.calls: list[str] = []
+
+    async def list_for_org(self, org_id: str) -> list[Any]:
+        self.calls.append(org_id)
+        return list(self._rows)
+
+
+def _make_org_install_service(
+    *, workspace_ids: list[str]
+) -> tuple[Any, _StubAddOnlyInstallRepo, _StubStateRepo, _StubWorkspaceRepo]:
+    from cubebox.services.mcp_installs import MCPConnectorInstallService
+
+    install_repo = _StubAddOnlyInstallRepo()
+    state_repo = _StubStateRepo()
+    ws_repo = _StubWorkspaceRepo(workspace_ids=workspace_ids)
+    svc = MCPConnectorInstallService(
+        install_repo=cast(Any, install_repo),
+        state_repo=cast(Any, state_repo),
+        grant_repo=cast(Any, object()),
+        cred_service=cast(Any, object()),
+        org_id="org-test",
+        actor_user_id="u1",
+        workspace_repo=cast(Any, ws_repo),
+    )
+    return svc, install_repo, state_repo, ws_repo
+
+
+async def test_create_from_template_for_org_selected_rejects_foreign_workspace_id() -> None:
+    """Bad workspace_ids in ``distribution=selected`` must reject BEFORE the
+    install row is written.
+
+    The route layer maps the ValueError to a 400. The critical invariant
+    here is that ``_install_repo.add`` is NEVER called when validation
+    fails — otherwise a typo'd id would leave a phantom install with no
+    state rows behind.
+    """
+    from types import SimpleNamespace
+
+    svc, install_repo, state_repo, ws_repo = _make_org_install_service(
+        workspace_ids=["ws-1", "ws-2"]
+    )
+    template = SimpleNamespace(
+        id="mctpl-x",
+        name="t",
+        server_url="https://example.com/mcp",
+        transport="http",
+        tool_citation_defaults={},
+    )
+
+    with pytest.raises(ValueError, match="workspace_not_in_org"):
+        await svc.create_from_template_for_org(
+            template=cast(Any, template),
+            auth_method="none",
+            credential_policy="none",
+            distribution={"mode": "selected", "workspace_ids": ["ws-not-mine"]},
+        )
+
+    assert install_repo.added == [], (
+        "install row must NOT be written when a workspace_id is foreign"
+    )
+    assert state_repo.upserts == [], "state rows must NOT be written either"
+    # Workspace repo was consulted to compute the valid set.
+    assert ws_repo.calls == ["org-test"]
+
+
+async def test_create_from_template_for_org_selected_accepts_valid_workspace_ids() -> None:
+    """Happy path: every requested id is in the org → install + state rows written."""
+    from types import SimpleNamespace
+
+    svc, install_repo, state_repo, ws_repo = _make_org_install_service(
+        workspace_ids=["ws-1", "ws-2"]
+    )
+    template = SimpleNamespace(
+        id="mctpl-x",
+        name="t",
+        server_url="https://example.com/mcp",
+        transport="http",
+        tool_citation_defaults={},
+    )
+
+    await svc.create_from_template_for_org(
+        template=cast(Any, template),
+        auth_method="none",
+        credential_policy="none",
+        distribution={"mode": "selected", "workspace_ids": ["ws-1"]},
+    )
+
+    assert len(install_repo.added) == 1
+    assert len(state_repo.upserts) == 1
+    assert state_repo.upserts[0]["workspace_id"] == "ws-1"
+    assert ws_repo.calls == ["org-test"]

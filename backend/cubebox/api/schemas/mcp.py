@@ -285,6 +285,24 @@ class MCPEffectiveConnectorOut(BaseModel):
     reason: str
 
 
+class MCPConnectorTemplateListOut(BaseModel):
+    """Envelope for list endpoints returning connector templates."""
+
+    items: list[MCPConnectorTemplateOut]
+
+
+class MCPConnectorInstallListOut(BaseModel):
+    """Envelope for list endpoints returning connector installs."""
+
+    items: list[MCPConnectorInstallOut]
+
+
+class MCPEffectiveConnectorListOut(BaseModel):
+    """Envelope for list endpoints returning effective connectors."""
+
+    items: list[MCPEffectiveConnectorOut]
+
+
 class AutoEnableIn(BaseModel):
     """Distribution payload for org-scope installs."""
 

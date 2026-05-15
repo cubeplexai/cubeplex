@@ -26,10 +26,12 @@ from cubebox.api.schemas.mcp import (
     AdminCreateInstallIn,
     CreateGrantIn,
     MCPConnectorInstallOut,
+    MCPConnectorTemplateListOut,
     MCPConnectorTemplateOut,
     MCPCredentialGrantStatusOut,
     MCPCredentialStatus,
     MCPCredentialUpsert,
+    MCPEffectiveConnectorListOut,
     MCPEffectiveConnectorOut,
     MCPOAuthStartIn,
     MCPOAuthStartOut,
@@ -669,30 +671,32 @@ def _dto_to_effective_out(dto: MCPEffectiveConnectorDTO) -> MCPEffectiveConnecto
     )
 
 
-@router.get("/templates", response_model=list[MCPConnectorTemplateOut])
+@router.get("/templates", response_model=MCPConnectorTemplateListOut)
 async def list_workspace_templates(
     workspace_id: str,  # noqa: ARG001 — path param, future workspace-scoped filtering
     svc: Annotated[MCPConnectorTemplateService, Depends(get_connector_template_service)],
     _ctx: Annotated[RequestContext, Depends(require_member)],
-) -> list[MCPConnectorTemplateOut]:
+) -> MCPConnectorTemplateListOut:
     """Workspace view over the global connector template catalog."""
     templates = await svc.list_active()
-    return [_template_to_out(t) for t in templates]
+    return MCPConnectorTemplateListOut(items=[_template_to_out(t) for t in templates])
 
 
-@router.get("/connectors", response_model=list[MCPEffectiveConnectorOut])
+@router.get("/connectors", response_model=MCPEffectiveConnectorListOut)
 async def list_workspace_connectors(
     workspace_id: str,
     ctx: Annotated[RequestContext, Depends(require_member)],
     effective_svc: Annotated[MCPEffectiveConnectorService, Depends(get_ws_effective_service)],
-) -> list[MCPEffectiveConnectorOut]:
+) -> MCPEffectiveConnectorListOut:
     """Effective connector list for the workspace + current user."""
     dtos = await effective_svc.list_for_workspace_user(
         workspace_id,
         ctx.user.id,
         include_unusable=True,
     )
-    return [_dto_to_effective_out(dto) for dto in dtos]
+    return MCPEffectiveConnectorListOut(
+        items=[_dto_to_effective_out(dto) for dto in dtos],
+    )
 
 
 @router.post(
