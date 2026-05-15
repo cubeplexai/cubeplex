@@ -4,7 +4,7 @@
 
 **Goal:** Replace the current MCP catalog/server/override model with the final four-layer model: connector templates, connector installs, workspace connector states, and credential grants.
 
-**Architecture:** Use a direct schema and API replacement because the product has not shipped. Create target tables and model classes, remove old catalog/override routes, make `credential_grants` the single grant table, and make `EffectiveConnectorService` the only source of runtime usability.
+**Architecture:** Use a direct schema and API replacement because the product has not shipped. Create target tables and model classes, remove old catalog/override routes, make `mcp_credential_grants` the single grant table, and make `MCPEffectiveConnectorService` the only source of runtime usability.
 
 **Tech Stack:** FastAPI, SQLModel, Alembic, PostgreSQL, Redis, OAuthTokenManager, Next.js, Zustand, TypeScript, pytest, Playwright.
 
@@ -16,13 +16,13 @@
 - Remove `catalog` and `override` from public API paths, frontend API helpers, UI copy,
   services, repositories, and new tests.
 - Use target table names now:
-  `connector_templates`, `connector_installs`, `workspace_connector_states`,
-  `credential_grants`.
+  `mcp_connector_templates`, `mcp_connector_installs`, `mcp_workspace_connector_states`,
+  `mcp_credential_grants`.
 - Existing local MCP data can be dropped by migration. The product has no released
   external contract.
 - Keep the credential vault table; grant rows point to vault credential ids.
 - Keep `backend/cubebox/models/mcp.py` as the MCP model module, but replace the model
-  classes inside it with the four final nouns.
+  classes inside it with the four final MCP-prefixed nouns.
 
 ---
 
@@ -88,7 +88,7 @@
 
 ---
 
-## Task 1: Target Schema And Model Classes
+## Task 1: Target Prefixed Schema And Model Classes
 
 **Files:**
 
@@ -96,29 +96,29 @@
 - Modify: `backend/cubebox/models/mcp.py`
 - Modify: `backend/tests/unit/test_mcp_models.py`
 
-- [ ] **Step 1: Write model tests for final table names**
+- [ ] **Step 1: Write model tests for final prefixed table names**
 
 Append to `backend/tests/unit/test_mcp_models.py`:
 
 ```python
 def test_mcp_four_layer_table_names() -> None:
     from cubebox.models import (
-        ConnectorInstall,
-        ConnectorTemplate,
-        CredentialGrant,
-        WorkspaceConnectorState,
+        MCPConnectorInstall,
+        MCPConnectorTemplate,
+        MCPCredentialGrant,
+        MCPWorkspaceConnectorState,
     )
 
-    assert ConnectorTemplate.__tablename__ == "connector_templates"
-    assert ConnectorInstall.__tablename__ == "connector_installs"
-    assert WorkspaceConnectorState.__tablename__ == "workspace_connector_states"
-    assert CredentialGrant.__tablename__ == "credential_grants"
+    assert MCPConnectorTemplate.__tablename__ == "mcp_connector_templates"
+    assert MCPConnectorInstall.__tablename__ == "mcp_connector_installs"
+    assert MCPWorkspaceConnectorState.__tablename__ == "mcp_workspace_connector_states"
+    assert MCPCredentialGrant.__tablename__ == "mcp_credential_grants"
 
 
 def test_no_auth_install_defaults_to_none_policy() -> None:
-    from cubebox.models import ConnectorInstall
+    from cubebox.models import MCPConnectorInstall
 
-    row = ConnectorInstall(
+    row = MCPConnectorInstall(
         org_id="org-1",
         name="NoAuth",
         server_url="https://noauth.example.com/mcp",
@@ -164,10 +164,10 @@ from sqlmodel import Field
 from cubebox.models.mixins import CubeboxBase
 
 
-class ConnectorTemplate(CubeboxBase, table=True):
+class MCPConnectorTemplate(CubeboxBase, table=True):
     _PREFIX: ClassVar[str] = "ctpl"
-    __tablename__ = "connector_templates"
-    __table_args__ = (UniqueConstraint("slug", name="uq_connector_template_slug"),)
+    __tablename__ = "mcp_connector_templates"
+    __table_args__ = (UniqueConstraint("slug", name="uq_mcp_connector_template_slug"),)
 
     slug: str = Field(max_length=64, index=True)
     name: str = Field(max_length=128)
@@ -204,24 +204,24 @@ class ConnectorTemplate(CubeboxBase, table=True):
     status: str = Field(default="active", max_length=16)
 
 
-class ConnectorInstall(CubeboxBase, table=True):
+class MCPConnectorInstall(CubeboxBase, table=True):
     _PREFIX: ClassVar[str] = "cins"
-    __tablename__ = "connector_installs"
+    __tablename__ = "mcp_connector_installs"
     __table_args__ = (
         UniqueConstraint(
             "org_id",
             "workspace_id",
             "server_url_hash",
-            name="uq_connector_install_url",
+            name="uq_mcp_connector_install_url",
         ),
         UniqueConstraint(
             "org_id",
             "workspace_id",
             "name",
-            name="uq_connector_install_name",
+            name="uq_mcp_connector_install_name",
         ),
         Index(
-            "uq_connector_install_per_template",
+            "uq_mcp_connector_install_per_template",
             "org_id",
             text("COALESCE(workspace_id, '_org')"),
             "template_id",
@@ -233,7 +233,7 @@ class ConnectorInstall(CubeboxBase, table=True):
     org_id: str = Field(foreign_key="organizations.id", max_length=20, index=True)
     template_id: str | None = Field(
         default=None,
-        foreign_key="connector_templates.id",
+        foreign_key="mcp_connector_templates.id",
         max_length=20,
         index=True,
     )
@@ -275,37 +275,37 @@ class ConnectorInstall(CubeboxBase, table=True):
     created_by_user_id: str = Field(foreign_key="users.id", max_length=20)
 
 
-class WorkspaceConnectorState(CubeboxBase, table=True):
+class MCPWorkspaceConnectorState(CubeboxBase, table=True):
     _PREFIX: ClassVar[str] = "wcst"
-    __tablename__ = "workspace_connector_states"
+    __tablename__ = "mcp_workspace_connector_states"
     __table_args__ = (
-        UniqueConstraint("workspace_id", "install_id", name="uq_workspace_connector_state"),
+        UniqueConstraint("workspace_id", "install_id", name="uq_mcp_workspace_connector_state"),
     )
 
     org_id: str = Field(foreign_key="organizations.id", max_length=20, index=True)
     workspace_id: str = Field(foreign_key="workspaces.id", max_length=20, index=True)
-    install_id: str = Field(foreign_key="connector_installs.id", max_length=20, index=True)
+    install_id: str = Field(foreign_key="mcp_connector_installs.id", max_length=20, index=True)
     enabled: bool = Field(default=True)
     credential_policy: str = Field(max_length=16)
     enablement_source: str = Field(default="workspace_manual", max_length=32)
     updated_by_user_id: str = Field(foreign_key="users.id", max_length=20)
 
 
-class CredentialGrant(CubeboxBase, table=True):
+class MCPCredentialGrant(CubeboxBase, table=True):
     _PREFIX: ClassVar[str] = "cgrn"
-    __tablename__ = "credential_grants"
+    __tablename__ = "mcp_credential_grants"
     __table_args__ = (
         UniqueConstraint(
             "install_id",
             "grant_scope",
             "workspace_id",
             "user_id",
-            name="uq_credential_grant_scope",
+            name="uq_mcp_credential_grant_scope",
         ),
     )
 
     org_id: str = Field(foreign_key="organizations.id", max_length=20, index=True)
-    install_id: str = Field(foreign_key="connector_installs.id", max_length=20, index=True)
+    install_id: str = Field(foreign_key="mcp_connector_installs.id", max_length=20, index=True)
     grant_scope: str = Field(max_length=16)
     workspace_id: str | None = Field(
         default=None,
@@ -344,8 +344,8 @@ def upgrade() -> None:
     op.drop_table("mcp_servers")
     op.drop_table("mcp_catalog_connectors")
 
-    # Create connector_templates, connector_installs,
-    # workspace_connector_states, and credential_grants with the
+    # Create mcp_connector_templates, mcp_connector_installs,
+    # mcp_workspace_connector_states, and mcp_credential_grants with the
     # columns defined in backend/cubebox/models/mcp.py.
 ```
 
@@ -354,23 +354,23 @@ constraints:
 
 ```python
 op.create_check_constraint(
-    "ck_connector_installs_scope",
-    "connector_installs",
+    "ck_mcp_connector_installs_scope",
+    "mcp_connector_installs",
     "install_scope IN ('org', 'workspace')",
 )
 op.create_check_constraint(
-    "ck_connector_installs_auth_method",
-    "connector_installs",
+    "ck_mcp_connector_installs_auth_method",
+    "mcp_connector_installs",
     "auth_method IN ('oauth', 'static', 'none')",
 )
 op.create_check_constraint(
-    "ck_workspace_connector_states_policy",
-    "workspace_connector_states",
+    "ck_mcp_workspace_connector_states_policy",
+    "mcp_workspace_connector_states",
     "credential_policy IN ('org', 'workspace', 'user', 'none')",
 )
 op.create_check_constraint(
-    "ck_credential_grants_scope",
-    "credential_grants",
+    "ck_mcp_credential_grants_scope",
+    "mcp_credential_grants",
     "grant_scope IN ('org', 'workspace', 'user')",
 )
 ```
@@ -429,9 +429,9 @@ Append to `backend/tests/unit/test_mcp_repositories.py`:
 
 ```python
 async def test_connector_template_repository_upserts_by_slug(session: AsyncSession) -> None:
-    from cubebox.repositories.mcp import ConnectorTemplateRepository
+    from cubebox.repositories.mcp import MCPConnectorTemplateRepository
 
-    repo = ConnectorTemplateRepository(session)
+    repo = MCPConnectorTemplateRepository(session)
     row = await repo.upsert_by_slug(
         slug="github",
         name="GitHub",
@@ -450,12 +450,12 @@ async def test_connector_template_repository_upserts_by_slug(session: AsyncSessi
 async def test_credential_grant_repository_scopes_user_grants(
     session: AsyncSession,
 ) -> None:
-    from cubebox.models import CredentialGrant
-    from cubebox.repositories.mcp import CredentialGrantRepository
+    from cubebox.models import MCPCredentialGrant
+    from cubebox.repositories.mcp import MCPCredentialGrantRepository
 
-    repo = CredentialGrantRepository(session, org_id="org-1")
+    repo = MCPCredentialGrantRepository(session, org_id="org-1")
     await repo.add(
-        CredentialGrant(
+        MCPCredentialGrant(
             org_id="org-1",
             install_id="cins-1",
             grant_scope="user",
@@ -485,32 +485,32 @@ Expected: FAIL because the final repositories do not exist.
 
 Edit `backend/cubebox/repositories/mcp.py` so it exports these concrete methods:
 
-- `ConnectorTemplateRepository.get(template_id: str) -> ConnectorTemplate | None`
-- `ConnectorTemplateRepository.get_by_slug(slug: str) -> ConnectorTemplate | None`
-- `ConnectorTemplateRepository.list_active() -> list[ConnectorTemplate]`
-- `ConnectorTemplateRepository.upsert_by_slug(slug: str, name: str, description: str,
+- `MCPConnectorTemplateRepository.get(template_id: str) -> MCPConnectorTemplate | None`
+- `MCPConnectorTemplateRepository.get_by_slug(slug: str) -> MCPConnectorTemplate | None`
+- `MCPConnectorTemplateRepository.list_active() -> list[MCPConnectorTemplate]`
+- `MCPConnectorTemplateRepository.upsert_by_slug(slug: str, name: str, description: str,
   provider: str, server_url: str, transport: str, supported_auth_methods: list[str],
-  default_credential_policy: str) -> ConnectorTemplate`
-- `ConnectorInstallRepository.get(install_id: str) -> ConnectorInstall | None`
-- `ConnectorInstallRepository.list_org_installs() -> list[ConnectorInstall]`
-- `ConnectorInstallRepository.list_workspace_installs(workspace_id: str)
-  -> list[ConnectorInstall]`
-- `ConnectorInstallRepository.add(install: ConnectorInstall) -> ConnectorInstall`
-- `ConnectorInstallRepository.update(install: ConnectorInstall) -> ConnectorInstall`
-- `WorkspaceConnectorStateRepository.get(workspace_id: str, install_id: str)
-  -> WorkspaceConnectorState | None`
-- `WorkspaceConnectorStateRepository.list_for_workspace(workspace_id: str)
-  -> list[WorkspaceConnectorState]`
-- `WorkspaceConnectorStateRepository.upsert(workspace_id: str, install_id: str,
+  default_credential_policy: str) -> MCPConnectorTemplate`
+- `MCPConnectorInstallRepository.get(install_id: str) -> MCPConnectorInstall | None`
+- `MCPConnectorInstallRepository.list_org_installs() -> list[MCPConnectorInstall]`
+- `MCPConnectorInstallRepository.list_workspace_installs(workspace_id: str)
+  -> list[MCPConnectorInstall]`
+- `MCPConnectorInstallRepository.add(install: MCPConnectorInstall) -> MCPConnectorInstall`
+- `MCPConnectorInstallRepository.update(install: MCPConnectorInstall) -> MCPConnectorInstall`
+- `MCPWorkspaceConnectorStateRepository.get(workspace_id: str, install_id: str)
+  -> MCPWorkspaceConnectorState | None`
+- `MCPWorkspaceConnectorStateRepository.list_for_workspace(workspace_id: str)
+  -> list[MCPWorkspaceConnectorState]`
+- `MCPWorkspaceConnectorStateRepository.upsert(workspace_id: str, install_id: str,
   enabled: bool, credential_policy: str, enablement_source: str,
-  updated_by_user_id: str) -> WorkspaceConnectorState`
-- `CredentialGrantRepository.add(grant: CredentialGrant) -> CredentialGrant`
-- `CredentialGrantRepository.get_org_grant(install_id: str) -> CredentialGrant | None`
-- `CredentialGrantRepository.get_workspace_grant(install_id: str, workspace_id: str)
-  -> CredentialGrant | None`
-- `CredentialGrantRepository.get_user_grant(install_id: str, user_id: str)
-  -> CredentialGrant | None`
-- `CredentialGrantRepository.delete_scope(install_id: str, grant_scope: str,
+  updated_by_user_id: str) -> MCPWorkspaceConnectorState`
+- `MCPCredentialGrantRepository.add(grant: MCPCredentialGrant) -> MCPCredentialGrant`
+- `MCPCredentialGrantRepository.get_org_grant(install_id: str) -> MCPCredentialGrant | None`
+- `MCPCredentialGrantRepository.get_workspace_grant(install_id: str, workspace_id: str)
+  -> MCPCredentialGrant | None`
+- `MCPCredentialGrantRepository.get_user_grant(install_id: str, user_id: str)
+  -> MCPCredentialGrant | None`
+- `MCPCredentialGrantRepository.delete_scope(install_id: str, grant_scope: str,
   workspace_id: str | None, user_id: str | None) -> None`
 
 Use the existing org-scoped repository pattern: every non-template repository receives
@@ -523,18 +523,18 @@ Create `backend/cubebox/services/mcp_templates.py`:
 ```python
 """Connector template service."""
 
-from cubebox.models import ConnectorTemplate
-from cubebox.repositories.mcp import ConnectorTemplateRepository
+from cubebox.models import MCPConnectorTemplate
+from cubebox.repositories.mcp import MCPConnectorTemplateRepository
 
 
-class ConnectorTemplateService:
-    def __init__(self, repo: ConnectorTemplateRepository) -> None:
+class MCPConnectorTemplateService:
+    def __init__(self, repo: MCPConnectorTemplateRepository) -> None:
         self._repo = repo
 
-    async def list_active(self) -> list[ConnectorTemplate]:
+    async def list_active(self) -> list[MCPConnectorTemplate]:
         return await self._repo.list_active()
 
-    async def get_active(self, template_id: str) -> ConnectorTemplate:
+    async def get_active(self, template_id: str) -> MCPConnectorTemplate:
         row = await self._repo.get(template_id)
         if row is None or row.status != "active":
             raise ValueError("connector_template_not_found")
@@ -553,7 +553,7 @@ git mv backend/cubebox/cli/seed_mcp_catalog.py backend/cubebox/cli/seed_mcp_temp
 ```
 
 In `backend/cubebox/mcp/template_seed.py`, rename `CatalogSeedEntry` to
-`ConnectorTemplateSeedEntry`. Rename fields:
+`MCPConnectorTemplateSeedEntry`. Rename fields:
 
 ```python
 default_credential_scope -> default_credential_policy
@@ -563,7 +563,7 @@ tool_citations -> tool_citation_defaults
 ```
 
 Update `backend/cubebox/seeders/mcp_template_seeder.py` and
-`backend/cubebox/cli/seed_mcp_templates.py` to call `ConnectorTemplateRepository`.
+`backend/cubebox/cli/seed_mcp_templates.py` to call `MCPConnectorTemplateRepository`.
 
 - [ ] **Step 6: Run repository and seed tests**
 
@@ -656,21 +656,21 @@ from datetime import UTC, datetime
 from cubebox.mcp._constants import CREDENTIAL_KIND_MCP
 from cubebox.mcp._constants import server_url_hash
 from cubebox.models import (
-    ConnectorInstall,
-    ConnectorTemplate,
-    CredentialGrant,
-    WorkspaceConnectorState,
+    MCPConnectorInstall,
+    MCPConnectorTemplate,
+    MCPCredentialGrant,
+    MCPWorkspaceConnectorState,
 )
 from cubebox.repositories.mcp import (
-    ConnectorInstallRepository,
-    CredentialGrantRepository,
-    WorkspaceConnectorStateRepository,
+    MCPConnectorInstallRepository,
+    MCPCredentialGrantRepository,
+    MCPWorkspaceConnectorStateRepository,
 )
 from cubebox.services.credential import CredentialService
 
 
 @dataclass(frozen=True, slots=True)
-class InstallDefaults:
+class MCPInstallDefaults:
     auth_status: str
     credential_policy: str
 
@@ -678,19 +678,19 @@ class InstallDefaults:
 def install_defaults_for_auth_method(
     auth_method: str,
     requested_policy: str,
-) -> InstallDefaults:
+) -> MCPInstallDefaults:
     if auth_method == "none":
-        return InstallDefaults(auth_status="not_required", credential_policy="none")
-    return InstallDefaults(auth_status="pending", credential_policy=requested_policy)
+        return MCPInstallDefaults(auth_status="not_required", credential_policy="none")
+    return MCPInstallDefaults(auth_status="pending", credential_policy=requested_policy)
 
 
-class ConnectorInstallService:
+class MCPConnectorInstallService:
     def __init__(
         self,
         *,
-        install_repo: ConnectorInstallRepository,
-        state_repo: WorkspaceConnectorStateRepository,
-        grant_repo: CredentialGrantRepository,
+        install_repo: MCPConnectorInstallRepository,
+        state_repo: MCPWorkspaceConnectorStateRepository,
+        grant_repo: MCPCredentialGrantRepository,
         cred_service: CredentialService,
         org_id: str,
         actor_user_id: str,
@@ -705,14 +705,14 @@ class ConnectorInstallService:
     async def create_from_template_for_workspace(
         self,
         *,
-        template: ConnectorTemplate,
+        template: MCPConnectorTemplate,
         workspace_id: str,
         auth_method: str,
         credential_policy: str,
-    ) -> ConnectorInstall:
+    ) -> MCPConnectorInstall:
         defaults = install_defaults_for_auth_method(auth_method, credential_policy)
         install = await self._install_repo.add(
-            ConnectorInstall(
+            MCPConnectorInstall(
                 org_id=self._org_id,
                 template_id=template.id,
                 install_scope="workspace",
@@ -748,14 +748,14 @@ class ConnectorInstallService:
         workspace_id: str | None = None,
         user_id: str | None = None,
         name: str | None = None,
-    ) -> CredentialGrant:
+    ) -> MCPCredentialGrant:
         credential_id = await self._cred_service.create(
             kind=CREDENTIAL_KIND_MCP,
             name=name or f"mcp:{install_id}:{grant_scope}",
             plaintext=plaintext,
         )
         return await self._grant_repo.add(
-            CredentialGrant(
+            MCPCredentialGrant(
                 org_id=self._org_id,
                 install_id=install_id,
                 grant_scope=grant_scope,
@@ -767,7 +767,7 @@ class ConnectorInstallService:
             )
         )
 
-    async def uninstall(self, install_id: str) -> ConnectorInstall:
+    async def uninstall(self, install_id: str) -> MCPConnectorInstall:
         install = await self._install_repo.get(install_id)
         if install is None:
             raise ValueError("connector_install_not_found")
@@ -784,19 +784,19 @@ Edit `backend/cubebox/mcp/dependencies.py` and add:
 ```python
 async def get_connector_template_service(
     session: AsyncSession = Depends(get_session),
-) -> ConnectorTemplateService:
-    return ConnectorTemplateService(ConnectorTemplateRepository(session))
+) -> MCPConnectorTemplateService:
+    return MCPConnectorTemplateService(MCPConnectorTemplateRepository(session))
 
 
 async def get_connector_install_service(
     session: AsyncSession = Depends(get_session),
     cred_service: CredentialService = Depends(get_credential_service),
     ctx: RequestContext = Depends(require_member),
-) -> ConnectorInstallService:
-    return ConnectorInstallService(
-        install_repo=ConnectorInstallRepository(session, org_id=ctx.org_id),
-        state_repo=WorkspaceConnectorStateRepository(session, org_id=ctx.org_id),
-        grant_repo=CredentialGrantRepository(session, org_id=ctx.org_id),
+) -> MCPConnectorInstallService:
+    return MCPConnectorInstallService(
+        install_repo=MCPConnectorInstallRepository(session, org_id=ctx.org_id),
+        state_repo=MCPWorkspaceConnectorStateRepository(session, org_id=ctx.org_id),
+        grant_repo=MCPCredentialGrantRepository(session, org_id=ctx.org_id),
         cred_service=cred_service,
         org_id=ctx.org_id,
         actor_user_id=ctx.user.id,
@@ -896,17 +896,17 @@ Use `Literal["org", "workspace", "user", "none"]` for credential policy fields a
 
 The response schemas must include these fields:
 
-- `ConnectorTemplateOut`: `template_id`, `slug`, `name`, `provider`, `description`,
+- `MCPConnectorTemplateOut`: `template_id`, `slug`, `name`, `provider`, `description`,
   `server_url`, `transport`, `supported_auth_methods`, `default_credential_policy`,
   `static_form_schema`, `status`.
-- `ConnectorInstallOut`: `install_id`, `template_id`, `install_scope`, `workspace_id`,
+- `MCPConnectorInstallOut`: `install_id`, `template_id`, `install_scope`, `workspace_id`,
   `name`, `server_url`, `transport`, `auth_method`, `default_credential_policy`,
   `auth_status`, `discovery_status`, `install_state`, `tool_count`, `last_error`.
-- `WorkspaceConnectorStateOut`: `workspace_id`, `install_id`, `enabled`,
+- `MCPWorkspaceConnectorStateOut`: `workspace_id`, `install_id`, `enabled`,
   `credential_policy`, `enablement_source`.
-- `CredentialGrantStatusOut`: `install_id`, `grant_scope`, `workspace_id`, `user_id`,
+- `MCPCredentialGrantStatusOut`: `install_id`, `grant_scope`, `workspace_id`, `user_id`,
   `grant_status`, `has_value`, `expires_at`.
-- `EffectiveConnectorOut`: `template`, `install`, `workspace_state`, `credential_policy`,
+- `MCPEffectiveConnectorOut`: `template`, `install`, `workspace_state`, `credential_policy`,
   `credential_availability`, `credential_source`, `usable`, `reason`.
 
 - [ ] **Step 4: Replace admin routes**
@@ -987,12 +987,12 @@ git commit -m "feat(mcp): replace catalog routes with four-layer API"
 Create `backend/tests/unit/mcp/test_effective_state.py`:
 
 ```python
-from cubebox.mcp.effective import EffectiveInput, GrantInput, compute_effective_state
+from cubebox.mcp.effective import MCPEffectiveInput, MCPGrantInput, compute_effective_state
 
 
 def test_no_auth_connector_is_usable_without_grant() -> None:
     result = compute_effective_state(
-        EffectiveInput(
+        MCPEffectiveInput(
             template_status="active",
             install_state="active",
             workspace_enabled=True,
@@ -1010,7 +1010,7 @@ def test_no_auth_connector_is_usable_without_grant() -> None:
 
 def test_user_policy_requires_user_grant() -> None:
     result = compute_effective_state(
-        EffectiveInput(
+        MCPEffectiveInput(
             template_status="active",
             install_state="active",
             workspace_enabled=True,
@@ -1027,13 +1027,13 @@ def test_user_policy_requires_user_grant() -> None:
 
 def test_valid_user_grant_makes_user_policy_usable() -> None:
     result = compute_effective_state(
-        EffectiveInput(
+        MCPEffectiveInput(
             template_status="active",
             install_state="active",
             workspace_enabled=True,
             auth_method="static",
             credential_policy="user",
-            grant=GrantInput(scope="user", status="valid"),
+            grant=MCPGrantInput(scope="user", status="valid"),
             transport="streamable_http",
         )
     )
@@ -1051,7 +1051,7 @@ from dataclasses import dataclass
 from typing import Literal
 
 CredentialPolicy = Literal["org", "workspace", "user", "none"]
-EffectiveReason = Literal[
+MCPEffectiveReason = Literal[
     "usable",
     "template_inactive",
     "install_uninstalled",
@@ -1063,64 +1063,64 @@ EffectiveReason = Literal[
 
 
 @dataclass(frozen=True, slots=True)
-class GrantInput:
+class MCPGrantInput:
     scope: str
     status: str
 
 
 @dataclass(frozen=True, slots=True)
-class EffectiveInput:
+class MCPEffectiveInput:
     template_status: str | None
     install_state: str
     workspace_enabled: bool
     auth_method: str
     credential_policy: CredentialPolicy
-    grant: GrantInput | None
+    grant: MCPGrantInput | None
     transport: str
 
 
 @dataclass(frozen=True, slots=True)
-class EffectiveResult:
+class MCPEffectiveResult:
     usable: bool
-    reason: EffectiveReason
+    reason: MCPEffectiveReason
     credential_availability: str
 
 
-def compute_effective_state(value: EffectiveInput) -> EffectiveResult:
+def compute_effective_state(value: MCPEffectiveInput) -> MCPEffectiveResult:
     if value.template_status is not None and value.template_status != "active":
-        return EffectiveResult(False, "template_inactive", "missing")
+        return MCPEffectiveResult(False, "template_inactive", "missing")
     if value.install_state != "active":
-        return EffectiveResult(False, "install_uninstalled", "missing")
+        return MCPEffectiveResult(False, "install_uninstalled", "missing")
     if value.transport not in {"streamable_http", "sse"}:
-        return EffectiveResult(False, "unsupported_transport", "missing")
+        return MCPEffectiveResult(False, "unsupported_transport", "missing")
     if not value.workspace_enabled:
-        return EffectiveResult(False, "workspace_disabled", "missing")
+        return MCPEffectiveResult(False, "workspace_disabled", "missing")
     if value.auth_method == "none" or value.credential_policy == "none":
-        return EffectiveResult(True, "usable", "not_required")
+        return MCPEffectiveResult(True, "usable", "not_required")
     if value.grant is None:
-        return EffectiveResult(False, "credential_missing", "missing")
+        return MCPEffectiveResult(False, "credential_missing", "missing")
     if value.grant.status != "valid" or value.grant.scope != value.credential_policy:
-        return EffectiveResult(False, "credential_invalid", "missing")
-    return EffectiveResult(True, "usable", "available")
+        return MCPEffectiveResult(False, "credential_invalid", "missing")
+    return MCPEffectiveResult(True, "usable", "available")
 ```
 
 - [ ] **Step 3: Add DB-backed effective service**
 
-Extend `backend/cubebox/mcp/effective.py` with `EffectiveConnectorService`.
+Extend `backend/cubebox/mcp/effective.py` with `MCPEffectiveConnectorService`.
 
 It should:
 
 - load active org installs plus workspace installs;
-- load `WorkspaceConnectorState` for each install and workspace;
-- load the required grant from `CredentialGrantRepository`;
+- load `MCPWorkspaceConnectorState` for each install and workspace;
+- load the required grant from `MCPCredentialGrantRepository`;
 - return unusable rows when `include_unusable=True`;
 - return only usable rows to runtime.
 
 The service exposes two methods:
 
 - `list_for_workspace_user(workspace_id: str, user_id: str, include_unusable: bool)
-  -> list[EffectiveConnectorDTO]`
-- `list_runtime_specs(workspace_id: str, user_id: str) -> list[RuntimeConnectorSpec]`
+  -> list[MCPEffectiveConnectorDTO]`
+- `list_runtime_specs(workspace_id: str, user_id: str) -> list[MCPRuntimeConnectorSpec]`
 
 - [ ] **Step 4: Wire OAuth refresh in runtime token resolution**
 
@@ -1128,7 +1128,7 @@ Edit `backend/cubebox/mcp/cubepi_runtime.py` so `load_workspace_mcp_tools_for_cu
 accepts:
 
 ```python
-effective_service: EffectiveConnectorService
+effective_service: MCPEffectiveConnectorService
 token_manager: OAuthTokenManager | None
 ```
 
@@ -1148,7 +1148,7 @@ For no-auth connectors, sign the short-lived Cubebox identity token.
 
 - [ ] **Step 5: Wire run manager**
 
-Edit `backend/cubebox/streams/run_manager.py` to construct `EffectiveConnectorService`
+Edit `backend/cubebox/streams/run_manager.py` to construct `MCPEffectiveConnectorService`
 inside the MCP tools block and pass it to `load_workspace_mcp_tools_for_cubepi`.
 Construct `OAuthTokenManager` using the same `_build_token_manager_for_org` helper used by
 admin MCP dependencies.
@@ -1196,9 +1196,9 @@ Append to `backend/tests/e2e/conftest.py`:
 ```python
 @pytest_asyncio.fixture
 async def noauth_template_id(db_session: AsyncSession) -> AsyncIterator[str]:
-    from cubebox.repositories.mcp import ConnectorTemplateRepository
+    from cubebox.repositories.mcp import MCPConnectorTemplateRepository
 
-    row = await ConnectorTemplateRepository(db_session).upsert_by_slug(
+    row = await MCPConnectorTemplateRepository(db_session).upsert_by_slug(
         slug="noauth-e2e",
         name="NoAuth E2E",
         description="No auth connector.",
@@ -1326,7 +1326,7 @@ Remove `MCPCatalogConnector`, `MCPCatalogListResponse`, `MCPOrgInstallOverrideRe
 and old server override types. Add:
 
 ```typescript
-export interface ConnectorTemplate {
+export interface MCPConnectorTemplate {
   template_id: string
   slug: string
   name: string
@@ -1340,7 +1340,7 @@ export interface ConnectorTemplate {
   status: 'active' | 'deprecated' | 'disabled'
 }
 
-export interface ConnectorInstall {
+export interface MCPConnectorInstall {
   install_id: string
   template_id: string | null
   install_scope: 'org' | 'workspace'
@@ -1353,17 +1353,17 @@ export interface ConnectorInstall {
   install_state: 'active' | 'uninstalled'
 }
 
-export interface WorkspaceConnectorState {
+export interface MCPWorkspaceConnectorState {
   workspace_id: string
   install_id: string
   enabled: boolean
   credential_policy: MCPCredentialScope
 }
 
-export interface EffectiveConnector {
-  template: ConnectorTemplate | null
-  install: ConnectorInstall
-  workspace_state: WorkspaceConnectorState
+export interface MCPEffectiveConnector {
+  template: MCPConnectorTemplate | null
+  install: MCPConnectorInstall
+  workspace_state: MCPWorkspaceConnectorState
   credential_policy: MCPCredentialScope
   credential_availability: 'available' | 'missing' | 'not_required'
   credential_source: 'org' | 'workspace' | 'user' | null
@@ -1382,30 +1382,30 @@ Add helpers for final paths:
 export async function wsListTemplates(client: ApiClient, wsId: string) {
   const res = await client.get(`/api/v1/ws/${wsId}/mcp/templates`)
   if (!res.ok) throw await toApiError(res)
-  return (await res.json()) as { items: ConnectorTemplate[] }
+  return (await res.json()) as { items: MCPConnectorTemplate[] }
 }
 
 export async function wsCreateInstall(client: ApiClient, wsId: string, body: unknown) {
   const res = await client.post(`/api/v1/ws/${wsId}/mcp/installs`, body)
   if (!res.ok) throw await toApiError(res)
-  return (await res.json()) as ConnectorInstall
+  return (await res.json()) as MCPConnectorInstall
 }
 
 export async function wsPatchInstallState(
   client: ApiClient,
   wsId: string,
   installId: string,
-  body: Partial<WorkspaceConnectorState>,
+  body: Partial<MCPWorkspaceConnectorState>,
 ) {
   const res = await client.patch(`/api/v1/ws/${wsId}/mcp/installs/${installId}/state`, body)
   if (!res.ok) throw await toApiError(res)
-  return (await res.json()) as WorkspaceConnectorState
+  return (await res.json()) as MCPWorkspaceConnectorState
 }
 
 export async function wsListEffectiveConnectors(client: ApiClient, wsId: string) {
   const res = await client.get(`/api/v1/ws/${wsId}/mcp/connectors`)
   if (!res.ok) throw await toApiError(res)
-  return (await res.json()) as { items: EffectiveConnector[] }
+  return (await res.json()) as { items: MCPEffectiveConnector[] }
 }
 ```
 

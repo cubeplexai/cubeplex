@@ -412,7 +412,7 @@ Outcome:
 Introduce one conceptual service as the only source of truth:
 
 ```text
-EffectiveConnectorService.list_for_workspace_user(
+MCPEffectiveConnectorService.list_for_workspace_user(
   org_id,
   workspace_id,
   user_id,
@@ -624,29 +624,36 @@ Avoid using "catalog" or "override" in UI.
 Because the product has not shipped, implementation should move directly to
 the target schema instead of layering compatibility names on top of old tables:
 
-| Concept | Target Table |
-| --- | --- |
-| `ConnectorTemplate` | `connector_templates` |
-| `ConnectorInstall` | `connector_installs` |
-| `WorkspaceConnectorState` | `workspace_connector_states` |
-| `CredentialGrant` | `credential_grants` |
+Implementation naming uses one explicit MCP prefix:
+
+- Python model/repository/service classes use `MCP...`.
+- Database tables use `mcp_...`.
+- Product copy can still use the shorter nouns: template, install, workspace state,
+  and grant.
+
+| Concept | Python Model | Target Table |
+| --- | --- | --- |
+| `ConnectorTemplate` | `MCPConnectorTemplate` | `mcp_connector_templates` |
+| `ConnectorInstall` | `MCPConnectorInstall` | `mcp_connector_installs` |
+| `WorkspaceConnectorState` | `MCPWorkspaceConnectorState` | `mcp_workspace_connector_states` |
+| `CredentialGrant` | `MCPCredentialGrant` | `mcp_credential_grants` |
 
 Existing MCP tables (`mcp_catalog_connectors`, `mcp_servers`,
 `workspace_mcp_overrides`, `workspace_mcp_credentials`, `user_mcp_credentials`) are
 implementation history, not product model. The implementation plan may use destructive
 migration for local/dev data, because there is no released external contract.
 
-Org, workspace, and user grants should all be rows in `credential_grants`. The
-credential vault remains the secret storage layer; `credential_grants.credential_id`
-and `credential_grants.refresh_credential_id` point to vault rows.
+Org, workspace, and user grants should all be rows in `mcp_credential_grants`. The
+credential vault remains the secret storage layer; `mcp_credential_grants.credential_id`
+and `mcp_credential_grants.refresh_credential_id` point to vault rows.
 
 ## Implementation Strategy
 
 ### Phase 1: Target Schema And Domain Names
 
 - Create target tables for templates, installs, workspace states, and grants.
-- Replace old model class names with `ConnectorTemplate`, `ConnectorInstall`,
-  `WorkspaceConnectorState`, and `CredentialGrant`.
+- Replace old model class names with `MCPConnectorTemplate`, `MCPConnectorInstall`,
+  `MCPWorkspaceConnectorState`, and `MCPCredentialGrant`.
 - Replace catalog/override repositories and services with template/install/state/grant
   repositories and services.
 
@@ -737,7 +744,7 @@ These decisions are resolved for the first implementation:
    distributable?
    Recommended answer: add an org install policy later; v1 can allow enable for all org installs.
 4. Should org grant stay on `mcp_servers.credential_id` short-term?
-   Recommended answer: no. Use unified `credential_grants` now.
+   Recommended answer: no. Use unified `mcp_credential_grants` now.
 
 ## Success Criteria
 
