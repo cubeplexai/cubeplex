@@ -11,14 +11,26 @@ import {
   Loader2,
   Plug,
 } from 'lucide-react'
-import { createApiClient, useWorkspaceMcpCatalogStore, wsOAuthStart } from '@cubebox/core'
-import type { MCPAuthMethod, MCPCatalogConnector, MCPCatalogStaticFormField } from '@cubebox/core'
+import {
+  createApiClient,
+  useWorkspaceMcpCatalogStore,
+  useWorkspaceSettingsStore,
+  wsOAuthStart,
+} from '@cubebox/core'
+import type {
+  MCPAuthMethod,
+  MCPCatalogConnector,
+  MCPCatalogStaticFormField,
+  MCPCredentialMode,
+  MCPServerItem,
+} from '@cubebox/core'
 import { useTranslations } from 'next-intl'
 
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 import { cn } from '@/lib/utils'
 
 const OAUTH_ORIGIN_KEY = 'mcp_oauth_origin'
@@ -355,6 +367,7 @@ function ActionPanel({ connector, wsId }: { connector: MCPCatalogConnector; wsId
   const disableOrgInstall = useWorkspaceMcpCatalogStore((s) => s.disableOrgInstall)
   const uninstallWorkspacePrivate = useWorkspaceMcpCatalogStore((s) => s.uninstallWorkspacePrivate)
   const [busy, setBusy] = useState(false)
+  const [resumeError, setResumeError] = useState<string | null>(null)
 
   const client = useMemo(() => {
     const c = createApiClient('')
@@ -372,31 +385,58 @@ function ActionPanel({ connector, wsId }: { connector: MCPCatalogConnector; wsId
   }
 
   if (connector.user_install_id) {
-    return (
-      <Button
-        variant="destructive"
-        disabled={busy}
-        onClick={() =>
-          withBusy(() =>
-            uninstallWorkspacePrivate(client, wsId, connector.user_install_id as string),
-          )
+    // Workspace-private install. If it's already authed (workspace_visible),
+    // only Uninstall is relevant. If it's unauthed and the catalog supports
+    // OAuth, the user likely hit an interrupted callback — offer Resume so
+    // they don't have to delete+recreate the install to retry the dance.
+    const installId = connector.user_install_id
+    const showResume =
+      !connector.workspace_visible && connector.supported_auth_methods.includes('oauth')
+
+    async function handleResume(): Promise<void> {
+      setResumeError(null)
+      setBusy(true)
+      try {
+        persistOAuthOrigin()
+        const oauth = await wsOAuthStart(client, wsId, installId)
+        if (typeof window !== 'undefined') {
+          window.location.href = oauth.authorize_url
         }
-      >
-        {busy && <Loader2 className="mr-2 size-4 animate-spin" />}
-        {t('actionUninstall')}
-      </Button>
+      } catch (err) {
+        setResumeError((err as Error).message)
+        setBusy(false)
+      }
+    }
+
+    return (
+      <div className="flex flex-col gap-2">
+        {showResume && (
+          <Button disabled={busy} onClick={() => void handleResume()}>
+            {busy && <Loader2 className="mr-2 size-4 animate-spin" />}
+            {t('actionResumeOAuth')}
+          </Button>
+        )}
+        {resumeError && <p className="text-xs text-destructive">{resumeError}</p>}
+        <Button
+          variant={showResume ? 'outline' : 'destructive'}
+          disabled={busy}
+          onClick={() => withBusy(() => uninstallWorkspacePrivate(client, wsId, installId))}
+        >
+          {busy && <Loader2 className="mr-2 size-4 animate-spin" />}
+          {t('actionUninstall')}
+        </Button>
+      </div>
     )
   }
 
   if (connector.org_install_id) {
+    const installId = connector.org_install_id
     if (connector.workspace_visible) {
       return (
         <Button
           variant="outline"
           disabled={busy}
-          onClick={() =>
-            withBusy(() => disableOrgInstall(client, wsId, connector.org_install_id as string))
-          }
+          onClick={() => withBusy(() => disableOrgInstall(client, wsId, installId))}
         >
           {busy && <Loader2 className="mr-2 size-4 animate-spin" />}
           {t('actionDisable')}
@@ -406,9 +446,7 @@ function ActionPanel({ connector, wsId }: { connector: MCPCatalogConnector; wsId
     return (
       <Button
         disabled={busy}
-        onClick={() =>
-          withBusy(() => enableOrgInstall(client, wsId, connector.org_install_id as string))
-        }
+        onClick={() => withBusy(() => enableOrgInstall(client, wsId, installId))}
       >
         {busy && <Loader2 className="mr-2 size-4 animate-spin" />}
         {t('actionEnable')}
@@ -419,7 +457,94 @@ function ActionPanel({ connector, wsId }: { connector: MCPCatalogConnector; wsId
   return <InstallForm connector={connector} wsId={wsId} />
 }
 
-function ConnectorDetail({ connector, wsId }: { connector: MCPCatalogConnector; wsId: string }) {
+const CREDENTIAL_MODES: MCPCredentialMode[] = ['org', 'workspace', 'user']
+
+function CredentialModeSection({ server, wsId }: { server: MCPServerItem; wsId: string }) {
+  const t = useTranslations('mcp.wsPanel')
+  const patchMCPCredentialMode = useWorkspaceSettingsStore((s) => s.patchMCPCredentialMode)
+  const reloadSettings = useWorkspaceSettingsStore((s) => s.loadAll)
+  const [saving, setSaving] = useState(false)
+
+  const client = useMemo(() => {
+    const c = createApiClient('')
+    c.setWorkspaceId(wsId)
+    return c
+  }, [wsId])
+
+  async function handleModeChange(mode: string): Promise<void> {
+    setSaving(true)
+    try {
+      await patchMCPCredentialMode(client, server.server_id, mode as MCPCredentialMode)
+      // Reload so credential_source picks up the new mode's resolved state.
+      await reloadSettings(client)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="rounded-lg border border-border/70 bg-card/40 p-4">
+      <h4 className="mb-3 text-sm font-semibold">{t('credentialModeTitle')}</h4>
+      <RadioGroup
+        value={server.credential_mode}
+        onValueChange={(v) => void handleModeChange(v)}
+        disabled={saving}
+        className="flex flex-col gap-3"
+      >
+        {CREDENTIAL_MODES.map((mode) => (
+          <label
+            key={mode}
+            htmlFor={`cred-mode-${mode}`}
+            className={cn(
+              'flex cursor-pointer items-start gap-3 rounded-lg border p-3',
+              'transition-colors hover:bg-accent/40',
+              server.credential_mode === mode
+                ? 'border-primary/40 bg-primary/5'
+                : 'border-border/70',
+            )}
+          >
+            <RadioGroupItem value={mode} id={`cred-mode-${mode}`} disabled={saving} />
+            <span className="flex flex-col gap-0.5">
+              <span className="text-sm font-medium">{t(`credMode_${mode}_title`)}</span>
+              <span className="text-xs text-muted-foreground">{t(`credMode_${mode}_help`)}</span>
+            </span>
+          </label>
+        ))}
+      </RadioGroup>
+
+      <div className="mt-3 rounded-md bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+        <CredentialStateDescription server={server} />
+      </div>
+    </div>
+  )
+}
+
+function CredentialStateDescription({ server }: { server: MCPServerItem }) {
+  const t = useTranslations('mcp.wsPanel')
+  switch (server.credential_mode) {
+    case 'org':
+      return <span>{t('credStateOrg')}</span>
+    case 'workspace':
+      if (server.credential_source === 'workspace' && server.credential_shared_by) {
+        return <span>{t('credStateWsActive', { name: server.credential_shared_by })}</span>
+      }
+      return <span>{t('credStateWsNeeded')}</span>
+    case 'user':
+      return <span>{t('credStateUser')}</span>
+    default:
+      return null
+  }
+}
+
+function ConnectorDetail({
+  connector,
+  wsId,
+  orgServerItem,
+}: {
+  connector: MCPCatalogConnector
+  wsId: string
+  orgServerItem: MCPServerItem | null
+}) {
   const t = useTranslations('mcp.wsPanel.catalog')
   const status = statusOf(connector)
 
@@ -461,6 +586,7 @@ function ConnectorDetail({ connector, wsId }: { connector: MCPCatalogConnector; 
       </div>
 
       <ActionPanel connector={connector} wsId={wsId} />
+      {orgServerItem && <CredentialModeSection server={orgServerItem} wsId={wsId} />}
     </div>
   )
 }
@@ -473,6 +599,10 @@ export function McpPanel({ wsId }: McpPanelProps) {
   const selectedSlug = useWorkspaceMcpCatalogStore((s) => s.selectedSlug)
   const selectSlug = useWorkspaceMcpCatalogStore((s) => s.selectSlug)
   const load = useWorkspaceMcpCatalogStore((s) => s.load)
+  // Workspace settings store carries credential_mode/source for each org install,
+  // joined by mcp_server_id; the catalog endpoint doesn't expose those.
+  const settingsMcp = useWorkspaceSettingsStore((s) => s.mcp)
+  const loadSettings = useWorkspaceSettingsStore((s) => s.loadAll)
 
   const [search, setSearch] = useState('')
 
@@ -484,7 +614,8 @@ export function McpPanel({ wsId }: McpPanelProps) {
 
   useEffect(() => {
     void load(client, wsId)
-  }, [client, wsId, load])
+    void loadSettings(client)
+  }, [client, wsId, load, loadSettings])
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase()
@@ -511,6 +642,11 @@ export function McpPanel({ wsId }: McpPanelProps) {
     () => connectors.find((c) => c.slug === selectedSlug) ?? null,
     [connectors, selectedSlug],
   )
+
+  const selectedOrgServerItem = useMemo<MCPServerItem | null>(() => {
+    if (!selected?.org_install_id || !settingsMcp) return null
+    return settingsMcp.org_servers.find((s) => s.server_id === selected.org_install_id) ?? null
+  }, [selected, settingsMcp])
 
   const enabledCount = connectors.filter((c) => c.workspace_visible).length
 
@@ -569,7 +705,11 @@ export function McpPanel({ wsId }: McpPanelProps) {
 
         <section className="flex flex-1 overflow-y-auto">
           {selected ? (
-            <ConnectorDetail connector={selected} wsId={wsId} />
+            <ConnectorDetail
+              connector={selected}
+              wsId={wsId}
+              orgServerItem={selectedOrgServerItem}
+            />
           ) : (
             <div
               className="flex flex-1 items-center justify-center p-8 text-sm

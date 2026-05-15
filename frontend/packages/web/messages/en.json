@@ -598,7 +598,8 @@
         "installTitle": "Install for this workspace",
         "actionEnable": "Enable for workspace",
         "actionDisable": "Disable for workspace",
-        "actionUninstall": "Uninstall"
+        "actionUninstall": "Uninstall",
+        "actionResumeOAuth": "Resume setup"
       }
     },
     "wsPage": {
