@@ -58,6 +58,7 @@ export function MCPCitationMappingTab({
         setState(r)
         setDraft(r.tool_citations)
         setSelectedTool(r.tools_cache[0]?.name ?? null)
+        setError(null)
       })
       .catch((e: unknown) => {
         if (!cancelled) setError(String(e))
@@ -149,12 +150,14 @@ export function MCPCitationMappingTab({
   }
 
   const save = async () => {
+    setError(null)
     setSaving(true)
     try {
       const updated = await wsPatchToolCitations(client, workspaceId, serverId, draft)
       setState(updated)
       setDraft(updated.tool_citations)
       setDirty(false)
+      setError(null)
     } catch (e: unknown) {
       setError(String(e))
     } finally {
