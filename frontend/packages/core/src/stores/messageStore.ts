@@ -274,7 +274,14 @@ function restoreTodosFromHistory(messages: Message[]): TodoItem[] {
 function hydrateCitationsFromHistory(conversationId: string, messages: Message[]): void {
   for (const msg of messages) {
     if (msg.role !== 'tool_result') continue
-    const citations = msg.metadata?.citations
+    // CitationMiddleware persists citations on ToolResultMessage.details
+    // (cubebox/middleware/citation.py:169 — AfterToolCallResult(details={"citations": [...]})).
+    // metadata.citations only exists for in-memory finalized messages.
+    const details = msg.details as
+      | { citations?: import('../types').CitationData[] }
+      | null
+      | undefined
+    const citations = details?.citations ?? msg.metadata?.citations
     if (citations && citations.length > 0) {
       useCitationStore.getState().loadCitations(conversationId, citations)
     }
