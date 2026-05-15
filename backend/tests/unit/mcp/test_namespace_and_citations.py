@@ -191,3 +191,85 @@ async def test_loader_continues_on_per_server_load_failure() -> None:
 
     assert {t.name for t in tools} == {"live__ping"}
     assert citation_configs == {}
+
+
+@pytest.mark.asyncio
+async def test_loader_slugifies_server_name_in_namespace() -> None:
+    """Server names with spaces / punctuation are sanitized for the tool name prefix."""
+    from cubebox.mcp.cubepi_discovery import CubepiMCPServerSpec
+    from cubebox.mcp.cubepi_runtime import load_workspace_mcp_tools_for_cubepi
+
+    specs = [
+        CubepiMCPServerSpec(
+            server_id="mcp-1",
+            server_name="Cloudflare Workers",
+            url="http://example.com/mcp",
+            headers={},
+            tool_citations={},
+        ),
+    ]
+    with (
+        patch(
+            "cubebox.mcp.cubepi_runtime.discover_workspace_mcp_servers_for_cubepi",
+            new=AsyncMock(return_value=specs),
+        ),
+        patch(
+            "cubebox.mcp.cubepi_runtime.load_mcp_tools_http",
+            new=AsyncMock(return_value=[_fake_tool("fetch_url")]),
+        ),
+    ):
+        tools, _ = await load_workspace_mcp_tools_for_cubepi(
+            session=None,  # type: ignore[arg-type]
+            workspace_id="ws-x",
+            org_id="org-x",
+            user_id="usr-x",
+            cred_service=None,  # type: ignore[arg-type]
+            signer=None,  # type: ignore[arg-type]
+        )
+
+    assert len(tools) == 1
+    # Spaces collapsed to underscore; matches OpenAI strict regex.
+    assert tools[0].name == "Cloudflare_Workers__fetch_url"
+    import re
+
+    assert re.fullmatch(r"[a-zA-Z0-9_]+", tools[0].name)
+
+
+@pytest.mark.asyncio
+async def test_loader_truncates_long_namespaced_names() -> None:
+    """Very long server names are truncated so combined name <= 64 chars."""
+    from cubebox.mcp.cubepi_discovery import CubepiMCPServerSpec
+    from cubebox.mcp.cubepi_runtime import load_workspace_mcp_tools_for_cubepi
+
+    long_name = "X" * 100  # way over 64
+    specs = [
+        CubepiMCPServerSpec(
+            server_id="mcp-1",
+            server_name=long_name,
+            url="http://example.com/mcp",
+            headers={},
+            tool_citations={},
+        ),
+    ]
+    with (
+        patch(
+            "cubebox.mcp.cubepi_runtime.discover_workspace_mcp_servers_for_cubepi",
+            new=AsyncMock(return_value=specs),
+        ),
+        patch(
+            "cubebox.mcp.cubepi_runtime.load_mcp_tools_http",
+            new=AsyncMock(return_value=[_fake_tool("ping")]),
+        ),
+    ):
+        tools, _ = await load_workspace_mcp_tools_for_cubepi(
+            session=None,  # type: ignore[arg-type]
+            workspace_id="ws-x",
+            org_id="org-x",
+            user_id="usr-x",
+            cred_service=None,  # type: ignore[arg-type]
+            signer=None,  # type: ignore[arg-type]
+        )
+
+    assert len(tools) == 1
+    assert len(tools[0].name) <= 64
+    assert tools[0].name.endswith("__ping")

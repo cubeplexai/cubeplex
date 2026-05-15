@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import dataclasses
 import logging
+import re
 from typing import Any
 
 from cubepi.agent.types import AgentTool
@@ -18,6 +19,33 @@ from cubebox.middleware.citations.config import CitationConfig
 from cubebox.services.credential import CredentialService
 
 logger = logging.getLogger(__name__)
+
+_NS_SLUG_RE = re.compile(r"[^a-zA-Z0-9]+")
+_NS_MAX_LEN = 64  # OpenAI strict function-name max length
+
+
+def _slugify_for_namespace(server_name: str) -> str:
+    """Produce a function-name-safe slug from an MCP server's display name.
+
+    Replaces runs of non-[A-Za-z0-9] with underscore; strips leading/trailing
+    underscores; falls back to "mcp" if empty.
+    """
+    slug = _NS_SLUG_RE.sub("_", server_name).strip("_")
+    return slug or "mcp"
+
+
+def _build_namespaced_name(server_name: str, tool_name: str) -> str:
+    """Return ``{slug}__{tool_name}`` with total length <= 64."""
+    slug = _slugify_for_namespace(server_name)
+    combined = f"{slug}__{tool_name}"
+    if len(combined) <= _NS_MAX_LEN:
+        return combined
+    # Truncate the slug; preserve full tool name. If tool name itself is too
+    # long, truncate that as a last resort (logged + audited via the parent loop).
+    budget = _NS_MAX_LEN - len(tool_name) - 2  # 2 for "__"
+    if budget < 1:
+        return tool_name[:_NS_MAX_LEN]
+    return f"{slug[:budget]}__{tool_name}"
 
 
 async def load_workspace_mcp_tools_for_cubepi(
@@ -68,10 +96,10 @@ async def load_workspace_mcp_tools_for_cubepi(
             )
             continue
 
-        prefix = f"{spec.server_name}__"
         for tool in tools:
             bare_name = tool.name
-            namespaced = dataclasses.replace(tool, name=f"{prefix}{bare_name}")
+            namespaced_name = _build_namespaced_name(spec.server_name, bare_name)
+            namespaced = dataclasses.replace(tool, name=namespaced_name)
             all_tools.append(namespaced)
             raw = spec.tool_citations.get(bare_name)
             if raw is None:
