@@ -1,1629 +1,957 @@
-# MCP Management Four-Layer Implementation Plan
+# MCP Management Four-Layer Direct Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Implement the four-layer MCP management model so templates, installs, workspace state, and credential grants have separate product and runtime semantics.
+**Goal:** Replace the current MCP catalog/server/override model with the final four-layer model: connector templates, connector installs, workspace connector states, and credential grants.
 
-**Architecture:** Add a backend effective-state service over the current tables first, then move runtime, APIs, and UI to consume that service. Keep legacy `catalog`/`override` URLs as compatibility wrappers while the product language changes to connector templates, installs, workspace state, and grants.
+**Architecture:** Use a direct schema and API replacement because the product has not shipped. Create target tables and model classes, remove old catalog/override routes, make `credential_grants` the single grant table, and make `EffectiveConnectorService` the only source of runtime usability.
 
 **Tech Stack:** FastAPI, SQLModel, Alembic, PostgreSQL, Redis, OAuthTokenManager, Next.js, Zustand, TypeScript, pytest, Playwright.
 
 **Spec:** `docs/superpowers/specs/2026-05-15-mcp-management-four-layer-design.md`
 
-**Conventions:**
+**Implementation Policy:**
 
-- Run backend commands from `backend/`.
-- Run frontend commands from `frontend/`.
-- In this worktree, read `.worktree.env` before manual server checks.
-- Keep one logical commit per task unless a task only updates this plan.
-- Do not physically rename existing DB tables in this implementation pass.
-- Preserve old endpoints until frontend and runtime have migrated.
+- No forward compatibility with old MCP product/API names.
+- Remove `catalog` and `override` from public API paths, frontend API helpers, UI copy,
+  services, repositories, and new tests.
+- Use target table names now:
+  `connector_templates`, `connector_installs`, `workspace_connector_states`,
+  `credential_grants`.
+- Existing local MCP data can be dropped by migration. The product has no released
+  external contract.
+- Keep the credential vault table; grant rows point to vault credential ids.
+- Keep `backend/cubebox/models/mcp.py` as the MCP model module, but replace the model
+  classes inside it with the four final nouns.
 
 ---
 
 ## File Structure
 
-**Backend — new files:**
+**Backend — create:**
 
-- `backend/cubebox/mcp/effective.py` — four-layer domain types, pure state computation,
-  DB-backed effective connector service, and runtime spec conversion.
-- `backend/tests/unit/mcp/test_effective_state.py` — pure decision-table tests.
-- `backend/tests/unit/mcp/test_effective_service.py` — service tests using fake rows/repos.
-- `backend/tests/e2e/test_mcp_effective_connectors.py` — route and runtime-level coverage.
+- `backend/alembic/versions/f2a6c7d8e901_normalize_mcp_four_layer_tables.py`
+- `backend/cubebox/mcp/effective.py`
+- `backend/cubebox/services/mcp_templates.py`
+- `backend/cubebox/services/mcp_installs.py`
+- `backend/tests/unit/mcp/test_effective_state.py`
+- `backend/tests/unit/mcp/test_effective_service.py`
+- `backend/tests/e2e/test_mcp_four_layer_routes.py`
+- `backend/tests/e2e/test_mcp_four_layer_runtime.py`
 
-**Backend — modified files:**
+**Backend — modify:**
 
-- `backend/cubebox/models/mcp.py` — add `install_status` to separate install lifecycle
-  from credential readiness.
-- `backend/cubebox/repositories/mcp.py` — filter active installs and add active-list helpers.
-- `backend/cubebox/services/mcp_catalog.py` — no-auth workspace install fix,
-  `install_status` transitions, and reactivation behavior.
-- `backend/cubebox/mcp/dependencies.py` — add `get_effective_connector_service`.
-- `backend/cubebox/api/schemas/mcp.py` — effective connector response and patch schemas.
-- `backend/cubebox/api/schemas/ws_settings.py` — tighten MCP credential mode literals.
-- `backend/cubebox/api/routes/v1/ws_mcp.py` — add normalized workspace connector routes.
-- `backend/cubebox/api/routes/v1/mcp_catalog.py` — expose template aliases while keeping
-  catalog routes.
-- `backend/cubebox/api/routes/v1/ws_settings.py` — delegate MCP settings to the
-  effective service.
-- `backend/cubebox/mcp/cubepi_discovery.py` — stop duplicating effective-state logic.
-- `backend/cubebox/mcp/cubepi_runtime.py` — load runtime specs from the effective service.
-- `backend/cubebox/streams/run_manager.py` — pass OAuth token manager into MCP runtime load.
+- `backend/cubebox/models/mcp.py` — final four model classes.
+- `backend/cubebox/repositories/mcp.py` — final four repositories.
+- Rename `backend/cubebox/mcp/catalog_seed.py` to
+  `backend/cubebox/mcp/template_seed.py`.
+- Rename `backend/cubebox/seeders/mcp_catalog_seeder.py` to
+  `backend/cubebox/seeders/mcp_template_seeder.py`.
+- Rename `backend/cubebox/cli/seed_mcp_catalog.py` to
+  `backend/cubebox/cli/seed_mcp_templates.py`.
+- `backend/cubebox/mcp/dependencies.py` — new template/install/effective providers.
+- `backend/cubebox/api/schemas/mcp.py` — template/install/state/grant schemas.
+- `backend/cubebox/api/routes/v1/admin_mcp.py` — admin template/install/grant routes.
+- `backend/cubebox/api/routes/v1/ws_mcp.py` — workspace template/install/state/grant routes.
+- `backend/cubebox/api/app.py` — stop mounting old catalog router.
+- `backend/cubebox/mcp/cubepi_discovery.py` — use effective runtime specs.
+- `backend/cubebox/mcp/cubepi_runtime.py` — load only usable effective connectors.
+- `backend/cubebox/streams/run_manager.py` — pass OAuth token manager to runtime.
 
-**Frontend — modified files:**
+**Backend — delete:**
 
-- `frontend/packages/core/src/types/mcp.ts` — add template, install, state, grant,
-  and effective connector types.
-- `frontend/packages/core/src/api/mcp.ts` — add effective connector API helpers.
-- `frontend/packages/core/src/api/workspace-settings.ts` — route MCP settings through
-  the normalized connector endpoints.
-- `frontend/packages/core/src/stores/workspaceSettingsStore.ts` — store effective connector
-  state and update it after workspace-state patches.
-- `frontend/packages/core/__tests__/api/mcp.test.ts` — API path and payload coverage.
-- `frontend/packages/web/components/workspace-settings/McpPanel.tsx` — show four-layer
-  semantics without exposing `override` as product language.
-- `frontend/packages/web/components/mcp/MCPCatalogInstallPanel.tsx` — present catalog as
-  connector templates.
-- `frontend/packages/web/messages/en.json` and
-  `frontend/packages/web/messages/zh.json` — terminology updates.
+- `backend/cubebox/api/routes/v1/mcp_catalog.py`
+- `backend/cubebox/repositories/mcp_catalog.py`
+- `backend/cubebox/services/mcp_catalog.py`
+
+**Frontend — create or rename:**
+
+- Rename `frontend/packages/web/components/mcp/MCPCatalogInstallPanel.tsx` to
+  `frontend/packages/web/components/mcp/MCPTemplateInstallPanel.tsx`.
+
+**Frontend — modify:**
+
+- `frontend/packages/core/src/types/mcp.ts`
+- `frontend/packages/core/src/api/mcp.ts`
+- `frontend/packages/core/src/types/workspace-settings.ts`
+- `frontend/packages/core/src/api/workspace-settings.ts`
+- `frontend/packages/core/src/stores/workspaceSettingsStore.ts`
+- `frontend/packages/core/__tests__/api/mcp.test.ts`
+- `frontend/packages/web/components/workspace-settings/McpPanel.tsx`
+- `frontend/packages/web/components/mcp/MCPConnectorList.tsx`
+- `frontend/packages/web/components/mcp/MCPAdminDetailPanel.tsx`
+- `frontend/packages/web/components/mcp/MCPWorkspacesTab.tsx`
+- `frontend/packages/web/messages/en.json`
+- `frontend/packages/web/messages/zh.json`
+- `frontend/packages/web/__tests__/e2e/mcp/ws-mcp.spec.ts`
+- `frontend/packages/web/__tests__/e2e/mcp/admin-mcp.spec.ts`
 
 ---
 
-## Task 1: Effective State Domain Model
+## Task 1: Target Schema And Model Classes
 
 **Files:**
 
-- Create: `backend/cubebox/mcp/effective.py`
-- Create: `backend/tests/unit/mcp/test_effective_state.py`
-
-- [ ] **Step 1: Write the pure state tests**
-
-Create `backend/tests/unit/mcp/test_effective_state.py`:
-
-```python
-from cubebox.mcp.effective import (
-    ConnectorInstallView,
-    ConnectorTemplateView,
-    CredentialGrantView,
-    WorkspaceConnectorStateView,
-    compute_effective_state,
-)
-
-
-def _install(
-    *,
-    auth_method: str = "static",
-    credential_scope: str = "org",
-    install_status: str = "active",
-    origin: str = "org",
-) -> ConnectorInstallView:
-    return ConnectorInstallView(
-        install_id="mcp-1",
-        name="GitHub",
-        server_url="https://github.example.com/mcp",
-        transport="streamable_http",
-        auth_method=auth_method,
-        credential_scope=credential_scope,
-        install_status=install_status,
-        origin=origin,
-        owner_workspace_id=None if origin == "org" else "ws-1",
-        credential_id="cred-1" if credential_scope == "org" else None,
-        headers={},
-        tools_cache=[],
-        tool_citations={},
-    )
-
-
-def _template(status: str = "active") -> ConnectorTemplateView:
-    return ConnectorTemplateView(
-        template_id="mctlg-1",
-        slug="github",
-        name="GitHub",
-        provider="GitHub",
-        status=status,
-    )
-
-
-def test_no_auth_connector_is_usable_without_grant() -> None:
-    state = compute_effective_state(
-        template=_template(),
-        install=_install(auth_method="none", credential_scope="none"),
-        workspace_state=WorkspaceConnectorStateView(enabled=True, credential_policy=None),
-        grant=None,
-    )
-
-    assert state.usable is True
-    assert state.reason == "usable"
-    assert state.credential_policy == "none"
-    assert state.credential_availability == "not_required"
-
-
-def test_user_policy_requires_current_user_grant() -> None:
-    state = compute_effective_state(
-        template=_template(),
-        install=_install(credential_scope="org"),
-        workspace_state=WorkspaceConnectorStateView(enabled=True, credential_policy="user"),
-        grant=None,
-    )
-
-    assert state.usable is False
-    assert state.reason == "credential_missing"
-    assert state.credential_policy == "user"
-    assert state.credential_availability == "missing"
-
-
-def test_available_user_grant_makes_user_policy_usable() -> None:
-    state = compute_effective_state(
-        template=_template(),
-        install=_install(credential_scope="org"),
-        workspace_state=WorkspaceConnectorStateView(enabled=True, credential_policy="user"),
-        grant=CredentialGrantView(policy="user", available=True, source="user"),
-    )
-
-    assert state.usable is True
-    assert state.reason == "usable"
-    assert state.credential_source == "user"
-
-
-def test_disabled_workspace_state_blocks_runtime() -> None:
-    state = compute_effective_state(
-        template=_template(),
-        install=_install(credential_scope="org"),
-        workspace_state=WorkspaceConnectorStateView(enabled=False, credential_policy=None),
-        grant=CredentialGrantView(policy="org", available=True, source="org"),
-    )
-
-    assert state.usable is False
-    assert state.reason == "workspace_disabled"
-
-
-def test_inactive_template_blocks_catalog_backed_install() -> None:
-    state = compute_effective_state(
-        template=_template(status="disabled"),
-        install=_install(credential_scope="org"),
-        workspace_state=WorkspaceConnectorStateView(enabled=True, credential_policy=None),
-        grant=CredentialGrantView(policy="org", available=True, source="org"),
-    )
-
-    assert state.usable is False
-    assert state.reason == "template_inactive"
-
-
-def test_deleted_install_blocks_runtime_before_credentials() -> None:
-    state = compute_effective_state(
-        template=_template(),
-        install=_install(credential_scope="org", install_status="deleted"),
-        workspace_state=WorkspaceConnectorStateView(enabled=True, credential_policy=None),
-        grant=CredentialGrantView(policy="org", available=True, source="org"),
-    )
-
-    assert state.usable is False
-    assert state.reason == "install_deleted"
-```
-
-- [ ] **Step 2: Run tests and confirm the missing module failure**
-
-Run: `cd backend && uv run pytest -q tests/unit/mcp/test_effective_state.py`
-
-Expected: FAIL with `ModuleNotFoundError: No module named 'cubebox.mcp.effective'`.
-
-- [ ] **Step 3: Add the domain model and pure computation**
-
-Create `backend/cubebox/mcp/effective.py`:
-
-```python
-"""Effective MCP connector state.
-
-This module is the semantic boundary for the four-layer MCP model:
-template, install, workspace state, and credential grant.
-"""
-
-from __future__ import annotations
-
-from dataclasses import dataclass, field
-from typing import Any, Literal, cast
-
-AuthMethod = Literal["static", "oauth", "none"]
-ConnectorOrigin = Literal["org", "workspace"]
-CredentialPolicy = Literal["org", "workspace", "user", "none"]
-CredentialAvailability = Literal["available", "missing", "not_required"]
-CredentialSource = Literal["org", "workspace", "user"]
-EffectiveReason = Literal[
-    "usable",
-    "template_inactive",
-    "install_deleted",
-    "workspace_disabled",
-    "credential_missing",
-    "unsupported_transport",
-]
-
-_VALID_CREDENTIAL_POLICIES: frozenset[str] = frozenset({"org", "workspace", "user", "none"})
-_VALID_TRANSPORTS: frozenset[str] = frozenset({"sse", "streamable_http"})
-
-
-@dataclass(frozen=True, slots=True)
-class ConnectorTemplateView:
-    template_id: str | None
-    slug: str | None
-    name: str
-    provider: str | None
-    status: str
-
-
-@dataclass(frozen=True, slots=True)
-class ConnectorInstallView:
-    install_id: str
-    name: str
-    server_url: str
-    transport: str
-    auth_method: str
-    credential_scope: str
-    install_status: str
-    origin: str
-    owner_workspace_id: str | None
-    credential_id: str | None
-    headers: dict[str, str] = field(default_factory=dict)
-    tools_cache: list[dict[str, Any]] = field(default_factory=list)
-    tool_citations: dict[str, dict[str, Any]] = field(default_factory=dict)
-
-
-@dataclass(frozen=True, slots=True)
-class WorkspaceConnectorStateView:
-    enabled: bool
-    credential_policy: str | None
-
-
-@dataclass(frozen=True, slots=True)
-class CredentialGrantView:
-    policy: str
-    available: bool
-    source: str | None = None
-    shared_by: str | None = None
-
-
-@dataclass(frozen=True, slots=True)
-class EffectiveConnectorState:
-    template: ConnectorTemplateView | None
-    install: ConnectorInstallView
-    workspace_state: WorkspaceConnectorStateView
-    credential_policy: CredentialPolicy
-    credential_availability: CredentialAvailability
-    credential_source: str | None
-    credential_shared_by: str | None
-    usable: bool
-    reason: EffectiveReason
-
-
-def normalize_credential_policy(
-    *,
-    auth_method: str,
-    install_scope: str,
-    workspace_policy: str | None,
-) -> CredentialPolicy:
-    if auth_method == "none":
-        return "none"
-    raw = workspace_policy or install_scope
-    if raw not in _VALID_CREDENTIAL_POLICIES or raw == "none":
-        return "user"
-    return cast(CredentialPolicy, raw)
-
-
-def compute_effective_state(
-    *,
-    template: ConnectorTemplateView | None,
-    install: ConnectorInstallView,
-    workspace_state: WorkspaceConnectorStateView,
-    grant: CredentialGrantView | None,
-) -> EffectiveConnectorState:
-    policy = normalize_credential_policy(
-        auth_method=install.auth_method,
-        install_scope=install.credential_scope,
-        workspace_policy=workspace_state.credential_policy,
-    )
-
-    if policy == "none":
-        availability: CredentialAvailability = "not_required"
-        source: str | None = None
-        shared_by: str | None = None
-    elif grant is not None and grant.available and grant.policy == policy:
-        availability = "available"
-        source = grant.source
-        shared_by = grant.shared_by
-    else:
-        availability = "missing"
-        source = None
-        shared_by = None
-
-    reason: EffectiveReason = "usable"
-    usable = True
-    if template is not None and template.status != "active":
-        reason = "template_inactive"
-        usable = False
-    elif install.install_status != "active":
-        reason = "install_deleted"
-        usable = False
-    elif install.transport not in _VALID_TRANSPORTS:
-        reason = "unsupported_transport"
-        usable = False
-    elif not workspace_state.enabled:
-        reason = "workspace_disabled"
-        usable = False
-    elif availability == "missing":
-        reason = "credential_missing"
-        usable = False
-
-    return EffectiveConnectorState(
-        template=template,
-        install=install,
-        workspace_state=workspace_state,
-        credential_policy=policy,
-        credential_availability=availability,
-        credential_source=source,
-        credential_shared_by=shared_by,
-        usable=usable,
-        reason=reason,
-    )
-```
-
-- [ ] **Step 4: Run the pure tests**
-
-Run: `cd backend && uv run pytest -q tests/unit/mcp/test_effective_state.py`
-
-Expected: 6 passed.
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add backend/cubebox/mcp/effective.py backend/tests/unit/mcp/test_effective_state.py
-git commit -m "feat(mcp): add effective connector state model"
-```
-
----
-
-## Task 2: Install Lifecycle and No-Auth Correctness
-
-**Files:**
-
+- Create: `backend/alembic/versions/f2a6c7d8e901_normalize_mcp_four_layer_tables.py`
 - Modify: `backend/cubebox/models/mcp.py`
-- Modify: `backend/cubebox/repositories/mcp.py`
-- Modify: `backend/cubebox/services/mcp_catalog.py`
 - Modify: `backend/tests/unit/test_mcp_models.py`
-- Modify: `backend/tests/e2e/test_mcp_catalog_routes.py`
-- Create: `backend/alembic/versions/<ts>_add_mcp_install_status.py`
 
-- [ ] **Step 1: Add model and route tests for `install_status`**
+- [ ] **Step 1: Write model tests for final table names**
 
 Append to `backend/tests/unit/test_mcp_models.py`:
 
 ```python
-def test_mcp_server_install_status_defaults_active() -> None:
-    from cubebox.models import MCPServer
+def test_mcp_four_layer_table_names() -> None:
+    from cubebox.models import (
+        ConnectorInstall,
+        ConnectorTemplate,
+        CredentialGrant,
+        WorkspaceConnectorState,
+    )
 
-    row = MCPServer(
+    assert ConnectorTemplate.__tablename__ == "connector_templates"
+    assert ConnectorInstall.__tablename__ == "connector_installs"
+    assert WorkspaceConnectorState.__tablename__ == "workspace_connector_states"
+    assert CredentialGrant.__tablename__ == "credential_grants"
+
+
+def test_no_auth_install_defaults_to_none_policy() -> None:
+    from cubebox.models import ConnectorInstall
+
+    row = ConnectorInstall(
         org_id="org-1",
-        name="GitHub",
-        server_url="https://github.example.com/mcp",
+        name="NoAuth",
+        server_url="https://noauth.example.com/mcp",
         server_url_hash="hash",
         transport="streamable_http",
         auth_method="none",
-        credential_scope="none",
+        default_credential_policy="none",
         created_by_user_id="user-1",
     )
 
-    assert row.install_status == "active"
+    assert row.auth_method == "none"
+    assert row.default_credential_policy == "none"
+    assert row.install_state == "active"
+    assert row.auth_status == "not_required"
+    assert row.discovery_status == "not_run"
 ```
 
-Append to `backend/tests/e2e/test_mcp_catalog_routes.py`:
-
-```python
-async def test_workspace_no_auth_catalog_install_uses_none_scope(
-    client: httpx.AsyncClient,
-    workspace_id: str,
-    db_session: AsyncSession,
-) -> None:
-    from cubebox.repositories.mcp_catalog import MCPCatalogConnectorRepository
-
-    row = await MCPCatalogConnectorRepository(db_session).upsert_by_slug(
-        slug="noauth-effective-test",
-        name="NoAuth Effective Test",
-        description="No auth connector.",
-        provider="Cubebox",
-        server_url="https://noauth-effective.example.com/mcp",
-        transport="streamable_http",
-        supported_auth_methods=["none"],
-        default_credential_scope="none",
-    )
-    await db_session.commit()
-
-    resp = await client.post(
-        f"/api/v1/ws/{workspace_id}/mcp/catalog/{row.id}/install",
-        json={"auth_method": "none"},
-    )
-
-    assert resp.status_code == 201, resp.text
-    install_id = resp.json()["install_id"]
-    detail = await client.get(f"/api/v1/ws/{workspace_id}/mcp/servers/{install_id}")
-    assert detail.status_code == 200, detail.text
-    body = detail.json()
-    assert body["auth_method"] == "none"
-    assert body["credential_scope"] == "none"
-    assert body["authed"] is True
-```
-
-- [ ] **Step 2: Run tests and confirm failures**
-
-Run: `cd backend && uv run pytest -q tests/unit/test_mcp_models.py::test_mcp_server_install_status_defaults_active`
-
-Expected: FAIL with `AttributeError: 'MCPServer' object has no attribute 'install_status'`.
-
-Run: `cd backend && uv run pytest -q tests/e2e/test_mcp_catalog_routes.py::test_workspace_no_auth_catalog_install_uses_none_scope`
-
-Expected: FAIL because workspace catalog install currently forces user scope.
-
-- [ ] **Step 3: Add `install_status` to the model**
-
-Edit `backend/cubebox/models/mcp.py` inside `MCPServer`, after `credential_scope`:
-
-```python
-    install_status: str = Field(
-        default="active",
-        max_length=16,
-        sa_column_kwargs={"server_default": text("'active'")},
-    )
-```
-
-- [ ] **Step 4: Add the Alembic migration**
+- [ ] **Step 2: Run the tests and confirm the missing model failure**
 
 Run:
 
 ```bash
 cd backend
-uv run alembic revision --autogenerate -m "add mcp install status"
+uv run pytest -q tests/unit/test_mcp_models.py::test_mcp_four_layer_table_names \
+                 tests/unit/test_mcp_models.py::test_no_auth_install_defaults_to_none_policy
 ```
 
-Edit the generated migration so `upgrade()` contains:
+Expected: FAIL because the four final model classes are not exported.
+
+- [ ] **Step 3: Replace MCP model classes**
+
+Edit `backend/cubebox/models/mcp.py` so it defines these final classes:
 
 ```python
-op.add_column(
-    "mcp_servers",
-    sa.Column(
-        "install_status",
-        sa.String(length=16),
-        server_default=sa.text("'active'"),
-        nullable=False,
-    ),
+"""MCP connector management models."""
+
+from datetime import datetime
+from typing import Any, ClassVar
+
+from sqlalchemy import JSON, Column, Index, UniqueConstraint, text
+from sqlmodel import Field
+
+from cubebox.models.mixins import CubeboxBase
+
+
+class ConnectorTemplate(CubeboxBase, table=True):
+    _PREFIX: ClassVar[str] = "ctpl"
+    __tablename__ = "connector_templates"
+    __table_args__ = (UniqueConstraint("slug", name="uq_connector_template_slug"),)
+
+    slug: str = Field(max_length=64, index=True)
+    name: str = Field(max_length=128)
+    description: str = Field(max_length=2048)
+    provider: str = Field(max_length=64)
+    server_url: str = Field(max_length=2048)
+    transport: str = Field(max_length=16)
+    supported_auth_methods: list[str] = Field(
+        default_factory=list,
+        sa_column=Column(JSON, nullable=False),
+    )
+    default_credential_policy: str = Field(default="user", max_length=16)
+    oauth_dcr_supported: bool | None = Field(default=None)
+    oauth_default_scope: str | None = Field(default=None, max_length=512)
+    oauth_static_client_id: str | None = Field(default=None, max_length=256)
+    oauth_static_client_secret_credential_id: str | None = Field(
+        default=None,
+        foreign_key="credentials.id",
+        max_length=20,
+    )
+    static_form_schema: list[dict[str, Any]] | None = Field(
+        default=None,
+        sa_column=Column(JSON, nullable=True),
+    )
+    static_auth_header_template: str | None = Field(default=None, max_length=256)
+    template_metadata: dict[str, Any] = Field(
+        default_factory=dict,
+        sa_column=Column(JSON, nullable=False, server_default=text("'{}'")),
+    )
+    tool_citation_defaults: dict[str, dict[str, Any]] = Field(
+        default_factory=dict,
+        sa_column=Column(JSON, nullable=False, server_default=text("'{}'")),
+    )
+    status: str = Field(default="active", max_length=16)
+
+
+class ConnectorInstall(CubeboxBase, table=True):
+    _PREFIX: ClassVar[str] = "cins"
+    __tablename__ = "connector_installs"
+    __table_args__ = (
+        UniqueConstraint(
+            "org_id",
+            "workspace_id",
+            "server_url_hash",
+            name="uq_connector_install_url",
+        ),
+        UniqueConstraint(
+            "org_id",
+            "workspace_id",
+            "name",
+            name="uq_connector_install_name",
+        ),
+        Index(
+            "uq_connector_install_per_template",
+            "org_id",
+            text("COALESCE(workspace_id, '_org')"),
+            "template_id",
+            unique=True,
+            postgresql_where=text("template_id IS NOT NULL AND install_state = 'active'"),
+        ),
+    )
+
+    org_id: str = Field(foreign_key="organizations.id", max_length=20, index=True)
+    template_id: str | None = Field(
+        default=None,
+        foreign_key="connector_templates.id",
+        max_length=20,
+        index=True,
+    )
+    install_scope: str = Field(default="org", max_length=16)
+    workspace_id: str | None = Field(
+        default=None,
+        foreign_key="workspaces.id",
+        max_length=20,
+        index=True,
+    )
+    name: str = Field(max_length=64)
+    server_url: str = Field(max_length=2048)
+    server_url_hash: str = Field(max_length=64)
+    transport: str = Field(max_length=16)
+    auth_method: str = Field(max_length=16)
+    default_credential_policy: str = Field(max_length=16)
+    auth_status: str = Field(default="pending", max_length=16)
+    discovery_status: str = Field(default="not_run", max_length=16)
+    install_state: str = Field(
+        default="active",
+        max_length=16,
+        sa_column_kwargs={"server_default": text("'active'")},
+    )
+    oauth_client_config: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
+    headers: dict[str, str] = Field(default_factory=dict, sa_column=Column(JSON))
+    tools_cache: list[dict[str, Any]] = Field(default_factory=list, sa_column=Column(JSON))
+    tool_citations: dict[str, dict[str, Any]] = Field(
+        default_factory=dict,
+        sa_column=Column(JSON, nullable=False, server_default=text("'{}'")),
+    )
+    last_error: str | None = Field(default=None, max_length=2048)
+    last_discovered_at: datetime | None = None
+    timeout: float = Field(default=30.0)
+    sse_read_timeout: float = Field(default=300.0)
+    auto_enroll_new_workspaces: bool = Field(
+        default=True,
+        sa_column_kwargs={"server_default": text("true")},
+    )
+    created_by_user_id: str = Field(foreign_key="users.id", max_length=20)
+
+
+class WorkspaceConnectorState(CubeboxBase, table=True):
+    _PREFIX: ClassVar[str] = "wcst"
+    __tablename__ = "workspace_connector_states"
+    __table_args__ = (
+        UniqueConstraint("workspace_id", "install_id", name="uq_workspace_connector_state"),
+    )
+
+    org_id: str = Field(foreign_key="organizations.id", max_length=20, index=True)
+    workspace_id: str = Field(foreign_key="workspaces.id", max_length=20, index=True)
+    install_id: str = Field(foreign_key="connector_installs.id", max_length=20, index=True)
+    enabled: bool = Field(default=True)
+    credential_policy: str = Field(max_length=16)
+    enablement_source: str = Field(default="workspace_manual", max_length=32)
+    updated_by_user_id: str = Field(foreign_key="users.id", max_length=20)
+
+
+class CredentialGrant(CubeboxBase, table=True):
+    _PREFIX: ClassVar[str] = "cgrn"
+    __tablename__ = "credential_grants"
+    __table_args__ = (
+        UniqueConstraint(
+            "install_id",
+            "grant_scope",
+            "workspace_id",
+            "user_id",
+            name="uq_credential_grant_scope",
+        ),
+    )
+
+    org_id: str = Field(foreign_key="organizations.id", max_length=20, index=True)
+    install_id: str = Field(foreign_key="connector_installs.id", max_length=20, index=True)
+    grant_scope: str = Field(max_length=16)
+    workspace_id: str | None = Field(
+        default=None,
+        foreign_key="workspaces.id",
+        max_length=20,
+        index=True,
+    )
+    user_id: str | None = Field(
+        default=None,
+        foreign_key="users.id",
+        max_length=20,
+        index=True,
+    )
+    credential_id: str = Field(foreign_key="credentials.id", max_length=20)
+    refresh_credential_id: str | None = Field(default=None, foreign_key="credentials.id")
+    expires_at: datetime | None = None
+    grant_status: str = Field(default="valid", max_length=16)
+    created_by_user_id: str = Field(foreign_key="users.id", max_length=20)
+```
+
+Update `backend/cubebox/models/__init__.py` to export the four classes and remove old
+MCP model exports.
+
+- [ ] **Step 4: Add destructive migration to target tables**
+
+Create `backend/alembic/versions/f2a6c7d8e901_normalize_mcp_four_layer_tables.py`.
+
+Use revision id `f2a6c7d8e901` and set `down_revision` to the current head before this
+branch. The migration should:
+
+```python
+def upgrade() -> None:
+    op.drop_table("user_mcp_credentials")
+    op.drop_table("workspace_mcp_credentials")
+    op.drop_table("workspace_mcp_overrides")
+    op.drop_table("mcp_servers")
+    op.drop_table("mcp_catalog_connectors")
+
+    # Create connector_templates, connector_installs,
+    # workspace_connector_states, and credential_grants with the
+    # columns defined in backend/cubebox/models/mcp.py.
+```
+
+Create the four tables with the columns from `backend/cubebox/models/mcp.py`. Keep these
+constraints:
+
+```python
+op.create_check_constraint(
+    "ck_connector_installs_scope",
+    "connector_installs",
+    "install_scope IN ('org', 'workspace')",
 )
 op.create_check_constraint(
-    "ck_mcp_servers_install_status",
-    "mcp_servers",
-    "install_status IN ('active', 'deleted')",
+    "ck_connector_installs_auth_method",
+    "connector_installs",
+    "auth_method IN ('oauth', 'static', 'none')",
+)
+op.create_check_constraint(
+    "ck_workspace_connector_states_policy",
+    "workspace_connector_states",
+    "credential_policy IN ('org', 'workspace', 'user', 'none')",
+)
+op.create_check_constraint(
+    "ck_credential_grants_scope",
+    "credential_grants",
+    "grant_scope IN ('org', 'workspace', 'user')",
 )
 ```
 
-Ensure `downgrade()` contains:
+For `downgrade()`, drop the four target tables and recreate the old MCP tables only if
+the repository convention requires reversible migrations. If reversible migrations are not
+required for destructive internal changes, raise:
 
 ```python
-op.drop_constraint("ck_mcp_servers_install_status", "mcp_servers", type_="check")
-op.drop_column("mcp_servers", "install_status")
+raise RuntimeError("Destructive MCP four-layer migration is not reversible")
 ```
 
-- [ ] **Step 5: Filter deleted installs in repository list helpers**
-
-Edit `backend/cubebox/repositories/mcp.py`.
-
-In `list_for_org`, add this filter before returning:
-
-```python
-        stmt = stmt.where(MCPServer.install_status == "active")  # type: ignore[arg-type]
-```
-
-In `list_for_workspace`, replace the `MCPServer.authed` filter with:
-
-```python
-            MCPServer.install_status == "active",  # type: ignore[arg-type]
-```
-
-Keep credential readiness out of this repository method. Effective-state code will decide
-whether an active install is usable for a specific user.
-
-In `list_org_wide_with_workspace_override`, add:
-
-```python
-                MCPServer.install_status == "active",  # type: ignore[arg-type]
-```
-
-- [ ] **Step 6: Set lifecycle state during delete and re-key**
-
-Edit `backend/cubebox/services/mcp_catalog.py`.
-
-In `delete_install`, replace the block that sets `server.authed = False` with:
-
-```python
-        server.install_status = "deleted"
-        server.authed = False
-        server.last_error = None
-        server.tools_cache = []
-        server.last_discovered_at = datetime.now(UTC)
-        await self.server_repo.update(server)
-```
-
-In `switch_auth_method`, immediately after `server.auth_method = new_auth_method`, add:
-
-```python
-        server.install_status = "active"
-```
-
-In `_finalize_install`, add this as the first statement:
-
-```python
-        server.install_status = "active"
-```
-
-- [ ] **Step 7: Fix workspace no-auth catalog install scope**
-
-Edit `_install_workspace_user` in `backend/cubebox/services/mcp_catalog.py`.
-
-Replace the server constructor's hard-coded user scope with:
-
-```python
-            credential_scope="none" if auth_method == "none" else "user",
-```
-
-Keep static and OAuth user installs as user-scope because those grants are owned by the
-installing user.
-
-- [ ] **Step 8: Run migration and tests**
+- [ ] **Step 5: Run migration and model tests**
 
 Run:
 
 ```bash
 cd backend
 uv run alembic upgrade head
-uv run pytest -q tests/unit/test_mcp_models.py::test_mcp_server_install_status_defaults_active
-uv run pytest -q tests/e2e/test_mcp_catalog_routes.py::test_workspace_no_auth_catalog_install_uses_none_scope
+uv run pytest -q tests/unit/test_mcp_models.py::test_mcp_four_layer_table_names \
+                 tests/unit/test_mcp_models.py::test_no_auth_install_defaults_to_none_policy
 ```
 
-Expected: all commands pass.
+Expected: migration succeeds and tests pass.
 
-- [ ] **Step 9: Commit**
+- [ ] **Step 6: Commit**
 
 ```bash
 git add backend/cubebox/models/mcp.py \
-        backend/cubebox/repositories/mcp.py \
-        backend/cubebox/services/mcp_catalog.py \
-        backend/alembic/versions/*add_mcp_install_status* \
-        backend/tests/unit/test_mcp_models.py \
-        backend/tests/e2e/test_mcp_catalog_routes.py
-git commit -m "feat(mcp): separate install lifecycle from credential readiness"
+        backend/cubebox/models/__init__.py \
+        backend/alembic/versions/f2a6c7d8e901_normalize_mcp_four_layer_tables.py \
+        backend/tests/unit/test_mcp_models.py
+git commit -m "feat(mcp): add four-layer connector schema"
 ```
 
 ---
 
-## Task 3: DB-Backed Effective Connector Service
+## Task 2: Repositories And Template Seeding
 
 **Files:**
 
-- Modify: `backend/cubebox/mcp/effective.py`
-- Modify: `backend/cubebox/mcp/dependencies.py`
-- Create: `backend/tests/unit/mcp/test_effective_service.py`
+- Modify: `backend/cubebox/repositories/mcp.py`
+- Create: `backend/cubebox/services/mcp_templates.py`
+- Rename: `backend/cubebox/mcp/catalog_seed.py` to
+  `backend/cubebox/mcp/template_seed.py`
+- Rename: `backend/cubebox/seeders/mcp_catalog_seeder.py` to
+  `backend/cubebox/seeders/mcp_template_seeder.py`
+- Rename: `backend/cubebox/cli/seed_mcp_catalog.py` to
+  `backend/cubebox/cli/seed_mcp_templates.py`
+- Modify: `backend/tests/unit/test_catalog_seed.py`
+- Modify: `backend/tests/unit/test_mcp_repositories.py`
 
-- [ ] **Step 1: Add service tests with fake dependencies**
+- [ ] **Step 1: Write repository tests for final nouns**
 
-Create `backend/tests/unit/mcp/test_effective_service.py`:
+Append to `backend/tests/unit/test_mcp_repositories.py`:
 
 ```python
-from types import SimpleNamespace
+async def test_connector_template_repository_upserts_by_slug(session: AsyncSession) -> None:
+    from cubebox.repositories.mcp import ConnectorTemplateRepository
 
-import pytest
-
-from cubebox.mcp.effective import EffectiveConnectorService
-
-
-def _server(**overrides: object) -> SimpleNamespace:
-    base = {
-        "id": "mcp-1",
-        "catalog_connector_id": "mctlg-1",
-        "name": "GitHub",
-        "server_url": "https://github.example.com/mcp",
-        "transport": "streamable_http",
-        "auth_method": "static",
-        "credential_scope": "org",
-        "install_status": "active",
-        "owner_workspace_id": None,
-        "credential_id": "cred-1",
-        "headers": {},
-        "tools_cache": [],
-        "tool_citations": {},
-    }
-    base.update(overrides)
-    return SimpleNamespace(**base)
-
-
-def _catalog(**overrides: object) -> SimpleNamespace:
-    base = {
-        "id": "mctlg-1",
-        "slug": "github",
-        "name": "GitHub",
-        "provider": "GitHub",
-        "status": "active",
-    }
-    base.update(overrides)
-    return SimpleNamespace(**base)
-
-
-class _ServerRepo:
-    def __init__(self, rows: list[SimpleNamespace]) -> None:
-        self.rows = rows
-
-    async def list_for_org(self, *, owner_workspace_id: str | None | object = ...) -> list[object]:
-        if owner_workspace_id is ...:
-            return list(self.rows)
-        return [row for row in self.rows if row.owner_workspace_id == owner_workspace_id]
-
-    async def list_org_wide_with_workspace_override(self, workspace_id: str) -> list[tuple[object, object | None]]:
-        return [(row, SimpleNamespace(enabled=True, credential_mode=None)) for row in self.rows]
-
-
-class _CatalogRepo:
-    async def get_by_id(self, catalog_id: str) -> object:
-        assert catalog_id == "mctlg-1"
-        return _catalog()
-
-
-class _WorkspaceCredRepo:
-    async def get(self, *, workspace_id: str, mcp_server_id: str) -> object | None:
-        return None
-
-
-class _UserCredRepo:
-    async def get(self, *, user_id: str, mcp_server_id: str) -> object | None:
-        return None
-
-
-class _Session:
-    async def get(self, model: object, key: str) -> object | None:
-        return None
-
-
-@pytest.mark.asyncio
-async def test_effective_service_lists_active_org_install_with_org_grant() -> None:
-    service = EffectiveConnectorService(
-        session=_Session(),  # type: ignore[arg-type]
-        server_repo=_ServerRepo([_server()]),  # type: ignore[arg-type]
-        catalog_repo=_CatalogRepo(),  # type: ignore[arg-type]
-        ws_cred_repo=_WorkspaceCredRepo(),  # type: ignore[arg-type]
-        user_cred_repo=_UserCredRepo(),  # type: ignore[arg-type]
+    repo = ConnectorTemplateRepository(session)
+    row = await repo.upsert_by_slug(
+        slug="github",
+        name="GitHub",
+        description="GitHub MCP server.",
+        provider="GitHub",
+        server_url="https://github.example.com/mcp",
+        transport="streamable_http",
+        supported_auth_methods=["oauth", "static"],
+        default_credential_policy="user",
     )
 
-    rows = await service.list_for_workspace_user(
-        workspace_id="ws-1",
-        user_id="user-1",
-        include_unusable=True,
+    assert row.slug == "github"
+    assert row.default_credential_policy == "user"
+
+
+async def test_credential_grant_repository_scopes_user_grants(
+    session: AsyncSession,
+) -> None:
+    from cubebox.models import CredentialGrant
+    from cubebox.repositories.mcp import CredentialGrantRepository
+
+    repo = CredentialGrantRepository(session, org_id="org-1")
+    await repo.add(
+        CredentialGrant(
+            org_id="org-1",
+            install_id="cins-1",
+            grant_scope="user",
+            user_id="user-1",
+            credential_id="cred-1",
+            created_by_user_id="user-1",
+        )
     )
 
-    assert len(rows) == 1
-    assert rows[0].usable is True
-    assert rows[0].credential_policy == "org"
-    assert rows[0].credential_source == "org"
-
-
-@pytest.mark.asyncio
-async def test_effective_service_marks_missing_user_grant_unusable() -> None:
-    service = EffectiveConnectorService(
-        session=_Session(),  # type: ignore[arg-type]
-        server_repo=_ServerRepo([_server(credential_scope="user", credential_id=None)]),  # type: ignore[arg-type]
-        catalog_repo=_CatalogRepo(),  # type: ignore[arg-type]
-        ws_cred_repo=_WorkspaceCredRepo(),  # type: ignore[arg-type]
-        user_cred_repo=_UserCredRepo(),  # type: ignore[arg-type]
-    )
-
-    rows = await service.list_for_workspace_user(
-        workspace_id="ws-1",
-        user_id="user-1",
-        include_unusable=True,
-    )
-
-    assert rows[0].usable is False
-    assert rows[0].reason == "credential_missing"
+    assert await repo.get_user_grant(install_id="cins-1", user_id="user-1") is not None
+    assert await repo.get_user_grant(install_id="cins-1", user_id="user-2") is None
 ```
 
-- [ ] **Step 2: Run tests and confirm service is missing**
+- [ ] **Step 2: Run tests and confirm missing repositories**
 
-Run: `cd backend && uv run pytest -q tests/unit/mcp/test_effective_service.py`
+Run:
 
-Expected: FAIL with `ImportError` for `EffectiveConnectorService`.
+```bash
+cd backend
+uv run pytest -q tests/unit/test_mcp_repositories.py::test_connector_template_repository_upserts_by_slug \
+                 tests/unit/test_mcp_repositories.py::test_credential_grant_repository_scopes_user_grants
+```
 
-- [ ] **Step 3: Add service construction and row mapping**
+Expected: FAIL because the final repositories do not exist.
 
-Append to `backend/cubebox/mcp/effective.py`:
+- [ ] **Step 3: Replace repository classes**
+
+Edit `backend/cubebox/repositories/mcp.py` so it exports these concrete methods:
+
+- `ConnectorTemplateRepository.get(template_id: str) -> ConnectorTemplate | None`
+- `ConnectorTemplateRepository.get_by_slug(slug: str) -> ConnectorTemplate | None`
+- `ConnectorTemplateRepository.list_active() -> list[ConnectorTemplate]`
+- `ConnectorTemplateRepository.upsert_by_slug(slug: str, name: str, description: str,
+  provider: str, server_url: str, transport: str, supported_auth_methods: list[str],
+  default_credential_policy: str) -> ConnectorTemplate`
+- `ConnectorInstallRepository.get(install_id: str) -> ConnectorInstall | None`
+- `ConnectorInstallRepository.list_org_installs() -> list[ConnectorInstall]`
+- `ConnectorInstallRepository.list_workspace_installs(workspace_id: str)
+  -> list[ConnectorInstall]`
+- `ConnectorInstallRepository.add(install: ConnectorInstall) -> ConnectorInstall`
+- `ConnectorInstallRepository.update(install: ConnectorInstall) -> ConnectorInstall`
+- `WorkspaceConnectorStateRepository.get(workspace_id: str, install_id: str)
+  -> WorkspaceConnectorState | None`
+- `WorkspaceConnectorStateRepository.list_for_workspace(workspace_id: str)
+  -> list[WorkspaceConnectorState]`
+- `WorkspaceConnectorStateRepository.upsert(workspace_id: str, install_id: str,
+  enabled: bool, credential_policy: str, enablement_source: str,
+  updated_by_user_id: str) -> WorkspaceConnectorState`
+- `CredentialGrantRepository.add(grant: CredentialGrant) -> CredentialGrant`
+- `CredentialGrantRepository.get_org_grant(install_id: str) -> CredentialGrant | None`
+- `CredentialGrantRepository.get_workspace_grant(install_id: str, workspace_id: str)
+  -> CredentialGrant | None`
+- `CredentialGrantRepository.get_user_grant(install_id: str, user_id: str)
+  -> CredentialGrant | None`
+- `CredentialGrantRepository.delete_scope(install_id: str, grant_scope: str,
+  workspace_id: str | None, user_id: str | None) -> None`
+
+Use the existing org-scoped repository pattern: every non-template repository receives
+`org_id` in `__init__` and filters by it in every query.
+
+- [ ] **Step 4: Create template service**
+
+Create `backend/cubebox/services/mcp_templates.py`:
 
 ```python
-from sqlalchemy.ext.asyncio import AsyncSession
+"""Connector template service."""
 
-from cubebox.models import User
-from cubebox.repositories.mcp import (
-    MCPServerRepository,
-    UserMCPCredentialRepository,
-    WorkspaceMCPCredentialRepository,
+from cubebox.models import ConnectorTemplate
+from cubebox.repositories.mcp import ConnectorTemplateRepository
+
+
+class ConnectorTemplateService:
+    def __init__(self, repo: ConnectorTemplateRepository) -> None:
+        self._repo = repo
+
+    async def list_active(self) -> list[ConnectorTemplate]:
+        return await self._repo.list_active()
+
+    async def get_active(self, template_id: str) -> ConnectorTemplate:
+        row = await self._repo.get(template_id)
+        if row is None or row.status != "active":
+            raise ValueError("connector_template_not_found")
+        return row
+```
+
+- [ ] **Step 5: Rename seed concepts to templates**
+
+Run:
+
+```bash
+git mv backend/cubebox/mcp/catalog_seed.py backend/cubebox/mcp/template_seed.py
+git mv backend/cubebox/seeders/mcp_catalog_seeder.py \
+       backend/cubebox/seeders/mcp_template_seeder.py
+git mv backend/cubebox/cli/seed_mcp_catalog.py backend/cubebox/cli/seed_mcp_templates.py
+```
+
+In `backend/cubebox/mcp/template_seed.py`, rename `CatalogSeedEntry` to
+`ConnectorTemplateSeedEntry`. Rename fields:
+
+```python
+default_credential_scope -> default_credential_policy
+static_form_fields -> static_form_schema
+cred_metadata -> template_metadata
+tool_citations -> tool_citation_defaults
+```
+
+Update `backend/cubebox/seeders/mcp_template_seeder.py` and
+`backend/cubebox/cli/seed_mcp_templates.py` to call `ConnectorTemplateRepository`.
+
+- [ ] **Step 6: Run repository and seed tests**
+
+Run:
+
+```bash
+cd backend
+uv run pytest -q tests/unit/test_mcp_repositories.py tests/unit/test_catalog_seed.py
+```
+
+Expected: all tests pass.
+
+- [ ] **Step 7: Delete old repository/service files**
+
+Run:
+
+```bash
+git rm backend/cubebox/repositories/mcp_catalog.py backend/cubebox/services/mcp_catalog.py
+```
+
+- [ ] **Step 8: Commit**
+
+```bash
+git add backend/cubebox/repositories/mcp.py \
+        backend/cubebox/services/mcp_templates.py \
+        backend/cubebox/mcp/template_seed.py \
+        backend/cubebox/seeders/mcp_template_seeder.py \
+        backend/cubebox/cli/seed_mcp_templates.py \
+        backend/tests/unit/test_catalog_seed.py \
+        backend/tests/unit/test_mcp_repositories.py
+git commit -m "feat(mcp): replace catalog repositories with connector templates"
+```
+
+---
+
+## Task 3: Install, Workspace State, And Grant Services
+
+**Files:**
+
+- Create: `backend/cubebox/services/mcp_installs.py`
+- Modify: `backend/cubebox/mcp/dependencies.py`
+- Modify: `backend/tests/unit/test_mcp_service_invariants.py`
+- Create: `backend/tests/e2e/test_mcp_four_layer_routes.py`
+
+- [ ] **Step 1: Add service invariant tests**
+
+Append to `backend/tests/unit/test_mcp_service_invariants.py`:
+
+```python
+def test_auth_method_none_resolves_not_required_defaults() -> None:
+    from cubebox.services.mcp_installs import install_defaults_for_auth_method
+
+    defaults = install_defaults_for_auth_method("none", "user")
+
+    assert defaults.auth_status == "not_required"
+    assert defaults.credential_policy == "none"
+
+
+def test_static_auth_uses_requested_policy() -> None:
+    from cubebox.services.mcp_installs import install_defaults_for_auth_method
+
+    defaults = install_defaults_for_auth_method("static", "workspace")
+
+    assert defaults.auth_status == "pending"
+    assert defaults.credential_policy == "workspace"
+```
+
+- [ ] **Step 2: Run invariant tests and confirm missing service**
+
+Run:
+
+```bash
+cd backend
+uv run pytest -q tests/unit/test_mcp_service_invariants.py::test_auth_method_none_resolves_not_required_defaults \
+                 tests/unit/test_mcp_service_invariants.py::test_static_auth_uses_requested_policy
+```
+
+Expected: FAIL because `cubebox.services.mcp_installs` does not exist.
+
+- [ ] **Step 3: Create install service primitives**
+
+Create `backend/cubebox/services/mcp_installs.py`:
+
+```python
+"""Connector install, workspace state, and grant service."""
+
+from dataclasses import dataclass
+from datetime import UTC, datetime
+
+from cubebox.mcp._constants import CREDENTIAL_KIND_MCP
+from cubebox.mcp._constants import server_url_hash
+from cubebox.models import (
+    ConnectorInstall,
+    ConnectorTemplate,
+    CredentialGrant,
+    WorkspaceConnectorState,
 )
-from cubebox.repositories.mcp_catalog import MCPCatalogConnectorRepository
+from cubebox.repositories.mcp import (
+    ConnectorInstallRepository,
+    CredentialGrantRepository,
+    WorkspaceConnectorStateRepository,
+)
+from cubebox.services.credential import CredentialService
 
 
-class EffectiveConnectorService:
+@dataclass(frozen=True, slots=True)
+class InstallDefaults:
+    auth_status: str
+    credential_policy: str
+
+
+def install_defaults_for_auth_method(
+    auth_method: str,
+    requested_policy: str,
+) -> InstallDefaults:
+    if auth_method == "none":
+        return InstallDefaults(auth_status="not_required", credential_policy="none")
+    return InstallDefaults(auth_status="pending", credential_policy=requested_policy)
+
+
+class ConnectorInstallService:
     def __init__(
         self,
         *,
-        session: AsyncSession,
-        server_repo: MCPServerRepository,
-        catalog_repo: MCPCatalogConnectorRepository,
-        ws_cred_repo: WorkspaceMCPCredentialRepository,
-        user_cred_repo: UserMCPCredentialRepository,
+        install_repo: ConnectorInstallRepository,
+        state_repo: WorkspaceConnectorStateRepository,
+        grant_repo: CredentialGrantRepository,
+        cred_service: CredentialService,
+        org_id: str,
+        actor_user_id: str,
     ) -> None:
-        self._session = session
-        self._server_repo = server_repo
-        self._catalog_repo = catalog_repo
-        self._ws_cred_repo = ws_cred_repo
-        self._user_cred_repo = user_cred_repo
+        self._install_repo = install_repo
+        self._state_repo = state_repo
+        self._grant_repo = grant_repo
+        self._cred_service = cred_service
+        self._org_id = org_id
+        self._actor_user_id = actor_user_id
 
-    async def list_for_workspace_user(
+    async def create_from_template_for_workspace(
         self,
         *,
+        template: ConnectorTemplate,
         workspace_id: str,
-        user_id: str,
-        include_unusable: bool = True,
-    ) -> list[EffectiveConnectorState]:
-        org_rows = await self._server_repo.list_org_wide_with_workspace_override(workspace_id)
-        workspace_rows = [
-            (row, None)
-            for row in await self._server_repo.list_for_org(owner_workspace_id=workspace_id)
-        ]
-        states: list[EffectiveConnectorState] = []
+        auth_method: str,
+        credential_policy: str,
+    ) -> ConnectorInstall:
+        defaults = install_defaults_for_auth_method(auth_method, credential_policy)
+        install = await self._install_repo.add(
+            ConnectorInstall(
+                org_id=self._org_id,
+                template_id=template.id,
+                install_scope="workspace",
+                workspace_id=workspace_id,
+                name=template.name,
+                server_url=template.server_url,
+                server_url_hash=server_url_hash(template.server_url),
+                transport=template.transport,
+                auth_method=auth_method,
+                default_credential_policy=defaults.credential_policy,
+                auth_status=defaults.auth_status,
+                discovery_status="not_run",
+                tool_citations=dict(template.tool_citation_defaults or {}),
+                created_by_user_id=self._actor_user_id,
+            )
+        )
+        await self._state_repo.upsert(
+            workspace_id=workspace_id,
+            install_id=install.id,
+            enabled=True,
+            credential_policy=defaults.credential_policy,
+            enablement_source="workspace_manual",
+            updated_by_user_id=self._actor_user_id,
+        )
+        return install
 
-        for server, override in [*org_rows, *workspace_rows]:
-            enabled = bool(server.owner_workspace_id == workspace_id)
-            credential_policy: str | None = None
-            if server.owner_workspace_id is None:
-                enabled = bool(override is not None and override.enabled)
-                credential_policy = getattr(override, "credential_mode", None)
-
-            template = await self._template_view(server.catalog_connector_id)
-            install = ConnectorInstallView(
-                install_id=server.id,
-                name=server.name,
-                server_url=server.server_url,
-                transport=server.transport,
-                auth_method=server.auth_method,
-                credential_scope=server.credential_scope,
-                install_status=server.install_status,
-                origin="workspace" if server.owner_workspace_id else "org",
-                owner_workspace_id=server.owner_workspace_id,
-                credential_id=server.credential_id,
-                headers=dict(server.headers or {}),
-                tools_cache=list(server.tools_cache or []),
-                tool_citations=dict(server.tool_citations or {}),
-            )
-            workspace_state = WorkspaceConnectorStateView(
-                enabled=enabled,
-                credential_policy=credential_policy,
-            )
-            policy = normalize_credential_policy(
-                auth_method=server.auth_method,
-                install_scope=server.credential_scope,
-                workspace_policy=credential_policy,
-            )
-            grant = await self._grant_view(
-                policy=policy,
-                server_id=server.id,
-                server_credential_id=server.credential_id,
+    async def create_static_grant(
+        self,
+        *,
+        install_id: str,
+        grant_scope: str,
+        plaintext: str,
+        workspace_id: str | None = None,
+        user_id: str | None = None,
+        name: str | None = None,
+    ) -> CredentialGrant:
+        credential_id = await self._cred_service.create(
+            kind=CREDENTIAL_KIND_MCP,
+            name=name or f"mcp:{install_id}:{grant_scope}",
+            plaintext=plaintext,
+        )
+        return await self._grant_repo.add(
+            CredentialGrant(
+                org_id=self._org_id,
+                install_id=install_id,
+                grant_scope=grant_scope,
                 workspace_id=workspace_id,
                 user_id=user_id,
+                credential_id=credential_id,
+                grant_status="valid",
+                created_by_user_id=self._actor_user_id,
             )
-            state = compute_effective_state(
-                template=template,
-                install=install,
-                workspace_state=workspace_state,
-                grant=grant,
-            )
-            if include_unusable or state.usable:
-                states.append(state)
-
-        return states
-
-    async def _template_view(self, catalog_connector_id: str | None) -> ConnectorTemplateView | None:
-        if catalog_connector_id is None:
-            return None
-        row = await self._catalog_repo.get_by_id(catalog_connector_id)
-        if row is None:
-            return None
-        return ConnectorTemplateView(
-            template_id=row.id,
-            slug=row.slug,
-            name=row.name,
-            provider=row.provider,
-            status=row.status,
         )
 
-    async def _grant_view(
-        self,
-        *,
-        policy: CredentialPolicy,
-        server_id: str,
-        server_credential_id: str | None,
-        workspace_id: str,
-        user_id: str,
-    ) -> CredentialGrantView | None:
-        if policy == "none":
-            return None
-        if policy == "org":
-            return CredentialGrantView(
-                policy="org",
-                available=server_credential_id is not None,
-                source="org" if server_credential_id is not None else None,
-            )
-        if policy == "workspace":
-            row = await self._ws_cred_repo.get(
-                workspace_id=workspace_id,
-                mcp_server_id=server_id,
-            )
-            shared_by = None
-            if row is not None:
-                user = await self._session.get(User, row.created_by_user_id)
-                shared_by = user.email if user is not None else None
-            return CredentialGrantView(
-                policy="workspace",
-                available=row is not None,
-                source="workspace" if row is not None else None,
-                shared_by=shared_by,
-            )
-        row = await self._user_cred_repo.get(user_id=user_id, mcp_server_id=server_id)
-        return CredentialGrantView(
-            policy="user",
-            available=row is not None,
-            source="user" if row is not None else None,
-        )
+    async def uninstall(self, install_id: str) -> ConnectorInstall:
+        install = await self._install_repo.get(install_id)
+        if install is None:
+            raise ValueError("connector_install_not_found")
+        install.install_state = "uninstalled"
+        install.auth_status = "disconnected"
+        install.updated_at = datetime.now(UTC)
+        return await self._install_repo.update(install)
 ```
 
-- [ ] **Step 4: Add the FastAPI dependency**
+- [ ] **Step 4: Add dependency providers**
 
-Edit `backend/cubebox/mcp/dependencies.py`.
-
-Add the import:
+Edit `backend/cubebox/mcp/dependencies.py` and add:
 
 ```python
-from cubebox.mcp.effective import EffectiveConnectorService
-```
-
-Add this provider after `get_member_catalog_service`:
-
-```python
-async def get_effective_connector_service(
+async def get_connector_template_service(
     session: AsyncSession = Depends(get_session),
+) -> ConnectorTemplateService:
+    return ConnectorTemplateService(ConnectorTemplateRepository(session))
+
+
+async def get_connector_install_service(
+    session: AsyncSession = Depends(get_session),
+    cred_service: CredentialService = Depends(get_credential_service),
     ctx: RequestContext = Depends(require_member),
-) -> EffectiveConnectorService:
-    return EffectiveConnectorService(
-        session=session,
-        server_repo=MCPServerRepository(session, org_id=ctx.org_id),
-        catalog_repo=MCPCatalogConnectorRepository(session),
-        ws_cred_repo=WorkspaceMCPCredentialRepository(session, org_id=ctx.org_id),
-        user_cred_repo=UserMCPCredentialRepository(session, org_id=ctx.org_id),
+) -> ConnectorInstallService:
+    return ConnectorInstallService(
+        install_repo=ConnectorInstallRepository(session, org_id=ctx.org_id),
+        state_repo=WorkspaceConnectorStateRepository(session, org_id=ctx.org_id),
+        grant_repo=CredentialGrantRepository(session, org_id=ctx.org_id),
+        cred_service=cred_service,
+        org_id=ctx.org_id,
+        actor_user_id=ctx.user.id,
     )
 ```
 
 - [ ] **Step 5: Run service tests**
 
-Run: `cd backend && uv run pytest -q tests/unit/mcp/test_effective_state.py tests/unit/mcp/test_effective_service.py`
+Run:
+
+```bash
+cd backend
+uv run pytest -q tests/unit/test_mcp_service_invariants.py
+```
 
 Expected: all tests pass.
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add backend/cubebox/mcp/effective.py \
+git add backend/cubebox/services/mcp_installs.py \
         backend/cubebox/mcp/dependencies.py \
-        backend/tests/unit/mcp/test_effective_service.py
-git commit -m "feat(mcp): add effective connector service"
+        backend/tests/unit/test_mcp_service_invariants.py
+git commit -m "feat(mcp): add install state and grant services"
 ```
 
 ---
 
-## Task 4: Normalized Workspace Connector API
+## Task 4: Final API Routes Only
 
 **Files:**
 
 - Modify: `backend/cubebox/api/schemas/mcp.py`
+- Modify: `backend/cubebox/api/routes/v1/admin_mcp.py`
 - Modify: `backend/cubebox/api/routes/v1/ws_mcp.py`
-- Modify: `backend/cubebox/api/schemas/ws_settings.py`
-- Modify: `backend/cubebox/api/routes/v1/ws_settings.py`
-- Modify: `backend/tests/e2e/conftest.py`
-- Create: `backend/tests/e2e/test_mcp_effective_connectors.py`
+- Modify: `backend/cubebox/api/app.py`
+- Delete: `backend/cubebox/api/routes/v1/mcp_catalog.py`
+- Modify: `backend/tests/unit/test_admin_mcp_routes.py`
+- Modify: `backend/tests/unit/test_ws_mcp_routes.py`
+- Modify: `backend/tests/e2e/test_mcp_four_layer_routes.py`
 
-- [ ] **Step 1: Add the no-auth catalog fixture**
+- [ ] **Step 1: Add route registration tests**
 
-Append to `backend/tests/e2e/conftest.py`:
-
-```python
-@pytest_asyncio.fixture
-async def noauth_catalog_id(db_session: AsyncSession) -> AsyncIterator[str]:
-    from cubebox.repositories.mcp_catalog import MCPCatalogConnectorRepository
-
-    row = await MCPCatalogConnectorRepository(db_session).upsert_by_slug(
-        slug="noauth-effective",
-        name="NoAuth Effective",
-        description="No auth connector for effective-state tests.",
-        provider="Cubebox",
-        server_url="https://noauth-effective.example.com/mcp",
-        transport="streamable_http",
-        supported_auth_methods=["none"],
-        default_credential_scope="none",
-    )
-    await db_session.commit()
-    yield row.id
-```
-
-- [ ] **Step 2: Add API tests for effective connector listing and state patching**
-
-Create `backend/tests/e2e/test_mcp_effective_connectors.py`:
+Replace the MCP route assertions in `backend/tests/unit/test_ws_mcp_routes.py` with:
 
 ```python
-import httpx
-import pytest
+def test_workspace_mcp_four_layer_routes_are_registered() -> None:
+    from cubebox.api.app import create_app
 
+    app = create_app()
+    paths = {route.path for route in app.routes}
 
-@pytest.mark.usefixtures("stub_discover_tools")
-async def test_effective_connectors_report_missing_user_grant(
-    admin_client: tuple[httpx.AsyncClient, str],
-    github_catalog_id: str,
-) -> None:
-    client, workspace_id = admin_client
-
-    install = await client.post(
-        f"/api/v1/admin/mcp/catalog/{github_catalog_id}/install",
-        json={"auth_method": "static", "credential_plaintext": "ghp_test"},
-    )
-    assert install.status_code == 201, install.text
-    install_id = install.json()["install_id"]
-
-    patch = await client.patch(
-        f"/api/v1/ws/{workspace_id}/mcp/connectors/{install_id}/state",
-        json={"enabled": True, "credential_policy": "user"},
-    )
-    assert patch.status_code == 200, patch.text
-
-    resp = await client.get(f"/api/v1/ws/{workspace_id}/mcp/connectors")
-    assert resp.status_code == 200, resp.text
-    rows = resp.json()["items"]
-    row = next(item for item in rows if item["install"]["install_id"] == install_id)
-    assert row["workspace_state"]["enabled"] is True
-    assert row["credential_policy"] == "user"
-    assert row["credential_availability"] == "missing"
-    assert row["usable"] is False
-    assert row["reason"] == "credential_missing"
-
-
-@pytest.mark.usefixtures("stub_discover_tools")
-async def test_effective_connectors_report_no_auth_as_usable(
-    client: httpx.AsyncClient,
-    workspace_id: str,
-    noauth_catalog_id: str,
-) -> None:
-    install = await client.post(
-        f"/api/v1/ws/{workspace_id}/mcp/catalog/{noauth_catalog_id}/install",
-        json={"auth_method": "none"},
-    )
-    assert install.status_code == 201, install.text
-
-    resp = await client.get(f"/api/v1/ws/{workspace_id}/mcp/connectors")
-    assert resp.status_code == 200, resp.text
-    row = next(
-        item
-        for item in resp.json()["items"]
-        if item["install"]["install_id"] == install.json()["install_id"]
-    )
-    assert row["credential_policy"] == "none"
-    assert row["credential_availability"] == "not_required"
-    assert row["usable"] is True
+    assert "/api/v1/ws/{workspace_id}/mcp/templates" in paths
+    assert "/api/v1/ws/{workspace_id}/mcp/installs" in paths
+    assert "/api/v1/ws/{workspace_id}/mcp/installs/{install_id}/state" in paths
+    assert "/api/v1/ws/{workspace_id}/mcp/installs/{install_id}/grants/me" in paths
+    assert "/api/v1/ws/{workspace_id}/mcp/installs/{install_id}/grants/workspace" in paths
+    assert "/api/v1/ws/{workspace_id}/mcp/connectors" in paths
+    assert "/api/v1/ws/{workspace_id}/mcp/catalog" not in paths
+    assert "/api/v1/ws/{workspace_id}/mcp/org-installs/{install_id}/override" not in paths
 ```
 
-- [ ] **Step 3: Run route tests and confirm missing route failure**
-
-Run: `cd backend && uv run pytest -q tests/e2e/test_mcp_effective_connectors.py`
-
-Expected: FAIL with 404 for `/api/v1/ws/{workspace_id}/mcp/connectors`.
-
-- [ ] **Step 4: Add response and patch schemas**
-
-Append to `backend/cubebox/api/schemas/mcp.py`:
+Replace the MCP route assertions in `backend/tests/unit/test_admin_mcp_routes.py` with:
 
 ```python
-class MCPConnectorTemplateOut(BaseModel):
-    template_id: str | None
-    slug: str | None
-    name: str
-    provider: str | None
-    status: str
+def test_admin_mcp_four_layer_routes_are_registered() -> None:
+    from cubebox.api.app import create_app
 
+    app = create_app()
+    paths = {route.path for route in app.routes}
 
-class MCPConnectorInstallOut(BaseModel):
-    install_id: str
-    name: str
-    server_url: str
-    transport: str
-    auth_method: str
-    credential_scope: str
-    install_status: str
-    origin: str
-    owner_workspace_id: str | None
-    tool_count: int
-
-
-class MCPWorkspaceConnectorStateOut(BaseModel):
-    enabled: bool
-    credential_policy: str | None
-
-
-class MCPEffectiveConnectorOut(BaseModel):
-    template: MCPConnectorTemplateOut | None
-    install: MCPConnectorInstallOut
-    workspace_state: MCPWorkspaceConnectorStateOut
-    credential_policy: str
-    credential_availability: str
-    credential_source: str | None
-    credential_shared_by: str | None
-    usable: bool
-    reason: str
-
-
-class MCPEffectiveConnectorListOut(BaseModel):
-    items: list[MCPEffectiveConnectorOut]
-
-
-class MCPWorkspaceConnectorStatePatch(BaseModel):
-    enabled: bool | None = None
-    credential_policy: Literal["org", "workspace", "user", "none"] | None = None
+    assert "/api/v1/admin/mcp/templates" in paths
+    assert "/api/v1/admin/mcp/templates/{template_id}/installs" in paths
+    assert "/api/v1/admin/mcp/installs" in paths
+    assert "/api/v1/admin/mcp/installs/{install_id}" in paths
+    assert "/api/v1/admin/mcp/installs/{install_id}/grants/org" in paths
+    assert "/api/v1/admin/mcp/catalog/{catalog_id}/install" not in paths
+    assert "/api/v1/admin/mcp/servers/{server_id}/overrides" not in paths
 ```
 
-- [ ] **Step 5: Add route mapping helpers and endpoints**
-
-Edit `backend/cubebox/api/routes/v1/ws_mcp.py`.
-
-Add imports:
-
-```python
-from cubebox.api.schemas.mcp import (
-    MCPEffectiveConnectorListOut,
-    MCPEffectiveConnectorOut,
-    MCPConnectorInstallOut,
-    MCPConnectorTemplateOut,
-    MCPWorkspaceConnectorStateOut,
-    MCPWorkspaceConnectorStatePatch,
-)
-from cubebox.mcp.dependencies import get_effective_connector_service
-from cubebox.mcp.effective import EffectiveConnectorService, EffectiveConnectorState
-```
-
-Add helper:
-
-```python
-def _effective_to_out(state: EffectiveConnectorState) -> MCPEffectiveConnectorOut:
-    template = None
-    if state.template is not None:
-        template = MCPConnectorTemplateOut(
-            template_id=state.template.template_id,
-            slug=state.template.slug,
-            name=state.template.name,
-            provider=state.template.provider,
-            status=state.template.status,
-        )
-    return MCPEffectiveConnectorOut(
-        template=template,
-        install=MCPConnectorInstallOut(
-            install_id=state.install.install_id,
-            name=state.install.name,
-            server_url=state.install.server_url,
-            transport=state.install.transport,
-            auth_method=state.install.auth_method,
-            credential_scope=state.install.credential_scope,
-            install_status=state.install.install_status,
-            origin=state.install.origin,
-            owner_workspace_id=state.install.owner_workspace_id,
-            tool_count=len(state.install.tools_cache),
-        ),
-        workspace_state=MCPWorkspaceConnectorStateOut(
-            enabled=state.workspace_state.enabled,
-            credential_policy=state.workspace_state.credential_policy,
-        ),
-        credential_policy=state.credential_policy,
-        credential_availability=state.credential_availability,
-        credential_source=state.credential_source,
-        credential_shared_by=state.credential_shared_by,
-        usable=state.usable,
-        reason=state.reason,
-    )
-```
-
-Add endpoints near the top of the router:
-
-```python
-@router.get("/connectors", response_model=MCPEffectiveConnectorListOut)
-async def list_effective_connectors(
-    workspace_id: str,
-    ctx: RequestContext = Depends(require_member),
-    effective: EffectiveConnectorService = Depends(get_effective_connector_service),
-) -> MCPEffectiveConnectorListOut:
-    rows = await effective.list_for_workspace_user(
-        workspace_id=workspace_id,
-        user_id=ctx.user.id,
-        include_unusable=True,
-    )
-    return MCPEffectiveConnectorListOut(items=[_effective_to_out(row) for row in rows])
-
-
-@router.patch(
-    "/connectors/{install_id}/state",
-    response_model=MCPEffectiveConnectorOut,
-)
-async def patch_effective_connector_state(
-    workspace_id: str,
-    install_id: str,
-    body: MCPWorkspaceConnectorStatePatch,
-    svc: MCPServerService = Depends(get_mcp_service),
-    ctx: RequestContext = Depends(require_member),
-    effective: EffectiveConnectorService = Depends(get_effective_connector_service),
-) -> MCPEffectiveConnectorOut:
-    server = await svc.server_repo.get(install_id)
-    if server is None or server.owner_workspace_id is not None:
-        raise HTTPException(404, detail={"code": "mcp_install_not_found"})
-
-    if body.enabled is not None:
-        if body.enabled:
-            await svc.override_repo.upsert(
-                workspace_id=workspace_id,
-                mcp_server_id=install_id,
-                enabled=True,
-                updated_by_user_id=ctx.user.id,
-            )
-        else:
-            await svc.override_repo.delete(
-                workspace_id=workspace_id,
-                mcp_server_id=install_id,
-            )
-
-    if body.credential_policy is not None:
-        override = await svc.override_repo.get_for_workspace_and_server(
-            workspace_id=workspace_id,
-            mcp_server_id=install_id,
-        )
-        if override is None:
-            raise HTTPException(
-                status.HTTP_409_CONFLICT,
-                detail={"code": "mcp_connector_state_required"},
-            )
-        override.credential_mode = body.credential_policy
-        override.updated_by_user_id = ctx.user.id
-        svc.server_repo.session.add(override)
-        await svc.server_repo.session.commit()
-
-    rows = await effective.list_for_workspace_user(
-        workspace_id=workspace_id,
-        user_id=ctx.user.id,
-        include_unusable=True,
-    )
-    for row in rows:
-        if row.install.install_id == install_id:
-            return _effective_to_out(row)
-    raise HTTPException(404, detail={"code": "mcp_install_not_found"})
-```
-
-- [ ] **Step 6: Tighten workspace settings schema literals**
-
-Edit `backend/cubebox/api/schemas/ws_settings.py`.
-
-Add import:
-
-```python
-from typing import Literal
-```
-
-Replace:
-
-```python
-    credential_mode: str = "org"
-```
-
-with:
-
-```python
-    credential_mode: Literal["org", "workspace", "user", "none"] = "org"
-```
-
-Replace:
-
-```python
-    credential_mode: str | None = None
-```
-
-with:
-
-```python
-    credential_mode: Literal["org", "workspace", "user", "none"] | None = None
-```
-
-- [ ] **Step 7: Delegate settings MCP list to effective service**
-
-Edit `backend/cubebox/api/routes/v1/ws_settings.py`.
-
-Replace `list_workspace_mcp`'s body with:
-
-```python
-    from cubebox.mcp.dependencies import get_effective_connector_service
-
-    effective = await get_effective_connector_service(session=session, ctx=ctx)
-    rows = await effective.list_for_workspace_user(
-        workspace_id=ctx.workspace_id,
-        user_id=ctx.user.id,
-        include_unusable=True,
-    )
-    org_servers: list[MCPServerItem] = []
-    workspace_servers: list[MCPServerItem] = []
-    for row in rows:
-        item = MCPServerItem(
-            server_id=row.install.install_id,
-            name=row.install.name,
-            server_url=row.install.server_url,
-            transport=row.install.transport,
-            enabled=row.workspace_state.enabled,
-            scope=row.install.origin,
-            credential_mode=row.credential_policy,
-            credential_source=(
-                row.credential_source
-                if row.credential_availability == "available"
-                else "needs_setup"
-                if row.credential_availability == "missing"
-                else None
-            ),
-            credential_shared_by=row.credential_shared_by,
-        )
-        if row.install.origin == "org":
-            org_servers.append(item)
-        else:
-            workspace_servers.append(item)
-    return WorkspaceMCPOut(org_servers=org_servers, workspace_servers=workspace_servers)
-```
-
-- [ ] **Step 8: Run API tests**
+- [ ] **Step 2: Run route tests and confirm old route names still exist**
 
 Run:
 
 ```bash
 cd backend
-uv run pytest -q tests/e2e/test_mcp_effective_connectors.py
-uv run pytest -q tests/e2e/test_ws_settings.py
+uv run pytest -q tests/unit/test_ws_mcp_routes.py tests/unit/test_admin_mcp_routes.py
 ```
 
-Expected: all tests pass.
+Expected: FAIL because current routes still expose old MCP paths.
 
-- [ ] **Step 9: Commit**
+- [ ] **Step 3: Replace MCP schemas**
+
+Edit `backend/cubebox/api/schemas/mcp.py` so public schemas use final names.
+Use `Literal["org", "workspace", "user", "none"]` for credential policy fields and
+`Literal["oauth", "static", "none"]` for auth method fields.
+
+The response schemas must include these fields:
+
+- `ConnectorTemplateOut`: `template_id`, `slug`, `name`, `provider`, `description`,
+  `server_url`, `transport`, `supported_auth_methods`, `default_credential_policy`,
+  `static_form_schema`, `status`.
+- `ConnectorInstallOut`: `install_id`, `template_id`, `install_scope`, `workspace_id`,
+  `name`, `server_url`, `transport`, `auth_method`, `default_credential_policy`,
+  `auth_status`, `discovery_status`, `install_state`, `tool_count`, `last_error`.
+- `WorkspaceConnectorStateOut`: `workspace_id`, `install_id`, `enabled`,
+  `credential_policy`, `enablement_source`.
+- `CredentialGrantStatusOut`: `install_id`, `grant_scope`, `workspace_id`, `user_id`,
+  `grant_status`, `has_value`, `expires_at`.
+- `EffectiveConnectorOut`: `template`, `install`, `workspace_state`, `credential_policy`,
+  `credential_availability`, `credential_source`, `usable`, `reason`.
+
+- [ ] **Step 4: Replace admin routes**
+
+Edit `backend/cubebox/api/routes/v1/admin_mcp.py` to expose these routes:
+
+- `GET /api/v1/admin/mcp/templates`
+- `POST /api/v1/admin/mcp/templates/{template_id}/installs`
+- `GET /api/v1/admin/mcp/installs`
+- `DELETE /api/v1/admin/mcp/installs/{install_id}`
+- `PUT /api/v1/admin/mcp/installs/{install_id}/grants/org`
+
+Remove server/override route handlers from this module.
+
+- [ ] **Step 5: Replace workspace routes**
+
+Edit `backend/cubebox/api/routes/v1/ws_mcp.py` to expose these routes:
+
+- `GET /api/v1/ws/{workspace_id}/mcp/templates`
+- `POST /api/v1/ws/{workspace_id}/mcp/installs`
+- `PATCH /api/v1/ws/{workspace_id}/mcp/installs/{install_id}/state`
+- `PUT /api/v1/ws/{workspace_id}/mcp/installs/{install_id}/grants/me`
+- `PUT /api/v1/ws/{workspace_id}/mcp/installs/{install_id}/grants/workspace`
+- `GET /api/v1/ws/{workspace_id}/mcp/connectors`
+
+Remove old server/catalog/org-install override handlers from this module.
+
+- [ ] **Step 6: Remove old route module from app**
+
+Edit `backend/cubebox/api/app.py` and remove the import/mount for
+`cubebox.api.routes.v1.mcp_catalog`.
+
+Run:
 
 ```bash
-git add backend/cubebox/api/schemas/mcp.py \
-        backend/cubebox/api/routes/v1/ws_mcp.py \
-        backend/cubebox/api/schemas/ws_settings.py \
-        backend/cubebox/api/routes/v1/ws_settings.py \
-        backend/tests/e2e/conftest.py \
-        backend/tests/e2e/test_mcp_effective_connectors.py
-git commit -m "feat(mcp): expose effective workspace connector state"
+git rm backend/cubebox/api/routes/v1/mcp_catalog.py
 ```
 
----
-
-## Task 5: Runtime Uses Effective Service and OAuth Refresh
-
-**Files:**
-
-- Modify: `backend/cubebox/mcp/effective.py`
-- Modify: `backend/cubebox/mcp/cubepi_discovery.py`
-- Modify: `backend/cubebox/mcp/cubepi_runtime.py`
-- Modify: `backend/cubebox/streams/run_manager.py`
-- Modify: `backend/tests/unit/test_mcp_cubepi_runtime.py`
-- Modify: `backend/tests/unit/mcp/test_oauth_token_manager.py`
-
-- [ ] **Step 1: Add runtime token resolver tests**
-
-Append to `backend/tests/unit/test_mcp_cubepi_runtime.py`:
-
-```python
-@pytest.mark.asyncio
-async def test_load_only_discovers_usable_effective_connectors(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from cubebox.mcp.effective import (
-        ConnectorInstallView,
-        EffectiveConnectorState,
-        WorkspaceConnectorStateView,
-    )
-
-    usable = EffectiveConnectorState(
-        template=None,
-        install=ConnectorInstallView(
-            install_id="s1",
-            name="good",
-            server_url="http://good",
-            transport="streamable_http",
-            auth_method="none",
-            credential_scope="none",
-            install_status="active",
-            origin="workspace",
-            owner_workspace_id="ws-1",
-            credential_id=None,
-        ),
-        workspace_state=WorkspaceConnectorStateView(enabled=True, credential_policy=None),
-        credential_policy="none",
-        credential_availability="not_required",
-        credential_source=None,
-        credential_shared_by=None,
-        usable=True,
-        reason="usable",
-    )
-    unusable = dataclasses.replace(usable, usable=False, reason="credential_missing")
-
-    class _Effective:
-        async def list_for_workspace_user(
-            self, *, workspace_id: str, user_id: str, include_unusable: bool
-        ) -> list[EffectiveConnectorState]:
-            return [usable, unusable]
-
-    async def _fake_loader(
-        url: str,
-        *,
-        headers: dict[str, str] | None,
-        timeout: float,
-        transport: str,
-    ) -> list[object]:
-        assert url == "http://good"
-        return [_FakeTool(name="search")]
-
-    monkeypatch.setattr("cubebox.mcp.cubepi_runtime.load_mcp_tools_http", _fake_loader)
-
-    tools, _citation_configs = await load_workspace_mcp_tools_for_cubepi(
-        session=None,  # type: ignore[arg-type]
-        workspace_id="ws-1",
-        org_id="org-1",
-        user_id="user-1",
-        cred_service=None,  # type: ignore[arg-type]
-        signer=None,  # type: ignore[arg-type]
-        effective_service=_Effective(),  # type: ignore[arg-type]
-        token_manager=None,
-    )
-
-    assert [tool.name for tool in tools] == ["good__search"]
-```
-
-- [ ] **Step 2: Run the runtime test and confirm signature failure**
+- [ ] **Step 7: Run route tests**
 
 Run:
 
 ```bash
 cd backend
-uv run pytest -q tests/unit/test_mcp_cubepi_runtime.py::test_load_only_discovers_usable_effective_connectors
-```
-
-Expected: FAIL because `load_workspace_mcp_tools_for_cubepi` does not accept
-`effective_service`.
-
-- [ ] **Step 3: Add runtime spec conversion to effective service**
-
-Append to `backend/cubebox/mcp/effective.py`:
-
-```python
-@dataclass(frozen=True, slots=True)
-class RuntimeConnectorSpec:
-    server_id: str
-    server_name: str
-    url: str
-    transport: str
-    headers: dict[str, str]
-    tool_citations: dict[str, dict[str, Any]]
-    credential_policy: CredentialPolicy
-    auth_method: str
-    credential_id: str | None
-
-
-def effective_state_to_runtime_spec(state: EffectiveConnectorState) -> RuntimeConnectorSpec:
-    return RuntimeConnectorSpec(
-        server_id=state.install.install_id,
-        server_name=state.install.name,
-        url=state.install.server_url,
-        transport=state.install.transport,
-        headers=dict(state.install.headers),
-        tool_citations=dict(state.install.tool_citations),
-        credential_policy=state.credential_policy,
-        auth_method=state.install.auth_method,
-        credential_id=state.install.credential_id,
-    )
-```
-
-- [ ] **Step 4: Change runtime loader signature and filtering**
-
-Edit `backend/cubebox/mcp/cubepi_runtime.py`.
-
-Add imports:
-
-```python
-from cubebox.mcp.effective import (
-    EffectiveConnectorService,
-    RuntimeConnectorSpec,
-    effective_state_to_runtime_spec,
-)
-from cubebox.mcp.oauth.token_manager import OAuthTokenManager
-```
-
-Change `load_workspace_mcp_tools_for_cubepi` signature to include:
-
-```python
-    effective_service: EffectiveConnectorService | None = None,
-    token_manager: OAuthTokenManager | None = None,
-```
-
-Replace the call to `discover_workspace_mcp_servers_for_cubepi` with:
-
-```python
-    if effective_service is None:
-        servers = await discover_workspace_mcp_servers_for_cubepi(
-            session=session,
-            workspace_id=workspace_id,
-            org_id=org_id,
-            user_id=user_id,
-            cred_service=cred_service,
-            signer=signer,
-            token_manager=token_manager,
-        )
-    else:
-        states = await effective_service.list_for_workspace_user(
-            workspace_id=workspace_id,
-            user_id=user_id,
-            include_unusable=False,
-        )
-        servers = [
-            CubepiMCPServerSpec(
-                server_id=spec.server_id,
-                server_name=spec.server_name,
-                url=spec.url,
-                transport=cast(Any, spec.transport),
-                headers=spec.headers,
-                tool_citations=spec.tool_citations,
-            )
-            for spec in [effective_state_to_runtime_spec(state) for state in states]
-        ]
-```
-
-Add `cast` to the typing imports if it is not present.
-
-- [ ] **Step 5: Add OAuth token manager pass-through in discovery**
-
-Edit `backend/cubebox/mcp/cubepi_discovery.py`.
-
-Import:
-
-```python
-from cubebox.mcp.oauth.token_manager import OAuthTokenManager
-```
-
-Add parameter to `discover_workspace_mcp_servers_for_cubepi`:
-
-```python
-    token_manager: OAuthTokenManager | None = None,
-```
-
-Pass it into `_resolve_token_for_cubepi`:
-
-```python
-                token_manager=token_manager,
-```
-
-Add parameter to `_resolve_token_for_cubepi`:
-
-```python
-    token_manager: OAuthTokenManager | None,
-```
-
-At the top of the user-scope branch, before falling back to direct vault decryption:
-
-```python
-        if auth_method == "oauth" and token_manager is not None:
-            return await token_manager.get_access_token(
-                server_id=server_id,
-                user_id=user_id,
-            )
-```
-
-This keeps OAuth refresh in one manager instead of decrypting stale access tokens directly.
-
-- [ ] **Step 6: Wire token manager and effective service in run manager**
-
-Edit `backend/cubebox/streams/run_manager.py`.
-
-Inside the MCP tools block, import:
-
-```python
-import httpx
-
-from cubebox.mcp.dependencies import _build_token_manager_for_org
-from cubebox.mcp.effective import EffectiveConnectorService
-from cubebox.mcp.oauth.metadata import OAuthMetadataDiscovery
-from cubebox.repositories.mcp import (
-    MCPServerRepository,
-    UserMCPCredentialRepository,
-    WorkspaceMCPCredentialRepository,
-)
-from cubebox.repositories.mcp_catalog import MCPCatalogConnectorRepository
-```
-
-Before calling `load_workspace_mcp_tools_for_cubepi`, construct:
-
-```python
-                oauth_http_client = getattr(
-                    self._app.state,
-                    "_mcp_oauth_http_client",
-                    None,
-                )
-                if oauth_http_client is None:
-                    oauth_http_client = httpx.AsyncClient(timeout=30.0)
-                    setattr(
-                        self._app.state,
-                        "_mcp_oauth_http_client",
-                        oauth_http_client,
-                    )
-
-                oauth_metadata = getattr(
-                    self._app.state,
-                    "_mcp_oauth_metadata_discovery",
-                    None,
-                )
-                if oauth_metadata is None:
-                    oauth_metadata = OAuthMetadataDiscovery(oauth_http_client)
-                    setattr(
-                        self._app.state,
-                        "_mcp_oauth_metadata_discovery",
-                        oauth_metadata,
-                    )
-
-                token_manager = _build_token_manager_for_org(
-                    session=mcp_session,
-                    backend=self._app.state.encryption_backend,
-                    redis=self._app.state.redis,
-                    http_client=oauth_http_client,
-                    metadata=oauth_metadata,
-                    org_id=ctx.org_id,
-                )
-```
-
-Then pass:
-
-```python
-                effective_service = EffectiveConnectorService(
-                    session=mcp_session,
-                    server_repo=MCPServerRepository(mcp_session, org_id=ctx.org_id),
-                    catalog_repo=MCPCatalogConnectorRepository(mcp_session),
-                    ws_cred_repo=WorkspaceMCPCredentialRepository(mcp_session, org_id=ctx.org_id),
-                    user_cred_repo=UserMCPCredentialRepository(mcp_session, org_id=ctx.org_id),
-                )
-```
-
-and call the loader with:
-
-```python
-                    effective_service=effective_service,
-                    token_manager=token_manager,
-```
-
-- [ ] **Step 7: Run runtime tests**
-
-Run:
-
-```bash
-cd backend
-uv run pytest -q tests/unit/test_mcp_cubepi_runtime.py
-uv run pytest -q tests/unit/mcp/test_oauth_token_manager.py
+uv run pytest -q tests/unit/test_ws_mcp_routes.py tests/unit/test_admin_mcp_routes.py
 ```
 
 Expected: all tests pass.
@@ -1631,105 +959,339 @@ Expected: all tests pass.
 - [ ] **Step 8: Commit**
 
 ```bash
-git add backend/cubebox/mcp/effective.py \
-        backend/cubebox/mcp/cubepi_discovery.py \
-        backend/cubebox/mcp/cubepi_runtime.py \
-        backend/cubebox/streams/run_manager.py \
-        backend/tests/unit/test_mcp_cubepi_runtime.py \
-        backend/tests/unit/mcp/test_oauth_token_manager.py
-git commit -m "feat(mcp): load runtime tools from effective connector state"
+git add backend/cubebox/api/schemas/mcp.py \
+        backend/cubebox/api/routes/v1/admin_mcp.py \
+        backend/cubebox/api/routes/v1/ws_mcp.py \
+        backend/cubebox/api/app.py \
+        backend/tests/unit/test_admin_mcp_routes.py \
+        backend/tests/unit/test_ws_mcp_routes.py
+git commit -m "feat(mcp): replace catalog routes with four-layer API"
 ```
 
 ---
 
-## Task 6: Template Aliases and Grant-Oriented Compatibility
+## Task 5: Effective State Service And Runtime
 
 **Files:**
 
-- Modify: `backend/cubebox/api/routes/v1/mcp_catalog.py`
-- Modify: `backend/cubebox/api/routes/v1/ws_mcp.py`
-- Modify: `backend/tests/unit/test_ws_mcp_routes.py`
-- Modify: `backend/tests/e2e/test_mcp_effective_connectors.py`
+- Create: `backend/cubebox/mcp/effective.py`
+- Modify: `backend/cubebox/mcp/cubepi_discovery.py`
+- Modify: `backend/cubebox/mcp/cubepi_runtime.py`
+- Modify: `backend/cubebox/streams/run_manager.py`
+- Create: `backend/tests/unit/mcp/test_effective_state.py`
+- Create: `backend/tests/unit/mcp/test_effective_service.py`
+- Modify: `backend/tests/unit/test_mcp_cubepi_runtime.py`
 
-- [ ] **Step 1: Add route registration tests**
+- [ ] **Step 1: Add effective state tests**
 
-Append to `backend/tests/unit/test_ws_mcp_routes.py`:
+Create `backend/tests/unit/mcp/test_effective_state.py`:
 
 ```python
-def test_workspace_mcp_effective_routes_are_registered() -> None:
-    from cubebox.api.app import create_app
+from cubebox.mcp.effective import EffectiveInput, GrantInput, compute_effective_state
 
-    app = create_app()
-    paths = {route.path for route in app.routes}
 
-    assert "/api/v1/ws/{workspace_id}/mcp/connectors" in paths
-    assert "/api/v1/ws/{workspace_id}/mcp/connectors/{install_id}/state" in paths
-    assert "/api/v1/ws/{workspace_id}/mcp/templates" in paths
+def test_no_auth_connector_is_usable_without_grant() -> None:
+    result = compute_effective_state(
+        EffectiveInput(
+            template_status="active",
+            install_state="active",
+            workspace_enabled=True,
+            auth_method="none",
+            credential_policy="none",
+            grant=None,
+            transport="streamable_http",
+        )
+    )
+
+    assert result.usable is True
+    assert result.reason == "usable"
+    assert result.credential_availability == "not_required"
+
+
+def test_user_policy_requires_user_grant() -> None:
+    result = compute_effective_state(
+        EffectiveInput(
+            template_status="active",
+            install_state="active",
+            workspace_enabled=True,
+            auth_method="static",
+            credential_policy="user",
+            grant=None,
+            transport="streamable_http",
+        )
+    )
+
+    assert result.usable is False
+    assert result.reason == "credential_missing"
+
+
+def test_valid_user_grant_makes_user_policy_usable() -> None:
+    result = compute_effective_state(
+        EffectiveInput(
+            template_status="active",
+            install_state="active",
+            workspace_enabled=True,
+            auth_method="static",
+            credential_policy="user",
+            grant=GrantInput(scope="user", status="valid"),
+            transport="streamable_http",
+        )
+    )
+
+    assert result.usable is True
+    assert result.reason == "usable"
 ```
 
-- [ ] **Step 2: Add template alias endpoint**
+- [ ] **Step 2: Implement pure effective-state model**
 
-Edit `backend/cubebox/api/routes/v1/mcp_catalog.py`.
-
-Below `list_catalog`, add:
+Create `backend/cubebox/mcp/effective.py`:
 
 ```python
-@catalog_member_router.get("/templates", response_model=MCPCatalogListOut)
-async def list_templates(
-    workspace_id: str = Path(..., max_length=20),
-    q: str | None = Query(default=None),
-    provider: str | None = Query(default=None),
-    svc: MCPCatalogService = Depends(get_member_catalog_service),
-) -> MCPCatalogListOut:
-    dtos = await svc.list_for_member(workspace_id, q=q, provider=provider)
-    return MCPCatalogListOut(items=[_connector_to_out(dto) for dto in dtos])
+from dataclasses import dataclass
+from typing import Literal
+
+CredentialPolicy = Literal["org", "workspace", "user", "none"]
+EffectiveReason = Literal[
+    "usable",
+    "template_inactive",
+    "install_uninstalled",
+    "workspace_disabled",
+    "credential_missing",
+    "credential_invalid",
+    "unsupported_transport",
+]
+
+
+@dataclass(frozen=True, slots=True)
+class GrantInput:
+    scope: str
+    status: str
+
+
+@dataclass(frozen=True, slots=True)
+class EffectiveInput:
+    template_status: str | None
+    install_state: str
+    workspace_enabled: bool
+    auth_method: str
+    credential_policy: CredentialPolicy
+    grant: GrantInput | None
+    transport: str
+
+
+@dataclass(frozen=True, slots=True)
+class EffectiveResult:
+    usable: bool
+    reason: EffectiveReason
+    credential_availability: str
+
+
+def compute_effective_state(value: EffectiveInput) -> EffectiveResult:
+    if value.template_status is not None and value.template_status != "active":
+        return EffectiveResult(False, "template_inactive", "missing")
+    if value.install_state != "active":
+        return EffectiveResult(False, "install_uninstalled", "missing")
+    if value.transport not in {"streamable_http", "sse"}:
+        return EffectiveResult(False, "unsupported_transport", "missing")
+    if not value.workspace_enabled:
+        return EffectiveResult(False, "workspace_disabled", "missing")
+    if value.auth_method == "none" or value.credential_policy == "none":
+        return EffectiveResult(True, "usable", "not_required")
+    if value.grant is None:
+        return EffectiveResult(False, "credential_missing", "missing")
+    if value.grant.status != "valid" or value.grant.scope != value.credential_policy:
+        return EffectiveResult(False, "credential_invalid", "missing")
+    return EffectiveResult(True, "usable", "available")
 ```
 
-This preserves the existing response shape while moving product language off `catalog`.
+- [ ] **Step 3: Add DB-backed effective service**
 
-- [ ] **Step 3: Add grant alias routes for user and workspace credentials**
+Extend `backend/cubebox/mcp/effective.py` with `EffectiveConnectorService`.
 
-Edit `backend/cubebox/api/routes/v1/ws_mcp.py`.
+It should:
 
-For the existing user credential handlers, add route decorators above the same functions:
+- load active org installs plus workspace installs;
+- load `WorkspaceConnectorState` for each install and workspace;
+- load the required grant from `CredentialGrantRepository`;
+- return unusable rows when `include_unusable=True`;
+- return only usable rows to runtime.
+
+The service exposes two methods:
+
+- `list_for_workspace_user(workspace_id: str, user_id: str, include_unusable: bool)
+  -> list[EffectiveConnectorDTO]`
+- `list_runtime_specs(workspace_id: str, user_id: str) -> list[RuntimeConnectorSpec]`
+
+- [ ] **Step 4: Wire OAuth refresh in runtime token resolution**
+
+Edit `backend/cubebox/mcp/cubepi_runtime.py` so `load_workspace_mcp_tools_for_cubepi`
+accepts:
 
 ```python
-@router.get("/connectors/{server_id}/grants/me", response_model=MCPCredentialStatus)
+effective_service: EffectiveConnectorService
+token_manager: OAuthTokenManager | None
 ```
 
-```python
-@router.put("/connectors/{server_id}/grants/me", response_model=MCPCredentialStatus)
-```
+For OAuth grants, call:
 
 ```python
-@router.delete("/connectors/{server_id}/grants/me", status_code=status.HTTP_204_NO_CONTENT)
-```
-
-For workspace credential handlers, add:
-
-```python
-@router.get("/connectors/{server_id}/grants/workspace", response_model=MCPCredentialStatus)
-```
-
-```python
-@router.put("/connectors/{server_id}/grants/workspace", response_model=MCPCredentialStatus)
-```
-
-```python
-@router.delete(
-    "/connectors/{server_id}/grants/workspace",
-    status_code=status.HTTP_204_NO_CONTENT,
+token = await token_manager.get_access_token(
+    install_id=spec.install_id,
+    grant_scope=spec.grant_scope,
+    workspace_id=workspace_id,
+    user_id=user_id,
 )
 ```
 
-- [ ] **Step 4: Run route registration and E2E tests**
+For static grants, decrypt `spec.credential_id` through `CredentialService`.
+For no-auth connectors, sign the short-lived Cubebox identity token.
+
+- [ ] **Step 5: Wire run manager**
+
+Edit `backend/cubebox/streams/run_manager.py` to construct `EffectiveConnectorService`
+inside the MCP tools block and pass it to `load_workspace_mcp_tools_for_cubepi`.
+Construct `OAuthTokenManager` using the same `_build_token_manager_for_org` helper used by
+admin MCP dependencies.
+
+- [ ] **Step 6: Run effective and runtime tests**
 
 Run:
 
 ```bash
 cd backend
-uv run pytest -q tests/unit/test_ws_mcp_routes.py::test_workspace_mcp_effective_routes_are_registered
-uv run pytest -q tests/e2e/test_mcp_effective_connectors.py
+uv run pytest -q tests/unit/mcp/test_effective_state.py \
+                 tests/unit/mcp/test_effective_service.py \
+                 tests/unit/test_mcp_cubepi_runtime.py
+```
+
+Expected: all tests pass.
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add backend/cubebox/mcp/effective.py \
+        backend/cubebox/mcp/cubepi_discovery.py \
+        backend/cubebox/mcp/cubepi_runtime.py \
+        backend/cubebox/streams/run_manager.py \
+        backend/tests/unit/mcp/test_effective_state.py \
+        backend/tests/unit/mcp/test_effective_service.py \
+        backend/tests/unit/test_mcp_cubepi_runtime.py
+git commit -m "feat(mcp): derive runtime connectors from effective state"
+```
+
+---
+
+## Task 6: Backend E2E Coverage
+
+**Files:**
+
+- Create: `backend/tests/e2e/test_mcp_four_layer_routes.py`
+- Create: `backend/tests/e2e/test_mcp_four_layer_runtime.py`
+- Modify: `backend/tests/e2e/conftest.py`
+
+- [ ] **Step 1: Add template fixtures**
+
+Append to `backend/tests/e2e/conftest.py`:
+
+```python
+@pytest_asyncio.fixture
+async def noauth_template_id(db_session: AsyncSession) -> AsyncIterator[str]:
+    from cubebox.repositories.mcp import ConnectorTemplateRepository
+
+    row = await ConnectorTemplateRepository(db_session).upsert_by_slug(
+        slug="noauth-e2e",
+        name="NoAuth E2E",
+        description="No auth connector.",
+        provider="Cubebox",
+        server_url="https://noauth-e2e.example.com/mcp",
+        transport="streamable_http",
+        supported_auth_methods=["none"],
+        default_credential_policy="none",
+    )
+    await db_session.commit()
+    yield row.id
+```
+
+- [ ] **Step 2: Add no-auth route E2E**
+
+Create `backend/tests/e2e/test_mcp_four_layer_routes.py`:
+
+```python
+import httpx
+import pytest
+
+
+@pytest.mark.usefixtures("stub_discover_tools")
+async def test_workspace_installs_noauth_template_and_gets_usable_connector(
+    client: httpx.AsyncClient,
+    workspace_id: str,
+    noauth_template_id: str,
+) -> None:
+    install = await client.post(
+        f"/api/v1/ws/{workspace_id}/mcp/installs",
+        json={"template_id": noauth_template_id, "auth_method": "none"},
+    )
+    assert install.status_code == 201, install.text
+
+    connectors = await client.get(f"/api/v1/ws/{workspace_id}/mcp/connectors")
+    assert connectors.status_code == 200, connectors.text
+    row = next(
+        item
+        for item in connectors.json()["items"]
+        if item["install"]["install_id"] == install.json()["install_id"]
+    )
+    assert row["workspace_state"]["enabled"] is True
+    assert row["credential_policy"] == "none"
+    assert row["credential_availability"] == "not_required"
+    assert row["usable"] is True
+```
+
+- [ ] **Step 3: Add user grant isolation E2E**
+
+Append to `backend/tests/e2e/test_mcp_four_layer_routes.py`:
+
+```python
+@pytest.mark.usefixtures("stub_discover_tools")
+async def test_user_grant_policy_does_not_fall_back_to_org_grant(
+    admin_client: tuple[httpx.AsyncClient, str],
+    github_template_id: str,
+) -> None:
+    client, workspace_id = admin_client
+    install = await client.post(
+        f"/api/v1/admin/mcp/templates/{github_template_id}/installs",
+        json={
+            "auth_method": "static",
+            "credential_policy": "org",
+            "credential_plaintext": "org-token",
+        },
+    )
+    assert install.status_code == 201, install.text
+    install_id = install.json()["install_id"]
+
+    state = await client.patch(
+        f"/api/v1/ws/{workspace_id}/mcp/installs/{install_id}/state",
+        json={"enabled": True, "credential_policy": "user"},
+    )
+    assert state.status_code == 200, state.text
+
+    connectors = await client.get(f"/api/v1/ws/{workspace_id}/mcp/connectors")
+    row = next(
+        item
+        for item in connectors.json()["items"]
+        if item["install"]["install_id"] == install_id
+    )
+    assert row["credential_policy"] == "user"
+    assert row["credential_availability"] == "missing"
+    assert row["usable"] is False
+```
+
+- [ ] **Step 4: Run backend E2E tests**
+
+Run:
+
+```bash
+cd backend
+uv run pytest -q tests/e2e/test_mcp_four_layer_routes.py
 ```
 
 Expected: all tests pass.
@@ -1737,16 +1299,15 @@ Expected: all tests pass.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/cubebox/api/routes/v1/mcp_catalog.py \
-        backend/cubebox/api/routes/v1/ws_mcp.py \
-        backend/tests/unit/test_ws_mcp_routes.py \
-        backend/tests/e2e/test_mcp_effective_connectors.py
-git commit -m "feat(mcp): add template and grant route aliases"
+git add backend/tests/e2e/conftest.py \
+        backend/tests/e2e/test_mcp_four_layer_routes.py \
+        backend/tests/e2e/test_mcp_four_layer_runtime.py
+git commit -m "test(mcp): cover four-layer connector flows"
 ```
 
 ---
 
-## Task 7: Frontend Core API and State Types
+## Task 7: Frontend Core API And Types
 
 **Files:**
 
@@ -1757,210 +1318,124 @@ git commit -m "feat(mcp): add template and grant route aliases"
 - Modify: `frontend/packages/core/src/stores/workspaceSettingsStore.ts`
 - Modify: `frontend/packages/core/__tests__/api/mcp.test.ts`
 
-- [ ] **Step 1: Add API tests**
+- [ ] **Step 1: Replace core type names**
+
+Edit `frontend/packages/core/src/types/mcp.ts`.
+
+Remove `MCPCatalogConnector`, `MCPCatalogListResponse`, `MCPOrgInstallOverrideRequest`,
+and old server override types. Add:
+
+```typescript
+export interface ConnectorTemplate {
+  template_id: string
+  slug: string
+  name: string
+  provider: string
+  description: string
+  server_url: string
+  transport: MCPTransport
+  supported_auth_methods: MCPAuthMethod[]
+  default_credential_policy: MCPCredentialScope
+  static_form_schema: MCPTemplateStaticFormField[] | null
+  status: 'active' | 'deprecated' | 'disabled'
+}
+
+export interface ConnectorInstall {
+  install_id: string
+  template_id: string | null
+  install_scope: 'org' | 'workspace'
+  workspace_id: string | null
+  name: string
+  auth_method: MCPAuthMethod
+  default_credential_policy: MCPCredentialScope
+  auth_status: string
+  discovery_status: string
+  install_state: 'active' | 'uninstalled'
+}
+
+export interface WorkspaceConnectorState {
+  workspace_id: string
+  install_id: string
+  enabled: boolean
+  credential_policy: MCPCredentialScope
+}
+
+export interface EffectiveConnector {
+  template: ConnectorTemplate | null
+  install: ConnectorInstall
+  workspace_state: WorkspaceConnectorState
+  credential_policy: MCPCredentialScope
+  credential_availability: 'available' | 'missing' | 'not_required'
+  credential_source: 'org' | 'workspace' | 'user' | null
+  usable: boolean
+  reason: string
+}
+```
+
+- [ ] **Step 2: Replace API helpers**
+
+Edit `frontend/packages/core/src/api/mcp.ts`.
+
+Add helpers for final paths:
+
+```typescript
+export async function wsListTemplates(client: ApiClient, wsId: string) {
+  const res = await client.get(`/api/v1/ws/${wsId}/mcp/templates`)
+  if (!res.ok) throw await toApiError(res)
+  return (await res.json()) as { items: ConnectorTemplate[] }
+}
+
+export async function wsCreateInstall(client: ApiClient, wsId: string, body: unknown) {
+  const res = await client.post(`/api/v1/ws/${wsId}/mcp/installs`, body)
+  if (!res.ok) throw await toApiError(res)
+  return (await res.json()) as ConnectorInstall
+}
+
+export async function wsPatchInstallState(
+  client: ApiClient,
+  wsId: string,
+  installId: string,
+  body: Partial<WorkspaceConnectorState>,
+) {
+  const res = await client.patch(`/api/v1/ws/${wsId}/mcp/installs/${installId}/state`, body)
+  if (!res.ok) throw await toApiError(res)
+  return (await res.json()) as WorkspaceConnectorState
+}
+
+export async function wsListEffectiveConnectors(client: ApiClient, wsId: string) {
+  const res = await client.get(`/api/v1/ws/${wsId}/mcp/connectors`)
+  if (!res.ok) throw await toApiError(res)
+  return (await res.json()) as { items: EffectiveConnector[] }
+}
+```
+
+Remove helpers whose names include `Catalog` or `Override`.
+
+- [ ] **Step 3: Add API path tests**
 
 Append to `frontend/packages/core/__tests__/api/mcp.test.ts`:
 
 ```typescript
-it('lists effective workspace connectors', async () => {
+it('uses template and install paths for workspace MCP', async () => {
   const { client, fetchMock } = makeClient({
     ok: true,
     json: async () => ({ items: [] }),
   })
 
-  const out = await wsListEffectiveConnectors(client, 'ws-x')
-
-  expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/ws/ws-x/mcp/connectors')
-  expect(out).toEqual({ items: [] })
+  await wsListTemplates(client, 'ws-x')
+  expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/ws/ws-x/mcp/templates')
 })
 
-it('patches effective workspace connector state', async () => {
-  const { client, fetchMock } = makeClient({
-    ok: true,
-    json: async () => ({
-      install: { install_id: 'mcp-1' },
-      workspace_state: { enabled: true, credential_policy: 'user' },
-    }),
-  })
+it('does not use catalog or override paths', async () => {
+  const source = await import('../../src/api/mcp')
+  const exportedNames = Object.keys(source)
 
-  await wsPatchConnectorState(client, 'ws-x', 'mcp-1', {
-    enabled: true,
-    credential_policy: 'user',
-  })
-
-  expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/ws/ws-x/mcp/connectors/mcp-1/state')
-  expect(JSON.parse(fetchMock.mock.calls[0][1]?.body as string)).toEqual({
-    enabled: true,
-    credential_policy: 'user',
-  })
+  expect(exportedNames.some((name) => name.includes('Catalog'))).toBe(false)
+  expect(exportedNames.some((name) => name.includes('Override'))).toBe(false)
 })
 ```
 
-- [ ] **Step 2: Run tests and confirm missing exports**
-
-Run:
-
-```bash
-cd frontend
-pnpm --filter @cubebox/core test -- mcp.test.ts
-```
-
-Expected: FAIL because `wsListEffectiveConnectors` and `wsPatchConnectorState` are
-not exported.
-
-- [ ] **Step 3: Add effective connector types**
-
-Append to `frontend/packages/core/src/types/mcp.ts`:
-
-```typescript
-export type MCPEffectiveReason =
-  | 'usable'
-  | 'template_inactive'
-  | 'install_deleted'
-  | 'workspace_disabled'
-  | 'credential_missing'
-  | 'unsupported_transport'
-
-export type MCPCredentialAvailability = 'available' | 'missing' | 'not_required'
-
-export interface MCPConnectorTemplate {
-  template_id: string | null
-  slug: string | null
-  name: string
-  provider: string | null
-  status: string
-}
-
-export interface MCPConnectorInstall {
-  install_id: string
-  name: string
-  server_url: string
-  transport: MCPTransport
-  auth_method: MCPAuthMethod
-  credential_scope: MCPCredentialScope
-  install_status: 'active' | 'deleted'
-  origin: 'org' | 'workspace'
-  owner_workspace_id: string | null
-  tool_count: number
-}
-
-export interface MCPWorkspaceConnectorState {
-  enabled: boolean
-  credential_policy: MCPCredentialScope | null
-}
-
-export interface MCPEffectiveConnector {
-  template: MCPConnectorTemplate | null
-  install: MCPConnectorInstall
-  workspace_state: MCPWorkspaceConnectorState
-  credential_policy: MCPCredentialScope
-  credential_availability: MCPCredentialAvailability
-  credential_source: 'org' | 'workspace' | 'user' | null
-  credential_shared_by: string | null
-  usable: boolean
-  reason: MCPEffectiveReason
-}
-
-export interface MCPEffectiveConnectorList {
-  items: MCPEffectiveConnector[]
-}
-
-export interface MCPWorkspaceConnectorStatePatch {
-  enabled?: boolean
-  credential_policy?: MCPCredentialScope
-}
-```
-
-- [ ] **Step 4: Add API helpers**
-
-Edit `frontend/packages/core/src/api/mcp.ts`.
-
-Add imports:
-
-```typescript
-  MCPEffectiveConnector,
-  MCPEffectiveConnectorList,
-  MCPWorkspaceConnectorStatePatch,
-```
-
-Add functions:
-
-```typescript
-export async function wsListEffectiveConnectors(
-  client: ApiClient,
-  wsId: string,
-): Promise<MCPEffectiveConnectorList> {
-  const res = await client.get(`/api/v1/ws/${wsId}/mcp/connectors`)
-  if (!res.ok) throw await toApiError(res)
-  return (await res.json()) as MCPEffectiveConnectorList
-}
-
-export async function wsPatchConnectorState(
-  client: ApiClient,
-  wsId: string,
-  installId: string,
-  body: MCPWorkspaceConnectorStatePatch,
-): Promise<MCPEffectiveConnector> {
-  const res = await client.patch(`/api/v1/ws/${wsId}/mcp/connectors/${installId}/state`, body)
-  if (!res.ok) throw await toApiError(res)
-  return (await res.json()) as MCPEffectiveConnector
-}
-```
-
-- [ ] **Step 5: Extend workspace settings types**
-
-Edit `frontend/packages/core/src/types/workspace-settings.ts`.
-
-Change:
-
-```typescript
-export type MCPCredentialMode = 'org' | 'workspace' | 'user'
-```
-
-to:
-
-```typescript
-export type MCPCredentialMode = 'org' | 'workspace' | 'user' | 'none'
-```
-
-Add import:
-
-```typescript
-import type { MCPEffectiveConnector } from './mcp'
-```
-
-Add to `WorkspaceMCP`:
-
-```typescript
-  connectors?: MCPEffectiveConnector[]
-```
-
-- [ ] **Step 6: Route workspace settings store through normalized helpers**
-
-Edit `frontend/packages/core/src/api/workspace-settings.ts`.
-
-Keep existing functions for compatibility, but make `patchWorkspaceMCPCredentialMode`
-call the connector state endpoint when the `ApiClient` has a workspace id in scope:
-
-```typescript
-export async function patchWorkspaceMCPCredentialMode(
-  client: ApiClient,
-  serverId: string,
-  credentialMode: MCPCredentialMode,
-): Promise<{ server_id: string; credential_mode: MCPCredentialMode }> {
-  const res = await client.patch(`/api/v1/mcp/connectors/${serverId}/state`, {
-    credential_policy: credentialMode,
-  })
-  if (!res.ok) throw await toApiError(res)
-  const body = await res.json()
-  return {
-    server_id: body.install.install_id,
-    credential_mode: body.credential_policy,
-  }
-}
-```
-
-- [ ] **Step 7: Run frontend core tests and typecheck**
+- [ ] **Step 4: Run frontend core checks**
 
 Run:
 
@@ -1972,7 +1447,7 @@ pnpm --filter @cubebox/core type-check
 
 Expected: both commands pass.
 
-- [ ] **Step 8: Commit**
+- [ ] **Step 5: Commit**
 
 ```bash
 git add frontend/packages/core/src/types/mcp.ts \
@@ -1981,117 +1456,107 @@ git add frontend/packages/core/src/types/mcp.ts \
         frontend/packages/core/src/api/workspace-settings.ts \
         frontend/packages/core/src/stores/workspaceSettingsStore.ts \
         frontend/packages/core/__tests__/api/mcp.test.ts
-git commit -m "feat(mcp): add effective connector types and API client"
+git commit -m "feat(mcp): switch frontend core to four-layer API"
 ```
 
 ---
 
-## Task 8: Workspace UI Uses Four-Layer Semantics
+## Task 8: Frontend UI Terminology And Flows
 
 **Files:**
 
+- Rename: `frontend/packages/web/components/mcp/MCPCatalogInstallPanel.tsx`
+  to `frontend/packages/web/components/mcp/MCPTemplateInstallPanel.tsx`
 - Modify: `frontend/packages/web/components/workspace-settings/McpPanel.tsx`
-- Modify: `frontend/packages/web/components/mcp/MCPCatalogInstallPanel.tsx`
+- Modify: `frontend/packages/web/components/mcp/MCPConnectorList.tsx`
+- Modify: `frontend/packages/web/components/mcp/MCPAdminDetailPanel.tsx`
+- Modify: `frontend/packages/web/components/mcp/MCPWorkspacesTab.tsx`
 - Modify: `frontend/packages/web/messages/en.json`
 - Modify: `frontend/packages/web/messages/zh.json`
 - Modify: `frontend/packages/web/__tests__/e2e/mcp/ws-mcp.spec.ts`
+- Modify: `frontend/packages/web/__tests__/e2e/mcp/admin-mcp.spec.ts`
 
-- [ ] **Step 1: Add Playwright assertions for visible semantics**
+- [ ] **Step 1: Rename the install panel file**
 
-Edit `frontend/packages/web/__tests__/e2e/mcp/ws-mcp.spec.ts`.
+Run:
 
-Add a test that navigates to workspace settings and asserts these user-facing strings:
+```bash
+git mv frontend/packages/web/components/mcp/MCPCatalogInstallPanel.tsx \
+       frontend/packages/web/components/mcp/MCPTemplateInstallPanel.tsx
+```
+
+Update imports that referenced `MCPCatalogInstallPanel`.
+
+- [ ] **Step 2: Replace UI copy**
+
+Use these final product labels:
+
+```text
+Connector templates
+Connector installs
+Workspace state
+Credential policy
+Org grant
+Workspace grant
+My grant
+Connect
+Disconnect
+Uninstall
+Needs your credential
+Ready
+```
+
+Remove visible UI copy containing `Catalog`, `Override`, `catalog`, or `override`.
+
+- [ ] **Step 3: Add message keys**
+
+Add to `frontend/packages/web/messages/en.json` under `mcp`:
+
+```json
+"templates": "Connector templates",
+"installs": "Connector installs",
+"workspaceState": "Workspace state",
+"credentialPolicy": "Credential policy",
+"orgGrant": "Org grant",
+"workspaceGrant": "Workspace grant",
+"myGrant": "My grant",
+"needsCredential": "Needs your credential",
+"ready": "Ready"
+```
+
+Add to `frontend/packages/web/messages/zh.json` under `mcp`:
+
+```json
+"templates": "连接器模板",
+"installs": "连接器安装",
+"workspaceState": "工作区状态",
+"credentialPolicy": "凭证策略",
+"orgGrant": "组织授权",
+"workspaceGrant": "工作区授权",
+"myGrant": "我的授权",
+"needsCredential": "需要你的凭证",
+"ready": "可用"
+```
+
+- [ ] **Step 4: Add E2E copy assertions**
+
+Append to `frontend/packages/web/__tests__/e2e/mcp/ws-mcp.spec.ts`:
 
 ```typescript
 await expect(page.getByText('Connector templates')).toBeVisible()
-await expect(page.getByText('Installed in this workspace')).toBeVisible()
-await expect(page.getByText('Needs your credential')).toBeVisible()
+await expect(page.getByText('Workspace state')).toBeVisible()
+await expect(page.getByText('Credential policy')).toBeVisible()
+await expect(page.getByText('Override')).toHaveCount(0)
+await expect(page.getByText('Catalog')).toHaveCount(0)
 ```
 
-For Chinese locale coverage, add the same assertion pattern using:
+Append to `frontend/packages/web/__tests__/e2e/mcp/admin-mcp.spec.ts`:
 
 ```typescript
-await expect(page.getByText('连接器模板')).toBeVisible()
-await expect(page.getByText('已安装到此工作区')).toBeVisible()
-await expect(page.getByText('需要你的凭证')).toBeVisible()
-```
-
-- [ ] **Step 2: Update workspace panel terminology**
-
-Edit `frontend/packages/web/components/workspace-settings/McpPanel.tsx`.
-
-Use these display labels:
-
-```typescript
-const reasonLabel: Record<string, string> = {
-  usable: t('state.usable'),
-  template_inactive: t('state.templateInactive'),
-  install_deleted: t('state.installDeleted'),
-  workspace_disabled: t('state.workspaceDisabled'),
-  credential_missing: t('state.credentialMissing'),
-  unsupported_transport: t('state.unsupportedTransport'),
-}
-```
-
-Use "Enable for workspace" for workspace state, "Credential policy" for mode,
-and "Disconnect" for deleting a user grant. Do not display the word "override".
-
-- [ ] **Step 3: Present catalog as templates**
-
-Edit `frontend/packages/web/components/mcp/MCPCatalogInstallPanel.tsx`.
-
-Change the heading and empty state keys to:
-
-```typescript
-const title = t('templates.title')
-const empty = t('templates.empty')
-```
-
-Ensure actions still call the existing install helpers. The endpoint alias will be used by
-core API after compatibility is verified.
-
-- [ ] **Step 4: Add message keys**
-
-Add under `mcp.wsPanel` in `frontend/packages/web/messages/en.json`:
-
-```json
-"templates": {
-  "title": "Connector templates",
-  "empty": "No connector templates match this filter."
-},
-"installedWorkspace": "Installed in this workspace",
-"credentialPolicy": "Credential policy",
-"enableWorkspace": "Enable for workspace",
-"disconnect": "Disconnect",
-"state": {
-  "usable": "Ready",
-  "templateInactive": "Template unavailable",
-  "installDeleted": "Install removed",
-  "workspaceDisabled": "Disabled in this workspace",
-  "credentialMissing": "Needs your credential",
-  "unsupportedTransport": "Unsupported transport"
-}
-```
-
-Add under `mcp.wsPanel` in `frontend/packages/web/messages/zh.json`:
-
-```json
-"templates": {
-  "title": "连接器模板",
-  "empty": "没有匹配的连接器模板。"
-},
-"installedWorkspace": "已安装到此工作区",
-"credentialPolicy": "凭证策略",
-"enableWorkspace": "为工作区启用",
-"disconnect": "断开连接",
-"state": {
-  "usable": "可用",
-  "templateInactive": "模板不可用",
-  "installDeleted": "安装已移除",
-  "workspaceDisabled": "此工作区已停用",
-  "credentialMissing": "需要你的凭证",
-  "unsupportedTransport": "不支持的传输方式"
-}
+await expect(page.getByText('Connector installs')).toBeVisible()
+await expect(page.getByText('Org grant')).toBeVisible()
+await expect(page.getByText('Override')).toHaveCount(0)
+await expect(page.getByText('Catalog')).toHaveCount(0)
 ```
 
 - [ ] **Step 5: Run frontend checks**
@@ -2101,149 +1566,46 @@ Run:
 ```bash
 cd frontend
 pnpm --filter @cubebox/web type-check
-pnpm --filter @cubebox/web test:e2e -- mcp/ws-mcp.spec.ts
+pnpm --filter @cubebox/web test:e2e -- mcp/ws-mcp.spec.ts mcp/admin-mcp.spec.ts
 ```
 
-Expected: typecheck passes and the MCP workspace spec passes.
+Expected: typecheck passes and both MCP E2E specs pass.
 
 - [ ] **Step 6: Commit**
 
 ```bash
 git add frontend/packages/web/components/workspace-settings/McpPanel.tsx \
-        frontend/packages/web/components/mcp/MCPCatalogInstallPanel.tsx \
-        frontend/packages/web/messages/en.json \
-        frontend/packages/web/messages/zh.json \
-        frontend/packages/web/__tests__/e2e/mcp/ws-mcp.spec.ts
-git commit -m "feat(mcp): clarify workspace connector management UI"
-```
-
----
-
-## Task 9: Admin UI and Compatibility Cleanup
-
-**Files:**
-
-- Modify: `frontend/packages/web/app/admin/mcp/page.tsx`
-- Modify: `frontend/packages/web/components/mcp/MCPConnectorList.tsx`
-- Modify: `frontend/packages/web/components/mcp/MCPWorkspacesTab.tsx`
-- Modify: `frontend/packages/web/components/mcp/MCPCredentialPanel.tsx`
-- Modify: `frontend/packages/web/messages/en.json`
-- Modify: `frontend/packages/web/messages/zh.json`
-- Modify: `frontend/packages/web/__tests__/e2e/mcp/admin-mcp.spec.ts`
-- Modify: `backend/tests/e2e/test_mcp_auto_enroll.py`
-
-- [ ] **Step 1: Add admin E2E assertions for install vs workspace state**
-
-Edit `frontend/packages/web/__tests__/e2e/mcp/admin-mcp.spec.ts`.
-
-Add assertions for these visible labels:
-
-```typescript
-await expect(page.getByText('Connector installs')).toBeVisible()
-await expect(page.getByText('Workspace state')).toBeVisible()
-await expect(page.getByText('Org grant')).toBeVisible()
-```
-
-- [ ] **Step 2: Update admin labels**
-
-In the admin MCP page and components, replace visible "Catalog" labels with
-"Templates" and "Override" labels with "Workspace state".
-
-Use this map for admin badges:
-
-```typescript
-const scopeLabel: Record<string, string> = {
-  org: t('scope.orgInstall'),
-  workspace: t('scope.workspaceInstall'),
-  user: t('scope.userGrant'),
-  none: t('scope.noGrantRequired'),
-}
-```
-
-- [ ] **Step 3: Keep old endpoint names inside API helpers only**
-
-Do not rename functions that still target old backend URLs in UI components. Keep old
-endpoint terminology in `frontend/packages/core/src/api/mcp.ts` until backend compatibility
-metrics show no remaining callers.
-
-- [ ] **Step 4: Verify delete vs disconnect semantics**
-
-Extend `backend/tests/e2e/test_mcp_auto_enroll.py` with:
-
-```python
-async def test_admin_delete_install_removes_workspace_state_not_user_grants(
-    admin_client: tuple[httpx.AsyncClient, str],
-    github_catalog_id: str,
-) -> None:
-    client, workspace_id = admin_client
-    install = await client.post(
-        f"/api/v1/admin/mcp/catalog/{github_catalog_id}/install",
-        json={"auth_method": "static", "credential_plaintext": "ghp_test"},
-    )
-    assert install.status_code == 201, install.text
-    install_id = install.json()["install_id"]
-
-    delete_resp = await client.delete(f"/api/v1/admin/mcp/installs/{install_id}")
-    assert delete_resp.status_code == 204, delete_resp.text
-
-    rows = await client.get(f"/api/v1/ws/{workspace_id}/mcp/connectors")
-    assert rows.status_code == 200, rows.text
-    assert all(item["install"]["install_id"] != install_id for item in rows.json()["items"])
-```
-
-- [ ] **Step 5: Run admin checks**
-
-Run:
-
-```bash
-cd backend
-uv run pytest -q tests/e2e/test_mcp_auto_enroll.py
-cd ../frontend
-pnpm --filter @cubebox/web type-check
-pnpm --filter @cubebox/web test:e2e -- mcp/admin-mcp.spec.ts
-```
-
-Expected: all commands pass.
-
-- [ ] **Step 6: Commit**
-
-```bash
-git add frontend/packages/web/app/admin/mcp/page.tsx \
+        frontend/packages/web/components/mcp/MCPTemplateInstallPanel.tsx \
         frontend/packages/web/components/mcp/MCPConnectorList.tsx \
+        frontend/packages/web/components/mcp/MCPAdminDetailPanel.tsx \
         frontend/packages/web/components/mcp/MCPWorkspacesTab.tsx \
-        frontend/packages/web/components/mcp/MCPCredentialPanel.tsx \
         frontend/packages/web/messages/en.json \
         frontend/packages/web/messages/zh.json \
-        frontend/packages/web/__tests__/e2e/mcp/admin-mcp.spec.ts \
-        backend/tests/e2e/test_mcp_auto_enroll.py
-git commit -m "feat(mcp): align admin terminology with connector model"
+        frontend/packages/web/__tests__/e2e/mcp/ws-mcp.spec.ts \
+        frontend/packages/web/__tests__/e2e/mcp/admin-mcp.spec.ts
+git commit -m "feat(mcp): update UI to connector template model"
 ```
 
 ---
 
-## Task 10: Final Verification and Risk Review
+## Task 9: Final Cleanup And Verification
 
 **Files:**
 
-- Modify: this plan only if verification finds command or path drift.
+- Modify files found by the search commands in this task.
 
-- [ ] **Step 1: Run backend MCP slices**
+- [ ] **Step 1: Search for removed public concepts**
 
 Run:
 
 ```bash
-cd backend
-uv run pytest -q tests/unit/mcp tests/unit/test_mcp_*.py
-uv run pytest -q tests/e2e/test_mcp_catalog_routes.py \
-                 tests/e2e/test_mcp_effective_connectors.py \
-                 tests/e2e/test_mcp_catalog_runtime.py \
-                 tests/e2e/test_mcp_auto_enroll.py \
-                 tests/e2e/test_mcp_user_credentials.py \
-                 tests/e2e/test_mcp_bindings.py \
-                 tests/e2e/test_ws_settings.py
+rg -n "Catalog|catalog|Override|override|mcp_catalog|workspace_mcp_overrides" \
+  backend/cubebox frontend/packages/core frontend/packages/web \
+  -g '!**/.venv/**' -g '!**/node_modules/**'
 ```
 
-Expected: all selected backend tests pass.
+Expected remaining matches are limited to migration filenames, migration comments, or tests
+that assert old routes are absent.
 
 - [ ] **Step 2: Run backend quality gate**
 
@@ -2269,7 +1631,7 @@ pnpm --filter @cubebox/web test:e2e -- mcp/ws-mcp.spec.ts mcp/admin-mcp.spec.ts
 
 Expected: all commands pass.
 
-- [ ] **Step 4: Manual runtime smoke check**
+- [ ] **Step 4: Manual smoke test**
 
 Run:
 
@@ -2286,28 +1648,20 @@ cd frontend
 pnpm dev
 ```
 
-Open the `BASE_URL` printed by `.worktree.env`, install a no-auth MCP template in one
-workspace, and confirm it appears as ready in workspace settings without creating a
-credential grant.
+Open the worktree `BASE_URL`, install a no-auth connector template into a workspace,
+and confirm the connector appears as `Ready` without creating any credential grant.
 
-- [ ] **Step 5: Review known design risks**
+- [ ] **Step 5: Commit verification cleanup**
 
-Confirm these are true before merging:
-
-- `catalog` remains only as a compatibility name for old URLs and DB tables.
-- Product copy uses template, install, workspace state, and grant.
-- Runtime reads one effective-state path.
-- `auth_method="none"` never creates a user credential requirement.
-- `install_status` separates deletion from credential readiness.
-- Workspace-local installs are workspace-scoped, not creator-private.
-- Disconnecting a user grant does not uninstall the connector.
-
-- [ ] **Step 6: Final commit if verification changed files**
+Run:
 
 ```bash
 git status --short
-git add <changed-files>
-git commit -m "test(mcp): verify four-layer connector management"
 ```
 
-If `git status --short` is empty, no commit is needed.
+If files changed during cleanup:
+
+```bash
+git add backend/cubebox frontend/packages
+git commit -m "chore(mcp): remove old catalog and override surfaces"
+```
