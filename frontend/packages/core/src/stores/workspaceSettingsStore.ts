@@ -3,6 +3,7 @@ import type { ApiClient } from '../api/client'
 import {
   getAgentConfig,
   listWorkspaceMCP,
+  listWorkspaceMCPConnectors,
   listWorkspaceSkills,
   patchWorkspaceMCPCredentialMode,
   toggleWorkspaceMCP,
@@ -17,15 +18,23 @@ import type {
   WorkspaceMCP,
   WorkspaceSkills,
 } from '../types/workspace-settings'
+import type { MCPEffectiveConnector } from '../types/mcp'
 
 export interface WorkspaceSettingsStore {
   agentConfig: AgentConfig | null
   skills: WorkspaceSkills | null
   mcp: WorkspaceMCP | null
+  /**
+   * Four-layer effective connector list for the currently-loaded workspace.
+   * Populated lazily by `loadMcpEffectiveConnectors`; coexists with `mcp`
+   * (legacy `MCPServerItem` projection) until Task 8 retires the old UI.
+   */
+  mcpEffectiveConnectors: MCPEffectiveConnector[] | null
   loading: boolean
   error: string | null
 
   loadAll: (client: ApiClient) => Promise<void>
+  loadMcpEffectiveConnectors: (client: ApiClient, wsId: string) => Promise<void>
   savePersona: (client: ApiClient, prompt: string) => Promise<void>
   toggleSkill: (client: ApiClient, installId: string, enabled: boolean) => Promise<void>
   toggleMCP: (client: ApiClient, serverId: string, enabled: boolean) => Promise<void>
@@ -40,6 +49,7 @@ export const useWorkspaceSettingsStore = create<WorkspaceSettingsStore>((set, ge
   agentConfig: null,
   skills: null,
   mcp: null,
+  mcpEffectiveConnectors: null,
   loading: false,
   error: null,
 
@@ -54,6 +64,15 @@ export const useWorkspaceSettingsStore = create<WorkspaceSettingsStore>((set, ge
       set({ agentConfig, skills, mcp, loading: false })
     } catch (e) {
       set({ loading: false, error: String(e) })
+    }
+  },
+
+  async loadMcpEffectiveConnectors(client: ApiClient, wsId: string) {
+    try {
+      const items = await listWorkspaceMCPConnectors(client, wsId)
+      set({ mcpEffectiveConnectors: items })
+    } catch (e) {
+      set({ error: String(e) })
     }
   },
 

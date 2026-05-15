@@ -238,3 +238,58 @@ export interface MCPAdminConnector {
   workspace_count: number
   last_error: string | null
 }
+
+// ---------------- Four-layer connector model (templates / installs / state / effective) ---------------- //
+//
+// These types describe the new MCP management surface introduced by the
+// four-layer plan. They coexist with the legacy MCPCatalog* / MCPServer
+// types above until Task 8 migrates the UI components. The new endpoints
+// live under `/api/v1/ws/{ws}/mcp/templates`, `/installs`, `/connectors`,
+// and `/connectors/{installId}/state`.
+
+export interface MCPConnectorTemplate {
+  template_id: string
+  slug: string
+  name: string
+  provider: string
+  description: string
+  server_url: string
+  transport: MCPTransport
+  supported_auth_methods: MCPAuthMethod[]
+  default_credential_policy: MCPCredentialScope
+  static_form_schema: unknown[] | null
+  status: 'active' | 'deprecated' | 'disabled'
+}
+
+export interface MCPConnectorInstall {
+  install_id: string
+  template_id: string | null
+  install_scope: 'org' | 'workspace'
+  workspace_id: string | null
+  name: string
+  auth_method: MCPAuthMethod
+  default_credential_policy: MCPCredentialScope
+  auth_status: string
+  discovery_status: string
+  install_state: 'active' | 'uninstalled'
+}
+
+export interface MCPWorkspaceConnectorState {
+  workspace_id: string
+  install_id: string
+  enabled: boolean
+  credential_policy: MCPCredentialScope
+  enablement_source?: string
+}
+
+export interface MCPEffectiveConnector {
+  template: MCPConnectorTemplate | null
+  install: MCPConnectorInstall
+  workspace_state: MCPWorkspaceConnectorState
+  credential_policy: MCPCredentialScope
+  required_grant_scope?: MCPCredentialScope
+  credential_availability: 'available' | 'missing' | 'not_required'
+  credential_source: 'org' | 'workspace' | 'user' | null
+  usable: boolean
+  reason: string
+}

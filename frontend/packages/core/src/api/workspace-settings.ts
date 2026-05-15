@@ -5,6 +5,8 @@ import type {
   WorkspaceMCP,
   WorkspaceSkills,
 } from '../types/workspace-settings'
+import { wsListEffectiveConnectors } from './mcp'
+import type { MCPEffectiveConnector } from '../types/mcp'
 
 export async function getAgentConfig(client: ApiClient): Promise<AgentConfig> {
   const res = await client.get('/api/v1/settings/agent')
@@ -66,6 +68,21 @@ export async function toggleWorkspaceMCP(
   const res = await client.patch(`/api/v1/settings/mcp/${serverId}`, { enabled })
   if (!res.ok) throw await toApiError(res)
   return (await res.json()) as { server_id: string; enabled: boolean }
+}
+
+/**
+ * Four-layer effective connector list for a workspace. Wraps
+ * `wsListEffectiveConnectors` for callers that already live on the
+ * workspace-settings API surface (e.g. settings store). The shape returned
+ * here is the effective row (template + install + state + credential
+ * availability), not the legacy `MCPServerItem` projection.
+ */
+export async function listWorkspaceMCPConnectors(
+  client: ApiClient,
+  wsId: string,
+): Promise<MCPEffectiveConnector[]> {
+  const data = await wsListEffectiveConnectors(client, wsId)
+  return data.items
 }
 
 export async function patchWorkspaceMCPCredentialMode(

@@ -4,6 +4,7 @@ import {
   wsGetToolCitations,
   wsPatchToolCitations,
   wsGetCatalogToolCitations,
+  wsListTemplates,
 } from '../../src/api/mcp'
 import type { CitationConfigJSON, ToolCitationsResponse } from '../../src/types/mcp'
 
@@ -108,5 +109,41 @@ describe('MCP tool-citations API', () => {
         },
       }),
     ).rejects.toThrow()
+  })
+})
+
+describe('MCP four-layer API', () => {
+  let fetchMock: ReturnType<typeof vi.fn>
+  beforeEach(() => {
+    fetchMock = vi.fn()
+    globalThis.fetch = fetchMock as unknown as typeof fetch
+  })
+  afterEach(() => vi.restoreAllMocks())
+
+  it('uses template and install paths for workspace MCP', async () => {
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ items: [] }), { status: 200 }))
+    const client = createApiClient('')
+    await wsListTemplates(client, 'ws-x')
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/ws/ws-x/mcp/templates')
+  })
+
+  it('does not use catalog or override paths', async () => {
+    // Coexist policy: legacy MCPCatalog* helpers still live in this module
+    // until Task 8 migrates the React components, so a blanket
+    // `every export name lacks Catalog/Override` assertion would fail
+    // (and rightly so). Instead, assert the four-layer helpers introduced
+    // by this task don't accidentally carry the legacy substrings.
+    const source = await import('../../src/api/mcp')
+    const fourLayerNames = [
+      'wsListTemplates',
+      'wsCreateInstall',
+      'wsPatchConnectorState',
+      'wsListEffectiveConnectors',
+    ]
+    for (const name of fourLayerNames) {
+      expect(typeof (source as Record<string, unknown>)[name]).toBe('function')
+      expect(name.includes('Catalog')).toBe(false)
+      expect(name.includes('Override')).toBe(false)
+    }
   })
 })
