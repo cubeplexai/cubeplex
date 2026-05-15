@@ -37,7 +37,7 @@ credential、admin distribution 继续叠加时会变得更难维护。
 
 - 建立清晰的功能模型，使 org、workspace、user 三层职责分离。
 - 明确安装、启用、授权、可运行四个状态不是同一件事。
-- 统一 admin 页面、workspace settings、catalog 页面、runtime loading 的状态来源。
+- 统一 admin 页面、workspace settings、template library 页面、runtime loading 的状态来源。
 - 支持以下产品场景：
   - org admin 安装 connector，并分发到一个或多个 workspace。
   - workspace admin 启用 org connector，并选择 credential policy。
@@ -48,8 +48,9 @@ credential、admin distribution 继续叠加时会变得更难维护。
 
 ## Non-Goals
 
-- 不在本 spec 中定义具体迁移脚本步骤。
-- 不要求一次 PR 完成所有对象重命名。
+- 不保留旧 `catalog` / `override` API、产品文案或服务命名的向前兼容层；产品尚未发布，
+  可以直接切到正确模型。
+- 不保留旧 MCP 表结构的长期兼容；实现时应直接迁移到四层目标 schema。
 - 不设计 MCP server tool invocation 的 try-it 后端。
 - 不改变 Organization、Workspace、Membership、OrganizationMembership 的基础身份模型。
 - 不移除 credential vault；本设计继续使用现有 vault 作为 secret 存储层。
@@ -73,7 +74,7 @@ connector 语义。personal connector 可以作为未来功能，但不应混入
 
 ### ConnectorTemplate
 
-`ConnectorTemplate` 是系统 catalog 中的可安装模板。它只回答：
+`ConnectorTemplate` 是系统连接器模板库中的可安装模板。它只回答：
 
 > 系统支持什么 connector？安装它需要哪些信息？
 
@@ -100,7 +101,7 @@ Conceptual fields:
 Rules:
 
 - Template is global.
-- Template rows are seeded by system catalog seeding.
+- Template rows are seeded by connector template seeding.
 - Template can be deprecated without breaking existing installs.
 - Template cannot be "enabled" in a workspace directly.
 - Template cannot be "authorized".
@@ -167,8 +168,8 @@ Rules:
 - State is not the install itself.
 - For org installs, state is required for workspace runtime use.
 - For workspace installs, state is created with `enabled=true` when install is created.
-- No state means "not enabled" unless a migration compatibility layer explicitly says otherwise.
-- The object should not be named "override" in product language.
+- No state means "not enabled".
+- The object must not be named "override" in product language, API, service, or DB schema.
 
 ### CredentialGrant
 
@@ -398,7 +399,7 @@ Uninstall:
 
 1. Actor removes or tombstones install.
 2. Workspace states are removed or marked inactive.
-3. Grants are revoked/deleted as appropriate.
+3. Grants are revoked at the provider when OAuth revoke is available, then deleted locally.
 4. Duplicate install checks ignore uninstalled rows.
 5. User can install the same template again.
 
@@ -421,7 +422,7 @@ EffectiveConnectorService.list_for_workspace_user(
 
 Responsibilities:
 
-1. Load templates relevant to catalog display.
+1. Load templates relevant to template library display.
 2. Load org installs and workspace-local installs.
 3. Load workspace connector states.
 4. Resolve credential policy.
@@ -434,7 +435,7 @@ Consumers:
 
 - Admin MCP page.
 - Workspace MCP/settings page.
-- Catalog page.
+- Template library page.
 - Runtime MCP tool loader.
 - Future diagnostics/support endpoints.
 
@@ -468,12 +469,12 @@ Admin install create supports:
 
 ```json
 {
-  "template_id": "mctlg-...",
+  "template_id": "ctpl-example",
   "install_scope": "org",
   "auth_method": "oauth",
   "auto_enable": {
     "mode": "selected",
-    "workspace_ids": ["ws-..."]
+    "workspace_ids": ["ws-example"]
   },
   "default_credential_policy": "org"
 }
@@ -495,7 +496,7 @@ Example:
 ```json
 {
   "template_slug": "github",
-  "install_id": "mcp-...",
+  "install_id": "cins-example",
   "install_scope": "org",
   "enabled": true,
   "credential_policy": "user",
@@ -543,7 +544,9 @@ DELETE /api/v1/ws/{workspace_id}/mcp/installs/{install_id}/grants/me
 OAuth start can be scoped to the grant being created:
 
 ```text
-POST /api/v1/.../grants/{org|workspace|me}/oauth/start
+POST /api/v1/admin/mcp/installs/{install_id}/grants/org/oauth/start
+POST /api/v1/ws/{workspace_id}/mcp/installs/{install_id}/grants/workspace/oauth/start
+POST /api/v1/ws/{workspace_id}/mcp/installs/{install_id}/grants/me/oauth/start
 ```
 
 This makes OAuth intent explicit. The callback should know whether it is creating
@@ -555,7 +558,7 @@ an org, workspace, or user grant.
 
 Admin page should be organized around org installs:
 
-- Catalog/templates list.
+- Connector template list.
 - Installed org connectors.
 - Install detail:
   - Overview: auth/discovery/install state.
@@ -614,57 +617,60 @@ Use precise labels:
 | Disconnected | Grant was removed but install remains |
 | Uninstalled | Install was removed/tombstoned |
 
-Avoid using "override" in UI.
+Avoid using "catalog" or "override" in UI.
 
-## Data Model Mapping To Current Tables
+## Target Data Model
 
-The four concepts can map onto current tables initially:
+Because the product has not shipped, implementation should move directly to
+the target schema instead of layering compatibility names on top of old tables:
 
-| Concept | Current Table |
+| Concept | Target Table |
 | --- | --- |
-| `ConnectorTemplate` | `mcp_catalog_connectors` |
-| `ConnectorInstall` | `mcp_servers` |
-| `WorkspaceConnectorState` | `workspace_mcp_overrides` |
-| `CredentialGrant(org)` | `mcp_servers.credential_id` initially |
-| `CredentialGrant(workspace)` | `workspace_mcp_credentials` |
-| `CredentialGrant(user)` | `user_mcp_credentials` |
+| `ConnectorTemplate` | `connector_templates` |
+| `ConnectorInstall` | `connector_installs` |
+| `WorkspaceConnectorState` | `workspace_connector_states` |
+| `CredentialGrant` | `credential_grants` |
 
-Short-term compatibility is acceptable, but product/service names should move
-toward the four concepts even before physical table names change.
+Existing MCP tables (`mcp_catalog_connectors`, `mcp_servers`,
+`workspace_mcp_overrides`, `workspace_mcp_credentials`, `user_mcp_credentials`) are
+implementation history, not product model. The implementation plan may use destructive
+migration for local/dev data, because there is no released external contract.
 
-Longer term, org grants should move out of `mcp_servers.credential_id` into a
-dedicated grant table or unified grant repository. That will make org/workspace/user
-grant resolution symmetrical.
+Org, workspace, and user grants should all be rows in `credential_grants`. The
+credential vault remains the secret storage layer; `credential_grants.credential_id`
+and `credential_grants.refresh_credential_id` point to vault rows.
 
-## Migration Strategy
+## Implementation Strategy
 
-### Phase 1: Semantic Service Layer
+### Phase 1: Target Schema And Domain Names
 
-- Introduce normalized DTOs for effective connector state.
-- Implement one effective-state service over current tables.
-- Update workspace catalog/settings/runtime to consume this service.
-- Keep existing routes as compatibility wrappers.
+- Create target tables for templates, installs, workspace states, and grants.
+- Replace old model class names with `ConnectorTemplate`, `ConnectorInstall`,
+  `WorkspaceConnectorState`, and `CredentialGrant`.
+- Replace catalog/override repositories and services with template/install/state/grant
+  repositories and services.
 
-### Phase 2: Correctness Fixes
+### Phase 2: Correct State Machine
 
+- Implement install lifecycle with `install_state`.
+- Implement auth lifecycle with grants, not `authed` on installs.
 - Fix no-auth workspace install to use `credential_policy=none`.
-- Validate credential policy values.
+- Validate credential policy values at the API boundary and repository layer.
 - Reject custom OAuth installs unless hand-rolled OAuth metadata is supported.
-- Wire OAuth refresh into runtime effective state resolution.
 
-### Phase 3: API And UI Realignment
+### Phase 3: Correct API And UI
 
-- Add new connector/state/grant routes.
+- Expose only template/install/state/grant routes.
+- Remove old catalog/override routes and frontend helpers.
 - Update admin MCP page to use install/state/grant language.
 - Update workspace settings to show normalized reason states.
-- Deprecate ambiguous fields such as `user_install_id` for workspace-local install.
 
-### Phase 4: Schema Cleanup
+### Phase 4: Runtime And Verification
 
-- Rename or replace `workspace_mcp_overrides` with workspace connector state.
-- Add explicit `install_state`.
-- Split disconnect and uninstall persistence.
-- Consider unified credential grant table.
+- Runtime loads connectors from one effective-state service.
+- OAuth access tokens are resolved through `OAuthTokenManager`.
+- Tests assert old catalog/override routes are absent.
+- Tests cover no-auth, org grant, workspace grant, user grant, disconnect, and uninstall.
 
 ## Invariants
 
@@ -721,18 +727,17 @@ Frontend tests:
 
 ## Open Decisions
 
-These decisions should be made before implementation planning:
+These decisions are resolved for the first implementation:
 
 1. Should workspace members be allowed to create personal connectors in a future phase?
    Recommended answer: not in this redesign; keep it separate.
 2. Should workspace state rows be created explicitly for disabled org installs?
-   Recommended answer: yes for auditability, but runtime can treat missing as disabled during
-   migration.
+   Recommended answer: yes for auditability; runtime treats missing as disabled.
 3. Should workspace admin be allowed to enable any org install, or only those admin marks
    distributable?
    Recommended answer: add an org install policy later; v1 can allow enable for all org installs.
 4. Should org grant stay on `mcp_servers.credential_id` short-term?
-   Recommended answer: yes short-term; introduce unified grants after API semantics settle.
+   Recommended answer: no. Use unified `credential_grants` now.
 
 ## Success Criteria
 
@@ -744,3 +749,5 @@ These decisions should be made before implementation planning:
   the same state composition rules.
 - Disconnect and uninstall are separate user actions with separate persistence semantics.
 - Workspace-local install is consistently workspace-local, not creator-private.
+- Product/API/DB names use template, install, workspace state, and grant; there is no
+  `catalog` or `override` compatibility surface.
