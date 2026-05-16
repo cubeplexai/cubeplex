@@ -16,6 +16,7 @@ export interface MCPToolEntry {
 export interface MCPOAuthStartResult {
   authorize_url: string
   state: string
+  expires_at: string
 }
 
 // ---------------- Tool-citations ---------------- //

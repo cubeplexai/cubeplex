@@ -228,3 +228,20 @@ export async function wsMyGrantOAuthStart(
   if (!res.ok) throw await toApiError(res)
   return (await res.json()) as MCPOAuthStartResult
 }
+
+// ---------------- Admin install effective lookup ---------------- //
+
+export interface MCPAdminInstallEffective {
+  install_id: string
+  usable: boolean
+  reason: 'usable' | 'pending_oauth' | 'missing_org_grant' | 'grant_expired'
+}
+
+export async function adminGetInstallEffective(
+  client: ApiClient,
+  installId: string,
+): Promise<MCPAdminInstallEffective> {
+  const res = await client.get(`/api/v1/admin/mcp/installs/${installId}/effective`)
+  if (!res.ok) throw await toApiError(res)
+  return (await res.json()) as MCPAdminInstallEffective
+}

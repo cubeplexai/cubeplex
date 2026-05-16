@@ -7,6 +7,7 @@ export * from './api/providers'
 export { useProvidersStore } from './stores/providersStore'
 export { useModelsStore } from './stores/modelsStore'
 export { useOrgModelSettingsStore } from './stores/orgModelSettingsStore'
+export * from './oauth'
 
 // `useDeploymentMode` is intentionally NOT re-exported from this barrel.
 // The hook is `'use client'` and pulls swr; re-exporting it here would force
