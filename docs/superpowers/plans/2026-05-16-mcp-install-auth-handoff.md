@@ -165,19 +165,19 @@ class OAuthStartService:
     def __init__(
         self,
         *,
-        install_repo: MCPConnectorInstallRepository,
+        session: AsyncSession,
+        backend: EncryptionBackend,
         state_store: OAuthStateStore,
         metadata: OAuthMetadataDiscovery,
         dcr: DCRClient,
-        cred_service: CredentialService,
         http_client: httpx.AsyncClient,
         state_ttl_seconds: int = 300,
     ) -> None:
-        self._install_repo = install_repo
+        self._session = session
+        self._backend = backend
         self._state_store = state_store
         self._metadata = metadata
         self._dcr = dcr
-        self._cred_service = cred_service
         self._http = http_client
         self._state_ttl_seconds = state_ttl_seconds
 
@@ -190,7 +190,16 @@ class OAuthStartService:
         workspace_id: str | None,
         user_id: str | None,
     ) -> OAuthStartResult:
-        install = await self._install_repo.get(install_id)
+        # One-off org-agnostic install lookup so we can resolve org_id
+        # before building any org-scoped service. See OAuthCallbackHandler
+        # for the same pattern.
+        from sqlmodel import select
+        from cubebox.models.mcp import MCPConnectorInstall as _Install
+        install = (
+            await self._session.execute(
+                select(_Install).where(_Install.id == install_id)
+            )
+        ).scalar_one_or_none()
         if install is None:
             raise OAuthStartError("connector_install_not_found")
         if install.install_state != "active":
@@ -198,13 +207,26 @@ class OAuthStartService:
         if install.auth_method != "oauth":
             raise OAuthStartError("oauth_start_only_valid_for_oauth_auth")
 
+        # Build org-scoped service surface AFTER install reveals org_id.
+        cred_service = build_credential_service(
+            self._session,
+            self._backend,
+            org_id=install.org_id,
+            actor_user_id=actor_user_id,
+        )
+        install_repo = MCPConnectorInstallRepository(
+            self._session, org_id=install.org_id,
+        )
+
         # AS metadata: discovery is internally cached per server_url, so no
         # snapshot is persisted on the install row (the install model has
         # NO authorization_endpoint / token_endpoint columns — see
         # `MCPConnectorInstall` in models/mcp.py; OAuth fields all live in
         # the `oauth_client_config` JSON).
         _pr_meta, as_meta = await self._metadata.discover_for_resource(install.server_url)
-        client_id, client_secret_id = await self._ensure_client(install, as_meta)
+        client_id, client_secret_id = await self._ensure_client(
+            install, as_meta, cred_service, install_repo,
+        )
 
         pkce = generate_pkce()
         state = await self._state_store.issue(
@@ -237,7 +259,9 @@ class OAuthStartService:
             expires_at=expires_at,
         )
 
-    async def _ensure_client(self, install, as_meta) -> tuple[str, str | None]:
+    async def _ensure_client(
+        self, install, as_meta, cred_service, install_repo,
+    ) -> tuple[str, str | None]:
         """Read or create OAuth client. Stored in `install.oauth_client_config`
         JSON with keys `client_id` and `client_secret_credential_id` —
         matches what `OAuthTokenManager._post_refresh_grant_endpoint`
@@ -261,7 +285,9 @@ class OAuthStartService:
         if dcr_resp.client_secret:
             # Use upsert to tolerate retries — DCR may be re-attempted on
             # transient install_repo.update failures (next callback retry).
-            secret_id = await self._cred_service.upsert_by_kind_name(
+            # cred_service was built with org_id=install.org_id above, so
+            # the credential row carries the right org.
+            secret_id = await cred_service.upsert_by_kind_name(
                 kind="mcp_oauth_client_secret",
                 name=f"mcp:{install.id}:client_secret",
                 plaintext=dcr_resp.client_secret,
@@ -270,7 +296,7 @@ class OAuthStartService:
         if secret_id is not None:
             cfg["client_secret_credential_id"] = secret_id
         install.oauth_client_config = cfg
-        await self._install_repo.update(install)
+        await install_repo.update(install)
         return dcr_resp.client_id, secret_id
 
 
@@ -646,7 +672,7 @@ class OAuthCallbackHandler:
         grant_repo = MCPCredentialGrantRepository(self._session, org_id=install.org_id)
 
         try:
-            token = await self._post_token_exchange(install, code, verifier)
+            token = await self._post_token_exchange(install, code, verifier, cred_service)
         except httpx.HTTPError as exc:
             return OAuthCallbackResult(
                 status="error",
@@ -668,7 +694,7 @@ class OAuthCallbackHandler:
 
         return OAuthCallbackResult(status="ok", install_id=install.id, state=state)
 
-    async def _post_token_exchange(self, install, code, verifier) -> dict:
+    async def _post_token_exchange(self, install, code, verifier, cred_service) -> dict:
         # Token endpoint lives in the AS metadata, not on the install row.
         # Re-discover (internally cached) by server_url.
         _pr, as_meta = await self._metadata.discover_for_resource(install.server_url)
@@ -686,8 +712,9 @@ class OAuthCallbackHandler:
         secret_id = install.oauth_client_config.get("client_secret_credential_id")
         if isinstance(secret_id, str) and secret_id:
             # Read secret from vault, set Authorization header. Implementation
-            # mirrors token_manager.py:286-289.
-            secret = await self._cred_service.get_decrypted(
+            # mirrors token_manager.py:286-289. cred_service was built with
+            # the install's org_id in handle_callback().
+            secret = await cred_service.get_decrypted(
                 credential_id=secret_id,
                 requesting_kind="mcp_oauth_client_secret",
             )
@@ -859,33 +886,27 @@ the callback handler instead of a pre-built credential service:
 
 ```python
 async def get_oauth_start_service(
-    request: Request,
     session: AsyncSession = Depends(get_session),
     backend: EncryptionBackend = Depends(get_encryption_backend),
-    install_repo: MCPConnectorInstallRepository = Depends(get_install_repo),
     state_store: OAuthStateStore = Depends(get_oauth_state_store),
     metadata: OAuthMetadataDiscovery = Depends(get_oauth_metadata_discovery),
     dcr: DCRClient = Depends(get_dcr_client),
     http_client: httpx.AsyncClient = Depends(get_oauth_http_client),
 ) -> OAuthStartService:
-    # Org/actor come from whichever request context the calling route
-    # used. Both `get_admin_request_context` and `require_member` expose
-    # `ctx.org_id` and `ctx.user.id`; route handlers pass them in via
-    # OAuthStartService.start_oauth_flow's existing `actor_user_id`
-    # parameter and we look the org up from the install row.
-    cred_service = build_credential_service(
-        session, backend, org_id=None, actor_user_id=None,
-    )
-    # NOTE: org_id is rebound INSIDE the service per-call, after the
-    # install row is fetched (the install carries its own org_id and is
-    # the source of truth for credential scoping). See OAuthStartService
-    # bootstrap below.
+    # Same model as the callback handler: defer credential-service AND
+    # install-repo construction to inside `start_oauth_flow`, after the
+    # install row reveals `org_id`. Constructing a credential-service
+    # with `org_id=None` here and rebinding `_org_id` later does NOT
+    # rescope the underlying `CredentialRepository`, which it captured
+    # at __init__ — `repo.add()` would persist the client_secret with
+    # org_id=NULL (system scope) and the callback's org-scoped repo
+    # could never read it back.
     return OAuthStartService(
-        install_repo=install_repo,
+        session=session,
+        backend=backend,
         state_store=state_store,
         metadata=metadata,
         dcr=dcr,
-        cred_service=cred_service,
         http_client=http_client,
     )
 
@@ -1535,78 +1556,90 @@ import { computeAuthBandState } from './effectiveAuthState'
 describe('computeAuthBandState', () => {
   it('returns ready when usable and credential_source set', () => {
     const s = computeAuthBandState({
-      usable: true,
-      credential_availability: 'available',
-      credential_source: 'org',
-      reason: 'usable',
-      required_grant_scope: 'org',
-      install: { auth_method: 'oauth', auth_status: 'authorized' },
+      connector: {
+        usable: true,
+        credential_availability: 'available',
+        credential_source: 'org',
+        reason: 'usable',
+        required_grant_scope: 'org',
+        install: { auth_method: 'oauth', auth_status: 'authorized' },
+      } as any,
       callerRole: 'admin',
       isOrgAdmin: true,
-    } as any)
+    })
     expect(s.kind).toBe('ready')
   })
 
   it('returns ready (no-credential) when auth_method=none', () => {
     const s = computeAuthBandState({
-      usable: true,
-      credential_availability: 'not_required',
-      credential_source: null,
-      reason: 'usable',
-      install: { auth_method: 'none', auth_status: 'not_required' },
+      connector: {
+        usable: true,
+        credential_availability: 'not_required',
+        credential_source: null,
+        reason: 'usable',
+        install: { auth_method: 'none', auth_status: 'not_required' },
+      } as any,
       callerRole: 'member',
       isOrgAdmin: false,
-    } as any)
+    })
     expect(s.kind).toBe('ready')
-    expect(s.subkind).toBe('no_credential')
+    if (s.kind === 'ready') expect(s.subkind).toBe('no_credential')
   })
 
   it('returns needs-action for user_needs_connection on user-policy install', () => {
     const s = computeAuthBandState({
-      usable: false,
-      credential_availability: 'missing',
-      reason: 'user_needs_connection',
-      required_grant_scope: 'user',
-      install: { auth_method: 'oauth', auth_status: 'pending' },
+      connector: {
+        usable: false,
+        credential_availability: 'missing',
+        reason: 'user_needs_connection',
+        required_grant_scope: 'user',
+        install: { auth_method: 'oauth', auth_status: 'pending' },
+      } as any,
       callerRole: 'member',
       isOrgAdmin: false,
-    } as any)
+    })
     expect(s.kind).toBe('needs-action')
   })
 
   it('returns awaiting-others for missing_org_grant when caller is not org admin', () => {
     const s = computeAuthBandState({
-      usable: false,
-      reason: 'missing_org_grant',
-      required_grant_scope: 'org',
-      install: { auth_method: 'oauth', auth_status: 'pending' },
+      connector: {
+        usable: false,
+        reason: 'missing_org_grant',
+        required_grant_scope: 'org',
+        install: { auth_method: 'oauth', auth_status: 'pending' },
+      } as any,
       callerRole: 'member',
       isOrgAdmin: false,
-    } as any)
+    })
     expect(s.kind).toBe('awaiting-others')
-    expect(s.who).toBe('org_admin')
+    if (s.kind === 'awaiting-others') expect(s.who).toBe('org_admin')
   })
 
   it('returns needs-action for pending_oauth on org install when caller is org admin', () => {
     const s = computeAuthBandState({
-      usable: false,
-      reason: 'pending_oauth',
-      required_grant_scope: 'org',
-      install: { auth_method: 'oauth', auth_status: 'pending' },
+      connector: {
+        usable: false,
+        reason: 'pending_oauth',
+        required_grant_scope: 'org',
+        install: { auth_method: 'oauth', auth_status: 'pending' },
+      } as any,
       callerRole: 'admin',
       isOrgAdmin: true,
-    } as any)
+    })
     expect(s.kind).toBe('needs-action')
   })
 
   it('returns hidden for non-auth reasons (discovery_failed)', () => {
     const s = computeAuthBandState({
-      usable: false,
-      reason: 'discovery_failed',
-      install: { auth_method: 'oauth', auth_status: 'authorized' },
+      connector: {
+        usable: false,
+        reason: 'discovery_failed',
+        install: { auth_method: 'oauth', auth_status: 'authorized' },
+      } as any,
       callerRole: 'admin',
       isOrgAdmin: false,
-    } as any)
+    })
     expect(s.kind).toBe('hidden')
   })
 })
