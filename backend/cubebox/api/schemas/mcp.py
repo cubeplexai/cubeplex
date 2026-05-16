@@ -272,6 +272,32 @@ class PatchWorkspaceStateIn(BaseModel):
     credential_policy: CredentialPolicyLiteral | None = None
 
 
+class AdminInstallInvokeIn(BaseModel):
+    """Body of ``POST /admin/mcp/installs/{id}/tools/{tool}/invoke``."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    workspace_id: str | None = None
+    arguments: dict[str, Any] = Field(default_factory=dict)
+
+
+class WsInstallInvokeIn(BaseModel):
+    """Body of ``POST /ws/{ws}/mcp/installs/{id}/tools/{tool}/invoke``."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    arguments: dict[str, Any] = Field(default_factory=dict)
+
+
+class ToolInvokeOut(BaseModel):
+    """Response of the Try It invoke routes."""
+
+    ok: bool
+    result: Any | None = None
+    error: str | None = None
+    duration_ms: int
+
+
 class ToolCitationUpsertIn(BaseModel):
     """Body of ``PUT /admin/mcp/installs/{id}/tool-citations``.
 

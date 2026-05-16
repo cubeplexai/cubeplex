@@ -6,14 +6,18 @@ four-layer model — ``MCPConnectorTemplate`` / ``MCPConnectorInstall`` /
 """
 
 import asyncio
+import time
+from contextvars import ContextVar
 from typing import Annotated, Any
 
 from cubepi.mcp import load_mcp_tools_http
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from cubebox.api.middleware.rate_limit import limiter
 from cubebox.api.schemas.mcp import (
     AdminCreateInstallIn,
+    AdminInstallInvokeIn,
     AdminInstallRefreshIn,
     CreateGrantIn,
     MCPAdminInstallEffectiveOut,
@@ -30,6 +34,7 @@ from cubebox.api.schemas.mcp import (
     TestConnectionIn,
     TestConnectionOut,
     ToolCitationUpsertIn,
+    ToolInvokeOut,
 )
 from cubebox.audit.sink import AuditSink
 from cubebox.auth.context import RequestContext
@@ -410,6 +415,152 @@ async def admin_upsert_tool_citation(
     install.tool_citations = current
     saved = await svc._install_repo.update(install)
     return _install_to_out(saved, include_tool_citations=True)
+
+
+# ---------------------------------------------------------------------------
+# Try It (admin surface).
+# ---------------------------------------------------------------------------
+
+
+_INVOKE_USER_ID_ADMIN: ContextVar[str | None] = ContextVar("_INVOKE_USER_ID_ADMIN", default=None)
+_ADMIN_INVOKE_TIMEOUT_SECONDS = 10.0
+
+
+def _set_admin_invoke_user_id(user: User = Depends(current_active_user)) -> User:
+    _INVOKE_USER_ID_ADMIN.set(user.id)
+    return user
+
+
+def _admin_invoke_rate_key(_req: Request | None = None) -> str:
+    return _INVOKE_USER_ID_ADMIN.get() or "anonymous"
+
+
+@router.post(
+    "/installs/{install_id}/tools/{tool_name}/invoke",
+    response_model=ToolInvokeOut,
+)
+@limiter.limit("30/minute", key_func=_admin_invoke_rate_key)
+async def admin_invoke_tool(
+    request: Request,  # noqa: ARG001
+    install_id: str,
+    tool_name: str,
+    body: AdminInstallInvokeIn,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    backend: Annotated[EncryptionBackend, Depends(get_encryption_backend)],
+    signer: Annotated[MCPUserTokenSigner, Depends(get_user_token_signer)],
+    token_mgr: Annotated[OAuthTokenManager, Depends(get_admin_oauth_token_manager)],
+    grant_repo: Annotated[MCPCredentialGrantRepository, Depends(get_grant_repo)],
+    ctx: Annotated[RequestContext, Depends(get_admin_request_context)],
+    _rate_key_user: Annotated[User, Depends(_set_admin_invoke_user_id)],
+    audit: Annotated[AuditSink, Depends(get_audit_sink)],
+) -> ToolInvokeOut:
+    """Admin Try It: invoke a tool on any install in the admin's org."""
+    from cubebox.api.routes.v1.ws_mcp import _invoke_tool_via_cubepi
+    from cubebox.mcp.cubepi_runtime import _resolve_headers_from_spec
+    from cubebox.mcp.effective import MCPEffectiveConnectorService
+    from cubebox.repositories.mcp import (
+        MCPConnectorTemplateRepository,
+        MCPWorkspaceConnectorStateRepository,
+    )
+    from cubebox.services.mcp_discovery import _build_runtime_spec_for_discovery
+
+    install_repo = MCPConnectorInstallRepository(session, org_id=ctx.org_id)
+    install = await install_repo.get(install_id)
+    if install is None:
+        raise HTTPException(404, detail={"code": "mcp_install_not_found"})
+    needs_ws = install.default_credential_policy in {"workspace", "user"}
+    if needs_ws and not body.workspace_id:
+        raise HTTPException(
+            422,
+            detail=[
+                {
+                    "type": "value_error",
+                    "loc": ["body", "workspace_id"],
+                    "msg": "workspace_id_required_for_scoped_policy",
+                    "input": None,
+                }
+            ],
+        )
+    cred_service = build_credential_service(
+        session, backend, org_id=ctx.org_id, actor_user_id=ctx.user.id
+    )
+    grant: Any
+    if body.workspace_id is not None:
+        effective_svc = MCPEffectiveConnectorService(
+            template_repo=MCPConnectorTemplateRepository(session),
+            install_repo=install_repo,
+            state_repo=MCPWorkspaceConnectorStateRepository(session, org_id=ctx.org_id),
+            grant_repo=grant_repo,
+            org_id=ctx.org_id,
+        )
+        dtos = await effective_svc.list_for_workspace_user(
+            body.workspace_id, ctx.user.id, include_unusable=True
+        )
+        dto = next((d for d in dtos if d.install.id == install_id), None)
+        if dto is None or not dto.usable:
+            raise HTTPException(
+                400,
+                detail={
+                    "code": "connector_not_usable",
+                    "reason": dto.reason if dto else "missing",
+                },
+            )
+        grant = dto.grant
+    else:
+        grant = await grant_repo.get_org_grant(install_id)
+    spec = _build_runtime_spec_for_discovery(install=install, grant=grant)
+    headers = await _resolve_headers_from_spec(
+        spec=spec,
+        workspace_id=body.workspace_id or "",
+        org_id=ctx.org_id,
+        user_id=ctx.user.id,
+        cred_service=cred_service,
+        signer=signer,
+        token_manager=token_mgr,
+        grant_repo=grant_repo,
+    )
+    if headers is None:
+        raise HTTPException(400, detail={"code": "credential_resolution_failed"})
+    started = time.perf_counter()
+    try:
+        result = await asyncio.wait_for(
+            _invoke_tool_via_cubepi(
+                install.server_url,
+                tool_name,
+                body.arguments,
+                headers=headers or None,
+                timeout=install.timeout,
+                transport=install.transport,
+            ),
+            timeout=_ADMIN_INVOKE_TIMEOUT_SECONDS,
+        )
+    except Exception as exc:  # noqa: BLE001
+        duration = int((time.perf_counter() - started) * 1000)
+        await audit.record(
+            event="mcp.tool.invoked",
+            actor_user_id=ctx.user.id,
+            org_id=ctx.org_id,
+            target_id=install_id,
+            details={
+                "tool_name": tool_name,
+                "workspace_id": body.workspace_id,
+                "ok": False,
+            },
+        )
+        return ToolInvokeOut(ok=False, error=str(exc)[:512], duration_ms=duration)
+    duration = int((time.perf_counter() - started) * 1000)
+    await audit.record(
+        event="mcp.tool.invoked",
+        actor_user_id=ctx.user.id,
+        org_id=ctx.org_id,
+        target_id=install_id,
+        details={
+            "tool_name": tool_name,
+            "workspace_id": body.workspace_id,
+            "ok": True,
+        },
+    )
+    return ToolInvokeOut(ok=True, result=result, duration_ms=duration)
 
 
 @router.patch(
