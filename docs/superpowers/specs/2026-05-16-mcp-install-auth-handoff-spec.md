@@ -422,6 +422,8 @@ plus optional `reason`.
       (navigates the already-open blank popup to the AS).
    5. Race:
         - message on the channel where `state === <our state>`
+          (strict equality, no sentinels — see §5.6 for why this is
+          safe across multiple parallel in-flight flows).
         - 90s setTimeout
         - 1s polling: child.closed && no message yet → 'cancelled'
    6. On `ok` message → resolve('ok').
@@ -467,14 +469,19 @@ fixes its contract:
     `state_mismatch`, `callback_not_wired`, `grant_write_failed`,
     `user_denied`).
 
-- If the callback genuinely cannot recover `state` (corrupt URL, the
-  AS never redirected back to us), the return page MUST navigate to
-  `/oauth/mcp/return?status=error&state=__missing__&reason=state_unrecoverable`.
-  The parent matches `state === <our state>` strictly; the sentinel
-  `__missing__` is treated as "no opinion" and the parent falls
-  through to its 90 s timeout (which then closes the popup and
-  surfaces `error/timeout`). This is the only sanctioned omission of
-  a real state value.
+- The callback MUST always include the real state value. The state
+  token is recoverable on every legitimate path — from the AS's
+  redirect query, or from our own ticket cookie. The only case
+  where state is genuinely unrecoverable is a hostile or stray
+  navigation directly to `/oauth/mcp/return` with no AS context.
+  In that case the return page MUST NOT broadcast on the channel
+  and MUST NOT auto-close: render a static "Sign-in failed,
+  please close this window and retry from the connector page."
+  fallback. Any in-flight controller in another tab will time out
+  at 90 s on its own; we accept that delay as the cost of avoiding
+  a sentinel that would either mis-resolve parallel flows (if the
+  parent accepts it) or get masked by the `child.closed` poll (if
+  the parent ignores it).
 
 - Behavior:
   1. Post a typed message on `BroadcastChannel('cubebox-mcp-oauth')`:
