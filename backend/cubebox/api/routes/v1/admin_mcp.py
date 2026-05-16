@@ -5,8 +5,10 @@ four-layer model — ``MCPConnectorTemplate`` / ``MCPConnectorInstall`` /
 ``MCPCredentialGrant``.
 """
 
+import asyncio
 from typing import Annotated, Any
 
+from cubepi.mcp import load_mcp_tools_http
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -24,6 +26,8 @@ from cubebox.api.schemas.mcp import (
     MCPOAuthStartOut,
     MCPToolEntry,
     PatchInstallIn,
+    TestConnectionIn,
+    TestConnectionOut,
 )
 from cubebox.audit.sink import AuditSink
 from cubebox.auth.context import RequestContext
@@ -486,6 +490,49 @@ async def admin_org_grant_oauth_start(
         state=result.state,
         expires_at=result.expires_at,
     )
+
+
+# ---------------------------------------------------------------------------
+# Admin test-connection probe (spec §3.3).
+# ---------------------------------------------------------------------------
+
+_TEST_CONNECTION_TIMEOUT = 10.0
+
+
+@router.post("/test-connection", response_model=TestConnectionOut)
+async def admin_test_connection(
+    body: TestConnectionIn,
+    _ctx: Annotated[RequestContext, Depends(get_admin_request_context)],
+) -> TestConnectionOut:
+    """Probe an MCP server URL without persisting anything.
+
+    Used by the admin Custom-install form to validate the URL +
+    optional static credential before creating the install row.
+    Returns ``{ok, tool_count}`` on success or
+    ``{ok=False, error_code, error_message}`` on transport / protocol
+    failure.
+    """
+    headers = dict(body.headers or {})
+    if body.auth_method == "static" and body.credential_plaintext:
+        headers.setdefault("Authorization", f"Bearer {body.credential_plaintext}")
+    try:
+        tools = await asyncio.wait_for(
+            load_mcp_tools_http(
+                body.server_url,
+                headers=headers or None,
+                timeout=_TEST_CONNECTION_TIMEOUT,
+                transport=body.transport,
+            ),
+            timeout=_TEST_CONNECTION_TIMEOUT,
+        )
+    except Exception as exc:  # noqa: BLE001 — any IO / protocol error surfaces as ok=False
+        return TestConnectionOut(
+            ok=False,
+            tool_count=0,
+            error_code=type(exc).__name__,
+            error_message=str(exc)[:256],
+        )
+    return TestConnectionOut(ok=True, tool_count=len(tools))
 
 
 # ---------------------------------------------------------------------------

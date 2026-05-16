@@ -325,3 +325,52 @@ async def test_admin_refresh_discovery_requires_workspace_id_for_scoped_policy(
     res = await client.post(f"/api/v1/admin/mcp/installs/{install_id}/refresh-discovery", json={})
     assert res.status_code == 422, res.text
     assert res.json()["detail"][0]["loc"][-1] == "workspace_id"
+
+
+# ---------------------------------------------------------------------------
+# Task 4 — Test connection route.
+# ---------------------------------------------------------------------------
+
+
+async def test_admin_test_connection_returns_tool_count(
+    admin_client: tuple[httpx.AsyncClient, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client, _ws = admin_client
+
+    async def fake_load(*args: object, **kwargs: object) -> list[object]:
+        return [
+            SimpleNamespace(name="a", description=None, input_schema=None),
+            SimpleNamespace(name="b", description=None, input_schema=None),
+        ]
+
+    monkeypatch.setattr("cubebox.api.routes.v1.admin_mcp.load_mcp_tools_http", fake_load)
+
+    res = await client.post(
+        "/api/v1/admin/mcp/test-connection",
+        json={
+            "server_url": "https://probe.example.com/mcp",
+            "transport": "streamable_http",
+            "auth_method": "none",
+        },
+    )
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body["ok"] is True
+    assert body["tool_count"] == 2
+
+
+async def test_admin_test_connection_rejects_static_plaintext_with_none_auth(
+    admin_client: tuple[httpx.AsyncClient, str],
+) -> None:
+    client, _ws = admin_client
+    res = await client.post(
+        "/api/v1/admin/mcp/test-connection",
+        json={
+            "server_url": "https://probe.example.com/mcp",
+            "transport": "streamable_http",
+            "auth_method": "none",
+            "credential_plaintext": "should-not-be-here",
+        },
+    )
+    assert res.status_code == 422, res.text
