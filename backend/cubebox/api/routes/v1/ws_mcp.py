@@ -15,6 +15,7 @@ Authorization recap (per spec §User Roles And Permissions):
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from cubebox.api.routes.v1.admin_mcp import (
     _install_to_out,
@@ -34,14 +35,19 @@ from cubebox.api.schemas.mcp import (
     MCPWorkspaceConnectorStateOut,
     PatchWorkspaceStateIn,
     WorkspaceCreateInstallIn,
+    WsInstallRefreshIn,
 )
 from cubebox.audit.sink import AuditSink
 from cubebox.auth.context import RequestContext
 from cubebox.auth.dependencies import require_admin, require_member
+from cubebox.credentials.dependencies import get_credential_service
+from cubebox.db.session import get_session
 from cubebox.mcp.dependencies import (
     get_audit_sink,
     get_connector_template_service,
     get_oauth_start_service,
+    get_oauth_token_manager,
+    get_user_token_signer,
     get_ws_effective_service,
     get_ws_install_service,
 )
@@ -50,6 +56,11 @@ from cubebox.mcp.effective import (
     MCPEffectiveConnectorService,
 )
 from cubebox.mcp.oauth import OAuthStartError, OAuthStartService
+from cubebox.mcp.oauth.token_manager import OAuthTokenManager
+from cubebox.mcp.user_token import MCPUserTokenSigner
+from cubebox.repositories.mcp import MCPConnectorInstallRepository
+from cubebox.services.credential import CredentialService
+from cubebox.services.mcp_discovery import discover_tools_for_install
 from cubebox.services.mcp_installs import MCPConnectorInstallService
 from cubebox.services.mcp_templates import MCPConnectorTemplateService
 
@@ -197,6 +208,46 @@ async def delete_workspace_install(
         target_id=install_id,
         details={"workspace_id": workspace_id},
     )
+
+
+@router.post(
+    "/installs/{install_id}/refresh-discovery",
+    response_model=MCPConnectorInstallOut,
+)
+async def ws_refresh_discovery(
+    workspace_id: str,
+    install_id: str,
+    body: WsInstallRefreshIn,  # noqa: ARG001 — keep empty body for OpenAPI clarity
+    session: Annotated[AsyncSession, Depends(get_session)],
+    cred_service: Annotated[CredentialService, Depends(get_credential_service)],
+    signer: Annotated[MCPUserTokenSigner, Depends(get_user_token_signer)],
+    token_mgr: Annotated[OAuthTokenManager, Depends(get_oauth_token_manager)],
+    ctx: Annotated[RequestContext, Depends(require_admin)],
+) -> MCPConnectorInstallOut:
+    """Re-discover tools for one install scoped to this workspace lens.
+
+    The workspace path pins the credential policy lookup; no body
+    argument needed (compare admin which needs ``workspace_id``).
+    """
+    install_repo = MCPConnectorInstallRepository(session, org_id=ctx.org_id)
+    install = await install_repo.get(install_id)
+    if install is None:
+        raise HTTPException(404, detail={"code": "mcp_install_not_found"})
+    try:
+        await discover_tools_for_install(
+            install_id=install_id,
+            workspace_id=workspace_id,
+            actor_user_id=ctx.user.id,
+            session=session,
+            cred_service=cred_service,
+            signer=signer,
+            token_mgr=token_mgr,
+        )
+    except ValueError as exc:
+        raise HTTPException(400, detail={"code": str(exc)}) from exc
+    refreshed = await install_repo.get(install_id)
+    assert refreshed is not None
+    return _install_to_out(refreshed)
 
 
 @router.patch(
