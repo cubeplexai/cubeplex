@@ -405,7 +405,8 @@ plus optional `reason`.
  runOAuthFlow (called synchronously from the user-activation click):
  ─────────────────────────────────────────────────────────────────────
    1. Open a blank popup synchronously, BEFORE any await:
-        const child = window.open('about:blank', 'mcp-oauth',
+        const target = `mcp-oauth-${crypto.randomUUID()}`;
+        const child = window.open('about:blank', target,
                                   'width=620,height=760');
       If `child === null` → resolve('error', 'popup_blocked')
       and return immediately. The synchronous open is required
@@ -414,6 +415,16 @@ plus optional `reason`.
       moment we `await` anything. Awaiting `oauth/start` first
       causes legitimate clicks to be reported as `popup_blocked`
       even with popups allowed.
+
+      The target name MUST be per-flow unique (UUID suffix above),
+      not a fixed string like `'mcp-oauth'`. With a fixed name,
+      starting a second OAuth flow before the first finishes
+      causes window.open to reuse the existing popup — the second
+      controller navigates the first controller's popup away
+      from its authorize URL, and the first controller times out
+      or reports cancelled. The strict per-flow `state` filter
+      assumes each popup completes its own redirect chain; a
+      shared window breaks that assumption.
    2. Open a BroadcastChannel named `cubebox-mcp-oauth`.
    3. await POST <oauth/start URL>; receive { authorize_url, state }.
       - On network/server error → child.close(); resolve('error',
