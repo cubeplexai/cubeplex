@@ -12,6 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from cubebox.api.schemas.mcp import (
     AdminCreateInstallIn,
     CreateGrantIn,
+    MCPAdminInstallEffectiveOut,
     MCPConnectorInstallListOut,
     MCPConnectorInstallOut,
     MCPConnectorTemplateListOut,
@@ -29,10 +30,13 @@ from cubebox.mcp.dependencies import (
     get_admin_request_context,
     get_audit_sink,
     get_connector_template_service,
+    get_grant_repo,
     get_oauth_start_service,
 )
 from cubebox.mcp.oauth import OAuthStartError, OAuthStartService
 from cubebox.models import MCPConnectorInstall, User
+from cubebox.models.mcp import MCPCredentialGrant
+from cubebox.repositories.mcp import MCPCredentialGrantRepository
 from cubebox.services.mcp_installs import MCPConnectorInstallService
 from cubebox.services.mcp_templates import MCPConnectorTemplateService
 
@@ -394,6 +398,69 @@ async def admin_org_grant_oauth_start(
         state=result.state,
         expires_at=result.expires_at,
     )
+
+
+# ---------------------------------------------------------------------------
+# Admin install effective (org-row reason derivation — spec §4 admin row).
+# ---------------------------------------------------------------------------
+
+
+def _derive_admin_org_effective(
+    install: MCPConnectorInstall,
+    org_grant: MCPCredentialGrant | None,
+) -> MCPAdminInstallEffectiveOut:
+    """Spec §4 admin row: ordered decision table.
+
+    Rule order (first match wins):
+      1. ``install.auth_method == 'none'`` → usable.
+      2. org grant exists, ``grant_status == 'valid'`` → usable.
+      3. org grant exists, ``grant_status == 'expired'``, no refresh
+         available → grant_expired.
+      4. no org grant, ``install.auth_method == 'oauth'``,
+         ``install.auth_status == 'pending'`` → pending_oauth.
+      5. no org grant otherwise → missing_org_grant.
+    """
+    if install.auth_method == "none":
+        return MCPAdminInstallEffectiveOut(install_id=install.id, usable=True, reason="usable")
+    if org_grant is not None and org_grant.grant_status == "valid":
+        return MCPAdminInstallEffectiveOut(install_id=install.id, usable=True, reason="usable")
+    if (
+        org_grant is not None
+        and org_grant.grant_status == "expired"
+        and org_grant.refresh_credential_id is None
+    ):
+        return MCPAdminInstallEffectiveOut(
+            install_id=install.id, usable=False, reason="grant_expired"
+        )
+    if org_grant is None and install.auth_method == "oauth" and install.auth_status == "pending":
+        return MCPAdminInstallEffectiveOut(
+            install_id=install.id, usable=False, reason="pending_oauth"
+        )
+    return MCPAdminInstallEffectiveOut(
+        install_id=install.id, usable=False, reason="missing_org_grant"
+    )
+
+
+@router.get(
+    "/installs/{install_id}/effective",
+    response_model=MCPAdminInstallEffectiveOut,
+)
+async def get_admin_install_effective(
+    install_id: str,
+    svc: Annotated[MCPConnectorInstallService, Depends(get_admin_install_service)],
+    grant_repo: Annotated[MCPCredentialGrantRepository, Depends(get_grant_repo)],
+    _ctx: Annotated[RequestContext, Depends(get_admin_request_context)],
+) -> MCPAdminInstallEffectiveOut:
+    """Org-row effective state for the admin page (bypasses workspace lens)."""
+    install = await svc._install_repo.get(install_id)
+    if install is None:
+        raise HTTPException(404, detail={"code": "mcp_install_not_found"})
+    if install.install_scope != "org":
+        # Workspace-scope installs get their effective state from the
+        # workspace lens — this endpoint is org-row only.
+        raise HTTPException(400, detail={"code": "not_an_org_install"})
+    org_grant = await grant_repo.get_org_grant(install_id)
+    return _derive_admin_org_effective(install, org_grant)
 
 
 # ---------------------------------------------------------------------------

@@ -441,3 +441,80 @@ async def test_callback_writes_org_grant_and_authorizes_install(
     install = await install_repo.get(install_id)
     assert install is not None
     assert install.auth_status == "authorized"
+
+
+# ---------------------------------------------------------------------------
+# Task 4: admin org-row effective endpoint.
+# ---------------------------------------------------------------------------
+
+
+@pytest_asyncio.fixture
+async def seeded_static_org_install(
+    admin_client: tuple[httpx.AsyncClient, str],
+    static_template_id: str,
+) -> str:
+    """Install a static-auth org-scope row WITHOUT writing an org grant.
+
+    ``default_credential_policy='org'`` and ``auth_status='pending'`` so the
+    admin-row derivation must yield ``missing_org_grant``.
+    """
+    client, _workspace_id = admin_client
+    resp = await client.post(
+        "/api/v1/admin/mcp/installs",
+        json={
+            "template_id": static_template_id,
+            "install_scope": "org",
+            "auth_method": "static",
+            "default_credential_policy": "org",
+            "auto_enable": {"mode": "none"},
+        },
+    )
+    assert resp.status_code == 201, resp.text
+    return str(resp.json()["install_id"])
+
+
+@pytest_asyncio.fixture
+async def seeded_oauth_org_install_no_grant(
+    admin_client: tuple[httpx.AsyncClient, str],
+    oauth_template_id: str,
+) -> str:
+    """Install an OAuth org-scope row with no grant yet — admin row → pending_oauth."""
+    client, _workspace_id = admin_client
+    resp = await client.post(
+        "/api/v1/admin/mcp/installs",
+        json={
+            "template_id": oauth_template_id,
+            "install_scope": "org",
+            "auth_method": "oauth",
+            "default_credential_policy": "org",
+            "auto_enable": {"mode": "none"},
+        },
+    )
+    assert resp.status_code == 201, resp.text
+    return str(resp.json()["install_id"])
+
+
+async def test_admin_install_effective_static_org_pending(
+    admin_client: tuple[httpx.AsyncClient, str],
+    seeded_static_org_install: str,
+) -> None:
+    client, _workspace_id = admin_client
+    install_id = seeded_static_org_install
+    res = await client.get(f"/api/v1/admin/mcp/installs/{install_id}/effective")
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body["usable"] is False
+    assert body["reason"] == "missing_org_grant"
+
+
+async def test_admin_install_effective_oauth_org_pending_returns_pending_oauth(
+    admin_client: tuple[httpx.AsyncClient, str],
+    seeded_oauth_org_install_no_grant: str,
+) -> None:
+    client, _workspace_id = admin_client
+    install_id = seeded_oauth_org_install_no_grant
+    res = await client.get(f"/api/v1/admin/mcp/installs/{install_id}/effective")
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body["usable"] is False
+    assert body["reason"] == "pending_oauth"
