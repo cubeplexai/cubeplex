@@ -97,21 +97,32 @@ class OAuthStartService:
         *,
         install_id: str,
         actor_user_id: str,
+        actor_org_id: str,
         grant_scope: str,
         workspace_id: str | None,
         user_id: str | None,
     ) -> OAuthStartResult:
-        # One-off org-agnostic install lookup so we can resolve org_id
-        # before building any org-scoped service. See OAuthCallbackHandler
-        # for the same pattern.
+        # Org-scoped install lookup. The unauthenticated callback later
+        # builds repos and credential service from ``install.org_id``, so
+        # an install id alone is enough to direct grant writes into ANY
+        # org. Without an org-scoped filter here, a caller in org A who
+        # knows org B's install_id could mint a valid state token and
+        # the callback would honor it, persisting credentials in B.
+        # Cross-org and truly-missing collapse to the same error so
+        # OAuth start cannot be used as an org-existence oracle.
         install = (
             await self._session.execute(
                 select(MCPConnectorInstall).where(
                     MCPConnectorInstall.id == install_id,  # type: ignore[arg-type]
+                    MCPConnectorInstall.org_id == actor_org_id,  # type: ignore[arg-type]
                 )
             )
         ).scalar_one_or_none()
         if install is None:
+            raise OAuthStartError("connector_install_not_found")
+        # Belt + suspenders: even if a future refactor drops the where()
+        # clause above, this guard keeps the boundary.
+        if install.org_id != actor_org_id:
             raise OAuthStartError("connector_install_not_found")
         if install.install_state != "active":
             raise OAuthStartError("connector_install_not_active")

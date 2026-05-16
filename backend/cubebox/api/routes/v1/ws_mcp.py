@@ -407,6 +407,7 @@ async def my_user_grant_oauth_start(
         result = await svc.start_oauth_flow(
             install_id=install_id,
             actor_user_id=ctx.user.id,
+            actor_org_id=ctx.org_id,
             grant_scope="user",
             workspace_id=workspace_id,
             user_id=ctx.user.id,
@@ -514,6 +515,7 @@ async def workspace_grant_oauth_start(
         result = await svc.start_oauth_flow(
             install_id=install_id,
             actor_user_id=ctx.user.id,
+            actor_org_id=ctx.org_id,
             grant_scope="workspace",
             workspace_id=workspace_id,
             user_id=None,
