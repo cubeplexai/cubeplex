@@ -269,6 +269,33 @@ Notes on the admin console row:
   this spec does not add one.
 - An admin viewing an org-policy install still sees the `org` action band on
   the org-wide install row when `required_grant_scope === 'org'`.
+  **This row bypasses the workspace-state lens entirely.** The org
+  grant is authored at install/org level — there is no workspace it
+  "belongs to," so the action band must NOT consult the lens
+  workspace's effective DTO (which would surface
+  `not_enabled_in_workspace` for any org install created with
+  `auto_enable.mode='none'`, hiding the org Connect action behind a
+  blocker that's irrelevant to org-grant authoring). The admin
+  page therefore derives the org row's action band from the install
+  row and the org-scope grant directly:
+  - `usable = (install.auth_method == 'none') OR (an org-scope
+    MCPCredentialGrant exists for this install with grant_status !=
+    'expired')`
+  - `reason` for the org row is computed from
+    `(install.auth_method, install.auth_status, presence_of_org_grant,
+    grant_status)` using the same auth-only subset of
+    MCPEffectiveReason — `pending_oauth` if auth_method='oauth' and
+    auth_status='pending' and no org grant; `missing_org_grant` if
+    auth_status='authorized' but no org grant (rotation / disconnect
+    path); `grant_expired` if the org grant is expired without
+    refresh; `usable` otherwise.
+
+  Concretely: today `list_admin_installs` returns raw install rows
+  with no effective state. The admin page needs either a new admin
+  effective DTO (org-row specific, computed from install + org grant,
+  no workspace lens) or a small derivation helper on the front end.
+  Either is acceptable; the spec only constrains the inputs and the
+  reason-token output.
 - `required_grant_scope` is a **single** value resolved by the backend from
   one effective policy: `workspace_state.credential_policy` when present,
   otherwise `install.default_credential_policy` (see
