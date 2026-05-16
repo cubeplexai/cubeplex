@@ -122,9 +122,35 @@ detail.
 - Empty state: "Discovery has not run yet — click Refresh tools."
 - Filtered-empty state: "No tools match 'foo'."
 
-Data source: `MCPEffectiveConnector.install.tools_cache` (admin
-view uses `MCPConnectorInstall.tools_cache` directly via the
-admin install fetch). No new endpoint.
+Data source: `install.tools_cache` (list of `{name, description,
+input_schema}` rows that backend discovery writes).
+
+**Required schema additions (the existing API does NOT expose
+these fields):**
+
+`MCPConnectorInstallOut` currently returns `tool_count` (an
+integer derived from `len(install.tools_cache)`) but not the
+list itself, and `MCPEffectiveConnectorOut` only embeds the
+install row, so the UI today has no way to read tool metadata
+even though the column is populated. This spec extends both:
+
+- Add `tools: list[MCPToolEntry]` to `MCPConnectorInstallOut`
+  (and therefore to `MCPEffectiveConnectorOut.install`). The
+  shape mirrors the JSON in `tools_cache`:
+  `{ name: str, description: str | None, input_schema: dict
+    | None }`. Read-only, derived from `install.tools_cache`.
+- Add `tool_citations: dict[str, CitationConfigJSON] | None`
+  to the same DTOs. Source of truth is
+  `install.tool_citations`. Omitted (or `null`) for non-admin
+  callers since the citation editor (§3.7) is admin-only.
+
+Why on the existing list endpoints (not a new sub-route): the
+Tools tab opens in the same network round trip that already
+fetches the effective connector. A separate `GET
+/installs/{id}/tools` would mean a double-fetch on every detail
+open and force the UI to juggle a second loading state for no
+caching gain — the JSON is small enough (~kB) that piggybacking
+on the existing fetch is the right tradeoff.
 
 ### 3.2 Refresh tools button (Tier 1.2)
 
@@ -167,10 +193,21 @@ UX:
   (§3.6) shows the message.
 
 Authority:
-- Admin route accepts any org admin.
-- Workspace route accepts any workspace member (matches read
-  authority — discovery is idempotent and the caller's grant
-  is what's used).
+- Admin route: org admin only.
+- Workspace route: **workspace admin only** (NOT any member).
+  Discovery writes shared install-level state — `tools_cache`,
+  `discovery_status`, `last_error`. A member running discovery
+  with their own (potentially limited or expired) grant would
+  let one user clobber the cache for the whole workspace and
+  flip the install into `discovery_status='error'`, which the
+  effective-state rules treat as unusable for every other
+  member. Restricting to workspace admin keeps the surface
+  available without making shared state a per-member soft
+  vandalism vector. Members who want a refresh ask their
+  workspace admin (or, for org-scope installs, an org admin).
+- The button in the UI is hidden from non-admin members and
+  shown with a "Workspace admin only" tooltip if a member ever
+  reaches it via a deep link.
 
 ### 3.3 Test connection (Tier 1.3)
 
@@ -450,7 +487,7 @@ id). Try It is for debugging, not a substitute for the agent.
 | Feature | Org admin (admin page) | Workspace admin (ws settings) | Workspace member (ws settings) |
 | --- | --- | --- | --- |
 | 3.1 Tools tab — view | yes | yes | yes |
-| 3.2 Refresh tools | yes | yes | yes (per spec §3.2) |
+| 3.2 Refresh tools | yes | yes | no (admin only — §3.2) |
 | 3.3 Test connection | yes | n/a (no custom install flow) | n/a |
 | 3.4 Error banner | yes | yes | yes |
 | 3.5 Custom install | yes | no | no |
@@ -468,7 +505,7 @@ install's org). The workspace settings page passes
 | Endpoint | New / repurposed | Authority |
 | --- | --- | --- |
 | `POST /admin/mcp/installs/{id}/refresh-discovery` | New | org admin |
-| `POST /ws/{ws}/mcp/installs/{id}/refresh-discovery` | New | ws member |
+| `POST /ws/{ws}/mcp/installs/{id}/refresh-discovery` | New | ws admin |
 | `POST /admin/mcp/test-connection` | New | org admin |
 | `POST /admin/mcp/installs` with `template_id=None` | Repurposed shape | org admin |
 | `POST /admin/mcp/installs/{id}/promote-to-org` | New | org admin |
