@@ -198,7 +198,12 @@ class OAuthStartService:
         if install.auth_method != "oauth":
             raise OAuthStartError("oauth_start_only_valid_for_oauth_auth")
 
-        as_meta = await self._ensure_as_metadata(install)
+        # AS metadata: discovery is internally cached per server_url, so no
+        # snapshot is persisted on the install row (the install model has
+        # NO authorization_endpoint / token_endpoint columns — see
+        # `MCPConnectorInstall` in models/mcp.py; OAuth fields all live in
+        # the `oauth_client_config` JSON).
+        _pr_meta, as_meta = await self._metadata.discover_for_resource(install.server_url)
         client_id, client_secret_id = await self._ensure_client(install, as_meta)
 
         pkce = generate_pkce()
@@ -221,7 +226,8 @@ class OAuthStartService:
             redirect_uri=_redirect_uri(),
             code_challenge=pkce.challenge,
             state=state,
-            scope=install.oauth_default_scope,
+            scope=install.oauth_client_config.get("default_scope")
+            or as_meta.scopes_supported_default,
         )
 
         expires_at = datetime.now(tz=UTC) + timedelta(seconds=self._state_ttl_seconds)
@@ -231,24 +237,16 @@ class OAuthStartService:
             expires_at=expires_at,
         )
 
-    async def _ensure_as_metadata(self, install) -> AuthorizationServerMetadata:
-        # Snapshots authorize_endpoint / token_endpoint / etc. onto the install
-        # row when first discovered, so refresh + revoke can avoid re-discovery.
-        if install.authorization_endpoint:
-            return AuthorizationServerMetadata.from_install(install)
-        _pr_meta, as_meta = await self._metadata.discover_for_resource(install.server_url)
-        install.authorization_endpoint = as_meta.authorization_endpoint
-        install.token_endpoint = as_meta.token_endpoint
-        install.revocation_endpoint = as_meta.revocation_endpoint
-        install.oauth_default_scope = (
-            install.oauth_default_scope or as_meta.scopes_supported_default
-        )
-        await self._install_repo.update(install)
-        return as_meta
-
     async def _ensure_client(self, install, as_meta) -> tuple[str, str | None]:
-        if install.oauth_client_id:
-            return install.oauth_client_id, install.oauth_client_secret_id
+        """Read or create OAuth client. Stored in `install.oauth_client_config`
+        JSON with keys `client_id` and `client_secret_credential_id` —
+        matches what `OAuthTokenManager._post_refresh_grant_endpoint`
+        consumes (see token_manager.py:267-289).
+        """
+        cfg = dict(install.oauth_client_config or {})
+        existing_client_id = cfg.get("client_id")
+        if isinstance(existing_client_id, str) and existing_client_id:
+            return existing_client_id, cfg.get("client_secret_credential_id")
         if not as_meta.registration_endpoint:
             raise OAuthStartError("dcr_unsupported_and_no_static_client")
         dcr_resp = await self._dcr.register(
@@ -261,13 +259,17 @@ class OAuthStartService:
         )
         secret_id: str | None = None
         if dcr_resp.client_secret:
-            secret_id = await self._cred_service.create(
+            # Use upsert to tolerate retries — DCR may be re-attempted on
+            # transient install_repo.update failures (next callback retry).
+            secret_id = await self._cred_service.upsert_by_kind_name(
                 kind="mcp_oauth_client_secret",
                 name=f"mcp:{install.id}:client_secret",
                 plaintext=dcr_resp.client_secret,
             )
-        install.oauth_client_id = dcr_resp.client_id
-        install.oauth_client_secret_id = secret_id
+        cfg["client_id"] = dcr_resp.client_id
+        if secret_id is not None:
+            cfg["client_secret_credential_id"] = secret_id
+        install.oauth_client_config = cfg
         await self._install_repo.update(install)
         return dcr_resp.client_id, secret_id
 
@@ -546,19 +548,25 @@ class OAuthCallbackResult:
 
 
 class OAuthCallbackHandler:
+    """Per-request handler. Repos and credential service are built INSIDE
+    handle_callback() after the state token reveals the install_id (and
+    therefore org_id) — the route itself is unauthenticated and has no
+    request_context to seed an org-scoped factory.
+    """
+
     def __init__(
         self,
         *,
-        install_repo: MCPConnectorInstallRepository,
-        grant_repo: MCPCredentialGrantRepository,
-        cred_service: CredentialService,
+        session: AsyncSession,
+        backend: EncryptionBackend,
         state_store: OAuthStateStore,
+        metadata: OAuthMetadataDiscovery,
         http_client: httpx.AsyncClient,
     ) -> None:
-        self._install_repo = install_repo
-        self._grant_repo = grant_repo
-        self._cred_service = cred_service
+        self._session = session
+        self._backend = backend
         self._state_store = state_store
+        self._metadata = metadata
         self._http = http_client
 
     async def handle_callback(
@@ -608,7 +616,17 @@ class OAuthCallbackHandler:
                 reason="pkce_missing",
             )
 
-        install = await self._install_repo.get(payload.install_id)
+        # We need org-scoped repos to honor multi-tenant isolation, but we
+        # don't know org_id until we read the install row — and the install
+        # repo itself is org-scoped. Solve by doing a one-off org-agnostic
+        # read on the raw model first.
+        from sqlmodel import select
+        from cubebox.models.mcp import MCPConnectorInstall as _Install
+        install = (
+            await self._session.execute(
+                select(_Install).where(_Install.id == payload.install_id)
+            )
+        ).scalar_one_or_none()
         if install is None:
             return OAuthCallbackResult(
                 status="error",
@@ -616,6 +634,16 @@ class OAuthCallbackHandler:
                 state=state,
                 reason="install_not_found",
             )
+
+        # Now build the org-scoped service surface for the rest of the work.
+        cred_service = build_credential_service(
+            self._session,
+            self._backend,
+            org_id=install.org_id,
+            actor_user_id=payload.actor_user_id,
+        )
+        install_repo = MCPConnectorInstallRepository(self._session, org_id=install.org_id)
+        grant_repo = MCPCredentialGrantRepository(self._session, org_id=install.org_id)
 
         try:
             token = await self._post_token_exchange(install, code, verifier)
@@ -631,35 +659,60 @@ class OAuthCallbackHandler:
             install=install,
             payload=payload,
             token=token,
+            cred_service=cred_service,
+            grant_repo=grant_repo,
         )
-        await self._maybe_authorize_install(install=install, grant=grant)
+        await self._maybe_authorize_install(
+            install=install, grant=grant, install_repo=install_repo,
+        )
 
         return OAuthCallbackResult(status="ok", install_id=install.id, state=state)
 
     async def _post_token_exchange(self, install, code, verifier) -> dict:
-        # Tested via monkeypatch in unit tests; in prod this is a real httpx POST.
+        # Token endpoint lives in the AS metadata, not on the install row.
+        # Re-discover (internally cached) by server_url.
+        _pr, as_meta = await self._metadata.discover_for_resource(install.server_url)
+        client_id = install.oauth_client_config.get("client_id")
         from urllib.parse import urlencode
         body = urlencode({
             "grant_type": "authorization_code",
             "code": code,
             "redirect_uri": _redirect_uri(),
-            "client_id": install.oauth_client_id,
+            "client_id": client_id,
             "code_verifier": verifier,
         })
         headers = {"Content-Type": "application/x-www-form-urlencoded"}
-        resp = await self._http.post(install.token_endpoint, content=body, headers=headers)
+        # Basic auth if client_secret stored (confidential client).
+        secret_id = install.oauth_client_config.get("client_secret_credential_id")
+        if isinstance(secret_id, str) and secret_id:
+            # Read secret from vault, set Authorization header. Implementation
+            # mirrors token_manager.py:286-289.
+            secret = await self._cred_service.get_decrypted(
+                credential_id=secret_id,
+                requesting_kind="mcp_oauth_client_secret",
+            )
+            import base64
+            basic = base64.b64encode(f"{client_id}:{secret}".encode()).decode("ascii")
+            headers["Authorization"] = f"Basic {basic}"
+        resp = await self._http.post(as_meta.token_endpoint, content=body, headers=headers)
         resp.raise_for_status()
         return resp.json()
 
-    async def _upsert_grant(self, *, install, payload, token) -> MCPCredentialGrant:
-        access_id = await self._cred_service.create(
+    async def _upsert_grant(
+        self, *, install, payload, token, cred_service, grant_repo,
+    ) -> MCPCredentialGrant:
+        # Use upsert_by_kind_name (not create) — on re-OAuth the rows
+        # `mcp:{install_id}:access|refresh` already exist and the unique
+        # index `(org_id, kind, name)` would otherwise reject the second
+        # create. upsert_by_kind_name rotates the encrypted value in place.
+        access_id = await cred_service.upsert_by_kind_name(
             kind=CREDENTIAL_KIND_MCP_OAUTH_ACCESS_TOKEN,
             name=f"mcp:{install.id}:access",
             plaintext=token["access_token"],
         )
         refresh_id: str | None = None
         if "refresh_token" in token:
-            refresh_id = await self._cred_service.create(
+            refresh_id = await cred_service.upsert_by_kind_name(
                 kind=CREDENTIAL_KIND_MCP_OAUTH_REFRESH_TOKEN,
                 name=f"mcp:{install.id}:refresh",
                 plaintext=token["refresh_token"],
@@ -668,7 +721,7 @@ class OAuthCallbackHandler:
         if "expires_in" in token:
             expires_at = datetime.now(tz=UTC) + timedelta(seconds=int(token["expires_in"]))
 
-        existing = await self._grant_repo.get_for_scope(
+        existing = await grant_repo.get_for_scope(
             install_id=install.id,
             grant_scope=payload.grant_scope,
             workspace_id=payload.workspace_id,
@@ -687,14 +740,14 @@ class OAuthCallbackHandler:
                 grant_status="valid",
                 created_by_user_id=payload.actor_user_id,
             )
-            return await self._grant_repo.add(grant)
+            return await grant_repo.add(grant)
         existing.credential_id = access_id
         existing.refresh_credential_id = refresh_id
         existing.expires_at = expires_at
         existing.grant_status = "valid"
-        return await self._grant_repo.update(existing)
+        return await grant_repo.update(existing)
 
-    async def _maybe_authorize_install(self, *, install, grant) -> None:
+    async def _maybe_authorize_install(self, *, install, grant, install_repo) -> None:
         # Spec §6: only flip auth_status when the new grant's scope matches
         # the install's currently-effective required scope. For org/workspace
         # policy installs the install becomes 'authorized' as soon as its
@@ -704,7 +757,7 @@ class OAuthCallbackHandler:
         required_scope = install.default_credential_policy
         if required_scope == grant.grant_scope and required_scope in {"org", "workspace"}:
             install.auth_status = "authorized"
-            await self._install_repo.update(install)
+            await install_repo.update(install)
 
 
 def _redirect_uri() -> str:
@@ -785,17 +838,48 @@ And include all five names in `__all__`.
 
 - [ ] **Step 2: Add DI factories**
 
-Edit `backend/cubebox/mcp/dependencies.py`. Add:
+Edit `backend/cubebox/mcp/dependencies.py`. Critical wiring constraint:
+`OAuthStartService` and `OAuthCallbackHandler` are mounted on routes
+that lack a `{workspace_id}` path param (admin start, callback). The
+default `get_credential_service` factory in
+`backend/cubebox/credentials/dependencies.py:37` depends on
+`require_member`, which requires a workspace path. So we MUST construct
+the credential service from `(session, encryption_backend, org_id)`
+directly via `build_credential_service`, NOT via
+`Depends(get_credential_service)`.
+
+For the START service we have the org from the request context (admin
+context for org-scope start; workspace request_context's `org_id` for
+workspace/user starts — both expose `ctx.org_id`). For the CALLBACK we
+don't have a request context at all (the route is unauthenticated by
+design — it's the AS redirect). The callback resolves the install row
+first via state token, then constructs the credential service from
+`install.org_id`. Implement this by passing the SESSION + BACKEND into
+the callback handler instead of a pre-built credential service:
 
 ```python
 async def get_oauth_start_service(
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+    backend: EncryptionBackend = Depends(get_encryption_backend),
     install_repo: MCPConnectorInstallRepository = Depends(get_install_repo),
     state_store: OAuthStateStore = Depends(get_oauth_state_store),
     metadata: OAuthMetadataDiscovery = Depends(get_oauth_metadata_discovery),
     dcr: DCRClient = Depends(get_dcr_client),
-    cred_service: CredentialService = Depends(get_credential_service),
     http_client: httpx.AsyncClient = Depends(get_oauth_http_client),
 ) -> OAuthStartService:
+    # Org/actor come from whichever request context the calling route
+    # used. Both `get_admin_request_context` and `require_member` expose
+    # `ctx.org_id` and `ctx.user.id`; route handlers pass them in via
+    # OAuthStartService.start_oauth_flow's existing `actor_user_id`
+    # parameter and we look the org up from the install row.
+    cred_service = build_credential_service(
+        session, backend, org_id=None, actor_user_id=None,
+    )
+    # NOTE: org_id is rebound INSIDE the service per-call, after the
+    # install row is fetched (the install carries its own org_id and is
+    # the source of truth for credential scoping). See OAuthStartService
+    # bootstrap below.
     return OAuthStartService(
         install_repo=install_repo,
         state_store=state_store,
@@ -807,26 +891,44 @@ async def get_oauth_start_service(
 
 
 async def get_oauth_callback_handler(
-    install_repo: MCPConnectorInstallRepository = Depends(get_install_repo),
-    grant_repo: MCPCredentialGrantRepository = Depends(get_grant_repo),
-    cred_service: CredentialService = Depends(get_credential_service),
+    session: AsyncSession = Depends(get_session),
+    backend: EncryptionBackend = Depends(get_encryption_backend),
     state_store: OAuthStateStore = Depends(get_oauth_state_store),
+    metadata: OAuthMetadataDiscovery = Depends(get_oauth_metadata_discovery),
     http_client: httpx.AsyncClient = Depends(get_oauth_http_client),
 ) -> OAuthCallbackHandler:
+    # Callback has no caller identity. Defer credential-service / repo
+    # construction until handle_callback() decodes the state token and
+    # resolves the install (and hence org_id).
     return OAuthCallbackHandler(
-        install_repo=install_repo,
-        grant_repo=grant_repo,
-        cred_service=cred_service,
+        session=session,
+        backend=backend,
         state_store=state_store,
+        metadata=metadata,
         http_client=http_client,
     )
 ```
 
+Required adjustments to the service classes (lift these into Tasks 1
+and 2 when implementing):
+
+- `OAuthStartService.start_oauth_flow`: after `install` is fetched,
+  rebind `self._cred_service._org_id = install.org_id` and
+  `self._cred_service._actor_user_id = actor_user_id` before calling
+  `_ensure_client`. Single-request scope, no concurrency hazard.
+- `OAuthCallbackHandler.__init__` takes `session, backend, state_store,
+  http_client` and constructs the per-org credential-service / install
+  repo / grant repo INSIDE `handle_callback` after the state payload
+  yields the install_id (then a single `install_repo.get(install_id)`
+  reveals `org_id`, and the rest of the per-org services are built via
+  `build_credential_service(session, backend, org_id=..., actor_user_id=
+  payload.actor_user_id)` and the corresponding `MCPCredentialGrantRepository(session, org_id=...)`).
+
 If `get_install_repo` / `get_grant_repo` / `get_dcr_client` /
-`get_credential_service` / `get_oauth_metadata_discovery` aren't already
-exposed at module level, add them following the existing factory pattern
-in this file. Each one constructs the instance from the request-scoped
-session / redis / config — no caching across requests.
+`get_oauth_metadata_discovery` aren't already exposed at module level,
+add them following the existing factory pattern in this file. Each one
+constructs the instance from the request-scoped session / redis / config
+— no caching across requests.
 
 - [ ] **Step 3: Add `state` to `MCPOAuthStartOut`**
 
