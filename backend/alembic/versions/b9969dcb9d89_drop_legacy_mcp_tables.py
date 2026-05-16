@@ -13,7 +13,13 @@ The four-layer schema (``mcp_connector_templates`` /
 ``mcp_connector_installs`` / ``mcp_workspace_connector_states`` /
 ``mcp_credential_grants``) is untouched.
 
-This migration is **not reversible** — ``downgrade`` raises.
+``downgrade`` is a no-op so the alembic version pointer can step back
+without erroring (lets ``alembic downgrade -1`` and branch-switch
+auto-downgrade work). It does NOT recreate the legacy tables — the
+legacy SQLModels are gone, no code reads them, and there is no shipped
+data to migrate. For a full reset, use
+``scripts/worktree-env reseed-db`` (drops the database, recreates it,
+re-runs ``alembic upgrade head`` from base — never walks downgrade).
 
 Revision ID: b9969dcb9d89
 Revises: 3fcdfc800664
@@ -31,89 +37,33 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
-    """Drop the five legacy MCP tables.
+    """Drop the five legacy MCP tables, idempotently.
 
-    Order matters: FK dependencies require child tables (``user_mcp_credentials``,
-    ``workspace_mcp_credentials``, ``workspace_mcp_overrides``) to drop before
-    their parent (``mcp_servers``); ``mcp_servers`` references
+    Uses ``DROP TABLE IF EXISTS ... CASCADE`` so re-running upgrade after a
+    downgrade-then-upgrade roundtrip is a no-op rather than an error. CASCADE
+    also drops the table's own indexes and any dependent FK constraints in one
+    statement, so we don't need to list each index by name.
+
+    Order matters for FK dependencies: child tables (``user_mcp_credentials``,
+    ``workspace_mcp_credentials``, ``workspace_mcp_overrides``) drop before
+    their parent ``mcp_servers``; ``mcp_servers`` references
     ``mcp_catalog_connectors`` via ``catalog_connector_id`` so the catalog
-    table must drop last.
+    table drops last. ``CASCADE`` makes order tolerant but we keep it
+    deliberate for clarity.
     """
-    op.drop_index(
-        op.f("ix_workspace_mcp_overrides_mcp_server_id"),
-        table_name="workspace_mcp_overrides",
-    )
-    op.drop_index(
-        op.f("ix_workspace_mcp_overrides_org_id"),
-        table_name="workspace_mcp_overrides",
-    )
-    op.drop_index(
-        op.f("ix_workspace_mcp_overrides_workspace_id"),
-        table_name="workspace_mcp_overrides",
-    )
-    op.drop_table("workspace_mcp_overrides")
-
-    op.drop_index(
-        op.f("ix_workspace_mcp_credentials_mcp_server_id"),
-        table_name="workspace_mcp_credentials",
-    )
-    op.drop_index(
-        op.f("ix_workspace_mcp_credentials_org_id"),
-        table_name="workspace_mcp_credentials",
-    )
-    op.drop_index(
-        op.f("ix_workspace_mcp_credentials_workspace_id"),
-        table_name="workspace_mcp_credentials",
-    )
-    op.drop_table("workspace_mcp_credentials")
-
-    op.drop_index(
-        op.f("ix_user_mcp_credentials_mcp_server_id"),
-        table_name="user_mcp_credentials",
-    )
-    op.drop_index(
-        op.f("ix_user_mcp_credentials_org_id"),
-        table_name="user_mcp_credentials",
-    )
-    op.drop_index(
-        op.f("ix_user_mcp_credentials_user_id"),
-        table_name="user_mcp_credentials",
-    )
-    op.drop_table("user_mcp_credentials")
-
-    op.drop_index(
-        op.f("ix_mcp_server_org_wide_name_unique"),
-        table_name="mcp_servers",
-        postgresql_where="(owner_workspace_id IS NULL)",
-    )
-    op.drop_index(
-        op.f("ix_mcp_server_org_wide_url_unique"),
-        table_name="mcp_servers",
-        postgresql_where="(owner_workspace_id IS NULL)",
-    )
-    op.drop_index(
-        op.f("ix_mcp_servers_catalog_connector_id"),
-        table_name="mcp_servers",
-    )
-    op.drop_index(op.f("ix_mcp_servers_org_id"), table_name="mcp_servers")
-    op.drop_index(
-        op.f("ix_mcp_servers_owner_workspace_id"),
-        table_name="mcp_servers",
-    )
-    op.drop_index(
-        op.f("uq_mcp_install_per_catalog"),
-        table_name="mcp_servers",
-        postgresql_where="(catalog_connector_id IS NOT NULL)",
-    )
-    op.drop_table("mcp_servers")
-
-    op.drop_index(
-        op.f("ix_mcp_catalog_connectors_slug"),
-        table_name="mcp_catalog_connectors",
-    )
-    op.drop_table("mcp_catalog_connectors")
+    for table in (
+        "workspace_mcp_overrides",
+        "workspace_mcp_credentials",
+        "user_mcp_credentials",
+        "mcp_servers",
+        "mcp_catalog_connectors",
+    ):
+        op.execute(f"DROP TABLE IF EXISTS {table} CASCADE")
 
 
 def downgrade() -> None:
-    """Destructive legacy cleanup is not reversible."""
-    raise RuntimeError("Destructive legacy MCP cleanup is not reversible")
+    """No-op: pointer moves back, schema unchanged.
+
+    The legacy MCP tables are not recreated. See module docstring.
+    """
+    pass
