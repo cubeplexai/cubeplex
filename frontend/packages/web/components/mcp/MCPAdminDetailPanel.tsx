@@ -310,7 +310,21 @@ function AdminAuthActionBand({
           required_grant_scope: 'org',
           usable: orgEffective.usable,
           reason: orgEffective.reason,
-          credential_availability: orgEffective.usable ? 'available' : 'missing',
+          // For auth_method='none' installs the backend reports
+          // reason='usable' AND no credential is involved at all.
+          // The ready band has a dedicated "No credential required"
+          // sub-state that keys off `credential_availability ===
+          // 'not_required'` — forcing 'available' here would route
+          // the band into the "credential from <source>" variant
+          // even though credential_source is null, which would
+          // render incorrectly. Mirror the backend's effective-state
+          // mapping: auth_method='none' → not_required.
+          credential_availability:
+            connector.install.auth_method === 'none'
+              ? 'not_required'
+              : orgEffective.usable
+                ? 'available'
+                : 'missing',
         }
       : connector
 

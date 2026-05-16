@@ -163,11 +163,27 @@ class OAuthStartService:
         # the callback can complete the exchange without re-issuing PKCE.
         await self._state_store.attach_pkce(state=state, verifier=pkce.verifier)
 
+        # Scope resolution priority:
+        # 1. install.oauth_client_config['default_scope'] — set by past
+        #    runs of this method when DCR / template scope wrote it back.
+        # 2. template.oauth_default_scope — seeded catalog connectors
+        #    (GitHub, Slack, Notion, ...) declare required scopes here
+        #    via the v1 template seed. If we don't read it and fall
+        #    through to AS metadata, providers that don't publish
+        #    `scopes_supported` in their well-known doc would hit the
+        #    authorize endpoint without `scope=`, triggering invalid_scope
+        #    or returning a token without the perms the catalog expects.
+        # 3. AS metadata `scopes_supported` (best-effort, all of them).
         scope_param: str | None = None
         cfg_default = install.oauth_client_config.get("default_scope")
         if isinstance(cfg_default, str) and cfg_default:
             scope_param = cfg_default
-        elif as_meta.scopes_supported:
+        elif install.template_id is not None:
+            tpl_repo = MCPConnectorTemplateRepository(self._session)
+            template = await tpl_repo.get(install.template_id)
+            if template is not None and template.oauth_default_scope:
+                scope_param = template.oauth_default_scope
+        if scope_param is None and as_meta.scopes_supported:
             scope_param = " ".join(as_meta.scopes_supported)
 
         authorize_url = _build_authorize_url(
