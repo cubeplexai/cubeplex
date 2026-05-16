@@ -258,6 +258,39 @@ class PatchWorkspaceStateIn(BaseModel):
     credential_policy: CredentialPolicyLiteral | None = None
 
 
+class TestConnectionIn(BaseModel):
+    """Body of ``POST /admin/mcp/test-connection``.
+
+    A connect probe used by the admin Custom-install form: tries to
+    fetch ``tools/list`` without persisting anything. Static auth
+    accepts an inline ``credential_plaintext`` (one-shot, not saved);
+    other auth methods reject it (a misuse).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    server_url: str
+    transport: Literal["streamable_http", "sse"]
+    auth_method: AuthMethodLiteral
+    credential_plaintext: str | None = None
+    headers: dict[str, str] | None = None
+
+    @model_validator(mode="after")
+    def _validate_plaintext_only_with_static(self) -> "TestConnectionIn":
+        if self.credential_plaintext is not None and self.auth_method != "static":
+            raise ValueError("credential_plaintext_only_valid_with_static_auth")
+        return self
+
+
+class TestConnectionOut(BaseModel):
+    """Response of ``POST /admin/mcp/test-connection``."""
+
+    ok: bool
+    tool_count: int = 0
+    error_code: str | None = None
+    error_message: str | None = None
+
+
 class AdminInstallRefreshIn(BaseModel):
     """Body of ``POST /admin/mcp/installs/{id}/refresh-discovery``.
 
