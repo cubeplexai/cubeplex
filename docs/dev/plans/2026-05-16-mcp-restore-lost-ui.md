@@ -119,7 +119,7 @@ async def seeded_static_org_install_with_tools_cache(
             name="seeded-with-tools",
             server_url="https://seeded.example.com/mcp",
             server_url_hash=server_url_hash("https://seeded.example.com/mcp"),
-            transport="http",
+            transport="streamable_http",
             auth_method="static",
             default_credential_policy="org",
             auth_status="pending",
@@ -301,7 +301,7 @@ async def test_discover_tools_for_install_writes_tools_cache(
             name="disc-test",
             server_url="https://disc.example.com/mcp",
             server_url_hash=server_url_hash("https://disc.example.com/mcp"),
-            transport="http",
+            transport="streamable_http",
             auth_method="none",
             default_credential_policy="none",
             auth_status="not_required",
@@ -415,7 +415,14 @@ async def discover_tools_for_install(
     actor_user_id: str,
     session: AsyncSession,
     cred_service: CredentialService,
+    signer: MCPUserTokenSigner,
+    token_mgr: OAuthTokenManager,
 ) -> DiscoveryResult:
+    """Routes inject `signer` and `token_mgr` via the existing
+    `get_user_token_signer` and OAuth token-manager DI factories.
+    Both are needed because `_resolve_headers_from_spec` mints an
+    identity token for `auth_method='none'` installs and refreshes
+    OAuth grants on call for `auth_method='oauth'` installs."""
     install_repo = MCPConnectorInstallRepository(session, org_id=cred_service._org_id)  # type: ignore[arg-type]
     install = await install_repo.get(install_id)
     if install is None:
@@ -461,11 +468,64 @@ async def discover_tools_for_install(
     if not usable:
         raise MCPDiscoveryFailed(f"connector_not_usable:{reason}")
 
-    headers: dict[str, str] = dict(install.headers or {})
-    # NOTE: building the auth header from the resolved grant is a
-    # cross-cutting concern. The runtime path does it in
-    # `cubepi_runtime.py:load_workspace_mcp_tools_for_cubepi`.
-    # Step 4 of this task extracts a helper.
+    # Resolve auth headers from the actual grant the agent runtime
+    # would use. Just forwarding install.headers leaves out the
+    # Bearer token / static credential / OAuth access token that
+    # private MCP servers require. The runtime calls
+    # `cubebox.mcp.cubepi_runtime._resolve_headers_from_spec` for
+    # this; the discovery service must too. Build an
+    # MCPRuntimeConnectorSpec from the install + chosen grant and
+    # pass it through. The function returns `None` when a credential
+    # is required but cannot be resolved (e.g. credential_id missing)
+    # — treat that as a usability error.
+    from cubebox.mcp.cubepi_runtime import (
+        MCPRuntimeConnectorSpec,
+        _resolve_headers_from_spec,
+    )
+
+    spec = _build_runtime_spec_for_discovery(install=install, grant=...)
+    # The grant is the one identified above by the effective DTO (for
+    # workspace/user policy) or `org_grant` (for org policy); for
+    # `auth_method='none'` the spec carries no credential_id and the
+    # resolver mints an identity token.
+    headers = await _resolve_headers_from_spec(
+        spec=spec,
+        workspace_id=workspace_id or install.workspace_id or "",
+        org_id=install.org_id,
+        user_id=actor_user_id,
+        cred_service=cred_service,
+        signer=signer,           # MCPUserTokenSigner injected via DI
+        token_manager=token_mgr, # OAuthTokenManager injected via DI
+        grant_repo=grant_repo,
+    )
+    if headers is None:
+        install.discovery_status = "error"
+        install.last_error = "Auth header resolution failed"
+        await install_repo.update(install)
+        return DiscoveryResult(
+            install_id=install_id,
+            discovery_status="error",
+            tool_count=0,
+            tools_cache_raw=list(install.tools_cache or []),
+            last_error=install.last_error,
+        )
+
+# Helper placed at module level. Builds the runtime spec shape that
+# _resolve_headers_from_spec expects without going through the
+# full effective-state list (which we already computed above).
+def _build_runtime_spec_for_discovery(install, grant):
+    return MCPRuntimeConnectorSpec(
+        install_id=install.id,
+        name=install.name,
+        server_url=install.server_url,
+        transport=install.transport,
+        auth_method=install.auth_method,
+        credential_id=(grant.credential_id if grant is not None else None),
+        refresh_credential_id=(grant.refresh_credential_id if grant is not None else None),
+        headers=install.headers or {},
+        timeout=install.timeout,
+        tool_citations={},  # not needed for discovery
+    )
 
     try:
         tools = await asyncio.wait_for(
@@ -743,7 +803,7 @@ async def test_admin_test_connection_returns_tool_count(
         "/api/v1/admin/mcp/test-connection",
         json={
             "server_url": "https://probe.example.com/mcp",
-            "transport": "http",
+            "transport": "streamable_http",
             "auth_method": "none",
         },
     )
@@ -760,7 +820,7 @@ async def test_admin_test_connection_rejects_static_plaintext_with_none_auth(
         "/api/v1/admin/mcp/test-connection",
         json={
             "server_url": "https://probe.example.com/mcp",
-            "transport": "http",
+            "transport": "streamable_http",
             "auth_method": "none",
             "credential_plaintext": "should-not-be-here",
         },
@@ -777,7 +837,7 @@ async def test_admin_test_connection_rejects_static_plaintext_with_none_auth(
 ```python
 class TestConnectionIn(BaseModel):
     server_url: str
-    transport: Literal["http", "sse"]
+    transport: Literal["streamable_http", "sse"]
     auth_method: Literal["oauth", "static", "none"]
     credential_plaintext: str | None = None
     headers: dict[str, str] | None = None
@@ -869,7 +929,7 @@ async def test_admin_create_custom_install_for_org(admin_client) -> None:
             "install_scope": "org",
             "name": "My internal MCP",
             "server_url": "https://internal.corp/mcp",
-            "transport": "http",
+            "transport": "streamable_http",
             "auth_method": "none",
             "default_credential_policy": "none",
             "auto_enable": {"mode": "none"},
@@ -892,7 +952,7 @@ async def test_admin_create_custom_install_rejects_credential_plaintext_with_sco
             "install_scope": "org",
             "name": "x",
             "server_url": "https://x.com/mcp",
-            "transport": "http",
+            "transport": "streamable_http",
             "auth_method": "static",
             "default_credential_policy": "user",
             "auto_enable": {"mode": "none"},
@@ -919,7 +979,7 @@ class AdminCreateInstallIn(BaseModel):
     # Custom-install required when template_id is None:
     name: str | None = None
     server_url: str | None = None
-    transport: Literal["http", "sse"] | None = None
+    transport: Literal["streamable_http", "sse"] | None = None
 
     auth_method: Literal["oauth", "static", "none"]
     default_credential_policy: Literal["org", "workspace", "user", "none"]
@@ -1371,13 +1431,36 @@ shim that constructs the cubepi MCP client + calls `.invoke()`.)
 ```python
 from slowapi.util import get_remote_address
 from cubebox.api.middleware.rate_limit import limiter
+from cubebox.auth.dependencies import current_active_user
+from cubebox.models import User
+
+# Limiter key: read the authenticated user id from a context var
+# set by a dependency rather than from req.state.user_id. The
+# request.state.user_id field is populated by UserIdentityMiddleware
+# from the client-controlled X-User-ID header / cubebox_user_id
+# cookie — an authenticated client could rotate either to dodge
+# their per-user bucket. Key on the JWT-verified User row instead.
+from contextvars import ContextVar
+_INVOKE_USER_ID: ContextVar[str | None] = ContextVar("_INVOKE_USER_ID", default=None)
+
+
+def _set_invoke_user_id(user: User = Depends(current_active_user)) -> User:
+    _INVOKE_USER_ID.set(user.id)
+    return user
+
+
+def _invoke_rate_key(_req: Request) -> str:
+    # Called by slowapi to derive the bucket key. The dep above runs
+    # BEFORE the route body, so the contextvar is set by the time
+    # slowapi calls this.
+    return _INVOKE_USER_ID.get() or "anonymous"
 
 
 @router.post(
     "/installs/{install_id}/tools/{tool_name}/invoke",
     response_model=ToolInvokeOut,
 )
-@limiter.limit("30/minute", key_func=lambda req: req.state.user_id)
+@limiter.limit("30/minute", key_func=_invoke_rate_key)
 async def ws_invoke_tool(
     request: Request,
     workspace_id: str,
@@ -1387,6 +1470,7 @@ async def ws_invoke_tool(
     svc: Annotated[MCPConnectorInstallService, Depends(get_ws_install_service)],
     effective_svc: Annotated[MCPEffectiveConnectorService, Depends(get_ws_effective_service)],
     ctx: Annotated[RequestContext, Depends(require_member)],
+    _rate_key_user: Annotated[User, Depends(_set_invoke_user_id)],
     audit: Annotated[AuditSink, Depends(get_audit_sink)],
 ) -> ToolInvokeOut:
     install = await svc._install_repo.get(install_id)
