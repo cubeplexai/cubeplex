@@ -57,8 +57,12 @@ For each PR you're driving:
    directory containing this `SKILL.md`). Resolve it once at the start of
    the loop and reuse it.
 
-   First iteration uses `--since 1970-01-01T00:00:00Z` (default) or the
-   timestamp of the push commit.
+   First iteration uses `--since 1970-01-01T00:00:00Z#0` (the default) or
+   a cursor near the push commit's timestamp. Cursor format is
+   `"<iso8601>#<id>"`; a bare timestamp is accepted and treated as
+   `"<iso>#0"` (the entire boundary second is included). The id
+   tie-breaker is what makes same-second codex review bursts safe — see
+   the poller header for details.
 
 4. **Classify each new comment** (rules below). For each, take exactly one
    of: *fix*, *reply-declining*, *reply-already-fixed*, *reply-clarify*.
@@ -71,8 +75,20 @@ For each PR you're driving:
    gh pr comment <PR> --body "@codex please take another pass — pushed <short-sha>."
    ```
 
-8. **Update cursor** to the `cursor` field returned by the poller and
-   loop back to step 2.
+8. **Update cursor** so the next poll skips your own replies and re-tag.
+
+   - **Wrong:** reuse the cursor returned in step 3. That cursor predates
+     the replies and re-tag you just posted, so the next poll surfaces
+     them as `new_comments` and the loop will reply to its own replies.
+   - **Right:** set the new cursor to a wall-clock timestamp captured
+     **after** step 7 lands. UTC ISO 8601 plus a `#0` tail is sufficient:
+
+     ```bash
+     CURSOR="$(date -u +%Y-%m-%dT%H:%M:%SZ)#0"
+     ```
+
+   Anything codex (or a human) posts strictly after that instant is
+   genuinely new and will show up on the next pass. Loop back to step 2.
 
 **Exit when**: one full poll round returns `count: 0` *after* you've
 re-tagged @codex on the latest pushed SHA. (Empty before re-tag means
@@ -135,8 +151,11 @@ context.
 # First pass (no cursor)
 "$SKILL_DIR/scripts/codex-poll.sh" 107
 
-# Subsequent passes — use cursor returned from previous call
-"$SKILL_DIR/scripts/codex-poll.sh" 107 --since 2026-05-16T04:25:14Z
+# After a poll — feed back the returned cursor verbatim
+"$SKILL_DIR/scripts/codex-poll.sh" 107 --since '2026-05-16T06:18:48Z#3252317544'
+
+# After step 7 (replies + re-tag posted) — use wall clock
+"$SKILL_DIR/scripts/codex-poll.sh" 107 --since "$(date -u +%Y-%m-%dT%H:%M:%SZ)#0"
 
 # Specific repo (rarely needed; auto-detects from cwd)
 "$SKILL_DIR/scripts/codex-poll.sh" 107 --repo xfgong/cubebox
@@ -145,12 +164,17 @@ context.
 Output is JSON with `cursor`, `count`, `new_comments[]`. Each comment has:
 
 - `kind` — `"review"` (inline) or `"issue"` (top-level).
-- `id` — needed for review-comment replies.
+- `id` — needed for review-comment replies; also the tie-breaker in the
+  cursor.
 - `author` — e.g. `chatgpt-codex-connector[bot]` or a human login.
 - `body` — full markdown (includes P1/P2 badge HTML).
 - `path`, `line` — for review comments only.
 - `html_url` — direct link.
-- `created_at` — ISO 8601 UTC; this is the cursor unit.
+- `created_at` — ISO 8601 UTC.
+
+Cursor format is `"<iso8601>#<id>"`; lexicographic order. A bare ISO
+timestamp without `#<id>` is accepted and treated as `#0` (boundary
+second included).
 
 ## State To Track (in TodoWrite or scratchpad)
 

@@ -10,11 +10,25 @@
 # skill, a /loop invocation, etc.) decide cadence and exit conditions.
 #
 # Usage:
-#   codex-poll.sh <pr-number> [--since <iso8601>] [--repo <owner/name>]
+#   codex-poll.sh <pr-number> [--since <cursor>] [--repo <owner/name>]
+#
+# Cursor format:
+#   "<iso8601>#<id>"   e.g. "2026-05-16T06:18:48Z#3252317540"
+#
+#   The `#<id>` tail is a tie-breaker — GitHub comment timestamps are
+#   only second-granularity, and codex review batches frequently share a
+#   created_at down to the second. A timestamp-only cursor with strict
+#   `>` permanently drops same-second siblings; with `>=` it returns
+#   duplicates. Pairing the timestamp with the comment id lets us use
+#   lexicographic `>` and keep both correctness properties.
+#
+#   `--since` accepts either the composite form or a bare ISO 8601
+#   timestamp (in which case the id half is treated as 0, so the
+#   boundary second is included).
 #
 # Output:
 #   {
-#     "cursor": "<latest created_at seen, or input --since if empty>",
+#     "cursor": "<iso8601>#<id>",   // empty result → echoes input
 #     "count": <int>,
 #     "new_comments": [
 #       {
@@ -42,7 +56,7 @@ usage() {
 }
 
 PR=""
-SINCE="1970-01-01T00:00:00Z"
+SINCE="1970-01-01T00:00:00Z#0"
 REPO=""
 
 while [[ $# -gt 0 ]]; do
@@ -83,6 +97,14 @@ gh api --paginate "repos/$REPO/issues/$PR/comments"  > "$tmpdir/issues.json"  ||
   echo "failed to fetch issue comments for $REPO#$PR" >&2; exit 1
 }
 
+# Normalize cursor: bare ISO timestamp → "<iso>#0" so a 14-char id (or
+# any non-empty id) at the same second is strictly greater. Composite
+# form passes through.
+case "$SINCE" in
+  *'#'*) ;;
+  *) SINCE="${SINCE}#0" ;;
+esac
+
 jq -n \
   --slurpfile reviews "$tmpdir/reviews.json" \
   --slurpfile issues  "$tmpdir/issues.json" \
@@ -110,11 +132,14 @@ jq -n \
       html_url:   .html_url,
       created_at: .created_at
     };
+  # Composite key: "<iso>#<id>". Lexicographic compare orders by time
+  # first (ISO 8601 sorts naturally) and by id within the same second.
+  def cursor_key: "\(.created_at)#\(.id)";
 
   ( ($reviews | add | map(norm_review)) + ($issues | add | map(norm_issue)) )
-  | map(select(.created_at > $since))
-  | sort_by(.created_at)
-  | { cursor: (if length > 0 then (.[-1].created_at) else $since end),
+  | map(select(cursor_key > $since))
+  | sort_by(cursor_key)
+  | { cursor: (if length > 0 then (.[-1] | cursor_key) else $since end),
       count:  length,
       new_comments: . }
   '
