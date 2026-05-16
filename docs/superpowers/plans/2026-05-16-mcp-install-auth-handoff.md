@@ -273,13 +273,17 @@ class OAuthStartService:
             return existing_client_id, cfg.get("client_secret_credential_id")
         if not as_meta.registration_endpoint:
             raise OAuthStartError("dcr_unsupported_and_no_static_client")
+        # DCRClient owns its own httpx.AsyncClient (constructor takes it);
+        # the register() call signature is
+        # `register(registration_endpoint: str, request: DCRRequest)`.
+        # DCRRequest carries body-only fields (redirect_uris, client_name,
+        # grant_types, scope, ...), NOT the registration endpoint.
         dcr_resp = await self._dcr.register(
+            as_meta.registration_endpoint,
             DCRRequest(
-                registration_endpoint=as_meta.registration_endpoint,
                 redirect_uris=[_redirect_uri()],
                 client_name=f"cubebox:{install.id}",
             ),
-            http_client=self._http,
         )
         secret_id: str | None = None
         if dcr_resp.client_secret:
@@ -369,10 +373,26 @@ async def oauth_start_service(...):  # wire all real deps via DI factories
     ...
 ```
 
-Use whatever real seed helpers the existing four-layer test file has;
-do NOT mock the OAuth metadata discovery against a real AS — instead,
-pre-populate `install.authorization_endpoint` / `token_endpoint` /
-`oauth_client_id` so the service skips DCR + discovery.
+Use whatever real seed helpers the existing four-layer test file has.
+Important — the install model has NO `authorization_endpoint` /
+`token_endpoint` / `oauth_client_id` columns, so they cannot be
+pre-populated to skip discovery. Two real options for tests:
+
+1. **Pre-populate `oauth_client_config`** with `client_id` (and
+   optionally `client_secret_credential_id`). This makes
+   `_ensure_client` short-circuit DCR. Discovery (AS metadata
+   `authorization_endpoint`) still runs.
+
+2. **Monkeypatch the `OAuthMetadataDiscovery` instance** the service
+   was injected with so `discover_for_resource(server_url)` returns
+   a deterministic `(ProtectedResourceMetadata, AuthorizationServerMetadata)`
+   pair pointing at a test URL. Combined with option (1), the test
+   never makes any network calls.
+
+The fixture writes both: a fake AS metadata pair via monkeypatch on
+`OAuthMetadataDiscovery.discover_for_resource`, plus
+`install.oauth_client_config = {"client_id": "test-client"}` in the
+seeded row.
 
 - [ ] **Step 6: Run the test to verify it passes**
 
