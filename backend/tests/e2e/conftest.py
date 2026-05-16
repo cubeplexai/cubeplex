@@ -46,8 +46,8 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
 
     Makes the directory the source of truth for the marker so a forgotten
     `pytestmark` can't slip past `-m "not e2e"` and run alongside unit
-    tests. The directory-is-the-contract rule is mechanically enforced —
-    see backend/CLAUDE.md.
+    tests. The directory-is-the-contract rule is mechanically enforced
+    by this function.
     """
     e2e_dir = str(Path(__file__).parent.resolve())
     for item in items:
