@@ -214,3 +214,114 @@ def _test_fernet_key() -> str:
     from cryptography.fernet import Fernet
 
     return Fernet.generate_key().decode()
+
+
+@pytest_asyncio.fixture
+async def seeded_static_org_install_no_grant(
+    admin_client: tuple[httpx.AsyncClient, str],
+    db_session_maker: async_sessionmaker[AsyncSession],
+) -> str:
+    """Org-scope ``auth_method='none'`` install — usable without any grant."""
+    client, ws_id = admin_client
+    org_id, user_id = await _resolve_org_user_for_client(client, ws_id)
+    async with db_session_maker() as session:
+        from cubebox.mcp._constants import server_url_hash
+        from cubebox.models.mcp import MCPConnectorInstall
+
+        url = f"https://no-grant-{ws_id}.example.com/mcp"
+        install = MCPConnectorInstall(
+            org_id=org_id,
+            template_id=None,
+            install_scope="org",
+            workspace_id=None,
+            name="no-grant",
+            server_url=url,
+            server_url_hash=server_url_hash(url),
+            transport="streamable_http",
+            auth_method="none",
+            default_credential_policy="none",
+            auth_status="not_required",
+            install_state="active",
+            tools_cache=[],
+            tool_citations={},
+            created_by_user_id=user_id,
+        )
+        session.add(install)
+        await session.commit()
+        await session.refresh(install)
+        return install.id
+
+
+@pytest_asyncio.fixture
+async def seeded_oauth_user_policy_install(
+    admin_client: tuple[httpx.AsyncClient, str],
+    db_session_maker: async_sessionmaker[AsyncSession],
+) -> str:
+    """Org-scope OAuth install with ``default_credential_policy='user'`` —
+    refresh-discovery against this requires ``workspace_id`` because the
+    grant is per-user-per-workspace."""
+    client, ws_id = admin_client
+    org_id, user_id = await _resolve_org_user_for_client(client, ws_id)
+    async with db_session_maker() as session:
+        from cubebox.mcp._constants import server_url_hash
+        from cubebox.models.mcp import MCPConnectorInstall
+
+        url = f"https://oauth-user-{ws_id}.example.com/mcp"
+        install = MCPConnectorInstall(
+            org_id=org_id,
+            template_id=None,
+            install_scope="org",
+            workspace_id=None,
+            name="oauth-user",
+            server_url=url,
+            server_url_hash=server_url_hash(url),
+            transport="streamable_http",
+            auth_method="oauth",
+            default_credential_policy="user",
+            auth_status="pending",
+            install_state="active",
+            tools_cache=[],
+            tool_citations={},
+            created_by_user_id=user_id,
+        )
+        session.add(install)
+        await session.commit()
+        await session.refresh(install)
+        return install.id
+
+
+# ---------------------------------------------------------------------------
+# Task 3 — Refresh-discovery routes (admin + ws).
+# ---------------------------------------------------------------------------
+
+
+async def test_admin_refresh_discovery_writes_install(
+    admin_client: tuple[httpx.AsyncClient, str],
+    seeded_static_org_install_no_grant: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client, _ws = admin_client
+    install_id = seeded_static_org_install_no_grant
+
+    async def fake_load(*args: object, **kwargs: object) -> list[object]:
+        return [SimpleNamespace(name="ping", description=None, input_schema=None)]
+
+    monkeypatch.setattr("cubebox.services.mcp_discovery.load_mcp_tools_http", fake_load)
+
+    res = await client.post(f"/api/v1/admin/mcp/installs/{install_id}/refresh-discovery", json={})
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body["discovery_status"] == "ok"
+    assert body["tool_count"] == 1
+    assert body["tools"][0]["name"] == "ping"
+
+
+async def test_admin_refresh_discovery_requires_workspace_id_for_scoped_policy(
+    admin_client: tuple[httpx.AsyncClient, str],
+    seeded_oauth_user_policy_install: str,
+) -> None:
+    client, _ws = admin_client
+    install_id = seeded_oauth_user_policy_install
+    res = await client.post(f"/api/v1/admin/mcp/installs/{install_id}/refresh-discovery", json={})
+    assert res.status_code == 422, res.text
+    assert res.json()["detail"][0]["loc"][-1] == "workspace_id"

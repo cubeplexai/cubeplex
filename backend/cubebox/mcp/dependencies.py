@@ -30,6 +30,7 @@ from cubebox.mcp.oauth import (
     OAuthStartService,
     OAuthStateStore,
 )
+from cubebox.mcp.oauth.token_manager import OAuthTokenManager
 from cubebox.mcp.user_token import HS256Signer, MCPUserTokenSigner
 from cubebox.models import Role, User
 from cubebox.repositories.mcp import (
@@ -277,3 +278,58 @@ async def get_grant_repo(
 ) -> MCPCredentialGrantRepository:
     """Org-scoped grant repo, used by admin endpoints (org-row effective)."""
     return MCPCredentialGrantRepository(session, org_id=ctx.org_id)
+
+
+async def get_ws_grant_repo(
+    session: AsyncSession = Depends(get_session),
+    ctx: RequestContext = Depends(request_context),
+) -> MCPCredentialGrantRepository:
+    """Org-scoped grant repo for workspace routes (org_id from membership)."""
+    return MCPCredentialGrantRepository(session, org_id=ctx.org_id)
+
+
+async def get_oauth_token_manager(
+    session: AsyncSession = Depends(get_session),
+    backend: EncryptionBackend = Depends(get_encryption_backend),
+    redis: Redis = Depends(get_redis),
+    metadata: OAuthMetadataDiscovery = Depends(get_oauth_metadata_discovery),
+    http_client: httpx.AsyncClient = Depends(get_oauth_http_client),
+    ctx: RequestContext = Depends(request_context),
+) -> OAuthTokenManager:
+    """Build an OAuth ``OAuthTokenManager`` bound to the caller's org.
+
+    Reuses the shared httpx pool and OAuth metadata cache stashed on
+    ``app.state`` by the existing DI factories. The token manager is
+    request-scoped because it needs a session-bound
+    ``CredentialRepository``.
+    """
+    from cubebox.repositories.credential import CredentialRepository
+
+    return OAuthTokenManager(
+        http_client=http_client,
+        redis=redis,
+        encryption_backend=backend,
+        credential_repo=CredentialRepository(session, org_id=ctx.org_id),
+        metadata=metadata,
+    )
+
+
+async def get_admin_oauth_token_manager(
+    session: AsyncSession = Depends(get_session),
+    backend: EncryptionBackend = Depends(get_encryption_backend),
+    redis: Redis = Depends(get_redis),
+    metadata: OAuthMetadataDiscovery = Depends(get_oauth_metadata_discovery),
+    http_client: httpx.AsyncClient = Depends(get_oauth_http_client),
+    ctx: RequestContext = Depends(get_admin_request_context),
+) -> OAuthTokenManager:
+    """Admin variant of ``get_oauth_token_manager`` — org_id comes from
+    ``get_admin_request_context`` instead of workspace membership."""
+    from cubebox.repositories.credential import CredentialRepository
+
+    return OAuthTokenManager(
+        http_client=http_client,
+        redis=redis,
+        encryption_backend=backend,
+        credential_repo=CredentialRepository(session, org_id=ctx.org_id),
+        metadata=metadata,
+    )

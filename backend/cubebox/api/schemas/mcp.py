@@ -258,6 +258,28 @@ class PatchWorkspaceStateIn(BaseModel):
     credential_policy: CredentialPolicyLiteral | None = None
 
 
+class AdminInstallRefreshIn(BaseModel):
+    """Body of ``POST /admin/mcp/installs/{id}/refresh-discovery``.
+
+    ``workspace_id`` is required when the install's default credential
+    policy is workspace/user-scoped (the grant lookup needs the
+    workspace lens). For org-policy installs it is left as None.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    workspace_id: str | None = None
+
+
+class WsInstallRefreshIn(BaseModel):
+    """Body of ``POST /ws/{ws}/mcp/installs/{id}/refresh-discovery``.
+
+    Workspace context comes from the path; body is empty.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+
 class CreateGrantIn(BaseModel):
     """Body of POST /api/v1/.../grants/{org|workspace|me}.
 

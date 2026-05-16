@@ -8,9 +8,11 @@ four-layer model — ``MCPConnectorTemplate`` / ``MCPConnectorInstall`` /
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from cubebox.api.schemas.mcp import (
     AdminCreateInstallIn,
+    AdminInstallRefreshIn,
     CreateGrantIn,
     MCPAdminInstallEffectiveOut,
     MCPConnectorInstallListOut,
@@ -26,18 +28,29 @@ from cubebox.api.schemas.mcp import (
 from cubebox.audit.sink import AuditSink
 from cubebox.auth.context import RequestContext
 from cubebox.auth.dependencies import current_active_user
+from cubebox.credentials.dependencies import build_credential_service, get_encryption_backend
+from cubebox.credentials.encryption import EncryptionBackend
+from cubebox.db.session import get_session
 from cubebox.mcp.dependencies import (
     get_admin_install_service,
+    get_admin_oauth_token_manager,
     get_admin_request_context,
     get_audit_sink,
     get_connector_template_service,
     get_grant_repo,
     get_oauth_start_service,
+    get_user_token_signer,
 )
 from cubebox.mcp.oauth import OAuthStartError, OAuthStartService
+from cubebox.mcp.oauth.token_manager import OAuthTokenManager
+from cubebox.mcp.user_token import MCPUserTokenSigner
 from cubebox.models import MCPConnectorInstall, User
 from cubebox.models.mcp import MCPCredentialGrant
-from cubebox.repositories.mcp import MCPCredentialGrantRepository
+from cubebox.repositories.mcp import (
+    MCPConnectorInstallRepository,
+    MCPCredentialGrantRepository,
+)
+from cubebox.services.mcp_discovery import discover_tools_for_install
 from cubebox.services.mcp_installs import MCPConnectorInstallService
 from cubebox.services.mcp_templates import MCPConnectorTemplateService
 
@@ -236,6 +249,63 @@ async def get_admin_install(
     if install is None:
         raise HTTPException(404, detail={"code": "mcp_install_not_found"})
     return _install_to_out(install, include_tool_citations=True)
+
+
+@router.post(
+    "/installs/{install_id}/refresh-discovery",
+    response_model=MCPConnectorInstallOut,
+)
+async def admin_refresh_discovery(
+    install_id: str,
+    body: AdminInstallRefreshIn,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    backend: Annotated[EncryptionBackend, Depends(get_encryption_backend)],
+    signer: Annotated[MCPUserTokenSigner, Depends(get_user_token_signer)],
+    token_mgr: Annotated[OAuthTokenManager, Depends(get_admin_oauth_token_manager)],
+    ctx: Annotated[RequestContext, Depends(get_admin_request_context)],
+) -> MCPConnectorInstallOut:
+    """Re-discover tools for one install and persist into ``tools_cache``.
+
+    Requires ``workspace_id`` when the install's default credential
+    policy is workspace/user-scoped — the grant lookup needs the
+    workspace lens. Org-policy installs are looked up against the org
+    grant directly.
+    """
+    cred_service = build_credential_service(
+        session, backend, org_id=ctx.org_id, actor_user_id=ctx.user.id
+    )
+    install_repo = MCPConnectorInstallRepository(session, org_id=ctx.org_id)
+    install = await install_repo.get(install_id)
+    if install is None:
+        raise HTTPException(404, detail={"code": "mcp_install_not_found"})
+    needs_ws = install.default_credential_policy in {"workspace", "user"}
+    if needs_ws and not body.workspace_id:
+        raise HTTPException(
+            422,
+            detail=[
+                {
+                    "type": "value_error",
+                    "loc": ["body", "workspace_id"],
+                    "msg": "workspace_id_required_for_scoped_policy",
+                    "input": None,
+                }
+            ],
+        )
+    try:
+        await discover_tools_for_install(
+            install_id=install_id,
+            workspace_id=body.workspace_id,
+            actor_user_id=ctx.user.id,
+            session=session,
+            cred_service=cred_service,
+            signer=signer,
+            token_mgr=token_mgr,
+        )
+    except ValueError as exc:
+        raise HTTPException(400, detail={"code": str(exc)}) from exc
+    refreshed = await install_repo.get(install_id)
+    assert refreshed is not None
+    return _install_to_out(refreshed, include_tool_citations=True)
 
 
 @router.patch(
