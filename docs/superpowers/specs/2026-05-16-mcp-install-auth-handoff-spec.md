@@ -107,12 +107,30 @@ console, the org-admin bit. The function is centralized so both surfaces agree.
  └──────────────────────────────────────────────────────────────────────┘
 ```
 
-- Shown when `connector.credential_availability === 'missing'` AND the caller
-  has authority to create the grant at `required_grant_scope` (see §4).
-- `<reason copy>` translates `connector.reason` using the actual reason
-  tokens emitted by `backend/cubebox/mcp/effective.py` (`MCPEffectiveReason`
-  literal: `usable | pending_oauth | missing_org_grant |
-  missing_workspace_grant | user_needs_connection | grant_expired`):
+- Shown when `connector.reason` is one of the **auth-related** tokens
+  emitted by `backend/cubebox/mcp/effective.py` —
+  `pending_oauth | missing_org_grant | missing_workspace_grant |
+  user_needs_connection | grant_expired` — AND the caller has authority
+  to create the grant at `required_grant_scope` (see §4). Do NOT key the
+  predicate solely on `credential_availability === 'missing'`: that field
+  is also `missing` for non-auth blockers (`not_installed`,
+  `install_uninstalled`, `template_deprecated`,
+  `not_enabled_in_workspace`, `discovery_failed`), and the action band
+  has no copy for those — they belong to other surfaces:
+  - `not_enabled_in_workspace` is handled by the existing workspace
+    enable/disable toggle (`McpPanel.ConnectorDetail`), not this band.
+  - `discovery_failed` surfaces as an inline error message in the
+    detail panel's existing "tools" area, not the action band; the
+    fix is to retry discovery, not to (re-)authorize.
+  - `not_installed`, `install_uninstalled`, `template_deprecated`
+    cannot reach a state where the action band is shown — the panel
+    they would render in is the install panel or an "uninstalled"
+    placeholder, both outside this band's scope.
+- `<reason copy>` translates `connector.reason` (full `MCPEffectiveReason`
+  literal for reference: `usable | not_installed | not_enabled_in_workspace
+  | install_uninstalled | template_deprecated | pending_oauth |
+  missing_org_grant | missing_workspace_grant | user_needs_connection |
+  grant_expired | discovery_failed`):
   - `pending_oauth` → "Authorization was started but not finished."
   - `missing_org_grant` (caller is org admin) → "No org credential on file
     yet."
@@ -229,24 +247,37 @@ Notes on the admin console row:
 
 ## 5. End-to-end interaction flows
 
-### 5.1 Workspace member installs a `user`-policy connector (e.g. Linear)
+### 5.1 Workspace admin installs a `user`-policy connector, members authorize (e.g. Linear)
+
+Install creation is admin-only (`backend/cubebox/api/routes/v1/ws_mcp.py::
+create_workspace_install` depends on `require_admin`), but the `user`-policy
+means each member runs their own OAuth flow against their own grant. This is
+the two-actor flow.
 
 ```
  ┌─────────────────────────────────────────────────────────────────────┐
- │ Step 1 — install                                                    │
+ │ Actor A — workspace admin: install                                 │
  │  Template list → click "Connect" on Linear                          │
  │   ↓                                                                 │
- │  POST /api/v1/ws/{ws}/mcp/installs                                  │
+ │  POST /api/v1/ws/{ws}/mcp/installs        (require_admin)           │
  │     { template_id, install_scope: "workspace",                      │
  │       auth_method: "oauth", default_credential_policy: "user" }     │
  │   ↓                                                                 │
  │  list reload + auto-select the new install (existing behavior)      │
  │                                                                     │
- │ Step 2 — authorize                                                  │
+ │  Admin's own detail panel now renders the same `needs-action`       │
+ │  band as any member would see — the admin can authorize their own   │
+ │  user grant immediately if they want to use the connector too.      │
+ │                                                                     │
+ │ Actor B — workspace member (and admin, separately): authorize       │
+ │  Open the connector in workspace settings                           │
  │  Detail panel renders with action band in state `needs-action`     │
+ │  (because the member's own user grant is missing — reason           │
+ │   `user_needs_connection`)                                          │
  │   ↓ click "Connect with Linear"                                     │
  │   ↓                                                                 │
  │  POST /api/v1/ws/{ws}/mcp/installs/{id}/grants/me/oauth/start       │
+ │     (require_member — any workspace member may do this)             │
  │     → { authorize_url, expires_at }                                 │
  │   ↓                                                                 │
  │  window.open(authorize_url, …)                                      │
@@ -254,8 +285,9 @@ Notes on the admin console row:
  │                                                                     │
  │ Step 3 — pop-up returns                                             │
  │  AS → /api/v1/oauth/mcp/callback?state=…&code=…                     │
- │  Backend exchanges code, upserts MCPCredentialGrant(scope='user'),  │
- │  redirects 302 to /oauth/mcp/return?install_id=…&status=ok          │
+ │  Backend exchanges code, upserts MCPCredentialGrant(scope='user',   │
+ │  user_id=<the authorizing member>), redirects 302 to                │
+ │  /oauth/mcp/return?install_id=…&status=ok                           │
  │   ↓                                                                 │
  │  /oauth/mcp/return posts a typed message and closes itself          │
  │   ↓                                                                 │
@@ -263,6 +295,15 @@ Notes on the admin console row:
  │  Band transitions to `ready`                                        │
  └─────────────────────────────────────────────────────────────────────┘
 ```
+
+**New UI rule introduced by this spec:** the front end MUST hide the
+template list section in `McpPanel.tsx` (the "Connect to a new template"
+sub-pane) from workspace members who are not admins. Today the section is
+rendered to all members, so a non-admin who clicks the template-row
+"Connect" button hits the install POST and gets rejected by
+`require_admin`. The action band concept assumes members only see
+connectors an admin has already installed and their only authoring action
+is creating their own user grant; this UI rule keeps that invariant.
 
 ### 5.2 Workspace admin installs a `workspace`-policy connector
 
