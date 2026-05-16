@@ -194,49 +194,80 @@ async def create_admin_install(
     ctx: Annotated[RequestContext, Depends(get_admin_request_context)],
     audit: Annotated[AuditSink, Depends(get_audit_sink)],
 ) -> MCPConnectorInstallOut:
-    """Create an org-scope install, optionally fanning out into workspaces."""
+    """Create an org-scope install, optionally fanning out into workspaces.
+
+    Two branches:
+
+    * ``template_id`` provided → install from a catalog template.
+    * ``template_id is None`` → custom install (admin-supplied URL +
+      transport + name). The schema validator enforces the required
+      custom-install fields.
+    """
+    install: MCPConnectorInstall
+    template_id_for_audit: str | None = None
     if body.template_id is None:
-        raise HTTPException(
-            status_code=422,
-            detail=[
-                {
-                    "type": "value_error",
-                    "loc": ["body", "template_id"],
-                    "msg": "template_id is required for org installs",
-                    "input": None,
-                }
-            ],
-        )
+        # Custom install. The schema validator already guaranteed
+        # name/server_url/transport are present.
+        assert body.name is not None
+        assert body.server_url is not None
+        assert body.transport is not None
+        try:
+            install = await svc.create_custom_install_for_org(
+                name=body.name,
+                server_url=body.server_url,
+                transport=body.transport,
+                auth_method=body.auth_method,
+                default_credential_policy=body.default_credential_policy,
+                headers=body.headers,
+                distribution=body.auto_enable.model_dump(),
+            )
+        except ValueError as exc:
+            raise HTTPException(400, detail={"code": str(exc)}) from exc
+    else:
+        try:
+            template = await template_svc.get_active(body.template_id)
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=404,
+                detail={"code": "connector_template_not_found"},
+            ) from exc
 
-    try:
-        template = await template_svc.get_active(body.template_id)
-    except ValueError as exc:
-        raise HTTPException(
-            status_code=404,
-            detail={"code": "connector_template_not_found"},
-        ) from exc
+        try:
+            install = await svc.create_from_template_for_org(
+                template=template,
+                auth_method=body.auth_method,
+                credential_policy=body.default_credential_policy,
+                distribution=body.auto_enable.model_dump(),
+            )
+        except ValueError as exc:
+            # Service-side guards raise ValueError with a canonical code as the
+            # message (e.g. ``auth_method_not_supported_by_template``,
+            # ``workspace_not_in_org``, ``unknown distribution mode: ...``).
+            # Map to 400 with the message as ``code`` so the frontend can parse
+            # uniformly across admin and workspace install routes.
+            raise HTTPException(400, detail={"code": str(exc)}) from exc
+        template_id_for_audit = template.id
 
-    try:
-        install = await svc.create_from_template_for_org(
-            template=template,
-            auth_method=body.auth_method,
-            credential_policy=body.default_credential_policy,
-            distribution=body.auto_enable.model_dump(),
-        )
-    except ValueError as exc:
-        # Service-side guards raise ValueError with a canonical code as the
-        # message (e.g. ``auth_method_not_supported_by_template``,
-        # ``workspace_not_in_org``, ``unknown distribution mode: ...``). Map
-        # to 400 with the message as ``code`` so the frontend can parse
-        # uniformly across admin and workspace install routes.
-        raise HTTPException(400, detail={"code": str(exc)}) from exc
+    # Org-policy static one-shot grant: when admin passes
+    # ``credential_plaintext`` the install is born with a usable grant.
+    # Schema validator already enforces auth_method='static' and
+    # default_credential_policy='org'.
+    if body.credential_plaintext is not None:
+        try:
+            await svc.create_static_grant(
+                install_id=install.id,
+                grant_scope="org",
+                plaintext=body.credential_plaintext,
+            )
+        except ValueError as exc:
+            raise HTTPException(400, detail={"code": str(exc)}) from exc
 
     await audit.record(
         event="mcp.install.created",
         actor_user_id=ctx.user.id,
         org_id=ctx.org_id,
         target_id=install.id,
-        details={"scope": "org", "template_id": template.id},
+        details={"scope": "org", "template_id": template_id_for_audit},
     )
     return _install_to_out(install, include_tool_citations=True)
 

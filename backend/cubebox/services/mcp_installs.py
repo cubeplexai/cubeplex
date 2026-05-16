@@ -222,46 +222,7 @@ class MCPConnectorInstallService:
         """
         if auth_method not in template.supported_auth_methods:
             raise ValueError("auth_method_not_supported_by_template")
-        mode = distribution.get("mode")
-        if mode not in {"all", "selected", "none"}:
-            raise ValueError(f"unknown distribution mode: {mode!r}")
-
-        # Pre-resolve workspace_ids BEFORE writing the install row so that a
-        # bad id in ``distribution.workspace_ids`` cannot leave behind a
-        # phantom install with no state rows. For ``mode='all'`` the lookup
-        # is the authoritative list (no client input to validate); for
-        # ``mode='selected'`` we cross-check every requested id against the
-        # org's actual workspaces.
-        workspace_ids: list[str] = []
-        enablement_source = ""
-        if mode == "all":
-            if self._workspace_repo is None:
-                raise RuntimeError(
-                    "create_from_template_for_org(mode='all') requires workspace_repo"
-                )
-            workspaces = await self._workspace_repo.list_for_org(self._org_id)
-            workspace_ids = [ws.id for ws in workspaces]
-            enablement_source = "admin_auto"
-        elif mode == "selected":
-            raw_ids = distribution.get("workspace_ids") or []
-            if not isinstance(raw_ids, list):
-                raise ValueError("distribution.workspace_ids must be a list")
-            requested = [str(wid) for wid in raw_ids]
-            if requested:
-                if self._workspace_repo is None:
-                    raise RuntimeError(
-                        "create_from_template_for_org(mode='selected') requires workspace_repo"
-                    )
-                valid_ws = await self._workspace_repo.list_for_org(self._org_id)
-                valid_ids = {ws.id for ws in valid_ws}
-                unknown = [wid for wid in requested if wid not in valid_ids]
-                if unknown:
-                    # Reject the entire call BEFORE the install row is written so a
-                    # typo'd id can't leave the org with a half-distributed install.
-                    raise ValueError("workspace_not_in_org")
-            workspace_ids = requested
-            enablement_source = "admin_manual"
-
+        workspace_ids, enablement_source, mode = await self._resolve_distribution(distribution)
         defaults = install_defaults_for_auth_method(auth_method, credential_policy)
         # Derive ``auto_enroll_new_workspaces`` from the requested distribution
         # mode rather than relying on the model's ``server_default=true``. The
@@ -287,18 +248,172 @@ class MCPConnectorInstallService:
             created_by_user_id=self._actor_user_id,
         )
         saved = await self._install_repo.add(install)
+        await self._fan_out_state_rows(
+            install=saved,
+            workspace_ids=workspace_ids,
+            credential_policy=defaults.credential_policy,
+            enablement_source=enablement_source,
+        )
+        return saved
 
-        if mode == "none":
-            return saved
+    async def _resolve_distribution(
+        self, distribution: dict[str, Any]
+    ) -> tuple[list[str], str, str]:
+        """Resolve the ``distribution`` payload to a list of workspace ids.
 
+        Validates the mode AND every requested workspace id BEFORE any
+        install row is written (the caller does the actual write next),
+        so a typo can't leave behind a phantom install with no state.
+        Returns ``(workspace_ids, enablement_source, mode)``.
+        """
+        mode = distribution.get("mode")
+        if mode not in {"all", "selected", "none"}:
+            raise ValueError(f"unknown distribution mode: {mode!r}")
+
+        workspace_ids: list[str] = []
+        enablement_source = ""
+        if mode == "all":
+            if self._workspace_repo is None:
+                raise RuntimeError("distribution mode='all' requires workspace_repo")
+            workspaces = await self._workspace_repo.list_for_org(self._org_id)
+            workspace_ids = [ws.id for ws in workspaces]
+            enablement_source = "admin_auto"
+        elif mode == "selected":
+            raw_ids = distribution.get("workspace_ids") or []
+            if not isinstance(raw_ids, list):
+                raise ValueError("distribution.workspace_ids must be a list")
+            requested = [str(wid) for wid in raw_ids]
+            if requested:
+                if self._workspace_repo is None:
+                    raise RuntimeError("distribution mode='selected' requires workspace_repo")
+                valid_ws = await self._workspace_repo.list_for_org(self._org_id)
+                valid_ids = {ws.id for ws in valid_ws}
+                unknown = [wid for wid in requested if wid not in valid_ids]
+                if unknown:
+                    raise ValueError("workspace_not_in_org")
+            workspace_ids = requested
+            enablement_source = "admin_manual"
+        return workspace_ids, enablement_source, str(mode)
+
+    async def _fan_out_state_rows(
+        self,
+        *,
+        install: MCPConnectorInstall,
+        workspace_ids: list[str],
+        credential_policy: str,
+        enablement_source: str,
+    ) -> None:
+        """Upsert ``MCPWorkspaceConnectorState`` rows for the given workspaces.
+
+        No-op when ``workspace_ids`` is empty (``mode='none'``).
+        """
         for ws_id in workspace_ids:
             await self._state_repo.upsert(
                 workspace_id=ws_id,
-                install_id=saved.id,
+                install_id=install.id,
                 enabled=True,
-                credential_policy=defaults.credential_policy,
+                credential_policy=credential_policy,
                 enablement_source=enablement_source,
                 updated_by_user_id=self._actor_user_id,
+            )
+
+    async def create_custom_install_for_org(
+        self,
+        *,
+        name: str,
+        server_url: str,
+        transport: str,
+        auth_method: str,
+        default_credential_policy: str,
+        headers: dict[str, str] | None,
+        distribution: dict[str, Any],
+    ) -> MCPConnectorInstall:
+        """Custom (no template) install at ``install_scope='org'``.
+
+        Mirrors :meth:`create_from_template_for_org` but skips the
+        template lookup and uses the user-supplied name / URL /
+        transport. Uniqueness is enforced by the existing partial
+        unique index on ``(org_id, server_url_hash)`` filtered by
+        ``install_state='active'``.
+        """
+        workspace_ids, enablement_source, mode = await self._resolve_distribution(distribution)
+        defaults = install_defaults_for_auth_method(auth_method, default_credential_policy)
+        auto_enroll = mode == "all"
+        install = MCPConnectorInstall(
+            org_id=self._org_id,
+            template_id=None,
+            install_scope="org",
+            workspace_id=None,
+            name=name,
+            server_url=server_url,
+            server_url_hash=server_url_hash(server_url),
+            transport=transport,
+            auth_method=auth_method,
+            default_credential_policy=defaults.credential_policy,
+            auth_status=defaults.auth_status,
+            install_state="active",
+            headers=dict(headers or {}),
+            tools_cache=[],
+            tool_citations={},
+            auto_enroll_new_workspaces=auto_enroll,
+            created_by_user_id=self._actor_user_id,
+        )
+        saved = await self._install_repo.add(install)
+        await self._fan_out_state_rows(
+            install=saved,
+            workspace_ids=workspace_ids,
+            credential_policy=defaults.credential_policy,
+            enablement_source=enablement_source,
+        )
+        return saved
+
+    async def promote_workspace_install_to_org(
+        self,
+        *,
+        install_id: str,
+        distribution: dict[str, Any],
+    ) -> MCPConnectorInstall:
+        """Promote a workspace-scope install to org scope.
+
+        Flips ``install_scope='org'`` + clears ``workspace_id``, then
+        fans the install out into the requested distribution. The source
+        workspace's existing state row is preserved untouched — it is
+        explicitly excluded from the fan-out so the admin's pre-promote
+        workspace policy doesn't get clobbered.
+
+        ``auto_enroll_new_workspaces`` is set to ``True`` for
+        ``mode='all'`` (admin asked for "every workspace") and ``False``
+        for ``mode='selected'`` / ``'none'`` (the admin has scoped the
+        install explicitly).
+        """
+        install = await self._install_repo.get(install_id)
+        if install is None or install.org_id != self._org_id:
+            raise ValueError("connector_install_not_found")
+        if install.install_scope != "workspace":
+            raise ValueError("install_already_org_scope")
+        if install.install_state != "active":
+            raise ValueError("connector_install_not_active")
+
+        source_ws = install.workspace_id
+        mode = distribution.get("mode", "none")
+        # Pre-validate distribution BEFORE mutating the install row so a
+        # bad workspace id rejects the whole call without leaving the
+        # install in a half-promoted state.
+        all_ws_ids, enablement_source, _ = await self._resolve_distribution(distribution)
+        # Exclude source workspace from the fan-out.
+        all_ws_ids = [w for w in all_ws_ids if w != source_ws]
+
+        install.install_scope = "org"
+        install.workspace_id = None
+        install.auto_enroll_new_workspaces = mode == "all"
+        saved = await self._install_repo.update(install)
+
+        if all_ws_ids:
+            await self._fan_out_state_rows(
+                install=saved,
+                workspace_ids=all_ws_ids,
+                credential_policy=saved.default_credential_policy,
+                enablement_source=enablement_source,
             )
         return saved
 
