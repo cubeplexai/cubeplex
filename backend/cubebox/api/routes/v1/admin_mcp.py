@@ -321,7 +321,25 @@ async def admin_refresh_discovery(
     install = await install_repo.get(install_id)
     if install is None:
         raise HTTPException(404, detail={"code": "mcp_install_not_found"})
-    needs_ws = install.default_credential_policy in {"workspace", "user"}
+    # Determine effective policy for the workspace_id requirement check.
+    # If body.workspace_id is provided, the workspace's state row's
+    # credential_policy (when set) OVERRIDES install.default_credential_policy.
+    # That lookup runs first so workspace overrides aren't ignored.
+    # If body.workspace_id is missing, fall back to the install default —
+    # so an admin refreshing an org-default install with no workspace
+    # lens uses the org grant. Admins who want to refresh as a specific
+    # workspace's effective policy must pass `workspace_id`; otherwise
+    # they get the install-default-scope view.
+    effective_policy = install.default_credential_policy
+    if body.workspace_id:
+        from cubebox.repositories.mcp import (
+            MCPWorkspaceConnectorStateRepository,
+        )
+        state_repo = MCPWorkspaceConnectorStateRepository(session, org_id=ctx.org_id)
+        ws_state = await state_repo.get(body.workspace_id, install_id)
+        if ws_state is not None and ws_state.credential_policy:
+            effective_policy = ws_state.credential_policy
+    needs_ws = effective_policy in {"workspace", "user"}
     if needs_ws and not body.workspace_id:
         raise HTTPException(
             422,
@@ -473,7 +491,15 @@ async def admin_invoke_tool(
     install = await install_repo.get(install_id)
     if install is None:
         raise HTTPException(404, detail={"code": "mcp_install_not_found"})
-    needs_ws = install.default_credential_policy in {"workspace", "user"}
+    # Same effective-policy logic as refresh-discovery: workspace_state
+    # credential_policy overrides install default when present.
+    effective_policy = install.default_credential_policy
+    if body.workspace_id:
+        state_repo = MCPWorkspaceConnectorStateRepository(session, org_id=ctx.org_id)
+        ws_state = await state_repo.get(body.workspace_id, install_id)
+        if ws_state is not None and ws_state.credential_policy:
+            effective_policy = ws_state.credential_policy
+    needs_ws = effective_policy in {"workspace", "user"}
     if needs_ws and not body.workspace_id:
         raise HTTPException(
             422,
