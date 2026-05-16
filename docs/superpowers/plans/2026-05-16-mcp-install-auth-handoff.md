@@ -292,16 +292,31 @@ class OAuthStartService:
             template = await tpl_repo.get(install.template_id)
             if template is not None and template.oauth_static_client_id:
                 cfg["client_id"] = template.oauth_static_client_id
+                # IMPORTANT: template.oauth_static_client_secret_credential_id
+                # points at a SYSTEM-scope credential (template_seed.py
+                # writes it with org_id=NULL). Org-scoped CredentialRepository
+                # filters `Credential.org_id == org_id` and would never
+                # find it. Clone the secret into org scope on first use so
+                # callback / refresh paths can read it.
+                org_secret_id: str | None = None
                 if template.oauth_static_client_secret_credential_id:
-                    cfg["client_secret_credential_id"] = (
-                        template.oauth_static_client_secret_credential_id
+                    sys_cred_service = build_credential_service(
+                        self._session, self._backend,
+                        org_id=None, actor_user_id=None,
                     )
+                    plaintext = await sys_cred_service.get_decrypted(
+                        credential_id=template.oauth_static_client_secret_credential_id,
+                        requesting_kind="mcp_oauth_client_secret",
+                    )
+                    org_secret_id = await cred_service.upsert_by_kind_name(
+                        kind="mcp_oauth_client_secret",
+                        name=f"mcp:{install.id}:client_secret",
+                        plaintext=plaintext,
+                    )
+                    cfg["client_secret_credential_id"] = org_secret_id
                 install.oauth_client_config = cfg
                 await install_repo.update(install)
-                return (
-                    template.oauth_static_client_id,
-                    template.oauth_static_client_secret_credential_id,
-                )
+                return template.oauth_static_client_id, org_secret_id
 
         # Step 3: DCR.
         if not as_meta.registration_endpoint:
@@ -781,20 +796,27 @@ class OAuthCallbackHandler:
     async def _upsert_grant(
         self, *, install, payload, token, cred_service, grant_repo,
     ) -> MCPCredentialGrant:
-        # Use upsert_by_kind_name (not create) — on re-OAuth the rows
-        # `mcp:{install_id}:access|refresh` already exist and the unique
-        # index `(org_id, kind, name)` would otherwise reject the second
-        # create. upsert_by_kind_name rotates the encrypted value in place.
+        # Credential name must encode the full grant identity
+        # (install_id + grant_scope + workspace_id + user_id), not just
+        # install_id. Otherwise multiple user grants — or workspace
+        # grants across two workspaces — would collide on the unique
+        # `(org_id, kind, name)` index, and upsert_by_kind_name would
+        # silently overwrite the FIRST grant's tokens with the SECOND
+        # grant's. Both grant rows would then point at the latest
+        # actor's tokens. Using a per-grant name keeps re-OAuth (same
+        # grant identity) rotating in place while distinct grants get
+        # distinct credential rows.
+        grant_name_suffix = _grant_credential_suffix(payload)
         access_id = await cred_service.upsert_by_kind_name(
             kind=CREDENTIAL_KIND_MCP_OAUTH_ACCESS_TOKEN,
-            name=f"mcp:{install.id}:access",
+            name=f"mcp:{install.id}:{grant_name_suffix}:access",
             plaintext=token["access_token"],
         )
         refresh_id: str | None = None
         if "refresh_token" in token:
             refresh_id = await cred_service.upsert_by_kind_name(
                 kind=CREDENTIAL_KIND_MCP_OAUTH_REFRESH_TOKEN,
-                name=f"mcp:{install.id}:refresh",
+                name=f"mcp:{install.id}:{grant_name_suffix}:refresh",
                 plaintext=token["refresh_token"],
             )
         expires_at: datetime | None = None
@@ -844,6 +866,19 @@ def _redirect_uri() -> str:
     from cubebox.config import config
     base = str(config.get("public_base_url", "http://localhost:8000")).rstrip("/")
     return f"{base}/api/v1/oauth/mcp/callback"
+
+
+def _grant_credential_suffix(payload) -> str:
+    """Stable, scope-aware suffix so each grant owns distinct credential
+    rows on the unique (org_id, kind, name) index. Re-OAuth for the SAME
+    grant identity reuses the same suffix and rotates in place.
+    """
+    if payload.grant_scope == "org":
+        return "org"
+    if payload.grant_scope == "workspace":
+        return f"ws:{payload.workspace_id}"
+    # user
+    return f"usr:{payload.user_id}:ws:{payload.workspace_id}"
 ```
 
 - [ ] **Step 4: Add `MCPCredentialGrantRepository.get_for_scope`**
