@@ -29,7 +29,9 @@ from cubebox.mcp.dependencies import (
     get_admin_request_context,
     get_audit_sink,
     get_connector_template_service,
+    get_oauth_start_service,
 )
+from cubebox.mcp.oauth import OAuthStartError, OAuthStartService
 from cubebox.models import MCPConnectorInstall, User
 from cubebox.services.mcp_installs import MCPConnectorInstallService
 from cubebox.services.mcp_templates import MCPConnectorTemplateService
@@ -373,19 +375,24 @@ async def delete_admin_org_grant(
 async def admin_org_grant_oauth_start(
     install_id: str,
     body: MCPOAuthStartIn,  # noqa: ARG001 — present for OpenAPI clarity
-    _ctx: Annotated[RequestContext, Depends(get_admin_request_context)],
+    svc: Annotated[OAuthStartService, Depends(get_oauth_start_service)],
+    ctx: Annotated[RequestContext, Depends(get_admin_request_context)],
 ) -> MCPOAuthStartOut:
     """Start an OAuth flow that produces an org-scope grant."""
-    raise HTTPException(
-        status_code=501,
-        detail={
-            "code": "mcp_oauth.four_layer_start_not_yet_wired",
-            "message": (
-                "Four-layer OAuth start is registered but the AS handshake"
-                " wiring lands in plan Task 6."
-            ),
-            "install_id": install_id,
-        },
+    try:
+        result = await svc.start_oauth_flow(
+            install_id=install_id,
+            actor_user_id=ctx.user.id,
+            grant_scope="org",
+            workspace_id=None,
+            user_id=None,
+        )
+    except OAuthStartError as exc:
+        raise HTTPException(status_code=400, detail={"code": str(exc)}) from exc
+    return MCPOAuthStartOut(
+        authorize_url=result.authorize_url,
+        state=result.state,
+        expires_at=result.expires_at,
     )
 
 

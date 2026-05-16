@@ -1,12 +1,8 @@
 """MCP OAuth callback route.
 
-Four-layer OAuth start routes live as 501 stubs in ``admin_mcp.py`` and
-``ws_mcp.py``. The callback handshake (AS authorize_code → token exchange →
-``MCPCredentialGrant`` upsert) lands in plan Task 6.
-
-Until then, the callback endpoint short-circuits to the frontend return
-page with ``status=error&reason=callback_not_wired`` so the browser flow
-fails fast instead of hanging.
+Delegates to :class:`cubebox.mcp.oauth.OAuthCallbackHandler`, which decodes
+the HMAC-signed state token, exchanges the auth code for tokens, writes
+the grant row, and conditionally flips ``install.auth_status``.
 """
 
 from __future__ import annotations
@@ -14,12 +10,14 @@ from __future__ import annotations
 from typing import Annotated
 from urllib.parse import urlencode
 
-from fastapi import APIRouter, Query, Request, Response
+from fastapi import APIRouter, Depends, Query, Response
 from fastapi.responses import RedirectResponse
 
 from cubebox.config import config
+from cubebox.mcp.dependencies import get_oauth_callback_handler
+from cubebox.mcp.oauth import OAuthCallbackHandler
 
-# Cookie name preserved so a future Task-6 implementation can reuse the
+# Cookie name preserved so a future implementation can reuse the
 # infrastructure without breaking the cookie ticket contract.
 CALLBACK_TICKET_COOKIE_NAME = "cubebox_mcp_oauth_ticket"
 _CALLBACK_COOKIE_PATH = "/api/v1/oauth/mcp/callback"
@@ -41,18 +39,20 @@ def _strip_ticket_cookie(response: Response) -> None:
 
 @oauth_callback_router.get("/callback", include_in_schema=True)
 async def oauth_callback(
-    request: Request,  # noqa: ARG001 — present so handler signature can evolve
+    handler: Annotated[OAuthCallbackHandler, Depends(get_oauth_callback_handler)],
     state: Annotated[str, Query()],
     code: Annotated[str | None, Query()] = None,
-    error: Annotated[str | None, Query()] = None,  # noqa: ARG001
+    error: Annotated[str | None, Query()] = None,
 ) -> RedirectResponse:
-    """Stub: four-layer OAuth callback handler lands in plan Task 6."""
-    _ = state, code  # avoid unused-arg warnings
+    """Four-layer OAuth callback: AS redirect → grant write → return-page redirect."""
+    result = await handler.handle_callback(state=state, code=code, error=error)
     params: dict[str, str] = {
-        "install_id": "",
-        "status": "error",
-        "reason": "callback_not_wired",
+        "status": result.status,
+        "state": result.state,
+        "install_id": result.install_id,
     }
+    if result.reason:
+        params["reason"] = result.reason
     url = f"{_frontend_return_url()}?{urlencode(params)}"
     response = RedirectResponse(url=url, status_code=302)
     _strip_ticket_cookie(response)

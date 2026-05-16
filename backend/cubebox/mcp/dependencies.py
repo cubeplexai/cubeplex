@@ -23,8 +23,13 @@ from cubebox.credentials.dependencies import (
 from cubebox.credentials.encryption import EncryptionBackend
 from cubebox.db.session import get_session
 from cubebox.mcp.effective import MCPEffectiveConnectorService
-from cubebox.mcp.oauth.metadata import OAuthMetadataDiscovery
-from cubebox.mcp.oauth.state import OAuthStateStore
+from cubebox.mcp.oauth import (
+    DCRClient,
+    OAuthCallbackHandler,
+    OAuthMetadataDiscovery,
+    OAuthStartService,
+    OAuthStateStore,
+)
 from cubebox.mcp.user_token import HS256Signer, MCPUserTokenSigner
 from cubebox.models import Role, User
 from cubebox.repositories.mcp import (
@@ -210,3 +215,65 @@ async def get_admin_install_service(
         actor_user_id=ctx.user.id,
         workspace_repo=WorkspaceRepository(session),
     )
+
+
+# ---------------- OAuth start / callback DI factories (Task 3) ---------------- #
+
+
+async def get_dcr_client(
+    http_client: httpx.AsyncClient = Depends(get_oauth_http_client),
+) -> DCRClient:
+    """Return a fresh DCRClient bound to the shared httpx pool."""
+    return DCRClient(http_client)
+
+
+async def get_oauth_start_service(
+    session: AsyncSession = Depends(get_session),
+    backend: EncryptionBackend = Depends(get_encryption_backend),
+    state_store: OAuthStateStore = Depends(get_oauth_state_store),
+    metadata: OAuthMetadataDiscovery = Depends(get_oauth_metadata_discovery),
+    dcr: DCRClient = Depends(get_dcr_client),
+    http_client: httpx.AsyncClient = Depends(get_oauth_http_client),
+) -> OAuthStartService:
+    """Build the OAuth start orchestrator.
+
+    Credential service and install repo are deliberately built inside
+    ``start_oauth_flow`` so the route surface (admin start has no workspace
+    path) doesn't need ``request_context``.
+    """
+    return OAuthStartService(
+        session=session,
+        backend=backend,
+        state_store=state_store,
+        metadata=metadata,
+        dcr=dcr,
+        http_client=http_client,
+    )
+
+
+async def get_oauth_callback_handler(
+    session: AsyncSession = Depends(get_session),
+    backend: EncryptionBackend = Depends(get_encryption_backend),
+    state_store: OAuthStateStore = Depends(get_oauth_state_store),
+    metadata: OAuthMetadataDiscovery = Depends(get_oauth_metadata_discovery),
+    http_client: httpx.AsyncClient = Depends(get_oauth_http_client),
+) -> OAuthCallbackHandler:
+    """Callback handler is unauthenticated — defers org-scoped construction
+    until ``handle_callback()`` decodes the state token and resolves the
+    install (and hence org_id).
+    """
+    return OAuthCallbackHandler(
+        session=session,
+        backend=backend,
+        state_store=state_store,
+        metadata=metadata,
+        http_client=http_client,
+    )
+
+
+async def get_grant_repo(
+    session: AsyncSession = Depends(get_session),
+    ctx: RequestContext = Depends(get_admin_request_context),
+) -> MCPCredentialGrantRepository:
+    """Org-scoped grant repo, used by admin endpoints (org-row effective)."""
+    return MCPCredentialGrantRepository(session, org_id=ctx.org_id)
