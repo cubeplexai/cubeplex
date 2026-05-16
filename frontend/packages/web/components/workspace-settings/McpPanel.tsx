@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { AlertTriangle, CheckCircle2, Loader2, PauseCircle, Plug } from 'lucide-react'
+import { AlertTriangle, CheckCircle2, Loader2, PauseCircle, Plug, Wrench } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 import {
   createApiClient,
@@ -10,15 +10,19 @@ import {
   wsListEffectiveConnectors,
   wsListTemplates,
   wsPatchConnectorState,
+  wsRefreshDiscovery,
   type MCPConnectorTemplate,
   type MCPCredentialScope,
   type MCPEffectiveConnector,
 } from '@cubebox/core'
 
 import { AuthActionBand } from '@/components/mcp/AuthActionBand'
+import { ServerErrorBanner } from '@/components/mcp/detail/ServerErrorBanner'
+import { ToolsPanel } from '@/components/mcp/detail/tools/ToolsPanel'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { cn } from '@/lib/utils'
 
 interface McpPanelProps {
@@ -170,9 +174,11 @@ function ConnectorDetail({
 }) {
   const t = useTranslations('mcpAdmin')
   const [saving, setSaving] = useState(false)
+  const [refreshing, setRefreshing] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const wsState = connector.workspace_state
-  const installId = connector.install.install_id
+  const install = connector.install
+  const installId = install.install_id
 
   const client = useMemo(() => {
     const c = createApiClient('')
@@ -182,6 +188,21 @@ function ConnectorDetail({
 
   const wsRole = useWorkspaceStore((s) => s.workspaces.find((w) => w.id === wsId)?.role)
   const callerRole: 'admin' | 'member' = wsRole === 'admin' ? 'admin' : 'member'
+
+  async function handleRefresh(): Promise<void> {
+    setRefreshing(true)
+    setError(null)
+    try {
+      await wsRefreshDiscovery(client, wsId, installId)
+      await onChanged()
+    } catch (err) {
+      setError((err as Error).message)
+    } finally {
+      setRefreshing(false)
+    }
+  }
+
+  const discoveryError = install.discovery_status === 'error'
 
   async function toggle(): Promise<void> {
     setSaving(true)
@@ -211,12 +232,30 @@ function ConnectorDetail({
 
   return (
     <div className="flex w-full flex-col gap-4 p-6">
+      {discoveryError ? (
+        <ServerErrorBanner
+          error={install.last_error ?? 'Discovery failed.'}
+          onRetry={() => void handleRefresh()}
+          retrying={refreshing}
+        />
+      ) : null}
       <header className="flex flex-col gap-2">
         <div className="flex flex-wrap items-center gap-2">
           <h3 className="text-xl font-semibold tracking-tight">
-            {connector.install.name || connector.template?.name || installId}
+            {install.name || connector.template?.name || installId}
           </h3>
           <StatusPill status={statusOf(connector)} />
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="ml-auto"
+            disabled={refreshing}
+            onClick={() => void handleRefresh()}
+          >
+            {refreshing ? <Loader2 className="mr-1.5 size-3.5 animate-spin" /> : null}
+            {t('refreshTools')}
+          </Button>
         </div>
         {connector.template?.description && (
           <p className="text-sm text-muted-foreground">{connector.template.description}</p>
@@ -232,42 +271,64 @@ function ConnectorDetail({
         onChanged={onChanged}
       />
 
-      <div className="rounded-lg border border-border/70 bg-card/40 p-4">
-        <h4 className="mb-3 text-sm font-semibold">{t('workspaceState')}</h4>
-        <div className="flex items-center justify-between gap-3 text-sm">
-          <span>{wsState?.enabled ? t('wsEnabled') : t('wsDisabled')}</span>
-          <Button
-            size="sm"
-            variant={wsState?.enabled ? 'outline' : 'default'}
-            disabled={saving}
-            onClick={() => void toggle()}
-          >
-            {wsState?.enabled ? 'Disconnect' : 'Connect'}
-          </Button>
-        </div>
-        {error && <p className="mt-2 text-xs text-destructive">{error}</p>}
-      </div>
+      <Tabs defaultValue="overview" className="flex-1 flex-col">
+        <TabsList variant="line" className="w-full justify-start border-b border-border/60 pb-0">
+          <TabsTrigger value="overview">{t('tabOverview')}</TabsTrigger>
+          <TabsTrigger value="tools">
+            <Wrench className="size-3.5" />
+            {t('tabTools', { count: install.tool_count })}
+          </TabsTrigger>
+        </TabsList>
 
-      <div className="rounded-lg border border-border/70 bg-card/40 p-4">
-        <h4 className="mb-3 text-sm font-semibold">{t('credentialPolicy')}</h4>
-        <div className="flex flex-wrap gap-2">
-          {(['org', 'workspace', 'user', 'none'] as MCPCredentialScope[]).map((p) => (
-            <Button
-              key={p}
-              size="sm"
-              variant={connector.credential_policy === p ? 'default' : 'outline'}
-              disabled={saving}
-              onClick={() => void changePolicy(p)}
-            >
-              {p}
-            </Button>
-          ))}
-        </div>
-        <p className="mt-2 text-xs text-muted-foreground">
-          {t('credentialAvailability')}: {connector.credential_availability}
-          {connector.credential_source ? ` (${connector.credential_source})` : ''}
-        </p>
-      </div>
+        <TabsContent value="overview" className="mt-4 flex flex-col gap-4">
+          <div className="rounded-lg border border-border/70 bg-card/40 p-4">
+            <h4 className="mb-3 text-sm font-semibold">{t('workspaceState')}</h4>
+            <div className="flex items-center justify-between gap-3 text-sm">
+              <span>{wsState?.enabled ? t('wsEnabled') : t('wsDisabled')}</span>
+              <Button
+                size="sm"
+                variant={wsState?.enabled ? 'outline' : 'default'}
+                disabled={saving}
+                onClick={() => void toggle()}
+              >
+                {wsState?.enabled ? 'Disconnect' : 'Connect'}
+              </Button>
+            </div>
+            {error && <p className="mt-2 text-xs text-destructive">{error}</p>}
+          </div>
+
+          <div className="rounded-lg border border-border/70 bg-card/40 p-4">
+            <h4 className="mb-3 text-sm font-semibold">{t('credentialPolicy')}</h4>
+            <div className="flex flex-wrap gap-2">
+              {(['org', 'workspace', 'user', 'none'] as MCPCredentialScope[]).map((p) => (
+                <Button
+                  key={p}
+                  size="sm"
+                  variant={connector.credential_policy === p ? 'default' : 'outline'}
+                  disabled={saving}
+                  onClick={() => void changePolicy(p)}
+                >
+                  {p}
+                </Button>
+              ))}
+            </div>
+            <p className="mt-2 text-xs text-muted-foreground">
+              {t('credentialAvailability')}: {connector.credential_availability}
+              {connector.credential_source ? ` (${connector.credential_source})` : ''}
+            </p>
+          </div>
+        </TabsContent>
+
+        <TabsContent value="tools" className="mt-4">
+          <ToolsPanel
+            tools={install.tools}
+            installId={installId}
+            client={client}
+            surface="ws"
+            wsId={wsId}
+          />
+        </TabsContent>
+      </Tabs>
     </div>
   )
 }

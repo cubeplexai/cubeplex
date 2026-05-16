@@ -404,6 +404,71 @@
       "removeMyGrant": "移除我的授权",
       "errorPopupBlocked": "浏览器拦截了弹窗。请允许本站弹窗后重试。",
       "errorTimeout": "授权超时。请重试。"
+    },
+    "tools": {
+      "filterPlaceholder": "过滤工具…",
+      "countAll": "{count, plural, =0 {无工具} other {# 个工具}}",
+      "countMatch": "{matched} / {total} 个工具",
+      "empty": "尚未运行发现，或服务器未暴露工具。",
+      "emptyMatch": "没有匹配 \"{query}\" 的工具。",
+      "argsSummary": "{count, plural, =0 {无参数} other {# 个参数}}",
+      "requiredSummary": "{count} 个必填",
+      "detail": {
+        "viewSchema": "结构",
+        "viewTryIt": "试运行",
+        "viewJson": "原始 JSON",
+        "schema": {
+          "parameters": "参数",
+          "noParams": "此工具不需要参数。",
+          "malformed": "工具结构格式错误。",
+          "required": "必填",
+          "defaultLabel": "默认：",
+          "allowed": "可选：",
+          "variantLabel": "变体 {n}",
+          "itemShape": "条目结构",
+          "cycleRef": "循环引用",
+          "unresolvedRef": "未解析 $ref"
+        },
+        "tryit": {
+          "banner": "调用会使用工作区的有效凭证发往真实 MCP 服务器。",
+          "run": "运行",
+          "running": "运行中…",
+          "runDisabledTooltip": "请先选择工作区视角",
+          "jsonHint": "输入 JSON（对象/数组）",
+          "resultOk": "成功",
+          "resultErr": "错误",
+          "workspaceLensLabel": "工作区视角",
+          "workspaceLensPlaceholder": "选择一个工作区",
+          "workspaceLensHelp": "此连接器使用工作区/用户级凭证。请选择使用哪个工作区的凭证。"
+        },
+        "json": {
+          "copy": "复制",
+          "copied": "已复制"
+        },
+        "errorBanner": {
+          "title": "发现失败",
+          "expand": "查看完整信息",
+          "collapse": "收起",
+          "retry": "重试发现",
+          "retrying": "重试中…"
+        }
+      }
+    },
+    "detail": {
+      "errorBanner": {
+        "title": "发现失败",
+        "expand": "查看完整信息",
+        "collapse": "收起",
+        "retry": "重试发现",
+        "retrying": "重试中…"
+      }
+    },
+    "tryIt": {
+      "run": "运行",
+      "running": "运行中…"
+    },
+    "errorBanner": {
+      "title": "发现失败"
     }
   },
   "mcpOAuthReturn": {
