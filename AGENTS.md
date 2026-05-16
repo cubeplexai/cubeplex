@@ -1,175 +1,226 @@
 # AGENTS.md
 
-Guidance for AI agent work in this repository.
+Guidance for AI agents working in cubebox. This file is auto-loaded by Claude
+Code (and other AGENTS.md-aware tools) on every session. Walking from any
+subdir back up still finds this file — so the discipline below applies
+everywhere.
 
-## Project Overview
-- `cubebox` is a full-stack system with:
-  - FastAPI + cubepi backend (streaming agent execution, SSE events)
-  - Next.js frontend monorepo with shared TypeScript core package
-- Backend and frontend each have additional detailed instructions:
-  - `backend/CLAUDE.md`
-  - `frontend/CLAUDE.md`
+If you only read one section, read **Workflow Discipline** and **Critical
+Subsystems → docs to load before touching**.
 
-## Repository Layout (high level)
-```
-cubebox/
-├── backend/        # Python API, agents, auth, E2E tests
-├── frontend/       # Next.js web app + @cubebox/core
-└── .kiro/          # Specs and steering docs
-```
+---
 
-## Global Rules
-- All functions require type annotations.
-- Line length: 100 chars.
-- Prefer E2E tests over unit tests.
-- Read architecture docs before implementing features.
-- Do not create docs without permission.
+## What This Repo Is
+
+cubebox is a full-stack agent platform.
+
+- `backend/` — FastAPI + cubepi streaming agent runtime, SSE API, Postgres
+  message history, MCP tool integration.
+- `frontend/` — Next.js + React 19 monorepo (`packages/web` + shared
+  `@cubebox/core`).
+- `docs/` — cross-cutting documentation, including
+  `docs/dev/{specs,plans,notes}` for **all** feature specs, multi-step
+  plans, and engineering notes (see below).
+- `backend/docs/`, `frontend/docs/` — area-specific reference and
+  architecture deep dives. Indexed in the "Critical Subsystems" table.
+- `scripts/` — worktree provisioning, dev helpers.
+
+---
+
+## Workflow Discipline (non-negotiable)
+
+1. **Worktree before spec/code** for any non-trivial feature. Run
+   `./scripts/new-worktree feat/<name>` from the **main repo root**.
+2. **Read `.worktree.env` first** on entering a worktree. Never assume
+   ports 8000 / 3000. See [docs/worktrees.md](docs/worktrees.md).
+3. **E2E priority over mocks/units.** Skip E2E only when the system genuinely
+   cannot be simulated (e.g. third-party SaaS with no test mode); fall back
+   to unit tests, not fake-server E2E.
+4. **Plan before code** for multi-step work. Use `/writing-plans` skill.
+5. **Brainstorm before designing** features. Use `/brainstorming` skill.
+6. **One concern per PR.** Decide spec/plan/code split (1 PR vs N) **before**
+   pushing, based on coupling and review cost.
+7. **PR codex review loop** — automated by the
+   [`pr-codex-review-loop`](.claude/skills/pr-codex-review-loop/SKILL.md)
+   skill. Push → wait → poll → fix actionable feedback → reply to every
+   comment → re-tag `@codex` → repeat until clean.
+8. **Branch discipline.** During multi-task execution, stay on the feature
+   branch. Never auto-switch to main or initiate merges mid-execution.
+9. **Verify before claiming done.** Run the actual command, paste evidence.
+   `/verification-before-completion` skill enforces this.
+10. **Act on review feedback directly** once you've confirmed it's valid —
+    push the fix as a follow-up commit; don't ask permission first.
+11. **Incremental testing during dev**: run only changed-module tests per
+    task; reserve the full suite for the pre-PR sweep.
+12. **Plain language in docs/specs.** Don't invent abstract jargon. Say what
+    literally happens + why, in concrete words.
+
+---
+
+## Hard Code Rules
+
+- **Type annotations everywhere.** mypy strict in backend, strict TS in
+  frontend.
+- **Line length: 100 chars.**
+- **Datetimes from DB → `utc_isoformat()`** so frontend sees the UTC offset.
+- **New business table → public ID prefix** in
+  `backend/cubebox/models/public_id.py`; `default_factory` uses
+  `generate_public_id(PREFIX_X)`.
+- **Migrations: `alembic revision --autogenerate -m "..."`.** Do not hand-edit
+  migration files; do not skip autogen.
+- **Dependencies: `uv add <pkg>` (backend), `pnpm add` (frontend).** Don't
+  hand-edit `pyproject.toml` / `package.json`.
+- **Do not create new docs without permission.** Update an existing doc when
+  possible.
+
+---
+
+## Critical Subsystems — Read Before Touching
+
+If you're modifying any of the following, **read the linked doc first**.
+These are the spots where wrong changes are expensive (broken cache bills,
+broken auth, data corruption).
+
+| If you're modifying… | Read first |
+|---|---|
+| LLM call path, system prompt, tools, memory, middleware, message replay | [backend/docs/prompt-cache-discipline.md](backend/docs/prompt-cache-discipline.md) |
+| Auth, registration, org/workspace bootstrap, RBAC | [backend/docs/auth.md](backend/docs/auth.md) |
+| Agent middleware stack, request flow, event types | [backend/docs/agent-system-design.md](backend/docs/agent-system-design.md) |
+| MCP catalog / OAuth / connector install | [backend/docs/mcp_catalog_oauth.md](backend/docs/mcp_catalog_oauth.md) |
+| Frontend auth, CSRF, SSE proxy, deployment mode | [frontend/docs/auth-and-sse.md](frontend/docs/auth-and-sse.md) |
+| Worktree provisioning, rebase / migration drift | [docs/worktrees.md](docs/worktrees.md) |
+
+Env vars, commands, file layouts (reference, not discipline) live in
+[backend/docs/quick-reference.md](backend/docs/quick-reference.md) and
+[frontend/docs/quick-reference.md](frontend/docs/quick-reference.md).
+
+---
+
+## Skill Index — When To Trigger What
+
+Skills are loaded on demand; trigger them when the situation matches.
+
+**Process / discipline:**
+
+| Skill | Trigger |
+|---|---|
+| `/brainstorming` | **Before** designing any feature or non-trivial change — explores intent before code. |
+| `/writing-plans` | Multi-step work that needs a written plan before touching code. |
+| `/executing-plans` | When you have a written plan and need checkpointed execution. |
+| `/systematic-debugging` | Any bug, test failure, or unexpected behavior — **before** proposing fixes. |
+| `/test-driven-development` | Implementing a feature or bug fix — tests before code. |
+| `/verification-before-completion` | Before claiming "done" / committing / opening a PR. |
+| `/receiving-code-review` | When responding to codex / human review comments. |
+| `/pr-codex-review-loop` | After pushing a PR — automates push → poll → fix → reply → re-tag until clean. Bundled poller at `.claude/skills/pr-codex-review-loop/scripts/codex-poll.sh`. |
+| `/finishing-a-development-branch` | When implementation is complete and you're choosing merge / PR / cleanup. |
+| `/using-git-worktrees` | Before starting feature work that needs isolation. |
+
+**Implementation domains:**
+
+| Skill | Trigger |
+|---|---|
+| `sqlmodel-expert` | Creating / modifying SQLModel + Alembic migrations, query optimization. |
+| `frontend-design` / `huashu-design` | Building UI components or pages with high design quality. |
+| `shadcn` | Adding shadcn/ui components. |
+| `web-design-guidelines` | UI accessibility / design review pass. |
+| `playwright-cli` | Writing or debugging Playwright tests. |
+| `claude-api` | Working with the Anthropic SDK / claude-api integration code. |
+| `karpathy-guidelines` | LLM coding pitfalls and disciplines from Andrej Karpathy's observations — heuristics around context, evals, complexity, etc. |
+
+**Escape hatch:**
+
+| Skill | Trigger |
+|---|---|
+| `/codex:rescue` | Stuck; want a second opinion or alternate implementation pass. |
+
+---
 
 ## Quick Start
-- Backend: `cd backend && make dev-install && python main.py` (listens `http://localhost:8000`)
-- Frontend: `cd frontend && pnpm install && pnpm dev` (listens `http://localhost:3000`)
-- First frontend E2E run: `npx playwright install`
 
-## Backend essentials
-- Environment (实际有效的入口):
-  - `ENV_FOR_DYNACONF` (optional, default `development`)
-  - `CUBEBOX_LLM__PROVIDERS__<PROVIDER>__BASE_URL`
-  - `CUBEBOX_LLM__PROVIDERS__<PROVIDER>__API_KEY`
-  - `CUBEBOX_LLM__DEFAULT_MODEL`（覆盖 `default_model`，值如 `provider/model-id`）
-  - `CUBEBOX_AUTH__JWT_SECRET`
-  - `CUBEBOX_AUTH__CSRF_SECRET`
-  - `CUBEBOX_AUTH__VAULT_KEY` — comma-separated Fernet keys; first key encrypts,
-    all keys decrypt. Required once Credential Vault is enabled.
-  - `CUBEBOX_REDIS__URL`
-  - `CUBEBOX_DATABASE__HOST|PORT|USER|PASSWORD|NAME`
-  - `CUBEBOX_SANDBOX__DOMAIN`
-  - `CUBEBOX_SANDBOX__IMAGE`
-  - `CUBEBOX_SANDBOX__API_KEY`
-- 测试环境（当前项目）: `config.test.yaml` 使用
-  - `CUBEBOX_E2E_LLM_BASE_URL`
-  - `CUBEBOX_E2E_LLM_API_KEY`
-  - `CUBEBOX_E2E_LLM_MODEL_ID`
-- `backend/.env.example` 示例中给了可直接用的环境变量名；`config.py` 会加载 `backend/.env`、`backend/config.<env>.local.yaml` 作为本地覆盖
-- Common commands (`backend/`):
-  - `make dev-install`, `make format`, `make lint`, `make lint-fix`
-  - `make type-check`, `make test`, `make test-cov`, `make check`
-- Core runtime flow:
-  - API route streams via `RunManager._run_cubepi_path` → `cubepi.Agent` listener → SSE translator
-  - SSE event stream includes `text_delta`, `reasoning`, `tool_call`, `tool_result`, `usage`, `error`, `done`
-- Architecture to remember:
-  - Agent factory: `cubebox/agents/graph.py::create_cubebox_agent`
-  - Middleware stack: sandbox / subagents / skills / memory / compaction / cost / timestamps / todo / artifacts / citation / attachment-hint
-  - Message history persisted by cubepi `PostgresCheckpointer` (HASH-partitioned 64 ways on `thread_id`)
-  - Identity model: Organization → Workspace → Membership → User, with `OrgScopedMixin` enforcement
-  - All business routes are workspace-scoped via `/api/v1/ws/{workspace_id}/...`
-- E2E caveat:
-  - Local E2E requires `backend/.env` and `backend/config.development.local.yaml` (gitignored); copy from main worktree when in worktree environments.
-- Database:
-  - Alembic for migrations (`alembic upgrade head`, `alembic revision ...`)
-- Vault rotation:
-  - Generate a new Fernet key.
-  - Deploy `CUBEBOX_AUTH__VAULT_KEY=<new>,<old>`.
-  - Run the key rotation command once it lands.
-  - Deploy `CUBEBOX_AUTH__VAULT_KEY=<new>` only after rotation is verified.
+```bash
+# Backend
+cd backend && make dev-install && python main.py   # → http://localhost:8000
 
-## Frontend essentials
-- Tech stack: Next.js app router + React + TypeScript + Tailwind + shadcn/ui + Zustand + pnpm workspace.
-- Commands (`frontend/`):
-  - `pnpm dev`, `pnpm build`, `pnpm start`, `pnpm type-check`, `pnpm test:e2e`
-  - Use `pnpm -w` for root/workspace and `pnpm --filter <pkg> ...` for package-level tasks
-- Shared package pattern:
-  - `@cubebox/core` contains API clients, types, and Zustand stores
-  - Core should stay framework-agnostic and type-safe
-- Routing/workspace behavior:
-  - Auth pages: `(auth)/login`, `(auth)/register`
-  - App pages: `(app)/w/[wsId]/...`
-  - Active workspace is URL segment `[wsId]`
-  - `ApiClient.setWorkspaceId(wsId)` rewrites scoped paths to `/api/v1/ws/{wsId}/...`
-  - Auth routes and workspace list routes remain unscoped
-- CSRF:
-  - `ApiClient` adds `X-CSRF-Token` from `cubebox_csrf` cookie for non-GET requests
-- SSE proxy:
-  - Route `app/api/v1/ws/[wsId]/conversations/[id]/messages/route.ts` forwards credentials and headers to backend
-- Common gotcha:
-  - Core package must be built before web can consume API/type changes
-  - Use `npx shadcn-ui@latest` from `packages/web/` when adding components
+# Frontend
+cd frontend && pnpm install && pnpm dev            # → http://localhost:3000
 
-## Worktrees and parallel dev
+# First-time frontend E2E
+npx playwright install
+```
 
-This repo uses `git worktree` for parallel feature development. Each
-worktree gets its own allocated ports, PostgreSQL databases, and Redis
-prefix to avoid collisions when multiple worktrees run dev servers or E2E
-suites at the same time. All allocations land in `<worktree_root>/.worktree.env`
-(gitignored).
+Local E2E needs `backend/.env` + `backend/config.development.local.yaml`
+(both gitignored — copy from a working machine; don't recreate from scratch).
+Worktrees need both copied in before first test run. Details:
+[backend/docs/quick-reference.md](backend/docs/quick-reference.md).
 
-### Creating a new worktree
+---
 
-Always run from the main repo root. The wrapper branches from latest
-`origin/main`:
+## Worktrees in Brief
 
-    ./scripts/new-worktree feat/<branch-name>
+Always create from main repo root:
 
-This: fetches origin/main, creates the worktree, allocates a slot,
-provisions PostgreSQL databases on the shared `~/infra/postgresql`
-cluster, runs `alembic upgrade head`, copies `backend/.env` and
-`config.development.local.yaml` from main if missing, and writes
-`.worktree.env`.
+```bash
+./scripts/new-worktree feat/<name>
+```
 
-### Working inside a worktree
+Inside a worktree, **first command**:
 
-**First thing on entry: read the allocated values.**
+```bash
+cat .worktree.env             # allocated ports + DBs
+./scripts/worktree-env doctor # health check
+```
 
-    ./scripts/worktree-env show
-    # or just: cat .worktree.env
+Full reference (subcommands, rebase migration drift, agent caveats):
+[docs/worktrees.md](docs/worktrees.md).
 
-`.worktree.env` declares values like:
+---
 
-    CUBEBOX_WORKTREE_NAME=feat-m7-file-upload
-    CUBEBOX_WORKTREE_SLOT=37
-    CUBEBOX_API__PORT=8037
-    CUBEBOX_DATABASE__NAME=cubebox_feat_m7_file_upload
-    CUBEBOX_REDIS__KEY_PREFIX=cubebox-feat-m7-file-upload
-    CUBEBOX_API_URL=http://localhost:8037
-    PORT=3037
-    BASE_URL=http://localhost:3037
+## Auth & Scoping Mental Model
 
-Backend (`backend/cubebox/config.py`), Next (`next.config.ts`), and
-Playwright (`playwright.config.ts`) all auto-load this file. So
-`python main.py`, `pnpm dev`, and `pnpm test:e2e` just work with the
-allocated ports — but **never assume 3000 / 8000** when checking
-manually with `curl` or `lsof`.
+`Organization → Workspace → Membership → User`. All business routes are
+workspace-scoped via the path: `/api/v1/ws/{workspace_id}/...`. Repository
+layer enforces `(org_id, workspace_id)` structurally via `OrgScopedMixin` +
+`ScopedRepository[T]` — not via ACL bolted on.
 
-### Other subcommands
+Two deployment modes: `single_tenant` (OSS, one shared org) vs
+`multi_tenant` (cloud, per-user org). Bootstrap diverges at registration.
+Full details, role tables, operator CLI, system endpoints:
+[backend/docs/auth.md](backend/docs/auth.md).
 
-- `./scripts/worktree-env doctor` — verify databases exist, ports free, Postgres/Redis reachable, alembic at head
-- `./scripts/worktree-env destroy` — drop databases, clear redis prefix, delete `.worktree.env` (run **before** `git worktree remove`)
-- `./scripts/worktree-env clean-orphans` — interactive cleanup of registry entries and PostgreSQL databases left behind by removed worktrees
-- `./scripts/worktree-env reseed-db` — drop + recreate the worktree's dev/test databases and re-run all migrations from base. **Destructive — wipes every row.** Pass `--yes` to skip the prompt.
+---
 
-### When to use `reseed-db`
+## Common Gotchas (cross-cutting)
 
-After a rebase that pulls in `main` migrations newer than this branch's own
-migrations, alembic's stored revision pointer on the DB already shows
-`head` (because the branch's old head was applied before the rebase), so
-`alembic upgrade head` is a no-op even though tables are still missing
-the columns the skipped migrations were supposed to add.
+- **Subagent CWD**: subagents don't inherit cwd. When dispatching into a
+  worktree, pin the absolute path AND tell them to `cat .worktree.env`
+  first.
+- **pnpm not npm** in frontend, always.
+- **`@cubebox/core` must build** before web sees API/type changes.
+- **shadcn/ui**: run `npx shadcn-ui@latest` from `packages/web/`.
+- **SSE compress**: Next.js rewrite buffers SSE if compress is on. Keep
+  `compress: false`.
+- **Worktree ports**: `8000` / `3000` are wrong inside worktrees — port
+  collisions silently test the wrong code.
 
-Symptom: 500s with `psycopg.errors.UndefinedColumn: column X does not
-exist` against tables that landed on `main` while this branch was diverged
-(common offenders: `workspace_mcp_overrides`, `conversations`).
+---
 
-Fix: `./scripts/worktree-env reseed-db` from inside the worktree. This
-drops both databases, recreates them, and re-runs alembic from base —
-clean slate, no manual `ALTER` patching. Costs you all your local
-conversation/run/attachment data, so don't run it on a worktree mid-test.
+## Authoring Conventions for Agents
 
-### Notes for AI agents
-
-- Subagents do not inherit `cwd`. When dispatching work into a worktree,
-  pin the absolute path AND tell the agent to `cat .worktree.env` first.
-- Default ports (3000 / 8000) only apply in the **main** worktree. Inside
-  any other worktree they are wrong.
-- CI runs in the main checkout (no `.worktree.env`); all the dotenv
-  loaders no-op there, so CI behavior is unchanged.
-- The Postgres cluster lives at `~/infra/postgresql` on `localhost:5432`
-  and is shared across worktrees; isolation is per-database, not per-port.
+- Temporary / one-shot scripts → `backend/scripts/dev/`. They are not
+  long-term commitments.
+- **All specs, plans, and engineering notes live under `docs/dev/`** at
+  the repo root — never `backend/docs/superpowers/` or
+  `frontend/docs/superpowers/` (those locations are gone). Use the
+  following subdirs and naming pattern:
+  - `docs/dev/specs/YYYY-MM-DD-<slug>-design.md` — feature designs
+    (the "what and why" before implementation).
+  - `docs/dev/plans/YYYY-MM-DD-<slug>.md` — multi-step implementation
+    plans broken into reviewable chunks.
+  - `docs/dev/notes/YYYY-MM-DD-<slug>.md` — investigation notes,
+    decision records, post-mortems.
+  A spec/plan is a frozen snapshot; rebase the content, don't rewrite
+  history.
+- Don't write multi-paragraph code comments. Only add a comment when the
+  *why* is non-obvious.
+- Don't add backwards-compat shims unless explicitly asked — the project
+  hasn't shipped publicly yet; cut over cleanly.

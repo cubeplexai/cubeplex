@@ -2,7 +2,7 @@
 
 Walks back through the message list to find the most recent completed
 AssistantMessage and marks it. The system prompt and last tool definition
-also get markers (cubebox's prompt cache discipline; see backend/CLAUDE.md).
+also get markers (cubebox's prompt cache discipline; see backend/docs/prompt-cache-discipline.md).
 """
 
 from __future__ import annotations

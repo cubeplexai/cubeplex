@@ -2,7 +2,7 @@
 
 Constants and tiny helpers consumed by test_journey.py, test_subagent.py,
 and test_compaction.py. See
-docs/superpowers/specs/2026-05-15-agent-middleware-e2e-design.md.
+docs/dev/specs/2026-05-15-agent-middleware-e2e-design.md.
 """
 
 from __future__ import annotations

@@ -1,7 +1,7 @@
 // Worktree-specific overrides (ports, DB schema, Redis prefix). Loaded before
 // next.config so the rewrite rule below picks up CUBEBOX_API_URL from
 // .worktree.env when running inside a worktree. See
-// docs/superpowers/specs/2026-04-28-worktree-parallel-dev-isolation-design.md
+// docs/dev/specs/2026-04-28-worktree-parallel-dev-isolation-design.md
 import dotenv from 'dotenv'
 import path from 'path'
 dotenv.config({
