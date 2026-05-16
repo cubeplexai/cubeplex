@@ -20,6 +20,7 @@ from cubebox.api.schemas.mcp import (
     MCPCredentialGrantStatusOut,
     MCPOAuthStartIn,
     MCPOAuthStartOut,
+    MCPToolEntry,
     PatchInstallIn,
 )
 from cubebox.audit.sink import AuditSink
@@ -68,7 +69,21 @@ def _template_to_out(
     )
 
 
-def _install_to_out(install: MCPConnectorInstall) -> MCPConnectorInstallOut:
+def _install_to_out(
+    install: MCPConnectorInstall,
+    *,
+    include_tool_citations: bool = False,
+) -> MCPConnectorInstallOut:
+    tools_cache = install.tools_cache or []
+    tool_entries = [
+        MCPToolEntry(
+            name=str(t.get("name", "")),
+            description=t.get("description"),
+            input_schema=t.get("input_schema"),
+        )
+        for t in tools_cache
+        if isinstance(t, dict) and t.get("name")
+    ]
     return MCPConnectorInstallOut(
         install_id=install.id,
         template_id=install.template_id,
@@ -82,7 +97,9 @@ def _install_to_out(install: MCPConnectorInstall) -> MCPConnectorInstallOut:
         auth_status=install.auth_status,
         discovery_status=install.discovery_status,
         install_state=install.install_state,
-        tool_count=len(install.tools_cache or []),
+        tool_count=len(tool_entries),
+        tools=tool_entries,
+        tool_citations=(install.tool_citations or {}) if include_tool_citations else None,
         last_error=install.last_error,
         auto_enroll_new_workspaces=install.auto_enroll_new_workspaces,
     )
@@ -144,7 +161,7 @@ async def list_admin_installs(
     """List every org-scope install in the admin's current org."""
     org_rows = await svc._install_repo.list_org_installs()
     return MCPConnectorInstallListOut(
-        items=[_install_to_out(install) for install in org_rows],
+        items=[_install_to_out(install, include_tool_citations=True) for install in org_rows],
     )
 
 
@@ -204,7 +221,7 @@ async def create_admin_install(
         target_id=install.id,
         details={"scope": "org", "template_id": template.id},
     )
-    return _install_to_out(install)
+    return _install_to_out(install, include_tool_citations=True)
 
 
 @router.get(
@@ -218,7 +235,7 @@ async def get_admin_install(
     install = await svc._install_repo.get(install_id)
     if install is None:
         raise HTTPException(404, detail={"code": "mcp_install_not_found"})
-    return _install_to_out(install)
+    return _install_to_out(install, include_tool_citations=True)
 
 
 @router.patch(
@@ -275,7 +292,7 @@ async def patch_admin_install(
         org_id=ctx.org_id,
         target_id=install_id,
     )
-    return _install_to_out(saved)
+    return _install_to_out(saved, include_tool_citations=True)
 
 
 @router.delete(

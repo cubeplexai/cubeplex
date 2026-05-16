@@ -49,6 +49,17 @@ class MCPConnectorTemplateOut(BaseModel):
     install_summary: dict[str, Any] | None = None
 
 
+CitationConfigJSON = dict[str, Any]  # opaque shape; agent runtime validates
+
+
+class MCPToolEntry(BaseModel):
+    """Single entry from ``MCPConnectorInstall.tools_cache``."""
+
+    name: str
+    description: str | None = None
+    input_schema: dict[str, Any] | None = None
+
+
 class MCPConnectorInstallOut(BaseModel):
     """One ``MCPConnectorInstall`` row."""
 
@@ -65,6 +76,8 @@ class MCPConnectorInstallOut(BaseModel):
     discovery_status: str
     install_state: str
     tool_count: int
+    tools: list[MCPToolEntry]
+    tool_citations: dict[str, CitationConfigJSON] | None
     last_error: str | None
     auto_enroll_new_workspaces: bool
 

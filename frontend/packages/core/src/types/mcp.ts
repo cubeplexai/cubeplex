@@ -9,8 +9,8 @@ export type MCPCredentialScope = 'org' | 'workspace' | 'user' | 'none'
 
 export interface MCPToolEntry {
   name: string
-  description: string
-  input_schema: Record<string, unknown>
+  description: string | null
+  input_schema: Record<string, unknown> | null
 }
 
 export interface MCPOAuthStartResult {
@@ -62,6 +62,8 @@ export interface MCPConnectorInstall {
   discovery_status: string
   install_state: 'active' | 'uninstalled'
   tool_count: number
+  tools: MCPToolEntry[]
+  tool_citations: Record<string, CitationConfigJSON> | null
   last_error: string | null
   auto_enroll_new_workspaces: boolean
 }
