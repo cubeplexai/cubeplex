@@ -96,3 +96,15 @@ class OAuthCallbackError(OAuthError):
 
 class OAuthPKCEMissing(OAuthError):
     """PKCE verifier was not found in redis (expired / never written)."""
+
+
+class MCPDiscoveryFailed(RuntimeError):
+    """Raised when refresh-discovery cannot resolve a usable grant."""
+
+
+class MCPInvokeFailed(RuntimeError):
+    """Raised when Try It cannot resolve a usable grant or the tool errors."""
+
+
+class MCPInvokeRateLimited(RuntimeError):
+    """Raised when the Try It rate limit is exceeded."""

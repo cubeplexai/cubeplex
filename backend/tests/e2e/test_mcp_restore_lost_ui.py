@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
+from types import SimpleNamespace
 
 import httpx
 import pytest
@@ -121,3 +122,95 @@ async def test_install_dto_exposes_tools_and_tool_citations(
         assert {"name", "description", "input_schema"} <= sample.keys()
     assert "tool_citations" in body
     assert isinstance(body["tool_citations"], dict) or body["tool_citations"] is None
+
+
+# ---------------------------------------------------------------------------
+# Task 2 — Discovery service writes tools_cache.
+# ---------------------------------------------------------------------------
+
+
+async def test_discover_tools_for_install_writes_tools_cache(
+    admin_client: tuple[httpx.AsyncClient, str],
+    db_session_maker: async_sessionmaker[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Discovery service should fetch tools via cubepi and persist
+    the result into install.tools_cache / .discovery_status."""
+    client, ws_id = admin_client
+    org_id, user_id = await _resolve_org_user_for_client(client, ws_id)
+
+    async with db_session_maker() as session:
+        from cubebox.mcp._constants import server_url_hash
+        from cubebox.models.mcp import MCPConnectorInstall
+
+        install = MCPConnectorInstall(
+            org_id=org_id,
+            template_id=None,
+            install_scope="org",
+            workspace_id=None,
+            name="disc-test",
+            server_url="https://disc.example.com/mcp",
+            server_url_hash=server_url_hash("https://disc.example.com/mcp"),
+            transport="streamable_http",
+            auth_method="none",
+            default_credential_policy="none",
+            auth_status="not_required",
+            install_state="active",
+            tools_cache=[],
+            tool_citations={},
+            created_by_user_id=user_id,
+        )
+        session.add(install)
+        await session.commit()
+        await session.refresh(install)
+        install_id = install.id
+
+    # Stub the cubepi helper used inside discover_tools_for_install.
+    async def fake_load(*args: object, **kwargs: object) -> list[object]:
+        return [
+            SimpleNamespace(
+                name="ping",
+                description="say hi",
+                input_schema={"type": "object"},
+            ),
+            SimpleNamespace(
+                name="pong",
+                description="say bye",
+                input_schema={"type": "object"},
+            ),
+        ]
+
+    monkeypatch.setattr("cubebox.services.mcp_discovery.load_mcp_tools_http", fake_load)
+
+    from cubebox.credentials.dependencies import build_credential_service
+    from cubebox.credentials.encryption import FernetBackend
+    from cubebox.mcp.dependencies import build_user_token_signer
+    from cubebox.services.mcp_discovery import discover_tools_for_install
+
+    backend = FernetBackend([_test_fernet_key().encode()])
+    async with db_session_maker() as session:
+        cred_service = build_credential_service(
+            session, backend, org_id=org_id, actor_user_id=user_id
+        )
+        signer = build_user_token_signer()
+        result = await discover_tools_for_install(
+            install_id=install_id,
+            workspace_id=None,
+            actor_user_id=user_id,
+            session=session,
+            cred_service=cred_service,
+            signer=signer,
+            token_mgr=None,  # type: ignore[arg-type]
+        )
+        assert result.discovery_status == "ok"
+        assert result.tool_count == 2
+        names = sorted(t["name"] for t in result.tools_cache_raw)
+        assert names == ["ping", "pong"]
+        assert result.last_error is None
+
+
+def _test_fernet_key() -> str:
+    """Return a deterministic Fernet key for tests."""
+    from cryptography.fernet import Fernet
+
+    return Fernet.generate_key().decode()
