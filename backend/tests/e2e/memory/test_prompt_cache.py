@@ -83,7 +83,7 @@ async def test_cache_hit_rate_meets_bar(
                 f"CUBEBOX_E2E_LLM_CACHE_CAPABLE=true; this is a real "
                 f"regression. Common causes: cache_control markers not "
                 f"applied, dynamic content invalidating the stable prefix. "
-                f"See backend/CLAUDE.md 'Prompt Cache Discipline'."
+                f"See backend/docs/prompt-cache-discipline.md."
             )
         pytest.skip(
             f"{message} CUBEBOX_E2E_LLM_CACHE_CAPABLE not set; treating as "
@@ -98,7 +98,7 @@ async def test_cache_hit_rate_meets_bar(
         f"Turn 2 cache reuse {ratio_2:.2%} below 50% bar "
         f"(cache_read={second['cache_read_tokens']}, input={second['input_tokens']}). "
         f"Likely cause: dynamic content snuck into the stable prefix. "
-        f"See backend/CLAUDE.md 'Prompt Cache Discipline'."
+        f"See backend/docs/prompt-cache-discipline.md."
     )
 
     # Turn 3..N — extend conversation, last turn must hit the high bar.

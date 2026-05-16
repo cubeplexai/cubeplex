@@ -47,22 +47,31 @@ For each PR you're driving:
 2. **Wait ~5 minutes** for codex to comment. Use a real sleep or
    `ScheduleWakeup` — do not poll in a tight loop, you'll get rate-limited
    and the bot needs time anyway.
-3. **Poll** with a stable cursor:
+3. **Poll** with a stable cursor and self-author exclusion:
 
    ```bash
-   "$SKILL_DIR/scripts/codex-poll.sh" <PR> --since <last-cursor>
+   ME="$(gh api user --jq .login)"   # resolve once at start of loop
+   "$SKILL_DIR/scripts/codex-poll.sh" <PR> \
+       --since <last-cursor> \
+       --exclude-author "$ME"
    ```
 
    `$SKILL_DIR` is the absolute path of this skill's directory (the
    directory containing this `SKILL.md`). Resolve it once at the start of
    the loop and reuse it.
 
+   `--exclude-author` drops the agent's own comments before filtering —
+   the primary defense against the self-reply loop. Wall-clock cursors
+   alone don't fix this, because if the agent's reply lands in the same
+   wall-clock second as the cursor, its `#<id>` still sorts greater than
+   `#0`. The author filter is robust to that.
+
    First iteration uses `--since 1970-01-01T00:00:00Z#0` (the default) or
    a cursor near the push commit's timestamp. Cursor format is
    `"<iso8601>#<id>"`; a bare timestamp is accepted and treated as
-   `"<iso>#0"` (the entire boundary second is included). The id
-   tie-breaker is what makes same-second codex review bursts safe — see
-   the poller header for details.
+   `"<iso>#0"` (the entire boundary second is included). Inside the
+   poller the timestamp is compared as a string and the id as a number,
+   so decimal id widths don't matter to callers.
 
 4. **Classify each new comment** (rules below). For each, take exactly one
    of: *fix*, *reply-declining*, *reply-already-fixed*, *reply-clarify*.
@@ -75,20 +84,23 @@ For each PR you're driving:
    gh pr comment <PR> --body "@codex please take another pass — pushed <short-sha>."
    ```
 
-8. **Update cursor** so the next poll skips your own replies and re-tag.
+8. **Update cursor** to skip past everything you just posted.
 
-   - **Wrong:** reuse the cursor returned in step 3. That cursor predates
-     the replies and re-tag you just posted, so the next poll surfaces
-     them as `new_comments` and the loop will reply to its own replies.
-   - **Right:** set the new cursor to a wall-clock timestamp captured
-     **after** step 7 lands. UTC ISO 8601 plus a `#0` tail is sufficient:
+   The primary self-loop defense is `--exclude-author "$ME"` on every
+   poll (see step 3) — the agent's own replies/re-tag are filtered
+   regardless of cursor position. The cursor still advances so the
+   poller doesn't re-fetch the same codex comments on every round.
 
-     ```bash
-     CURSOR="$(date -u +%Y-%m-%dT%H:%M:%SZ)#0"
-     ```
+   Two valid choices for the new cursor:
 
-   Anything codex (or a human) posts strictly after that instant is
-   genuinely new and will show up on the next pass. Loop back to step 2.
+   - **Reuse the cursor returned in step 3** — the latest
+     codex-authored entry the poller saw. Simple; correct as long as
+     `--exclude-author` is in place (it always should be).
+   - **Wall-clock**: `CURSOR="$(date -u +%Y-%m-%dT%H:%M:%SZ)#0"` —
+     fine too, just an additional belt with the suspenders.
+
+   Anything codex (or a human reviewer) posts strictly after the
+   cursor will show up next pass. Loop back to step 2.
 
 **Exit when**: one full poll round returns `count: 0` *after* you've
 re-tagged @codex on the latest pushed SHA. (Empty before re-tag means
@@ -148,17 +160,20 @@ context.
 ## Poller Usage Cheat Sheet
 
 ```bash
-# First pass (no cursor)
-"$SKILL_DIR/scripts/codex-poll.sh" 107
+ME="$(gh api user --jq .login)"
 
-# After a poll — feed back the returned cursor verbatim
-"$SKILL_DIR/scripts/codex-poll.sh" 107 --since '2026-05-16T06:18:48Z#3252317544'
+# First pass — no prior cursor
+"$SKILL_DIR/scripts/codex-poll.sh" 107 --exclude-author "$ME"
 
-# After step 7 (replies + re-tag posted) — use wall clock
-"$SKILL_DIR/scripts/codex-poll.sh" 107 --since "$(date -u +%Y-%m-%dT%H:%M:%SZ)#0"
+# Subsequent passes — feed back the returned cursor verbatim
+"$SKILL_DIR/scripts/codex-poll.sh" 107 \
+    --since '2026-05-16T06:18:48Z#3252317544' \
+    --exclude-author "$ME"
 
 # Specific repo (rarely needed; auto-detects from cwd)
-"$SKILL_DIR/scripts/codex-poll.sh" 107 --repo xfgong/cubebox
+"$SKILL_DIR/scripts/codex-poll.sh" 107 \
+    --repo xfgong/cubebox \
+    --exclude-author "$ME"
 ```
 
 Output is JSON with `cursor`, `count`, `new_comments[]`. Each comment has:
@@ -172,9 +187,10 @@ Output is JSON with `cursor`, `count`, `new_comments[]`. Each comment has:
 - `html_url` — direct link.
 - `created_at` — ISO 8601 UTC.
 
-Cursor format is `"<iso8601>#<id>"`; lexicographic order. A bare ISO
-timestamp without `#<id>` is accepted and treated as `#0` (boundary
-second included).
+Cursor format is `"<iso8601>#<id>"`. The timestamp is compared as a
+string (ISO 8601 sorts naturally); the id is compared as a number, so
+decimal widths don't matter to callers. A bare ISO timestamp without
+`#<id>` is accepted and treated as `#0` (boundary second included).
 
 ## State To Track (in TodoWrite or scratchpad)
 

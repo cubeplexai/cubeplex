@@ -1018,7 +1018,7 @@ class RunManager:
             # can prepend the rendered snapshot text during transform_context.
             # Baking the snapshot at append-time (rather than re-deriving it
             # on replay) is what keeps the historical prefix byte-stable for
-            # prompt caching — see backend/CLAUDE.md "Prompt Cache Discipline".
+            # prompt caching — see backend/docs/prompt-cache-discipline.md.
             import time as _time
 
             from cubepi.providers.base import TextContent as _TextContent
