@@ -14,10 +14,15 @@ class MCPOAuthStartIn(BaseModel):
 
 
 class MCPOAuthStartOut(BaseModel):
-    """Response of ``POST .../oauth/start``."""
+    """Body of ``POST .../oauth/start``.
+
+    The front-end OAuth controller stores ``state`` and filters
+    BroadcastChannel messages by exact-match equality (spec §5.5).
+    """
 
     authorize_url: str
     state: str
+    expires_at: datetime
 
 
 # ---------------- Four-layer (template / install / state / grant) schemas ---------------- #

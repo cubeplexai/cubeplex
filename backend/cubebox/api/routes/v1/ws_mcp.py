@@ -41,6 +41,7 @@ from cubebox.auth.dependencies import require_admin, require_member
 from cubebox.mcp.dependencies import (
     get_audit_sink,
     get_connector_template_service,
+    get_oauth_start_service,
     get_ws_effective_service,
     get_ws_install_service,
 )
@@ -48,6 +49,7 @@ from cubebox.mcp.effective import (
     MCPEffectiveConnectorDTO,
     MCPEffectiveConnectorService,
 )
+from cubebox.mcp.oauth import OAuthStartError, OAuthStartService
 from cubebox.services.mcp_installs import MCPConnectorInstallService
 from cubebox.services.mcp_templates import MCPConnectorTemplateService
 
@@ -397,20 +399,24 @@ async def my_user_grant_oauth_start(
     workspace_id: str,
     install_id: str,
     body: MCPOAuthStartIn,  # noqa: ARG001 — present for OpenAPI clarity
-    _ctx: Annotated[RequestContext, Depends(require_member)],
+    svc: Annotated[OAuthStartService, Depends(get_oauth_start_service)],
+    ctx: Annotated[RequestContext, Depends(require_member)],
 ) -> MCPOAuthStartOut:
     """Start an OAuth flow that produces a user-scope grant."""
-    raise HTTPException(
-        status_code=501,
-        detail={
-            "code": "mcp_oauth.four_layer_start_not_yet_wired",
-            "message": (
-                "Four-layer OAuth start is registered but the AS handshake"
-                " wiring lands in plan Task 6."
-            ),
-            "install_id": install_id,
-            "workspace_id": workspace_id,
-        },
+    try:
+        result = await svc.start_oauth_flow(
+            install_id=install_id,
+            actor_user_id=ctx.user.id,
+            grant_scope="user",
+            workspace_id=workspace_id,
+            user_id=ctx.user.id,
+        )
+    except OAuthStartError as exc:
+        raise HTTPException(status_code=400, detail={"code": str(exc)}) from exc
+    return MCPOAuthStartOut(
+        authorize_url=result.authorize_url,
+        state=result.state,
+        expires_at=result.expires_at,
     )
 
 
@@ -500,18 +506,22 @@ async def workspace_grant_oauth_start(
     workspace_id: str,
     install_id: str,
     body: MCPOAuthStartIn,  # noqa: ARG001 — present for OpenAPI clarity
-    _ctx: Annotated[RequestContext, Depends(require_admin)],
+    svc: Annotated[OAuthStartService, Depends(get_oauth_start_service)],
+    ctx: Annotated[RequestContext, Depends(require_admin)],
 ) -> MCPOAuthStartOut:
     """Start an OAuth flow that produces a workspace-scope grant."""
-    raise HTTPException(
-        status_code=501,
-        detail={
-            "code": "mcp_oauth.four_layer_start_not_yet_wired",
-            "message": (
-                "Four-layer OAuth start is registered but the AS handshake"
-                " wiring lands in plan Task 6."
-            ),
-            "install_id": install_id,
-            "workspace_id": workspace_id,
-        },
+    try:
+        result = await svc.start_oauth_flow(
+            install_id=install_id,
+            actor_user_id=ctx.user.id,
+            grant_scope="workspace",
+            workspace_id=workspace_id,
+            user_id=None,
+        )
+    except OAuthStartError as exc:
+        raise HTTPException(status_code=400, detail={"code": str(exc)}) from exc
+    return MCPOAuthStartOut(
+        authorize_url=result.authorize_url,
+        state=result.state,
+        expires_at=result.expires_at,
     )
