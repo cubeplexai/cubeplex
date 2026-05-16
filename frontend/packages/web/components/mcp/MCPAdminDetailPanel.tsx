@@ -325,6 +325,16 @@ function AdminAuthActionBand({
               : orgEffective.usable
                 ? 'available'
                 : 'missing',
+          // The workspace lens (when the admin's current workspace
+          // overrides the org-policy install down to user/workspace)
+          // surfaces a different credential_source. For the org-row
+          // band we always want 'org' (when usable + needs a
+          // credential) so the ready band reads "credential from
+          // Org grant" and the Disconnect menu targets the org
+          // grant — not whichever workspace-lens grant happened to
+          // be there.
+          credential_source:
+            connector.install.auth_method === 'none' ? null : orgEffective.usable ? 'org' : null,
         }
       : connector
 
