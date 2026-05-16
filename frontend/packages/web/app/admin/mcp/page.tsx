@@ -57,7 +57,7 @@ export default function AdminMcpPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [search, setSearch] = useState('')
   const [filter, setFilter] = useState<MCPConnectorFilter>('all')
-  const [mode, setMode] = useState<'detail' | 'install_template' | null>(null)
+  const [mode, setMode] = useState<'detail' | 'install_template' | 'custom_install' | null>(null)
   const [installTemplate, setInstallTemplate] = useState<MCPConnectorTemplate | null>(null)
 
   const lensWsId = workspaces[0]?.id ?? ''
@@ -209,35 +209,46 @@ export default function AdminMcpPage() {
             selectedId={selectedId}
             onSelect={handleSelect}
           />
-          {availableTemplates.length > 0 && (
-            <div className="border-t border-border/60">
-              <div className="px-4 py-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                {t('templates')}
-              </div>
-              <div className="flex flex-col gap-1.5 p-3">
-                {availableTemplates.map((tpl) => (
-                  <button
-                    key={tpl.template_id}
-                    type="button"
-                    onClick={() => {
-                      setSelectedId(null)
-                      setInstallTemplate(tpl)
-                      setMode('install_template')
-                    }}
-                    data-testid={`template-row-${tpl.slug}`}
-                    className="flex w-full flex-col gap-0.5 rounded-lg border border-border/70 bg-card/40 p-3 text-left hover:border-border hover:bg-accent/40"
-                  >
-                    <span className="truncate text-sm font-semibold">{tpl.name}</span>
-                    {tpl.description && (
-                      <span className="line-clamp-1 text-xs text-muted-foreground">
-                        {tpl.description}
-                      </span>
-                    )}
-                  </button>
-                ))}
-              </div>
+          <div className="border-t border-border/60">
+            <div className="px-4 py-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+              {t('templates')}
             </div>
-          )}
+            <div className="flex flex-col gap-1.5 p-3">
+              <button
+                type="button"
+                onClick={() => {
+                  setSelectedId(null)
+                  setInstallTemplate(null)
+                  setMode('custom_install')
+                }}
+                data-testid="mcp-add-custom-connector"
+                className="flex w-full items-center gap-2 rounded-lg border border-dashed border-border/70 bg-card/40 p-3 text-left text-sm font-medium hover:border-border hover:bg-accent/40"
+              >
+                <span aria-hidden>+</span>
+                {t('addCustomConnector')}
+              </button>
+              {availableTemplates.map((tpl) => (
+                <button
+                  key={tpl.template_id}
+                  type="button"
+                  onClick={() => {
+                    setSelectedId(null)
+                    setInstallTemplate(tpl)
+                    setMode('install_template')
+                  }}
+                  data-testid={`template-row-${tpl.slug}`}
+                  className="flex w-full flex-col gap-0.5 rounded-lg border border-border/70 bg-card/40 p-3 text-left hover:border-border hover:bg-accent/40"
+                >
+                  <span className="truncate text-sm font-semibold">{tpl.name}</span>
+                  {tpl.description && (
+                    <span className="line-clamp-1 text-xs text-muted-foreground">
+                      {tpl.description}
+                    </span>
+                  )}
+                </button>
+              ))}
+            </div>
+          </div>
         </aside>
 
         <section className="flex flex-1 overflow-y-auto">

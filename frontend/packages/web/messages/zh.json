@@ -469,6 +469,39 @@
     },
     "errorBanner": {
       "title": "发现失败"
+    },
+    "promote": {
+      "title": "提升为组织级安装",
+      "description": "让 \"{name}\" 在本组织所有工作区都可用。",
+      "close": "关闭",
+      "cancel": "取消",
+      "confirm": "提升",
+      "failed": "提升失败",
+      "distNoneTitle": "不自动启用",
+      "distNoneHelp": "成为组织级安装；各工作区需手动启用。",
+      "distAllTitle": "对所有工作区自动启用",
+      "distAllHelp": "对现有工作区扩散启用，并对新工作区自动加入。"
+    },
+    "citations": {
+      "editorTitle": "引用映射 · {tool}",
+      "statusMapped": "已映射",
+      "statusUnmapped": "未映射",
+      "disable": "重置映射",
+      "sourceType": "来源类型",
+      "contentType": "内容类型",
+      "contentField": "内容字段",
+      "contentFieldRoot": "（根）",
+      "mapping": "字段映射",
+      "mappingKeyPlaceholder": "snippet",
+      "addMapping": "+ 添加字段",
+      "removeMapping": "移除",
+      "rowMapped": "✓ 已映射",
+      "rowUnmapped": "—",
+      "filterPlaceholder": "过滤工具…",
+      "countAll": "{count, plural, =0 {无工具} other {# 个工具}}",
+      "countMatch": "{matched} / {total} 个工具",
+      "emptyNoTools": "尚未发现工具。请先点击刷新。",
+      "emptyMatch": "没有匹配 \"{query}\" 的工具。"
     }
   },
   "mcpOAuthReturn": {
@@ -854,6 +887,11 @@
     "customFieldCredName": "凭证名称（可选）",
     "customFieldCredNamePlaceholder": "在凭证保险库中显示的标签",
     "customFieldCredPlaintext": "凭证",
-    "customSubmit": "创建服务器"
+    "customSubmit": "创建服务器",
+    "customTestConnection": "测试连接",
+    "customTestOk": "已连接 · {count} 个工具",
+    "customTestFailed": "连接失败",
+    "addCustomConnector": "+ 添加自定义连接器",
+    "promoteToOrg": "提升为组织级"
   }
 }

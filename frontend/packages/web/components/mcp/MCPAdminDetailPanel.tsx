@@ -2,16 +2,30 @@
 
 import { useEffect, useState } from 'react'
 import { useTranslations } from 'next-intl'
-import { Check, FileText, Loader2, Network, Trash2, Wrench, X } from 'lucide-react'
+import {
+  ArrowUpCircle,
+  BookOpen,
+  Check,
+  FileText,
+  Loader2,
+  Network,
+  Trash2,
+  Wrench,
+  X,
+} from 'lucide-react'
 import {
   adminDeleteInstall,
   adminGetInstallEffective,
+  adminPromoteToOrg,
   adminRefreshDiscovery,
+  useOrgAdminFlag,
+  useWorkspaceStore,
   wsListTemplates,
   type ApiClient,
   type MCPAdminInstallEffective,
   type MCPConnectorTemplate,
   type MCPEffectiveConnector,
+  type PromoteDistribution,
 } from '@cubebox/core'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -19,6 +33,9 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { cn } from '@/lib/utils'
 
 import { AuthActionBand } from './AuthActionBand'
+import { MCPCitationsTab } from './MCPCitationsTab'
+import { MCPCustomCreatePanel } from './MCPCustomCreatePanel'
+import { MCPPromoteDialog } from './MCPPromoteDialog'
 import { MCPTemplateInstallPanel } from './MCPTemplateInstallPanel'
 import { MCPWorkspacesTab } from './MCPWorkspacesTab'
 import { ServerErrorBanner } from './detail/ServerErrorBanner'
@@ -26,7 +43,7 @@ import { ToolsPanel } from './detail/tools/ToolsPanel'
 
 interface MCPAdminDetailPanelProps {
   connector: MCPEffectiveConnector | null
-  mode: 'detail' | 'install_template' | null
+  mode: 'detail' | 'install_template' | 'custom_install' | null
   installTemplate: MCPConnectorTemplate | null
   client: ApiClient
   wsId: string
@@ -51,6 +68,12 @@ export function MCPAdminDetailPanel({
   const [deleting, setDeleting] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
   const [actionError, setActionError] = useState<string | null>(null)
+  const [promoteOpen, setPromoteOpen] = useState(false)
+
+  const currentOrgId = useWorkspaceStore(
+    (s) => s.workspaces.find((w) => w.id === wsId)?.org_id ?? null,
+  )
+  const isOrgAdmin = useOrgAdminFlag(currentOrgId)
 
   if (mode === 'install_template' && installTemplate) {
     return (
@@ -59,6 +82,15 @@ export function MCPAdminDetailPanel({
         client={client}
         wsId={wsId}
         onInstalled={onInstalled}
+      />
+    )
+  }
+
+  if (mode === 'custom_install') {
+    return (
+      <MCPCustomCreatePanel
+        client={client}
+        onCreated={(install) => onInstalled(install.install_id)}
       />
     )
   }
@@ -105,6 +137,13 @@ export function MCPAdminDetailPanel({
       setConfirmDelete(false)
     }
   }
+
+  async function handlePromote(distribution: PromoteDistribution): Promise<void> {
+    await adminPromoteToOrg(client, installId, distribution)
+    await onRefresh()
+  }
+
+  const canPromote = !isOrgWide && isOrgAdmin
 
   const busy = refreshing || deleting
 
@@ -173,6 +212,19 @@ export function MCPAdminDetailPanel({
             {refreshing ? <Loader2 data-icon="inline-start" className="animate-spin" /> : null}
             {t('refreshTools')}
           </Button>
+          {canPromote ? (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={busy}
+              onClick={() => setPromoteOpen(true)}
+              data-testid="mcp-promote-menu-item"
+            >
+              <ArrowUpCircle data-icon="inline-start" />
+              {t('promoteToOrg')}
+            </Button>
+          ) : null}
           {!confirmDelete ? (
             <Button
               type="button"
@@ -227,6 +279,10 @@ export function MCPAdminDetailPanel({
             <Wrench className="size-3.5" />
             {t('tabTools', { count: install.tool_count })}
           </TabsTrigger>
+          <TabsTrigger value="citations">
+            <BookOpen className="size-3.5" />
+            {t('tabCitations')}
+          </TabsTrigger>
           {isOrgWide && (
             <TabsTrigger value="workspaces">
               <Network className="size-3.5" />
@@ -275,12 +331,23 @@ export function MCPAdminDetailPanel({
           />
         </TabsContent>
 
+        <TabsContent value="citations" className="mt-4">
+          <MCPCitationsTab install={install} client={client} onUpdated={() => void onRefresh()} />
+        </TabsContent>
+
         {isOrgWide && (
           <TabsContent value="workspaces" className="mt-4">
             <MCPWorkspacesTab installId={installId} client={client} />
           </TabsContent>
         )}
       </Tabs>
+
+      <MCPPromoteDialog
+        install={install}
+        open={promoteOpen}
+        onOpenChange={setPromoteOpen}
+        onConfirm={handlePromote}
+      />
     </div>
   )
 }

@@ -469,6 +469,39 @@
     },
     "errorBanner": {
       "title": "Discovery error"
+    },
+    "promote": {
+      "title": "Promote to org-wide install",
+      "description": "Make \"{name}\" available to every workspace in this org.",
+      "close": "Close",
+      "cancel": "Cancel",
+      "confirm": "Promote",
+      "failed": "Promote failed",
+      "distNoneTitle": "Don't auto-enable",
+      "distNoneHelp": "Install becomes available org-wide. Workspaces opt in manually.",
+      "distAllTitle": "Auto-enable in every workspace",
+      "distAllHelp": "Fan out to all existing workspaces and auto-enroll new ones."
+    },
+    "citations": {
+      "editorTitle": "Citation mapping · {tool}",
+      "statusMapped": "Mapped",
+      "statusUnmapped": "Unmapped",
+      "disable": "Reset mapping",
+      "sourceType": "Source type",
+      "contentType": "Content type",
+      "contentField": "Content field",
+      "contentFieldRoot": "(root)",
+      "mapping": "Field mapping",
+      "mappingKeyPlaceholder": "snippet",
+      "addMapping": "+ Add field",
+      "removeMapping": "Remove",
+      "rowMapped": "✓ Mapped",
+      "rowUnmapped": "—",
+      "filterPlaceholder": "Filter tools…",
+      "countAll": "{count, plural, =0 {No tools} one {1 tool} other {# tools}}",
+      "countMatch": "{matched} of {total} tools",
+      "emptyNoTools": "No tools discovered yet. Run Refresh first.",
+      "emptyMatch": "No tools match \"{query}\"."
     }
   },
   "mcpOAuthReturn": {
@@ -854,6 +887,11 @@
     "customFieldCredName": "Credential name (optional)",
     "customFieldCredNamePlaceholder": "Label shown in the credential vault",
     "customFieldCredPlaintext": "Credential",
-    "customSubmit": "Create server"
+    "customSubmit": "Create server",
+    "customTestConnection": "Test connection",
+    "customTestOk": "Connected · {count} tool(s)",
+    "customTestFailed": "Connection failed",
+    "addCustomConnector": "+ Add custom connector",
+    "promoteToOrg": "Promote to org-wide"
   }
 }
