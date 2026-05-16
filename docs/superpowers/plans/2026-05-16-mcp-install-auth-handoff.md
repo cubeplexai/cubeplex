@@ -75,10 +75,11 @@ async def test_start_oauth_flow_returns_authorize_url_state_and_expires_at(
     oauth_start_service: OAuthStartService,
     seeded_oauth_install,
 ) -> None:
-    install_id, scope, ws_id, user_id = seeded_oauth_install
+    install_id, scope, ws_id, user_id, org_id = seeded_oauth_install
     result = await oauth_start_service.start_oauth_flow(
         install_id=install_id,
         actor_user_id=user_id,
+        actor_org_id=org_id,
         grant_scope=scope,
         workspace_id=ws_id,
         user_id=user_id,
@@ -186,21 +187,36 @@ class OAuthStartService:
         *,
         install_id: str,
         actor_user_id: str,
+        actor_org_id: str,  # the CALLER's org from ctx.org_id
         grant_scope: str,
         workspace_id: str | None,
         user_id: str | None,
     ) -> OAuthStartResult:
-        # One-off org-agnostic install lookup so we can resolve org_id
-        # before building any org-scoped service. See OAuthCallbackHandler
-        # for the same pattern.
+        # Org-scoped install lookup. The unauthenticated callback later
+        # builds repos and credential service from `install.org_id`, so
+        # an install id alone is enough to direct grant writes into ANY
+        # org. Without an org-scoped filter here, a caller who knows
+        # (or guesses) another org's install_id could mint a valid state
+        # token and have the callback persist credentials in that other
+        # org. Fix is two-part: filter the install lookup by the caller's
+        # org, and (belt + suspenders) assert `install.org_id ==
+        # actor_org_id` post-load so a future refactor can't quietly
+        # cross orgs.
         from sqlmodel import select
         from cubebox.models.mcp import MCPConnectorInstall as _Install
         install = (
             await self._session.execute(
-                select(_Install).where(_Install.id == install_id)
+                select(_Install).where(
+                    _Install.id == install_id,
+                    _Install.org_id == actor_org_id,
+                )
             )
         ).scalar_one_or_none()
         if install is None:
+            # Cross-org and truly-missing collapse to the same error so
+            # OAuth start cannot be used as an org-existence oracle.
+            raise OAuthStartError("connector_install_not_found")
+        if install.org_id != actor_org_id:
             raise OAuthStartError("connector_install_not_found")
         if install.install_state != "active":
             raise OAuthStartError("connector_install_not_active")
@@ -410,10 +426,13 @@ In the same test file, add fixtures (lifted from the patterns in `backend/tests/
 ```python
 @pytest.fixture
 async def seeded_oauth_install(db_session: AsyncSession, seed_org_workspace_user):
-    """Yield (install_id, grant_scope, workspace_id, user_id) for an OAuth install."""
+    """Yield (install_id, grant_scope, workspace_id, user_id, org_id) for an
+    OAuth install. The trailing org_id is needed so call sites can pass
+    actor_org_id into start_oauth_flow — that's the cross-tenant guard
+    added in §6 (defense-in-depth org check in the install lookup)."""
     org_id, ws_id, user_id = seed_org_workspace_user
     install = await _seed_oauth_install(db_session, org_id=org_id, workspace_id=ws_id)
-    return install.id, "user", ws_id, user_id
+    return install.id, "user", ws_id, user_id, org_id
 
 
 @pytest.fixture
@@ -480,12 +499,13 @@ async def test_callback_writes_user_grant_and_keeps_install_pending(
     """User-policy install: grant lands at scope='user', auth_status STAYS
     'pending' (per spec §6 — auth_status is per-install, not per-user, so
     one user finishing OAuth doesn't claim the install for everyone)."""
-    install_id, scope, ws_id, user_id = seeded_oauth_install
+    install_id, scope, ws_id, user_id, org_id = seeded_oauth_install
     assert scope == "user"  # fixture invariant
 
     start = await oauth_start_service.start_oauth_flow(
         install_id=install_id,
         actor_user_id=user_id,
+        actor_org_id=org_id,
         grant_scope=scope,
         workspace_id=ws_id,
         user_id=user_id,
@@ -537,6 +557,7 @@ async def test_callback_writes_org_grant_and_authorizes_install(
     start = await oauth_start_service.start_oauth_flow(
         install_id=install_id,
         actor_user_id="usr-test-actor",
+        actor_org_id=org_id,
         grant_scope="org",
         workspace_id=None,
         user_id=None,
@@ -1076,6 +1097,7 @@ async def admin_org_grant_oauth_start(
         result = await svc.start_oauth_flow(
             install_id=install_id,
             actor_user_id=ctx.user.id,
+            actor_org_id=ctx.org_id,
             grant_scope="org",
             workspace_id=None,
             user_id=None,
@@ -1099,7 +1121,10 @@ from cubebox.mcp.oauth import OAuthStartError, OAuthStartService
 - [ ] **Step 5: Replace the workspace OAuth start stubs**
 
 Edit `backend/cubebox/api/routes/v1/ws_mcp.py`. For BOTH `my_user_grant_oauth_start`
-AND `workspace_grant_oauth_start`, replace the body with the same shape as Step 4.
+AND `workspace_grant_oauth_start`, replace the body with the same shape as Step 4
+(don't forget `actor_org_id=ctx.org_id` — the cross-tenant guard added in
+Task 1's `start_oauth_flow` is mandatory on every call site).
+
 Difference per route:
 
 - `my_user_grant_oauth_start`: `grant_scope="user"`, `workspace_id=workspace_id`,
