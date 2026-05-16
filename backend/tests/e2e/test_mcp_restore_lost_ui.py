@@ -551,3 +551,75 @@ async def test_admin_clear_tool_citation_with_null_config(
     assert res.status_code == 200, res.text
     body = res.json()
     assert "ping" not in body["tool_citations"]
+
+
+# ---------------------------------------------------------------------------
+# Task 8 — Try It routes (admin + ws).
+# ---------------------------------------------------------------------------
+
+
+@pytest_asyncio.fixture
+async def seeded_none_auth_install_with_state(
+    admin_client: tuple[httpx.AsyncClient, str],
+    noauth_template_id: str,
+    db_session_maker: async_sessionmaker[AsyncSession],
+) -> tuple[str, str]:
+    client, workspace_id = admin_client
+    res = await client.post(
+        f"/api/v1/ws/{workspace_id}/mcp/installs",
+        json={
+            "template_id": noauth_template_id,
+            "install_scope": "workspace",
+            "auth_method": "none",
+            "default_credential_policy": "none",
+        },
+    )
+    assert res.status_code == 201, res.text
+    install_id = res.json()["install_id"]
+    async with db_session_maker() as session:
+        from cubebox.models.mcp import MCPConnectorInstall
+
+        install = await session.get(MCPConnectorInstall, install_id)
+        assert install is not None
+        install.tools_cache = [
+            {"name": "ping", "description": "say hi", "input_schema": {"type": "object"}}
+        ]
+        await session.commit()
+    return install_id, workspace_id
+
+
+async def test_ws_invoke_tool_returns_result(
+    admin_client: tuple[httpx.AsyncClient, str],
+    seeded_none_auth_install_with_state: tuple[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client, _ws = admin_client
+    install_id, ws_id = seeded_none_auth_install_with_state
+
+    async def fake_invoke(server_url, tool_name, arguments, *, headers, timeout, transport):
+        return {"echo": arguments, "tool": tool_name}
+
+    monkeypatch.setattr("cubebox.api.routes.v1.ws_mcp._invoke_tool_via_cubepi", fake_invoke)
+
+    res = await client.post(
+        f"/api/v1/ws/{ws_id}/mcp/installs/{install_id}/tools/ping/invoke",
+        json={"arguments": {"x": 1}},
+    )
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body["ok"] is True
+    assert body["result"]["echo"] == {"x": 1}
+    assert "duration_ms" in body
+
+
+async def test_admin_invoke_requires_workspace_id_for_scoped_policy(
+    admin_client: tuple[httpx.AsyncClient, str],
+    seeded_oauth_user_policy_install: str,
+) -> None:
+    client, _ws = admin_client
+    install_id = seeded_oauth_user_policy_install
+    res = await client.post(
+        f"/api/v1/admin/mcp/installs/{install_id}/tools/foo/invoke",
+        json={"arguments": {}},
+    )
+    assert res.status_code == 422, res.text

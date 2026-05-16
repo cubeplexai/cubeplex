@@ -12,11 +12,16 @@ Authorization recap (per spec §User Roles And Permissions):
 - ``*/grants/me*`` routes are open to any member.
 """
 
-from typing import Annotated
+import asyncio
+import time
+from contextvars import ContextVar
+from datetime import timedelta
+from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from cubebox.api.middleware.rate_limit import limiter
 from cubebox.api.routes.v1.admin_mcp import (
     _install_to_out,
     _template_to_out,
@@ -34,14 +39,17 @@ from cubebox.api.schemas.mcp import (
     MCPOAuthStartOut,
     MCPWorkspaceConnectorStateOut,
     PatchWorkspaceStateIn,
+    ToolInvokeOut,
     WorkspaceCreateInstallIn,
+    WsInstallInvokeIn,
     WsInstallRefreshIn,
 )
 from cubebox.audit.sink import AuditSink
 from cubebox.auth.context import RequestContext
-from cubebox.auth.dependencies import require_admin, require_member
+from cubebox.auth.dependencies import current_active_user, require_admin, require_member
 from cubebox.credentials.dependencies import get_credential_service
 from cubebox.db.session import get_session
+from cubebox.mcp.cubepi_runtime import _resolve_headers_from_spec
 from cubebox.mcp.dependencies import (
     get_audit_sink,
     get_connector_template_service,
@@ -49,6 +57,7 @@ from cubebox.mcp.dependencies import (
     get_oauth_token_manager,
     get_user_token_signer,
     get_ws_effective_service,
+    get_ws_grant_repo,
     get_ws_install_service,
 )
 from cubebox.mcp.effective import (
@@ -58,9 +67,16 @@ from cubebox.mcp.effective import (
 from cubebox.mcp.oauth import OAuthStartError, OAuthStartService
 from cubebox.mcp.oauth.token_manager import OAuthTokenManager
 from cubebox.mcp.user_token import MCPUserTokenSigner
-from cubebox.repositories.mcp import MCPConnectorInstallRepository
+from cubebox.models import User
+from cubebox.repositories.mcp import (
+    MCPConnectorInstallRepository,
+    MCPCredentialGrantRepository,
+)
 from cubebox.services.credential import CredentialService
-from cubebox.services.mcp_discovery import discover_tools_for_install
+from cubebox.services.mcp_discovery import (
+    _build_runtime_spec_for_discovery,
+    discover_tools_for_install,
+)
 from cubebox.services.mcp_installs import MCPConnectorInstallService
 from cubebox.services.mcp_templates import MCPConnectorTemplateService
 
@@ -578,3 +594,173 @@ async def workspace_grant_oauth_start(
         state=result.state,
         expires_at=result.expires_at,
     )
+
+
+# ---------------------------------------------------------------------------
+# Try It (workspace surface).
+# ---------------------------------------------------------------------------
+
+
+_INVOKE_USER_ID: ContextVar[str | None] = ContextVar("_INVOKE_USER_ID", default=None)
+_INVOKE_TIMEOUT_SECONDS = 10.0
+
+
+def _set_invoke_user_id(user: User = Depends(current_active_user)) -> User:
+    _INVOKE_USER_ID.set(user.id)
+    return user
+
+
+def _invoke_rate_key(_req: Request | None = None) -> str:
+    return _INVOKE_USER_ID.get() or "anonymous"
+
+
+async def _invoke_tool_via_cubepi(
+    server_url: str,
+    tool_name: str,
+    arguments: dict[str, Any],
+    *,
+    headers: dict[str, str] | None,
+    timeout: float,
+    transport: str,
+) -> Any:
+    """Thin wrapper for unit-test monkeypatching."""
+    from mcp import ClientSession
+    from mcp.client.sse import sse_client
+    from mcp.client.streamable_http import streamablehttp_client
+
+    if transport == "streamable_http":
+        timeout_td = timedelta(seconds=timeout)
+        async with streamablehttp_client(
+            server_url,
+            headers=headers,
+            timeout=timeout_td,
+            sse_read_timeout=timeout_td,
+        ) as (read_stream, write_stream, _get_session_id):
+            async with ClientSession(read_stream, write_stream) as session:
+                await session.initialize()
+                result = await session.call_tool(tool_name, arguments)
+    elif transport == "sse":
+        async with sse_client(
+            server_url,
+            headers=headers,
+            timeout=timeout,
+            sse_read_timeout=timeout,
+        ) as (read_stream, write_stream):
+            async with ClientSession(read_stream, write_stream) as session:
+                await session.initialize()
+                result = await session.call_tool(tool_name, arguments)
+    else:
+        raise ValueError(f"unsupported transport: {transport!r}")
+
+    out: dict[str, Any] = {"isError": bool(getattr(result, "isError", False))}
+    content_list: list[dict[str, Any]] = []
+    for c in getattr(result, "content", []) or []:
+        ctype = getattr(c, "type", None)
+        if ctype == "text":
+            content_list.append({"type": "text", "text": getattr(c, "text", "")})
+        elif ctype == "image":
+            content_list.append(
+                {
+                    "type": "image",
+                    "data": getattr(c, "data", ""),
+                    "mimeType": getattr(c, "mimeType", ""),
+                }
+            )
+    out["content"] = content_list
+    structured = getattr(result, "structuredContent", None)
+    if structured is not None:
+        out["structuredContent"] = structured
+    return out
+
+
+@router.post(
+    "/installs/{install_id}/tools/{tool_name}/invoke",
+    response_model=ToolInvokeOut,
+)
+@limiter.limit("30/minute", key_func=_invoke_rate_key)
+async def ws_invoke_tool(
+    request: Request,  # noqa: ARG001
+    workspace_id: str,
+    install_id: str,
+    tool_name: str,
+    body: WsInstallInvokeIn,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    effective_svc: Annotated[MCPEffectiveConnectorService, Depends(get_ws_effective_service)],
+    cred_service: Annotated[CredentialService, Depends(get_credential_service)],
+    signer: Annotated[MCPUserTokenSigner, Depends(get_user_token_signer)],
+    token_mgr: Annotated[OAuthTokenManager, Depends(get_oauth_token_manager)],
+    grant_repo: Annotated[MCPCredentialGrantRepository, Depends(get_ws_grant_repo)],
+    ctx: Annotated[RequestContext, Depends(require_member)],
+    _rate_key_user: Annotated[User, Depends(_set_invoke_user_id)],
+    audit: Annotated[AuditSink, Depends(get_audit_sink)],
+) -> ToolInvokeOut:
+    """Invoke a single tool on an installed connector (workspace surface)."""
+    install_repo = MCPConnectorInstallRepository(session, org_id=ctx.org_id)
+    install = await install_repo.get(install_id)
+    if install is None:
+        raise HTTPException(404, detail={"code": "mcp_install_not_found"})
+    dtos = await effective_svc.list_for_workspace_user(
+        workspace_id, ctx.user.id, include_unusable=True
+    )
+    dto = next((d for d in dtos if d.install.id == install_id), None)
+    if dto is None or not dto.usable:
+        raise HTTPException(
+            400,
+            detail={
+                "code": "connector_not_usable",
+                "reason": dto.reason if dto else "missing",
+            },
+        )
+    spec = _build_runtime_spec_for_discovery(install=install, grant=dto.grant)
+    headers = await _resolve_headers_from_spec(
+        spec=spec,
+        workspace_id=workspace_id,
+        org_id=ctx.org_id,
+        user_id=ctx.user.id,
+        cred_service=cred_service,
+        signer=signer,
+        token_manager=token_mgr,
+        grant_repo=grant_repo,
+    )
+    if headers is None:
+        raise HTTPException(400, detail={"code": "credential_resolution_failed"})
+    started = time.perf_counter()
+    try:
+        result = await asyncio.wait_for(
+            _invoke_tool_via_cubepi(
+                install.server_url,
+                tool_name,
+                body.arguments,
+                headers=headers or None,
+                timeout=install.timeout,
+                transport=install.transport,
+            ),
+            timeout=_INVOKE_TIMEOUT_SECONDS,
+        )
+    except Exception as exc:  # noqa: BLE001
+        duration = int((time.perf_counter() - started) * 1000)
+        await audit.record(
+            event="mcp.tool.invoked",
+            actor_user_id=ctx.user.id,
+            org_id=ctx.org_id,
+            target_id=install_id,
+            details={
+                "tool_name": tool_name,
+                "workspace_id": workspace_id,
+                "ok": False,
+            },
+        )
+        return ToolInvokeOut(ok=False, error=str(exc)[:512], duration_ms=duration)
+    duration = int((time.perf_counter() - started) * 1000)
+    await audit.record(
+        event="mcp.tool.invoked",
+        actor_user_id=ctx.user.id,
+        org_id=ctx.org_id,
+        target_id=install_id,
+        details={
+            "tool_name": tool_name,
+            "workspace_id": workspace_id,
+            "ok": True,
+        },
+    )
+    return ToolInvokeOut(ok=True, result=result, duration_ms=duration)
