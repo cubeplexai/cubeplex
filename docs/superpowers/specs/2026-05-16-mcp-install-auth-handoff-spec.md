@@ -161,17 +161,27 @@ console, the org-admin bit. The function is centralized so both surfaces agree.
  └──────────────────────────────────────────────────────────────────────┘
 ```
 
-- Shown when `connector.credential_availability === 'missing'` AND the caller
-  does **not** have authority over `required_grant_scope`. The reason
-  token drives the copy:
+- Shown when `connector.reason` is one of `missing_org_grant |
+  missing_workspace_grant` AND the caller does **not** have authority
+  over `required_grant_scope`. As with §3.2, do NOT key on
+  `credential_availability === 'missing'` alone — that field also fires
+  for `not_installed`, `install_uninstalled`, `template_deprecated`,
+  `not_enabled_in_workspace`, and `discovery_failed`, none of which are
+  "another actor needs to authorize" situations. Those non-auth reasons
+  must be filtered out before the authority check so they reach their
+  proper surfaces (workspace toggle, install panel, discovery error
+  card) rather than this band with empty copy.
+- Reason → copy:
   - `missing_org_grant` (caller not org admin) → `<who> = "your
     organization admin"`.
   - `missing_workspace_grant` (caller not workspace admin) → `<who> =
     "your workspace admin"`.
 
-  `user_needs_connection` and `grant_expired` never surface here — both
-  are always actionable by the caller (they own the user grant or are the
-  scope-owner whose grant just expired).
+  `user_needs_connection` and `grant_expired` cannot reach this band:
+  both are always actionable by the caller. `user_needs_connection` is
+  the caller's own grant; `grant_expired` is reported only against the
+  scope whose grant just expired, and only that scope's owner sees the
+  installed connector with that reason.
 - `[Notify]` is a stub for v1 — disabled with tooltip "Coming soon." Listed
   in the spec for layout completeness; not in MVP scope.
 
