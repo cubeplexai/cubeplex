@@ -263,6 +263,13 @@ class MCPConnectorInstallService:
             enablement_source = "admin_manual"
 
         defaults = install_defaults_for_auth_method(auth_method, credential_policy)
+        # Derive ``auto_enroll_new_workspaces`` from the requested distribution
+        # mode rather than relying on the model's ``server_default=true``. The
+        # default is right for ``mode='all'`` (admin asked for "every workspace
+        # in the org") but wrong for ``selected`` / ``none``: in those cases the
+        # admin has explicitly scoped the install, and letting the bootstrap
+        # hook auto-enroll future workspaces would silently broaden that scope.
+        auto_enroll = mode == "all"
         install = MCPConnectorInstall(
             org_id=self._org_id,
             workspace_id=None,
@@ -276,6 +283,7 @@ class MCPConnectorInstallService:
             default_credential_policy=defaults.credential_policy,
             auth_status=defaults.auth_status,
             tool_citations=dict(template.tool_citation_defaults),
+            auto_enroll_new_workspaces=auto_enroll,
             created_by_user_id=self._actor_user_id,
         )
         saved = await self._install_repo.add(install)

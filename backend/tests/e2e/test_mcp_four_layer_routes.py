@@ -682,3 +682,87 @@ async def test_patch_state_upserts_for_org_install_with_no_state_row(
         assert len(rows) == 1, f"second PATCH must update, not insert; got {rows}"
         assert rows[0].enabled is False
         assert rows[0].credential_policy == "org"
+
+
+# ---------------------------------------------------------------------------
+# Scenario #10 — selected-distribution install must NOT auto-enroll new ws
+# ---------------------------------------------------------------------------
+
+
+async def test_selected_distribution_does_not_auto_enroll_new_workspace(
+    admin_client: tuple[httpx.AsyncClient, str],
+    noauth_template_id: str,
+    db_maker: async_sessionmaker[AsyncSession],
+) -> None:
+    """An org install with ``auto_enable.mode='selected'`` must NOT fan out
+    to workspaces created later.
+
+    The bootstrap hook ``enroll_workspace_in_org_wide_mcp`` fires on every
+    workspace create (see ``POST /api/v1/workspaces``) and enrolls any
+    active org-scope install whose ``auto_enroll_new_workspaces`` is True.
+    If the create-time service leaves that flag at the model's
+    ``server_default=true`` for ``selected``/``none`` distributions, then
+    a later workspace would silently inherit the install — directly
+    contradicting the admin's explicit scoping at install time.
+    """
+    from sqlalchemy import select
+
+    from cubebox.models import MCPConnectorInstall, MCPWorkspaceConnectorState
+
+    client, workspace_id = admin_client
+
+    workspaces_resp = await client.get("/api/v1/workspaces")
+    assert workspaces_resp.status_code == 200, workspaces_resp.text
+    org_id = workspaces_resp.json()[0]["org_id"]
+
+    install_resp = await client.post(
+        "/api/v1/admin/mcp/installs",
+        json={
+            "template_id": noauth_template_id,
+            "install_scope": "org",
+            "auth_method": "none",
+            "default_credential_policy": "none",
+            "auto_enable": {"mode": "selected", "workspace_ids": [workspace_id]},
+        },
+    )
+    assert install_resp.status_code == 201, install_resp.text
+    install_id = install_resp.json()["install_id"]
+
+    # Persisted flag is explicitly False, NOT the model server_default of True.
+    async with db_maker() as session:
+        install_row = await session.get(MCPConnectorInstall, install_id)
+        assert install_row is not None
+        assert install_row.auto_enroll_new_workspaces is False, (
+            "selected distribution must persist auto_enroll_new_workspaces=False"
+        )
+
+    # Create a brand-new workspace in the same org AFTER the install exists.
+    # The workspace-create handler invokes ``enroll_workspace_in_org_wide_mcp``
+    # which is where a wrongly-defaulted flag would leak the install.
+    new_ws_resp = await client.post(
+        "/api/v1/workspaces",
+        json={"name": "post-install-ws", "org_id": org_id},
+    )
+    assert new_ws_resp.status_code == 201, new_ws_resp.text
+    new_ws_id = new_ws_resp.json()["id"]
+
+    # No state row for the new workspace — only the originally-targeted one.
+    async with db_maker() as session:
+        states = (
+            (
+                await session.execute(
+                    select(MCPWorkspaceConnectorState).where(
+                        MCPWorkspaceConnectorState.install_id == install_id  # type: ignore[arg-type]
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        states_by_ws = {s.workspace_id: s for s in states}
+        assert workspace_id in states_by_ws, (
+            "originally-targeted workspace should still have its state row"
+        )
+        assert new_ws_id not in states_by_ws, (
+            "post-install workspace must NOT be auto-enrolled in a 'selected' distribution install"
+        )
