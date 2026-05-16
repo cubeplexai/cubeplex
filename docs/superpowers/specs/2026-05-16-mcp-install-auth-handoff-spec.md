@@ -161,27 +161,43 @@ console, the org-admin bit. The function is centralized so both surfaces agree.
  └──────────────────────────────────────────────────────────────────────┘
 ```
 
-- Shown when `connector.reason` is one of `missing_org_grant |
-  missing_workspace_grant` AND the caller does **not** have authority
-  over `required_grant_scope`. As with §3.2, do NOT key on
-  `credential_availability === 'missing'` alone — that field also fires
-  for `not_installed`, `install_uninstalled`, `template_deprecated`,
-  `not_enabled_in_workspace`, and `discovery_failed`, none of which are
-  "another actor needs to authorize" situations. Those non-auth reasons
-  must be filtered out before the authority check so they reach their
-  proper surfaces (workspace toggle, install panel, discovery error
-  card) rather than this band with empty copy.
-- Reason → copy:
-  - `missing_org_grant` (caller not org admin) → `<who> = "your
-    organization admin"`.
-  - `missing_workspace_grant` (caller not workspace admin) → `<who> =
-    "your workspace admin"`.
+- Shown when **all three** hold:
+  1. `connector.reason ∈ { missing_org_grant, missing_workspace_grant,
+     pending_oauth, grant_expired }` — the auth-blocker subset of
+     `MCPEffectiveReason`. Do NOT key on `credential_availability ===
+     'missing'` alone: that field also fires for `not_installed`,
+     `install_uninstalled`, `template_deprecated`,
+     `not_enabled_in_workspace`, and `discovery_failed`, none of which
+     are "another actor needs to authorize" situations. Those non-auth
+     reasons must be filtered out before the authority check so they
+     reach their proper surfaces (workspace toggle, install panel,
+     discovery error card) rather than this band with empty copy.
+  2. `connector.required_grant_scope ∈ { org, workspace }` — user-scope
+     grants always belong to the caller and never block on someone
+     else, so `awaiting-others` cannot apply when the required scope is
+     `user`.
+  3. The caller does **not** have authority over `required_grant_scope`
+     (see §4: non-admin viewing an org-policy install, or non-admin
+     viewing a workspace-policy install).
+- Reason → copy (the `<who>` is derived from `required_grant_scope`,
+  not from the reason token, because `pending_oauth` and `grant_expired`
+  can fire under either policy):
+  - `required_grant_scope === 'org'` → `<who> = "your organization
+    admin"`. The reason token (`missing_org_grant` / `pending_oauth` /
+    `grant_expired`) determines the second sentence:
+    - `missing_org_grant` → "Your org admin hasn't authorized this
+      yet."
+    - `pending_oauth` → "Your org admin started authorizing but
+      hasn't finished."
+    - `grant_expired` → "The org's authorization expired and needs
+      to be renewed."
+  - `required_grant_scope === 'workspace'` → `<who> = "your workspace
+    admin"`. Same three reason variants with "org" → "workspace" in
+    the second sentence.
 
-  `user_needs_connection` and `grant_expired` cannot reach this band:
-  both are always actionable by the caller. `user_needs_connection` is
-  the caller's own grant; `grant_expired` is reported only against the
-  scope whose grant just expired, and only that scope's owner sees the
-  installed connector with that reason.
+  `user_needs_connection` cannot reach this band: it is by construction
+  the caller's own grant (rule 7 with `credential_policy='user'` only
+  fires for the calling user). It belongs in `needs-action` (§3.2).
 - `[Notify]` is a stub for v1 — disabled with tooltip "Coming soon." Listed
   in the spec for layout completeness; not in MVP scope.
 
