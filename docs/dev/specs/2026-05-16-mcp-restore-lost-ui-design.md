@@ -118,7 +118,7 @@ detail.
     pill + description + nested children for object types).
   - **Raw JSON** — collapsed JSON of the schema, for users who
     want to copy-paste into their own tooling.
-- **No "Try it"** sub-tab in this round (see §3.8).
+  - **Try It** — invoke the tool live; see §3.8.
 - Empty state: "Discovery has not run yet — click Refresh tools."
 - Filtered-empty state: "No tools match 'foo'."
 
@@ -309,10 +309,14 @@ Backend changes needed:
   accepts the same shape the route sends:
   `(name, server_url, transport, auth_method,
    default_credential_policy, headers, auto_enable)` and writes
-  the install with `template_id=None` plus a synthesized
-  `slug` (e.g. `custom-{public_id}`) that the unique
-  partial-index uses. Workspace state fan-out reuses the
-  existing distribution helper.
+  the install with `template_id=None`. Install uniqueness is
+  enforced by the existing partial unique indexes
+  (`uq_install_org_url_active_org` /
+  `uq_install_ws_url_active_ws` on
+  `(org_id [, workspace_id], server_url_hash)` filtered by
+  `install_state='active'`) — the install model has no `slug`
+  column, so there is nothing to synthesize. Workspace state
+  fan-out reuses the existing distribution helper.
 
 Schema additions:
 - `AdminCreateInstallIn`: when `template_id is None`, require
@@ -492,28 +496,45 @@ Third sub-tab inside the Tools detail pane (alongside Schema +
 Raw JSON). Lets the user invoke the tool from the UI for debugging
 the connector.
 
-New backend route:
+New backend routes (one per surface — admin page has no workspace
+path parameter, so the workspace-scoped route alone leaves the
+admin Try It with no callable endpoint):
 
 ```
+POST /api/v1/admin/mcp/installs/{install_id}/tools/{tool_name}/invoke
+  body: { workspace_id?: str, arguments: dict }
+  → { ok, result?, error?, duration_ms }
+
 POST /api/v1/ws/{ws}/mcp/installs/{install_id}/tools/{tool_name}/invoke
   body: { arguments: dict }
   → { ok, result?, error?, duration_ms }
 ```
 
 Behavior:
-- Build the cubepi client per the install + caller's grant (the
-  test invocation uses the caller's user grant where applicable,
-  not a system grant — same as agent runtime).
-- 10-second timeout.
+- Build the cubepi client per the install + caller's grant. The
+  caller's user grant is preferred where applicable, falling back
+  to workspace / org grant per the existing effective-state rules
+  — same as agent runtime.
+- For the **admin route**: the admin viewing an `install_scope =
+  'org'` install needs a workspace context to resolve user-policy
+  grants. The body's `workspace_id` is optional; when omitted,
+  the route uses the admin's first own membership in the install's
+  org (or 422 `workspace_id_required_for_user_policy` if the
+  install's effective policy is `user` and the admin has no
+  membership). For `install_scope = 'workspace'` installs, the
+  route 404s — admins should call the workspace route directly.
+- 10-second timeout on the underlying invoke.
 - Returns `result` JSON (whatever the tool returned) or `error`
   string.
 - Audit logged: `mcp.tool.invoked` with `(install_id, tool_name,
-  workspace_id, user_id)` so a "free-form invoke" surface has a
-  trace.
+  workspace_id, user_id)` so the surface has a trace.
 
-Authority: any workspace member with a grant that makes the
-connector `usable`. If the connector is not `usable`, the Invoke
-button is disabled with tooltip "Authorize the connector first."
+Authority:
+- Admin route: org admin only.
+- Workspace route: any workspace member with a grant that makes
+  the connector `usable`. If the connector is not `usable`, the
+  Invoke button is disabled with tooltip "Authorize the
+  connector first."
 
 Rate-limit: 30 invocations / minute / user (slowapi key on user
 id). Try It is for debugging, not a substitute for the agent.
@@ -552,6 +573,7 @@ NOT generalize here.
 | `POST /admin/mcp/installs` with `template_id=None` | Repurposed shape | org admin |
 | `POST /admin/mcp/installs/{id}/promote-to-org` | New | org admin |
 | `PUT /admin/mcp/installs/{id}/tool-citations` | New | org admin |
+| `POST /admin/mcp/installs/{id}/tools/{tool}/invoke` | New | org admin, rate-limited |
 | `POST /ws/{ws}/mcp/installs/{id}/tools/{tool}/invoke` | New | ws member, rate-limited |
 
 All new endpoints return the standard error envelope (422 / 400
