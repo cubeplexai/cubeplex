@@ -173,13 +173,28 @@ New backend route:
 
 ```
 POST /api/v1/admin/mcp/installs/{install_id}/refresh-discovery   (org admin)
+  body: { workspace_id?: str }
 POST /api/v1/ws/{ws}/mcp/installs/{install_id}/refresh-discovery (ws admin)
+  body: {}
 ```
 
 Both return the updated `MCPConnectorInstallOut`. Behavior:
-- Resolve install, build the cubepi client per the install's
-  auth (using whatever grant is currently active for the
-  caller).
+- Resolve install. Build the cubepi client per the install's
+  effective grant (resolved via the same path the agent runtime
+  uses — `MCPEffectiveConnectorService._resolve_grant`). For:
+  - Org-policy installs: the org grant (workspace-independent).
+  - Workspace-policy installs: the grant for the workspace
+    context — `{ws}` from the path on the ws route, or
+    `body.workspace_id` on the admin route. Admin route 422s
+    with `workspace_id_required_for_scoped_policy` if the
+    install's effective policy is workspace or user and the
+    body omits it.
+  - User-policy installs: the caller's own user grant within
+    the workspace context. For the admin route, the admin
+    needs both a workspace context AND a user grant THERE —
+    if their own user grant in the picked workspace doesn't
+    exist, 400 `admin_lacks_user_grant_for_discovery` so the
+    admin authorizes via Try It's workspace picker first.
 - Call `client.list_tools()`.
 - Update `install.tools_cache`, `install.discovery_status`,
   `install.last_error` per the result.
@@ -518,10 +533,22 @@ POST /api/v1/ws/{ws}/mcp/installs/{install_id}/tools/{tool_name}/invoke
 ```
 
 Behavior:
-- Build the cubepi client per the install + caller's grant. The
-  caller's user grant is preferred where applicable, falling back
-  to workspace / org grant per the existing effective-state rules
-  — same as agent runtime.
+- Build the cubepi client per the install + the effective grant
+  resolved from the install's policy via
+  `MCPEffectiveConnectorService._resolve_grant`. This is the
+  SAME resolution the agent runtime uses, with NO cross-scope
+  fallback:
+  - Org-policy install → uses the org grant. If missing, 400
+    `connector_not_usable` (`reason='missing_org_grant'`).
+  - Workspace-policy install → uses the (install, workspace)
+    grant. If missing, 400 `connector_not_usable`.
+  - User-policy install → uses the (install, workspace, user)
+    grant for the calling user. If missing, 400
+    `connector_not_usable` (`reason='user_needs_connection'`).
+  Falling back across scopes would change the credential
+  boundary vs. agent runtime — a user-policy install would
+  silently use an org or workspace grant the agent itself
+  would never accept.
 - For the **admin route**: the admin viewing an `install_scope =
   'org'` install needs a workspace context for any grant lookup
   that is keyed on workspace (i.e. `workspace`- or `user`-policy
