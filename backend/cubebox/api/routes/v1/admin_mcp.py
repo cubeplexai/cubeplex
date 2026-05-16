@@ -387,6 +387,7 @@ async def admin_org_grant_oauth_start(
         result = await svc.start_oauth_flow(
             install_id=install_id,
             actor_user_id=ctx.user.id,
+            actor_org_id=ctx.org_id,
             grant_scope="org",
             workspace_id=None,
             user_id=None,
