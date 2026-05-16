@@ -1,10 +1,20 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { AlertTriangle, CheckCircle2, Loader2, PauseCircle, Plug, Wrench } from 'lucide-react'
+import {
+  AlertTriangle,
+  ArrowUpCircle,
+  CheckCircle2,
+  Loader2,
+  PauseCircle,
+  Plug,
+  Wrench,
+} from 'lucide-react'
 import { useTranslations } from 'next-intl'
 import {
+  adminPromoteToOrg,
   createApiClient,
+  useOrgAdminFlag,
   useWorkspaceStore,
   wsCreateInstall,
   wsListEffectiveConnectors,
@@ -14,11 +24,13 @@ import {
   type MCPConnectorTemplate,
   type MCPCredentialScope,
   type MCPEffectiveConnector,
+  type PromoteDistribution,
 } from '@cubebox/core'
 
 import { AuthActionBand } from '@/components/mcp/AuthActionBand'
 import { ServerErrorBanner } from '@/components/mcp/detail/ServerErrorBanner'
 import { ToolsPanel } from '@/components/mcp/detail/tools/ToolsPanel'
+import { MCPPromoteDialog } from '@/components/mcp/MCPPromoteDialog'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -189,6 +201,16 @@ function ConnectorDetail({
   const wsRole = useWorkspaceStore((s) => s.workspaces.find((w) => w.id === wsId)?.role)
   const callerRole: 'admin' | 'member' = wsRole === 'admin' ? 'admin' : 'member'
 
+  const orgId = useWorkspaceStore((s) => s.workspaces.find((w) => w.id === wsId)?.org_id ?? null)
+  const isOrgAdmin = useOrgAdminFlag(orgId)
+  const canPromote = install.install_scope === 'workspace' && isOrgAdmin
+  const [promoteOpen, setPromoteOpen] = useState(false)
+
+  async function handlePromote(distribution: PromoteDistribution): Promise<void> {
+    await adminPromoteToOrg(client, installId, distribution)
+    await onChanged()
+  }
+
   async function handleRefresh(): Promise<void> {
     setRefreshing(true)
     setError(null)
@@ -245,11 +267,24 @@ function ConnectorDetail({
             {install.name || connector.template?.name || installId}
           </h3>
           <StatusPill status={statusOf(connector)} />
+          {canPromote ? (
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="ml-auto"
+              onClick={() => setPromoteOpen(true)}
+              data-testid="mcp-promote-menu-item"
+            >
+              <ArrowUpCircle className="mr-1.5 size-3.5" />
+              {t('promoteToOrg')}
+            </Button>
+          ) : null}
           <Button
             type="button"
             size="sm"
             variant="outline"
-            className="ml-auto"
+            className={canPromote ? undefined : 'ml-auto'}
             disabled={refreshing}
             onClick={() => void handleRefresh()}
           >
@@ -329,6 +364,13 @@ function ConnectorDetail({
           />
         </TabsContent>
       </Tabs>
+
+      <MCPPromoteDialog
+        install={install}
+        open={promoteOpen}
+        onOpenChange={setPromoteOpen}
+        onConfirm={handlePromote}
+      />
     </div>
   )
 }

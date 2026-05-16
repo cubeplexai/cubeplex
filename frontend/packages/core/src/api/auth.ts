@@ -6,11 +6,17 @@ export interface RegisterResult {
   default_workspace_id: string
 }
 
+export interface OrgMembership {
+  org_id: string
+  role: string
+}
+
 export interface MeResult {
   id: string
   email: string
   language: string
   needs_org_setup?: boolean
+  org_memberships?: OrgMembership[]
 }
 
 export async function registerUser(

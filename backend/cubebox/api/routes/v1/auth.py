@@ -90,7 +90,7 @@ async def me(
     user: Annotated[User, Depends(current_active_user)],
     session: Annotated[AsyncSession, Depends(get_session)],
     request: Request,
-) -> dict[str, str | bool]:
+) -> dict[str, object]:
     from sqlalchemy import func, select
 
     from cubebox.models import Organization, OrganizationMembership
@@ -112,11 +112,24 @@ async def me(
                 )
             ).scalar_one()
             needs_setup = int(has_membership) == 0
+    membership_rows = (
+        (
+            await session.execute(
+                select(OrganizationMembership).where(
+                    OrganizationMembership.user_id == user.id  # type: ignore[arg-type]
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    org_memberships = [{"org_id": m.org_id, "role": m.role} for m in membership_rows]
     return {
         "id": user.id,
         "email": user.email,
         "language": user.language,
         "needs_org_setup": needs_setup,
+        "org_memberships": org_memberships,
     }
 
 
@@ -125,16 +138,33 @@ async def patch_me(
     user: Annotated[User, Depends(current_active_user)],
     body: Annotated[UserLanguageUpdate, Body()],
     session: Annotated[AsyncSession, Depends(get_session)],
-) -> dict[str, str | bool]:
+) -> dict[str, object]:
+    from sqlalchemy import select
+
+    from cubebox.models import OrganizationMembership
+
     user.language = body.language
     session.add(user)
     await session.commit()
     await session.refresh(user)
+    membership_rows = (
+        (
+            await session.execute(
+                select(OrganizationMembership).where(
+                    OrganizationMembership.user_id == user.id  # type: ignore[arg-type]
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    org_memberships = [{"org_id": m.org_id, "role": m.role} for m in membership_rows]
     return {
         "id": user.id,
         "email": user.email,
         "language": user.language,
         "needs_org_setup": False,
+        "org_memberships": org_memberships,
     }
 
 
