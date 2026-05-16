@@ -266,11 +266,44 @@ class OAuthStartService:
         JSON with keys `client_id` and `client_secret_credential_id` —
         matches what `OAuthTokenManager._post_refresh_grant_endpoint`
         consumes (see token_manager.py:267-289).
+
+        Resolution order (first match wins):
+        1. install.oauth_client_config['client_id'] (already provisioned).
+        2. template.oauth_static_client_id (catalog connector ships its
+           own pre-registered confidential client — common for
+           GitHub/Slack/Google etc. that disable DCR). The plan must
+           copy template.oauth_static_client_id +
+           oauth_static_client_secret_credential_id into the install's
+           oauth_client_config the first time we use them, so subsequent
+           calls don't re-fetch the template row.
+        3. DCR via as_meta.registration_endpoint.
+
+        Failure: raise dcr_unsupported_and_no_static_client only when
+        all three options are exhausted.
         """
         cfg = dict(install.oauth_client_config or {})
         existing_client_id = cfg.get("client_id")
         if isinstance(existing_client_id, str) and existing_client_id:
             return existing_client_id, cfg.get("client_secret_credential_id")
+
+        # Step 2: try the template's static OAuth client.
+        if install.template_id is not None:
+            tpl_repo = MCPConnectorTemplateRepository(self._session)
+            template = await tpl_repo.get(install.template_id)
+            if template is not None and template.oauth_static_client_id:
+                cfg["client_id"] = template.oauth_static_client_id
+                if template.oauth_static_client_secret_credential_id:
+                    cfg["client_secret_credential_id"] = (
+                        template.oauth_static_client_secret_credential_id
+                    )
+                install.oauth_client_config = cfg
+                await install_repo.update(install)
+                return (
+                    template.oauth_static_client_id,
+                    template.oauth_static_client_secret_credential_id,
+                )
+
+        # Step 3: DCR.
         if not as_meta.registration_endpoint:
             raise OAuthStartError("dcr_unsupported_and_no_static_client")
         # DCRClient owns its own httpx.AsyncClient (constructor takes it);
