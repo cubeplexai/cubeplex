@@ -298,9 +298,21 @@ Backend changes needed:
   `template_id: None` (custom), `ws_mcp.py POST /installs` keeps
   the `template_id is required` guard (workspace admins can only
   install from the catalog; custom is org admin only).
-- Existing `MCPConnectorInstallService.create_from_template_for_org`
-  already has a branch for custom — confirm via reading
-  `services/mcp_installs.py:188-280` whether it does.
+- Add a new service method
+  `MCPConnectorInstallService.create_custom_install_for_org`
+  alongside the existing `create_from_template_for_org`. The
+  existing template method dereferences `template.id`,
+  `template.name`, `template.server_url`,
+  `template.supported_auth_methods`, etc. — there is no custom
+  branch today, so relaxing the route alone leaves the service
+  layer with no path to build the install row. The new method
+  accepts the same shape the route sends:
+  `(name, server_url, transport, auth_method,
+   default_credential_policy, headers, auto_enable)` and writes
+  the install with `template_id=None` plus a synthesized
+  `slug` (e.g. `custom-{public_id}`) that the unique
+  partial-index uses. Workspace state fan-out reuses the
+  existing distribution helper.
 
 Schema additions:
 - `AdminCreateInstallIn`: when `template_id is None`, require
@@ -340,9 +352,16 @@ on admin install).
 
 A new entry in the admin/workspace detail panel's overflow menu
 (next to Uninstall): **Promote to org-wide**. Only visible when:
-- The caller is an org admin (workspace settings page won't show
-  this unless the user has org-admin authority on this workspace's
-  org).
+- The caller is an org admin (org-admin role on the install's
+  org). Workspace settings must therefore compute and pass
+  `isOrgAdmin` honestly — the install→auth-handoff spec defaulted
+  it to `false` because that page had no org-admin context for
+  the action band, but the Promote action genuinely needs the
+  real value. New helper hook `useOrgAdminFlag(orgId)` reads from
+  `useAuthStore` / `GET /api/v1/auth/me` (which already returns
+  the caller's org memberships and roles). Workspace settings'
+  detail panel passes the result into the menu's visibility
+  gate.
 - `install.install_scope === 'workspace'`.
 
 New backend route:
@@ -359,11 +378,19 @@ Behavior:
   `install_scope == 'workspace'`, `install_state == 'active'`.
 - Update `install.install_scope = 'org'`, `install.workspace_id =
   None`.
-- Apply distribution per `auto_enable`: same logic as
-  `create_from_template_for_org` (`mode='all'` upserts a
-  `workspace_connector_state` row in every workspace; `'selected'`
-  in the listed ids; `'none'` skips fan-out — only the original
-  workspace keeps its existing state row).
+- Apply distribution per `auto_enable`. Reuses the same per-
+  workspace upsert as `create_from_template_for_org`, BUT the
+  source workspace (the install's pre-promote `workspace_id`)
+  is **excluded** from the fan-out write — its existing state
+  row is preserved untouched, including any override on
+  `credential_policy` or `enabled` (matches §6.4 promise).
+  Modes:
+  - `mode='all'` → upsert state rows in every OTHER workspace
+    in the org (skip source).
+  - `mode='selected'` → upsert in the listed ids, MINUS the
+    source if it appears in the list.
+  - `mode='none'` → no fan-out at all; only the source's
+    pre-existing state row stays.
 - Existing grant for the workspace stays attached at scope
   `workspace`. The admin can later create an org grant (existing
   endpoint).
@@ -491,14 +518,20 @@ id). Try It is for debugging, not a substitute for the agent.
 | 3.3 Test connection | yes | n/a (no custom install flow) | n/a |
 | 3.4 Error banner | yes | yes | yes |
 | 3.5 Custom install | yes | no | no |
-| 3.6 Promote ws → org | yes | no (must escalate) | no |
+| 3.6 Promote ws → org | yes | yes IF org admin too (§3.6) | no |
 | 3.7 Citation editor | yes | no | no |
 | 3.8 Try it | yes | yes | yes (rate-limited) |
 
 The admin-only features (3.3, 3.5, 3.6, 3.7) are gated on
 `isOrgAdmin === true` (caller has `OrgRole.OWNER | ADMIN` on the
-install's org). The workspace settings page passes
-`isOrgAdmin === false` always (it has no org-admin context).
+install's org). For 3.6 Promote specifically, the workspace
+settings page must compute `isOrgAdmin` honestly from
+`GET /api/v1/auth/me` so an org admin viewing a workspace-scope
+install in workspace settings can still reach Promote (which is
+the natural surface for it — the admin list only returns
+org-scope installs). The action band's `isOrgAdmin=false` shortcut
+on workspace settings (from the install→auth-handoff spec) does
+NOT generalize here.
 
 ## 5. Back-end contract
 
