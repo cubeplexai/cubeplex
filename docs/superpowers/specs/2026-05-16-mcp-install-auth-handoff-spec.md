@@ -76,15 +76,23 @@ console, the org-admin bit. The function is centralized so both surfaces agree.
  └──────────────────────────────────────────────────────────────────────┘
 ```
 
-- Shown when `connector.usable === true` AND `connector.credential_source !=
-  null`.
-- `<source>` is one of `Org grant`, `Workspace grant`, `My grant`, or
-  `No credential required` (the `auth_method='none'` case, which renders
-  without the "from …" suffix).
+- Shown when `connector.usable === true`. Two sub-cases:
+  - `credential_availability === 'available'` AND `credential_source !=
+    null` → render "credential from `<source>`" where `<source>` is one of
+    `Org grant`, `Workspace grant`, `My grant` (mapped from the
+    backend's `credential_source` value `org` / `workspace` / `user`; the
+    backend already maps internal `"none"` to JSON `null` in
+    `ws_mcp.py::_dto_to_effective_out`).
+  - `credential_availability === 'not_required'` (i.e.
+    `install.auth_method === 'none'`) → render "No credential required"
+    instead. `credential_source` is `null` on this path; do NOT predicate
+    `ready` on its non-nullness, otherwise the no-auth happy path is
+    excluded.
 - The `Disconnect` menu offers `Remove org grant`, `Remove workspace grant`,
   `Remove my grant` depending on which scopes the caller may revoke. A
   member who only owns a `me` grant sees a single `Remove my grant` button —
-  not a menu.
+  not a menu. When `credential_availability === 'not_required'`, the
+  Disconnect control is omitted entirely (there is no grant to revoke).
 
 ### 3.2 State `needs-action` — caller must authorize
 
@@ -101,10 +109,21 @@ console, the org-admin bit. The function is centralized so both surfaces agree.
 
 - Shown when `connector.credential_availability === 'missing'` AND the caller
   has authority to create the grant at `required_grant_scope` (see §4).
-- `<reason copy>` translates `connector.reason`:
+- `<reason copy>` translates `connector.reason` using the actual reason
+  tokens emitted by `backend/cubebox/mcp/effective.py` (`MCPEffectiveReason`
+  literal: `usable | pending_oauth | missing_org_grant |
+  missing_workspace_grant | user_needs_connection | grant_expired`):
   - `pending_oauth` → "Authorization was started but not finished."
-  - `missing_grant` → "No credential on file yet."
-  - `expired_oauth` → "Your previous authorization expired."
+  - `missing_org_grant` (caller is org admin) → "No org credential on file
+    yet."
+  - `missing_workspace_grant` (caller is workspace admin) → "No workspace
+    credential on file yet."
+  - `user_needs_connection` → "Connect your account to start using this."
+  - `grant_expired` → "The previous authorization expired."
+
+  The `missing_org_grant` / `missing_workspace_grant` reasons also reach
+  callers without authority — those are routed to the `awaiting-others`
+  band in §3.3 with their own copy, not this band.
 - Auth method controls which controls appear:
   - `install.auth_method='oauth'` → only the **Connect with `<Provider>`**
     primary button.
@@ -125,11 +144,16 @@ console, the org-admin bit. The function is centralized so both surfaces agree.
 ```
 
 - Shown when `connector.credential_availability === 'missing'` AND the caller
-  does **not** have authority over `required_grant_scope`. Examples:
-  - Workspace member viewing an org-policy install whose org grant is missing
-    → `<who> = "your organization admin"`.
-  - Workspace member viewing a workspace-policy install whose workspace grant
-    is missing → `<who> = "your workspace admin"`.
+  does **not** have authority over `required_grant_scope`. The reason
+  token drives the copy:
+  - `missing_org_grant` (caller not org admin) → `<who> = "your
+    organization admin"`.
+  - `missing_workspace_grant` (caller not workspace admin) → `<who> =
+    "your workspace admin"`.
+
+  `user_needs_connection` and `grant_expired` never surface here — both
+  are always actionable by the caller (they own the user grant or are the
+  scope-owner whose grant just expired).
 - `[Notify]` is a stub for v1 — disabled with tooltip "Coming soon." Listed
   in the spec for layout completeness; not in MVP scope.
 
@@ -193,10 +217,15 @@ Notes on the admin console row:
   not to an admin alias — there is no admin alias for workspace grants and
   this spec does not add one.
 - An admin viewing an org-policy install still sees the `org` action band on
-  the org-wide install row regardless of lens.
-- If the org-policy install also has *user* policy override for the admin's
-  own membership (rare but legal), only the highest-priority missing scope's
-  band is shown. Priority: `org > workspace > user`.
+  the org-wide install row when `required_grant_scope === 'org'`.
+- `required_grant_scope` is a **single** value resolved by the backend from
+  one effective policy: `workspace_state.credential_policy` when present,
+  otherwise `install.default_credential_policy` (see
+  `backend/cubebox/mcp/effective.py` rules 3-4). There is no simultaneous
+  multi-scope-missing case to disambiguate — exactly one scope is required
+  per (install, workspace) pair. If a workspace overrides an org-policy
+  install down to `user`, the band displayed on the admin's lens row for
+  that workspace becomes the `user` (per-admin) variant, not `org`.
 
 ## 5. End-to-end interaction flows
 
