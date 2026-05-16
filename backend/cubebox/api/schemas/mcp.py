@@ -272,6 +272,14 @@ class PatchWorkspaceStateIn(BaseModel):
     credential_policy: CredentialPolicyLiteral | None = None
 
 
+class PromoteInstallIn(BaseModel):
+    """Body of ``POST /admin/mcp/installs/{id}/promote-to-org``."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    distribution: AutoEnableIn = Field(default_factory=lambda: AutoEnableIn(mode="none"))
+
+
 class TestConnectionIn(BaseModel):
     """Body of ``POST /admin/mcp/test-connection``.
 

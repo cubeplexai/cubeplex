@@ -26,6 +26,7 @@ from cubebox.api.schemas.mcp import (
     MCPOAuthStartOut,
     MCPToolEntry,
     PatchInstallIn,
+    PromoteInstallIn,
     TestConnectionIn,
     TestConnectionOut,
 )
@@ -341,6 +342,46 @@ async def admin_refresh_discovery(
     refreshed = await install_repo.get(install_id)
     assert refreshed is not None
     return _install_to_out(refreshed, include_tool_citations=True)
+
+
+@router.post(
+    "/installs/{install_id}/promote-to-org",
+    response_model=MCPConnectorInstallOut,
+)
+async def admin_promote_install_to_org(
+    install_id: str,
+    body: PromoteInstallIn,
+    svc: Annotated[MCPConnectorInstallService, Depends(get_admin_install_service)],
+    ctx: Annotated[RequestContext, Depends(get_admin_request_context)],
+    audit: Annotated[AuditSink, Depends(get_audit_sink)],
+) -> MCPConnectorInstallOut:
+    """Promote a workspace-scope install to org scope.
+
+    The source workspace's existing state row is preserved — it is
+    explicitly excluded from the fan-out so the workspace's
+    pre-promote credential policy doesn't get clobbered.
+    ``auto_enroll_new_workspaces`` is set per ``distribution.mode``:
+    ``True`` for ``mode='all'``, ``False`` otherwise.
+    """
+    try:
+        install = await svc.promote_workspace_install_to_org(
+            install_id=install_id,
+            distribution=body.distribution.model_dump(),
+        )
+    except ValueError as exc:
+        code = str(exc)
+        status_code = 409 if code == "install_already_org_scope" else 400
+        if code == "connector_install_not_found":
+            status_code = 404
+        raise HTTPException(status_code, detail={"code": code}) from exc
+    await audit.record(
+        event="mcp.install.promoted",
+        actor_user_id=ctx.user.id,
+        org_id=ctx.org_id,
+        target_id=install_id,
+        details={"distribution_mode": body.distribution.mode},
+    )
+    return _install_to_out(install, include_tool_citations=True)
 
 
 @router.patch(

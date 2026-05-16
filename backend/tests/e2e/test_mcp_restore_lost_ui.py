@@ -425,3 +425,86 @@ async def test_admin_create_custom_install_rejects_credential_plaintext_with_sco
     )
     assert res.status_code == 422, res.text
     assert "credential_plaintext_only_valid_for_org_policy" in res.text
+
+
+# ---------------------------------------------------------------------------
+# Task 6 — Promote ws → org.
+# ---------------------------------------------------------------------------
+
+
+@pytest_asyncio.fixture
+async def seeded_workspace_install_with_state(
+    admin_client: tuple[httpx.AsyncClient, str],
+    noauth_template_id: str,
+) -> tuple[str, str, str]:
+    """Admin installs a no-auth template into their workspace.
+
+    Returns ``(install_id, source_workspace_id, source_policy)``.
+    """
+    client, workspace_id = admin_client
+    res = await client.post(
+        f"/api/v1/ws/{workspace_id}/mcp/installs",
+        json={
+            "template_id": noauth_template_id,
+            "install_scope": "workspace",
+            "auth_method": "none",
+            "default_credential_policy": "none",
+        },
+    )
+    assert res.status_code == 201, res.text
+    body = res.json()
+    return body["install_id"], workspace_id, body["default_credential_policy"]
+
+
+@pytest_asyncio.fixture
+async def extra_workspace_id(admin_client: tuple[httpx.AsyncClient, str]) -> str:
+    """Create a second workspace inside the admin's org and return its id."""
+    client, ws_id = admin_client
+    org_id, _user_id = await _resolve_org_user_for_client(client, ws_id)
+    res = await client.post(
+        "/api/v1/workspaces",
+        json={"name": "promote-extra", "org_id": org_id},
+    )
+    assert res.status_code == 201, res.text
+    return res.json()["id"]
+
+
+async def test_promote_install_writes_org_scope_and_excludes_source(
+    admin_client: tuple[httpx.AsyncClient, str],
+    seeded_workspace_install_with_state: tuple[str, str, str],
+    extra_workspace_id: str,
+) -> None:
+    """Promote a workspace install to org with mode='all' must:
+
+    * flip ``install_scope`` to ``'org'``
+    * clear ``install.workspace_id``
+    * upsert state rows in OTHER workspaces
+    * NOT overwrite the source workspace's existing state row
+    * set ``auto_enroll_new_workspaces=true``
+    """
+    client, _ws = admin_client
+    install_id, source_ws, source_state_policy = seeded_workspace_install_with_state
+    other_ws = extra_workspace_id
+
+    res = await client.post(
+        f"/api/v1/admin/mcp/installs/{install_id}/promote-to-org",
+        json={"distribution": {"mode": "all"}},
+    )
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body["install_scope"] == "org"
+    assert body["workspace_id"] is None
+    assert body["auto_enroll_new_workspaces"] is True
+
+    # Source workspace's state row preserved untouched.
+    state_res = await client.get(f"/api/v1/ws/{source_ws}/mcp/connectors")
+    assert state_res.status_code == 200, state_res.text
+    sources = [c for c in state_res.json()["items"] if c["install"]["install_id"] == install_id]
+    assert len(sources) == 1
+    assert sources[0]["workspace_state"]["credential_policy"] == source_state_policy
+
+    # Other workspace got a state row.
+    other_res = await client.get(f"/api/v1/ws/{other_ws}/mcp/connectors")
+    assert other_res.status_code == 200, other_res.text
+    others = [c for c in other_res.json()["items"] if c["install"]["install_id"] == install_id]
+    assert len(others) == 1
