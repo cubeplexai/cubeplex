@@ -372,6 +372,27 @@ class MCPCredentialGrantRepository:
             )
         return (await self.session.execute(stmt)).scalar_one_or_none()
 
+    async def get_for_scope(
+        self,
+        *,
+        install_id: str,
+        grant_scope: str,
+        workspace_id: str | None,
+        user_id: str | None,
+    ) -> MCPCredentialGrant | None:
+        """Single grant per (install, scope-shape).
+
+        Org grants ignore both ``workspace_id`` and ``user_id``; workspace
+        grants ignore ``user_id``; user grants require both.
+        """
+        if grant_scope == "org":
+            return await self.get_org_grant(install_id)
+        if grant_scope == "workspace":
+            assert workspace_id is not None, "workspace grant requires workspace_id"
+            return await self.get_workspace_grant(install_id, workspace_id)
+        assert workspace_id is not None and user_id is not None, "user grant requires both"
+        return await self.get_user_grant(install_id, user_id, workspace_id=workspace_id)
+
     async def delete_scope(
         self,
         install_id: str,
