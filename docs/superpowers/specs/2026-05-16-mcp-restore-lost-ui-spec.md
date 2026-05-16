@@ -1,0 +1,541 @@
+# MCP Lost-UI Restoration (Interaction Spec)
+
+**Status:** Draft for review
+**Author:** xfgong
+**Date:** 2026-05-16
+**Scope:** Restoration of MCP management UI / endpoints that were
+removed in commit `243e6396` (legacy catalog/server/override cleanup)
+but should still exist on top of the new four-layer data model
+(`template / install / state / grant`).
+
+This spec does NOT change the four-layer data model. It only adds
+back surfaces that consume fields already on `MCPConnectorInstall`
+(`tools_cache`, `tool_citations`, `last_error`, `discovery_status`)
+and one missing route shape (`install_scope` promotion + custom
+install creation + refresh + test-connection).
+
+## 1. Problem
+
+The four-layer refactor deleted ~21k lines while moving to the new
+data model. Some deletions were correct (legacy `mcp_servers` table,
+the `workspace_mcp_overrides` shim). Some were UI/route layers that
+have no equivalent on the four-layer model yet, so the regression is
+silent: the data is still in the DB, but the user can no longer see
+or trigger it.
+
+User-visible regressions:
+
+- **No tool list.** Can't see what tools a connector exposes,
+  search them, or inspect their JSON Schema. The data is on
+  `install.tools_cache`; nothing renders it.
+- **No "Refresh tools" button.** Tools are only re-discovered the
+  next time an agent run touches the connector. Admins/users
+  can't force a refresh from the UI.
+- **No "Test connection" check.** When creating a custom
+  connector the admin has no way to verify the URL + auth are
+  reachable before saving.
+- **No citation mapping editor.** `install.tool_citations` JSON
+  is on the model and `tool_citations` is wired into the agent
+  runtime (see `cubebox.middleware.citation`), but the UI to
+  set it has been gone since `243e6396`.
+- **No custom connector creation.** Catalog-installs require a
+  `template_id`, but the data model has always allowed
+  `template_id=None`. There is no UI path (and no API path —
+  `ws_mcp.py` rejects `template_id is None` at line 132-143)
+  to make a one-off custom install.
+- **No "Promote to org-wide" flow.** A workspace admin who
+  realizes other workspaces would also want a connector has no
+  way to lift the install scope from `workspace` to `org`. Old
+  flow was `POST /servers/{id}/promote-to-org` (deleted).
+- **Discovery errors are buried.** The install has a
+  `last_error` field, but the only place it surfaces is a single
+  line in the Overview tab's `dl`. There used to be an
+  attention-getting `ServerErrorBanner` that surfaced this at
+  the top of the detail panel.
+
+## 2. Mental model
+
+```
+ ┌──────────────────────────────────────────────────────────────────────┐
+ │ What the user wants to do with a connector once it's installed       │
+ │                                                                       │
+ │  ┌─────────────┐    ┌─────────────┐    ┌─────────────┐               │
+ │  │  see tools  │    │  fix errors │    │   tune it   │               │
+ │  │ (Tier 1.1)  │    │ (Tier 1.2)  │    │ (Tier 2.4)  │               │
+ │  └──────┬──────┘    └──────┬──────┘    └──────┬──────┘               │
+ │         ↓                  ↓                   ↓                       │
+ │    list+detail+      ServerErrorBanner    citation editor             │
+ │    refresh button     +  Refresh           per tool                   │
+ │                                                                       │
+ │  ┌─────────────┐    ┌─────────────┐    ┌─────────────┐               │
+ │  │ test before │    │ add a one- │    │ promote up  │               │
+ │  │   saving    │    │off install │    │  the scope  │               │
+ │  │ (Tier 1.3)  │    │ (Tier 2.5) │    │ (Tier 2.6) │               │
+ │  └──────┬──────┘    └─────┬──────┘    └─────┬──────┘               │
+ │         ↓                  ↓                  ↓                       │
+ │    test-connection    custom-install     promote dialog               │
+ │    button              panel              (ws→org)                    │
+ └──────────────────────────────────────────────────────────────────────┘
+```
+
+All of these are **read-only consumers of the four-layer model** or
+**new write endpoints whose effect is captured by existing four-layer
+state** (e.g. promote = update `install.install_scope`).
+
+## 3. The eight features
+
+### 3.1 Tools tab — list, detail, schema view (Tier 1.1)
+
+```
+ ┌────────────────────────┬─────────────────────────────────────────┐
+ │ ┌────────────────────┐ │  search_repos                            │
+ │ │ 🔍 filter tools    │ │  Search GitHub repositories.             │
+ │ └────────────────────┘ │                                          │
+ │                        │  ┌─[Schema]─[Raw JSON]──────────────┐    │
+ │  ▸ search_repos        │  │ query: string  *required          │    │
+ │    Search repos…       │  │   Query string. Example: cubebox  │    │
+ │    2 args · 1 required │  │ sort: enum  optional              │    │
+ │  ▸ create_issue        │  │   Sort order. One of "stars",     │    │
+ │    Create a new issue. │  │   "forks", "updated".             │    │
+ │    4 args · 2 required │  │ per_page: integer  optional       │    │
+ │  ▸ list_pull_requests  │  │   Default 30. Max 100.            │    │
+ │    …                   │  └───────────────────────────────────┘    │
+ │                        │                                          │
+ │  12 of 23 tools        │                                          │
+ └────────────────────────┴─────────────────────────────────────────┘
+```
+
+New Tabs tab "Tools" mounted between Overview and Workspaces in
+`MCPAdminDetailPanel` (and same shape inside workspace settings
+`ConnectorDetail`). Master-detail layout — left rail is filtered
+list of `install.tools_cache[]`, right pane is the selected tool's
+detail.
+
+- **Search** is client-side over `tool.name + tool.description`.
+- **Detail view** has two sub-tabs:
+  - **Schema** — pretty-rendered `tool.input_schema` with the
+    `SchemaParameterRow` layout (name + type badge + required
+    pill + description + nested children for object types).
+  - **Raw JSON** — collapsed JSON of the schema, for users who
+    want to copy-paste into their own tooling.
+- **No "Try it"** sub-tab in this round (see §3.8).
+- Empty state: "Discovery has not run yet — click Refresh tools."
+- Filtered-empty state: "No tools match 'foo'."
+
+Data source: `MCPEffectiveConnector.install.tools_cache` (admin
+view uses `MCPConnectorInstall.tools_cache` directly via the
+admin install fetch). No new endpoint.
+
+### 3.2 Refresh tools button (Tier 1.2)
+
+```
+ ┌──────────────────────────────────────────────────────────────────┐
+ │ [⟳ Refresh tools]    ← already in the header, currently just
+ │                        re-fetches the list. Spec: actually
+ │                        trigger discovery on the backend.
+ └──────────────────────────────────────────────────────────────────┘
+```
+
+The header already has a "Refresh tools" button in
+`MCPAdminDetailPanel.tsx:147-156`, but `handleRefresh` calls
+`onRefresh()` which only re-fetches the connector list. This
+spec changes the wiring so the button hits a new backend
+endpoint that re-runs discovery against the MCP server, then
+re-fetches.
+
+New backend route:
+
+```
+POST /api/v1/admin/mcp/installs/{install_id}/refresh-discovery   (admin)
+POST /api/v1/ws/{ws}/mcp/installs/{install_id}/refresh-discovery (ws member)
+```
+
+Both return the updated `MCPConnectorInstallOut`. Behavior:
+- Resolve install, build the cubepi client per the install's
+  auth (using whatever grant is currently active for the
+  caller).
+- Call `client.list_tools()`.
+- Update `install.tools_cache`, `install.discovery_status`,
+  `install.last_error` per the result.
+- Return the updated install row.
+
+UX:
+- Button shows a spinner.
+- On success: toast "Discovered N tools" — the Tools tab
+  re-renders with the new list.
+- On failure: `last_error` populates and the Error banner
+  (§3.6) shows the message.
+
+Authority:
+- Admin route accepts any org admin.
+- Workspace route accepts any workspace member (matches read
+  authority — discovery is idempotent and the caller's grant
+  is what's used).
+
+### 3.3 Test connection (Tier 1.3)
+
+```
+ ┌──────────────────────────────────────────────────────────────────┐
+ │  Add custom connector                                            │
+ │  ─────────────────────────                                       │
+ │  Server URL    [ https://example.com/mcp                      ]  │
+ │  Transport     ( http )  ( sse )                                 │
+ │  Auth method   ( none ) ( static ) ( oauth )                     │
+ │  Static token  [ ●●●●●●●●●●●●●●●●●●                          ]   │
+ │                                                                  │
+ │  [ Test connection ]                                             │
+ │      ✓ Reachable · 12 tools discovered                           │
+ │                                                                  │
+ │  [ Cancel ]    [ Save install ]                                  │
+ └──────────────────────────────────────────────────────────────────┘
+```
+
+Lives inside the Custom Install panel (§3.5). Optional — admin
+can save without testing, but the button surfaces a clear
+"this will work" / "this won't work" signal before commit.
+
+New backend route:
+
+```
+POST /api/v1/admin/mcp/test-connection
+  body: { server_url, transport, auth_method, credential_plaintext?, headers? }
+  → { ok, tool_count, error_code?, error_message? }
+```
+
+The route does NOT write to the DB. It:
+1. Builds a transient cubepi client from the body fields.
+2. Calls `client.list_tools()` with a 10-second timeout.
+3. Returns `(ok, tool_count)` or `(ok=false, error)`.
+
+Authority: org admin only. Workspace settings has no equivalent
+because workspace settings doesn't yet have a custom-install
+flow (admins create installs).
+
+### 3.4 Discovery error banner (Tier 2.7)
+
+```
+ ┌──────────────────────────────────────────────────────────────────┐
+ │ ⚠  Discovery failed · 2 minutes ago                              │
+ │     ConnectError: getaddrinfo ENOTFOUND example.invalid          │
+ │     Last successful discovery: 12 hours ago.            [⟳ Retry] │
+ └──────────────────────────────────────────────────────────────────┘
+```
+
+Banner inserted right under the title row when
+`install.discovery_status === 'error'`. Reads `install.last_error`
+verbatim. The Retry button is a shortcut to §3.2.
+
+Cleanup: today's overview tab's `dl` shows
+`discoveryStatus: error` as a tiny key-value row. The banner is
+the same data, just more visible. We keep the dl row for
+non-error states (lets admins see when last discovery succeeded).
+
+No new backend.
+
+### 3.5 Custom connector creation (Tier 2.5)
+
+```
+ ┌──────────────────────────────────────────────────────────────────┐
+ │  ←  Add custom connector                                         │
+ │                                                                  │
+ │  Name           [ My internal MCP                              ] │
+ │  Server URL     [ https://mcp.internal.corp/mcp                ] │
+ │  Transport      ( http ▼ )                                       │
+ │  Auth method    ( static ▼ )                                     │
+ │  Credential     [ ●●●●●●●●●●●●●●●●●●●●                         ] │
+ │  Policy         ( org / workspace / user )                       │
+ │                                                                  │
+ │  [ Test connection ]   ✓ Reachable · 7 tools                     │
+ │                                                                  │
+ │  [ Cancel ]              [ Save install ]                        │
+ └──────────────────────────────────────────────────────────────────┘
+```
+
+New entry in the admin templates sidebar (under
+"Connector templates" section): **+ Add custom connector**. Clicking
+opens a panel (replacing the install panel) with the form above.
+
+Backend changes needed:
+- `ws_mcp.py:132-143` currently rejects `template_id is None`. Lift
+  that to ONLY admin route: `admin_mcp.py POST /installs` accepts
+  `template_id: None` (custom), `ws_mcp.py POST /installs` keeps
+  the `template_id is required` guard (workspace admins can only
+  install from the catalog; custom is org admin only).
+- Existing `MCPConnectorInstallService.create_from_template_for_org`
+  already has a branch for custom — confirm via reading
+  `services/mcp_installs.py:188-280` whether it does.
+
+Schema additions:
+- `AdminCreateInstallIn`: when `template_id is None`, require
+  `name`, `server_url`, `transport`. `headers`, `default_credential_policy`
+  optional. Cross-field validator.
+- Per `auth_method='static'` + saved-from-create-form, the
+  endpoint also accepts an optional `credential_plaintext` on the
+  same POST so the static grant is created in one round trip
+  instead of two. (For OAuth, the user still goes through the
+  OAuth pop-up after install creation as today.)
+
+The custom install reuses the action band for credential
+authorization just like a catalog install (§install→auth handoff
+spec). The only difference is no template name in the title.
+
+Auto-enable distribution is supported (the existing
+`auto_enable: { mode: 'all' | 'selected' | 'none' }` body shape
+on admin install).
+
+### 3.6 Promote workspace → org (Tier 2.6)
+
+```
+ ┌──────────────────────────────────────────────────────────────────┐
+ │  Promote "My internal MCP" to org-wide?                          │
+ │  ────────────────────────────────────────                        │
+ │  This install will become available to all workspaces in your    │
+ │  org. The existing grant stays attached to your workspace; you   │
+ │  can leave it or convert to an org-scope grant later.            │
+ │                                                                  │
+ │  Distribute to                                                   │
+ │  ( ) All current and future workspaces                           │
+ │  (●) Only this workspace (the others can opt in)                 │
+ │                                                                  │
+ │  [ Cancel ]                                  [ Promote install ] │
+ └──────────────────────────────────────────────────────────────────┘
+```
+
+A new entry in the admin/workspace detail panel's overflow menu
+(next to Uninstall): **Promote to org-wide**. Only visible when:
+- The caller is an org admin (workspace settings page won't show
+  this unless the user has org-admin authority on this workspace's
+  org).
+- `install.install_scope === 'workspace'`.
+
+New backend route:
+
+```
+POST /api/v1/admin/mcp/installs/{install_id}/promote-to-org
+  body: { distribution: { mode: "all" | "selected" | "none",
+                          workspace_ids?: list[str] } }
+  → MCPConnectorInstallOut
+```
+
+Behavior:
+- Validate install exists, is in caller's org, currently
+  `install_scope == 'workspace'`, `install_state == 'active'`.
+- Update `install.install_scope = 'org'`, `install.workspace_id =
+  None`.
+- Apply distribution per `auto_enable`: same logic as
+  `create_from_template_for_org` (`mode='all'` upserts a
+  `workspace_connector_state` row in every workspace; `'selected'`
+  in the listed ids; `'none'` skips fan-out — only the original
+  workspace keeps its existing state row).
+- Existing grant for the workspace stays attached at scope
+  `workspace`. The admin can later create an org grant (existing
+  endpoint).
+- Return the updated install.
+
+Edge cases:
+- Caller is workspace admin but NOT org admin → 403. The promote
+  button must be hidden in that case to avoid the dead end.
+- Concurrent promote (two admins) → the unique partial index on
+  (`org_id, server_url_hash, install_scope='org'`) catches the
+  duplicate; second caller gets a clean 409 with
+  `code='org_install_already_exists'`.
+
+### 3.7 Citation mapping editor (Tier 2.4)
+
+```
+ ┌─────────────────────────┬─────────────────────────────────────────┐
+ │  Tools                  │  search_repos                            │
+ │  ─────                  │  ──────────                              │
+ │  ▸ search_repos    ✓    │  Citation source                         │
+ │  ▸ create_issue   —    │  ( web ) ( document ) ( api )            │
+ │  ▸ list_pull_req…  ✓    │                                          │
+ │                         │  Content type                            │
+ │                         │  ( json ) ( text ) ( html )              │
+ │                         │                                          │
+ │                         │  Content field                           │
+ │                         │  [ items[].body                        ] │
+ │                         │                                          │
+ │                         │  Field mapping                           │
+ │                         │  title    [ items[].title              ] │
+ │                         │  url      [ items[].html_url           ] │
+ │                         │  snippet  [ items[].description        ] │
+ │                         │                                          │
+ │                         │     ✓ Mapped ·  [Copy from peer ▾]       │
+ │                         │                                          │
+ │                         │  [ Reset ]              [ Save mapping ] │
+ └─────────────────────────┴─────────────────────────────────────────┘
+```
+
+New tab "Citations" between "Tools" and "Workspaces" in
+`MCPAdminDetailPanel`, hidden from non-admin workspace member view.
+Lists every tool from `install.tools_cache`. Selecting a tool shows
+its citation config — read from `install.tool_citations[<tool_name>]`.
+
+Backend changes:
+- Add `PUT /api/v1/admin/mcp/installs/{install_id}/tool-citations`
+  body: `{ tool_name: str, config: CitationConfigJSON | null }`.
+  Sets / clears one tool's mapping. Returns the updated install.
+- Existing `tool_citations: dict[str, dict]` JSON field is the
+  source of truth; the route is a thin upsert into that dict.
+
+UX rules:
+- "Mapped" checkmark on a tool name in the left rail iff there's
+  a non-null config for that tool.
+- "Copy from peer" pulls the existing config of another install
+  that has the same `tool.name`. Peers come from the same org's
+  active installs. Helpful when a team has a Notion-style
+  connector configured and wants to reuse the mapping shape on a
+  different deployment of the same template.
+- "Reset" sends `config: null` (clears the row).
+- This editor lives ONLY in the admin detail panel. Workspace
+  settings users see citations via the agent at runtime but can't
+  edit them.
+
+### 3.8 "Try it" view (Tier 3.10)
+
+```
+ ┌──────────────────────────────────────────────────────────────────┐
+ │  Try it · search_repos                                           │
+ │  ────────────────────                                            │
+ │                                                                  │
+ │  Arguments                                                       │
+ │  query   * [ cubebox                                          ]  │
+ │  sort      [ stars ▼ ]                                           │
+ │  per_page  [ 10                                                ] │
+ │                                                                  │
+ │  [ ▶ Invoke ]                                                    │
+ │                                                                  │
+ │  Result · 320 ms                                                 │
+ │  ┌──────────────────────────────────────────────────────────┐    │
+ │  │ { "items": [ { "name": "xfgong/cubebox", "stargazers": …│    │
+ │  │ ...                                                       │    │
+ │  └──────────────────────────────────────────────────────────┘    │
+ │                                                                  │
+ │  [ Copy result ]   [ Clear ]                                     │
+ └──────────────────────────────────────────────────────────────────┘
+```
+
+Third sub-tab inside the Tools detail pane (alongside Schema +
+Raw JSON). Lets the user invoke the tool from the UI for debugging
+the connector.
+
+New backend route:
+
+```
+POST /api/v1/ws/{ws}/mcp/installs/{install_id}/tools/{tool_name}/invoke
+  body: { arguments: dict }
+  → { ok, result?, error?, duration_ms }
+```
+
+Behavior:
+- Build the cubepi client per the install + caller's grant (the
+  test invocation uses the caller's user grant where applicable,
+  not a system grant — same as agent runtime).
+- 10-second timeout.
+- Returns `result` JSON (whatever the tool returned) or `error`
+  string.
+- Audit logged: `mcp.tool.invoked` with `(install_id, tool_name,
+  workspace_id, user_id)` so a "free-form invoke" surface has a
+  trace.
+
+Authority: any workspace member with a grant that makes the
+connector `usable`. If the connector is not `usable`, the Invoke
+button is disabled with tooltip "Authorize the connector first."
+
+Rate-limit: 30 invocations / minute / user (slowapi key on user
+id). Try It is for debugging, not a substitute for the agent.
+
+## 4. Caller authority matrix
+
+| Feature | Org admin (admin page) | Workspace admin (ws settings) | Workspace member (ws settings) |
+| --- | --- | --- | --- |
+| 3.1 Tools tab — view | yes | yes | yes |
+| 3.2 Refresh tools | yes | yes | yes (per spec §3.2) |
+| 3.3 Test connection | yes | n/a (no custom install flow) | n/a |
+| 3.4 Error banner | yes | yes | yes |
+| 3.5 Custom install | yes | no | no |
+| 3.6 Promote ws → org | yes | no (must escalate) | no |
+| 3.7 Citation editor | yes | no | no |
+| 3.8 Try it | yes | yes | yes (rate-limited) |
+
+The admin-only features (3.3, 3.5, 3.6, 3.7) are gated on
+`isOrgAdmin === true` (caller has `OrgRole.OWNER | ADMIN` on the
+install's org). The workspace settings page passes
+`isOrgAdmin === false` always (it has no org-admin context).
+
+## 5. Back-end contract
+
+| Endpoint | New / repurposed | Authority |
+| --- | --- | --- |
+| `POST /admin/mcp/installs/{id}/refresh-discovery` | New | org admin |
+| `POST /ws/{ws}/mcp/installs/{id}/refresh-discovery` | New | ws member |
+| `POST /admin/mcp/test-connection` | New | org admin |
+| `POST /admin/mcp/installs` with `template_id=None` | Repurposed shape | org admin |
+| `POST /admin/mcp/installs/{id}/promote-to-org` | New | org admin |
+| `PUT /admin/mcp/installs/{id}/tool-citations` | New | org admin |
+| `POST /ws/{ws}/mcp/installs/{id}/tools/{tool}/invoke` | New | ws member, rate-limited |
+
+All new endpoints return the standard error envelope (422 / 400
+/ 404 / 409 with `{ "code": "..." }`).
+
+## 6. Edge cases
+
+1. **Refresh discovery while a previous discovery is in flight.**
+   We use an advisory lock keyed on `install_id`. Second call
+   returns 409 `discovery_in_progress`. Frontend disables the
+   button while one is pending and re-enables on response.
+
+2. **Test connection with credential_plaintext but auth_method='none'.**
+   422 — body validation rejects, mirroring the existing
+   credential_policy cross-field check.
+
+3. **Custom install with a server_url that collides with an
+   existing org-scope install.** The unique partial index
+   (`org_id, server_url_hash`) catches it. 409
+   `org_install_already_exists`.
+
+4. **Promote where the workspace state row's `credential_policy`
+   has been overridden to `user`.** Distribution honors the
+   existing override — only the other workspaces' fan-out state
+   rows use the install's `default_credential_policy`. The
+   originating workspace's row is left untouched.
+
+5. **Citation editor — tool removed from tools_cache after a
+   discovery refresh.** The existing config for that tool name
+   in `tool_citations` is preserved (not auto-pruned) so a
+   subsequent re-add of the tool keeps the user's mapping. UI
+   shows a "Tool currently missing" note next to such configs.
+
+6. **Try It while the grant is expired.** Backend's existing
+   `OAuthTokenManager.get_access_token` rotates first; if
+   refresh fails, the invoke returns
+   `error='credential_expired'` and the action band's
+   `grant_expired` state surfaces on the next list refresh.
+
+7. **Discovery race + tools_cache.** If two refresh calls race
+   and the advisory lock is bypassed (e.g. infra glitch), the
+   newer write wins. tools_cache is a JSON list, not append-only;
+   the older result loses cleanly.
+
+## 7. What this spec is NOT
+
+- Not a redesign of the four-layer data model. All seven features
+  are read-only consumers or single-row writes to existing
+  columns.
+- Not a server "hero header" redesign (Tier 3.8 — out of scope
+  per user direction).
+- Not a re-add of the legacy server / catalog / override stack.
+  Anywhere this spec uses the word "server" or "MCP server" it
+  means the live remote MCP server addressable by `install.server_url`,
+  not the deleted `mcp_servers` table.
+- Not a multi-tool invocation playground. Try It is one tool at
+  a time, no chaining.
+
+## 8. Future work (deferred)
+
+- Visual hero header (`ServerHero` equivalent) with template logo
+  + docs link.
+- Tool chaining playground.
+- Org-level citation defaults that workspaces inherit
+  (currently per-install only).
+- Bulk re-discovery across all installs (cron-style admin tool).
