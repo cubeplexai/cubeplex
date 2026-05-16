@@ -420,19 +420,42 @@ class DiscoveryResult:
 def _build_runtime_spec_for_discovery(install, grant):
     """Builds the MCPRuntimeConnectorSpec shape that
     _resolve_headers_from_spec expects without going through the
-    full effective-state list (which the caller already computed)."""
-    from cubebox.mcp.cubepi_runtime import MCPRuntimeConnectorSpec
+    full effective-state list (which the caller already computed).
+
+    Field accounting (matches effective.py:MCPRuntimeConnectorSpec):
+    - `grant_scope` has NO default — must be supplied. For
+      `auth_method='none'` it's None; otherwise read from the grant.
+    - `tool_citations` has NO default; pass `install.tool_citations`
+      so the loader can wire citations even though discovery itself
+      doesn't need them.
+    - `grant` (the live MCPCredentialGrant row) MUST be copied through
+      because OAuthTokenManager refresh paths mutate it via
+      grant_repo.update; passing None for an OAuth install with a
+      refresh credential breaks token rotation.
+    - `oauth_client_config` carries `client_id` /
+      `client_secret_credential_id` that the OAuth refresh needs;
+      copy `install.oauth_client_config` so silent re-auth has the
+      same context as the runtime.
+    """
+    from cubebox.mcp.effective import MCPRuntimeConnectorSpec
     return MCPRuntimeConnectorSpec(
         install_id=install.id,
         name=install.name,
         server_url=install.server_url,
         transport=install.transport,
         auth_method=install.auth_method,
+        grant_scope=(grant.grant_scope if grant is not None else None),
         credential_id=(grant.credential_id if grant is not None else None),
         refresh_credential_id=(grant.refresh_credential_id if grant is not None else None),
-        headers=install.headers or {},
+        tool_citations=dict(install.tool_citations or {}),
+        tools_cache=list(install.tools_cache or []),
+        headers=dict(install.headers or {}),
         timeout=install.timeout,
-        tool_citations={},  # not needed for discovery
+        template_id=install.template_id,
+        org_id=install.org_id,
+        workspace_id=install.workspace_id or "",
+        grant=grant,
+        oauth_client_config=dict(install.oauth_client_config or {}),
     )
 
 
@@ -1491,13 +1514,21 @@ async def ws_invoke_tool(
     svc: Annotated[MCPConnectorInstallService, Depends(get_ws_install_service)],
     effective_svc: Annotated[MCPEffectiveConnectorService, Depends(get_ws_effective_service)],
     ctx: Annotated[RequestContext, Depends(require_member)],
+    session: Annotated[AsyncSession, Depends(get_session)],
     cred_service: Annotated[CredentialService, Depends(get_credential_service)],
     signer: Annotated[MCPUserTokenSigner, Depends(get_user_token_signer)],
     token_mgr: Annotated[OAuthTokenManager, Depends(get_oauth_token_manager)],
-    grant_repo: Annotated[MCPCredentialGrantRepository, Depends(get_grant_repo)],
     _rate_key_user: Annotated[User, Depends(_set_invoke_user_id)],
     audit: Annotated[AuditSink, Depends(get_audit_sink)],
 ) -> ToolInvokeOut:
+    # Build a workspace-scoped grant repo directly. `get_grant_repo`
+    # in mcp/dependencies.py depends on `get_admin_request_context`
+    # (org-admin gated), so wiring it here would 403 ordinary
+    # workspace members — but the spec marks this route as
+    # accessible to any workspace member (`require_member`). The
+    # grant repo only needs (session, org_id) and we already have
+    # both from the request context.
+    grant_repo = MCPCredentialGrantRepository(session, org_id=ctx.org_id)
     install = await svc._install_repo.get(install_id)
     if install is None:
         raise HTTPException(404, detail={"code": "mcp_install_not_found"})

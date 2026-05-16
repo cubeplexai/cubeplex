@@ -29,6 +29,7 @@ from cubebox.api.schemas.mcp import (
     PromoteInstallIn,
     TestConnectionIn,
     TestConnectionOut,
+    ToolCitationUpsertIn,
 )
 from cubebox.audit.sink import AuditSink
 from cubebox.auth.context import RequestContext
@@ -382,6 +383,33 @@ async def admin_promote_install_to_org(
         details={"distribution_mode": body.distribution.mode},
     )
     return _install_to_out(install, include_tool_citations=True)
+
+
+@router.put(
+    "/installs/{install_id}/tool-citations",
+    response_model=MCPConnectorInstallOut,
+)
+async def admin_upsert_tool_citation(
+    install_id: str,
+    body: ToolCitationUpsertIn,
+    svc: Annotated[MCPConnectorInstallService, Depends(get_admin_install_service)],
+    _ctx: Annotated[RequestContext, Depends(get_admin_request_context)],
+) -> MCPConnectorInstallOut:
+    """Upsert or clear one tool's citation mapping on an install.
+
+    ``config=None`` clears the entry; a dict upserts it.
+    """
+    install = await svc._install_repo.get(install_id)
+    if install is None:
+        raise HTTPException(404, detail={"code": "mcp_install_not_found"})
+    current = dict(install.tool_citations or {})
+    if body.config is None:
+        current.pop(body.tool_name, None)
+    else:
+        current[body.tool_name] = body.config
+    install.tool_citations = current
+    saved = await svc._install_repo.update(install)
+    return _install_to_out(saved, include_tool_citations=True)
 
 
 @router.patch(

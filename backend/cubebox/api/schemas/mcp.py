@@ -272,6 +272,20 @@ class PatchWorkspaceStateIn(BaseModel):
     credential_policy: CredentialPolicyLiteral | None = None
 
 
+class ToolCitationUpsertIn(BaseModel):
+    """Body of ``PUT /admin/mcp/installs/{id}/tool-citations``.
+
+    Sending ``config=None`` clears the entry for ``tool_name``; a non-null
+    dict upserts the config as-is. The agent runtime validates the dict
+    shape via :class:`CitationConfig` at tool-load time.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    tool_name: str
+    config: dict[str, Any] | None = None
+
+
 class PromoteInstallIn(BaseModel):
     """Body of ``POST /admin/mcp/installs/{id}/promote-to-org``."""
 

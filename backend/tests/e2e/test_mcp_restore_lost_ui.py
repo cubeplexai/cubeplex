@@ -508,3 +508,46 @@ async def test_promote_install_writes_org_scope_and_excludes_source(
     assert other_res.status_code == 200, other_res.text
     others = [c for c in other_res.json()["items"] if c["install"]["install_id"] == install_id]
     assert len(others) == 1
+
+
+# ---------------------------------------------------------------------------
+# Task 7 — Tool-citation upsert.
+# ---------------------------------------------------------------------------
+
+
+async def test_admin_upsert_tool_citation(
+    admin_client: tuple[httpx.AsyncClient, str],
+    seeded_static_org_install_with_tools_cache: str,
+) -> None:
+    client, _ws = admin_client
+    install_id = seeded_static_org_install_with_tools_cache
+    res = await client.put(
+        f"/api/v1/admin/mcp/installs/{install_id}/tool-citations",
+        json={
+            "tool_name": "pong",
+            "config": {
+                "content_type": "json",
+                "source_type": "web",
+                "content_field": None,
+                "mapping": {"snippet": "summary"},
+            },
+        },
+    )
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body["tool_citations"]["pong"]["mapping"] == {"snippet": "summary"}
+
+
+async def test_admin_clear_tool_citation_with_null_config(
+    admin_client: tuple[httpx.AsyncClient, str],
+    seeded_static_org_install_with_tools_cache: str,
+) -> None:
+    client, _ws = admin_client
+    install_id = seeded_static_org_install_with_tools_cache
+    res = await client.put(
+        f"/api/v1/admin/mcp/installs/{install_id}/tool-citations",
+        json={"tool_name": "ping", "config": None},
+    )
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert "ping" not in body["tool_citations"]
