@@ -374,3 +374,54 @@ async def test_admin_test_connection_rejects_static_plaintext_with_none_auth(
         },
     )
     assert res.status_code == 422, res.text
+
+
+# ---------------------------------------------------------------------------
+# Task 5 — Custom connector creation.
+# ---------------------------------------------------------------------------
+
+
+async def test_admin_create_custom_install_for_org(
+    admin_client: tuple[httpx.AsyncClient, str],
+) -> None:
+    client, _ws = admin_client
+    res = await client.post(
+        "/api/v1/admin/mcp/installs",
+        json={
+            "template_id": None,
+            "install_scope": "org",
+            "name": "My internal MCP",
+            "server_url": "https://internal.corp/mcp",
+            "transport": "streamable_http",
+            "auth_method": "none",
+            "default_credential_policy": "none",
+            "auto_enable": {"mode": "none"},
+        },
+    )
+    assert res.status_code == 201, res.text
+    body = res.json()
+    assert body["template_id"] is None
+    assert body["name"] == "My internal MCP"
+    assert body["install_scope"] == "org"
+
+
+async def test_admin_create_custom_install_rejects_credential_plaintext_with_scoped_policy(
+    admin_client: tuple[httpx.AsyncClient, str],
+) -> None:
+    client, _ws = admin_client
+    res = await client.post(
+        "/api/v1/admin/mcp/installs",
+        json={
+            "template_id": None,
+            "install_scope": "org",
+            "name": "scoped-fail",
+            "server_url": "https://scoped-fail.example.com/mcp",
+            "transport": "streamable_http",
+            "auth_method": "static",
+            "default_credential_policy": "user",
+            "auto_enable": {"mode": "none"},
+            "credential_plaintext": "should-fail",
+        },
+    )
+    assert res.status_code == 422, res.text
+    assert "credential_plaintext_only_valid_for_org_policy" in res.text

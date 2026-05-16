@@ -182,6 +182,11 @@ class AdminCreateInstallIn(BaseModel):
     transport: Literal["streamable_http", "sse"] | None = None
     headers: dict[str, str] | None = None
 
+    # Org-policy static one-shot grant: when provided alongside a custom
+    # static install with org-scope policy, the route creates the grant
+    # immediately so the connector lands in a usable state on creation.
+    credential_plaintext: str | None = Field(default=None, min_length=1)
+
     @model_validator(mode="after")
     def _validate_policy_vs_auth(self) -> "AdminCreateInstallIn":
         if self.default_credential_policy == "none" and self.auth_method != "none":
@@ -190,6 +195,15 @@ class AdminCreateInstallIn(BaseModel):
             )
         if self.auth_method == "none" and self.default_credential_policy != "none":
             raise ValueError("auth_method='none' requires default_credential_policy='none'")
+        if self.template_id is None:
+            # Custom install: name/server_url/transport are required.
+            if not (self.name and self.server_url and self.transport):
+                raise ValueError("name_server_url_transport_required_for_custom_installs")
+        if self.credential_plaintext is not None:
+            if self.auth_method != "static":
+                raise ValueError("credential_plaintext_only_valid_with_static_auth")
+            if self.default_credential_policy != "org":
+                raise ValueError("credential_plaintext_only_valid_for_org_policy")
         return self
 
 
