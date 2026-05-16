@@ -273,7 +273,7 @@ class OAuthStartService:
 
 
 def _redirect_uri() -> str:
-    base = str(config.get("backend_base_url", "http://localhost:8000")).rstrip("/")
+    base = str(config.get("public_base_url", "http://localhost:8000")).rstrip("/")
     return f"{base}{_REDIRECT_PATH}"
 
 
@@ -373,7 +373,7 @@ git commit -m "feat(mcp/oauth): add four-layer OAuthStartService"
 Append to `backend/tests/e2e/test_mcp_oauth_handoff.py`:
 
 ```python
-async def test_callback_writes_grant_and_authorizes_install(
+async def test_callback_writes_user_grant_and_keeps_install_pending(
     oauth_callback_handler,
     oauth_start_service,
     grant_repo,
@@ -381,7 +381,12 @@ async def test_callback_writes_grant_and_authorizes_install(
     seeded_oauth_install,
     monkeypatch,
 ) -> None:
+    """User-policy install: grant lands at scope='user', auth_status STAYS
+    'pending' (per spec §6 — auth_status is per-install, not per-user, so
+    one user finishing OAuth doesn't claim the install for everyone)."""
     install_id, scope, ws_id, user_id = seeded_oauth_install
+    assert scope == "user"  # fixture invariant
+
     start = await oauth_start_service.start_oauth_flow(
         install_id=install_id,
         actor_user_id=user_id,
@@ -390,7 +395,6 @@ async def test_callback_writes_grant_and_authorizes_install(
         user_id=user_id,
     )
 
-    # Stub the AS token endpoint: return a fake access_token + refresh.
     async def fake_post_token(*args, **kwargs):
         class R:
             def json(self_):
@@ -414,7 +418,49 @@ async def test_callback_writes_grant_and_authorizes_install(
     assert result.install_id == install_id
     assert result.state == start.state
 
-    grant = await grant_repo.get_user_grant(install_id, ws_id, user_id)
+    grant = await grant_repo.get_user_grant(install_id, user_id, workspace_id=ws_id)
+    assert grant is not None
+    assert grant.grant_status == "valid"
+
+    install = await install_repo.get(install_id)
+    assert install.auth_status == "pending"  # user-policy: never flips
+
+
+async def test_callback_writes_org_grant_and_authorizes_install(
+    oauth_callback_handler,
+    oauth_start_service,
+    grant_repo,
+    install_repo,
+    seeded_oauth_org_install,  # NEW fixture: org-policy OAuth install
+    monkeypatch,
+) -> None:
+    """Org-policy install: grant lands at scope='org', auth_status flips
+    'pending' → 'authorized' because rule §6 fires."""
+    install_id, org_id, _ = seeded_oauth_org_install
+
+    start = await oauth_start_service.start_oauth_flow(
+        install_id=install_id,
+        actor_user_id="usr-test-actor",
+        grant_scope="org",
+        workspace_id=None,
+        user_id=None,
+    )
+
+    async def fake_post_token(*args, **kwargs):
+        class R:
+            def json(self_):
+                return {"access_token": "a", "refresh_token": "r", "expires_in": 3600}
+            def raise_for_status(self_):
+                return None
+        return R()
+    monkeypatch.setattr(oauth_callback_handler, "_post_token_exchange", fake_post_token)
+
+    result = await oauth_callback_handler.handle_callback(
+        state=start.state, code="fake-code",
+    )
+    assert result.status == "ok"
+
+    grant = await grant_repo.get_org_grant(install_id)
     assert grant is not None
     assert grant.grant_status == "valid"
 
@@ -422,10 +468,27 @@ async def test_callback_writes_grant_and_authorizes_install(
     assert install.auth_status == "authorized"
 ```
 
+Add the new fixture next to `seeded_oauth_install`:
+
+```python
+@pytest.fixture
+async def seeded_oauth_org_install(db_session: AsyncSession, seed_org_workspace_user):
+    """Yield (install_id, org_id, workspace_id) for an org-policy OAuth install."""
+    org_id, ws_id, _user_id = seed_org_workspace_user
+    install = await _seed_oauth_install(
+        db_session,
+        org_id=org_id,
+        workspace_id=None,  # org-scope install
+        install_scope="org",
+        default_credential_policy="org",
+    )
+    return install.id, org_id, ws_id
+```
+
 - [ ] **Step 2: Run to verify it fails**
 
-Run: `cd backend && uv run pytest tests/e2e/test_mcp_oauth_handoff.py::test_callback_writes_grant_and_authorizes_install -v`
-Expected: FAIL — `OAuthCallbackHandler` does not exist.
+Run: `cd backend && uv run pytest tests/e2e/test_mcp_oauth_handoff.py -v -k callback`
+Expected: FAIL on both new tests — `OAuthCallbackHandler` does not exist.
 
 - [ ] **Step 3: Create `OAuthCallbackHandler`**
 
@@ -646,7 +709,7 @@ class OAuthCallbackHandler:
 
 def _redirect_uri() -> str:
     from cubebox.config import config
-    base = str(config.get("backend_base_url", "http://localhost:8000")).rstrip("/")
+    base = str(config.get("public_base_url", "http://localhost:8000")).rstrip("/")
     return f"{base}/api/v1/oauth/mcp/callback"
 ```
 
@@ -665,20 +728,28 @@ async def get_for_scope(
 ) -> MCPCredentialGrant | None:
     """Single grant per (install, scope-shape). Org grants ignore both
     workspace_id and user_id; workspace grants ignore user_id; user grants
-    require both."""
+    require both.
+
+    Mirrors the existing per-scope getter signatures exactly:
+    - get_org_grant(install_id)
+    - get_workspace_grant(install_id, workspace_id)
+    - get_user_grant(install_id, user_id, *, workspace_id=None)
+      (note workspace_id is KEYWORD-ONLY on get_user_grant)
+    """
     if grant_scope == "org":
         return await self.get_org_grant(install_id)
     if grant_scope == "workspace":
         assert workspace_id is not None, "workspace grant requires workspace_id"
         return await self.get_workspace_grant(install_id, workspace_id)
     assert workspace_id is not None and user_id is not None, "user grant requires both"
-    return await self.get_user_grant(install_id, workspace_id, user_id)
+    return await self.get_user_grant(install_id, user_id, workspace_id=workspace_id)
 ```
 
-- [ ] **Step 5: Run the test to verify it passes**
+- [ ] **Step 5: Run the tests to verify they pass**
 
-Run: `cd backend && uv run pytest tests/e2e/test_mcp_oauth_handoff.py::test_callback_writes_grant_and_authorizes_install -v`
-Expected: PASS.
+Run: `cd backend && uv run pytest tests/e2e/test_mcp_oauth_handoff.py -v -k callback`
+Expected: PASS for both `test_callback_writes_user_grant_and_keeps_install_pending`
+and `test_callback_writes_org_grant_and_authorizes_install`.
 
 - [ ] **Step 6: Commit**
 
@@ -1123,15 +1194,13 @@ export async function runOAuthFlow(deps: RunOAuthFlowDeps): Promise<OAuthFlowRes
       return { status: 'error', reason: `start_failed:${(err as Error).message}` }
     }
 
-    // 4. Navigate the popup.
-    try {
-      child.location.href = start.authorize_url
-    } catch {
-      child.close()
-      return { status: 'error', reason: 'popup_navigate_failed' }
-    }
-
-    // 5. Race: matching message vs. 90s timeout vs. closed-popup poll.
+    // 4. Set up the message listener and timers BEFORE navigating the
+    //    popup. If the AS is already authorized (silent re-consent) or
+    //    the network is fast, /oauth/mcp/return can broadcast within
+    //    milliseconds — attaching the listener after navigation can
+    //    miss the message and leave the parent waiting for the
+    //    timeout / closed-popup poll, both of which would resolve as
+    //    a wrong status.
     return await new Promise<OAuthFlowResult>((resolve) => {
       let done = false
       const finish = (r: OAuthFlowResult) => {
@@ -1164,6 +1233,14 @@ export async function runOAuthFlow(deps: RunOAuthFlowDeps): Promise<OAuthFlowRes
       }, POLL_INTERVAL_MS)
 
       channel.addEventListener('message', onMessage)
+
+      // Now safe to navigate — listener is live.
+      try {
+        child.location.href = start.authorize_url
+      } catch {
+        child.close()
+        finish({ status: 'error', reason: 'popup_navigate_failed' })
+      }
     })
   } finally {
     channel.close()
