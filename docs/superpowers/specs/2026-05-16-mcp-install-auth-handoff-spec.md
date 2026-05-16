@@ -278,17 +278,29 @@ Notes on the admin console row:
   blocker that's irrelevant to org-grant authoring). The admin
   page therefore derives the org row's action band from the install
   row and the org-scope grant directly:
-  - `usable = (install.auth_method == 'none') OR (an org-scope
-    MCPCredentialGrant exists for this install with grant_status !=
-    'expired')`
-  - `reason` for the org row is computed from
-    `(install.auth_method, install.auth_status, presence_of_org_grant,
-    grant_status)` using the same auth-only subset of
-    MCPEffectiveReason — `pending_oauth` if auth_method='oauth' and
-    auth_status='pending' and no org grant; `missing_org_grant` if
-    auth_status='authorized' but no org grant (rotation / disconnect
-    path); `grant_expired` if the org grant is expired without
-    refresh; `usable` otherwise.
+  Decision order (first match wins):
+
+  1. `install.auth_method == 'none'` → `(usable=true, reason='usable')`.
+  2. Org-scope grant exists AND `grant_status == 'valid'` →
+     `(usable=true, reason='usable')`.
+  3. Org-scope grant exists AND `grant_status == 'expired'` AND no
+     refresh credential available (for OAuth) →
+     `(usable=false, reason='grant_expired')`.
+  4. No org-scope grant exists AND `install.auth_method == 'oauth'`
+     AND `install.auth_status == 'pending'` →
+     `(usable=false, reason='pending_oauth')`. Mirrors
+     `compute_effective_state` rule 6.
+  5. No org-scope grant exists, otherwise →
+     `(usable=false, reason='missing_org_grant')`. This branch
+     deliberately covers the static-org case where
+     `install.auth_status` stays `'pending'` until the first grant
+     lands (the static grant flow does not touch `auth_status`),
+     AND the OAuth-org rotation case where `auth_status='authorized'`
+     but the grant has been disconnected. The earlier draft of this
+     section gated `missing_org_grant` on `auth_status='authorized'`,
+     which left fresh static org installs falling through to
+     `usable` and hid the token input — the bug codex flagged in
+     review round 11.
 
   Concretely: today `list_admin_installs` returns raw install rows
   with no effective state. The admin page needs either a new admin
