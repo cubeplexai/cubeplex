@@ -146,6 +146,30 @@ class OAuthStateStore:
             user_id=str(raw_user_id) if raw_user_id is not None else None,
         )
 
+    async def attach_pkce(self, *, state: str, verifier: str) -> None:
+        """Persist the PKCE verifier under the same TTL as the state token.
+
+        Stored under ``mcp_oauth_state:pkce:{state}`` so the callback can
+        complete the token exchange without the verifier being passed
+        through the user agent.
+        """
+        await self._redis.set(
+            _REDIS_KEY_PREFIX + "pkce:" + state,
+            verifier,
+            ex=self._ttl_seconds,
+        )
+
+    async def consume_pkce(self, state: str) -> str | None:
+        """Atomically read-and-delete the PKCE verifier for this state."""
+        key = _REDIS_KEY_PREFIX + "pkce:" + state
+        raw = await self._redis.get(key)
+        if raw is None:
+            return None
+        await self._redis.delete(key)
+        if isinstance(raw, bytes):
+            return raw.decode("utf-8")
+        return str(raw)
+
     def _verify(self, state: str) -> bytes:
         """Decode + HMAC-verify the wire token. Returns canonical payload bytes."""
         if not isinstance(state, str) or "." not in state:
