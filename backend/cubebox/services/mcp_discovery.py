@@ -168,8 +168,18 @@ async def discover_tools_for_install(
         grant = dto.grant
     else:
         grant = await grant_repo.get_org_grant(install_id)
+        # Match the workspace-side effective rule (compute_effective_state
+        # rule 8): an org OAuth grant whose status is 'expired' but still
+        # has a refresh_credential_id is usable — the token manager rotates
+        # the access token on call. Rejecting it here would block Refresh
+        # tools for any org OAuth install that ever had a transient
+        # refresh failure mark the grant expired.
         usable = install.auth_method == "none" or (
-            grant is not None and grant.grant_status == "valid"
+            grant is not None
+            and (
+                grant.grant_status == "valid"
+                or (grant.grant_status == "expired" and grant.refresh_credential_id is not None)
+            )
         )
         reason = "usable" if usable else "missing_org_grant"
 

@@ -400,8 +400,20 @@ class MCPConnectorInstallService:
         # bad workspace id rejects the whole call without leaving the
         # install in a half-promoted state.
         all_ws_ids, enablement_source, _ = await self._resolve_distribution(distribution)
-        # Exclude source workspace from the fan-out.
-        all_ws_ids = [w for w in all_ws_ids if w != source_ws]
+        # Exclude source workspace from fan-out ONLY when its existing
+        # state row should be preserved. If the source row was deleted
+        # before promote, unconditional exclusion would leave the
+        # workspace with no state row at all after install_scope flips
+        # to 'org' and workspace_id is cleared — the effective service
+        # only surfaces org installs with state rows, so the source
+        # would silently lose access to the connector it used to own.
+        # Look up the source row; if absent, include it in fan-out
+        # so a fresh state row gets written.
+        source_state = None
+        if source_ws:
+            source_state = await self._state_repo.get(source_ws, install_id)
+        if source_state is not None:
+            all_ws_ids = [w for w in all_ws_ids if w != source_ws]
 
         install.install_scope = "org"
         install.workspace_id = None
