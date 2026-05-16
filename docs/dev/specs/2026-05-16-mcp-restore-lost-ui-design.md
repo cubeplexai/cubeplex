@@ -386,11 +386,20 @@ Behavior:
   `credential_policy` or `enabled` (matches §6.4 promise).
   Modes:
   - `mode='all'` → upsert state rows in every OTHER workspace
-    in the org (skip source).
+    in the org (skip source). Set
+    `install.auto_enroll_new_workspaces = true` so workspaces
+    created LATER also get the state row via
+    `enroll_workspace_in_org_wide_mcp()` on workspace creation.
   - `mode='selected'` → upsert in the listed ids, MINUS the
-    source if it appears in the list.
+    source if it appears in the list. Set
+    `install.auto_enroll_new_workspaces = false` — the admin
+    explicitly picked a subset, future workspaces must NOT be
+    auto-included; an admin who later wants to add another
+    workspace toggles its state row from the existing
+    workspace-state PATCH endpoint.
   - `mode='none'` → no fan-out at all; only the source's
-    pre-existing state row stays.
+    pre-existing state row stays. Same as `selected`: set
+    `install.auto_enroll_new_workspaces = false`.
 - Existing grant for the workspace stays attached at scope
   `workspace`. The admin can later create an org grant (existing
   endpoint).
