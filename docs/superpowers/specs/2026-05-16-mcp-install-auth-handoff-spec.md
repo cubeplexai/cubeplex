@@ -304,16 +304,16 @@ the two-actor flow.
  │   ↓                                                                 │
  │  POST /api/v1/ws/{ws}/mcp/installs/{id}/grants/me/oauth/start       │
  │     (require_member — any workspace member may do this)             │
- │     → { authorize_url, expires_at }                                 │
+ │     → { authorize_url, state, expires_at }                          │
  │   ↓                                                                 │
- │  window.open(authorize_url, …)                                      │
+ │  controller navigates the already-open popup to authorize_url       │
  │  Band transitions to `oauth-in-flight`                              │
  │                                                                     │
  │ Step 3 — pop-up returns                                             │
  │  AS → /api/v1/oauth/mcp/callback?state=…&code=…                     │
  │  Backend exchanges code, upserts MCPCredentialGrant(scope='user',   │
  │  user_id=<the authorizing member>), redirects 302 to                │
- │  /oauth/mcp/return?install_id=…&status=ok                           │
+ │  /oauth/mcp/return?install_id=…&status=ok&state=…                   │
  │   ↓                                                                 │
  │  /oauth/mcp/return posts a typed message and closes itself          │
  │   ↓                                                                 │
@@ -357,11 +357,13 @@ Same as 5.1 with two differences:
  │  Action band `needs-action` (caller authority = org admin)         │
  │   ↓ "Connect with GitHub"                                          │
  │  POST /api/v1/admin/mcp/installs/{id}/grants/org/oauth/start        │
- │  → window.open(authorize_url)                                       │
+ │  → { authorize_url, state, expires_at }                             │
+ │  → controller navigates the popup to authorize_url                  │
  │                                                                     │
  │ Step 3 — callback writes one org-scope grant                        │
  │  → grant_scope='org', workspace_id=null, user_id=null               │
  │  → install.auth_status='authorized'                                 │
+ │  → 302 /oauth/mcp/return?install_id=…&status=ok&state=…             │
  │   ↓ return page postMessage → parent refresh                       │
  │  Detail panel → `ready` from the org admin's view AND from every    │
  │  workspace member's view, because credential_source='org'.          │
