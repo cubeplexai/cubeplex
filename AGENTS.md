@@ -122,7 +122,7 @@ Skills are loaded on demand; trigger them when the situation matches.
 | `web-design-guidelines` | UI accessibility / design review pass. |
 | `playwright-cli` | Writing or debugging Playwright tests. |
 | `claude-api` | Working with the Anthropic SDK / claude-api integration code. |
-| `langgraph-docs` | (Legacy — only if touching residual langgraph code; cubepi is the active path.) |
+| `karpathy-guidelines` | LLM coding pitfalls and disciplines from Andrej Karpathy's observations — heuristics around context, evals, complexity, etc. |
 
 **Escape hatch:**
 

@@ -5,3 +5,9 @@
 *.js.map linguist-vendored=true
 *.mjs.map linguist-vendored=true
 *.cjs.map linguist-vendored=true
+
+# .agents/ holds third-party skill content pulled in via `npx skills`
+# (Karpathy guidelines, shadcn, sqlmodel-expert, etc.). It's tracked so
+# fresh checkouts get the symlink targets, but it shouldn't count toward
+# the repo's language statistics.
+.agents/** linguist-vendored=true

@@ -22,7 +22,10 @@ node_modules/
 .next/
 
 # Claude Code
-.agents/
+# .agents/ is tracked — it holds installed skill content (managed by
+# `npx skills`); .claude/skills/<name> symlinks point into it. The
+# linguist-vendored marker in .gitattributes keeps it out of language
+# stats.
 .superpowers/
 settings.local.json
 .claude/scheduled_tasks.lock
