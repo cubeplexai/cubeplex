@@ -172,8 +172,8 @@ re-fetches.
 New backend route:
 
 ```
-POST /api/v1/admin/mcp/installs/{install_id}/refresh-discovery   (admin)
-POST /api/v1/ws/{ws}/mcp/installs/{install_id}/refresh-discovery (ws member)
+POST /api/v1/admin/mcp/installs/{install_id}/refresh-discovery   (org admin)
+POST /api/v1/ws/{ws}/mcp/installs/{install_id}/refresh-discovery (ws admin)
 ```
 
 Both return the updated `MCPConnectorInstallOut`. Behavior:
