@@ -327,15 +327,24 @@ async def test_discover_tools_for_install_writes_tools_cache(
     async with db_session_maker() as session:
         from cubebox.credentials.dependencies import build_credential_service
         from cubebox.credentials.encryption import get_test_backend
+        from cubebox.mcp.dependencies import build_user_token_signer
         cred_service = build_credential_service(
             session, get_test_backend(), org_id=org_id, actor_user_id=user_id
         )
+        # For auth_method='none' the signer mints an identity token and
+        # token_mgr is unused — test can use real instances. For
+        # auth_method='static'/'oauth' tests, monkeypatch cred_service
+        # / token_mgr as needed.
+        signer = build_user_token_signer()
+        token_mgr = None  # type: ignore[assignment]
         result = await discover_tools_for_install(
             install_id=install_id,
             workspace_id=None,
             actor_user_id=user_id,
             session=session,
             cred_service=cred_service,
+            signer=signer,
+            token_mgr=token_mgr,  # type: ignore[arg-type]
         )
         assert result.discovery_status == "ok"
         assert result.tool_count == 2
@@ -408,6 +417,25 @@ class DiscoveryResult:
     last_error: str | None
 
 
+def _build_runtime_spec_for_discovery(install, grant):
+    """Builds the MCPRuntimeConnectorSpec shape that
+    _resolve_headers_from_spec expects without going through the
+    full effective-state list (which the caller already computed)."""
+    from cubebox.mcp.cubepi_runtime import MCPRuntimeConnectorSpec
+    return MCPRuntimeConnectorSpec(
+        install_id=install.id,
+        name=install.name,
+        server_url=install.server_url,
+        transport=install.transport,
+        auth_method=install.auth_method,
+        credential_id=(grant.credential_id if grant is not None else None),
+        refresh_credential_id=(grant.refresh_credential_id if grant is not None else None),
+        headers=install.headers or {},
+        timeout=install.timeout,
+        tool_citations={},  # not needed for discovery
+    )
+
+
 async def discover_tools_for_install(
     *,
     install_id: str,
@@ -448,6 +476,7 @@ async def discover_tools_for_install(
     if workspace_id is None and install.default_credential_policy in {"workspace", "user"}:
         raise ValueError("workspace_id_required_for_scoped_policy")
 
+    grant = None
     if workspace_id is not None:
         dtos = await effective_svc.list_for_workspace_user(
             workspace_id, actor_user_id, include_unusable=True,
@@ -457,11 +486,12 @@ async def discover_tools_for_install(
             raise ValueError("connector_install_not_found")
         usable = dto.usable
         reason = dto.reason
+        grant = dto.grant  # MCPCredentialGrant | None from effective DTO
     else:
         # Org-policy install, no workspace context needed.
-        org_grant = await grant_repo.get_org_grant(install_id)
+        grant = await grant_repo.get_org_grant(install_id)
         usable = install.auth_method == "none" or (
-            org_grant is not None and org_grant.grant_status == "valid"
+            grant is not None and grant.grant_status == "valid"
         )
         reason = "usable" if usable else "missing_org_grant"
 
@@ -483,11 +513,11 @@ async def discover_tools_for_install(
         _resolve_headers_from_spec,
     )
 
-    spec = _build_runtime_spec_for_discovery(install=install, grant=...)
-    # The grant is the one identified above by the effective DTO (for
-    # workspace/user policy) or `org_grant` (for org policy); for
-    # `auth_method='none'` the spec carries no credential_id and the
-    # resolver mints an identity token.
+    spec = _build_runtime_spec_for_discovery(install=install, grant=grant)
+    # `grant` was set above by the effective DTO (for workspace/user
+    # policy) or `grant_repo.get_org_grant(install_id)` (for org
+    # policy). For `auth_method='none'` it's None and the resolver
+    # mints an identity token.
     headers = await _resolve_headers_from_spec(
         spec=spec,
         workspace_id=workspace_id or install.workspace_id or "",
@@ -509,23 +539,6 @@ async def discover_tools_for_install(
             tools_cache_raw=list(install.tools_cache or []),
             last_error=install.last_error,
         )
-
-# Helper placed at module level. Builds the runtime spec shape that
-# _resolve_headers_from_spec expects without going through the
-# full effective-state list (which we already computed above).
-def _build_runtime_spec_for_discovery(install, grant):
-    return MCPRuntimeConnectorSpec(
-        install_id=install.id,
-        name=install.name,
-        server_url=install.server_url,
-        transport=install.transport,
-        auth_method=install.auth_method,
-        credential_id=(grant.credential_id if grant is not None else None),
-        refresh_credential_id=(grant.refresh_credential_id if grant is not None else None),
-        headers=install.headers or {},
-        timeout=install.timeout,
-        tool_citations={},  # not needed for discovery
-    )
 
     try:
         tools = await asyncio.wait_for(
@@ -692,6 +705,8 @@ async def admin_refresh_discovery(
     body: AdminInstallRefreshIn,
     session: Annotated[AsyncSession, Depends(get_session)],
     backend: Annotated[EncryptionBackend, Depends(get_encryption_backend)],
+    signer: Annotated[MCPUserTokenSigner, Depends(get_user_token_signer)],
+    token_mgr: Annotated[OAuthTokenManager, Depends(get_oauth_token_manager)],
     ctx: Annotated[RequestContext, Depends(get_admin_request_context)],
 ) -> MCPConnectorInstallOut:
     cred_service = build_credential_service(
@@ -720,6 +735,8 @@ async def admin_refresh_discovery(
             actor_user_id=ctx.user.id,
             session=session,
             cred_service=cred_service,
+            signer=signer,
+            token_mgr=token_mgr,
         )
     except ValueError as exc:
         raise HTTPException(400, detail={"code": str(exc)}) from exc
@@ -741,6 +758,8 @@ async def ws_refresh_discovery(
     install_id: str,
     session: Annotated[AsyncSession, Depends(get_session)],
     cred_service: Annotated[CredentialService, Depends(get_credential_service)],
+    signer: Annotated[MCPUserTokenSigner, Depends(get_user_token_signer)],
+    token_mgr: Annotated[OAuthTokenManager, Depends(get_oauth_token_manager)],
     ctx: Annotated[RequestContext, Depends(require_admin)],
 ) -> MCPConnectorInstallOut:
     install_repo = MCPConnectorInstallRepository(session, org_id=ctx.org_id)
@@ -751,6 +770,8 @@ async def ws_refresh_discovery(
             actor_user_id=ctx.user.id,
             session=session,
             cred_service=cred_service,
+            signer=signer,
+            token_mgr=token_mgr,
         )
     except ValueError as exc:
         raise HTTPException(400, detail={"code": str(exc)}) from exc
@@ -1470,6 +1491,10 @@ async def ws_invoke_tool(
     svc: Annotated[MCPConnectorInstallService, Depends(get_ws_install_service)],
     effective_svc: Annotated[MCPEffectiveConnectorService, Depends(get_ws_effective_service)],
     ctx: Annotated[RequestContext, Depends(require_member)],
+    cred_service: Annotated[CredentialService, Depends(get_credential_service)],
+    signer: Annotated[MCPUserTokenSigner, Depends(get_user_token_signer)],
+    token_mgr: Annotated[OAuthTokenManager, Depends(get_oauth_token_manager)],
+    grant_repo: Annotated[MCPCredentialGrantRepository, Depends(get_grant_repo)],
     _rate_key_user: Annotated[User, Depends(_set_invoke_user_id)],
     audit: Annotated[AuditSink, Depends(get_audit_sink)],
 ) -> ToolInvokeOut:
@@ -1483,8 +1508,27 @@ async def ws_invoke_tool(
     if dto is None or not dto.usable:
         raise HTTPException(400, detail={"code": "connector_not_usable",
                                           "reason": dto.reason if dto else "missing"})
-    headers = dict(install.headers or {})
-    # (auth header injection via grant — see Step 5)
+    # Same credential resolution as discovery (Task 2): build the
+    # runtime spec from (install, dto.grant) and ask
+    # _resolve_headers_from_spec for the Authorization header.
+    # Without this, Try It against a static / OAuth connector sends
+    # no Bearer token even though dto.usable=True, and the invoke
+    # fails for any private MCP server.
+    spec = _build_runtime_spec_for_discovery(install=install, grant=dto.grant)
+    headers = await _resolve_headers_from_spec(
+        spec=spec,
+        workspace_id=workspace_id,
+        org_id=ctx.org_id,
+        user_id=ctx.user.id,
+        cred_service=cred_service,
+        signer=signer,
+        token_manager=token_mgr,
+        grant_repo=grant_repo,
+    )
+    if headers is None:
+        raise HTTPException(
+            400, detail={"code": "credential_resolution_failed"},
+        )
     started = time.perf_counter()
     try:
         result = await asyncio.wait_for(
