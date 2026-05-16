@@ -131,7 +131,12 @@ console, the org-admin bit. The function is centralized so both surfaces agree.
   | install_uninstalled | template_deprecated | pending_oauth |
   missing_org_grant | missing_workspace_grant | user_needs_connection |
   grant_expired | discovery_failed`):
-  - `pending_oauth` → "Authorization was started but not finished."
+  - `pending_oauth` → "Authorization is pending — finish connecting
+    to start using this." (Backend emits `pending_oauth` whenever
+    `auth_status='pending'` AND no grant exists, which is the state
+    of every fresh org/workspace OAuth install before anyone has
+    clicked Connect — so do NOT phrase this as "was started but not
+    finished" or the copy lies on the post-install state.)
   - `missing_org_grant` (caller is org admin) → "No org credential on file
     yet."
   - `missing_workspace_grant` (caller is workspace admin) → "No workspace
@@ -187,8 +192,10 @@ console, the org-admin bit. The function is centralized so both surfaces agree.
     `grant_expired`) determines the second sentence:
     - `missing_org_grant` → "Your org admin hasn't authorized this
       yet."
-    - `pending_oauth` → "Your org admin started authorizing but
-      hasn't finished."
+    - `pending_oauth` → "Your org admin hasn't connected this yet."
+      (Same caveat as §3.2 — `pending_oauth` is the backend's signal
+      for "an authorization is required and has not landed," not
+      strictly "an authorization was started.")
     - `grant_expired` → "The org's authorization expired and needs
       to be renewed."
   - `required_grant_scope === 'workspace'` → `<who> = "your workspace
