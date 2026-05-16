@@ -3,49 +3,63 @@
 # codex-poll.sh — single-shot PR comment fetcher for the codex review loop.
 #
 # Pulls three GitHub feedback streams for a given PR, merges them,
-# filters by a created_at cursor, and emits a JSON blob on stdout:
+# filters by per-kind cursors, and emits a JSON blob on stdout:
 #
 #   1. /pulls/<n>/comments  — inline review comments (file-anchored)
 #   2. /issues/<n>/comments — top-level PR thread comments
 #   3. /pulls/<n>/reviews   — review summaries (the body of "Comment" /
 #                             "Request changes" / "Approve" actions)
 #
-# Without (3), a reviewer who submits a top-level summary with no inline
-# comments would never surface and the loop could exit clean while a
-# blocking review body sits unanswered.
+# Each of those endpoints assigns ids from its own GitHub object table
+# (PR review comments, issue comments, PR reviews) — the id namespaces
+# overlap. So a single global cursor with an id tie-breaker can drop
+# same-second comments across streams: if stream A's last seen id at
+# second T is higher than stream B's just-arrived id at second T,
+# stream B's comment looks "older" than the cursor and gets skipped
+# forever. The poller therefore tracks **one cursor per kind**.
 #
 # This is deliberately not a daemon. Callers (the pr-codex-review-loop
 # skill, a /loop invocation, etc.) decide cadence and exit conditions.
 #
 # Usage:
-#   codex-poll.sh <pr-number> [--since <cursor>] [--repo <owner/name>]
-#                             [--exclude-author <login>]
+#   codex-poll.sh <pr-number> [--repo <owner/name>] \
+#                             [--exclude-author <login>] \
+#                             [--since <cursor>] \
+#                             [--since-review <cursor>] \
+#                             [--since-issue <cursor>] \
+#                             [--since-summary <cursor>]
 #
-# Cursor format:
+# Cursor format (per kind):
 #   "<iso8601>#<id>"   e.g. "2026-05-16T06:18:48Z#3252317540"
 #
 #   The `#<id>` tail is a tie-breaker — GitHub comment timestamps are
-#   only second-granularity, and codex review batches frequently share a
-#   created_at down to the second. A timestamp-only cursor with strict
-#   `>` permanently drops same-second siblings; with `>=` it returns
-#   duplicates. The split (timestamp string compare + id numeric
-#   compare) keeps both correctness properties without forcing the
-#   caller to zero-pad ids.
+#   second-granularity, and codex review batches frequently share a
+#   created_at down to the second. The poller compares timestamp as a
+#   string and id as a number so decimal id widths don't matter.
 #
-#   `--since` accepts either the composite form or a bare ISO 8601
-#   timestamp (in which case the id half is treated as 0, so the
-#   boundary second is included).
+#   A bare ISO 8601 timestamp without `#<id>` is accepted and treated
+#   as `<iso>#0` (boundary second included).
+#
+# --since acts as a convenience that applies to all three kinds; each
+# `--since-<kind>` flag overrides per kind. Use the per-kind flags
+# during the loop (the poller emits them in its output for you to feed
+# back); use the bare `--since` only on the first poll or in ad-hoc
+# inspection.
 #
 # --exclude-author:
 #   Drops comments authored by the given login before filtering. Use
 #   this to keep the agent from fetching its own replies and re-tag as
-#   "new comments" when the cursor lands inside the same wall-clock
+#   "new comments" when a cursor lands inside the same wall-clock
 #   second the agent just posted into. The skill resolves the login
 #   via `gh api user --jq .login` and passes it on every poll.
 #
 # Output:
 #   {
-#     "cursor": "<iso8601>#<id>",   // empty result → echoes input
+#     "cursor": {
+#       "review":         "<iso8601>#<id>",
+#       "issue":          "<iso8601>#<id>",
+#       "review_summary": "<iso8601>#<id>"
+#     },
 #     "count": <int>,
 #     "new_comments": [
 #       {
@@ -62,10 +76,11 @@
 #     ]
 #   }
 #
-# Review summaries (kind=review_summary) only appear when the review
-# body is non-empty (skipping the empty-body reviews GitHub auto-creates
-# when you post inline replies via the API). `state` is null for the
-# other two kinds.
+# Each cursor advances independently; kinds with no new comments echo
+# the input cursor unchanged. Review summaries (kind=review_summary)
+# only surface when body is non-empty (skipping the empty-body reviews
+# GitHub auto-creates when you submit inline replies via the API).
+# `state` is null for the other two kinds.
 #
 # Exit codes:
 #   0  ok (new_comments may be empty)
@@ -74,21 +89,28 @@
 set -euo pipefail
 
 usage() {
-  sed -n '3,32p' "$0" >&2
+  sed -n '3,67p' "$0" >&2
   exit 1
 }
 
 PR=""
-SINCE="1970-01-01T00:00:00Z#0"
 REPO=""
 EXCLUDE_AUTHOR=""
+DEFAULT_CURSOR="1970-01-01T00:00:00Z#0"
+SINCE_GLOBAL=""
+SINCE_REVIEW=""
+SINCE_ISSUE=""
+SINCE_SUMMARY=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    -h|--help) usage ;;
-    --since)            SINCE="$2";          shift 2 ;;
-    --repo)             REPO="$2";           shift 2 ;;
-    --exclude-author)   EXCLUDE_AUTHOR="$2"; shift 2 ;;
+    -h|--help)            usage ;;
+    --since)              SINCE_GLOBAL="$2";   shift 2 ;;
+    --since-review)       SINCE_REVIEW="$2";   shift 2 ;;
+    --since-issue)        SINCE_ISSUE="$2";    shift 2 ;;
+    --since-summary)      SINCE_SUMMARY="$2";  shift 2 ;;
+    --repo)               REPO="$2";           shift 2 ;;
+    --exclude-author)     EXCLUDE_AUTHOR="$2"; shift 2 ;;
     --) shift; break ;;
     -*) echo "unknown flag: $1" >&2; usage ;;
     *)
@@ -109,41 +131,51 @@ if [[ -z "$REPO" ]]; then
   [[ -z "$REPO" ]] && { echo "could not resolve repo (pass --repo)" >&2; exit 1; }
 fi
 
-# Fetch both comment streams via temp files (avoid ARGV limits on busy
-# PRs). --paginate handles repos with long threads. --slurpfile reads
-# each file as an array-of-arrays (one element per paginated page); the
-# jq filter flattens before processing.
+# Resolve per-kind cursors: per-kind flag wins, else --since global, else
+# default epoch. Then normalize bare ISO → "<iso>#0" so the boundary
+# second is included.
+normalize_cursor() {
+  local raw="$1"
+  case "$raw" in
+    *'#'*) printf '%s' "$raw" ;;
+    *)     printf '%s#0' "$raw" ;;
+  esac
+}
+
+CUR_REVIEW="$(normalize_cursor "${SINCE_REVIEW:-${SINCE_GLOBAL:-$DEFAULT_CURSOR}}")"
+CUR_ISSUE="$(normalize_cursor  "${SINCE_ISSUE:-${SINCE_GLOBAL:-$DEFAULT_CURSOR}}")"
+CUR_SUMMARY="$(normalize_cursor "${SINCE_SUMMARY:-${SINCE_GLOBAL:-$DEFAULT_CURSOR}}")"
+
+# Fetch all three streams via temp files (avoid ARGV limits on busy PRs).
+# --paginate handles repos with long threads. --slurpfile reads each file
+# as an array-of-arrays (one element per paginated page); the jq filter
+# flattens before processing.
 tmpdir=$(mktemp -d)
 trap 'rm -rf "$tmpdir"' EXIT
-gh api --paginate "repos/$REPO/pulls/$PR/comments"   > "$tmpdir/reviews.json"  || {
+gh api --paginate "repos/$REPO/pulls/$PR/comments"   > "$tmpdir/reviews.json"   || {
   echo "failed to fetch review comments for $REPO#$PR" >&2; exit 1
 }
-gh api --paginate "repos/$REPO/issues/$PR/comments"  > "$tmpdir/issues.json"   || {
+gh api --paginate "repos/$REPO/issues/$PR/comments"  > "$tmpdir/issues.json"    || {
   echo "failed to fetch issue comments for $REPO#$PR" >&2; exit 1
 }
 gh api --paginate "repos/$REPO/pulls/$PR/reviews"    > "$tmpdir/summaries.json" || {
   echo "failed to fetch review summaries for $REPO#$PR" >&2; exit 1
 }
 
-# Normalize cursor: bare ISO timestamp → "<iso>#0" (boundary second
-# included). Composite form passes through.
-case "$SINCE" in
-  *'#'*) ;;
-  *) SINCE="${SINCE}#0" ;;
-esac
-
-# Split cursor into timestamp + numeric id so we can do a proper
-# tuple compare. Raw lexicographic compare of "<iso>#<id>" misorders
-# decimal ids of different lengths ("#10" < "#9" lexicographically).
-SINCE_TS="${SINCE%%#*}"
-SINCE_ID="${SINCE##*#}"
+# Split each cursor into ts (string) + id (number) for the jq tuple compare.
+split_ts() { printf '%s' "${1%%#*}"; }
+split_id() { printf '%s' "${1##*#}"; }
 
 jq -n \
   --slurpfile reviews         "$tmpdir/reviews.json" \
   --slurpfile issues          "$tmpdir/issues.json" \
   --slurpfile summaries       "$tmpdir/summaries.json" \
-  --arg       since_ts        "$SINCE_TS" \
-  --argjson   since_id        "$SINCE_ID" \
+  --arg       review_ts       "$(split_ts "$CUR_REVIEW")" \
+  --argjson   review_id       "$(split_id "$CUR_REVIEW")" \
+  --arg       issue_ts        "$(split_ts "$CUR_ISSUE")" \
+  --argjson   issue_id        "$(split_id "$CUR_ISSUE")" \
+  --arg       summary_ts      "$(split_ts "$CUR_SUMMARY")" \
+  --argjson   summary_id      "$(split_id "$CUR_SUMMARY")" \
   --arg       exclude_author  "$EXCLUDE_AUTHOR" \
   '
   def norm_review:
@@ -182,21 +214,38 @@ jq -n \
       html_url:   .html_url,
       created_at: .submitted_at
     };
-  # Tuple compare: timestamp first (ISO 8601 sorts as strings), id
-  # second as a number to avoid the lex pitfall with mixed widths.
-  def newer_than_cursor:
-    .created_at > $since_ts
-    or (.created_at == $since_ts and .id > $since_id);
+  # Per-kind tuple compare: ts as string (ISO 8601 sorts naturally),
+  # id as number (no decimal-width pitfall).
+  def newer(ts; id):
+    .created_at > ts
+    or (.created_at == ts and .id > id);
   def cursor_key: "\(.created_at)#\(.id)";
+  # Advance a per-kind cursor: max of input cursor and any new comment
+  # of that kind. New comments arrive sorted by (created_at, id), so
+  # the last entry has the highest tuple.
+  def advance(input_cursor; entries):
+    if (entries | length) > 0
+    then (entries | sort_by(.created_at, .id) | .[-1] | cursor_key)
+    else input_cursor
+    end;
 
-  ( ($reviews   | add | map(norm_review))
-  + ($issues    | add | map(norm_issue))
-  + ($summaries | add | map(norm_summary)
-                     | map(select(.body != "" and .created_at != null))) )
-  | map(select(($exclude_author == "") or (.author != $exclude_author)))
-  | map(select(newer_than_cursor))
-  | sort_by(.created_at, .id)
-  | { cursor: (if length > 0 then (.[-1] | cursor_key) else "\($since_ts)#\($since_id)" end),
-      count:  length,
-      new_comments: . }
+  ($reviews | add | map(norm_review)
+              | map(select(($exclude_author == "") or (.author != $exclude_author)))
+              | map(select(newer($review_ts; $review_id)))) as $r
+  | ($issues | add | map(norm_issue)
+              | map(select(($exclude_author == "") or (.author != $exclude_author)))
+              | map(select(newer($issue_ts; $issue_id)))) as $i
+  | ($summaries | add | map(norm_summary)
+                | map(select(.body != "" and .created_at != null))
+                | map(select(($exclude_author == "") or (.author != $exclude_author)))
+                | map(select(newer($summary_ts; $summary_id)))) as $s
+  | {
+      cursor: {
+        review:         advance("\($review_ts)#\($review_id)";   $r),
+        issue:          advance("\($issue_ts)#\($issue_id)";     $i),
+        review_summary: advance("\($summary_ts)#\($summary_id)"; $s)
+      },
+      count: ($r + $i + $s | length),
+      new_comments: ($r + $i + $s | sort_by(.created_at, .id))
+    }
   '

@@ -47,31 +47,38 @@ For each PR you're driving:
 2. **Wait ~5 minutes** for codex to comment. Use a real sleep or
    `ScheduleWakeup` — do not poll in a tight loop, you'll get rate-limited
    and the bot needs time anyway.
-3. **Poll** with a stable cursor and self-author exclusion:
+3. **Poll** with per-kind cursors and self-author exclusion:
 
    ```bash
    ME="$(gh api user --jq .login)"   # resolve once at start of loop
+
    "$SKILL_DIR/scripts/codex-poll.sh" <PR> \
-       --since <last-cursor> \
-       --exclude-author "$ME"
+       --exclude-author "$ME" \
+       --since-review  "$CUR_REVIEW" \
+       --since-issue   "$CUR_ISSUE" \
+       --since-summary "$CUR_SUMMARY"
    ```
 
    `$SKILL_DIR` is the absolute path of this skill's directory (the
-   directory containing this `SKILL.md`). Resolve it once at the start of
-   the loop and reuse it.
+   directory containing this `SKILL.md`). Resolve it once at the start
+   of the loop and reuse it.
 
    `--exclude-author` drops the agent's own comments before filtering —
-   the primary defense against the self-reply loop. Wall-clock cursors
-   alone don't fix this, because if the agent's reply lands in the same
-   wall-clock second as the cursor, its `#<id>` still sorts greater than
-   `#0`. The author filter is robust to that.
+   the primary defense against the self-reply loop.
 
-   First iteration uses `--since 1970-01-01T00:00:00Z#0` (the default) or
-   a cursor near the push commit's timestamp. Cursor format is
-   `"<iso8601>#<id>"`; a bare timestamp is accepted and treated as
-   `"<iso>#0"` (the entire boundary second is included). Inside the
-   poller the timestamp is compared as a string and the id as a number,
-   so decimal id widths don't matter to callers.
+   **Per-kind cursors are mandatory** because the three GitHub APIs
+   (`/pulls/<n>/comments`, `/issues/<n>/comments`, `/pulls/<n>/reviews`)
+   assign ids from independent namespaces. A single global cursor with
+   an id tie-breaker silently drops same-second comments across streams.
+   The poller emits a `cursor` object — feed each kind's cursor back to
+   the matching `--since-<kind>` flag on the next pass.
+
+   On the first iteration, omit the cursor flags (or pass
+   `--since 1970-01-01T00:00:00Z#0` to all kinds). Cursor format per kind
+   is `"<iso8601>#<id>"`; bare timestamps are accepted and treated as
+   `"<iso>#0"` (boundary second included). Inside the poller the
+   timestamp is compared as a string and the id as a number, so decimal
+   id widths don't matter to callers.
 
 4. **Classify each new comment** (rules below). For each, take exactly one
    of: *fix*, *reply-declining*, *reply-already-fixed*, *reply-clarify*.
@@ -84,23 +91,25 @@ For each PR you're driving:
    gh pr comment <PR> --body "@codex please take another pass — pushed <short-sha>."
    ```
 
-8. **Update cursor** to skip past everything you just posted.
+8. **Update cursors** by storing the poller's returned `cursor` object
+   and feeding each kind back on the next pass:
 
-   The primary self-loop defense is `--exclude-author "$ME"` on every
+   ```bash
+   CURSORS_JSON="$(... poller output ...)"
+   CUR_REVIEW="$(printf '%s' "$CURSORS_JSON"  | jq -r .cursor.review)"
+   CUR_ISSUE="$(printf '%s' "$CURSORS_JSON"   | jq -r .cursor.issue)"
+   CUR_SUMMARY="$(printf '%s' "$CURSORS_JSON" | jq -r .cursor.review_summary)"
+   ```
+
+   The poller already advances each per-kind cursor to the max of
+   (input, latest entry of that kind). Kinds with no new comments echo
+   the input cursor unchanged, so a no-op kind stays pinned. The
+   primary self-loop defense is `--exclude-author "$ME"` on every
    poll (see step 3) — the agent's own replies/re-tag are filtered
-   regardless of cursor position. The cursor still advances so the
-   poller doesn't re-fetch the same codex comments on every round.
-
-   Two valid choices for the new cursor:
-
-   - **Reuse the cursor returned in step 3** — the latest
-     codex-authored entry the poller saw. Simple; correct as long as
-     `--exclude-author` is in place (it always should be).
-   - **Wall-clock**: `CURSOR="$(date -u +%Y-%m-%dT%H:%M:%SZ)#0"` —
-     fine too, just an additional belt with the suspenders.
+   regardless of cursor position.
 
    Anything codex (or a human reviewer) posts strictly after the
-   cursor will show up next pass. Loop back to step 2.
+   per-kind cursor will show up next pass. Loop back to step 2.
 
 **Exit when**: one full poll round returns `count: 0` *after* you've
 re-tagged @codex on the latest pushed SHA. (Empty before re-tag means
@@ -193,10 +202,17 @@ ME="$(gh api user --jq .login)"
 # First pass — no prior cursor
 "$SKILL_DIR/scripts/codex-poll.sh" 107 --exclude-author "$ME"
 
-# Subsequent passes — feed back the returned cursor verbatim
+# Subsequent passes — feed back each kind's cursor verbatim
 "$SKILL_DIR/scripts/codex-poll.sh" 107 \
-    --since '2026-05-16T06:18:48Z#3252317544' \
-    --exclude-author "$ME"
+    --exclude-author "$ME" \
+    --since-review  '2026-05-16T06:53:55Z#3252395204' \
+    --since-issue   '1970-01-01T00:00:00Z#0' \
+    --since-summary '2026-05-16T06:53:55Z#4303234315'
+
+# Ad-hoc inspection with a single timestamp for all kinds
+"$SKILL_DIR/scripts/codex-poll.sh" 107 \
+    --exclude-author "$ME" \
+    --since '2026-05-16T06:00:00Z'
 
 # Specific repo (rarely needed; auto-detects from cwd)
 "$SKILL_DIR/scripts/codex-poll.sh" 107 \
@@ -204,28 +220,34 @@ ME="$(gh api user --jq .login)"
     --exclude-author "$ME"
 ```
 
-Output is JSON with `cursor`, `count`, `new_comments[]`. Each comment has:
+Output JSON keys:
 
-- `kind` — `"review"` (inline) or `"issue"` (top-level).
-- `id` — needed for review-comment replies; also the tie-breaker in the
-  cursor.
-- `author` — e.g. `chatgpt-codex-connector[bot]` or a human login.
-- `body` — full markdown (includes P1/P2 badge HTML).
-- `path`, `line` — for review comments only.
-- `html_url` — direct link.
-- `created_at` — ISO 8601 UTC.
+- `cursor` — **object** with `review`, `issue`, `review_summary` keys.
+  Each holds a per-kind cursor; feed each back via the matching
+  `--since-<kind>` flag next pass.
+- `count` — total across all three kinds.
+- `new_comments[]` — merged, sorted by `(created_at, id)`. Each entry:
 
-Cursor format is `"<iso8601>#<id>"`. The timestamp is compared as a
-string (ISO 8601 sorts naturally); the id is compared as a number, so
-decimal widths don't matter to callers. A bare ISO timestamp without
-`#<id>` is accepted and treated as `#0` (boundary second included).
+  - `kind` — `"review"` (inline) / `"issue"` (top-level) / `"review_summary"` (PR review body).
+  - `id` — id within that kind's namespace; needed for inline review replies.
+  - `author` — e.g. `chatgpt-codex-connector[bot]` or a human login.
+  - `body` — full markdown (includes P1/P2 badge HTML).
+  - `path`, `line` — review-comment kind only.
+  - `state` — review_summary kind only (`APPROVED` / `COMMENTED` / `CHANGES_REQUESTED`).
+  - `html_url` — direct link.
+  - `created_at` — ISO 8601 UTC.
+
+Cursor format per kind: `"<iso8601>#<id>"`. Timestamp is compared as a
+string (ISO 8601 sorts naturally); id is compared as a number, so
+decimal widths don't matter. A bare ISO timestamp without `#<id>` is
+accepted and treated as `#0` (boundary second included).
 
 ## State To Track (in TodoWrite or scratchpad)
 
 Per loop iteration:
 
 - Current PR number.
-- Last cursor.
+- Per-kind cursors: `CUR_REVIEW`, `CUR_ISSUE`, `CUR_SUMMARY`.
 - Pending fixes (one TodoWrite item per actionable comment).
 - Last SHA pushed.
 
