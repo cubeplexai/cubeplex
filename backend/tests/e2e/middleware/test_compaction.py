@@ -13,7 +13,7 @@ config object is loaded at module import time, so monkeypatch.setenv
 cannot override the already-initialized compaction thresholds per-test
 without modifying conftest (out of scope).
 
-See plan: docs/superpowers/plans/2026-05-15-agent-middleware-e2e.md
+See plan: docs/dev/plans/2026-05-15-agent-middleware-e2e.md
 """
 
 from __future__ import annotations

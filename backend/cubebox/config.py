@@ -27,7 +27,7 @@ settings_files = [
 # Load worktree-specific allocations (ports, DB schema, Redis prefix) from
 # .worktree.env at the worktree root, BEFORE dynaconf reads. override=False
 # means real shell exports still win. See
-# docs/superpowers/specs/2026-04-28-worktree-parallel-dev-isolation-design.md
+# docs/dev/specs/2026-04-28-worktree-parallel-dev-isolation-design.md
 _worktree_env_path = backend_dir.parent / ".worktree.env"
 if _worktree_env_path.exists():
     _load_worktree_dotenv(_worktree_env_path, override=False)

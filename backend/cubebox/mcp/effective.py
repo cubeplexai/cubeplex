@@ -113,7 +113,7 @@ def _missing_grant_reason(policy: CredentialPolicy) -> MCPEffectiveReason:
 def compute_effective_state(value: MCPEffectiveInput) -> MCPEffectiveResult:
     """Decide usability + diagnostic reason for a single install.
 
-    Decision order (first match wins) — see ``docs/superpowers/plans/
+    Decision order (first match wins) — see ``docs/dev/plans/
     2026-05-16-mcp-management-four-layer.md`` §Task 5 Step 2 for the spec
     contract.
     """

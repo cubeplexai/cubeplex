@@ -15,7 +15,7 @@ Each test maps 1:1 to a scenario in the spec's testing-strategy section:
 
 The tests intentionally use the **public HTTP surface** (admin + workspace
 routes) rather than poking repositories directly, so the contract documented
-in ``docs/superpowers/specs/...`` is exercised exactly as the frontend sees
+in ``docs/dev/specs/...`` is exercised exactly as the frontend sees
 it. Database-level assertions are added for invariants that aren't visible
 via the API alone (install_scope, workspace_id NULL, install_state tombstones,
 WorkspaceConnectorState rows).

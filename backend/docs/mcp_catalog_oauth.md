@@ -4,7 +4,7 @@ This document describes how cubebox installs and runs remote MCP
 connectors after the M2 catalog rework. It is a working reference for
 operators and engineers; the authoritative source for design decisions
 remains the spec at
-`docs/superpowers/specs/2026-05-08-mcp-catalog-oauth-design.md`.
+`docs/dev/specs/2026-05-08-mcp-catalog-oauth-design.md`.
 
 ## Architecture
 

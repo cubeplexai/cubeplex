@@ -53,7 +53,7 @@ cd frontend && pnpm format && git add -u
 
 ## CI expectations
 
-Every PR runs 4 jobs: `backend-check`, `frontend-check`, `e2e`, `test-ee-compat`. All must pass before merge. Full spec: [docs/superpowers/specs/2026-04-21-ci-baseline-design.md](docs/superpowers/specs/2026-04-21-ci-baseline-design.md).
+Every PR runs 4 jobs: `backend-check`, `frontend-check`, `e2e`, `test-ee-compat`. All must pass before merge. Full spec: [docs/dev/specs/2026-04-21-ci-baseline-design.md](docs/dev/specs/2026-04-21-ci-baseline-design.md).
 
 ## Code style
 
