@@ -166,6 +166,15 @@ async def discover_tools_for_install(
         usable = dto.usable
         reason = dto.reason
         grant = dto.grant
+        # Retry path: if the connector is unusable ONLY because the
+        # previous discovery left `discovery_status='error'`, allow
+        # this run to proceed so the Retry button can actually clear
+        # the persisted error. The effective service emits
+        # `reason='discovery_failed'` for that state; treat it as
+        # transient-usable here. Other unusable reasons (missing
+        # grant, expired without refresh, etc.) still block.
+        if not usable and reason == "discovery_failed":
+            usable = True
     else:
         grant = await grant_repo.get_org_grant(install_id)
         # Match the workspace-side effective rule (compute_effective_state
