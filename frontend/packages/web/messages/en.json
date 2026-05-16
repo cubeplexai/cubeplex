@@ -404,6 +404,71 @@
       "removeMyGrant": "Remove my grant",
       "errorPopupBlocked": "Pop-ups are blocked. Allow pop-ups for this site, then retry.",
       "errorTimeout": "Authorization timed out. Please retry."
+    },
+    "tools": {
+      "filterPlaceholder": "Filter tools…",
+      "countAll": "{count, plural, =0 {No tools} one {1 tool} other {# tools}}",
+      "countMatch": "{matched} of {total} tools",
+      "empty": "Discovery has not run yet, or the server exposes no tools.",
+      "emptyMatch": "No tools match \"{query}\".",
+      "argsSummary": "{count, plural, =0 {no args} one {1 arg} other {# args}}",
+      "requiredSummary": "{count} required",
+      "detail": {
+        "viewSchema": "Schema",
+        "viewTryIt": "Try It",
+        "viewJson": "Raw JSON",
+        "schema": {
+          "parameters": "Parameters",
+          "noParams": "This tool takes no parameters.",
+          "malformed": "Tool schema is malformed.",
+          "required": "required",
+          "defaultLabel": "default:",
+          "allowed": "allowed:",
+          "variantLabel": "Variant {n}",
+          "itemShape": "Item shape",
+          "cycleRef": "Cyclic reference",
+          "unresolvedRef": "Unresolved $ref"
+        },
+        "tryit": {
+          "banner": "Calls go to the live MCP server using the workspace's effective credentials.",
+          "run": "Run",
+          "running": "Running…",
+          "runDisabledTooltip": "Select a workspace lens above",
+          "jsonHint": "Enter JSON (object / array)",
+          "resultOk": "ok",
+          "resultErr": "error",
+          "workspaceLensLabel": "Workspace lens",
+          "workspaceLensPlaceholder": "Select a workspace",
+          "workspaceLensHelp": "This connector uses workspace/user-scoped credentials. Pick which workspace's credential to use."
+        },
+        "json": {
+          "copy": "Copy",
+          "copied": "Copied"
+        },
+        "errorBanner": {
+          "title": "Discovery error",
+          "expand": "Show full message",
+          "collapse": "Hide details",
+          "retry": "Retry discovery",
+          "retrying": "Retrying…"
+        }
+      }
+    },
+    "detail": {
+      "errorBanner": {
+        "title": "Discovery error",
+        "expand": "Show full message",
+        "collapse": "Hide details",
+        "retry": "Retry discovery",
+        "retrying": "Retrying…"
+      }
+    },
+    "tryIt": {
+      "run": "Run",
+      "running": "Running…"
+    },
+    "errorBanner": {
+      "title": "Discovery error"
     }
   },
   "mcpOAuthReturn": {

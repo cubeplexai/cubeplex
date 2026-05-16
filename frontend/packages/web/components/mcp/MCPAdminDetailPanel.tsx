@@ -2,10 +2,11 @@
 
 import { useEffect, useState } from 'react'
 import { useTranslations } from 'next-intl'
-import { Check, FileText, Loader2, Network, Trash2, X } from 'lucide-react'
+import { Check, FileText, Loader2, Network, Trash2, Wrench, X } from 'lucide-react'
 import {
   adminDeleteInstall,
   adminGetInstallEffective,
+  adminRefreshDiscovery,
   wsListTemplates,
   type ApiClient,
   type MCPAdminInstallEffective,
@@ -20,6 +21,8 @@ import { cn } from '@/lib/utils'
 import { AuthActionBand } from './AuthActionBand'
 import { MCPTemplateInstallPanel } from './MCPTemplateInstallPanel'
 import { MCPWorkspacesTab } from './MCPWorkspacesTab'
+import { ServerErrorBanner } from './detail/ServerErrorBanner'
+import { ToolsPanel } from './detail/tools/ToolsPanel'
 
 interface MCPAdminDetailPanelProps {
   connector: MCPEffectiveConnector | null
@@ -78,6 +81,10 @@ export function MCPAdminDetailPanel({
     setRefreshing(true)
     setActionError(null)
     try {
+      // Re-run tool discovery on the backend, then reload the list so the
+      // parent's connector state reflects the new tools_cache/discovery_status.
+      const lens = install.default_credential_policy === 'org' ? null : wsId
+      await adminRefreshDiscovery(client, installId, lens)
       await onRefresh()
     } catch (err) {
       setActionError((err as Error).message)
@@ -101,8 +108,17 @@ export function MCPAdminDetailPanel({
 
   const busy = refreshing || deleting
 
+  const discoveryError = install.discovery_status === 'error'
+
   return (
     <div className="flex w-full flex-col gap-4 p-6" data-testid="mcp-admin-detail-panel">
+      {discoveryError ? (
+        <ServerErrorBanner
+          error={install.last_error ?? 'Discovery failed.'}
+          onRetry={() => void handleRefresh()}
+          retrying={refreshing}
+        />
+      ) : null}
       <div className="flex flex-col gap-4 rounded-xl border border-border bg-card p-5 sm:flex-row sm:items-start sm:justify-between">
         <div className="flex min-w-0 flex-col gap-3">
           <div className="flex flex-wrap items-center gap-2">
@@ -207,6 +223,10 @@ export function MCPAdminDetailPanel({
             <FileText className="size-3.5" />
             {t('tabOverview')}
           </TabsTrigger>
+          <TabsTrigger value="tools">
+            <Wrench className="size-3.5" />
+            {t('tabTools', { count: install.tool_count })}
+          </TabsTrigger>
           {isOrgWide && (
             <TabsTrigger value="workspaces">
               <Network className="size-3.5" />
@@ -238,6 +258,21 @@ export function MCPAdminDetailPanel({
               ) : null}
             </dl>
           </div>
+        </TabsContent>
+
+        <TabsContent value="tools" className="mt-4">
+          <ToolsPanel
+            tools={install.tools}
+            installId={installId}
+            client={client}
+            surface="admin"
+            wsId={wsId}
+            requiresWorkspacePicker={
+              install.default_credential_policy === 'workspace' ||
+              install.default_credential_policy === 'user'
+            }
+            scopedAdminWorkspaceId={wsId}
+          />
         </TabsContent>
 
         {isOrgWide && (
