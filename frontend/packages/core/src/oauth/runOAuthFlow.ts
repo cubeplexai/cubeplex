@@ -38,7 +38,21 @@ export interface RunOAuthFlowDeps {
 
 export async function runOAuthFlow(deps: RunOAuthFlowDeps): Promise<OAuthFlowResult> {
   // 1. Open popup synchronously BEFORE any await.
-  const target = `mcp-oauth-${crypto.randomUUID()}`
+  //
+  // Per-flow unique window target name. A fixed name like
+  // `mcp-oauth` would make window.open reuse the existing popup
+  // when a second flow starts before the first finishes (codex
+  // round-7 catch). crypto.randomUUID is cleanest but is missing on
+  // browsers older than ~Chrome 92 / FF 95 / Safari 15.4 and on
+  // non-secure contexts other than localhost (real bug surfaced
+  // in local testing). Fall back to timestamp + Math.random — this
+  // string only needs to be locally unique within the page, not
+  // cryptographic.
+  const uniqueSuffix =
+    typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(36).slice(2)}`
+  const target = `mcp-oauth-${uniqueSuffix}`
   const child = window.open('about:blank', target, 'width=620,height=760')
   if (child === null) {
     return { status: 'error', reason: 'popup_blocked' }
