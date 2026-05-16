@@ -123,6 +123,22 @@ class MCPEffectiveConnectorListOut(BaseModel):
     items: list[MCPEffectiveConnectorOut]
 
 
+class MCPAdminInstallEffectiveOut(BaseModel):
+    """Org-row effective state for the admin page.
+
+    Bypasses the workspace lens — see spec §4 admin row.
+    """
+
+    install_id: str
+    usable: bool
+    reason: Literal[
+        "usable",
+        "pending_oauth",
+        "missing_org_grant",
+        "grant_expired",
+    ]
+
+
 class AutoEnableIn(BaseModel):
     """Distribution payload for org-scope installs."""
 
