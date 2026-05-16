@@ -322,11 +322,18 @@ Schema additions:
 - `AdminCreateInstallIn`: when `template_id is None`, require
   `name`, `server_url`, `transport`. `headers`, `default_credential_policy`
   optional. Cross-field validator.
-- Per `auth_method='static'` + saved-from-create-form, the
-  endpoint also accepts an optional `credential_plaintext` on the
-  same POST so the static grant is created in one round trip
-  instead of two. (For OAuth, the user still goes through the
-  OAuth pop-up after install creation as today.)
+- Per `auth_method='static'` + `default_credential_policy='org'`
+  ONLY, the endpoint accepts an optional `credential_plaintext`
+  on the same POST so the org-scope static grant is created in
+  one round trip instead of two. For `workspace`/`user` policy
+  the body alone is insufficient (workspace_id and possibly
+  user_id are missing from this admin POST), so the schema
+  validator rejects `credential_plaintext` with 422
+  `credential_plaintext_only_valid_for_org_policy` and the admin
+  uses the existing two-step flow (create install → create
+  grant via the workspace-scoped grant endpoint, which has the
+  right scope fields). For OAuth, the user still goes through
+  the OAuth pop-up after install creation as today.
 
 The custom install reuses the action band for credential
 authorization just like a catalog install (§install→auth handoff
@@ -516,13 +523,22 @@ Behavior:
   to workspace / org grant per the existing effective-state rules
   — same as agent runtime.
 - For the **admin route**: the admin viewing an `install_scope =
-  'org'` install needs a workspace context to resolve user-policy
-  grants. The body's `workspace_id` is optional; when omitted,
-  the route uses the admin's first own membership in the install's
-  org (or 422 `workspace_id_required_for_user_policy` if the
-  install's effective policy is `user` and the admin has no
-  membership). For `install_scope = 'workspace'` installs, the
-  route 404s — admins should call the workspace route directly.
+  'org'` install needs a workspace context for any grant lookup
+  that is keyed on workspace (i.e. `workspace`- or `user`-policy
+  installs). The body's `workspace_id` is REQUIRED for those
+  cases — auto-picking the admin's "first membership" would be
+  non-deterministic for an admin in multiple workspaces and could
+  resolve to a workspace with no grant when a different one has
+  one. So:
+  - Org-policy install → `workspace_id` ignored (not needed; the
+    org grant is workspace-independent).
+  - Workspace-policy or user-policy install → `workspace_id` is
+    REQUIRED on the body. 422
+    `workspace_id_required_for_scoped_policy` if missing. The
+    admin UI provides a workspace picker on the Try It panel
+    when the effective policy is workspace or user.
+  - For `install_scope = 'workspace'` installs the admin route
+    404s — admins should call the workspace route directly.
 - 10-second timeout on the underlying invoke.
 - Returns `result` JSON (whatever the tool returned) or `error`
   string.
