@@ -5,6 +5,7 @@ import { AlertTriangle, CheckCircle2, Loader2, PauseCircle, Plug } from 'lucide-
 import { useTranslations } from 'next-intl'
 import {
   createApiClient,
+  useWorkspaceStore,
   wsCreateInstall,
   wsListEffectiveConnectors,
   wsListTemplates,
@@ -14,6 +15,7 @@ import {
   type MCPEffectiveConnector,
 } from '@cubebox/core'
 
+import { AuthActionBand } from '@/components/mcp/AuthActionBand'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -178,6 +180,9 @@ function ConnectorDetail({
     return c
   }, [wsId])
 
+  const wsRole = useWorkspaceStore((s) => s.workspaces.find((w) => w.id === wsId)?.role)
+  const callerRole: 'admin' | 'member' = wsRole === 'admin' ? 'admin' : 'member'
+
   async function toggle(): Promise<void> {
     setSaving(true)
     setError(null)
@@ -217,6 +222,15 @@ function ConnectorDetail({
           <p className="text-sm text-muted-foreground">{connector.template.description}</p>
         )}
       </header>
+
+      <AuthActionBand
+        connector={connector}
+        client={client}
+        wsId={wsId}
+        callerRole={callerRole}
+        isOrgAdmin={false}
+        onChanged={onChanged}
+      />
 
       <div className="rounded-lg border border-border/70 bg-card/40 p-4">
         <h4 className="mb-3 text-sm font-semibold">{t('workspaceState')}</h4>
@@ -267,6 +281,10 @@ export function McpPanel({ wsId }: McpPanelProps) {
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [installing, setInstalling] = useState<string | null>(null)
   const [search, setSearch] = useState('')
+
+  // Template list (= adding new connectors) is admin-only in workspace settings.
+  // Spec §5.1 "New UI rule introduced by this spec".
+  const meWsRole = useWorkspaceStore((s) => s.workspaces.find((w) => w.id === wsId)?.role)
 
   const client = useMemo(() => {
     const c = createApiClient('')
@@ -416,7 +434,7 @@ export function McpPanel({ wsId }: McpPanelProps) {
                 )}
               </section>
 
-              {filteredTemplates.length > 0 && (
+              {meWsRole === 'admin' && filteredTemplates.length > 0 && (
                 <section>
                   <h3 className="mb-2 px-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
                     {t('templates')}

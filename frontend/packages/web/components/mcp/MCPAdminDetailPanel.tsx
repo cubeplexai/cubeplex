@@ -1,12 +1,14 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useTranslations } from 'next-intl'
 import { Check, FileText, Loader2, Network, Trash2, X } from 'lucide-react'
 import {
   adminDeleteInstall,
+  adminGetInstallEffective,
   wsListTemplates,
   type ApiClient,
+  type MCPAdminInstallEffective,
   type MCPConnectorTemplate,
   type MCPEffectiveConnector,
 } from '@cubebox/core'
@@ -15,6 +17,7 @@ import { Button } from '@/components/ui/button'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { cn } from '@/lib/utils'
 
+import { AuthActionBand } from './AuthActionBand'
 import { MCPTemplateInstallPanel } from './MCPTemplateInstallPanel'
 import { MCPWorkspacesTab } from './MCPWorkspacesTab'
 
@@ -191,6 +194,13 @@ export function MCPAdminDetailPanel({
 
       {actionError ? <p className="text-xs text-destructive">{actionError}</p> : null}
 
+      <AdminAuthActionBand
+        connector={connector}
+        client={client}
+        wsId={wsId}
+        onChanged={onRefresh}
+      />
+
       <Tabs defaultValue="overview" className="flex-1 flex-col">
         <TabsList variant="line" className="w-full justify-start border-b border-border/60 pb-0">
           <TabsTrigger value="overview">
@@ -237,6 +247,82 @@ export function MCPAdminDetailPanel({
         )}
       </Tabs>
     </div>
+  )
+}
+
+/**
+ * Wraps AuthActionBand for the admin detail panel.
+ *
+ * For org-scope installs the workspace lens can misreport `required_grant_scope`
+ * (e.g. an org install whose workspace lens overrides to `user` would surface
+ * the wrong band on the admin page). On admin we always want the org-row
+ * semantics — see spec §4 admin row. We therefore pre-fetch the dedicated
+ * admin /effective endpoint and synthesize an `MCPEffectiveConnector` with
+ * `required_grant_scope='org'` before handing it to the band.
+ *
+ * For workspace-scope installs the lens is already the right answer; no extra
+ * call is needed.
+ */
+function AdminAuthActionBand({
+  connector,
+  client,
+  wsId,
+  onChanged,
+}: {
+  connector: MCPEffectiveConnector
+  client: ApiClient
+  wsId: string
+  onChanged: () => Promise<void>
+}) {
+  const isOrgScope = connector.install.install_scope === 'org'
+  const [orgEffective, setOrgEffective] = useState<MCPAdminInstallEffective | null>(null)
+  const [loaded, setLoaded] = useState(!isOrgScope)
+
+  useEffect(() => {
+    if (!isOrgScope) {
+      setLoaded(true)
+      return
+    }
+    let cancelled = false
+    setLoaded(false)
+    void adminGetInstallEffective(client, connector.install.install_id)
+      .then((res) => {
+        if (cancelled) return
+        setOrgEffective(res)
+      })
+      .catch(() => {
+        // Fall back to lens connector — band will hide if reason is unknown.
+      })
+      .finally(() => {
+        if (!cancelled) setLoaded(true)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [client, connector.install.install_id, isOrgScope])
+
+  if (!loaded) return null
+
+  const synthesized: MCPEffectiveConnector =
+    isOrgScope && orgEffective
+      ? {
+          ...connector,
+          required_grant_scope: 'org',
+          usable: orgEffective.usable,
+          reason: orgEffective.reason,
+          credential_availability: orgEffective.usable ? 'available' : 'missing',
+        }
+      : connector
+
+  return (
+    <AuthActionBand
+      connector={synthesized}
+      client={client}
+      wsId={wsId}
+      callerRole="admin"
+      isOrgAdmin={true}
+      onChanged={onChanged}
+    />
   )
 }
 
