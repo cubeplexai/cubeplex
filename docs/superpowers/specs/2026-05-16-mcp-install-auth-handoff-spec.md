@@ -402,22 +402,33 @@ A single TypeScript helper exported from `@cubebox/core` named
 plus optional `reason`.
 
 ```
- runOAuthFlow:
+ runOAuthFlow (called synchronously from the user-activation click):
  ─────────────────────────────────────────────────────────────────────
-   1. POST <oauth/start URL>; receive { authorize_url, state }.
+   1. Open a blank popup synchronously, BEFORE any await:
+        const child = window.open('about:blank', 'mcp-oauth',
+                                  'width=620,height=760');
+      If `child === null` → resolve('error', 'popup_blocked')
+      and return immediately. The synchronous open is required
+      because browsers gate window.open on the user-activation
+      token, which is consumed by the click handler and lost the
+      moment we `await` anything. Awaiting `oauth/start` first
+      causes legitimate clicks to be reported as `popup_blocked`
+      even with popups allowed.
    2. Open a BroadcastChannel named `cubebox-mcp-oauth`.
-   3. window.open(authorize_url, 'mcp-oauth',
-                  'width=620,height=760,noopener=no');
-      Save the WindowProxy reference for cancellation.
-   4. Race:
-        - message on the channel (filtered by matching `state`)
+   3. await POST <oauth/start URL>; receive { authorize_url, state }.
+      - On network/server error → child.close(); resolve('error',
+        'start_failed').
+   4. child.location.href = authorize_url;
+      (navigates the already-open blank popup to the AS).
+   5. Race:
+        - message on the channel where `state === <our state>`
         - 90s setTimeout
         - 1s polling: child.closed && no message yet → 'cancelled'
-   5. On `ok` message → resolve('ok').
-   6. On `cancelled` message (user denied at the AS) → resolve('cancelled').
-   7. On `error` message → resolve('error', reason).
-   8. On timeout → close child, resolve('error', 'timeout').
-   9. Always: close the BroadcastChannel.
+   6. On `ok` message → resolve('ok').
+   7. On `cancelled` message (user denied at the AS) → resolve('cancelled').
+   8. On `error` message → resolve('error', reason).
+   9. On timeout → child.close(); resolve('error', 'timeout').
+  10. Always: close the BroadcastChannel.
 ```
 
 The 90 s timeout reasoning: AS providers vary, but MFA + consent screens of
@@ -439,13 +450,31 @@ served by our own Next.js app at `/oauth/mcp/return`.
 Already referenced by the back-end stub (`mcp_oauth.py:30-32`). This spec
 fixes its contract:
 
-- Query params accepted (all optional except `status`):
-  - `status` — `ok | error | cancelled`
-  - `install_id`
-  - `reason` — short machine-friendly token (e.g. `state_mismatch`,
-    `callback_not_wired`, `grant_write_failed`, `user_denied`)
-  - `state` — the OAuth state token, so the parent can match the message
-    to the in-flight request
+- Query params:
+  - `status` — `ok | error | cancelled` (required).
+  - `state` — the OAuth state token (required). The callback ALWAYS
+    knows its state, even on error/denial paths, because the state
+    token is recovered from the request that the AS redirected to us
+    (or from our own ticket cookie on AS-initiated errors). Marking
+    this required eliminates the failure mode where an error redirect
+    omits state and the popup's BroadcastChannel filter discards the
+    message — the user would otherwise see a `timeout` instead of the
+    real server reason.
+  - `install_id` — optional. Present on `ok` paths; may be empty on
+    AS-side errors where the back end did not finish state-token
+    decoding. Consumers must not assume non-empty.
+  - `reason` — optional. Short machine-friendly token (e.g.
+    `state_mismatch`, `callback_not_wired`, `grant_write_failed`,
+    `user_denied`).
+
+- If the callback genuinely cannot recover `state` (corrupt URL, the
+  AS never redirected back to us), the return page MUST navigate to
+  `/oauth/mcp/return?status=error&state=__missing__&reason=state_unrecoverable`.
+  The parent matches `state === <our state>` strictly; the sentinel
+  `__missing__` is treated as "no opinion" and the parent falls
+  through to its 90 s timeout (which then closes the popup and
+  surfaces `error/timeout`). This is the only sanctioned omission of
+  a real state value.
 
 - Behavior:
   1. Post a typed message on `BroadcastChannel('cubebox-mcp-oauth')`:
