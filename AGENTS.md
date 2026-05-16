@@ -18,8 +18,11 @@ cubebox is a full-stack agent platform.
   message history, MCP tool integration.
 - `frontend/` — Next.js + React 19 monorepo (`packages/web` + shared
   `@cubebox/core`).
-- `docs/`, `backend/docs/`, `frontend/docs/` — design specs, architecture
-  deep dives, reference content. Indexed below.
+- `docs/` — cross-cutting documentation, including
+  `docs/dev/{specs,plans,notes}` for **all** feature specs, multi-step
+  plans, and engineering notes (see below).
+- `backend/docs/`, `frontend/docs/` — area-specific reference and
+  architecture deep dives. Indexed in the "Critical Subsystems" table.
 - `scripts/` — worktree provisioning, dev helpers.
 
 ---
@@ -205,8 +208,18 @@ Full details, role tables, operator CLI, system endpoints:
 
 - Temporary / one-shot scripts → `backend/scripts/dev/`. They are not
   long-term commitments.
-- Specs and plans → `docs/superpowers/{specs,plans}/` (repo root), **not**
-  `backend/docs/`.
+- **All specs, plans, and engineering notes live under `docs/dev/`** at
+  the repo root — never `backend/docs/superpowers/` or
+  `frontend/docs/superpowers/` (those locations are gone). Use the
+  following subdirs and naming pattern:
+  - `docs/dev/specs/YYYY-MM-DD-<slug>-design.md` — feature designs
+    (the "what and why" before implementation).
+  - `docs/dev/plans/YYYY-MM-DD-<slug>.md` — multi-step implementation
+    plans broken into reviewable chunks.
+  - `docs/dev/notes/YYYY-MM-DD-<slug>.md` — investigation notes,
+    decision records, post-mortems.
+  A spec/plan is a frozen snapshot; rebase the content, don't rewrite
+  history.
 - Don't write multi-paragraph code comments. Only add a comment when the
   *why* is non-obvious.
 - Don't add backwards-compat shims unless explicitly asked — the project
