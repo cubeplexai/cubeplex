@@ -179,16 +179,33 @@ async def discover_tools_for_install(
     from cubebox.mcp.cubepi_runtime import _resolve_headers_from_spec
 
     spec = _build_runtime_spec_for_discovery(install=install, grant=grant)
-    headers = await _resolve_headers_from_spec(
-        spec=spec,
-        workspace_id=workspace_id or install.workspace_id or "",
-        org_id=install.org_id,
-        user_id=actor_user_id,
-        cred_service=cred_service,
-        signer=signer,
-        token_manager=token_mgr,
-        grant_repo=grant_repo,
-    )
+    # Wrap header resolution: vault read failures (deleted credential,
+    # wrong kind, OAuth refresh failure) raise from
+    # `_resolve_headers_from_spec`. Persist them as
+    # discovery_status='error' + last_error so the banner surfaces
+    # them; never bubble as a 500.
+    try:
+        headers = await _resolve_headers_from_spec(
+            spec=spec,
+            workspace_id=workspace_id or install.workspace_id or "",
+            org_id=install.org_id,
+            user_id=actor_user_id,
+            cred_service=cred_service,
+            signer=signer,
+            token_manager=token_mgr,
+            grant_repo=grant_repo,
+        )
+    except Exception as exc:  # noqa: BLE001
+        install.discovery_status = "error"
+        install.last_error = f"credential_resolution_failed: {exc}"[:2048]
+        await install_repo.update(install)
+        return DiscoveryResult(
+            install_id=install_id,
+            discovery_status="error",
+            tool_count=0,
+            tools_cache_raw=list(install.tools_cache or []),
+            last_error=install.last_error,
+        )
     if headers is None:
         install.discovery_status = "error"
         install.last_error = "Auth header resolution failed"

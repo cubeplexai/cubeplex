@@ -64,6 +64,7 @@ from cubebox.mcp.effective import (
     MCPEffectiveConnectorDTO,
     MCPEffectiveConnectorService,
 )
+from cubebox.mcp.exceptions import MCPDiscoveryFailed
 from cubebox.mcp.oauth import OAuthStartError, OAuthStartService
 from cubebox.mcp.oauth.token_manager import OAuthTokenManager
 from cubebox.mcp.user_token import MCPUserTokenSigner
@@ -259,6 +260,10 @@ async def ws_refresh_discovery(
             signer=signer,
             token_mgr=token_mgr,
         )
+    except MCPDiscoveryFailed as exc:
+        raise HTTPException(
+            400, detail={"code": "connector_not_usable", "reason": str(exc)}
+        ) from exc
     except ValueError as exc:
         raise HTTPException(400, detail={"code": str(exc)}) from exc
     refreshed = await install_repo.get(install_id)
@@ -712,19 +717,39 @@ async def ws_invoke_tool(
             },
         )
     spec = _build_runtime_spec_for_discovery(install=install, grant=dto.grant)
-    headers = await _resolve_headers_from_spec(
-        spec=spec,
-        workspace_id=workspace_id,
-        org_id=ctx.org_id,
-        user_id=ctx.user.id,
-        cred_service=cred_service,
-        signer=signer,
-        token_manager=token_mgr,
-        grant_repo=grant_repo,
-    )
-    if headers is None:
-        raise HTTPException(400, detail={"code": "credential_resolution_failed"})
     started = time.perf_counter()
+    try:
+        headers = await _resolve_headers_from_spec(
+            spec=spec,
+            workspace_id=workspace_id,
+            org_id=ctx.org_id,
+            user_id=ctx.user.id,
+            cred_service=cred_service,
+            signer=signer,
+            token_manager=token_mgr,
+            grant_repo=grant_repo,
+        )
+        if headers is None:
+            raise RuntimeError("credential_resolution_returned_none")
+    except Exception as exc:  # noqa: BLE001
+        duration = int((time.perf_counter() - started) * 1000)
+        await audit.record(
+            event="mcp.tool.invoked",
+            actor_user_id=ctx.user.id,
+            org_id=ctx.org_id,
+            target_id=install_id,
+            details={
+                "tool_name": tool_name,
+                "workspace_id": workspace_id,
+                "ok": False,
+                "error_kind": "credential_resolution_failed",
+            },
+        )
+        return ToolInvokeOut(
+            ok=False,
+            error=f"credential_resolution_failed: {exc}"[:512],
+            duration_ms=duration,
+        )
     try:
         result = await asyncio.wait_for(
             _invoke_tool_via_cubepi(
