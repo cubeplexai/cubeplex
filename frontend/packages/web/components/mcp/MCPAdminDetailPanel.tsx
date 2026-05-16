@@ -115,7 +115,22 @@ export function MCPAdminDetailPanel({
     try {
       // Re-run tool discovery on the backend, then reload the list so the
       // parent's connector state reflects the new tools_cache/discovery_status.
-      const lens = install.default_credential_policy === 'org' ? null : wsId
+      //
+      // Choose the lens based on the connector's EFFECTIVE
+      // `credential_policy` from the DTO, not `install.default_credential_policy`.
+      // A workspace state row can override the install default (e.g. an
+      // org install lensed into a workspace whose state row sets
+      // `credential_policy='user'`); sending `workspace_id=null` in that
+      // case would resolve the org grant instead of the workspace/user
+      // one the runtime actually uses.
+      // `connector` is the parent's effective DTO. The handleRefresh
+      // closure is created in the same render where the panel mounted
+      // an install, so the connector is non-null when the button is
+      // clickable — but TS narrowing is lost across the await above.
+      // Fall back to the install-default lens if the DTO is somehow
+      // missing.
+      const effectivePolicy = connector?.credential_policy ?? install.default_credential_policy
+      const lens = effectivePolicy === 'org' ? null : wsId
       await adminRefreshDiscovery(client, installId, lens)
       await onRefresh()
     } catch (err) {
