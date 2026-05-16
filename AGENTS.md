@@ -29,8 +29,22 @@ cubebox is a full-stack agent platform.
 
 ## Workflow Discipline (non-negotiable)
 
-1. **Worktree before spec/code** for any non-trivial feature. Run
-   `./scripts/new-worktree feat/<name>` from the **main repo root**.
+1. **Worktree before *any* keystroke** of new work. Run
+   `./scripts/new-worktree feat/<name>` from the **main repo root**
+   *first*, then `cd` into the worktree and start editing.
+   - This applies to specs, plans, prototypes, "let me just try
+     something quick" — all of it. Not just full features.
+   - **Never** start in the main checkout and migrate to a worktree
+     later: that path leaves stale duplicates of new files in the
+     main tree (untracked or on the wrong branch), pollutes the next
+     `git status` with cruft that doesn't belong to whatever feature
+     is actually on the main checkout's branch, and forces
+     reconciliation work that the worktree-first flow avoids
+     entirely.
+   - If you catch yourself mid-edit in the main checkout, **stop**:
+     `git stash` (if needed), create the worktree, redo the edits
+     there, then explicitly clean the residue from the main checkout
+     before continuing.
 2. **Read `.worktree.env` first** on entering a worktree. Never assume
    ports 8000 / 3000. See [docs/worktrees.md](docs/worktrees.md).
 3. **E2E priority over mocks/units.** Skip E2E only when the system genuinely
