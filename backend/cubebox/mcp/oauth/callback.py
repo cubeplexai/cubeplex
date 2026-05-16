@@ -266,7 +266,17 @@ class OAuthCallbackHandler:
             )
             return await grant_repo.add(grant)
         existing.credential_id = access_id
-        existing.refresh_credential_id = refresh_id
+        # Only overwrite refresh_credential_id when the AS sent a new
+        # refresh_token. Many providers (GitHub, Slack, Google with
+        # access_type=online, ...) omit the refresh_token on
+        # re-authorization unless the user fully re-consents — they
+        # expect the client to keep the original refresh credential.
+        # Blindly assigning `None` here would convert a refreshable
+        # grant into a non-refreshable one on the next silent re-auth,
+        # and the connector would break the first time the access
+        # token expired.
+        if refresh_id is not None:
+            existing.refresh_credential_id = refresh_id
         existing.expires_at = expires_at
         existing.grant_status = "valid"
         return await grant_repo.update(existing)
