@@ -121,8 +121,33 @@ disagreement worth resolving manually).
 | Comment is on a line that no longer exists (already changed) | Reply with "already addressed in <sha>" and link. |
 | Comment asks a question | Reply with the answer; no code change needed. |
 
-**Don't** silently ignore comments. Every comment gets a reply (next
-section).
+### Comment kinds
+
+The poller returns three `kind` values, each with its own handling
+nuance:
+
+| kind | Source | Notes |
+|---|---|---|
+| `review` | inline review comments (`/pulls/<n>/comments`) | The bulk of codex feedback. Reply via `/pulls/<n>/comments/<id>/replies`. |
+| `issue` | top-level PR thread (`/issues/<n>/comments`) | Reply with a new issue comment (`gh pr comment`). |
+| `review_summary` | review header body (`/pulls/<n>/reviews`) | The optional body attached to a "Comment" / "Request changes" / "Approve" action. **`state` matters.** |
+
+For `review_summary`:
+
+- **`state == "APPROVED"`** — no action; the body is usually just a sign-off note.
+- **`state == "CHANGES_REQUESTED"`** — blocking; treat as P1 unless the
+  body itself says nit.
+- **`state == "COMMENTED"`** with the codex bot's batch boilerplate
+  body (starts with `### 💡 Codex Review`, lists the reviewed commit
+  and a count of inline suggestions) — informational header for the
+  inline comments in the same review. **Skip; the inline `review`
+  entries already cover the actionable feedback.**
+- **`state == "COMMENTED"`** from a human — treat like a P2 unless the
+  body is clearly stylistic.
+
+**Don't** silently ignore comments. Every actionable comment gets a
+reply (next section). Codex boilerplate headers are the one exception
+— the inline comments they wrap are what you reply to.
 
 ## Reply Rules
 
@@ -153,6 +178,9 @@ Replying mechanics:
 - **Issue comment** (top-level PR thread, `kind: "issue"`): reply with a
   new issue comment `gh pr comment <PR> --body '...'`, quoting or
   referencing the original.
+- **Review summary** (`kind: "review_summary"`): there is no per-review
+  reply endpoint. Post a new issue comment quoting the relevant phrase
+  from the summary and citing the fix SHA.
 
 The poller's `html_url` field gives you the link if you need to attach
 context.

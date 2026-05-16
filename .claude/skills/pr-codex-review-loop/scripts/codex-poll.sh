@@ -2,9 +2,17 @@
 #
 # codex-poll.sh — single-shot PR comment fetcher for the codex review loop.
 #
-# Pulls both review comments (inline, file-anchored) and issue comments
-# (top-level PR thread) for a given PR, merges them, filters by a
-# created_at cursor, and emits a JSON blob on stdout.
+# Pulls three GitHub feedback streams for a given PR, merges them,
+# filters by a created_at cursor, and emits a JSON blob on stdout:
+#
+#   1. /pulls/<n>/comments  — inline review comments (file-anchored)
+#   2. /issues/<n>/comments — top-level PR thread comments
+#   3. /pulls/<n>/reviews   — review summaries (the body of "Comment" /
+#                             "Request changes" / "Approve" actions)
+#
+# Without (3), a reviewer who submits a top-level summary with no inline
+# comments would never surface and the loop could exit clean while a
+# blocking review body sits unanswered.
 #
 # This is deliberately not a daemon. Callers (the pr-codex-review-loop
 # skill, a /loop invocation, etc.) decide cadence and exit conditions.
@@ -41,17 +49,23 @@
 #     "count": <int>,
 #     "new_comments": [
 #       {
-#         "kind":       "review" | "issue",
+#         "kind":       "review" | "issue" | "review_summary",
 #         "id":         <int>,
 #         "author":     "<login>",
 #         "body":       "<text>",
 #         "path":       "<file path, review only>" | null,
 #         "line":       <int, review only> | null,
+#         "state":      "APPROVED" | "COMMENTED" | "CHANGES_REQUESTED" | null,
 #         "html_url":   "<link>",
 #         "created_at": "<iso8601>"
 #       }, ...
 #     ]
 #   }
+#
+# Review summaries (kind=review_summary) only appear when the review
+# body is non-empty (skipping the empty-body reviews GitHub auto-creates
+# when you post inline replies via the API). `state` is null for the
+# other two kinds.
 #
 # Exit codes:
 #   0  ok (new_comments may be empty)
@@ -101,11 +115,14 @@ fi
 # jq filter flattens before processing.
 tmpdir=$(mktemp -d)
 trap 'rm -rf "$tmpdir"' EXIT
-gh api --paginate "repos/$REPO/pulls/$PR/comments"   > "$tmpdir/reviews.json" || {
+gh api --paginate "repos/$REPO/pulls/$PR/comments"   > "$tmpdir/reviews.json"  || {
   echo "failed to fetch review comments for $REPO#$PR" >&2; exit 1
 }
-gh api --paginate "repos/$REPO/issues/$PR/comments"  > "$tmpdir/issues.json"  || {
+gh api --paginate "repos/$REPO/issues/$PR/comments"  > "$tmpdir/issues.json"   || {
   echo "failed to fetch issue comments for $REPO#$PR" >&2; exit 1
+}
+gh api --paginate "repos/$REPO/pulls/$PR/reviews"    > "$tmpdir/summaries.json" || {
+  echo "failed to fetch review summaries for $REPO#$PR" >&2; exit 1
 }
 
 # Normalize cursor: bare ISO timestamp → "<iso>#0" (boundary second
@@ -124,6 +141,7 @@ SINCE_ID="${SINCE##*#}"
 jq -n \
   --slurpfile reviews         "$tmpdir/reviews.json" \
   --slurpfile issues          "$tmpdir/issues.json" \
+  --slurpfile summaries       "$tmpdir/summaries.json" \
   --arg       since_ts        "$SINCE_TS" \
   --argjson   since_id        "$SINCE_ID" \
   --arg       exclude_author  "$EXCLUDE_AUTHOR" \
@@ -136,6 +154,7 @@ jq -n \
       body:       (.body // ""),
       path:       .path,
       line:       (.line // .original_line),
+      state:      null,
       html_url:   .html_url,
       created_at: .created_at
     };
@@ -147,8 +166,21 @@ jq -n \
       body:       (.body // ""),
       path:       null,
       line:       null,
+      state:      null,
       html_url:   .html_url,
       created_at: .created_at
+    };
+  def norm_summary:
+    {
+      kind:       "review_summary",
+      id:         .id,
+      author:     .user.login,
+      body:       (.body // ""),
+      path:       null,
+      line:       null,
+      state:      .state,
+      html_url:   .html_url,
+      created_at: .submitted_at
     };
   # Tuple compare: timestamp first (ISO 8601 sorts as strings), id
   # second as a number to avoid the lex pitfall with mixed widths.
@@ -157,7 +189,10 @@ jq -n \
     or (.created_at == $since_ts and .id > $since_id);
   def cursor_key: "\(.created_at)#\(.id)";
 
-  ( ($reviews | add | map(norm_review)) + ($issues | add | map(norm_issue)) )
+  ( ($reviews   | add | map(norm_review))
+  + ($issues    | add | map(norm_issue))
+  + ($summaries | add | map(norm_summary)
+                     | map(select(.body != "" and .created_at != null))) )
   | map(select(($exclude_author == "") or (.author != $exclude_author)))
   | map(select(newer_than_cursor))
   | sort_by(.created_at, .id)
