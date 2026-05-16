@@ -193,6 +193,7 @@ class OAuthStartService:
             code_challenge=pkce.challenge,
             state=state,
             scope=scope_param,
+            resource=install.server_url,
         )
 
         expires_at = datetime.now(tz=UTC) + timedelta(seconds=self._state_ttl_seconds)
@@ -295,6 +296,7 @@ def _build_authorize_url(
     code_challenge: str,
     state: str,
     scope: str | None,
+    resource: str,
 ) -> str:
     params: dict[str, str] = {
         "response_type": "code",
@@ -303,6 +305,13 @@ def _build_authorize_url(
         "code_challenge": code_challenge,
         "code_challenge_method": "S256",
         "state": state,
+        # RFC 8707 audience binding — the MCP authorization spec
+        # (https://modelcontextprotocol.io/specification/2025-06-18/basic/authorization)
+        # requires `resource` on authorize AND token requests, identifying
+        # the target MCP server. ASes that enforce audience binding will
+        # otherwise reject the code exchange or issue a token whose
+        # audience is not the MCP server.
+        "resource": resource,
     }
     if scope:
         params["scope"] = scope

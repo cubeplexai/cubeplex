@@ -197,6 +197,11 @@ class OAuthCallbackHandler:
                 "redirect_uri": _redirect_uri(),
                 "client_id": client_id,
                 "code_verifier": verifier,
+                # RFC 8707 audience binding — must match the `resource`
+                # sent on the authorize request (see start.py
+                # _build_authorize_url). MCP authorization spec
+                # requires the same target on both legs of the flow.
+                "resource": install.server_url,
             }
         )
         headers = {"Content-Type": "application/x-www-form-urlencoded"}
