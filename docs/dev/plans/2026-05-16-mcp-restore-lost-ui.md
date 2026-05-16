@@ -1546,21 +1546,46 @@ async def ws_invoke_tool(
     # no Bearer token even though dto.usable=True, and the invoke
     # fails for any private MCP server.
     spec = _build_runtime_spec_for_discovery(install=install, grant=dto.grant)
-    headers = await _resolve_headers_from_spec(
-        spec=spec,
-        workspace_id=workspace_id,
-        org_id=ctx.org_id,
-        user_id=ctx.user.id,
-        cred_service=cred_service,
-        signer=signer,
-        token_manager=token_mgr,
-        grant_repo=grant_repo,
-    )
-    if headers is None:
-        raise HTTPException(
-            400, detail={"code": "credential_resolution_failed"},
-        )
+    # Wrap credential resolution + the None-result branch in try/except
+    # so that vault-read failures (deleted credential, wrong kind,
+    # failed OAuth refresh) come back as a clean ToolInvokeOut with
+    # ok=False + a documented `error` string, NOT a 500. Audit the
+    # failure too so it traces in the same channel as a successful
+    # invoke. The cubepi-invoke try/except below catches tool-side
+    # failures separately.
     started = time.perf_counter()
+    try:
+        headers = await _resolve_headers_from_spec(
+            spec=spec,
+            workspace_id=workspace_id,
+            org_id=ctx.org_id,
+            user_id=ctx.user.id,
+            cred_service=cred_service,
+            signer=signer,
+            token_manager=token_mgr,
+            grant_repo=grant_repo,
+        )
+        if headers is None:
+            raise RuntimeError("credential_resolution_returned_none")
+    except Exception as exc:  # noqa: BLE001
+        duration = int((time.perf_counter() - started) * 1000)
+        await audit.record(
+            event="mcp.tool.invoked",
+            actor_user_id=ctx.user.id,
+            org_id=ctx.org_id,
+            target_id=install_id,
+            details={
+                "tool_name": tool_name,
+                "workspace_id": workspace_id,
+                "ok": False,
+                "error_kind": "credential_resolution_failed",
+            },
+        )
+        return ToolInvokeOut(
+            ok=False,
+            error=f"credential_resolution_failed: {exc}"[:512],
+            duration_ms=duration,
+        )
     try:
         result = await asyncio.wait_for(
             _invoke_tool_via_cubepi(
