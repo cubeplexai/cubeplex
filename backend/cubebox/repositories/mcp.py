@@ -262,6 +262,19 @@ class MCPWorkspaceConnectorStateRepository:
         )
         return list((await self.session.execute(stmt)).scalars().all())
 
+    async def list_for_install(self, install_id: str) -> list[MCPWorkspaceConnectorState]:
+        """Every state row pointing at this install across all workspaces.
+
+        Used by the admin connector list to compute the per-install
+        ``workspace_distribution`` aggregate in one query instead of a
+        per-workspace fan-out.
+        """
+        stmt = select(MCPWorkspaceConnectorState).where(
+            MCPWorkspaceConnectorState.org_id == self.org_id,  # type: ignore[arg-type]
+            MCPWorkspaceConnectorState.install_id == install_id,  # type: ignore[arg-type]
+        )
+        return list((await self.session.execute(stmt)).scalars().all())
+
     async def delete_for_install(self, install_id: str) -> int:
         """Bulk-delete every state row for ``install_id``. Returns count.
 
