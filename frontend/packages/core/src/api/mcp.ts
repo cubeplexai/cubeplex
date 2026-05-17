@@ -236,7 +236,7 @@ export async function wsMyGrantOAuthStart(
 export interface MCPAdminInstallEffective {
   install_id: string
   usable: boolean
-  reason: 'usable' | 'pending_oauth' | 'missing_org_grant' | 'grant_expired'
+  reason: 'usable' | 'pending_oauth' | 'missing_org_grant' | 'grant_expired' | 'discovery_failed'
 }
 
 export async function adminGetInstallEffective(

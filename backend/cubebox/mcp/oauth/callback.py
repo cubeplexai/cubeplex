@@ -23,6 +23,7 @@ from typing import Any, Literal
 from urllib.parse import urlencode
 
 import httpx
+from redis.asyncio import Redis
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -37,7 +38,10 @@ from cubebox.mcp._constants import (
 from cubebox.mcp.exceptions import OAuthStateExpired, OAuthStateInvalid
 from cubebox.mcp.oauth.metadata import OAuthMetadataDiscovery
 from cubebox.mcp.oauth.state import OAuthStatePayload, OAuthStateStore
+from cubebox.mcp.oauth.token_manager import OAuthTokenManager
+from cubebox.mcp.user_token import MCPUserTokenSigner
 from cubebox.models.mcp import MCPConnectorInstall, MCPCredentialGrant
+from cubebox.repositories.credential import CredentialRepository
 from cubebox.repositories.mcp import (
     MCPConnectorInstallRepository,
     MCPCredentialGrantRepository,
@@ -72,12 +76,21 @@ class OAuthCallbackHandler:
         state_store: OAuthStateStore,
         metadata: OAuthMetadataDiscovery,
         http_client: httpx.AsyncClient,
+        signer: MCPUserTokenSigner,
+        redis: Redis,
     ) -> None:
         self._session = session
         self._backend = backend
         self._state_store = state_store
         self._metadata = metadata
         self._http = http_client
+        # Held for post-grant discovery: an org-scoped OAuthTokenManager
+        # and the identity-token signer are needed to drive
+        # ``_resolve_headers_from_spec``. We build the token manager
+        # lazily inside ``handle_callback`` because org_id only becomes
+        # known after the install row is loaded.
+        self._signer = signer
+        self._redis = redis
 
     async def handle_callback(
         self,
@@ -176,6 +189,34 @@ class OAuthCallbackHandler:
             install=install,
             grant=grant,
             install_repo=install_repo,
+        )
+
+        # Validate the freshly-granted token against the real MCP
+        # server by running discovery. A successful exchange against
+        # the AS doesn't prove the server accepts the token — only an
+        # actual ``tools/list`` does. Failures land in
+        # install.discovery_status / last_error.
+        # Local import: ``mcp_discovery`` pulls in cubepi_runtime which
+        # transitively imports OAuthTokenManager via effective.py, so
+        # importing it at module top would create a circular import
+        # through ``cubebox.mcp.oauth.__init__``.
+        from cubebox.services.mcp_discovery import run_post_grant_discovery
+
+        token_mgr = OAuthTokenManager(
+            http_client=self._http,
+            redis=self._redis,
+            encryption_backend=self._backend,
+            credential_repo=CredentialRepository(self._session, org_id=install.org_id),
+            metadata=self._metadata,
+        )
+        await run_post_grant_discovery(
+            install_id=install.id,
+            workspace_id=payload.workspace_id,
+            actor_user_id=payload.actor_user_id,
+            session=self._session,
+            cred_service=cred_service,
+            signer=self._signer,
+            token_mgr=token_mgr,
         )
 
         return OAuthCallbackResult(status="ok", install_id=install.id, state=state)

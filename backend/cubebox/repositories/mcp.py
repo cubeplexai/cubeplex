@@ -456,7 +456,10 @@ class MCPCredentialGrantRepository:
         grant_scope: str,
         workspace_id: str | None = None,
         user_id: str | None = None,
-    ) -> None:
+    ) -> list[MCPCredentialGrant]:
+        """Delete matching grants. Returns the deleted rows so callers can
+        clean up the credentials they pointed at (the vault rows aren't
+        scoped to grants by FK; the service is responsible for cascading)."""
         stmt = select(MCPCredentialGrant).where(
             MCPCredentialGrant.org_id == self.org_id,  # type: ignore[arg-type]
             MCPCredentialGrant.install_id == install_id,  # type: ignore[arg-type]
@@ -469,7 +472,9 @@ class MCPCredentialGrantRepository:
         if user_id is not None:
             stmt = stmt.where(MCPCredentialGrant.user_id == user_id)  # type: ignore[arg-type]
         rows = list((await self.session.execute(stmt)).scalars().all())
+        deleted = list(rows)
         for row in rows:
             await self.session.delete(row)
         if rows:
             await self.session.commit()
+        return deleted

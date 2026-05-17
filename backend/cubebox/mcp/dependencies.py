@@ -258,10 +258,14 @@ async def get_oauth_callback_handler(
     state_store: OAuthStateStore = Depends(get_oauth_state_store),
     metadata: OAuthMetadataDiscovery = Depends(get_oauth_metadata_discovery),
     http_client: httpx.AsyncClient = Depends(get_oauth_http_client),
+    signer: MCPUserTokenSigner = Depends(get_user_token_signer),
+    redis: Redis = Depends(get_redis),
 ) -> OAuthCallbackHandler:
     """Callback handler is unauthenticated — defers org-scoped construction
     until ``handle_callback()`` decodes the state token and resolves the
-    install (and hence org_id).
+    install (and hence org_id). ``signer`` and ``redis`` are passed in so
+    the handler can run post-grant discovery without re-resolving them
+    via DI mid-flight.
     """
     return OAuthCallbackHandler(
         session=session,
@@ -269,6 +273,8 @@ async def get_oauth_callback_handler(
         state_store=state_store,
         metadata=metadata,
         http_client=http_client,
+        signer=signer,
+        redis=redis,
     )
 
 

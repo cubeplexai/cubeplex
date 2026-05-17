@@ -450,7 +450,9 @@
           "expand": "查看完整信息",
           "collapse": "收起",
           "retry": "重试发现",
-          "retrying": "重试中…"
+          "retrying": "重试中…",
+          "replaceCredential": "更换凭证",
+          "replacing": "正在移除…"
         }
       }
     },
@@ -460,7 +462,9 @@
         "expand": "查看完整信息",
         "collapse": "收起",
         "retry": "重试发现",
-        "retrying": "重试中…"
+        "retrying": "重试中…",
+        "replaceCredential": "更换凭证",
+        "replacing": "正在移除…"
       }
     },
     "tryIt": {

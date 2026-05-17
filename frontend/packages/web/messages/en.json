@@ -450,7 +450,9 @@
           "expand": "Show full message",
           "collapse": "Hide details",
           "retry": "Retry discovery",
-          "retrying": "Retrying…"
+          "retrying": "Retrying…",
+          "replaceCredential": "Replace credential",
+          "replacing": "Removing…"
         }
       }
     },
@@ -460,7 +462,9 @@
         "expand": "Show full message",
         "collapse": "Hide details",
         "retry": "Retry discovery",
-        "retrying": "Retrying…"
+        "retrying": "Retrying…",
+        "replaceCredential": "Replace credential",
+        "replacing": "Removing…"
       }
     },
     "tryIt": {
