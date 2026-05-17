@@ -44,7 +44,7 @@ import { MCPPromoteDialog } from './MCPPromoteDialog'
 import { MCPTemplateInstallPanel } from './MCPTemplateInstallPanel'
 import { MCPWorkspacesTab } from './MCPWorkspacesTab'
 import { ServerErrorBanner } from './detail/ServerErrorBanner'
-import { ToolsPanel } from './detail/tools/ToolsPanel'
+import { AdminToolsPanel } from './detail/tools/AdminToolsPanel'
 
 interface MCPAdminDetailPanelProps {
   connector: MCPEffectiveConnector | null
@@ -405,11 +405,10 @@ export function MCPAdminDetailPanel({
         </TabsContent>
 
         <TabsContent value="tools" className="mt-4">
-          <ToolsPanel
+          <AdminToolsPanel
             tools={install.tools}
             installId={installId}
             client={client}
-            surface="admin"
             // Pass wsId only when the install has a workspace state
             // row in this lens. The admin invoke route's
             // list_for_workspace_user filters org installs without a
