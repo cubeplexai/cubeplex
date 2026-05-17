@@ -44,6 +44,10 @@ from cubebox.api.schemas.mcp import (
     WsInstallInvokeIn,
     WsInstallRefreshIn,
 )
+from cubebox.api.schemas.mcp_ws_available import (
+    WsAvailableListOut,
+    WsAvailableOut,
+)
 from cubebox.audit.sink import AuditSink
 from cubebox.auth.context import RequestContext
 from cubebox.auth.dependencies import current_active_user, require_admin, require_member
@@ -137,6 +141,59 @@ async def list_workspace_connectors(
     return MCPEffectiveConnectorListOut(
         items=[_dto_to_effective_out(dto) for dto in dtos],
     )
+
+
+@router.get("/available", response_model=WsAvailableListOut)
+async def list_workspace_available(
+    workspace_id: str,
+    _ctx: Annotated[RequestContext, Depends(require_member)],
+    install_svc: Annotated[MCPConnectorInstallService, Depends(get_ws_install_service)],
+    template_svc: Annotated[MCPConnectorTemplateService, Depends(get_connector_template_service)],
+) -> WsAvailableListOut:
+    """Connectors the workspace can opt into.
+
+    Includes org installs not yet enabled in this workspace + templates
+    the workspace doesn't already have. Spec §3.2.
+    """
+    from cubebox.services.mcp_ws_available import compute_available_rows
+
+    org_installs = await install_svc._install_repo.list_org_installs()
+    ws_installs = await install_svc._install_repo.list_workspace_installs(workspace_id)
+    ws_states = await install_svc._state_repo.list_for_workspace(workspace_id)
+    templates = await template_svc.list_active()
+
+    rows = compute_available_rows(
+        ws_id=workspace_id,
+        org_installs=org_installs,
+        ws_installs=ws_installs,
+        ws_states=ws_states,
+        templates=templates,
+    )
+
+    installs_by_id = {i.id: i for i in org_installs}
+    templates_by_id = {t.id: t for t in templates}
+
+    items: list[WsAvailableOut] = []
+    for row in rows:
+        install_out = (
+            _install_to_out(installs_by_id[row.install_id])
+            if row.source == "org_install" and row.install_id is not None
+            else None
+        )
+        template_out = (
+            _template_to_out(templates_by_id[row.template_id])
+            if row.template_id is not None and row.template_id in templates_by_id
+            else None
+        )
+        items.append(
+            WsAvailableOut(
+                source=row.source,
+                install=install_out,
+                template=template_out,
+                reason=row.reason,
+            )
+        )
+    return WsAvailableListOut(items=items)
 
 
 @router.post(
