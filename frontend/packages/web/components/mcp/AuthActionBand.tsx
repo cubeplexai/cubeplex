@@ -3,11 +3,14 @@
 /**
  * Authentication action band — five mutually exclusive states.
  * Spec: docs/superpowers/specs/2026-05-16-mcp-install-auth-handoff-spec.md §3.
+ *
+ * Intermediate form: delegates all visual rendering to AuthBandFrame and only
+ * binds API callbacks per caller scope. Task 13 will split this into
+ * AdminAuthBand + WsAuthBand and delete this file.
  */
 
-import { useState, type ReactNode } from 'react'
+import { useState } from 'react'
 import { useTranslations } from 'next-intl'
-import { AlertTriangle, CheckCircle2, Clock, MoreHorizontal, XCircle } from 'lucide-react'
 import {
   runOAuthFlow,
   wsCreateMyGrant,
@@ -23,20 +26,11 @@ import {
   type MCPEffectiveConnector,
   type MCPOAuthStartResult,
 } from '@cubebox/core'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu'
-import { cn } from '@/lib/utils'
 
-import { computeAuthBandState, type AuthBandState, type AuthReason } from './effectiveAuthState'
+import { computeAuthBandState } from './effectiveAuthState'
+import { AuthBandFrame, type DisconnectOption } from './AuthBandFrame'
 
 type Scope = 'org' | 'workspace' | 'user'
-type BandT = ReturnType<typeof useTranslations<'mcp.auth'>>
 
 export interface AuthActionBandProps {
   connector: MCPEffectiveConnector
@@ -56,225 +50,28 @@ export function AuthActionBand(props: AuthActionBandProps) {
     isOrgAdmin: props.isOrgAdmin,
   })
   const [inFlight, setInFlight] = useState(false)
-  const [errorState, setErrorState] = useState<{ reason?: string } | null>(null)
+  const [errorMessage, setErrorMessage] = useState<string | undefined>(undefined)
 
-  if (state.kind === 'hidden') return null
-
-  // Scope the connect / save / delete action targets. Mirrors §4.
   const scope = scopeForBand(props.connector)
+  const installId = props.connector.install.install_id
 
-  if (state.kind === 'ready') {
-    return <ReadyBand state={state} t={t} scope={scope} props={props} />
-  }
-
-  if (state.kind === 'awaiting-others') {
-    return <AwaitingBand state={state} t={t} />
-  }
-
-  if (state.kind === 'oauth-in-flight' || inFlight) {
-    return (
-      <Banner color="amber" icon={<Clock className="size-4" />}>
-        <div className="flex-1">
-          <p className="font-medium">{t('bandTitleInFlight')}</p>
-        </div>
-      </Banner>
-    )
-  }
-
-  if (errorState || state.kind === 'error') {
-    const reason = errorState?.reason ?? (state.kind === 'error' ? state.reason : undefined)
-    return (
-      <Banner color="rose" icon={<XCircle className="size-4" />}>
-        <div className="flex-1">
-          <p className="font-medium">{t('bandTitleError')}</p>
-          <p className="text-xs text-muted-foreground">{errorReasonCopy(t, reason)}</p>
-        </div>
-        <Button
-          size="sm"
-          variant="outline"
-          onClick={() => {
-            setErrorState(null)
-          }}
-        >
-          {t('retryButton')}
-        </Button>
-      </Banner>
-    )
-  }
-
-  if (state.kind === 'needs-action') {
-    if (props.connector.install.auth_method === 'oauth') {
-      const onConnect = async (): Promise<void> => {
-        setInFlight(true)
-        setErrorState(null)
-        const startPost = oauthStartFn(scope, props)
-        const result = await runOAuthFlow({ startPost })
-        setInFlight(false)
-        if (result.status === 'ok') {
-          await props.onChanged()
-          return
-        }
-        if (result.status === 'cancelled') return
-        setErrorState({ reason: result.reason })
-      }
-      return (
-        <Banner color="amber" icon={<AlertTriangle className="size-4" />}>
-          <div className="flex-1">
-            <p className="font-medium">{t('bandTitleNeedsAction')}</p>
-            <p className="text-xs text-muted-foreground">
-              {needsActionReasonCopy(t, state.reason)}
-            </p>
-          </div>
-          <Button size="sm" onClick={() => void onConnect()}>
-            {t('connectButton', { provider: providerLabel(props.connector) })}
-          </Button>
-        </Banner>
-      )
-    }
-
-    // static
-    return (
-      <StaticTokenForm
-        scope={scope}
-        props={props}
-        t={t}
-        reason={state.reason}
-        onError={(reason) => setErrorState({ reason })}
-      />
-    )
-  }
-
-  return null
-}
-
-// ---------- sub-components ---------- //
-
-function ReadyBand({
-  state,
-  t,
-  scope,
-  props,
-}: {
-  state: Extract<AuthBandState, { kind: 'ready' }>
-  t: BandT
-  scope: Scope
-  props: AuthActionBandProps
-}) {
-  const [busy, setBusy] = useState(false)
-  const message =
-    state.subkind === 'no_credential'
-      ? t('readyNoCredential')
-      : t('readyWithCredential', { source: state.source ?? '' })
-
-  const disconnects = disconnectsForCaller(props, state.source)
-
-  const onDelete = async (target: Scope): Promise<void> => {
-    setBusy(true)
-    try {
-      if (target === 'org') {
-        await adminDeleteOrgGrant(props.client, props.connector.install.install_id)
-      } else if (target === 'workspace') {
-        await wsDeleteWorkspaceGrant(props.client, props.wsId, props.connector.install.install_id)
-      } else {
-        await wsDeleteMyGrant(props.client, props.wsId, props.connector.install.install_id)
-      }
+  const onConnect = async (): Promise<void> => {
+    setInFlight(true)
+    setErrorMessage(undefined)
+    const startPost = oauthStartFn(scope, props)
+    const result = await runOAuthFlow({ startPost })
+    setInFlight(false)
+    if (result.status === 'ok') {
       await props.onChanged()
-    } finally {
-      setBusy(false)
+      return
     }
+    if (result.status === 'cancelled') return
+    setErrorMessage(result.reason)
   }
 
-  return (
-    <Banner color="emerald" icon={<CheckCircle2 className="size-4" />}>
-      <div className="flex-1">
-        <p className="font-medium">{message}</p>
-      </div>
-      {state.subkind === 'with_credential' && disconnects.length > 0 && (
-        <DropdownMenu>
-          <DropdownMenuTrigger
-            disabled={busy}
-            aria-label={t('disconnectMenu')}
-            className="inline-flex h-8 items-center justify-center rounded-md px-2 text-sm hover:bg-accent disabled:opacity-50"
-          >
-            <MoreHorizontal className="size-4" />
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
-            {disconnects.includes('org') && (
-              <DropdownMenuItem onSelect={() => void onDelete('org')}>
-                {t('removeOrgGrant')}
-              </DropdownMenuItem>
-            )}
-            {disconnects.includes('workspace') && (
-              <DropdownMenuItem onSelect={() => void onDelete('workspace')}>
-                {t('removeWsGrant')}
-              </DropdownMenuItem>
-            )}
-            {disconnects.includes('user') && (
-              <DropdownMenuItem onSelect={() => void onDelete('user')}>
-                {t('removeMyGrant')}
-              </DropdownMenuItem>
-            )}
-          </DropdownMenuContent>
-        </DropdownMenu>
-      )}
-      {/* `scope` is referenced so the lint rule does not flag the parameter. */}
-      <span data-scope={scope} className="hidden" aria-hidden="true" />
-    </Banner>
-  )
-}
-
-function AwaitingBand({
-  state,
-  t,
-}: {
-  state: Extract<AuthBandState, { kind: 'awaiting-others' }>
-  t: BandT
-}) {
-  const who = state.who === 'org_admin' ? t('whoOrgAdmin') : t('whoWorkspaceAdmin')
-  const scopeLabel = state.who === 'org_admin' ? 'org' : 'workspace'
-  return (
-    <Banner color="amber" icon={<Clock className="size-4" />}>
-      <div className="flex-1">
-        <p className="font-medium">{t('bandTitleAwaiting', { who })}</p>
-        <p className="text-xs text-muted-foreground">
-          {awaitingReasonCopy(t, state.reason, who, scopeLabel)}
-        </p>
-      </div>
-      <span
-        title={t('notifyTooltip')}
-        // Notify is a future affordance — render disabled so the layout slot is
-        // accounted for. Spec §3.4.
-      >
-        <Button size="sm" variant="outline" disabled>
-          {t('notifyButton')}
-        </Button>
-      </span>
-    </Banner>
-  )
-}
-
-function StaticTokenForm({
-  scope,
-  props,
-  t,
-  reason,
-  onError,
-}: {
-  scope: Scope
-  props: AuthActionBandProps
-  t: BandT
-  reason: AuthReason
-  onError: (reason: string) => void
-}) {
-  const [token, setToken] = useState('')
-  const [busy, setBusy] = useState(false)
-
-  const onSave = async (): Promise<void> => {
-    if (!token) return
-    setBusy(true)
+  const onSaveStaticToken = async (token: string): Promise<void> => {
     try {
       const body = { credential_plaintext: token }
-      const installId = props.connector.install.install_id
       if (scope === 'org') {
         await adminCreateOrgGrant(props.client, installId, body)
       } else if (scope === 'workspace') {
@@ -282,71 +79,48 @@ function StaticTokenForm({
       } else {
         await wsCreateMyGrant(props.client, props.wsId, installId, body)
       }
-      setToken('')
       await props.onChanged()
     } catch (err) {
-      onError(`save_failed:${(err as Error).message}`)
-    } finally {
-      setBusy(false)
+      setErrorMessage(`save_failed:${(err as Error).message}`)
     }
   }
 
+  const onDelete = async (target: Scope): Promise<void> => {
+    if (target === 'org') {
+      await adminDeleteOrgGrant(props.client, installId)
+    } else if (target === 'workspace') {
+      await wsDeleteWorkspaceGrant(props.client, props.wsId, installId)
+    } else {
+      await wsDeleteMyGrant(props.client, props.wsId, installId)
+    }
+    await props.onChanged()
+  }
+
+  const source =
+    state.kind === 'ready' && state.subkind === 'with_credential' ? state.source : undefined
+  const disconnectOptions: DisconnectOption[] = disconnectsForCaller(props, source).map((s) => ({
+    scope: s,
+    label:
+      s === 'org'
+        ? t('removeOrgGrant')
+        : s === 'workspace'
+          ? t('removeWsGrant')
+          : t('removeMyGrant'),
+    onClick: () => void onDelete(s),
+  }))
+
   return (
-    <Banner color="amber" icon={<AlertTriangle className="size-4" />}>
-      <div className="flex flex-1 flex-col gap-2">
-        <div>
-          <p className="font-medium">{t('bandTitleNeedsAction')}</p>
-          <p className="text-xs text-muted-foreground">{needsActionReasonCopy(t, reason)}</p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <Input
-            type="password"
-            value={token}
-            onChange={(e) => setToken(e.target.value)}
-            placeholder={t('staticTokenLabel')}
-            className="max-w-xs"
-            aria-label={t('staticTokenLabel')}
-          />
-          <Button size="sm" disabled={busy || !token} onClick={() => void onSave()}>
-            {t('staticTokenSave')}
-          </Button>
-        </div>
-      </div>
-    </Banner>
-  )
-}
-
-// ---------- banner shell ---------- //
-
-const BANNER_COLORS = {
-  emerald:
-    'border-emerald-300/60 bg-emerald-50 text-emerald-900 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-100',
-  amber:
-    'border-amber-300/60 bg-amber-50 text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-100',
-  rose: 'border-rose-300/60 bg-rose-50 text-rose-900 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-100',
-} as const
-
-function Banner({
-  color,
-  icon,
-  children,
-}: {
-  color: keyof typeof BANNER_COLORS
-  icon: ReactNode
-  children: ReactNode
-}) {
-  return (
-    <div
-      role="status"
-      data-testid="mcp-auth-band"
-      className={cn(
-        'flex items-start gap-3 rounded-lg border px-3 py-2.5 text-sm',
-        BANNER_COLORS[color],
-      )}
-    >
-      <span className="mt-0.5 shrink-0">{icon}</span>
-      {children}
-    </div>
+    <AuthBandFrame
+      state={state}
+      authMethod={props.connector.install.auth_method === 'oauth' ? 'oauth' : 'static'}
+      providerLabel={providerLabel(props.connector)}
+      onConnect={() => void onConnect()}
+      onSaveStaticToken={(token) => void onSaveStaticToken(token)}
+      disconnectOptions={disconnectOptions}
+      onRetryError={() => setErrorMessage(undefined)}
+      errorMessage={errorMessage}
+      inFlight={inFlight}
+    />
   )
 }
 
@@ -375,44 +149,6 @@ function oauthStartFn(
 
 function providerLabel(connector: MCPEffectiveConnector): string {
   return connector.template?.provider || connector.template?.name || connector.install.name
-}
-
-function needsActionReasonCopy(t: BandT, reason: AuthReason): string {
-  switch (reason) {
-    case 'pending_oauth':
-      return t('reasonPendingOAuth')
-    case 'missing_org_grant':
-      return t('reasonMissingOrgGrantSelf')
-    case 'missing_workspace_grant':
-      return t('reasonMissingWsGrantSelf')
-    case 'user_needs_connection':
-      return t('reasonUserNeedsConnection')
-    case 'grant_expired':
-      return t('reasonGrantExpiredSelf')
-    default:
-      return ''
-  }
-}
-
-function awaitingReasonCopy(t: BandT, reason: AuthReason, who: string, scope: string): string {
-  switch (reason) {
-    case 'pending_oauth':
-      return t('reasonAwaitingPendingOauth', { who })
-    case 'grant_expired':
-      return t('reasonAwaitingExpired', { scope })
-    case 'missing_org_grant':
-    case 'missing_workspace_grant':
-    case 'user_needs_connection':
-    default:
-      return t('reasonAwaitingMissingOrg', { who })
-  }
-}
-
-function errorReasonCopy(t: BandT, reason: string | undefined): string {
-  if (!reason) return ''
-  if (reason === 'popup_blocked') return t('errorPopupBlocked')
-  if (reason === 'timeout') return t('errorTimeout')
-  return reason
 }
 
 /**
