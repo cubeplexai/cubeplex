@@ -2,12 +2,12 @@
 
 import { useTranslations } from 'next-intl'
 import { AlertTriangle, CheckCircle2, LockKeyhole, PauseCircle, Plug } from 'lucide-react'
-import type { MCPConnectorFilter, MCPEffectiveConnector } from '@cubebox/core'
+import type { AdminOrgConnector, MCPConnectorFilter } from '@cubebox/core'
 import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'
 
 interface MCPConnectorListProps {
-  connectors: MCPEffectiveConnector[]
+  connectors: AdminOrgConnector[]
   loading: boolean
   search: string
   filter: MCPConnectorFilter
@@ -15,19 +15,19 @@ interface MCPConnectorListProps {
   onSelect: (id: string) => void
 }
 
-function nameOf(c: MCPEffectiveConnector): string {
+function nameOf(c: AdminOrgConnector): string {
   return c.install.name || c.template?.name || c.install.install_id
 }
 
-function providerOf(c: MCPEffectiveConnector): string {
+function providerOf(c: AdminOrgConnector): string {
   return c.template?.provider ?? ''
 }
 
 function filterConnectors(
-  connectors: MCPEffectiveConnector[],
+  connectors: AdminOrgConnector[],
   search: string,
   filter: MCPConnectorFilter,
-): MCPEffectiveConnector[] {
+): AdminOrgConnector[] {
   const q = search.trim().toLowerCase()
 
   return connectors
@@ -52,12 +52,12 @@ function filterConnectors(
 }
 
 interface StatusPillProps {
-  connector: MCPEffectiveConnector
+  connector: AdminOrgConnector
 }
 
 function StatusPill({ connector }: StatusPillProps) {
   const t = useTranslations('mcpAdmin')
-  const ws = connector.workspace_state
+  const eff = connector.org_effective
 
   // Disconnected — install removed
   if (connector.install.install_state === 'uninstalled') {
@@ -69,16 +69,7 @@ function StatusPill({ connector }: StatusPillProps) {
     )
   }
 
-  if (!ws?.enabled) {
-    return (
-      <span className="inline-flex items-center gap-1 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
-        <PauseCircle className="size-3" />
-        {t('statusWorkspaceDisabled')}
-      </span>
-    )
-  }
-
-  if (connector.usable) {
+  if (eff.usable) {
     return (
       <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-medium text-emerald-600 dark:text-emerald-400">
         <CheckCircle2 className="size-3" />
@@ -87,7 +78,7 @@ function StatusPill({ connector }: StatusPillProps) {
     )
   }
 
-  if (connector.reason === 'pending_oauth' || connector.install.auth_status === 'pending_oauth') {
+  if (eff.reason === 'pending_oauth' || connector.install.auth_status === 'pending_oauth') {
     return (
       <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-600 dark:text-amber-400">
         <AlertTriangle className="size-3" />
@@ -96,7 +87,7 @@ function StatusPill({ connector }: StatusPillProps) {
     )
   }
 
-  if (connector.credential_availability === 'missing') {
+  if (eff.credential_availability === 'missing') {
     return (
       <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-600 dark:text-amber-400">
         <LockKeyhole className="size-3" />
@@ -147,6 +138,7 @@ export function MCPConnectorList({
       {filtered.map((c) => {
         const id = c.install.install_id
         const active = id === selectedId
+        const dist = c.workspace_distribution
         return (
           <button
             key={id}
@@ -173,8 +165,17 @@ export function MCPConnectorList({
                 {c.install.install_scope === 'org' ? t('scopeOrg') : t('scopeWorkspace')}
               </Badge>
               <Badge variant="outline" className="px-1.5 text-[10px]">
-                {c.credential_policy}
+                {c.install.default_credential_policy}
               </Badge>
+              <span
+                className="text-[10px] tabular-nums text-muted-foreground"
+                title={t('workspaceStateSummary', {
+                  enabled: dist.enabled_count,
+                  total: dist.eligible_count,
+                })}
+              >
+                {dist.enabled_count}/{dist.eligible_count}
+              </span>
             </div>
           </button>
         )

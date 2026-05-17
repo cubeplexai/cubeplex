@@ -5,31 +5,25 @@
  *
  * Spec: docs/superpowers/specs/2026-05-16-mcp-install-auth-handoff-spec.md §3,§4.
  *
- * Renders the auth action band on the admin detail panel. For org-scope
- * installs the workspace lens can misreport `required_grant_scope` (e.g. an
- * org install whose workspace lens overrides to `user` would surface the
- * wrong band on the admin page). On admin we always want the org-row
- * semantics — see spec §4 admin row. We therefore pre-fetch the dedicated
- * admin /effective endpoint and synthesize an `MCPEffectiveConnector` with
- * `required_grant_scope='org'` before handing it to {@link AuthBandFrame}.
- *
- * For workspace-scope installs the lens is already the right answer; no
- * extra call is needed.
+ * Consumes the admin-only `AdminOrgConnector` DTO, which already carries the
+ * org-row effective state (`org_effective`). We adapt that into the shape
+ * expected by {@link computeAuthBandState} (which is shared with the
+ * workspace band and still types against `MCPEffectiveConnector`) by
+ * synthesizing a connector with `required_grant_scope='org'`.
  *
  * Binds admin-only write APIs (org-grant create/delete/oauth-start). No
  * workspace/user grant calls reach this component.
  */
 
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { useTranslations } from 'next-intl'
 import {
   adminCreateOrgGrant,
   adminDeleteOrgGrant,
-  adminGetInstallEffective,
   adminOrgGrantOAuthStart,
   runOAuthFlow,
+  type AdminOrgConnector,
   type ApiClient,
-  type MCPAdminInstallEffective,
   type MCPEffectiveConnector,
 } from '@cubebox/core'
 
@@ -37,84 +31,56 @@ import { computeAuthBandState } from './effectiveAuthState'
 import { AuthBandFrame, type DisconnectOption } from './AuthBandFrame'
 
 export interface AdminAuthBandProps {
-  connector: MCPEffectiveConnector
+  connector: AdminOrgConnector
   client: ApiClient
-  /** Lens workspace id — used only for callback URL context, not for grant scope. */
-  wsId: string
   onChanged: () => Promise<void>
 }
 
 export function AdminAuthBand(props: AdminAuthBandProps) {
   const { connector, client, onChanged } = props
-  const isOrgScope = connector.install.install_scope === 'org'
-  const [orgEffective, setOrgEffective] = useState<MCPAdminInstallEffective | null>(null)
-  const [loaded, setLoaded] = useState(!isOrgScope)
-
-  // Re-fetch on connector reference change too — the parent passes a fresh
-  // MCPEffectiveConnector object on every list reload (after the band calls
-  // onChanged() following a save/delete grant), so the reference flip is a
-  // reliable signal that org-grant state may have changed. Without this,
-  // /admin/.../effective stays cached at the pre-save reason and the
-  // ready/needs-action band shows stale state until the user navigates away.
-  useEffect(() => {
-    if (!isOrgScope) {
-      setLoaded(true)
-      return
-    }
-    let cancelled = false
-    setLoaded(false)
-    void adminGetInstallEffective(client, connector.install.install_id)
-      .then((res) => {
-        if (cancelled) return
-        setOrgEffective(res)
-      })
-      .catch(() => {
-        // Fall back to lens connector — band will hide if reason is unknown.
-      })
-      .finally(() => {
-        if (!cancelled) setLoaded(true)
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [client, connector, isOrgScope])
-
-  if (!loaded) return null
-
-  const synthesized: MCPEffectiveConnector =
-    isOrgScope && orgEffective
-      ? {
-          ...connector,
-          required_grant_scope: 'org',
-          usable: orgEffective.usable,
-          reason: orgEffective.reason,
-          // For auth_method='none' installs the backend reports
-          // reason='usable' AND no credential is involved at all. The ready
-          // band has a dedicated "No credential required" sub-state that
-          // keys off `credential_availability === 'not_required'` — forcing
-          // 'available' here would route the band into the "credential from
-          // <source>" variant even though credential_source is null, which
-          // would render incorrectly. Mirror the backend's effective-state
-          // mapping: auth_method='none' → not_required.
-          credential_availability:
-            connector.install.auth_method === 'none'
-              ? 'not_required'
-              : orgEffective.usable
-                ? 'available'
-                : 'missing',
-          // The workspace lens (when the admin's current workspace overrides
-          // the org-policy install down to user/workspace) surfaces a
-          // different credential_source. For the org-row band we always want
-          // 'org' (when usable + needs a credential) so the ready band reads
-          // "credential from Org grant" and the Disconnect menu targets the
-          // org grant — not whichever workspace-lens grant happened to be
-          // there.
-          credential_source:
-            connector.install.auth_method === 'none' ? null : orgEffective.usable ? 'org' : null,
-        }
-      : connector
-
+  const synthesized = toEffectiveForAdmin(connector)
   return <AdminBandInner connector={synthesized} client={client} onChanged={onChanged} />
+}
+
+// Bridge between the new admin DTO and the shared band-state computer.
+// `computeAuthBandState` is still typed against `MCPEffectiveConnector`
+// (kept untouched because `WsAuthBand` also consumes it). The admin row
+// always evaluates the org grant, so we pin `required_grant_scope='org'`
+// and lift `usable` / `reason` / availability straight out of
+// `connector.org_effective`.
+function toEffectiveForAdmin(connector: AdminOrgConnector): MCPEffectiveConnector {
+  const eff = connector.org_effective
+  const isNoAuth = connector.install.auth_method === 'none'
+  // Mirror the backend's effective-state mapping: for auth_method='none'
+  // there's no credential involved, so the ready band's "no credential"
+  // sub-state should fire (not "credential from <source>"). When a
+  // credential IS required, surface 'available'/'missing' so the band
+  // routes to the correct branch.
+  const credentialAvailability: MCPEffectiveConnector['credential_availability'] = isNoAuth
+    ? 'not_required'
+    : eff.credential_availability === 'available'
+      ? 'available'
+      : 'missing'
+  // The admin band always targets the org grant when a credential is
+  // present, so `credential_source='org'` (or null when the install
+  // doesn't take credentials, or isn't usable yet).
+  const credentialSource: MCPEffectiveConnector['credential_source'] = isNoAuth
+    ? null
+    : eff.usable
+      ? 'org'
+      : null
+
+  return {
+    template: connector.template,
+    install: connector.install,
+    workspace_state: null,
+    credential_policy: connector.install.default_credential_policy,
+    required_grant_scope: 'org',
+    credential_availability: credentialAvailability,
+    credential_source: credentialSource,
+    usable: eff.usable,
+    reason: eff.reason,
+  }
 }
 
 function AdminBandInner({
