@@ -337,6 +337,19 @@ class MCPConnectorInstallService:
         ``install_state='active'``.
         """
         workspace_ids, enablement_source, mode = await self._resolve_distribution(distribution)
+        # Preflight uniqueness before insert. Without this, the partial
+        # unique indexes (uq_mcp_connector_install_url_org / name_org)
+        # raise IntegrityError at commit, which the route only catches
+        # as a generic 500. Translate the most-common admin input
+        # collision (duplicate name or URL within the org's active
+        # installs) into a clean 409.
+        if await self._has_org_install_conflict(
+            server_url_hash=server_url_hash(server_url),
+            name=name,
+            template_id=None,
+            exclude_id=None,
+        ):
+            raise ValueError("org_install_already_exists")
         defaults = install_defaults_for_auth_method(auth_method, default_credential_policy)
         auto_enroll = mode == "all"
         install = MCPConnectorInstall(
@@ -366,6 +379,46 @@ class MCPConnectorInstallService:
             enablement_source=enablement_source,
         )
         return saved
+
+    async def _has_org_install_conflict(
+        self,
+        *,
+        server_url_hash: str,
+        name: str,
+        template_id: str | None,
+        exclude_id: str | None,
+    ) -> bool:
+        """Return True iff an active org-scope install in this org
+        collides on the partial unique indexes
+        (url / name / template). Any one collision is enough — use
+        `.first()` so OR-matches across columns don't raise
+        MultipleResultsFound."""
+        from sqlalchemy import or_
+        from sqlmodel import select
+        from cubebox.models.mcp import MCPConnectorInstall as _Install
+
+        or_clauses = [
+            _Install.server_url_hash == server_url_hash,  # type: ignore[arg-type]
+            _Install.name == name,  # type: ignore[arg-type]
+        ]
+        if template_id is not None:
+            or_clauses.append(
+                _Install.template_id == template_id,  # type: ignore[arg-type]
+            )
+        stmt = (
+            select(_Install.id)
+            .where(
+                _Install.org_id == self._org_id,  # type: ignore[arg-type]
+                _Install.workspace_id.is_(None),  # type: ignore[union-attr]
+                _Install.install_state == "active",  # type: ignore[arg-type]
+            )
+            .where(or_(*or_clauses))
+            .limit(1)
+        )
+        if exclude_id is not None:
+            stmt = stmt.where(_Install.id != exclude_id)  # type: ignore[arg-type]
+        row = (await self._install_repo.session.execute(stmt)).first()
+        return row is not None
 
     async def promote_workspace_install_to_org(
         self,
@@ -435,29 +488,12 @@ class MCPConnectorInstallService:
         # indexes (uq_mcp_connector_install_url_org / name / template)
         # at commit time, surfacing as IntegrityError → 500. Detect
         # the collision here so the route can return a clean 409.
-        from sqlalchemy import or_
-        from sqlmodel import select
-        from cubebox.models.mcp import MCPConnectorInstall as _Install
-        or_clauses = [
-            _Install.server_url_hash == install.server_url_hash,  # type: ignore[arg-type]
-            _Install.name == install.name,  # type: ignore[arg-type]
-        ]
-        if install.template_id is not None:
-            or_clauses.append(
-                _Install.template_id == install.template_id,  # type: ignore[arg-type]
-            )
-        dup_stmt = (
-            select(_Install)
-            .where(
-                _Install.org_id == self._org_id,  # type: ignore[arg-type]
-                _Install.workspace_id.is_(None),  # type: ignore[union-attr]
-                _Install.install_state == "active",  # type: ignore[arg-type]
-                _Install.id != install_id,  # type: ignore[arg-type]
-            )
-            .where(or_(*or_clauses))
-        )
-        dup = (await self._install_repo.session.execute(dup_stmt)).scalar_one_or_none()
-        if dup is not None:
+        if await self._has_org_install_conflict(
+            server_url_hash=install.server_url_hash,
+            name=install.name,
+            template_id=install.template_id,
+            exclude_id=install_id,
+        ):
             raise ValueError("org_install_already_exists")
 
         install.install_scope = "org"
