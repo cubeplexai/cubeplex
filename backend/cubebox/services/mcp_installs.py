@@ -674,6 +674,22 @@ class MCPConnectorInstallService:
                     # what disconnect promises; the orphan check on the
                     # next rotate will sweep up a stale row anyway.
                     logger.warning("MCP disconnect: skipping vault delete for {}: {}", cred_id, exc)
+        # Reset discovery state when the org grant goes away. A stale
+        # ``discovery_status='error'`` + ``last_error`` left over from
+        # the previous credential would otherwise keep ServerErrorBanner
+        # visible after disconnect AND keep the admin org-row effective
+        # stuck on ``reason='discovery_failed'`` even though the grant
+        # causing the failure is gone — which would hide the auth band
+        # ("needs credential" form) the operator wants next. Scope:
+        # only on org-grant disconnect, because ``install.discovery_status``
+        # is the org-level signal; workspace/user grant freshness
+        # doesn't roll up to the install row today.
+        if grant_scope == "org" and deleted:
+            install = await self._install_repo.get(install_id)
+            if install is not None and install.discovery_status == "error":
+                install.discovery_status = "not_run"
+                install.last_error = None
+                await self._install_repo.update(install)
 
     async def uninstall(self, install_id: str) -> MCPConnectorInstall:
         """Tombstone an install + cascade-clean state rows and grants.

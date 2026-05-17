@@ -945,54 +945,44 @@ def _derive_admin_org_effective(
     """Spec §4 admin row: ordered decision table.
 
     Rule order (first match wins):
-      1. ``install.auth_method == 'none'`` → usable iff discovery succeeded
-         (or hasn't run yet), else ``discovery_failed``.
-      2. org grant exists, ``grant_status == 'valid'`` → same discovery
-         check as rule 1, then usable.
-      3. org grant exists, ``grant_status == 'expired'``, no refresh
-         available → grant_expired.
-      4. no org grant, ``install.auth_method == 'oauth'``,
+      1. ``install.auth_method == 'none'`` → usable.
+      2. no org grant, ``install.auth_method == 'oauth'``,
          ``install.auth_status == 'pending'`` → pending_oauth.
-      5. no org grant otherwise → missing_org_grant.
-
-    Discovery: when all auth gates pass but ``discovery_status='error'``
-    the connector is not actually usable from the runtime's perspective —
-    a tools_cache that the agent can't refresh means no tools to call.
-    Mirror the workspace-side effective rule (``compute_effective_state``
-    rule 10) so the admin band and the workspace band don't disagree.
+      3. no org grant otherwise → missing_org_grant.
+      4. org grant exists, ``grant_status == 'expired'``, no refresh
+         available → grant_expired.
+      5. org grant exists + ``discovery_status='error'`` → discovery_failed.
+         Mirrors workspace ``compute_effective_state`` rule 10: only
+         reported AFTER auth gates pass, because a discovery failure
+         without an attached credential means the credential causing
+         the failure is gone — so the right reason is "needs a grant",
+         not "the (now-deleted) grant didn't work".
+      6. org grant valid (or expired-with-refresh) → usable.
     """
+    if install.auth_method == "none":
+        return MCPAdminInstallEffectiveOut(install_id=install.id, usable=True, reason="usable")
+    if org_grant is None:
+        if install.auth_method == "oauth" and install.auth_status == "pending":
+            return MCPAdminInstallEffectiveOut(
+                install_id=install.id, usable=False, reason="pending_oauth"
+            )
+        return MCPAdminInstallEffectiveOut(
+            install_id=install.id, usable=False, reason="missing_org_grant"
+        )
+    # Org grant exists from here on.
+    if org_grant.grant_status == "expired" and org_grant.refresh_credential_id is None:
+        return MCPAdminInstallEffectiveOut(
+            install_id=install.id, usable=False, reason="grant_expired"
+        )
     if install.discovery_status == "error":
         return MCPAdminInstallEffectiveOut(
             install_id=install.id, usable=False, reason="discovery_failed"
         )
-    if install.auth_method == "none":
-        return MCPAdminInstallEffectiveOut(install_id=install.id, usable=True, reason="usable")
-    # Rule 2: usable when the org grant is valid OR when it's expired
-    # but still refreshable — the runtime token manager rotates the
-    # access token on next call. Matches the workspace-side
-    # effective service (compute_effective_state rule 8 only emits
-    # `grant_expired` when the grant is expired AND there is no
-    # refresh credential).
-    if org_grant is not None and (
-        org_grant.grant_status == "valid"
-        or (org_grant.grant_status == "expired" and org_grant.refresh_credential_id is not None)
-    ):
-        return MCPAdminInstallEffectiveOut(install_id=install.id, usable=True, reason="usable")
-    if (
-        org_grant is not None
-        and org_grant.grant_status == "expired"
-        and org_grant.refresh_credential_id is None
-    ):
-        return MCPAdminInstallEffectiveOut(
-            install_id=install.id, usable=False, reason="grant_expired"
-        )
-    if org_grant is None and install.auth_method == "oauth" and install.auth_status == "pending":
-        return MCPAdminInstallEffectiveOut(
-            install_id=install.id, usable=False, reason="pending_oauth"
-        )
-    return MCPAdminInstallEffectiveOut(
-        install_id=install.id, usable=False, reason="missing_org_grant"
-    )
+    # Valid OR expired-with-refresh — runtime token manager rotates the
+    # access token on next call. Matches workspace-side
+    # compute_effective_state rule 8 (only reports grant_expired when
+    # there's no refresh credential).
+    return MCPAdminInstallEffectiveOut(install_id=install.id, usable=True, reason="usable")
 
 
 @router.get(
