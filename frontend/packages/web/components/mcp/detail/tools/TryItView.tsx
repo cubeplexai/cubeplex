@@ -263,7 +263,18 @@ function FieldRow({
         <Input
           type="number"
           value={value === undefined ? '' : String(value)}
-          onChange={(e) => onChange(Number(e.target.value))}
+          // Empty input → pass '' so coerceArgs skips this field
+          // (optional numeric arg cleared by user). Number('') === 0
+          // would otherwise invoke the tool with 0 for an unset arg.
+          onChange={(e) => {
+            const raw = e.target.value
+            if (raw === '') {
+              onChange('')
+            } else {
+              const n = Number(raw)
+              onChange(Number.isFinite(n) ? n : raw)
+            }
+          }}
         />
       ) : typeInfo.kind === 'object' || typeInfo.kind === 'array' ? (
         <Textarea

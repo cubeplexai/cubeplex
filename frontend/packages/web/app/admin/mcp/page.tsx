@@ -30,12 +30,16 @@ function synthesizeStubEffective(
   return {
     template: null,
     install,
-    workspace_state: {
-      workspace_id: workspaceId,
-      install_id: install.install_id,
-      enabled: false,
-      credential_policy: install.default_credential_policy,
-    },
+    // Keep workspace_state = null for synthesized rows. A non-null
+    // value tells MCPAdminDetailPanel "this install has a real
+    // workspace state row in this lens" — which Try It then uses
+    // to send the wsId lens to the admin invoke route. The backend
+    // workspace-effective service filters org installs without a
+    // real state row, so the synthesized lens would 400 with
+    // connector_not_usable. We only synthesize this entry so the
+    // admin list shows the install at all; the panel must NOT
+    // treat it as workspace-enabled.
+    workspace_state: null,
     credential_policy: install.default_credential_policy,
     credential_availability: credentialAvailability,
     credential_source: null,
