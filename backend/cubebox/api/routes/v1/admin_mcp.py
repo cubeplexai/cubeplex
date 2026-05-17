@@ -230,7 +230,9 @@ async def create_admin_install(
                 distribution=body.auto_enable.model_dump(),
             )
         except ValueError as exc:
-            raise HTTPException(400, detail={"code": str(exc)}) from exc
+            code = str(exc)
+            status_code = 409 if code == "org_install_already_exists" else 400
+            raise HTTPException(status_code, detail={"code": code}) from exc
     else:
         try:
             template = await template_svc.get_active(body.template_id)
