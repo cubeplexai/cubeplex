@@ -104,7 +104,19 @@ export function TryItView({
       const args = coerceArgs(values, properties)
       let res: ToolInvokeResult
       if (surface === 'admin') {
-        const lens = requiresWorkspacePicker ? (scopedAdminWorkspaceId ?? null) : null
+        // Lens precedence:
+        //   1. Explicit picker selection (user-policy installs that
+        //      need workspace + user grant resolution).
+        //   2. The admin panel's current lens wsId (so an org install
+        //      whose workspace state overrides default to
+        //      `workspace`/`user` still gets the right grant, and
+        //      no-auth installs mint an identity token with a real
+        //      `ws` claim).
+        //   3. null only when there is no wsId at all (e.g. early
+        //      mount before lens is set).
+        const lens = requiresWorkspacePicker
+          ? (scopedAdminWorkspaceId ?? null)
+          : (wsId ?? null)
         res = await adminInvokeTool(client, installId, toolName, args, lens)
       } else {
         if (!wsId) throw new Error('workspace id missing')
