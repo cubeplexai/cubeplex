@@ -270,6 +270,7 @@ class MCPEffectiveConnectorService:
         user_id: str,
         *,
         include_unusable: bool = True,
+        include_disabled_org_installs: bool = True,
     ) -> list[MCPEffectiveConnectorDTO]:
         """Return effective rows for every install visible to this workspace.
 
@@ -281,8 +282,17 @@ class MCPEffectiveConnectorService:
 
         ``install_state != "active"`` rows are filtered out entirely — they're
         tombstones; the runtime / UI should never see them again.
+
+        ``include_disabled_org_installs=False`` further narrows org-scope
+        installs to those whose state row is ``enabled=True``. Workspace-local
+        installs are unaffected (the disabled-state surface lives on the admin
+        page, not the workspace page).
         """
-        rows = await self._collect_rows(workspace_id=workspace_id, user_id=user_id)
+        rows = await self._collect_rows(
+            workspace_id=workspace_id,
+            user_id=user_id,
+            include_disabled_org_installs=include_disabled_org_installs,
+        )
         if include_unusable:
             return rows
         return [row for row in rows if row.usable]
@@ -340,6 +350,7 @@ class MCPEffectiveConnectorService:
         *,
         workspace_id: str,
         user_id: str,
+        include_disabled_org_installs: bool = True,
     ) -> list[MCPEffectiveConnectorDTO]:
         # 1. Installs in scope: workspace-local + org-wide for this org. The
         #    org-wide set is further filtered by "has a workspace state row"
@@ -358,12 +369,24 @@ class MCPEffectiveConnectorService:
             state.install_id: state for state in ws_states
         }
 
-        # 3. Filter org installs to only those with a workspace state row;
-        #    workspace-local installs are always in-scope.
+        # 3. Decide which org installs count as "in scope" for this workspace.
+        #    Default: any org install with a state row (enabled or disabled) is
+        #    visible — the admin surface needs to show "disabled here" rows.
+        #    When ``include_disabled_org_installs=False`` (workspace page), drop
+        #    org installs whose state row is disabled or missing.
+        if include_disabled_org_installs:
+            org_visible_ids = set(states_by_install.keys())
+        else:
+            org_visible_ids = {
+                install_id for install_id, state in states_by_install.items() if state.enabled
+            }
+
+        # 4. Filter org installs to that visibility set; workspace-local
+        #    installs are always in-scope.
         visible_installs = [
             install
             for install in all_installs
-            if install.workspace_id == workspace_id or install.id in states_by_install
+            if install.workspace_id == workspace_id or install.id in org_visible_ids
         ]
 
         if not visible_installs:

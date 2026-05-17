@@ -132,11 +132,16 @@ async def list_workspace_connectors(
     ctx: Annotated[RequestContext, Depends(require_member)],
     effective_svc: Annotated[MCPEffectiveConnectorService, Depends(get_ws_effective_service)],
 ) -> MCPEffectiveConnectorListOut:
-    """Effective connector list for the workspace + current user."""
+    """Effective connector list for the workspace + current user.
+
+    Workspace page lens: org installs disabled by the workspace admin (or
+    never opted into) are hidden — the admin page is the surface for those.
+    """
     dtos = await effective_svc.list_for_workspace_user(
         workspace_id,
         ctx.user.id,
         include_unusable=True,
+        include_disabled_org_installs=False,
     )
     return MCPEffectiveConnectorListOut(
         items=[_dto_to_effective_out(dto) for dto in dtos],

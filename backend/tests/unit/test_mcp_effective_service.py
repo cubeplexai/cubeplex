@@ -206,6 +206,97 @@ async def test_uninstalled_rows_are_filtered(session: AsyncSession) -> None:
     assert [row.install.id for row in rows] == ["mcins-active"]
 
 
+async def test_list_for_workspace_user_excludes_disabled_org_installs(
+    session: AsyncSession,
+) -> None:
+    """include_disabled_org_installs=False drops org installs whose state row is
+    disabled (or absent); workspace-scope installs stay visible regardless."""
+    org_id = "org-1"
+    workspace_id = "ws-1"
+
+    # Workspace-scope install (always visible).
+    await _add_workspace_install(
+        session,
+        install_id="mcins-ws-local",
+        org_id=org_id,
+        workspace_id=workspace_id,
+    )
+    # Org installs: one enabled, one disabled, one with no state row.
+    await _add_org_install(session, install_id="mcins-org-enabled", org_id=org_id)
+    await _add_org_install(session, install_id="mcins-org-disabled", org_id=org_id)
+    await _add_org_install(session, install_id="mcins-org-no-state", org_id=org_id)
+
+    state_repo = MCPWorkspaceConnectorStateRepository(session, org_id=org_id)
+    await state_repo.upsert(
+        workspace_id=workspace_id,
+        install_id="mcins-ws-local",
+        enabled=True,
+        credential_policy="none",
+        enablement_source="workspace_manual",
+        updated_by_user_id="u1",
+    )
+    await state_repo.upsert(
+        workspace_id=workspace_id,
+        install_id="mcins-org-enabled",
+        enabled=True,
+        credential_policy="none",
+        enablement_source="admin_manual",
+        updated_by_user_id="u1",
+    )
+    await state_repo.upsert(
+        workspace_id=workspace_id,
+        install_id="mcins-org-disabled",
+        enabled=False,
+        credential_policy="none",
+        enablement_source="admin_manual",
+        updated_by_user_id="u1",
+    )
+    # mcins-org-no-state intentionally has no state row.
+
+    service = _make_service(session, org_id=org_id)
+    out = await service.list_for_workspace_user(
+        workspace_id,
+        "u1",
+        include_unusable=True,
+        include_disabled_org_installs=False,
+    )
+    ids = {row.install.id for row in out}
+    assert "mcins-ws-local" in ids
+    assert "mcins-org-enabled" in ids
+    assert "mcins-org-disabled" not in ids
+    assert "mcins-org-no-state" not in ids
+
+
+async def test_list_for_workspace_user_default_keeps_disabled_org_installs(
+    session: AsyncSession,
+) -> None:
+    """Backwards compat: default (True) keeps disabled-org rows visible."""
+    org_id = "org-1"
+    workspace_id = "ws-1"
+
+    await _add_org_install(session, install_id="mcins-org-disabled", org_id=org_id)
+
+    state_repo = MCPWorkspaceConnectorStateRepository(session, org_id=org_id)
+    await state_repo.upsert(
+        workspace_id=workspace_id,
+        install_id="mcins-org-disabled",
+        enabled=False,
+        credential_policy="none",
+        enablement_source="admin_manual",
+        updated_by_user_id="u1",
+    )
+
+    service = _make_service(session, org_id=org_id)
+    out = await service.list_for_workspace_user(
+        workspace_id,
+        "u1",
+        include_unusable=True,
+        # default include_disabled_org_installs=True
+    )
+    ids = {row.install.id for row in out}
+    assert "mcins-org-disabled" in ids
+
+
 async def test_list_runtime_specs_drops_unusable_rows(session: AsyncSession) -> None:
     """``list_runtime_specs`` returns only usable installs."""
     org_id = "org-1"
