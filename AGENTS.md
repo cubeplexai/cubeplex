@@ -72,6 +72,17 @@ cubebox is a full-stack agent platform.
   hand-edit `pyproject.toml` / `package.json`.
 - **Do not create new docs without permission.** Update an existing doc when
   possible.
+- **Scope-isolated APIs.** Workspace routes (`/api/v1/ws/{ws}/...`) and
+  org-admin routes (`/api/v1/admin/...`) must be separate handlers, even
+  when the logic is identical. Don't parameterize one route to serve
+  both audiences. Reuse goes one layer down — services, repositories,
+  pure functions — never at the route layer. The smell: catching yourself
+  adding `?scope=` or a `role` body field.
+- **Scope-isolated pages.** Each user-facing page gets its own Next route
+  and its own page file, even when the layout looks identical to another
+  page. Pages are assemblies of modules; modules (`<List>`, `<DetailPanel>`,
+  `<Toolbar>`, …) are the reuse boundary. The smell: a `mode?: 'admin' | 'workspace'`
+  prop on a page component.
 
 ---
 
