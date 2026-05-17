@@ -413,7 +413,21 @@ class MCPConnectorInstallService:
         if source_ws:
             source_state = await self._state_repo.get(source_ws, install_id)
         if source_state is not None:
+            # Source row exists — preserve it untouched; skip from fan-out.
             all_ws_ids = [w for w in all_ws_ids if w != source_ws]
+        elif source_ws:
+            # Source state row was deleted before promote, but the
+            # install is still install_scope='workspace' pointing at
+            # source_ws. If we just flip install_scope to 'org' and
+            # workspace_id to None without writing a state row for
+            # source_ws, the source workspace loses the connector
+            # entirely (org installs only surface to workspaces with
+            # state rows). For mode='all' the source is already in
+            # all_ws_ids; for 'selected' / 'none' it may not be. Force
+            # the source into the fan-out so a fresh state row gets
+            # written.
+            if source_ws not in all_ws_ids:
+                all_ws_ids = list(all_ws_ids) + [source_ws]
 
         install.install_scope = "org"
         install.workspace_id = None
