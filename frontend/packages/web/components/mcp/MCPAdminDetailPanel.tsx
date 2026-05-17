@@ -136,7 +136,13 @@ export function MCPAdminDetailPanel({
       // Fall back to the install-default lens if the DTO is somehow
       // missing.
       const effectivePolicy = connector?.credential_policy ?? install.default_credential_policy
-      const lens = effectivePolicy === 'org' ? null : wsId
+      // 'none' policy (auth_method='none') also needs null lens for
+      // the same reason as 'org': org-scope no-auth installs without
+      // a state row in this workspace are invisible to the workspace
+      // effective service. Without this, Refresh for a custom no-auth
+      // install with auto_enable.mode='none' would 404 with
+      // connector_install_not_found.
+      const lens = effectivePolicy === 'org' || effectivePolicy === 'none' ? null : wsId
       await adminRefreshDiscovery(client, installId, lens)
       await onRefresh()
     } catch (err) {

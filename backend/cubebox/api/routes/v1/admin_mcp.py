@@ -399,9 +399,12 @@ async def admin_promote_install_to_org(
         )
     except ValueError as exc:
         code = str(exc)
-        status_code = 409 if code == "install_already_org_scope" else 400
         if code == "connector_install_not_found":
             status_code = 404
+        elif code in {"install_already_org_scope", "org_install_already_exists"}:
+            status_code = 409
+        else:
+            status_code = 400
         raise HTTPException(status_code, detail={"code": code}) from exc
     await audit.record(
         event="mcp.install.promoted",
