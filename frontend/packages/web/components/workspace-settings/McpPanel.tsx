@@ -27,7 +27,7 @@ import {
   type PromoteDistribution,
 } from '@cubebox/core'
 
-import { AuthActionBand } from '@/components/mcp/AuthActionBand'
+import { WsAuthBand } from '@/components/mcp/WsAuthBand'
 import { ServerErrorBanner } from '@/components/mcp/detail/ServerErrorBanner'
 import { WsToolsPanel } from '@/components/mcp/detail/tools/WsToolsPanel'
 import { MCPPromoteDialog } from '@/components/mcp/MCPPromoteDialog'
@@ -297,12 +297,11 @@ function ConnectorDetail({
         )}
       </header>
 
-      <AuthActionBand
+      <WsAuthBand
         connector={connector}
         client={client}
         wsId={wsId}
         callerRole={callerRole}
-        isOrgAdmin={false}
         onChanged={onChanged}
       />
 

@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { useTranslations } from 'next-intl'
 import {
   ArrowUpCircle,
@@ -16,7 +16,6 @@ import {
 import {
   adminDeleteInstall,
   adminDeleteOrgGrant,
-  adminGetInstallEffective,
   adminPatchInstall,
   adminPromoteToOrg,
   adminRefreshDiscovery,
@@ -26,7 +25,6 @@ import {
   wsDeleteWorkspaceGrant,
   wsListTemplates,
   type ApiClient,
-  type MCPAdminInstallEffective,
   type MCPAuthMethod,
   type MCPConnectorTemplate,
   type MCPEffectiveConnector,
@@ -37,7 +35,7 @@ import { Button } from '@/components/ui/button'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { cn } from '@/lib/utils'
 
-import { AuthActionBand } from './AuthActionBand'
+import { AdminAuthBand } from './AdminAuthBand'
 import { MCPCitationsTab } from './MCPCitationsTab'
 import { MCPCustomCreatePanel } from './MCPCustomCreatePanel'
 import { MCPPromoteDialog } from './MCPPromoteDialog'
@@ -350,12 +348,7 @@ export function MCPAdminDetailPanel({
 
       <AuthMethodSwitcher connector={connector} client={client} onChanged={onRefresh} />
 
-      <AdminAuthActionBand
-        connector={connector}
-        client={client}
-        wsId={wsId}
-        onChanged={onRefresh}
-      />
+      <AdminAuthBand connector={connector} client={client} wsId={wsId} onChanged={onRefresh} />
 
       <Tabs defaultValue="overview" className="flex-1 flex-col">
         <TabsList variant="line" className="w-full justify-start border-b border-border/60 pb-0">
@@ -455,113 +448,6 @@ export function MCPAdminDetailPanel({
         onConfirm={handlePromote}
       />
     </div>
-  )
-}
-
-/**
- * Wraps AuthActionBand for the admin detail panel.
- *
- * For org-scope installs the workspace lens can misreport `required_grant_scope`
- * (e.g. an org install whose workspace lens overrides to `user` would surface
- * the wrong band on the admin page). On admin we always want the org-row
- * semantics — see spec §4 admin row. We therefore pre-fetch the dedicated
- * admin /effective endpoint and synthesize an `MCPEffectiveConnector` with
- * `required_grant_scope='org'` before handing it to the band.
- *
- * For workspace-scope installs the lens is already the right answer; no extra
- * call is needed.
- */
-function AdminAuthActionBand({
-  connector,
-  client,
-  wsId,
-  onChanged,
-}: {
-  connector: MCPEffectiveConnector
-  client: ApiClient
-  wsId: string
-  onChanged: () => Promise<void>
-}) {
-  const isOrgScope = connector.install.install_scope === 'org'
-  const [orgEffective, setOrgEffective] = useState<MCPAdminInstallEffective | null>(null)
-  const [loaded, setLoaded] = useState(!isOrgScope)
-
-  // Re-fetch on connector reference change too — the parent passes a
-  // fresh MCPEffectiveConnector object on every list reload (after
-  // AuthActionBand calls onChanged() following a save/delete grant),
-  // so the reference flip is a reliable signal that org-grant state
-  // may have changed. Without this, /admin/.../effective stays
-  // cached at the pre-save reason and the ready/needs-action band
-  // shows stale state until the user navigates away.
-  useEffect(() => {
-    if (!isOrgScope) {
-      setLoaded(true)
-      return
-    }
-    let cancelled = false
-    setLoaded(false)
-    void adminGetInstallEffective(client, connector.install.install_id)
-      .then((res) => {
-        if (cancelled) return
-        setOrgEffective(res)
-      })
-      .catch(() => {
-        // Fall back to lens connector — band will hide if reason is unknown.
-      })
-      .finally(() => {
-        if (!cancelled) setLoaded(true)
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [client, connector, isOrgScope])
-
-  if (!loaded) return null
-
-  const synthesized: MCPEffectiveConnector =
-    isOrgScope && orgEffective
-      ? {
-          ...connector,
-          required_grant_scope: 'org',
-          usable: orgEffective.usable,
-          reason: orgEffective.reason,
-          // For auth_method='none' installs the backend reports
-          // reason='usable' AND no credential is involved at all.
-          // The ready band has a dedicated "No credential required"
-          // sub-state that keys off `credential_availability ===
-          // 'not_required'` — forcing 'available' here would route
-          // the band into the "credential from <source>" variant
-          // even though credential_source is null, which would
-          // render incorrectly. Mirror the backend's effective-state
-          // mapping: auth_method='none' → not_required.
-          credential_availability:
-            connector.install.auth_method === 'none'
-              ? 'not_required'
-              : orgEffective.usable
-                ? 'available'
-                : 'missing',
-          // The workspace lens (when the admin's current workspace
-          // overrides the org-policy install down to user/workspace)
-          // surfaces a different credential_source. For the org-row
-          // band we always want 'org' (when usable + needs a
-          // credential) so the ready band reads "credential from
-          // Org grant" and the Disconnect menu targets the org
-          // grant — not whichever workspace-lens grant happened to
-          // be there.
-          credential_source:
-            connector.install.auth_method === 'none' ? null : orgEffective.usable ? 'org' : null,
-        }
-      : connector
-
-  return (
-    <AuthActionBand
-      connector={synthesized}
-      client={client}
-      wsId={wsId}
-      callerRole="admin"
-      isOrgAdmin={true}
-      onChanged={onChanged}
-    />
   )
 }
 

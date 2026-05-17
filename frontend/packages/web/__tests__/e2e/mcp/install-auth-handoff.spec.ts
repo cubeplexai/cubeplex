@@ -6,7 +6,7 @@ import { test, expect, type Page } from '@playwright/test'
  * Spec: docs/superpowers/specs/2026-05-16-mcp-install-auth-handoff-spec.md
  *
  * Scope of this file:
- * - Verifies the AuthActionBand wiring doesn't regress the MCP tab page load.
+ * - Verifies the WsAuthBand wiring doesn't regress the MCP tab page load.
  * - Verifies an admin (workspace owner = first-registered user) sees the
  *   "Connector templates" section in workspace settings.
  *
@@ -57,9 +57,7 @@ test.describe('MCP install→auth handoff', () => {
     })
   })
 
-  test('MCP tab page loads without runtime errors after AuthActionBand wiring', async ({
-    page,
-  }) => {
+  test('MCP tab page loads without runtime errors after WsAuthBand wiring', async ({ page }) => {
     const wsId = await registerAndGetWsId(page)
 
     const consoleErrors: string[] = []
