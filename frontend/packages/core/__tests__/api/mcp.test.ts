@@ -3,7 +3,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createApiClient } from '../../src/api/client'
 import {
   adminCreateInstall,
-  adminListInstalls,
   adminListTemplates,
   wsCreateInstall,
   wsCreateMyGrant,
@@ -27,15 +26,11 @@ describe('MCP four-layer API', () => {
     expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/ws/ws-x/mcp/templates')
   })
 
-  it('adminListTemplates and adminListInstalls hit the admin scope', async () => {
-    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ items: [] }), { status: 200 }))
+  it('adminListTemplates hits the admin scope', async () => {
     fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ items: [] }), { status: 200 }))
     const client = createApiClient('')
     await adminListTemplates(client)
     expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/admin/mcp/templates')
-    const out = await adminListInstalls(client)
-    expect(fetchMock.mock.calls[1][0]).toBe('/api/v1/admin/mcp/installs')
-    expect(out).toEqual({ items: [] })
   })
 
   it('wsCreateInstall POSTs to workspace install endpoint', async () => {

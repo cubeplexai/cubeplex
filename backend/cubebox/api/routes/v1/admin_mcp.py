@@ -21,7 +21,6 @@ from cubebox.api.schemas.mcp import (
     AdminInstallRefreshIn,
     CreateGrantIn,
     MCPAdminInstallEffectiveOut,
-    MCPConnectorInstallListOut,
     MCPConnectorInstallOut,
     MCPConnectorTemplateListOut,
     MCPConnectorTemplateOut,
@@ -196,17 +195,6 @@ async def list_admin_templates(
     """Admin view over the global connector template catalog."""
     templates = await svc.list_active()
     return MCPConnectorTemplateListOut(items=[_template_to_out(t) for t in templates])
-
-
-@router.get("/installs", response_model=MCPConnectorInstallListOut)
-async def list_admin_installs(
-    svc: Annotated[MCPConnectorInstallService, Depends(get_admin_install_service)],
-) -> MCPConnectorInstallListOut:
-    """List every org-scope install in the admin's current org."""
-    org_rows = await svc._install_repo.list_org_installs()
-    return MCPConnectorInstallListOut(
-        items=[_install_to_out(install) for install in org_rows],
-    )
 
 
 @router.post(

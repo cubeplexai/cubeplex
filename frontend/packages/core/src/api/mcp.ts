@@ -41,14 +41,6 @@ export async function adminListTemplates(
 
 // ---------------- Installs (admin org-scope + workspace-scope) ---------------- //
 
-export async function adminListInstalls(
-  client: ApiClient,
-): Promise<{ items: MCPConnectorInstall[] }> {
-  const res = await client.get('/api/v1/admin/mcp/installs')
-  if (!res.ok) throw await toApiError(res)
-  return (await res.json()) as { items: MCPConnectorInstall[] }
-}
-
 export async function adminCreateInstall(
   client: ApiClient,
   body: unknown,
