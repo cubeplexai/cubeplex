@@ -86,7 +86,6 @@ export function MCPAdminDetailPanel({
       <MCPTemplateInstallPanel
         template={installTemplate}
         client={client}
-        wsId={wsId}
         onInstalled={onInstalled}
       />
     )

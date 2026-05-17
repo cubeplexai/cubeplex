@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useTranslations } from 'next-intl'
 import { Loader2 } from 'lucide-react'
 import {
-  wsCreateInstall,
+  adminCreateInstall,
   type ApiClient,
   type MCPAuthMethod,
   type MCPConnectorTemplate,
@@ -15,10 +15,11 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 
+type DistributionMode = 'all' | 'none'
+
 interface MCPTemplateInstallPanelProps {
   template: MCPConnectorTemplate
   client: ApiClient
-  wsId: string
   onInstalled: (installId: string) => void
 }
 
@@ -37,18 +38,24 @@ function defaultPolicy(scope: MCPCredentialScope, method: MCPAuthMethod): MCPCre
 export function MCPTemplateInstallPanel({
   template,
   client,
-  wsId,
   onInstalled,
 }: MCPTemplateInstallPanelProps) {
   const t = useTranslations('mcpAdmin')
 
   const supported = useMemo(() => template.supported_auth_methods, [template])
   const [authMethod, setAuthMethod] = useState<MCPAuthMethod>(() => defaultAuthMethod(supported))
+  // Distribution defaults to 'none' (each workspace opts in). 'all' fans
+  // the install out into every existing workspace AND auto-enrolls new
+  // ones. The default is the safer / less invasive choice for an admin
+  // who just picked a template — they can flip it before clicking
+  // Install if they really want everyone on by default.
+  const [distribution, setDistribution] = useState<DistributionMode>('none')
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     setAuthMethod(defaultAuthMethod(supported))
+    setDistribution('none')
     setError(null)
   }, [template.template_id, supported])
 
@@ -57,11 +64,12 @@ export function MCPTemplateInstallPanel({
     setError(null)
     try {
       const policy = defaultPolicy(template.default_credential_policy, authMethod)
-      const install = await wsCreateInstall(client, wsId, {
+      const install = await adminCreateInstall(client, {
         template_id: template.template_id,
-        install_scope: 'workspace',
+        install_scope: 'org',
         auth_method: authMethod,
         default_credential_policy: policy,
+        auto_enable: { mode: distribution },
       })
       onInstalled(install.install_id)
     } catch (err) {
@@ -123,6 +131,33 @@ export function MCPTemplateInstallPanel({
               ))}
             </div>
           )}
+
+          <div className="flex flex-col gap-2">
+            <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              {t('distributionLabel')}
+            </span>
+            <div className="flex flex-wrap gap-2">
+              <Button
+                type="button"
+                size="sm"
+                variant={distribution === 'none' ? 'default' : 'outline'}
+                onClick={() => setDistribution('none')}
+              >
+                {t('distributionNone')}
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant={distribution === 'all' ? 'default' : 'outline'}
+                onClick={() => setDistribution('all')}
+              >
+                {t('distributionAll')}
+              </Button>
+            </div>
+            <p className="text-xs leading-relaxed text-muted-foreground">
+              {distribution === 'none' ? t('distributionNoneHint') : t('distributionAllHint')}
+            </p>
+          </div>
 
           <p className="text-xs text-muted-foreground">{t('templateInstallNotice')}</p>
 
