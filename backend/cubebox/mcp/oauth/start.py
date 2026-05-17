@@ -27,6 +27,7 @@ from typing import Final
 from urllib.parse import urlencode
 
 import httpx
+from loguru import logger
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -142,7 +143,23 @@ class OAuthStartService:
         # snapshot is persisted on the install row (the install model has
         # NO authorization_endpoint / token_endpoint columns — OAuth fields
         # all live in the ``oauth_client_config`` JSON).
-        _pr_meta, as_meta = await self._metadata.discover_for_resource(install.server_url)
+        #
+        # Network errors are common at this hop: the backend has to reach
+        # the MCP server's ``.well-known/oauth-protected-resource`` and
+        # the AS metadata URL, both over WAN. A proxy outage, DNS
+        # failure, or unreachable AS would otherwise bubble out as a
+        # 500 + unhandled exception (httpx leaks the raw ConnectError
+        # which is meaningless to the operator). Wrap it as a clean
+        # OAuthStartError so the route maps to 400 with a typed code.
+        try:
+            _pr_meta, as_meta = await self._metadata.discover_for_resource(install.server_url)
+        except httpx.HTTPError as exc:
+            logger.warning(
+                "OAuth start: AS metadata fetch failed for {}: {}",
+                install.server_url,
+                exc,
+            )
+            raise OAuthStartError(f"as_metadata_unreachable: {type(exc).__name__}") from exc
         client_id, _client_secret_id = await self._ensure_client(
             install,
             as_meta,
