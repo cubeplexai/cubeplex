@@ -429,6 +429,37 @@ class MCPConnectorInstallService:
             if source_ws not in all_ws_ids:
                 all_ws_ids = list(all_ws_ids) + [source_ws]
 
+        # Preflight: if an active org-scope install with the same URL,
+        # name, or template already exists in this org, flipping
+        # workspace_id to None would violate the org partial unique
+        # indexes (uq_mcp_connector_install_url_org / name / template)
+        # at commit time, surfacing as IntegrityError → 500. Detect
+        # the collision here so the route can return a clean 409.
+        from sqlalchemy import or_
+        from sqlmodel import select
+        from cubebox.models.mcp import MCPConnectorInstall as _Install
+        or_clauses = [
+            _Install.server_url_hash == install.server_url_hash,  # type: ignore[arg-type]
+            _Install.name == install.name,  # type: ignore[arg-type]
+        ]
+        if install.template_id is not None:
+            or_clauses.append(
+                _Install.template_id == install.template_id,  # type: ignore[arg-type]
+            )
+        dup_stmt = (
+            select(_Install)
+            .where(
+                _Install.org_id == self._org_id,  # type: ignore[arg-type]
+                _Install.workspace_id.is_(None),  # type: ignore[union-attr]
+                _Install.install_state == "active",  # type: ignore[arg-type]
+                _Install.id != install_id,  # type: ignore[arg-type]
+            )
+            .where(or_(*or_clauses))
+        )
+        dup = (await self._install_repo.session.execute(dup_stmt)).scalar_one_or_none()
+        if dup is not None:
+            raise ValueError("org_install_already_exists")
+
         install.install_scope = "org"
         install.workspace_id = None
         install.auto_enroll_new_workspaces = mode == "all"
