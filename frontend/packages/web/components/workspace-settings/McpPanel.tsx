@@ -16,17 +16,17 @@ import {
   createApiClient,
   useOrgAdminFlag,
   useWorkspaceStore,
-  wsCreateInstall,
+  wsListAvailable,
   wsListEffectiveConnectors,
-  wsListTemplates,
   wsPatchConnectorState,
   wsRefreshDiscovery,
-  type MCPConnectorTemplate,
   type MCPCredentialScope,
   type MCPEffectiveConnector,
   type PromoteDistribution,
+  type WsAvailable,
 } from '@cubebox/core'
 
+import { AvailableConnectorRow } from '@/components/mcp/AvailableConnectorRow'
 import { WsAuthBand } from '@/components/mcp/WsAuthBand'
 import { ServerErrorBanner } from '@/components/mcp/detail/ServerErrorBanner'
 import { WsToolsPanel } from '@/components/mcp/detail/tools/WsToolsPanel'
@@ -137,41 +137,6 @@ function ConnectorRow({
         </Badge>
       </div>
     </button>
-  )
-}
-
-function TemplateRow({
-  template,
-  installing,
-  onInstall,
-}: {
-  template: MCPConnectorTemplate
-  installing: boolean
-  onInstall: () => void
-}) {
-  return (
-    <div
-      className="flex items-center justify-between gap-2 rounded-lg border border-border/70 bg-card/40 p-3"
-      data-testid={`ws-template-row-${template.slug}`}
-    >
-      <div className="flex min-w-0 flex-col gap-0.5">
-        <div className="flex items-center gap-2">
-          <span className="truncate text-sm font-semibold">{template.name}</span>
-          {template.provider && (
-            <Badge variant="outline" className="text-[10px]">
-              {template.provider}
-            </Badge>
-          )}
-        </div>
-        {template.description && (
-          <p className="line-clamp-1 text-xs text-muted-foreground">{template.description}</p>
-        )}
-      </div>
-      <Button size="sm" disabled={installing} onClick={onInstall}>
-        {installing && <Loader2 className="mr-2 size-3.5 animate-spin" />}
-        Connect
-      </Button>
-    </div>
   )
 }
 
@@ -370,16 +335,17 @@ function ConnectorDetail({
 
 export function McpPanel({ wsId }: McpPanelProps) {
   const t = useTranslations('mcpAdmin')
+  const tAvailable = useTranslations('mcp.available')
+  const tMcp = useTranslations('mcp')
   const [connectors, setConnectors] = useState<MCPEffectiveConnector[]>([])
-  const [templates, setTemplates] = useState<MCPConnectorTemplate[]>([])
+  const [available, setAvailable] = useState<WsAvailable[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [selectedId, setSelectedId] = useState<string | null>(null)
-  const [installing, setInstalling] = useState<string | null>(null)
   const [search, setSearch] = useState('')
 
-  // Template list (= adding new connectors) is admin-only in workspace settings.
-  // Spec §5.1 "New UI rule introduced by this spec".
+  // Adding new connectors (Available section) is admin-only in workspace
+  // settings. Spec §5.1 "New UI rule introduced by this spec".
   const meWsRole = useWorkspaceStore((s) => s.workspaces.find((w) => w.id === wsId)?.role)
 
   const client = useMemo(() => {
@@ -392,12 +358,12 @@ export function McpPanel({ wsId }: McpPanelProps) {
     setLoading(true)
     setError(null)
     try {
-      const [eff, tpl] = await Promise.all([
+      const [eff, avail] = await Promise.all([
         wsListEffectiveConnectors(client, wsId),
-        wsListTemplates(client, wsId),
+        wsListAvailable(client, wsId),
       ])
       setConnectors(eff.items)
-      setTemplates(tpl.items)
+      setAvailable(avail.items)
     } catch (err) {
       setError((err as Error).message)
     } finally {
@@ -426,58 +392,27 @@ export function McpPanel({ wsId }: McpPanelProps) {
       })
   }, [connectors, search])
 
-  const filteredTemplates = useMemo(() => {
-    // Only ACTIVE installs mask their template — tombstoned (uninstalled)
-    // rows must not block reinstalling, otherwise "Disconnect" turns into
-    // a one-shot per template from the workspace settings panel.
-    const installedTemplateIds = new Set(
-      connectors
-        .filter((c) => c.install.install_state === 'active')
-        .map((c) => c.template?.template_id)
-        .filter((v): v is string => Boolean(v)),
-    )
+  const filteredAvailable = useMemo(() => {
     const q = search.trim().toLowerCase()
-    return templates
-      .filter((tpl) => !installedTemplateIds.has(tpl.template_id))
-      .filter((tpl) => {
+    return available
+      .filter((row) => {
         if (!q) return true
-        return `${tpl.name} ${tpl.provider} ${tpl.description}`.toLowerCase().includes(q)
+        const name = row.install?.name ?? row.template?.name ?? ''
+        const provider = row.template?.provider ?? ''
+        const description = row.template?.description ?? ''
+        return `${name} ${provider} ${description}`.toLowerCase().includes(q)
       })
-      .sort((a, b) => a.name.localeCompare(b.name))
-  }, [templates, connectors, search])
+      .sort((a, b) => {
+        const an = a.install?.name ?? a.template?.name ?? ''
+        const bn = b.install?.name ?? b.template?.name ?? ''
+        return an.localeCompare(bn)
+      })
+  }, [available, search])
 
   const selected = useMemo(
     () => connectors.find((c) => c.install.install_id === selectedId) ?? null,
     [connectors, selectedId],
   )
-
-  async function installTemplate(template: MCPConnectorTemplate): Promise<void> {
-    setInstalling(template.template_id)
-    try {
-      const method =
-        template.supported_auth_methods.find((m) => m === 'static') ??
-        template.supported_auth_methods.find((m) => m === 'none') ??
-        template.supported_auth_methods[0]
-      const policy: MCPCredentialScope =
-        method === 'none'
-          ? 'none'
-          : template.default_credential_policy === 'none'
-            ? 'user'
-            : template.default_credential_policy
-      const result = await wsCreateInstall(client, wsId, {
-        template_id: template.template_id,
-        install_scope: 'workspace',
-        auth_method: method,
-        default_credential_policy: policy,
-      })
-      await load()
-      setSelectedId(result.install_id)
-    } catch (err) {
-      setError((err as Error).message)
-    } finally {
-      setInstalling(null)
-    }
-  }
 
   const enabledCount = connectors.filter((c) => c.workspace_state?.enabled).length
 
@@ -512,7 +447,7 @@ export function McpPanel({ wsId }: McpPanelProps) {
             <div className="flex flex-col gap-4 p-3">
               <section>
                 <h3 className="mb-2 px-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                  {t('installs')}
+                  {tMcp('installed')}
                 </h3>
                 {filteredConnectors.length === 0 ? (
                   <p className="px-1 text-xs text-muted-foreground">{t('noConnectors')}</p>
@@ -530,21 +465,26 @@ export function McpPanel({ wsId }: McpPanelProps) {
                 )}
               </section>
 
-              {meWsRole === 'admin' && filteredTemplates.length > 0 && (
+              {meWsRole === 'admin' && (
                 <section>
                   <h3 className="mb-2 px-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                    {t('templates')}
+                    {tAvailable('title')}
                   </h3>
-                  <div className="flex flex-col gap-1.5">
-                    {filteredTemplates.map((tpl) => (
-                      <TemplateRow
-                        key={tpl.template_id}
-                        template={tpl}
-                        installing={installing === tpl.template_id}
-                        onInstall={() => void installTemplate(tpl)}
-                      />
-                    ))}
-                  </div>
+                  {filteredAvailable.length === 0 ? (
+                    <p className="px-1 text-xs text-muted-foreground">{tAvailable('empty')}</p>
+                  ) : (
+                    <div className="flex flex-col gap-1.5">
+                      {filteredAvailable.map((row) => (
+                        <AvailableConnectorRow
+                          key={row.install?.install_id ?? row.template?.template_id ?? 'unknown'}
+                          row={row}
+                          client={client}
+                          wsId={wsId}
+                          onConnected={load}
+                        />
+                      ))}
+                    </div>
+                  )}
                 </section>
               )}
             </div>

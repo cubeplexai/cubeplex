@@ -368,6 +368,12 @@
     "discard": "Discard"
   },
   "mcp": {
+    "installed": "Installed",
+    "available": {
+      "title": "Available",
+      "connect": "Connect",
+      "empty": "No connectors available to add."
+    },
     "scopeBadge": {
       "org": "Org shared",
       "workspace": "Workspace shared",

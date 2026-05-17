@@ -368,6 +368,12 @@
     "discard": "放弃修改"
   },
   "mcp": {
+    "installed": "已启用",
+    "available": {
+      "title": "可启用",
+      "connect": "启用",
+      "empty": "暂无可启用的连接器。"
+    },
     "scopeBadge": {
       "org": "组织共享",
       "workspace": "工作区共享",
