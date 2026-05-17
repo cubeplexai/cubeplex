@@ -20,7 +20,7 @@ import { MCPAdminDetailPanel } from '@/components/mcp/MCPAdminDetailPanel'
 
 function synthesizeStubEffective(
   install: MCPConnectorInstall,
-  workspaceId: string,
+  _workspaceId: string,
 ): MCPEffectiveConnector {
   // Mirror the backend "no workspace_state row" semantics: the install
   // exists, but has not been enabled in the lens workspace. The admin
