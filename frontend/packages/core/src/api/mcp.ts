@@ -10,6 +10,8 @@ import type {
   MCPTransport,
   MCPWorkspaceConnectorState,
 } from '../types/mcp'
+import type { AdminOrgConnector } from '../types/mcp_admin_connector'
+import type { WsAvailable } from '../types/mcp_ws_available'
 import { toApiError, type ApiClient } from './client'
 
 // ---------------- Templates (public + admin) ---------------- //
@@ -373,4 +375,23 @@ export async function adminUpsertToolCitation(
   })
   if (!res.ok) throw await toApiError(res)
   return (await res.json()) as MCPConnectorInstall
+}
+
+// ---------------- Admin org connectors + workspace available ---------------- //
+
+export async function adminListConnectors(
+  client: ApiClient,
+): Promise<{ items: AdminOrgConnector[] }> {
+  const res = await client.get('/api/v1/admin/mcp/connectors')
+  if (!res.ok) throw await toApiError(res)
+  return (await res.json()) as { items: AdminOrgConnector[] }
+}
+
+export async function wsListAvailable(
+  client: ApiClient,
+  wsId: string,
+): Promise<{ items: WsAvailable[] }> {
+  const res = await client.get(`/api/v1/ws/${wsId}/mcp/available`)
+  if (!res.ok) throw await toApiError(res)
+  return (await res.json()) as { items: WsAvailable[] }
 }
