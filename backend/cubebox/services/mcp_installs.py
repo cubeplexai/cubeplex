@@ -395,6 +395,7 @@ class MCPConnectorInstallService:
         MultipleResultsFound."""
         from sqlalchemy import or_
         from sqlmodel import select
+
         from cubebox.models.mcp import MCPConnectorInstall as _Install
 
         or_clauses = [
