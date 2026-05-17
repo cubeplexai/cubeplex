@@ -128,15 +128,28 @@ the existing Workspaces tab still pulls the per-row detail on demand.
 ### 3.2 `GET /api/v1/ws/{ws}/mcp/available` (new)
 
 Returns connectors that this workspace can install or enable but
-hasn't yet. One row per org install with `enabled != true` for this
-workspace, plus one row per template not installed at the org level
-(workspace can install as workspace-scope):
+hasn't yet. Three filters compose:
+
+1. **`source='org_install'` rows** — one per org install where this
+   workspace's state row is absent or `enabled=false`. Includes
+   custom-installed org connectors (no `template_id`).
+2. **`source='template'` rows** — one per active template that this
+   workspace cannot already reach. A template is reachable when:
+   - an org install of the same template exists (regardless of state
+     row) — that row appears under `source='org_install'` instead, or
+   - this workspace already owns an **active** workspace-scope install
+     of the same template. Without this filter the Connect button
+     would POST a workspace install for a template the workspace
+     already has, hitting `uq_mcp_connector_install_per_template_ws`
+     (the partial-unique index that excludes tombstones only).
+     Tombstoned workspace installs do not block — reinstall must
+     stay a one-click action.
 
 ```ts
 type WsAvailable = {
   source: 'org_install' | 'template'
   install: MCPConnectorInstall | null    // present iff source='org_install'
-  template: MCPConnectorTemplate         // always present
+  template: MCPConnectorTemplate | null  // null only for custom org installs
   reason: 'no_state_row' | 'state_disabled' | 'not_installed_at_org'
 }
 ```
@@ -160,10 +173,15 @@ this workspace owns, plus org installs with `state_row.enabled=true`.
 The current behavior (returning org installs with disabled state
 rows) goes to `/available` instead.
 
-In `compute_effective_state` that means rule 4 changes from
-"workspace_state_present and workspace_enabled" gates `usable` to
-"workspace_state_present and workspace_enabled" gates *visibility on
-this endpoint entirely* — disabled rows just don't come back.
+The change is at the LIST endpoint's filter, not in the pure
+`compute_effective_state` function. The function still emits
+`reason='not_enabled_in_workspace'` for disabled rows (runtime spec
+build and other consumers depend on it); the list endpoint just
+filters those rows out before serializing. Concretely:
+`list_for_workspace_user` adds `state.enabled=True` to its
+`visible_installs` predicate for org installs (workspace-local
+installs are still always visible because they have no enable/disable
+concept — the install itself IS the workspace's opt-in).
 
 ## 4. Frontend rules
 
