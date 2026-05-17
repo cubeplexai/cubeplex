@@ -60,6 +60,7 @@ from cubebox.models import MCPConnectorInstall, User
 from cubebox.models.mcp import MCPCredentialGrant
 from cubebox.repositories.mcp import (
     MCPConnectorInstallRepository,
+    MCPConnectorTemplateRepository,
     MCPCredentialGrantRepository,
 )
 from cubebox.services.mcp_discovery import discover_tools_for_install
@@ -153,12 +154,21 @@ def _validate_install_policy_pairing(
     Used by PATCH endpoints where the body alone is insufficient (auth_method
     is fixed on the row and not in the request body).
     """
-    if requested_policy == "none" and install.auth_method != "none":
+    _validate_pair(install.auth_method, requested_policy, field=field)
+
+
+def _validate_pair(auth_method: str, policy: str, *, field: str) -> None:
+    """Raise the canonical 422 when (auth_method, policy) pairing is invalid.
+
+    Single source of truth for the rule reused at install-create,
+    install-patch, and auth-method-switch sites.
+    """
+    if policy == "none" and auth_method != "none":
         raise _policy_field_error(
             field,
             "credential_policy='none' is only valid when auth_method='none'",
         )
-    if requested_policy != "none" and install.auth_method == "none":
+    if policy != "none" and auth_method == "none":
         raise _policy_field_error(
             field,
             "auth_method='none' install requires credential_policy='none'",
@@ -635,12 +645,51 @@ async def patch_admin_install(
     if install is None:
         raise HTTPException(404, detail={"code": "mcp_install_not_found"})
 
+    # Switching auth_method post-install is supported so the credential
+    # provisioning step (not the install step) is where the operator picks
+    # OAuth vs static token on multi-method templates. Guard rails:
+    # - the new method must be in the template's supported_auth_methods
+    #   (free for custom installs, which have no template)
+    # - reject when any credential grant already exists — those grants
+    #   are tied to the old method and would orphan; require the admin
+    #   to disconnect first
+    # - validate the (auth_method, policy) pairing using the effective
+    #   values after the patch applies
+    new_auth_method = body.auth_method if body.auth_method is not None else install.auth_method
+    new_policy = (
+        body.default_credential_policy
+        if body.default_credential_policy is not None
+        else install.default_credential_policy
+    )
+    if body.auth_method is not None and body.auth_method != install.auth_method:
+        if install.template_id is not None:
+            template_repo = MCPConnectorTemplateRepository(svc._install_repo.session)
+            template = await template_repo.get(install.template_id)
+            if template is not None and body.auth_method not in (
+                template.supported_auth_methods or []
+            ):
+                raise _policy_field_error(
+                    "auth_method",
+                    "auth_method_not_supported_by_template",
+                )
+        grant_repo = MCPCredentialGrantRepository(svc._install_repo.session, org_id=install.org_id)
+        if await grant_repo.has_any_grant(install_id):
+            raise HTTPException(
+                409,
+                detail={"code": "auth_method_change_blocked_by_existing_grant"},
+            )
+        # Clear OAuth-only side state when leaving OAuth — DCR results
+        # for the old client identity must not leak into a static or
+        # no-auth install. Symmetric: nothing to clear when leaving
+        # static (the secret lives on the grant, which we already
+        # required to be absent).
+        if install.auth_method == "oauth" and body.auth_method != "oauth":
+            install.oauth_client_config = {}
+        install.auth_method = body.auth_method
+        install.auth_status = "not_required" if body.auth_method == "none" else "pending"
+
+    _validate_pair(new_auth_method, new_policy, field="default_credential_policy")
     if body.default_credential_policy is not None:
-        _validate_install_policy_pairing(
-            install=install,
-            requested_policy=body.default_credential_policy,
-            field="default_credential_policy",
-        )
         install.default_credential_policy = body.default_credential_policy
 
     if body.auto_enroll_new_workspaces is not None:

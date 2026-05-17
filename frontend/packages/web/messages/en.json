@@ -858,6 +858,7 @@
     "authMethodOAuth": "OAuth",
     "authMethodStatic": "API token",
     "authMethodNone": "No auth",
+    "authMethodLabel": "Auth method",
     "installButton": "Install",
     "uninstallButton": "Uninstall",
     "confirmUninstallLabel": "Uninstall?",

@@ -191,18 +191,26 @@ class MCPConnectorInstallRepository:
         return (await self.session.execute(stmt)).scalar_one_or_none()
 
     async def list_org_installs(self) -> list[MCPConnectorInstall]:
-        """Installs at org scope (``workspace_id IS NULL``)."""
+        """Active org-scope installs (``workspace_id IS NULL``).
+
+        Tombstoned (``install_state='uninstalled'``) rows are excluded —
+        the admin list and the effective-state pipeline both want only
+        live installs. Tombstones survive in the table as an audit trail
+        but never surface to API consumers.
+        """
         stmt = select(MCPConnectorInstall).where(
             MCPConnectorInstall.org_id == self.org_id,  # type: ignore[arg-type]
             MCPConnectorInstall.workspace_id.is_(None),  # type: ignore[union-attr]
+            MCPConnectorInstall.install_state == "active",  # type: ignore[arg-type]
         )
         return list((await self.session.execute(stmt)).scalars().all())
 
     async def list_workspace_installs(self, workspace_id: str) -> list[MCPConnectorInstall]:
-        """Installs owned by a specific workspace (workspace-scope only)."""
+        """Active workspace-scope installs for the given workspace."""
         stmt = select(MCPConnectorInstall).where(
             MCPConnectorInstall.org_id == self.org_id,  # type: ignore[arg-type]
             MCPConnectorInstall.workspace_id == workspace_id,  # type: ignore[arg-type]
+            MCPConnectorInstall.install_state == "active",  # type: ignore[arg-type]
         )
         return list((await self.session.execute(stmt)).scalars().all())
 
@@ -253,6 +261,25 @@ class MCPWorkspaceConnectorStateRepository:
             MCPWorkspaceConnectorState.workspace_id == workspace_id,  # type: ignore[arg-type]
         )
         return list((await self.session.execute(stmt)).scalars().all())
+
+    async def delete_for_install(self, install_id: str) -> int:
+        """Bulk-delete every state row for ``install_id``. Returns count.
+
+        Called on uninstall: state rows for a tombstoned install would
+        otherwise hang around forever as orphans, since reinstall mints a
+        new install_id (the partial unique indexes exclude tombstones, so
+        the old row never gets rebound to the new install).
+        """
+        stmt = select(MCPWorkspaceConnectorState).where(
+            MCPWorkspaceConnectorState.org_id == self.org_id,  # type: ignore[arg-type]
+            MCPWorkspaceConnectorState.install_id == install_id,  # type: ignore[arg-type]
+        )
+        rows = list((await self.session.execute(stmt)).scalars().all())
+        for row in rows:
+            await self.session.delete(row)
+        if rows:
+            await self.session.commit()
+        return len(rows)
 
     async def upsert(
         self,
@@ -342,6 +369,19 @@ class MCPCredentialGrantRepository:
         )
         return (await self.session.execute(stmt)).scalar_one_or_none()
 
+    async def has_any_grant(self, install_id: str) -> bool:
+        """True if any grant (any scope) exists for this install.
+
+        Used by auth-method-switch to refuse changes that would orphan
+        credentials provisioned for the previous method.
+        """
+        stmt = select(MCPCredentialGrant).where(
+            MCPCredentialGrant.org_id == self.org_id,  # type: ignore[arg-type]
+            MCPCredentialGrant.install_id == install_id,  # type: ignore[arg-type]
+        )
+        result = await self.session.execute(stmt)
+        return result.first() is not None
+
     async def get_workspace_grant(
         self, install_id: str, workspace_id: str
     ) -> MCPCredentialGrant | None:
@@ -392,6 +432,23 @@ class MCPCredentialGrantRepository:
             return await self.get_workspace_grant(install_id, workspace_id)
         assert workspace_id is not None and user_id is not None, "user grant requires both"
         return await self.get_user_grant(install_id, user_id, workspace_id=workspace_id)
+
+    async def delete_for_install(self, install_id: str) -> int:
+        """Bulk-delete every grant for ``install_id``. Returns count.
+
+        Called on uninstall so credentials don't outlive the install
+        they were provisioned for. Symmetric with the state-row cleanup.
+        """
+        stmt = select(MCPCredentialGrant).where(
+            MCPCredentialGrant.org_id == self.org_id,  # type: ignore[arg-type]
+            MCPCredentialGrant.install_id == install_id,  # type: ignore[arg-type]
+        )
+        rows = list((await self.session.execute(stmt)).scalars().all())
+        for row in rows:
+            await self.session.delete(row)
+        if rows:
+            await self.session.commit()
+        return len(rows)
 
     async def delete_scope(
         self,
