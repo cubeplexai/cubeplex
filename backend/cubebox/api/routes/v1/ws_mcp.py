@@ -679,7 +679,10 @@ async def _invoke_tool_via_cubepi(
 
 
 @router.post(
-    "/installs/{install_id}/tools/{tool_name}/invoke",
+    # `tool_name:path` captures slash-containing names (some MCP
+    # servers expose tools like `repos/list`). See admin_mcp.py
+    # equivalent for the rationale.
+    "/installs/{install_id}/tools/{tool_name:path}/invoke",
     response_model=ToolInvokeOut,
 )
 @limiter.limit("30/minute", key_func=_invoke_rate_key)
