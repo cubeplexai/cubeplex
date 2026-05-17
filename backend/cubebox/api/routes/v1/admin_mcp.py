@@ -36,6 +36,10 @@ from cubebox.api.schemas.mcp import (
     ToolCitationUpsertIn,
     ToolInvokeOut,
 )
+from cubebox.api.schemas.mcp_admin_connector import (
+    AdminOrgConnectorListOut,
+    AdminOrgConnectorOut,
+)
 from cubebox.audit.sink import AuditSink
 from cubebox.auth.context import RequestContext
 from cubebox.auth.dependencies import current_active_user
@@ -62,6 +66,12 @@ from cubebox.repositories.mcp import (
     MCPConnectorInstallRepository,
     MCPConnectorTemplateRepository,
     MCPCredentialGrantRepository,
+    MCPWorkspaceConnectorStateRepository,
+)
+from cubebox.repositories.workspace import WorkspaceRepository
+from cubebox.services.mcp_admin_connectors import (
+    build_workspace_distribution,
+    derive_admin_org_effective,
 )
 from cubebox.services.mcp_discovery import (
     discover_tools_for_install,
@@ -931,6 +941,57 @@ async def admin_test_connection(
             error_message=str(exc)[:256],
         )
     return TestConnectionOut(ok=True, tool_count=len(tools))
+
+
+# ---------------------------------------------------------------------------
+# Admin connector list (GET /admin/mcp/connectors — spec §3.1).
+# ---------------------------------------------------------------------------
+
+
+@router.get("/connectors", response_model=AdminOrgConnectorListOut)
+async def list_admin_connectors(
+    svc: Annotated[MCPConnectorInstallService, Depends(get_admin_install_service)],
+    grant_repo: Annotated[MCPCredentialGrantRepository, Depends(get_grant_repo)],
+    ctx: Annotated[RequestContext, Depends(get_admin_request_context)],
+) -> AdminOrgConnectorListOut:
+    """List every org-scope install with its org-level effective state and
+    a per-install workspace-distribution aggregate.
+
+    Spec §3.1. Workspace-scope installs are excluded (admins find those
+    via the workspace settings page). No workspace lens is applied — the
+    admin row never carries per-workspace status.
+    """
+    org_installs = await svc._install_repo.list_org_installs()
+    session = svc._install_repo.session
+    state_repo = MCPWorkspaceConnectorStateRepository(session, org_id=ctx.org_id)
+    workspace_repo = WorkspaceRepository(session)
+    template_repo = MCPConnectorTemplateRepository(session)
+    eligible = len(await workspace_repo.list_for_org(ctx.org_id))
+
+    items: list[AdminOrgConnectorOut] = []
+    for install in org_installs:
+        org_grant = await grant_repo.get_org_grant(install.id)
+        eff = derive_admin_org_effective(install, org_grant)
+        state_rows = await state_repo.list_for_install(install.id)
+        dist = build_workspace_distribution(
+            install=install,
+            state_rows=state_rows,
+            eligible_workspace_count=eligible,
+        )
+        template_out: MCPConnectorTemplateOut | None = None
+        if install.template_id is not None:
+            template = await template_repo.get(install.template_id)
+            if template is not None:
+                template_out = _template_to_out(template)
+        items.append(
+            AdminOrgConnectorOut(
+                install=_install_to_out(install),
+                template=template_out,
+                org_effective=eff,
+                workspace_distribution=dist,
+            )
+        )
+    return AdminOrgConnectorListOut(items=items)
 
 
 # ---------------------------------------------------------------------------
