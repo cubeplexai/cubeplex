@@ -102,19 +102,20 @@ export function MCPCitationEditor({
 
       <div className="flex flex-col gap-1.5">
         <Label>{t('contentField')}</Label>
-        <select
-          className="h-8 rounded-md border px-2 text-sm"
+        <Input
+          list={`citation-output-fields-${toolName}`}
           value={cfg.content_field ?? ''}
           onChange={(e) => onChange({ ...cfg, content_field: e.target.value || null })}
-          disabled={readOnly}
-        >
-          <option value="">{t('contentFieldRoot')}</option>
-          {outputFieldCandidates.map((f) => (
-            <option key={f} value={f}>
-              {f}
-            </option>
-          ))}
-        </select>
+          placeholder={t('contentFieldRoot')}
+          readOnly={readOnly}
+        />
+        {outputFieldCandidates.length > 0 ? (
+          <datalist id={`citation-output-fields-${toolName}`}>
+            {outputFieldCandidates.map((f) => (
+              <option key={f} value={f} />
+            ))}
+          </datalist>
+        ) : null}
       </div>
 
       <div className="flex flex-col gap-2">
@@ -129,19 +130,14 @@ export function MCPCitationEditor({
                 readOnly={readOnly}
                 className="max-w-[180px]"
               />
-              <select
-                className="h-8 flex-1 rounded-md border px-2 text-sm"
+              <Input
+                list={`citation-output-fields-${toolName}`}
                 value={v}
                 onChange={(e) => updateMappingValue(k, e.target.value)}
-                disabled={readOnly}
-              >
-                <option value="">—</option>
-                {outputFieldCandidates.map((f) => (
-                  <option key={f} value={f}>
-                    {f}
-                  </option>
-                ))}
-              </select>
+                placeholder={t('mappingValuePlaceholder')}
+                readOnly={readOnly}
+                className="flex-1"
+              />
               {!readOnly ? (
                 <button
                   type="button"

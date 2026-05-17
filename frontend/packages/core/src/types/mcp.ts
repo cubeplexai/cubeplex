@@ -11,6 +11,7 @@ export interface MCPToolEntry {
   name: string
   description: string | null
   input_schema: Record<string, unknown> | null
+  output_schema: Record<string, unknown> | null
 }
 
 export interface MCPOAuthStartResult {
@@ -63,7 +64,7 @@ export interface MCPConnectorInstall {
   install_state: 'active' | 'uninstalled'
   tool_count: number
   tools: MCPToolEntry[]
-  tool_citations: Record<string, CitationConfigJSON> | null
+  tool_citations: Record<string, CitationConfigJSON>
   last_error: string | null
   auto_enroll_new_workspaces: boolean
 }
