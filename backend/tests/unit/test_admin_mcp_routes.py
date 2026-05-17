@@ -22,7 +22,6 @@ def test_admin_mcp_four_layer_routes_are_registered() -> None:
 
     expected: list[tuple[str, str]] = [
         ("GET", "/api/v1/admin/mcp/templates"),
-        ("GET", "/api/v1/admin/mcp/installs"),
         ("POST", "/api/v1/admin/mcp/installs"),
         ("GET", "/api/v1/admin/mcp/installs/{install_id}"),
         ("PATCH", "/api/v1/admin/mcp/installs/{install_id}"),

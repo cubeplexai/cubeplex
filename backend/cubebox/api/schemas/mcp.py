@@ -125,12 +125,6 @@ class MCPConnectorTemplateListOut(BaseModel):
     items: list[MCPConnectorTemplateOut]
 
 
-class MCPConnectorInstallListOut(BaseModel):
-    """Envelope for list endpoints returning connector installs."""
-
-    items: list[MCPConnectorInstallOut]
-
-
 class MCPEffectiveConnectorListOut(BaseModel):
     """Envelope for list endpoints returning effective connectors."""
 
