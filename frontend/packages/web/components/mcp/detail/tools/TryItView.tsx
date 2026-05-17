@@ -34,6 +34,12 @@ export interface TryItViewProps {
   onScopedWorkspaceChange?: (wsId: string) => void
   /** True iff the admin connector's required grant scope is workspace or user. */
   requiresWorkspacePicker?: boolean
+  /** Connector's auth_method. Used by admin Try It to decide whether
+   * to send the panel lens wsId on non-picker installs: auth='none'
+   * needs the lens for identity-token `ws` claim, while other
+   * auth methods with org-policy must send null lens to avoid the
+   * backend rejecting installs not enabled in that workspace. */
+  adminAuthMethod?: 'oauth' | 'static' | 'none'
 }
 
 type FieldValue = string | number | boolean
@@ -76,6 +82,7 @@ export function TryItView({
   scopedAdminWorkspaceId,
   onScopedWorkspaceChange,
   requiresWorkspacePicker,
+  adminAuthMethod,
 }: TryItViewProps) {
   const t = useTranslations('mcp.tools.detail.tryit')
   const properties = useMemo(
@@ -105,18 +112,22 @@ export function TryItView({
       let res: ToolInvokeResult
       if (surface === 'admin') {
         // Lens precedence:
-        //   1. Explicit picker selection (user-policy installs that
-        //      need workspace + user grant resolution).
-        //   2. The admin panel's current lens wsId (so an org install
-        //      whose workspace state overrides default to
-        //      `workspace`/`user` still gets the right grant, and
-        //      no-auth installs mint an identity token with a real
-        //      `ws` claim).
-        //   3. null only when there is no wsId at all (e.g. early
-        //      mount before lens is set).
-        const lens = requiresWorkspacePicker
-          ? (scopedAdminWorkspaceId ?? null)
-          : (wsId ?? null)
+        //   1. requiresWorkspacePicker (effective policy is
+        //      workspace/user) → use explicit picker selection.
+        //   2. auth='none' → use the panel lens wsId so the identity
+        //      token carries a real `ws` claim instead of empty.
+        //   3. Otherwise (org-policy install) → null lens, so the
+        //      backend resolves the org grant without rejecting
+        //      installs not enabled in the panel workspace
+        //      (auto_enable.mode='none' / disabled there).
+        let lens: string | null
+        if (requiresWorkspacePicker) {
+          lens = scopedAdminWorkspaceId ?? null
+        } else if (adminAuthMethod === 'none') {
+          lens = wsId ?? null
+        } else {
+          lens = null
+        }
         res = await adminInvokeTool(client, installId, toolName, args, lens)
       } else {
         if (!wsId) throw new Error('workspace id missing')
