@@ -148,6 +148,13 @@ async def discover_tools_for_install(
         state_repo=state_repo,
         grant_repo=grant_repo,
         org_id=install.org_id,
+        # Pass token_manager so _resolve_grant can rotate expired
+        # OAuth tokens proactively, matching agent runtime. Without
+        # this, an OAuth install whose access token has expired but
+        # has a refresh credential would surface as unusable from
+        # the effective DTO and discovery would 400 before
+        # _resolve_headers_from_spec gets a chance to refresh.
+        token_manager=token_mgr,
     )
 
     if workspace_id is None and install.install_scope == "workspace":
