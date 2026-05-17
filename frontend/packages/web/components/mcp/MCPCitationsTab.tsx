@@ -21,12 +21,13 @@ export interface MCPCitationsTabProps {
 }
 
 function extractOutputFieldCandidates(tool: MCPToolEntry): string[] {
-  // Conservative heuristic: top-level property names of the input_schema
-  // become candidate output field names. The real output schema isn't
-  // exposed today; this gives the operator a list of likely keys to start
-  // from. They can also type a custom path into the mapping.
-  if (!tool.input_schema || typeof tool.input_schema !== 'object') return []
-  return Object.keys(getProperties(tool.input_schema as SchemaNode))
+  // Top-level keys of the tool's declared output_schema. MCP servers may
+  // omit outputSchema entirely (it's optional in the spec); in that case
+  // the editor falls back to a free-text input with no datalist hints.
+  // Do NOT fall back to input_schema — input args and output fields are
+  // unrelated, so suggesting input keys would mislead the operator.
+  if (!tool.output_schema || typeof tool.output_schema !== 'object') return []
+  return Object.keys(getProperties(tool.output_schema as SchemaNode))
 }
 
 export function MCPCitationsTab({ install, client, onUpdated }: MCPCitationsTabProps) {

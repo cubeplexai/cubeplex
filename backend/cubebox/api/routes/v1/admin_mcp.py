@@ -94,11 +94,7 @@ def _template_to_out(
     )
 
 
-def _install_to_out(
-    install: MCPConnectorInstall,
-    *,
-    include_tool_citations: bool = False,
-) -> MCPConnectorInstallOut:
+def _install_to_out(install: MCPConnectorInstall) -> MCPConnectorInstallOut:
     tools_cache = install.tools_cache or []
     tool_entries = [
         MCPToolEntry(
@@ -124,7 +120,7 @@ def _install_to_out(
         install_state=install.install_state,
         tool_count=len(tool_entries),
         tools=tool_entries,
-        tool_citations=(install.tool_citations or {}) if include_tool_citations else None,
+        tool_citations=dict(install.tool_citations or {}),
         last_error=install.last_error,
         auto_enroll_new_workspaces=install.auto_enroll_new_workspaces,
     )
@@ -186,7 +182,7 @@ async def list_admin_installs(
     """List every org-scope install in the admin's current org."""
     org_rows = await svc._install_repo.list_org_installs()
     return MCPConnectorInstallListOut(
-        items=[_install_to_out(install, include_tool_citations=True) for install in org_rows],
+        items=[_install_to_out(install) for install in org_rows],
     )
 
 
@@ -279,7 +275,7 @@ async def create_admin_install(
         target_id=install.id,
         details={"scope": "org", "template_id": template_id_for_audit},
     )
-    return _install_to_out(install, include_tool_citations=True)
+    return _install_to_out(install)
 
 
 @router.get(
@@ -293,7 +289,7 @@ async def get_admin_install(
     install = await svc._install_repo.get(install_id)
     if install is None:
         raise HTTPException(404, detail={"code": "mcp_install_not_found"})
-    return _install_to_out(install, include_tool_citations=True)
+    return _install_to_out(install)
 
 
 @router.post(
@@ -373,7 +369,7 @@ async def admin_refresh_discovery(
         raise HTTPException(400, detail={"code": str(exc)}) from exc
     refreshed = await install_repo.get(install_id)
     assert refreshed is not None
-    return _install_to_out(refreshed, include_tool_citations=True)
+    return _install_to_out(refreshed)
 
 
 @router.post(
@@ -416,7 +412,7 @@ async def admin_promote_install_to_org(
         target_id=install_id,
         details={"distribution_mode": body.distribution.mode},
     )
-    return _install_to_out(install, include_tool_citations=True)
+    return _install_to_out(install)
 
 
 @router.put(
@@ -443,7 +439,7 @@ async def admin_upsert_tool_citation(
         current[body.tool_name] = body.config
     install.tool_citations = current
     saved = await svc._install_repo.update(install)
-    return _install_to_out(saved, include_tool_citations=True)
+    return _install_to_out(saved)
 
 
 # ---------------------------------------------------------------------------
@@ -678,7 +674,7 @@ async def patch_admin_install(
         org_id=ctx.org_id,
         target_id=install_id,
     )
-    return _install_to_out(saved, include_tool_citations=True)
+    return _install_to_out(saved)
 
 
 @router.delete(

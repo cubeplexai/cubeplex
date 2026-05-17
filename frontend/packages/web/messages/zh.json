@@ -493,6 +493,7 @@
       "contentFieldRoot": "（根）",
       "mapping": "字段映射",
       "mappingKeyPlaceholder": "snippet",
+      "mappingValuePlaceholder": "来源字段路径",
       "addMapping": "+ 添加字段",
       "removeMapping": "移除",
       "rowMapped": "✓ 已映射",

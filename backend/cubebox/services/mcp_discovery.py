@@ -30,7 +30,7 @@ import asyncio
 from dataclasses import dataclass
 from typing import Any, cast
 
-from cubepi.mcp import load_mcp_tools_http
+from cubepi.mcp.http_loader import _open_session
 from loguru import logger
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -60,17 +60,23 @@ class DiscoveryResult:
 
 
 def _tool_to_dict(tool: Any) -> dict[str, Any]:
-    """Normalise ``load_mcp_tools_http`` results to ``{name, description,
-    input_schema}`` dicts.
+    """Normalise an MCP ``Tool`` descriptor (or a test stub) into the
+    ``{name, description, input_schema, output_schema}`` dict shape we
+    persist in ``tools_cache``.
 
-    Real ``AgentTool`` instances carry the JSON Schema indirectly through
-    a synthesized pydantic model on ``.parameters``; we recover it via
-    ``model_json_schema()``. Test stubs that already expose
-    ``input_schema`` directly fall through the ``getattr`` path.
+    Real ``mcp.types.Tool`` instances expose camelCase ``inputSchema`` /
+    ``outputSchema``; test stubs typically already use snake_case
+    ``input_schema`` / ``output_schema``. Both are accepted.
     """
     name = getattr(tool, "name", "")
     description = getattr(tool, "description", None)
-    input_schema: dict[str, Any] | None = getattr(tool, "input_schema", None)
+    input_schema: dict[str, Any] | None = getattr(tool, "input_schema", None) or getattr(
+        tool, "inputSchema", None
+    )
+    output_schema: dict[str, Any] | None = getattr(tool, "output_schema", None) or getattr(
+        tool, "outputSchema", None
+    )
+    # AgentTool path (legacy): synthesised pydantic model on .parameters.
     if input_schema is None:
         params = getattr(tool, "parameters", None)
         if params is not None and hasattr(params, "model_json_schema"):
@@ -82,7 +88,32 @@ def _tool_to_dict(tool: Any) -> dict[str, Any]:
         "name": name,
         "description": description,
         "input_schema": input_schema,
+        "output_schema": output_schema,
     }
+
+
+async def _list_raw_mcp_tools(
+    server_url: str,
+    *,
+    headers: dict[str, str] | None,
+    timeout: float,
+    transport: MCPTransport,
+) -> list[Any]:
+    """Open an MCP session and call ``list_tools``, returning raw
+    descriptors (``mcp.types.Tool``).
+
+    We bypass ``cubepi.mcp.load_mcp_tools_http`` because its
+    ``AgentTool`` wrapper drops the optional ``outputSchema`` field —
+    citation editing needs it to suggest output field names. Tool
+    invocation still goes through cubepi (Try It path); only discovery
+    talks to MCP directly here.
+    """
+    async with _open_session(
+        server_url, headers=headers, timeout=timeout, transport=transport
+    ) as session:
+        await asyncio.wait_for(session.initialize(), timeout=timeout)
+        tools_resp = await asyncio.wait_for(session.list_tools(), timeout=timeout)
+    return list(tools_resp.tools)
 
 
 def _build_runtime_spec_for_discovery(install: Any, grant: Any) -> Any:
@@ -246,7 +277,7 @@ async def discover_tools_for_install(
 
     try:
         tools = await asyncio.wait_for(
-            load_mcp_tools_http(
+            _list_raw_mcp_tools(
                 install.server_url,
                 headers=headers or None,
                 timeout=install.timeout,

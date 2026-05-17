@@ -58,6 +58,7 @@ class MCPToolEntry(BaseModel):
     name: str
     description: str | None = None
     input_schema: dict[str, Any] | None = None
+    output_schema: dict[str, Any] | None = None
 
 
 class MCPConnectorInstallOut(BaseModel):
@@ -77,7 +78,7 @@ class MCPConnectorInstallOut(BaseModel):
     install_state: str
     tool_count: int
     tools: list[MCPToolEntry]
-    tool_citations: dict[str, CitationConfigJSON] | None
+    tool_citations: dict[str, CitationConfigJSON]
     last_error: str | None
     auto_enroll_new_workspaces: bool
 

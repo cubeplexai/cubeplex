@@ -493,6 +493,7 @@
       "contentFieldRoot": "(root)",
       "mapping": "Field mapping",
       "mappingKeyPlaceholder": "snippet",
+      "mappingValuePlaceholder": "source field path",
       "addMapping": "+ Add field",
       "removeMapping": "Remove",
       "rowMapped": "✓ Mapped",
