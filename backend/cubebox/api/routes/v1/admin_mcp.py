@@ -337,6 +337,7 @@ async def admin_refresh_discovery(
         from cubebox.repositories.mcp import (
             MCPWorkspaceConnectorStateRepository,
         )
+
         state_repo = MCPWorkspaceConnectorStateRepository(session, org_id=ctx.org_id)
         ws_state = await state_repo.get(body.workspace_id, install_id)
         if ws_state is not None and ws_state.credential_policy:

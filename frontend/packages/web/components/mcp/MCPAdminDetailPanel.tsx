@@ -377,8 +377,7 @@ export function MCPAdminDetailPanel({
               // overrides) not install.default_credential_policy.
               // An org install whose lens workspace overrides to
               // workspace/user needs the picker.
-              connector.credential_policy === 'workspace' ||
-              connector.credential_policy === 'user'
+              connector.credential_policy === 'workspace' || connector.credential_policy === 'user'
             }
             // Workspace picker wiring for scoped Try It. Without
             // adminWorkspaceOptions + onScopedWorkspaceChange the

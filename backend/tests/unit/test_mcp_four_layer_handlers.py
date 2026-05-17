@@ -275,6 +275,7 @@ class _FullFakeInstall:
         self.discovery_status = "pending"
         self.install_state = "active"
         self.tools_cache: list[Any] = []
+        self.tool_citations: dict[str, Any] = {}
         self.last_error: str | None = None
         self.auto_enroll_new_workspaces = False
         self.headers: dict[str, str] = {}
@@ -542,6 +543,7 @@ def _make_fake_install_for_workspace(template_id: str, workspace_id: str) -> Any
             self.discovery_status = "pending"
             self.install_state = "active"
             self.tools_cache: list[Any] = []
+            self.tool_citations: dict[str, Any] = {}
             self.last_error: str | None = None
             self.auto_enroll_new_workspaces = False
             self.headers: dict[str, str] = {}
