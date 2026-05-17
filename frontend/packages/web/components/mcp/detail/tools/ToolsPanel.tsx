@@ -17,6 +17,7 @@ export interface ToolsPanelProps {
   scopedAdminWorkspaceId?: string | null
   onScopedWorkspaceChange?: (wsId: string) => void
   requiresWorkspacePicker?: boolean
+  adminAuthMethod?: 'oauth' | 'static' | 'none'
 }
 
 export function ToolsPanel({
@@ -29,6 +30,7 @@ export function ToolsPanel({
   scopedAdminWorkspaceId,
   onScopedWorkspaceChange,
   requiresWorkspacePicker,
+  adminAuthMethod,
 }: ToolsPanelProps) {
   const t = useTranslations('mcp.tools')
   const [selectedName, setSelectedName] = useState<string | null>(
@@ -89,6 +91,7 @@ export function ToolsPanel({
             scopedAdminWorkspaceId={scopedAdminWorkspaceId}
             onScopedWorkspaceChange={onScopedWorkspaceChange}
             requiresWorkspacePicker={requiresWorkspacePicker}
+            adminAuthMethod={adminAuthMethod}
           />
         ) : null}
       </section>

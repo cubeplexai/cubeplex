@@ -343,6 +343,7 @@ export function MCPAdminDetailPanel({
               install.default_credential_policy === 'user'
             }
             scopedAdminWorkspaceId={wsId}
+            adminAuthMethod={install.auth_method}
           />
         </TabsContent>
 

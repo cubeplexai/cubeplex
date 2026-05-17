@@ -24,6 +24,7 @@ export interface ToolDetailProps {
   scopedAdminWorkspaceId?: string | null
   onScopedWorkspaceChange?: (wsId: string) => void
   requiresWorkspacePicker?: boolean
+  adminAuthMethod?: 'oauth' | 'static' | 'none'
 }
 
 export function ToolDetail({
@@ -38,6 +39,7 @@ export function ToolDetail({
   scopedAdminWorkspaceId,
   onScopedWorkspaceChange,
   requiresWorkspacePicker,
+  adminAuthMethod,
 }: ToolDetailProps) {
   const t = useTranslations('mcp.tools.detail')
   const schema = (tool.input_schema as SchemaNode | null) ?? null
@@ -73,6 +75,7 @@ export function ToolDetail({
             scopedAdminWorkspaceId={scopedAdminWorkspaceId}
             onScopedWorkspaceChange={onScopedWorkspaceChange}
             requiresWorkspacePicker={requiresWorkspacePicker}
+            adminAuthMethod={adminAuthMethod}
           />
         </TabsContent>
         <TabsContent value="json" className="mt-4">
