@@ -136,13 +136,27 @@ export function MCPAdminDetailPanel({
       // Fall back to the install-default lens if the DTO is somehow
       // missing.
       const effectivePolicy = connector?.credential_policy ?? install.default_credential_policy
-      // 'none' policy (auth_method='none') also needs null lens for
-      // the same reason as 'org': org-scope no-auth installs without
-      // a state row in this workspace are invisible to the workspace
-      // effective service. Without this, Refresh for a custom no-auth
-      // install with auto_enable.mode='none' would 404 with
-      // connector_install_not_found.
-      const lens = effectivePolicy === 'org' || effectivePolicy === 'none' ? null : wsId
+      // Lens selection:
+      // - 'org' / 'none' policy → null (use org grant or no creds).
+      //   No-auth org installs without a state row in this workspace
+      //   would otherwise 404 via workspace_effective_service.
+      // - 'workspace' / 'user' policy → use panel wsId ONLY when
+      //   this workspace has a state row. For installs distributed
+      //   only to sibling workspaces (e.g. selected mode picked
+      //   another ws), passing wsId would 404 with
+      //   connector_install_not_found. In that case fall through
+      //   to the lens stored from the Try It picker (if user has
+      //   selected one); otherwise pass null and let the backend
+      //   surface 'workspace_id_required_for_scoped_policy' so the
+      //   user understands they need a picker selection.
+      let lens: string | null
+      if (effectivePolicy === 'org' || effectivePolicy === 'none') {
+        lens = null
+      } else if (connector?.workspace_state) {
+        lens = wsId
+      } else {
+        lens = tryItScopedWsId !== wsId ? tryItScopedWsId : null
+      }
       await adminRefreshDiscovery(client, installId, lens)
       await onRefresh()
     } catch (err) {
