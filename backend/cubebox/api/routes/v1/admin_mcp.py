@@ -459,7 +459,11 @@ def _admin_invoke_rate_key(_req: Request | None = None) -> str:
 
 
 @router.post(
-    "/installs/{install_id}/tools/{tool_name}/invoke",
+    # `tool_name:path` captures slash-containing names (some MCP
+    # servers expose tools like `repos/list`). FastAPI's default
+    # string parameter stops at the next slash and decodes %2F as
+    # one too, so frontend encodeURIComponent doesn't save us.
+    "/installs/{install_id}/tools/{tool_name:path}/invoke",
     response_model=ToolInvokeOut,
 )
 @limiter.limit("30/minute", key_func=_admin_invoke_rate_key)
