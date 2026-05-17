@@ -337,10 +337,22 @@ export function MCPAdminDetailPanel({
             installId={installId}
             client={client}
             surface="admin"
-            wsId={wsId}
+            // Pass wsId only when the install has a workspace state
+            // row in this lens. The admin invoke route's
+            // list_for_workspace_user filters org installs without a
+            // state row, so sending wsId without a state row 400s
+            // with connector_not_usable. For auth=none installs we
+            // need wsId for the identity token's `ws` claim; in the
+            // no-state-row case we accept the empty `ws` claim
+            // rather than blocking the invoke.
+            wsId={connector.workspace_state ? wsId : null}
             requiresWorkspacePicker={
-              install.default_credential_policy === 'workspace' ||
-              install.default_credential_policy === 'user'
+              // Use the EFFECTIVE policy (respects workspace state
+              // overrides) not install.default_credential_policy.
+              // An org install whose lens workspace overrides to
+              // workspace/user needs the picker.
+              connector.credential_policy === 'workspace' ||
+              connector.credential_policy === 'user'
             }
             scopedAdminWorkspaceId={wsId}
             adminAuthMethod={install.auth_method}
