@@ -63,7 +63,10 @@ from cubebox.repositories.mcp import (
     MCPConnectorTemplateRepository,
     MCPCredentialGrantRepository,
 )
-from cubebox.services.mcp_discovery import discover_tools_for_install
+from cubebox.services.mcp_discovery import (
+    discover_tools_for_install,
+    run_post_grant_discovery,
+)
 from cubebox.services.mcp_installs import MCPConnectorInstallService
 from cubebox.services.mcp_templates import MCPConnectorTemplateService
 
@@ -205,6 +208,10 @@ async def create_admin_install(
     body: AdminCreateInstallIn,
     svc: Annotated[MCPConnectorInstallService, Depends(get_admin_install_service)],
     template_svc: Annotated[MCPConnectorTemplateService, Depends(get_connector_template_service)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+    backend: Annotated[EncryptionBackend, Depends(get_encryption_backend)],
+    signer: Annotated[MCPUserTokenSigner, Depends(get_user_token_signer)],
+    token_mgr: Annotated[OAuthTokenManager, Depends(get_admin_oauth_token_manager)],
     ctx: Annotated[RequestContext, Depends(get_admin_request_context)],
     audit: Annotated[AuditSink, Depends(get_audit_sink)],
 ) -> MCPConnectorInstallOut:
@@ -277,6 +284,21 @@ async def create_admin_install(
             )
         except ValueError as exc:
             raise HTTPException(400, detail={"code": str(exc)}) from exc
+        # Static one-shot grant on install: validate by discovering
+        # tools right away. Failures land in install.discovery_status
+        # / last_error rather than failing the install create.
+        cred_service = build_credential_service(
+            session, backend, org_id=ctx.org_id, actor_user_id=ctx.user.id
+        )
+        await run_post_grant_discovery(
+            install_id=install.id,
+            workspace_id=None,
+            actor_user_id=ctx.user.id,
+            session=session,
+            cred_service=cred_service,
+            signer=signer,
+            token_mgr=token_mgr,
+        )
 
     await audit.record(
         event="mcp.install.created",
@@ -757,6 +779,10 @@ async def create_admin_org_grant(
     install_id: str,
     body: CreateGrantIn,
     svc: Annotated[MCPConnectorInstallService, Depends(get_admin_install_service)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+    backend: Annotated[EncryptionBackend, Depends(get_encryption_backend)],
+    signer: Annotated[MCPUserTokenSigner, Depends(get_user_token_signer)],
+    token_mgr: Annotated[OAuthTokenManager, Depends(get_admin_oauth_token_manager)],
     ctx: Annotated[RequestContext, Depends(get_admin_request_context)],
     audit: Annotated[AuditSink, Depends(get_audit_sink)],
 ) -> MCPCredentialGrantStatusOut:
@@ -788,6 +814,21 @@ async def create_admin_org_grant(
         org_id=ctx.org_id,
         target_id=install_id,
         details={"scope": "org"},
+    )
+    # Trigger discovery so the operator immediately sees whether the
+    # token actually works against the server, rather than a silent
+    # "saved" with discovery_status still 'not_run'.
+    cred_service = build_credential_service(
+        session, backend, org_id=ctx.org_id, actor_user_id=ctx.user.id
+    )
+    await run_post_grant_discovery(
+        install_id=install_id,
+        workspace_id=None,
+        actor_user_id=ctx.user.id,
+        session=session,
+        cred_service=cred_service,
+        signer=signer,
+        token_mgr=token_mgr,
     )
     return MCPCredentialGrantStatusOut(
         install_id=install_id,
@@ -904,14 +945,26 @@ def _derive_admin_org_effective(
     """Spec §4 admin row: ordered decision table.
 
     Rule order (first match wins):
-      1. ``install.auth_method == 'none'`` → usable.
-      2. org grant exists, ``grant_status == 'valid'`` → usable.
+      1. ``install.auth_method == 'none'`` → usable iff discovery succeeded
+         (or hasn't run yet), else ``discovery_failed``.
+      2. org grant exists, ``grant_status == 'valid'`` → same discovery
+         check as rule 1, then usable.
       3. org grant exists, ``grant_status == 'expired'``, no refresh
          available → grant_expired.
       4. no org grant, ``install.auth_method == 'oauth'``,
          ``install.auth_status == 'pending'`` → pending_oauth.
       5. no org grant otherwise → missing_org_grant.
+
+    Discovery: when all auth gates pass but ``discovery_status='error'``
+    the connector is not actually usable from the runtime's perspective —
+    a tools_cache that the agent can't refresh means no tools to call.
+    Mirror the workspace-side effective rule (``compute_effective_state``
+    rule 10) so the admin band and the workspace band don't disagree.
     """
+    if install.discovery_status == "error":
+        return MCPAdminInstallEffectiveOut(
+            install_id=install.id, usable=False, reason="discovery_failed"
+        )
     if install.auth_method == "none":
         return MCPAdminInstallEffectiveOut(install_id=install.id, usable=True, reason="usable")
     # Rule 2: usable when the org grant is valid OR when it's expired

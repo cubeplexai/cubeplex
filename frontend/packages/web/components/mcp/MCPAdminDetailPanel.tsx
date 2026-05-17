@@ -15,12 +15,15 @@ import {
 } from 'lucide-react'
 import {
   adminDeleteInstall,
+  adminDeleteOrgGrant,
   adminGetInstallEffective,
   adminPatchInstall,
   adminPromoteToOrg,
   adminRefreshDiscovery,
   useOrgAdminFlag,
   useWorkspaceStore,
+  wsDeleteMyGrant,
+  wsDeleteWorkspaceGrant,
   wsListTemplates,
   type ApiClient,
   type MCPAdminInstallEffective,
@@ -69,6 +72,7 @@ export function MCPAdminDetailPanel({
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
+  const [replacingCredential, setReplacingCredential] = useState(false)
   const [actionError, setActionError] = useState<string | null>(null)
   const [promoteOpen, setPromoteOpen] = useState(false)
 
@@ -185,11 +189,49 @@ export function MCPAdminDetailPanel({
     await onRefresh()
   }
 
+  async function handleReplaceCredential(): Promise<void> {
+    // Discovery_failed after a fresh grant usually means the credential
+    // is bad (wrong static token, OAuth granted but server rejects).
+    // Delete the existing grant at the install's policy scope, then
+    // refresh so the auth band re-renders in "needs credential" state
+    // and the user can enter a new token / re-OAuth.
+    //
+    // Use effective ``credential_policy`` (which honors workspace state
+    // overrides) rather than install.default_credential_policy so a
+    // workspace lensed into user-policy targets the user grant, not
+    // the install-default org grant.
+    setReplacingCredential(true)
+    setActionError(null)
+    try {
+      const policy = connector?.credential_policy ?? install.default_credential_policy
+      if (policy === 'org') {
+        await adminDeleteOrgGrant(client, installId)
+      } else if (policy === 'workspace') {
+        await wsDeleteWorkspaceGrant(client, wsId, installId)
+      } else if (policy === 'user') {
+        await wsDeleteMyGrant(client, wsId, installId)
+      }
+      await onRefresh()
+    } catch (err) {
+      setActionError((err as Error).message)
+    } finally {
+      setReplacingCredential(false)
+    }
+  }
+
   const canPromote = !isOrgWide && isOrgAdmin
 
-  const busy = refreshing || deleting
+  const busy = refreshing || deleting || replacingCredential
 
   const discoveryError = install.discovery_status === 'error'
+  // Only offer "Replace credential" for credentialed installs. For
+  // ``auth_method='none'`` discovery_failed is purely a server-side
+  // problem (network / 5xx / shape mismatch), and the action would be
+  // misleading. We don't gate on credential_source because the admin
+  // band overrides it to null when discovery fails — but the grant
+  // may still exist; the delete is idempotent so showing the button
+  // unconditionally for credentialed installs is safe.
+  const hasCredential = install.auth_method !== 'none'
 
   return (
     <div className="flex w-full flex-col gap-4 p-6" data-testid="mcp-admin-detail-panel">
@@ -198,6 +240,8 @@ export function MCPAdminDetailPanel({
           error={install.last_error ?? 'Discovery failed.'}
           onRetry={() => void handleRefresh()}
           retrying={refreshing}
+          onReplaceCredential={hasCredential ? () => void handleReplaceCredential() : undefined}
+          replacing={replacingCredential}
         />
       ) : null}
       <div className="flex flex-col gap-4 rounded-xl border border-border bg-card p-5 sm:flex-row sm:items-start sm:justify-between">

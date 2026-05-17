@@ -29,6 +29,8 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, cast
 
+from loguru import logger
+
 from cubebox.mcp._constants import CREDENTIAL_KIND_MCP, server_url_hash
 from cubebox.models import (
     MCPConnectorInstall,
@@ -605,7 +607,13 @@ class MCPConnectorInstallService:
             raise ValueError("static_grant_only_valid_for_static_auth")
 
         credential_name = name or f"mcp:{install_id}:{grant_scope}"
-        credential_id = await self._cred_service.create(
+        # Upsert (not create) so a "replace credential" flow — disconnect
+        # the old grant, then submit a new token — works even if the old
+        # vault row for the same (kind, name) wasn't fully cleaned up.
+        # Names are deterministic per (install, scope), so a plain
+        # ``create`` would collide with ``uq_credential_org_kind_name``
+        # on the second attempt.
+        credential_id = await self._cred_service.upsert_by_kind_name(
             kind=CREDENTIAL_KIND_MCP,
             name=credential_name,
             plaintext=plaintext,
@@ -630,21 +638,42 @@ class MCPConnectorInstallService:
         workspace_id: str | None = None,
         user_id: str | None = None,
     ) -> None:
-        """Delete the matching grant row.
+        """Delete the matching grant row + the vault credentials it points at.
 
-        Intentionally does **not** touch the install row or its
-        per-workspace state rows: per the spec, disconnect is a
-        credential-only operation. OAuth-side revocation against the
-        AS happens (when available) inside the OAuth-specific path,
-        not here.
+        Per spec, disconnect is a credential-only operation: it does **not**
+        touch the install row or its per-workspace state rows. OAuth-side
+        revocation against the AS happens (when available) inside the
+        OAuth-specific path, not here.
+
+        Cascading the vault rows matters for two reasons:
+          1. Without it, repeated "Replace credential" flows would leave
+             behind orphan encrypted credentials in the vault (the next
+             ``create_static_grant`` upserts the same (kind, name) row,
+             but earlier rotated rows would never be reclaimed).
+          2. ``cred_service.delete`` runs ``_guard_references`` so a
+             credential still referenced by other grants (e.g. the
+             unlikely case of two grants sharing one credential) stays
+             put — we don't accidentally yank a shared row.
         """
         self._validate_grant_scope_shape(grant_scope, workspace_id, user_id)
-        await self._grant_repo.delete_scope(
+        deleted = await self._grant_repo.delete_scope(
             install_id,
             grant_scope,
             workspace_id=workspace_id,
             user_id=user_id,
         )
+        for grant in deleted:
+            for cred_id in (grant.credential_id, grant.refresh_credential_id):
+                if not cred_id:
+                    continue
+                try:
+                    await self._cred_service.delete(credential_id=cred_id)
+                except Exception as exc:  # noqa: BLE001
+                    # Guard fired (still referenced) or row already gone.
+                    # Either way, swallow — the grant is gone, which is
+                    # what disconnect promises; the orphan check on the
+                    # next rotate will sweep up a stale row anyway.
+                    logger.warning("MCP disconnect: skipping vault delete for {}: {}", cred_id, exc)
 
     async def uninstall(self, install_id: str) -> MCPConnectorInstall:
         """Tombstone an install + cascade-clean state rows and grants.

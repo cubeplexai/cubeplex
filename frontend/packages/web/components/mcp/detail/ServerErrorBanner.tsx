@@ -8,11 +8,27 @@ export interface ServerErrorBannerProps {
   error: string
   onRetry?: () => void
   retrying?: boolean
+  /**
+   * Optional "Replace credential" action — shown when the discovery
+   * failure is most plausibly explained by a bad credential (admin
+   * just provisioned a token / OAuth callback just landed). The
+   * handler should delete the existing grant; the credential band
+   * will then re-render in its "needs credential" state so the user
+   * can enter a new token.
+   */
+  onReplaceCredential?: () => void
+  replacing?: boolean
 }
 
 const SHORT_LIMIT = 140
 
-export function ServerErrorBanner({ error, onRetry, retrying }: ServerErrorBannerProps) {
+export function ServerErrorBanner({
+  error,
+  onRetry,
+  retrying,
+  onReplaceCredential,
+  replacing,
+}: ServerErrorBannerProps) {
   const t = useTranslations('mcp.detail.errorBanner')
   const [expanded, setExpanded] = useState(false)
   const isLong = error.length > SHORT_LIMIT
@@ -52,6 +68,16 @@ export function ServerErrorBanner({ error, onRetry, retrying }: ServerErrorBanne
               className="text-xs font-medium text-destructive/80 hover:text-destructive disabled:opacity-60"
             >
               {retrying ? t('retrying') : t('retry')}
+            </button>
+          ) : null}
+          {onReplaceCredential ? (
+            <button
+              type="button"
+              onClick={onReplaceCredential}
+              disabled={replacing}
+              className="text-xs font-medium text-destructive/80 hover:text-destructive disabled:opacity-60"
+            >
+              {replacing ? t('replacing') : t('replaceCredential')}
             </button>
           ) : null}
         </div>

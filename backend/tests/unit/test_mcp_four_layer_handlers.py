@@ -188,11 +188,28 @@ def test_post_admin_install_static_with_none_policy_returns_422() -> None:
 
         return _S()
 
+    # The create route now resolves session / backend / signer / token_mgr
+    # so it can drive post-grant discovery; stub them with no-op sentinels
+    # since the request body should 422 before any of them is touched.
+    from cubebox.credentials.dependencies import get_encryption_backend
+    from cubebox.db.session import get_session
+    from cubebox.mcp.dependencies import (
+        get_admin_oauth_token_manager,
+        get_user_token_signer,
+    )
+
+    async def _fake_dep() -> Any:
+        return object()
+
     app = _make_app_with_overrides(
         {
             get_admin_request_context: _fake_admin_ctx,
             get_connector_template_service: _fake_template_svc,
             get_admin_install_service: _fake_install_svc,
+            get_session: _fake_dep,
+            get_encryption_backend: _fake_dep,
+            get_user_token_signer: _fake_dep,
+            get_admin_oauth_token_manager: _fake_dep,
         }
     )
 

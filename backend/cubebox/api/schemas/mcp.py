@@ -150,6 +150,7 @@ class MCPAdminInstallEffectiveOut(BaseModel):
         "pending_oauth",
         "missing_org_grant",
         "grant_expired",
+        "discovery_failed",
     ]
 
 

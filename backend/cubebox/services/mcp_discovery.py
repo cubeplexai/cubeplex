@@ -50,6 +50,26 @@ from cubebox.services.credential import CredentialService
 _DISCOVERY_TIMEOUT_SECONDS = 30.0
 
 
+def _format_discovery_error(exc: BaseException) -> str:
+    """Produce a human-readable error string for ``install.last_error``.
+
+    The MCP SDK opens the session through an ``async with`` block backed
+    by an asyncio ``TaskGroup`` (and httpx adds its own connection-level
+    task groups), so a 401 from the MCP server bubbles out as
+    ``ExceptionGroup("unhandled errors in a TaskGroup", [...])``. Showing
+    that to the operator is useless — they need to see the actual cause.
+    Unwrap one or more layers of ExceptionGroup, prefer the first
+    non-group inner exception, and fall back to the outer message only
+    when the group is empty (shouldn't happen but defensive).
+    """
+    inner: BaseException = exc
+    while isinstance(inner, BaseExceptionGroup) and inner.exceptions:
+        inner = inner.exceptions[0]
+    name = type(inner).__name__
+    msg = str(inner) or repr(inner)
+    return f"{name}: {msg}"
+
+
 @dataclass(frozen=True)
 class DiscoveryResult:
     install_id: str
@@ -142,6 +162,41 @@ def _build_runtime_spec_for_discovery(install: Any, grant: Any) -> Any:
         grant=grant,
         oauth_client_config=dict(install.oauth_client_config or {}),
     )
+
+
+async def run_post_grant_discovery(
+    *,
+    install_id: str,
+    workspace_id: str | None,
+    actor_user_id: str,
+    session: AsyncSession,
+    cred_service: CredentialService,
+    signer: MCPUserTokenSigner,
+    token_mgr: OAuthTokenManager,
+) -> None:
+    """Best-effort discovery after a grant lands.
+
+    Called from the static-grant POST routes and the OAuth callback so
+    the operator gets immediate feedback on whether the credential
+    actually works against the MCP server, instead of "saved" with no
+    validation. ``discover_tools_for_install`` already persists
+    successes / failures into install.discovery_status / last_error;
+    we just swallow the "install not usable yet" precondition errors
+    (transient grant-not-yet-visible races etc.) so a discovery
+    misfire never breaks the caller's success path.
+    """
+    try:
+        await discover_tools_for_install(
+            install_id=install_id,
+            workspace_id=workspace_id,
+            actor_user_id=actor_user_id,
+            session=session,
+            cred_service=cred_service,
+            signer=signer,
+            token_mgr=token_mgr,
+        )
+    except (MCPDiscoveryFailed, ValueError) as exc:
+        logger.warning("Post-grant discovery skipped for {}: {}", install_id, exc)
 
 
 async def discover_tools_for_install(
@@ -254,7 +309,7 @@ async def discover_tools_for_install(
         )
     except Exception as exc:  # noqa: BLE001
         install.discovery_status = "error"
-        install.last_error = f"credential_resolution_failed: {exc}"[:2048]
+        install.last_error = f"credential_resolution_failed: {_format_discovery_error(exc)}"[:2048]
         await install_repo.update(install)
         return DiscoveryResult(
             install_id=install_id,
@@ -286,9 +341,10 @@ async def discover_tools_for_install(
             timeout=_DISCOVERY_TIMEOUT_SECONDS,
         )
     except Exception as exc:  # noqa: BLE001
-        logger.warning("MCP discovery failed for {}: {}", install_id, exc)
+        formatted = _format_discovery_error(exc)
+        logger.warning("MCP discovery failed for {}: {}", install_id, formatted)
         install.discovery_status = "error"
-        install.last_error = str(exc)[:2048]
+        install.last_error = formatted[:2048]
         await install_repo.update(install)
         return DiscoveryResult(
             install_id=install_id,

@@ -77,6 +77,7 @@ from cubebox.services.credential import CredentialService
 from cubebox.services.mcp_discovery import (
     _build_runtime_spec_for_discovery,
     discover_tools_for_install,
+    run_post_grant_discovery,
 )
 from cubebox.services.mcp_installs import MCPConnectorInstallService
 from cubebox.services.mcp_templates import MCPConnectorTemplateService
@@ -393,6 +394,10 @@ async def create_my_user_grant(
     install_id: str,
     body: CreateGrantIn,
     svc: Annotated[MCPConnectorInstallService, Depends(get_ws_install_service)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+    cred_service: Annotated[CredentialService, Depends(get_credential_service)],
+    signer: Annotated[MCPUserTokenSigner, Depends(get_user_token_signer)],
+    token_mgr: Annotated[OAuthTokenManager, Depends(get_oauth_token_manager)],
     ctx: Annotated[RequestContext, Depends(require_member)],
     audit: Annotated[AuditSink, Depends(get_audit_sink)],
 ) -> MCPCredentialGrantStatusOut:
@@ -425,6 +430,15 @@ async def create_my_user_grant(
         org_id=ctx.org_id,
         target_id=install_id,
         details={"scope": "user", "workspace_id": workspace_id},
+    )
+    await run_post_grant_discovery(
+        install_id=install_id,
+        workspace_id=workspace_id,
+        actor_user_id=ctx.user.id,
+        session=session,
+        cred_service=cred_service,
+        signer=signer,
+        token_mgr=token_mgr,
     )
     return MCPCredentialGrantStatusOut(
         install_id=install_id,
@@ -503,6 +517,10 @@ async def create_workspace_grant(
     install_id: str,
     body: CreateGrantIn,
     svc: Annotated[MCPConnectorInstallService, Depends(get_ws_install_service)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+    cred_service: Annotated[CredentialService, Depends(get_credential_service)],
+    signer: Annotated[MCPUserTokenSigner, Depends(get_user_token_signer)],
+    token_mgr: Annotated[OAuthTokenManager, Depends(get_oauth_token_manager)],
     ctx: Annotated[RequestContext, Depends(require_admin)],
     audit: Annotated[AuditSink, Depends(get_audit_sink)],
 ) -> MCPCredentialGrantStatusOut:
@@ -534,6 +552,15 @@ async def create_workspace_grant(
         org_id=ctx.org_id,
         target_id=install_id,
         details={"scope": "workspace", "workspace_id": workspace_id},
+    )
+    await run_post_grant_discovery(
+        install_id=install_id,
+        workspace_id=workspace_id,
+        actor_user_id=ctx.user.id,
+        session=session,
+        cred_service=cred_service,
+        signer=signer,
+        token_mgr=token_mgr,
     )
     return MCPCredentialGrantStatusOut(
         install_id=install_id,
