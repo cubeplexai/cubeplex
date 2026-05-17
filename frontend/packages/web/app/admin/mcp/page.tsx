@@ -21,6 +21,7 @@ import { MCPAdminDetailPanel } from '@/components/mcp/MCPAdminDetailPanel'
 function synthesizeStubEffective(
   install: MCPConnectorInstall,
   _workspaceId: string,
+  template: MCPConnectorTemplate | null,
 ): MCPEffectiveConnector {
   // Mirror the backend "no workspace_state row" semantics: the install
   // exists, but has not been enabled in the lens workspace. The admin
@@ -28,7 +29,12 @@ function synthesizeStubEffective(
   // ``auto_enable.mode='none'`` ones) remain visible / manageable.
   const credentialAvailability = install.auth_method === 'none' ? 'not_required' : 'missing'
   return {
-    template: null,
+    // Hydrate template when we have it cached client-side. The detail
+    // panel uses template.supported_auth_methods to decide whether to
+    // expose the auth-method switcher — without this lookup, every
+    // org-scope install with no lens state row would render as if it
+    // had no template (single-method).
+    template,
     install,
     // Keep workspace_state = null for synthesized rows. A non-null
     // value tells MCPAdminDetailPanel "this install has a real
@@ -95,6 +101,7 @@ export default function AdminMcpPage() {
         wsListTemplates(wsClient, lensWsId),
       ])
       const effByInstallId = new Map(eff.items.map((c) => [c.install.install_id, c]))
+      const templatesById = new Map(tpl.items.map((t) => [t.template_id, t]))
       const merged: MCPEffectiveConnector[] = []
       const seen = new Set<string>()
       for (const install of adminInstalls.items) {
@@ -108,7 +115,10 @@ export default function AdminMcpPage() {
           // and manage org installs that have no workspace_state row in
           // the lens workspace. Enabled=false reflects the fact that the
           // install is not active in this workspace.
-          merged.push(synthesizeStubEffective(install, lensWsId))
+          const template = install.template_id
+            ? (templatesById.get(install.template_id) ?? null)
+            : null
+          merged.push(synthesizeStubEffective(install, lensWsId, template))
         }
       }
       for (const effRow of eff.items) {

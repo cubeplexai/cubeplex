@@ -647,19 +647,27 @@ class MCPConnectorInstallService:
         )
 
     async def uninstall(self, install_id: str) -> MCPConnectorInstall:
-        """Tombstone an install without deleting workspace state rows.
+        """Tombstone an install + cascade-clean state rows and grants.
 
-        The effective-state service filters on
-        ``install_state == 'active'`` so a tombstoned install becomes
-        invisible to the runtime even though
-        ``MCPWorkspaceConnectorState`` rows remain. Keeping the state
-        rows lets a reinstall (which the partial unique indexes permit
-        because they exclude tombstones) re-attach to the same shape
-        without losing per-workspace policy memory.
+        The install row itself is kept (``install_state='uninstalled'``)
+        as an audit trail. Everything that pointed AT it is removed:
+
+        - ``MCPWorkspaceConnectorState`` rows would otherwise become
+          orphans — reinstall mints a new ``install_id``, so the old
+          state rows never rebind. Worse, the admin install list (which
+          joins through state rows via the workspace-effective lens)
+          would surface them as ghost duplicates of the live install.
+        - ``MCPCredentialGrant`` rows are tied to the previous
+          (install, auth_method) pair; reusing them after reinstall
+          would either be wrong (auth_method may have changed) or
+          impossible (new install_id). Drop them so the operator
+          provisions credentials fresh on reinstall.
         """
         install = await self._install_repo.get(install_id)
         if install is None:
             raise ValueError(f"install not found: {install_id}")
+        await self._state_repo.delete_for_install(install_id)
+        await self._grant_repo.delete_for_install(install_id)
         install.install_state = "uninstalled"
         install.auth_status = "disconnected"
         install.updated_at = datetime.now(UTC)

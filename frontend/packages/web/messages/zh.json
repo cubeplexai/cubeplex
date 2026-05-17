@@ -858,6 +858,7 @@
     "authMethodOAuth": "OAuth",
     "authMethodStatic": "API Token",
     "authMethodNone": "无需认证",
+    "authMethodLabel": "认证方式",
     "installButton": "安装",
     "uninstallButton": "卸载",
     "confirmUninstallLabel": "确认卸载？",

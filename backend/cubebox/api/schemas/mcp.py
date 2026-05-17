@@ -252,6 +252,7 @@ class PatchInstallIn(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+    auth_method: AuthMethodLiteral | None = None
     default_credential_policy: CredentialPolicyLiteral | None = None
     auto_enroll_new_workspaces: bool | None = None
     headers: dict[str, str] | None = None

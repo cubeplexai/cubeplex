@@ -16,6 +16,7 @@ import {
 import {
   adminDeleteInstall,
   adminGetInstallEffective,
+  adminPatchInstall,
   adminPromoteToOrg,
   adminRefreshDiscovery,
   useOrgAdminFlag,
@@ -23,6 +24,7 @@ import {
   wsListTemplates,
   type ApiClient,
   type MCPAdminInstallEffective,
+  type MCPAuthMethod,
   type MCPConnectorTemplate,
   type MCPEffectiveConnector,
   type PromoteDistribution,
@@ -302,6 +304,8 @@ export function MCPAdminDetailPanel({
 
       {actionError ? <p className="text-xs text-destructive">{actionError}</p> : null}
 
+      <AuthMethodSwitcher connector={connector} client={client} onChanged={onRefresh} />
+
       <AdminAuthActionBand
         connector={connector}
         client={client}
@@ -515,6 +519,93 @@ function AdminAuthActionBand({
       isOrgAdmin={true}
       onChanged={onChanged}
     />
+  )
+}
+
+// Multi-method auth picker. Renders only when the template supports more
+// than one auth method AND no credential is already provisioned —
+// switching with a grant attached would orphan it, which the backend
+// also rejects (409). Calls PATCH install with auth_method + a derived
+// default_credential_policy; the (auth, policy) pair is validated
+// server-side.
+function AuthMethodSwitcher({
+  connector,
+  client,
+  onChanged,
+}: {
+  connector: MCPEffectiveConnector
+  client: ApiClient
+  onChanged: () => Promise<void>
+}) {
+  const t = useTranslations('mcpAdmin')
+  const [submitting, setSubmitting] = useState<MCPAuthMethod | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const supported = connector.template?.supported_auth_methods ?? []
+  const hasGrant = connector.credential_availability === 'available'
+  // Don't render the chooser when there's nothing to choose (single
+  // method, or grant already exists and the switch would be rejected).
+  if (supported.length < 2 || hasGrant) return null
+
+  const current = connector.install.auth_method
+
+  async function handleSwitch(method: MCPAuthMethod): Promise<void> {
+    if (method === current) return
+    setSubmitting(method)
+    setError(null)
+    try {
+      // Pair (auth_method, default_credential_policy) per the install
+      // validator: 'none' policy iff 'none' auth. When switching TO
+      // 'none', force policy='none'. When switching FROM 'none' to a
+      // credentialed method, set a sensible policy ('org') because the
+      // existing policy='none' is incompatible. Server re-validates.
+      const nextPolicy: 'none' | 'org' | 'workspace' | 'user' =
+        method === 'none'
+          ? 'none'
+          : connector.install.default_credential_policy === 'none'
+            ? 'org'
+            : connector.install.default_credential_policy
+      await adminPatchInstall(client, connector.install.install_id, {
+        auth_method: method,
+        default_credential_policy: nextPolicy,
+      })
+      await onChanged()
+    } catch (err) {
+      setError((err as Error).message)
+    } finally {
+      setSubmitting(null)
+    }
+  }
+
+  return (
+    <div className="flex flex-col gap-1.5 rounded-lg border border-border/60 bg-muted/30 px-3 py-2">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+          {t('authMethodLabel')}
+        </span>
+        {supported.map((m) => (
+          <Button
+            key={m}
+            type="button"
+            size="sm"
+            variant={current === m ? 'default' : 'outline'}
+            disabled={submitting !== null}
+            onClick={() => void handleSwitch(m)}
+          >
+            {submitting === m ? (
+              <Loader2 data-icon="inline-start" className="animate-spin" />
+            ) : null}
+            {t(
+              m === 'oauth'
+                ? 'authMethodOAuth'
+                : m === 'static'
+                  ? 'authMethodStatic'
+                  : 'authMethodNone',
+            )}
+          </Button>
+        ))}
+      </div>
+      {error ? <p className="text-xs text-destructive">{error}</p> : null}
+    </div>
   )
 }
 

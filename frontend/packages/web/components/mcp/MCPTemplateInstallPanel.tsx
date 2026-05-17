@@ -42,8 +42,14 @@ export function MCPTemplateInstallPanel({
 }: MCPTemplateInstallPanelProps) {
   const t = useTranslations('mcpAdmin')
 
+  // Auth method is auto-picked at install time using a template-preferred
+  // order (oauth > static > none). The admin can switch later from the
+  // detail panel via PATCH install — that's the right place to choose,
+  // since it sits next to the credential provisioning UI. Install itself
+  // is just "wire this template to the org"; the credential method
+  // decision belongs with credentials.
   const supported = useMemo(() => template.supported_auth_methods, [template])
-  const [authMethod, setAuthMethod] = useState<MCPAuthMethod>(() => defaultAuthMethod(supported))
+  const authMethod = useMemo<MCPAuthMethod>(() => defaultAuthMethod(supported), [supported])
   // Distribution defaults to 'none' (each workspace opts in). 'all' fans
   // the install out into every existing workspace AND auto-enrolls new
   // ones. The default is the safer / less invasive choice for an admin
@@ -54,10 +60,9 @@ export function MCPTemplateInstallPanel({
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
-    setAuthMethod(defaultAuthMethod(supported))
     setDistribution('none')
     setError(null)
-  }, [template.template_id, supported])
+  }, [template.template_id])
 
   async function handleInstall(): Promise<void> {
     setSubmitting(true)
@@ -110,28 +115,6 @@ export function MCPTemplateInstallPanel({
           <CardTitle>{t('templateInstallTitle')}</CardTitle>
         </CardHeader>
         <CardContent className="flex flex-col gap-4">
-          {supported.length > 1 && (
-            <div className="flex gap-2">
-              {supported.map((m) => (
-                <Button
-                  key={m}
-                  type="button"
-                  size="sm"
-                  variant={authMethod === m ? 'default' : 'outline'}
-                  onClick={() => setAuthMethod(m)}
-                >
-                  {t(
-                    m === 'oauth'
-                      ? 'authMethodOAuth'
-                      : m === 'static'
-                        ? 'authMethodStatic'
-                        : 'authMethodNone',
-                  )}
-                </Button>
-              ))}
-            </div>
-          )}
-
           <div className="flex flex-col gap-2">
             <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
               {t('distributionLabel')}
