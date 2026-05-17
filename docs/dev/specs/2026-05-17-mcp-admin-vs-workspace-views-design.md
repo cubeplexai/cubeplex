@@ -234,7 +234,13 @@ concept — the install itself IS the workspace's opt-in).
 Two sections, both flat lists:
 
 - **Installed** — fed by `/ws/{ws}/mcp/connectors` (tightened). Shows
-  exactly what this workspace opted into and can run.
+  everything this workspace **has opted into**, whether or not it is
+  currently usable. The filter is `state.enabled=true` (plus
+  workspace-scope installs unconditionally) — **not** `usable=true`.
+  An opted-in connector with a missing grant or `pending_oauth` must
+  still render here so its auth band can guide the operator to fix
+  the gap; filtering to usable-only would strand those rows (they
+  also don't appear in `/available`).
 - **Available** — fed by `/ws/{ws}/mcp/available`. All rows render
   identically with a single **Connect** button. The frontend routes
   the click per the row's `source` field (PATCH state for org
