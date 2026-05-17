@@ -29,7 +29,7 @@ import {
 
 import { AuthActionBand } from '@/components/mcp/AuthActionBand'
 import { ServerErrorBanner } from '@/components/mcp/detail/ServerErrorBanner'
-import { ToolsPanel } from '@/components/mcp/detail/tools/ToolsPanel'
+import { WsToolsPanel } from '@/components/mcp/detail/tools/WsToolsPanel'
 import { MCPPromoteDialog } from '@/components/mcp/MCPPromoteDialog'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -355,13 +355,7 @@ function ConnectorDetail({
         </TabsContent>
 
         <TabsContent value="tools" className="mt-4">
-          <ToolsPanel
-            tools={install.tools}
-            installId={installId}
-            client={client}
-            surface="ws"
-            wsId={wsId}
-          />
+          <WsToolsPanel tools={install.tools} installId={installId} client={client} wsId={wsId} />
         </TabsContent>
       </Tabs>
 

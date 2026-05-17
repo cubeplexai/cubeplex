@@ -4,14 +4,16 @@ import type { ApiClient, MCPToolEntry } from '@cubebox/core'
 import { useMemo, useState } from 'react'
 import { useTranslations } from 'next-intl'
 
+import { AdminTryItView } from './AdminTryItView'
 import { ToolDetail, type ToolDetailView } from './ToolDetail'
 import { ToolList } from './ToolList'
 
-export interface ToolsPanelProps {
+export interface AdminToolsPanelProps {
   tools: MCPToolEntry[]
   installId: string
   client: ApiClient
-  surface: 'admin' | 'ws'
+  /** Panel lens workspace id; null when the install has no state row
+   * in the current lens. */
   wsId: string | null
   adminWorkspaceOptions?: Array<{ id: string; name: string }>
   scopedAdminWorkspaceId?: string | null
@@ -20,18 +22,17 @@ export interface ToolsPanelProps {
   adminAuthMethod?: 'oauth' | 'static' | 'none'
 }
 
-export function ToolsPanel({
+export function AdminToolsPanel({
   tools,
   installId,
   client,
-  surface,
   wsId,
   adminWorkspaceOptions,
   scopedAdminWorkspaceId,
   onScopedWorkspaceChange,
   requiresWorkspacePicker,
   adminAuthMethod,
-}: ToolsPanelProps) {
+}: AdminToolsPanelProps) {
   const t = useTranslations('mcp.tools')
   const [selectedName, setSelectedName] = useState<string | null>(
     tools.length > 0 ? tools[0].name : null,
@@ -49,7 +50,7 @@ export function ToolsPanel({
   }, [tools, query])
 
   const effectiveSelected: string | null =
-    selectedName && filtered.some((tool: MCPToolEntry) => tool.name === selectedName)
+    selectedName && filtered.some((tool) => tool.name === selectedName)
       ? selectedName
       : filtered.length > 0
         ? filtered[0].name
@@ -83,15 +84,21 @@ export function ToolsPanel({
             tool={selected}
             view={view}
             onViewChange={setView}
-            installId={installId}
-            client={client}
-            surface={surface}
-            wsId={wsId}
-            adminWorkspaceOptions={adminWorkspaceOptions}
-            scopedAdminWorkspaceId={scopedAdminWorkspaceId}
-            onScopedWorkspaceChange={onScopedWorkspaceChange}
-            requiresWorkspacePicker={requiresWorkspacePicker}
-            adminAuthMethod={adminAuthMethod}
+            tryItSlot={
+              <AdminTryItView
+                key={selected.name}
+                installId={installId}
+                toolName={selected.name}
+                inputSchema={(selected.input_schema as Record<string, unknown> | null) ?? null}
+                client={client}
+                wsId={wsId}
+                adminWorkspaceOptions={adminWorkspaceOptions}
+                scopedAdminWorkspaceId={scopedAdminWorkspaceId}
+                onScopedWorkspaceChange={onScopedWorkspaceChange}
+                requiresWorkspacePicker={requiresWorkspacePicker}
+                adminAuthMethod={adminAuthMethod}
+              />
+            }
           />
         ) : null}
       </section>

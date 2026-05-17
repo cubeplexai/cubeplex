@@ -1,6 +1,7 @@
 'use client'
 
-import type { ApiClient, MCPToolEntry } from '@cubebox/core'
+import type { MCPToolEntry } from '@cubebox/core'
+import type { ReactNode } from 'react'
 import { useTranslations } from 'next-intl'
 
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -8,7 +9,6 @@ import type { SchemaNode } from '@/lib/jsonSchemaTypes'
 
 import { JsonView } from './JsonView'
 import { SchemaView } from './SchemaView'
-import { TryItView } from './TryItView'
 
 export type ToolDetailView = 'schema' | 'tryit' | 'json'
 
@@ -16,31 +16,13 @@ export interface ToolDetailProps {
   tool: MCPToolEntry
   view: ToolDetailView
   onViewChange: (view: ToolDetailView) => void
-  installId: string
-  client: ApiClient
-  surface: 'admin' | 'ws'
-  wsId: string | null
-  adminWorkspaceOptions?: Array<{ id: string; name: string }>
-  scopedAdminWorkspaceId?: string | null
-  onScopedWorkspaceChange?: (wsId: string) => void
-  requiresWorkspacePicker?: boolean
-  adminAuthMethod?: 'oauth' | 'static' | 'none'
+  /** Scope-specific Try It view (AdminTryItView or WsTryItView). The
+   * parent panel composes the right variant; ToolDetail just frames
+   * the tabs. */
+  tryItSlot: ReactNode
 }
 
-export function ToolDetail({
-  tool,
-  view,
-  onViewChange,
-  installId,
-  client,
-  surface,
-  wsId,
-  adminWorkspaceOptions,
-  scopedAdminWorkspaceId,
-  onScopedWorkspaceChange,
-  requiresWorkspacePicker,
-  adminAuthMethod,
-}: ToolDetailProps) {
+export function ToolDetail({ tool, view, onViewChange, tryItSlot }: ToolDetailProps) {
   const t = useTranslations('mcp.tools.detail')
   const schema = (tool.input_schema as SchemaNode | null) ?? null
 
@@ -63,20 +45,7 @@ export function ToolDetail({
           <SchemaView schema={schema} />
         </TabsContent>
         <TabsContent value="tryit" className="mt-4">
-          <TryItView
-            key={tool.name}
-            toolName={tool.name}
-            schema={schema}
-            installId={installId}
-            client={client}
-            surface={surface}
-            wsId={wsId}
-            adminWorkspaceOptions={adminWorkspaceOptions}
-            scopedAdminWorkspaceId={scopedAdminWorkspaceId}
-            onScopedWorkspaceChange={onScopedWorkspaceChange}
-            requiresWorkspacePicker={requiresWorkspacePicker}
-            adminAuthMethod={adminAuthMethod}
-          />
+          {tryItSlot}
         </TabsContent>
         <TabsContent value="json" className="mt-4">
           <JsonView schema={schema} />
