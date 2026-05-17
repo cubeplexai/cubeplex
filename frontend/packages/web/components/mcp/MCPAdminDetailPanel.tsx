@@ -21,13 +21,11 @@ import {
   adminRefreshDiscovery,
   useOrgAdminFlag,
   useWorkspaceStore,
-  wsDeleteMyGrant,
-  wsDeleteWorkspaceGrant,
   wsListTemplates,
+  type AdminOrgConnector,
   type ApiClient,
   type MCPAuthMethod,
   type MCPConnectorTemplate,
-  type MCPEffectiveConnector,
   type PromoteDistribution,
 } from '@cubebox/core'
 import { Badge } from '@/components/ui/badge'
@@ -45,11 +43,10 @@ import { ServerErrorBanner } from './detail/ServerErrorBanner'
 import { AdminToolsPanel } from './detail/tools/AdminToolsPanel'
 
 interface MCPAdminDetailPanelProps {
-  connector: MCPEffectiveConnector | null
+  connector: AdminOrgConnector | null
   mode: 'detail' | 'install_template' | 'custom_install' | null
   installTemplate: MCPConnectorTemplate | null
   client: ApiClient
-  wsId: string
   onRefresh: () => Promise<void>
   onDelete: (installId: string) => Promise<void>
   onInstalled: (installId: string) => void
@@ -60,7 +57,6 @@ export function MCPAdminDetailPanel({
   mode,
   installTemplate,
   client,
-  wsId,
   onRefresh,
   onDelete,
   onInstalled,
@@ -74,16 +70,17 @@ export function MCPAdminDetailPanel({
   const [actionError, setActionError] = useState<string | null>(null)
   const [promoteOpen, setPromoteOpen] = useState(false)
 
-  const currentOrgId = useWorkspaceStore(
-    (s) => s.workspaces.find((w) => w.id === wsId)?.org_id ?? null,
-  )
+  // Admin page has no workspace lens. Use the first workspace's org_id as
+  // the caller's org context — single-org-per-user today; revisit when
+  // multi-org ships.
+  const currentOrgId = useWorkspaceStore((s) => s.workspaces[0]?.org_id ?? null)
   const isOrgAdmin = useOrgAdminFlag(currentOrgId)
   // Workspaces in caller's org — used by Try It's workspace picker
   // when an install needs scoped-grant resolution (workspace/user policy).
   const orgWorkspaces = useWorkspaceStore((s) =>
     currentOrgId ? s.workspaces.filter((w) => w.org_id === currentOrgId) : [],
   )
-  const [tryItScopedWsId, setTryItScopedWsId] = useState<string | null>(wsId)
+  const [tryItScopedWsId, setTryItScopedWsId] = useState<string | null>(null)
 
   if (mode === 'install_template' && installTemplate) {
     return (
@@ -113,10 +110,11 @@ export function MCPAdminDetailPanel({
   }
 
   const install = connector.install
-  const ws = connector.workspace_state
+  const orgEff = connector.org_effective
   const isOrgWide = install.install_scope === 'org'
   const installId = install.install_id
-  const connected = connector.usable
+  const connected = orgEff.usable
+  const policy = install.default_credential_policy
 
   async function handleRefresh(): Promise<void> {
     setRefreshing(true)
@@ -125,41 +123,13 @@ export function MCPAdminDetailPanel({
       // Re-run tool discovery on the backend, then reload the list so the
       // parent's connector state reflects the new tools_cache/discovery_status.
       //
-      // Choose the lens based on the connector's EFFECTIVE
-      // `credential_policy` from the DTO, not `install.default_credential_policy`.
-      // A workspace state row can override the install default (e.g. an
-      // org install lensed into a workspace whose state row sets
-      // `credential_policy='user'`); sending `workspace_id=null` in that
-      // case would resolve the org grant instead of the workspace/user
-      // one the runtime actually uses.
-      // `connector` is the parent's effective DTO. The handleRefresh
-      // closure is created in the same render where the panel mounted
-      // an install, so the connector is non-null when the button is
-      // clickable — but TS narrowing is lost across the await above.
-      // Fall back to the install-default lens if the DTO is somehow
-      // missing.
-      const effectivePolicy = connector?.credential_policy ?? install.default_credential_policy
-      // Lens selection:
+      // Lens selection (admin page has no workspace lens):
       // - 'org' / 'none' policy → null (use org grant or no creds).
-      //   No-auth org installs without a state row in this workspace
-      //   would otherwise 404 via workspace_effective_service.
-      // - 'workspace' / 'user' policy → use panel wsId ONLY when
-      //   this workspace has a state row. For installs distributed
-      //   only to sibling workspaces (e.g. selected mode picked
-      //   another ws), passing wsId would 404 with
-      //   connector_install_not_found. In that case fall through
-      //   to the lens stored from the Try It picker (if user has
-      //   selected one); otherwise pass null and let the backend
-      //   surface 'workspace_id_required_for_scoped_policy' so the
-      //   user understands they need a picker selection.
-      let lens: string | null
-      if (effectivePolicy === 'org' || effectivePolicy === 'none') {
-        lens = null
-      } else if (connector?.workspace_state) {
-        lens = wsId
-      } else {
-        lens = tryItScopedWsId !== wsId ? tryItScopedWsId : null
-      }
+      // - 'workspace' / 'user' policy → use the Try It picker selection
+      //   when present; otherwise null and let the backend surface
+      //   'workspace_id_required_for_scoped_policy' so the user
+      //   understands they need a picker selection.
+      const lens = policy === 'org' || policy === 'none' ? null : tryItScopedWsId
       await adminRefreshDiscovery(client, installId, lens)
       await onRefresh()
     } catch (err) {
@@ -190,25 +160,13 @@ export function MCPAdminDetailPanel({
   async function handleReplaceCredential(): Promise<void> {
     // Discovery_failed after a fresh grant usually means the credential
     // is bad (wrong static token, OAuth granted but server rejects).
-    // Delete the existing grant at the install's policy scope, then
-    // refresh so the auth band re-renders in "needs credential" state
-    // and the user can enter a new token / re-OAuth.
-    //
-    // Use effective ``credential_policy`` (which honors workspace state
-    // overrides) rather than install.default_credential_policy so a
-    // workspace lensed into user-policy targets the user grant, not
-    // the install-default org grant.
+    // The admin page only manages the ORG grant; workspace/user grants
+    // live on the workspace settings UI. We delete the org grant then
+    // refresh so the auth band re-renders in "needs credential" state.
     setReplacingCredential(true)
     setActionError(null)
     try {
-      const policy = connector?.credential_policy ?? install.default_credential_policy
-      if (policy === 'org') {
-        await adminDeleteOrgGrant(client, installId)
-      } else if (policy === 'workspace') {
-        await wsDeleteWorkspaceGrant(client, wsId, installId)
-      } else if (policy === 'user') {
-        await wsDeleteMyGrant(client, wsId, installId)
-      }
+      await adminDeleteOrgGrant(client, installId)
       await onRefresh()
     } catch (err) {
       setActionError((err as Error).message)
@@ -225,9 +183,7 @@ export function MCPAdminDetailPanel({
   // Only offer "Replace credential" for credentialed installs. For
   // ``auth_method='none'`` discovery_failed is purely a server-side
   // problem (network / 5xx / shape mismatch), and the action would be
-  // misleading. We don't gate on credential_source because the admin
-  // band overrides it to null when discovery fails — but the grant
-  // may still exist; the delete is idempotent so showing the button
+  // misleading. The org-grant delete is idempotent so showing the button
   // unconditionally for credentialed installs is safe.
   const hasCredential = install.auth_method !== 'none'
 
@@ -268,7 +224,7 @@ export function MCPAdminDetailPanel({
               {isOrgWide ? t('scopeOrg') : t('scopeWorkspace')}
             </Badge>
             <Badge variant="secondary" className="text-[11px]">
-              {connector.credential_policy}
+              {policy}
             </Badge>
           </div>
           <p className="text-sm text-muted-foreground">
@@ -348,7 +304,7 @@ export function MCPAdminDetailPanel({
 
       <AuthMethodSwitcher connector={connector} client={client} onChanged={onRefresh} />
 
-      <AdminAuthBand connector={connector} client={client} wsId={wsId} onChanged={onRefresh} />
+      <AdminAuthBand connector={connector} client={client} onChanged={onRefresh} />
 
       <Tabs defaultValue="overview" className="flex-1 flex-col">
         <TabsList variant="line" className="w-full justify-start border-b border-border/60 pb-0">
@@ -378,21 +334,13 @@ export function MCPAdminDetailPanel({
               <dt className="text-muted-foreground">{t('installs')}</dt>
               <dd className="font-mono text-xs">{installId}</dd>
               <dt className="text-muted-foreground">{t('credentialPolicy')}</dt>
-              <dd>{connector.credential_policy}</dd>
-              <dt className="text-muted-foreground">{t('workspaceState')}</dt>
-              <dd>{ws?.enabled ? t('wsEnabled') : t('wsDisabled')}</dd>
+              <dd>{policy}</dd>
               <dt className="text-muted-foreground">{t('authStatus')}</dt>
               <dd>{install.auth_status}</dd>
               <dt className="text-muted-foreground">{t('discoveryStatus')}</dt>
               <dd>{install.discovery_status}</dd>
               <dt className="text-muted-foreground">{t('credentialAvailability')}</dt>
-              <dd>{connector.credential_availability}</dd>
-              {connector.credential_source ? (
-                <>
-                  <dt className="text-muted-foreground">{t('credentialSource')}</dt>
-                  <dd>{connector.credential_source}</dd>
-                </>
-              ) : null}
+              <dd>{orgEff.credential_availability ?? '—'}</dd>
             </dl>
           </div>
         </TabsContent>
@@ -402,27 +350,16 @@ export function MCPAdminDetailPanel({
             tools={install.tools}
             installId={installId}
             client={client}
-            // Pass wsId only when the install has a workspace state
-            // row in this lens. The admin invoke route's
-            // list_for_workspace_user filters org installs without a
-            // state row, so sending wsId without a state row 400s
-            // with connector_not_usable. For auth=none installs we
-            // need wsId for the identity token's `ws` claim; in the
-            // no-state-row case we accept the empty `ws` claim
-            // rather than blocking the invoke.
-            wsId={connector.workspace_state ? wsId : null}
-            requiresWorkspacePicker={
-              // Use the EFFECTIVE policy (respects workspace state
-              // overrides) not install.default_credential_policy.
-              // An org install whose lens workspace overrides to
-              // workspace/user needs the picker.
-              connector.credential_policy === 'workspace' || connector.credential_policy === 'user'
-            }
+            // Admin page has no workspace lens. For credentialed scoped
+            // policies the Try It picker drives wsId; for org/none
+            // policies wsId stays null and the backend resolves via
+            // the org grant.
+            wsId={tryItScopedWsId}
+            requiresWorkspacePicker={policy === 'workspace' || policy === 'user'}
             // Workspace picker wiring for scoped Try It. Without
             // adminWorkspaceOptions + onScopedWorkspaceChange the
-            // picker never shows and Try It silently uses the
-            // page's wsId — bad for admins in multiple workspaces
-            // when the usable grant lives in a non-default ws.
+            // picker never shows and Try It silently uses null wsId,
+            // which fails for scoped policies.
             adminWorkspaceOptions={orgWorkspaces.map((w) => ({ id: w.id, name: w.name }))}
             scopedAdminWorkspaceId={tryItScopedWsId}
             onScopedWorkspaceChange={setTryItScopedWsId}
@@ -462,7 +399,7 @@ function AuthMethodSwitcher({
   client,
   onChanged,
 }: {
-  connector: MCPEffectiveConnector
+  connector: AdminOrgConnector
   client: ApiClient
   onChanged: () => Promise<void>
 }) {
@@ -470,7 +407,7 @@ function AuthMethodSwitcher({
   const [submitting, setSubmitting] = useState<MCPAuthMethod | null>(null)
   const [error, setError] = useState<string | null>(null)
   const supported = connector.template?.supported_auth_methods ?? []
-  const hasGrant = connector.credential_availability === 'available'
+  const hasGrant = connector.org_effective.credential_availability === 'available'
   // Don't render the chooser when there's nothing to choose (single
   // method, or grant already exists and the switch would be rejected).
   if (supported.length < 2 || hasGrant) return null

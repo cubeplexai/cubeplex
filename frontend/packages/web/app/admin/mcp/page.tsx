@@ -4,64 +4,22 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useTranslations } from 'next-intl'
 import {
   adminDeleteInstall,
-  adminListInstalls,
+  adminListConnectors,
+  adminListTemplates,
   createApiClient,
-  useWorkspaceStore,
-  wsListEffectiveConnectors,
-  wsListTemplates,
+  type AdminOrgConnector,
   type MCPConnectorFilter,
-  type MCPConnectorInstall,
   type MCPConnectorTemplate,
-  type MCPEffectiveConnector,
 } from '@cubebox/core'
 import { MCPToolbar } from '@/components/mcp/MCPToolbar'
 import { MCPConnectorList } from '@/components/mcp/MCPConnectorList'
 import { MCPAdminDetailPanel } from '@/components/mcp/MCPAdminDetailPanel'
 
-function synthesizeStubEffective(
-  install: MCPConnectorInstall,
-  _workspaceId: string,
-  template: MCPConnectorTemplate | null,
-): MCPEffectiveConnector {
-  // Mirror the backend "no workspace_state row" semantics: the install
-  // exists, but has not been enabled in the lens workspace. The admin
-  // page still wants to render it so org-scope installs (especially
-  // ``auto_enable.mode='none'`` ones) remain visible / manageable.
-  const credentialAvailability = install.auth_method === 'none' ? 'not_required' : 'missing'
-  return {
-    // Hydrate template when we have it cached client-side. The detail
-    // panel uses template.supported_auth_methods to decide whether to
-    // expose the auth-method switcher — without this lookup, every
-    // org-scope install with no lens state row would render as if it
-    // had no template (single-method).
-    template,
-    install,
-    // Keep workspace_state = null for synthesized rows. A non-null
-    // value tells MCPAdminDetailPanel "this install has a real
-    // workspace state row in this lens" — which Try It then uses
-    // to send the wsId lens to the admin invoke route. The backend
-    // workspace-effective service filters org installs without a
-    // real state row, so the synthesized lens would 400 with
-    // connector_not_usable. We only synthesize this entry so the
-    // admin list shows the install at all; the panel must NOT
-    // treat it as workspace-enabled.
-    workspace_state: null,
-    credential_policy: install.default_credential_policy,
-    credential_availability: credentialAvailability,
-    credential_source: null,
-    usable: false,
-    reason: 'not_enabled_in_workspace',
-  }
-}
-
 export default function AdminMcpPage() {
   const t = useTranslations('mcpAdmin')
   const client = useMemo(() => createApiClient(''), [])
 
-  const workspaces = useWorkspaceStore((s) => s.workspaces)
-  const fetchWorkspaceList = useWorkspaceStore((s) => s.fetchList)
-
-  const [connectors, setConnectors] = useState<MCPEffectiveConnector[]>([])
+  const [connectors, setConnectors] = useState<AdminOrgConnector[]>([])
   const [templates, setTemplates] = useState<MCPConnectorTemplate[]>([])
   const [loading, setLoading] = useState(true)
   const [selectedId, setSelectedId] = useState<string | null>(null)
@@ -70,69 +28,19 @@ export default function AdminMcpPage() {
   const [mode, setMode] = useState<'detail' | 'install_template' | 'custom_install' | null>(null)
   const [installTemplate, setInstallTemplate] = useState<MCPConnectorTemplate | null>(null)
 
-  const lensWsId = workspaces[0]?.id ?? ''
-
-  useEffect(() => {
-    if (workspaces.length === 0) void fetchWorkspaceList(client)
-  }, [client, fetchWorkspaceList, workspaces.length])
-
   const load = useCallback(async () => {
-    if (!lensWsId) return
     setLoading(true)
     try {
-      const wsClient = createApiClient('')
-      wsClient.setWorkspaceId(lensWsId)
-      // Admin install list (``/admin/mcp/installs`` → ``list_org_installs``)
-      // is the source of truth for org-scope rows in the left rail —
-      // wsListEffectiveConnectors only surfaces org installs with a
-      // workspace_state row, so org installs with auto_enable.mode='none'
-      // or scoped to a sibling workspace would otherwise be hidden from
-      // the admin. The effective list still feeds per-workspace state
-      // (enabled flag, credential availability) for the lens workspace.
-      //
-      // Workspace-scope installs (created from workspace settings, not
-      // this admin page) are not returned by ``list_org_installs``, so we
-      // append any workspace-scope effective rows below the org list. The
-      // admin page is read-only for those — promote / uninstall live on
-      // the workspace settings UI.
-      const [adminInstalls, eff, tpl] = await Promise.all([
-        adminListInstalls(client),
-        wsListEffectiveConnectors(wsClient, lensWsId),
-        wsListTemplates(wsClient, lensWsId),
+      const [conn, tpl] = await Promise.all([
+        adminListConnectors(client),
+        adminListTemplates(client),
       ])
-      const effByInstallId = new Map(eff.items.map((c) => [c.install.install_id, c]))
-      const templatesById = new Map(tpl.items.map((t) => [t.template_id, t]))
-      const merged: MCPEffectiveConnector[] = []
-      const seen = new Set<string>()
-      for (const install of adminInstalls.items) {
-        if (seen.has(install.install_id)) continue
-        seen.add(install.install_id)
-        const existing = effByInstallId.get(install.install_id)
-        if (existing) {
-          merged.push(existing)
-        } else {
-          // Synthesize a stub effective row so the admin can still see
-          // and manage org installs that have no workspace_state row in
-          // the lens workspace. Enabled=false reflects the fact that the
-          // install is not active in this workspace.
-          const template = install.template_id
-            ? (templatesById.get(install.template_id) ?? null)
-            : null
-          merged.push(synthesizeStubEffective(install, lensWsId, template))
-        }
-      }
-      for (const effRow of eff.items) {
-        if (seen.has(effRow.install.install_id)) continue
-        if (effRow.install.install_scope !== 'workspace') continue
-        seen.add(effRow.install.install_id)
-        merged.push(effRow)
-      }
-      setConnectors(merged)
+      setConnectors(conn.items)
       setTemplates(tpl.items)
     } finally {
       setLoading(false)
     }
-  }, [client, lensWsId])
+  }, [client])
 
   useEffect(() => {
     void load()
@@ -168,16 +76,11 @@ export default function AdminMcpPage() {
   }
 
   const availableTemplates = useMemo(() => {
-    // Prefer ``install.template_id`` because synthesized stubs (admin
-    // installs without a workspace effective row) don't carry the
-    // hydrated ``template`` payload but still know the template id.
-    //
     // Only ACTIVE installs mask their template from the install dialog —
     // tombstoned (uninstalled) rows are kept around so a reinstall can
     // re-attach the same shape (see ``MCPConnectorInstallService.uninstall``),
     // but they must NOT block the admin from re-launching the install
-    // flow for the same template. Without this filter, "uninstall" is a
-    // one-shot operation per template.
+    // flow for the same template.
     const installedTemplateIds = new Set(
       connectors
         .filter((c) => c.install.install_state === 'active')
@@ -270,7 +173,6 @@ export default function AdminMcpPage() {
             mode={mode}
             installTemplate={installTemplate}
             client={client}
-            wsId={lensWsId}
             onRefresh={handleRefresh}
             onDelete={handleDelete}
             onInstalled={handleInstalled}
