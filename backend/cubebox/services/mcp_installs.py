@@ -27,7 +27,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, cast
 
 from cubebox.mcp._constants import CREDENTIAL_KIND_MCP, server_url_hash
 from cubebox.models import (
@@ -394,30 +394,36 @@ class MCPConnectorInstallService:
         `.first()` so OR-matches across columns don't raise
         MultipleResultsFound."""
         from sqlalchemy import or_
+        from sqlalchemy.sql import ColumnElement
         from sqlmodel import select
 
         from cubebox.models.mcp import MCPConnectorInstall as _Install
 
-        or_clauses = [
-            _Install.server_url_hash == server_url_hash,  # type: ignore[arg-type]
-            _Install.name == name,  # type: ignore[arg-type]
+        # SQLModel column descriptors return ColumnElement[bool] from
+        # comparisons at runtime, but the static types declare bare
+        # `str` for the column attribute, so mypy infers `bool` for
+        # `_Install.server_url_hash == ...`. Cast each clause to keep
+        # `or_(...)` happy without inviting `# type: ignore` rot.
+        or_clauses: list[ColumnElement[bool]] = [
+            cast("ColumnElement[bool]", _Install.server_url_hash == server_url_hash),
+            cast("ColumnElement[bool]", _Install.name == name),
         ]
         if template_id is not None:
             or_clauses.append(
-                _Install.template_id == template_id,  # type: ignore[arg-type]
+                cast("ColumnElement[bool]", _Install.template_id == template_id),
             )
         stmt = (
             select(_Install.id)
             .where(
-                _Install.org_id == self._org_id,  # type: ignore[arg-type]
+                cast("ColumnElement[bool]", _Install.org_id == self._org_id),
                 _Install.workspace_id.is_(None),  # type: ignore[union-attr]
-                _Install.install_state == "active",  # type: ignore[arg-type]
+                cast("ColumnElement[bool]", _Install.install_state == "active"),
             )
             .where(or_(*or_clauses))
             .limit(1)
         )
         if exclude_id is not None:
-            stmt = stmt.where(_Install.id != exclude_id)  # type: ignore[arg-type]
+            stmt = stmt.where(cast("ColumnElement[bool]", _Install.id != exclude_id))
         row = (await self._install_repo.session.execute(stmt)).first()
         return row is not None
 
