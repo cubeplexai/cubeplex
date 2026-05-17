@@ -74,6 +74,12 @@ export function MCPAdminDetailPanel({
     (s) => s.workspaces.find((w) => w.id === wsId)?.org_id ?? null,
   )
   const isOrgAdmin = useOrgAdminFlag(currentOrgId)
+  // Workspaces in caller's org — used by Try It's workspace picker
+  // when an install needs scoped-grant resolution (workspace/user policy).
+  const orgWorkspaces = useWorkspaceStore((s) =>
+    currentOrgId ? s.workspaces.filter((w) => w.org_id === currentOrgId) : [],
+  )
+  const [tryItScopedWsId, setTryItScopedWsId] = useState<string | null>(wsId)
 
   if (mode === 'install_template' && installTemplate) {
     return (
@@ -354,7 +360,14 @@ export function MCPAdminDetailPanel({
               connector.credential_policy === 'workspace' ||
               connector.credential_policy === 'user'
             }
-            scopedAdminWorkspaceId={wsId}
+            // Workspace picker wiring for scoped Try It. Without
+            // adminWorkspaceOptions + onScopedWorkspaceChange the
+            // picker never shows and Try It silently uses the
+            // page's wsId — bad for admins in multiple workspaces
+            // when the usable grant lives in a non-default ws.
+            adminWorkspaceOptions={orgWorkspaces.map((w) => ({ id: w.id, name: w.name }))}
+            scopedAdminWorkspaceId={tryItScopedWsId}
+            onScopedWorkspaceChange={setTryItScopedWsId}
             adminAuthMethod={install.auth_method}
           />
         </TabsContent>
@@ -408,6 +421,13 @@ function AdminAuthActionBand({
   const [orgEffective, setOrgEffective] = useState<MCPAdminInstallEffective | null>(null)
   const [loaded, setLoaded] = useState(!isOrgScope)
 
+  // Re-fetch on connector reference change too — the parent passes a
+  // fresh MCPEffectiveConnector object on every list reload (after
+  // AuthActionBand calls onChanged() following a save/delete grant),
+  // so the reference flip is a reliable signal that org-grant state
+  // may have changed. Without this, /admin/.../effective stays
+  // cached at the pre-save reason and the ready/needs-action band
+  // shows stale state until the user navigates away.
   useEffect(() => {
     if (!isOrgScope) {
       setLoaded(true)
@@ -429,7 +449,7 @@ function AdminAuthActionBand({
     return () => {
       cancelled = true
     }
-  }, [client, connector.install.install_id, isOrgScope])
+  }, [client, connector, isOrgScope])
 
   if (!loaded) return null
 
