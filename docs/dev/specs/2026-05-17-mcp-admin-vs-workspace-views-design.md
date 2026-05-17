@@ -108,7 +108,12 @@ type AdminOrgConnector = {
     reason: AdminReason   // 'usable' | 'missing_org_grant' |
                           //   'pending_oauth' | 'grant_expired' |
                           //   'discovery_failed'
-    credential_availability: 'available' | 'missing' | 'not_required'
+    // 'available' / 'missing' only meaningful when default_credential_policy='org'.
+    // 'not_required' for auth_method='none'.
+    // null when credentials live below the org level (workspace / user
+    // policies) — admin doesn't supply those, so the org row shouldn't
+    // claim a status for them.
+    credential_availability: 'available' | 'missing' | 'not_required' | null
   }
   workspace_distribution: {
     enabled_count: number     // how many ws have enabled=true
@@ -119,11 +124,28 @@ type AdminOrgConnector = {
 }
 ```
 
-The `org_effective` block reuses the logic already in
-`_derive_admin_org_effective`. The `workspace_distribution` block is a
-lightweight aggregate computed from
-`MCPWorkspaceConnectorState`; the UI uses it as a hint on the row, and
-the existing Workspaces tab still pulls the per-row detail on demand.
+The `org_effective` block branches on `install.default_credential_policy`:
+
+- **`'org'`** — same logic as today's `_derive_admin_org_effective`
+  (look up the org grant, derive `reason` from grant status,
+  discovery status checked after auth gates pass per
+  `compute_effective_state` rule 10).
+- **`'workspace'` / `'user'`** — credentials live below the org level
+  and the admin doesn't supply them. The org row's `reason` is just
+  `usable` or `discovery_failed` (no grant lookup, no
+  `missing_org_grant` for an admin who can't act on it).
+  `credential_availability` is `null` — the per-workspace breakdown
+  rolls up into `workspace_distribution` and the existing Workspaces
+  tab, not into a single org-level status. Otherwise the admin row
+  would always show `missing_org_grant` and tempt the admin to
+  create an org grant the workspace/user runtime path won't use.
+- **`'none'`** — covered by `auth_method='none'`; `reason='usable'`,
+  `credential_availability='not_required'`.
+
+The `workspace_distribution` block is a lightweight aggregate computed
+from `MCPWorkspaceConnectorState`; the UI uses it as a hint on the row,
+and the existing Workspaces tab still pulls the per-row detail on
+demand.
 
 ### 3.2 `GET /api/v1/ws/{ws}/mcp/available` (new)
 
