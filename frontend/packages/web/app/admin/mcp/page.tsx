@@ -84,12 +84,11 @@ export default function AdminMcpPage() {
       // the admin. The effective list still feeds per-workspace state
       // (enabled flag, credential availability) for the lens workspace.
       //
-      // However ``list_org_installs`` omits workspace-scope installs
-      // entirely, so a connector freshly created via
-      // ``MCPTemplateInstallPanel`` (which posts ``install_scope:'workspace'``)
-      // would vanish from the admin page right after creation. To cover
-      // those, also append any workspace-scope effective rows that the
-      // admin endpoint omits.
+      // Workspace-scope installs (created from workspace settings, not
+      // this admin page) are not returned by ``list_org_installs``, so we
+      // append any workspace-scope effective rows below the org list. The
+      // admin page is read-only for those — promote / uninstall live on
+      // the workspace settings UI.
       const [adminInstalls, eff, tpl] = await Promise.all([
         adminListInstalls(client),
         wsListEffectiveConnectors(wsClient, lensWsId),
