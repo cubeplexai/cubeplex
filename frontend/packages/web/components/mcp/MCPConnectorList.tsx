@@ -155,11 +155,16 @@ export function MCPConnectorList({
           >
             <div className="flex items-center gap-2">
               <span className="truncate text-sm font-semibold">{nameOf(c)}</span>
+              {providerOf(c) ? (
+                <Badge variant="outline" className="shrink-0 text-[10px]">
+                  {providerOf(c)}
+                </Badge>
+              ) : null}
               <StatusPill connector={c} />
             </div>
-            {providerOf(c) && (
-              <p className="truncate text-xs text-muted-foreground">{providerOf(c)}</p>
-            )}
+            {c.template?.description ? (
+              <p className="line-clamp-1 text-xs text-muted-foreground">{c.template.description}</p>
+            ) : null}
             <div className="flex flex-wrap items-center gap-1 pt-0.5">
               <Badge variant="outline" className="px-1.5 text-[10px]">
                 {c.install.install_scope === 'org' ? t('scopeOrg') : t('scopeWorkspace')}
