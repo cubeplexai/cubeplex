@@ -325,14 +325,29 @@ async def oauth_callback_handler(
     encryption_backend: FernetBackend,
     oauth_state_store: OAuthStateStore,
     http_client: httpx.AsyncClient,
+    fake_redis: fakeredis.aioredis.FakeRedis,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> OAuthCallbackHandler:
+    # Post-grant discovery would otherwise probe the fake AS host on
+    # success. These tests assert the grant/install state shape, not the
+    # network round-trip — short-circuit the discovery hop.
+    async def _noop(**_kwargs: object) -> None:
+        return None
+
+    monkeypatch.setattr("cubebox.services.mcp_discovery.run_post_grant_discovery", _noop)
+
     metadata: Any = _StubDiscovery()
+    from cubebox.mcp.dependencies import build_user_token_signer
+
+    signer = build_user_token_signer()
     return OAuthCallbackHandler(
         session=db_session,
         backend=encryption_backend,
         state_store=oauth_state_store,
         metadata=metadata,
         http_client=http_client,
+        signer=signer,
+        redis=fake_redis,
     )
 
 

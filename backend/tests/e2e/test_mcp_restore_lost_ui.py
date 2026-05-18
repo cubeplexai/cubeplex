@@ -180,7 +180,7 @@ async def test_discover_tools_for_install_writes_tools_cache(
             ),
         ]
 
-    monkeypatch.setattr("cubebox.services.mcp_discovery.load_mcp_tools_http", fake_load)
+    monkeypatch.setattr("cubebox.services.mcp_discovery._list_raw_mcp_tools", fake_load)
 
     from cubebox.credentials.dependencies import build_credential_service
     from cubebox.credentials.encryption import FernetBackend
@@ -306,7 +306,7 @@ async def test_admin_refresh_discovery_writes_install(
     async def fake_load(*args: object, **kwargs: object) -> list[object]:
         return [SimpleNamespace(name="ping", description=None, input_schema=None)]
 
-    monkeypatch.setattr("cubebox.services.mcp_discovery.load_mcp_tools_http", fake_load)
+    monkeypatch.setattr("cubebox.services.mcp_discovery._list_raw_mcp_tools", fake_load)
 
     res = await client.post(f"/api/v1/admin/mcp/installs/{install_id}/refresh-discovery", json={})
     assert res.status_code == 200, res.text
