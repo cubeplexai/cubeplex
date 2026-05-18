@@ -20,7 +20,16 @@ export interface AvailableConnectorRowProps {
   row: WsAvailable
   client: ApiClient
   wsId: string
-  onConnected: () => Promise<void>
+  /**
+   * Called after the row moves to Installed. The argument is the
+   * install id the row now points at — the org install's id when the
+   * source was `org_install` (just had its state row enabled), or the
+   * freshly-created workspace install's id when the source was
+   * `template`. The parent uses it to select the row so the detail
+   * panel + auth band open automatically and the operator can finish
+   * credential provisioning without hunting for the new install.
+   */
+  onConnected: (installId: string) => Promise<void>
 }
 
 export function AvailableConnectorRow({
@@ -41,10 +50,12 @@ export function AvailableConnectorRow({
     setBusy(true)
     setError(null)
     try {
+      let installId: string | null = null
       if (row.source === 'org_install' && row.install) {
         await wsPatchConnectorState(client, wsId, row.install.install_id, {
           enabled: true,
         })
+        installId = row.install.install_id
       } else if (row.source === 'template' && row.template) {
         const tpl = row.template
         const method: MCPAuthMethod =
@@ -57,14 +68,17 @@ export function AvailableConnectorRow({
             : tpl.default_credential_policy === 'none'
               ? 'user'
               : tpl.default_credential_policy
-        await wsCreateInstall(client, wsId, {
+        const created = await wsCreateInstall(client, wsId, {
           template_id: tpl.template_id,
           install_scope: 'workspace',
           auth_method: method,
           default_credential_policy: policy,
         })
+        installId = created.install_id
       }
-      await onConnected()
+      if (installId !== null) {
+        await onConnected(installId)
+      }
     } catch (err) {
       setError((err as Error).message)
     } finally {
