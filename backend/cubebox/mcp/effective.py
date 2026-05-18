@@ -235,6 +235,11 @@ class MCPRuntimeConnectorSpec:
     # token manager can rotate it in place via ``grant_repo.update``.
     grant: MCPCredentialGrant | None = None
     oauth_client_config: dict[str, Any] = field(default_factory=dict)
+    # Display metadata captured at discovery time (server icons + per-tool
+    # icons). Surfaced so the workspace ``/active-tools`` registry can be
+    # built from one ``list_runtime_specs`` call without re-reading
+    # install rows.
+    discovery_metadata: dict[str, Any] = field(default_factory=dict)
 
 
 class MCPEffectiveConnectorService:
@@ -339,6 +344,7 @@ class MCPEffectiveConnectorService:
                     workspace_id=workspace_id,
                     grant=row.grant,
                     oauth_client_config=dict(install.oauth_client_config or {}),
+                    discovery_metadata=dict(install.discovery_metadata or {}),
                 )
             )
         return specs

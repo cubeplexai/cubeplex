@@ -29,12 +29,15 @@ from cubebox.api.routes.v1.admin_mcp import (
 )
 from cubebox.api.schemas.mcp import (
     CreateGrantIn,
+    McpActiveToolListOut,
+    McpActiveToolOut,
     MCPConnectorInstallOut,
     MCPConnectorTemplateListOut,
     MCPConnectorTemplateOut,
     MCPCredentialGrantStatusOut,
     MCPEffectiveConnectorListOut,
     MCPEffectiveConnectorOut,
+    McpIconOut,
     MCPOAuthStartIn,
     MCPOAuthStartOut,
     MCPWorkspaceConnectorStateOut,
@@ -146,6 +149,81 @@ async def list_workspace_connectors(
     return MCPEffectiveConnectorListOut(
         items=[_dto_to_effective_out(dto) for dto in dtos],
     )
+
+
+@router.get("/active-tools", response_model=McpActiveToolListOut)
+async def list_workspace_active_tools(
+    workspace_id: str,
+    ctx: Annotated[RequestContext, Depends(require_member)],
+    effective_svc: Annotated[MCPEffectiveConnectorService, Depends(get_ws_effective_service)],
+) -> McpActiveToolListOut:
+    """Flat list of active MCP tools + display metadata for the chat UI.
+
+    For every usable install enabled in this workspace, enumerate the
+    cached ``tools_cache`` and surface each tool with the namespaced name
+    the runtime gives the LLM, the original (bare) tool name, the
+    install's display name, and the server / per-tool icons captured at
+    discovery time (MCP spec rev 2025-11-25 ``Implementation.icons`` +
+    ``Tool.icons``).
+
+    The frontend tool registry calls this once per workspace mount and
+    keys lookups by ``namespaced_name`` to swap raw ``WebTools__web_search``
+    style labels in tool-call cards for a server icon + bare name.
+
+    Namespacing matches ``cubepi_runtime._build_namespaced_name_with_prefix``
+    exactly — same slug, same collision/length suffix rules — so the
+    name the LLM sees and the key the frontend uses agree.
+    """
+    from collections import Counter
+
+    from cubebox.mcp.cubepi_runtime import (
+        _NS_LENGTH_DEFENCE,
+        _build_namespaced_name_with_prefix,
+        _slugify_for_namespace,
+    )
+
+    specs = await effective_svc.list_runtime_specs(workspace_id, ctx.user.id)
+    proposed_slugs: dict[str, str] = {
+        spec.install_id: _slugify_for_namespace(spec.name) for spec in specs
+    }
+    slug_counts: Counter[str] = Counter(proposed_slugs.values())
+
+    def _icons_for(payload: list[dict[str, Any]] | None) -> list[McpIconOut]:
+        return [McpIconOut(**icon) for icon in (payload or [])]
+
+    items: list[McpActiveToolOut] = []
+    for spec in specs:
+        slug = proposed_slugs[spec.install_id]
+        explicit_collision = slug_counts[slug] > 1
+        risky_truncation = len(slug) > _NS_LENGTH_DEFENCE
+        if explicit_collision or risky_truncation:
+            safe = spec.install_id.replace("-", "")
+            suffix = f"_{safe[-4:] if len(safe) >= 4 else safe}"
+        else:
+            suffix = ""
+
+        meta = spec.discovery_metadata or {}
+        server_meta: dict[str, Any] = meta.get("server") or {}
+        tool_icons_map: dict[str, list[dict[str, Any]]] = meta.get("tool_icons") or {}
+        server_icons = _icons_for(server_meta.get("icons"))
+
+        for tool in spec.tools_cache:
+            bare = tool.get("name")
+            if not bare:
+                continue
+            namespaced = _build_namespaced_name_with_prefix(slug, bare, suffix=suffix)
+            items.append(
+                McpActiveToolOut(
+                    namespaced_name=namespaced,
+                    bare_name=bare,
+                    install_id=spec.install_id,
+                    server_name=spec.name,
+                    server_icons=server_icons,
+                    tool_icons=_icons_for(tool_icons_map.get(bare)),
+                )
+            )
+
+    return McpActiveToolListOut(items=items)
 
 
 @router.get("/available", response_model=WsAvailableListOut)

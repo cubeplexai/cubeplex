@@ -912,7 +912,7 @@ async def admin_test_connection(
     if body.auth_method == "static" and body.credential_plaintext:
         headers.setdefault("Authorization", f"Bearer {body.credential_plaintext}")
     try:
-        tools = await asyncio.wait_for(
+        discovery = await asyncio.wait_for(
             load_mcp_tools_http(
                 body.server_url,
                 headers=headers or None,
@@ -928,7 +928,7 @@ async def admin_test_connection(
             error_code=type(exc).__name__,
             error_message=str(exc)[:256],
         )
-    return TestConnectionOut(ok=True, tool_count=len(tools))
+    return TestConnectionOut(ok=True, tool_count=len(discovery.tools))
 
 
 # ---------------------------------------------------------------------------

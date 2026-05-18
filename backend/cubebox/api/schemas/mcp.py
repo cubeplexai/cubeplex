@@ -387,3 +387,43 @@ class CreateGrantIn(BaseModel):
     credential_plaintext: str | None = Field(default=None, min_length=1)
     oauth_callback_state: str | None = None
     name: str | None = None
+
+
+# ---------------------------------------------------------------------------
+# Active-tools registry (GET /api/v1/ws/{ws}/mcp/active-tools)
+# ---------------------------------------------------------------------------
+
+
+class McpIconOut(BaseModel):
+    """One icon entry (MCP spec rev 2025-11-25 ``Icon`` shape).
+
+    ``src`` is either an HTTP/HTTPS URL or a ``data:`` URI. ``theme``
+    is ``"light"`` / ``"dark"`` when the server supplies separate
+    variants so the frontend can match the active UI theme.
+    """
+
+    src: str
+    mime_type: str | None = None
+    sizes: list[str] | None = None
+    theme: str | None = None
+
+
+class McpActiveToolOut(BaseModel):
+    """One MCP tool surfaced to the workspace's chat UI.
+
+    ``namespaced_name`` is the name the LLM sees and the SSE
+    ``tool_call.name`` field carries — the frontend uses it as the
+    lookup key. ``bare_name`` is what the MCP server originally called
+    the tool (suitable as a display label next to the server icon).
+    """
+
+    namespaced_name: str
+    bare_name: str
+    install_id: str
+    server_name: str
+    server_icons: list[McpIconOut] = Field(default_factory=list)
+    tool_icons: list[McpIconOut] = Field(default_factory=list)
+
+
+class McpActiveToolListOut(BaseModel):
+    items: list[McpActiveToolOut]
