@@ -15,6 +15,8 @@ from cubepi.agent.types import AgentTool
 from cubepi.middleware.base import Middleware
 from cubepi.providers.base import Provider
 
+from cubebox.middleware._compose import compose_after_tool_call
+
 
 def create_cubebox_agent(
     *,
@@ -46,6 +48,7 @@ def create_cubebox_agent(
             8192; callers should pass the model's configured max_tokens).
         temperature: Sampling temperature forwarded to the provider (default 0.7).
     """
+    mw_list = middleware or []
     return Agent(
         provider=provider,
         model=Model(
@@ -55,5 +58,11 @@ def create_cubebox_agent(
         tools=tools or [],
         checkpointer=checkpointer,
         thread_id=thread_id,
-        middleware=middleware or [],
+        middleware=mw_list,
+        # Override cubepi's default after_tool_call composer: the default keeps
+        # only the last non-None AfterToolCallResult, so a middleware that
+        # rewrites `content` (CitationMiddleware) is dropped the moment a later
+        # middleware (TimestampMiddleware) returns a details-only result. Our
+        # composer threads each middleware's return through to the next.
+        after_tool_call=compose_after_tool_call(mw_list),
     )
