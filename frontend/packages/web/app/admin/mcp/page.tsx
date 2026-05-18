@@ -7,6 +7,7 @@ import {
   adminListConnectors,
   adminListTemplates,
   createApiClient,
+  useWorkspaceStore,
   type AdminOrgConnector,
   type MCPConnectorFilter,
   type MCPConnectorTemplate,
@@ -28,6 +29,14 @@ export default function AdminMcpPage() {
   const [mode, setMode] = useState<'detail' | 'install_template' | 'custom_install' | null>(null)
   const [installTemplate, setInstallTemplate] = useState<MCPConnectorTemplate | null>(null)
 
+  // The admin layout doesn't populate the workspace store; the detail
+  // panel's Try It workspace picker (for workspace/user policy installs)
+  // reads from useWorkspaceStore, so without this fetch the picker is
+  // empty and Run stays disabled. Page no longer uses workspace ids for
+  // its own list (no lens), but downstream consumers still do.
+  const workspaces = useWorkspaceStore((s) => s.workspaces)
+  const fetchWorkspaceList = useWorkspaceStore((s) => s.fetchList)
+
   const load = useCallback(async () => {
     setLoading(true)
     try {
@@ -44,7 +53,8 @@ export default function AdminMcpPage() {
 
   useEffect(() => {
     void load()
-  }, [load])
+    if (workspaces.length === 0) void fetchWorkspaceList(client)
+  }, [load, client, workspaces.length, fetchWorkspaceList])
 
   const selected = useMemo(
     () => connectors.find((c) => c.install.install_id === selectedId) ?? null,

@@ -180,12 +180,15 @@ export function MCPAdminDetailPanel({
   const busy = refreshing || deleting || replacingCredential
 
   const discoveryError = install.discovery_status === 'error'
-  // Only offer "Replace credential" for credentialed installs. For
-  // ``auth_method='none'`` discovery_failed is purely a server-side
-  // problem (network / 5xx / shape mismatch), and the action would be
-  // misleading. The org-grant delete is idempotent so showing the button
-  // unconditionally for credentialed installs is safe.
-  const hasCredential = install.auth_method !== 'none'
+  // "Replace credential" only fires `adminDeleteOrgGrant`, which is a
+  // no-op for installs whose policy keeps credentials at the
+  // workspace/user level — clicking it on those would silently fail and
+  // leave the stale discovery error. Gate on org-policy + credentialed
+  // auth method. Workspace/user policy installs surface the same fix
+  // path on the per-workspace settings page (Replace credential there
+  // hits the matching scope).
+  const hasCredential =
+    install.auth_method !== 'none' && install.default_credential_policy === 'org'
 
   return (
     <div className="flex w-full flex-col gap-4 p-6" data-testid="mcp-admin-detail-panel">
