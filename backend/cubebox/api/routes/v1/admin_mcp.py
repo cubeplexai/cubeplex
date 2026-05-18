@@ -738,6 +738,25 @@ async def patch_admin_install(
     if body.transport is not None:
         install.transport = body.transport
 
+    # Preflight the org-wide R1/R2/R3 uniqueness rule. PATCH on name /
+    # server_url could otherwise hit `IntegrityError` from
+    # `uq_mcp_connector_install_{name,url,template}_per_org` and surface
+    # as a 500. Excluding the row itself keeps no-op renames and
+    # unrelated patches (e.g. just headers) from tripping on the
+    # install's own values. ``no_autoflush`` prevents SQLAlchemy from
+    # flushing the dirty install row before the SELECT runs — without
+    # it, the autoflush itself raises the IntegrityError we're trying
+    # to translate.
+    with svc._install_repo.session.no_autoflush:
+        conflicts = await svc._has_install_conflict(
+            server_url_hash=install.server_url_hash,
+            name=install.name,
+            template_id=install.template_id,
+            exclude_id=install.id,
+        )
+    if conflicts:
+        raise HTTPException(409, detail={"code": "install_already_exists"})
+
     saved = await svc._install_repo.update(install)
     await audit.record(
         event="mcp.install.patched",
