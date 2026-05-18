@@ -380,6 +380,24 @@ def _uv_sync_all_extras(worktree_path: Path) -> None:
         raise RuntimeError(f"uv sync --all-extras failed (exit {result.returncode}).")
 
 
+def _pnpm_install_frontend(worktree_path: Path) -> None:
+    """Install frontend deps so pre-push hooks (lint/type-check/build) work.
+
+    Without this, the first ``git push`` fails inside ``frontend-check-ci``
+    because ``node_modules`` is missing and ``tsc`` can't resolve imports.
+    """
+    frontend = worktree_path / "frontend"
+    if not (frontend / "package.json").exists():
+        return
+    print(f"→ installing frontend deps (pnpm install --frozen-lockfile) in {frontend}")
+    result = subprocess.run(
+        ["pnpm", "install", "--frozen-lockfile"],
+        cwd=frontend,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(f"pnpm install failed (exit {result.returncode}).")
+
+
 def _alembic_upgrade(worktree_path: Path) -> None:
     """Run `alembic upgrade head` in the worktree's backend dir.
 
@@ -504,6 +522,7 @@ def cmd_init(args: argparse.Namespace) -> int:
     _load_dotenv_into_environ(info.path / "backend" / ".env")
 
     _uv_sync_all_extras(info.path)
+    _pnpm_install_frontend(info.path)
     _create_schemas(slug)
     _alembic_upgrade(info.path)
 
