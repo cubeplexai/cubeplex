@@ -525,6 +525,79 @@ async def test_marker_header_excludes_source_type_and_chains_chunks() -> None:
     assert text.count("[url: http://a.com") == 1
 
 
+# ---------------------------------------------------------------------------
+# CitationCounter.seed_from_messages
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_seed_from_messages_advances_past_existing_markers() -> None:
+    from cubepi.providers.base import ToolResultMessage
+
+    counter = CitationCounter(start=1)
+    msgs = [
+        ToolResultMessage(
+            tool_call_id="tc-old-1",
+            tool_name="web_search",
+            content=[TextContent(text="【3-0】 [url: http://a] alpha\n\n【3-1】 beta")],
+        ),
+        ToolResultMessage(
+            tool_call_id="tc-old-2",
+            tool_name="web_fetch",
+            content=[TextContent(text="【7-0】 [url: http://b] gamma")],
+        ),
+    ]
+    await counter.seed_from_messages(msgs)
+    assert await counter.next() == 8
+
+
+@pytest.mark.asyncio
+async def test_seed_from_messages_noop_when_no_markers() -> None:
+    from cubepi.providers.base import ToolResultMessage
+
+    counter = CitationCounter(start=1)
+    await counter.seed_from_messages(
+        [
+            ToolResultMessage(
+                tool_call_id="tc-1",
+                tool_name="web_search",
+                content=[TextContent(text="plain result, no markers")],
+            )
+        ]
+    )
+    assert await counter.next() == 1
+
+
+@pytest.mark.asyncio
+async def test_seed_from_messages_does_not_regress_counter() -> None:
+    """If counter is already ahead of historical max, leave it alone."""
+    from cubepi.providers.base import ToolResultMessage
+
+    counter = CitationCounter(start=20)
+    await counter.seed_from_messages(
+        [
+            ToolResultMessage(
+                tool_call_id="tc-1",
+                tool_name="web_search",
+                content=[TextContent(text="【2-0】 stale")],
+            )
+        ]
+    )
+    assert await counter.next() == 20
+
+
+@pytest.mark.asyncio
+async def test_seed_from_messages_ignores_non_tool_result_messages() -> None:
+    from cubepi.providers.base import AssistantMessage, Usage
+
+    counter = CitationCounter(start=1)
+    # Assistant message with 【N-M】 in its own text must NOT advance the
+    # counter — those are the LLM's outputs, not source markers.
+    msg = AssistantMessage(content=[TextContent(text="cite 【9-0】 here")], usage=Usage())
+    await counter.seed_from_messages([msg])
+    assert await counter.next() == 1
+
+
 @pytest.mark.asyncio
 async def test_citation_middleware_uses_text_path_when_content_type_is_text() -> None:
     """content_type='text' skips JSON parse and treats raw output as one item."""

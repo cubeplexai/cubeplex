@@ -573,6 +573,7 @@ class RunManager:
         from cubebox.db.engine import async_session_maker
         from cubebox.llm.cache_markers import CubeboxCacheMarkerPolicy
         from cubebox.llm.factory import LLMFactory
+        from cubebox.middleware.citations.counter import citation_counter_var
 
         try:
             async with async_session_maker() as llm_session:
@@ -1046,6 +1047,20 @@ class RunManager:
         )
 
         async with init_checkpointer() as cp:
+            # Seed the citation counter past any 【N-M】 markers already
+            # persisted in this conversation's tool-result history so
+            # cross-turn ids don't collide in the frontend store (which is
+            # keyed by citation_id alone). No-op on the first turn.
+            try:
+                _hist = await cp.load(conversation_id)
+            except Exception as _seed_exc:
+                logger.warning("Citation seed: failed to load history: {}", _seed_exc)
+                _hist = None
+            if _hist is not None and _hist.messages:
+                _counter = citation_counter_var.get()
+                if _counter is not None:
+                    await _counter.seed_from_messages(_hist.messages)
+
             agent = create_cubebox_agent(
                 provider=provider,
                 model_id=model_id,
