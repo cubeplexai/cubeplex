@@ -225,6 +225,54 @@ async def test_org_custom_install_dup_same_scope_still_rejected(
 
 
 # ---------------------------------------------------------------------------
+# R1' — names that slugify to the same namespace key collide
+# ---------------------------------------------------------------------------
+
+
+async def test_names_that_slugify_to_same_namespace_collide(
+    admin_client: tuple[httpx.AsyncClient, str],
+) -> None:
+    """``cubepi_runtime._slugify_for_namespace`` maps any non-alphanumeric
+    run to ``_``, so ``Web Tools`` and ``Web-Tools`` both produce slug
+    ``Web_Tools``. A raw ``(org_id, name)`` index would treat them as
+    distinct and let both rows live — the LLM-facing tool namespace
+    would then collide. The uniqueness rule must be enforced on the
+    canonical slug, not the raw display name.
+    """
+    client, _ws = admin_client
+    res = await client.post(
+        "/api/v1/admin/mcp/installs",
+        json={
+            "template_id": None,
+            "install_scope": "org",
+            "name": "Web Tools",
+            "server_url": "https://slug-a.example.com/mcp",
+            "transport": "streamable_http",
+            "auth_method": "none",
+            "default_credential_policy": "none",
+            "auto_enable": {"mode": "none"},
+        },
+    )
+    assert res.status_code == 201, res.text
+
+    res = await client.post(
+        "/api/v1/admin/mcp/installs",
+        json={
+            "template_id": None,
+            "install_scope": "org",
+            "name": "Web-Tools",  # different chars, same slug as above
+            "server_url": "https://slug-b.example.com/mcp",
+            "transport": "streamable_http",
+            "auth_method": "none",
+            "default_credential_policy": "none",
+            "auto_enable": {"mode": "none"},
+        },
+    )
+    assert res.status_code == 409, res.text
+    assert res.json()["detail"]["code"] == "install_already_exists"
+
+
+# ---------------------------------------------------------------------------
 # PATCH must hit the same 409 path, not commit a colliding update
 # ---------------------------------------------------------------------------
 

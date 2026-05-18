@@ -9,7 +9,7 @@ explicitly.
 from datetime import datetime
 from typing import Any, ClassVar
 
-from sqlalchemy import JSON, CheckConstraint, Column, UniqueConstraint, text
+from sqlalchemy import JSON, CheckConstraint, Column, String, UniqueConstraint, event, text
 from sqlmodel import Field
 
 from cubebox.models.mixins import CubeboxBase
@@ -98,6 +98,24 @@ class MCPConnectorInstall(CubeboxBase, table=True):
     )
 
     name: str = Field(max_length=64)
+    # Canonical namespace slug — the LLM-facing tool name prefix
+    # ``{slug}__{tool_name}``. Same algorithm as
+    # :func:`cubebox.mcp._constants.slugify_for_namespace`. Uniqueness is
+    # enforced on this column, not ``name``, so display names differing
+    # only by characters the runtime strips/replaces (``Web Tools`` vs
+    # ``Web-Tools``) still collide. Populated by a ``before_insert`` /
+    # ``before_update`` event listener (see bottom of this module) so
+    # the value never drifts from ``name`` on ORM writes. A
+    # server-side default of ``'mcp'`` keeps the column NOT NULL on
+    # historical inserts that bypassed the ORM.
+    slug_name: str = Field(
+        default="mcp",
+        sa_column=Column(
+            String(length=72),
+            nullable=False,
+            server_default=text("'mcp'"),
+        ),
+    )
     server_url: str = Field(max_length=2048)
     server_url_hash: str = Field(max_length=64)
     transport: str = Field(max_length=16)
@@ -223,3 +241,32 @@ class MCPCredentialGrant(CubeboxBase, table=True):
         sa_column_kwargs={"server_default": text("'valid'")},
     )
     created_by_user_id: str = Field(foreign_key="users.id", max_length=20)
+
+
+# ---------------------------------------------------------------------------
+# slug_name invariant — set/refresh on every ORM write
+# ---------------------------------------------------------------------------
+
+
+@event.listens_for(MCPConnectorInstall, "before_insert")
+@event.listens_for(MCPConnectorInstall, "before_update")
+def _populate_slug_name(_mapper: Any, _connection: Any, target: MCPConnectorInstall) -> None:
+    """Mirror ``MCPConnectorInstall.name`` into ``slug_name``.
+
+    Keeps the canonical namespace slug in sync with the display name so
+    the org-wide ``uq_mcp_connector_install_slug_per_org`` partial unique
+    index catches any pair of installs whose names slugify to the same
+    value (e.g. ``Web Tools`` vs ``Web-Tools``). The matching service
+    preflight queries this column too — both layers stay correct by
+    using one shared helper.
+
+    Cross-database: SQLite (used by some unit tests) doesn't accept the
+    PG regex expression a generated column would need, so the slug
+    invariant is enforced in Python rather than via ``Computed``.
+    Production writes always go through the ORM so this is a sound
+    place for the invariant.
+    """
+    from cubebox.mcp._constants import slugify_for_namespace
+
+    if target.name is not None:
+        target.slug_name = slugify_for_namespace(target.name)

@@ -407,22 +407,27 @@ class MCPConnectorInstallService:
         exclude_id: str | None,
     ) -> bool:
         """Return True iff an active install in this org — at any scope —
-        collides on name, server URL, or template (R1 / R2 / R3 of the
-        cross-scope uniqueness rule).
+        collides on slug-normalized name, server URL, or template (R1 /
+        R2 / R3 of the cross-scope uniqueness rule).
 
-        The DB has matching org-wide partial unique indexes, but those
-        only surface as ``IntegrityError`` at commit, which the route
-        layer can't reasonably translate to a precise 409. This
-        preflight gives a clean ``install_already_exists`` for every
-        creation path (admin custom, admin from template, workspace
-        from template, promote-to-org). Any one collision is enough;
-        ``.first()`` avoids ``MultipleResultsFound`` when more than one
-        column matches.
+        Name match uses the canonical slug (same algorithm as the DB
+        ``slug_name`` generated column) so display names that differ
+        only by characters the runtime strips/replaces (``Web Tools``
+        vs ``Web-Tools``) still collide. The DB has matching org-wide
+        partial unique indexes, but those only surface as
+        ``IntegrityError`` at commit, which the route layer can't
+        reasonably translate to a precise 409. This preflight gives a
+        clean ``install_already_exists`` for every creation path
+        (admin custom, admin from template, workspace from template,
+        promote-to-org). Any one collision is enough; ``.first()``
+        avoids ``MultipleResultsFound`` when more than one column
+        matches.
         """
         from sqlalchemy import or_
         from sqlalchemy.sql import ColumnElement
         from sqlmodel import select
 
+        from cubebox.mcp._constants import slugify_for_namespace
         from cubebox.models.mcp import MCPConnectorInstall as _Install
 
         # SQLModel column descriptors return ColumnElement[bool] from
@@ -432,7 +437,7 @@ class MCPConnectorInstallService:
         # `or_(...)` happy without inviting `# type: ignore` rot.
         or_clauses: list[ColumnElement[bool]] = [
             cast("ColumnElement[bool]", _Install.server_url_hash == server_url_hash),
-            cast("ColumnElement[bool]", _Install.name == name),
+            cast("ColumnElement[bool]", _Install.slug_name == slugify_for_namespace(name)),
         ]
         if template_id is not None:
             or_clauses.append(
