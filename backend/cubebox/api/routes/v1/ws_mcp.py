@@ -325,11 +325,13 @@ async def create_workspace_install(
             credential_policy=body.default_credential_policy,
         )
     except ValueError as exc:
-        # Service-side guards (e.g. ``auth_method_not_supported_by_template``)
-        # surface as ValueError. Map to 400 with the ValueError message as the
-        # canonical ``code`` so the frontend can parse uniformly across admin
-        # and workspace install routes.
-        raise HTTPException(400, detail={"code": str(exc)}) from exc
+        # Service-side guards raise ValueError with a canonical code as
+        # the message (``auth_method_not_supported_by_template``,
+        # ``install_already_exists``). 409 for the uniqueness rule,
+        # 400 for everything else.
+        code = str(exc)
+        status_code = 409 if code == "install_already_exists" else 400
+        raise HTTPException(status_code, detail={"code": code}) from exc
 
     await audit.record(
         event="mcp.install.created",
