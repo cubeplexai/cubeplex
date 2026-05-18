@@ -9,7 +9,6 @@ from __future__ import annotations
 import asyncio
 import dataclasses
 import logging
-import re
 from collections import Counter
 from datetime import timedelta
 from typing import Any, Literal, cast
@@ -42,7 +41,6 @@ _VALID_TRANSPORTS: frozenset[str] = frozenset({"sse", "streamable_http"})
 
 logger = logging.getLogger(__name__)
 
-_NS_SLUG_RE = re.compile(r"[^a-zA-Z0-9]+")
 _NS_MAX_LEN = 64  # OpenAI strict function-name max length
 _NS_LENGTH_DEFENCE = 32
 """Slug length threshold above which we always append an id-disambiguator,
@@ -52,10 +50,14 @@ length cap can otherwise collapse them to the same final prefix.
 """
 
 
-def _slugify_for_namespace(server_name: str) -> str:
-    """Produce a function-name-safe slug from an MCP install's display name."""
-    slug = _NS_SLUG_RE.sub("_", server_name).strip("_")
-    return slug or "mcp"
+# Canonical definition lives in ``cubebox.mcp._constants`` so the
+# event-listener that populates ``MCPConnectorInstall.slug_name`` and
+# this runtime namespacing math share one helper. The leading
+# underscore is preserved as a private alias inside this module so
+# existing in-module call sites keep their style.
+from cubebox.mcp._constants import slugify_for_namespace  # noqa: E402
+
+_slugify_for_namespace = slugify_for_namespace
 
 
 def _build_namespaced_name_with_prefix(prefix: str, tool_name: str, suffix: str = "") -> str:
