@@ -90,6 +90,24 @@ def test_patch_install_in_rejects_unknown_keys() -> None:
         PatchInstallIn(unknown_field="oops")  # type: ignore[call-arg]
 
 
+class _NullSession:
+    """Stub the bits of ``AsyncSession`` the PATCH handler touches.
+
+    The handler now runs the R1/R2/R3 cross-scope preflight before
+    persisting; the preflight wraps the SELECT in
+    ``session.no_autoflush`` so the dirty install row doesn't get
+    flushed early. These fake-repo unit tests never hit a real session
+    so the context manager is a plain no-op.
+    """
+
+    no_autoflush = __import__("contextlib").nullcontext()
+
+
+async def _no_conflict(**_kwargs: Any) -> bool:
+    """``MCPConnectorInstallService._has_install_conflict`` stub for fake-repo tests."""
+    return False
+
+
 class _FakeInstall:
     """Minimal stand-in for MCPConnectorInstall used in pairing tests."""
 
@@ -334,6 +352,7 @@ def test_patch_admin_install_server_url_change_recomputes_hash() -> None:
     class _Repo:
         def __init__(self) -> None:
             self.updated_rows: list[Any] = []
+            self.session = _NullSession()
 
         async def get(self, install_id: str) -> Any:  # noqa: ARG002
             return fake_install
@@ -347,6 +366,7 @@ def test_patch_admin_install_server_url_change_recomputes_hash() -> None:
     class _Svc:
         def __init__(self) -> None:
             self._install_repo = repo
+            self._has_install_conflict = _no_conflict
 
     async def _fake_install_svc() -> Any:
         return _Svc()
@@ -405,6 +425,7 @@ def test_patch_admin_install_server_url_unchanged_keeps_hash() -> None:
     class _Repo:
         def __init__(self) -> None:
             self.updated_rows: list[Any] = []
+            self.session = _NullSession()
 
         async def get(self, install_id: str) -> Any:  # noqa: ARG002
             return fake_install
@@ -418,6 +439,7 @@ def test_patch_admin_install_server_url_unchanged_keeps_hash() -> None:
     class _Svc:
         def __init__(self) -> None:
             self._install_repo = repo
+            self._has_install_conflict = _no_conflict
 
     async def _fake_install_svc() -> Any:
         return _Svc()

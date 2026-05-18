@@ -222,3 +222,141 @@ async def test_org_custom_install_dup_same_scope_still_rejected(
     res = await client.post("/api/v1/admin/mcp/installs", json=body)
     assert res.status_code == 409, res.text
     assert res.json()["detail"]["code"] == "install_already_exists"
+
+
+# ---------------------------------------------------------------------------
+# PATCH must hit the same 409 path, not commit a colliding update
+# ---------------------------------------------------------------------------
+
+
+async def test_patch_install_to_colliding_name_returns_409(
+    admin_client: tuple[httpx.AsyncClient, str],
+) -> None:
+    """Editing an active install's ``name`` to collide with another active
+    install must surface as a clean 409 — not a 500 from the
+    ``IntegrityError`` raised by the org-wide partial unique index.
+    """
+    client, _ws = admin_client
+    res = await client.post(
+        "/api/v1/admin/mcp/installs",
+        json={
+            "template_id": None,
+            "install_scope": "org",
+            "name": "Original",
+            "server_url": "https://patch-a.example.com/mcp",
+            "transport": "streamable_http",
+            "auth_method": "none",
+            "default_credential_policy": "none",
+            "auto_enable": {"mode": "none"},
+        },
+    )
+    assert res.status_code == 201, res.text
+    other_id = res.json()["install_id"]
+
+    res = await client.post(
+        "/api/v1/admin/mcp/installs",
+        json={
+            "template_id": None,
+            "install_scope": "org",
+            "name": "Renamable",
+            "server_url": "https://patch-b.example.com/mcp",
+            "transport": "streamable_http",
+            "auth_method": "none",
+            "default_credential_policy": "none",
+            "auto_enable": {"mode": "none"},
+        },
+    )
+    assert res.status_code == 201, res.text
+    renamable_id = res.json()["install_id"]
+    assert renamable_id != other_id
+
+    # Rename Renamable → "Original" — should be rejected.
+    res = await client.patch(
+        f"/api/v1/admin/mcp/installs/{renamable_id}",
+        json={"name": "Original"},
+    )
+    assert res.status_code == 409, res.text
+    assert res.json()["detail"]["code"] == "install_already_exists"
+
+
+async def test_patch_install_to_colliding_url_returns_409(
+    admin_client: tuple[httpx.AsyncClient, str],
+) -> None:
+    """Same as above but for ``server_url`` (the R2 lens of the rule)."""
+    client, _ws = admin_client
+    res = await client.post(
+        "/api/v1/admin/mcp/installs",
+        json={
+            "template_id": None,
+            "install_scope": "org",
+            "name": "PatchUrlA",
+            "server_url": "https://patch-url-a.example.com/mcp",
+            "transport": "streamable_http",
+            "auth_method": "none",
+            "default_credential_policy": "none",
+            "auto_enable": {"mode": "none"},
+        },
+    )
+    assert res.status_code == 201, res.text
+
+    res = await client.post(
+        "/api/v1/admin/mcp/installs",
+        json={
+            "template_id": None,
+            "install_scope": "org",
+            "name": "PatchUrlB",
+            "server_url": "https://patch-url-b.example.com/mcp",
+            "transport": "streamable_http",
+            "auth_method": "none",
+            "default_credential_policy": "none",
+            "auto_enable": {"mode": "none"},
+        },
+    )
+    assert res.status_code == 201, res.text
+    target_id = res.json()["install_id"]
+
+    res = await client.patch(
+        f"/api/v1/admin/mcp/installs/{target_id}",
+        json={"server_url": "https://patch-url-a.example.com/mcp"},
+    )
+    assert res.status_code == 409, res.text
+    assert res.json()["detail"]["code"] == "install_already_exists"
+
+
+async def test_patch_install_self_rename_succeeds(
+    admin_client: tuple[httpx.AsyncClient, str],
+) -> None:
+    """A PATCH that keeps the same name (no-op rename) or changes to a
+    free name must NOT trip the conflict check — only collisions with
+    *other* installs should 409."""
+    client, _ws = admin_client
+    res = await client.post(
+        "/api/v1/admin/mcp/installs",
+        json={
+            "template_id": None,
+            "install_scope": "org",
+            "name": "SelfRenameOK",
+            "server_url": "https://self-rename.example.com/mcp",
+            "transport": "streamable_http",
+            "auth_method": "none",
+            "default_credential_policy": "none",
+            "auto_enable": {"mode": "none"},
+        },
+    )
+    assert res.status_code == 201, res.text
+    iid = res.json()["install_id"]
+
+    # Same name — no-op
+    res = await client.patch(
+        f"/api/v1/admin/mcp/installs/{iid}",
+        json={"name": "SelfRenameOK"},
+    )
+    assert res.status_code == 200, res.text
+
+    # Free name — should succeed
+    res = await client.patch(
+        f"/api/v1/admin/mcp/installs/{iid}",
+        json={"name": "SelfRenameOK2"},
+    )
+    assert res.status_code == 200, res.text
+    assert res.json()["name"] == "SelfRenameOK2"
