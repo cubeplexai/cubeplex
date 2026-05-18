@@ -1,10 +1,14 @@
 """CitationMiddleware.
 
-Implements the cubepi ``Middleware`` protocol with a single hook:
+Implements two cubepi ``Middleware`` hooks:
 
-- ``after_tool_call``: after each tool returns, scans the tool result content
-  for citation patterns per ``CitationConfig``, then returns an
-  ``AfterToolCallResult`` carrying extracted citation data in ``details``.
+- ``transform_system_prompt``: appends ``CITATION_PROMPT`` to the system
+  prompt when any citation configs are registered, instructing the LLM to
+  emit ``【N-M】`` markers for the chunks it cites.
+- ``after_tool_call``: after each tool returns, scans the tool result
+  content per ``CitationConfig``, rewrites ``content`` so each chunk is
+  prefixed with ``【N-M】 [meta_header]`` (LLM-visible), and attaches the
+  extracted citation data to ``details`` (SSE-visible).
 
 Pure helpers (``chunk_text``, ``CitationCounter``, ``CitationConfig``,
 ``_extract_text_content``) live alongside the middleware.
@@ -23,11 +27,13 @@ from typing import Any
 
 from cubepi.agent.types import AfterToolCallContext, AfterToolCallResult
 from cubepi.middleware.base import Middleware
+from cubepi.providers.base import Content, TextContent
 from loguru import logger
 
 from cubebox.middleware.citations.chunker import chunk_text
 from cubebox.middleware.citations.config import CitationConfig
 from cubebox.middleware.citations.counter import citation_counter_var, citation_event_queue
+from cubebox.prompts.citations import CITATION_PROMPT
 
 
 def _extract_text_content(content: list[Any]) -> str:
@@ -49,6 +55,16 @@ def _extract_text_content(content: list[Any]) -> str:
     return "\n".join(texts)
 
 
+def _format_meta_header(metadata: dict[str, Any]) -> str:
+    """Render the inline metadata header (url/title/...) shown to the LLM."""
+    parts: list[str] = []
+    for key, value in metadata.items():
+        if key == "source_type":
+            continue
+        parts.append(f"{key}: {value}")
+    return " | ".join(parts)
+
+
 class CitationMiddleware(Middleware):
     """Intercepts tool results to chunk text and assign citation IDs.
 
@@ -57,15 +73,12 @@ class CitationMiddleware(Middleware):
     - Parses tool output and extracts result items
     - Chunks text into ~200-300 char segments
     - Assigns session-level incrementing citation IDs
-    - Returns ``AfterToolCallResult(details={"citations": [...]})`` so the
-      agent loop merges citation data into ``AgentToolResult.details``
+    - Rewrites tool result ``content`` so the LLM sees
+      ``【N-M】 [meta_header] chunk`` for each chunk
+    - Returns ``AfterToolCallResult`` carrying both the rewritten content
+      and ``details={"citations": [...]}`` for SSE emission
 
     For tools without a matching config the hook returns ``None`` (pass-through).
-
-    The LLM-visible content rewrite (【N-M】 markers) is **not** applied here
-    because the cubepi hook cannot mutate the already-committed ``content``
-    field of ``AgentToolResult`` mid-stream.  The citation data is available
-    in ``details`` for the SSE stream handler to emit citation events.
     """
 
     def __init__(
@@ -77,13 +90,29 @@ class CitationMiddleware(Middleware):
         self._configs = citation_configs
         self._event_queue = event_queue
 
+    async def transform_system_prompt(
+        self,
+        system_prompt: str,
+        *,
+        signal: Any = None,
+    ) -> str:
+        """Append CITATION_PROMPT when any citation configs are registered.
+
+        Skipped when ``_configs`` is empty so conversations without
+        citation-eligible tools don't pay the prompt-cache cost.
+        """
+        del signal  # not used
+        if not self._configs:
+            return system_prompt
+        return system_prompt + "\n\n" + CITATION_PROMPT
+
     async def after_tool_call(
         self,
         ctx: AfterToolCallContext,
         *,
         signal: Any = None,
     ) -> AfterToolCallResult | None:
-        """Extract citations from a tool result and attach them to details.
+        """Extract citations from a tool result and inject markers.
 
         Args:
             ctx: Hook context providing ``tool_call`` (name/id/args) and
@@ -91,8 +120,9 @@ class CitationMiddleware(Middleware):
             signal: Optional cancellation signal (unused).
 
         Returns:
-            ``AfterToolCallResult`` with ``details={"citations": [...]}`` when
-            citations are extracted, or ``None`` for unrecognised tools.
+            ``AfterToolCallResult`` with rewritten ``content`` and
+            ``details={"citations": [...]}`` when citations are extracted,
+            or ``None`` for unrecognised tools / empty results.
         """
         del signal  # not used
 
@@ -130,6 +160,7 @@ class CitationMiddleware(Middleware):
                     return None
 
         all_citations: list[dict[str, Any]] = []
+        chunks_for_llm: list[str] = []
 
         for item in items:
             citation_id = await counter.next()
@@ -157,13 +188,26 @@ class CitationMiddleware(Middleware):
 
             all_citations.append(citation_data)
 
+            meta_header = _format_meta_header(metadata)
+            for i, c in enumerate(chunks):
+                if i == 0 and meta_header:
+                    chunks_for_llm.append(f"【{citation_id}-{i}】 [{meta_header}] {c}")
+                else:
+                    chunks_for_llm.append(f"【{citation_id}-{i}】 {c}")
+
         if not all_citations:
             return None
 
+        new_content: list[Content] = [TextContent(text="\n\n".join(chunks_for_llm))]
+
         logger.info(
-            "CitationMiddleware: tool='{}' emitted {} citations",
+            "CitationMiddleware: tool='{}' emitted {} citations, {} chunks",
             tool_name,
             len(all_citations),
+            len(chunks_for_llm),
         )
 
-        return AfterToolCallResult(details={"citations": all_citations})
+        return AfterToolCallResult(
+            content=new_content,
+            details={"citations": all_citations},
+        )

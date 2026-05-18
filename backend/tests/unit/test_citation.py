@@ -390,9 +390,9 @@ async def test_args_mapping_fills_missing_metadata() -> None:
 
 
 @pytest.mark.asyncio
-async def test_result_has_no_content_override() -> None:
-    """AfterToolCallResult should not set content (loop keeps original content)."""
-    _set_counter()
+async def test_result_rewrites_content_with_markers() -> None:
+    """AfterToolCallResult must rewrite content so the LLM sees 【N-M】 markers."""
+    _set_counter(start=1)
     mw = _make_middleware()
 
     snippet = "a" * 250
@@ -403,7 +403,19 @@ async def test_result_has_no_content_override() -> None:
 
     out = await mw.after_tool_call(ctx)
     assert out is not None
-    assert out.content is None  # loop preserves original content
+    assert out.content is not None
+    rewritten = _extract_text_content(out.content)
+    # First chunk carries the metadata header.
+    assert "【1-0】" in rewritten
+    assert "url: http://r.com" in rewritten
+    assert "title: R" in rewritten
+    # Original raw JSON payload must NOT leak through.
+    assert '"results"' not in rewritten
+    # Every recorded chunk must appear in the rewritten content.
+    for i, chunk in enumerate(out.details["citations"][0]["chunks"]):
+        marker = f"【1-{i}】"
+        assert marker in rewritten
+        assert chunk["content"] in rewritten
 
 
 @pytest.mark.asyncio
@@ -460,6 +472,57 @@ def test_citation_config_rejects_unknown_content_type() -> None:
 # ---------------------------------------------------------------------------
 # content_type="text" takes the fast path (no JSON parse)
 # ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# transform_system_prompt
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_transform_system_prompt_appends_when_configs_present() -> None:
+    from cubebox.prompts.citations import CITATION_PROMPT
+
+    mw = _make_middleware()  # default: web_search config
+    out = await mw.transform_system_prompt("BASE")
+    assert out.startswith("BASE")
+    assert CITATION_PROMPT in out
+
+
+@pytest.mark.asyncio
+async def test_transform_system_prompt_passthrough_when_no_configs() -> None:
+    # Bypass _make_middleware's `configs or {...}` default for the empty case.
+    mw = CitationMiddleware(citation_configs={})
+    out = await mw.transform_system_prompt("BASE")
+    assert out == "BASE"
+
+
+# ---------------------------------------------------------------------------
+# Meta header formatting
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_marker_header_excludes_source_type_and_chains_chunks() -> None:
+    """source_type stays out of [meta_header]; only chunk 0 carries it."""
+    _set_counter(start=5)
+    mw = _make_middleware()
+
+    # Build a snippet long enough to force >1 chunk.
+    sentences = "Sentence one. " * 40
+    payload = json.dumps({"results": [{"url": "http://a.com", "title": "A", "snippet": sentences}]})
+    tool_call = _make_tool_call()
+    result = _make_result(payload)
+    ctx = _make_context(tool_call, result)
+
+    out = await mw.after_tool_call(ctx)
+    assert out is not None
+    text = _extract_text_content(out.content or [])
+    assert "source_type" not in text
+    assert "【5-0】 [url: http://a.com | title: A]" in text
+    # At least chunk 1 exists without the header repeated.
+    assert "【5-1】" in text
+    assert text.count("[url: http://a.com") == 1
 
 
 @pytest.mark.asyncio
