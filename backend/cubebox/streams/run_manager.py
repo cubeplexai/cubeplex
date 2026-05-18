@@ -1242,7 +1242,10 @@ class RunManager:
         # _drain_subagent_citation_queue). Without this, SubAgentMiddleware
         # and CitationMiddleware push events that never reach the SSE
         # consumer, breaking live subagent rendering and live citations.
-        event_q_drainer: asyncio.Task[None] = asyncio.create_task(
+        # Typed `| None` so the success path can null it after the pre-Done
+        # drain (see the DoneEvent block below) and the safety net in
+        # `finally` skips when it already ran.
+        event_q_drainer: asyncio.Task[None] | None = asyncio.create_task(
             _drain_subagent_citation_queue(event_q, publish_stream_event),
             name=f"event_q_drainer:{run_id}",
         )
@@ -1369,6 +1372,25 @@ class RunManager:
                 workspace_id=ctx.workspace_id,
                 user_id=ctx.user_id,
             )
+            # Drain the subagent/citation queue BEFORE DoneEvent: SSE
+            # consumers (and the frontend) close on `done`, so any event
+            # still sitting in the drainer after the final tool call would
+            # be dropped — leaving last-turn 【N-M】 markers without hover
+            # data and last-turn subagent text missing until the
+            # conversation is reloaded. Bounded wait_for so a stuck
+            # consumer can't block run teardown forever (mirrors the
+            # safety pattern in the `finally` block).
+            if event_q_drainer is not None:
+                with suppress(Exception):
+                    event_q.put_nowait(None)
+                try:
+                    await asyncio.wait_for(event_q_drainer, timeout=5.0)
+                except (TimeoutError, Exception):
+                    if not event_q_drainer.done():
+                        event_q_drainer.cancel()
+                        with suppress(asyncio.CancelledError, Exception):
+                            await event_q_drainer
+                event_q_drainer = None
             # --- Aggregate session-level token totals ---
             from cubebox.services.usage import SessionUsage, get_session_usage
 
@@ -1440,18 +1462,20 @@ class RunManager:
                 with suppress(asyncio.CancelledError):
                     await stream_task
 
-            # Signal the subagent/citation drainer and wait for it to flush
-            # any in-flight events. Bounded wait so a stuck consumer can't
-            # delay run teardown forever.
-            with suppress(Exception):
-                event_q.put_nowait(None)
-            try:
-                await asyncio.wait_for(event_q_drainer, timeout=5.0)
-            except (TimeoutError, Exception):
-                if not event_q_drainer.done():
-                    event_q_drainer.cancel()
-                    with suppress(asyncio.CancelledError, Exception):
-                        await event_q_drainer
+            # Safety net for error/cancel paths that bypassed the
+            # pre-DoneEvent drain — shut the drainer down so the task
+            # doesn't leak. The success path nulls `event_q_drainer` after
+            # its own drain, so this block is a no-op then.
+            if event_q_drainer is not None:
+                with suppress(Exception):
+                    event_q.put_nowait(None)
+                try:
+                    await asyncio.wait_for(event_q_drainer, timeout=5.0)
+                except (TimeoutError, Exception):
+                    if not event_q_drainer.done():
+                        event_q_drainer.cancel()
+                        with suppress(asyncio.CancelledError, Exception):
+                            await event_q_drainer
 
             if sandbox_create_task is not None and not sandbox_create_task.done():
                 sandbox_create_task.cancel()
