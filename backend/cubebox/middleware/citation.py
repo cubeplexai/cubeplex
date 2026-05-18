@@ -209,5 +209,12 @@ class CitationMiddleware(Middleware):
 
         return AfterToolCallResult(
             content=new_content,
-            details={"citations": all_citations},
+            details={
+                "citations": all_citations,
+                # Side channel for the SSE/frontend path: the raw tool output
+                # before chunk rewriting, so previews (SearchResultView etc.)
+                # still see parseable JSON. The LLM-visible content above is
+                # the 【N-M】-marked chunk text. See `_stringify_tool_result`.
+                "original_content": raw_content,
+            },
         )

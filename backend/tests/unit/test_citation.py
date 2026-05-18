@@ -419,6 +419,24 @@ async def test_result_rewrites_content_with_markers() -> None:
 
 
 @pytest.mark.asyncio
+async def test_result_stashes_original_content_for_sse() -> None:
+    """details["original_content"] must carry the pre-rewrite raw output so the
+    SSE path can show the frontend a parseable preview (web_search etc.)."""
+    _set_counter(start=1)
+    mw = _make_middleware()
+
+    snippet = "a" * 250
+    payload = json.dumps({"results": [{"url": "http://r.com", "title": "R", "snippet": snippet}]})
+    tool_call = _make_tool_call()
+    result = _make_result(payload)
+    ctx = _make_context(tool_call, result)
+
+    out = await mw.after_tool_call(ctx)
+    assert out is not None
+    assert out.details["original_content"] == payload
+
+
+@pytest.mark.asyncio
 async def test_result_details_contain_citations_key() -> None:
     _set_counter()
     mw = _make_middleware()

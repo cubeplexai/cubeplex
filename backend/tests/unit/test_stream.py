@@ -215,3 +215,21 @@ def test_tool_result_preserves_is_error_flag() -> None:
     out = convert_agent_event_to_sse(evt)
     assert out[0]["is_error"] is True
     assert out[0]["result"] == "boom"
+
+
+def test_tool_result_prefers_details_original_content_for_sse() -> None:
+    """CitationMiddleware rewrites .content to 【N-M】 marker text for the LLM and
+    stashes the pre-rewrite JSON in details["original_content"]. The SSE path
+    must surface the original so frontend previews (e.g. SearchResultView)
+    receive parseable JSON instead of the marker text."""
+    payload = AgentToolResult(
+        content=[TextContent(text="【1-0】 [url: http://x] chunk")],
+        details={
+            "citations": [{"citation_id": 1}],
+            "original_content": '{"query":"q","results":[{"url":"http://x","title":"X"}]}',
+        },
+    )
+    evt = ToolExecutionEndEvent(tool_call_id="tc-g", tool_name="web_search", result=payload)
+    out = convert_agent_event_to_sse(evt)
+    assert out[0]["result"] == '{"query":"q","results":[{"url":"http://x","title":"X"}]}'
+    assert out[0]["details"]["citations"] == [{"citation_id": 1}]

@@ -45,8 +45,15 @@ def _stringify_tool_result(result: Any) -> tuple[str, Any]:
     the post-reload one (``ToolResultMessage.details``).
     """
     if isinstance(result, AgentToolResult):
+        # CitationMiddleware rewrites .content to 【N-M】-marked chunk text for
+        # the LLM and stashes the pre-rewrite raw output in
+        # details["original_content"] so the frontend preview can still parse
+        # the original (e.g. JSON for web_search). Prefer it when present.
+        details = result.details
+        if isinstance(details, dict) and isinstance(details.get("original_content"), str):
+            return details["original_content"], details
         text = "".join(b.text for b in result.content if isinstance(b, TextContent))
-        return text, result.details
+        return text, details
     if isinstance(result, str):
         return result, None
     if result is None:
