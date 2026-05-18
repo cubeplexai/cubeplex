@@ -51,24 +51,29 @@ export function AdminAuthBand(props: AdminAuthBandProps) {
 function toEffectiveForAdmin(connector: AdminOrgConnector): MCPEffectiveConnector {
   const eff = connector.org_effective
   const isNoAuth = connector.install.auth_method === 'none'
-  // Mirror the backend's effective-state mapping: for auth_method='none'
-  // there's no credential involved, so the ready band's "no credential"
-  // sub-state should fire (not "credential from <source>"). When a
-  // credential IS required, surface 'available'/'missing' so the band
-  // routes to the correct branch.
+  // For workspace/user policy installs the admin doesn't manage a grant —
+  // org_effective.credential_availability comes back null, and the row
+  // doesn't claim a credential at the org level (credentials live on
+  // per-workspace state or per-user grants). Surfacing 'available' /
+  // credential_source='org' here would render "ready with org
+  // credential" and expose a remove-org-grant action that targets a
+  // grant that does not exist; route those installs through the
+  // "no_credential" ready sub-state instead.
+  const isOrgManaged = !isNoAuth && eff.credential_availability !== null
   const credentialAvailability: MCPEffectiveConnector['credential_availability'] = isNoAuth
     ? 'not_required'
-    : eff.credential_availability === 'available'
-      ? 'available'
-      : 'missing'
-  // The admin band always targets the org grant when a credential is
-  // present, so `credential_source='org'` (or null when the install
-  // doesn't take credentials, or isn't usable yet).
-  const credentialSource: MCPEffectiveConnector['credential_source'] = isNoAuth
-    ? null
-    : eff.usable
-      ? 'org'
-      : null
+    : !isOrgManaged
+      ? 'not_required'
+      : eff.credential_availability === 'available'
+        ? 'available'
+        : 'missing'
+  // credential_source = 'org' only when (a) creds are managed at the
+  // org level (default_credential_policy='org') and (b) the org grant
+  // is actually present (usable + 'available'). Workspace/user policy
+  // installs have null source — the disconnect action menu has nothing
+  // to target at the admin level.
+  const credentialSource: MCPEffectiveConnector['credential_source'] =
+    isOrgManaged && eff.usable && eff.credential_availability === 'available' ? 'org' : null
 
   return {
     template: connector.template,
