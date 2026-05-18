@@ -129,6 +129,17 @@ class MCPConnectorInstall(CubeboxBase, table=True):
         default_factory=dict,
         sa_column=Column(JSON, nullable=False, server_default=text("'{}'")),
     )
+    # Display metadata captured from the MCP ``initialize`` handshake +
+    # per-tool ``Tool.icons`` (MCP spec rev 2025-11-25). Shape:
+    # ``{"server": MCPServerInfo dict | None, "tool_icons": {tool_name: [icon_dict, ...]}}``.
+    # Separate from ``tools_cache`` so citation editing (which reads
+    # ``input_schema`` / ``output_schema`` from ``tools_cache``) stays
+    # decoupled from icon metadata; the frontend tool registry endpoint
+    # reads this column directly.
+    discovery_metadata: dict[str, Any] = Field(
+        default_factory=dict,
+        sa_column=Column(JSON, nullable=False, server_default=text("'{}'")),
+    )
 
     last_error: str | None = Field(default=None, max_length=2048)
     last_discovered_at: datetime | None = None

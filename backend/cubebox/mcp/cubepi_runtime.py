@@ -158,12 +158,13 @@ async def load_workspace_mcp_tools_for_cubepi(
             continue
 
         try:
-            tools = await load_mcp_tools_http(
+            discovery = await load_mcp_tools_http(
                 spec.server_url,
                 headers=headers or None,
                 timeout=spec.timeout,
                 transport=cast(MCPTransport, spec.transport),
             )
+            tools = discovery.tools
         except asyncio.CancelledError:
             raise
         except Exception as exc:  # noqa: BLE001

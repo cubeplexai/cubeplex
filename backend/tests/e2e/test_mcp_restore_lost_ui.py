@@ -338,11 +338,15 @@ async def test_admin_test_connection_returns_tool_count(
 ) -> None:
     client, _ws = admin_client
 
-    async def fake_load(*args: object, **kwargs: object) -> list[object]:
-        return [
-            SimpleNamespace(name="a", description=None, input_schema=None),
-            SimpleNamespace(name="b", description=None, input_schema=None),
-        ]
+    async def fake_load(*args: object, **kwargs: object) -> object:
+        return SimpleNamespace(
+            tools=[
+                SimpleNamespace(name="a", description=None, input_schema=None),
+                SimpleNamespace(name="b", description=None, input_schema=None),
+            ],
+            server=None,
+            tool_infos=[],
+        )
 
     monkeypatch.setattr("cubebox.api.routes.v1.admin_mcp.load_mcp_tools_http", fake_load)
 
