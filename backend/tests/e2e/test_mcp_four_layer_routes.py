@@ -432,6 +432,46 @@ async def test_disconnect_keeps_install_and_state(
 
 
 # ---------------------------------------------------------------------------
+# Regression: re-POST an org grant must upsert (not collide on the partial
+# unique index). If a previous attempt left a row behind — e.g. discovery
+# raised an unexpected error after grant_repo.add committed — the next
+# attempt should replace the row, not 500 on uq_mcp_credential_grant_org.
+# ---------------------------------------------------------------------------
+
+
+async def test_repost_org_grant_is_idempotent(
+    admin_client: tuple[httpx.AsyncClient, str],
+    static_template_id: str,
+) -> None:
+    client, workspace_id = admin_client
+
+    install_resp = await client.post(
+        "/api/v1/admin/mcp/installs",
+        json={
+            "template_id": static_template_id,
+            "install_scope": "org",
+            "auth_method": "static",
+            "default_credential_policy": "org",
+            "auto_enable": {"mode": "selected", "workspace_ids": [workspace_id]},
+        },
+    )
+    assert install_resp.status_code == 201, install_resp.text
+    install_id = install_resp.json()["install_id"]
+
+    first = await client.post(
+        f"/api/v1/admin/mcp/installs/{install_id}/grants/org",
+        json={"credential_plaintext": "org-token-v1"},
+    )
+    assert first.status_code == 201, first.text
+
+    second = await client.post(
+        f"/api/v1/admin/mcp/installs/{install_id}/grants/org",
+        json={"credential_plaintext": "org-token-v2"},
+    )
+    assert second.status_code == 201, second.text
+
+
+# ---------------------------------------------------------------------------
 # Scenario #6 — uninstall then reinstall same template
 # ---------------------------------------------------------------------------
 

@@ -241,10 +241,16 @@ async def run_post_grant_discovery(
     the operator gets immediate feedback on whether the credential
     actually works against the MCP server, instead of "saved" with no
     validation. ``discover_tools_for_install`` already persists
-    successes / failures into install.discovery_status / last_error;
-    we just swallow the "install not usable yet" precondition errors
-    (transient grant-not-yet-visible races etc.) so a discovery
-    misfire never breaks the caller's success path.
+    successes / failures into install.discovery_status / last_error
+    for the call paths it knows about (header resolution + tool list).
+
+    Any exception from here must not bubble up to the caller — the
+    grant has already been committed, and a 500 from discovery would
+    leave the client thinking the save failed even though it didn't.
+    Swallow everything except control-flow exceptions (CancelledError,
+    KeyboardInterrupt, SystemExit) and log so the failure is at least
+    visible in server logs. The next discovery run (manual Retry or
+    runtime use) will re-attempt and persist its own state.
     """
     try:
         await discover_tools_for_install(
@@ -258,6 +264,8 @@ async def run_post_grant_discovery(
         )
     except (MCPDiscoveryFailed, ValueError) as exc:
         logger.warning("Post-grant discovery skipped for {}: {}", install_id, exc)
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Post-grant discovery raised unexpectedly for {}: {}", install_id, exc)
 
 
 async def discover_tools_for_install(

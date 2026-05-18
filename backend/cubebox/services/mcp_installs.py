@@ -618,17 +618,34 @@ class MCPConnectorInstallService:
             name=credential_name,
             plaintext=plaintext,
         )
-        grant = MCPCredentialGrant(
-            org_id=self._org_id,
+        # Upsert the grant row too. A failed post-grant step (e.g. discovery
+        # raising an unexpected error) commits the grant before surfacing as
+        # 500 to the client; without this, the retry would collide with
+        # ``uq_mcp_credential_grant_{org,workspace,user}``. Mirrors the OAuth
+        # callback's get_for_scope → add/update pattern.
+        existing = await self._grant_repo.get_for_scope(
             install_id=install_id,
             grant_scope=grant_scope,
             workspace_id=workspace_id,
             user_id=user_id,
-            credential_id=credential_id,
-            grant_status="valid",
-            created_by_user_id=self._actor_user_id,
         )
-        return await self._grant_repo.add(grant)
+        if existing is None:
+            grant = MCPCredentialGrant(
+                org_id=self._org_id,
+                install_id=install_id,
+                grant_scope=grant_scope,
+                workspace_id=workspace_id,
+                user_id=user_id,
+                credential_id=credential_id,
+                grant_status="valid",
+                created_by_user_id=self._actor_user_id,
+            )
+            return await self._grant_repo.add(grant)
+        existing.credential_id = credential_id
+        existing.refresh_credential_id = None
+        existing.expires_at = None
+        existing.grant_status = "valid"
+        return await self._grant_repo.update(existing)
 
     async def disconnect_grant(
         self,
