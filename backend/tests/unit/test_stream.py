@@ -1,6 +1,7 @@
 """stream tests — cubepi StreamEvent → cubebox SSE (M1.3)."""
 
-from cubepi.agent.types import MessageEndEvent
+from cubepi import AgentToolResult
+from cubepi.agent.types import MessageEndEvent, ToolExecutionEndEvent
 from cubepi.providers.base import (
     AssistantMessage,
     StreamEvent,
@@ -142,3 +143,75 @@ def test_message_end_with_none_usage_is_dropped() -> None:
     evt = MessageEndEvent(message=msg)
     out = convert_agent_event_to_sse(evt)
     assert out == []
+
+
+# ---------------------------------------------------------------------------
+# convert_agent_event_to_sse — ToolExecutionEndEvent → tool_result
+#
+# Regression: cubepi's ToolExecutionEndEvent.result is an ``AgentToolResult``
+# Pydantic model. The previous implementation forwarded the model object as
+# the SSE dict's ``result`` field; downstream ``str()`` produced a Pydantic
+# repr like ``content=[TextContent(text='{"foo":1}')] details=None ...``
+# which broke frontend JSON.parse and surfaced ``save_artifact`` as a regular
+# tool call card instead of an artifact card during live runs.
+
+
+def test_tool_result_extracts_text_from_agent_tool_result() -> None:
+    """AgentToolResult.content TextContent → string in SSE ``result`` field."""
+    payload = AgentToolResult(content=[TextContent(text='{"action":"created"}')])
+    evt = ToolExecutionEndEvent(tool_call_id="tc-a", tool_name="save_artifact", result=payload)
+    out = convert_agent_event_to_sse(evt)
+    assert len(out) == 1
+    d = out[0]
+    assert d["type"] == "tool_result"
+    assert d["tool_call_id"] == "tc-a"
+    assert d["name"] == "save_artifact"
+    assert d["result"] == '{"action":"created"}'
+    assert d["is_error"] is False
+
+
+def test_tool_result_concatenates_multiple_text_blocks() -> None:
+    """Multiple TextContent blocks concatenate; non-text blocks are dropped."""
+    payload = AgentToolResult(content=[TextContent(text="part-1 "), TextContent(text="part-2")])
+    evt = ToolExecutionEndEvent(tool_call_id="tc-b", tool_name="echo", result=payload)
+    out = convert_agent_event_to_sse(evt)
+    assert out[0]["result"] == "part-1 part-2"
+
+
+def test_tool_result_propagates_details() -> None:
+    """AgentToolResult.details survives to the SSE dict, so frontend gets
+    ``details.subagent_events`` live (matching the reload-from-DB shape)."""
+    payload = AgentToolResult(
+        content=[TextContent(text="inner final")],
+        details={"subagent_events": [{"type": "text_delta", "delta": "hi"}]},
+    )
+    evt = ToolExecutionEndEvent(tool_call_id="tc-c", tool_name="subagent", result=payload)
+    out = convert_agent_event_to_sse(evt)
+    assert out[0]["details"] == {"subagent_events": [{"type": "text_delta", "delta": "hi"}]}
+
+
+def test_tool_result_handles_plain_string_result() -> None:
+    """If a producer ever hands us a plain string instead of AgentToolResult,
+    pass it through unchanged."""
+    evt = ToolExecutionEndEvent(tool_call_id="tc-d", tool_name="raw", result="plain text")
+    out = convert_agent_event_to_sse(evt)
+    assert out[0]["result"] == "plain text"
+    assert out[0]["details"] is None
+
+
+def test_tool_result_handles_none_result() -> None:
+    """None result → empty string + no details, no exception."""
+    evt = ToolExecutionEndEvent(tool_call_id="tc-e", tool_name="silent", result=None)
+    out = convert_agent_event_to_sse(evt)
+    assert out[0]["result"] == ""
+    assert out[0]["details"] is None
+
+
+def test_tool_result_preserves_is_error_flag() -> None:
+    payload = AgentToolResult(content=[TextContent(text="boom")])
+    evt = ToolExecutionEndEvent(
+        tool_call_id="tc-f", tool_name="fail", result=payload, is_error=True
+    )
+    out = convert_agent_event_to_sse(evt)
+    assert out[0]["is_error"] is True
+    assert out[0]["result"] == "boom"
