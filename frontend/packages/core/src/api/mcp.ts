@@ -387,3 +387,36 @@ export async function wsListAvailable(
   if (!res.ok) throw await toApiError(res)
   return (await res.json()) as { items: WsAvailable[] }
 }
+
+// ---------------- Active-tools registry (chat UI tool icons) ---------------- //
+
+/** One MCP ``Icon`` (spec rev 2025-11-25). ``src`` is HTTP(S) URL or ``data:`` URI. */
+export interface MCPToolIcon {
+  src: string
+  mime_type: string | null
+  sizes: string[] | null
+  /** ``"light"`` / ``"dark"`` when the server supplies separate variants. */
+  theme: string | null
+}
+
+/** One MCP tool surfaced to the chat UI from a workspace's enabled installs. */
+export interface MCPActiveTool {
+  /** What the LLM sees and ``tool_call.name`` carries — used as the lookup key. */
+  namespaced_name: string
+  /** Original (bare) tool name from the MCP server's tools/list. */
+  bare_name: string
+  install_id: string
+  /** Install display name (the slug source for namespacing). */
+  server_name: string
+  server_icons: MCPToolIcon[]
+  tool_icons: MCPToolIcon[]
+}
+
+export async function wsListActiveTools(
+  client: ApiClient,
+  wsId: string,
+): Promise<{ items: MCPActiveTool[] }> {
+  const res = await client.get(`/api/v1/ws/${wsId}/mcp/active-tools`)
+  if (!res.ok) throw await toApiError(res)
+  return (await res.json()) as { items: MCPActiveTool[] }
+}

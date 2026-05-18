@@ -5,6 +5,7 @@ import {
   createApiClient,
   useArtifactStore,
   useConversationStore,
+  useMcpToolRegistryStore,
   useWorkspaceSettingsStore,
 } from '@cubebox/core'
 import { WorkspaceContext } from '@/hooks/useWorkspaceContext'
@@ -33,9 +34,11 @@ export default function WorkspaceLayout({
       loading: false,
       error: null,
     })
+    useMcpToolRegistryStore.setState({ byWorkspace: {}, loading: {} })
     const client = createApiClient('')
     client.setWorkspaceId(wsId)
     useConversationStore.getState().fetchList(client)
+    useMcpToolRegistryStore.getState().loadForWorkspace(client, wsId)
   }, [wsId])
 
   return <WorkspaceContext.Provider value={value}>{children}</WorkspaceContext.Provider>

@@ -1,10 +1,20 @@
 'use client'
 
 import { useState, useEffect, useRef, memo } from 'react'
-import type { ToolCallRef } from '@cubebox/core'
-import { CheckCircle2, Circle, PanelRight } from 'lucide-react'
+import type { MCPToolIcon, ToolCallRef } from '@cubebox/core'
+import { CheckCircle2, Circle, PanelRight, Plug } from 'lucide-react'
 import { getToolIcon, getParamSummary } from '@/lib/toolIcons'
-import { useToolDetailStore } from '@cubebox/core'
+import { useMcpToolRegistryStore, useToolDetailStore } from '@cubebox/core'
+
+/** Pick the best icon variant: prefer per-tool over server icon; fall back
+ * to the first entry when nothing else matches. Theme matching is best-effort
+ * — the dom doesn't expose the current color scheme cleanly here, and the
+ * spec says clients ignorant of theme should pick the first entry. */
+function pickIcon(toolIcons: MCPToolIcon[], serverIcons: MCPToolIcon[]): MCPToolIcon | null {
+  if (toolIcons.length > 0) return toolIcons[0]
+  if (serverIcons.length > 0) return serverIcons[0]
+  return null
+}
 
 interface ToolCallItemProps {
   name: string
@@ -72,9 +82,13 @@ export const ToolCallItem = memo(function ToolCallItem({
     ? toolResult.receivedAt - (toolResult.startedAt ?? startedAt.current)
     : elapsed
 
-  const Icon = getToolIcon(name)
-  const summary = summaryOverride ?? getParamSummary(name, args)
+  const mcpEntry = useMcpToolRegistryStore((s) => s.lookup(name))
+  const displayName = mcpEntry?.bare_name ?? name
+  const mcpIcon = mcpEntry ? pickIcon(mcpEntry.tool_icons, mcpEntry.server_icons) : null
+  const FallbackIcon = getToolIcon(displayName)
+  const summary = summaryOverride ?? getParamSummary(displayName, args)
   const canOpen = Boolean(toolResult) || allowOpenWhenPending
+  const labelTooltip = mcpEntry ? `${mcpEntry.server_name} · ${mcpEntry.bare_name}` : displayName
 
   const handleViewInPanel = () => {
     openPanel(
@@ -91,19 +105,24 @@ export const ToolCallItem = memo(function ToolCallItem({
       <button
         type="button"
         onClick={canOpen ? handleViewInPanel : undefined}
+        title={labelTooltip}
         className={`flex w-full items-center gap-2 px-3
           py-2 text-sm transition-colors
           ${canOpen ? 'hover:bg-muted/50 cursor-pointer' : ''}`}
       >
-        <Icon
-          className="size-3.5 text-muted-foreground
-            shrink-0"
-        />
+        {mcpIcon ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={mcpIcon.src} alt="" className="size-3.5 rounded-sm shrink-0 object-contain" />
+        ) : mcpEntry ? (
+          <Plug className="size-3.5 text-muted-foreground shrink-0" />
+        ) : (
+          <FallbackIcon className="size-3.5 text-muted-foreground shrink-0" />
+        )}
         <span
           className="font-medium text-foreground
             shrink-0"
         >
-          {name}
+          {displayName}
         </span>
         {summary && (
           <>
