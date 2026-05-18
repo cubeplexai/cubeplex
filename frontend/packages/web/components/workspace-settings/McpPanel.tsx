@@ -480,7 +480,10 @@ export function McpPanel({ wsId }: McpPanelProps) {
                           row={row}
                           client={client}
                           wsId={wsId}
-                          onConnected={load}
+                          onConnected={async (installId: string) => {
+                            await load()
+                            setSelectedId(installId)
+                          }}
                         />
                       ))}
                     </div>
