@@ -42,17 +42,19 @@ async function registerAndGetWsId(page: Page): Promise<string> {
 }
 
 test.describe('MCP install→auth handoff', () => {
-  test('admin sees Connector templates section', async ({ page }) => {
+  test('admin sees Available connectors section', async ({ page }) => {
     const wsId = await registerAndGetWsId(page)
     await page.goto(`/w/${wsId}/settings?tab=mcp`)
 
     // The first registered user is the workspace owner (= admin), so the
-    // template list section should render. Task 9 of the impl plan added
-    // an admin-only gate; this asserts admins still see the section.
+    // Available section should render. The MCP admin/workspace split
+    // replaced the old "Connector templates" + "Installs" divider with
+    // an "Installed" / "Available" pair; the admin-only gate (Task 9 of
+    // the original restore-lost-UI plan) still applies to Available.
     await expect(page.getByText('MCP Connectors').first()).toBeVisible({
       timeout: 10_000,
     })
-    await expect(page.getByText('Connector templates').first()).toBeVisible({
+    await expect(page.getByText('Available').first()).toBeVisible({
       timeout: 10_000,
     })
   })

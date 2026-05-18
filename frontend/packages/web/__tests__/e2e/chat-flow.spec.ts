@@ -47,5 +47,9 @@ test('conversation history persists after page reload', async ({ page }) => {
 
   const main = page.getByRole('main')
   await expect(main.getByText('My favorite color is blue.')).toBeVisible({ timeout: 10_000 })
-  await expect(main.locator('[data-role="assistant"]')).toBeVisible()
+  // The agent may render multiple [data-role="assistant"] nodes per
+  // run (thinking / tool calls + final response). The history-reload
+  // assertion only cares that AT LEAST one survives the reload; use
+  // .first() to keep the assertion robust against multi-step replies.
+  await expect(main.locator('[data-role="assistant"]').first()).toBeVisible()
 })
