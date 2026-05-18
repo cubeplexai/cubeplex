@@ -107,6 +107,7 @@ function ConnectorRow({
   const t = useTranslations('mcpAdmin')
   const name = connector.install.name || connector.template?.name || connector.install.install_id
   const provider = connector.template?.provider ?? ''
+  const description = connector.template?.description ?? ''
   return (
     <button
       type="button"
@@ -123,11 +124,18 @@ function ConnectorRow({
       <div className="flex items-center gap-2">
         <Plug className="size-3.5 shrink-0 text-muted-foreground" />
         <span className="truncate text-sm font-semibold">{name}</span>
+        {provider ? (
+          <Badge variant="outline" className="shrink-0 text-[10px]">
+            {provider}
+          </Badge>
+        ) : null}
         <span className="ml-auto shrink-0">
           <StatusPill status={statusOf(connector)} />
         </span>
       </div>
-      {provider && <p className="truncate text-xs text-muted-foreground">{provider}</p>}
+      {description ? (
+        <p className="line-clamp-1 text-xs text-muted-foreground">{description}</p>
+      ) : null}
       <div className="flex flex-wrap items-center gap-1 pt-0.5">
         <Badge variant="outline" className="px-1.5 text-[10px]">
           {connector.install.install_scope === 'org' ? t('scopeOrg') : t('scopeWorkspace')}
