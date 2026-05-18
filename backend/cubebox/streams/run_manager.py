@@ -186,6 +186,59 @@ async def _drain_cubepi_sse_queue(
         await publish(sse_event, None)
 
 
+async def _drain_subagent_citation_queue(
+    queue: asyncio.Queue[tuple[str, Any, Any] | None],
+    publish: Any,
+) -> None:
+    """Drain (kind, agent_id, payload) tuples and publish typed AgentEvents.
+
+    Counterpart to :func:`_drain_cubepi_sse_queue` for the shared queue that
+    ``SubAgentMiddleware`` and ``CitationMiddleware`` push onto:
+
+    - ``("subagent", agent_id, sse_dict)`` — already-translated cubepi SSE
+      dict produced by ``convert_agent_event_to_sse``. We retranslate via
+      :func:`cubepi_dict_to_agent_event` and stamp the originating subagent
+      ``agent_id`` so the frontend's per-agent stream buckets work.
+    - ``("citation", agent_id, citation_payload)`` — wrapped into a
+      :class:`CitationEvent`.
+
+    Unknown kinds and unmappable subagent dicts are silently dropped.
+    Exits on the ``None`` sentinel.
+
+    Background: when the langgraph dispatch branch was removed in M6.6,
+    the only consumer of this queue went with it; subagent live events
+    accumulated and were discarded at run end. This drainer restores live
+    delivery so the frontend doesn't have to wait for a page reload to
+    see what a subagent did.
+    """
+    while True:
+        item = await queue.get()
+        if item is None:
+            return
+        try:
+            kind, agent_id, payload = item
+        except (TypeError, ValueError):
+            logger.warning("subagent/citation queue produced malformed item: {!r}", item)
+            continue
+
+        timestamp = datetime.now(UTC).isoformat()
+        sse_event: AgentEvent | None = None
+        if kind == "subagent":
+            sse_event = cubepi_dict_to_agent_event(payload, timestamp)
+            if sse_event is not None and agent_id is not None:
+                sse_event.agent_id = agent_id
+        elif kind == "citation":
+            from cubebox.agents.schemas import CitationEvent
+
+            sse_event = CitationEvent(timestamp=timestamp, data=payload, agent_id=agent_id)
+        else:
+            continue
+
+        if sse_event is None:
+            continue
+        await publish(sse_event, agent_id)
+
+
 def cubepi_dict_to_agent_event(d: dict[str, Any], timestamp: str) -> AgentEvent | None:
     """Translate a single SSE dict produced by ``convert_agent_event_to_sse``
     into a typed cubebox ``AgentEvent``.
@@ -224,6 +277,12 @@ def cubepi_dict_to_agent_event(d: dict[str, Any], timestamp: str) -> AgentEvent 
             },
         )
     if t == "tool_result":
+        # ``convert_agent_event_to_sse`` extracts a string from cubepi's
+        # ``AgentToolResult`` before the dict reaches this translator; the
+        # ``str()`` here is defensive against unexpected producers and is
+        # a no-op for the expected string case. ``details`` carries
+        # middleware-attached payloads such as ``subagent_events`` so the
+        # live SSE shape matches the post-reload one.
         return ToolResultEvent(
             timestamp=timestamp,
             data={
@@ -231,6 +290,7 @@ def cubepi_dict_to_agent_event(d: dict[str, Any], timestamp: str) -> AgentEvent 
                 "name": d.get("name", ""),
                 "content": str(d.get("result", "")),
                 "is_error": d.get("is_error", False),
+                "details": d.get("details"),
             },
         )
     if t == "usage":
@@ -1163,6 +1223,15 @@ class RunManager:
                     turn_usage[key] += sse_event.data.get(key, 0)
             await publish_event(sse_event)
 
+        # Drainer for the shared subagent/citation queue (see
+        # _drain_subagent_citation_queue). Without this, SubAgentMiddleware
+        # and CitationMiddleware push events that never reach the SSE
+        # consumer, breaking live subagent rendering and live citations.
+        event_q_drainer: asyncio.Task[None] = asyncio.create_task(
+            _drain_subagent_citation_queue(event_q, publish_stream_event),
+            name=f"event_q_drainer:{run_id}",
+        )
+
         try:
             # Open a long-lived session for the SkillCatalogService — used by
             # both SkillsMiddleware (read prompts) and LazySandbox (push files
@@ -1355,6 +1424,19 @@ class RunManager:
                 stream_task.cancel()
                 with suppress(asyncio.CancelledError):
                     await stream_task
+
+            # Signal the subagent/citation drainer and wait for it to flush
+            # any in-flight events. Bounded wait so a stuck consumer can't
+            # delay run teardown forever.
+            with suppress(Exception):
+                event_q.put_nowait(None)
+            try:
+                await asyncio.wait_for(event_q_drainer, timeout=5.0)
+            except (TimeoutError, Exception):
+                if not event_q_drainer.done():
+                    event_q_drainer.cancel()
+                    with suppress(asyncio.CancelledError, Exception):
+                        await event_q_drainer
 
             if sandbox_create_task is not None and not sandbox_create_task.done():
                 sandbox_create_task.cancel()

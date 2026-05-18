@@ -20,13 +20,38 @@ from __future__ import annotations
 
 from typing import Any
 
+from cubepi import AgentToolResult
 from cubepi.agent.types import (
     AgentEvent,
     MessageEndEvent,
     MessageUpdateEvent,
     ToolExecutionEndEvent,
 )
-from cubepi.providers.base import AssistantMessage, StreamEvent, ToolCall
+from cubepi.providers.base import AssistantMessage, StreamEvent, TextContent, ToolCall
+
+
+def _stringify_tool_result(result: Any) -> tuple[str, Any]:
+    """Extract a string and details payload from a cubepi tool result.
+
+    ``ToolExecutionEndEvent.result`` is typed ``Any`` but is in practice an
+    ``AgentToolResult`` whose ``content`` is a list of cubepi content blocks
+    (text/image/etc.). The previous implementation forwarded the model
+    object as-is and let downstream ``str()`` produce a Pydantic repr —
+    which broke frontend JSON parsers (e.g. ``save_artifact`` rendering
+    fell through to a regular tool-call card instead of the artifact card).
+
+    We concatenate ``TextContent.text`` blocks and surface
+    ``AgentToolResult.details`` separately so the live SSE shape matches
+    the post-reload one (``ToolResultMessage.details``).
+    """
+    if isinstance(result, AgentToolResult):
+        text = "".join(b.text for b in result.content if isinstance(b, TextContent))
+        return text, result.details
+    if isinstance(result, str):
+        return result, None
+    if result is None:
+        return "", None
+    return str(result), None
 
 
 def convert_event_to_sse(evt: StreamEvent) -> list[dict[str, Any]]:
@@ -89,12 +114,14 @@ def convert_agent_event_to_sse(evt: AgentEvent) -> list[dict[str, Any]]:
         return convert_event_to_sse(evt.stream_event)
 
     if isinstance(evt, ToolExecutionEndEvent):
+        text, details = _stringify_tool_result(evt.result)
         return [
             {
                 "type": "tool_result",
                 "tool_call_id": evt.tool_call_id,
                 "name": evt.tool_name,
-                "result": evt.result,
+                "result": text,
+                "details": details,
                 "is_error": evt.is_error,
             }
         ]

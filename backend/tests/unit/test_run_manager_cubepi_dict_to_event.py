@@ -48,7 +48,7 @@ def test_tool_result_dict_maps_to_tool_result_event() -> None:
             "type": "tool_result",
             "tool_call_id": "t1",
             "name": "calc",
-            "result": 42,
+            "result": "42",
             "is_error": False,
         },
         TS,
@@ -59,7 +59,27 @@ def test_tool_result_dict_maps_to_tool_result_event() -> None:
         "name": "calc",
         "content": "42",
         "is_error": False,
+        "details": None,
     }
+
+
+def test_tool_result_dict_propagates_details() -> None:
+    """Details (e.g. subagent_events from SubAgentMiddleware's AgentToolResult)
+    must survive to the typed event so the frontend gets the live shape that
+    matches the post-reload one."""
+    evt = cubepi_dict_to_agent_event(
+        {
+            "type": "tool_result",
+            "tool_call_id": "tc-sub",
+            "name": "subagent",
+            "result": "inner final text",
+            "is_error": False,
+            "details": {"subagent_events": [{"type": "text_delta", "delta": "hi"}]},
+        },
+        TS,
+    )
+    assert isinstance(evt, ToolResultEvent)
+    assert evt.data["details"] == {"subagent_events": [{"type": "text_delta", "delta": "hi"}]}
 
 
 def test_usage_dict_maps_to_usage_event() -> None:
