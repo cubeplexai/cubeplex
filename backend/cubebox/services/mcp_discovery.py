@@ -112,28 +112,89 @@ def _tool_to_dict(tool: Any) -> dict[str, Any]:
     }
 
 
+@dataclass(frozen=True)
+class _DiscoveredRaw:
+    """Raw output of one discovery handshake.
+
+    ``tools`` are ``mcp.types.Tool`` descriptors preserving the full
+    schema fields (notably ``outputSchema`` which cubepi's AgentTool
+    wrapper drops). ``init_result`` is the ``InitializeResult`` carrying
+    ``serverInfo`` (name + icons + websiteUrl).
+    """
+
+    tools: list[Any]
+    init_result: Any
+
+
 async def _list_raw_mcp_tools(
     server_url: str,
     *,
     headers: dict[str, str] | None,
     timeout: float,
     transport: MCPTransport,
-) -> list[Any]:
-    """Open an MCP session and call ``list_tools``, returning raw
-    descriptors (``mcp.types.Tool``).
+) -> _DiscoveredRaw:
+    """Open an MCP session, call ``initialize`` + ``list_tools``, and
+    return both the raw tool descriptors and the initialize result.
 
     We bypass ``cubepi.mcp.load_mcp_tools_http`` because its
     ``AgentTool`` wrapper drops the optional ``outputSchema`` field —
     citation editing needs it to suggest output field names. Tool
     invocation still goes through cubepi (Try It path); only discovery
     talks to MCP directly here.
+
+    The initialize result is captured here (rather than in a separate
+    handshake) so we can surface the server's display metadata —
+    ``Implementation.icons`` + ``websiteUrl`` from MCP spec rev
+    2025-11-25 — to the frontend's tool registry without an extra RTT.
     """
     async with _open_session(
         server_url, headers=headers, timeout=timeout, transport=transport
     ) as session:
-        await asyncio.wait_for(session.initialize(), timeout=timeout)
+        init_result = await asyncio.wait_for(session.initialize(), timeout=timeout)
         tools_resp = await asyncio.wait_for(session.list_tools(), timeout=timeout)
-    return list(tools_resp.tools)
+    return _DiscoveredRaw(tools=list(tools_resp.tools), init_result=init_result)
+
+
+def _icon_to_dict(icon: Any) -> dict[str, Any]:
+    """Serialise an ``MCPIcon`` (or duck-type) to the JSON dict shape
+    persisted in ``discovery_metadata``."""
+    sizes = getattr(icon, "sizes", None)
+    return {
+        "src": getattr(icon, "src", ""),
+        "mime_type": getattr(icon, "mime_type", None),
+        "sizes": list(sizes) if sizes else None,
+        "theme": getattr(icon, "theme", None),
+    }
+
+
+def _build_discovery_metadata(discovered: _DiscoveredRaw) -> dict[str, Any]:
+    """Build the JSON shape persisted in ``MCPConnectorInstall.discovery_metadata``.
+
+    Server icons + websiteUrl come from ``InitializeResult.serverInfo``;
+    per-tool icons come from each ``Tool.icons``. Tools without icons are
+    omitted from ``tool_icons`` (keeps the JSON small for installs whose
+    server didn't bother).
+    """
+    from cubepi.mcp.types import icons_from_raw, server_info_from_init_result
+
+    server = server_info_from_init_result(discovered.init_result)
+    server_dict: dict[str, Any] | None = None
+    if server is not None:
+        server_dict = {
+            "name": server.name,
+            "version": server.version,
+            "website_url": server.website_url,
+            "icons": [_icon_to_dict(i) for i in server.icons],
+        }
+
+    tool_icons: dict[str, list[dict[str, Any]]] = {}
+    for tool in discovered.tools:
+        icons = icons_from_raw(getattr(tool, "icons", None))
+        if not icons:
+            continue
+        tool_icons[getattr(tool, "name", "")] = [_icon_to_dict(i) for i in icons]
+
+    return {"server": server_dict, "tool_icons": tool_icons}
 
 
 def _build_runtime_spec_for_discovery(install: Any, grant: Any) -> Any:
@@ -331,7 +392,7 @@ async def discover_tools_for_install(
         )
 
     try:
-        tools = await asyncio.wait_for(
+        discovered = await asyncio.wait_for(
             _list_raw_mcp_tools(
                 install.server_url,
                 headers=headers or None,
@@ -354,7 +415,7 @@ async def discover_tools_for_install(
             last_error=install.last_error,
         )
 
-    tools_cache_raw: list[dict[str, Any]] = [_tool_to_dict(t) for t in tools]
+    tools_cache_raw: list[dict[str, Any]] = [_tool_to_dict(t) for t in discovered.tools]
     # Strip orphan citation mapping keys whose tool no longer exists in
     # the freshly discovered tools_cache. Mirrors the legacy refresh
     # behavior: on success, tools_cache is authoritative.
@@ -366,6 +427,7 @@ async def discover_tools_for_install(
             install.tool_citations = cleaned
 
     install.tools_cache = tools_cache_raw
+    install.discovery_metadata = _build_discovery_metadata(discovered)
     install.discovery_status = "ok"
     install.last_error = None
     await install_repo.update(install)
