@@ -5,8 +5,13 @@ between the main agent and any subagents via ContextVar inheritance.
 """
 
 import asyncio
+import re
 from contextvars import ContextVar
 from typing import Any
+
+# Matches the 【N-M】 markers CitationMiddleware injects into tool result
+# content. We only need group 1 (citation_id) to recover the watermark.
+_MARKER_RE = re.compile(r"【(\d+)-\d+】")
 
 
 class CitationCounter:
@@ -26,6 +31,35 @@ class CitationCounter:
             val = self._next
             self._next += 1
             return val
+
+    async def seed_from_messages(self, messages: list[Any]) -> None:
+        """Advance ``_next`` past the highest citation id in tool-result history.
+
+        Scans ``ToolResultMessage.content`` for ``【N-M】`` markers and ensures
+        the next assigned id is strictly greater than any historical N, so
+        cross-turn ids don't collide in the frontend citation store
+        (which is keyed by id alone).
+
+        Safe to call before the agent starts; no-op when history has no
+        markers or the counter is already ahead.
+        """
+        max_id = 0
+        for msg in messages:
+            if getattr(msg, "role", None) != "tool_result":
+                continue
+            for block in getattr(msg, "content", []) or []:
+                text = getattr(block, "text", None)
+                if not text:
+                    continue
+                for match in _MARKER_RE.finditer(text):
+                    n = int(match.group(1))
+                    if n > max_id:
+                        max_id = n
+        if max_id == 0:
+            return
+        async with self._lock:
+            if max_id >= self._next:
+                self._next = max_id + 1
 
 
 citation_counter_var: ContextVar[CitationCounter | None] = ContextVar(
