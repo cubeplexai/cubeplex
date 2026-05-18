@@ -160,6 +160,14 @@ class MCPConnectorInstallService:
         """
         if auth_method not in template.supported_auth_methods:
             raise ValueError("auth_method_not_supported_by_template")
+        # R1/R2/R3 cross-scope uniqueness preflight (see _has_install_conflict).
+        if await self._has_install_conflict(
+            server_url_hash=server_url_hash(template.server_url),
+            name=template.name,
+            template_id=template.id,
+            exclude_id=None,
+        ):
+            raise ValueError("install_already_exists")
         defaults = install_defaults_for_auth_method(auth_method, credential_policy)
         install = MCPConnectorInstall(
             org_id=self._org_id,
@@ -224,6 +232,14 @@ class MCPConnectorInstallService:
         """
         if auth_method not in template.supported_auth_methods:
             raise ValueError("auth_method_not_supported_by_template")
+        # R1/R2/R3 cross-scope uniqueness preflight.
+        if await self._has_install_conflict(
+            server_url_hash=server_url_hash(template.server_url),
+            name=template.name,
+            template_id=template.id,
+            exclude_id=None,
+        ):
+            raise ValueError("install_already_exists")
         workspace_ids, enablement_source, mode = await self._resolve_distribution(distribution)
         defaults = install_defaults_for_auth_method(auth_method, credential_policy)
         # Derive ``auto_enroll_new_workspaces`` from the requested distribution
@@ -345,13 +361,13 @@ class MCPConnectorInstallService:
         # as a generic 500. Translate the most-common admin input
         # collision (duplicate name or URL within the org's active
         # installs) into a clean 409.
-        if await self._has_org_install_conflict(
+        if await self._has_install_conflict(
             server_url_hash=server_url_hash(server_url),
             name=name,
             template_id=None,
             exclude_id=None,
         ):
-            raise ValueError("org_install_already_exists")
+            raise ValueError("install_already_exists")
         defaults = install_defaults_for_auth_method(auth_method, default_credential_policy)
         auto_enroll = mode == "all"
         install = MCPConnectorInstall(
@@ -382,7 +398,7 @@ class MCPConnectorInstallService:
         )
         return saved
 
-    async def _has_org_install_conflict(
+    async def _has_install_conflict(
         self,
         *,
         server_url_hash: str,
@@ -390,11 +406,19 @@ class MCPConnectorInstallService:
         template_id: str | None,
         exclude_id: str | None,
     ) -> bool:
-        """Return True iff an active org-scope install in this org
-        collides on the partial unique indexes
-        (url / name / template). Any one collision is enough — use
-        `.first()` so OR-matches across columns don't raise
-        MultipleResultsFound."""
+        """Return True iff an active install in this org — at any scope —
+        collides on name, server URL, or template (R1 / R2 / R3 of the
+        cross-scope uniqueness rule).
+
+        The DB has matching org-wide partial unique indexes, but those
+        only surface as ``IntegrityError`` at commit, which the route
+        layer can't reasonably translate to a precise 409. This
+        preflight gives a clean ``install_already_exists`` for every
+        creation path (admin custom, admin from template, workspace
+        from template, promote-to-org). Any one collision is enough;
+        ``.first()`` avoids ``MultipleResultsFound`` when more than one
+        column matches.
+        """
         from sqlalchemy import or_
         from sqlalchemy.sql import ColumnElement
         from sqlmodel import select
@@ -418,7 +442,6 @@ class MCPConnectorInstallService:
             select(_Install.id)
             .where(
                 cast("ColumnElement[bool]", _Install.org_id == self._org_id),
-                _Install.workspace_id.is_(None),  # type: ignore[union-attr]
                 cast("ColumnElement[bool]", _Install.install_state == "active"),
             )
             .where(or_(*or_clauses))
@@ -497,13 +520,13 @@ class MCPConnectorInstallService:
         # indexes (uq_mcp_connector_install_url_org / name / template)
         # at commit time, surfacing as IntegrityError → 500. Detect
         # the collision here so the route can return a clean 409.
-        if await self._has_org_install_conflict(
+        if await self._has_install_conflict(
             server_url_hash=install.server_url_hash,
             name=install.name,
             template_id=install.template_id,
             exclude_id=install_id,
         ):
-            raise ValueError("org_install_already_exists")
+            raise ValueError("install_already_exists")
 
         install.install_scope = "org"
         install.workspace_id = None

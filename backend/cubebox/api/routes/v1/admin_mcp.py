@@ -242,7 +242,7 @@ async def create_admin_install(
             )
         except ValueError as exc:
             code = str(exc)
-            status_code = 409 if code == "org_install_already_exists" else 400
+            status_code = 409 if code == "install_already_exists" else 400
             raise HTTPException(status_code, detail={"code": code}) from exc
     else:
         try:
@@ -263,10 +263,12 @@ async def create_admin_install(
         except ValueError as exc:
             # Service-side guards raise ValueError with a canonical code as the
             # message (e.g. ``auth_method_not_supported_by_template``,
-            # ``workspace_not_in_org``, ``unknown distribution mode: ...``).
-            # Map to 400 with the message as ``code`` so the frontend can parse
-            # uniformly across admin and workspace install routes.
-            raise HTTPException(400, detail={"code": str(exc)}) from exc
+            # ``workspace_not_in_org``, ``unknown distribution mode: ...``,
+            # ``install_already_exists``). 409 for the uniqueness rule,
+            # 400 for everything else.
+            code = str(exc)
+            status_code = 409 if code == "install_already_exists" else 400
+            raise HTTPException(status_code, detail={"code": code}) from exc
         template_id_for_audit = template.id
 
     # Org-policy static one-shot grant: when admin passes
@@ -430,7 +432,7 @@ async def admin_promote_install_to_org(
         code = str(exc)
         if code == "connector_install_not_found":
             status_code = 404
-        elif code in {"install_already_org_scope", "org_install_already_exists"}:
+        elif code in {"install_already_org_scope", "install_already_exists"}:
             status_code = 409
         else:
             status_code = 400

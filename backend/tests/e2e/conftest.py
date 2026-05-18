@@ -785,8 +785,14 @@ async def _seed_four_layer_template(
     default_credential_policy: str,
     template_metadata: dict[str, Any] | None = None,
     static_form_schema: list[dict[str, Any]] | None = None,
+    server_url: str | None = None,
 ) -> str:
-    """Idempotent template upsert for E2E setup. Returns the template id."""
+    """Idempotent template upsert for E2E setup. Returns the template id.
+
+    ``server_url`` defaults to the slug-derived URL. Override it to seed
+    two templates pointing at the same URL — useful for cross-template
+    URL uniqueness tests.
+    """
     from cubebox.repositories.mcp import MCPConnectorTemplateRepository
 
     test_engine = create_async_engine(_build_database_url(), poolclass=NullPool)
@@ -799,7 +805,7 @@ async def _seed_four_layer_template(
                 name=name,
                 description=f"E2E template '{slug}' for four-layer MCP tests.",
                 provider="e2e",
-                server_url=f"https://{slug}.example.com/mcp",
+                server_url=server_url or f"https://{slug}.example.com/mcp",
                 transport="streamable_http",
                 supported_auth_methods=supported_auth_methods,
                 default_credential_policy=default_credential_policy,

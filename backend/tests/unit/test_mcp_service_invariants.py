@@ -27,11 +27,29 @@ from cubebox.services.mcp_installs import MCPConnectorInstallService
 # ---------------------------------------------------------------------------
 
 
+class _NoConflictSession:
+    """Stub session whose ``execute()`` always reports no conflict.
+
+    ``MCPConnectorInstallService._has_install_conflict`` runs a SELECT
+    through ``install_repo.session.execute(...)``; for these auto-enroll
+    invariant tests we just need the preflight to find nothing and let
+    the real ``add()`` capture the install row.
+    """
+
+    async def execute(self, *_args: Any, **_kwargs: Any) -> Any:
+        class _Empty:
+            def first(self) -> None:
+                return None
+
+        return _Empty()
+
+
 class _FakeInstallRepo:
     """Capture the row passed to ``add`` so tests can inspect it."""
 
     def __init__(self) -> None:
         self.added: list[MCPConnectorInstall] = []
+        self.session = _NoConflictSession()
 
     async def add(self, install: MCPConnectorInstall) -> MCPConnectorInstall:
         self.added.append(install)
