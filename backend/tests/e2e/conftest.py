@@ -693,15 +693,27 @@ def sample_png_bytes() -> bytes:
 
 
 @pytest.fixture
-def stub_discover_tools() -> Iterator[None]:
-    """No-op MCP discovery stub.
+def stub_discover_tools(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    """No-op MCP discovery stub for tests that document "this run does not
+    hit the network".
 
-    The four-layer install service doesn't run synchronous discovery on
-    create — discovery happens in the agent runtime via the effective
-    service. This fixture is kept as a marker for tests that document
-    "this run does not hit the network", but it no longer needs to patch
-    anything.
+    The four-layer install service itself doesn't run synchronous
+    discovery on install create, but the static-grant POST routes
+    (admin + workspace) call ``run_post_grant_discovery`` so the operator
+    gets immediate feedback on whether the credential works against the
+    MCP server. For tests whose URLs point at fake hosts that resolve
+    to ``ConnectError``, that probe persists ``discovery_status='error'``
+    and breaks assertions about ``usable=True``. Patch both route-local
+    bindings (they import the symbol by name, so patching the service
+    module alone is not enough) plus the OAuth callback's local import.
     """
+
+    async def _noop(**_kwargs: object) -> None:
+        return None
+
+    monkeypatch.setattr("cubebox.services.mcp_discovery.run_post_grant_discovery", _noop)
+    monkeypatch.setattr("cubebox.api.routes.v1.admin_mcp.run_post_grant_discovery", _noop)
+    monkeypatch.setattr("cubebox.api.routes.v1.ws_mcp.run_post_grant_discovery", _noop)
     yield
 
 
