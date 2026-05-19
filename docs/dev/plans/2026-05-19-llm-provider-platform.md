@@ -7,6 +7,14 @@
 in the cubepi repo. cubebox-side milestones (M3–M7) get a follow-up
 plan once this slice is merged + cubepi released.
 
+**Revision 4** (icons): `ProviderPreset` gains a `logo: str | None`
+field carrying an `@lobehub/icons` provider id. cubepi ships no
+SVG assets — only the lookup key. cubebox frontend installs
+`@lobehub/icons` (M4 milestone) and renders via
+`<ProviderIcon provider={preset.logo} … />`. All 20 preset entries
+in the YAML now declare a `logo:` line (`logo: null` for the two
+`custom-*` presets). Spec §3.6, §3.7, §7 Q5.
+
 **Revision 3** (file layout): `capability.py` and the `catalog/`
 package moved under `cubepi/providers/` (was top-level
 `cubepi/capability.py` and `cubepi/catalog/`). Both are
@@ -1661,6 +1669,7 @@ def test_minimal_provider_preset_constructs():
     )
     assert p.slug == "custom-openai"
     assert p.model_capability_overrides == {}
+    assert p.logo is None  # custom presets default to no brand mark
 
 
 def test_model_preset_minimal():
@@ -1731,7 +1740,11 @@ class ProviderPreset(BaseModel):
     short_name: str
     category: Literal["saas", "oss-framework", "custom"]
     description: str
-    logo_url: str | None = None
+    # @lobehub/icons provider id (lowercase, e.g. "anthropic", "openai",
+    # "deepseek"). cubebox frontend renders via
+    # <ProviderIcon provider={preset.logo} size=28 type="color" />.
+    # None = render generic fallback. Spec §3.6, §7 Q5.
+    logo: str | None = None
 
     api: WireApi
     base_url: str
@@ -1796,6 +1809,7 @@ entry.
 - slug: anthropic
   display_name: Anthropic
   short_name: Anthropic
+  logo: anthropic
   category: saas
   description: Anthropic Claude (Messages API). Native thinking + budget.
   api: anthropic-messages
@@ -1822,6 +1836,7 @@ entry.
 - slug: openai
   display_name: OpenAI
   short_name: OpenAI
+  logo: openai
   category: saas
   description: OpenAI Responses API (GPT-5, o-series reasoning).
   api: openai-responses
@@ -1844,6 +1859,7 @@ entry.
 - slug: openai-legacy
   display_name: OpenAI (Chat Completions)
   short_name: OpenAI-Chat
+  logo: openai
   category: saas
   description: OpenAI legacy chat/completions wire (GPT-4/3.5).
   api: openai-completions
@@ -1860,6 +1876,7 @@ entry.
 - slug: qwen-dashscope
   display_name: 通义千问 (DashScope)
   short_name: Qwen
+  logo: qwen
   category: saas
   description: Alibaba Cloud DashScope OpenAI-compatible endpoint for Qwen models.
   api: openai-completions
@@ -1878,6 +1895,7 @@ entry.
 - slug: doubao-volcengine
   display_name: 豆包 (火山方舟)
   short_name: Doubao
+  logo: doubao
   category: saas
   description: ByteDance Volcengine OpenAI-compatible endpoint for Doubao models.
   api: openai-completions
@@ -1895,6 +1913,7 @@ entry.
 - slug: deepseek-anthropic
   display_name: DeepSeek (Anthropic shape)
   short_name: DeepSeek
+  logo: deepseek
   category: saas
   description: DeepSeek via its Anthropic-shape endpoint.
   api: anthropic-messages
@@ -1915,6 +1934,7 @@ entry.
 - slug: deepseek-openai
   display_name: DeepSeek (OpenAI shape)
   short_name: DeepSeek
+  logo: deepseek
   category: saas
   description: DeepSeek via its OpenAI chat-completions endpoint.
   api: openai-completions
@@ -1930,6 +1950,7 @@ entry.
 - slug: moonshot
   display_name: Moonshot Kimi
   short_name: Moonshot
+  logo: moonshot
   category: saas
   description: Moonshot AI Kimi OpenAI-compatible endpoint.
   api: openai-completions
@@ -1943,6 +1964,7 @@ entry.
 - slug: xai
   display_name: xAI
   short_name: xAI
+  logo: xai
   category: saas
   description: xAI Grok OpenAI-compatible endpoint.
   api: openai-completions
@@ -1957,6 +1979,7 @@ entry.
 - slug: mistral
   display_name: Mistral
   short_name: Mistral
+  logo: mistral
   category: saas
   description: Mistral La Plateforme OpenAI-compatible.
   api: openai-completions
@@ -1970,6 +1993,7 @@ entry.
 - slug: openrouter
   display_name: OpenRouter
   short_name: OpenRouter
+  logo: openrouter
   category: saas
   description: OpenRouter unified gateway. Per-model reasoning overrides for known reasoning models.
   api: openai-completions
@@ -1997,6 +2021,7 @@ entry.
 - slug: together-ai
   display_name: Together AI
   short_name: Together
+  logo: together
   category: saas
   description: Together AI OpenAI-compatible.
   api: openai-completions
@@ -2009,6 +2034,7 @@ entry.
 - slug: groq
   display_name: Groq
   short_name: Groq
+  logo: groq
   category: saas
   description: Groq high-throughput OpenAI-compatible.
   api: openai-completions
@@ -2021,6 +2047,7 @@ entry.
 - slug: fireworks
   display_name: Fireworks AI
   short_name: Fireworks
+  logo: fireworks
   category: saas
   description: Fireworks AI OpenAI-compatible.
   api: openai-completions
@@ -2033,6 +2060,7 @@ entry.
 - slug: vllm
   display_name: vLLM (self-hosted)
   short_name: vLLM
+  logo: vllm
   category: oss-framework
   description: vLLM OpenAI-compatible server. Reasoning conventions depend on the loaded model and reasoning parser plugin.
   api: openai-completions
@@ -2046,6 +2074,7 @@ entry.
 - slug: ollama
   display_name: Ollama
   short_name: Ollama
+  logo: ollama
   category: oss-framework
   description: Ollama local OpenAI-compatible endpoint.
   api: openai-completions
@@ -2059,6 +2088,7 @@ entry.
 - slug: lm-studio
   display_name: LM Studio
   short_name: LM Studio
+  logo: lmstudio
   category: oss-framework
   description: LM Studio local server.
   api: openai-completions
@@ -2072,6 +2102,7 @@ entry.
 - slug: tgi
   display_name: HuggingFace TGI
   short_name: TGI
+  logo: huggingface
   category: oss-framework
   description: Text Generation Inference OpenAI-compatible endpoint.
   api: openai-completions
@@ -2085,6 +2116,7 @@ entry.
 - slug: custom-openai
   display_name: Custom OpenAI-compatible
   short_name: Custom
+  logo: null
   category: custom
   description: Bring your own OpenAI chat-completions endpoint.
   api: openai-completions
@@ -2097,6 +2129,7 @@ entry.
 - slug: custom-anthropic
   display_name: Custom Anthropic-compatible
   short_name: Custom
+  logo: null
   category: custom
   description: Bring your own Anthropic Messages endpoint.
   api: anthropic-messages
