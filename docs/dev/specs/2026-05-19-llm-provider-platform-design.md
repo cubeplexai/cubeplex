@@ -371,7 +371,15 @@ class ProviderPreset(BaseModel):
     short_name: str
     category: Literal["saas", "oss-framework", "custom"]
     description: str
-    logo_url: str | None = None
+    # Logo identifier from @lobehub/icons (200+ AI/LLM brand SVGs, CC0
+    # license, used by the cubebox frontend). The catalog only carries
+    # the lookup key (lowercase id like "anthropic", "openai",
+    # "deepseek"); the rendering side belongs to cubebox UI, which
+    # imports @lobehub/icons and renders <ProviderIcon
+    # provider={preset.logo} size={28} type="color" />. None = render
+    # a generic fallback (custom-* presets, OSS frameworks without a
+    # listed brand).
+    logo: str | None = None
 
     api: WireApi                    # → drives which Provider class
     base_url: str
@@ -400,28 +408,33 @@ catalog on demand.
 
 ### 3.7 Initial catalog
 
-| slug | api | reasoning shape |
-|---|---|---|
-| `anthropic` | anthropic-messages | binary on/off + int_budget |
-| `openai` | openai-responses | effort field |
-| `openai-legacy` | openai-completions | none (older GPT-4/3.5) |
-| `qwen-dashscope` | openai-completions | binary `extra_body.enable_thinking` |
-| `doubao-volcengine` | openai-completions | enum `extra_body.thinking.type` |
-| `deepseek-anthropic` | anthropic-messages | binary + budget (mirrors Anthropic) |
-| `deepseek-openai` | openai-completions | binary via `extra_body.reasoning` |
-| `moonshot` | openai-completions | none today |
-| `xai` | openai-completions | binary today |
-| `mistral` | openai-completions | none |
-| `openrouter` | openai-completions | binary off via `reasoning.exclude` + effort field; **per-model overrides for non-reasoning models** |
-| `together-ai` | openai-completions | none |
-| `groq` | openai-completions | none |
-| `fireworks` | openai-completions | none |
-| `vllm` | openai-completions | per-deployment; default = none, admin overrides |
-| `ollama` | openai-completions | none; auth=none |
-| `lm-studio` | openai-completions | none; auth=none |
-| `tgi` | openai-completions | none |
-| `custom-openai` | openai-completions | empty descriptor; admin fills |
-| `custom-anthropic` | anthropic-messages | empty descriptor; admin fills |
+`logo` column is the `@lobehub/icons` provider id (verify each against
+the live catalog at https://lobehub.com/icons when populating the
+YAML; some IDs may differ from the slug — e.g. Qwen on dashscope
+likely maps to `qwen` rather than `dashscope`).
+
+| slug | api | logo | reasoning shape |
+|---|---|---|---|
+| `anthropic` | anthropic-messages | `anthropic` | binary on/off + int_budget |
+| `openai` | openai-responses | `openai` | effort field |
+| `openai-legacy` | openai-completions | `openai` | none (older GPT-4/3.5) |
+| `qwen-dashscope` | openai-completions | `qwen` | binary `extra_body.enable_thinking` |
+| `doubao-volcengine` | openai-completions | `doubao` | enum `extra_body.thinking.type` |
+| `deepseek-anthropic` | anthropic-messages | `deepseek` | binary + budget (mirrors Anthropic) |
+| `deepseek-openai` | openai-completions | `deepseek` | binary via `extra_body.reasoning` |
+| `moonshot` | openai-completions | `moonshot` | none today |
+| `xai` | openai-completions | `xai` | binary today |
+| `mistral` | openai-completions | `mistral` | none |
+| `openrouter` | openai-completions | `openrouter` | binary off via `reasoning.exclude` + effort field; **per-model overrides for non-reasoning models** |
+| `together-ai` | openai-completions | `together` | none |
+| `groq` | openai-completions | `groq` | none |
+| `fireworks` | openai-completions | `fireworks` | none |
+| `vllm` | openai-completions | `vllm` | per-deployment; default = none, admin overrides |
+| `ollama` | openai-completions | `ollama` | none; auth=none |
+| `lm-studio` | openai-completions | `lmstudio` | none; auth=none |
+| `tgi` | openai-completions | `huggingface` | none |
+| `custom-openai` | openai-completions | `null` | empty descriptor; admin fills |
+| `custom-anthropic` | anthropic-messages | `null` | empty descriptor; admin fills |
 
 OpenRouter's preset entry is the one with a non-trivial
 `model_capability_overrides`: keys for DeepSeek-R1, o1-mini, o3,
@@ -533,6 +546,13 @@ re-probing.
 
 (Unchanged in shape from rev-1's §4.5 — just rebound to read/write
 `capability` JSON instead of scattered fields.)
+
+**Icons.** The wizard's preset list, the Provider list page, and the
+ProviderDetail header render each preset's brand mark via
+`@lobehub/icons`. `pnpm add @lobehub/icons` in the web package.
+Render with `<ProviderIcon provider={preset.logo} size={28}
+type="color" />`. When `preset.logo` is null, fall back to a generic
+gear/wrench icon. The icon library is CC0; no NOTICE shim needed.
 
 Step 1: pick from preset catalog.
 Step 2: configure — preset auto-fills `display_name`, `base_url`, all
@@ -655,3 +675,16 @@ No behavior change for existing callers.
    model in the wizard's "Advanced" expander, or a separate "Model
    overrides" sub-screen on provider detail. Lean toward the
    sub-screen — keeps the wizard short.
+
+5. **Provider logos** — resolved. `ProviderPreset.logo` carries an
+   `@lobehub/icons` provider id (e.g. `anthropic`, `openai`,
+   `deepseek`). cubepi ships only the string; no SVG assets in cubepi.
+   The cubebox frontend `pnpm add @lobehub/icons` and renders via
+   `<ProviderIcon provider={preset.logo} size={28} type="color" />`.
+   When `preset.logo` is null (custom-* presets), the UI shows a
+   generic fallback icon. Verify each preset's `logo` id against the
+   live catalog at https://lobehub.com/icons when authoring the YAML;
+   some IDs may not match the obvious vendor name (e.g. Qwen-on-
+   dashscope likely uses the `qwen` icon, not `dashscope` or
+   `alibabacloud`). License: lobehub icons are CC0, no
+   trademark/license shim needed in cubepi.
