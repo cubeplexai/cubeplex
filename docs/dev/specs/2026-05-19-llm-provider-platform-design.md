@@ -270,9 +270,13 @@ CapabilityDescriptor(
     reasoning_level=ReasoningLevelSpec(
         path="thinking.budget_tokens",
         kind="int_budget",
-        level_budgets={"off": 0, "minimal": 1024, "low": 4000,
-                       "medium": 10000, "high": 32000, "xhigh": 64000,
-                       "max": 128000},
+        # Mirror cubepi.providers.base.ThinkingBudgets defaults so that
+        # capability=None on AnthropicProvider reproduces today's wire
+        # budgets exactly. xhigh = high preserves the existing
+        # clamp_thinking_level() behavior. ThinkingLevel literal has no
+        # "max" value — don't add a key that can never trigger.
+        level_budgets={"off": 0, "minimal": 1024, "low": 2048,
+                       "medium": 8192, "high": 16384, "xhigh": 16384},
     ),
 )
 ```
@@ -289,7 +293,7 @@ CapabilityDescriptor(
         kind="effort",
         level_to_effort={"minimal": "minimal", "low": "low",
                          "medium": "medium", "high": "high",
-                         "xhigh": "high", "max": "high"},
+                         "xhigh": "high"},  # ThinkingLevel has no "max"
     ),
 )
 ```
@@ -318,8 +322,32 @@ class OpenAIProvider(BaseProvider):
 with all fields at default. The defaults are an **empty
 reasoning_off/on_payload, free 0–2 temperature, max_tokens field, all
 flags True**. Result: behavior identical to today for any existing
-caller that doesn't pass `capability`. Same for the other two Provider
-classes.
+caller that doesn't pass `capability`.
+
+**Important: "active capability" gating for OpenAI-completions and
+OpenAI Responses.** Today these classes do **not** inject
+`temperature` / `max_tokens` into the base kwargs — they leave them
+absent and rely on the SDK / caller. Naively running every capability
+hook unconditionally would change wire bytes for every existing
+caller. So both classes track whether the caller explicitly passed
+`capability` (or `model_capability_overrides`):
+
+```python
+self._cap_active = capability is not None or model_capability_overrides is not None
+self._capability = capability or CapabilityDescriptor()
+```
+
+Inside `stream()`, capability application is gated on `self._cap_active`.
+When inactive, the class behaves exactly as today: no
+`temperature`/`max_tokens` injection, no reasoning payload merge, no
+max_tokens-field rename. When active, the descriptor drives every
+field.
+
+`AnthropicProvider` is different — today it already injects
+`temperature` and writes a thinking block, so its
+`capability=None` path instantiates a non-empty
+`_ANTHROPIC_DEFAULT_CAPABILITY` that mirrors today's behavior
+verbatim. No `_cap_active` flag is needed there.
 
 `_payload_quirks` (the existing string-set for cubepi's older
 `"max_completion_tokens_alias"` hack) is removed in this milestone —

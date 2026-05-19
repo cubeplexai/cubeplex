@@ -7,6 +7,18 @@
 in the cubepi repo. cubebox-side milestones (M3–M7) get a follow-up
 plan once this slice is merged + cubepi released.
 
+**Revision 2** (after codex review pass): introduced `_cap_active`
+flag on OpenAIProvider / OpenAIResponsesProvider so legacy callers
+(no capability passed) see byte-identical behavior — temperature /
+max_tokens / reasoning payload are only applied when capability or
+overrides were explicitly given. Anthropic budgets in the
+default-capability map aligned to `ThinkingBudgets` (minimal=1024,
+low=2048, medium=8192, high=16384, xhigh=16384). Dropped the never-
+triggerable `"max"` level keys. pyyaml made explicit dep. Hatch
+package-data declaration switched to `include` pattern (replacing
+`force-include`). Added explicit ruff + mypy verification steps in
+Task 16.
+
 **Goal:** Land the `CapabilityDescriptor` runtime in cubepi so every
 Provider class translates vendor-specific reasoning / temperature /
 max-tokens quirks from data, not branched code. Ship the
@@ -661,9 +673,23 @@ def test_resolve_capability_uses_override_when_present():
 
 def test_capability_default_when_kwarg_none():
     p = OpenAIProvider(api_key="x", base_url="http://example")
-    # No capability passed -> legacy no-op default
+    # No capability passed -> legacy no-op default, _cap_active=False
     assert isinstance(p._capability, CapabilityDescriptor)
     assert p._capability.reasoning_off_payload == {}
+    assert p._cap_active is False
+
+
+def test_cap_active_when_capability_passed():
+    p = OpenAIProvider(api_key="x", base_url="http://example", capability=CapabilityDescriptor())
+    assert p._cap_active is True
+
+
+def test_cap_active_when_only_overrides_passed():
+    p = OpenAIProvider(
+        api_key="x", base_url="http://example",
+        model_capability_overrides={"m": CapabilityDescriptor()},
+    )
+    assert p._cap_active is True
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -705,6 +731,12 @@ def __init__(
     self._payload_quirks: set[str] = set(payload_quirks or [])
     self._extra_body: dict[str, Any] = extra_body or {}
     from cubepi.capability import CapabilityDescriptor as _Cap
+    # Track whether capability was explicitly passed so the OpenAI path
+    # (which today injects no temperature / no max_tokens) can stay
+    # behavior-identical for legacy callers. Spec §3.5.
+    self._cap_active: bool = (
+        capability is not None or model_capability_overrides is not None
+    )
     self._capability: _Cap = capability or _Cap()
     self._model_overrides: dict[str, _Cap] = model_capability_overrides or {}
 
@@ -835,6 +867,15 @@ async def test_max_tokens_field_renamed():
     payload = await _capture_payload_openai(p, _model())
     assert "max_completion_tokens" in payload
     assert "max_tokens" not in payload
+
+
+@pytest.mark.asyncio
+async def test_legacy_no_capability_does_not_inject_temperature_or_max_tokens():
+    """Regression guard: no capability passed -> wire bytes identical to today."""
+    p = OpenAIProvider(api_key="x", base_url="http://e")  # no capability
+    payload = await _capture_payload_openai(p, _model())
+    assert "temperature" not in payload
+    assert "max_tokens" not in payload
 ```
 
 Note: the existing OpenAIProvider does not currently set
@@ -854,15 +895,9 @@ it before implementing.
 cd /home/chris/cubepi && grep -nE "^\s+temperature" cubepi/providers/base.py | head
 ```
 
-Expected: a line like `temperature: float = 1.0` inside the `Model` class.
-
-If it doesn't exist, **add it before continuing** as a separate
-sub-commit:
-
-```python
-# in cubepi/providers/base.py, Model class
-temperature: float = 1.0
-```
+Expected: a line `temperature: float = 0.7` inside the `Model` class
+(already present; AnthropicProvider uses it). Do NOT add or change
+this — just confirm.
 
 - [ ] **Step 3: Run tests to verify they fail**
 
@@ -874,39 +909,42 @@ Expected: 3 new tests fail (temperature/max_tokens not in payload).
 
 - [ ] **Step 4: Implement capability application in stream()**
 
-Edit `cubepi/providers/openai.py`. Locate the `_produce` inner function
-inside `stream()`. Find the block that sets `kwargs` (around line 80)
-and modify so the kwargs include `temperature` and `max_tokens` from
-the model, then apply capability transformations BEFORE
-`invoke_on_payload`:
+Critical: today the OpenAIProvider does NOT inject
+`temperature` / `max_tokens` into the base kwargs. Adding them
+unconditionally would change wire bytes for every existing caller.
+The capability path must therefore be **gated on `self._cap_active`**
+(set in Task 5 from the constructor) so callers that didn't pass
+`capability` see identical behavior.
+
+Edit `cubepi/providers/openai.py`. Inside the `_produce` inner
+function, AFTER the existing `invoke_on_payload` call and the
+existing `max_completion_tokens_alias` block (which Task 8 will
+delete), add the gated capability application:
 
 ```python
-kwargs: dict[str, Any] = {
-    "model": model.id,
-    "messages": api_messages,
-    "stream": True,
-    "max_tokens": model.max_tokens,
-    "temperature": model.temperature,
-}
-if tools:
-    kwargs["tools"] = [self._convert_tool(t) for t in tools]
+from cubepi.capability import (
+    apply_temperature,
+    merge_capability_payload,
+    write_reasoning_level,
+)  # actually move these to top-of-file imports
 
-# Resolve capability once (allows per-model override).
 cap = self._resolve_capability(model.id)
+if self._cap_active:
+    # Inject model defaults only when a caller opted into capability.
+    # setdefault preserves anything on_payload / extra_body already set.
+    kwargs.setdefault("temperature", model.temperature)
+    kwargs.setdefault("max_tokens", model.max_tokens)
+    apply_temperature(kwargs, cap.temperature)
+    if cap.max_tokens_field != "max_tokens" and "max_tokens" in kwargs:
+        kwargs[cap.max_tokens_field] = kwargs.pop("max_tokens")
 ```
 
-Then inside `_produce`, AFTER the existing `invoke_on_payload` call
-and the existing `max_completion_tokens_alias` block (which we'll
-delete in Task 9), apply capability:
+The reasoning blocks (added in Task 7) go inside the same
+`if self._cap_active:` body. Leave that placement for now; the Task 7
+diff below extends this block.
 
-```python
-# Capability application: temperature constraint, then field rename.
-from cubepi.capability import apply_temperature
-
-apply_temperature(kwargs, cap.temperature)
-if cap.max_tokens_field != "max_tokens" and "max_tokens" in kwargs:
-    kwargs[cap.max_tokens_field] = kwargs.pop("max_tokens")
-```
+Do NOT add `temperature` / `max_tokens` to the base `kwargs` literal
+above. Today they're absent and must stay absent for legacy callers.
 
 - [ ] **Step 5: Run tests to verify they pass**
 
@@ -1081,6 +1119,35 @@ async def test_model_override_wins_for_reasoning():
     async for _ in stream:
         pass
     assert captured["reasoning"] == {"effort": "low"}
+
+
+@pytest.mark.asyncio
+async def test_legacy_no_capability_does_not_merge_reasoning_payload():
+    """Regression: no capability -> no reasoning_off/on payload write."""
+    p = OpenAIProvider(api_key="x", base_url="http://e")  # legacy
+    captured: dict = {}
+    async def listener(kw, m): captured.update(kw)
+    p._request_listeners.append(listener)
+
+    class _FakeResponse:
+        response = None
+        def __aiter__(self):
+            async def gen():
+                return
+                yield
+            return gen()
+    async def fake_create(**kw): return _FakeResponse()
+    p._client.chat.completions.create = fake_create  # type: ignore
+
+    stream = await p.stream(
+        model=_model(),
+        messages=[UserMessage(content=[TextContent(text="hi")])],
+        options=StreamOptions(thinking="off"),
+    )
+    async for _ in stream:
+        pass
+    assert "extra_body" not in captured  # no merge fired
+    assert "reasoning_effort" not in captured
 ```
 
 - [ ] **Step 2: Run tests to verify they fail**
@@ -1089,26 +1156,32 @@ async def test_model_override_wins_for_reasoning():
 cd /home/chris/cubepi && uv run pytest tests/providers/test_openai_capability.py -v
 ```
 
-Expected: 4 new tests fail.
+Expected: 5 new tests fail (4 capability tests + the legacy guard,
+which already passes — it just asserts the absence of fields that
+would only appear after Step 3 wires the merge correctly).
 
 - [ ] **Step 3: Implement reasoning application**
 
-Edit `cubepi/providers/openai.py` inside `_produce`, after the
-temperature / max_tokens application from Task 6, add:
+Edit `cubepi/providers/openai.py` inside `_produce`. The reasoning
+block goes **inside the same `if self._cap_active:` body** introduced
+in Task 6 (immediately after the temperature / max_tokens-rename
+lines), so legacy callers with no capability see no reasoning
+payload merge:
 
 ```python
-from cubepi.capability import merge_capability_payload, write_reasoning_level
-
-if opts.thinking == "off":
-    merge_capability_payload(kwargs, cap.reasoning_off_payload)
-else:
-    merge_capability_payload(kwargs, cap.reasoning_on_payload)
-    if cap.reasoning_level is not None:
-        write_reasoning_level(kwargs, cap.reasoning_level, opts.thinking)
+if self._cap_active:
+    # ...temperature + max_tokens rename from Task 6 above...
+    if opts.thinking == "off":
+        merge_capability_payload(kwargs, cap.reasoning_off_payload)
+    else:
+        merge_capability_payload(kwargs, cap.reasoning_on_payload)
+        if cap.reasoning_level is not None:
+            write_reasoning_level(kwargs, cap.reasoning_level, opts.thinking)
 ```
 
-Move all three `from cubepi.capability import ...` lines from inside
-`_produce` to the top of the file.
+`merge_capability_payload` and `write_reasoning_level` should be
+imported at top-of-file alongside `apply_temperature` (one combined
+import line).
 
 - [ ] **Step 4: Run tests to verify they pass**
 
@@ -1248,16 +1321,20 @@ cd /home/chris/cubepi && uv run pytest tests/providers/test_openai_responses_cap
 
 In `cubepi/providers/openai_responses.py`:
 1. Add `capability`, `model_capability_overrides` kwargs to `__init__`
-   (same shape as OpenAIProvider, Task 5).
+   (same shape as OpenAIProvider, Task 5). Set
+   `self._cap_active = capability is not None or model_capability_overrides is not None`
+   for the same legacy-preservation reason.
 2. Add `_resolve_capability(model_id)` helper.
-3. In `stream()`, after kwargs construction, apply temperature and
-   max_tokens-field rename (the `Responses` API uses
-   `max_output_tokens` natively — leave that wire-specific bit alone).
-4. Replace the inline `_THINKING_TO_EFFORT[opts.thinking]` write with
+3. In `stream()`, gate all capability application on
+   `if self._cap_active:` — temperature constraint, max_tokens-field
+   rename (Responses uses `max_output_tokens` natively; the rename
+   targets that field), and reasoning level write via
    `write_reasoning_level(kwargs, cap.reasoning_level, opts.thinking)`
-   when `cap.reasoning_level is not None`. When capability is the
-   default empty descriptor, fall back to the old hardcoded behavior
-   so legacy callers don't change.
+   when `cap.reasoning_level is not None`.
+4. When `self._cap_active is False`, leave the existing inline
+   `_THINKING_TO_EFFORT[opts.thinking]` write intact so legacy callers
+   see byte-identical behavior. (Task 11 / a follow-up can migrate
+   the legacy path to the catalog preset; this slice doesn't.)
 
 - [ ] **Step 5: Run tests to verify they pass**
 
@@ -1306,10 +1383,14 @@ ANTHROPIC_DEFAULT_CAPABILITY = CapabilityDescriptor(
         path="thinking.budget_tokens",
         kind="int_budget",
         level_budgets={
-            # Mirror cubepi.providers.models.THINKING_BUDGETS defaults.
-            # Keep aligned — they're the contract Anthropic users rely on.
-            "off": 0, "minimal": 1024, "low": 4096,
-            "medium": 12288, "high": 32768, "xhigh": 65536,
+            # MUST mirror cubepi.providers.base.ThinkingBudgets defaults.
+            # Verified in cubepi/providers/base.py: minimal=1024, low=2048,
+            # medium=8192, high=16384. xhigh is clamped to high by
+            # clamp_thinking_level() today — preserve that by setting
+            # xhigh to the same value as high. ThinkingLevel literal has
+            # NO "max" value, so don't add a key that can't trigger.
+            "off": 0, "minimal": 1024, "low": 2048,
+            "medium": 8192, "high": 16384, "xhigh": 16384,
         },
     ),
     temperature=TemperatureSpec(mode="free", min=0.0, max=1.0, default=1.0),
@@ -1391,7 +1472,8 @@ async def test_default_capability_thinking_medium_writes_budget():
     p = AnthropicProvider(api_key="x")
     payload = await _capture_anthropic(p, StreamOptions(thinking="medium"))
     assert payload["thinking"]["type"] == "enabled"
-    assert payload["thinking"]["budget_tokens"] == 12288
+    # Mirrors ThinkingBudgets.medium in cubepi/providers/base.py.
+    assert payload["thinking"]["budget_tokens"] == 8192
     # Anthropic rejects custom temperature with thinking on — make sure we strip it
     assert "temperature" not in payload
 
@@ -1676,24 +1758,22 @@ git commit -m "feat(catalog): ProviderPreset / ModelPreset / AuthSpec / WireApi"
 - Modify: `/home/chris/cubepi/pyproject.toml` (ensure `pyyaml` is a
   declared dep)
 
-- [ ] **Step 1: Verify pyyaml availability**
+- [ ] **Step 1: Add pyyaml as an explicit dependency**
+
+pyyaml is not a transitive dep of anthropic or openai — don't rely on
+it being present accidentally.
+
+```bash
+cd /home/chris/cubepi && uv add pyyaml
+```
+
+Verify:
 
 ```bash
 cd /home/chris/cubepi && uv run python -c "import yaml; print(yaml.__version__)"
 ```
 
-If `ModuleNotFoundError`, add to `pyproject.toml`:
-
-```toml
-dependencies = [
-    "anthropic>=0.100.0",
-    "openai>=2.36.0",
-    "pydantic>=2.13.4",
-    "pyyaml>=6.0",
-]
-```
-
-Then `uv sync`.
+Expected: prints a 6.x version.
 
 - [ ] **Step 2: Author the YAML**
 
@@ -1719,7 +1799,9 @@ entry.
     reasoning_level:
       path: thinking.budget_tokens
       kind: int_budget
-      level_budgets: { off: 0, minimal: 1024, low: 4096, medium: 12288, high: 32768, xhigh: 65536 }
+      # Aligned with cubepi.providers.base.ThinkingBudgets so AnthropicProvider's
+      # capability=None default-capability reproduces today's wire bytes.
+      level_budgets: { off: 0, minimal: 1024, low: 2048, medium: 8192, high: 16384, xhigh: 16384 }
     temperature: { mode: free, min: 0.0, max: 1.0, default: 1.0 }
     max_tokens_field: max_tokens
     supports_tools: true
@@ -1816,7 +1898,8 @@ entry.
     reasoning_level:
       path: thinking.budget_tokens
       kind: int_budget
-      level_budgets: { off: 0, low: 4096, medium: 12288, high: 32768, xhigh: 65536 }
+      # Mirror Anthropic's budgets (same ThinkingBudgets contract).
+      level_budgets: { off: 0, low: 2048, medium: 8192, high: 16384, xhigh: 16384 }
     temperature: { mode: free, min: 0.0, max: 1.0, default: 1.0 }
   default_models:
     - { model_id: deepseek-v4-pro, display_name: DeepSeek V4 Pro, context_window: 64000, max_tokens: 12000, input_modalities: [text], reasoning: true }
@@ -2024,26 +2107,41 @@ cd /home/chris/cubepi && uv run python -c "import yaml; yaml.safe_load(open('cub
 
 Expected: no exception, no output.
 
-- [ ] **Step 4: Commit**
+- [ ] **Step 4: Declare YAML as package data**
+
+Hatchling's default wheel builder includes `.py` files but skips
+non-Python assets. The catalog YAML must be opted in or
+`get_provider_preset()` will silently fail at runtime in installed
+wheels. The current `[tool.hatch.build.targets.wheel]` section in
+`pyproject.toml` only has `packages = ["cubepi"]`. Extend it to:
+
+```toml
+[tool.hatch.build.targets.wheel]
+packages = ["cubepi"]
+include = ["cubepi/catalog/data/*.yaml"]
+```
+
+- [ ] **Step 5: Verify the YAML is reachable via importlib resources**
+
+```bash
+cd /home/chris/cubepi && uv run python -c "
+from pathlib import Path
+import cubepi.catalog as c
+f = Path(c.__file__).parent / 'data' / 'providers.yaml'
+assert f.is_file(), f'missing: {f}'
+print('ok:', f.stat().st_size, 'bytes')
+"
+```
+
+Expected: prints `ok: <N> bytes`.
+
+- [ ] **Step 6: Commit**
 
 ```bash
 cd /home/chris/cubepi
 git add cubepi/catalog/data/providers.yaml pyproject.toml
 git commit -m "feat(catalog): bundle 20-entry provider preset YAML"
 ```
-
-Note: package-data declaration may be needed in `pyproject.toml` so
-the YAML ships in built wheels. Add under `[tool.hatch.build.targets.wheel]`:
-
-```toml
-[tool.hatch.build.targets.wheel]
-packages = ["cubepi"]
-
-[tool.hatch.build.targets.wheel.force-include]
-"cubepi/catalog/data/providers.yaml" = "cubepi/catalog/data/providers.yaml"
-```
-
-Include this in the same commit if not already present.
 
 ---
 
@@ -2278,7 +2376,19 @@ cd /home/chris/cubepi && uv run ruff check cubepi tests
 Expected: clean. Address any lints touching files we modified; leave
 pre-existing lints in untouched files alone.
 
-- [ ] **Step 3: Type check**
+- [ ] **Step 3: mypy (if mypy is configured)**
+
+```bash
+cd /home/chris/cubepi && (ls mypy.ini pyproject.toml | xargs grep -l "\[tool.mypy\]" 2>/dev/null) \
+  && uv run mypy cubepi --no-error-summary --hide-error-context \
+  || echo "no mypy config — skipped"
+```
+
+Expected: no errors in files we modified. (cubepi has no pre-commit
+gate, so this is the only place mypy runs — do not skip if config
+exists.)
+
+- [ ] **Step 4: Smoke test the import path**
 
 ```bash
 cd /home/chris/cubepi && uv run python -c "import cubepi; print(cubepi.list_provider_presets()[0].slug)"
@@ -2286,7 +2396,7 @@ cd /home/chris/cubepi && uv run python -c "import cubepi; print(cubepi.list_prov
 
 Expected: prints `anthropic`.
 
-- [ ] **Step 4: Final commit (only if Steps 1–3 produced edits)**
+- [ ] **Step 5: Final commit (only if any earlier step produced edits)**
 
 ```bash
 cd /home/chris/cubepi
@@ -2294,7 +2404,7 @@ git status
 # If clean: skip the commit.
 ```
 
-- [ ] **Step 5: Open the PR**
+- [ ] **Step 6: Open the PR**
 
 ```bash
 cd /home/chris/cubepi
