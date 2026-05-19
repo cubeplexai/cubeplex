@@ -97,7 +97,7 @@ Provider(capability=…)  ←── constructed once, knows its endpoint's quirk
 
 ### 3.1 CapabilityDescriptor — the central type
 
-One pydantic model. Lives at `cubepi/capability.py`. Fields cover the
+One pydantic model. Lives at `cubepi/providers/capability.py`. Fields cover the
 four axes confirmed in scoping (reasoning, temperature, max_tokens field
 name, modality / tools flags) and nothing more.
 
@@ -221,7 +221,7 @@ Three concrete rules so this never ambiguates in implementation or test:
    that need an explicit `false` (Qwen) declare it.
 
 Implementation: a single function `merge_capability_payload(kwargs:
-dict, patch: dict) -> None` in `cubepi/capability.py`, with focused
+dict, patch: dict) -> None` in `cubepi/providers/capability.py`, with focused
 unit tests on each rule.
 
 ### 3.4 Provider runtime flow
@@ -355,8 +355,8 @@ replaced by `capability.max_tokens_field`.
 
 ### 3.6 Preset catalog
 
-New module `cubepi.catalog`. Bundled YAML at
-`cubepi/catalog/data/providers.yaml` containing the §3.7 preset list.
+New module `cubepi.providers.catalog`. Bundled YAML at
+`cubepi/providers/catalog/data/providers.yaml` containing the §3.7 preset list.
 Public API:
 
 ```python
@@ -579,7 +579,7 @@ today's behavior.
 
 ### M1 — cubepi: capability core (cubepi repo)
 
-- `cubepi/capability.py`: `CapabilityDescriptor`, `TemperatureSpec`,
+- `cubepi/providers/capability.py`: `CapabilityDescriptor`, `TemperatureSpec`,
   `ReasoningLevelSpec`, `merge_capability_payload`.
 - All three Provider classes accept `capability=None` and
   `model_capability_overrides=None` kwargs. Default = no-op.
@@ -593,7 +593,7 @@ No behavior change for existing callers.
 
 ### M2 — cubepi: preset catalog (cubepi repo)
 
-- `cubepi/catalog/data/providers.yaml` with §3.7 list.
+- `cubepi/providers/catalog/data/providers.yaml` with §3.7 list.
 - `list_provider_presets()`, `get_provider_preset(slug)`.
 - Catalog round-trip tested: every preset parses, every wire api is
   one of the three.

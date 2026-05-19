@@ -7,6 +7,14 @@
 in the cubepi repo. cubebox-side milestones (M3–M7) get a follow-up
 plan once this slice is merged + cubepi released.
 
+**Revision 3** (file layout): `capability.py` and the `catalog/`
+package moved under `cubepi/providers/` (was top-level
+`cubepi/capability.py` and `cubepi/catalog/`). Both are
+provider-layer concerns and belong next to `base.py` and
+`models.py` for discoverability. `cubepi.__init__` re-exports stay
+the same so the public import surface (`from cubepi import
+CapabilityDescriptor`) is unchanged.
+
 **Revision 2** (after codex review pass): introduced `_cap_active`
 flag on OpenAIProvider / OpenAIResponsesProvider so legacy callers
 (no capability passed) see byte-identical behavior — temperature /
@@ -33,7 +41,7 @@ payload deep-merge, optional fine-grain level write. A
 `model_capability_overrides: dict[model_id, CapabilityDescriptor]`
 handles the OpenRouter case (one endpoint, divergent model
 conventions). The preset catalog is a YAML data file at
-`cubepi/catalog/data/providers.yaml`, loaded once on import.
+`cubepi/providers/catalog/data/providers.yaml`, loaded once on import.
 
 **Tech Stack:** Python 3.11+, pydantic 2.x, pyyaml (already transitive
 via anthropic/openai SDK deps), pytest + pytest-asyncio (existing).
@@ -50,14 +58,14 @@ via anthropic/openai SDK deps), pytest + pytest-asyncio (existing).
 ## File Structure
 
 ### Created
-- `/home/chris/cubepi/cubepi/capability.py` — `CapabilityDescriptor`,
+- `/home/chris/cubepi/cubepi/providers/capability.py` — `CapabilityDescriptor`,
   `TemperatureSpec`, `ReasoningLevelSpec`, helpers `merge_capability_payload`,
   `apply_temperature`, `write_reasoning_level`.
-- `/home/chris/cubepi/cubepi/catalog/__init__.py` — public API
+- `/home/chris/cubepi/cubepi/providers/catalog/__init__.py` — public API
   (`list_provider_presets`, `get_provider_preset`, `WireApi` re-export).
-- `/home/chris/cubepi/cubepi/catalog/types.py` — `ProviderPreset`,
+- `/home/chris/cubepi/cubepi/providers/catalog/types.py` — `ProviderPreset`,
   `ModelPreset`, `AuthSpec`, `WireApi`.
-- `/home/chris/cubepi/cubepi/catalog/data/providers.yaml` — 20-entry
+- `/home/chris/cubepi/cubepi/providers/catalog/data/providers.yaml` — 20-entry
   preset list.
 - `/home/chris/cubepi/tests/test_capability.py` — type defaults, merge
   rules, temperature, reasoning level helpers.
@@ -96,7 +104,7 @@ via anthropic/openai SDK deps), pytest + pytest-asyncio (existing).
 ## Task 1: `CapabilityDescriptor` + sub-types
 
 **Files:**
-- Create: `/home/chris/cubepi/cubepi/capability.py`
+- Create: `/home/chris/cubepi/cubepi/providers/capability.py`
 - Test: `/home/chris/cubepi/tests/test_capability.py`
 
 - [ ] **Step 1: Write the failing test**
@@ -104,7 +112,7 @@ via anthropic/openai SDK deps), pytest + pytest-asyncio (existing).
 Create `tests/test_capability.py`:
 
 ```python
-from cubepi.capability import (
+from cubepi.providers.capability import (
     CapabilityDescriptor,
     ReasoningLevelSpec,
     TemperatureSpec,
@@ -166,11 +174,11 @@ def test_reasoning_level_enum_requires_map():
 cd /home/chris/cubepi && uv run pytest tests/test_capability.py -v
 ```
 
-Expected: collection error / ModuleNotFoundError for `cubepi.capability`.
+Expected: collection error / ModuleNotFoundError for `cubepi.providers.capability`.
 
 - [ ] **Step 3: Write minimal implementation**
 
-Create `cubepi/capability.py`:
+Create `cubepi/providers/capability.py`:
 
 ```python
 """Capability descriptor — vendor quirks expressed as data, bound to a Provider.
@@ -248,7 +256,7 @@ Expected: 5 passed.
 ```bash
 cd /home/chris/cubepi
 git checkout -b feat/capability-descriptor
-git add cubepi/capability.py tests/test_capability.py
+git add cubepi/providers/capability.py tests/test_capability.py
 git commit -m "feat(capability): introduce CapabilityDescriptor with validated defaults"
 ```
 
@@ -257,7 +265,7 @@ git commit -m "feat(capability): introduce CapabilityDescriptor with validated d
 ## Task 2: `merge_capability_payload` — three rules
 
 **Files:**
-- Modify: `/home/chris/cubepi/cubepi/capability.py`
+- Modify: `/home/chris/cubepi/cubepi/providers/capability.py`
 - Test: `/home/chris/cubepi/tests/test_capability.py`
 
 - [ ] **Step 1: Write the failing tests**
@@ -265,7 +273,7 @@ git commit -m "feat(capability): introduce CapabilityDescriptor with validated d
 Append to `tests/test_capability.py`:
 
 ```python
-from cubepi.capability import merge_capability_payload
+from cubepi.providers.capability import merge_capability_payload
 
 
 def test_merge_empty_patch_is_noop():
@@ -318,7 +326,7 @@ Expected: `ImportError: cannot import name 'merge_capability_payload'`.
 
 - [ ] **Step 3: Implement**
 
-Append to `cubepi/capability.py`:
+Append to `cubepi/providers/capability.py`:
 
 ```python
 def merge_capability_payload(kwargs: dict[str, Any], patch: dict[str, Any]) -> None:
@@ -358,7 +366,7 @@ Expected: all 11 tests pass (5 prior + 6 new).
 
 ```bash
 cd /home/chris/cubepi
-git add cubepi/capability.py tests/test_capability.py
+git add cubepi/providers/capability.py tests/test_capability.py
 git commit -m "feat(capability): merge_capability_payload deep-merge with array atomicity"
 ```
 
@@ -367,7 +375,7 @@ git commit -m "feat(capability): merge_capability_payload deep-merge with array 
 ## Task 3: `apply_temperature` — free / fixed / ignored
 
 **Files:**
-- Modify: `/home/chris/cubepi/cubepi/capability.py`
+- Modify: `/home/chris/cubepi/cubepi/providers/capability.py`
 - Test: `/home/chris/cubepi/tests/test_capability.py`
 
 - [ ] **Step 1: Write the failing tests**
@@ -375,7 +383,7 @@ git commit -m "feat(capability): merge_capability_payload deep-merge with array 
 Append to `tests/test_capability.py`:
 
 ```python
-from cubepi.capability import apply_temperature
+from cubepi.providers.capability import apply_temperature
 
 
 def test_apply_temperature_free_passes_through():
@@ -430,7 +438,7 @@ Expected: `ImportError: cannot import name 'apply_temperature'`.
 
 - [ ] **Step 3: Implement**
 
-Append to `cubepi/capability.py`:
+Append to `cubepi/providers/capability.py`:
 
 ```python
 def apply_temperature(kwargs: dict[str, Any], spec: TemperatureSpec) -> None:
@@ -467,7 +475,7 @@ Expected: 18 passed.
 
 ```bash
 cd /home/chris/cubepi
-git add cubepi/capability.py tests/test_capability.py
+git add cubepi/providers/capability.py tests/test_capability.py
 git commit -m "feat(capability): apply_temperature with free/fixed/ignored modes"
 ```
 
@@ -476,7 +484,7 @@ git commit -m "feat(capability): apply_temperature with free/fixed/ignored modes
 ## Task 4: `write_reasoning_level` — int_budget / effort / enum
 
 **Files:**
-- Modify: `/home/chris/cubepi/cubepi/capability.py`
+- Modify: `/home/chris/cubepi/cubepi/providers/capability.py`
 - Test: `/home/chris/cubepi/tests/test_capability.py`
 
 - [ ] **Step 1: Write the failing tests**
@@ -484,7 +492,7 @@ git commit -m "feat(capability): apply_temperature with free/fixed/ignored modes
 Append to `tests/test_capability.py`:
 
 ```python
-from cubepi.capability import write_reasoning_level
+from cubepi.providers.capability import write_reasoning_level
 
 
 def test_int_budget_writes_top_level_path():
@@ -552,7 +560,7 @@ Expected: `ImportError: cannot import name 'write_reasoning_level'`.
 
 - [ ] **Step 3: Implement**
 
-Append to `cubepi/capability.py`:
+Append to `cubepi/providers/capability.py`:
 
 ```python
 from cubepi.providers.base import ThinkingLevel
@@ -610,7 +618,7 @@ Expected: 23 passed.
 
 ```bash
 cd /home/chris/cubepi
-git add cubepi/capability.py tests/test_capability.py
+git add cubepi/providers/capability.py tests/test_capability.py
 git commit -m "feat(capability): write_reasoning_level for int_budget/effort/enum"
 ```
 
@@ -636,7 +644,7 @@ the kwargs the SDK would receive.
 
 import pytest
 
-from cubepi.capability import CapabilityDescriptor, TemperatureSpec
+from cubepi.providers.capability import CapabilityDescriptor, TemperatureSpec
 from cubepi.providers.openai import OpenAIProvider
 
 
@@ -730,7 +738,7 @@ def __init__(
     self._client = openai.AsyncOpenAI(**kwargs)
     self._payload_quirks: set[str] = set(payload_quirks or [])
     self._extra_body: dict[str, Any] = extra_body or {}
-    from cubepi.capability import CapabilityDescriptor as _Cap
+    from cubepi.providers.capability import CapabilityDescriptor as _Cap
     # Track whether capability was explicitly passed so the OpenAI path
     # (which today injects no temperature / no max_tokens) can stay
     # behavior-identical for legacy callers. Spec §3.5.
@@ -747,7 +755,7 @@ def _resolve_capability(self, model_id: str) -> "CapabilityDescriptor":
 Add the top-of-file import:
 
 ```python
-from cubepi.capability import CapabilityDescriptor
+from cubepi.providers.capability import CapabilityDescriptor
 ```
 
 - [ ] **Step 4: Run test to verify it passes**
@@ -922,7 +930,7 @@ existing `max_completion_tokens_alias` block (which Task 8 will
 delete), add the gated capability application:
 
 ```python
-from cubepi.capability import (
+from cubepi.providers.capability import (
     apply_temperature,
     merge_capability_payload,
     write_reasoning_level,
@@ -987,7 +995,7 @@ git commit -m "feat(openai): apply capability temperature + max_tokens_field ren
 Append to `tests/providers/test_openai_capability.py`:
 
 ```python
-from cubepi.capability import ReasoningLevelSpec
+from cubepi.providers.capability import ReasoningLevelSpec
 
 
 @pytest.mark.asyncio
@@ -1404,7 +1412,7 @@ Create `tests/providers/test_anthropic_capability.py`:
 ```python
 import pytest
 
-from cubepi.capability import CapabilityDescriptor, ReasoningLevelSpec, TemperatureSpec
+from cubepi.providers.capability import CapabilityDescriptor, ReasoningLevelSpec, TemperatureSpec
 from cubepi.providers.anthropic import AnthropicProvider
 from cubepi.providers.base import (
     Model, StreamOptions, TextContent, UserMessage,
@@ -1584,7 +1592,7 @@ cd /home/chris/cubepi && uv run pytest tests/test_init.py::test_capability_types
 Edit `cubepi/__init__.py`. Append:
 
 ```python
-from cubepi.capability import (
+from cubepi.providers.capability import (
     CapabilityDescriptor,
     ReasoningLevelSpec,
     TemperatureSpec,
@@ -1619,8 +1627,8 @@ git commit -m "feat(capability): export CapabilityDescriptor + helpers from cube
 ## Task 12: Catalog types — `ProviderPreset`, `ModelPreset`, `AuthSpec`
 
 **Files:**
-- Create: `/home/chris/cubepi/cubepi/catalog/__init__.py` (placeholder)
-- Create: `/home/chris/cubepi/cubepi/catalog/types.py`
+- Create: `/home/chris/cubepi/cubepi/providers/catalog/__init__.py` (placeholder)
+- Create: `/home/chris/cubepi/cubepi/providers/catalog/types.py`
 - Test: `/home/chris/cubepi/tests/test_catalog.py`
 
 - [ ] **Step 1: Write the failing test**
@@ -1628,10 +1636,10 @@ git commit -m "feat(capability): export CapabilityDescriptor + helpers from cube
 Create `tests/test_catalog.py`:
 
 ```python
-from cubepi.catalog.types import (
+from cubepi.providers.catalog.types import (
     AuthSpec, ModelPreset, ProviderPreset, WireApi,
 )
-from cubepi.capability import CapabilityDescriptor, TemperatureSpec
+from cubepi.providers.capability import CapabilityDescriptor, TemperatureSpec
 
 
 def test_wire_api_values():
@@ -1677,7 +1685,7 @@ cd /home/chris/cubepi && uv run pytest tests/test_catalog.py -v
 
 - [ ] **Step 3: Implement**
 
-Create `cubepi/catalog/__init__.py` (empty placeholder for now):
+Create `cubepi/providers/catalog/__init__.py` (empty placeholder for now):
 
 ```python
 """Provider preset catalog.
@@ -1686,7 +1694,7 @@ See docs/dev/specs/2026-05-19-llm-provider-platform-design.md §3.6.
 """
 ```
 
-Create `cubepi/catalog/types.py`:
+Create `cubepi/providers/catalog/types.py`:
 
 ```python
 """Catalog types: ProviderPreset, ModelPreset, AuthSpec, WireApi."""
@@ -1697,7 +1705,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-from cubepi.capability import CapabilityDescriptor
+from cubepi.providers.capability import CapabilityDescriptor
 
 WireApi = Literal["anthropic-messages", "openai-completions", "openai-responses"]
 
@@ -1745,7 +1753,7 @@ cd /home/chris/cubepi && uv run pytest tests/test_catalog.py -v
 
 ```bash
 cd /home/chris/cubepi
-git add cubepi/catalog/ tests/test_catalog.py
+git add cubepi/providers/catalog/ tests/test_catalog.py
 git commit -m "feat(catalog): ProviderPreset / ModelPreset / AuthSpec / WireApi"
 ```
 
@@ -1754,7 +1762,7 @@ git commit -m "feat(catalog): ProviderPreset / ModelPreset / AuthSpec / WireApi"
 ## Task 13: Catalog YAML data file (20 presets)
 
 **Files:**
-- Create: `/home/chris/cubepi/cubepi/catalog/data/providers.yaml`
+- Create: `/home/chris/cubepi/cubepi/providers/catalog/data/providers.yaml`
 - Modify: `/home/chris/cubepi/pyproject.toml` (ensure `pyyaml` is a
   declared dep)
 
@@ -1777,13 +1785,13 @@ Expected: prints a 6.x version.
 
 - [ ] **Step 2: Author the YAML**
 
-Create `cubepi/catalog/data/providers.yaml`. Below is the **complete**
+Create `cubepi/providers/catalog/data/providers.yaml`. Below is the **complete**
 20-preset file. Type it verbatim; the test in Task 14 validates every
 entry.
 
 ```yaml
 # Provider preset catalog. Spec: docs/dev/specs/2026-05-19-llm-provider-platform-design.md §3.7
-# Each entry parses into cubepi.catalog.types.ProviderPreset.
+# Each entry parses into cubepi.providers.catalog.types.ProviderPreset.
 
 - slug: anthropic
   display_name: Anthropic
@@ -2102,7 +2110,7 @@ entry.
 - [ ] **Step 3: Verify the YAML parses syntactically**
 
 ```bash
-cd /home/chris/cubepi && uv run python -c "import yaml; yaml.safe_load(open('cubepi/catalog/data/providers.yaml'))"
+cd /home/chris/cubepi && uv run python -c "import yaml; yaml.safe_load(open('cubepi/providers/catalog/data/providers.yaml'))"
 ```
 
 Expected: no exception, no output.
@@ -2118,7 +2126,7 @@ wheels. The current `[tool.hatch.build.targets.wheel]` section in
 ```toml
 [tool.hatch.build.targets.wheel]
 packages = ["cubepi"]
-include = ["cubepi/catalog/data/*.yaml"]
+include = ["cubepi/providers/catalog/data/*.yaml"]
 ```
 
 - [ ] **Step 5: Verify the YAML is reachable via importlib resources**
@@ -2126,7 +2134,7 @@ include = ["cubepi/catalog/data/*.yaml"]
 ```bash
 cd /home/chris/cubepi && uv run python -c "
 from pathlib import Path
-import cubepi.catalog as c
+import cubepi.providers.catalog as c
 f = Path(c.__file__).parent / 'data' / 'providers.yaml'
 assert f.is_file(), f'missing: {f}'
 print('ok:', f.stat().st_size, 'bytes')
@@ -2139,7 +2147,7 @@ Expected: prints `ok: <N> bytes`.
 
 ```bash
 cd /home/chris/cubepi
-git add cubepi/catalog/data/providers.yaml pyproject.toml
+git add cubepi/providers/catalog/data/providers.yaml pyproject.toml
 git commit -m "feat(catalog): bundle 20-entry provider preset YAML"
 ```
 
@@ -2148,7 +2156,7 @@ git commit -m "feat(catalog): bundle 20-entry provider preset YAML"
 ## Task 14: Catalog loader — `list_provider_presets`, `get_provider_preset`
 
 **Files:**
-- Modify: `/home/chris/cubepi/cubepi/catalog/__init__.py`
+- Modify: `/home/chris/cubepi/cubepi/providers/catalog/__init__.py`
 - Test: `/home/chris/cubepi/tests/test_catalog.py`
 
 - [ ] **Step 1: Write the failing tests**
@@ -2157,7 +2165,7 @@ Append to `tests/test_catalog.py`:
 
 ```python
 def test_list_provider_presets_returns_all_entries():
-    from cubepi.catalog import list_provider_presets
+    from cubepi.providers.catalog import list_provider_presets
 
     presets = list_provider_presets()
     slugs = [p.slug for p in presets]
@@ -2170,8 +2178,8 @@ def test_list_provider_presets_returns_all_entries():
 
 
 def test_every_preset_parses_into_typed_model():
-    from cubepi.catalog import list_provider_presets
-    from cubepi.catalog.types import WireApi
+    from cubepi.providers.catalog import list_provider_presets
+    from cubepi.providers.catalog.types import WireApi
 
     presets = list_provider_presets()
     assert len(presets) == 20
@@ -2184,7 +2192,7 @@ def test_every_preset_parses_into_typed_model():
 
 
 def test_get_provider_preset_by_slug():
-    from cubepi.catalog import get_provider_preset
+    from cubepi.providers.catalog import get_provider_preset
 
     qwen = get_provider_preset("qwen-dashscope")
     assert qwen.api == "openai-completions"
@@ -2193,14 +2201,14 @@ def test_get_provider_preset_by_slug():
 
 def test_get_provider_preset_unknown_raises():
     import pytest
-    from cubepi.catalog import get_provider_preset
+    from cubepi.providers.catalog import get_provider_preset
 
     with pytest.raises(KeyError):
         get_provider_preset("nonexistent")
 
 
 def test_openrouter_has_model_capability_overrides():
-    from cubepi.catalog import get_provider_preset
+    from cubepi.providers.catalog import get_provider_preset
 
     p = get_provider_preset("openrouter")
     assert "deepseek/deepseek-r1" in p.model_capability_overrides
@@ -2219,7 +2227,7 @@ Expected: ImportError on `list_provider_presets`.
 
 - [ ] **Step 3: Implement the loader**
 
-Replace `cubepi/catalog/__init__.py` contents:
+Replace `cubepi/providers/catalog/__init__.py` contents:
 
 ```python
 """Provider preset catalog. See spec §3.6."""
@@ -2231,7 +2239,7 @@ from pathlib import Path
 
 import yaml
 
-from cubepi.catalog.types import ProviderPreset
+from cubepi.providers.catalog.types import ProviderPreset
 
 _DATA_FILE = Path(__file__).parent / "data" / "providers.yaml"
 
@@ -2282,7 +2290,7 @@ Expected: all pass.
 
 ```bash
 cd /home/chris/cubepi
-git add cubepi/catalog/__init__.py tests/test_catalog.py
+git add cubepi/providers/catalog/__init__.py tests/test_catalog.py
 git commit -m "feat(catalog): YAML loader with per-entry pydantic validation"
 ```
 
@@ -2320,7 +2328,7 @@ cd /home/chris/cubepi && uv run pytest tests/test_init.py -v
 Edit `cubepi/__init__.py` — append to the existing additive block:
 
 ```python
-from cubepi.catalog import get_provider_preset, list_provider_presets
+from cubepi.providers.catalog import get_provider_preset, list_provider_presets
 
 __all__ = list(__all__) + [
     "list_provider_presets",
@@ -2416,7 +2424,7 @@ gh pr create --title "feat: CapabilityDescriptor + provider preset catalog" \
 - All three Provider classes (OpenAI, OpenAIResponses, Anthropic) drive temperature, max_tokens field name, and reasoning toggle through the descriptor.
 - model_capability_overrides handles per-model divergence on a shared endpoint (OpenRouter case).
 - Retire _payload_quirks string-set hack in favor of capability.max_tokens_field.
-- Ship cubepi.catalog with 20 provider presets (Anthropic, OpenAI, Qwen/DashScope, Doubao/Volcengine, DeepSeek both shapes, Moonshot, xAI, Mistral, OpenRouter, Together, Groq, Fireworks, vLLM, Ollama, LM Studio, TGI, Custom OpenAI/Anthropic).
+- Ship cubepi.providers.catalog with 20 provider presets (Anthropic, OpenAI, Qwen/DashScope, Doubao/Volcengine, DeepSeek both shapes, Moonshot, xAI, Mistral, OpenRouter, Together, Groq, Fireworks, vLLM, Ollama, LM Studio, TGI, Custom OpenAI/Anthropic).
 
 ## Test plan
 - [ ] Unit tests for merge_capability_payload, apply_temperature, write_reasoning_level
