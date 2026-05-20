@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from contextlib import suppress
+from contextlib import AsyncExitStack, suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
@@ -1130,8 +1130,29 @@ class RunManager:
                 timestamp=_time.time(),
                 metadata=_user_msg_metadata,
             )
+            from cubebox.agents.tracing import build_run_tracer
+
+            tracer = build_run_tracer()
             try:
-                await agent.prompt(_user_msg)
+                async with AsyncExitStack() as _trace_stack:
+                    if tracer is not None:
+                        # LIFO exit: attached() detaches + awaits its flush
+                        # task first, then the tracer's __aexit__ shuts down
+                        # (force_flush + close exporters) — so this run's
+                        # spans are on disk before _run_cubepi_path returns.
+                        # attached().__aenter__ calls Recorder/provider
+                        # subscription work that can raise; isolate it so a
+                        # tracing fault runs the turn untraced rather than
+                        # failing the run.
+                        try:
+                            await _trace_stack.enter_async_context(tracer)
+                            await _trace_stack.enter_async_context(tracer.attached(agent))
+                        except Exception as _trace_exc:
+                            logger.warning(
+                                "Tracing attach failed, continuing untraced: {}", _trace_exc
+                            )
+                            await _trace_stack.aclose()
+                    await agent.prompt(_user_msg)
             finally:
                 # Signal drainer and wait for it to flush remaining events so
                 # all SSE dicts are published before citation buffers flush.
