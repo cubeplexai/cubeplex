@@ -3,14 +3,16 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
+
+WireApi = Literal["openai-completions", "openai-responses", "anthropic-messages"]
 
 
 class ProviderCreate(BaseModel):
     name: str = Field(max_length=64)
-    provider_type: str = Field(default="openai-completions", max_length=32)
+    provider_type: WireApi = "openai-completions"
     base_url: str = Field(max_length=2048)
     auth_type: str = Field(default="api_key", max_length=32)
     api_key: str | None = Field(default=None, max_length=512)
@@ -21,7 +23,7 @@ class ProviderCreate(BaseModel):
 
 class ProviderUpdate(BaseModel):
     name: str | None = Field(default=None, max_length=64)
-    provider_type: str | None = Field(default=None, max_length=32)
+    provider_type: WireApi | None = None
     base_url: str | None = Field(default=None, max_length=2048)
     auth_type: str | None = Field(default=None, max_length=32)
     api_key: str | None = Field(default=None, max_length=512)
@@ -43,7 +45,7 @@ class ProviderLivenessRequest(BaseModel):
     """
 
     preset_slug: str | None = Field(default=None, max_length=64)
-    api: str = Field(default="openai-completions", max_length=32)
+    api: WireApi = "openai-completions"
     base_url: str = Field(max_length=2048)
     api_key: str | None = Field(default=None, max_length=512)
     capability: dict[str, Any] = Field(default_factory=dict)
@@ -135,6 +137,9 @@ class ModelReadinessOut(ModelOut):
 class ProviderOut(BaseModel):
     id: str
     name: str
+    # Read-side: reflects the DB column (a plain str). The 3-literal contract is
+    # enforced on the write path (ProviderCreate/ProviderUpdate), so stored values
+    # are already canonical; no need to re-validate on every read.
     provider_type: str
     base_url: str
     auth_type: str

@@ -17,10 +17,10 @@ from cubebox.services.task_model_resolver import resolve_task_model
 def _providers() -> dict[str, ProviderConfig]:
     return {
         "anthropic": ProviderConfig(
-            api="anthropic", base_url="https://api.anthropic.com", api_key="sk-a"
+            api="anthropic-messages", base_url="https://api.anthropic.com", api_key="sk-a"
         ),
         "haiku-provider": ProviderConfig(
-            api="anthropic", base_url="https://api.anthropic.com", api_key="sk-h"
+            api="anthropic-messages", base_url="https://api.anthropic.com", api_key="sk-h"
         ),
         "yamlprov": ProviderConfig(
             api="openai-completions", base_url="https://y.example", api_key="sk-y"

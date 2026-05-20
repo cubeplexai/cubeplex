@@ -7,7 +7,6 @@ import type {
   Model,
   ModelCreate,
   ModelUpdate,
-  TestResult,
   OrgLLMSettings,
   OrgLLMSettingsUpdate,
 } from '../types/provider'
@@ -43,30 +42,6 @@ export async function updateProvider(
 export async function deleteProvider(client: ApiClient, id: string): Promise<void> {
   const res = await client.del(`/api/v1/admin/providers/${id}`)
   if (!res.ok) throw await toApiError(res)
-}
-
-export async function testConnection(
-  client: ApiClient,
-  body: {
-    provider_type: string
-    base_url: string
-    api_key?: string | null
-    auth_type: string
-  },
-): Promise<TestResult> {
-  const res = await client.post('/api/v1/admin/providers/test', body)
-  if (!res.ok) throw await toApiError(res)
-  return res.json() as Promise<TestResult>
-}
-
-export async function testModel(
-  client: ApiClient,
-  providerId: string,
-  body: { model_id: string },
-): Promise<TestResult> {
-  const res = await client.post(`/api/v1/admin/providers/${providerId}/models/test`, body)
-  if (!res.ok) throw await toApiError(res)
-  return res.json() as Promise<TestResult>
 }
 
 export async function createModel(

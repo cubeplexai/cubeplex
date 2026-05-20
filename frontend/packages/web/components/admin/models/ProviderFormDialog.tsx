@@ -19,7 +19,7 @@ import { cn } from '@/lib/utils'
 
 type AuthType = 'api_key' | 'oauth' | 'none'
 
-const PROVIDER_TYPES = ['openai_compat', 'openai', 'anthropic'] as const
+const PROVIDER_TYPES = ['openai-completions', 'openai-responses', 'anthropic-messages'] as const
 
 interface ProviderFormDialogProps {
   open: boolean
@@ -40,7 +40,7 @@ export function ProviderFormDialog({
   const [error, setError] = useState<string | null>(null)
 
   const [name, setName] = useState('')
-  const [providerType, setProviderType] = useState('openai_compat')
+  const [providerType, setProviderType] = useState('openai-completions')
   const [baseUrl, setBaseUrl] = useState('')
   const [authType, setAuthType] = useState<AuthType>('api_key')
   const [apiKey, setApiKey] = useState('')
@@ -64,7 +64,7 @@ export function ProviderFormDialog({
         )
       } else {
         setName('')
-        setProviderType('openai_compat')
+        setProviderType('openai-completions')
         setBaseUrl('')
         setAuthType('api_key')
         setApiKey('')

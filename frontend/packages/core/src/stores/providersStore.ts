@@ -1,13 +1,7 @@
 import { create } from 'zustand'
 import type { ApiClient } from '../api/client'
-import {
-  fetchProviders,
-  createProvider,
-  updateProvider,
-  deleteProvider,
-  testConnection,
-} from '../api/providers'
-import type { Provider, ProviderCreate, ProviderUpdate, TestResult } from '../types/provider'
+import { fetchProviders, createProvider, updateProvider, deleteProvider } from '../api/providers'
+import type { Provider, ProviderCreate, ProviderUpdate } from '../types/provider'
 
 interface ProvidersState {
   providers: Provider[]
@@ -19,10 +13,6 @@ interface ProvidersState {
   createProvider: (client: ApiClient, body: ProviderCreate) => Promise<Provider>
   updateProvider: (client: ApiClient, id: string, body: ProviderUpdate) => Promise<void>
   deleteProvider: (client: ApiClient, id: string) => Promise<void>
-  testConnection: (
-    client: ApiClient,
-    body: { provider_type: string; base_url: string; api_key?: string | null; auth_type: string },
-  ) => Promise<TestResult>
 }
 
 export const useProvidersStore = create<ProvidersState>((set, _get) => ({
@@ -62,9 +52,5 @@ export const useProvidersStore = create<ProvidersState>((set, _get) => ({
       providers: s.providers.filter((p) => p.id !== id),
       selectedId: s.selectedId === id ? null : s.selectedId,
     }))
-  },
-
-  testConnection: async (client, body) => {
-    return testConnection(client, body)
   },
 }))

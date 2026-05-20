@@ -21,7 +21,7 @@ def test_build_cubepi_provider_routes_anthropic() -> None:
     factory = _mk_factory(
         {
             "anthropic": ProviderConfig(
-                api="anthropic",
+                api="anthropic-messages",
                 base_url="https://api.anthropic.com",
                 api_key="sk-test",
             ),
@@ -68,7 +68,7 @@ def test_build_cubepi_provider_unknown_api_raises() -> None:
     factory = _mk_factory(
         {
             "weird": ProviderConfig(
-                api="anthropic",  # valid; we'll override below
+                api="anthropic-messages",  # valid; we'll override below
                 base_url="https://x.com",
                 api_key="sk",
             ),
@@ -87,7 +87,7 @@ def test_build_cubepi_provider_anthropic_accepts_cache_policy() -> None:
     factory = _mk_factory(
         {
             "anthropic": ProviderConfig(
-                api="anthropic",
+                api="anthropic-messages",
                 base_url="https://api.anthropic.com",
                 api_key="sk-test",
             ),

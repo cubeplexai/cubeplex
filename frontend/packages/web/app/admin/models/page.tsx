@@ -32,7 +32,6 @@ export default function ModelsPage() {
     createModel,
     updateModel,
     deleteModel,
-    testModel,
   } = useModelsStore()
 
   const [query, setQuery] = useState('')
@@ -110,7 +109,6 @@ export default function ModelsPage() {
               onCreateModel={createModel}
               onUpdateModel={updateModel}
               onDeleteModel={deleteModel}
-              onTestModel={testModel}
             />
           ) : (
             <div className="flex h-full w-full items-center justify-center text-sm text-muted-foreground">

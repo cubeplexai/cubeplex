@@ -10,7 +10,6 @@ import type {
   ModelUpdate,
   Provider,
   ProviderUpdate,
-  TestResult,
 } from '@cubebox/core'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -36,11 +35,6 @@ interface ProviderDetailProps {
     body: ModelUpdate,
   ) => Promise<void>
   onDeleteModel: (client: ApiClient, providerId: string, modelId: string) => Promise<void>
-  onTestModel: (
-    client: ApiClient,
-    providerId: string,
-    body: { model_id: string },
-  ) => Promise<TestResult>
 }
 
 function authTypeLabel(
@@ -72,7 +66,6 @@ export function ProviderDetail({
   onCreateModel,
   onUpdateModel,
   onDeleteModel,
-  onTestModel,
 }: ProviderDetailProps) {
   const t = useTranslations('adminModels')
   const tExtra = useTranslations('adminModelsExtra')
@@ -291,14 +284,12 @@ export function ProviderDetail({
               <ModelRow
                 key={m.id}
                 model={m}
-                client={client}
                 onEdit={(model) => {
                   setEditingModel(model)
                   setModelError(null)
                   setModelFormOpen(true)
                 }}
                 onDelete={(model) => void handleDeleteModel(model)}
-                onTest={onTestModel}
               />
             ))}
           </div>
@@ -319,9 +310,6 @@ export function ProviderDetail({
           if (!open) setEditingModel(null)
         }}
         model={editingModel}
-        providerId={provider.id}
-        client={client}
-        onTest={onTestModel}
         onSave={
           editingModel
             ? (body) => handleUpdateModel(body as ModelUpdate)
