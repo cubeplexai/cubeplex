@@ -7,7 +7,8 @@ from __future__ import annotations
 
 import asyncio
 import time
-from typing import Any, Literal
+from collections.abc import Callable
+from typing import Any, Literal, cast
 
 from cubepi.providers.base import (
     Model,
@@ -239,3 +240,85 @@ def probe_streaming(*, observed_chunks: int, name: str = "streaming") -> ProbeSt
     if observed_chunks > 0:
         return ProbeStep(name="streaming", status="pass", detail=f"{observed_chunks} chunks")
     return ProbeStep(name="streaming", status="warn", detail="no SSE chunks observed")
+
+
+# Case-insensitive markers a vendor uses to say the model doesn't exist. Paired
+# with a 404 raw_status, these are the only signals that map probe → "unavailable".
+_MODEL_NOT_FOUND_MARKERS = (
+    "model_not_found",
+    "model not found",
+    "does not exist",
+    "unknown model",
+    "no such model",
+    "invalid model",
+)
+
+
+def _error_says_model_not_found(error: ProbeError) -> bool:
+    """Raw check: does this error mean the vendor lacks the model?
+
+    Keys on a 404 raw_status or a known marker in the error type/message.
+    Used by _is_model_not_found and by run_model_probe's robustness path, where
+    the advisory temperature/tools steps carry the error on a *warn* status.
+    """
+    if error.raw_status == 404:
+        return True
+    haystack = f"{error.type} {error.message}".lower()
+    return any(marker in haystack for marker in _MODEL_NOT_FOUND_MARKERS)
+
+
+def _is_model_not_found(step: ProbeStep) -> bool:
+    """True only when a failed step's error means the vendor lacks the model.
+
+    Keys on either a 404 raw_status or a known marker in the error type/message.
+    skip/warn steps are never model_not_found.
+    """
+    if step.status != "fail" or step.error is None:
+        return False
+    return _error_says_model_not_found(step.error)
+
+
+async def run_liveness(*, provider_factory: Callable[[], Any], model_id: str) -> ProbeStep:
+    """Phase A — provider grain. One minimal call against any model.
+    Caller persists the result to providers.last_liveness_*."""
+    provider = provider_factory()
+    return await probe_liveness(provider, model_id=model_id)
+
+
+async def run_model_probe(
+    *, provider_factory: Callable[[], Any], model_id: str, capability: CapabilityDescriptor
+) -> ProbeResult:
+    """Phase B — model grain. Assumes phase A already passed. Runs the
+    capability steps and aggregates. Caller persists to that model's last_test_*."""
+    provider = provider_factory()
+    reasoning = await probe_reasoning_toggle(provider, model_id=model_id, capability=capability)
+    if _is_model_not_found(reasoning):
+        return ProbeResult(overall="unavailable", blocking_failed=True, steps=[reasoning])
+    temperature, tools = await asyncio.gather(
+        probe_temperature(provider, model_id=model_id, capability=capability),
+        probe_tools(provider, model_id=model_id, capability=capability),
+        return_exceptions=False,
+    )
+    # ROBUSTNESS: when capability has no reasoning payloads, probe_reasoning_toggle
+    # SKIPS (no real call), so it can't catch model_not_found. In that case the
+    # first real calls are temperature/tools — check them too. Those advisory
+    # steps only ever WARN (never block), so we inspect the carried error directly
+    # rather than via _is_model_not_found (which gates on a fail status).
+    if reasoning.status == "skip":
+        for s in (temperature, tools):
+            if s.error is not None and _error_says_model_not_found(s.error):
+                return ProbeResult(
+                    overall="unavailable",
+                    blocking_failed=True,
+                    steps=[reasoning, temperature, tools],
+                )
+    streaming = probe_streaming(observed_chunks=reasoning.observed_chunks)
+    steps = [reasoning, temperature, tools, streaming]
+    overall, blocked = _aggregate_overall(steps)
+    # _aggregate_overall is typed str but only yields pass/fail/warn here; the
+    # "unavailable" verdict is reached via the short-circuit returns above.
+    return ProbeResult(
+        overall=cast(Literal["pass", "fail", "warn"], overall),
+        blocking_failed=blocked,
+        steps=steps,
+    )

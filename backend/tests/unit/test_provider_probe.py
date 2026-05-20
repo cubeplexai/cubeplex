@@ -10,11 +10,14 @@ from cubebox.services.provider_probe import (
     ProbeError,
     ProbeStep,
     _aggregate_overall,
+    _is_model_not_found,
     probe_liveness,
     probe_reasoning_toggle,
     probe_streaming,
     probe_temperature,
     probe_tools,
+    run_liveness,
+    run_model_probe,
 )
 
 
@@ -178,3 +181,127 @@ def test_probe_streaming_passes_on_chunks():
     step = probe_streaming(observed_chunks=3)
     assert step.status == "pass"
     assert "3" in step.detail
+
+
+# --- Task 9: orchestrators + model_not_found classifier ---------------------
+
+
+_GOOD_EVENT = type("E", (), {"type": "text_delta", "delta": "OK"})
+
+
+def _good_event():
+    return _GOOD_EVENT()
+
+
+def _reasoning_cap():
+    from cubepi.providers.capability import CapabilityDescriptor
+
+    return CapabilityDescriptor(
+        reasoning_off_payload={"extra_body": {"enable_thinking": False}},
+        reasoning_on_payload={"extra_body": {"enable_thinking": True}},
+    )
+
+
+class _NotFoundError(Exception):
+    """Vendor-style 404 exposing a status_code attribute."""
+
+    def __init__(self, message: str, status_code: int = 404):
+        super().__init__(message)
+        self.status_code = status_code
+
+
+def test_is_model_not_found_classifier():
+    not_found_404 = ProbeStep(
+        name="reasoning",
+        status="fail",
+        error=ProbeError(type="NotFoundError", message="boom", raw_status=404),
+    )
+    assert _is_model_not_found(not_found_404) is True
+
+    not_found_message = ProbeStep(
+        name="reasoning",
+        status="fail",
+        error=ProbeError(type="RuntimeError", message="error: model_not_found"),
+    )
+    assert _is_model_not_found(not_found_message) is True
+
+    warn_step = ProbeStep(name="tools", status="warn", detail="advisory only")
+    assert _is_model_not_found(warn_step) is False
+
+    other_fail = ProbeStep(
+        name="reasoning",
+        status="fail",
+        error=ProbeError(type="AuthError", message="401 Unauthorized", raw_status=401),
+    )
+    assert _is_model_not_found(other_fail) is False
+
+
+@pytest.mark.asyncio
+async def test_run_liveness_pass_and_fail():
+    good = run_liveness(
+        provider_factory=lambda: _StubProvider(events=[_good_event()]),
+        model_id="m",
+    )
+    step = await good
+    assert step.name == "liveness"
+    assert step.status == "pass"
+
+    bad = run_liveness(
+        provider_factory=lambda: _StubProvider(raise_error=RuntimeError("401 ...")),
+        model_id="m",
+    )
+    fail_step = await bad
+    assert fail_step.name == "liveness"
+    assert fail_step.status == "fail"
+
+
+@pytest.mark.asyncio
+async def test_run_model_probe_happy_path():
+    # Default capability has supports_tools=True, so the tools probe runs and
+    # needs a toolcall event to pass; pair it with a text delta for reasoning.
+    happy_events = [
+        type("E", (), {"type": "toolcall_start"})(),
+        _good_event(),
+    ]
+    result = await run_model_probe(
+        provider_factory=lambda: _StubProvider(events=happy_events),
+        model_id="m",
+        capability=_reasoning_cap(),
+    )
+    assert result.overall == "pass"
+    assert result.blocking_failed is False
+    names = [s.name for s in result.steps]
+    assert "reasoning" in names
+    assert "liveness" not in names
+
+
+@pytest.mark.asyncio
+async def test_run_model_probe_model_not_found_is_unavailable():
+    result = await run_model_probe(
+        provider_factory=lambda: _StubProvider(
+            raise_error=_NotFoundError("model_not_found", status_code=404)
+        ),
+        model_id="m",
+        capability=_reasoning_cap(),
+    )
+    assert result.overall == "unavailable"
+    assert result.blocking_failed is True
+
+
+@pytest.mark.asyncio
+async def test_run_model_probe_skipped_reasoning_still_detects_unavailable():
+    from cubepi.providers.capability import CapabilityDescriptor, TemperatureSpec
+
+    # Empty reasoning payloads → reasoning SKIPS, so temperature is the first
+    # real call. The stub always raises model_not_found, so the robustness path
+    # in run_model_probe must catch it on temperature/tools.
+    cap = CapabilityDescriptor(temperature=TemperatureSpec(mode="free", default=1.0))
+    result = await run_model_probe(
+        provider_factory=lambda: _StubProvider(
+            raise_error=_NotFoundError("model_not_found", status_code=404)
+        ),
+        model_id="m",
+        capability=cap,
+    )
+    assert result.overall == "unavailable"
+    assert result.blocking_failed is True
