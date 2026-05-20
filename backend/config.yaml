@@ -293,3 +293,12 @@ default:
     max_summary_tokens: 1024
     min_compact_messages: 4
     fallback_context_window: 64000
+
+  # cubepi agent tracing (OTLP/JSON spans on disk; default off; opt-in per env)
+  # When enabled, each run writes <directory>/<YYYY-MM-DD>/<run_id>.jsonl.
+  tracing:
+    enabled: false
+    directory: "./cubepi-traces"
+    # record_content=true captures full prompts / responses / tool args+results
+    # in the trace — useful for debugging, larger files, may contain sensitive data.
+    record_content: false

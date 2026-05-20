@@ -29,3 +29,8 @@ development:
   parsers:
     docling_serve:
       base_url: "http://localhost:5001"
+
+  # Tracing on by default in dev so local runs emit trace files.
+  tracing:
+    enabled: true
+    record_content: true
