@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from cubebox.api.schemas.provider import (
     ModelCreate,
     ModelOut,
+    ModelReadinessOut,
     ModelTest,
     ModelUpdate,
     OrgLLMSettingsOut,
@@ -26,6 +27,7 @@ from cubebox.api.schemas.provider import (
 from cubebox.auth.dependencies import require_org_admin, resolve_current_org_id
 from cubebox.credentials.dependencies import build_credential_service
 from cubebox.db import get_session
+from cubebox.llm.readiness import capability_fingerprint, derive_readiness
 from cubebox.models import User
 from cubebox.models.org_provider_override import OrgProviderOverride
 from cubebox.models.provider import Model, Provider
@@ -42,6 +44,7 @@ from cubebox.services.provider_service import (
     ProviderService,
     ProviderSystemReadonlyError,
 )
+from cubebox.utils.time import utc_isoformat
 
 router = APIRouter(prefix="/admin", tags=["admin-providers"])
 
@@ -89,6 +92,53 @@ def _model_out(m: Model) -> ModelOut:
     )
 
 
+def _model_readiness_out(m: Model, p: Provider) -> ModelReadinessOut:
+    """Build a model row with per-model status + server-derived readiness.
+
+    The `stale` signal compares the provider's current capability fingerprint
+    against the one stored in the model's `last_test_summary` by the probe. When
+    no fingerprint is stored yet (the common case until the probe persists one),
+    capability is treated as unchanged (not stale).
+    """
+    summary = m.last_test_summary or {}
+    stored_fp = summary.get("capability_fingerprint")
+    if stored_fp is None:
+        capability_changed = False
+    else:
+        current_fp = capability_fingerprint(p.capability, p.model_capability_overrides)
+        capability_changed = stored_fp != current_fp
+
+    readiness = derive_readiness(
+        liveness_status=p.last_liveness_status,
+        model_test_status=m.last_test_status,
+        capability_changed_since_test=capability_changed,
+    )
+    return ModelReadinessOut(
+        id=m.id,
+        provider_id=m.provider_id,
+        model_id=m.model_id,
+        display_name=m.display_name,
+        reasoning=m.reasoning,
+        input_modalities=m.input_modalities,
+        cost_input=m.cost_input,
+        cost_output=m.cost_output,
+        cost_cache_read=m.cost_cache_read,
+        cost_cache_write=m.cost_cache_write,
+        context_window=m.context_window,
+        max_tokens=m.max_tokens,
+        extra_body=m.extra_body,
+        extra_headers=m.extra_headers,
+        enabled=m.enabled,
+        is_system=m.org_id is None,
+        created_at=m.created_at,
+        updated_at=m.updated_at,
+        last_test_at=utc_isoformat(m.last_test_at) if m.last_test_at else None,
+        last_test_status=m.last_test_status,
+        last_test_summary=summary,
+        readiness=readiness,
+    )
+
+
 def _provider_out(
     p: Provider,
     model_count: int = 0,
@@ -106,10 +156,15 @@ def _provider_out(
         enabled=p.enabled,
         is_system=p.org_id is None,
         model_count=model_count,
-        models=[_model_out(m) for m in models] if models is not None else None,
+        models=[_model_readiness_out(m, p) for m in models] if models is not None else None,
         org_override=OrgProviderOverrideOut(enabled=override.enabled) if override else None,
         extra_body=p.extra_body,
         extra_headers=p.extra_headers,
+        capability=p.capability or {},
+        model_capability_overrides=p.model_capability_overrides or {},
+        last_liveness_at=utc_isoformat(p.last_liveness_at) if p.last_liveness_at else None,
+        last_liveness_status=p.last_liveness_status,
+        last_liveness_summary=p.last_liveness_summary or {},
         created_by_user_id=p.created_by_user_id,
         created_at=p.created_at,
         updated_at=p.updated_at,
