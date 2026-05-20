@@ -1,8 +1,13 @@
-"""Build a per-run cubepi Tracer from cubebox config.
+"""Build the process-level cubepi Tracer from cubebox config.
 
 Tracing is opt-in via the ``tracing:`` config block. When disabled — or when
-construction fails for any reason — the run proceeds untraced. A tracing fault
-must never break a run, so every failure path returns ``None``.
+construction fails for any reason — this returns ``None`` and runs proceed
+untraced. A tracing fault must never break the app, so every failure path
+returns ``None``.
+
+The Tracer is built once at app startup and reused across runs (each run
+attaches/detaches via :func:`cubepi.tracing.trace`); it is shut down once at
+app shutdown.
 """
 
 from __future__ import annotations
@@ -17,7 +22,7 @@ if TYPE_CHECKING:
     from cubepi.tracing import Tracer
 
 
-def build_run_tracer() -> Tracer | None:
+def build_tracer() -> Tracer | None:
     """Return a configured cubepi Tracer, or ``None`` when tracing is disabled.
 
     Reads ``tracing.enabled`` / ``tracing.directory`` / ``tracing.record_content``

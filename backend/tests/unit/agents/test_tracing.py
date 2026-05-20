@@ -1,4 +1,4 @@
-"""Unit tests for the per-run cubepi Tracer factory."""
+"""Unit tests for the process-level cubepi Tracer factory."""
 
 from __future__ import annotations
 
@@ -17,19 +17,19 @@ def _fake_config(values: dict[str, object]):
     return _Stub()
 
 
-def test_build_run_tracer_disabled_returns_none(monkeypatch):
+def test_build_tracer_disabled_returns_none(monkeypatch):
     monkeypatch.setattr(tracing_mod, "config", _fake_config({"tracing.enabled": False}))
-    assert tracing_mod.build_run_tracer() is None
+    assert tracing_mod.build_tracer() is None
 
 
-def test_build_run_tracer_missing_key_defaults_disabled(monkeypatch):
+def test_build_tracer_missing_key_defaults_disabled(monkeypatch):
     # No tracing.enabled key at all -> default False -> None.
     monkeypatch.setattr(tracing_mod, "config", _fake_config({}))
-    assert tracing_mod.build_run_tracer() is None
+    assert tracing_mod.build_tracer() is None
 
 
 @pytest.mark.asyncio
-async def test_build_run_tracer_enabled_returns_tracer(monkeypatch, tmp_path):
+async def test_build_tracer_enabled_returns_tracer(monkeypatch, tmp_path):
     from cubepi.tracing import Tracer
 
     monkeypatch.setattr(
@@ -44,7 +44,7 @@ async def test_build_run_tracer_enabled_returns_tracer(monkeypatch, tmp_path):
             }
         ),
     )
-    tracer = tracing_mod.build_run_tracer()
+    tracer = tracing_mod.build_tracer()
     assert isinstance(tracer, Tracer)
     # Clean up so the BatchSpanProcessor / atexit hook doesn't leak.
     await tracer.shutdown()

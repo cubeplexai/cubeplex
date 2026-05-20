@@ -56,6 +56,14 @@ async def lifespan(_app: FastAPI):  # type: ignore
     logger.info("Application starting up")
     _app.state.encryption_backend = _build_encryption_backend()
     _app.state.mcp_user_token_signer = _build_mcp_user_token_signer()
+
+    # Build the process-level cubepi Tracer once (None when tracing is disabled
+    # or unavailable). Each run attaches/detaches it via cubepi.tracing.trace;
+    # it is shut down in the shutdown phase below.
+    from cubebox.agents.tracing import build_tracer
+
+    _app.state.tracer = build_tracer()
+
     from cubebox.audit.sink import NoOpAuditSink
 
     _app.state.audit_sink = NoOpAuditSink()
@@ -306,6 +314,12 @@ async def lifespan(_app: FastAPI):  # type: ignore
         _app.state.drain_state.enter_draining()
         drain_timeout = _lifecycle_config.get("lifecycle.graceful_drain_timeout_seconds", 3600)
         await run_manager.drain(timeout_seconds=float(drain_timeout))
+    tracer = getattr(_app.state, "tracer", None)
+    if tracer is not None:
+        try:
+            await tracer.shutdown()
+        except Exception as exc:  # tracing teardown must never break shutdown
+            logger.warning("Tracer shutdown failed: {}", exc)
     if redis_client is not None:
         await redis_client.aclose()
     mcp_oauth_http_client = getattr(_app.state, "_mcp_oauth_http_client", None)
