@@ -267,6 +267,31 @@ def _error_says_model_not_found(error: ProbeError) -> bool:
     return any(marker in haystack for marker in _MODEL_NOT_FOUND_MARKERS)
 
 
+# Case-insensitive markers a vendor uses to say the credential is bad. Paired
+# with a 401/403 raw_status, these map a runtime error → provider liveness fail.
+_AUTH_ERROR_MARKERS = (
+    "unauthorized",
+    "invalid api key",
+    "invalid_api_key",
+    "authentication",
+    "incorrect api key",
+    "permission denied",
+    "forbidden",
+)
+
+
+def _error_says_auth_failure(error: ProbeError) -> bool:
+    """Raw check: does this error mean the provider credential is rejected?
+
+    Keys on a 401/403 raw_status or a known marker in the error type/message.
+    Used by the runtime status writeback to flip provider liveness to "fail".
+    """
+    if error.raw_status in (401, 403):
+        return True
+    haystack = f"{error.type} {error.message}".lower()
+    return any(marker in haystack for marker in _AUTH_ERROR_MARKERS)
+
+
 def _is_model_not_found(step: ProbeStep) -> bool:
     """True only when a failed step's error means the vendor lacks the model.
 

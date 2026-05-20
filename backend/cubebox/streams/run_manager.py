@@ -1136,10 +1136,33 @@ class RunManager:
             # no-op when tracing is disabled (tracer is None).
             from cubepi.tracing import trace
 
+            from cubebox.llm.runtime_writeback import (
+                schedule_runtime_status_writeback as _schedule_writeback,
+            )
+
             tracer = getattr(self._app.state, "tracer", None)
             try:
                 async with trace(tracer, agent):
                     await agent.prompt(_user_msg)
+            except BaseException as _run_exc:
+                # Out-of-band, best-effort: a 401/403 flips provider liveness to
+                # "fail"; a model_not_found flips this model to "unavailable".
+                # Never blocks or alters the live request — we re-raise as-is.
+                _schedule_writeback(
+                    org_id=ctx.org_id,
+                    provider_name=provider_name,
+                    model_id=model_id,
+                    exc=_run_exc,
+                )
+                raise
+            else:
+                # Success clears a stale liveness "fail" via a guarded UPDATE.
+                _schedule_writeback(
+                    org_id=ctx.org_id,
+                    provider_name=provider_name,
+                    model_id=model_id,
+                    exc=None,
+                )
             finally:
                 # Signal drainer and wait for it to flush remaining events so
                 # all SSE dicts are published before citation buffers flush.

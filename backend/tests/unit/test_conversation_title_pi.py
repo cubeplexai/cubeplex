@@ -53,7 +53,7 @@ async def test_generate_title_returns_streamed_text() -> None:
     provider.set_responses([faux_assistant_message("Quick chat about Tokyo")])
 
     factory = _make_fake_factory(provider)
-    text = await _generate_title(factory, "title prompt")  # type: ignore[arg-type]
+    text = await _generate_title(factory, "title prompt", org_id="org-x")  # type: ignore[arg-type]
 
     assert "Tokyo" in text
 
@@ -68,7 +68,7 @@ async def test_generate_title_raises_on_error_event() -> None:
 
     factory = _make_fake_factory(provider)
     with pytest.raises(RuntimeError, match="No more faux responses queued"):
-        await _generate_title(factory, "prompt")  # type: ignore[arg-type]
+        await _generate_title(factory, "prompt", org_id="org-x")  # type: ignore[arg-type]
 
 
 @pytest.mark.asyncio
@@ -84,7 +84,7 @@ async def test_generate_title_empty_response_returns_empty() -> None:
     provider.set_responses([faux_assistant_message("")])
 
     factory = _make_fake_factory(provider)
-    text = await _generate_title(factory, "prompt")  # type: ignore[arg-type]
+    text = await _generate_title(factory, "prompt", org_id="org-x")  # type: ignore[arg-type]
     assert text == ""
 
 
@@ -97,6 +97,6 @@ async def test_generate_title_provider_called_once() -> None:
     provider.set_responses([faux_assistant_message("A title")])
 
     factory = _make_fake_factory(provider)
-    await _generate_title(factory, "some prompt")  # type: ignore[arg-type]
+    await _generate_title(factory, "some prompt", org_id="org-x")  # type: ignore[arg-type]
 
     assert provider.call_count == 1
