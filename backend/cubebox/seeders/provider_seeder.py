@@ -8,6 +8,7 @@ migration.
 
 from typing import Any
 
+from cubepi.providers.catalog import get_provider_preset
 from loguru import logger
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -18,6 +19,24 @@ from cubebox.models import Credential
 from cubebox.models.provider import Model, Provider
 
 _PROVIDER_KEY_KIND = "provider_api_key"
+
+
+def _capability_for(slug: str) -> tuple[dict[str, Any], dict[str, Any]] | None:
+    """Resolve a cubepi preset slug to its cached capability snapshot.
+
+    Returns ``(capability, model_capability_overrides)`` as JSON-ready dicts, or
+    ``None`` when the slug is not a known preset. The mapping key is the provider
+    ``name`` matched exactly against a preset slug.
+    """
+    try:
+        preset = get_provider_preset(slug)
+    except KeyError:
+        return None
+    capability = preset.capability.model_dump(mode="json")
+    overrides = {
+        mid: cap.model_dump(mode="json") for mid, cap in preset.model_capability_overrides.items()
+    }
+    return capability, overrides
 
 
 async def _upsert_system_credential(
@@ -122,6 +141,19 @@ async def seed_system_providers_from_config(
             provider.base_url = base_url
             provider.provider_type = provider_type
             logger.debug("System provider '{}' already exists, updated", name)
+
+        # Backfill cached capability snapshot from the cubepi preset catalog.
+        # The mapping key is the provider name matched exactly against a preset
+        # slug. Only fill when the row's capability is still empty so re-seeding
+        # never clobbers admin edits.
+        if not provider.capability:
+            resolved = _capability_for(name)
+            if resolved is not None:
+                capability, overrides = resolved
+                provider.preset_slug = name
+                provider.capability = capability
+                provider.model_capability_overrides = overrides
+                logger.info("Seeded capability snapshot for provider '{}' (slug={})", name, name)
 
         api_key_raw = cfg_dict.get("api_key")
         api_key: str | None = (

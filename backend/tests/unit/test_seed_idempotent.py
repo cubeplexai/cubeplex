@@ -96,3 +96,52 @@ async def test_seed_updates_existing_provider_url(
     ).scalar_one()
     assert updated.base_url != "http://old-url"
     assert updated.provider_type == "openai-completions"
+
+
+async def test_seed_backfills_capability_for_known_slug(
+    clean_db: AsyncSession,
+    backend: FernetBackend,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A provider whose name matches a cubepi preset slug gets its capability snapshot.
+
+    ``vllm`` is a cubepi preset slug, so when the seed config declares a provider
+    named ``vllm`` the seeder must fill ``preset_slug`` + ``capability`` from the
+    catalog. A provider whose name has no matching preset is left empty.
+    """
+    fake_llm = {
+        "providers": {
+            "vllm": {
+                "base_url": "http://localhost:8000/v1",
+                "api": "openai-completions",
+                "models": [{"id": "qwen", "name": "Qwen"}],
+            },
+            "house-brand": {
+                "base_url": "http://localhost:9000/v1",
+                "api": "openai-completions",
+                "models": [{"id": "house", "name": "House"}],
+            },
+        }
+    }
+    monkeypatch.setattr(
+        "cubebox.seeders.provider_seeder.settings",
+        {"llm": fake_llm},
+        raising=True,
+    )
+
+    await seed_system_providers_from_config(clean_db, backend)
+
+    vllm = (
+        await clean_db.execute(select(Provider).where(Provider.name == "vllm"))
+    ).scalar_one_or_none()
+    assert vllm is not None, "expected a seeded 'vllm' provider"
+    assert vllm.preset_slug == "vllm"
+    assert vllm.capability, "capability snapshot must be populated for a known slug"
+    assert "supports_tools" in vllm.capability
+
+    # No preset matches this name -> capability stays empty.
+    house = (
+        await clean_db.execute(select(Provider).where(Provider.name == "house-brand"))
+    ).scalar_one()
+    assert house.preset_slug is None
+    assert not house.capability
