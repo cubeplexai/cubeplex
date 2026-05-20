@@ -157,6 +157,9 @@ exclude_lines = [
     "@abstractmethod",
 ]
 
+[tool.uv.sources]
+cubepi = { git = "https://github.com/cubeplexai/cubepi.git", rev = "b8ea8a8" }
+
 [dependency-groups]
 dev = [
     "aiosqlite>=0.20",
