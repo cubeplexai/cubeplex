@@ -5,8 +5,18 @@ See spec §4.4 for the two-phase sequence (liveness + per-model capability).
 
 from __future__ import annotations
 
-from typing import Literal
+import asyncio
+import time
+from typing import Any, Literal
 
+from cubepi.providers.base import (
+    Model,
+    StreamOptions,
+    TextContent,
+    ThinkingLevel,
+    UserMessage,
+)
+from cubepi.providers.capability import CapabilityDescriptor
 from pydantic import BaseModel, Field
 
 ProbeStepName = Literal["liveness", "reasoning", "temperature", "tools", "streaming"]
@@ -54,3 +64,90 @@ def _aggregate_overall(steps: list[ProbeStep]) -> tuple[str, bool]:
     if any(s.status in ("fail", "warn") for s in steps):
         return "warn", False
     return "pass", False
+
+
+def _probe_error(exc: Exception) -> ProbeError:
+    """Build a ProbeError from an exception, defensively extracting a status code.
+
+    raw_status is what Task 9's model_not_found classifier keys on, so we check
+    the common shapes: a top-level ``status_code`` or one on a ``response`` attr.
+    """
+    raw_status = getattr(exc, "status_code", None)
+    if raw_status is None:
+        raw_status = getattr(getattr(exc, "response", None), "status_code", None)
+    if not isinstance(raw_status, int):
+        raw_status = None
+    return ProbeError(type=type(exc).__name__, message=str(exc)[:200], raw_status=raw_status)
+
+
+async def _drain_stream(
+    provider: Any,
+    model_id: str,
+    *,
+    thinking: ThinkingLevel = "off",
+    prompt: str = "Reply with OK.",
+    max_output: int = 64,
+    max_seconds: float = 15.0,
+) -> tuple[list[Any], float]:
+    """Run a minimal stream, draining events. Return (events, elapsed_seconds)."""
+    start = time.perf_counter()
+    stream = await asyncio.wait_for(
+        provider.stream(
+            model=Model(id=model_id, provider="probe", context_window=8192, max_tokens=max_output),
+            messages=[UserMessage(content=[TextContent(text=prompt)])],
+            options=StreamOptions(thinking=thinking),
+        ),
+        timeout=max_seconds,
+    )
+    events: list[Any] = []
+    async for evt in stream:
+        events.append(evt)
+        if getattr(evt, "type", None) == "done":
+            break
+    return events, time.perf_counter() - start
+
+
+async def probe_liveness(provider: Any, *, model_id: str) -> ProbeStep:
+    # Spec §4.4 step 1: minimal completion — max_tokens=1, prompt ".",
+    # 5s timeout. Proves base_url + key + network reach the endpoint.
+    try:
+        events, elapsed = await _drain_stream(
+            provider,
+            model_id,
+            thinking="off",
+            prompt=".",
+            max_output=1,
+            max_seconds=5.0,
+        )
+    except Exception as exc:
+        return ProbeStep(name="liveness", status="fail", error=_probe_error(exc))
+    return ProbeStep(
+        name="liveness",
+        status="pass",
+        latency_ms=int(elapsed * 1000),
+        detail=f"{len(events)} events in {int(elapsed * 1000)}ms",
+    )
+
+
+async def probe_reasoning_toggle(
+    provider: Any, *, model_id: str, capability: CapabilityDescriptor
+) -> ProbeStep:
+    if not capability.reasoning_off_payload and not capability.reasoning_on_payload:
+        return ProbeStep(
+            name="reasoning",
+            status="skip",
+            detail="capability has no reasoning_off/on payload",
+        )
+    try:
+        await _drain_stream(provider, model_id, thinking="off")
+        on_events, _ = await _drain_stream(provider, model_id, thinking="medium")
+    except Exception as exc:
+        # A model-not-found error here is what Task 9's _is_model_not_found keys
+        # on to short-circuit to "unavailable" — keep type/raw_status in the error.
+        return ProbeStep(name="reasoning", status="fail", error=_probe_error(exc))
+    return ProbeStep(
+        name="reasoning",
+        status="pass",
+        detail="off + on payload both accepted",
+        observed_chunks=len(on_events),
+    )
