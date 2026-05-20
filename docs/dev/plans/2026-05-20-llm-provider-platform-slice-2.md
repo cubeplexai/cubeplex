@@ -47,6 +47,75 @@ fixed.
 
 ---
 
+## Pre-Implementation Review Amendments
+
+A pre-implementation review (verified against the live cubebox tree on
+2026-05-20) found four issues the executor MUST fold in. The task bodies
+below predate these; apply the amendments as you reach each task.
+
+**A1 — `provider_type` enum fan-out (blocks Create/Update after the
+Task 2 migration).** Changing the column value alone is not enough;
+several readers hard-code the OLD enum (`openai_compat` / `anthropic`):
+- `backend/cubebox/services/provider_service.py:284` — rejects anything
+  not in `("openai_compat",)`. Update to accept the three wire-api
+  literals (`openai-completions` / `anthropic-messages` /
+  `openai-responses`).
+- `backend/cubebox/services/provider_service.py:341-348` — branches on
+  `provider_type == "anthropic"` / `"openai_compat"`. Rewrite to use the
+  value as the wire api directly.
+- `backend/cubebox/api/schemas/provider.py` — three `provider_type`
+  defaults of `"openai_compat"`; change to `"openai-completions"`.
+- `backend/cubebox/seeders/provider_seeder.py:105-125` — drops the
+  `api_to_provider_type(...)` call; assign `cfg_dict.get("api",
+  "openai-completions")` directly.
+- Grep the frontend (`frontend/packages/**`) for `openai_compat` /
+  `provider_type` enum typedefs and update or note them.
+
+  → **Add a new Task 2b** "update provider_type readers" right after
+  Task 2; do not consider the migration done until these pass.
+
+**A2 — admin route placement.** Existing routers:
+`backend/cubebox/api/routes/v1/admin_providers.py` (provider rows) +
+`admin.py`, `admin_mcp.py`, etc. There is **no** `admin_llm.py` yet.
+- `/admin/llm/presets` → new `admin_llm.py` (catalog is LLM-scoped, not
+  a provider row). (Task 4.)
+- `/admin/providers/test` + `/{id}/test` → **extend** the existing
+  `admin_providers.py`, do NOT create a parallel router. (Task 10.)
+
+**A3 — path/reference corrections.**
+- Task 1 Step 5: the real test paths are
+  `backend/tests/unit/test_conversation_title_pi.py` and
+  `backend/tests/unit/test_llm_factory_cubepi.py` (not
+  `tests/test_conversation_title.py` / `tests/test_llm_factory.py`).
+- Task 13: the seed module is
+  `backend/cubebox/seeders/provider_seeder.py` (not
+  `backend/cubebox/db/seeds/system_providers.py`).
+- Task 1 Step 2: before editing, confirm `mcp` + `postgres` are still
+  declared extras in the pinned cubepi commit's `pyproject.toml`.
+
+**A4 — Task 12 must use the merged provider_config, not a raw dict
+lookup.** `factory.llm_config.providers[provider_name]` misses
+DB-overridden providers (the legacy `resolve_default_provider_and_config`
+runs `_load_db_provider_configs` + `_build_merged_config` first).
+- Fix: make `resolve_task_model` a **drop-in** replacement that returns
+  `(provider_name, model_id, provider_config)` — i.e. it loads/merges DB
+  configs the same way `resolve_default_provider_and_config` does, then
+  resolves the task ref against the merged config. Task 11's signature
+  and Task 12's swap both change to this 3-tuple shape.
+
+Confirmed OK (no change needed): `ProviderConfig` is permissive
+(`extra` default = ignore), so adding `capability` fields is
+non-breaking (A-finding 2); `OrgSettings` is free-form `(org_id, key)`
++ `value: JSON` as assumed (A-finding 4); `StreamOptions(thinking="off")`
+is a clean addition to `conversation_title._generate_title`'s
+`provider.stream(...)` call (A-finding 5); `backend/tests/e2e/` exists
+with a conftest (A-finding 6); the `_StubProvider` async-iterable shape
+matches cubepi's `MessageStream` (A-finding 7); the seed migration
+correctly skips admin-renamed providers, leaving capability empty →
+cubepi legacy path (A-finding 8).
+
+---
+
 ## File Structure
 
 ### Created
