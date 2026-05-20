@@ -28,9 +28,10 @@ def build_tracer() -> Tracer | None:
     Reads ``tracing.enabled`` / ``tracing.directory`` / ``tracing.record_content``
     from config. Import or construction failures are logged and swallowed.
     """
-    if not config.get("tracing.enabled", False):
-        return None
     try:
+        if not config.get("tracing.enabled", False):
+            return None
+
         from cubepi.tracing import JsonlSpanExporter, Tracer
 
         directory = config.get("tracing.directory", "./cubepi-traces")
