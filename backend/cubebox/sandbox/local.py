@@ -5,7 +5,7 @@ import os
 import uuid
 from pathlib import Path
 
-from cubebox.sandbox.base import ExecuteResult, Sandbox
+from cubebox.sandbox.base import BrowserEndpoint, ExecuteResult, Sandbox
 
 
 class LocalSandbox(Sandbox):
@@ -56,6 +56,10 @@ class LocalSandbox(Sandbox):
         for path in paths:
             result.append((path, Path(path).read_bytes()))
         return result
+
+    async def get_browser_endpoint(self, *, expires_in: int = 3600) -> BrowserEndpoint:
+        # Dev only: the local Neko stack (if running) is reachable on localhost.
+        return BrowserEndpoint(url=f"http://localhost:{self.BROWSER_PORT}/")
 
     async def close(self) -> None:
         pass

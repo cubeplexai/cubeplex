@@ -420,6 +420,7 @@ def create_app(
         public_artifacts,
         system,
         workspaces_router,
+        ws_browser,
         ws_mcp,
         ws_members,
         ws_settings,
@@ -447,6 +448,7 @@ def create_app(
     app.include_router(admin_providers.router, prefix="/api/v1")
     app.include_router(admin_llm.router, prefix="/api/v1")
     app.include_router(ws_skills.router, prefix="/api/v1")
+    app.include_router(ws_browser.router, prefix="/api/v1")
 
     from cubebox.api.routes.health import router as health_router
 

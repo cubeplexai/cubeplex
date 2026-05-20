@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -16,6 +16,20 @@ class ExecuteResult:
 
     output: str
     exit_code: int | None = None
+
+
+@dataclass
+class BrowserEndpoint:
+    """Reachable endpoint for the sandbox's Neko browser live view.
+
+    ``url`` must be embeddable directly in a browser ``<iframe>``. If ``headers``
+    is non-empty the URL is *not* directly embeddable — a browser cannot attach
+    request headers to an iframe navigation — and a same-origin proxy that
+    injects them is required before handing a URL to the frontend.
+    """
+
+    url: str
+    headers: dict[str, str] = field(default_factory=dict)
 
 
 class Sandbox(ABC):
@@ -57,6 +71,27 @@ class Sandbox(ABC):
     async def close(self) -> None:
         """Release sandbox resources."""
         ...
+
+    # Container port the Neko browser live view is served on.
+    BROWSER_PORT = 8080
+
+    async def start_browser(self) -> None:
+        """Start the on-demand Neko browser stack inside the sandbox (idempotent).
+
+        Baked into the sandbox image at ``/usr/local/bin/start-browser.sh``; safe
+        to call repeatedly (no-op if already running).
+        """
+        result = await self.execute("/usr/local/bin/start-browser.sh", timeout=120)
+        if result.exit_code not in (0, None):
+            raise RuntimeError(f"failed to start sandbox browser: {result.output}")
+
+    async def get_browser_endpoint(self, *, expires_in: int = 3600) -> BrowserEndpoint:
+        """Return a reachable endpoint for the Neko browser live view.
+
+        Backends that can expose an in-sandbox port override this; the default
+        signals the capability is unavailable.
+        """
+        raise NotImplementedError("browser live view is not supported by this sandbox backend")
 
     def has_synced(self, skill_version_id: str) -> bool:
         """Whether ``skill_version_id`` has already been uploaded to this sandbox.

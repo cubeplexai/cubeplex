@@ -1,9 +1,11 @@
 """OpenSandbox implementation of the Sandbox base class."""
 
+import time
+
 import opensandbox
 from loguru import logger
 
-from cubebox.sandbox.base import ExecuteResult, Sandbox
+from cubebox.sandbox.base import BrowserEndpoint, ExecuteResult, Sandbox
 
 
 class OpenSandbox(Sandbox):
@@ -56,6 +58,11 @@ class OpenSandbox(Sandbox):
                 raise
             result.append((path, content))
         return result
+
+    async def get_browser_endpoint(self, *, expires_in: int = 3600) -> BrowserEndpoint:
+        expires = int(time.time()) + expires_in
+        endpoint = await self._sandbox.get_signed_endpoint(self.BROWSER_PORT, expires)
+        return BrowserEndpoint(url=endpoint.endpoint, headers=dict(endpoint.headers or {}))
 
     async def close(self) -> None:
         pass
