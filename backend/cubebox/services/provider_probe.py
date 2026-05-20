@@ -21,7 +21,7 @@ from cubepi.providers.base import (
 from cubepi.providers.capability import CapabilityDescriptor
 from pydantic import BaseModel, Field
 
-ProbeStepName = Literal["liveness", "reasoning", "temperature", "tools", "streaming"]
+ProbeStepName = Literal["liveness", "reasoning", "temperature", "tools", "streaming", "usage"]
 ProbeStepStatus = Literal["pass", "fail", "skip", "warn"]
 
 
@@ -242,6 +242,33 @@ def probe_streaming(*, observed_chunks: int, name: str = "streaming") -> ProbeSt
     return ProbeStep(name="streaming", status="warn", detail="no SSE chunks observed")
 
 
+async def probe_usage(provider: Any, *, model_id: str) -> ProbeStep:
+    """Advisory: did the response carry a parseable token-usage structure?
+    cubebox cost tracking records zeros without it. Own minimal stream."""
+    try:
+        stream = await asyncio.wait_for(
+            provider.stream(
+                model=Model(id=model_id, provider="probe", context_window=8192, max_tokens=16),
+                messages=[UserMessage(content=[TextContent(text="hi")])],
+                options=StreamOptions(thinking="off"),
+            ),
+            timeout=15.0,
+        )
+        async for _ in stream:  # drain
+            pass
+        msg = await stream.result()
+    except Exception as exc:
+        return ProbeStep(name="usage", status="warn", error=_probe_error(exc))
+    usage = msg.usage
+    if usage is not None and (usage.input_tokens or usage.output_tokens):
+        return ProbeStep(
+            name="usage",
+            status="pass",
+            detail=f"in {usage.input_tokens} / out {usage.output_tokens}",
+        )
+    return ProbeStep(name="usage", status="warn", detail="no usage block → cost recorded as zero")
+
+
 # Case-insensitive markers a vendor uses to say the model doesn't exist. Paired
 # with a 404 raw_status, these are the only signals that map probe → "unavailable".
 _MODEL_NOT_FOUND_MARKERS = (
@@ -321,9 +348,10 @@ async def run_model_probe(
     reasoning = await probe_reasoning_toggle(provider, model_id=model_id, capability=capability)
     if _is_model_not_found(reasoning):
         return ProbeResult(overall="unavailable", blocking_failed=True, steps=[reasoning])
-    temperature, tools = await asyncio.gather(
+    temperature, tools, usage = await asyncio.gather(
         probe_temperature(provider, model_id=model_id, capability=capability),
         probe_tools(provider, model_id=model_id, capability=capability),
+        probe_usage(provider, model_id=model_id),
         return_exceptions=False,
     )
     # ROBUSTNESS: when capability has no reasoning payloads, probe_reasoning_toggle
@@ -332,15 +360,15 @@ async def run_model_probe(
     # steps only ever WARN (never block), so we inspect the carried error directly
     # rather than via _is_model_not_found (which gates on a fail status).
     if reasoning.status == "skip":
-        for s in (temperature, tools):
+        for s in (temperature, tools, usage):
             if s.error is not None and _error_says_model_not_found(s.error):
                 return ProbeResult(
                     overall="unavailable",
                     blocking_failed=True,
-                    steps=[reasoning, temperature, tools],
+                    steps=[reasoning, temperature, tools, usage],
                 )
     streaming = probe_streaming(observed_chunks=reasoning.observed_chunks)
-    steps = [reasoning, temperature, tools, streaming]
+    steps = [reasoning, temperature, tools, streaming, usage]
     overall, blocked = _aggregate_overall(steps)
     # _aggregate_overall is typed str but only yields pass/fail/warn here; the
     # "unavailable" verdict is reached via the short-circuit returns above.

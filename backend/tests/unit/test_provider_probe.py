@@ -66,6 +66,13 @@ class _StubProvider:
 
                 return gen()
 
+            async def result(_self):
+                # Default: report non-zero usage so the advisory usage probe
+                # passes for the orchestrator happy-path tests.
+                from cubepi.providers.base import AssistantMessage, Usage
+
+                return AssistantMessage(content=[], usage=Usage(input_tokens=5, output_tokens=2))
+
         return _Stream()
 
 
@@ -316,3 +323,48 @@ async def test_run_model_probe_skipped_reasoning_still_detects_unavailable():
     )
     assert result.overall == "unavailable"
     assert result.blocking_failed is True
+
+
+# --- Task B3: advisory usage probe ------------------------------------------
+
+
+class _UsageStub(_StubProvider):
+    """Stub whose stream.result() returns an AssistantMessage with given usage."""
+
+    def __init__(self, *, usage=None, **kw):
+        super().__init__(**kw)
+        self._usage = usage
+
+    async def stream(self, *a, **k):
+        s = await super().stream(*a, **k)
+        usage = self._usage
+
+        async def _result():
+            from cubepi.providers.base import AssistantMessage
+
+            return AssistantMessage(content=[], usage=usage)
+
+        s.result = _result  # type: ignore[attr-defined,method-assign]
+        return s
+
+
+@pytest.mark.asyncio
+async def test_probe_usage_pass_when_usage_present():
+    from cubepi.providers.base import Usage
+
+    from cubebox.services.provider_probe import probe_usage
+
+    step = await probe_usage(
+        _UsageStub(usage=Usage(input_tokens=10, output_tokens=3), events=[]),
+        model_id="m",
+    )
+    assert step.name == "usage"
+    assert step.status == "pass"
+
+
+@pytest.mark.asyncio
+async def test_probe_usage_warn_when_absent():
+    from cubebox.services.provider_probe import probe_usage
+
+    step = await probe_usage(_UsageStub(usage=None, events=[]), model_id="m")
+    assert step.status == "warn"
