@@ -435,12 +435,18 @@ class ProviderService:
     async def run_all_models_test_saved(self, provider_id: str) -> list[ProbeResult]:
         """Saved all-models test: one liveness (persisted), then each enabled model."""
         provider = await self.get_provider(provider_id)
+        models = await self._models.list_by_provider(provider_id)
+        # list_by_provider already filters to enabled models. With no models
+        # there is nothing to probe and no real model id to issue the liveness
+        # call against — probing a fake "ping" model would 404 on most backends
+        # and persist a bogus liveness failure for a valid-but-empty provider.
+        # Return an empty result set and leave status untouched. (codex P2.)
+        if not models:
+            return []
         cfg = await self._config_from_provider(provider)
         factory = self._provider_factory_from_config(cfg)
-        models = await self._models.list_by_provider(provider_id)
-        # list_by_provider already filters to enabled models.
         liveness = await provider_probe.run_liveness(
-            provider_factory=factory, model_id=models[0].model_id if models else "ping"
+            provider_factory=factory, model_id=models[0].model_id
         )
         await self._persist_provider_liveness(provider, liveness)
         if liveness.status != "pass":

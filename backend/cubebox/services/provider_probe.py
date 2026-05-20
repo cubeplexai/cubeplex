@@ -257,12 +257,14 @@ _MODEL_NOT_FOUND_MARKERS = (
 def _error_says_model_not_found(error: ProbeError) -> bool:
     """Raw check: does this error mean the vendor lacks the model?
 
-    Keys on a 404 raw_status or a known marker in the error type/message.
+    Requires a model-specific marker in the error type/message. A bare 404 is
+    NOT enough: a wrong base_url / route mismatch also 404s, and that is a
+    provider/config failure, not a missing model — misreading it would flip a
+    single model to "unavailable" and mask the real outage. Provider-level
+    reachability is caught at the provider grain by phase-A liveness instead.
     Used by _is_model_not_found and by run_model_probe's robustness path, where
     the advisory temperature/tools steps carry the error on a *warn* status.
     """
-    if error.raw_status == 404:
-        return True
     haystack = f"{error.type} {error.message}".lower()
     return any(marker in haystack for marker in _MODEL_NOT_FOUND_MARKERS)
 
