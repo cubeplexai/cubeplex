@@ -32,7 +32,7 @@ test:
       deepseek:
         base_url: https://api.deepseek.com/anthropic
         api_key: key-in-env
-        api: anthropic
+        api: anthropic-messages
         models:
           - id: deepseek-v4-pro
             name: "DeepSeek V4 Pro"
