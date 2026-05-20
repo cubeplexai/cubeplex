@@ -14,6 +14,7 @@ from cubepi.providers.base import (
     StreamOptions,
     TextContent,
     ThinkingLevel,
+    ToolDefinition,
     UserMessage,
 )
 from cubepi.providers.capability import CapabilityDescriptor
@@ -88,14 +89,20 @@ async def _drain_stream(
     prompt: str = "Reply with OK.",
     max_output: int = 64,
     max_seconds: float = 15.0,
+    temperature: float | None = None,
+    tools: list[ToolDefinition] | None = None,
 ) -> tuple[list[Any], float]:
     """Run a minimal stream, draining events. Return (events, elapsed_seconds)."""
     start = time.perf_counter()
+    model = Model(id=model_id, provider="probe", context_window=8192, max_tokens=max_output)
+    if temperature is not None:
+        model.temperature = temperature
     stream = await asyncio.wait_for(
         provider.stream(
-            model=Model(id=model_id, provider="probe", context_window=8192, max_tokens=max_output),
+            model=model,
             messages=[UserMessage(content=[TextContent(text=prompt)])],
             options=StreamOptions(thinking=thinking),
+            tools=tools,
         ),
         timeout=max_seconds,
     )
@@ -151,3 +158,84 @@ async def probe_reasoning_toggle(
         detail="off + on payload both accepted",
         observed_chunks=len(on_events),
     )
+
+
+# Stream event types that signal the endpoint emitted a tool call. cubepi's
+# StreamEvent.type uses the "toolcall_*" family (see cubepi.providers.base);
+# seeing any of these proves the endpoint can drive tool use.
+_TOOLCALL_EVENT_TYPES = {"toolcall_start", "toolcall_delta", "toolcall_end"}
+
+
+async def probe_temperature(
+    provider: Any, *, model_id: str, capability: CapabilityDescriptor
+) -> ProbeStep:
+    # Spec §4.4 step 3 (advisory): confirm the endpoint accepts the temperature
+    # we'd actually send. mode="ignored" means the key is stripped, so there's
+    # nothing to probe. Failures only WARN — temperature must never block save.
+    spec = capability.temperature
+    if spec.mode == "ignored":
+        return ProbeStep(name="temperature", status="skip", detail="temperature mode is ignored")
+    if spec.mode == "fixed" and spec.fixed_value is not None:
+        value = spec.fixed_value
+    else:
+        value = spec.default
+    try:
+        await _drain_stream(provider, model_id, temperature=value)
+    except Exception as exc:
+        return ProbeStep(
+            name="temperature",
+            status="warn",
+            detail=f"endpoint rejected temperature={value}",
+            error=_probe_error(exc),
+        )
+    return ProbeStep(name="temperature", status="pass", detail=f"accepted temperature={value}")
+
+
+async def probe_tools(
+    provider: Any, *, model_id: str, capability: CapabilityDescriptor
+) -> ProbeStep:
+    # Spec §4.4 step 4 (advisory): if the endpoint claims tool support, send a
+    # one-tool probe and confirm a tool-call event came back. Failures only WARN
+    # so an over-eager supports_tools flag doesn't block save.
+    if not capability.supports_tools:
+        return ProbeStep(name="tools", status="skip", detail="capability has supports_tools=False")
+    tool = ToolDefinition(
+        name="echo",
+        description="Echo the provided text back to the caller.",
+        parameters={
+            "type": "object",
+            "properties": {"text": {"type": "string"}},
+            "required": ["text"],
+        },
+    )
+    try:
+        events, _ = await _drain_stream(
+            provider,
+            model_id,
+            prompt="Call the echo tool with text='ping'.",
+            tools=[tool],
+        )
+    except Exception as exc:
+        return ProbeStep(
+            name="tools",
+            status="warn",
+            detail="endpoint did not emit tool call; consider unchecking supports_tools",
+            error=_probe_error(exc),
+        )
+    saw_tool_call = any(getattr(e, "type", None) in _TOOLCALL_EVENT_TYPES for e in events)
+    if saw_tool_call:
+        return ProbeStep(name="tools", status="pass", detail="endpoint emitted a tool call")
+    return ProbeStep(
+        name="tools",
+        status="warn",
+        detail="endpoint did not emit tool call; consider unchecking supports_tools",
+    )
+
+
+def probe_streaming(*, observed_chunks: int, name: str = "streaming") -> ProbeStep:
+    # Spec §4.4 step 5 (advisory, pure): reuse the chunk count captured by the
+    # reasoning probe. Zero chunks means the endpoint answered but never streamed
+    # — surface a warning rather than silently passing an inert config.
+    if observed_chunks > 0:
+        return ProbeStep(name="streaming", status="pass", detail=f"{observed_chunks} chunks")
+    return ProbeStep(name="streaming", status="warn", detail="no SSE chunks observed")
