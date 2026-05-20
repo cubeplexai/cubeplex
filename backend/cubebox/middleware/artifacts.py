@@ -13,7 +13,6 @@ Implements the cubepi Middleware protocol with two hooks:
 from __future__ import annotations
 
 import json
-import mimetypes
 import shlex
 from typing import Any
 
@@ -25,6 +24,7 @@ from pydantic import BaseModel, Field
 
 from cubebox.prompts.artifacts import ARTIFACT_PROMPT
 from cubebox.sandbox.base import Sandbox
+from cubebox.services.artifact_registration import register_artifact_from_sandbox
 
 # ---------------------------------------------------------------------------
 # Input schema for save_artifact
@@ -49,18 +49,6 @@ class _SaveArtifactArgs(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Pure helper — no framework dependency
-# ---------------------------------------------------------------------------
-
-
-def _guess_mime_type(path: str, entry_file: str | None) -> str | None:
-    """Guess MIME type from file extension."""
-    target = entry_file if entry_file else path
-    mime, _ = mimetypes.guess_type(target)
-    return mime
-
-
-# ---------------------------------------------------------------------------
 # Tool factory
 # ---------------------------------------------------------------------------
 
@@ -82,7 +70,9 @@ def _make_save_artifact_tool(
     ) -> AgentToolResult:
         del tool_call_id, signal, on_update
 
-        # 1. Validate path exists in sandbox
+        # Validate path exists in sandbox before delegating to the helper.
+        # The helper also checks this, but we catch FileNotFoundError here and
+        # return is_error so the tool's external JSON contract is unchanged.
         result = await sandbox.execute(f"test -e {shlex.quote(args.path)}")
         if result.exit_code is not None and result.exit_code != 0:
             return AgentToolResult(
@@ -94,87 +84,27 @@ def _make_save_artifact_tool(
                 is_error=True,
             )
 
-        # 2. Guess MIME type
-        mime_type = _guess_mime_type(args.path, args.entry_file)
-
-        # 3. Write to DB using independent session
-        from cubebox.db.engine import async_session_maker
-        from cubebox.repositories import ArtifactRepository, ArtifactVersionRepository
-
-        artifact_id = args.artifact_id
-        async with async_session_maker() as session:
-            repo = ArtifactRepository(session, org_id=org_id, workspace_id=workspace_id)
-            version_repo = ArtifactVersionRepository(
-                session, org_id=org_id, workspace_id=workspace_id
-            )
-
-            # Auto-match: if no artifact_id given, look for an existing
-            # artifact at the same path so we update instead of duplicating.
-            if not artifact_id:
-                existing = await repo.find_by_path(conversation_id, args.path)
-                if existing:
-                    artifact_id = existing.id
-                    logger.info(
-                        "Auto-matched artifact by path: id={}, path={}",
-                        artifact_id,
-                        args.path,
-                    )
-
-            if artifact_id:
-                artifact = await repo.update(
-                    artifact_id,
-                    name=args.name,
-                    artifact_type=args.artifact_type,
-                    path=args.path,
-                    entry_file=args.entry_file,
-                    mime_type=mime_type,
-                    description=args.description,
-                )
-                if not artifact:
-                    return AgentToolResult(
-                        content=[
-                            TextContent(
-                                text=json.dumps({"error": f"Artifact not found: {artifact_id}"})
-                            )
-                        ],
-                        is_error=True,
-                    )
-                action = "updated"
-            else:
-                artifact = await repo.create(
-                    conversation_id=conversation_id,
-                    name=args.name,
-                    artifact_type=args.artifact_type,
-                    path=args.path,
-                    entry_file=args.entry_file,
-                    mime_type=mime_type,
-                    description=args.description,
-                )
-                action = "created"
-
-            # Create version snapshot
-            await version_repo.create(
-                artifact_id=artifact.id,
-                version=artifact.version,
+        try:
+            artifact = await register_artifact_from_sandbox(
+                sandbox=sandbox,
+                conversation_id=conversation_id,
+                org_id=org_id,
+                workspace_id=workspace_id,
                 name=args.name,
-                description=args.description,
+                artifact_type=args.artifact_type,
                 path=args.path,
                 entry_file=args.entry_file,
-                mime_type=mime_type,
+                description=args.description,
+                artifact_id=args.artifact_id,
+            )
+        except ValueError as exc:
+            return AgentToolResult(
+                content=[TextContent(text=json.dumps({"error": str(exc)}))],
+                is_error=True,
             )
 
-        # Upload to object storage (non-fatal on failure)
-        try:
-            from cubebox.objectstore import get_objectstore_client
-
-            store = get_objectstore_client()
-            key_prefix = f"artifacts/{conversation_id}/{artifact.id}/v{artifact.version}/"
-            await store.upload_from_sandbox(sandbox, args.path, key_prefix)
-        except Exception:
-            logger.exception(
-                "Failed to upload artifact {} to object storage (non-fatal)",
-                artifact.id,
-            )
+        # version == 1 → artifact was just created; > 1 → existing was updated.
+        action = "created" if artifact.version == 1 else "updated"
 
         logger.info(
             "Artifact {}: id={}, name={}, type={}, version={}",
