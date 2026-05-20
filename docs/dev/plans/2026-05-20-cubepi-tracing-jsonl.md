@@ -200,8 +200,18 @@ Replace with:
                         # task first, then the tracer's __aexit__ shuts down
                         # (force_flush + close exporters) — so this run's
                         # spans are on disk before _run_cubepi_path returns.
-                        await _trace_stack.enter_async_context(tracer)
-                        await _trace_stack.enter_async_context(tracer.attached(agent))
+                        # attached().__aenter__ calls Recorder/provider
+                        # subscription work that can raise; isolate it so a
+                        # tracing fault runs the turn untraced rather than
+                        # failing the run (spec §3).
+                        try:
+                            await _trace_stack.enter_async_context(tracer)
+                            await _trace_stack.enter_async_context(tracer.attached(agent))
+                        except Exception as _trace_exc:
+                            logger.warning(
+                                "Tracing attach failed, continuing untraced: {}", _trace_exc
+                            )
+                            await _trace_stack.aclose()
                     await agent.prompt(_user_msg)
             finally:
                 # Signal drainer and wait for it to flush remaining events so
