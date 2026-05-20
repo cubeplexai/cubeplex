@@ -260,12 +260,12 @@ Expected: `capability OK, 20 presets` + `anthropic`.
 
 ```bash
 cd /home/chris/cubebox/.worktrees/feat/llm-provider-platform/backend && \
-  uv run pytest tests/test_conversation_title.py tests/test_llm_factory.py -q 2>&1 | tail -5
+  uv run pytest tests/unit/test_conversation_title_pi.py tests/unit/test_llm_factory_cubepi.py -q 2>&1 | tail -5
 ```
 
-(Adjust the test file names if they don't exist; the goal is to
-confirm the legacy LLMFactory + title-gen still work against the new
-cubepi.) Expect green — no source changes yet, just dep bump.
+(Real paths per Amendment A3. The goal is to confirm the legacy
+LLMFactory + title-gen still work against the new cubepi.) Expect green —
+no source changes yet, just dep bump.
 
 - [ ] **Step 6: Commit**
 
@@ -900,6 +900,10 @@ class ProbeStep(BaseModel):
     latency_ms: int | None = None
     detail: str = ""
     error: ProbeError | None = None
+    # Count of SSE chunks observed during this step's stream. Lets the
+    # streaming check (Task 8/9) verify a chunk arrived without re-streaming.
+    # Excluded from the API payload — internal probe plumbing only.
+    observed_chunks: int = Field(default=0, exclude=True)
 
 
 class ProbeResult(BaseModel):
@@ -1177,19 +1181,32 @@ async def probe_reasoning_toggle(
         )
     try:
         await _drain_stream(provider, model_id, thinking="off")
-        await _drain_stream(provider, model_id, thinking="medium")
+        on_events, _ = await _drain_stream(provider, model_id, thinking="medium")
     except Exception as exc:
+        err = ProbeError(type=type(exc).__name__, message=str(exc)[:200])
+        # A model-not-found error here is what Task 9's _is_model_not_found
+        # keys on to short-circuit to "unavailable" — keep the type/status
+        # in ProbeError so the caller can classify it.
         return ProbeStep(
             name="reasoning",
             status="fail",
-            error=ProbeError(type=type(exc).__name__, message=str(exc)[:200]),
+            error=err,
         )
+    # Capture the chunk count so reasoning_events_of() / the streaming
+    # check can confirm a chunk arrived without re-streaming.
     return ProbeStep(
         name="reasoning",
         status="pass",
         detail="off + on payload both accepted",
+        observed_chunks=len(on_events),
     )
 ```
+
+`_is_model_not_found(step)` (used by Task 9) inspects
+`step.error` — true when `error.raw_status == 404` or `error.type` /
+`error.message` indicate the vendor's `model_not_found`. Populate
+`ProbeError.raw_status` in `_drain_stream`'s except path where the
+cubepi error exposes a status code, so this classification is reliable.
 
 - [ ] **Step 4: Run tests to verify they pass**
 
@@ -1229,16 +1246,20 @@ async def probe_tools(
     """If capability.supports_tools, send a one-tool probe and verify tool_call.
     Else → skip."""
 
-async def probe_streaming(events: list, *, name: str = "streaming") -> ProbeStep:
-    """Pure inspection: did any event arrive during a prior probe?
-    Reuses the events from probe_liveness / probe_reasoning."""
+def probe_streaming(*, observed_chunks: int, name: str = "streaming") -> ProbeStep:
+    """Pure inspection: did a chunk arrive during the reasoning probe?
+    `observed_chunks` comes from ProbeStep.observed_chunks (set by
+    probe_reasoning_toggle). 0 → warn (don't fail); >0 → pass."""
 ```
 
 - [ ] Write tests for each (one happy path + one skip path each = 6 tests).
+- [ ] **Add the empty-chunk regression test:** `probe_streaming(observed_chunks=0)`
+      → `status="warn"`; `probe_streaming(observed_chunks=3)` → `status="pass"`.
+      (This is the test that would have caught the inert `events=[]` bug.)
 - [ ] Implement helpers — use `StreamOptions(thinking="off")` to keep
       the temperature probe cheap; use the stub `_StubProvider` pattern
       from Task 7 for the tool-call event shape.
-- [ ] Run all probe tests; expect 14 passed (8 prior + 6 new).
+- [ ] Run all probe tests; expect 15 passed (8 prior + 6 new + 1 streaming).
 - [ ] Commit:
    ```bash
    git commit -m "feat(probe): temperature + tools + streaming steps"
@@ -1316,14 +1337,14 @@ async def run_model_probe(
     if _is_model_not_found(reasoning):
         return ProbeResult(overall="unavailable", blocking_failed=True, steps=[reasoning])
 
-    # reasoning already drained a stream → reuse its captured events for the
-    # streaming check instead of passing an empty list (spec §4.4 step 5).
+    # reasoning already drained a stream → reuse its observed chunk count for
+    # the streaming check instead of passing an empty list (spec §4.4 step 5).
     temperature, tools = await asyncio.gather(
         probe_temperature(provider, model_id=model_id, capability=capability),
         probe_tools(provider, model_id=model_id, capability=capability),
         return_exceptions=False,
     )
-    streaming = probe_streaming(events=reasoning_events_of(reasoning))
+    streaming = probe_streaming(observed_chunks=reasoning.observed_chunks)
     steps = [reasoning, temperature, tools, streaming]
     overall, blocked = _aggregate_overall(steps)
     return ProbeResult(overall=overall, blocking_failed=blocked, steps=steps)
@@ -1337,9 +1358,9 @@ async def run_model_probe(
 >   the `unavailable` short-circuit above writes `"unavailable"` directly.
 >
 > `probe_reasoning_toggle` (Task 7) must distinguish a model_not_found
-> error from a generic 4xx so `_is_model_not_found` can fire; capturing
-> the drained events on the returned `ProbeStep` (e.g. a private field or
-> a small wrapper) lets `reasoning_events_of` feed the streaming check.
+> error from a generic 4xx so `_is_model_not_found` can fire; it also sets
+> `ProbeStep.observed_chunks` from its drained stream so the streaming
+> check reads `reasoning.observed_chunks` instead of re-streaming.
 
 - [ ] **Step 3: Run all probe tests; expect green (prior + 2 new)**
 
