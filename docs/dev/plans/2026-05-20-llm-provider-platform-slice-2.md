@@ -637,7 +637,7 @@ Expected: 5 passed.
 - [ ] **Step 7: Run existing factory tests for regression**
 
 ```bash
-uv run pytest tests/test_llm_factory.py -q 2>&1 | tail -5
+uv run pytest tests/unit/test_llm_factory_cubepi.py -q 2>&1 | tail -5
 ```
 
 Adjust file name if needed. Expected: all existing tests still pass —
@@ -1699,7 +1699,7 @@ descriptor's reasoning-off payload disables thinking.
 - [ ] **Step 3: Run e2e + unit tests**
 
 ```bash
-uv run pytest tests/e2e/test_title_model_routing_e2e.py tests/test_conversation_title.py -v 2>&1 | tail -10
+uv run pytest tests/e2e/test_title_model_routing_e2e.py tests/unit/test_conversation_title.py -v 2>&1 | tail -10
 ```
 
 - [ ] **Step 4: Commit**
