@@ -147,9 +147,10 @@ async def _list_raw_mcp_tools(
     ``Implementation.icons`` + ``websiteUrl`` from MCP spec rev
     2025-11-25 — to the frontend's tool registry without an extra RTT.
     """
-    async with _open_session(
-        server_url, headers=headers, timeout=timeout, transport=transport
-    ) as session:
+    async with _open_session(server_url, headers=headers, timeout=timeout, transport=transport) as (
+        session,
+        _get_session_id,
+    ):
         init_result = await asyncio.wait_for(session.initialize(), timeout=timeout)
         tools_resp = await asyncio.wait_for(session.list_tools(), timeout=timeout)
     return _DiscoveredRaw(tools=list(tools_resp.tools), init_result=init_result)

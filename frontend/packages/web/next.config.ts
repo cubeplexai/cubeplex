@@ -24,7 +24,7 @@ export const ATTACHMENT_PROXY_BODY_LIMIT = '60mb'
 const ADMIN_CSP = "frame-src 'self'; default-src 'self' 'unsafe-inline' 'unsafe-eval' data: blob:"
 
 export const nextConfig: NextConfig = {
-  allowedDevOrigins: ['localhost', '127.0.0.1', '[::1]', '192.168.1.111'],
+  allowedDevOrigins: ['localhost', '127.0.0.1', '[::1]', '192.168.1.111', '192.168.1.150'],
   compress: false,
   transpilePackages: ['katex', '@cubebox/core'],
   turbopack: {},

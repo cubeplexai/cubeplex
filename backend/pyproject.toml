@@ -32,8 +32,9 @@ dependencies = [
     "pillow>=10.4.0",
     "pyjwt>=2.12.1",
     "click>=8.3.1",
-    "cubepi[mcp,postgres]",
+    "cubepi[mcp,postgres,tracing,tracing-otlp]>=0.4.0",
     "orjson>=3.11.9",
+    "pyyaml>=6.0.3",
 ]
 
 [project.optional-dependencies]
@@ -155,9 +156,6 @@ exclude_lines = [
     "if TYPE_CHECKING:",
     "@abstractmethod",
 ]
-
-[tool.uv.sources]
-cubepi = { git = "https://github.com/cubeplexai/cubepi.git", rev = "ad26d82600e0d1f74a316ce089f22d2b8afe1958" }
 
 [dependency-groups]
 dev = [
