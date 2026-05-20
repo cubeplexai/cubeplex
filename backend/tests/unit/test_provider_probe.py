@@ -12,6 +12,9 @@ from cubebox.services.provider_probe import (
     _aggregate_overall,
     probe_liveness,
     probe_reasoning_toggle,
+    probe_streaming,
+    probe_temperature,
+    probe_tools,
 )
 
 
@@ -125,3 +128,53 @@ def test_aggregate_reasoning_fail_is_blocking():
     overall, blocked = _aggregate_overall(steps)
     assert overall == "fail"
     assert blocked is True
+
+
+@pytest.mark.asyncio
+async def test_probe_temperature_pass():
+    from cubepi.providers.capability import CapabilityDescriptor, TemperatureSpec
+
+    cap = CapabilityDescriptor(temperature=TemperatureSpec(mode="free", default=1.0))
+    provider = _StubProvider(events=[type("E", (), {"type": "text_delta", "delta": "OK"})()])
+    step = await probe_temperature(provider, model_id="m", capability=cap)
+    assert step.name == "temperature"
+    assert step.status == "pass"
+
+
+@pytest.mark.asyncio
+async def test_probe_temperature_skips_when_ignored():
+    from cubepi.providers.capability import CapabilityDescriptor, TemperatureSpec
+
+    cap = CapabilityDescriptor(temperature=TemperatureSpec(mode="ignored"))
+    step = await probe_temperature(_StubProvider(), model_id="m", capability=cap)
+    assert step.status == "skip"
+
+
+@pytest.mark.asyncio
+async def test_probe_tools_pass_on_toolcall_event():
+    from cubepi.providers.capability import CapabilityDescriptor
+
+    cap = CapabilityDescriptor(supports_tools=True)
+    provider = _StubProvider(events=[type("E", (), {"type": "toolcall_start"})()])
+    step = await probe_tools(provider, model_id="m", capability=cap)
+    assert step.name == "tools"
+    assert step.status == "pass"
+
+
+@pytest.mark.asyncio
+async def test_probe_tools_skips_when_unsupported():
+    from cubepi.providers.capability import CapabilityDescriptor
+
+    cap = CapabilityDescriptor(supports_tools=False)
+    step = await probe_tools(_StubProvider(), model_id="m", capability=cap)
+    assert step.status == "skip"
+
+
+def test_probe_streaming_warns_on_zero_chunks():
+    assert probe_streaming(observed_chunks=0).status == "warn"
+
+
+def test_probe_streaming_passes_on_chunks():
+    step = probe_streaming(observed_chunks=3)
+    assert step.status == "pass"
+    assert "3" in step.detail
