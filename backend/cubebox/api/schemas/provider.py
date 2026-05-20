@@ -88,6 +88,7 @@ class ModelCreate(BaseModel):
     max_tokens: int
     extra_body: dict[str, Any] = Field(default_factory=dict)
     extra_headers: dict[str, Any] = Field(default_factory=dict)
+    enabled: bool = True
 
 
 class ModelUpdate(BaseModel):

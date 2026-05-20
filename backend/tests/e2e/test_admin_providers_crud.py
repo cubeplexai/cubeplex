@@ -220,6 +220,36 @@ async def test_test_connection_endpoint(
     assert data["steps"][0]["name"] == "liveness"
 
 
+async def test_create_model_disabled(admin_client: tuple[AsyncClient, str]) -> None:
+    """Admin can create a model with enabled=false."""
+    client, _ = admin_client
+    res = await client.post(
+        "/api/v1/admin/providers",
+        json={
+            "name": "b2-model-disabled",
+            "provider_type": "openai-completions",
+            "base_url": "https://example.com",
+            "auth_type": "api_key",
+            "api_key": "sk-x",
+        },
+    )
+    assert res.status_code == 201
+    pid = res.json()["id"]
+    res = await client.post(
+        f"/api/v1/admin/providers/{pid}/models",
+        json={
+            "model_id": "m-disabled",
+            "display_name": "M",
+            "context_window": 8192,
+            "max_tokens": 1024,
+            "enabled": False,
+        },
+    )
+    assert res.status_code == 201
+    assert res.json()["enabled"] is False
+    await client.delete(f"/api/v1/admin/providers/{pid}")
+
+
 async def test_create_provider_persists_capability(
     admin_client: tuple[AsyncClient, str],
 ) -> None:

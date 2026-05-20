@@ -261,6 +261,7 @@ class ProviderService:
             max_tokens=data.max_tokens,
             extra_body=data.extra_body,
             extra_headers=data.extra_headers,
+            enabled=data.enabled,
         )
         return await self._models.add(m)
 
