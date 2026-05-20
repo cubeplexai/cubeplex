@@ -127,7 +127,7 @@ def _build_prompt(snippet: str) -> str:
     return TITLE_GENERATION_PROMPT.replace(TITLE_PROMPT_PLACEHOLDER, snippet)
 
 
-async def _generate_title(factory: LLMFactory, full_prompt: str) -> str:
+async def _generate_title(factory: LLMFactory, full_prompt: str, *, org_id: str) -> str:
     """One-shot title generation via cubepi.Provider direct call.
 
     No agent loop needed — title generation is a single-turn request.
@@ -135,27 +135,38 @@ async def _generate_title(factory: LLMFactory, full_prompt: str) -> str:
     from cubepi import Model
     from cubepi.providers.base import TextContent, UserMessage
 
+    from cubebox.llm.runtime_writeback import (
+        schedule_runtime_status_writeback as _schedule_writeback,
+    )
+
     provider_name, model_id, provider_config = await factory.resolve_default_provider_and_config()
     # cache_policy=None → cubepi's DefaultCacheMarkerPolicy. Title generation
     # is a one-shot call with no prior conversation context, so no cache
     # breakpoints will be inserted regardless of the policy used.
     provider = factory.build_cubepi_provider(provider_config, cache_policy=None)
 
-    stream = await provider.stream(
-        model=Model(id=model_id, provider=provider_name),
-        messages=[UserMessage(content=[TextContent(text=full_prompt)])],
-        system_prompt="",  # title-gen prompt is fully in the user message
-    )
+    try:
+        stream = await provider.stream(
+            model=Model(id=model_id, provider=provider_name),
+            messages=[UserMessage(content=[TextContent(text=full_prompt)])],
+            system_prompt="",  # title-gen prompt is fully in the user message
+        )
 
-    parts: list[str] = []
-    async for evt in stream:
-        if evt.type == "text_delta":
-            if evt.delta:
-                parts.append(evt.delta)
-        elif evt.type == "error":
-            raise RuntimeError(evt.error_message or "title generation failed")
-        elif evt.type == "done":
-            break
+        parts: list[str] = []
+        async for evt in stream:
+            if evt.type == "text_delta":
+                if evt.delta:
+                    parts.append(evt.delta)
+            elif evt.type == "error":
+                raise RuntimeError(evt.error_message or "title generation failed")
+            elif evt.type == "done":
+                break
+    except BaseException as _exc:
+        # Out-of-band, best-effort runtime status writeback (spec §4.4a).
+        _schedule_writeback(org_id=org_id, provider_name=provider_name, model_id=model_id, exc=_exc)
+        raise
+    else:
+        _schedule_writeback(org_id=org_id, provider_name=provider_name, model_id=model_id, exc=None)
     return "".join(parts)
 
 
@@ -196,7 +207,7 @@ async def generate_and_apply_title(
     full_prompt = _build_prompt(snippet)
 
     try:
-        raw_title = await _generate_title(factory, full_prompt)
+        raw_title = await _generate_title(factory, full_prompt, org_id=org_id)
     except Exception:
         logger.warning("Auto-title skipped: LLM call failed", exc_info=True)
         return conversation
