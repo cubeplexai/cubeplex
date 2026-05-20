@@ -19,10 +19,10 @@ from cubebox.api.schemas.provider import (
     OrgProviderOverrideOut,
     OrgProviderOverrideUpdate,
     ProviderCreate,
+    ProviderLivenessRequest,
     ProviderOut,
-    ProviderTest,
+    ProviderTestRequest,
     ProviderUpdate,
-    TestResultOut,
 )
 from cubebox.auth.dependencies import require_org_admin, resolve_current_org_id
 from cubebox.credentials.dependencies import build_credential_service
@@ -35,6 +35,7 @@ from cubebox.repositories.model import ModelRepository
 from cubebox.repositories.org_provider_override import OrgProviderOverrideRepository
 from cubebox.repositories.org_settings import OrgSettingsRepository
 from cubebox.repositories.provider import ProviderRepository
+from cubebox.services.provider_probe import ProbeResult, ProbeStep
 from cubebox.services.provider_service import (
     ModelNotFoundError,
     ProviderNameConflictError,
@@ -356,33 +357,83 @@ async def delete_model(
         raise HTTPException(status_code=404, detail="model_not_found") from e
 
 
-# -- Test connection ---------------------------------------------------------------
+# -- Test / liveness probe (spec §4.3) ---------------------------------------------
 
 
-@router.post("/providers/test", response_model=TestResultOut)
-async def test_provider(
-    body: ProviderTest,
+@router.post("/providers/liveness", response_model=ProbeStep)
+async def liveness_dryrun(
+    body: ProviderLivenessRequest,
     *,
     request: Request,
     user: Annotated[User, Depends(require_org_admin)],
     session: Annotated[AsyncSession, Depends(get_session)],
-) -> TestResultOut:
+) -> ProbeStep:
+    """Pre-save liveness dry-run. Builds a transient provider; no DB write."""
     svc = await _svc(user, session, request)
-    return await svc.test_connection(body)
+    return await svc.run_liveness_dryrun(body)
 
 
-@router.post("/providers/{provider_id}/models/test", response_model=TestResultOut)
-async def test_provider_model(
+@router.post("/providers/{provider_id}/liveness", response_model=ProbeStep)
+async def liveness_saved(
     provider_id: str,
     body: ModelTest,
     *,
     request: Request,
     user: Annotated[User, Depends(require_org_admin)],
     session: Annotated[AsyncSession, Depends(get_session)],
-) -> TestResultOut:
+) -> ProbeStep:
+    """Re-check a saved provider's liveness and persist last_liveness_*."""
     svc = await _svc(user, session, request)
     try:
-        return await svc.test_model_connection(provider_id, body.model_id)
+        return await svc.run_liveness_saved(provider_id, body.model_id)
+    except ProviderNotFoundError as e:
+        raise HTTPException(status_code=404, detail="provider_not_found") from e
+
+
+@router.post("/providers/test", response_model=ProbeResult)
+async def test_provider(
+    body: ProviderTestRequest,
+    *,
+    request: Request,
+    user: Annotated[User, Depends(require_org_admin)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> ProbeResult:
+    """Pre-save full probe (liveness + per-model capability). No DB write."""
+    svc = await _svc(user, session, request)
+    return await svc.run_test_dryrun(body)
+
+
+@router.post("/providers/{provider_id}/models/{mid}/test", response_model=ProbeResult)
+async def test_provider_model(
+    provider_id: str,
+    mid: str,
+    *,
+    request: Request,
+    user: Annotated[User, Depends(require_org_admin)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> ProbeResult:
+    """Saved single-model test; persists provider liveness + that model's last_test_*."""
+    svc = await _svc(user, session, request)
+    try:
+        return await svc.run_model_test_saved(provider_id, mid)
+    except ProviderNotFoundError as e:
+        raise HTTPException(status_code=404, detail="provider_not_found") from e
+    except ModelNotFoundError as e:
+        raise HTTPException(status_code=404, detail="model_not_found") from e
+
+
+@router.post("/providers/{provider_id}/test", response_model=list[ProbeResult])
+async def test_provider_all_models(
+    provider_id: str,
+    *,
+    request: Request,
+    user: Annotated[User, Depends(require_org_admin)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> list[ProbeResult]:
+    """Saved all-enabled-models test; persists provider liveness + each model's last_test_*."""
+    svc = await _svc(user, session, request)
+    try:
+        return await svc.run_all_models_test_saved(provider_id)
     except ProviderNotFoundError as e:
         raise HTTPException(status_code=404, detail="provider_not_found") from e
 
