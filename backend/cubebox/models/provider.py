@@ -1,5 +1,6 @@
 """Provider and Model — LLM provider/model configuration tables."""
 
+from datetime import datetime
 from typing import Any, ClassVar
 
 from sqlalchemy import Column, UniqueConstraint
@@ -33,6 +34,13 @@ class Provider(CubeboxBase, table=True):
     logo_url: str | None = Field(default=None, max_length=512)
     extra_body: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
     extra_headers: dict[str, str] = Field(default_factory=dict, sa_column=Column(JSON))
+    preset_slug: str | None = Field(default=None, max_length=64)
+    capability: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
+    model_capability_overrides: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
+    # Provider-level test = liveness/credential ONLY (spec §4.1).
+    last_liveness_at: datetime | None = Field(default=None)
+    last_liveness_status: str | None = Field(default=None, max_length=16)  # "ok" | "fail"
+    last_liveness_summary: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
     enabled: bool = Field(default=True)
     created_by_user_id: str | None = Field(
         default=None, foreign_key="users.id", max_length=20, nullable=True
@@ -62,4 +70,9 @@ class Model(CubeboxBase, table=True):
     max_tokens: int = Field()
     extra_body: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
     extra_headers: dict[str, str] = Field(default_factory=dict, sa_column=Column(JSON))
+    # Per-model test = capability probe + model existence (spec §4.1).
+    # "ok" | "warn" | "fail" | "unavailable".
+    last_test_at: datetime | None = Field(default=None)
+    last_test_status: str | None = Field(default=None, max_length=16)
+    last_test_summary: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
     enabled: bool = Field(default=True)

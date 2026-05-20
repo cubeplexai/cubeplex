@@ -281,7 +281,11 @@ class ProviderService:
 
     async def test_connection(self, data: ProviderTest) -> TestResultOut:
         start = time.monotonic()
-        if data.provider_type not in ("openai_compat",):
+        if data.provider_type not in (
+            "openai-completions",
+            "anthropic-messages",
+            "openai-responses",
+        ):
             return TestResultOut(
                 ok=False,
                 error=f"Unsupported provider_type: {data.provider_type}",
@@ -296,7 +300,7 @@ class ProviderService:
         from cubebox.llm.oneshot import OneShotLLM
 
         provider_cfg = ProviderConfig(
-            api="openai-completions",
+            api=data.provider_type,
             api_key=data.api_key or "placeholder",
             base_url=data.base_url or "",
             models=[],
@@ -338,11 +342,11 @@ class ProviderService:
         from cubebox.llm.factory import LLMFactory
         from cubebox.llm.oneshot import OneShotLLM
 
-        if provider.provider_type == "anthropic":
-            api = "anthropic"
-        elif provider.provider_type == "openai_compat":
-            api = "openai-completions"
-        else:
+        if provider.provider_type not in (
+            "openai-completions",
+            "anthropic-messages",
+            "openai-responses",
+        ):
             return TestResultOut(
                 ok=False,
                 error=f"Unsupported provider_type: {provider.provider_type}",
@@ -350,7 +354,7 @@ class ProviderService:
             )
 
         provider_cfg = ProviderConfig(
-            api=api,
+            api=provider.provider_type,
             api_key=api_key or "placeholder",
             base_url=provider.base_url or "",
             models=[],
