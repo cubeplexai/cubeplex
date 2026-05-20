@@ -657,7 +657,7 @@ git commit -am "feat(web): wizard step 1 PresetPicker (M5)"
 
 **Files:** Create `components/admin/models/wizard/{ConfigureStep,CapabilityEditor}.tsx`; Test `__tests__/ConfigureStep.test.tsx`
 
-- [ ] **Step 1: Failing test** — preset auto-fills display name/base URL/provider_type; API key required (Next disabled until filled); clicking Next calls `createProvider` with `{ name, provider_type: preset.api, base_url, api_key, preset_slug, capability, model_capability_overrides }` and reports the new id via `onProviderCreated(id)`.
+- [ ] **Step 1: Failing tests** — (a) for an `api_key`/`bearer` preset: auto-fills display name/base URL/provider_type, **API key required** (Next disabled until filled), and Next calls `createProvider` with `{ name, provider_type: preset.api, base_url, api_key, auth_type, preset_slug, capability, model_capability_overrides }` then `onProviderCreated(id)`; (b) for a `none`-auth preset: **no key input shown** and Next is enabled without a key (sends `auth_type: "none"`, no `api_key`); (c) for an `oauth`/`iam` preset: Next disabled with the unsupported note. (`auth_type` per the §-mapping below.)
 - [ ] **Step 2: Implement `ConfigureStep`** — controlled form seeded from the picked preset; "Advanced" expander renders `<CapabilityEditor value … onChange … />`; Next → `createProvider(client, body)` then `onProviderCreated(p.id)`. Optional "Test connection" button calls `presaveLiveness` for a quick check (non-blocking).
 
   **Auth gating (`preset.auth.mode`):** show the API-key input only when mode is
@@ -770,6 +770,6 @@ git commit -am "feat(web): configured-only page + readiness in pickers + i18n (M
 ## Self-review notes
 
 - Spec coverage: wizard 4 steps (F5–F9), readiness §4.7 (F4/F10/F11), page rule §4.8 (F11), M7 detail (F10), backend gaps (B1–B4), usage probe (B3), SSE (B4). All mapped.
-- The SSE endpoint takes explicit `model_ids` (not enabled-filter) — B4 + F9.
+- The SSE endpoint takes explicit `model_db_ids` (not enabled-filter) — B4 + F9.
 - Save gating keys off `ProbeResult.overall` (pass/warn), enable-on-save — F9.
 - PR base = `feat/llm-provider-platform` (stacked), not main — F12.
