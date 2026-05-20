@@ -30,8 +30,16 @@ _PROVIDER_TYPE_TO_API: dict[str, str] = {
 
 _API_TO_PROVIDER_TYPE: dict[str, str] = {v: k for k, v in _PROVIDER_TYPE_TO_API.items()}
 
+_WIRE_API_LITERALS: frozenset[str] = frozenset(
+    {"openai-completions", "anthropic-messages", "openai-responses"}
+)
+
 
 def _provider_type_to_api(provider_type: str) -> str:
+    # Post-A1-migration rows store the wire-api literal directly; accept it as-is.
+    # Older rows still use the legacy enum, which we map via _PROVIDER_TYPE_TO_API.
+    if provider_type in _WIRE_API_LITERALS:
+        return provider_type
     return _PROVIDER_TYPE_TO_API.get(provider_type, "openai-completions")
 
 
