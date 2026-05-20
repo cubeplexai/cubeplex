@@ -96,6 +96,12 @@ class LLMConfig(BaseModel):
         description="Fallback models in 'provider/model-id' format, tried in order",
         alias="fallback_models",
     )
+    title_model: str | None = Field(
+        default=None,
+        description="Model for title generation in 'provider/model-id' format; "
+        "yaml fallback for resolve_task_model('title')",
+        alias="title_model",
+    )
     providers: dict[str, ProviderConfig] = Field(
         default_factory=dict, description="LLM providers configuration"
     )

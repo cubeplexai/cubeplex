@@ -8,6 +8,11 @@ from sqlmodel import Field, SQLModel
 
 from cubebox.models.mixins import TimestampMixin
 
+# Per-task model routing. value shape:
+#   {"chat": "<provider/model>", "title": "...", "summarize": "..."}
+# All keys optional; a missing key falls back to default_model.
+TASK_MODELS_KEY = "task_models"
+
 
 class OrgSettings(SQLModel, TimestampMixin, table=True):
     """Per-org key-value settings store; composite PK (org_id, key)."""
