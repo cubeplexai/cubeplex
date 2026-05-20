@@ -90,6 +90,9 @@ Add the same three to `ProviderUpdate` as optional:
     capability: dict[str, Any] | None = None
     model_capability_overrides: dict[str, Any] | None = None
 ```
+Also add `preset_slug: str | None = None` to **`ProviderOut`** (it is needed in
+the GET response the Step-1 test asserts; `capability`/`model_capability_overrides`
+are already on `ProviderOut` from M3).
 
 - [ ] **Step 4: Persist in `create_provider`**
 
@@ -107,6 +110,15 @@ constructor kwargs:
 (follow the existing pattern around the `for field in (...)` list). Add
 `"preset_slug"`, `"capability"`, `"model_capability_overrides"` to that list so
 they update when present.
+
+- [ ] **Step 5b: Emit `preset_slug` in `_provider_out`**
+
+In `admin_providers.py`, `_provider_out(...)` builds `ProviderOut`. Add
+`preset_slug=p.preset_slug` to its kwargs (alongside the existing
+`capability`/`model_capability_overrides` it already emits). Also add
+`preset_slug?: string | null` to the frontend `Provider` type in
+`packages/core/src/types/provider.ts` (done in Task F1, noted here for
+traceability).
 
 - [ ] **Step 6: Run test — expect pass.** Then `uv run mypy cubebox/`.
 
@@ -145,9 +157,13 @@ async def test_create_model_disabled(admin_client, seeded_provider_id):
 
 - [ ] **Step 3: Add field**
 
-`ModelCreate` gains `enabled: bool = True` (default keeps existing callers
-unchanged). In `create_model`, pass `enabled=data.enabled` into the `Model(...)`
-constructor.
+`ModelCreate` gains `enabled: bool = True`. **Decision (vs spec §3.2):** keep
+the schema default `True` so existing callers and the seeder are unchanged and
+**no DB-default migration is needed** (the column default stays `True`); the
+**wizard explicitly sends `enabled=false`** when creating models (Task F8). The
+spec's "wizard creates disabled models" is satisfied by the caller, not by
+flipping the schema/DB default. In `create_model`, pass `enabled=data.enabled`
+into the `Model(...)` constructor.
 
 - [ ] **Step 4: Run — expect pass. mypy.**
 
@@ -168,18 +184,21 @@ git commit -am "feat(provider): ModelCreate.enabled so wizard can create disable
 - [ ] **Step 1: Failing tests**
 
 ```python
+from cubepi.providers.base import Usage
+# _UsageStub is defined in Step 3 (a _StubProvider whose .result() returns an
+# AssistantMessage with the given usage).
+
 @pytest.mark.asyncio
 async def test_probe_usage_pass_when_usage_present():
     from cubebox.services.provider_probe import probe_usage
-    ev = type("E", (), {"type": "done", "usage": {"input_tokens": 10, "output_tokens": 3}})()
-    step = await probe_usage(_StubProvider(events=[ev]), model_id="m")
+    step = await probe_usage(_UsageStub(usage=Usage(input_tokens=10, output_tokens=3),
+                                        events=[]), model_id="m")
     assert step.name == "usage" and step.status == "pass"
 
 @pytest.mark.asyncio
 async def test_probe_usage_warn_when_absent():
     from cubebox.services.provider_probe import probe_usage
-    ev = type("E", (), {"type": "text_delta", "delta": "hi"})()
-    step = await probe_usage(_StubProvider(events=[ev]), model_id="m")
+    step = await probe_usage(_UsageStub(usage=None, events=[]), model_id="m")
     assert step.status == "warn"
 ```
 
@@ -188,34 +207,56 @@ async def test_probe_usage_warn_when_absent():
 - [ ] **Step 3: Implement**
 
 In `provider_probe.py`: add `"usage"` to `ProbeStepName`. Leave `_BLOCKING_STEPS`
-unchanged. Add:
+unchanged.
+
+**Key fact (verified):** cubepi does NOT put usage on a `StreamEvent`. Usage
+lives on the `AssistantMessage` returned by `MessageStream.result()`
+(`cubepi/providers/base.py`: `MessageStream.result() -> AssistantMessage`;
+`AssistantMessage.usage: Usage | None`; `Usage(input_tokens, output_tokens,
+cache_read_tokens, cache_write_tokens)`). So `probe_usage` opens its own stream,
+drains it, then awaits `stream.result()` and inspects `.usage`:
 ```python
-def _extract_usage(events: list) -> dict | None:
-    """Find a token-usage block on any drained event (cubepi exposes usage on
-    the terminal/message event). Returns the usage dict or None."""
-    for evt in events:
-        usage = getattr(evt, "usage", None)
-        if usage:
-            return usage if isinstance(usage, dict) else getattr(usage, "__dict__", None)
-    return None
-
-
 async def probe_usage(provider: Any, *, model_id: str) -> ProbeStep:
     """Advisory: did the response carry a parseable token-usage structure?
     cubebox cost tracking records zeros without it. Own minimal stream."""
     try:
-        events, _ = await _drain_stream(provider, model_id, thinking="off",
-                                        prompt="hi", max_output=16)
+        stream = await asyncio.wait_for(
+            provider.stream(
+                model=Model(id=model_id, provider="probe", context_window=8192, max_tokens=16),
+                messages=[UserMessage(content=[TextContent(text="hi")])],
+                options=StreamOptions(thinking="off"),
+            ),
+            timeout=15.0,
+        )
+        async for _ in stream:  # drain
+            pass
+        msg = await stream.result()
     except Exception as exc:
         return ProbeStep(name="usage", status="warn", error=_probe_error(exc))
-    usage = _extract_usage(events)
-    if usage:
+    usage = msg.usage
+    if usage is not None and (usage.input_tokens or usage.output_tokens):
         return ProbeStep(name="usage", status="pass",
-                         detail=f"in {usage.get('input_tokens','?')} / out {usage.get('output_tokens','?')}")
+                         detail=f"in {usage.input_tokens} / out {usage.output_tokens}")
     return ProbeStep(name="usage", status="warn", detail="no usage block → cost recorded as zero")
 ```
 Add `probe_usage(...)` to the Phase-B `asyncio.gather` in `run_model_probe` and
 append its result to `steps`.
+
+Update the Step-1 unit tests to use a stub whose `.result()` returns an
+`AssistantMessage` with / without `usage` (NOT a fake `evt.usage`):
+```python
+class _UsageStub(_StubProvider):
+    def __init__(self, *, usage=None, **kw):
+        super().__init__(**kw); self._usage = usage
+    async def stream(self, *a, **k):
+        s = await super().stream(*a, **k)
+        async def result():
+            from cubepi.providers.base import AssistantMessage
+            return AssistantMessage(role="assistant", content=[], usage=self._usage)
+        s.result = result  # type: ignore[attr-defined]
+        return s
+```
+(present `Usage(input_tokens=10, output_tokens=3)` → pass; `usage=None` → warn.)
 
 - [ ] **Step 4: Run all probe tests — expect green. mypy.**
 
@@ -231,18 +272,36 @@ git commit -am "feat(probe): advisory usage step — verify token-usage structur
 
 **Files:**
 - Modify: `backend/cubebox/api/schemas/provider.py` (request body)
+- Modify: `backend/cubebox/repositories/model.py` (add `list_all_for_provider`)
 - Modify: `backend/cubebox/services/provider_service.py` (`run_test_stream`)
 - Modify: `backend/cubebox/api/routes/v1/admin_providers.py` (route)
 - Test: `backend/tests/e2e/test_admin_llm_endpoints.py`
+
+> **Naming:** the request carries **model DB ids** (`Model.id`, the `mdl_…`
+> primary keys), NOT the vendor `model_id` strings. The field is `model_db_ids`
+> throughout (schema, service, frontend) to avoid confusion with `Model.model_id`.
+
+- [ ] **Step 0: Add the unfiltered repo method**
+
+`ModelRepository` only has `list_by_provider` (enabled-filtered). Add:
+```python
+async def list_all_for_provider(self, provider_id: str) -> list[Model]:
+    """All models for a provider, including disabled (wizard models are
+    enabled=false). Mirrors list_by_provider minus the enabled filter."""
+    stmt = select(Model).where(Model.provider_id == provider_id, Model.org_id == self.org_id)
+    return list((await self._session.execute(stmt)).scalars().all())
+```
+(Match the exact org-scoping / session access pattern used by the existing
+`list_by_provider` in `repositories/model.py`.)
 
 - [ ] **Step 1: Request body schema**
 
 In `schemas/provider.py`:
 ```python
 class ProviderTestStreamRequest(BaseModel):
-    """Explicit model ids to test (wizard models are enabled=false, so we do
+    """Explicit model DB ids to test (wizard models are enabled=false, so we do
     NOT filter by enabled here)."""
-    model_ids: list[str] = Field(min_length=1)
+    model_db_ids: list[str] = Field(min_length=1)
 ```
 
 - [ ] **Step 2: Failing test (SSE emits liveness + per-model + done)**
@@ -259,13 +318,23 @@ async def test_test_stream_emits_events(admin_client, monkeypatch):
             steps=[provider_probe.ProbeStep(name="reasoning", status="pass")])
     monkeypatch.setattr(provider_probe, "run_liveness", stub_liveness)
     monkeypatch.setattr(provider_probe, "run_model_probe", stub_model)
-    # seed provider + 1 model (via admin API) → pid, mid (model db id)
-    ...
+    # full setup (no placeholders): create a provider + one model via the admin API
+    pres = await client.post("/api/v1/admin/providers", json={
+        "name": "sse-test-e2e", "provider_type": "anthropic-messages",
+        "base_url": "https://example.com", "auth_type": "api_key", "api_key": "sk-x",
+    })
+    pid = pres.json()["id"]
+    mres = await client.post(f"/api/v1/admin/providers/{pid}/models", json={
+        "model_id": "claude-x", "display_name": "X", "context_window": 8192,
+        "max_tokens": 1024, "enabled": False,
+    })
+    mid = mres.json()["id"]  # model DB id (mdl_…)
     res = await client.post(f"/api/v1/admin/providers/{pid}/test/stream",
-                            json={"model_ids": [mid]})
+                            json={"model_db_ids": [mid]})
     assert res.status_code == 200
     body = res.text
     assert "event: liveness" in body and "event: model" in body and "event: done" in body
+    await client.delete(f"/api/v1/admin/providers/{pid}")
 ```
 
 - [ ] **Step 3: Run — expect 404 (route absent).**
@@ -274,17 +343,18 @@ async def test_test_stream_emits_events(admin_client, monkeypatch):
 
 In `services/provider_service.py`:
 ```python
-async def run_test_stream(self, provider_id: str, model_ids: list[str]):
+async def run_test_stream(self, provider_id: str, model_db_ids: list[str]):
     """Yield SSE frames: one `liveness`, one `model` per id, then `done`.
     Persists liveness on the provider and last_test_* per model (reuses the
-    same persistence as run_model_test_saved)."""
+    same persistence as run_model_test_saved). Caller (route) has already
+    preflighted that the provider and all model_db_ids exist."""
     provider = await self.get_provider(provider_id)
     cfg = await self._config_from_provider(provider)
     factory = self._provider_factory_from_config(cfg)
     models = {m.id: m for m in await self._models.list_all_for_provider(provider_id)}
 
     liveness = await provider_probe.run_liveness(
-        provider_factory=factory, model_id=models[model_ids[0]].model_id)
+        provider_factory=factory, model_id=models[model_db_ids[0]].model_id)
     await self._persist_provider_liveness(provider, liveness)
     yield _sse("liveness", liveness.model_dump(mode="json"))
     if liveness.status != "pass":
@@ -292,27 +362,37 @@ async def run_test_stream(self, provider_id: str, model_ids: list[str]):
 
     fingerprint = capability_fingerprint(provider.capability or {},
                                          provider.model_capability_overrides or {})
-    for mid in model_ids:
-        model = models[mid]
+    for db_id in model_db_ids:
+        model = models[db_id]
         cap = self._resolve_capability(cfg, model.model_id)
         result = await provider_probe.run_model_probe(
             provider_factory=factory, model_id=model.model_id, capability=cap)
         await self._persist_model_test(model, result, fingerprint)
-        yield _sse("model", {"model_db_id": mid, **result.model_dump(mode="json")})
+        yield _sse("model", {"model_db_id": db_id, **result.model_dump(mode="json")})
     yield _sse("done", {})
+
+async def preflight_test_stream(self, provider_id: str, model_db_ids: list[str]) -> None:
+    """Raise ProviderNotFoundError / ModelNotFoundError synchronously before the
+    route returns a StreamingResponse (so errors are real HTTP codes, not a
+    half-open stream)."""
+    await self.get_provider(provider_id)  # raises if missing
+    known = {m.id for m in await self._models.list_all_for_provider(provider_id)}
+    missing = [i for i in model_db_ids if i not in known]
+    if missing:
+        raise ModelNotFoundError(f"models not found: {missing}")
 ```
 Add a module helper:
 ```python
 def _sse(event: str, data: dict) -> bytes:
     return f"event: {event}\ndata: {json.dumps(data)}\n\n".encode()
 ```
-(Use `list_all_for_provider` — a repo method that does NOT filter by enabled; if
-only an enabled-filtered `list_by_provider` exists, add the unfiltered variant.)
 
 - [ ] **Step 5: Add the route**
 
 In `admin_providers.py`:
 ```python
+_SSE_HEADERS = {"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
+
 @router.post("/providers/{provider_id}/test/stream")
 async def test_provider_stream(
     provider_id: str, body: ProviderTestStreamRequest, *, request: Request,
@@ -320,9 +400,18 @@ async def test_provider_stream(
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> StreamingResponse:
     svc = await _svc(user, session, request)
-    return StreamingResponse(svc.run_test_stream(provider_id, body.model_ids),
-                             media_type="text/event-stream")
+    try:  # preflight synchronously → real HTTP errors, not a half-open stream
+        await svc.preflight_test_stream(provider_id, body.model_db_ids)
+    except ProviderNotFoundError as e:
+        raise HTTPException(status_code=404, detail="provider_not_found") from e
+    except ModelNotFoundError as e:
+        raise HTTPException(status_code=404, detail="model_not_found") from e
+    return StreamingResponse(
+        svc.run_test_stream(provider_id, body.model_db_ids),
+        media_type="text/event-stream", headers=_SSE_HEADERS,
+    )
 ```
+(Mirror the headers used by the existing SSE route in `conversations.py`.)
 
 - [ ] **Step 6: Run test — expect pass. mypy. Run `-k provider_probe` green.**
 
@@ -344,10 +433,14 @@ git commit -am "feat(admin): SSE provider test endpoint — liveness + per-model
 export type WireApi = 'openai-completions' | 'openai-responses' | 'anthropic-messages'
 export type Readiness = 'ready' | 'degraded' | 'stale' | 'provider_error' | 'model_error' | 'unavailable'
 
+// cubepi catalog AuthSpec is a nested object (verified): mode is one of
+// api_key|bearer|none|oauth|iam; header_name/header_prefix accompany it.
+export interface AuthSpec { mode: 'api_key' | 'bearer' | 'none' | 'oauth' | 'iam'; header_name?: string; header_prefix?: string }
 export interface ProviderPreset {
   slug: string; display_name: string; short_name: string
   category: 'saas' | 'oss-framework' | 'custom'; description: string
   logo: string | null; api: WireApi; base_url: string
+  auth: AuthSpec   // gate the key input on mode; block oauth/iam in the wizard
   capability: Record<string, unknown>
   model_capability_overrides: Record<string, Record<string, unknown>>
   default_models: Array<{ model_id: string; display_name: string; context_window: number; max_tokens: number; input_modalities: string[]; reasoning: boolean }>
@@ -371,25 +464,60 @@ git commit -am "feat(core): provider preset + probe + readiness types (M5)"
 ## Task F2: core api helpers + SSE client
 
 **Files:**
+- Modify: `frontend/packages/core/src/api/client.ts` (add `postRaw`)
 - Modify: `frontend/packages/core/src/api/providers.ts`
 - Create: `frontend/packages/core/src/api/providerTestStream.ts`
+- Modify: `frontend/packages/core/src/api/index.ts` (barrel export the new file + helpers)
 - Test: `frontend/packages/core/src/api/__tests__/providerTestStream.test.ts`
 
-- [ ] **Step 1: api helpers** — append to `providers.ts`:
+- [ ] **Step 0: `postRaw` on `ApiClient`** — `client.ts` has `get/post/patch/del`
+  but no streaming POST. Add a method that returns the raw `Response` (no
+  `.json()`), reusing the same `doFetch`/CSRF/`credentials` path as `post`:
+```ts
+postRaw(path: string, body: unknown, headers?: Record<string,string>): Promise<Response> {
+  return this.doFetch(path, { method: 'POST', body: JSON.stringify(body),
+    headers: { 'Content-Type': 'application/json', ...(headers ?? {}) } })
+}
+```
+(Match the real `doFetch` signature/CSRF handling in `client.ts`; the chat
+streaming in `runStreams.ts` shows the established raw-fetch pattern.)
+
+- [ ] **Step 1: api helpers** — append to `providers.ts` (ALL helpers the rest
+  of the plan references — `listPresets`, `presaveLiveness`, `presaveTest`,
+  `testModel`, `checkLiveness`, `setModelEnabled`):
 ```ts
 export async function listPresets(client: ApiClient): Promise<ProviderPreset[]> {
   const res = await client.get('/api/v1/admin/llm/presets')
   if (!res.ok) throw await toApiError(res); return res.json()
 }
-export async function presaveLiveness(client: ApiClient, body: { api: string; base_url: string; api_key?: string|null; capability: Record<string,unknown>; model_capability_overrides?: Record<string,unknown>; model_id: string }): Promise<ProbeStep> {
+type LivenessBody = { api: string; base_url: string; api_key?: string|null; capability: Record<string,unknown>; model_capability_overrides?: Record<string,unknown>; model_id: string }
+export async function presaveLiveness(client: ApiClient, body: LivenessBody): Promise<ProbeStep> {
   const res = await client.post('/api/v1/admin/providers/liveness', body)
   if (!res.ok) throw await toApiError(res); return res.json()
 }
-export async function setModelEnabled(client: ApiClient, providerId: string, mid: string, enabled: boolean): Promise<Model> {
-  const res = await client.patch(`/api/v1/admin/providers/${providerId}/models/${mid}`, { enabled })
+export async function presaveTest(client: ApiClient, body: LivenessBody): Promise<ProbeResult> {
+  const res = await client.post('/api/v1/admin/providers/test', body)
+  if (!res.ok) throw await toApiError(res); return res.json()
+}
+export async function checkLiveness(client: ApiClient, providerId: string, modelId: string): Promise<ProbeStep> {
+  // saved-provider liveness re-check; body carries the vendor model_id string
+  const res = await client.post(`/api/v1/admin/providers/${providerId}/liveness`, { model_id: modelId })
+  if (!res.ok) throw await toApiError(res); return res.json()
+}
+export async function testModel(client: ApiClient, providerId: string, modelDbId: string): Promise<ProbeResult> {
+  const res = await client.post(`/api/v1/admin/providers/${providerId}/models/${modelDbId}/test`, {})
+  if (!res.ok) throw await toApiError(res); return res.json()
+}
+export async function setModelEnabled(client: ApiClient, providerId: string, modelDbId: string, enabled: boolean): Promise<Model> {
+  const res = await client.patch(`/api/v1/admin/providers/${providerId}/models/${modelDbId}`, { enabled })
   if (!res.ok) throw await toApiError(res); return res.json()
 }
 ```
+
+- [ ] **Step 1b: barrel export** — in `api/index.ts`, export the new helpers and
+  re-export `./providerTestStream` (`parseTestStream`, `startTestStream`,
+  `TestStreamEvent`). Confirm `@cubebox/core`'s public index re-exports them too
+  if components import from the package root.
 
 - [ ] **Step 2: Failing test for the SSE client**
 
@@ -424,13 +552,12 @@ export async function* parseTestStream(stream: ReadableStream<Uint8Array>): Asyn
     }
   }
 }
-export async function startTestStream(client: ApiClient, providerId: string, modelIds: string[]): Promise<ReadableStream<Uint8Array>> {
-  const res = await client.postRaw(`/api/v1/admin/providers/${providerId}/test/stream`, { model_ids: modelIds }, { Accept: 'text/event-stream' })
+export async function startTestStream(client: ApiClient, providerId: string, modelDbIds: string[]): Promise<ReadableStream<Uint8Array>> {
+  const res = await client.postRaw(`/api/v1/admin/providers/${providerId}/test/stream`, { model_db_ids: modelDbIds }, { Accept: 'text/event-stream' })
   if (!res.ok || !res.body) throw await toApiError(res); return res.body
 }
 ```
-(If `ApiClient` lacks a raw/streaming POST, add `postRaw` that returns the
-`Response` without `.json()` — mirror how `runStreams.ts` issues its fetch.)
+(`postRaw` is added in Step 0 above.)
 
 - [ ] **Step 4: Run vitest — expect pass. Build core.**
 
@@ -519,6 +646,14 @@ git commit -am "feat(web): wizard step 1 PresetPicker (M5)"
 
 - [ ] **Step 1: Failing test** — preset auto-fills display name/base URL/provider_type; API key required (Next disabled until filled); clicking Next calls `createProvider` with `{ name, provider_type: preset.api, base_url, api_key, preset_slug, capability, model_capability_overrides }` and reports the new id via `onProviderCreated(id)`.
 - [ ] **Step 2: Implement `ConfigureStep`** — controlled form seeded from the picked preset; "Advanced" expander renders `<CapabilityEditor value … onChange … />`; Next → `createProvider(client, body)` then `onProviderCreated(p.id)`. Optional "Test connection" button calls `presaveLiveness` for a quick check (non-blocking).
+
+  **Auth gating (`preset.auth.mode`):** show the API-key input only when mode is
+  `api_key` or `bearer` (required then). When `none`, hide the key input (send
+  `auth_type: "none"`, no key). When `oauth` or `iam`, the wizard cannot
+  complete the connection (OAuth provider auth is a parent-spec non-goal, IAM
+  unsupported) — disable Next with an inline note "OAuth/IAM presets aren't
+  supported yet" (the preset can still be picked to inspect, but not saved).
+  Map `auth_type` sent to the backend from `preset.auth.mode`.
 - [ ] **Step 3: Implement `CapabilityEditor`** — a JSON `<textarea>` bound to the capability object (parse on change, show parse errors) + a "use a template" popover for custom presets that injects a vendor reasoning block. Keep v1 simple (JSON view) per spec §11.
 - [ ] **Step 4: vitest pass. type-check. Commit.**
 
@@ -562,7 +697,15 @@ git commit -am "feat(web): wizard step 4 TestStep with SSE results + enable-on-p
 **Files:** Modify `components/admin/models/{ProviderDetail,ModelRow}.tsx`; Test `__tests__/ModelRow.test.tsx`
 
 - [ ] **Step 1: Failing test** — `ModelRow` given a model with `readiness:'degraded'` renders `<ReadinessBadge readiness="degraded">`; a "re-test" button calls `testModel(client, providerId, mid)` and updates the row.
-- [ ] **Step 2: Implement** — `ProviderDetail` header shows provider liveness dot from `last_liveness_status`; each `ModelRow` shows `<ReadinessBadge>` from the model's `readiness`; re-test buttons: provider liveness (`presave... no` → use saved `POST /{id}/liveness` via a `checkLiveness` helper), single model (`testModel`), "test all" (open the SSE stream over the provider's model ids). Re-fetch the provider after to refresh readiness.
+- [ ] **Step 2: Implement** — `ProviderDetail` header shows provider liveness dot from `last_liveness_status`; each `ModelRow` shows `<ReadinessBadge>` from the model's `readiness`. Re-test buttons:
+  - **provider liveness** — `checkLiveness(client, id, modelId)`; the saved
+    `/{id}/liveness` endpoint **requires a `model_id`** (vendor string), so pass
+    the first configured model's `model_id`. **Disable this button when the
+    provider has no models** (nothing to issue the cheap call against).
+  - **single model** — `testModel(client, id, model.id)` (model DB id).
+  - **test all** — open the SSE stream (`startTestStream`) over the provider's
+    model DB ids (all of them, enabled or not).
+  Re-fetch the provider (`fetchProvider`) after each to refresh `readiness`/dots.
 - [ ] **Step 3: vitest pass. type-check. Commit.**
 
 ```bash
@@ -576,7 +719,19 @@ git commit -am "feat(web): provider detail readiness dots + re-test (M7)"
 **Files:** `app/admin/models/page.tsx`, any model-picker component, locale message files.
 
 - [ ] **Step 1:** Verify `/admin/models` list/detail read only `fetchProviders`/`fetchProvider` (configured rows) — presets are fetched ONLY in the wizard. Add a test asserting the list page never calls `listPresets`.
-- [ ] **Step 2:** In any existing model picker that lists provider models, render unusable models (`provider_error`/`model_error`/`unavailable`) disabled with `<ReadinessBadge>` + reason (not hidden). Test the disabled state.
+- [ ] **Step 2: Model-picker readiness (concrete).** The existing
+  `frontend/packages/web/hooks/useAllModels.ts` currently **filters disabled
+  models out** and its option type has no `enabled`/`readiness`. Changes:
+  - Extend the option type with `enabled: boolean` and `readiness: Readiness`
+    (sourced from each provider's per-model read fields).
+  - Stop filtering disabled models out — pass them through.
+  - In the consuming picker (`OrgLLMSettingsCard`'s model `<Select>`), render a
+    not-usable option (`provider_error`/`model_error`/`unavailable`, or
+    `enabled === false`) with `<ReadinessBadge>` + reason and
+    `pointer-events: none` / `aria-disabled` (visible, not selectable — not
+    hidden). `ready`/`degraded`/`stale` stay selectable.
+  - Test: an unusable model renders disabled with its badge; a `ready` one is
+    selectable.
 - [ ] **Step 3:** Add all new i18n keys under `adminModels.*` (wizard step labels, readiness labels, test sub-check names, buttons) to every locale file; run the i18n parity check.
 - [ ] **Step 4:** `pnpm --filter @cubebox/web lint && pnpm --filter @cubebox/web type-check`. **Commit.**
 
