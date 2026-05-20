@@ -67,7 +67,12 @@ image — see the single-image constraint). Inside that container:
 - **Human view** is Neko's web UI, served on container port 8080, exposed to the
   frontend through opensandbox's existing `get_signed_endpoint(port, expires)`
   (a signed, expiring URL). The frontend embeds it in an `<iframe>` in the
-  preview panel.
+  preview panel. **The embeddable URL must be header-free** — a browser cannot
+  attach request headers to an iframe navigation (or its WebRTC/WS sub-requests).
+  The signed endpoint carries its auth token in the URL, which satisfies this;
+  for deployments whose endpoint instead requires headers, the backend serves a
+  **same-origin reverse proxy** that injects them (and forwards WS upgrades), and
+  hands the frontend the proxy URL. Either way the frontend gets a header-free URL.
 - **Read-only vs. interactive** is a frontend toggle (`pointer-events: none` for
   watch-only; removed for takeover), matching how Browserbase/Steel do it.
 
@@ -103,8 +108,12 @@ The full Dockerfile gotchas are captured from the PoC; the plan covers them.
 - **Takeover / privacy model** (mirrors OpenAI Operator): the agent pauses and
   signals "needs human" → frontend reveals the interactive view → while the
   human is in control, the agent does not capture page content into the model
-  context, and only the **session cookies** persist for the agent to resume.
-  Exact signaling (event type, who toggles control) is a plan/impl detail.
+  context. The agent resumes from the human's work because both drive the **same
+  long-lived Chromium with a persistent profile** (`--user-data-dir`); the
+  context is never recreated, so *all* auth state (cookies **and**
+  `localStorage`/`IndexedDB`) carries over — cookie-only persistence would be
+  insufficient for modern login flows. Exact signaling (event type, who toggles
+  control) is a plan/impl detail.
 
 ### 3. Frontend
 

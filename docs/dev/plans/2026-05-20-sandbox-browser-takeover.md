@@ -50,17 +50,29 @@ in-container Playwright `connectOverCDP().newPage()` drives the streamed Chromiu
 Files:
 - `backend/cubebox/sandbox/base.py` — add abstract `get_browser_endpoint()`.
 - `backend/cubebox/sandbox/opensandbox.py` — implement via
-  `self._sandbox.get_signed_endpoint(8080, expires)`, return `{url, headers,
-  expires_at}`.
+  `self._sandbox.get_signed_endpoint(8080, expires)`.
 - `backend/cubebox/sandbox/local.py` — return a localhost URL for dev.
 - `backend/cubebox/api/routes/v1/ws_browser.py` (new) — `GET
   /api/v1/ws/{workspace_id}/browser/live-view` → resolves the caller's active
-  sandbox (SandboxManager) and returns the signed Neko URL. Dedicated
+  sandbox (SandboxManager) and returns the live-view URL. Dedicated
   workspace-scoped handler (no shared/parameterized route).
 - Register the route in the v1 router.
 
-Tests: unit test the opensandbox method (signed endpoint shape) and the route
-(auth scope + returns URL). Real-sandbox E2E if the cluster sandbox is reachable.
+**Header vs. tokenized-URL (must resolve in this phase).** A browser cannot
+attach arbitrary request headers to an `<iframe>` navigation (or to the WebRTC/WS
+sub-requests it spawns). So the live view can only be embedded directly if the
+signed endpoint carries all auth **in the URL** (the OSEP-0011 route token is
+URL-borne, which is the expected case). If a deployment's endpoint instead
+requires `headers` (OpenSandbox secure-access/header modes), direct iframe
+embedding will fail. The route therefore returns a **header-free embeddable
+URL**; when the underlying endpoint needs headers, the backend exposes a
+**same-origin reverse proxy** (`/api/v1/ws/{workspace_id}/browser/proxy/...`)
+that injects them and forwards HTTP **and** WebSocket upgrades, and the route
+returns that proxy URL instead. The frontend always gets a header-free URL.
+
+Tests: unit test the opensandbox method (returns a URL; header case routes to the
+proxy), the route (auth scope), and the proxy path (header injection + WS
+upgrade). Real-sandbox E2E if the cluster sandbox is reachable.
 
 ## Phase 3 — Takeover / privacy signaling
 
@@ -69,11 +81,19 @@ Files: agent middleware / event types (`cubebox/agents/`, `core/src/types/events
   (initial trigger: explicit agent tool/marker; heuristics later).
 - Control toggle: an event/flag for "human in control" ↔ "agent in control".
 - Privacy: while human-in-control, do not capture page text/screenshots into
-  model context; persist only session cookies so the agent resumes logged-in
-  (mirrors OpenAI Operator). Keep v1 minimal — wire the signal + cookie reuse;
-  no elaborate redaction.
+  model context (mirrors OpenAI Operator). Keep v1 minimal — wire the signal; no
+  elaborate redaction.
+- Session continuity: the agent and the human drive **one long-lived Chromium
+  with a persistent profile** (`--user-data-dir` on the sandbox volume) and the
+  **same browser context is never recreated** mid-session. This keeps *all*
+  auth state — cookies **and** `localStorage` / `IndexedDB` — which modern login
+  flows rely on; "only session cookies" is insufficient. The agent resumes from
+  the exact authenticated profile because it is literally the same browser. (If a
+  future change ever needs to migrate/restore a context, it must capture full
+  Playwright `storage_state`, not just cookies.)
 
-Tests: unit-test the event emission + that capture is suppressed during takeover.
+Tests: unit-test the event emission + that capture is suppressed during takeover;
+assert the browser profile/context is reused (not recreated) across a takeover.
 
 ## Phase 4 — Frontend: live view in the preview panel
 
