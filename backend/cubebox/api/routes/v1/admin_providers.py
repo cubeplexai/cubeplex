@@ -161,6 +161,7 @@ def _provider_out(
         org_override=OrgProviderOverrideOut(enabled=override.enabled) if override else None,
         extra_body=p.extra_body,
         extra_headers=p.extra_headers,
+        preset_slug=p.preset_slug,
         capability=p.capability or {},
         model_capability_overrides=p.model_capability_overrides or {},
         last_liveness_at=utc_isoformat(p.last_liveness_at) if p.last_liveness_at else None,

@@ -19,6 +19,9 @@ class ProviderCreate(BaseModel):
     logo_url: str | None = Field(default=None, max_length=512)
     extra_body: dict[str, Any] = Field(default_factory=dict)
     extra_headers: dict[str, Any] = Field(default_factory=dict)
+    preset_slug: str | None = Field(default=None, max_length=64)
+    capability: dict[str, Any] = Field(default_factory=dict)
+    model_capability_overrides: dict[str, Any] = Field(default_factory=dict)
 
 
 class ProviderUpdate(BaseModel):
@@ -31,6 +34,9 @@ class ProviderUpdate(BaseModel):
     extra_body: dict[str, Any] | None = None
     extra_headers: dict[str, Any] | None = None
     enabled: bool | None = None
+    preset_slug: str | None = None
+    capability: dict[str, Any] | None = None
+    model_capability_overrides: dict[str, Any] | None = None
 
 
 class ModelTest(BaseModel):
@@ -152,6 +158,7 @@ class ProviderOut(BaseModel):
     org_override: OrgProviderOverrideOut | None = None
     extra_body: dict[str, Any]
     extra_headers: dict[str, Any]
+    preset_slug: str | None = None
     capability: dict[str, Any] = Field(default_factory=dict)
     model_capability_overrides: dict[str, Any] = Field(default_factory=dict)
     # Provider-level liveness/credential status (spec §4.1). UTC-offset ISO string.

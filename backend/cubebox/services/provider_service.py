@@ -152,6 +152,9 @@ class ProviderService:
             logo_url=data.logo_url,
             extra_body=data.extra_body,
             extra_headers=data.extra_headers,
+            preset_slug=data.preset_slug,
+            capability=data.capability,
+            model_capability_overrides=data.model_capability_overrides,
             created_by_user_id=self.actor_user_id,
         )
         return await self._providers.add(p)
@@ -185,6 +188,9 @@ class ProviderService:
             "logo_url",
             "extra_body",
             "extra_headers",
+            "preset_slug",
+            "capability",
+            "model_capability_overrides",
         ):
             val = getattr(data, field, None)
             if val is not None:
