@@ -318,6 +318,7 @@ async def lifespan(_app: FastAPI):  # type: ignore
         except asyncio.CancelledError:
             pass
         logger.info("Sandbox cleanup loop stopped")
+    log.shutdown()
 
 
 def create_app(

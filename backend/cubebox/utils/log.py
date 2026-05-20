@@ -7,6 +7,7 @@ Provides centralized logging setup using loguru with:
 - Integration with standard logging
 """
 
+import atexit
 import json
 import logging
 import os
@@ -207,3 +208,12 @@ def init(log_path: str | None = None, debug: bool | None = None) -> None:
     )
 
     logger.info("Logging initialized", log_path=log_path, debug=debug)
+
+
+def shutdown() -> None:
+    """Flush and stop Loguru handlers created by init()."""
+    logger.complete()
+    logger.remove()
+
+
+atexit.register(shutdown)
