@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from contextlib import AsyncExitStack, suppress
+from contextlib import suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
@@ -1130,38 +1130,17 @@ class RunManager:
                 timestamp=_time.time(),
                 metadata=_user_msg_metadata,
             )
-            from cubebox.agents.tracing import build_run_tracer
+            # Attach the process-level Tracer to this run via cubepi's
+            # best-effort scope: it swallows every tracing fault (attach,
+            # detach, flush) so tracing can never break the run, and is a
+            # no-op when tracing is disabled (tracer is None).
+            from cubepi.tracing import trace
 
-            # Tracing is best-effort: neither attach nor flush/shutdown may
-            # break or fail an otherwise-successful run. The AsyncExitStack is
-            # managed manually (not via `async with`) so its exit path —
-            # attached() detach + flush, then Tracer shutdown — can be wrapped
-            # in its own try/except. attached().__aenter__ also does provider/
-            # recorder subscription work that can raise, so the enter is
-            # isolated too; either failure logs and runs the turn untraced.
-            tracer = build_run_tracer()
-            _trace_stack = AsyncExitStack()
-            if tracer is not None:
-                try:
-                    # LIFO close: attached() detaches + awaits its flush task
-                    # first, then the tracer's __aexit__ shuts down
-                    # (force_flush + close exporters) — so this run's spans
-                    # are on disk before _run_cubepi_path returns.
-                    await _trace_stack.enter_async_context(tracer)
-                    await _trace_stack.enter_async_context(tracer.attached(agent))
-                except Exception as _trace_exc:
-                    logger.warning("Tracing attach failed, continuing untraced: {}", _trace_exc)
-                    with suppress(Exception):
-                        await _trace_stack.aclose()
+            tracer = getattr(self._app.state, "tracer", None)
             try:
-                await agent.prompt(_user_msg)
+                async with trace(tracer, agent):
+                    await agent.prompt(_user_msg)
             finally:
-                # Flush + shut down tracing (best-effort; a teardown failure
-                # must not fail the run). aclose() is a no-op if attach failed.
-                try:
-                    await _trace_stack.aclose()
-                except Exception as _trace_exc:
-                    logger.warning("Tracing flush/shutdown failed: {}", _trace_exc)
                 # Signal drainer and wait for it to flush remaining events so
                 # all SSE dicts are published before citation buffers flush.
                 await sse_queue.put(None)
