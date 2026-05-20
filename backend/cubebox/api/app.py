@@ -406,6 +406,7 @@ def create_app(
 
     # Register routers
     from cubebox.api.routes.v1 import (
+        admin_llm,
         admin_mcp,
         admin_members,
         admin_providers,
@@ -444,6 +445,7 @@ def create_app(
     app.include_router(ws_members.router, prefix="/api/v1")
     app.include_router(ws_settings.router, prefix="/api/v1")
     app.include_router(admin_providers.router, prefix="/api/v1")
+    app.include_router(admin_llm.router, prefix="/api/v1")
     app.include_router(ws_skills.router, prefix="/api/v1")
 
     from cubebox.api.routes.health import router as health_router
