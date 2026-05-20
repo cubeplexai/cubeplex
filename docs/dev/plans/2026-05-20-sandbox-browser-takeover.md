@@ -32,7 +32,12 @@ Steps (all verified in the PoC at `tmp/neko-poc/combined.Dockerfile`):
 6. Add a supervisord program that launches the **existing** Playwright Chromium
    (`/ms-playwright/.../chrome-linux64/chrome`) headful on `DISPLAY=:99.0` with
    `--remote-debugging-port=9222 --remote-debugging-address=127.0.0.1
-   --remote-allow-origins=* --disable-dev-shm-usage`.
+   --remote-allow-origins=* --disable-dev-shm-usage
+   --user-data-dir=/workspace/.cubebox-browser-profile`. The
+   `--user-data-dir` **must** point at the persistent sandbox volume
+   (`/workspace` is the PVC mount) so the profile — and thus all auth state —
+   survives, satisfying the Phase 3 continuity requirement. The agent's
+   `connectOverCDP` attaches to this same browser; it must not launch its own.
 7. Set ENV: `USER=neko DISPLAY=:99.0 XDG_RUNTIME_DIR=/tmp/runtime-neko
    NEKO_SERVER_BIND=:8080 NEKO_PLUGINS_ENABLED=true NEKO_PLUGINS_DIR=/etc/neko/plugins/`.
    Default CMD stays the agent's normal entrypoint; Neko stack runs under
