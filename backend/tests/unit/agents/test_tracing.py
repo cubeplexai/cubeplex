@@ -1,0 +1,50 @@
+"""Unit tests for the per-run cubepi Tracer factory."""
+
+from __future__ import annotations
+
+import pytest
+
+from cubebox.agents import tracing as tracing_mod
+
+
+def _fake_config(values: dict[str, object]):
+    """Return a stub with a dynaconf-like .get(key, default)."""
+
+    class _Stub:
+        def get(self, key: str, default: object = None) -> object:
+            return values.get(key, default)
+
+    return _Stub()
+
+
+def test_build_run_tracer_disabled_returns_none(monkeypatch):
+    monkeypatch.setattr(tracing_mod, "config", _fake_config({"tracing.enabled": False}))
+    assert tracing_mod.build_run_tracer() is None
+
+
+def test_build_run_tracer_missing_key_defaults_disabled(monkeypatch):
+    # No tracing.enabled key at all -> default False -> None.
+    monkeypatch.setattr(tracing_mod, "config", _fake_config({}))
+    assert tracing_mod.build_run_tracer() is None
+
+
+@pytest.mark.asyncio
+async def test_build_run_tracer_enabled_returns_tracer(monkeypatch, tmp_path):
+    from cubepi.tracing import Tracer
+
+    monkeypatch.setattr(
+        tracing_mod,
+        "config",
+        _fake_config(
+            {
+                "tracing.enabled": True,
+                "tracing.directory": str(tmp_path),
+                "tracing.record_content": True,
+                "env": "development",
+            }
+        ),
+    )
+    tracer = tracing_mod.build_run_tracer()
+    assert isinstance(tracer, Tracer)
+    # Clean up so the BatchSpanProcessor / atexit hook doesn't leak.
+    await tracer.shutdown()
