@@ -841,7 +841,7 @@ requires-dist = [
     { name = "alembic", specifier = ">=1.18.4" },
     { name = "click", specifier = ">=8.3.1" },
     { name = "cryptography", specifier = ">=42.0" },
-    { name = "cubepi", extras = ["mcp", "postgres", "tracing", "tracing-otlp"], specifier = ">=0.4.0" },
+    { name = "cubepi", extras = ["mcp", "postgres", "tracing", "tracing-otlp"], git = "https://github.com/cubeplexai/cubepi.git?rev=b8ea8a8" },
     { name = "dynaconf", specifier = ">=3.2.11" },
     { name = "fastapi", specifier = ">=0.110.0" },
     { name = "fastapi-users", extras = ["sqlalchemy"], specifier = ">=14.0" },
@@ -885,15 +885,11 @@ dev = [
 [[package]]
 name = "cubepi"
 version = "0.4.0"
-source = { registry = "https://pypi.org/simple" }
+source = { git = "https://github.com/cubeplexai/cubepi.git?rev=b8ea8a8#b8ea8a8eaacb1e3ba08d1bb1a562fe1b959af17b" }
 dependencies = [
     { name = "anthropic" },
     { name = "openai" },
     { name = "pydantic" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/20/dc/addb6bd924f55ea37fd979df5030ee4181698fa9fcdd82ac8a3ab0a0a8fc/cubepi-0.4.0.tar.gz", hash = "sha256:b34e203f89e05ad09c840f4c6bf75e7717e853e96ed8ada8235f87f716994bde", size = 985333, upload-time = "2026-05-19T08:31:56.124Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/dd/9f/32cce93c442f297f432e54241899bf383b82240b5a756f0e3036c33f2d15/cubepi-0.4.0-py3-none-any.whl", hash = "sha256:7dc938e0fa68b6858bf5f905d11b3e14107000b5713a78f4bdfd47f0eb000d51", size = 109837, upload-time = "2026-05-19T08:31:54.46Z" },
 ]
 
 [package.optional-dependencies]
