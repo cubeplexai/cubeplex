@@ -211,12 +211,23 @@ class _NotFoundError(Exception):
 
 
 def test_is_model_not_found_classifier():
-    not_found_404 = ProbeStep(
+    # A bare 404 with no model marker is NOT model_not_found — it's likely a
+    # wrong base_url / route mismatch (provider/config failure), which phase-A
+    # liveness catches at the provider grain. (PR #124 codex P1.)
+    bare_404 = ProbeStep(
         name="reasoning",
         status="fail",
         error=ProbeError(type="NotFoundError", message="boom", raw_status=404),
     )
-    assert _is_model_not_found(not_found_404) is True
+    assert _is_model_not_found(bare_404) is False
+
+    # A 404 that DOES carry a model marker is model_not_found.
+    not_found_404_marked = ProbeStep(
+        name="reasoning",
+        status="fail",
+        error=ProbeError(type="NotFoundError", message="unknown model gpt-x", raw_status=404),
+    )
+    assert _is_model_not_found(not_found_404_marked) is True
 
     not_found_message = ProbeStep(
         name="reasoning",

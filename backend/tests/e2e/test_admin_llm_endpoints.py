@@ -227,3 +227,33 @@ async def test_saved_model_test_persists_status_and_fingerprint(
     assert model["last_test_summary"].get("capability_fingerprint")
 
     await client.delete(f"/api/v1/admin/providers/{pid}")
+
+
+@pytest.mark.asyncio
+async def test_all_models_test_on_empty_provider_returns_empty_no_false_failure(
+    admin_client: tuple[AsyncClient, str],
+) -> None:
+    """A provider with zero enabled models: /providers/{id}/test returns [] and
+    does NOT persist a bogus liveness failure (codex P2)."""
+    client, _ws_id = admin_client
+    res = await client.post(
+        "/api/v1/admin/providers",
+        json={
+            "name": "empty-provider-e2e",
+            "base_url": "https://example.com/api",
+            "auth_type": "api_key",
+            "api_key": "sk-test",
+        },
+    )
+    assert res.status_code == 201
+    pid = res.json()["id"]
+
+    res = await client.post(f"/api/v1/admin/providers/{pid}/test")
+    assert res.status_code == 200
+    assert res.json() == []
+
+    # No fake-"ping" probe ran, so liveness stays unset (not "fail").
+    detail = (await client.get(f"/api/v1/admin/providers/{pid}")).json()
+    assert detail["last_liveness_status"] != "fail"
+
+    await client.delete(f"/api/v1/admin/providers/{pid}")
