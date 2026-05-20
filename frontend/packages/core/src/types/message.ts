@@ -104,6 +104,21 @@ export function getTextContent(msg: Message): string {
     .join('')
 }
 
+/**
+ * Content to feed tool-result previews (SearchResultView / WebFetchView, citation
+ * popovers). CitationMiddleware rewrites a tool result's `.content` to 【N-M】-marked
+ * chunk text for the LLM and stashes the raw, parseable output in
+ * `details.original_content` (see backend cubebox/middleware/citation.py). Previews
+ * need that raw output — falling back to `.content` would feed them the citation
+ * markup, which they can't parse. The live SSE path already prefers original_content
+ * (cubebox/agents/stream.py `_stringify_tool_result`); this keeps reload consistent.
+ */
+export function getToolResultPreviewContent(msg: ToolResultMessage): string {
+  const details = msg.details as { original_content?: unknown } | null | undefined
+  if (typeof details?.original_content === 'string') return details.original_content
+  return getTextContent(msg)
+}
+
 export function getThinking(msg: AssistantMessage): string {
   return msg.content
     .filter((b): b is Extract<ContentBlock, { type: 'thinking' }> => b.type === 'thinking')

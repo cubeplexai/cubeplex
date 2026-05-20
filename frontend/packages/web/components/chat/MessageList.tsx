@@ -2,7 +2,13 @@
 
 import { useEffect, useRef, useCallback, useMemo } from 'react'
 import { useTranslations } from 'next-intl'
-import { useMessageStore, createApiClient, getTextContent, getSubagentSummary } from '@cubebox/core'
+import {
+  useMessageStore,
+  createApiClient,
+  getTextContent,
+  getToolResultPreviewContent,
+  getSubagentSummary,
+} from '@cubebox/core'
 import type { Message, SubagentSummary } from '@cubebox/core'
 import { AlertCircle } from 'lucide-react'
 import { UserMessage } from './UserMessage'
@@ -69,7 +75,7 @@ function buildHistoricalToolResultMap(
     if (msg.role !== 'tool_result' || !msg.tool_call_id) continue
     const receivedAt = msgTimestampMs(msg)
     map[msg.tool_call_id] = {
-      content: getTextContent(msg),
+      content: getToolResultPreviewContent(msg),
       receivedAt: receivedAt || Date.now(),
       startedAt: toolCallStartMap[msg.tool_call_id],
     }

@@ -8,6 +8,7 @@ import {
   useMessageStore,
   bareToolName,
   getSubagentSummary,
+  getToolResultPreviewContent,
 } from '@cubebox/core'
 import type { CitationData } from '@cubebox/core'
 import { useTranslations } from 'next-intl'
@@ -298,10 +299,9 @@ export function CitationMarker({ citationId, chunkIndex, conversationId }: Citat
         for (const m of msgs) {
           if (m.role === 'tool_result' && m.tool_call_id === citation.tool_call_id) {
             toolName = m.tool_name || 'web_search'
-            content = m.content
-              .filter((b): b is { type: 'text'; text: string } => b.type === 'text')
-              .map((b) => b.text)
-              .join('')
+            // Prefer raw original_content over the 【N-M】-marked .content so the
+            // preview can parse it (mirrors the live SSE path).
+            content = getToolResultPreviewContent(m)
             break outer
           }
           // Search subagent inner tool results
