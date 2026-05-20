@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { useTranslations } from 'next-intl'
 import { ChevronDown, ChevronRight, BarChart3 } from 'lucide-react'
 import type { TurnUsage, SessionUsage } from '@cubebox/core'
+import { computeCacheHitRate, formatPercent } from '@/lib/cost/helpers'
 
 function formatTokenCount(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
@@ -29,10 +30,20 @@ export function TokenUsageBar({ turnUsage, sessionUsage, contextWindow }: TokenU
 
   if (!turnUsage && !sessionUsage) return null
 
-  const cacheHitRate =
-    turnUsage && turnUsage.input_tokens > 0
-      ? (turnUsage.cache_read_tokens / turnUsage.input_tokens) * 100
-      : null
+  // Cache hit rate is cached / (uncached input + cached). input_tokens is the
+  // UNCACHED portion, so dividing by it alone overcounts and can exceed 100%
+  // on heavily-cached turns. Use the shared helper (denominator = input +
+  // cacheRead), matching the admin cost insights.
+  const cacheHitRate = turnUsage
+    ? computeCacheHitRate({ input: turnUsage.input_tokens, cacheRead: turnUsage.cache_read_tokens })
+    : null
+
+  const sessionCacheHitRate = sessionUsage
+    ? computeCacheHitRate({
+        input: sessionUsage.total_input_tokens,
+        cacheRead: sessionUsage.total_cache_read_tokens,
+      })
+    : null
 
   const ctxPct =
     sessionUsage && contextWindow && contextWindow > 0
@@ -73,9 +84,7 @@ export function TokenUsageBar({ turnUsage, sessionUsage, contextWindow }: TokenU
                   {formatTokenCount(turnUsage.output_tokens)}
                 </span>
                 <span>{t('cacheHitRate')}</span>
-                <span className="text-right font-mono">
-                  {cacheHitRate !== null ? `${cacheHitRate.toFixed(1)}%` : '—'}
-                </span>
+                <span className="text-right font-mono">{formatPercent(cacheHitRate, 1)}</span>
               </div>
             </div>
           )}
@@ -92,9 +101,7 @@ export function TokenUsageBar({ turnUsage, sessionUsage, contextWindow }: TokenU
                 </span>
                 <span>{t('cacheHitRate')}</span>
                 <span className="text-right font-mono">
-                  {sessionUsage.total_input_tokens > 0
-                    ? `${((sessionUsage.total_cache_read_tokens / sessionUsage.total_input_tokens) * 100).toFixed(1)}%`
-                    : '—'}
+                  {formatPercent(sessionCacheHitRate, 1)}
                 </span>
               </div>
               {ctxPct !== null && (
