@@ -1,6 +1,6 @@
 # LLM Provider Platform — M5 (Add Provider wizard) + M7 (polish) design
 
-**Status:** Draft for review (rev 2 — folds in codex review of rev 1)
+**Status:** Draft for review (rev 3 — codex re-review: SSE takes explicit model-id list; footer keys off probe `overall`, not readiness)
 **Author:** xfgong
 **Date:** 2026-05-20
 **Parent spec:** `docs/dev/specs/2026-05-19-llm-provider-platform-design.md` (§4.5, §4.7, §4.8, M5/M7)
@@ -113,10 +113,14 @@ Mock: `step4-test-v2.html` (brainstorm session; ignore its "skip optional"
 toggle — dropped per §1).
 
 **Transport — SSE.** New endpoint (e.g. `POST /admin/providers/{id}/test/stream`,
-`text/event-stream`, `compress: false` per the SSE-buffering caveat). It runs
-`run_liveness` **once**, emits a `liveness` event, then for each enabled model
-runs `run_model_probe` and emits a `model` event with that model's
-`ProbeResult`, then a terminal `done` event. This replaces the rev-1 plan of
+`text/event-stream`, `compress: false` per the SSE-buffering caveat). Its
+request body carries an **explicit list of model ids to test** — it must NOT
+filter by `enabled=true`, because wizard models are still `enabled=false` at
+this point (and `run_all_models_test_saved`'s enabled-only filter is therefore
+not reusable here). It runs `run_liveness` **once**, emits a `liveness` event,
+then for each model id in the request runs `run_model_probe` and emits a
+`model` event with that model's `ProbeResult`, then a terminal `done` event.
+This replaces the rev-1 plan of
 looping `/{id}/models/{mid}/test` (which re-runs liveness every call —
 `run_model_test_saved` does liveness + persist each time). The per-model JSON
 endpoints remain for single-model re-test from the detail page (§7).
@@ -127,11 +131,13 @@ card streamed in as its event arrives, with 5 sub-check chips and an outcome
 badge derived from the `ProbeResult.overall`:
 `pass→可用` / `warn→降级` / `fail→无法启用` / `unavailable→无法启用 (model_not_found)`,
 with reason + "重测/移除" on failure. The badge is computed from the streamed
-`ProbeResult` (the authoritative `readiness` value is re-read from
-`GET /admin/providers/{id}` after the run when the page refreshes — the test
-stream itself returns `ProbeResult`, not the derived `readiness`).
-Footer "保存 Provider (N 个模型可用)" enabled once liveness passed and ≥1 model is
-`ready`/`degraded`; saving flips those models `enabled=true`.
+`ProbeResult.overall` (`pass`/`warn`/`fail`/`unavailable`) — the derived
+`readiness` enum is NOT in stream state; it's re-read from
+`GET /admin/providers/{id}` when the page refreshes after the run.
+Footer "保存 Provider (N 个模型可用)" enabled once liveness passed and ≥1 model's
+probe `overall` was `pass`/`warn` (read from the stream, not from readiness);
+saving flips those models `enabled=true`. (Their derived readiness — `ready` for
+`pass`, `degraded` for `warn` — shows on the detail page from the GET after.)
 
 ## 7. Readiness surfaces (§4.7) + detail polish (M7)
 
@@ -181,7 +187,7 @@ Frontend:
 - `ProviderDetail` / `ModelRow` — readiness dots + re-test (M7).
 - `@cubebox/core` `api/providers.ts` — helpers: `listPresets`,
   `createProvider`/`updateProvider` (extended bodies), `presaveLiveness`,
-  `presaveTest`, `testModel(id, mid)`, `testStream(id)` (SSE), `setModelEnabled`;
+  `presaveTest`, `testModel(id, mid)`, `testStream(id, modelIds)` (SSE), `setModelEnabled`;
   types for `ProbeResult`/`ProbeStep`/`ProviderPreset`/readiness.
 - Reuse: `ProviderList`, `ProviderCard`, `ProviderLogo`, `ModelFormDialog`,
   `ModelsToolbar`, the providers/models stores (extended).
