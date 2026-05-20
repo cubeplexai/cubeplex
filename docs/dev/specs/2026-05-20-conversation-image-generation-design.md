@@ -17,7 +17,7 @@ artifact 持久化、在右侧 artifact 预览面板展示,并回传给模型供
 |---|---|
 | 后端模型 | OpenAI `gpt-image-1`,复用现有 openai 凭证 |
 | 能力面 | 文生图 + 图编辑(输入已有图 + 提示词) |
-| provider 归属 | cubepi 新建 images 子系统(对齐 pi-agent-core,upstream-first);cubebox 零 vendor 代码 |
+| provider 归属 | cubepi 新建 `providers/images/` 子系统(对齐 pi-agent-core,upstream-first);cubebox 零 vendor 代码 |
 | 产物存储 | **artifact**(非 attachment);复用 `Artifact` + `ArtifactVersion` |
 | 前端渲染 | 复用右侧 `ArtifactPanel` + `ImagePreview.tsx`,经 `ArtifactCard`/`ArtifactGallery` 打开 |
 | 成本/配额 | 本期不追踪、不限额(后续另开) |
@@ -32,7 +32,7 @@ provider 上。参考实现:pi-agent-core `packages/ai/src/images.ts` +
 ```
 模型决定生图
   → generate_image 工具(cubebox)
-      → cubepi.images.generate_images(model, context)   # 调 gpt-image-1
+      → cubepi.providers.images.generate_images(model, context)   # 调 gpt-image-1
       → 写 PNG 进 sandbox
       → 注册为 artifact(type="image",复用 save_artifact 核心)
       → 返回 AgentToolResult: ImageContent(模型可见) + artifact 元数据
@@ -41,7 +41,7 @@ provider 上。参考实现:pi-agent-core `packages/ai/src/images.ts` +
 
 ## cubepi 侧:images 子系统
 
-位置:`~/cubepi/cubepi/images/`(与 `cubepi/providers/` 平行)。
+位置:`~/cubepi/cubepi/providers/images/`(与现有 chat provider 同住 `providers/` 下,所有 provider 相关代码集中一处)。
 
 组件:
 - **类型**:`ImagesModel`、`ImagesContext`(输入内容 = text + `ImageContent`)、
@@ -51,7 +51,7 @@ provider 上。参考实现:pi-agent-core `packages/ai/src/images.ts` +
 - **注册表**:`api -> provider`,对齐 pi 的 `images-api-registry.ts`。
 - **openai gpt-image-1 provider**:封装 OpenAI `images.generate`(文生图)与
   `images.edit`(编辑;输入图作为 image 入参)。
-- **顶层入口**:`cubepi.images.generate_images(model, context, options)`。
+- **顶层入口**:`cubepi.providers.images.generate_images(model, context, options)`。
 - **model catalog 条目**:登记 gpt-image-1 的能力(支持尺寸/质量等)。
 
 ## cubebox 侧:`generate_image` 工具
@@ -72,7 +72,7 @@ n: int = 1                        # 1-4
 ```
 
 `_execute` 流程:
-1. 调 `cubepi.images.generate_images(...)`。编辑分支先从 objectstore/sandbox
+1. 调 `cubepi.providers.images.generate_images(...)`。编辑分支先从 objectstore/sandbox
    读 `edit_source_paths` 原图作为输入。
 2. 把返回的 PNG 写进 sandbox 路径。
 3. 注册为 artifact(`artifact_type="image"`)。编辑同一来源图时写成该
