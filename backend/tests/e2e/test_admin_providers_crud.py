@@ -218,3 +218,29 @@ async def test_test_connection_endpoint(
     data = res.json()
     assert data["overall"] == "pass"
     assert data["steps"][0]["name"] == "liveness"
+
+
+async def test_create_provider_persists_capability(
+    admin_client: tuple[AsyncClient, str],
+) -> None:
+    client, _ = admin_client
+    cap = {"reasoning_off_payload": {"thinking": {"type": "disabled"}}}
+    res = await client.post(
+        "/api/v1/admin/providers",
+        json={
+            "name": "cap-create-e2e",
+            "provider_type": "anthropic-messages",
+            "base_url": "https://example.com",
+            "auth_type": "api_key",
+            "api_key": "sk-x",
+            "preset_slug": "anthropic",
+            "capability": cap,
+            "model_capability_overrides": {},
+        },
+    )
+    assert res.status_code == 201
+    pid = res.json()["id"]
+    got = (await client.get(f"/api/v1/admin/providers/{pid}")).json()
+    assert got["preset_slug"] == "anthropic"
+    assert got["capability"] == cap
+    await client.delete(f"/api/v1/admin/providers/{pid}")
