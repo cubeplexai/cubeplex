@@ -73,8 +73,12 @@ image — see the single-image constraint). Inside that container:
   for deployments whose endpoint instead requires headers, the backend serves a
   **same-origin reverse proxy** that injects them (and forwards WS upgrades), and
   hands the frontend the proxy URL. Either way the frontend gets a header-free URL.
-- **Read-only vs. interactive** is a frontend toggle (`pointer-events: none` for
-  watch-only; removed for takeover), matching how Browserbase/Steel do it.
+- **Read-only vs. interactive** is a frontend toggle. Watch-only must be a
+  *true* input lock, not just `pointer-events: none` (which blocks mouse/touch
+  but still lets the user tab-focus the iframe and send keystrokes): cover the
+  view with a transparent overlay that swallows pointer **and** keyboard events,
+  mark the iframe wrapper `inert` / non-focusable, and blur it. On takeover the
+  lock is lifted. This guarantees the agent isn't disrupted while it's in control.
 
 ## Components & boundaries
 

@@ -25,7 +25,11 @@ Steps (all verified in the PoC at `tmp/neko-poc/combined.Dockerfile`):
 3. `COPY --from=neko`: `/usr/bin/neko`, `/etc/neko`, `/var/www`,
    `/usr/lib/xorg/modules/drivers/dummy_drv.so`,
    `/usr/lib/xorg/modules/input/neko_drv.so`.
-4. Create the `neko` user (uid 1000; `userdel` the default `ubuntu` user first),
+4. Create the `neko` user (uid 1000). If uid 1000 is already taken (e.g. the
+   stock `ubuntu` user some Ubuntu 24.04 lineages ship), remove it
+   **conditionally** so the build stays deterministic across base-image variants
+   — `getent passwd 1000 && userdel -r "$(getent passwd 1000 | cut -d: -f1)" || true`
+   (never hard-fail when no such user exists),
    groups audio/video; make `/var/log/neko`, `/tmp/runtime-neko`, `/home/neko`.
 5. Rootless Xorg: `rm -f /usr/lib/xorg/Xorg.wrap`; copy the dummy `xorg.conf` to
    `/etc/X11/xorg.conf` and drop `-config <abs path>` from the x-server command.
@@ -40,9 +44,15 @@ Steps (all verified in the PoC at `tmp/neko-poc/combined.Dockerfile`):
    `connectOverCDP` attaches to this same browser; it must not launch its own.
 7. Set ENV: `USER=neko DISPLAY=:99.0 XDG_RUNTIME_DIR=/tmp/runtime-neko
    NEKO_SERVER_BIND=:8080 NEKO_PLUGINS_ENABLED=true NEKO_PLUGINS_DIR=/etc/neko/plugins/`.
-   Default CMD stays the agent's normal entrypoint; Neko stack runs under
-   supervisord launched by the image (decide: supervisord as the browser-mode
-   launcher vs. started on demand — keep it always-on for v1 simplicity).
+8. **Start the Neko stack on demand, not as PID 1.** opensandbox owns the
+   container's main process — it runs `/opt/opensandbox/bin/bootstrap.sh tail -f
+   /dev/null` and executes agent commands through its `execd`. So the image must
+   **not** set supervisord as CMD/entrypoint (that would fight opensandbox). The
+   image ships Neko + the supervisord config + a `start-browser.sh` that
+   daemonizes `supervisord -c /etc/neko/supervisord.conf`; the backend launches
+   it through `sandbox.execute(...)` the first time a live view is requested
+   (idempotent — no-op if already running). This also means only sandboxes that
+   actually browse pay the desktop/stack cost.
 
 Verify: build the image; `docker run` it; confirm supervisord shows all of
 x-server/openbox/pulseaudio/neko/chromium RUNNING, Neko UI returns 200, and an
@@ -59,8 +69,10 @@ Files:
 - `backend/cubebox/sandbox/local.py` — return a localhost URL for dev.
 - `backend/cubebox/api/routes/v1/ws_browser.py` (new) — `GET
   /api/v1/ws/{workspace_id}/browser/live-view` → resolves the caller's active
-  sandbox (SandboxManager) and returns the live-view URL. Dedicated
-  workspace-scoped handler (no shared/parameterized route).
+  sandbox (SandboxManager), **ensures the Neko stack is running** (idempotent
+  `start-browser.sh` via `sandbox.execute`, per Phase 1 step 8), then returns the
+  live-view URL. Dedicated workspace-scoped handler (no shared/parameterized
+  route).
 - Register the route in the v1 router.
 
 **Header vs. tokenized-URL (must resolve in this phase).** A browser cannot
@@ -104,8 +116,11 @@ assert the browser profile/context is reused (not recreated) across a takeover.
 
 Files:
 - `frontend/packages/web/components/panel/BrowserView.tsx` (new) — fetch the
-  signed URL from the Phase-2 route, embed in `<iframe>`; read-only by default
-  (`pointer-events:none`), switch to interactive on takeover.
+  signed URL from the Phase-2 route, embed in `<iframe>`; **read-only by default
+  via a true input lock** — a transparent overlay swallowing pointer **and**
+  keyboard events, the iframe wrapper marked `inert`/non-focusable and blurred
+  (not merely `pointer-events:none`, which leaves keyboard/focus open). Takeover
+  lifts the lock.
 - Wire it into the preview panel assembly (own module; pages stay scope-isolated).
 - "Take over" / "hand back" affordance driven by the Phase-3 events.
 - Handle Neko `postMessage` disconnect; refresh the signed URL on expiry.
