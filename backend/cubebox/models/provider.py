@@ -21,7 +21,7 @@ class Provider(CubeboxBase, table=True):
         default=None, foreign_key="organizations.id", max_length=20, index=True
     )
     name: str = Field(max_length=64)
-    provider_type: str = Field(default="openai_compat", max_length=32)
+    provider_type: str = Field(default="openai-completions", max_length=32)
     base_url: str = Field(max_length=2048)
     auth_type: str = Field(default="api_key", max_length=32)
     credential_id: str | None = Field(
