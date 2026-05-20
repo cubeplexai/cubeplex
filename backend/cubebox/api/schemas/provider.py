@@ -107,6 +107,20 @@ class ModelOut(BaseModel):
     updated_at: datetime
 
 
+class ModelReadinessOut(ModelOut):
+    """A model row plus its per-model test status and server-derived readiness.
+
+    Returned by GET /admin/providers/{id} so the UI reads `readiness` verbatim
+    (it never re-derives). `last_test_at` is a UTC-offset ISO string.
+    """
+
+    last_test_at: str | None = None
+    last_test_status: str | None = None  # "ok" | "warn" | "fail" | "unavailable"
+    last_test_summary: dict[str, Any] = Field(default_factory=dict)
+    # §4.1: "ready"|"degraded"|"stale"|"model_error"|"unavailable"|"provider_error"
+    readiness: str
+
+
 class ProviderOut(BaseModel):
     id: str
     name: str
@@ -118,10 +132,16 @@ class ProviderOut(BaseModel):
     enabled: bool
     is_system: bool
     model_count: int
-    models: list[ModelOut] | None = None
+    models: list[ModelReadinessOut] | None = None
     org_override: OrgProviderOverrideOut | None = None
     extra_body: dict[str, Any]
     extra_headers: dict[str, Any]
+    capability: dict[str, Any] = Field(default_factory=dict)
+    model_capability_overrides: dict[str, Any] = Field(default_factory=dict)
+    # Provider-level liveness/credential status (spec §4.1). UTC-offset ISO string.
+    last_liveness_at: str | None = None
+    last_liveness_status: str | None = None  # "ok" | "fail"
+    last_liveness_summary: dict[str, Any] = Field(default_factory=dict)
     created_by_user_id: str | None
     created_at: datetime
     updated_at: datetime
