@@ -91,12 +91,6 @@ export interface ModelUpdate {
   enabled?: boolean | null
 }
 
-export interface TestResult {
-  ok: boolean
-  error: string | null
-  latency_ms: number
-}
-
 export interface OrgLLMSettings {
   default_model: string | null
   fallback_models: string[]

@@ -317,7 +317,7 @@ class LLMFactory:
 
         Routes by ``provider_config.api`` (the wire-api literal):
 
-        - ``"anthropic-messages"`` (or legacy ``"anthropic"``) → AnthropicProvider
+        - ``"anthropic-messages"`` → AnthropicProvider
         - ``"openai-completions"`` → cubepi OpenAIProvider
         - ``"openai-responses"``   → cubepi OpenAIResponsesProvider
 
@@ -344,7 +344,7 @@ class LLMFactory:
             mid: CapabilityDescriptor.model_validate(d) for mid, d in overrides_raw.items()
         } or None
 
-        if api in ("anthropic-messages", "anthropic"):
+        if api == "anthropic-messages":
             from cubepi.providers.anthropic import AnthropicProvider
 
             return AnthropicProvider(

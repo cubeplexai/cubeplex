@@ -213,7 +213,7 @@ async def test_factory_decrypts_with_rotated_keys(
     provider = Provider(
         org_id=org_id,
         name="rotation-target",
-        provider_type="openai_compat",
+        provider_type="openai-completions",
         base_url="https://example.com",
         auth_type="api_key",
         credential_id=cred.id,

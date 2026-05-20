@@ -79,7 +79,7 @@ async def test_seed_updates_existing_provider_url(
     p = Provider(
         org_id=None,
         name="cubebox",
-        provider_type="openai_compat",
+        provider_type="openai-completions",
         base_url="http://old-url",
         auth_type="api_key",
         enabled=True,

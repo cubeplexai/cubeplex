@@ -3,8 +3,8 @@
 import { useEffect, useState } from 'react'
 import { useTranslations } from 'next-intl'
 import { Dialog as DialogPrimitive } from '@base-ui/react/dialog'
-import { Cable, X } from 'lucide-react'
-import type { ApiClient, Model, ModelCreate, ModelUpdate, TestResult } from '@cubebox/core'
+import { X } from 'lucide-react'
+import type { Model, ModelCreate, ModelUpdate } from '@cubebox/core'
 import {
   Accordion,
   AccordionContent,
@@ -24,27 +24,14 @@ interface ModelFormDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   model: Model | null
-  providerId: string
-  client: ApiClient
-  onTest: (client: ApiClient, providerId: string, body: { model_id: string }) => Promise<TestResult>
   onSave: (body: ModelCreate | ModelUpdate) => Promise<void>
 }
 
-export function ModelFormDialog({
-  open,
-  onOpenChange,
-  model,
-  providerId,
-  client,
-  onTest,
-  onSave,
-}: ModelFormDialogProps) {
+export function ModelFormDialog({ open, onOpenChange, model, onSave }: ModelFormDialogProps) {
   const t = useTranslations('adminModels')
   const isEdit = model !== null
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [testing, setTesting] = useState(false)
-  const [testResult, setTestResult] = useState<TestResult | null>(null)
 
   const [modelId, setModelId] = useState('')
   const [displayName, setDisplayName] = useState('')
@@ -85,8 +72,6 @@ export function ModelFormDialog({
       }
       setError(null)
       setSaving(false)
-      setTesting(false)
-      setTestResult(null)
     }
     /* eslint-enable react-hooks/set-state-in-effect */
   }, [open, model])
@@ -100,20 +85,6 @@ export function ModelFormDialog({
   function parseNumber(val: string): number {
     const n = parseFloat(val)
     return isNaN(n) ? 0 : n
-  }
-
-  async function handleTest() {
-    if (!modelId || testing) return
-    setTesting(true)
-    setTestResult(null)
-    try {
-      const result = await onTest(client, providerId, { model_id: modelId })
-      setTestResult(result)
-    } catch (e) {
-      setTestResult({ ok: false, error: (e as Error).message, latency_ms: 0 })
-    } finally {
-      setTesting(false)
-    }
   }
 
   async function handleSave(): Promise<void> {
@@ -338,24 +309,6 @@ export function ModelFormDialog({
               </AccordionItem>
             </Accordion>
 
-            {testResult && (
-              <div
-                data-testid="model-form-test-result"
-                className={cn(
-                  'rounded-md border px-2.5 py-1.5 text-xs',
-                  testResult.ok
-                    ? 'border-emerald-500/30 bg-emerald-500/5 text-emerald-700 dark:text-emerald-400'
-                    : 'border-destructive/30 bg-destructive/5 text-destructive',
-                )}
-              >
-                {testResult.ok ? (
-                  <span>{t('testOk', { latency: testResult.latency_ms })}</span>
-                ) : (
-                  <span className="break-words">{testResult.error ?? t('testFailed')}</span>
-                )}
-              </div>
-            )}
-
             {error && (
               <div className="rounded-md border border-destructive/30 bg-destructive/5 px-2.5 py-1.5 text-xs text-destructive">
                 {error}
@@ -363,36 +316,22 @@ export function ModelFormDialog({
             )}
           </div>
 
-          <div className="mt-4 flex items-center justify-between gap-2">
+          <div className="mt-4 flex items-center justify-end gap-2">
+            <DialogPrimitive.Close
+              render={
+                <Button type="button" variant="ghost" size="sm" disabled={saving}>
+                  {t('cancel')}
+                </Button>
+              }
+            />
             <Button
               type="button"
-              variant="outline"
               size="sm"
-              onClick={() => void handleTest()}
-              disabled={testing || saving || !modelId}
-              className="gap-1.5"
-              data-testid="model-form-test-button"
+              onClick={() => void handleSave()}
+              disabled={saving || !modelId}
             >
-              <Cable className={cn('size-3.5', testing && 'animate-pulse')} />
-              {testing ? t('testing') : t('test')}
+              {saving ? t('saving') : t('save')}
             </Button>
-            <div className="flex items-center gap-2">
-              <DialogPrimitive.Close
-                render={
-                  <Button type="button" variant="ghost" size="sm" disabled={saving}>
-                    {t('cancel')}
-                  </Button>
-                }
-              />
-              <Button
-                type="button"
-                size="sm"
-                onClick={() => void handleSave()}
-                disabled={saving || !modelId}
-              >
-                {saving ? t('saving') : t('save')}
-              </Button>
-            </div>
           </div>
         </DialogPrimitive.Popup>
       </DialogPrimitive.Portal>

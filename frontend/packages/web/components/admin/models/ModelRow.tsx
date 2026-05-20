@@ -2,18 +2,16 @@
 
 import { useState } from 'react'
 import { useTranslations } from 'next-intl'
-import { Brain, Cable, Check, Pencil, Trash2, X } from 'lucide-react'
-import type { ApiClient, Model, TestResult } from '@cubebox/core'
+import { Brain, Check, Pencil, Trash2, X } from 'lucide-react'
+import type { Model } from '@cubebox/core'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 
 interface ModelRowProps {
   model: Model
-  client: ApiClient
   onEdit: (model: Model) => void
   onDelete: (model: Model) => void
-  onTest: (client: ApiClient, providerId: string, body: { model_id: string }) => Promise<TestResult>
 }
 
 function formatCost(cost: number): string {
@@ -22,26 +20,10 @@ function formatCost(cost: number): string {
   return cost.toFixed(4)
 }
 
-export function ModelRow({ model, client, onEdit, onDelete, onTest }: ModelRowProps) {
+export function ModelRow({ model, onEdit, onDelete }: ModelRowProps) {
   const tExtra = useTranslations('adminModelsExtra')
   const t = useTranslations('adminModels')
   const [confirmOpen, setConfirmOpen] = useState(false)
-  const [testing, setTesting] = useState(false)
-  const [testResult, setTestResult] = useState<TestResult | null>(null)
-
-  async function handleTest() {
-    if (testing) return
-    setTesting(true)
-    setTestResult(null)
-    try {
-      const result = await onTest(client, model.provider_id, { model_id: model.model_id })
-      setTestResult(result)
-    } catch (e) {
-      setTestResult({ ok: false, error: (e as Error).message, latency_ms: 0 })
-    } finally {
-      setTesting(false)
-    }
-  }
 
   return (
     <div
@@ -95,33 +77,7 @@ export function ModelRow({ model, client, onEdit, onDelete, onTest }: ModelRowPr
           : '-'}
       </span>
 
-      {testResult && (
-        <span
-          data-testid={`model-test-result-${model.model_id}`}
-          className={cn(
-            'shrink-0 rounded-md px-1.5 py-0.5 text-[10px] font-medium',
-            testResult.ok
-              ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
-              : 'bg-destructive/10 text-destructive',
-          )}
-          title={testResult.error ?? ''}
-        >
-          {testResult.ok ? t('testOk', { latency: testResult.latency_ms }) : t('testFailed')}
-        </span>
-      )}
-
       <div className="flex shrink-0 items-center gap-1">
-        <Button
-          variant="ghost"
-          size="icon-xs"
-          onClick={() => void handleTest()}
-          disabled={testing}
-          aria-label={t('test')}
-          title={testing ? t('testing') : t('test')}
-        >
-          <Cable className={cn('size-3', testing && 'animate-pulse')} />
-        </Button>
-
         {!model.is_system && !confirmOpen && (
           <>
             <Button

@@ -19,7 +19,7 @@ async def test_create_and_list_providers(
             "base_url": "https://example.com/api",
             "auth_type": "api_key",
             "api_key": "sk-test-123",
-            "provider_type": "openai_compat",
+            "provider_type": "openai-completions",
         },
     )
     assert res.status_code == 201

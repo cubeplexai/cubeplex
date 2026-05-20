@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import type { ApiClient } from '../api/client'
-import { fetchProvider, createModel, updateModel, deleteModel, testModel } from '../api/providers'
-import type { Model, ModelCreate, ModelUpdate, TestResult } from '../types/provider'
+import { fetchProvider, createModel, updateModel, deleteModel } from '../api/providers'
+import type { Model, ModelCreate, ModelUpdate } from '../types/provider'
 
 interface ModelsState {
   models: Model[]
@@ -18,11 +18,6 @@ interface ModelsState {
     body: ModelUpdate,
   ) => Promise<void>
   deleteModel: (client: ApiClient, providerId: string, modelId: string) => Promise<void>
-  testModel: (
-    client: ApiClient,
-    providerId: string,
-    body: { model_id: string },
-  ) => Promise<TestResult>
 }
 
 export const useModelsStore = create<ModelsState>((set) => ({
@@ -63,9 +58,5 @@ export const useModelsStore = create<ModelsState>((set) => ({
   deleteModel: async (client, providerId, modelId) => {
     await deleteModel(client, providerId, modelId)
     set((s) => ({ models: s.models.filter((m) => m.id !== modelId) }))
-  },
-
-  testModel: async (client, providerId, body) => {
-    return testModel(client, providerId, body)
   },
 }))
