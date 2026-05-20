@@ -283,16 +283,21 @@ git commit -am "feat(probe): advisory usage step — verify token-usage structur
 
 - [ ] **Step 0: Add the unfiltered repo method**
 
-`ModelRepository` only has `list_by_provider` (enabled-filtered). Add:
+`ModelRepository` only has `list_by_provider` (enabled-filtered; uses
+`self.session`, no org field — provider-scoping is enough). Add the unfiltered
+twin (mirror `list_by_provider` exactly, minus `.where(Model.enabled)`):
 ```python
 async def list_all_for_provider(self, provider_id: str) -> list[Model]:
     """All models for a provider, including disabled (wizard models are
     enabled=false). Mirrors list_by_provider minus the enabled filter."""
-    stmt = select(Model).where(Model.provider_id == provider_id, Model.org_id == self.org_id)
-    return list((await self._session.execute(stmt)).scalars().all())
+    stmt = (
+        select(Model)
+        .where(Model.provider_id == provider_id)  # type: ignore[arg-type]
+        .order_by(Model.model_id)
+    )
+    result = await self.session.execute(stmt)
+    return list(result.scalars().all())
 ```
-(Match the exact org-scoping / session access pattern used by the existing
-`list_by_provider` in `repositories/model.py`.)
 
 - [ ] **Step 1: Request body schema**
 
@@ -381,7 +386,8 @@ async def preflight_test_stream(self, provider_id: str, model_db_ids: list[str])
     if missing:
         raise ModelNotFoundError(f"models not found: {missing}")
 ```
-Add a module helper:
+Add a module helper (and add `import json` to `provider_service.py`'s imports —
+it is not currently imported there):
 ```python
 def _sse(event: str, data: dict) -> bytes:
     return f"event: {event}\ndata: {json.dumps(data)}\n\n".encode()
@@ -411,7 +417,9 @@ async def test_provider_stream(
         media_type="text/event-stream", headers=_SSE_HEADERS,
     )
 ```
-(Mirror the headers used by the existing SSE route in `conversations.py`.)
+(Mirror the headers used by the existing SSE route in `conversations.py`. Add
+`from fastapi.responses import StreamingResponse` to `admin_providers.py` — it
+currently imports only from `fastapi`.)
 
 - [ ] **Step 6: Run test — expect pass. mypy. Run `-k provider_probe` green.**
 
@@ -471,16 +479,21 @@ git commit -am "feat(core): provider preset + probe + readiness types (M5)"
 - Test: `frontend/packages/core/src/api/__tests__/providerTestStream.test.ts`
 
 - [ ] **Step 0: `postRaw` on `ApiClient`** — `client.ts` has `get/post/patch/del`
-  but no streaming POST. Add a method that returns the raw `Response` (no
-  `.json()`), reusing the same `doFetch`/CSRF/`credentials` path as `post`:
+  but no streaming POST. `createApiClient` returns an object whose methods close
+  over local `doFetch` + `buildHeaders` (there is no `this`). Add `postRaw` to
+  the **`ApiClient` interface** (line ~21) and implement it in the returned
+  object the same way `post` is implemented:
 ```ts
-postRaw(path: string, body: unknown, headers?: Record<string,string>): Promise<Response> {
-  return this.doFetch(path, { method: 'POST', body: JSON.stringify(body),
-    headers: { 'Content-Type': 'application/json', ...(headers ?? {}) } })
-}
+// in interface ApiClient:
+postRaw(path: string, body: unknown, headers?: Record<string, string>): Promise<Response>
+// in the object returned by createApiClient (mirror the existing post()):
+postRaw(path, body, headers) {
+  return doFetch(path, {
+    method: 'POST', body: JSON.stringify(body),
+    headers: buildHeaders('POST', { 'Content-Type': 'application/json', ...(headers ?? {}) }),
+  })
+},
 ```
-(Match the real `doFetch` signature/CSRF handling in `client.ts`; the chat
-streaming in `runStreams.ts` shows the established raw-fetch pattern.)
 
 - [ ] **Step 1: api helpers** — append to `providers.ts` (ALL helpers the rest
   of the plan references — `listPresets`, `presaveLiveness`, `presaveTest`,
@@ -653,7 +666,11 @@ git commit -am "feat(web): wizard step 1 PresetPicker (M5)"
   complete the connection (OAuth provider auth is a parent-spec non-goal, IAM
   unsupported) — disable Next with an inline note "OAuth/IAM presets aren't
   supported yet" (the preset can still be picked to inspect, but not saved).
-  Map `auth_type` sent to the backend from `preset.auth.mode`.
+  **Map `preset.auth.mode` → backend `auth_type` explicitly** — the names
+  differ: cubepi uses `bearer`, backend `_validate_auth_creds` expects
+  `bearer_token`. Map `api_key → "api_key"`, `bearer → "bearer_token"`,
+  `none → "none"`; `oauth`/`iam` are blocked (never sent). Key input required
+  for `api_key`/`bearer`.
 - [ ] **Step 3: Implement `CapabilityEditor`** — a JSON `<textarea>` bound to the capability object (parse on change, show parse errors) + a "use a template" popover for custom presets that injects a vendor reasoning block. Keep v1 simple (JSON view) per spec §11.
 - [ ] **Step 4: vitest pass. type-check. Commit.**
 
@@ -682,7 +699,7 @@ git commit -am "feat(web): wizard step 3 ModelsStep — import disabled models (
 **Files:** Create `components/admin/models/wizard/{TestStep,ModelTestCard,LivenessRow}.tsx`; Test `__tests__/TestStep.test.tsx`
 
 - [ ] **Step 1: Failing test** — given a mocked `startTestStream`/`parseTestStream` yielding a `liveness` pass then a `model` pass for each id then `done`: renders the liveness row green, a `ModelTestCard` per model with its badge, and enables "Save" once liveness passed + ≥1 model `overall` ∈ {pass,warn}; on Save calls `setModelEnabled` for passing models and `onFinish()`.
-- [ ] **Step 2: Implement `TestStep`** — on mount (or "Run test" click) call `startTestStream(client, providerId, modelIds)` → iterate `parseTestStream`; update liveness state on `liveness`, push/replace a per-model result on `model`, mark complete on `done`. Footer Save gating per the test. On Save: for each model whose `overall` ∈ {pass,warn}, `setModelEnabled(client, providerId, mid, true)`, then `onFinish()` → back to list.
+- [ ] **Step 2: Implement `TestStep`** — `modelDbIds` (the model DB ids from F8's `onModelsCreated`) drive the run. On mount (or "Run test" click) call `startTestStream(client, providerId, modelDbIds)` → iterate `parseTestStream`; update liveness state on `liveness`, push/replace a per-model result keyed by `model_db_id` on `model`, mark complete on `done`. Footer Save gating per the test. On Save: for each model whose `overall` ∈ {pass,warn}, `setModelEnabled(client, providerId, modelDbId, true)`, then `onFinish()` → back to list.
 - [ ] **Step 3: Implement `LivenessRow`** (status + latency) and `ModelTestCard` (5 sub-check chips from `ProbeResult.steps` + outcome badge derived from `overall`: pass→可用/warn→降级/fail→无法启用/unavailable→无法启用; reason + 重测/移除 on failure).
 - [ ] **Step 4: vitest pass. type-check. Commit.**
 
