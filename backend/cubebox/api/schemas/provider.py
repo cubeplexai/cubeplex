@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 
 class ProviderCreate(BaseModel):
     name: str = Field(max_length=64)
-    provider_type: str = Field(default="openai_compat", max_length=32)
+    provider_type: str = Field(default="openai-completions", max_length=32)
     base_url: str = Field(max_length=2048)
     auth_type: str = Field(default="api_key", max_length=32)
     api_key: str | None = Field(default=None, max_length=512)
@@ -32,7 +32,7 @@ class ProviderUpdate(BaseModel):
 
 
 class ProviderTest(BaseModel):
-    provider_type: str = Field(default="openai_compat", max_length=32)
+    provider_type: str = Field(default="openai-completions", max_length=32)
     base_url: str = Field(max_length=2048)
     api_key: str | None = Field(default=None, max_length=512)
     auth_type: str = Field(default="api_key", max_length=32)

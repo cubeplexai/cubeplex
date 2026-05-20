@@ -95,4 +95,4 @@ async def test_seed_updates_existing_provider_url(
         await clean_db.execute(select(Provider).where(Provider.name == "cubebox"))
     ).scalar_one()
     assert updated.base_url != "http://old-url"
-    assert updated.provider_type == "openai_compat"
+    assert updated.provider_type == "openai-completions"

@@ -102,10 +102,8 @@ async def seed_system_providers_from_config(
         )
         provider: Provider | None = existing.scalar_one_or_none()
 
-        from cubebox.llm.factory import api_to_provider_type
-
         base_url: str = str(cfg_dict.get("base_url", ""))
-        provider_type: str = api_to_provider_type(str(cfg_dict.get("api", "openai-completions")))
+        provider_type: str = str(cfg_dict.get("api", "openai-completions"))
 
         if provider is None:
             provider = Provider(
