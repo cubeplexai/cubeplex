@@ -1,8 +1,10 @@
-"""ProviderService -- CRUD, invariants, test connection, seed."""
+"""ProviderService -- CRUD, invariants, two-phase test/liveness probe, seed."""
 
 from __future__ import annotations
 
-import time
+from collections.abc import Callable
+from datetime import UTC, datetime
+from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -12,20 +14,33 @@ from cubebox.api.schemas.provider import (
     OrgLLMSettingsOut,
     OrgLLMSettingsUpdate,
     ProviderCreate,
-    ProviderTest,
+    ProviderLivenessRequest,
+    ProviderTestRequest,
     ProviderUpdate,
-    TestResultOut,
 )
 from cubebox.credentials.exceptions import CredentialNotFound
+from cubebox.llm.config import ProviderConfig
+from cubebox.llm.factory import LLMFactory
+from cubebox.llm.readiness import capability_fingerprint
 from cubebox.models.org_provider_override import OrgProviderOverride
 from cubebox.models.provider import Model, Provider
 from cubebox.repositories.model import ModelRepository
 from cubebox.repositories.org_provider_override import OrgProviderOverrideRepository
 from cubebox.repositories.org_settings import OrgSettingsRepository
 from cubebox.repositories.provider import ProviderRepository
+from cubebox.services import provider_probe
 from cubebox.services.credential import CredentialService
+from cubebox.services.provider_probe import ProbeResult, ProbeStep
 
 _PROVIDER_KEY_KIND = "provider_api_key"
+
+# ProbeResult.overall → the model's persisted last_test_status.
+_OVERALL_TO_STATUS: dict[str, str] = {
+    "pass": "ok",
+    "warn": "warn",
+    "fail": "fail",
+    "unavailable": "unavailable",
+}
 
 
 class ProviderOAuthNotImplementedError(Exception):
@@ -277,104 +292,177 @@ class ProviderService:
             raise ModelNotFoundError(f"Model {model_db_id} not found")
         await self._models.delete(m)
 
-    # -- Test connection --------------------------------------------------------
+    # -- Two-phase test / liveness probe ----------------------------------------
 
-    async def test_connection(self, data: ProviderTest) -> TestResultOut:
-        start = time.monotonic()
-        if data.provider_type not in (
-            "openai-completions",
-            "anthropic-messages",
-            "openai-responses",
-        ):
-            return TestResultOut(
-                ok=False,
-                error=f"Unsupported provider_type: {data.provider_type}",
-                latency_ms=0,
-            )
+    def _provider_factory_from_config(self, cfg: ProviderConfig) -> Callable[[], Any]:
+        """Zero-arg callable that builds a fresh cubepi provider for the probe.
 
-        from cubepi import Model
-        from cubepi.providers.base import TextContent, UserMessage
+        The probe orchestrators call the factory each phase, so each invocation
+        must yield an independent provider instance.
+        """
 
-        from cubebox.llm.config import ProviderConfig
-        from cubebox.llm.factory import LLMFactory
-        from cubebox.llm.oneshot import OneShotLLM
+        def factory() -> Any:
+            return LLMFactory().build_cubepi_provider(cfg, cache_policy=None)
 
-        provider_cfg = ProviderConfig(
-            api=data.provider_type,
-            api_key=data.api_key or "placeholder",
-            base_url=data.base_url or "",
+        return factory
+
+    def _resolve_capability(self, cfg: ProviderConfig, model_id: str) -> Any:
+        """Effective CapabilityDescriptor for ``model_id`` (override > base).
+
+        Built off a throwaway cubepi provider so we reuse the exact same merge
+        logic the runtime uses (``provider._resolve_capability``), avoiding a
+        second copy of the override-precedence rule.
+        """
+        provider = LLMFactory().build_cubepi_provider(cfg, cache_policy=None)
+        return provider._resolve_capability(model_id)
+
+    @staticmethod
+    def _config_from_request(req: ProviderLivenessRequest) -> ProviderConfig:
+        return ProviderConfig(
+            api=req.api,
+            api_key=req.api_key or "placeholder",
+            base_url=req.base_url or "",
+            capability=req.capability or {},
+            model_capability_overrides=req.model_capability_overrides or {},
             models=[],
         )
-        try:
-            cubepi_provider = LLMFactory().build_cubepi_provider(provider_cfg, cache_policy=None)
-            oneshot = OneShotLLM(
-                cubepi_provider,
-                Model(id="ping", provider="_test", max_tokens=8),
-            )
-            await oneshot.generate_once(
-                system="",
-                messages=[UserMessage(content=[TextContent(text="ping")])],
-                max_output_tokens=8,
-            )
-            latency_ms = int((time.monotonic() - start) * 1000)
-            return TestResultOut(ok=False, error="Unexpected success", latency_ms=latency_ms)
-        except Exception as e:
-            latency_ms = int((time.monotonic() - start) * 1000)
-            error_str = str(e)
-            if (
-                "Connection refused" in error_str
-                or "Name or service not known" in error_str
-                or "getaddrinfo" in error_str.lower()
-            ):
-                return TestResultOut(ok=False, error=error_str, latency_ms=latency_ms)
-            return TestResultOut(ok=True, error=None, latency_ms=latency_ms)
 
-    async def test_model_connection(self, provider_id: str, model_id: str) -> TestResultOut:
-        """Test reachability of a specific model on a provider using stored credentials."""
-        start = time.monotonic()
-        provider = await self.get_provider(provider_id)
+    async def _config_from_provider(self, provider: Provider) -> ProviderConfig:
         api_key = await self._resolve_api_key(provider)
-
-        from cubepi import Model
-        from cubepi.providers.base import TextContent, UserMessage
-
-        from cubebox.llm.config import ProviderConfig
-        from cubebox.llm.factory import LLMFactory
-        from cubebox.llm.oneshot import OneShotLLM
-
-        if provider.provider_type not in (
-            "openai-completions",
-            "anthropic-messages",
-            "openai-responses",
-        ):
-            return TestResultOut(
-                ok=False,
-                error=f"Unsupported provider_type: {provider.provider_type}",
-                latency_ms=0,
-            )
-
-        provider_cfg = ProviderConfig(
+        return ProviderConfig(
             api=provider.provider_type,
             api_key=api_key or "placeholder",
             base_url=provider.base_url or "",
+            capability=provider.capability or {},
+            model_capability_overrides=provider.model_capability_overrides or {},
             models=[],
         )
-        try:
-            cubepi_provider = LLMFactory().build_cubepi_provider(provider_cfg, cache_policy=None)
-            oneshot = OneShotLLM(
-                cubepi_provider,
-                Model(id=model_id, provider="_test", max_tokens=32),
+
+    async def _persist_provider_liveness(self, provider: Provider, step: ProbeStep) -> None:
+        """Write the liveness verdict onto the provider row.
+
+        Test status is observed metadata (not config), so we mutate + commit
+        directly via the repo's ``update`` — which does NOT enforce the
+        system-readonly guard — instead of going through ``_check_not_system``.
+        """
+        provider.last_liveness_at = datetime.now(UTC)
+        provider.last_liveness_status = "ok" if step.status == "pass" else "fail"
+        provider.last_liveness_summary = step.model_dump(mode="json")
+        await self._providers.update(provider)
+
+    async def _persist_model_test(
+        self, model: Model, result: ProbeResult, fingerprint: str
+    ) -> None:
+        """Write the per-model probe verdict + capability fingerprint.
+
+        The fingerprint is REQUIRED: Task 5 readiness compares it against the
+        provider's current capability to flag a `stale` model after a capability
+        edit. Without it `stale` never fires.
+        """
+        summary = result.model_dump(mode="json")
+        summary["capability_fingerprint"] = fingerprint
+        model.last_test_at = datetime.now(UTC)
+        model.last_test_status = _OVERALL_TO_STATUS[result.overall]
+        model.last_test_summary = summary
+        await self._models.update(model)
+
+    async def run_liveness_dryrun(self, req: ProviderLivenessRequest) -> ProbeStep:
+        """Pre-save liveness — transient provider, no DB write (spec §4.3)."""
+        cfg = self._config_from_request(req)
+        return await provider_probe.run_liveness(
+            provider_factory=self._provider_factory_from_config(cfg),
+            model_id=req.model_id,
+        )
+
+    async def run_liveness_saved(self, provider_id: str, model_id: str) -> ProbeStep:
+        """Re-check a saved provider's liveness and persist the result."""
+        provider = await self.get_provider(provider_id)
+        cfg = await self._config_from_provider(provider)
+        step = await provider_probe.run_liveness(
+            provider_factory=self._provider_factory_from_config(cfg),
+            model_id=model_id,
+        )
+        await self._persist_provider_liveness(provider, step)
+        return step
+
+    async def run_test_dryrun(self, req: ProviderTestRequest) -> ProbeResult:
+        """Pre-save full probe — liveness then per-model capability. No DB write."""
+        cfg = self._config_from_request(req)
+        factory = self._provider_factory_from_config(cfg)
+        liveness = await provider_probe.run_liveness(
+            provider_factory=factory, model_id=req.model_id
+        )
+        if liveness.status != "pass":
+            return ProbeResult(overall="fail", blocking_failed=True, steps=[liveness])
+        capability = self._resolve_capability(cfg, req.model_id)
+        model_result = await provider_probe.run_model_probe(
+            provider_factory=factory, model_id=req.model_id, capability=capability
+        )
+        return ProbeResult(
+            overall=model_result.overall,
+            blocking_failed=model_result.blocking_failed,
+            steps=[liveness, *model_result.steps],
+        )
+
+    async def run_model_test_saved(self, provider_id: str, model_db_id: str) -> ProbeResult:
+        """Saved single-model test: liveness (persisted) then capability (persisted)."""
+        provider = await self.get_provider(provider_id)
+        model = await self._models.get(model_db_id)
+        if model is None or model.provider_id != provider_id:
+            raise ModelNotFoundError(f"Model {model_db_id} not found")
+        cfg = await self._config_from_provider(provider)
+        factory = self._provider_factory_from_config(cfg)
+        liveness = await provider_probe.run_liveness(
+            provider_factory=factory, model_id=model.model_id
+        )
+        await self._persist_provider_liveness(provider, liveness)
+        if liveness.status != "pass":
+            return ProbeResult(overall="fail", blocking_failed=True, steps=[liveness])
+        capability = self._resolve_capability(cfg, model.model_id)
+        model_result = await provider_probe.run_model_probe(
+            provider_factory=factory, model_id=model.model_id, capability=capability
+        )
+        fingerprint = capability_fingerprint(
+            provider.capability or {}, provider.model_capability_overrides or {}
+        )
+        await self._persist_model_test(model, model_result, fingerprint)
+        return ProbeResult(
+            overall=model_result.overall,
+            blocking_failed=model_result.blocking_failed,
+            steps=[liveness, *model_result.steps],
+        )
+
+    async def run_all_models_test_saved(self, provider_id: str) -> list[ProbeResult]:
+        """Saved all-models test: one liveness (persisted), then each enabled model."""
+        provider = await self.get_provider(provider_id)
+        cfg = await self._config_from_provider(provider)
+        factory = self._provider_factory_from_config(cfg)
+        models = await self._models.list_by_provider(provider_id)
+        # list_by_provider already filters to enabled models.
+        liveness = await provider_probe.run_liveness(
+            provider_factory=factory, model_id=models[0].model_id if models else "ping"
+        )
+        await self._persist_provider_liveness(provider, liveness)
+        if liveness.status != "pass":
+            return [ProbeResult(overall="fail", blocking_failed=True, steps=[liveness])]
+        fingerprint = capability_fingerprint(
+            provider.capability or {}, provider.model_capability_overrides or {}
+        )
+        results: list[ProbeResult] = []
+        for model in models:
+            capability = self._resolve_capability(cfg, model.model_id)
+            model_result = await provider_probe.run_model_probe(
+                provider_factory=factory, model_id=model.model_id, capability=capability
             )
-            await oneshot.generate_once(
-                system="",
-                messages=[UserMessage(content=[TextContent(text="ping")])],
-                max_output_tokens=32,
+            await self._persist_model_test(model, model_result, fingerprint)
+            results.append(
+                ProbeResult(
+                    overall=model_result.overall,
+                    blocking_failed=model_result.blocking_failed,
+                    steps=[liveness, *model_result.steps],
+                )
             )
-            latency_ms = int((time.monotonic() - start) * 1000)
-            return TestResultOut(ok=True, error=None, latency_ms=latency_ms)
-        except Exception as e:
-            latency_ms = int((time.monotonic() - start) * 1000)
-            return TestResultOut(ok=False, error=str(e), latency_ms=latency_ms)
+        return results
 
     # -- Org overrides ----------------------------------------------------------
 

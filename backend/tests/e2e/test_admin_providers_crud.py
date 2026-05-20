@@ -183,20 +183,38 @@ async def test_config_fallback(
 
 async def test_test_connection_endpoint(
     admin_client: tuple[AsyncClient, str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Test connection endpoint returns structured result."""
+    """Pre-save /providers/test returns a composed ProbeResult (no DB write)."""
+    from cubebox.services import provider_probe
+    from cubebox.services.provider_probe import ProbeResult, ProbeStep
+
+    async def _fake_liveness(**_: object) -> ProbeStep:
+        return ProbeStep(name="liveness", status="pass", latency_ms=12, detail="ok")
+
+    async def _fake_model_probe(**_: object) -> ProbeResult:
+        return ProbeResult(
+            overall="pass",
+            blocking_failed=False,
+            steps=[ProbeStep(name="reasoning", status="pass")],
+        )
+
+    monkeypatch.setattr(provider_probe, "run_liveness", _fake_liveness)
+    monkeypatch.setattr(provider_probe, "run_model_probe", _fake_model_probe)
+
     client, _ws_id = admin_client
 
     res = await client.post(
         "/api/v1/admin/providers/test",
         json={
-            "provider_type": "openai_compat",
-            "base_url": "https://httpbin.org/post",
+            "api": "openai-completions",
+            "base_url": "https://example.com/api",
             "api_key": "test",
-            "auth_type": "api_key",
+            "capability": {},
+            "model_id": "gpt-test",
         },
     )
     assert res.status_code == 200
     data = res.json()
-    assert "ok" in data
-    assert "latency_ms" in data
+    assert data["overall"] == "pass"
+    assert data["steps"][0]["name"] == "liveness"

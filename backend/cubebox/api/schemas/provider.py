@@ -31,21 +31,32 @@ class ProviderUpdate(BaseModel):
     enabled: bool | None = None
 
 
-class ProviderTest(BaseModel):
-    provider_type: str = Field(default="openai-completions", max_length=32)
-    base_url: str = Field(max_length=2048)
-    api_key: str | None = Field(default=None, max_length=512)
-    auth_type: str = Field(default="api_key", max_length=32)
-
-
 class ModelTest(BaseModel):
     model_id: str = Field(max_length=128)
 
 
-class TestResultOut(BaseModel):
-    ok: bool
-    error: str | None = None
-    latency_ms: int
+class ProviderLivenessRequest(BaseModel):
+    """Pre-save liveness dry-run body (spec §4.3).
+
+    Builds a transient provider from these fields — no row is written. ``model_id``
+    is the cheap model the single liveness call is issued against.
+    """
+
+    preset_slug: str | None = Field(default=None, max_length=64)
+    api: str = Field(default="openai-completions", max_length=32)
+    base_url: str = Field(max_length=2048)
+    api_key: str | None = Field(default=None, max_length=512)
+    capability: dict[str, Any] = Field(default_factory=dict)
+    model_capability_overrides: dict[str, Any] = Field(default_factory=dict)
+    model_id: str = Field(max_length=128)
+
+
+class ProviderTestRequest(ProviderLivenessRequest):
+    """Pre-save full-probe dry-run body (spec §4.3).
+
+    Same transient-provider construction as liveness, but runs liveness + the
+    per-model capability probe and returns the composed ``ProbeResult``.
+    """
 
 
 class OrgProviderOverrideUpdate(BaseModel):
