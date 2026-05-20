@@ -3,6 +3,12 @@
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Spec:** `docs/dev/specs/2026-05-19-llm-provider-platform-design.md`
+**Reconciled to spec rev-3** (model-grain readiness): test status is split
+into provider-level `last_liveness_*` + per-model `last_test_*`; the probe
+runs in two phases; a `readiness` field is derived server-side; runtime
+401 / model_not_found writes status back (Task 10b). The spec's §4.5/4.7/
+4.8 UI surfaces stay in the next slice (M5/M7); only the M3 schema + M4
+probe halves of rev-3 land here.
 **Slice:** Milestones M3 (schema + factory + read-only catalog endpoints),
 M4 (test endpoint), M6 (task model routing + title-gen switch). M5
 (Add Provider wizard UI) and M7 (polish) are the next slice.
@@ -23,14 +29,19 @@ fixed.
 **Architecture:**
 1. Bump cubebox's `cubepi` dependency from `==0.4.0` to a git ref of
    the feat branch so we don't have to wait for a cubepi PyPI release.
-2. Provider DB row gains `preset_slug`, `capability` (JSON), and
-   `model_capability_overrides` (JSON) plus three `last_test_*`
-   columns. `provider_type` semantics shift to wire-api literally.
+2. Provider DB row gains `preset_slug`, `capability` (JSON),
+   `model_capability_overrides` (JSON), and provider-level
+   `last_liveness_*` columns. The `models` row gains per-model
+   `last_test_*` columns (rev-3, spec §4.1). `provider_type` semantics
+   shift to wire-api literally.
 3. `LLMFactory.build_cubepi_provider` reads the JSON columns into
    pydantic `CapabilityDescriptor` and passes through to cubepi.
-4. New admin endpoints serve the preset catalog and probe a provider
-   end-to-end before save. ProbeResult persisted on the row so the
-   Provider list can show a status dot without re-probing.
+4. New admin endpoints serve the preset catalog and probe a provider in
+   two phases — provider liveness (once) + per-model capability — before
+   save. Liveness persists on the provider; each model's ProbeResult
+   persists on its row. A server-derived `readiness` per model drives the
+   UI status dots without re-probing. A runtime 401 / model_not_found
+   writes status back out-of-band (spec §4.4a).
 5. `LLMFactory.resolve_task_model(task)` walks OrgSettings → yaml →
    default. `conversation_title` calls `resolve_task_model("title")`.
 
@@ -120,12 +131,18 @@ cubepi legacy path (A-finding 8).
 
 ### Created
 - `backend/cubebox/api/routes/v1/admin_llm.py` — `GET /admin/llm/presets`,
-  `POST /admin/providers/test`, `POST /admin/providers/{id}/test`.
+  `POST /admin/providers/liveness` + `/{id}/liveness`,
+  `POST /admin/providers/test` (pre-save, one model),
+  `POST /admin/providers/{id}/models/{mid}/test`,
+  `POST /admin/providers/{id}/test` (all enabled models).
   (Or extend an existing admin router — see Task 4 for placement
   decision.)
 - `backend/cubebox/services/provider_probe.py` — `ProbeResult`,
-  `ProbeStep`, `run_provider_probe(...)` orchestrator + per-step
+  `ProbeStep`, the two-phase runner: `run_liveness(...)` (phase A,
+  provider grain) + `run_model_probe(...)` (phase B, per model) + per-step
   helpers.
+- `backend/cubebox/llm/readiness.py` — pure readiness-derivation helper
+  (§4.1 enum); single source of truth for status the UI renders.
 - `backend/cubebox/services/task_model_resolver.py` — small module
   with `resolve_task_model(factory, task)` per spec §4.6. Keeps
   `LLMFactory` from growing.
@@ -144,9 +161,11 @@ cubepi legacy path (A-finding 8).
 ### Modified
 - `backend/pyproject.toml` — switch `cubepi` dep to git ref of
   `feat/capability-descriptor`.
-- `backend/cubebox/models/provider.py` — add 6 columns: `preset_slug`,
-  `capability`, `model_capability_overrides`, `last_test_at`,
-  `last_test_status`, `last_test_summary`.
+- `backend/cubebox/models/provider.py` — `Provider` gains 6 columns:
+  `preset_slug`, `capability`, `model_capability_overrides`,
+  `last_liveness_at`, `last_liveness_status`, `last_liveness_summary`;
+  `Model` gains 3 columns: `last_test_at`, `last_test_status`,
+  `last_test_summary` (rev-3, spec §4.1).
 - `backend/cubebox/llm/factory.py` — `build_cubepi_provider` reads
   capability JSON → typed CapabilityDescriptor; passes through. Replace
   the `_PROVIDER_TYPE_TO_API` mapping (provider_type stored value is
@@ -251,16 +270,21 @@ git commit -m "feat(deps): pin cubepi to feat/capability-descriptor commit (slic
 
 ---
 
-## Task 2: Provider DB columns + alembic migration
+## Task 2: Provider + Model DB columns + alembic migration
+
+> **rev-3:** test status is split across two grains (spec §4.1). The
+> **provider** carries only `last_liveness_*` (can we reach base_url with
+> this key?). Each **model** carries `last_test_*` (does this model exist
+> + do its toggles work?). Do NOT put `last_test_*` on the provider.
 
 **Files:**
 - Modify: `backend/cubebox/models/provider.py`
 - Create: `backend/alembic/versions/<rev>_provider_capability_columns.py`
 
-- [ ] **Step 1: Add the 6 new fields to `Provider`**
+- [ ] **Step 1a: Add capability + liveness fields to `Provider`**
 
 Edit `backend/cubebox/models/provider.py`. After the existing
-`extra_headers` field, insert:
+`extra_headers` field on `Provider`, insert:
 
 ```python
     preset_slug: str | None = Field(default=None, max_length=64)
@@ -268,6 +292,22 @@ Edit `backend/cubebox/models/provider.py`. After the existing
     model_capability_overrides: dict[str, Any] = Field(
         default_factory=dict, sa_column=Column(JSON)
     )
+    # Provider-level test = liveness/credential ONLY (spec §4.1).
+    last_liveness_at: datetime | None = Field(default=None)
+    last_liveness_status: str | None = Field(default=None, max_length=16)  # "ok" | "fail"
+    last_liveness_summary: dict[str, Any] = Field(
+        default_factory=dict, sa_column=Column(JSON)
+    )
+```
+
+- [ ] **Step 1b: Add per-model test fields to `Model`**
+
+In the same file, after the existing `extra_headers` field on `Model`,
+insert:
+
+```python
+    # Per-model test = capability probe + model existence (spec §4.1).
+    # "ok" | "warn" | "fail" | "unavailable".
     last_test_at: datetime | None = Field(default=None)
     last_test_status: str | None = Field(default=None, max_length=16)
     last_test_summary: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
@@ -279,21 +319,27 @@ present.
 `capability` and `model_capability_overrides` are stored as opaque
 JSON. Pydantic-typed access lives in the factory (Task 3); the model
 itself stays generic JSON to avoid recursive validation on every
-SQLAlchemy load.
+SQLAlchemy load. The `last_test_*` columns on `Model` are the *observed*
+status axis — they do not reopen §4.1's "no per-model capability config
+column" decision (that bars per-model capability *input*, not test
+*output*).
 
 - [ ] **Step 2: Generate the migration**
 
 ```bash
 cd /home/chris/cubebox/.worktrees/feat/llm-provider-platform/backend && \
   source .venv/bin/activate && \
-  alembic revision --autogenerate -m "provider capability + last_test columns"
+  alembic revision --autogenerate -m "provider capability + liveness + model test columns"
 ```
 
 The autogen should produce something like
-`backend/alembic/versions/<rev>_provider_capability_+_last_test_columns.py`.
+`backend/alembic/versions/<rev>_provider_capability_+_liveness_+_model_test_columns.py`.
 **Inspect** the generated file — autogen sometimes drops or duplicates
-columns; verify all 6 new columns appear in `op.add_column(...)` calls
-and that no unrelated changes are present.
+columns; verify all 6 new `providers` columns (`preset_slug`,
+`capability`, `model_capability_overrides`, `last_liveness_at`,
+`last_liveness_status`, `last_liveness_summary`) and all 3 new `models`
+columns (`last_test_at`, `last_test_status`, `last_test_summary`) appear
+in `op.add_column(...)` calls, and that no unrelated changes are present.
 
 - [ ] **Step 3: Add a one-shot backfill for `provider_type` semantics**
 
@@ -346,12 +392,17 @@ from cubebox.db import get_engine
 import asyncio
 async def run():
     async with get_engine().connect() as conn:
-        cols = await conn.run_sync(
+        pcols = await conn.run_sync(
             lambda sync_conn: [c['name'] for c in inspect(sync_conn).get_columns('providers')]
         )
         for needed in ('preset_slug', 'capability', 'model_capability_overrides',
-                       'last_test_at', 'last_test_status', 'last_test_summary'):
-            assert needed in cols, needed
+                       'last_liveness_at', 'last_liveness_status', 'last_liveness_summary'):
+            assert needed in pcols, f'providers.{needed}'
+        mcols = await conn.run_sync(
+            lambda sync_conn: [c['name'] for c in inspect(sync_conn).get_columns('models')]
+        )
+        for needed in ('last_test_at', 'last_test_status', 'last_test_summary'):
+            assert needed in mcols, f'models.{needed}'
         print('schema OK')
 asyncio.run(run())
 "
@@ -366,7 +417,7 @@ this codebase; the goal is just to confirm the columns exist.)
 
 ```bash
 git add backend/cubebox/models/provider.py backend/alembic/versions/
-git commit -m "feat(db): provider capability + last_test columns (slice 2 §4.1)"
+git commit -m "feat(db): provider capability + liveness + per-model test columns (slice 2 §4.1)"
 ```
 
 ---
@@ -690,7 +741,12 @@ git commit -m "feat(admin): GET /admin/llm/presets — serve cubepi catalog"
 
 ---
 
-## Task 5: GET /admin/providers/{id} returns capability + last_test
+## Task 5: GET /admin/providers/{id} returns capability + liveness + per-model status
+
+> **rev-3:** the response carries provider-level `last_liveness_*` plus,
+> for each model in the provider, that model's `last_test_*` and a
+> server-derived `readiness` field (spec §4.1 table). The picker/UI never
+> re-derives readiness — it reads this field.
 
 **Files:**
 - Locate or extend: backend/cubebox/api/routes/v1/admin_llm.py (or an
@@ -704,9 +760,22 @@ grep -rn '"/admin/providers"\|admin/providers/{' backend/cubebox/api/routes 2>&1
 ```
 
 If `GET /admin/providers/{id}` exists, extend it to include
-`capability`, `model_capability_overrides`, `last_test_at`,
-`last_test_status`, `last_test_summary` in the response. If it doesn't
+`capability`, `model_capability_overrides`, the provider's
+`last_liveness_at` / `last_liveness_status` / `last_liveness_summary`,
+and a `models` list where each entry carries `last_test_at` /
+`last_test_status` / `last_test_summary` / `readiness`. If it doesn't
 exist, add it.
+
+- [ ] **Step 1b: Add the readiness-derivation helper**
+
+Create `backend/cubebox/llm/readiness.py` with a pure function that maps
+`(provider.last_liveness_status, model.last_test_status,
+capability_changed_since_test)` → the §4.1 readiness enum
+(`ready` / `degraded` / `provider_error` / `model_error` / `unavailable`
+/ `stale`). Approximate `capability_changed_since_test` as
+`provider.updated_at > model.last_test_at`. This helper is the single
+source of truth reused by Task 5's serializer and any later picker
+payloads. Unit-test each branch.
 
 - [ ] **Step 2: Append failing test**
 
@@ -714,7 +783,7 @@ Append to `tests/test_admin_llm_endpoints.py`:
 
 ```python
 @pytest.mark.asyncio
-async def test_get_provider_includes_capability_and_last_test(
+async def test_get_provider_includes_capability_liveness_and_model_status(
     admin_client: AsyncClient, seeded_provider_id: str
 ):
     resp = await admin_client.get(f"/api/v1/admin/providers/{seeded_provider_id}")
@@ -722,9 +791,14 @@ async def test_get_provider_includes_capability_and_last_test(
     body = resp.json()
     assert "capability" in body
     assert "model_capability_overrides" in body
-    assert "last_test_at" in body
-    assert "last_test_status" in body
-    assert "last_test_summary" in body
+    assert "last_liveness_at" in body
+    assert "last_liveness_status" in body
+    assert "last_liveness_summary" in body
+    assert isinstance(body["models"], list)
+    if body["models"]:
+        m = body["models"][0]
+        assert "last_test_status" in m
+        assert "readiness" in m
 ```
 
 You'll need a `seeded_provider_id` fixture — see Step 4 below for the
@@ -733,14 +807,16 @@ shape if it doesn't exist already.
 - [ ] **Step 3: Run to verify it fails**
 
 ```bash
-uv run pytest tests/test_admin_llm_endpoints.py::test_get_provider_includes_capability_and_last_test -v 2>&1 | tail -5
+uv run pytest tests/test_admin_llm_endpoints.py::test_get_provider_includes_capability_liveness_and_model_status -v 2>&1 | tail -5
 ```
 
-- [ ] **Step 4: Extend the provider response schema**
+- [ ] **Step 4: Extend the provider + model response schemas**
 
-If `backend/cubebox/api/schemas/provider.py` (or equivalent) defines
-a `ProviderRead` pydantic model, add the 5 new fields. Otherwise,
-update the inline serialization in the handler.
+If `backend/cubebox/api/schemas/provider.py` (or equivalent) defines a
+`ProviderRead` pydantic model, add the capability + `last_liveness_*`
+fields, and add `last_test_*` + `readiness` to the per-model read
+schema. Otherwise update the inline serialization in the handler.
+`readiness` comes from the Step 1b helper.
 
 - [ ] **Step 5: Confirm the test passes**
 
@@ -753,13 +829,27 @@ uv run pytest tests/test_admin_llm_endpoints.py -v 2>&1 | tail -5
 ```bash
 git add backend/cubebox/api/routes/v1/admin_llm.py \
         backend/cubebox/api/schemas/provider.py \
+        backend/cubebox/llm/readiness.py \
         backend/tests/test_admin_llm_endpoints.py
-git commit -m "feat(admin): GET /admin/providers/{id} returns capability + last_test"
+git commit -m "feat(admin): GET /admin/providers/{id} returns liveness + per-model readiness"
 ```
 
 ---
 
 ## Task 6: ProbeResult + ProbeStep types + probe runner skeleton
+
+> **rev-3 — two phases (spec §4.4).** The probe is split by grain:
+> - **Phase A — liveness** (provider grain): one cheap call. Result
+>   persists to `providers.last_liveness_*`. If it fails, phase B is
+>   skipped and every model is `provider_error`.
+> - **Phase B — per-model capability** (model grain): reasoning +
+>   temperature + tools + streaming, run against ONE model. Result
+>   (`ProbeResult`) persists to that `models` row's `last_test_*`.
+>
+> The per-step helpers (Tasks 7–8) are unchanged; only the orchestrator
+> (Task 9) and endpoints/persistence (Task 10) re-shape around the two
+> phases. `liveness` is no longer one of phase B's blocking steps — it's
+> phase A. Phase B's only blocking step is `reasoning`.
 
 **Files:**
 - Create: `backend/cubebox/services/provider_probe.py`
@@ -870,6 +960,9 @@ Append to `provider_probe.py`:
 
 ```python
 # Steps that block save when they fail; the remainder are advisory.
+# Phase-agnostic: phase A passes [liveness]; phase B passes the model
+# steps. Each phase only ever feeds its own step names, so keeping both
+# blocking names in one set is harmless and keeps the helper reusable.
 _BLOCKING_STEPS: set[ProbeStepName] = {"liveness", "reasoning"}
 
 
@@ -1128,58 +1221,68 @@ async def probe_streaming(events: list, *, name: str = "streaming") -> ProbeStep
 
 ---
 
-## Task 9: Probe orchestrator + provider-config conversion
+## Task 9: Two-phase orchestrators (liveness + per-model probe)
 
 **Files:**
 - Modify: `backend/cubebox/services/provider_probe.py`
 - Modify: `backend/tests/test_provider_probe.py`
 
-The endpoint (Task 10) needs a single entry point that takes a
-candidate provider config OR a saved provider row, builds a
-short-lived cubepi.Provider, runs steps 1–5 in the right order, and
-returns the aggregated `ProbeResult`.
+> **rev-3:** there is no longer one `run_provider_probe`. The endpoint
+> (Task 10) calls two entry points: `run_liveness(...)` (phase A, once per
+> provider) and `run_model_probe(...)` (phase B, once per model). Phase B
+> is only reached after phase A passes.
 
-- [ ] **Step 1: Write the integration test**
+- [ ] **Step 1: Write the integration tests**
 
 ```python
 @pytest.mark.asyncio
-async def test_run_provider_probe_happy_path():
-    """Stub provider returning good events → overall=pass, all blocking steps pass."""
-    from cubebox.services.provider_probe import run_provider_probe
+async def test_run_liveness_pass_and_fail():
+    """Phase A: a good stub provider → ProbeStep(name='liveness', pass);
+    a 401 stub → status='fail'."""
+    from cubebox.services.provider_probe import run_liveness
+    # ok = await run_liveness(provider_factory=<good stub>, model_id="m")
+    # assert ok.name == "liveness" and ok.status == "pass"
+    # bad = await run_liveness(provider_factory=<401 stub>, model_id="m")
+    # assert bad.status == "fail"
+
+@pytest.mark.asyncio
+async def test_run_model_probe_happy_path():
+    """Phase B: stub provider with good events → overall=pass, reasoning passes."""
+    from cubebox.services.provider_probe import run_model_probe
     from cubepi.providers.capability import CapabilityDescriptor
 
-    # ... build a stub provider factory (returns _StubProvider with good events) ...
-    # ... build a CapabilityDescriptor with non-empty reasoning payloads ...
-    result = await run_provider_probe(
+    result = await run_model_probe(
         provider_factory=...,  # callable returning _StubProvider
         model_id="probe-model",
-        capability=...,
+        capability=...,        # CapabilityDescriptor with non-empty reasoning payloads
     )
     assert result.overall == "pass"
     assert result.blocking_failed is False
     step_names = {s.name for s in result.steps}
-    assert step_names >= {"liveness", "reasoning"}  # blocking ones at minimum
+    assert "reasoning" in step_names          # phase B's only blocking step
+    assert "liveness" not in step_names       # liveness is phase A, not here
 ```
 
-- [ ] **Step 2: Implement `run_provider_probe`**
+- [ ] **Step 2: Implement the two entry points**
 
 ```python
-async def run_provider_probe(
+async def run_liveness(*, provider_factory, model_id: str) -> ProbeStep:
+    """Phase A — provider grain. One minimal call against any model.
+    Caller persists the result to providers.last_liveness_*."""
+    provider = provider_factory()
+    return await probe_liveness(provider, model_id=model_id)
+
+
+async def run_model_probe(
     *,
     provider_factory,   # callable -> cubepi.Provider
     model_id: str,
     capability: CapabilityDescriptor,
 ) -> ProbeResult:
-    """Run liveness first; if it fails, return immediately. Else run the
-    rest in parallel and aggregate."""
+    """Phase B — model grain. Assumes phase A already passed. Runs the four
+    capability steps in parallel and aggregates. Caller persists the result
+    to that models row's last_test_*."""
     provider = provider_factory()
-    liveness = await probe_liveness(provider, model_id=model_id)
-    if liveness.status == "fail":
-        return ProbeResult(
-            overall="fail", blocking_failed=True, steps=[liveness]
-        )
-
-    # Run the remaining four in parallel.
     reasoning, temperature, tools, streaming = await asyncio.gather(
         probe_reasoning_toggle(provider, model_id=model_id, capability=capability),
         probe_temperature(provider, model_id=model_id, capability=capability),
@@ -1187,22 +1290,36 @@ async def run_provider_probe(
         probe_streaming(events=[]),  # see Task 8 for the streaming variant
         return_exceptions=False,
     )
-    steps = [liveness, reasoning, temperature, tools, streaming]
+    steps = [reasoning, temperature, tools, streaming]
     overall, blocked = _aggregate_overall(steps)
+    # Map overall → models.last_test_status. "unavailable" is set only by
+    # runtime writeback (§4.4a / Task 10b), never by a clean probe run.
     return ProbeResult(overall=overall, blocking_failed=blocked, steps=steps)
 ```
 
-- [ ] **Step 3: Run all probe tests; expect 15 passed**
+- [ ] **Step 3: Run all probe tests; expect green (prior + 2 new)**
 
 - [ ] **Step 4: Commit**
 
 ```bash
-git commit -m "feat(probe): run_provider_probe orchestrator with liveness gate"
+git commit -m "feat(probe): two-phase orchestrators — run_liveness + run_model_probe"
 ```
 
 ---
 
-## Task 10: POST /admin/providers/test + /admin/providers/{id}/test
+## Task 10: Test endpoints — liveness + pre-save + per-model + all-models
+
+> **rev-3 endpoints (spec §4.3):**
+> - `POST /admin/providers/liveness` + `/{id}/liveness` — phase A only.
+> - `POST /admin/providers/test` — pre-save: phase A then phase B against
+>   `probe_model_id`; returns one composed `ProbeResult` whose `steps` are
+>   `[liveness, *model_steps]` (so the wizard sees liveness first). No DB
+>   write.
+> - `POST /admin/providers/{id}/models/{mid}/test` — saved single model:
+>   phase A (writes provider liveness) + phase B (writes that model's
+>   `last_test_*`).
+> - `POST /admin/providers/{id}/test` — all enabled models: phase A once,
+>   then phase B per model; returns `ProbeResult[]`; persists each.
 
 **Files:**
 - Modify: `backend/cubebox/api/routes/v1/admin_llm.py`
@@ -1228,14 +1345,17 @@ class ProviderTestRequest(BaseModel):
 ```python
 @pytest.mark.asyncio
 async def test_probe_dryrun_returns_step_summary(admin_client, monkeypatch):
-    # Monkey-patch run_provider_probe to return a deterministic ProbeResult.
+    # Monkey-patch both phase entry points to deterministic results.
     from cubebox.services import provider_probe
-    fake_result = provider_probe.ProbeResult(
-        overall="pass", blocking_failed=False,
-        steps=[provider_probe.ProbeStep(name="liveness", status="pass", latency_ms=180)],
-    )
-    async def stub(*args, **kw): return fake_result
-    monkeypatch.setattr(provider_probe, "run_provider_probe", stub)
+    async def stub_liveness(*a, **k):
+        return provider_probe.ProbeStep(name="liveness", status="pass", latency_ms=180)
+    async def stub_model(*a, **k):
+        return provider_probe.ProbeResult(
+            overall="pass", blocking_failed=False,
+            steps=[provider_probe.ProbeStep(name="reasoning", status="pass")],
+        )
+    monkeypatch.setattr(provider_probe, "run_liveness", stub_liveness)
+    monkeypatch.setattr(provider_probe, "run_model_probe", stub_model)
 
     resp = await admin_client.post(
         "/api/v1/admin/providers/test",
@@ -1255,26 +1375,74 @@ async def test_probe_dryrun_returns_step_summary(admin_client, monkeypatch):
     assert body["steps"][0]["name"] == "liveness"
 ```
 
-- [ ] **Step 3: Implement the endpoint**
+- [ ] **Step 3: Implement the pre-save `/test` + `/liveness` endpoints**
 
-The handler builds a transient cubepi.Provider from the request body
-(no DB write), calls `run_provider_probe`, returns the result.
+`/liveness` (and `/{id}/liveness`) build a transient cubepi.Provider and
+call `run_liveness` only. The pre-save `/test` builds a transient
+provider, calls `run_liveness`; if it fails, returns a `ProbeResult`
+with `steps=[liveness]`, `blocking_failed=True`; if it passes, calls
+`run_model_probe(probe_model_id)` and returns a composed `ProbeResult`
+with `steps=[liveness, *model_result.steps]`. No DB write in either.
 
-- [ ] **Step 4: Implement `/admin/providers/{id}/test`**
+- [ ] **Step 4: Implement the saved-provider test endpoints + persistence**
 
-This variant looks up the saved provider, builds the cubepi.Provider
-the way `LLMFactory.build_cubepi_provider` does, runs the probe, then
-**persists** `last_test_at`, `last_test_status`, `last_test_summary` on
-the row.
+`/{id}/models/{mid}/test`: look up the saved provider + that model,
+build the cubepi.Provider the way `LLMFactory.build_cubepi_provider`
+does. Run `run_liveness` → **persist** `providers.last_liveness_*`. If
+liveness passed, run `run_model_probe` → **persist** that model's
+`last_test_at` / `last_test_status` / `last_test_summary`.
 
-Add a regression test for persistence.
+`/{id}/test`: run `run_liveness` once → persist provider liveness. If it
+passed, fan out `run_model_probe` over every `enabled` model, persist
+each model's `last_test_*`, and return the list of results.
+
+Add regression tests for both persistence targets (provider liveness row
++ model test row).
 
 - [ ] **Step 5: Run admin endpoint tests; expect green**
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git commit -m "feat(admin): POST /admin/providers/test + /{id}/test"
+git commit -m "feat(admin): liveness + pre-save + per-model + all-models test endpoints"
+```
+
+---
+
+## Task 10b: Runtime status writeback (spec §4.4a)
+
+**Files:**
+- Modify: the agent LLM call path (where cubepi stream errors surface —
+  locate via `grep -rn "build_cubepi_provider\|except" backend/cubebox/llm`).
+- Modify: `backend/tests/test_provider_runtime_writeback.py` (create).
+
+> Tests are point-in-time; keys get revoked and models retired between
+> probes. Mirror MCP's "refresh failure flips authed=false" so the UI
+> reflects reality without a manual re-test.
+
+- [ ] **Step 1: Failing tests**
+
+  - A real call raising an auth error (401/403) → `providers.last_liveness_status`
+    flips to `"fail"`.
+  - A real call raising model-not-found (vendor `model_not_found` / 404
+    on the model) → that `models.last_test_status` flips to
+    `"unavailable"`; sibling models untouched.
+  - A subsequent successful call clears provider liveness back to `"ok"`.
+
+- [ ] **Step 2: Implement the writeback hook**
+
+In the agent call path, wrap the cubepi stream call: on the mapped
+error types, enqueue a best-effort status update (separate DB session /
+background task) keyed by provider_id (liveness) or (provider_id,
+model_id) (model). **Never block or fail the live request on the status
+write** — swallow writeback errors and log.
+
+- [ ] **Step 3: Run the writeback tests; expect green**
+
+- [ ] **Step 4: Commit**
+
+```bash
+git commit -m "feat(llm): runtime status writeback — 401->liveness fail, model_not_found->unavailable (§4.4a)"
 ```
 
 ---
@@ -1629,18 +1797,24 @@ M7 (polish) are the next slice.
 ## What changed
 
 - DB: 6 new columns on `providers` (preset_slug, capability,
-  model_capability_overrides, last_test_at, last_test_status,
-  last_test_summary). `provider_type` semantics shifted to wire api
-  literally; one-shot SQL backfill in the migration.
+  model_capability_overrides, last_liveness_at, last_liveness_status,
+  last_liveness_summary) + 3 new columns on `models` (last_test_at,
+  last_test_status, last_test_summary) — rev-3 two-grain split.
+  `provider_type` semantics shifted to wire api literally; one-shot SQL
+  backfill in the migration.
 - `LLMFactory.build_cubepi_provider` reads JSON capability + overrides
   → typed pydantic → passes to cubepi.
+- `cubebox/llm/readiness.py` — pure §4.1 readiness-derivation helper.
 - `GET /api/v1/admin/llm/presets` — serves cubepi's 20-preset catalog.
-- `GET /api/v1/admin/providers/{id}` — now includes capability,
-  model_capability_overrides, last_test_*.
-- `POST /api/v1/admin/providers/test` (pre-save) and
-  `POST /api/v1/admin/providers/{id}/test` (re-test) — 5-step
-  probe (liveness, reasoning, temperature, tools, streaming) with
-  liveness + reasoning blocking and the rest advisory.
+- `GET /api/v1/admin/providers/{id}` — includes capability,
+  model_capability_overrides, provider last_liveness_*, and per-model
+  last_test_* + derived readiness.
+- Test endpoints (§4.3): `/liveness` (+`/{id}/liveness`), pre-save
+  `/test`, `/{id}/models/{mid}/test`, `/{id}/test` (all enabled models) —
+  two-phase probe: phase A liveness (provider grain) + phase B capability
+  (model grain: reasoning blocking, temperature/tools/streaming advisory).
+- Runtime status writeback (§4.4a): 401/403 → provider liveness fail;
+  model_not_found → model unavailable; best-effort, out-of-band.
 - `OrgSettings.task_models` + `LLMFactory.resolve_task_model(task)` —
   conversation_title uses it; passes `StreamOptions(thinking="off")`.
 - Seed migration backfills capability for known system providers from
