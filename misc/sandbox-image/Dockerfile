@@ -1,3 +1,8 @@
+# Source of the Neko streaming runtime (server binary, HTML5 client, configs,
+# custom Xorg drivers). Pin/mirror this into the internal registry for builds
+# that cannot reach ghcr.
+FROM ghcr.io/m1k1o/neko/chromium:latest AS neko
+
 FROM hub.sensedeal.vip/library/ubuntu:24.04
 
 # Set build-time arguments
@@ -128,5 +133,63 @@ RUN python3 -m venv /opt/venv \
 # Create app directory
 RUN mkdir -p /workspace
 ENV HOME=/workspace
+
+# ---------------------------------------------------------------------------
+# Neko browser-takeover stack (started on demand, see neko/start-browser.sh).
+# Lets a user watch and take over the sandbox browser from the cubebox frontend
+# while the agent drives the same Chromium over CDP.
+# ---------------------------------------------------------------------------
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        xserver-xorg-core xserver-xorg-video-dummy x11-xserver-utils xauth \
+        openbox pulseaudio dbus-x11 supervisor \
+        libgtk-3-0 libxtst6 libxcvt0 \
+        libgstreamer1.0-0 libgstreamer-plugins-base1.0-0 \
+        gstreamer1.0-plugins-base gstreamer1.0-plugins-good \
+        gstreamer1.0-plugins-bad gstreamer1.0-plugins-ugly gstreamer1.0-libav \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
+
+# Neko runtime from the upstream image: server binary, configs, HTML5 client,
+# and the two custom Xorg modules (patched dummy video + the "neko" input driver
+# that exposes /tmp/xf86-input-neko.sock for event injection).
+COPY --from=neko /usr/bin/neko /usr/bin/neko
+COPY --from=neko /etc/neko /etc/neko
+COPY --from=neko /var/www /var/www
+COPY --from=neko /usr/lib/xorg/modules/drivers/dummy_drv.so /usr/lib/xorg/modules/drivers/dummy_drv.so
+COPY --from=neko /usr/lib/xorg/modules/input/neko_drv.so /usr/lib/xorg/modules/input/neko_drv.so
+
+# neko user at uid 1000. Remove a pre-existing uid-1000 user conditionally so the
+# build stays deterministic across base-image variants (never hard-fail).
+RUN (getent passwd 1000 && userdel -r "$(getent passwd 1000 | cut -d: -f1)" 2>/dev/null || true) \
+    && (getent group 1000 && groupdel "$(getent group 1000 | cut -d: -f1)" 2>/dev/null || true) \
+    && groupadd -g 1000 neko \
+    && useradd -u 1000 -g 1000 -m -d /home/neko -s /bin/bash neko \
+    && usermod -aG audio,video neko \
+    && mkdir -p /var/log/neko /tmp/runtime-neko /home/neko/.config/chromium \
+    && chown -R neko:neko /var/log/neko /tmp/runtime-neko /home/neko \
+    && chmod 700 /tmp/runtime-neko
+
+# Run Xorg fully rootless (drop the setuid Xorg.wrap) so the neko input socket is
+# owned by the neko user, and load the dummy config from the default path
+# (Xorg.wrap rejects an absolute -config path).
+RUN rm -f /usr/lib/xorg/Xorg.wrap \
+    && cp /etc/neko/xorg.conf /etc/X11/xorg.conf \
+    && sed -i 's# -config /etc/neko/xorg.conf##' /etc/neko/supervisord.conf
+
+# Stream the image's own Playwright Chromium (version-matched to Playwright so
+# CDP per-page sessions work); stable symlink to the versioned binary.
+RUN ln -s "$(ls -d /ms-playwright/chromium-*/chrome-linux64 | head -1)/chrome" /ms-playwright/chrome
+
+COPY neko/chromium.conf /etc/neko/supervisord/chromium.conf
+COPY neko/start-browser.sh /usr/local/bin/start-browser.sh
+RUN chmod +x /usr/local/bin/start-browser.sh
+
+ENV USER=neko \
+    DISPLAY=:99.0 \
+    XDG_RUNTIME_DIR=/tmp/runtime-neko \
+    NEKO_SERVER_BIND=:8080 \
+    NEKO_PLUGINS_ENABLED=true \
+    NEKO_PLUGINS_DIR=/etc/neko/plugins/
 
 WORKDIR /workspace
