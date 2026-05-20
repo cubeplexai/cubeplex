@@ -1,9 +1,33 @@
 # LLM Provider Platform — Capability-Driven Providers + Preset Catalog + Test
 
-**Status:** Draft for review (revision 2)
+**Status:** Draft for review (revision 3)
 **Author:** xfgong
 **Date:** 2026-05-19
 **Supersedes:** `2026-05-18-llm-vendor-compat-design.md`
+**Revision 3 changes** (vs revision 2):
+
+- **Readiness state moves to the model grain.** Whether a thing is usable
+  is split across two layers, mirroring MCP's catalog/install model:
+  - *Provider layer* — one cheap liveness/credential check ("can we reach
+    this base_url with this key?"). One bad key fails the whole provider;
+    no point probing 20 models to learn the key is wrong.
+  - *Model layer* — per-model capability probe ("does THIS model exist,
+    and do its reasoning / tools toggles actually work on the wire?").
+    Stored on the `models` row. This is what the model picker reads.
+- This does **not** reopen §4.1's "no per-model capability column"
+  decision: that rule bars per-model *capability config* (input); a
+  per-model *test status* (observed output) is a different axis.
+- §4.4 probe is re-cut into a provider-liveness phase + a per-model
+  capability phase. "A wired model is a tested model" now applies at the
+  model grain. Save-gating moves with it.
+- Added runtime status writeback: a real-call 401 flips the provider to
+  `error`; a `model_not_found` flips that one model to `unavailable`.
+- Readiness is defined auth-mode-agnostically ("credential valid"), so
+  the future OAuth slot (§5 non-goal today) reuses the same state machine.
+- §4.8 added: the admin page shows only configured rows; the preset
+  catalog appears only in the Add flow. Pure rendering rule, no schema /
+  API change (catalog and configured data are already separate endpoints).
+
 **Revision 2 changes** (vs the morning's first cut of this same file):
 
 - Capability config is bound to the **Provider instance** at construction,
@@ -449,23 +473,60 @@ models inherit the "no reasoning off-switch" provider default.
 ALTER TABLE providers ADD COLUMN preset_slug VARCHAR(64) NULL;
 ALTER TABLE providers ADD COLUMN capability  JSON NULL;        -- CapabilityDescriptor as JSON
 ALTER TABLE providers ADD COLUMN model_capability_overrides JSON NULL;  -- dict[model_id, CapabilityDescriptor]
-ALTER TABLE providers ADD COLUMN last_test_at        TIMESTAMP NULL;
-ALTER TABLE providers ADD COLUMN last_test_status    VARCHAR(16) NULL;  -- "ok" | "fail" | "warn"
-ALTER TABLE providers ADD COLUMN last_test_summary   JSON NULL;
+-- Provider-level test = liveness/credential ONLY ("can we reach base_url
+-- with this key?"). Not the per-model capability result — that lives on
+-- the models row below.
+ALTER TABLE providers ADD COLUMN last_liveness_at      TIMESTAMP NULL;
+ALTER TABLE providers ADD COLUMN last_liveness_status  VARCHAR(16) NULL;  -- "ok" | "fail"
+ALTER TABLE providers ADD COLUMN last_liveness_summary JSON NULL;
+
+-- Per-model test = the capability probe (reasoning / tools / temperature /
+-- streaming) plus model existence. This is the axis the model picker reads.
+ALTER TABLE models ADD COLUMN last_test_at      TIMESTAMP NULL;
+ALTER TABLE models ADD COLUMN last_test_status  VARCHAR(16) NULL;  -- "ok" | "warn" | "fail" | "unavailable"
+ALTER TABLE models ADD COLUMN last_test_summary JSON NULL;          -- ProbeResult JSON
 ```
+
+**Two status layers, not one.** Usability is decided across both, the
+same way MCP splits `authed` (install-level) from the per-tool contents
+of `tools_cache`:
+
+| Layer | Answers | Source | Failure blast radius |
+|---|---|---|---|
+| Provider `last_liveness_*` | "base_url + key reachable?" | one cheap liveness call; runtime 401 writeback | all models under it |
+| Model `last_test_*` | "does this model exist + do its toggles work on the wire?" | per-model capability probe; runtime `model_not_found` writeback | just that model |
+
+A **model is usable** ⟺ its provider's `last_liveness_status = "ok"` AND
+its own `last_test_status ∈ {ok, warn}`. Derived readiness states the UI
+renders (no separate stored enum needed — compute from the two layers):
+
+| readiness | condition | picker behavior |
+|---|---|---|
+| `ready` | provider liveness ok + model test ok | selectable |
+| `degraded` | model test = warn (an advisory probe failed, e.g. tools) | selectable, yellow dot + hint |
+| `provider_error` | provider liveness fail (key/url) | disabled — "Provider unreachable; fix credentials / re-test" |
+| `model_error` | provider ok but model test fail | disabled — "Model test failing; re-test" |
+| `unavailable` | model test = unavailable (vendor returned model_not_found) | disabled — "Model not offered by this provider" |
+| `stale` | capability edited since last model test | selectable, hint "config changed; re-test recommended" |
+
+`models.capability` (a per-model *capability config* column) is still
+intentionally **not** added (rationale below). The `last_test_*` columns
+above are the *observed result* axis — orthogonal to capability config,
+so adding them does not reopen that decision.
 
 `providers.provider_type` (existing) — its values become wire api
 directly (`openai-completions` / `anthropic-messages` /
 `openai-responses`). Migration backfills the current `openai_compat`
 default to `openai-completions`.
 
-`models.capability` (column on Model rows) is intentionally **not**
-added in this milestone. Rationale: capability is a Provider-level
-property by design; the OpenRouter-style "different models on same
-endpoint" case is handled by `providers.model_capability_overrides`
+Rationale for no `models.capability` config column: capability is a
+Provider-level property by design; the OpenRouter-style "different models
+on same endpoint" case is handled by `providers.model_capability_overrides`
 (an editable JSON column). Reserving a separate `models.capability` row
 column would invite the wrong mental model (admins editing model-level
-capability per-model on a Qwen provider where it's wrong).
+capability per-model on a Qwen provider where it's wrong). The per-model
+`last_test_*` columns added above are unaffected by this — they record
+what the probe *observed*, not capability the admin *configures*.
 
 ### 4.2 LLMFactory
 
@@ -483,13 +544,23 @@ mapping table — the column value IS the wire api.
 ### 4.3 Admin endpoints
 
 ```
-GET  /api/v1/admin/llm/presets                  → ProviderPreset[]
-POST /api/v1/admin/providers/test               → ProbeResult (pre-save)
-POST /api/v1/admin/providers/{id}/test          → ProbeResult (re-test)
-GET  /api/v1/admin/providers/{id}               → row + capability + last test
-POST /api/v1/admin/providers                    → create
-PUT  /api/v1/admin/providers/{id}               → update
+GET  /api/v1/admin/llm/presets                       → ProviderPreset[]
+POST /api/v1/admin/providers/liveness                → LivenessResult (pre-save; base_url+key only)
+POST /api/v1/admin/providers/{id}/liveness           → LivenessResult (re-check saved provider)
+POST /api/v1/admin/providers/test                    → ProbeResult (pre-save: liveness + probe one model)
+POST /api/v1/admin/providers/{id}/models/{mid}/test  → ProbeResult (re-test one saved model)
+POST /api/v1/admin/providers/{id}/test               → ProbeResult[] (re-test all enabled models)
+GET  /api/v1/admin/providers/{id}                    → row + capability + liveness + per-model status
+POST /api/v1/admin/providers                         → create
+PUT  /api/v1/admin/providers/{id}                    → update
 ```
+
+The pre-save `POST /providers/test` carries a `model_id` in its body —
+the wizard probes the model the admin is about to import (step 4's first
+pick). It runs liveness then the capability probe against that one model
+and returns a single `ProbeResult`. Saved-provider re-tests fan out per
+model and persist each model's `last_test_*`; liveness persists on the
+provider row.
 
 `ProbeResult` shape:
 
@@ -509,12 +580,24 @@ class ProbeResult(BaseModel):
 
 ### 4.4 Test probe sequence
 
-Five steps, in order. Steps 1–2 **block save** on failure; steps 3–5
-are advisory (warn, don't block).
+Two phases. **Phase A (provider liveness)** runs once and gates everything.
+**Phase B (per-model capability)** runs against a specific model and is
+what writes the model's `last_test_*`.
 
-1. **Liveness** — minimal completion: `max_tokens=1`, prompt
-   `"."` (or `"ping"`). 5s timeout. Fail = wrong base URL, bad API key,
-   network issue.
+Within phase B, steps 2 blocks the model's save on failure; steps 3–5 are
+advisory (warn, don't block).
+
+**Phase A — provider liveness** (writes `providers.last_liveness_*`):
+
+1. **Liveness** — minimal completion against any one model:
+   `max_tokens=1`, prompt `"."` (or `"ping"`). 5s timeout. Fail = wrong
+   base URL, bad API key, network issue. On fail, phase B is skipped
+   entirely — every model under this provider is `provider_error`. This
+   is the cheap gate that answers Open Q#3's probe-cost worry: a wrong
+   key is caught in one call, not N.
+
+**Phase B — per-model capability** (writes `models.last_test_*` for the
+probed model). Runs only after phase A passes:
 2. **Reasoning toggle** — runs only if `capability.reasoning_off_payload`
    or `reasoning_on_payload` is non-empty.
    - Send a probe with `StreamOptions(thinking="off")` and a prompt
@@ -537,10 +620,34 @@ are advisory (warn, don't block).
 5. **Streaming** — verify at least one SSE chunk arrived during step 1
    or 2 with `stream=True`. Warn (don't fail) on no chunks.
 
-Steps 2–5 run in parallel after step 1 passes. Persist
-`last_test_status` (`ok` / `warn` / `fail`) and `last_test_summary` on
-the row so the Provider list UI can show a status dot without
-re-probing.
+Steps 2–5 run in parallel after step 1 passes. Persist `last_liveness_*`
+on the provider row (once) and `last_test_*` (`ok` / `warn` / `fail`) +
+`last_test_summary` on each probed **model** row, so the model picker and
+provider detail can show status dots without re-probing.
+
+**Save-gating at the model grain.** "A wired model is a tested model"
+means: a model row can only be saved as `enabled=true` if phase A passed
+*and* its own step 2 passed. A provider can be saved with liveness-ok and
+zero tested models; each model is then enabled as it passes its own probe.
+This replaces rev-2's provider-grain "steps 1–2 block save."
+
+### 4.4a Runtime status writeback
+
+Tests are point-in-time; keys get revoked and models get retired between
+tests. Mirror MCP's "refresh failure flips `authed=false`" so the UI
+reflects reality without a manual re-test:
+
+- A real agent call that returns **401 / 403 (auth)** flips
+  `providers.last_liveness_status = "fail"`. All models under it render
+  `provider_error` until the next successful call or re-check.
+- A real call that returns **model-not-found** (vendor's
+  `model_not_found` / 404-on-model) flips that one model's
+  `last_test_status = "unavailable"`; siblings are untouched.
+- A subsequent successful call clears the flag back to `ok` (liveness) /
+  leaves the model for the next explicit probe to re-validate.
+
+Writeback is best-effort and out-of-band of the user's stream — never
+block or fail a live request on the status update.
 
 ### 4.5 Add Provider UI (4-step wizard)
 
@@ -558,10 +665,15 @@ Step 1: pick from preset catalog.
 Step 2: configure — preset auto-fills `display_name`, `base_url`, all
 capability fields. "Advanced" expander reveals the capability editor
 (JSON view + per-field form). API key is the only required free input.
-Step 3: Test connection (streaming probe results, can't proceed past
-this until step 1 + step 2 pass).
-Step 4: Default models — import from preset (checkbox list) or add
-custom.
+Step 3: Default models — import from preset (checkbox list) or add
+custom. (Moved ahead of Test in rev-3: the per-model probe needs a model
+to target.)
+Step 4: Test connection — runs phase A (liveness) once, then phase B
+against each selected model, streaming results per model. Can't finish
+the wizard until liveness passes and at least one model's step 2
+(reasoning) passes. Models that fail their probe are saved but left
+`enabled=false` with their `last_test_status`; the admin can re-test
+later from provider detail.
 
 For custom presets (`custom-openai`, `custom-anthropic`), step 2's
 advanced fields are visible by default. Reasoning toggle is filled by
@@ -575,11 +687,54 @@ effort / Anthropic budget templates that copy their respective
 "summarize": "..."})`. `LLMFactory.resolve_task_model(task: str)` walks
 this → yaml fallback → default. Title gen switches to
 `resolve_task_model("title")`. UI section under admin settings is a
-trivial dropdown per task with "Use chat model" as default.
+dropdown per task; options are filtered/annotated by readiness per §4.7
+(unusable models disabled with reason). Default is "Use chat model."
 
 This independently fixes the 30s title timeout for admins who route
 title to a small non-reasoning model; for everyone else it preserves
 today's behavior.
+
+### 4.7 Readiness in model-selection UIs
+
+Every surface that lets someone pick a model — the task-routing dropdowns
+(§4.6), the Add-Provider wizard's model list (§4.5), and any end-user chat
+model selector — reads the **derived readiness** computed from the two
+status layers in §4.1. The rule is uniform:
+
+- `ready` / `degraded` / `stale` → selectable (the latter two carry a
+  dot + tooltip).
+- `provider_error` / `model_error` / `unavailable` → shown **disabled,
+  not hidden**, each with a one-line reason and the matching fix
+  affordance (re-test model, fix credentials, or "not offered"). This is
+  the LLM parallel to MCP's "Reconnect" — surface the broken thing with
+  the path to fix it rather than silently dropping it.
+
+Readiness is computed server-side and returned alongside each model in
+the list/picker payloads, so the frontend never re-derives the rule.
+
+### 4.8 Page shows configured rows only; catalog lives in the Add flow
+
+The Providers / Models admin page renders **only configured rows** —
+`GET /admin/providers` (DB rows) plus each provider's `models` rows. The
+preset catalog (presets and their `default_models`) is **never** pre-
+rendered on this page; it appears **only** inside the Add-Provider /
+Add-Model flow, sourced from `GET /admin/llm/presets`. No preset
+materializes a row until the admin imports it. This needs no schema or
+API change — catalog and configured data are already served by different
+endpoints; it is purely a rendering rule.
+
+Do not conflate this with §4.7's "disabled, not hidden":
+
+- A **configured-but-broken** model (`provider_error` / `model_error` /
+  `unavailable`) is a real `models` row → stays on the page, disabled,
+  with a reason and fix affordance.
+- An **un-added preset model** is catalog template data → does **not**
+  appear on the page at all; it only shows as an importable option inside
+  the Add flow.
+
+The smell to avoid: rendering a preset's `default_models` greyed-out on
+the main page as an "available to add" list. Available-to-add belongs in
+the wizard, not the page.
 
 ## 5. Non-goals
 
@@ -591,7 +746,14 @@ today's behavior.
 - **No general-purpose `extra_body` rules engine.** Capability is the
   four-field shape, period.
 - **No OAuth provider auth implementation** in this round (slot
-  reserved in `AuthSpec`).
+  reserved in `AuthSpec`). The readiness machine (§4.1) is written
+  auth-mode-agnostically — provider liveness means "credential valid,"
+  not "API key present" — so when OAuth lands, an expired/revoked grant
+  flips `last_liveness_status` exactly like a bad key does, with no
+  state-model change.
+- **No org/workspace/user scope for providers** — providers stay
+  org/admin-level; the MCP-style multi-scope install matrix is
+  explicitly out of scope.
 - **No streaming-format quirks** in capability — stays inside the
   Provider classes' wire handling.
 
@@ -620,19 +782,27 @@ No behavior change for existing callers.
 
 ### M3 — cubebox: schema + factory + read-only catalog endpoints
 
-- Alembic: provider columns per §4.1.
+- Alembic: provider columns + provider `last_liveness_*` + model
+  `last_test_*` per §4.1.
 - `LLMFactory` reads capability + overrides from row; passes to
   cubepi.
-- `GET /admin/llm/presets`, `GET /admin/providers/{id}`.
+- `GET /admin/llm/presets`, `GET /admin/providers/{id}` (returns
+  liveness + per-model status).
+- Server-side derived-readiness helper (the §4.1 table) reused by every
+  picker payload.
 - Seed migration: existing system providers backfilled with their
   matching preset's capability where slug matches.
 
-### M4 — cubebox: test endpoint
+### M4 — cubebox: test endpoint + runtime writeback
 
-- Probe runner per §4.4.
-- `POST /admin/providers/test` (dry run) and
-  `POST /admin/providers/{id}/test` (saved).
-- Last-test fields persisted.
+- Probe runner per §4.4: phase A (liveness) + phase B (per-model).
+- `POST /admin/providers/liveness` + `/{id}/liveness`,
+  `POST /admin/providers/test` (pre-save, one model),
+  `POST /admin/providers/{id}/models/{mid}/test`,
+  `POST /admin/providers/{id}/test` (all enabled models).
+- `last_liveness_*` persisted on provider; `last_test_*` on each model.
+- Runtime writeback (§4.4a): 401/403 → provider liveness fail;
+  model_not_found → model unavailable. Best-effort, out-of-band.
 
 ### M5 — cubebox: Add Provider wizard UI
 
@@ -648,8 +818,9 @@ No behavior change for existing callers.
 
 ### M7 — Polish
 
-- Provider detail page status dots from `last_test_status`.
-- Re-test button.
+- Provider detail: provider liveness dot + a per-model status list
+  (dots from each model's `last_test_status`, reason tooltips per §4.7).
+- Re-test buttons at both grains (provider liveness; single model).
 - i18n sweep.
 
 ## 7. Open questions
@@ -668,8 +839,11 @@ No behavior change for existing callers.
    breaks loading; admin can re-pull preset on demand to update.
 3. **Probe-cost surface.** Each capability probe is 1–3 LLM calls. For
    pay-per-token vendors that adds up if admins click Test often.
-   Provide a "skip optional probes" checkbox on re-test (default ON
-   for re-test; OFF for first-save).
+   Mitigated by the rev-3 two-phase split: a bad key is caught by one
+   liveness call (phase A) instead of one probe per model, and re-tests
+   target a single model rather than the whole provider. Still provide a
+   "skip optional probes" checkbox on re-test (default ON for re-test;
+   OFF for first-save).
 4. **OpenRouter override editability.** When `preset_slug=openrouter`,
    the override map is non-trivial. Edit UI: a tab per overridden
    model in the wizard's "Advanced" expander, or a separate "Model
