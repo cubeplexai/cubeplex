@@ -22,7 +22,18 @@ def _make_fake_factory(provider: FauxProvider) -> object:
     class _FakeProviderConfig:
         name = "faux"
 
+    class _FakeLLMConfig:
+        # No ``title_model`` attribute → resolve_task_model falls through to
+        # the default provider/model below.
+        title_model = None
+
     class _FakeFactory:
+        # resolve_task_model only consults OrgSettings when both are truthy;
+        # leaving them None keeps these unit tests on the default path.
+        _session = None
+        _org_id = None
+        llm_config = _FakeLLMConfig()
+
         async def resolve_default_provider_and_config(
             self,
         ) -> tuple[str, str, _FakeProviderConfig]:

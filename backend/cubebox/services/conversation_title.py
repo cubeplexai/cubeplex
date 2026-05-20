@@ -133,13 +133,14 @@ async def _generate_title(factory: LLMFactory, full_prompt: str, *, org_id: str)
     No agent loop needed — title generation is a single-turn request.
     """
     from cubepi import Model
-    from cubepi.providers.base import TextContent, UserMessage
+    from cubepi.providers.base import StreamOptions, TextContent, UserMessage
 
     from cubebox.llm.runtime_writeback import (
         schedule_runtime_status_writeback as _schedule_writeback,
     )
+    from cubebox.services.task_model_resolver import resolve_task_model
 
-    provider_name, model_id, provider_config = await factory.resolve_default_provider_and_config()
+    provider_name, model_id, provider_config = await resolve_task_model(factory, "title")
     # cache_policy=None → cubepi's DefaultCacheMarkerPolicy. Title generation
     # is a one-shot call with no prior conversation context, so no cache
     # breakpoints will be inserted regardless of the policy used.
@@ -150,6 +151,9 @@ async def _generate_title(factory: LLMFactory, full_prompt: str, *, org_id: str)
             model=Model(id=model_id, provider=provider_name),
             messages=[UserMessage(content=[TextContent(text=full_prompt)])],
             system_prompt="",  # title-gen prompt is fully in the user message
+            # Force reasoning off: title-gen is latency-sensitive and a
+            # reasoning model here can stall (the 30s timeout incident).
+            options=StreamOptions(thinking="off"),
         )
 
         parts: list[str] = []
