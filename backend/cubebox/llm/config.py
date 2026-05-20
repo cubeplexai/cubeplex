@@ -75,6 +75,8 @@ class ProviderConfig(BaseModel):
         description="Extra headers",
         alias="extra_headers",
     )
+    capability: dict[str, Any] = Field(default_factory=dict)
+    model_capability_overrides: dict[str, dict[str, Any]] = Field(default_factory=dict)
     models: list[ModelConfig] = Field(default_factory=list, description="Available models")
 
     class Config:

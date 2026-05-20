@@ -23,29 +23,6 @@ from cubebox.llm.config import LLMConfig, ModelConfig, ProviderConfig
 
 logger = logging.getLogger(__name__)
 
-_PROVIDER_TYPE_TO_API: dict[str, str] = {
-    "openai_compat": "openai-completions",
-    "anthropic": "anthropic",
-}
-
-_API_TO_PROVIDER_TYPE: dict[str, str] = {v: k for k, v in _PROVIDER_TYPE_TO_API.items()}
-
-_WIRE_API_LITERALS: frozenset[str] = frozenset(
-    {"openai-completions", "anthropic-messages", "openai-responses"}
-)
-
-
-def _provider_type_to_api(provider_type: str) -> str:
-    # Post-A1-migration rows store the wire-api literal directly; accept it as-is.
-    # Older rows still use the legacy enum, which we map via _PROVIDER_TYPE_TO_API.
-    if provider_type in _WIRE_API_LITERALS:
-        return provider_type
-    return _PROVIDER_TYPE_TO_API.get(provider_type, "openai-completions")
-
-
-def api_to_provider_type(api: str) -> str:
-    return _API_TO_PROVIDER_TYPE.get(api, "openai_compat")
-
 
 class LLMFactory:
     """Factory for creating LLM instances from config.yaml (fallback) and DB (primary)."""
@@ -145,9 +122,11 @@ class LLMFactory:
             db_configs[p.name] = {
                 "base_url": p.base_url,
                 "api_key": api_key,
-                "api": _provider_type_to_api(p.provider_type),
+                "api": p.provider_type,
                 "extra_body": p.extra_body,
                 "extra_headers": p.extra_headers,
+                "capability": p.capability or {},
+                "model_capability_overrides": p.model_capability_overrides or {},
                 "models": [
                     {
                         "id": m.model_id,
@@ -336,31 +315,44 @@ class LLMFactory:
     ) -> Any:
         """Build a cubepi.Provider instance from a ProviderConfig.
 
-        Routes by ``provider_config.api``:
+        Routes by ``provider_config.api`` (the wire-api literal):
 
-        - ``"anthropic"``          → cubepi AnthropicProvider
+        - ``"anthropic-messages"`` (or legacy ``"anthropic"``) → AnthropicProvider
         - ``"openai-completions"`` → cubepi OpenAIProvider
         - ``"openai-responses"``   → cubepi OpenAIResponsesProvider
+
+        Capability quirks stored as JSON on the provider (``capability`` +
+        ``model_capability_overrides``) are converted to typed
+        ``CapabilityDescriptor`` objects and forwarded to the cubepi provider.
+        Empty capability ⇒ ``None`` ⇒ legacy byte-identical behavior.
 
         ``cache_policy`` (Anthropic only): forwarded to AnthropicProvider.
         When ``None``, AnthropicProvider defaults to DefaultCacheMarkerPolicy.
 
-        For OpenAI-compatible endpoints that need reasoning quirks,
-        wrap the returned OpenAIProvider with ``payload_quirks`` after
-        this call; that is not handled here.
-
         Raises:
             ValueError: If ``provider_config.api`` is not a recognised value.
         """
+        from cubepi.providers.capability import CapabilityDescriptor
+
         api = provider_config.api
 
-        if api == "anthropic":
+        cap_dict = provider_config.capability or {}
+        capability = CapabilityDescriptor.model_validate(cap_dict) if cap_dict else None
+
+        overrides_raw = provider_config.model_capability_overrides or {}
+        model_capability_overrides: dict[str, CapabilityDescriptor] | None = {
+            mid: CapabilityDescriptor.model_validate(d) for mid, d in overrides_raw.items()
+        } or None
+
+        if api in ("anthropic-messages", "anthropic"):
             from cubepi.providers.anthropic import AnthropicProvider
 
             return AnthropicProvider(
                 api_key=provider_config.api_key,
                 base_url=provider_config.base_url or None,
                 cache_policy=cache_policy,
+                capability=capability,
+                model_capability_overrides=model_capability_overrides,
             )
 
         if api == "openai-completions":
@@ -371,6 +363,8 @@ class LLMFactory:
                 base_url=provider_config.base_url,
                 extra_body=provider_config.extra_body or None,
                 extra_headers=provider_config.extra_headers or None,
+                capability=capability,
+                model_capability_overrides=model_capability_overrides,
             )
 
         if api == "openai-responses":
@@ -379,6 +373,8 @@ class LLMFactory:
             return OpenAIResponsesProvider(
                 api_key=provider_config.api_key,
                 base_url=provider_config.base_url,
+                capability=capability,
+                model_capability_overrides=model_capability_overrides,
             )
 
         raise ValueError(f"unsupported api for cubepi provider: {api!r}")

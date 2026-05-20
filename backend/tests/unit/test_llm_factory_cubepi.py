@@ -3,7 +3,7 @@
 import pytest
 
 from cubebox.llm.config import LLMConfig, ProviderConfig
-from cubebox.llm.factory import LLMFactory, _provider_type_to_api
+from cubebox.llm.factory import LLMFactory
 
 
 def _mk_factory(named_configs: dict[str, ProviderConfig]) -> LLMFactory:
@@ -78,16 +78,6 @@ def test_build_cubepi_provider_unknown_api_raises() -> None:
     object.__setattr__(cfg, "api", "some-unknown-api")
     with pytest.raises(ValueError, match="unsupported api"):
         factory.build_cubepi_provider(cfg)
-
-
-def test_provider_type_to_api_accepts_wire_api_literals() -> None:
-    # Post-A1-migration rows store the wire-api literal directly; pass through unchanged.
-    assert _provider_type_to_api("anthropic-messages") == "anthropic-messages"
-    assert _provider_type_to_api("openai-responses") == "openai-responses"
-    assert _provider_type_to_api("openai-completions") == "openai-completions"
-    # Legacy enum values still map via the old table.
-    assert _provider_type_to_api("openai_compat") == "openai-completions"
-    assert _provider_type_to_api("anthropic") == "anthropic"
 
 
 def test_build_cubepi_provider_anthropic_accepts_cache_policy() -> None:
