@@ -130,13 +130,20 @@ cubepi legacy path (A-finding 8).
 ## File Structure
 
 ### Created
-- `backend/cubebox/api/routes/v1/admin_llm.py` — `GET /admin/llm/presets`,
+- `backend/cubebox/api/routes/v1/admin_llm.py` — **catalog only**:
+  `GET /admin/llm/presets` (per Amendment A2 — catalog is LLM-scoped, not
+  a provider row).
+
+### Extended (existing routers, per Amendment A2)
+- `backend/cubebox/api/routes/v1/admin_providers.py` — the provider-row
+  endpoints go here, NOT in `admin_llm.py`:
   `POST /admin/providers/liveness` + `/{id}/liveness`,
   `POST /admin/providers/test` (pre-save, one model),
   `POST /admin/providers/{id}/models/{mid}/test`,
-  `POST /admin/providers/{id}/test` (all enabled models).
-  (Or extend an existing admin router — see Task 4 for placement
-  decision.)
+  `POST /admin/providers/{id}/test` (all enabled models), and the
+  `GET /admin/providers/{id}` extension (Task 5).
+
+### Created (cont.)
 - `backend/cubebox/services/provider_probe.py` — `ProbeResult`,
   `ProbeStep`, the two-phase runner: `run_liveness(...)` (phase A,
   provider grain) + `run_model_probe(...)` (phase B, per model) + per-step
@@ -749,8 +756,8 @@ git commit -m "feat(admin): GET /admin/llm/presets — serve cubepi catalog"
 > re-derives readiness — it reads this field.
 
 **Files:**
-- Locate or extend: backend/cubebox/api/routes/v1/admin_llm.py (or an
-  existing admin-providers router).
+- Extend: `backend/cubebox/api/routes/v1/admin_providers.py` (provider-row
+  endpoint, per Amendment A2 — NOT `admin_llm.py`).
 - Modify: `backend/tests/test_admin_llm_endpoints.py`
 
 - [ ] **Step 1: Locate the existing provider admin endpoint**
@@ -772,10 +779,15 @@ Create `backend/cubebox/llm/readiness.py` with a pure function that maps
 `(provider.last_liveness_status, model.last_test_status,
 capability_changed_since_test)` → the §4.1 readiness enum
 (`ready` / `degraded` / `provider_error` / `model_error` / `unavailable`
-/ `stale`). Approximate `capability_changed_since_test` as
-`provider.updated_at > model.last_test_at`. This helper is the single
-source of truth reused by Task 5's serializer and any later picker
-payloads. Unit-test each branch.
+/ `stale`). `capability_changed_since_test` must reflect *capability*
+edits specifically (spec §4.1 says "capability edited since last test"),
+not any provider edit — so base it on a hash/snapshot of
+`(capability, model_capability_overrides)` rather than the generic
+`provider.updated_at`. Persist a `capability_fingerprint` on the model
+row at probe time (or store the hash in `last_test_summary`) and compare;
+do NOT use `updated_at > last_test_at` (it flips stale on unrelated edits
+like a rename). This helper is the single source of truth reused by Task
+5's serializer and any later picker payloads. Unit-test each branch.
 
 - [ ] **Step 2: Append failing test**
 
@@ -827,7 +839,7 @@ uv run pytest tests/test_admin_llm_endpoints.py -v 2>&1 | tail -5
 - [ ] **Step 6: Commit**
 
 ```bash
-git add backend/cubebox/api/routes/v1/admin_llm.py \
+git add backend/cubebox/api/routes/v1/admin_providers.py \
         backend/cubebox/api/schemas/provider.py \
         backend/cubebox/llm/readiness.py \
         backend/tests/test_admin_llm_endpoints.py
@@ -891,10 +903,16 @@ class ProbeStep(BaseModel):
 
 
 class ProbeResult(BaseModel):
-    overall: Literal["pass", "fail", "warn"]
+    # "unavailable" is the model-not-found short-circuit (Task 9); the
+    # aggregator only ever returns pass/fail/warn.
+    overall: Literal["pass", "fail", "warn", "unavailable"]
     blocking_failed: bool
     steps: list[ProbeStep] = Field(default_factory=list)
 ```
+
+Persisted-column mapping (model probe): `overall` maps to
+`models.last_test_status` as `pass → "ok"`, `warn → "warn"`,
+`fail → "fail"`, `unavailable → "unavailable"`.
 
 - [ ] **Step 2: Write the failing test (overall=pass with all-pass steps)**
 
@@ -1105,13 +1123,15 @@ from cubepi.providers.capability import CapabilityDescriptor
 
 
 async def _drain_stream(provider: Any, model_id: str, *, thinking: str = "off",
+                        prompt: str = "Reply with OK.", max_output: int = 64,
                         max_seconds: float = 15.0) -> tuple[list, float]:
     """Run a minimal stream, draining events. Return (events, elapsed_seconds)."""
     start = time.perf_counter()
     stream = await asyncio.wait_for(
         provider.stream(
-            model=Model(id=model_id, provider="probe", context_window=8192, max_tokens=64),
-            messages=[UserMessage(content=[TextContent(text="Reply with OK.")])],
+            model=Model(id=model_id, provider="probe", context_window=8192,
+                        max_tokens=max_output),
+            messages=[UserMessage(content=[TextContent(text=prompt)])],
             options=StreamOptions(thinking=thinking),
         ),
         timeout=max_seconds,
@@ -1125,8 +1145,13 @@ async def _drain_stream(provider: Any, model_id: str, *, thinking: str = "off",
 
 
 async def probe_liveness(provider: Any, *, model_id: str) -> ProbeStep:
+    # Spec §4.4 step 1: minimal completion — max_tokens=1, prompt ".",
+    # 5s timeout. Just proves base_url + key + network reach the endpoint.
     try:
-        events, elapsed = await _drain_stream(provider, model_id, thinking="off", max_seconds=5.0)
+        events, elapsed = await _drain_stream(
+            provider, model_id, thinking="off", prompt=".", max_output=1,
+            max_seconds=5.0,
+        )
     except (asyncio.TimeoutError, Exception) as exc:
         return ProbeStep(
             name="liveness",
@@ -1279,23 +1304,42 @@ async def run_model_probe(
     model_id: str,
     capability: CapabilityDescriptor,
 ) -> ProbeResult:
-    """Phase B — model grain. Assumes phase A already passed. Runs the four
-    capability steps in parallel and aggregates. Caller persists the result
-    to that models row's last_test_*."""
+    """Phase B — model grain. Assumes phase A already passed. Runs the
+    capability steps and aggregates. Caller persists the result to that
+    models row's last_test_*."""
     provider = provider_factory()
-    reasoning, temperature, tools, streaming = await asyncio.gather(
-        probe_reasoning_toggle(provider, model_id=model_id, capability=capability),
+
+    # model-not-found is a valid Phase B outcome (spec §4.1/§4.4): a probe
+    # against a model the vendor doesn't offer must yield "unavailable".
+    # The per-step helpers raise/return on model_not_found; detect it here.
+    reasoning = await probe_reasoning_toggle(provider, model_id=model_id, capability=capability)
+    if _is_model_not_found(reasoning):
+        return ProbeResult(overall="unavailable", blocking_failed=True, steps=[reasoning])
+
+    # reasoning already drained a stream → reuse its captured events for the
+    # streaming check instead of passing an empty list (spec §4.4 step 5).
+    temperature, tools = await asyncio.gather(
         probe_temperature(provider, model_id=model_id, capability=capability),
         probe_tools(provider, model_id=model_id, capability=capability),
-        probe_streaming(events=[]),  # see Task 8 for the streaming variant
         return_exceptions=False,
     )
+    streaming = probe_streaming(events=reasoning_events_of(reasoning))
     steps = [reasoning, temperature, tools, streaming]
     overall, blocked = _aggregate_overall(steps)
-    # Map overall → models.last_test_status. "unavailable" is set only by
-    # runtime writeback (§4.4a / Task 10b), never by a clean probe run.
     return ProbeResult(overall=overall, blocking_failed=blocked, steps=steps)
 ```
+
+> **Status mapping (spec §4.1 vs §4.4).** Probe steps speak
+> `pass/fail/warn/skip`; the persisted columns speak a different
+> vocabulary. Define the translation explicitly and persist via it:
+> - liveness `pass → providers.last_liveness_status = "ok"`; `fail → "fail"`.
+> - model probe `overall`: `pass → "ok"`, `warn → "warn"`, `fail → "fail"`;
+>   the `unavailable` short-circuit above writes `"unavailable"` directly.
+>
+> `probe_reasoning_toggle` (Task 7) must distinguish a model_not_found
+> error from a generic 4xx so `_is_model_not_found` can fire; capturing
+> the drained events on the returned `ProbeStep` (e.g. a private field or
+> a small wrapper) lets `reasoning_events_of` feed the streaming check.
 
 - [ ] **Step 3: Run all probe tests; expect green (prior + 2 new)**
 
@@ -1312,7 +1356,7 @@ git commit -m "feat(probe): two-phase orchestrators — run_liveness + run_model
 > **rev-3 endpoints (spec §4.3):**
 > - `POST /admin/providers/liveness` + `/{id}/liveness` — phase A only.
 > - `POST /admin/providers/test` — pre-save: phase A then phase B against
->   `probe_model_id`; returns one composed `ProbeResult` whose `steps` are
+>   `model_id`; returns one composed `ProbeResult` whose `steps` are
 >   `[liveness, *model_steps]` (so the wizard sees liveness first). No DB
 >   write.
 > - `POST /admin/providers/{id}/models/{mid}/test` — saved single model:
@@ -1322,7 +1366,8 @@ git commit -m "feat(probe): two-phase orchestrators — run_liveness + run_model
 >   then phase B per model; returns `ProbeResult[]`; persists each.
 
 **Files:**
-- Modify: `backend/cubebox/api/routes/v1/admin_llm.py`
+- Extend: `backend/cubebox/api/routes/v1/admin_providers.py` (per
+  Amendment A2 — provider-row endpoints, NOT `admin_llm.py`).
 - Modify: `backend/tests/test_admin_llm_endpoints.py`
 
 - [ ] **Step 1: Define the request body shape**
@@ -1336,8 +1381,9 @@ class ProviderTestRequest(BaseModel):
     api_key: str | None = None
     capability: dict
     model_capability_overrides: dict[str, dict] = {}
-    # Pick a default model from default_models; the caller passes one explicit:
-    probe_model_id: str
+    # The model to probe (spec §4.3 names this `model_id`). Caller passes
+    # one explicit pick from the preset's default_models.
+    model_id: str
 ```
 
 - [ ] **Step 2: Append failing test**
@@ -1365,7 +1411,7 @@ async def test_probe_dryrun_returns_step_summary(admin_client, monkeypatch):
             "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
             "api_key": "sk-test",
             "capability": {"reasoning_off_payload": {"extra_body": {"enable_thinking": False}}},
-            "probe_model_id": "qwen3.6-flash",
+            "model_id": "qwen3.6-flash",
         },
     )
     assert resp.status_code == 200
@@ -1377,12 +1423,19 @@ async def test_probe_dryrun_returns_step_summary(admin_client, monkeypatch):
 
 - [ ] **Step 3: Implement the pre-save `/test` + `/liveness` endpoints**
 
-`/liveness` (and `/{id}/liveness`) build a transient cubepi.Provider and
-call `run_liveness` only. The pre-save `/test` builds a transient
-provider, calls `run_liveness`; if it fails, returns a `ProbeResult`
-with `steps=[liveness]`, `blocking_failed=True`; if it passes, calls
-`run_model_probe(probe_model_id)` and returns a composed `ProbeResult`
-with `steps=[liveness, *model_result.steps]`. No DB write in either.
+Pre-save `POST /providers/liveness` builds a transient cubepi.Provider
+from the request body, calls `run_liveness` only, returns the step. **No
+DB write** (dry-run — there's no row yet).
+
+Saved `POST /providers/{id}/liveness` looks up the row, rebuilds its
+provider, calls `run_liveness`, and **persists** `providers.last_liveness_*`
+(`ok`/`fail` per the mapping). This is the re-check path (spec §4.3).
+
+The pre-save `/test` builds a transient provider, calls `run_liveness`;
+if it fails, returns a `ProbeResult` with `steps=[liveness]`,
+`blocking_failed=True`; if it passes, calls `run_model_probe(model_id)`
+and returns a composed `ProbeResult` with
+`steps=[liveness, *model_result.steps]`. **No DB write** (dry-run).
 
 - [ ] **Step 4: Implement the saved-provider test endpoints + persistence**
 
@@ -1513,15 +1566,31 @@ session + org_id + yaml config.
 
 - [ ] **Step 4: Implement `resolve_task_model`**
 
+> **Amendment A4:** `resolve_task_model` must be a **drop-in** replacement
+> for `resolve_default_provider_and_config` — it returns the same 3-tuple
+> `(provider_name, model_id, provider_config)` and loads/merges DB provider
+> configs the SAME way (`_load_db_provider_configs` + `_build_merged_config`),
+> then resolves the task ref against the merged config. Returning a bare
+> `(provider_name, model_id)` and re-looking-up the config via
+> `factory.llm_config.providers[...]` misses DB-overridden providers.
+
 ```python
-async def resolve_task_model(factory: "LLMFactory", task: str) -> tuple[str, str]:
-    """Resolve which provider+model to use for ``task``.
+async def resolve_task_model(
+    factory: "LLMFactory", task: str
+) -> tuple[str, str, ProviderConfig]:
+    """Resolve (provider_name, model_id, provider_config) for ``task``.
 
     Walks: OrgSettings.task_models[task] → config.llm.<task>_model
-    (e.g. ``title_model``) → ``config.llm.default_model``.
-
-    Returns (provider_name, model_id) parsed from the picked ref.
+    (e.g. ``title_model``) → default. The provider_config is taken from
+    the SAME merged config that resolve_default_provider_and_config builds,
+    so DB-overridden providers resolve correctly.
     """
+    merged = await factory._build_merged_config()  # DB + yaml, same as default path
+
+    def _resolve_ref(model_ref: str) -> tuple[str, str, ProviderConfig]:
+        provider_name, model_id = factory._parse_model_ref(model_ref)
+        return provider_name, model_id, merged.providers[provider_name]
+
     # 1. OrgSettings
     if factory._session and factory._org_id:
         from cubebox.models.org_settings import OrgSettings as DBS, TASK_MODELS_KEY
@@ -1532,17 +1601,20 @@ async def resolve_task_model(factory: "LLMFactory", task: str) -> tuple[str, str
         result = await factory._session.execute(stmt)
         row = result.scalar_one_or_none()
         if row and (model_ref := (row.value or {}).get(task)):
-            return factory._parse_model_ref(model_ref)
+            return _resolve_ref(model_ref)
 
     # 2. yaml fallback (e.g. config.llm.title_model)
-    field = f"{task}_model"
-    yaml_ref = getattr(factory.llm_config, field, None)
+    yaml_ref = getattr(factory.llm_config, f"{task}_model", None)
     if yaml_ref:
-        return factory._parse_model_ref(yaml_ref)
+        return _resolve_ref(yaml_ref)
 
-    # 3. default
-    return await factory.get_default_model()
+    # 3. default — already returns the merged 3-tuple
+    return await factory.resolve_default_provider_and_config()
 ```
+
+(Confirm the real internal helper names — `_build_merged_config`,
+`resolve_default_provider_and_config` — against `factory.py` when
+implementing; match whatever the default path actually calls.)
 
 - [ ] **Step 5: Run tests; expect 4 passed**
 
@@ -1591,14 +1663,12 @@ Open `backend/cubebox/services/conversation_title.py`. Find the call:
 provider_name, model_id, provider_config = await factory.resolve_default_provider_and_config()
 ```
 
-Replace with:
+Replace with (drop-in — same 3-tuple, no separate config lookup):
 
 ```python
 from cubebox.services.task_model_resolver import resolve_task_model
 
-provider_name, model_id = await resolve_task_model(factory, "title")
-# Then load the provider_config the same way resolve_default_provider_and_config did.
-provider_config = factory.llm_config.providers[provider_name]
+provider_name, model_id, provider_config = await resolve_task_model(factory, "title")
 ```
 
 Also pass `StreamOptions(thinking="off")` to the cubepi call —
