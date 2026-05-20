@@ -2,18 +2,21 @@
 
 CITATION_PROMPT = """## Citation Rules
 
-When your response uses information from tool results that contain citation markers like 【N-M】, you MUST follow these rules:
+Your tool results (web_search, web_fetch, subagents, …) contain citation markers like 【N-M】 (N = source number, M = chunk index). These markers are how the user's interface links each statement you make back to its source, so they only work if they appear in the answer the user actually reads.
 
-1. **Citation syntax**: Use 【N-M】 format only. N is the source number, M is the chunk index. Example: 【3-0】, 【3-1】. Do NOT use other formats like [1], (source 1), markdown links, or footnotes.
+**The core rule**: every fact in your final answer that came from a tool result MUST carry its 【N-M】 marker inline, immediately after that fact — even after you rephrase it, summarize it, translate it, or drop it into a table. Summarizing tool data is exactly when you cite; it is not a reason to stop citing.
 
-2. **Inline placement**: Place citations immediately after the fact they support. Example: "The revenue grew 15% in Q3 【2-0】 while costs decreased 【2-1】【3-0】."
+1. **Markers go in the visible answer, not only in your private thinking.** If your reasoning noted "source 【11-4】 shows a high of 24°", the answer must read "high of 24°【11-4】". A fact in the answer without its marker is a rule violation.
 
-3. **Preserve original IDs**: Never renumber citations. If the tool result says 【5-2】, use 【5-2】 exactly. Renumbering breaks frontend reference linking.
+2. **Syntax**: Use 【N-M】 exactly as given. N is the source number, M is the chunk index (e.g. 【3-0】, 【3-1】). Never invent, renumber, or convert to other formats like [1], (source 1), markdown links, or footnotes. Renumbering breaks frontend reference linking.
 
-4. **Multiple sources**: When a fact is supported by multiple chunks, list them consecutively: 【1-0】【2-1】【3-0】
+3. **Placement**: Immediately after the supported fact. Multiple sources go consecutively, e.g. "Revenue grew 15%【2-0】 while costs fell【2-1】【3-0】". Inside a table, put the marker in the cell with the value.
 
-5. **No citation needed**: For your own reasoning, general knowledge, or conversation context, do NOT add citations. Only cite tool results that contain 【N-M】 markers.
+4. **When NOT to cite**: Only your own analysis, general knowledge, or conversational filler. A fact you copied from a tool result is never "your own analysis", even after you reword it.
 
-6. **No separate references section**: Do NOT add a "References" or "Sources" list at the end. Citations are inline only.
+5. **No references section**: Citations are inline only. Never append a "Sources" / "信息来源" / "References" list at the end.
 
-7. **Subagent citations**: When a subagent's output contains 【N-M】 citation markers, copy them through verbatim into your response. The system has already registered the citation sources — you do not need the original data to use them. Treat subagent citation markers the same as those from your own tool results."""  # noqa: E501
+6. **Subagent citations**: When a subagent's output contains 【N-M】 markers, copy them through verbatim into your response. The system has already registered the citation sources — you do not need the original data to use them. Treat subagent citation markers the same as those from your own tool results.
+
+Example of a correct final answer:
+Tomorrow Beijing is cloudy【11-4】, with a high of 24° and a low of 16°【11-0】【11-1】, and no precipitation all day【11-2】."""  # noqa: E501
