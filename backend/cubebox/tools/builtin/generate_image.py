@@ -97,14 +97,18 @@ def make_generate_image_tool(
             except Exception:  # noqa: BLE001
                 pass
 
-        # Read edit source images from the sandbox.
+        # Read edit source images from the sandbox. A missing/unreadable source must
+        # fail fast — silently dropping it would turn an edit into a fresh generation
+        # and then overwrite edit_source_paths[0] with unrelated content.
         input_images: list[ImageContent] = []
         for path in args.edit_source_paths:
             result = await sandbox.execute(f"base64 -w0 {shlex.quote(path)}")
-            if result.exit_code in (None, 0) and result.output.strip():
-                input_images.append(
-                    ImageContent(source=result.output.strip(), media_type="image/png")
+            if result.exit_code not in (None, 0) or not result.output.strip():
+                return AgentToolResult(
+                    content=[TextContent(text=f"Could not read edit source image: {path}")],
+                    is_error=True,
                 )
+            input_images.append(ImageContent(source=result.output.strip(), media_type="image/png"))
 
         # Build per-call model with requested size/quality.
         model = images_model.model_copy(update={"size": args.size, "quality": args.quality})

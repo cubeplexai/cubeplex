@@ -169,7 +169,8 @@ def test_resolve_openai_image_credentials_returns_none_none_when_no_providers() 
     assert base_url is None
 
 
-def test_resolve_openai_image_credentials_returns_none_key_when_provider_has_no_key() -> None:
+def test_resolve_openai_image_credentials_skips_keyless_openai() -> None:
+    """A keyless OpenAI row is not usable → (None, None), not (None, base_url)."""
     factory = _mk_factory(
         {
             "openai": ProviderConfig(
@@ -181,4 +182,25 @@ def test_resolve_openai_image_credentials_returns_none_key_when_provider_has_no_
     )
     key, base_url = factory.resolve_openai_image_credentials()
     assert key is None
+    assert base_url is None
+
+
+def test_resolve_openai_image_credentials_keyless_openai_does_not_shadow_valid() -> None:
+    """A stale keyless OpenAI row must not shadow a later valid OpenAI row."""
+    factory = _mk_factory(
+        {
+            "openai-stale": ProviderConfig(
+                api="openai-completions",
+                base_url="https://api.openai.com/v1",
+                api_key=None,
+            ),
+            "openai-valid": ProviderConfig(
+                api="openai-completions",
+                base_url="https://api.openai.com/v1",
+                api_key="sk-valid",
+            ),
+        }
+    )
+    key, base_url = factory.resolve_openai_image_credentials()
+    assert key == "sk-valid"
     assert base_url == "https://api.openai.com/v1"
