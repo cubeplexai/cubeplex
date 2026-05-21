@@ -27,7 +27,7 @@
 - **Modify** `backend/cubebox/services/task_model_resolver.py` — variable rename (provider_name → slug).
 - **Modify** `backend/cubebox/services/provider_service.py` — also `_validate_model_ref` (settings-save write path) → slug + `get_by_slug`.
 - **Modify** `backend/cubebox/llm/runtime_writeback.py` — resolve provider by slug; rename `provider_name` → `provider_slug` through the public API.
-- **Modify** `backend/cubebox/services/conversation_title.py` + `backend/cubebox/agent/run_manager.py` — writeback call sites pass `provider_slug`.
+- **Modify** `backend/cubebox/services/conversation_title.py` + `backend/cubebox/streams/run_manager.py` — writeback call sites pass `provider_slug`.
 - **Modify** `frontend/packages/core/src/types/provider.ts` — `Provider.slug`.
 - **Modify** `frontend/packages/web/hooks/useAllModels.ts` — `ref = ${slug}/${modelId}` + `providerSlug`.
 - **Modify** `frontend/packages/web/components/admin/models/ProviderConfigForm.tsx` — editable slug field (create) / read-only (edit).
@@ -164,11 +164,28 @@ from sqlalchemy import Column, Index, UniqueConstraint  # add Index
 Run: `cd backend && uv run python -c "from cubebox.models.provider import Provider; print('slug' in Provider.model_fields)"`
 Expected: `True`
 
-- [ ] **Step 3: Commit**
+- [ ] **Step 3: Update existing direct `Provider(...)` test fixtures**
+
+`slug` is now a required field, so every test that constructs `Provider(...)`
+directly (not via the API/service) must pass `slug=`. Find them and add a
+deterministic slug (e.g. `slug="acme"`, or `slug=slugify(name)`):
+
+Run: `cd backend && grep -rln "Provider(" tests/` — known offenders include
+`tests/e2e/test_provider_vault.py`, `tests/e2e/test_provider_runtime_writeback_e2e.py`,
+`tests/e2e/test_title_model_routing_e2e.py`, `tests/unit/test_seed_idempotent.py`,
+`tests/unit/test_provider_service_invariants.py`. Add `slug=` to each `Provider(...)`
+call. (Skip files where `Provider(` is an unrelated symbol — verify it's the model.)
+
+- [ ] **Step 4: Verify fixtures construct**
+
+Run: `cd backend && set -a && source ../.worktree.env && set +a && uv run pytest tests/unit/test_provider_service_invariants.py tests/e2e/test_provider_vault.py -q`
+Expected: PASS (no "field required: slug" construction errors).
+
+- [ ] **Step 5: Commit**
 
 ```bash
-git add backend/cubebox/models/provider.py
-git commit -m "feat(provider): add slug column to Provider model"
+git add backend/cubebox/models/provider.py backend/tests/
+git commit -m "feat(provider): add slug column to Provider model; update fixtures"
 ```
 
 ---
@@ -343,10 +360,29 @@ shared docker Postgres:
 Run: `source backend/../.worktree.env 2>/dev/null; docker exec -e PGPASSWORD=postgres infra-postgresql psql -h localhost -U postgres -d "$CUBEBOX_DATABASE__NAME" -c "SELECT name, slug, org_id FROM providers ORDER BY name;"`
 Expected: every row has a non-null slug; `DeepSeek (Anthropic shape)` → `deepseek-anthropic-shape`; `deepseek` → `deepseek`.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 5: Migration data test (fail-first risk coverage)**
+
+Mirror the harness in `backend/tests/e2e/test_migration.py` (it stamps a prior
+revision, seeds rows, runs `alembic upgrade`, asserts). Add a test that seeds:
+a system provider named `DeepSeek` and an org provider also named `DeepSeek` in
+some org; plus that org's `OrgSettings` rows `default_model={"model_ref":
+"DeepSeek/m-1"}`, `fallback_models={"models": ["DeepSeek/m-2"]}`,
+`task_models={"title": "DeepSeek/m-1"}`. After running this revision's upgrade,
+assert: the system provider's slug is `deepseek`, the org provider's slug is
+`deepseek-2` (deduped against the system slug), and the three OrgSettings refs
+were rewritten to the org provider's slug (`deepseek-2/m-1`, etc.) since the
+name `DeepSeek` maps to the org provider within that org's name→slug map. If the
+repo's migration harness can't easily stamp+seed+upgrade, assert the same end
+state by extracting the `_assign` and ref-rewrite logic into module-level pure
+functions in the migration and unit-testing those directly.
+
+Run: `cd backend && set -a && source ../.worktree.env && set +a && uv run pytest tests/e2e/test_migration.py -k slug -q`
+Expected: PASS.
+
+- [ ] **Step 6: Commit**
 
 ```bash
-git add backend/alembic/versions/
+git add backend/alembic/versions/ backend/tests/e2e/test_migration.py
 git commit -m "feat(provider): migration — add slug, backfill, rewrite OrgSettings refs name->slug"
 ```
 
@@ -477,13 +513,14 @@ class InvalidProviderSlugError(Exception):
             if await self._providers.get_by_slug(explicit) is not None:
                 raise ProviderSlugConflictError(f"Provider slug '{explicit}' already exists")
             return explicit
-        base = slugify(name)[:60]  # leave room for a "-NN" suffix within the 64-char column
-        candidate = base
-        n = 2
-        while await self._providers.get_by_slug(candidate) is not None:
-            candidate = f"{base}-{n}"
+        base = slugify(name)
+        n = 1
+        while True:
+            suffix = "" if n == 1 else f"-{n}"
+            candidate = base[: 64 - len(suffix)] + suffix  # always fits the 64-char column
+            if await self._providers.get_by_slug(candidate) is None:
+                return candidate
             n += 1
-        return candidate
 ```
 
 In `create_provider`, after the name-conflict check, add:
@@ -574,7 +611,7 @@ any one leaves a half-cutover where refs silently fail.
 - Modify: `backend/cubebox/services/task_model_resolver.py:30-34` (var rename)
 - Modify: `backend/cubebox/services/provider_service.py:556-562` — `_validate_model_ref` uses slug + `get_by_slug` (write path: saving `default_model`/`fallback_models`/`task_models`)
 - Modify: `backend/cubebox/llm/runtime_writeback.py` — resolve provider by slug; rename `provider_name` → `provider_slug` through the public API
-- Modify: `backend/cubebox/services/conversation_title.py` + `backend/cubebox/agent/run_manager.py` — writeback call sites pass `provider_slug=...`
+- Modify: `backend/cubebox/services/conversation_title.py` + `backend/cubebox/streams/run_manager.py` — writeback call sites pass `provider_slug=...`
 - Test: `backend/tests/` (factory resolver test — add to the existing factory test module if present, else create `backend/tests/unit/test_factory_slug_resolve.py`)
 
 - [ ] **Step 1: Write a failing resolver test**
@@ -593,7 +630,18 @@ def test_parse_model_ref_returns_slug_and_model() -> None:
     assert model_id == "deepseek-v4-pro"
 ```
 
-(The full DB-backed "ref resolves to provider by slug" path is covered by the e2e in Task 8; this unit test pins the parse contract.)
+- [ ] **Step 1b: Add a DB-backed resolution test (name ≠ slug)**
+
+The parse test alone passes before the keying change, so add a DB-backed test
+that *fails first* against the current name-keyed resolver. Mirror
+`backend/tests/unit/test_llm_factory_cubepi.py` / `tests/unit/test_task_model_resolver.py`
+(they build an `LLMFactory` over a session with seeded providers). Seed a provider
+with **name `Routed Provider`, slug `routed-provider`** and an enabled model `m-1`,
+set the org `default_model` to `routed-provider/m-1`, and assert
+`await factory.resolve_default_provider_and_config()` returns that provider/model.
+Add a second assertion that a `default_model` of `Routed Provider/m-1` (the old
+name-based ref) no longer resolves to it. This test FAILS before Step 3-4 (the
+merged map is still name-keyed) and PASSES after.
 
 - [ ] **Step 2: Run to verify it passes already (parse is unchanged) — then make the keying change**
 
@@ -706,7 +754,7 @@ name:
 - Update the external call sites that pass `provider_name=...` (the value is
   already the resolver's slug) to `provider_slug=...`:
   - `backend/cubebox/services/conversation_title.py:170,173`
-  - `backend/cubebox/agent/run_manager.py` (the `schedule_runtime_status_writeback`/`_schedule_writeback` call — grep for `provider_name=` in that file).
+  - `backend/cubebox/streams/run_manager.py` (the `schedule_runtime_status_writeback`/`_schedule_writeback` call — grep for `provider_name=` in that file).
   Rename the local variable feeding it to `provider_slug` where it improves clarity (the value comes from the resolver's first return).
 
 - [ ] **Step 6: Run tests**
@@ -717,7 +765,7 @@ Expected: PASS + mypy clean. (If pre-existing factory tests reference name-based
 - [ ] **Step 7: Commit**
 
 ```bash
-git add backend/cubebox/llm/factory.py backend/cubebox/services/task_model_resolver.py backend/cubebox/services/provider_service.py backend/cubebox/llm/runtime_writeback.py backend/cubebox/services/conversation_title.py backend/cubebox/agent/run_manager.py backend/tests/
+git add backend/cubebox/llm/factory.py backend/cubebox/services/task_model_resolver.py backend/cubebox/services/provider_service.py backend/cubebox/llm/runtime_writeback.py backend/cubebox/services/conversation_title.py backend/cubebox/streams/run_manager.py backend/tests/
 git commit -m "feat(provider): resolve & validate model refs by provider slug everywhere"
 ```
 
@@ -906,4 +954,7 @@ PR base = `main` (this is a fresh feature off main, not a stacked slice). Tag `@
 - **System-bucket uniqueness:** enforced via two partial unique indexes (org bucket + `org_id IS NULL` bucket), mirroring `models/credential.py` — a single composite constraint would leave NULL org_ids unconstrained (T2/T3).
 - **Slug length:** base capped at 60 chars before `-NN` suffixing in both migration and create path, keeping within the 64-char column (T3/T4).
 - **Explicit slug:** validated against `^[a-z0-9]+(-[a-z0-9]+)*$` (422) and uniqueness (409, object detail shape) on create (T4).
-- **Risk:** if any pre-existing factory/resolver test fixtures hard-code name-keyed merged config with multi-word names, T6 step 6 calls out updating them.
+- **Existing fixtures (codex r3):** `slug` is required, so direct `Provider(...)` constructors in tests need `slug=` — T2 step 3 enumerates the known files + a grep.
+- **Test coverage (codex r3):** migration data test (T3 step 5, mirrors `test_migration.py`) and a DB-backed name≠slug resolution test that fails-first (T6 step 1b).
+- **Correct paths (codex r3):** `run_manager.py` lives at `backend/cubebox/streams/run_manager.py` (not `agent/`); writeback call sites ≈ lines 1067/1153/1162.
+- **Risk:** if any pre-existing factory/resolver test fixtures hard-code name-keyed merged config with multi-word names, T6 calls out updating them.
