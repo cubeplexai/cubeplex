@@ -8,7 +8,7 @@ describe('wizardMachine', () => {
       step: 1,
       preset: null,
       providerId: null,
-      modelDbIds: [],
+      models: [],
     })
   })
 
@@ -24,12 +24,18 @@ describe('wizardMachine', () => {
     expect(s.providerId).toBe('prv_1')
   })
 
-  it('modelsCreated stores the model db ids', () => {
+  it('modelsCreated stores the created models with labels', () => {
     const s = wizardReducer(initialWizardState, {
       type: 'modelsCreated',
-      modelDbIds: ['mdl_1', 'mdl_2'],
+      models: [
+        { id: 'mdl_1', model_id: 'm-a', display_name: 'Model A' },
+        { id: 'mdl_2', model_id: 'm-b', display_name: 'Model B' },
+      ],
     })
-    expect(s.modelDbIds).toEqual(['mdl_1', 'mdl_2'])
+    expect(s.models).toEqual([
+      { id: 'mdl_1', model_id: 'm-a', display_name: 'Model A' },
+      { id: 'mdl_2', model_id: 'm-b', display_name: 'Model B' },
+    ])
   })
 
   it('next does not advance from step 1 without a preset', () => {
@@ -63,7 +69,10 @@ describe('wizardMachine', () => {
     expect(canAdvance(atStep3)).toBe(false)
     expect(wizardReducer(atStep3, { type: 'next' }).step).toBe(3)
 
-    const withModels = wizardReducer(atStep3, { type: 'modelsCreated', modelDbIds: ['mdl_1'] })
+    const withModels = wizardReducer(atStep3, {
+      type: 'modelsCreated',
+      models: [{ id: 'mdl_1', model_id: 'm-a', display_name: 'Model A' }],
+    })
     expect(canAdvance(withModels)).toBe(true)
     expect(wizardReducer(withModels, { type: 'next' }).step).toBe(4)
   })

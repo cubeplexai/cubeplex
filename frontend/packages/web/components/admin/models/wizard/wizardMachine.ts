@@ -2,17 +2,26 @@ import type { ProviderPreset } from '@cubebox/core'
 
 export type WizardStep = 1 | 2 | 3 | 4
 
+export interface CreatedModel {
+  /** Database id (mdl_…) */
+  id: string
+  /** Vendor model id */
+  model_id: string
+  /** Human-friendly label */
+  display_name: string
+}
+
 export interface WizardState {
   step: WizardStep
   preset: ProviderPreset | null
   providerId: string | null
-  modelDbIds: string[]
+  models: CreatedModel[]
 }
 
 export type WizardAction =
   | { type: 'pickPreset'; preset: ProviderPreset }
   | { type: 'providerCreated'; providerId: string }
-  | { type: 'modelsCreated'; modelDbIds: string[] }
+  | { type: 'modelsCreated'; models: CreatedModel[] }
   | { type: 'next' }
   | { type: 'back' }
 
@@ -20,7 +29,7 @@ export const initialWizardState: WizardState = {
   step: 1,
   preset: null,
   providerId: null,
-  modelDbIds: [],
+  models: [],
 }
 
 // Whether `next` may advance from the given state. Step 1 needs a preset,
@@ -32,7 +41,7 @@ export function canAdvance(state: WizardState): boolean {
     case 2:
       return state.providerId !== null
     case 3:
-      return state.modelDbIds.length > 0
+      return state.models.length > 0
     case 4:
       return false
   }
@@ -45,7 +54,7 @@ export function wizardReducer(state: WizardState, action: WizardAction): WizardS
     case 'providerCreated':
       return { ...state, providerId: action.providerId }
     case 'modelsCreated':
-      return { ...state, modelDbIds: action.modelDbIds }
+      return { ...state, models: action.models }
     case 'next': {
       if (!canAdvance(state)) return state
       return { ...state, step: (state.step + 1) as WizardStep }

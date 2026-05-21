@@ -41,7 +41,13 @@ function streamEvents(events: TestStreamEvent[]): AsyncGenerator<TestStreamEvent
 function renderStep(onFinish = vi.fn()) {
   render(
     <NextIntlClientProvider locale="en" messages={en}>
-      <TestStep client={fakeClient} providerId="prv_1" modelDbIds={['mdl_1']} onFinish={onFinish} />
+      <TestStep
+        client={fakeClient}
+        providerId="prv_1"
+        modelDbIds={['mdl_1']}
+        modelLabels={{ mdl_1: 'GPT Test' }}
+        onFinish={onFinish}
+      />
     </NextIntlClientProvider>,
   )
   return { onFinish }
@@ -63,6 +69,12 @@ describe('TestStep', () => {
       ]),
     )
     vi.mocked(core.setModelEnabled).mockResolvedValue({ id: 'mdl_1' } as Model)
+  })
+
+  it('shows the model display name (not the db id) when the event omits one', async () => {
+    renderStep()
+    expect(await screen.findByText('GPT Test')).toBeInTheDocument()
+    expect(screen.queryByText('mdl_1')).not.toBeInTheDocument()
   })
 
   it('streams a green liveness row and a card per model, then enables Save', async () => {
