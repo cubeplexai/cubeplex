@@ -67,6 +67,12 @@ class OpenSandbox(Sandbox):
         if not url.startswith(("http://", "https://")):
             protocol = getattr(self._sandbox.connection_config, "protocol", "http")
             url = f"{protocol}://{url}"
+        # A trailing slash after the .../proxy/<port> path is REQUIRED: the Neko
+        # client uses relative asset/WS paths, so without it they resolve against
+        # .../proxy/ (dropping the port) and the proxy returns 401 — the client JS
+        # never loads and only the static login shell shows.
+        if not url.endswith("/"):
+            url += "/"
         return BrowserEndpoint(url=url, headers=dict(endpoint.headers or {}))
 
     async def close(self) -> None:
