@@ -1,7 +1,7 @@
 ---
 name: browser
 description: Use when the user wants to open or control a web browser — navigate to a site, click, fill forms, log in, search, scrape a page, or do any interactive web task that plain HTTP fetch can't (JS-rendered pages, logins, OAuth, CAPTCHA). The user watches this browser live and can take over for steps only a human can do.
-version: 1.0.0
+version: 1.0.1
 keywords:
   - browser
   - 浏览器
@@ -22,15 +22,21 @@ browser with the `agent-browser` CLI over CDP. Because the user sees exactly wha
 you do, this is also how logins / OAuth / CAPTCHAs get solved: you navigate, and
 when a step needs a human you ask the user to take over in the panel.
 
-## Always attach first — never launch your own browser
+## First: start the browser stack, then attach (never launch your own)
 
 ```bash
-agent-browser connect 9222
+/usr/local/bin/start-browser.sh   # idempotent: brings up the live browser if not running
+agent-browser connect 9222        # attach to that user-visible Chromium (CDP 127.0.0.1:9222)
 ```
 
-This attaches to the **user-visible** Chromium (CDP on `127.0.0.1:9222`). Do this
-once at the start. **Never** start a fresh/headless browser — the user would see
-nothing and the session wouldn't be theirs.
+`start-browser.sh` boots the headful Chromium the user watches; it's a no-op if
+already running, so always run it first (the browser may not be up yet if the
+user hasn't opened the panel). Then `agent-browser connect 9222` attaches to it.
+If `connect` fails with "connection refused", the stack isn't up yet — run
+`start-browser.sh` again and wait a few seconds. **Never** start a fresh/headless
+browser — the user would see nothing and the session wouldn't be theirs.
+
+Tell the user they can watch and take over in the cubebox **browser panel**.
 
 ## Learn the commands from the CLI (don't guess)
 
