@@ -17,6 +17,7 @@ from cubebox.config import config as settings
 from cubebox.credentials.encryption import EncryptionBackend
 from cubebox.models import Credential
 from cubebox.models.provider import Model, Provider
+from cubebox.utils.slug import slugify
 
 _PROVIDER_KEY_KIND = "provider_api_key"
 
@@ -128,6 +129,7 @@ async def seed_system_providers_from_config(
             provider = Provider(
                 org_id=None,
                 name=name,
+                slug=slugify(name),
                 provider_type=provider_type,
                 base_url=base_url,
                 auth_type="api_key",
@@ -140,6 +142,8 @@ async def seed_system_providers_from_config(
         else:
             provider.base_url = base_url
             provider.provider_type = provider_type
+            if not getattr(provider, "slug", None):
+                provider.slug = slugify(name)
             logger.debug("System provider '{}' already exists, updated", name)
 
         # Backfill cached capability snapshot from the cubepi preset catalog.
