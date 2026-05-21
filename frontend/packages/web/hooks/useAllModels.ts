@@ -7,12 +7,13 @@ import type { Model, Provider, Readiness } from '@cubebox/core'
 export interface ProviderModelOption {
   providerId: string
   providerName: string
+  providerSlug: string
   providerLogoUrl: string | null
   modelId: string
   displayName: string
   enabled: boolean
   readiness: Readiness
-  /** Reference stored in OrgLLMSettings: `${providerName}/${modelId}` */
+  /** Reference stored in OrgLLMSettings: `${providerSlug}/${modelId}` */
   ref: string
 }
 
@@ -68,12 +69,13 @@ export function useAllModels(): UseAllModelsResult {
         out.push({
           providerId: p.id,
           providerName: p.name,
+          providerSlug: p.slug,
           providerLogoUrl: p.logo_url,
           modelId: m.model_id,
           displayName: m.display_name || m.model_id,
           enabled: m.enabled,
           readiness: m.readiness ?? 'ready',
-          ref: `${p.name}/${m.model_id}`,
+          ref: `${p.slug}/${m.model_id}`,
         })
       }
     }
