@@ -294,6 +294,16 @@ default:
     min_compact_messages: 4
     fallback_context_window: 64000
 
+  # Image generation (generate_image tool, sandbox-gated).
+  # Set enabled: true and supply a real api_key in config.*.local.yaml or via env
+  # (CUBEBOX_IMAGE_GENERATION__API_KEY) to activate.  Never commit real keys here.
+  image_generation:
+    enabled: false
+    api: "openai-images"
+    model: "gpt-image-2"
+    api_key: null
+    base_url: null
+
   # cubepi agent tracing (OTLP/JSON spans on disk; default off; opt-in per env)
   # When enabled, each run writes <directory>/<YYYY-MM-DD>/<run_id>.jsonl.
   tracing:

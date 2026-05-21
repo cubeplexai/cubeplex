@@ -12,6 +12,7 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from cubepi.providers.base import ImageContent
 from cubepi.providers.images.types import AssistantImages, ImagesContext, ImagesModel
 
 from cubebox.sandbox.base import ExecuteResult
@@ -312,3 +313,119 @@ async def test_generate_image_unreadable_edit_source_fails(
     assert len(sandbox.uploaded) == 0
     error_text = " ".join(c.text for c in result.content if hasattr(c, "text"))
     assert "/work/missing.png" in error_text
+
+
+# ---------------------------------------------------------------------------
+# Test 5: size/quality flow through options to the provider
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_generate_image_size_quality_passed_via_options(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """size and quality args must land in the options dict passed to generate_images."""
+    captured_options: list[dict[str, Any] | None] = []
+
+    class _SpyProvider:
+        async def generate_images(
+            self,
+            model: ImagesModel,
+            context: ImagesContext,
+            options: dict[str, Any] | None = None,
+        ) -> AssistantImages:
+            captured_options.append(options)
+            return AssistantImages(
+                api=model.api,
+                provider=model.provider,
+                model=model.id,
+                output=[ImageContent(source=_FAKE_PNG_B64, media_type="image/png")],
+                stop_reason="stop",
+            )
+
+    sandbox = FakeSandbox()
+
+    async def fake_register(**kwargs: Any) -> SimpleNamespace:
+        return _make_artifact()
+
+    monkeypatch.setattr(
+        "cubebox.tools.builtin.generate_image.register_artifact_from_sandbox",
+        fake_register,
+    )
+    monkeypatch.setattr(
+        "cubebox.tools.builtin.generate_image.resize_to_long_edge",
+        lambda data, *, target, jpeg_quality: b"SMALL",
+    )
+
+    tool = make_generate_image_tool(
+        org_id="org-1",
+        workspace_id="ws-1",
+        conversation_id="conv-1",
+        sandbox=sandbox,  # type: ignore[arg-type]
+        images_provider=_SpyProvider(),
+        images_model=_FAKE_MODEL,
+    )
+
+    args = GenerateImageInput(prompt="landscape", size="1536x864", quality="high")
+    result = await tool.execute("tc-5", args, signal=None, on_update=None)
+
+    assert not result.is_error
+    assert len(captured_options) == 1
+    opts = captured_options[0]
+    assert opts is not None
+    assert opts.get("size") == "1536x864"
+    assert opts.get("quality") == "high"
+
+
+@pytest.mark.asyncio
+async def test_generate_image_no_options_when_size_quality_omitted(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When size/quality are omitted, options is None (not an empty dict)."""
+    captured_options: list[dict[str, Any] | None] = []
+
+    class _SpyProvider2:
+        async def generate_images(
+            self,
+            model: ImagesModel,
+            context: ImagesContext,
+            options: dict[str, Any] | None = None,
+        ) -> AssistantImages:
+            captured_options.append(options)
+            return AssistantImages(
+                api=model.api,
+                provider=model.provider,
+                model=model.id,
+                output=[ImageContent(source=_FAKE_PNG_B64, media_type="image/png")],
+                stop_reason="stop",
+            )
+
+    sandbox = FakeSandbox()
+
+    async def fake_register(**kwargs: Any) -> SimpleNamespace:
+        return _make_artifact()
+
+    monkeypatch.setattr(
+        "cubebox.tools.builtin.generate_image.register_artifact_from_sandbox",
+        fake_register,
+    )
+    monkeypatch.setattr(
+        "cubebox.tools.builtin.generate_image.resize_to_long_edge",
+        lambda data, *, target, jpeg_quality: b"SMALL",
+    )
+
+    tool = make_generate_image_tool(
+        org_id="org-1",
+        workspace_id="ws-1",
+        conversation_id="conv-1",
+        sandbox=sandbox,  # type: ignore[arg-type]
+        images_provider=_SpyProvider2(),
+        images_model=_FAKE_MODEL,
+    )
+
+    args = GenerateImageInput(prompt="simple")
+    result = await tool.execute("tc-6", args, signal=None, on_update=None)
+
+    assert not result.is_error
+    assert len(captured_options) == 1
+    assert captured_options[0] is None

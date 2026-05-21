@@ -159,59 +159,48 @@ async def generate_image_client(
 ) -> AsyncIterator[httpx.AsyncClient]:
     """Async client with FauxProvider + FauxImagesProvider + LocalSandbox.
 
-    Injection strategy (DI path, post-P1 fix):
-    1. Make resolve_openai_image_credentials() return a dummy key so the
-       run_manager includes the generate_image tool.
-    2. Monkeypatch OpenAIImagesProvider in run_manager's namespace so the
-       instantiated provider is a FauxImagesProvider — no network hit.
+    Injection strategy (config-driven path):
+    1. Monkeypatch get_image_generation_config() to return enabled=True + a dummy
+       api_key so run_manager decides to include the generate_image tool.
+    2. Monkeypatch cubebox.streams.run_manager.create_images_provider to return a
+       FauxImagesProvider instance — no network hit, real tool/sandbox/artifact path.
     """
     await _ensure_default_user_and_membership()
 
-    # --- 1. Inject fake image provider via DI seam ---
+    # --- 1. Enable image_generation config via monkeypatch ---
     from cubepi.providers.images.faux import FauxImagesProvider
+
+    from cubebox.llm.config import ImageGenerationConfig
 
     _faux_images_instance = FauxImagesProvider(_PNG_1x1_B64)
 
-    # Make resolve_openai_image_credentials() return a dummy key + url so the
-    # run_manager decides to include the generate_image tool.
-    from cubebox.llm.factory import LLMFactory
-
     monkeypatch.setattr(
-        LLMFactory,
-        "resolve_openai_image_credentials",
-        lambda self: ("sk-test-dummy", "https://api.openai.com/v1"),
+        "cubebox.llm.config.get_image_generation_config",
+        lambda: ImageGenerationConfig(
+            enabled=True,
+            api="openai-images",
+            model="gpt-image-2",
+            api_key="sk-test-dummy",
+        ),
     )
 
-    # Monkeypatch the OpenAIImagesProvider class on its source module so that any
-    # `from cubepi.providers.images.openai_images import OpenAIImagesProvider`
-    # inside _run_cubepi_path (lazy import) picks up the fake.
-    import cubepi.providers.images.openai_images as _oai_images_mod
-
-    class _FakeOpenAIImagesProvider:
-        def __init__(self, *, api_key: Any = None, base_url: Any = None) -> None:
-            pass
-
-        async def generate_images(
-            self,
-            model: Any,
-            context: Any,
-            options: Any = None,
-        ) -> Any:
-            return await _faux_images_instance.generate_images(model, context, options)
-
+    # --- 2. Monkeypatch create_images_provider in run_manager's namespace ---
+    # This intercepts the lazy import inside _run_cubepi_path so the faux
+    # provider is used without any network call.
     monkeypatch.setattr(
-        _oai_images_mod,
-        "OpenAIImagesProvider",
-        _FakeOpenAIImagesProvider,
+        "cubebox.streams.run_manager.create_images_provider",
+        lambda api, **kwargs: _faux_images_instance,
     )
 
-    # --- 2. Set up FauxProvider scripted responses ---
+    # --- 4. Set up FauxProvider scripted responses ---
     from cubepi.providers.faux import (
         FauxProvider,
         faux_assistant_message,
         faux_text,
         faux_tool_call,
     )
+
+    from cubebox.llm.factory import LLMFactory
 
     faux_provider = FauxProvider()
     faux_provider.set_responses(
@@ -236,7 +225,7 @@ async def generate_image_client(
         lambda self, provider_config, **kw: faux_provider,
     )
 
-    # --- 3. Create temp sandbox directory ---
+    # --- 5. Create temp sandbox directory ---
     with tempfile.TemporaryDirectory(prefix="cubebox_e2e_img_") as tmpdir:
         sandbox_factory = lambda: _TempLocalSandbox(tmpdir)  # noqa: E731
 

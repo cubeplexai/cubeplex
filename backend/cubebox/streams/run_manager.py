@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
+from cubepi.providers.images import create_images_provider
 from fastapi import FastAPI
 from loguru import logger
 from redis.asyncio import Redis
@@ -713,28 +714,30 @@ class RunManager:
         except Exception as _exc:
             logger.warning("view_images unavailable for cubepi run: {}", _exc)
 
-        # generate_image — sandbox-gated: only available when a code sandbox is active.
-        # Requires a real OpenAI provider (base_url containing api.openai.com).
-        # Builds a per-run OpenAIImagesProvider instance — never touches the global registry.
+        # generate_image — sandbox-gated; enabled only when image_generation config is active.
+        # Builds a per-run provider instance via create_images_provider — never the global registry.
         if sandbox is not None:
             try:
-                from cubepi.providers.images.openai_images import OpenAIImagesProvider
-                from cubepi.providers.images.types import ImagesModel
+                from cubepi.providers.images.types import ImagesModel as _ImagesModel
 
+                from cubebox.llm.config import get_image_generation_config
                 from cubebox.tools.builtin.generate_image import make_generate_image_tool
 
-                _img_key, _img_base_url = factory.resolve_openai_image_credentials()
-                if _img_key is None:
-                    logger.info("generate_image unavailable: no real-OpenAI provider configured")
-                else:
-                    _images_model = ImagesModel(
-                        id="gpt-image-1",
-                        provider="openai",
-                        api="openai-images",
+                _img_cfg = get_image_generation_config()
+                if not _img_cfg.enabled or not _img_cfg.api_key:
+                    logger.info(
+                        "generate_image unavailable: image_generation not enabled or api_key absent"
                     )
-                    _images_provider = OpenAIImagesProvider(
-                        api_key=_img_key,
-                        base_url=_img_base_url or None,
+                else:
+                    _images_provider = create_images_provider(
+                        _img_cfg.api,
+                        api_key=_img_cfg.api_key,
+                        base_url=_img_cfg.base_url or None,
+                    )
+                    _images_model = _ImagesModel(
+                        id=_img_cfg.model,
+                        provider="image-gen",
+                        api=_img_cfg.api,
                     )
                     _builtin_tools.append(
                         make_generate_image_tool(
