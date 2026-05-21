@@ -1,7 +1,7 @@
 """Unit tests for the generate_image tool (cubepi.AgentTool).
 
 Hermetic: no DB, no Pillow, no real image provider.
-- cubepi faux images provider is pre-registered.
+- Provider instances are passed directly to make_generate_image_tool (DI).
 - register_artifact_from_sandbox and resize_to_long_edge are monkeypatched.
 """
 
@@ -12,7 +12,7 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
-from cubepi.providers.images.types import AssistantImages, ImagesModel
+from cubepi.providers.images.types import AssistantImages, ImagesContext, ImagesModel
 
 from cubebox.sandbox.base import ExecuteResult
 from cubebox.tools.builtin.generate_image import GenerateImageInput, make_generate_image_tool
@@ -23,7 +23,7 @@ from cubebox.tools.builtin.generate_image import GenerateImageInput, make_genera
 
 _FAKE_PNG_BYTES = b"\x89PNG\r\n\x1a\n" + b"\x00" * 16
 _FAKE_PNG_B64 = base64.b64encode(_FAKE_PNG_BYTES).decode("ascii")
-_FAKE_MODEL = ImagesModel(id="faux-image", provider="faux", api="faux-images")
+_FAKE_MODEL = ImagesModel(id="gpt-image-1", provider="openai", api="openai-images")
 
 
 # ---------------------------------------------------------------------------
@@ -81,10 +81,11 @@ def _make_artifact(*, art_id: str = "art_1", version: int = 1) -> SimpleNamespac
     return SimpleNamespace(id=art_id, version=version, name="image.png")
 
 
-def _register_faux(png_b64: str = _FAKE_PNG_B64) -> None:
-    from cubepi.providers.images.faux import register_faux_images
+def _make_faux_provider(png_b64: str = _FAKE_PNG_B64) -> Any:
+    """Return a FauxImagesProvider instance (no global registry side-effects)."""
+    from cubepi.providers.images.faux import FauxImagesProvider
 
-    register_faux_images(png_b64)
+    return FauxImagesProvider(png_b64)
 
 
 # ---------------------------------------------------------------------------
@@ -95,8 +96,6 @@ def _register_faux(png_b64: str = _FAKE_PNG_B64) -> None:
 @pytest.mark.asyncio
 async def test_generate_image_success_path(monkeypatch: pytest.MonkeyPatch) -> None:
     """Happy path: faux provider returns one PNG; artifact is registered; small JPEG returned."""
-    _register_faux()
-
     sandbox = FakeSandbox()
 
     artifact_kwargs_captured: dict[str, Any] = {}
@@ -119,8 +118,8 @@ async def test_generate_image_success_path(monkeypatch: pytest.MonkeyPatch) -> N
         workspace_id="ws-1",
         conversation_id="conv-1",
         sandbox=sandbox,  # type: ignore[arg-type]
+        images_provider=_make_faux_provider(),
         images_model=_FAKE_MODEL,
-        api_key=None,
     )
 
     args = GenerateImageInput(prompt="a cat")
@@ -168,15 +167,12 @@ async def test_generate_image_provider_error_no_artifact(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """When the provider returns stop_reason='error', result is is_error=True, no artifact."""
-    from cubepi.providers.images.registry import register_images_provider
 
-    class ErrorProvider:
-        api = "faux-images"
-
+    class _ErrorProvider:
         async def generate_images(
             self,
             model: ImagesModel,
-            context: Any,
+            context: ImagesContext,
             options: dict[str, Any] | None = None,
         ) -> AssistantImages:
             return AssistantImages(
@@ -187,8 +183,6 @@ async def test_generate_image_provider_error_no_artifact(
                 stop_reason="error",
                 error_message="policy",
             )
-
-    register_images_provider(ErrorProvider())
 
     sandbox = FakeSandbox()
     artifact_call_count = 0
@@ -208,8 +202,8 @@ async def test_generate_image_provider_error_no_artifact(
         workspace_id="ws-1",
         conversation_id="conv-1",
         sandbox=sandbox,  # type: ignore[arg-type]
+        images_provider=_ErrorProvider(),
         images_model=_FAKE_MODEL,
-        api_key=None,
     )
 
     args = GenerateImageInput(prompt="bad prompt")
@@ -231,8 +225,6 @@ async def test_generate_image_edit_branch_writes_to_source_path(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """With edit_source_paths=['/work/src.png'], the output is written to that path."""
-    _register_faux()
-
     source_path = "/work/src.png"
     sandbox = FakeSandbox(base64_for_paths={source_path: _FAKE_PNG_B64})
 
@@ -256,8 +248,8 @@ async def test_generate_image_edit_branch_writes_to_source_path(
         workspace_id="ws-1",
         conversation_id="conv-1",
         sandbox=sandbox,  # type: ignore[arg-type]
+        images_provider=_make_faux_provider(),
         images_model=_FAKE_MODEL,
-        api_key=None,
     )
 
     args = GenerateImageInput(prompt="cat with hat", edit_source_paths=[source_path])

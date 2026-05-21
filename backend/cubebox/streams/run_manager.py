@@ -714,30 +714,38 @@ class RunManager:
             logger.warning("view_images unavailable for cubepi run: {}", _exc)
 
         # generate_image — sandbox-gated: only available when a code sandbox is active.
-        # Requires the OpenAI images API; resolves the api_key from the already-merged
-        # llm_config (populated by resolve_default_provider_and_config above).
+        # Requires a real OpenAI provider (base_url containing api.openai.com).
+        # Builds a per-run OpenAIImagesProvider instance — never touches the global registry.
         if sandbox is not None:
             try:
+                from cubepi.providers.images.openai_images import OpenAIImagesProvider
                 from cubepi.providers.images.types import ImagesModel
 
                 from cubebox.tools.builtin.generate_image import make_generate_image_tool
 
-                _images_model = ImagesModel(
-                    id="gpt-image-1",
-                    provider="openai",
-                    api="openai-images",
-                )
-                _openai_api_key = factory.resolve_openai_api_key()
-                _builtin_tools.append(
-                    make_generate_image_tool(
-                        org_id=ctx.org_id,
-                        workspace_id=ctx.workspace_id,
-                        conversation_id=conversation_id,
-                        sandbox=sandbox,
-                        images_model=_images_model,
-                        api_key=_openai_api_key,
+                _img_key, _img_base_url = factory.resolve_openai_image_credentials()
+                if _img_key is None:
+                    logger.info("generate_image unavailable: no real-OpenAI provider configured")
+                else:
+                    _images_model = ImagesModel(
+                        id="gpt-image-1",
+                        provider="openai",
+                        api="openai-images",
                     )
-                )
+                    _images_provider = OpenAIImagesProvider(
+                        api_key=_img_key,
+                        base_url=_img_base_url or None,
+                    )
+                    _builtin_tools.append(
+                        make_generate_image_tool(
+                            org_id=ctx.org_id,
+                            workspace_id=ctx.workspace_id,
+                            conversation_id=conversation_id,
+                            sandbox=sandbox,
+                            images_provider=_images_provider,
+                            images_model=_images_model,
+                        )
+                    )
             except Exception as _exc:
                 logger.warning("generate_image unavailable for cubepi run: {}", _exc)
 
