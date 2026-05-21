@@ -123,9 +123,9 @@ async def _clear_provider_liveness(session: AsyncSession, *, provider_id: str) -
 
 
 async def _resolve_provider_id(
-    session: AsyncSession, *, org_id: str, provider_name: str
+    session: AsyncSession, *, org_id: str, provider_slug: str
 ) -> str | None:
-    """Resolve ``provider_name`` (config key / ``Provider.name``) to a DB id.
+    """Resolve ``provider_slug`` (slug / ``Provider.slug``) to a DB id.
 
     Scoped to the org plus system-level (org_id IS NULL) providers — the same
     visibility rule the run path used to load the provider config.
@@ -133,14 +133,14 @@ async def _resolve_provider_id(
     from cubebox.repositories.provider import ProviderRepository
 
     repo = ProviderRepository(session, org_id=org_id)
-    provider = await repo.get_by_name(provider_name)
+    provider = await repo.get_by_slug(provider_slug)
     return provider.id if provider is not None else None
 
 
 async def _do_writeback(
     *,
     org_id: str,
-    provider_name: str,
+    provider_slug: str,
     model_id: str,
     outcome: RuntimeOutcome,
     summary: str,
@@ -149,7 +149,7 @@ async def _do_writeback(
     the caller's task wrapper logs + swallows so failures never escape."""
     async with async_session_maker() as session:
         provider_id = await _resolve_provider_id(
-            session, org_id=org_id, provider_name=provider_name
+            session, org_id=org_id, provider_slug=provider_slug
         )
         if provider_id is None:
             # Config-only provider (no DB row) — nothing to write back to.
@@ -167,7 +167,7 @@ async def _do_writeback(
 def schedule_runtime_status_writeback(
     *,
     org_id: str,
-    provider_name: str,
+    provider_slug: str,
     model_id: str,
     exc: BaseException | None,
 ) -> asyncio.Task[None] | None:
@@ -197,7 +197,7 @@ def schedule_runtime_status_writeback(
             try:
                 await _do_writeback(
                     org_id=org_id,
-                    provider_name=provider_name,
+                    provider_slug=provider_slug,
                     model_id=model_id,
                     outcome=outcome,
                     summary=summary,
@@ -205,7 +205,7 @@ def schedule_runtime_status_writeback(
             except Exception:  # noqa: BLE001 — best-effort, never propagate
                 logger.warning(
                     "runtime status writeback failed (provider=%s model=%s outcome=%s)",
-                    provider_name,
+                    provider_slug,
                     model_id,
                     outcome,
                     exc_info=True,

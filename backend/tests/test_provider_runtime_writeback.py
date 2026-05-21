@@ -63,6 +63,6 @@ def test_auth_wins_over_model_marker() -> None:
 def test_schedule_returns_none_for_non_actionable_error() -> None:
     # A transient/other error must not schedule a writeback task at all.
     task = schedule_runtime_status_writeback(
-        org_id="org-x", provider_name="p", model_id="m", exc=_StatusExc("boom", 500)
+        org_id="org-x", provider_slug="p", model_id="m", exc=_StatusExc("boom", 500)
     )
     assert task is None

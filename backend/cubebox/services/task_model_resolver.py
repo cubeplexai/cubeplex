@@ -28,11 +28,11 @@ async def resolve_task_model(factory: "LLMFactory", task: str) -> tuple[str, str
     from sqlalchemy import select
 
     def _resolve_ref(merged: LLMConfig, model_ref: str) -> tuple[str, str, ProviderConfig]:
-        provider_name, model_id = factory._parse_model_ref(model_ref)
-        provider_config = merged.providers.get(provider_name)
+        slug, model_id = factory._parse_model_ref(model_ref)
+        provider_config = merged.providers.get(slug)
         if provider_config is None:
-            raise ValueError(f"Task '{task}' provider '{provider_name}' not found in merged config")
-        return provider_name, model_id, provider_config
+            raise ValueError(f"Task '{task}' provider '{slug}' not found in merged config")
+        return slug, model_id, provider_config
 
     # 1. OrgSettings.task_models[task] — per-org admin choice.
     if factory._session and factory._org_id:
@@ -61,6 +61,6 @@ async def resolve_task_model(factory: "LLMFactory", task: str) -> tuple[str, str
 async def _build_merged(factory: "LLMFactory") -> LLMConfig:
     """Build the DB+yaml merged config the same way the default path does."""
     if factory._session and factory._org_id:
-        db_cfgs, db_names = await factory._load_db_provider_configs()
-        return factory._build_merged_config(db_cfgs, db_names)
+        db_cfgs, db_slugs = await factory._load_db_provider_configs()
+        return factory._build_merged_config(db_cfgs, db_slugs)
     return factory.llm_config

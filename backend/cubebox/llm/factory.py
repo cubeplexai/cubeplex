@@ -57,7 +57,7 @@ class LLMFactory:
     async def _load_db_provider_configs(self) -> tuple[dict[str, dict[str, Any]], set[str]]:
         """Load enabled provider configs from DB.
 
-        Returns (dict[name, config_dict], set of ALL provider names in DB).
+        Returns (dict[slug, config_dict], set of ALL provider slugs in DB).
         """
         if not self._session or not self._org_id:
             return {}, set()
@@ -119,7 +119,7 @@ class LLMFactory:
                             p.name,
                         )
 
-            db_configs[p.name] = {
+            db_configs[p.slug] = {
                 "base_url": p.base_url,
                 "api_key": api_key,
                 "api": p.provider_type,
@@ -147,36 +147,40 @@ class LLMFactory:
                     for m in db_models
                 ],
             }
-        # Also get ALL provider names (including disabled) so _build_merged_config
+        # Also get ALL provider slugs (including disabled) so _build_merged_config
         # can skip config.yaml providers that exist in DB regardless of enabled state.
-        all_names_stmt = select(DBP).where(
+        all_rows_stmt = select(DBP).where(
             (DBP.org_id == None) | (DBP.org_id == self._org_id),  # type: ignore[arg-type]  # noqa: E711
         )
-        all_names_result = await self._session.execute(all_names_stmt)
-        db_names = {p.name for p in all_names_result.scalars().all()}
-        return db_configs, db_names
+        all_rows = (await self._session.execute(all_rows_stmt)).scalars().all()
+        db_slugs = {p.slug for p in all_rows}
+        return db_configs, db_slugs
 
     def _build_merged_config(
-        self, db_configs: dict[str, dict[str, Any]], db_names: set[str]
+        self, db_configs: dict[str, dict[str, Any]], db_slugs: set[str]
     ) -> LLMConfig:
         """Merge DB configs with config.yaml fallback.
 
         CRITICAL: Only config-fallback providers that do NOT exist in DB at all.
         Once a provider is seeded into DB, its visibility is governed by DB +
         OrgProviderOverride, and config.yaml must NOT reintroduce it.
+
+        Both DB providers (keyed by slug) and config.yaml providers (keyed by
+        slugify(name)) are merged into a single slug-keyed dict.
         """
+        from cubebox.utils.slug import slugify
+
         config_providers = dict(self.llm_config.providers)
-        # Normalise to lowercase for the exclusion check: Dynaconf uppercases env-var
-        # keys (CUBEBOX_LLM__PROVIDERS__DEEPSEEK__API_KEY → DEEPSEEK) while DB stores
-        # the original lowercase name.  A case-sensitive check would silently include
-        # the partial env-only entry and fail ProviderConfig validation.
-        db_names_lower = {n.lower() for n in db_names}
+        # Normalise slugs for the exclusion check so config-yaml providers whose
+        # slug matches a DB provider are correctly excluded.
+        db_slugs_lower = {s.lower() for s in db_slugs}
         merged: dict[str, ProviderConfig] = {}
         for name, cfg in config_providers.items():
-            if name.lower() not in db_names_lower:  # Skip if provider exists in DB
-                merged[name] = cfg  # Only use config when provider not in DB
-        for name, db_cfg in db_configs.items():
-            merged[name] = ProviderConfig(**db_cfg)  # DB always overrides
+            slug = slugify(name)
+            if slug.lower() not in db_slugs_lower:  # Skip if provider exists in DB
+                merged[slug] = cfg  # Only use config when provider not in DB
+        for slug, db_cfg in db_configs.items():
+            merged[slug] = ProviderConfig(**db_cfg)  # DB always overrides
         return LLMConfig(
             default_model=self.llm_config.default_model,
             fallback_models=self.llm_config.fallback_models,
@@ -216,13 +220,13 @@ class LLMFactory:
     @staticmethod
     def _parse_model_ref(model_ref: str) -> tuple[str, str]:
         """
-        Parse a model reference in "provider/model-id" format.
+        Parse a model reference in "slug/model-id" format.
 
         Args:
             model_ref: Model reference string
 
         Returns:
-            Tuple of (provider_name, model_id)
+            Tuple of (slug, model_id)
 
         Raises:
             ValueError: If format is invalid
@@ -237,7 +241,7 @@ class LLMFactory:
         Parse the default_model, checking org override first.
 
         Returns:
-            Tuple of (provider_name, model_id)
+            Tuple of (slug, model_id)
 
         Raises:
             ValueError: If default_model is not set or has invalid format
@@ -252,10 +256,10 @@ class LLMFactory:
     async def get_default_model_config(self) -> ModelConfig:
         """Resolve the default model's ModelConfig, merging DB configs if available."""
         if self._session and self._org_id:
-            db_cfgs, db_names = await self._load_db_provider_configs()
-            self.llm_config = self._build_merged_config(db_cfgs, db_names)
-        provider_name, model_id = await self.get_default_model()
-        return self.get_model_config(provider_name, model_id)
+            db_cfgs, db_slugs = await self._load_db_provider_configs()
+            self.llm_config = self._build_merged_config(db_cfgs, db_slugs)
+        slug, model_id = await self.get_default_model()
+        return self.get_model_config(slug, model_id)
 
     async def resolve_default_provider_and_config(
         self,
@@ -267,21 +271,21 @@ class LLMFactory:
         reference.
 
         Returns:
-            Tuple of (provider_name, model_id, ProviderConfig)
+            Tuple of (slug, model_id, ProviderConfig)
 
         Raises:
             ValueError: If default_model is unset, has invalid format, or the
                 provider is not found after merging.
         """
         if self._session and self._org_id:
-            db_cfgs, db_names = await self._load_db_provider_configs()
-            self.llm_config = self._build_merged_config(db_cfgs, db_names)
+            db_cfgs, db_slugs = await self._load_db_provider_configs()
+            self.llm_config = self._build_merged_config(db_cfgs, db_slugs)
 
-        provider_name, model_id = await self.get_default_model()
-        provider_config = self.llm_config.providers.get(provider_name)
+        slug, model_id = await self.get_default_model()
+        provider_config = self.llm_config.providers.get(slug)
         if provider_config is None:
-            raise ValueError(f"Default provider '{provider_name}' not found in merged config")
-        return provider_name, model_id, provider_config
+            raise ValueError(f"Default provider '{slug}' not found in merged config")
+        return slug, model_id, provider_config
 
     def get_model_config(self, provider_name: str, model_id: str) -> ModelConfig:
         """

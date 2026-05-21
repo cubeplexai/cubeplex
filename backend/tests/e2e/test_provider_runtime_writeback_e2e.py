@@ -70,6 +70,8 @@ async def _seed_provider_with_models(
 
 
 async def test_auth_error_flips_provider_liveness_fail(db_session: AsyncSession) -> None:
+    from cubebox.utils.slug import slugify
+
     name = f"rt-writeback-auth-{uuid.uuid4().hex[:8]}"
     provider_id, _, _ = await _seed_provider_with_models(
         db_session, name=name, liveness_status="ok"
@@ -77,7 +79,7 @@ async def test_auth_error_flips_provider_liveness_fail(db_session: AsyncSession)
 
     await _do_writeback(
         org_id=_ORG_ID,
-        provider_name=name,
+        provider_slug=slugify(name),
         model_id="model-a",
         outcome="auth_error",
         summary="HTTPStatusError: 401 Unauthorized",
@@ -92,6 +94,8 @@ async def test_auth_error_flips_provider_liveness_fail(db_session: AsyncSession)
 
 
 async def test_model_not_found_flips_only_that_model(db_session: AsyncSession) -> None:
+    from cubebox.utils.slug import slugify
+
     name = f"rt-writeback-modelnf-{uuid.uuid4().hex[:8]}"
     provider_id, model_a_id, model_b_id = await _seed_provider_with_models(
         db_session, name=name, liveness_status="ok"
@@ -99,7 +103,7 @@ async def test_model_not_found_flips_only_that_model(db_session: AsyncSession) -
 
     await _do_writeback(
         org_id=_ORG_ID,
-        provider_name=name,
+        provider_slug=slugify(name),
         model_id="model-a",
         outcome="model_not_found",
         summary="404 model_not_found",
@@ -123,6 +127,8 @@ async def test_model_not_found_flips_only_that_model(db_session: AsyncSession) -
 
 
 async def test_success_clears_only_a_failed_provider(db_session: AsyncSession) -> None:
+    from cubebox.utils.slug import slugify
+
     # Provider currently failing -> success clears it back to "ok".
     name_fail = f"rt-writeback-clear-{uuid.uuid4().hex[:8]}"
     provider_id_fail, _, _ = await _seed_provider_with_models(
@@ -130,7 +136,7 @@ async def test_success_clears_only_a_failed_provider(db_session: AsyncSession) -
     )
     await _do_writeback(
         org_id=_ORG_ID,
-        provider_name=name_fail,
+        provider_slug=slugify(name_fail),
         model_id="model-a",
         outcome="other",
         summary="runtime call succeeded",
@@ -142,6 +148,8 @@ async def test_success_clears_only_a_failed_provider(db_session: AsyncSession) -
 
 
 async def test_success_is_noop_for_healthy_provider(db_session: AsyncSession) -> None:
+    from cubebox.utils.slug import slugify
+
     # Guarded UPDATE: a provider that was never tested (NULL) stays NULL —
     # success must not invent an "ok" out of nowhere.
     name_ok = f"rt-writeback-noop-{uuid.uuid4().hex[:8]}"
@@ -150,7 +158,7 @@ async def test_success_is_noop_for_healthy_provider(db_session: AsyncSession) ->
     )
     await _do_writeback(
         org_id=_ORG_ID,
-        provider_name=name_ok,
+        provider_slug=slugify(name_ok),
         model_id="model-a",
         outcome="other",
         summary="runtime call succeeded",

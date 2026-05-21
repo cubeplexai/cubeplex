@@ -591,16 +591,16 @@ class ProviderService:
         parts = model_ref.split("/", 1)
         if len(parts) != 2:
             raise ValueError(f"Invalid model ref format: '{model_ref}'")
-        provider_name, model_id = parts
-        provider = await self._providers.get_by_name(provider_name)
+        slug, model_id = parts
+        provider = await self._providers.get_by_slug(slug)  # was get_by_name(provider_name)
         if provider is None:
-            raise ValueError(f"Provider '{provider_name}' not found")
+            raise ValueError(f"Provider slug '{slug}' not found")
         if provider.org_id is None:
             override = await self._overrides.get(provider.id)
             if override and not override.enabled:
-                raise ValueError(f"Provider '{provider_name}' is disabled by org")
+                raise ValueError(f"Provider '{slug}' is disabled by org")
         model = await self._models.get_by_model_id(provider.id, model_id)
         if model is None:
-            raise ValueError(f"Model '{model_id}' not found in provider '{provider_name}'")
+            raise ValueError(f"Model '{model_id}' not found in provider '{slug}'")
         if not model.enabled:
             raise ValueError(f"Model '{model_id}' is disabled")
