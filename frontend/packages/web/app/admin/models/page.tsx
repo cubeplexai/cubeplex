@@ -109,6 +109,10 @@ export default function ModelsPage() {
               onCreateModel={createModel}
               onUpdateModel={updateModel}
               onDeleteModel={deleteModel}
+              onRefresh={() => {
+                void fetchProviders(client)
+                if (selectedId) void fetchModels(client, selectedId)
+              }}
             />
           ) : (
             <div className="flex h-full w-full items-center justify-center text-sm text-muted-foreground">

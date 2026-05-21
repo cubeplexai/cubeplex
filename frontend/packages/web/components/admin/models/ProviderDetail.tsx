@@ -2,15 +2,19 @@
 
 import { useState } from 'react'
 import { useTranslations } from 'next-intl'
-import { Box, Check, Pencil, Plus, Trash2, X } from 'lucide-react'
-import type {
-  ApiClient,
-  Model,
-  ModelCreate,
-  ModelUpdate,
-  Provider,
-  ProviderUpdate,
+import { Box, Check, Loader2, Pencil, Plus, RotateCw, Trash2, Zap, X } from 'lucide-react'
+import {
+  checkLiveness,
+  parseTestStream,
+  startTestStream,
+  type ApiClient,
+  type Model,
+  type ModelCreate,
+  type ModelUpdate,
+  type Provider,
+  type ProviderUpdate,
 } from '@cubebox/core'
+import { cn } from '@/lib/utils'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Separator } from '@/components/ui/separator'
@@ -35,6 +39,13 @@ interface ProviderDetailProps {
     body: ModelUpdate,
   ) => Promise<void>
   onDeleteModel: (client: ApiClient, providerId: string, modelId: string) => Promise<void>
+  onRefresh?: () => void
+}
+
+function livenessDotClass(status: string | null | undefined): string {
+  if (status === 'ok' || status === 'pass') return 'bg-green-500'
+  if (status === 'fail' || status === 'error') return 'bg-red-500'
+  return 'bg-zinc-400'
 }
 
 function authTypeLabel(
@@ -66,6 +77,7 @@ export function ProviderDetail({
   onCreateModel,
   onUpdateModel,
   onDeleteModel,
+  onRefresh,
 }: ProviderDetailProps) {
   const t = useTranslations('adminModels')
   const tExtra = useTranslations('adminModelsExtra')
@@ -76,8 +88,46 @@ export function ProviderDetail({
   const [modelFormOpen, setModelFormOpen] = useState(false)
   const [editingModel, setEditingModel] = useState<Model | null>(null)
   const [modelError, setModelError] = useState<string | null>(null)
+  const [testingAll, setTestingAll] = useState(false)
+  const [testingConn, setTestingConn] = useState(false)
 
   const isSystem = provider.is_system
+
+  async function handleTestAll() {
+    if (models.length === 0) return
+    setTestingAll(true)
+    setModelError(null)
+    try {
+      const stream = await startTestStream(
+        client,
+        provider.id,
+        models.map((m) => m.id),
+      )
+      // Drain the stream so the backend records each model result.
+      for await (const _e of parseTestStream(stream)) {
+        void _e
+      }
+      onRefresh?.()
+    } catch (e) {
+      setModelError((e as Error).message)
+    } finally {
+      setTestingAll(false)
+    }
+  }
+
+  async function handleTestConnection() {
+    if (models.length === 0) return
+    setTestingConn(true)
+    setModelError(null)
+    try {
+      await checkLiveness(client, provider.id, models[0].model_id)
+      onRefresh?.()
+    } catch (e) {
+      setModelError((e as Error).message)
+    } finally {
+      setTestingConn(false)
+    }
+  }
 
   async function handleDelete() {
     setDeleting(true)
@@ -137,6 +187,14 @@ export function ProviderDetail({
         <ProviderLogo name={provider.name} logoUrl={provider.logo_url} size="lg" />
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
+            <span
+              className={cn(
+                'size-2.5 shrink-0 rounded-full',
+                livenessDotClass(provider.last_liveness_status),
+              )}
+              title={t('livenessStatus')}
+              data-testid="provider-liveness-dot"
+            />
             <h3 className="text-xl font-semibold tracking-tight">{provider.name}</h3>
             {isSystem && (
               <Badge variant="secondary" className="text-[11px]">
@@ -227,21 +285,53 @@ export function ProviderDetail({
       <section>
         <div className="mb-3 flex items-center justify-between">
           <h4 className="text-sm font-medium">{t('modelsHeading', { count: models.length })}</h4>
-          {!isSystem && (
+          <div className="flex items-center gap-2">
             <Button
               variant="outline"
               size="sm"
-              onClick={() => {
-                setEditingModel(null)
-                setModelError(null)
-                setModelFormOpen(true)
-              }}
+              onClick={() => void handleTestConnection()}
+              disabled={testingConn || models.length === 0}
               className="gap-1.5"
+              data-testid="provider-test-connection"
             >
-              <Plus className="size-3.5" />
-              {t('addModel')}
+              {testingConn ? (
+                <Loader2 className="size-3.5 animate-spin" />
+              ) : (
+                <Zap className="size-3.5" />
+              )}
+              {t('testConnection')}
             </Button>
-          )}
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => void handleTestAll()}
+              disabled={testingAll || models.length === 0}
+              className="gap-1.5"
+              data-testid="provider-test-all"
+            >
+              {testingAll ? (
+                <Loader2 className="size-3.5 animate-spin" />
+              ) : (
+                <RotateCw className="size-3.5" />
+              )}
+              {t('testAll')}
+            </Button>
+            {!isSystem && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  setEditingModel(null)
+                  setModelError(null)
+                  setModelFormOpen(true)
+                }}
+                className="gap-1.5"
+              >
+                <Plus className="size-3.5" />
+                {t('addModel')}
+              </Button>
+            )}
+          </div>
         </div>
 
         {modelError && (
@@ -284,12 +374,15 @@ export function ProviderDetail({
               <ModelRow
                 key={m.id}
                 model={m}
+                client={client}
+                providerId={provider.id}
                 onEdit={(model) => {
                   setEditingModel(model)
                   setModelError(null)
                   setModelFormOpen(true)
                 }}
                 onDelete={(model) => void handleDeleteModel(model)}
+                onRetested={() => onRefresh?.()}
               />
             ))}
           </div>

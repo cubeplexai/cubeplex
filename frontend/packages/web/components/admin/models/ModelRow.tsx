@@ -2,16 +2,20 @@
 
 import { useState } from 'react'
 import { useTranslations } from 'next-intl'
-import { Brain, Check, Pencil, Trash2, X } from 'lucide-react'
-import type { Model } from '@cubebox/core'
+import { Brain, Check, Loader2, Pencil, RotateCw, Trash2, X } from 'lucide-react'
+import { testModel, type ApiClient, type Model } from '@cubebox/core'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
+import { ReadinessBadge } from './ReadinessBadge'
 
 interface ModelRowProps {
   model: Model
+  client: ApiClient
+  providerId: string
   onEdit: (model: Model) => void
   onDelete: (model: Model) => void
+  onRetested?: () => void
 }
 
 function formatCost(cost: number): string {
@@ -20,10 +24,28 @@ function formatCost(cost: number): string {
   return cost.toFixed(4)
 }
 
-export function ModelRow({ model, onEdit, onDelete }: ModelRowProps) {
+export function ModelRow({
+  model,
+  client,
+  providerId,
+  onEdit,
+  onDelete,
+  onRetested,
+}: ModelRowProps) {
   const tExtra = useTranslations('adminModelsExtra')
   const t = useTranslations('adminModels')
   const [confirmOpen, setConfirmOpen] = useState(false)
+  const [retesting, setRetesting] = useState(false)
+
+  async function handleRetest() {
+    setRetesting(true)
+    try {
+      await testModel(client, providerId, model.id)
+      onRetested?.()
+    } finally {
+      setRetesting(false)
+    }
+  }
 
   return (
     <div
@@ -77,7 +99,27 @@ export function ModelRow({ model, onEdit, onDelete }: ModelRowProps) {
           : '-'}
       </span>
 
+      <div className="hidden shrink-0 items-center md:flex">
+        <ReadinessBadge readiness={model.readiness ?? 'ready'} />
+      </div>
+
       <div className="flex shrink-0 items-center gap-1">
+        {!confirmOpen && (
+          <Button
+            variant="ghost"
+            size="icon-xs"
+            onClick={() => void handleRetest()}
+            disabled={retesting}
+            aria-label={t('retest', { name: model.model_id })}
+            data-testid={`model-row-${model.model_id}-retest`}
+          >
+            {retesting ? (
+              <Loader2 className="size-3 animate-spin" />
+            ) : (
+              <RotateCw className="size-3" />
+            )}
+          </Button>
+        )}
         {!model.is_system && !confirmOpen && (
           <>
             <Button
