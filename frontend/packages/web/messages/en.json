@@ -343,7 +343,15 @@
     "extraBodyInvalid": "extra_body must be valid JSON",
     "modelCreateTitle": "Add model",
     "modelEditTitle": "Edit model",
-    "modelTestHint": "Save the model to enable connection test"
+    "modelTestHint": "Save the model to enable connection test",
+    "readiness": {
+      "ready": "Ready",
+      "degraded": "Degraded",
+      "stale": "Stale",
+      "providerError": "Provider unreachable",
+      "modelError": "Model test failed",
+      "unavailable": "Unavailable"
+    }
   },
   "adminSettings": {
     "title": "Org Settings",

@@ -1,4 +1,23 @@
 import Image from 'next/image'
+import type { ComponentType, SVGProps } from 'react'
+import {
+  Anthropic,
+  DeepSeek,
+  Doubao,
+  Fireworks,
+  Groq,
+  HuggingFace,
+  LmStudio,
+  Mistral,
+  Moonshot,
+  Ollama,
+  OpenAI,
+  OpenRouter,
+  Qwen,
+  Together,
+  Vllm,
+  XAI,
+} from '@lobehub/icons'
 import { cn } from '@/lib/utils'
 
 const COLORS = [
@@ -14,6 +33,32 @@ const COLORS = [
   { bg: 'bg-cyan-100', text: 'text-cyan-600', dark: 'dark:bg-cyan-900/40 dark:text-cyan-300' },
 ]
 
+// The @lobehub/icons brand exports are SVG components that accept a numeric
+// `size`. Color brands ship a `.Color` variant; the rest render in
+// currentColor (Mono is the default export).
+type BrandIcon = ComponentType<SVGProps<SVGSVGElement> & { size?: number }>
+
+// Maps our preset `logo` ids to a brand glyph. Color variant preferred when
+// the brand ships one, otherwise the monochrome default.
+const BRAND_ICONS: Record<string, BrandIcon> = {
+  anthropic: Anthropic,
+  openai: OpenAI,
+  qwen: Qwen.Color,
+  deepseek: DeepSeek.Color,
+  doubao: Doubao.Color,
+  openrouter: OpenRouter,
+  ollama: Ollama,
+  vllm: Vllm.Color,
+  moonshot: Moonshot,
+  xai: XAI,
+  mistral: Mistral.Color,
+  together: Together.Color,
+  groq: Groq,
+  fireworks: Fireworks.Color,
+  lmstudio: LmStudio,
+  huggingface: HuggingFace.Color,
+}
+
 function hashName(name: string): number {
   let hash = 0
   for (let i = 0; i < name.length; i++) {
@@ -25,26 +70,33 @@ function hashName(name: string): number {
 interface ProviderLogoProps {
   name: string
   logoUrl: string | null
+  logo?: string | null
   size?: 'sm' | 'lg'
 }
 
-export function ProviderLogo({ name, logoUrl, size = 'sm' }: ProviderLogoProps) {
-  const colorIndex = hashName(name) % COLORS.length
-  const color = COLORS[colorIndex]
+export function ProviderLogo({ name, logoUrl, logo = null, size = 'sm' }: ProviderLogoProps) {
+  const boxClass = size === 'sm' ? 'size-6' : 'size-10'
 
   if (logoUrl) {
     return (
-      <div
-        className={cn(
-          'relative shrink-0 overflow-hidden rounded-full',
-          size === 'sm' ? 'size-6' : 'size-10',
-        )}
-      >
+      <div className={cn('relative shrink-0 overflow-hidden rounded-full', boxClass)}>
         <Image src={logoUrl} alt={name} fill className="object-cover" unoptimized />
       </div>
     )
   }
 
+  const BrandIcon = logo ? BRAND_ICONS[logo] : undefined
+  if (BrandIcon) {
+    return (
+      <div
+        className={cn('flex shrink-0 items-center justify-center rounded-full bg-muted', boxClass)}
+      >
+        <BrandIcon size={size === 'sm' ? 16 : 24} aria-label={name} />
+      </div>
+    )
+  }
+
+  const color = COLORS[hashName(name) % COLORS.length]
   return (
     <div
       className={cn(
