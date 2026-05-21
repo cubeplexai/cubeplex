@@ -36,7 +36,10 @@ mkdir -p /workspace/.cubebox-browser-profile
 chown -R neko:neko /workspace/.cubebox-browser-profile 2>/dev/null || true
 
 # Daemonize supervisord; it brings up Xorg, openbox, pulseaudio, neko, chromium.
-nohup /usr/bin/supervisord -c /etc/neko/supervisord.conf >/var/log/neko/supervisord.boot.log 2>&1 &
+# Close the lock fd (9) in the child: otherwise supervisord (and its children)
+# inherit it and hold the flock for their whole lifetime, so every later
+# start-browser.sh blocks forever on flock and the live-view request hangs (500).
+nohup /usr/bin/supervisord -c /etc/neko/supervisord.conf >/var/log/neko/supervisord.boot.log 2>&1 9>&- &
 echo $! > "$PIDFILE"
 
 # Wait for the Neko web server to answer.
