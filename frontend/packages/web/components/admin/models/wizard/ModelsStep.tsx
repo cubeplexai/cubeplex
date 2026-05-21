@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
 import { cn } from '@/lib/utils'
+import type { CreatedModel } from './wizardMachine'
 
 interface ModelRow {
   key: string
@@ -26,7 +27,7 @@ interface ModelsStepProps {
   client: ApiClient
   preset: ProviderPreset
   providerId: string
-  onModelsCreated: (modelDbIds: string[]) => void
+  onModelsCreated: (models: CreatedModel[]) => void
 }
 
 export function ModelsStep({ client, preset, providerId, onModelsCreated }: ModelsStepProps) {
@@ -88,7 +89,7 @@ export function ModelsStep({ client, preset, providerId, onModelsCreated }: Mode
     setSaving(true)
     setError(null)
     try {
-      const ids: string[] = []
+      const created: CreatedModel[] = []
       for (const r of selected) {
         const body: ModelCreate = {
           model_id: r.model_id,
@@ -100,9 +101,9 @@ export function ModelsStep({ client, preset, providerId, onModelsCreated }: Mode
           enabled: false,
         }
         const model = await createModel(client, providerId, body)
-        ids.push(model.id)
+        created.push({ id: model.id, model_id: r.model_id, display_name: r.display_name })
       }
-      onModelsCreated(ids)
+      onModelsCreated(created)
     } catch (e) {
       setError((e as Error).message || t('importFailed'))
       setSaving(false)

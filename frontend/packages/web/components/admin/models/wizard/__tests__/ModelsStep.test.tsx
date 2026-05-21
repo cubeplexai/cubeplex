@@ -81,7 +81,12 @@ describe('ModelsStep', () => {
       reasoning: true,
       enabled: false,
     })
-    await waitFor(() => expect(onModelsCreated).toHaveBeenCalledWith(['mdl_1', 'mdl_2']))
+    await waitFor(() =>
+      expect(onModelsCreated).toHaveBeenCalledWith([
+        { id: 'mdl_1', model_id: 'm-a', display_name: 'Model A' },
+        { id: 'mdl_2', model_id: 'm-b', display_name: 'Model B' },
+      ]),
+    )
   })
 
   it('unchecking a model excludes it from creation', async () => {
@@ -91,6 +96,10 @@ describe('ModelsStep', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Next' }))
     await waitFor(() => expect(core.createModel).toHaveBeenCalledTimes(1))
     expect(vi.mocked(core.createModel).mock.calls[0][2].model_id).toBe('m-a')
-    await waitFor(() => expect(onModelsCreated).toHaveBeenCalledWith(['mdl_1']))
+    await waitFor(() =>
+      expect(onModelsCreated).toHaveBeenCalledWith([
+        { id: 'mdl_1', model_id: 'm-a', display_name: 'Model A' },
+      ]),
+    )
   })
 })
