@@ -102,24 +102,47 @@ def test_build_cubepi_provider_anthropic_accepts_cache_policy() -> None:
 
 
 # ---------------------------------------------------------------------------
-# resolve_openai_api_key
+# resolve_openai_image_credentials
 # ---------------------------------------------------------------------------
 
 
-def test_resolve_openai_api_key_returns_key_when_openai_completions_provider_present() -> None:
+def test_resolve_openai_image_credentials_returns_key_and_url_for_real_openai() -> None:
     factory = _mk_factory(
         {
             "openai": ProviderConfig(
                 api="openai-completions",
-                base_url="https://api.openai.com",
+                base_url="https://api.openai.com/v1",
                 api_key="sk-openai-test",
             ),
         }
     )
-    assert factory.resolve_openai_api_key() == "sk-openai-test"
+    key, base_url = factory.resolve_openai_image_credentials()
+    assert key == "sk-openai-test"
+    assert base_url == "https://api.openai.com/v1"
 
 
-def test_resolve_openai_api_key_returns_none_when_no_openai_completions_provider() -> None:
+def test_resolve_openai_image_credentials_skips_non_openai_compatible() -> None:
+    """A DeepSeek-like openai-completions provider is NOT selected; real OpenAI is."""
+    factory = _mk_factory(
+        {
+            "deepseek": ProviderConfig(
+                api="openai-completions",
+                base_url="https://api.deepseek.com/v1",
+                api_key="sk-deepseek",
+            ),
+            "openai": ProviderConfig(
+                api="openai-completions",
+                base_url="https://api.openai.com/v1",
+                api_key="sk-real-openai",
+            ),
+        }
+    )
+    key, base_url = factory.resolve_openai_image_credentials()
+    assert key == "sk-real-openai"
+    assert base_url == "https://api.openai.com/v1"
+
+
+def test_resolve_openai_image_credentials_returns_none_none_when_no_openai() -> None:
     factory = _mk_factory(
         {
             "anthropic": ProviderConfig(
@@ -127,39 +150,35 @@ def test_resolve_openai_api_key_returns_none_when_no_openai_completions_provider
                 base_url="https://api.anthropic.com",
                 api_key="sk-ant",
             ),
+            "deepseek": ProviderConfig(
+                api="openai-completions",
+                base_url="https://api.deepseek.com/v1",
+                api_key="sk-ds",
+            ),
         }
     )
-    assert factory.resolve_openai_api_key() is None
+    key, base_url = factory.resolve_openai_image_credentials()
+    assert key is None
+    assert base_url is None
 
 
-def test_resolve_openai_api_key_returns_none_when_provider_has_no_key() -> None:
+def test_resolve_openai_image_credentials_returns_none_none_when_no_providers() -> None:
+    factory = _mk_factory({})
+    key, base_url = factory.resolve_openai_image_credentials()
+    assert key is None
+    assert base_url is None
+
+
+def test_resolve_openai_image_credentials_returns_none_key_when_provider_has_no_key() -> None:
     factory = _mk_factory(
         {
             "openai": ProviderConfig(
                 api="openai-completions",
-                base_url="https://api.openai.com",
+                base_url="https://api.openai.com/v1",
                 api_key=None,
             ),
         }
     )
-    assert factory.resolve_openai_api_key() is None
-
-
-def test_resolve_openai_api_key_prefers_first_openai_completions_provider() -> None:
-    """When multiple providers have api==openai-completions, returns the first one's key."""
-    # dict iteration order is insertion order in Python 3.7+
-    factory = _mk_factory(
-        {
-            "oai-primary": ProviderConfig(
-                api="openai-completions",
-                base_url="https://api.openai.com",
-                api_key="sk-primary",
-            ),
-            "oai-secondary": ProviderConfig(
-                api="openai-completions",
-                base_url="https://api.openai.com/v2",
-                api_key="sk-secondary",
-            ),
-        }
-    )
-    assert factory.resolve_openai_api_key() == "sk-primary"
+    key, base_url = factory.resolve_openai_image_credentials()
+    assert key is None
+    assert base_url == "https://api.openai.com/v1"

@@ -1,7 +1,7 @@
 """generate_image tool — cubepi.AgentTool (image generation + artifact registration).
 
 Factory pattern: call make_generate_image_tool(...) at agent-construction time.
-The tool calls the cubepi image-generation subsystem, writes the result to the
+The tool calls the supplied images_provider instance, writes the result to the
 sandbox, registers it as an artifact, and returns a downscaled copy to the model.
 """
 
@@ -10,17 +10,27 @@ from __future__ import annotations
 import base64
 import re
 import shlex
-from typing import Literal
+from typing import Any, Literal, Protocol
 
 from cubepi.agent.types import AgentTool, AgentToolResult
 from cubepi.providers.base import ImageContent, TextContent
-from cubepi.providers.images import generate_images
-from cubepi.providers.images.types import ImagesContext, ImagesModel
+from cubepi.providers.images.types import AssistantImages, ImagesContext, ImagesModel
 from pydantic import BaseModel, Field
 
 from cubebox.sandbox.base import Sandbox
 from cubebox.services.artifact_registration import register_artifact_from_sandbox
 from cubebox.services.attachments import resize_to_long_edge
+
+
+class _ImagesProvider(Protocol):
+    """Structural type for a cubepi images provider instance."""
+
+    async def generate_images(
+        self,
+        model: ImagesModel,
+        context: ImagesContext,
+        options: dict[str, Any] | None = None,
+    ) -> AssistantImages: ...
 
 
 class GenerateImageInput(BaseModel):
@@ -57,18 +67,14 @@ def make_generate_image_tool(
     workspace_id: str,
     conversation_id: str,
     sandbox: Sandbox,
+    images_provider: _ImagesProvider,
     images_model: ImagesModel,
-    api_key: str | None,
 ) -> AgentTool[GenerateImageInput]:
     """Build the generate_image cubepi.AgentTool with bound dependencies.
 
-    If images_model.api == 'openai-images', registers the OpenAI images provider
-    at construction time using the supplied api_key.
+    images_provider must be a per-run instance (e.g. OpenAIImagesProvider or
+    FauxImagesProvider) created by the caller — never the global registry.
     """
-    if images_model.api == "openai-images":
-        from cubepi.providers.images.openai_images import register_openai_images
-
-        register_openai_images(api_key=api_key)
 
     async def _execute(
         tool_call_id: str,
@@ -103,7 +109,7 @@ def make_generate_image_tool(
         # Build per-call model with requested size/quality.
         model = images_model.model_copy(update={"size": args.size, "quality": args.quality})
 
-        gen_result = await generate_images(
+        gen_result = await images_provider.generate_images(
             model, ImagesContext(prompt=args.prompt, input_images=input_images)
         )
 
