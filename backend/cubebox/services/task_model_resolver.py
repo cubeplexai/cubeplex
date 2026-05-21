@@ -19,6 +19,14 @@ if TYPE_CHECKING:
     from cubebox.llm.factory import LLMFactory
 
 
+def _slugify_ref_provider(ref: str) -> str:
+    """Normalize the provider segment of a ``provider/model-id`` ref to its slug."""
+    from cubebox.utils.slug import slugify
+
+    head, sep, tail = ref.partition("/")
+    return f"{slugify(head)}{sep}{tail}" if sep else ref
+
+
 async def resolve_task_model(factory: "LLMFactory", task: str) -> tuple[str, str, ProviderConfig]:
     """Resolve (provider_name, model_id, ProviderConfig) for ``task``.
 
@@ -48,11 +56,14 @@ async def resolve_task_model(factory: "LLMFactory", task: str) -> tuple[str, str
             merged = await _build_merged(factory)
             return _resolve_ref(merged, str(model_ref))
 
-    # 2. yaml fallback: config.llm.<task>_model.
+    # 2. yaml fallback: config.llm.<task>_model. The merged map is slug-keyed, but
+    #    the yaml ref uses the raw provider key — normalize its provider segment to
+    #    its slug (same as default_model/fallback_models). OrgSettings refs above are
+    #    already migrated to slug, so they are not normalized here.
     yaml_ref = getattr(factory.llm_config, f"{task}_model", None)
     if yaml_ref:
         merged = await _build_merged(factory)
-        return _resolve_ref(merged, str(yaml_ref))
+        return _resolve_ref(merged, _slugify_ref_provider(str(yaml_ref)))
 
     # 3. default.
     return await factory.resolve_default_provider_and_config()
