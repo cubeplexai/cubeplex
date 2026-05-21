@@ -92,8 +92,11 @@ caller (create service + migration), not in `slugify` itself.
   seeder also stores `slug = slugify(name)` on the rows it seeds, so the two
   paths agree.) So `merged.providers[slug]` resolves in both
   `LLMFactory.resolve_default_provider_and_config` and `task_model_resolver`.
-- No name fallback. A ref whose slug is unknown resolves to the global default
-  (the existing "unknown ref" behaviour), it does not try to match by name.
+- No name fallback. This feature changes the *identifier* (name → slug), not the
+  resolution fallback semantics: a ref whose slug is unknown behaves exactly as
+  the pre-existing unknown-ref path did for each consumer (`default_model`
+  already falls back to the global default; the task-model resolver surfaces the
+  error as it does today). We do **not** add any name-matching fallback.
 
 ### One-shot ref migration (OrgSettings)
 
