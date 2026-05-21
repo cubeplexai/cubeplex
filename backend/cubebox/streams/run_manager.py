@@ -625,6 +625,7 @@ class RunManager:
         #   → subagent
         #   → calculator/datetime
         #   → view_images
+        #   → generate_image  (sandbox-gated)
         #   → memory_*
         #   → load_skill
         #   → mcp_tools
@@ -711,6 +712,34 @@ class RunManager:
             )
         except Exception as _exc:
             logger.warning("view_images unavailable for cubepi run: {}", _exc)
+
+        # generate_image — sandbox-gated: only available when a code sandbox is active.
+        # Requires the OpenAI images API; resolves the api_key from the already-merged
+        # llm_config (populated by resolve_default_provider_and_config above).
+        if sandbox is not None:
+            try:
+                from cubepi.providers.images.types import ImagesModel
+
+                from cubebox.tools.builtin.generate_image import make_generate_image_tool
+
+                _images_model = ImagesModel(
+                    id="gpt-image-1",
+                    provider="openai",
+                    api="openai-images",
+                )
+                _openai_api_key = factory.resolve_openai_api_key()
+                _builtin_tools.append(
+                    make_generate_image_tool(
+                        org_id=ctx.org_id,
+                        workspace_id=ctx.workspace_id,
+                        conversation_id=conversation_id,
+                        sandbox=sandbox,
+                        images_model=_images_model,
+                        api_key=_openai_api_key,
+                    )
+                )
+            except Exception as _exc:
+                logger.warning("generate_image unavailable for cubepi run: {}", _exc)
 
         # MCP tools — per-workspace enabled HTTP MCP connectors. Reads from
         # the four-layer ``mcp_connector_installs`` / ``mcp_workspace_connector_states`` /
