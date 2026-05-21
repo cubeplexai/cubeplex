@@ -453,6 +453,7 @@
     "fallbackRemove": "Remove {model}",
     "noModels": "No models available. Add a provider and models on the Models page first.",
     "noMatchingModels": "No matching models",
+    "modelUnavailable": "Not usable",
     "save": "Save",
     "saving": "Saving…",
     "saved": "Saved",
