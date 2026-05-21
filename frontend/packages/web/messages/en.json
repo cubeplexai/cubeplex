@@ -307,6 +307,8 @@
     "livenessStatus": "Connection status",
     "providerType": "Provider type",
     "name": "Name",
+    "slug": "Slug",
+    "slugHint": "Stable identifier used in model refs (e.g. my-provider/model-id). Auto-derived from name; editable before saving.",
     "baseUrl": "Base URL",
     "authType": "Authentication",
     "authApiKey": "API Key",

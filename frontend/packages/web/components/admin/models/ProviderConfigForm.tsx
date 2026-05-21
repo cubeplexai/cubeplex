@@ -23,6 +23,14 @@ const PROVIDER_TYPES: readonly WireApi[] = [
   'anthropic-messages',
 ] as const
 
+function slugifyTs(name: string): string {
+  const s = name
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+  return s || 'provider'
+}
+
 // Radio choices for the editable auth field. bearer_token shares the api_key
 // wire shape, so it folds into 'api_key' in the radio (matching the old dialog).
 type AuthChoice = 'api_key' | 'none'
@@ -79,6 +87,10 @@ export function ProviderConfigForm({
   const [name, setName] = useState(() =>
     isCreate ? (preset?.display_name ?? '') : (provider?.name ?? ''),
   )
+  const [slug, setSlug] = useState(() =>
+    isCreate ? slugifyTs(preset?.display_name ?? '') : (provider?.slug ?? ''),
+  )
+  const [slugTouched, setSlugTouched] = useState(false)
   const [baseUrl, setBaseUrl] = useState(() =>
     isCreate ? (preset?.base_url ?? '') : (provider?.base_url ?? ''),
   )
@@ -136,6 +148,7 @@ export function ProviderConfigForm({
     if (isCreate && preset) {
       const body: ProviderCreate = {
         name: name.trim(),
+        slug: slug.trim() || undefined,
         provider_type: providerType,
         base_url: baseUrl.trim(),
         auth_type: authType,
@@ -168,7 +181,29 @@ export function ProviderConfigForm({
     <div className="flex flex-col gap-4">
       <div className="flex flex-col gap-1.5">
         <Label htmlFor="pcf-name">{t('name')}</Label>
-        <Input id="pcf-name" value={name} onChange={(e) => setName(e.target.value)} />
+        <Input
+          id="pcf-name"
+          value={name}
+          onChange={(e) => {
+            setName(e.target.value)
+            if (isCreate && !slugTouched) setSlug(slugifyTs(e.target.value))
+          }}
+        />
+      </div>
+
+      <div className="flex flex-col gap-1.5">
+        <Label htmlFor="cfg-slug">{t('slug')}</Label>
+        <Input
+          id="cfg-slug"
+          value={slug}
+          onChange={(e) => {
+            setSlug(e.target.value)
+            setSlugTouched(true)
+          }}
+          disabled={!isCreate}
+          aria-label={t('slug')}
+        />
+        {isCreate && <span className="text-[11px] text-muted-foreground">{t('slugHint')}</span>}
       </div>
 
       <div className="flex flex-col gap-1.5">

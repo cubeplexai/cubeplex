@@ -307,6 +307,8 @@
     "livenessStatus": "连接状态",
     "providerType": "Provider 类型",
     "name": "名称",
+    "slug": "Slug",
+    "slugHint": "用于模型引用的稳定标识符（如 my-provider/model-id），保存前可编辑，自动从名称派生。",
     "baseUrl": "Base URL",
     "authType": "认证方式",
     "authApiKey": "API Key",
