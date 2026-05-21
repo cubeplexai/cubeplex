@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { Eye, Hand, RefreshCw } from 'lucide-react'
 
 import { useBrowserLiveView } from '@/hooks/useBrowserLiveView'
+import { csrfHeaders } from '@/lib/csrf'
 
 // Ping the backend below the sandbox touch_interval (default 60s) so a long
 // takeover session — whose traffic goes straight to Neko — isn't TTL-reaped.
@@ -40,9 +41,11 @@ export function BrowserView({ workspaceId, enabled = true }: BrowserViewProps) {
   useEffect(() => {
     if (!workspaceId || !url) return
     const ping = () => {
+      // Must carry the CSRF token or CSRFMiddleware rejects the authenticated POST.
       void fetch(`/api/v1/ws/${workspaceId}/browser/keepalive`, {
         method: 'POST',
         credentials: 'include',
+        headers: csrfHeaders(),
       }).catch(() => {})
     }
     const id = setInterval(ping, KEEPALIVE_MS)
