@@ -17,8 +17,17 @@ import {
   ComboboxLabel,
   ComboboxList,
 } from '@/components/ui/combobox'
+import { ReadinessBadge } from '@/components/admin/models/ReadinessBadge'
 import { useAllModels, type ProviderModelOption } from '@/hooks/useAllModels'
 import { cn } from '@/lib/utils'
+
+// A model is selectable when it is enabled and not in a hard-error/unavailable
+// state. ready/degraded/stale stay usable; provider_error/model_error/unavailable
+// (or a disabled model) are shown but not selectable.
+function isUsable(opt: ProviderModelOption): boolean {
+  if (!opt.enabled) return false
+  return opt.readiness === 'ready' || opt.readiness === 'degraded' || opt.readiness === 'stale'
+}
 
 interface DraftState {
   defaultModel: string
@@ -208,8 +217,8 @@ export function OrgLLMSettingsCard() {
                     <ComboboxGroup key={g.providerName}>
                       <ComboboxLabel>{g.providerName}</ComboboxLabel>
                       {g.items.map((opt) => (
-                        <ComboboxItem key={opt.ref} value={opt.ref}>
-                          {opt.modelId}
+                        <ComboboxItem key={opt.ref} value={opt.ref} disabled={!isUsable(opt)}>
+                          <ModelOptionLabel opt={opt} />
                         </ComboboxItem>
                       ))}
                     </ComboboxGroup>
@@ -278,8 +287,8 @@ export function OrgLLMSettingsCard() {
                       <ComboboxGroup key={g.providerName}>
                         <ComboboxLabel>{g.providerName}</ComboboxLabel>
                         {g.items.map((opt) => (
-                          <ComboboxItem key={opt.ref} value={opt.ref}>
-                            {opt.modelId}
+                          <ComboboxItem key={opt.ref} value={opt.ref} disabled={!isUsable(opt)}>
+                            <ModelOptionLabel opt={opt} />
                           </ComboboxItem>
                         ))}
                       </ComboboxGroup>
@@ -326,6 +335,22 @@ export function OrgLLMSettingsCard() {
         </>
       )}
     </Card>
+  )
+}
+
+function ModelOptionLabel({ opt }: { opt: ProviderModelOption }) {
+  const t = useTranslations('adminSettings')
+  const usable = isUsable(opt)
+  return (
+    <span className="flex w-full items-center justify-between gap-2">
+      <span className={cn('truncate', !usable && 'text-muted-foreground')}>{opt.modelId}</span>
+      {!usable && (
+        <span className="flex shrink-0 items-center gap-1.5">
+          <ReadinessBadge readiness={opt.enabled ? opt.readiness : 'unavailable'} />
+          <span className="text-[11px] text-muted-foreground">{t('modelUnavailable')}</span>
+        </span>
+      )}
+    </span>
   )
 }
 
