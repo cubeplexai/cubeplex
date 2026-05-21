@@ -106,7 +106,10 @@ export function BrowserView({ workspaceId, enabled = true }: BrowserViewProps) {
               // reach it. `inert` removes it from the focus/interaction tree.
               inert={!takeover}
               tabIndex={takeover ? undefined : -1}
-              allow="clipboard-read; clipboard-write"
+              // fullscreen: a cross-origin iframe can't enter fullscreen without
+              // this delegation, so Neko's fullscreen button is otherwise a no-op.
+              allow="fullscreen; clipboard-read; clipboard-write"
+              allowFullScreen
             />
             {!takeover && (
               // Transparent input lock: captures pointer + keyboard so neither

@@ -142,13 +142,17 @@ ENV HOME=/workspace
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         xserver-xorg-core xserver-xorg-video-dummy x11-xserver-utils xauth \
-        openbox pulseaudio dbus-x11 supervisor \
+        openbox pulseaudio dbus-x11 supervisor xclip \
         libgtk-3-0 libxtst6 libxcvt0 \
         libgstreamer1.0-0 libgstreamer-plugins-base1.0-0 \
         gstreamer1.0-plugins-base gstreamer1.0-plugins-good \
         gstreamer1.0-plugins-bad gstreamer1.0-plugins-ugly gstreamer1.0-libav \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
+
+# agent-browser CLI: the agent drives the streamed Chromium via CDP with it
+# (`agent-browser connect 9222`). See the preinstalled `browser` skill.
+RUN npm install -g agent-browser
 
 # Neko runtime from the upstream image: server binary, configs, HTML5 client,
 # and the two custom Xorg modules (patched dummy video + the "neko" input driver
@@ -158,6 +162,11 @@ COPY --from=neko /etc/neko /etc/neko
 COPY --from=neko /var/www /var/www
 COPY --from=neko /usr/lib/xorg/modules/drivers/dummy_drv.so /usr/lib/xorg/modules/drivers/dummy_drv.so
 COPY --from=neko /usr/lib/xorg/modules/input/neko_drv.so /usr/lib/xorg/modules/input/neko_drv.so
+# Trim the embedded Neko client UI:
+# - hide the "open in new window" (popout) control — useless in the panel;
+# - hide the big n.eko logo on the connecting splash (keep the small spinner).
+# Keep clipboard + fullscreen.
+RUN sed -i 's#</head>#<style>.video-menu li:has(.fa-external-link-alt){display:none!important}.loading .logo{display:none!important}</style></head>#' /var/www/index.html
 
 # neko user at uid 1000. Remove a pre-existing uid-1000 user conditionally so the
 # build stays deterministic across base-image variants (never hard-fail).
