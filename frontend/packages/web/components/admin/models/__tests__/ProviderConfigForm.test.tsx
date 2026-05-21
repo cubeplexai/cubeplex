@@ -28,6 +28,7 @@ function makeProvider(over: Partial<Provider> = {}): Provider {
   return {
     id: 'prv_1',
     name: 'My OpenAI',
+    slug: 'my-openai',
     provider_type: 'openai-completions',
     base_url: 'https://api.openai.com/v1',
     auth_type: 'api_key',

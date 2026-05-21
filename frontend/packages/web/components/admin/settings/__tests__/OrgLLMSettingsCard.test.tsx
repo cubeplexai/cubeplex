@@ -30,12 +30,13 @@ function opt(over: Partial<ProviderModelOption>): ProviderModelOption {
   return {
     providerId: 'prv_1',
     providerName: 'Acme',
+    providerSlug: 'acme',
     providerLogoUrl: null,
     modelId: 'm-ready',
     displayName: 'm-ready',
     enabled: true,
     readiness: 'ready',
-    ref: 'Acme/m-ready',
+    ref: 'acme/m-ready',
     ...over,
   }
 }

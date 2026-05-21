@@ -53,6 +53,7 @@ export interface ProbeResult {
 export interface Provider {
   id: string
   name: string
+  slug: string
   provider_type: string
   base_url: string
   auth_type: 'api_key' | 'oauth' | 'bearer_token' | 'none'
@@ -102,6 +103,7 @@ export interface Model {
 
 export interface ProviderCreate {
   name: string
+  slug?: string
   provider_type?: string
   base_url: string
   auth_type?: string
