@@ -3,7 +3,7 @@
 from datetime import datetime
 from typing import Any, ClassVar
 
-from sqlalchemy import Column, UniqueConstraint
+from sqlalchemy import Column, Index, UniqueConstraint
 from sqlalchemy.types import JSON
 from sqlmodel import Field
 
@@ -15,12 +15,28 @@ class Provider(CubeboxBase, table=True):
 
     _PREFIX: ClassVar[str] = "prv"
     __tablename__ = "providers"
-    __table_args__ = (UniqueConstraint("org_id", "name", name="uq_provider_org_name"),)
+    __table_args__ = (
+        UniqueConstraint("org_id", "name", name="uq_provider_org_name"),
+        Index(
+            "uq_provider_org_slug",
+            "org_id",
+            "slug",
+            unique=True,
+            postgresql_where="org_id IS NOT NULL",
+        ),
+        Index(
+            "uq_provider_system_slug",
+            "slug",
+            unique=True,
+            postgresql_where="org_id IS NULL",
+        ),
+    )
 
     org_id: str | None = Field(
         default=None, foreign_key="organizations.id", max_length=20, index=True
     )
     name: str = Field(max_length=64)
+    slug: str = Field(max_length=64, index=True)
     provider_type: str = Field(default="openai-completions", max_length=32)
     base_url: str = Field(max_length=2048)
     auth_type: str = Field(default="api_key", max_length=32)

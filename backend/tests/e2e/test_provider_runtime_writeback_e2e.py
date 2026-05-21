@@ -34,9 +34,12 @@ async def _seed_provider_with_models(
 ) -> tuple[str, str, str]:
     """Insert a system-scoped (org-NULL) provider + two models. Returns
     (provider_id, model_a_db_id, model_b_db_id)."""
+    from cubebox.utils.slug import slugify
+
     provider = Provider(
         org_id=None,
         name=name,
+        slug=slugify(name),
         base_url="https://example.com/api",
         last_liveness_status=liveness_status,
     )

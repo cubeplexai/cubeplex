@@ -108,6 +108,7 @@ async def test_system_provider_readonly_on_update(db_session: AsyncSession) -> N
     p = Provider(
         org_id=None,
         name="system-openai",
+        slug="system-openai",
         base_url="https://api.openai.com",
         auth_type="api_key",
         created_by_user_id="system",
@@ -127,6 +128,7 @@ async def test_system_provider_readonly_on_delete(db_session: AsyncSession) -> N
     p = Provider(
         org_id=None,
         name="system-anthropic",
+        slug="system-anthropic",
         base_url="https://api.anthropic.com",
         auth_type="api_key",
         created_by_user_id="system",
