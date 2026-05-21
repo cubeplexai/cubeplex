@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import AsyncIterator, Callable
 from datetime import UTC, datetime
 from typing import Any
@@ -32,8 +33,11 @@ from cubebox.repositories.provider import ProviderRepository
 from cubebox.services import provider_probe
 from cubebox.services.credential import CredentialService
 from cubebox.services.provider_probe import ProbeResult, ProbeStep
+from cubebox.utils.slug import slugify
 
 _PROVIDER_KEY_KIND = "provider_api_key"
+
+_SLUG_RE = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
 
 # ProbeResult.overall → the model's persisted last_test_status.
 _OVERALL_TO_STATUS: dict[str, str] = {
@@ -54,6 +58,14 @@ class ProviderOAuthNotImplementedError(Exception):
 
 class ProviderNameConflictError(Exception):
     """Raised when provider name is duplicate in same scope."""
+
+
+class ProviderSlugConflictError(Exception):
+    """Raised when a provider slug already exists in the org."""
+
+
+class InvalidProviderSlugError(Exception):
+    """Raised when an explicitly-provided slug is malformed."""
 
 
 class ProviderSystemReadonlyError(Exception):
@@ -93,6 +105,24 @@ class ProviderService:
         self._session = session
         self.org_id = org_id
         self.actor_user_id = actor_user_id
+
+    async def _resolve_slug(self, name: str, explicit: str | None) -> str:
+        if explicit is not None:
+            if not _SLUG_RE.match(explicit) or len(explicit) > 64:
+                raise InvalidProviderSlugError(
+                    "slug must match ^[a-z0-9]+(-[a-z0-9]+)*$ and be <= 64 chars"
+                )
+            if await self._providers.get_by_slug(explicit) is not None:
+                raise ProviderSlugConflictError(f"Provider slug '{explicit}' already exists")
+            return explicit
+        base = slugify(name)
+        n = 1
+        while True:
+            suffix = "" if n == 1 else f"-{n}"
+            candidate = base[: 64 - len(suffix)] + suffix  # always fits the 64-char column
+            if await self._providers.get_by_slug(candidate) is None:
+                return candidate
+            n += 1
 
     def _check_not_system(self, provider: Provider) -> None:
         if provider.org_id is None:
@@ -139,6 +169,8 @@ class ProviderService:
         if existing is not None:
             raise ProviderNameConflictError(f"Provider name '{data.name}' already exists")
 
+        slug = await self._resolve_slug(data.name, data.slug)
+
         credential_id: str | None = None
         if data.auth_type != "none" and data.api_key:
             credential_id = await self._credentials.create(
@@ -150,6 +182,7 @@ class ProviderService:
         p = Provider(
             org_id=self.org_id,
             name=data.name,
+            slug=slug,
             provider_type=data.provider_type,
             base_url=data.base_url,
             auth_type=data.auth_type,

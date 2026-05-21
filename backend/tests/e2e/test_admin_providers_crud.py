@@ -297,3 +297,73 @@ async def test_provider_out_resolves_brand_logo_from_preset(
     got = (await client.get(f"/api/v1/admin/providers/{pid}")).json()
     assert got["logo"] == "anthropic"
     await client.delete(f"/api/v1/admin/providers/{pid}")
+
+
+async def test_create_provider_derives_slug_from_name(
+    admin_client: tuple[AsyncClient, str],
+) -> None:
+    client, _ = admin_client
+    body = {
+        "name": "My DeepSeek",
+        "provider_type": "openai-completions",
+        "base_url": "https://x.test/v1",
+        "auth_type": "api_key",
+        "api_key": "k",
+    }
+    r = await client.post("/api/v1/admin/providers", json=body)
+    assert r.status_code == 201, r.text
+    assert r.json()["slug"] == "my-deepseek"
+    await client.delete(f"/api/v1/admin/providers/{r.json()['id']}")
+
+
+async def test_create_provider_explicit_slug_and_conflict(
+    admin_client: tuple[AsyncClient, str],
+) -> None:
+    client, _ = admin_client
+    base = {
+        "provider_type": "openai-completions",
+        "base_url": "https://x.test/v1",
+        "auth_type": "api_key",
+        "api_key": "k",
+    }
+    r1 = await client.post("/api/v1/admin/providers", json={**base, "name": "A", "slug": "shared"})
+    assert r1.status_code == 201
+    assert r1.json()["slug"] == "shared"
+    r2 = await client.post("/api/v1/admin/providers", json={**base, "name": "B", "slug": "shared"})
+    assert r2.status_code == 409
+    await client.delete(f"/api/v1/admin/providers/{r1.json()['id']}")
+
+
+async def test_create_provider_auto_slug_suffixes_on_collision(
+    admin_client: tuple[AsyncClient, str],
+) -> None:
+    client, _ = admin_client
+    base = {
+        "provider_type": "openai-completions",
+        "base_url": "https://x.test/v1",
+        "auth_type": "api_key",
+        "api_key": "k",
+    }
+    r1 = await client.post("/api/v1/admin/providers", json={**base, "name": "Dup Name"})
+    r2 = await client.post("/api/v1/admin/providers", json={**base, "name": "Dup  Name"})
+    assert {r1.json()["slug"], r2.json()["slug"]} == {"dup-name", "dup-name-2"}
+    await client.delete(f"/api/v1/admin/providers/{r1.json()['id']}")
+    await client.delete(f"/api/v1/admin/providers/{r2.json()['id']}")
+
+
+@pytest.mark.parametrize("bad", ["Has Space", "UPPER", "trailing-", "has/slash", ""])
+async def test_create_provider_rejects_malformed_explicit_slug(
+    admin_client: tuple[AsyncClient, str],
+    bad: str,
+) -> None:
+    client, _ = admin_client
+    body = {
+        "name": "Whatever",
+        "provider_type": "openai-completions",
+        "base_url": "https://x.test/v1",
+        "auth_type": "api_key",
+        "api_key": "k",
+        "slug": bad,
+    }
+    r = await client.post("/api/v1/admin/providers", json=body)
+    assert r.status_code == 422

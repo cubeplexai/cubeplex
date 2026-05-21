@@ -55,6 +55,24 @@ class ProviderRepository:
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
 
+    async def get_by_slug(self, slug: str) -> Provider | None:
+        # Spans the org bucket + the system (org_id NULL) bucket. App-level
+        # uniqueness keeps these from colliding, but order org-scoped first and
+        # take one row defensively (the DB partial indexes don't forbid a cross-
+        # bucket duplicate, so never let this raise MultipleResultsFound).
+        stmt = (
+            select(Provider)
+            .where(
+                (Provider.org_id.is_(None))  # type: ignore[union-attr]
+                | (Provider.org_id == self.org_id)
+            )
+            .where(Provider.slug == slug)  # type: ignore[arg-type]
+            .order_by(Provider.org_id.is_(None))  # type: ignore[union-attr]  # org-scoped (False) before system (True)
+            .limit(1)
+        )
+        result = await self.session.execute(stmt)
+        return result.scalars().first()
+
     async def add(self, provider: Provider) -> Provider:
         provider.org_id = self.org_id
         self.session.add(provider)
