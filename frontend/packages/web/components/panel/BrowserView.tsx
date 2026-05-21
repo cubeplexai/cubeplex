@@ -1,9 +1,13 @@
 'use client'
 
-import { useCallback, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Eye, Hand, RefreshCw } from 'lucide-react'
 
 import { useBrowserLiveView } from '@/hooks/useBrowserLiveView'
+
+// Ping the backend below the sandbox touch_interval (default 60s) so a long
+// takeover session — whose traffic goes straight to Neko — isn't TTL-reaped.
+const KEEPALIVE_MS = 45_000
 
 interface BrowserViewProps {
   workspaceId: string | null
@@ -30,6 +34,20 @@ export function BrowserView({ workspaceId, enabled = true }: BrowserViewProps) {
     e.preventDefault()
     e.stopPropagation()
   }, [])
+
+  // Keep the sandbox alive while the live view is open (iframe traffic bypasses
+  // the backend, so without this a long takeover could be TTL-reaped).
+  useEffect(() => {
+    if (!workspaceId || !url) return
+    const ping = () => {
+      void fetch(`/api/v1/ws/${workspaceId}/browser/keepalive`, {
+        method: 'POST',
+        credentials: 'include',
+      }).catch(() => {})
+    }
+    const id = setInterval(ping, KEEPALIVE_MS)
+    return () => clearInterval(id)
+  }, [workspaceId, url])
 
   if (!workspaceId) return null
 

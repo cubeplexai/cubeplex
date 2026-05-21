@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 
 from cubebox.auth.context import RequestContext
@@ -39,6 +39,10 @@ async def get_live_view(
         workspace_id=ctx.workspace_id,
     )
     await sandbox.start_browser()
+    # Live-view / takeover traffic goes straight to Neko and bypasses the normal
+    # per-tool activity updates, so mark the sandbox active here too (the
+    # frontend also pings /keepalive while the view is open).
+    await manager.touch(sandbox.id, org_id=ctx.org_id, workspace_id=ctx.workspace_id)
     endpoint = await sandbox.get_browser_endpoint()
     if endpoint.headers:
         # The endpoint requires request headers a browser cannot attach to an
@@ -49,3 +53,21 @@ async def get_live_view(
             detail="sandbox browser endpoint requires header auth; same-origin proxy not yet implemented",
         )
     return BrowserLiveViewResponse(url=endpoint.url)
+
+
+@router.post("/keepalive", status_code=status.HTTP_204_NO_CONTENT)
+async def keepalive(
+    ctx: Annotated[RequestContext, Depends(require_member)],
+) -> None:
+    """Mark the sandbox active during a live-view/takeover session.
+
+    Browser traffic goes directly to Neko, so without this a long human takeover
+    (OAuth + 2FA, etc.) could be reaped by TTL cleanup. The frontend pings this
+    on an interval while the live view is open."""
+    manager = get_sandbox_manager()
+    sandbox = await manager.get_or_create(
+        ctx.user.id,
+        org_id=ctx.org_id,
+        workspace_id=ctx.workspace_id,
+    )
+    await manager.touch(sandbox.id, org_id=ctx.org_id, workspace_id=ctx.workspace_id)

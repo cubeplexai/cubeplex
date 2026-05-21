@@ -9,7 +9,11 @@ set -eu
 
 PIDFILE=/var/run/neko-supervisord.pid
 
-if [ -S /var/run/supervisor.sock ] && supervisorctl status >/dev/null 2>&1; then
+SUPERVISORD_CONF=/etc/neko/supervisord.conf
+
+# Idempotency check must target the same supervisord (config/socket) we start
+# below; a bare `supervisorctl` uses its own default and would mis-detect.
+if [ -S /var/run/supervisor.sock ] && supervisorctl -c "$SUPERVISORD_CONF" status >/dev/null 2>&1; then
     echo "neko stack already running"
     exit 0
 fi
