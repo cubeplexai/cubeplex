@@ -11,6 +11,11 @@ vi.mock('@/components/admin/models/ProviderLogo', () => ({
   ProviderLogo: () => null,
 }))
 
+// The page uses useRouter() (Add provider → /admin/models/new); stub it.
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({ push: vi.fn() }),
+}))
+
 const fakeClient = {
   get: vi.fn(async () => ({ ok: true, json: async () => [] })),
 } as unknown as ApiClient

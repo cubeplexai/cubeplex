@@ -68,6 +68,9 @@ export interface Provider {
   created_at: string
   updated_at: string
   preset_slug?: string | null
+  logo?: string | null
+  capability?: Record<string, unknown>
+  model_capability_overrides?: Record<string, unknown>
   last_liveness_status?: string | null
   last_liveness_at?: string | null
 }

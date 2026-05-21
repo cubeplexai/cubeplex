@@ -274,3 +274,26 @@ async def test_create_provider_persists_capability(
     assert got["preset_slug"] == "anthropic"
     assert got["capability"] == cap
     await client.delete(f"/api/v1/admin/providers/{pid}")
+
+
+async def test_provider_out_resolves_brand_logo_from_preset(
+    admin_client: tuple[AsyncClient, str],
+) -> None:
+    """A provider with a known preset_slug exposes its brand-icon id as `logo`."""
+    client, _ = admin_client
+    res = await client.post(
+        "/api/v1/admin/providers",
+        json={
+            "name": "logo-resolve-e2e",
+            "provider_type": "anthropic-messages",
+            "base_url": "https://example.com",
+            "auth_type": "api_key",
+            "api_key": "sk-x",
+            "preset_slug": "anthropic",
+        },
+    )
+    assert res.status_code == 201
+    pid = res.json()["id"]
+    got = (await client.get(f"/api/v1/admin/providers/{pid}")).json()
+    assert got["logo"] == "anthropic"
+    await client.delete(f"/api/v1/admin/providers/{pid}")

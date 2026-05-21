@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Annotated
 
+from cubepi.providers.catalog import get_provider_preset
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy import func, select
@@ -142,6 +143,16 @@ def _model_readiness_out(m: Model, p: Provider) -> ModelReadinessOut:
     )
 
 
+def _resolve_logo(preset_slug: str | None) -> str | None:
+    """Resolve the brand-icon id from the preset catalog. None if unknown."""
+    if not preset_slug:
+        return None
+    try:
+        return get_provider_preset(preset_slug).logo
+    except Exception:
+        return None
+
+
 def _provider_out(
     p: Provider,
     model_count: int = 0,
@@ -164,6 +175,7 @@ def _provider_out(
         extra_body=p.extra_body,
         extra_headers=p.extra_headers,
         preset_slug=p.preset_slug,
+        logo=_resolve_logo(p.preset_slug),
         capability=p.capability or {},
         model_capability_overrides=p.model_capability_overrides or {},
         last_liveness_at=utc_isoformat(p.last_liveness_at) if p.last_liveness_at else None,

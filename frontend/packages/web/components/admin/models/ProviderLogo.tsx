@@ -2,12 +2,14 @@ import Image from 'next/image'
 import type { ComponentType, SVGProps } from 'react'
 import {
   Anthropic,
+  ChatGLM,
   DeepSeek,
   Doubao,
   Fireworks,
   Groq,
   HuggingFace,
   LmStudio,
+  Minimax,
   Mistral,
   Moonshot,
   Ollama,
@@ -57,6 +59,8 @@ const BRAND_ICONS: Record<string, BrandIcon> = {
   fireworks: Fireworks.Color,
   lmstudio: LmStudio,
   huggingface: HuggingFace.Color,
+  zhipu: ChatGLM.Color,
+  minimax: Minimax.Color,
 }
 
 function hashName(name: string): number {

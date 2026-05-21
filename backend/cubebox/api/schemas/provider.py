@@ -166,6 +166,9 @@ class ProviderOut(BaseModel):
     extra_body: dict[str, Any]
     extra_headers: dict[str, Any]
     preset_slug: str | None = None
+    # Brand-icon id resolved from the preset catalog so the configured-only
+    # provider UI can render the brand glyph without fetching presets.
+    logo: str | None = None
     capability: dict[str, Any] = Field(default_factory=dict)
     model_capability_overrides: dict[str, Any] = Field(default_factory=dict)
     # Provider-level liveness/credential status (spec §4.1). UTC-offset ISO string.

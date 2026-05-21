@@ -28,7 +28,7 @@ export function ProviderCard({ provider, active, onClick }: ProviderCardProps) {
       )}
     >
       <div className="flex items-center gap-2.5">
-        <ProviderLogo name={provider.name} logoUrl={provider.logo_url} />
+        <ProviderLogo name={provider.name} logoUrl={provider.logo_url} logo={provider.logo} />
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-1.5">
             <span className="truncate text-sm font-semibold">{provider.name}</span>

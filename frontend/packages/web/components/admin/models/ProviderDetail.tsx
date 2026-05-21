@@ -184,7 +184,12 @@ export function ProviderDetail({
   return (
     <div className="flex w-full flex-col gap-5 p-6" data-testid="provider-detail-panel">
       <header className="flex items-start gap-4">
-        <ProviderLogo name={provider.name} logoUrl={provider.logo_url} size="lg" />
+        <ProviderLogo
+          name={provider.name}
+          logoUrl={provider.logo_url}
+          logo={provider.logo}
+          size="lg"
+        />
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
             <span
@@ -393,7 +398,7 @@ export function ProviderDetail({
         open={editOpen}
         onOpenChange={setEditOpen}
         provider={provider}
-        onSave={(body) => handleEditSave(body as ProviderUpdate)}
+        onSave={handleEditSave}
       />
 
       <ModelFormDialog

@@ -1,16 +1,16 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
+import { useRouter } from 'next/navigation'
 import { useTranslations } from 'next-intl'
 import { createApiClient, useModelsStore, useProvidersStore } from '@cubebox/core'
 import { ModelsToolbar, type ProviderKind } from '@/components/admin/models/ModelsToolbar'
 import { ProviderList } from '@/components/admin/models/ProviderList'
 import { ProviderDetail } from '@/components/admin/models/ProviderDetail'
-import { ProviderFormDialog } from '@/components/admin/models/ProviderFormDialog'
-import type { ProviderCreate } from '@cubebox/core'
 
 export default function ModelsPage() {
   const t = useTranslations('adminModels')
+  const router = useRouter()
   const client = useMemo(() => createApiClient(''), [])
   const {
     providers,
@@ -19,7 +19,6 @@ export default function ModelsPage() {
     error,
     fetchProviders,
     selectProvider,
-    createProvider,
     updateProvider,
     deleteProvider,
   } = useProvidersStore()
@@ -36,7 +35,6 @@ export default function ModelsPage() {
 
   const [query, setQuery] = useState('')
   const [kind, setKind] = useState<ProviderKind>('all')
-  const [createOpen, setCreateOpen] = useState(false)
 
   useEffect(() => {
     void fetchProviders(client)
@@ -62,11 +60,6 @@ export default function ModelsPage() {
 
   const selectedProvider = providers.find((p) => p.id === selectedId) ?? null
 
-  async function handleCreate(body: ProviderCreate) {
-    const created = await createProvider(client, body)
-    selectProvider(created.id)
-  }
-
   return (
     <div className="flex h-full flex-col">
       <header className="border-b border-border/70 px-6 py-4">
@@ -79,7 +72,7 @@ export default function ModelsPage() {
         kind={kind}
         onQueryChange={setQuery}
         onKindChange={setKind}
-        onAddClick={() => setCreateOpen(true)}
+        onAddClick={() => router.push('/admin/models/new')}
       />
 
       <div className="flex flex-1 overflow-hidden">
@@ -121,16 +114,6 @@ export default function ModelsPage() {
           )}
         </section>
       </div>
-
-      <ProviderFormDialog
-        open={createOpen}
-        onOpenChange={setCreateOpen}
-        provider={null}
-        onSave={async (body) => {
-          await handleCreate(body as ProviderCreate)
-          setCreateOpen(false)
-        }}
-      />
     </div>
   )
 }
