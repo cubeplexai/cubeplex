@@ -25,6 +25,8 @@
 - **Modify** `backend/cubebox/seeders/provider_seeder.py` — set `slug = slugify(name)` on seed create + update.
 - **Modify** `backend/cubebox/llm/factory.py` — key merged config by slug; rename `_parse_model_ref` return.
 - **Modify** `backend/cubebox/services/task_model_resolver.py` — variable rename (provider_name → slug).
+- **Modify** `backend/cubebox/services/provider_service.py` — also `_validate_model_ref` (settings-save write path) → slug + `get_by_slug`.
+- **Modify** `backend/cubebox/llm/runtime_writeback.py` — resolve provider by slug, not name.
 - **Modify** `frontend/packages/core/src/types/provider.ts` — `Provider.slug`.
 - **Modify** `frontend/packages/web/hooks/useAllModels.ts` — `ref = ${slug}/${modelId}` + `providerSlug`.
 - **Modify** `frontend/packages/web/components/admin/models/ProviderConfigForm.tsx` — editable slug field (create) / read-only (edit).
@@ -115,14 +117,36 @@ git commit -m "feat(provider): add slugify helper"
 
 This task adds the field to the SQLModel only. The DB migration is Task 3; do not run the app against an un-migrated DB between these tasks.
 
-- [ ] **Step 1: Add the column + constraint**
+- [ ] **Step 1: Add the column + constraints**
 
-In `backend/cubebox/models/provider.py`, change the `Provider` table args and add the field after `name`:
+A single `UniqueConstraint("org_id", "slug")` does **not** enforce uniqueness for
+system providers (Postgres treats `NULL` org_ids as distinct). Mirror the
+credential-vault pattern (`models/credential.py`): two **partial unique
+indexes** — one for the org bucket, one for the system bucket. Add `Index` to
+the SQLAlchemy import.
+
+In `backend/cubebox/models/provider.py`:
+
+```python
+from sqlalchemy import Column, Index, UniqueConstraint  # add Index
+```
 
 ```python
     __table_args__ = (
         UniqueConstraint("org_id", "name", name="uq_provider_org_name"),
-        UniqueConstraint("org_id", "slug", name="uq_provider_org_slug"),
+        Index(
+            "uq_provider_org_slug",
+            "org_id",
+            "slug",
+            unique=True,
+            postgresql_where="org_id IS NOT NULL",
+        ),
+        Index(
+            "uq_provider_system_slug",
+            "slug",
+            unique=True,
+            postgresql_where="org_id IS NULL",
+        ),
     )
 
     org_id: str | None = Field(
@@ -193,19 +217,28 @@ def upgrade() -> None:
     used: dict[object, set[str]] = defaultdict(set)
     upd = sa.text("UPDATE providers SET slug = :slug WHERE id = :id")
     for row in rows:
-        base = _slugify(row.name)
+        base = _slugify(row.name)[:60]  # leave room for a "-NN" suffix within the 64-char column
         candidate = base
         n = 2
-        while candidate in used[row.org_id]:
+        while candidate in used[row.org_id]:  # org_id None => the system bucket, deduped on its own
             candidate = f"{base}-{n}"
             n += 1
         used[row.org_id].add(candidate)
         bind.execute(upd, {"slug": candidate, "id": row.id})
 
-    # 3. NOT NULL + unique constraint + index
+    # 3. NOT NULL + index + partial unique indexes (org bucket + system bucket).
+    #    Two partial indexes (not one composite constraint) so the org_id=NULL
+    #    system bucket is also uniquely constrained. Mirrors models/credential.py.
     op.alter_column("providers", "slug", existing_type=sa.String(length=64), nullable=False)
     op.create_index("ix_providers_slug", "providers", ["slug"])
-    op.create_unique_constraint("uq_provider_org_slug", "providers", ["org_id", "slug"])
+    op.create_index(
+        "uq_provider_org_slug", "providers", ["org_id", "slug"],
+        unique=True, postgresql_where=sa.text("org_id IS NOT NULL"),
+    )
+    op.create_index(
+        "uq_provider_system_slug", "providers", ["slug"],
+        unique=True, postgresql_where=sa.text("org_id IS NULL"),
+    )
 
     # 4. rewrite OrgSettings refs name->slug, per org
     #    refs can point at system providers (org_id NULL) too, so the name->slug
@@ -261,12 +294,19 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_constraint("uq_provider_org_slug", "providers", type_="unique")
+    op.drop_index("uq_provider_system_slug", table_name="providers")
+    op.drop_index("uq_provider_org_slug", table_name="providers")
     op.drop_index("ix_providers_slug", table_name="providers")
     op.drop_column("providers", "slug")
 ```
 
 > Note: `org_settings.value` is a JSON column; depending on the driver `bind.execute` returns it as a `dict` already (handled by the `isinstance` guard).
+>
+> **Cross-bucket note:** an org provider and a system provider may share a slug
+> (e.g. both `deepseek`) — the two partial indexes allow this, and at resolution
+> the merged config has the org provider override the system one for that slug
+> (same override semantics as today's name-based merge). The per-org backfill is
+> therefore correct; do not try to globally de-duplicate across buckets.
 
 - [ ] **Step 3: Apply the migration to the worktree DB**
 
@@ -275,8 +315,11 @@ Expected: runs the new revision with no error.
 
 - [ ] **Step 4: Verify the column + a sample slug**
 
-Run: `cd backend && set -a && source ../.worktree.env && set +a && uv run python -c "import asyncio; from sqlalchemy import text; from cubebox.db import engine; asyncio.run(_run()) if False else None" 2>/dev/null; psql "$CUBEBOX_DATABASE__URL" -c "SELECT name, slug FROM providers LIMIT 5;" 2>/dev/null || echo "use docker psql"`
-Alternatively (always works): connect to the worktree DB and run `SELECT name, slug, org_id FROM providers ORDER BY name;` — expect every row has a non-null slug; `DeepSeek (Anthropic shape)` → `deepseek-anthropic-shape`; `deepseek` → `deepseek`.
+The worktree env exposes `CUBEBOX_DATABASE__NAME` (not a full URL). Query via the
+shared docker Postgres:
+
+Run: `source backend/../.worktree.env 2>/dev/null; docker exec -e PGPASSWORD=postgres infra-postgresql psql -h localhost -U postgres -d "$CUBEBOX_DATABASE__NAME" -c "SELECT name, slug, org_id FROM providers ORDER BY name;"`
+Expected: every row has a non-null slug; `DeepSeek (Anthropic shape)` → `deepseek-anthropic-shape`; `deepseek` → `deepseek`.
 
 - [ ] **Step 5: Commit**
 
@@ -325,6 +368,14 @@ async def test_create_provider_auto_slug_suffixes_on_collision(admin_client) -> 
     r1 = await admin_client.post("/api/v1/admin/providers", json={**base, "name": "Dup Name"})
     r2 = await admin_client.post("/api/v1/admin/providers", json={**base, "name": "Dup  Name"})
     assert {r1.json()["slug"], r2.json()["slug"]} == {"dup-name", "dup-name-2"}
+
+
+@pytest.mark.parametrize("bad", ["Has Space", "UPPER", "trailing-", "has/slash", ""])
+async def test_create_provider_rejects_malformed_explicit_slug(admin_client, bad) -> None:
+    body = {"name": "Whatever", "provider_type": "openai-completions",
+            "base_url": "https://x.test/v1", "auth_type": "api_key", "api_key": "k", "slug": bad}
+    r = await admin_client.post("/api/v1/admin/providers", json=body)
+    assert r.status_code == 422
 ```
 
 - [ ] **Step 2: Run to verify they fail**
@@ -378,14 +429,27 @@ class ProviderSlugConflictError(Exception):
 Add a private helper and use it in `create_provider` (insert after the existing name-conflict check, before building the `Provider`):
 
 ```python
+    import re
     from cubebox.utils.slug import slugify  # add to module imports at top
 
+    _SLUG_RE = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")  # module-level constant
+
+
+class InvalidProviderSlugError(Exception):
+    """Raised when an explicitly-provided slug is malformed."""
+```
+
+```python
     async def _resolve_slug(self, name: str, explicit: str | None) -> str:
         if explicit is not None:
+            if not _SLUG_RE.match(explicit) or len(explicit) > 64:
+                raise InvalidProviderSlugError(
+                    "slug must match ^[a-z0-9]+(-[a-z0-9]+)*$ and be <= 64 chars"
+                )
             if await self._providers.get_by_slug(explicit) is not None:
                 raise ProviderSlugConflictError(f"Provider slug '{explicit}' already exists")
             return explicit
-        base = slugify(name)
+        base = slugify(name)[:60]  # leave room for a "-NN" suffix within the 64-char column
         candidate = base
         n = 2
         while await self._providers.get_by_slug(candidate) is not None:
@@ -406,7 +470,14 @@ and pass `slug=slug` into the `Provider(...)` constructor.
 
 In `backend/cubebox/api/routes/v1/admin_providers.py`:
 - In `_provider_out`, add `slug=p.slug,` to the `ProviderOut(...)` construction.
-- Import `ProviderSlugConflictError` from `provider_service` (add to the existing import block) and add an exception handler / `except` mapping to `HTTPException(status_code=409, detail="provider_slug_conflict")` wherever `ProviderNameConflictError` is already mapped to 409 (mirror it).
+- Import `ProviderSlugConflictError` and `InvalidProviderSlugError` from `provider_service` (add to the existing import block). In the POST `/providers` handler, mirror the existing `ProviderNameConflictError` 409 mapping — the detail is an **object**, not a string:
+
+```python
+    except ProviderSlugConflictError as e:
+        raise HTTPException(status_code=409, detail={"code": "provider_slug_conflict"}) from e
+    except InvalidProviderSlugError as e:
+        raise HTTPException(status_code=422, detail={"code": "invalid_provider_slug"}) from e
+```
 
 - [ ] **Step 7: Run tests to verify they pass**
 
@@ -464,11 +535,17 @@ git commit -m "feat(provider): seeder stores slug=slugify(name)"
 
 ---
 
-## Task 6: Resolver — key merged config by slug
+## Task 6: Resolve & validate model refs by slug (everywhere)
+
+This task switches **every** model-ref consumer from name to slug — read path
+(resolver), write-path validation (settings save), and runtime writeback. Missing
+any one leaves a half-cutover where refs silently fail.
 
 **Files:**
-- Modify: `backend/cubebox/llm/factory.py:122,156,159-183,217-233`
-- Modify: `backend/cubebox/services/task_model_resolver.py:30-34`
+- Modify: `backend/cubebox/llm/factory.py` — `_load_db_provider_configs` (key by slug), `_build_merged_config` (key by slug), `_parse_model_ref` (docstring)
+- Modify: `backend/cubebox/services/task_model_resolver.py:30-34` (var rename)
+- Modify: `backend/cubebox/services/provider_service.py:556-562` — `_validate_model_ref` uses slug + `get_by_slug` (write path: saving `default_model`/`fallback_models`/`task_models`)
+- Modify: `backend/cubebox/llm/runtime_writeback.py:126-136` — resolve provider by slug, not name
 - Test: `backend/tests/` (factory resolver test — add to the existing factory test module if present, else create `backend/tests/unit/test_factory_slug_resolve.py`)
 
 - [ ] **Step 1: Write a failing resolver test**
@@ -496,7 +573,8 @@ Expected: PASS (parse logic is identical; only its meaning changes). This test g
 
 - [ ] **Step 3: Key `db_configs` by slug**
 
-In `factory.py` `_build_db_configs`, change the dict key from name to slug, and rename the returned set:
+In `factory.py` `_load_db_provider_configs` (the method that returns
+`(db_configs, db_names)`), change the dict key from name to slug, and rename the returned set:
 
 ```python
             db_configs[p.slug] = {
@@ -554,6 +632,37 @@ In `task_model_resolver.py` `_resolve_ref`, rename `provider_name` → `slug`:
         return slug, model_id, provider_config
 ```
 
+- [ ] **Step 5b: Write-path — validate saved settings refs by slug**
+
+`provider_service._validate_model_ref` is called from `update_llm_settings` when
+an admin saves `default_model` / `fallback_models` / `task_models`. It currently
+looks the provider up by name; after the cutover the ref is slug-based. Change it
+to parse the slug and use `get_by_slug` (no name fallback):
+
+```python
+    async def _validate_model_ref(self, model_ref: str) -> None:
+        parts = model_ref.split("/", 1)
+        if len(parts) != 2 or not parts[0] or not parts[1]:
+            raise ValueError(f"Invalid model ref '{model_ref}'. Expected 'slug/model-id'")
+        slug, _model_id = parts
+        provider = await self._providers.get_by_slug(slug)
+        if provider is None:
+            raise ValueError(f"Provider slug '{slug}' not found")
+```
+
+(Keep any existing model-id existence check that follows; only the provider
+lookup switches from `get_by_name(provider_name)` to `get_by_slug(slug)`.)
+
+- [ ] **Step 5c: Runtime writeback — resolve by slug**
+
+`runtime_writeback.py` resolves the provider the resolver selected so it can
+write back liveness/test status. The resolver now hands it a **slug** (it used to
+be the name). In the `_resolve_provider_id` helper (around line 126-136), rename
+the `provider_name` parameter to `provider_slug` and switch
+`repo.get_by_name(provider_name)` → `repo.get_by_slug(provider_slug)`. Update the
+two call sites in the same file that pass `provider_name=...` to pass the slug the
+resolver returned (the variable is already the resolver's first return value).
+
 - [ ] **Step 6: Run tests**
 
 Run: `cd backend && set -a && source ../.worktree.env && set +a && uv run pytest tests/unit/test_factory_slug_resolve.py tests/ -k "factory or resolver or default_model or task_model" -q && uv run mypy cubebox/`
@@ -562,8 +671,8 @@ Expected: PASS + mypy clean. (If pre-existing factory tests reference name-based
 - [ ] **Step 7: Commit**
 
 ```bash
-git add backend/cubebox/llm/factory.py backend/cubebox/services/task_model_resolver.py backend/tests/
-git commit -m "feat(provider): resolve model refs by provider slug (merged config keyed by slug)"
+git add backend/cubebox/llm/factory.py backend/cubebox/services/task_model_resolver.py backend/cubebox/services/provider_service.py backend/cubebox/llm/runtime_writeback.py backend/tests/
+git commit -m "feat(provider): resolve & validate model refs by provider slug everywhere"
 ```
 
 ---
@@ -575,13 +684,13 @@ git commit -m "feat(provider): resolve model refs by provider slug (merged confi
 - Modify: `frontend/packages/web/hooks/useAllModels.ts:7-16,60-80`
 - Test: `frontend/packages/web/hooks/__tests__/useAllModels.test.ts` (if present; else assert via an existing picker test)
 
-- [ ] **Step 1: Add `slug` to the core Provider type**
+- [ ] **Step 1: Add `slug` to the core Provider + ProviderCreate types**
 
-In `frontend/packages/core/src/types/provider.ts`, add to the `Provider` interface (near `name`):
-
-```ts
-  slug: string
-```
+In `frontend/packages/core/src/types/provider.ts`:
+- add to the `Provider` (read) interface, near `name`: `slug: string`
+- add to the `ProviderCreate` (write) interface: `slug?: string` (optional — the
+  form sends it only in create mode; the backend derives it when omitted). Do
+  **not** add slug to `ProviderUpdate` (immutable).
 
 Rebuild core: `cd frontend && pnpm --filter @cubebox/core build`.
 
@@ -662,7 +771,7 @@ Add, right after the name field:
 </div>
 ```
 
-Add `slug: slug.trim() || undefined` to the `ProviderCreate` body in create mode (omit from the `ProviderUpdate` body — slug is immutable). Add `adminModels.wizard.configure.slug` + `slugHint` keys to `messages/en.json` and `messages/zh.json` (parity hook).
+Add `slug: slug.trim() || undefined` to the `ProviderCreate` body in create mode (omit from the `ProviderUpdate` body — slug is immutable). The field uses `t('slug')` / `t('slugHint')` where `t = useTranslations('adminModels')` (same translator as the `name` field), so add the keys at **`adminModels.slug`** and **`adminModels.slugHint`** in `messages/en.json` and `messages/zh.json` (parity hook). Do NOT put them under `adminModels.wizard.configure`.
 
 - [ ] **Step 3: Show slug on the detail panel**
 
@@ -684,7 +793,31 @@ async def test_provider_slug_round_trips(admin_client) -> None:
     assert created["slug"] == "round-trip"
     fetched = (await admin_client.get(f"/api/v1/admin/providers/{created['id']}")).json()
     assert fetched["slug"] == "round-trip"
+
+
+async def test_default_model_accepts_slug_ref_and_rejects_unknown(admin_client) -> None:
+    # create provider + model, then set default_model by slug ref (write-path
+    # validation must resolve the provider by slug, not name).
+    pbody = {"name": "Routed Provider", "provider_type": "openai-completions",
+             "base_url": "https://x.test/v1", "auth_type": "api_key", "api_key": "k"}
+    prov = (await admin_client.post("/api/v1/admin/providers", json=pbody)).json()
+    assert prov["slug"] == "routed-provider"
+    mbody = {"model_id": "m-1", "display_name": "M1", "context_window": 8000, "max_tokens": 1000}
+    await admin_client.post(f"/api/v1/admin/providers/{prov['id']}/models", json=mbody)
+
+    ok = await admin_client.put(
+        "/api/v1/admin/llm-settings", json={"default_model": "routed-provider/m-1"}
+    )
+    assert ok.status_code == 200, ok.text
+    bad = await admin_client.put(
+        "/api/v1/admin/llm-settings", json={"default_model": "Routed Provider/m-1"}
+    )
+    assert bad.status_code >= 400  # the old display-name ref no longer resolves
 ```
+
+(Adjust the llm-settings route path / request body to match the real
+`OrgLLMSettingsUpdate` endpoint in `admin_providers.py` — confirm the verb and
+shape before writing.)
 
 - [ ] **Step 6: Verify**
 
@@ -723,5 +856,8 @@ PR base = `main` (this is a fresh feature off main, not a stacked slice). Tag `@
 
 - **Spec coverage:** schema+constraint (T2/T3), slugify (T1), backfill + per-org collision (T3), ProviderCreate.slug + derive/suffix + 409 (T4), ProviderUpdate omits slug / immutable (T4 + T8 edit read-only), ProviderOut.slug (T4), resolver keyed by slug incl. config providers via slugify(yaml key) (T6), seeder slug (T5), one-shot OrgSettings ref rewrite (T3), frontend ref by slug (T7), editable slug field create-only + read-only edit + show on UI (T8). All mapped.
 - **Type consistency:** `slugify` (py) / `slugifyTs` (ts); `ProviderSlugConflictError`; `get_by_slug`; `db_slugs` (renamed from `db_names`); `ProviderModelOption.providerSlug`. Names consistent across tasks.
-- **Cutover:** resolver matches slug only; no name fallback (matches decision 3). The migration rewrites refs so existing OrgSettings keep resolving.
+- **Cutover (all consumers, post-codex):** resolver read path (factory + task_model_resolver), settings-save write path (`_validate_model_ref`), and runtime writeback all switch to slug — no name fallback anywhere (T6). Migration rewrites OrgSettings refs so saved settings keep resolving.
+- **System-bucket uniqueness:** enforced via two partial unique indexes (org bucket + `org_id IS NULL` bucket), mirroring `models/credential.py` — a single composite constraint would leave NULL org_ids unconstrained (T2/T3).
+- **Slug length:** base capped at 60 chars before `-NN` suffixing in both migration and create path, keeping within the 64-char column (T3/T4).
+- **Explicit slug:** validated against `^[a-z0-9]+(-[a-z0-9]+)*$` (422) and uniqueness (409, object detail shape) on create (T4).
 - **Risk:** if any pre-existing factory/resolver test fixtures hard-code name-keyed merged config with multi-word names, T6 step 6 calls out updating them.
