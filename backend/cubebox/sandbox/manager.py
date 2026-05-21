@@ -209,18 +209,22 @@ class SandboxManager:
         *,
         org_id: str,
         workspace_id: str,
+        force: bool = False,
     ) -> None:
         """Refresh `last_activity_at` for an in-use sandbox.
 
         Called from `LazySandbox` before each tool invocation so that
         cleanup_expired won't kill a sandbox in active use mid-turn.
         Throttled by `sandbox.touch_interval` to avoid one DB write per
-        execute call.
+        execute call. Pass ``force=True`` to bypass the throttle — used by the
+        browser keepalive so every ping reliably extends the TTL regardless of
+        the client cadence vs. ``touch_interval``.
         """
         now = datetime.now(UTC)
-        last = self._touch_cache.get(sandbox_id)
-        if last is not None and (now - last).total_seconds() < self._touch_interval:
-            return
+        if not force:
+            last = self._touch_cache.get(sandbox_id)
+            if last is not None and (now - last).total_seconds() < self._touch_interval:
+                return
         self._touch_cache[sandbox_id] = now
 
         async with self._session_factory() as session:

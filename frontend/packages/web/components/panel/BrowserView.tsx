@@ -6,9 +6,10 @@ import { Eye, Hand, RefreshCw } from 'lucide-react'
 import { useBrowserLiveView } from '@/hooks/useBrowserLiveView'
 import { csrfHeaders } from '@/lib/csrf'
 
-// Ping the backend below the sandbox touch_interval (default 60s) so a long
-// takeover session — whose traffic goes straight to Neko — isn't TTL-reaped.
-const KEEPALIVE_MS = 45_000
+// Keep a long takeover session — whose traffic goes straight to Neko — from
+// being TTL-reaped. The backend keepalive force-updates activity (bypasses the
+// touch throttle), so every ping reliably extends the TTL.
+const KEEPALIVE_MS = 30_000
 
 interface BrowserViewProps {
   workspaceId: string | null

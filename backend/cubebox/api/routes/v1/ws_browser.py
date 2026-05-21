@@ -70,4 +70,6 @@ async def keepalive(
         org_id=ctx.org_id,
         workspace_id=ctx.workspace_id,
     )
-    await manager.touch(sandbox.id, org_id=ctx.org_id, workspace_id=ctx.workspace_id)
+    # force=True bypasses the touch_interval throttle so each keepalive reliably
+    # extends the TTL even when the client cadence is below touch_interval.
+    await manager.touch(sandbox.id, org_id=ctx.org_id, workspace_id=ctx.workspace_id, force=True)
