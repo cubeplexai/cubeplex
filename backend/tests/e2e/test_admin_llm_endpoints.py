@@ -257,3 +257,55 @@ async def test_all_models_test_on_empty_provider_returns_empty_no_false_failure(
     assert detail["last_liveness_status"] != "fail"
 
     await client.delete(f"/api/v1/admin/providers/{pid}")
+
+
+@pytest.mark.asyncio
+async def test_test_stream_emits_events(
+    admin_client: tuple[AsyncClient, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """POST /providers/{id}/test/stream streams liveness + per-model + done SSE events."""
+    client, _ws_id = admin_client
+    from cubebox.services import provider_probe
+
+    async def stub_liveness(*a: object, **k: object) -> provider_probe.ProbeStep:
+        return provider_probe.ProbeStep(name="liveness", status="pass", latency_ms=10)
+
+    async def stub_model(*a: object, **k: object) -> provider_probe.ProbeResult:
+        return provider_probe.ProbeResult(
+            overall="pass",
+            blocking_failed=False,
+            steps=[provider_probe.ProbeStep(name="reasoning", status="pass")],
+        )
+
+    monkeypatch.setattr(provider_probe, "run_liveness", stub_liveness)
+    monkeypatch.setattr(provider_probe, "run_model_probe", stub_model)
+    pres = await client.post(
+        "/api/v1/admin/providers",
+        json={
+            "name": "sse-test-e2e",
+            "provider_type": "anthropic-messages",
+            "base_url": "https://example.com",
+            "auth_type": "api_key",
+            "api_key": "sk-x",
+        },
+    )
+    pid = pres.json()["id"]
+    mres = await client.post(
+        f"/api/v1/admin/providers/{pid}/models",
+        json={
+            "model_id": "claude-x",
+            "display_name": "X",
+            "context_window": 8192,
+            "max_tokens": 1024,
+            "enabled": False,
+        },
+    )
+    mid = mres.json()["id"]
+    res = await client.post(
+        f"/api/v1/admin/providers/{pid}/test/stream", json={"model_db_ids": [mid]}
+    )
+    assert res.status_code == 200
+    body = res.text
+    assert "event: liveness" in body and "event: model" in body and "event: done" in body
+    await client.delete(f"/api/v1/admin/providers/{pid}")

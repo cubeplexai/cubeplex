@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import StreamingResponse
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -22,6 +23,7 @@ from cubebox.api.schemas.provider import (
     ProviderLivenessRequest,
     ProviderOut,
     ProviderTestRequest,
+    ProviderTestStreamRequest,
     ProviderUpdate,
 )
 from cubebox.auth.dependencies import require_org_admin, resolve_current_org_id
@@ -437,6 +439,33 @@ async def test_provider_all_models(
         return await svc.run_all_models_test_saved(provider_id)
     except ProviderNotFoundError as e:
         raise HTTPException(status_code=404, detail="provider_not_found") from e
+
+
+_SSE_HEADERS = {"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
+
+
+@router.post("/providers/{provider_id}/test/stream")
+async def test_provider_stream(
+    provider_id: str,
+    body: ProviderTestStreamRequest,
+    *,
+    request: Request,
+    user: Annotated[User, Depends(require_org_admin)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> StreamingResponse:
+    """Stream liveness (once) + per-model probe events as SSE for the given model db ids."""
+    svc = await _svc(user, session, request)
+    try:
+        await svc.preflight_test_stream(provider_id, body.model_db_ids)
+    except ProviderNotFoundError as e:
+        raise HTTPException(status_code=404, detail="provider_not_found") from e
+    except ModelNotFoundError as e:
+        raise HTTPException(status_code=404, detail="model_not_found") from e
+    return StreamingResponse(
+        svc.run_test_stream(provider_id, body.model_db_ids),
+        media_type="text/event-stream",
+        headers=_SSE_HEADERS,
+    )
 
 
 # -- Org provider overrides --------------------------------------------------------
