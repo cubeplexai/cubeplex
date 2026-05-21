@@ -40,12 +40,14 @@ from cubebox.repositories.org_settings import OrgSettingsRepository
 from cubebox.repositories.provider import ProviderRepository
 from cubebox.services.provider_probe import ProbeResult, ProbeStep
 from cubebox.services.provider_service import (
+    InvalidProviderSlugError,
     ModelNotFoundError,
     ProviderNameConflictError,
     ProviderNotFoundError,
     ProviderOAuthNotImplementedError,
     ProviderOverrideNotApplicableError,
     ProviderService,
+    ProviderSlugConflictError,
     ProviderSystemReadonlyError,
 )
 from cubebox.utils.time import utc_isoformat
@@ -162,6 +164,7 @@ def _provider_out(
     return ProviderOut(
         id=p.id,
         name=p.name,
+        slug=p.slug,
         provider_type=p.provider_type,
         base_url=p.base_url,
         auth_type=p.auth_type,
@@ -230,6 +233,10 @@ async def create_provider(
         ) from e
     except ProviderNameConflictError as e:
         raise HTTPException(status_code=409, detail={"code": "provider_name_conflict"}) from e
+    except ProviderSlugConflictError as e:
+        raise HTTPException(status_code=409, detail={"code": "provider_slug_conflict"}) from e
+    except InvalidProviderSlugError as e:
+        raise HTTPException(status_code=422, detail={"code": "invalid_provider_slug"}) from e
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     return _provider_out(p)

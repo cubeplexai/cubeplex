@@ -12,6 +12,7 @@ WireApi = Literal["openai-completions", "openai-responses", "anthropic-messages"
 
 class ProviderCreate(BaseModel):
     name: str = Field(max_length=64)
+    slug: str | None = Field(default=None, max_length=64)
     provider_type: WireApi = "openai-completions"
     base_url: str = Field(max_length=2048)
     auth_type: str = Field(default="api_key", max_length=32)
@@ -150,6 +151,7 @@ class ModelReadinessOut(ModelOut):
 class ProviderOut(BaseModel):
     id: str
     name: str
+    slug: str
     # Read-side: reflects the DB column (a plain str). The 3-literal contract is
     # enforced on the write path (ProviderCreate/ProviderUpdate), so stored values
     # are already canonical; no need to re-validate on every read.
