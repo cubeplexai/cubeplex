@@ -343,7 +343,15 @@
     "extraBodyInvalid": "extra_body 格式无效，请输入合法 JSON",
     "modelCreateTitle": "添加模型",
     "modelEditTitle": "编辑模型",
-    "modelTestHint": "保存后即可在此处测试模型连接"
+    "modelTestHint": "保存后即可在此处测试模型连接",
+    "readiness": {
+      "ready": "可用",
+      "degraded": "降级",
+      "stale": "已过期",
+      "providerError": "Provider 不可达",
+      "modelError": "模型测试失败",
+      "unavailable": "不可用"
+    }
   },
   "adminSettings": {
     "title": "组织设置",
