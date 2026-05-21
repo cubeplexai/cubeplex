@@ -102,4 +102,31 @@ describe('ModelsStep', () => {
       ]),
     )
   })
+
+  it('retry after a mid-import failure skips already-created models', async () => {
+    let bAttempts = 0
+    vi.mocked(core.createModel).mockReset()
+    vi.mocked(core.createModel).mockImplementation(async (_c, _pid, body) => {
+      if (body.model_id === 'm-b') {
+        bAttempts += 1
+        if (bAttempts === 1) throw new Error('boom')
+        return { id: 'mdl_b' } as Model
+      }
+      return { id: 'mdl_a' } as Model
+    })
+    const { onModelsCreated } = renderStep()
+    // Attempt 1: m-a succeeds, m-b fails → no completion.
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }))
+    await waitFor(() => expect(core.createModel).toHaveBeenCalledTimes(2))
+    expect(onModelsCreated).not.toHaveBeenCalled()
+    // Attempt 2: m-a is cached (skipped), only m-b is re-created.
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }))
+    await waitFor(() => expect(onModelsCreated).toHaveBeenCalled())
+    const aCalls = vi.mocked(core.createModel).mock.calls.filter((c) => c[2].model_id === 'm-a')
+    expect(aCalls).toHaveLength(1) // m-a POSTed once across both attempts
+    expect(onModelsCreated).toHaveBeenCalledWith([
+      { id: 'mdl_a', model_id: 'm-a', display_name: 'Model A' },
+      { id: 'mdl_b', model_id: 'm-b', display_name: 'Model B' },
+    ])
+  })
 })

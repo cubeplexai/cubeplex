@@ -47,6 +47,7 @@ export default function AddProviderWizardPage() {
               <ConfigureStep
                 client={client}
                 preset={state.preset}
+                existingProviderId={state.providerId}
                 onProviderCreated={(id) => {
                   dispatch({ type: 'providerCreated', providerId: id })
                   dispatch({ type: 'next' })
