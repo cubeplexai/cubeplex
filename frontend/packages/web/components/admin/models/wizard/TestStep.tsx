@@ -19,12 +19,14 @@ interface TestStepProps {
   client: ApiClient
   providerId: string
   modelDbIds: string[]
+  /** Map of model db id → display label, carried from the models step. */
+  modelLabels?: Record<string, string>
   onFinish: () => void
 }
 
 type ModelEventData = ProbeResult & { model_db_id: string; display_name?: string }
 
-export function TestStep({ client, providerId, modelDbIds, onFinish }: TestStepProps) {
+export function TestStep({ client, providerId, modelDbIds, modelLabels, onFinish }: TestStepProps) {
   const t = useTranslations('adminModels.wizard.test')
   const tw = useTranslations('adminModels.wizard')
 
@@ -52,7 +54,8 @@ export function TestStep({ client, providerId, modelDbIds, onFinish }: TestStepP
           setCards((prev) => {
             const next: ModelTestState = {
               ...data,
-              display_name: data.display_name ?? data.model_db_id,
+              display_name:
+                data.display_name ?? modelLabels?.[data.model_db_id] ?? data.model_db_id,
             }
             const idx = prev.findIndex((c) => c.model_db_id === data.model_db_id)
             if (idx === -1) return [...prev, next]
@@ -70,7 +73,7 @@ export function TestStep({ client, providerId, modelDbIds, onFinish }: TestStepP
       setRunning(false)
       setDone(true)
     }
-  }, [client, providerId, modelDbIds])
+  }, [client, providerId, modelDbIds, modelLabels])
 
   useEffect(() => {
     if (started.current) return

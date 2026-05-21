@@ -58,8 +58,8 @@ export default function AddProviderWizardPage() {
                 client={client}
                 preset={state.preset}
                 providerId={state.providerId}
-                onModelsCreated={(ids) => {
-                  dispatch({ type: 'modelsCreated', modelDbIds: ids })
+                onModelsCreated={(models) => {
+                  dispatch({ type: 'modelsCreated', models })
                   dispatch({ type: 'next' })
                 }}
               />
@@ -68,7 +68,8 @@ export default function AddProviderWizardPage() {
               <TestStep
                 client={client}
                 providerId={state.providerId}
-                modelDbIds={state.modelDbIds}
+                modelDbIds={state.models.map((m) => m.id)}
+                modelLabels={Object.fromEntries(state.models.map((m) => [m.id, m.display_name]))}
                 onFinish={finish}
               />
             )}
