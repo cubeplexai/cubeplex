@@ -181,9 +181,20 @@ class LLMFactory:
                 merged[slug] = cfg  # Only use config when provider not in DB
         for slug, db_cfg in db_configs.items():
             merged[slug] = ProviderConfig(**db_cfg)  # DB always overrides
+
+        # The merged providers map is slug-keyed, but config.yaml's default/fallback
+        # refs use the raw provider key (e.g. "Acme AI/model"). Normalise the
+        # provider segment of these config-level refs to its slug so they resolve
+        # against the slug-keyed map. (OrgSettings refs are read separately and were
+        # already migrated to slug — they are not touched here.)
+        def _slug_ref(ref: str) -> str:
+            head, sep, tail = ref.partition("/")
+            return f"{slugify(head)}{sep}{tail}" if sep else ref
+
+        default_model = self.llm_config.default_model
         return LLMConfig(
-            default_model=self.llm_config.default_model,
-            fallback_models=self.llm_config.fallback_models,
+            default_model=_slug_ref(default_model) if default_model else default_model,
+            fallback_models=[_slug_ref(m) for m in self.llm_config.fallback_models],
             providers=merged,
         )
 

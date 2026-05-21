@@ -168,3 +168,39 @@ async def test_name_based_ref_does_not_resolve(
 
     with pytest.raises(ValueError):
         await factory.resolve_default_provider_and_config()
+
+
+@pytest.mark.asyncio
+async def test_config_default_model_resolves_via_slug(sqlite_session: AsyncSession) -> None:
+    """A config.yaml default_model using a human-readable provider key resolves.
+
+    The merged providers map is slug-keyed (`acme-ai`), but the config default_model
+    ref uses the raw key (`Acme AI/m-1`); its provider segment is slugified at merge
+    so it resolves. FAILS before the _build_merged_config fix, PASSES after.
+    """
+    from cubebox.llm.config import LLMConfig, ModelConfig, ModelCost, ProviderConfig
+
+    cfg = LLMConfig(
+        default_model="Acme AI/m-1",
+        providers={
+            "Acme AI": ProviderConfig(
+                base_url="https://acme.test/v1",
+                api="openai-completions",
+                models=[
+                    ModelConfig(
+                        id="m-1",
+                        name="M1",
+                        cost=ModelCost(input=0.0, output=0.0),
+                        contextWindow=8000,
+                        maxTokens=1000,
+                    )
+                ],
+            )
+        },
+    )
+    # session+org present (triggers the merged build) but no DB providers, so the
+    # config provider stays as a fallback entry.
+    factory = LLMFactory(llm_config=cfg, session=sqlite_session, org_id="org-cfg-test")
+    slug, model_id, _cfg = await factory.resolve_default_provider_and_config()
+    assert slug == "acme-ai"
+    assert model_id == "m-1"
