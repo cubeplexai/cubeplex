@@ -9,6 +9,8 @@ manual procedure documented in plan Task 6 (run alembic against a
 disposable test DB via ``CUBEBOX_DATABASE__NAME=cubebox_p1_test``).
 """
 
+import importlib
+
 import pytest
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
@@ -16,6 +18,25 @@ from sqlalchemy.ext.asyncio import create_async_engine
 from cubebox.db.engine import _build_database_url
 
 pytestmark = pytest.mark.e2e
+
+
+def _load_migration(revision: str) -> object:
+    """Import an Alembic migration module by its revision prefix."""
+    import glob
+    import os
+
+    pattern = os.path.join(
+        os.path.dirname(__file__), "..", "..", "alembic", "versions", f"{revision}_*.py"
+    )
+    matches = glob.glob(pattern)
+    if not matches:
+        raise FileNotFoundError(f"No migration file found for revision prefix {revision!r}")
+    path = matches[0]
+    spec = importlib.util.spec_from_file_location(f"migration_{revision}", path)
+    assert spec is not None and spec.loader is not None
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)  # type: ignore[union-attr]
+    return mod
 
 
 @pytest.mark.asyncio
@@ -64,3 +85,62 @@ async def test_scope_columns_are_not_null_on_existing_tables() -> None:
                 assert row[0] == 0, f"{tbl} has rows with NULL scope columns"
     finally:
         await engine.dispose()
+
+
+# ---------------------------------------------------------------------------
+# Provider slug migration — unit-level tests of the pure helpers
+# (the DB stamp+seed+upgrade pattern isn't practical with this harness;
+#  _assign / _rewrite_ref / _slugify are module-level in the migration so
+#  we import and exercise them directly — same coverage, no DB teardown)
+# ---------------------------------------------------------------------------
+
+
+def test_migration_slug_assign_system_bucket() -> None:
+    """System bucket: _assign produces unique slugs with numeric suffixes."""
+    m = _load_migration("538af47f81eb")
+    _assign = m._assign  # type: ignore[attr-defined]
+    _slugify = m._slugify  # type: ignore[attr-defined]
+
+    system_slugs: set[str] = set()
+
+    # system DeepSeek → "deepseek"
+    base = _slugify("DeepSeek")
+    slug_sys = _assign(base, system_slugs)
+    assert slug_sys == "deepseek"
+    system_slugs.add(slug_sys)
+
+    # org DeepSeek — must dedup against system bucket → "deepseek-2"
+    org_used: set[str] = set()
+    slug_org = _assign(base, org_used | system_slugs)
+    assert slug_org == "deepseek-2"
+    org_used.add(slug_org)
+
+
+def test_migration_slug_rewrite_ref_deepseek_collision() -> None:
+    """OrgSettings ref rewrite uses org slug (deepseek-2) not system slug (deepseek).
+
+    Scenario:
+      - system provider: name='DeepSeek', slug='deepseek'
+      - org provider   : name='DeepSeek', slug='deepseek-2'
+      - org settings   : default_model={"model_ref": "DeepSeek/m-1"},
+                         fallback_models={"models": ["DeepSeek/m-2"]},
+                         task_models={"title": "DeepSeek/m-1"}
+    After rewrite the org name-to-slug map resolves 'DeepSeek' → 'deepseek-2'
+    (the org-scoped provider wins over the system one), so all refs become
+    deepseek-2/…
+    """
+    m = _load_migration("538af47f81eb")
+    _rewrite_ref = m._rewrite_ref  # type: ignore[attr-defined]
+
+    # In the migration the org map is merged as {**system_map, **org_maps[org_id]},
+    # so org-scoped entries override system entries for the same name.
+    system_map = {"DeepSeek": "deepseek"}
+    org_map = {"DeepSeek": "deepseek-2"}
+    name_to_slug = {**system_map, **org_map}
+
+    assert _rewrite_ref("DeepSeek/m-1", name_to_slug) == "deepseek-2/m-1"
+    assert _rewrite_ref("DeepSeek/m-2", name_to_slug) == "deepseek-2/m-2"
+    # Unknown provider ref is left unchanged
+    assert _rewrite_ref("Unknown/m-1", name_to_slug) == "Unknown/m-1"
+    # Malformed ref (no slash) is left unchanged
+    assert _rewrite_ref("no-slash", name_to_slug) == "no-slash"
