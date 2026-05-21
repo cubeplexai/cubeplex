@@ -390,13 +390,16 @@ class LLMFactory:
         method that populates ``self.llm_config`` with the merged DB+config.yaml view)
         so that DB-decrypted keys are visible.
 
-        Returns (None, None) when no real-OpenAI openai-completions provider is found.
+        Returns (None, None) when no real-OpenAI openai-completions provider has a
+        usable key. Keyless OpenAI rows are skipped so a stale/keyless entry does not
+        shadow a later valid one.
         """
         for cfg in self.llm_config.providers.values():
             if (
                 cfg.api == "openai-completions"
                 and cfg.base_url
                 and ("api.openai.com" in cfg.base_url.lower())
+                and cfg.api_key
             ):
                 return cfg.api_key, cfg.base_url
         return None, None

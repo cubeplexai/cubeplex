@@ -269,3 +269,46 @@ async def test_generate_image_edit_branch_writes_to_source_path(
     image_blocks = [c for c in result.content if hasattr(c, "source")]
     assert len(image_blocks) == 1
     assert base64.b64decode(image_blocks[0].source) == b"EDITJPEG"
+
+
+# ---------------------------------------------------------------------------
+# Test 4: edit source unreadable → fail fast (is_error, no artifact)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_generate_image_unreadable_edit_source_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A missing/unreadable edit source must error out, not silently fresh-generate."""
+    # FakeSandbox returns exit_code 1 for any path not in base64_for_paths.
+    sandbox = FakeSandbox()
+    artifact_call_count = 0
+
+    async def counting_register(**kwargs: Any) -> SimpleNamespace:
+        nonlocal artifact_call_count
+        artifact_call_count += 1
+        return _make_artifact()
+
+    monkeypatch.setattr(
+        "cubebox.tools.builtin.generate_image.register_artifact_from_sandbox",
+        counting_register,
+    )
+
+    tool = make_generate_image_tool(
+        org_id="org-1",
+        workspace_id="ws-1",
+        conversation_id="conv-1",
+        sandbox=sandbox,  # type: ignore[arg-type]
+        images_provider=_make_faux_provider(),
+        images_model=_FAKE_MODEL,
+    )
+
+    args = GenerateImageInput(prompt="recolor", edit_source_paths=["/work/missing.png"])
+    result = await tool.execute("tc-4", args, signal=None, on_update=None)
+
+    assert result.is_error is True
+    assert artifact_call_count == 0
+    assert len(sandbox.uploaded) == 0
+    error_text = " ".join(c.text for c in result.content if hasattr(c, "text"))
+    assert "/work/missing.png" in error_text
