@@ -5,6 +5,7 @@ import { useTranslations } from 'next-intl'
 import { AlertTriangle, ChevronDown } from 'lucide-react'
 import {
   createProvider,
+  updateProvider,
   type ApiClient,
   type ProviderCreate,
   type ProviderPreset,
@@ -18,6 +19,10 @@ import { CapabilityEditor } from './CapabilityEditor'
 interface ConfigureStepProps {
   client: ApiClient
   preset: ProviderPreset
+  // Set once the provider has been created (e.g. user went forward then back to
+  // this step). When present, Next updates the existing row instead of creating
+  // a second provider (which would 409 on the name or orphan a row).
+  existingProviderId?: string | null
   onProviderCreated: (providerId: string) => void
 }
 
@@ -39,7 +44,12 @@ function authTypeFor(
   }
 }
 
-export function ConfigureStep({ client, preset, onProviderCreated }: ConfigureStepProps) {
+export function ConfigureStep({
+  client,
+  preset,
+  existingProviderId,
+  onProviderCreated,
+}: ConfigureStepProps) {
   const t = useTranslations('adminModels.wizard.configure')
   const tw = useTranslations('adminModels.wizard')
   const authType = authTypeFor(preset.auth.mode)
@@ -72,8 +82,14 @@ export function ConfigureStep({ client, preset, onProviderCreated }: ConfigureSt
         capability,
         model_capability_overrides: preset.model_capability_overrides,
       }
-      const provider = await createProvider(client, body)
-      onProviderCreated(provider.id)
+      if (existingProviderId) {
+        // Revisit: update the already-created provider instead of creating again.
+        await updateProvider(client, existingProviderId, body)
+        onProviderCreated(existingProviderId)
+      } else {
+        const provider = await createProvider(client, body)
+        onProviderCreated(provider.id)
+      }
     } catch (e) {
       setError((e as Error).message || t('createFailed'))
       setSaving(false)
