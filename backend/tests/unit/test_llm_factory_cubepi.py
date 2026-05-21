@@ -99,3 +99,67 @@ def test_build_cubepi_provider_anthropic_accepts_cache_policy() -> None:
     )
     # When cache_policy=None, AnthropicProvider falls back to DefaultCacheMarkerPolicy
     assert isinstance(provider._cache_policy, DefaultCacheMarkerPolicy)
+
+
+# ---------------------------------------------------------------------------
+# resolve_openai_api_key
+# ---------------------------------------------------------------------------
+
+
+def test_resolve_openai_api_key_returns_key_when_openai_completions_provider_present() -> None:
+    factory = _mk_factory(
+        {
+            "openai": ProviderConfig(
+                api="openai-completions",
+                base_url="https://api.openai.com",
+                api_key="sk-openai-test",
+            ),
+        }
+    )
+    assert factory.resolve_openai_api_key() == "sk-openai-test"
+
+
+def test_resolve_openai_api_key_returns_none_when_no_openai_completions_provider() -> None:
+    factory = _mk_factory(
+        {
+            "anthropic": ProviderConfig(
+                api="anthropic",
+                base_url="https://api.anthropic.com",
+                api_key="sk-ant",
+            ),
+        }
+    )
+    assert factory.resolve_openai_api_key() is None
+
+
+def test_resolve_openai_api_key_returns_none_when_provider_has_no_key() -> None:
+    factory = _mk_factory(
+        {
+            "openai": ProviderConfig(
+                api="openai-completions",
+                base_url="https://api.openai.com",
+                api_key=None,
+            ),
+        }
+    )
+    assert factory.resolve_openai_api_key() is None
+
+
+def test_resolve_openai_api_key_prefers_first_openai_completions_provider() -> None:
+    """When multiple providers have api==openai-completions, returns the first one's key."""
+    # dict iteration order is insertion order in Python 3.7+
+    factory = _mk_factory(
+        {
+            "oai-primary": ProviderConfig(
+                api="openai-completions",
+                base_url="https://api.openai.com",
+                api_key="sk-primary",
+            ),
+            "oai-secondary": ProviderConfig(
+                api="openai-completions",
+                base_url="https://api.openai.com/v2",
+                api_key="sk-secondary",
+            ),
+        }
+    )
+    assert factory.resolve_openai_api_key() == "sk-primary"

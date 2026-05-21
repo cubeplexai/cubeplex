@@ -379,6 +379,21 @@ class LLMFactory:
 
         raise ValueError(f"unsupported api for cubepi provider: {api!r}")
 
+    def resolve_openai_api_key(self) -> str | None:
+        """Return the api_key for the first OpenAI-compatible provider in the merged config.
+
+        Must be called after ``resolve_default_provider_and_config`` (or any other
+        method that populates ``self.llm_config`` with the merged DB+config.yaml view)
+        so that DB-decrypted keys are visible.
+
+        Returns None when no openai-completions provider is configured, or when the
+        configured provider has no api_key.
+        """
+        for cfg in self.llm_config.providers.values():
+            if cfg.api == "openai-completions":
+                return cfg.api_key
+        return None
+
     def list_providers(self) -> list[str]:
         """List all available provider names."""
         return list(self.llm_config.providers.keys())
