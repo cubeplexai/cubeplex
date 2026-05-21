@@ -201,6 +201,7 @@ export function ProviderDetail({
               data-testid="provider-liveness-dot"
             />
             <h3 className="text-xl font-semibold tracking-tight">{provider.name}</h3>
+            <code className="text-xs text-muted-foreground">{provider.slug}</code>
             {isSystem && (
               <Badge variant="secondary" className="text-[11px]">
                 {t('systemBadge')}

@@ -73,6 +73,33 @@ describe('ProviderConfigForm — create', () => {
     expect(body.capability).toEqual(makePreset().capability)
   })
 
+  it('typing name auto-fills slug field', () => {
+    renderForm({ preset: makePreset({ display_name: '' }) })
+    const nameInput = screen.getByLabelText('Name')
+    const slugInput = screen.getByLabelText('Slug') as HTMLInputElement
+    fireEvent.change(nameInput, { target: { value: 'My Provider' } })
+    expect(slugInput.value).toBe('my-provider')
+  })
+
+  it('editing slug then changing name keeps the edited slug', () => {
+    renderForm({ preset: makePreset({ display_name: '' }) })
+    const nameInput = screen.getByLabelText('Name')
+    const slugInput = screen.getByLabelText('Slug') as HTMLInputElement
+    // User edits slug manually
+    fireEvent.change(slugInput, { target: { value: 'custom-slug' } })
+    // Then changes name — slug should remain unchanged
+    fireEvent.change(nameInput, { target: { value: 'New Name' } })
+    expect(slugInput.value).toBe('custom-slug')
+  })
+
+  it('submitted ProviderCreate body carries slug', () => {
+    const { onSubmit } = renderForm({ preset: makePreset({ display_name: 'Test Provider' }) })
+    fireEvent.change(screen.getByLabelText('API key'), { target: { value: 'sk-1' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }))
+    const body = onSubmit.mock.calls[0][0] as ProviderCreate
+    expect(body.slug).toBe('test-provider')
+  })
+
   it('requires a key for api_key presets', () => {
     renderForm()
     expect(screen.getByRole('button', { name: 'Next' })).toBeDisabled()
@@ -120,6 +147,30 @@ describe('ProviderConfigForm — edit', () => {
     // Capability seeded from the existing provider.
     expect(body.capability).toEqual({ supports_tools: true })
     expect(body.model_capability_overrides).toEqual({ 'gpt-x': { reasoning: true } })
+  })
+
+  it('slug input is disabled and ProviderUpdate body has no slug', () => {
+    const provider = makeProvider({ slug: 'my-openai' })
+    const onSubmit = vi.fn()
+    render(
+      <NextIntlClientProvider locale="en" messages={en}>
+        <ProviderConfigForm
+          mode="edit"
+          provider={provider}
+          saving={false}
+          error={null}
+          submitLabel="Save"
+          onSubmit={onSubmit}
+        />
+      </NextIntlClientProvider>,
+    )
+    const slugInput = screen.getByLabelText('Slug') as HTMLInputElement
+    expect(slugInput).toBeDisabled()
+    expect(slugInput.value).toBe('my-openai')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    const body = onSubmit.mock.calls[0][0] as ProviderUpdate
+    expect('slug' in body).toBe(false)
   })
 
   it('sends the entered key when provided', () => {
