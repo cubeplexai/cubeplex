@@ -117,3 +117,29 @@ async def test_summarize_with_nothing_configured_returns_default() -> None:
     factory = _factory(task_models=None, title_model=None)
     provider, model, cfg = await resolve_task_model(factory, "summarize")
     assert (provider, model) == ("anthropic", "claude-sonnet-4")
+
+
+@pytest.mark.asyncio
+async def test_yaml_task_ref_with_nonslug_provider_key_resolves_via_slug() -> None:
+    """A yaml <task>_model using a human-readable provider key resolves.
+
+    The merged map is slug-keyed (`yaml-prov`), but the yaml `title_model` ref uses
+    the raw key (`Yaml Prov/yaml-title`); its provider segment is slugified before
+    lookup. FAILS before the task-resolver fix, PASSES after.
+    """
+    cfg = LLMConfig(
+        default_model="anthropic/claude-sonnet-4",
+        title_model="Yaml Prov/yaml-title",
+        providers={
+            "Yaml Prov": ProviderConfig(
+                api="openai-completions", base_url="https://y.example", api_key="sk-y"
+            )
+        },
+    )
+    factory = LLMFactory(
+        llm_config=cfg,
+        session=_FakeSession(None),  # type: ignore[arg-type]
+        org_id="org_test",
+    )
+    provider, model, _cfg = await resolve_task_model(factory, "title")
+    assert (provider, model) == ("yaml-prov", "yaml-title")
