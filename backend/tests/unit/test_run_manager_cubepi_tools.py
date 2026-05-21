@@ -1,54 +1,52 @@
-"""Smoke test: run_manager imports + new tool wiring compiles (M2.5, B3)."""
+"""Smoke test: run_manager imports + config-driven image gen tool wiring."""
 
+import base64
 from unittest.mock import MagicMock
+
+import pytest
+
+_FAKE_PNG = base64.b64encode(b"\x89PNG\r\n\x1a\n" + b"\x00" * 16).decode("ascii")
 
 
 def test_run_manager_imports_with_cubepi_tools() -> None:
-    """RunManager still imports after M2.5 wiring."""
+    """RunManager still imports after wiring."""
     from cubebox.streams.run_manager import RunManager
 
     assert RunManager is not None
 
 
 def test_run_cubepi_path_method_exists() -> None:
-    """The cubepi dispatch method is still on RunManager after M2.5."""
+    """The cubepi dispatch method is still on RunManager."""
     from cubebox.streams.run_manager import RunManager
 
     assert hasattr(RunManager, "_run_cubepi_path")
 
 
 # ---------------------------------------------------------------------------
-# generate_image sandbox-gating tests (B3)
+# generate_image config-driven gating tests
 #
 # _run_cubepi_path is too integrated to call in isolation (requires DB
-# sessions, factory, sandbox manager, etc.).  We test the sandbox-gating
-# logic by directly exercising make_generate_image_tool and verifying that:
-#   - with a sandbox AND a valid provider instance: the factory produces a valid
-#     AgentTool named "generate_image"
-#   - without a sandbox: the tool is NOT produced (i.e. the if-guard works)
-#   - without a valid OpenAI credential (key is None): the tool is NOT produced
-#
-# The gating for "no OpenAI credential" is exercised by checking that
-# resolve_openai_image_credentials() → (None, None) causes the tool to be
-# skipped, mirroring the guard in run_manager._run_cubepi_path.
+# sessions, factory, sandbox manager, etc.).  We test the config-driven
+# gating logic by:
+#   - Verifying make_generate_image_tool produces a valid AgentTool when
+#     called directly with a sandbox + provider instance.
+#   - Verifying the sandbox=None guard prevents the tool from being produced.
+#   - Verifying that get_image_generation_config() returning disabled/no-key
+#     maps to the run_manager not producing the tool (mirrors the guard code).
 # ---------------------------------------------------------------------------
 
 
 def test_generate_image_tool_produced_when_sandbox_and_provider_present() -> None:
     """make_generate_image_tool returns an AgentTool when sandbox + provider instance given."""
-    import base64
-
     from cubepi.agent.types import AgentTool
     from cubepi.providers.images.faux import FauxImagesProvider
     from cubepi.providers.images.types import ImagesModel
 
     from cubebox.tools.builtin.generate_image import make_generate_image_tool
 
-    _fake_png = base64.b64encode(b"\x89PNG\r\n\x1a\n" + b"\x00" * 16).decode("ascii")
-    provider_instance = FauxImagesProvider(_fake_png)
-
+    provider_instance = FauxImagesProvider(_FAKE_PNG)
     fake_sandbox = MagicMock()
-    images_model = ImagesModel(id="gpt-image-1", provider="openai", api="openai-images")
+    images_model = ImagesModel(id="gpt-image-2", provider="image-gen", api="openai-images")
 
     tool = make_generate_image_tool(
         org_id="org-1",
@@ -65,8 +63,6 @@ def test_generate_image_tool_produced_when_sandbox_and_provider_present() -> Non
 
 def test_generate_image_tool_not_added_when_sandbox_is_none() -> None:
     """The if-sandbox-is-not-None guard prevents adding generate_image to _builtin_tools."""
-    import base64
-
     from cubepi.providers.images.faux import FauxImagesProvider
     from cubepi.providers.images.types import ImagesModel
 
@@ -75,18 +71,15 @@ def test_generate_image_tool_not_added_when_sandbox_is_none() -> None:
     sandbox: object | None = None
     collected: list[object] = []
 
-    _fake_png = base64.b64encode(b"\x89PNG\r\n\x1a\n" + b"\x00" * 16).decode("ascii")
-
-    # Replicate the guard from run_manager._run_cubepi_path
     if sandbox is not None:
-        images_model = ImagesModel(id="gpt-image-1", provider="openai", api="openai-images")
+        images_model = ImagesModel(id="gpt-image-2", provider="image-gen", api="openai-images")
         collected.append(
             make_generate_image_tool(
                 org_id="org-1",
                 workspace_id="ws-1",
                 conversation_id="conv-1",
                 sandbox=sandbox,  # type: ignore[arg-type]
-                images_provider=FauxImagesProvider(_fake_png),
+                images_provider=FauxImagesProvider(_FAKE_PNG),
                 images_model=images_model,
             )
         )
@@ -95,54 +88,122 @@ def test_generate_image_tool_not_added_when_sandbox_is_none() -> None:
     assert "generate_image" not in tool_names
 
 
-def test_generate_image_tool_not_added_when_no_openai_credential() -> None:
-    """When resolve_openai_image_credentials() returns (None, None), tool is skipped.
+def test_generate_image_tool_not_added_when_config_disabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When image_generation.enabled=False, tool is skipped — mirrors run_manager guard."""
+    from cubebox.llm.config import ImageGenerationConfig
 
-    Mirrors the _img_key is None guard in run_manager._run_cubepi_path.
-    """
-    from cubebox.llm.config import LLMConfig, ProviderConfig
-    from cubebox.llm.factory import LLMFactory
-
-    # Config with only a non-OpenAI compatible provider (DeepSeek-like).
-    factory = LLMFactory(
-        llm_config=LLMConfig(
-            default_model="deepseek/deepseek-chat",
-            providers={
-                "deepseek": ProviderConfig(
-                    api="openai-completions",
-                    base_url="https://api.deepseek.com/v1",
-                    api_key="sk-ds",
-                ),
-            },
-        )
+    monkeypatch.setattr(
+        "cubebox.llm.config.get_image_generation_config",
+        lambda: ImageGenerationConfig(enabled=False, api_key="sk-test"),
     )
 
-    key, _base_url = factory.resolve_openai_image_credentials()
-    assert key is None, "Expected no real-OpenAI key to be resolved"
+    from cubebox.llm.config import get_image_generation_config
 
-    # Replicate the run_manager guard: tool is only added when key is not None.
+    cfg = get_image_generation_config()
+    # Guard: not enabled → no tool
     collected: list[object] = []
     fake_sandbox = MagicMock()
-    if key is not None:
-        import base64
-
+    if cfg.enabled and cfg.api_key:
         from cubepi.providers.images.faux import FauxImagesProvider
         from cubepi.providers.images.types import ImagesModel
 
         from cubebox.tools.builtin.generate_image import make_generate_image_tool
 
-        _fake_png = base64.b64encode(b"\x89PNG\r\n\x1a\n" + b"\x00" * 16).decode("ascii")
-        images_model = ImagesModel(id="gpt-image-1", provider="openai", api="openai-images")
+        images_model = ImagesModel(id=cfg.model, provider="image-gen", api=cfg.api)
         collected.append(
             make_generate_image_tool(
                 org_id="org-1",
                 workspace_id="ws-1",
                 conversation_id="conv-1",
                 sandbox=fake_sandbox,
-                images_provider=FauxImagesProvider(_fake_png),
+                images_provider=FauxImagesProvider(_FAKE_PNG),
                 images_model=images_model,
             )
         )
 
     tool_names = [getattr(t, "name", None) for t in collected]
     assert "generate_image" not in tool_names
+
+
+def test_generate_image_tool_not_added_when_api_key_absent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When image_generation.api_key is None/empty, tool is skipped."""
+    from cubebox.llm.config import ImageGenerationConfig
+
+    monkeypatch.setattr(
+        "cubebox.llm.config.get_image_generation_config",
+        lambda: ImageGenerationConfig(enabled=True, api_key=None),
+    )
+
+    from cubebox.llm.config import get_image_generation_config
+
+    cfg = get_image_generation_config()
+    collected: list[object] = []
+    fake_sandbox = MagicMock()
+    if cfg.enabled and cfg.api_key:
+        from cubepi.providers.images.faux import FauxImagesProvider
+        from cubepi.providers.images.types import ImagesModel
+
+        from cubebox.tools.builtin.generate_image import make_generate_image_tool
+
+        images_model = ImagesModel(id=cfg.model, provider="image-gen", api=cfg.api)
+        collected.append(
+            make_generate_image_tool(
+                org_id="org-1",
+                workspace_id="ws-1",
+                conversation_id="conv-1",
+                sandbox=fake_sandbox,
+                images_provider=FauxImagesProvider(_FAKE_PNG),
+                images_model=images_model,
+            )
+        )
+
+    tool_names = [getattr(t, "name", None) for t in collected]
+    assert "generate_image" not in tool_names
+
+
+def test_generate_image_tool_added_when_config_enabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When image_generation.enabled=True + api_key set, tool is produced via config path."""
+    from cubepi.agent.types import AgentTool
+    from cubepi.providers.images.faux import FauxImagesProvider
+    from cubepi.providers.images.types import ImagesModel
+
+    from cubebox.llm.config import ImageGenerationConfig
+    from cubebox.tools.builtin.generate_image import make_generate_image_tool
+
+    cfg = ImageGenerationConfig(
+        enabled=True,
+        api="openai-images",
+        model="gpt-image-2",
+        api_key="sk-test",
+    )
+    assert cfg.enabled
+    assert cfg.api_key
+
+    # Monkeypatch create_images_provider in run_manager to return a FauxImagesProvider,
+    # mirroring the e2e test seam (FauxImagesProvider doesn't accept api_key).
+    faux_provider = FauxImagesProvider(_FAKE_PNG)
+    monkeypatch.setattr(
+        "cubebox.streams.run_manager.create_images_provider",
+        lambda api, **kwargs: faux_provider,
+    )
+
+    fake_sandbox = MagicMock()
+    images_model = ImagesModel(id=cfg.model, provider="image-gen", api=cfg.api)
+
+    tool = make_generate_image_tool(
+        org_id="org-1",
+        workspace_id="ws-1",
+        conversation_id="conv-1",
+        sandbox=fake_sandbox,
+        images_provider=faux_provider,
+        images_model=images_model,
+    )
+
+    assert isinstance(tool, AgentTool)
+    assert tool.name == "generate_image"

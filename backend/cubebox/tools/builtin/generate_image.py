@@ -10,7 +10,7 @@ from __future__ import annotations
 import base64
 import re
 import shlex
-from typing import Any, Literal, Protocol
+from typing import Any, Protocol
 
 from cubepi.agent.types import AgentTool, AgentToolResult
 from cubepi.providers.base import ImageContent, TextContent
@@ -44,13 +44,20 @@ class GenerateImageInput(BaseModel):
             "When provided, the first path is overwritten with the generated result."
         ),
     )
-    size: Literal["1024x1024", "1536x1024", "1024x1536", "auto"] = Field(
-        default="auto",
-        description="Output image dimensions. 'auto' lets the provider decide.",
+    size: str | None = Field(
+        default=None,
+        description=(
+            "Output image dimensions — passed through to the provider. "
+            "Examples: '1024x1024', '1536x864', '1024x1536', or an aspect ratio like '16:9'. "
+            "Omit to let the provider decide."
+        ),
     )
-    quality: Literal["low", "medium", "high", "auto"] = Field(
-        default="auto",
-        description="Output image quality. 'auto' lets the provider decide.",
+    quality: str | None = Field(
+        default=None,
+        description=(
+            "Output image quality — provider-interpreted. "
+            "Examples: 'low', 'medium', 'high'. Omit to let the provider decide."
+        ),
     )
 
 
@@ -110,11 +117,17 @@ def make_generate_image_tool(
                 )
             input_images.append(ImageContent(source=result.output.strip(), media_type="image/png"))
 
-        # Build per-call model with requested size/quality.
-        model = images_model.model_copy(update={"size": args.size, "quality": args.quality})
+        # Forward size/quality as provider options when explicitly set.
+        _options: dict[str, Any] = {}
+        if args.size is not None:
+            _options["size"] = args.size
+        if args.quality is not None:
+            _options["quality"] = args.quality
 
         gen_result = await images_provider.generate_images(
-            model, ImagesContext(prompt=args.prompt, input_images=input_images)
+            images_model,
+            ImagesContext(prompt=args.prompt, input_images=input_images),
+            options=_options or None,
         )
 
         if gen_result.stop_reason != "stop" or not gen_result.output:
