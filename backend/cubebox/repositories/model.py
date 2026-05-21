@@ -20,6 +20,16 @@ class ModelRepository:
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
 
+    async def list_all_for_provider(self, provider_id: str) -> list[Model]:
+        """All models for a provider, including disabled (wizard models are enabled=false)."""
+        stmt = (
+            select(Model)
+            .where(Model.provider_id == provider_id)  # type: ignore[arg-type]
+            .order_by(Model.model_id)
+        )
+        result = await self.session.execute(stmt)
+        return list(result.scalars().all())
+
     async def get(self, model_db_id: str) -> Model | None:
         stmt = select(Model).where(Model.id == model_db_id)  # type: ignore[arg-type]
         result = await self.session.execute(stmt)

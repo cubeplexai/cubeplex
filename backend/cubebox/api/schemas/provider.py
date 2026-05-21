@@ -67,6 +67,12 @@ class ProviderTestRequest(ProviderLivenessRequest):
     """
 
 
+class ProviderTestStreamRequest(BaseModel):
+    """Explicit model DB ids to test (wizard models are enabled=false)."""
+
+    model_db_ids: list[str] = Field(min_length=1)
+
+
 class OrgProviderOverrideUpdate(BaseModel):
     enabled: bool
 

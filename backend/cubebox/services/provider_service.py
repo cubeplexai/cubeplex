@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+import json
+from collections.abc import AsyncIterator, Callable
 from datetime import UTC, datetime
 from typing import Any
 
@@ -41,6 +42,10 @@ _OVERALL_TO_STATUS: dict[str, str] = {
     "fail": "fail",
     "unavailable": "unavailable",
 }
+
+
+def _sse(event: str, data: dict[str, Any]) -> bytes:
+    return f"event: {event}\ndata: {json.dumps(data)}\n\n".encode()
 
 
 class ProviderOAuthNotImplementedError(Exception):
@@ -476,6 +481,43 @@ class ProviderService:
                 )
             )
         return results
+
+    async def run_test_stream(
+        self, provider_id: str, model_db_ids: list[str]
+    ) -> AsyncIterator[bytes]:
+        """Stream liveness (once) then a per-model probe event, persisting each verdict."""
+        provider = await self.get_provider(provider_id)
+        cfg = await self._config_from_provider(provider)
+        factory = self._provider_factory_from_config(cfg)
+        models = {m.id: m for m in await self._models.list_all_for_provider(provider_id)}
+        liveness = await provider_probe.run_liveness(
+            provider_factory=factory, model_id=models[model_db_ids[0]].model_id
+        )
+        await self._persist_provider_liveness(provider, liveness)
+        yield _sse("liveness", liveness.model_dump(mode="json"))
+        if liveness.status != "pass":
+            yield _sse("done", {"liveness": "fail"})
+            return
+        fingerprint = capability_fingerprint(
+            provider.capability or {}, provider.model_capability_overrides or {}
+        )
+        for db_id in model_db_ids:
+            model = models[db_id]
+            cap = self._resolve_capability(cfg, model.model_id)
+            result = await provider_probe.run_model_probe(
+                provider_factory=factory, model_id=model.model_id, capability=cap
+            )
+            await self._persist_model_test(model, result, fingerprint)
+            yield _sse("model", {"model_db_id": db_id, **result.model_dump(mode="json")})
+        yield _sse("done", {})
+
+    async def preflight_test_stream(self, provider_id: str, model_db_ids: list[str]) -> None:
+        """Validate provider + model ids before opening the SSE stream (errors → HTTP)."""
+        await self.get_provider(provider_id)
+        known = {m.id for m in await self._models.list_all_for_provider(provider_id)}
+        missing = [i for i in model_db_ids if i not in known]
+        if missing:
+            raise ModelNotFoundError(f"models not found: {missing}")
 
     # -- Org overrides ----------------------------------------------------------
 
