@@ -351,6 +351,86 @@
       "providerError": "Provider unreachable",
       "modelError": "Model test failed",
       "unavailable": "Unavailable"
+    },
+    "wizard": {
+      "title": "Add provider",
+      "subtitle": "Connect a new LLM provider and import its models.",
+      "back": "Back",
+      "next": "Next",
+      "cancel": "Cancel",
+      "finish": "Finish",
+      "step": {
+        "preset": { "label": "Preset", "hint": "Choose a provider" },
+        "configure": { "label": "Configure", "hint": "Credentials & capability" },
+        "models": { "label": "Models", "hint": "Pick models to import" },
+        "test": { "label": "Test", "hint": "Verify connection" }
+      },
+      "preset": {
+        "searchPlaceholder": "Search providers",
+        "searchAriaLabel": "Search providers",
+        "loading": "Loading presets…",
+        "loadFailed": "Failed to load presets",
+        "empty": "No providers match your search",
+        "categoryAll": "All",
+        "categoryHosted": "Hosted",
+        "categorySelfHosted": "Self-hosted",
+        "categoryCustom": "Custom",
+        "reasoningBudget": "Budget reasoning",
+        "reasoningEffort": "Effort reasoning",
+        "reasoningStandard": "Standard"
+      },
+      "configure": {
+        "name": "Display name",
+        "baseUrl": "Base URL",
+        "apiKey": "API key",
+        "apiKeyRequired": "An API key is required for this provider.",
+        "noAuth": "This provider needs no credentials.",
+        "unsupportedAuth": "OAuth/IAM presets aren't supported yet.",
+        "advanced": "Advanced: capability",
+        "creating": "Creating…",
+        "createFailed": "Failed to create provider"
+      },
+      "capability": {
+        "label": "Capability JSON",
+        "invalid": "Invalid JSON",
+        "useTemplate": "Use a template",
+        "templateReasoning": "Inject reasoning block",
+        "templateHint": "Adds a basic effort-style reasoning block you can edit."
+      },
+      "models": {
+        "heading": "Models to import",
+        "subtitle": "Selected models are imported disabled; enable them after the test passes.",
+        "addCustom": "Add custom model",
+        "modelId": "Model ID",
+        "displayName": "Display name",
+        "contextWindow": "Context window",
+        "maxTokens": "Max tokens",
+        "reasoning": "Reasoning",
+        "add": "Add",
+        "remove": "Remove",
+        "empty": "Pick at least one model to continue.",
+        "importing": "Importing…",
+        "importFailed": "Failed to import models"
+      },
+      "test": {
+        "heading": "Connection test",
+        "subtitle": "We run a liveness check, then probe each model.",
+        "run": "Run test",
+        "running": "Testing…",
+        "rerun": "Re-run test",
+        "liveness": "Provider liveness",
+        "livenessPending": "Waiting…",
+        "saving": "Enabling models…",
+        "saveFailed": "Failed to enable models",
+        "saveHint": "Liveness must pass and at least one model must be usable.",
+        "retest": "Re-test",
+        "outcome": {
+          "pass": "Available",
+          "warn": "Degraded",
+          "fail": "Cannot enable",
+          "unavailable": "Cannot enable"
+        }
+      }
     }
   },
   "adminSettings": {
