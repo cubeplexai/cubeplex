@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { useTranslations } from 'next-intl'
 import { Plus, Trash2 } from 'lucide-react'
 import { createModel, type ApiClient, type ModelCreate, type ProviderPreset } from '@cubebox/core'
@@ -51,6 +51,9 @@ export function ModelsStep({ client, preset, providerId, onModelsCreated }: Mode
   const [draftName, setDraftName] = useState('')
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // Models already created in a prior (failed) attempt, keyed by model_id, so a
+  // retry skips them instead of re-POSTing and 409-ing on the duplicate id.
+  const createdByModelId = useRef<Map<string, CreatedModel>>(new Map())
 
   const checkedCount = rows.filter((r) => r.checked).length
 
@@ -84,13 +87,22 @@ export function ModelsStep({ client, preset, providerId, onModelsCreated }: Mode
   }
 
   async function handleNext() {
-    const selected = rows.filter((r) => r.checked)
+    // Dedupe selected rows by vendor model_id (a custom row could collide with a
+    // preset row); keep the first occurrence.
+    const seen = new Set<string>()
+    const selected = rows.filter((r) => r.checked && !seen.has(r.model_id) && seen.add(r.model_id))
     if (selected.length === 0) return
     setSaving(true)
     setError(null)
     try {
       const created: CreatedModel[] = []
       for (const r of selected) {
+        const cached = createdByModelId.current.get(r.model_id)
+        if (cached) {
+          // Created on a prior attempt — don't re-POST (would 409 on the id).
+          created.push(cached)
+          continue
+        }
         const body: ModelCreate = {
           model_id: r.model_id,
           display_name: r.display_name,
@@ -101,7 +113,13 @@ export function ModelsStep({ client, preset, providerId, onModelsCreated }: Mode
           enabled: false,
         }
         const model = await createModel(client, providerId, body)
-        created.push({ id: model.id, model_id: r.model_id, display_name: r.display_name })
+        const entry: CreatedModel = {
+          id: model.id,
+          model_id: r.model_id,
+          display_name: r.display_name,
+        }
+        createdByModelId.current.set(r.model_id, entry)
+        created.push(entry)
       }
       onModelsCreated(created)
     } catch (e) {

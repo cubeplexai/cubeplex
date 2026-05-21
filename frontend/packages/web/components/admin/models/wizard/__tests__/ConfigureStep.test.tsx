@@ -9,7 +9,7 @@ import { makePreset } from './fixtures'
 
 vi.mock('@cubebox/core', async (importOriginal) => {
   const actual = await importOriginal<typeof core>()
-  return { ...actual, createProvider: vi.fn() }
+  return { ...actual, createProvider: vi.fn(), updateProvider: vi.fn() }
 })
 
 const fakeClient = {} as ApiClient
@@ -18,10 +18,19 @@ function created(id: string): Provider {
   return { id } as Provider
 }
 
-function renderStep(preset = makePreset(), onProviderCreated = vi.fn()) {
+function renderStep(
+  preset = makePreset(),
+  onProviderCreated = vi.fn(),
+  existingProviderId?: string | null,
+) {
   render(
     <NextIntlClientProvider locale="en" messages={en}>
-      <ConfigureStep client={fakeClient} preset={preset} onProviderCreated={onProviderCreated} />
+      <ConfigureStep
+        client={fakeClient}
+        preset={preset}
+        existingProviderId={existingProviderId}
+        onProviderCreated={onProviderCreated}
+      />
     </NextIntlClientProvider>,
   )
   return { onProviderCreated }
@@ -31,6 +40,19 @@ describe('ConfigureStep', () => {
   beforeEach(() => {
     vi.mocked(core.createProvider).mockReset()
     vi.mocked(core.createProvider).mockResolvedValue(created('prv_new'))
+    vi.mocked(core.updateProvider).mockReset()
+    vi.mocked(core.updateProvider).mockResolvedValue(created('prv_existing'))
+  })
+
+  it('revisit: updates the existing provider instead of creating a second one', async () => {
+    const preset = makePreset({ auth: { mode: 'api_key', header_name: 'x-api-key' } })
+    const { onProviderCreated } = renderStep(preset, vi.fn(), 'prv_existing')
+    fireEvent.change(screen.getByLabelText('API key'), { target: { value: 'sk-123' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }))
+    await waitFor(() => expect(core.updateProvider).toHaveBeenCalled())
+    expect(vi.mocked(core.updateProvider).mock.calls[0][1]).toBe('prv_existing')
+    expect(core.createProvider).not.toHaveBeenCalled()
+    await waitFor(() => expect(onProviderCreated).toHaveBeenCalledWith('prv_existing'))
   })
 
   it('api_key preset: requires a key, then creates provider with mapped body', async () => {
