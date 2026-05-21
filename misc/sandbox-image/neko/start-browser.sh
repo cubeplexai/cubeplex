@@ -8,8 +8,14 @@
 set -eu
 
 PIDFILE=/var/run/neko-supervisord.pid
-
 SUPERVISORD_CONF=/etc/neko/supervisord.conf
+
+# Serialize concurrent invocations: without a lock, two pings can both pass the
+# pre-check before the supervisor socket exists and both launch supervisord,
+# racing on the socket/ports. flock makes check+start atomic; the lock releases
+# when the script (fd 9) exits.
+exec 9>/var/run/neko-start.lock
+flock 9
 
 # Idempotency check must target the same supervisord (config/socket) we start
 # below. Use a daemon-level `pid` check, not `status`: `supervisorctl status`

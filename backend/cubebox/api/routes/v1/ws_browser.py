@@ -63,13 +63,9 @@ async def keepalive(
 
     Browser traffic goes directly to Neko, so without this a long human takeover
     (OAuth + 2FA, etc.) could be reaped by TTL cleanup. The frontend pings this
-    on an interval while the live view is open."""
+    on an interval while the live view is open.
+
+    Touches only the *existing* sandbox — never provisions one — so a dead/reaped
+    sandbox isn't silently re-created (and kept alive) behind a stale iframe."""
     manager = get_sandbox_manager()
-    sandbox = await manager.get_or_create(
-        ctx.user.id,
-        org_id=ctx.org_id,
-        workspace_id=ctx.workspace_id,
-    )
-    # force=True bypasses the touch_interval throttle so each keepalive reliably
-    # extends the TTL even when the client cadence is below touch_interval.
-    await manager.touch(sandbox.id, org_id=ctx.org_id, workspace_id=ctx.workspace_id, force=True)
+    await manager.touch_active(ctx.user.id, org_id=ctx.org_id, workspace_id=ctx.workspace_id)

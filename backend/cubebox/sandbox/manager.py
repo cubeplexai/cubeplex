@@ -231,6 +231,29 @@ class SandboxManager:
             repo = UserSandboxRepository(session, org_id=org_id, workspace_id=workspace_id)
             await repo.update_activity_by_sandbox_id(sandbox_id)
 
+    async def touch_active(
+        self,
+        user_id: str,
+        *,
+        org_id: str,
+        workspace_id: str,
+    ) -> bool:
+        """Refresh activity for the user's *existing* active sandbox, if any.
+
+        Unlike :meth:`touch` (keyed by sandbox_id) this never creates a sandbox —
+        used by the browser keepalive so a dead/reaped sandbox isn't silently
+        re-provisioned on every ping while the panel stays open. Returns whether
+        an active sandbox was found. Bypasses the touch throttle.
+        """
+        async with self._session_factory() as session:
+            repo = UserSandboxRepository(session, org_id=org_id, workspace_id=workspace_id)
+            record = await repo.get_active_by_user(user_id)
+            if record is None:
+                return False
+            await repo.update_activity(record.id)
+            self._touch_cache[record.sandbox_id] = datetime.now(UTC)
+            return True
+
     async def cleanup_expired(self) -> None:
         """Find and terminate sandboxes that exceeded their TTL.
 
