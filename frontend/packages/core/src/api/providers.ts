@@ -9,6 +9,9 @@ import type {
   ModelUpdate,
   OrgLLMSettings,
   OrgLLMSettingsUpdate,
+  ProviderPreset,
+  ProbeStep,
+  ProbeResult,
 } from '../types/provider'
 
 export async function fetchProviders(client: ApiClient): Promise<Provider[]> {
@@ -87,4 +90,69 @@ export async function updateOrgLLMSettings(
   const res = await client.put('/api/v1/admin/settings/llm', body)
   if (!res.ok) throw await toApiError(res)
   return res.json() as Promise<OrgLLMSettings>
+}
+
+export async function listPresets(client: ApiClient): Promise<ProviderPreset[]> {
+  const res = await client.get('/api/v1/admin/llm/presets')
+  if (!res.ok) throw await toApiError(res)
+  return res.json() as Promise<ProviderPreset[]>
+}
+
+interface LivenessBody {
+  api: string
+  base_url: string
+  api_key?: string | null
+  capability: Record<string, unknown>
+  model_capability_overrides?: Record<string, unknown>
+  model_id: string
+}
+
+export async function presaveLiveness(client: ApiClient, body: LivenessBody): Promise<ProbeStep> {
+  const res = await client.post('/api/v1/admin/providers/liveness', body)
+  if (!res.ok) throw await toApiError(res)
+  return res.json() as Promise<ProbeStep>
+}
+
+export async function presaveTest(client: ApiClient, body: LivenessBody): Promise<ProbeResult> {
+  const res = await client.post('/api/v1/admin/providers/test', body)
+  if (!res.ok) throw await toApiError(res)
+  return res.json() as Promise<ProbeResult>
+}
+
+export async function checkLiveness(
+  client: ApiClient,
+  providerId: string,
+  modelId: string,
+): Promise<ProbeStep> {
+  const res = await client.post(`/api/v1/admin/providers/${providerId}/liveness`, {
+    model_id: modelId,
+  })
+  if (!res.ok) throw await toApiError(res)
+  return res.json() as Promise<ProbeStep>
+}
+
+export async function testModel(
+  client: ApiClient,
+  providerId: string,
+  modelDbId: string,
+): Promise<ProbeResult> {
+  const res = await client.post(
+    `/api/v1/admin/providers/${providerId}/models/${modelDbId}/test`,
+    {},
+  )
+  if (!res.ok) throw await toApiError(res)
+  return res.json() as Promise<ProbeResult>
+}
+
+export async function setModelEnabled(
+  client: ApiClient,
+  providerId: string,
+  modelDbId: string,
+  enabled: boolean,
+): Promise<Model> {
+  const res = await client.patch(`/api/v1/admin/providers/${providerId}/models/${modelDbId}`, {
+    enabled,
+  })
+  if (!res.ok) throw await toApiError(res)
+  return res.json() as Promise<Model>
 }

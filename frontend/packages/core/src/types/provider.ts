@@ -1,3 +1,55 @@
+export type WireApi = 'openai-completions' | 'openai-responses' | 'anthropic-messages'
+
+export type Readiness =
+  | 'ready'
+  | 'degraded'
+  | 'stale'
+  | 'provider_error'
+  | 'model_error'
+  | 'unavailable'
+
+export interface AuthSpec {
+  mode: 'api_key' | 'bearer' | 'none' | 'oauth' | 'iam'
+  header_name?: string
+  header_prefix?: string
+}
+
+export interface ProviderPreset {
+  slug: string
+  display_name: string
+  short_name: string
+  category: 'saas' | 'oss-framework' | 'custom'
+  description: string
+  logo: string | null
+  api: WireApi
+  base_url: string
+  auth: AuthSpec
+  capability: Record<string, unknown>
+  model_capability_overrides: Record<string, Record<string, unknown>>
+  default_models: Array<{
+    model_id: string
+    display_name: string
+    context_window: number
+    max_tokens: number
+    input_modalities: string[]
+    reasoning: boolean
+  }>
+}
+
+export interface ProbeStep {
+  name: string
+  status: 'pass' | 'fail' | 'skip' | 'warn'
+  latency_ms?: number | null
+  detail?: string
+  error?: { type: string; message: string; raw_status?: number | null } | null
+}
+
+export interface ProbeResult {
+  overall: 'pass' | 'fail' | 'warn' | 'unavailable'
+  blocking_failed: boolean
+  steps: ProbeStep[]
+}
+
 export interface Provider {
   id: string
   name: string
@@ -15,6 +67,9 @@ export interface Provider {
   created_by_user_id: string
   created_at: string
   updated_at: string
+  preset_slug?: string | null
+  last_liveness_status?: string | null
+  last_liveness_at?: string | null
 }
 
 export interface Model {
@@ -36,6 +91,10 @@ export interface Model {
   is_system: boolean
   created_at: string
   updated_at: string
+  last_test_status?: string
+  last_test_at?: string | null
+  last_test_summary?: Record<string, unknown>
+  readiness?: Readiness
 }
 
 export interface ProviderCreate {
@@ -47,6 +106,9 @@ export interface ProviderCreate {
   logo_url?: string | null
   extra_body?: Record<string, unknown>
   extra_headers?: Record<string, unknown>
+  preset_slug?: string
+  capability?: Record<string, unknown>
+  model_capability_overrides?: Record<string, unknown>
 }
 
 export interface ProviderUpdate {
@@ -59,6 +121,9 @@ export interface ProviderUpdate {
   extra_body?: Record<string, unknown> | null
   extra_headers?: Record<string, unknown> | null
   enabled?: boolean | null
+  preset_slug?: string
+  capability?: Record<string, unknown>
+  model_capability_overrides?: Record<string, unknown>
 }
 
 export interface ModelCreate {
@@ -74,6 +139,7 @@ export interface ModelCreate {
   max_tokens: number
   extra_body?: Record<string, unknown>
   extra_headers?: Record<string, unknown>
+  enabled?: boolean
 }
 
 export interface ModelUpdate {

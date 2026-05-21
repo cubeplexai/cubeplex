@@ -28,6 +28,7 @@ export interface ApiClient {
   resolvePath(path: string): string
   get(path: string): Promise<Response>
   post(path: string, body: unknown): Promise<Response>
+  postRaw(path: string, body: unknown, headers?: Record<string, string>): Promise<Response>
   postForm(path: string, form: Record<string, string>): Promise<Response>
   put(path: string, body: unknown): Promise<Response>
   patch(path: string, body: unknown): Promise<Response>
@@ -113,6 +114,13 @@ export function createApiClient(baseUrl: string): ApiClient {
         method: 'POST',
         headers: buildHeaders('POST', { 'Content-Type': 'application/json' }),
         body: JSON.stringify(body),
+      })
+    },
+    postRaw(path, body, headers) {
+      return doFetch(path, {
+        method: 'POST',
+        body: JSON.stringify(body),
+        headers: buildHeaders('POST', { 'Content-Type': 'application/json', ...(headers ?? {}) }),
       })
     },
     postForm(path, form) {
