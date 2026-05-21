@@ -146,3 +146,35 @@ async def test_seed_backfills_capability_for_known_slug(
     ).scalar_one()
     assert house.preset_slug is None
     assert not house.capability
+
+
+async def test_seed_dedups_colliding_slugs(
+    clean_db: AsyncSession,
+    backend: FernetBackend,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Two config names that slugify to the same value must not collide on insert.
+
+    `Acme AI` and `acme-ai` both slugify to `acme-ai`; the seeder must suffix the
+    second (`acme-ai-2`) instead of violating the uq_provider_system_slug index.
+    """
+    fake_llm = {
+        "providers": {
+            "Acme AI": {
+                "base_url": "http://localhost:8000/v1",
+                "api": "openai-completions",
+                "models": [{"id": "a1", "name": "A1"}],
+            },
+            "acme-ai": {
+                "base_url": "http://localhost:8001/v1",
+                "api": "openai-completions",
+                "models": [{"id": "a2", "name": "A2"}],
+            },
+        }
+    }
+    monkeypatch.setattr("cubebox.seeders.provider_seeder.settings", {"llm": fake_llm}, raising=True)
+
+    await seed_system_providers_from_config(clean_db, backend)
+
+    slugs = {p.name: p.slug for p in (await clean_db.execute(select(Provider))).scalars().all()}
+    assert {slugs["Acme AI"], slugs["acme-ai"]} == {"acme-ai", "acme-ai-2"}

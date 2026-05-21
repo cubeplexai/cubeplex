@@ -22,6 +22,18 @@ from cubebox.utils.slug import slugify
 _PROVIDER_KEY_KIND = "provider_api_key"
 
 
+def _dedup_slug(base: str, taken: set[str]) -> str:
+    """Return ``base`` (or ``base-2``/``-3``…) not in ``taken``, capped at 64 chars."""
+    base = base or "provider"
+    n = 1
+    while True:
+        suffix = "" if n == 1 else f"-{n}"
+        candidate = base[: 64 - len(suffix)] + suffix
+        if candidate not in taken:
+            return candidate
+        n += 1
+
+
 def _capability_for(slug: str) -> tuple[dict[str, Any], dict[str, Any]] | None:
     """Resolve a cubepi preset slug to its cached capability snapshot.
 
@@ -100,6 +112,20 @@ async def seed_system_providers_from_config(
 
     config_model_ids: dict[str, set[str]] = {}
 
+    # Track system-bucket slugs so two config names that slugify to the same value
+    # get -2/-3 suffixing instead of violating uq_provider_system_slug (matches the
+    # migration backfill + create_provider dedup).
+    existing_system = (
+        (
+            await session.execute(
+                select(Provider).where(Provider.org_id.is_(None))  # type: ignore[union-attr]
+            )
+        )
+        .scalars()
+        .all()
+    )
+    used_slugs: set[str] = {p.slug for p in existing_system if p.slug}
+
     for name, cfg_dict_raw in config_providers.items():
         cfg_dict: dict[str, Any] = dict(cfg_dict_raw)
 
@@ -126,10 +152,12 @@ async def seed_system_providers_from_config(
         provider_type: str = str(cfg_dict.get("api", "openai-completions"))
 
         if provider is None:
+            slug = _dedup_slug(slugify(name), used_slugs)
+            used_slugs.add(slug)
             provider = Provider(
                 org_id=None,
                 name=name,
-                slug=slugify(name),
+                slug=slug,
                 provider_type=provider_type,
                 base_url=base_url,
                 auth_type="api_key",
@@ -143,7 +171,9 @@ async def seed_system_providers_from_config(
             provider.base_url = base_url
             provider.provider_type = provider_type
             if not getattr(provider, "slug", None):
-                provider.slug = slugify(name)
+                slug = _dedup_slug(slugify(name), used_slugs)
+                used_slugs.add(slug)
+                provider.slug = slug
             logger.debug("System provider '{}' already exists, updated", name)
 
         # Backfill cached capability snapshot from the cubepi preset catalog.
