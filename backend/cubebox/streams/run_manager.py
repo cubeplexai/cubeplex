@@ -1150,7 +1150,7 @@ class RunManager:
                 # Never blocks or alters the live request — we re-raise as-is.
                 _schedule_writeback(
                     org_id=ctx.org_id,
-                    provider_name=provider_name,
+                    provider_slug=provider_name,
                     model_id=model_id,
                     exc=_run_exc,
                 )
@@ -1159,7 +1159,7 @@ class RunManager:
                 # Success clears a stale liveness "fail" via a guarded UPDATE.
                 _schedule_writeback(
                     org_id=ctx.org_id,
-                    provider_name=provider_name,
+                    provider_slug=provider_name,
                     model_id=model_id,
                     exc=None,
                 )
