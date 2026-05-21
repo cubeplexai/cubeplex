@@ -453,6 +453,7 @@
     "fallbackRemove": "移除 {model}",
     "noModels": "暂无可用模型，请先在「模型」页面添加 Provider 与模型",
     "noMatchingModels": "无匹配模型",
+    "modelUnavailable": "不可用",
     "save": "保存",
     "saving": "保存中…",
     "saved": "已保存",
