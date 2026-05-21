@@ -9,6 +9,7 @@ docs/dev/specs/2026-05-20-sandbox-browser-takeover-design.md.
 from __future__ import annotations
 
 from typing import Annotated
+from urllib.parse import urlencode
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
@@ -18,6 +19,23 @@ from cubebox.auth.dependencies import require_member
 from cubebox.sandbox.manager import get_sandbox_manager
 
 router = APIRouter(prefix="/ws/{workspace_id}/browser", tags=["ws-browser"])
+
+# Neko HTML5 client URL params, read client-side:
+# - usr/pwd: auto-login (stripped after read). The password is the sandbox
+#   image's fixed Neko user password; with session.implicit_hosting the member
+#   auto-gets control, so the frontend "take over" works without an extra
+#   in-Neko step. The endpoint is per-sandbox access-controlled, so this isn't a
+#   meaningful secret.
+# - embed/show_side/volume: strip Neko's own chrome (logo bar, side/chat panel)
+#   and mute (muted autoplay avoids the "click to enable audio" overlay) so the
+#   iframe shows just the browser desktop.
+_NEKO_URL_PARAMS = {
+    "usr": "cubebox",
+    "pwd": "neko",
+    "embed": "1",
+    "show_side": "0",
+    "volume": "0",
+}
 
 
 class BrowserLiveViewResponse(BaseModel):
@@ -52,7 +70,9 @@ async def get_live_view(
             status_code=501,
             detail="sandbox browser endpoint requires header auth; same-origin proxy not yet implemented",
         )
-    return BrowserLiveViewResponse(url=endpoint.url)
+    sep = "&" if "?" in endpoint.url else "?"
+    url = f"{endpoint.url}{sep}{urlencode(_NEKO_URL_PARAMS)}"
+    return BrowserLiveViewResponse(url=url)
 
 
 @router.post("/keepalive", status_code=status.HTTP_204_NO_CONTENT)
