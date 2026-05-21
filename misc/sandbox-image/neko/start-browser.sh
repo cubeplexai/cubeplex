@@ -12,8 +12,10 @@ PIDFILE=/var/run/neko-supervisord.pid
 SUPERVISORD_CONF=/etc/neko/supervisord.conf
 
 # Idempotency check must target the same supervisord (config/socket) we start
-# below; a bare `supervisorctl` uses its own default and would mis-detect.
-if [ -S /var/run/supervisor.sock ] && supervisorctl -c "$SUPERVISORD_CONF" status >/dev/null 2>&1; then
+# below. Use a daemon-level `pid` check, not `status`: `supervisorctl status`
+# returns non-zero if any managed child is down, which would falsely fall
+# through and launch a second supervisord against the running one.
+if [ -S /var/run/supervisor.sock ] && supervisorctl -c "$SUPERVISORD_CONF" pid >/dev/null 2>&1; then
     echo "neko stack already running"
     exit 0
 fi

@@ -66,6 +66,13 @@ async def test_local_sandbox_browser_endpoint_is_localhost() -> None:
 
 
 @pytest.mark.asyncio
+async def test_local_sandbox_start_browser_is_noop() -> None:
+    # The in-image launch script is absent on a dev host; start must not raise.
+    sb = LocalSandbox()
+    await sb.start_browser()
+
+
+@pytest.mark.asyncio
 async def test_opensandbox_browser_endpoint_uses_signed_endpoint() -> None:
     """OpenSandbox.get_browser_endpoint signs port 8080 and maps the result."""
     from cubebox.sandbox.opensandbox import OpenSandbox

@@ -57,6 +57,11 @@ class LocalSandbox(Sandbox):
             result.append((path, Path(path).read_bytes()))
         return result
 
+    async def start_browser(self) -> None:
+        # Dev only: the in-image launch script isn't present on the host, so the
+        # base implementation would raise. Assume a locally-running Neko (if any).
+        return None
+
     async def get_browser_endpoint(self, *, expires_in: int = 3600) -> BrowserEndpoint:
         # Dev only: the local Neko stack (if running) is reachable on localhost.
         return BrowserEndpoint(url=f"http://localhost:{self.BROWSER_PORT}/")
