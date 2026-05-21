@@ -164,9 +164,12 @@ COPY --from=neko /usr/lib/xorg/modules/drivers/dummy_drv.so /usr/lib/xorg/module
 COPY --from=neko /usr/lib/xorg/modules/input/neko_drv.so /usr/lib/xorg/modules/input/neko_drv.so
 # Trim the embedded Neko client UI:
 # - hide the "open in new window" (popout) control — useless in the panel;
-# - hide the big n.eko logo on the connecting splash (keep the small spinner).
-# Keep clipboard + fullscreen.
-RUN sed -i 's#</head>#<style>.video-menu li:has(.fa-external-link-alt){display:none!important}.loading .logo{display:none!important}</style></head>#' /var/www/index.html
+# - hide every n.eko logo (connect + loading splashes) so none flashes;
+# - hide the player-overlay (the "click to play / unmute" prompt).
+# The script forces the <video> muted so it autoplays (browser autoplay policy
+# only allows muted autoplay; volume=0 alone still triggers the prompt), making
+# the now-hidden overlay unnecessary. Keep clipboard + fullscreen.
+RUN sed -i 's#</head>#<style>.video-menu li:has(.fa-external-link-alt){display:none!important}.logo{display:none!important}.player-overlay{display:none!important}</style><script>setInterval(function(){var v=document.querySelector("video");if(v){try{v.muted=true;if(v.paused)v.play().catch(function(){});}catch(e){}}},250);</script></head>#' /var/www/index.html
 
 # neko user at uid 1000. Remove a pre-existing uid-1000 user conditionally so the
 # build stays deterministic across base-image variants (never hard-fail).
