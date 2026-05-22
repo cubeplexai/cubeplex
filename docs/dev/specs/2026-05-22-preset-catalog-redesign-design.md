@@ -279,8 +279,8 @@ Clean cutover, no shim. Ordered so each step is independently reviewable.
    `capabilities.yaml`. Add the §4.1 parity test against a frozen snapshot of
    today's flat URLs.
 3. **cubebox: repoint the 3 consumers**:
-   - `admin_llm.py:list_provider_presets` → return the flattened endpoint
-     presets (new shape; §5.1).
+   - `admin_llm.py:list_provider_presets` → return the **nested vendor list**
+     (new shape; §5.1).
    - `admin_providers.py` logo lookup → resolve via vendor.
    - `provider_seeder.py` → resolve the config provider's `preset:` to a catalog
      endpoint and inherit base_url/api/capability/**model pool** with the §6.2
@@ -441,8 +441,10 @@ To prevent that, the migration is **exhaustive, not illustrative**:
   parse, host-override and full-`base_url`-override paths.
 - **Seeder test:** `preset:`-referenced providers (deepseek/arkcode/alicode/
   sensedeal) seed the right base_url + full model pool + pricing + capability;
-  `models:` subset filters correctly; a config field override beats the catalog;
-  an unknown `preset_key` or unknown subset model id fails loudly (§6.3); a
+  `models:` subset filters correctly; an **allowed** config override (`base_url`,
+  per-model `cost`) beats the catalog while `api`/`capability` overrides are
+  rejected (§6.2.3); an unknown `preset_key` or unknown subset model id fails
+  loudly (§6.3); a
   partial `cost` override deep-merges (inherits the unspecified legs); `api`
   alongside `preset:` is rejected.
 - **Backfill-parity test (§6.4):** every provider that got a capability snapshot
@@ -473,6 +475,7 @@ To prevent that, the migration is **exhaustive, not illustrative**:
 6. **Seeder match via explicit `config.yaml` `preset:` field** — no name
    heuristic.
 7. **Config references the catalog instead of restating it** — a `preset:` +
-   `api_key` is enough; base_url/models/pricing/capability inherit, with config
-   fields overriding and an optional `models:` subset filter (§6). The seeded
-   config is rewritten to this form.
+   `api_key` is enough; base_url/models/pricing/capability inherit. Only
+   *allowed* fields override (`base_url`, per-model `cost`); `api`/`capability`
+   are fixed by the chosen endpoint (§6.2.3). Optional `models:` subset filter.
+   The seeded config is rewritten to this form (§6.4 exhaustive).
