@@ -223,6 +223,23 @@ async def test_probe_streaming_fails_on_zero_chunks():
     assert step.status == "fail"
 
 
+@pytest.mark.asyncio
+async def test_probe_liveness_fails_on_error_event():
+    # cubepi surfaces a 401 as an `error` stream event (not an exception); it must
+    # NOT count as a successful "1 event" liveness pass.
+    err = type("E", (), {"type": "error", "error": "401 Unauthorized"})()
+    step = await probe_liveness(_StubProvider(events=[err]), model_id="m")
+    assert step.status == "fail"
+    assert "401" in step.detail
+
+
+@pytest.mark.asyncio
+async def test_probe_streaming_fails_on_error_event():
+    err = type("E", (), {"type": "error", "error": "boom"})()
+    step = await probe_streaming(_StubProvider(events=[err]), model_id="m")
+    assert step.status == "fail"
+
+
 # --- Task 9: orchestrators + model_not_found classifier ---------------------
 
 

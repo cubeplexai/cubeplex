@@ -129,6 +129,21 @@ async def _drain_stream(
     return events, time.perf_counter() - start, result
 
 
+def _first_error_event(events: list[Any]) -> Any | None:
+    """cubepi surfaces upstream API errors (e.g. 401) as an ``error`` stream event
+    rather than raising, so callers must inspect events — a lone error event must
+    NOT be mistaken for a successful chunk."""
+    return next((e for e in events if getattr(e, "type", None) == "error"), None)
+
+
+def _error_event_detail(evt: Any) -> str:
+    for attr in ("error", "message", "detail"):
+        v = getattr(evt, attr, None)
+        if v:
+            return str(v)[:200]
+    return "stream returned an error event"
+
+
 async def probe_liveness(provider: Any, *, model_id: str) -> ProbeStep:
     # Spec §4.4 step 1: minimal completion — max_tokens=1, prompt ".",
     # 5s timeout. Proves base_url + key + network reach the endpoint.
@@ -143,6 +158,9 @@ async def probe_liveness(provider: Any, *, model_id: str) -> ProbeStep:
         )
     except Exception as exc:
         return ProbeStep(name="liveness", status="fail", error=_probe_error(exc))
+    err = _first_error_event(events)
+    if err is not None:
+        return ProbeStep(name="liveness", status="fail", detail=_error_event_detail(err))
     return ProbeStep(
         name="liveness",
         status="pass",
@@ -232,6 +250,9 @@ async def probe_tools(provider: Any, *, model_id: str) -> ProbeStep:
     saw_result_toolcall = any(isinstance(c, ToolCall) for c in result_content)
     if saw_event or saw_result_toolcall:
         return ProbeStep(name="tools", status="pass", detail="endpoint returned a tool call")
+    err = _first_error_event(events)
+    if err is not None:
+        return ProbeStep(name="tools", status="fail", detail=_error_event_detail(err))
     return ProbeStep(name="tools", status="fail", detail="endpoint did not return a tool call")
 
 
@@ -250,6 +271,9 @@ async def probe_streaming(provider: Any, *, model_id: str) -> ProbeStep:
             detail="streaming request failed",
             error=_probe_error(exc),
         )
+    err = _first_error_event(events)
+    if err is not None:
+        return ProbeStep(name="streaming", status="fail", detail=_error_event_detail(err))
     chunks = len(events)
     if chunks > 0:
         return ProbeStep(name="streaming", status="pass", detail=f"{chunks} chunks")

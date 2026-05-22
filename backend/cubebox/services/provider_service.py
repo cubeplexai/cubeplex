@@ -140,10 +140,20 @@ class ProviderService:
             raise ValueError("api_key must be empty for auth_type='none'")
 
     async def _resolve_api_key(self, provider: Provider) -> str | None:
-        """Decrypt the provider's stored api key, or None if no credential is set."""
+        """Decrypt the provider's stored api key, or None if no credential is set.
+
+        A system provider (org_id=NULL) carries a system credential the org-scoped
+        credential service can't see, so read it with system scope — otherwise
+        testing a system provider runs with a placeholder key and 401s.
+        """
         if not provider.credential_id:
             return None
         try:
+            if provider.org_id is None:
+                return await self._credentials.get_decrypted_system(
+                    credential_id=provider.credential_id,
+                    requesting_kind=_PROVIDER_KEY_KIND,
+                )
             return await self._credentials.get_decrypted(
                 credential_id=provider.credential_id,
                 requesting_kind=_PROVIDER_KEY_KIND,
