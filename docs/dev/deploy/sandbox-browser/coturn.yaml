@@ -1,0 +1,43 @@
+# TURN relay for the sandbox browser's WebRTC media.
+#
+# Why: the OpenSandbox gateway proxies HTTP/WS only, so Neko's media (UDP) can't
+# traverse it, and the default STUN (stun.l.google.com) is unreachable from the
+# cluster. Without this relay ICE never completes and the live view stays blank.
+#
+# Replace 192.168.1.208 with an IP reachable by BOTH the viewer's browser and
+# the sandbox pods (here: a node IP, via hostNetwork). Change the realm and the
+# user:credential before anything beyond a closed test cluster, and prefer TLS
+# (--no-tls/--no-dtls are dropped here only because the test setup is plaintext).
+# The relay port range (min/max-port) must be open between viewer and node.
+#
+# Keep in sync with the Neko ICE config baked into the sandbox image
+# (NEKO_WEBRTC_ICESERVERS_* — build args NEKO_TURN_URL/USER/CRED).
+apiVersion: v1
+kind: Pod
+metadata:
+  name: coturn
+  namespace: default
+  labels:
+    app: coturn
+spec:
+  # hostNetwork so the advertised IP is the node IP both peers can reach.
+  hostNetwork: true
+  # nodeName: k8s-test-208   # pin to a node with a stable, reachable IP
+  containers:
+    - name: coturn
+      image: hub.sensedeal.vip/library/coturn:latest
+      args:
+        - "-n"
+        - "--listening-port=3478"
+        - "--listening-ip=192.168.1.208"
+        - "--relay-ip=192.168.1.208"
+        - "--external-ip=192.168.1.208"
+        - "--realm=cubebox"
+        - "--fingerprint"
+        - "--lt-cred-mech"
+        - "--user=neko:neko"
+        - "--min-port=49160"
+        - "--max-port=49200"
+        - "--no-tls"
+        - "--no-dtls"
+        - "--log-file=stdout"

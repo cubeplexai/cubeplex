@@ -1,0 +1,35 @@
+# Pre-pulls the sandbox image onto every node so the first real sandbox there
+# doesn't cold-pull a multi-GB image and blow past sandbox.ready_timeout (60s).
+#
+# It just runs the sandbox image as a sleeping container — scheduling the pod on
+# a node forces that node to pull the image. Re-point `image` at every new tag
+# and wait for `ready == desired` before relying on fast sandbox creates:
+#   kubectl set image ds/sandbox-prepull prepull=<new-tag> -n default
+#   kubectl rollout status ds/sandbox-prepull -n default
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: sandbox-prepull
+  namespace: default
+  labels:
+    app: sandbox-prepull
+spec:
+  selector:
+    matchLabels:
+      app: sandbox-prepull
+  template:
+    metadata:
+      labels:
+        app: sandbox-prepull
+    spec:
+      # Tolerate control-plane taints if those nodes also run sandboxes.
+      # tolerations:
+      #   - operator: Exists
+      containers:
+        - name: prepull
+          image: hub.sensedeal.vip/library/cubebox-sandbox:24.04-20260521-neko8
+          command: ["sleep", "infinity"]
+          resources:
+            requests:
+              cpu: "10m"
+              memory: "16Mi"

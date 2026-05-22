@@ -4,6 +4,11 @@ Operational notes for running the sandbox browser-takeover feature. The product
 design is in `docs/dev/specs/2026-05-20-sandbox-browser-takeover-design.md`; this
 file is only about what has to exist in the deployment for it to work.
 
+Ready-to-apply manifests/scripts for the pieces below (coturn, prepull
+DaemonSet, in-cluster image build, browser-skill install) live in
+[`docs/dev/deploy/sandbox-browser/`](../deploy/sandbox-browser/README.md) —
+they default to test-cluster values; override per environment.
+
 ## What runs where
 
 - Each sandbox pod runs a **headful Chromium** on a virtual X display, streamed
