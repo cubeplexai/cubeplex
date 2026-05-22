@@ -448,7 +448,14 @@ def create_app(
     app.include_router(admin_providers.router, prefix="/api/v1")
     app.include_router(admin_llm.router, prefix="/api/v1")
     app.include_router(ws_skills.router, prefix="/api/v1")
-    app.include_router(ws_browser.router, prefix="/api/v1")
+    # Browser live-view/keepalive handlers require the SandboxManager, which is
+    # only initialized when sandbox support is enabled (see the lifespan above).
+    # Don't expose /browser/* otherwise — the handlers would 500 with
+    # "SandboxManager not initialized". Gate the API surface to match capability.
+    from cubebox.config import config as _sandbox_config
+
+    if _sandbox_config.get("sandbox.enabled", False):
+        app.include_router(ws_browser.router, prefix="/api/v1")
 
     from cubebox.api.routes.health import router as health_router
 
