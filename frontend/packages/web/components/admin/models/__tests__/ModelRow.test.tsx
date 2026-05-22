@@ -68,6 +68,24 @@ describe('ModelRow', () => {
     expect(screen.getByText(en.adminModels.readiness.degraded)).toBeInTheDocument()
   })
 
+  it('surfaces warn/fail probe-step reasons from last_test_summary', () => {
+    renderRow(
+      makeModel({
+        readiness: 'degraded',
+        last_test_summary: {
+          overall: 'warn',
+          steps: [
+            { name: 'temperature', status: 'pass', detail: 'ok' },
+            { name: 'streaming', status: 'warn', detail: 'no SSE chunks observed' },
+          ],
+        },
+      }),
+    )
+    expect(screen.getByText(/streaming — no SSE chunks observed/)).toBeInTheDocument()
+    // passing steps are not listed as issues
+    expect(screen.queryByText(/temperature/)).not.toBeInTheDocument()
+  })
+
   it('clicking re-test calls testModel with the provider and model db ids', async () => {
     const { onRetested } = renderRow(makeModel())
     const btn = screen.getByTestId('model-row-gpt-test-retest')
