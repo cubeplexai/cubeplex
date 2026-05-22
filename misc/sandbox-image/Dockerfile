@@ -195,7 +195,8 @@ RUN ln -s "$(ls -d /ms-playwright/chromium-*/chrome-linux64 | head -1)/chrome" /
 
 COPY neko/chromium.conf /etc/neko/supervisord/chromium.conf
 COPY neko/start-browser.sh /usr/local/bin/start-browser.sh
-RUN chmod +x /usr/local/bin/start-browser.sh
+COPY neko/launch-chrome.sh /usr/local/bin/launch-chrome.sh
+RUN chmod +x /usr/local/bin/start-browser.sh /usr/local/bin/launch-chrome.sh
 
 ENV USER=neko \
     DISPLAY=:99.0 \
