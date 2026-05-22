@@ -113,8 +113,11 @@ Lives in cubebox: `cubebox/llm/catalog/` with `data/vendors.yaml`,
 `data/capabilities.yaml`, `types.py`, `loader.py`.
 
 Three nested levels: **Vendor** → **Endpoint** (region × protocol × plan) →
-**Model**. Models are a vendor-level pool; each endpoint names the subset (by
-`plan`, or explicit `model_ids`) it serves.
+**Model**. Models are a vendor-level pool. Membership has **exactly one
+mechanism**: each model carries a `plan` tag (or list of plans), and an endpoint
+serves the models whose `plan` intersects the endpoint's `plan`. Endpoints never
+list model ids; models never list endpoints/regions/protocols. (Untagged
+vendors — §4.2 — every endpoint serves every model.)
 
 ```yaml
 # cubebox/llm/catalog/data/vendors.yaml
@@ -180,16 +183,28 @@ rewrite.
 
 ### 4.2 The `plan` dimension
 
-`plan` (e.g. `general`, `coding`) is both:
-- a **display label** in the wizard ("Zhipu · CN · Coding"), and
-- a **model-membership selector** — each model is tagged with the `plan`(s) it
-  belongs to; an endpoint serves the models matching its `plan`. (A model may
-  also list explicit `endpoints`/`plans` if the default `plan` match is
-  insufficient.)
-- a **`preset_key` disambiguator** — see §4.4.
+`plan` (e.g. `general`, `coding`) is:
+- a **display label** in the wizard ("Zhipu · CN · Coding"),
+- the **sole model-membership selector** (§4 intro): a model's `plan` (string or
+  list) intersected with an endpoint's `plan`, and
+- a **`preset_key` disambiguator** (§4.4).
 
-`plan` is optional. A vendor with no plan tiers omits it everywhere; its single
-endpoint per (region, protocol) serves all models.
+**All-or-nothing per vendor.** A vendor is either *untagged* (no `plan` anywhere
+— on any endpoint or model) or *tiered* (every endpoint AND every model carries a
+`plan`). Mixing is rejected by the loader. Rationale: a mixed vendor makes "does
+this untagged model belong to the coding endpoint?" undefined.
+
+- **Untagged vendor:** at most one endpoint per `(region, protocol)`; every
+  endpoint serves every model.
+- **Tiered vendor:** `plan` is **required** and the `(region, protocol, plan)`
+  tuple must be **unique** across endpoints (this is what keeps the §4.4
+  `preset_key` unique). A model may belong to multiple plans via `plan: [a, b]`.
+
+**Loader validations (fail loudly at load):**
+- A tiered endpoint whose `plan` matches **no** model → error (dangling
+  endpoint).
+- A model whose `plan` matches **no** endpoint → error (unreachable model).
+- A vendor mixing tagged and untagged endpoints/models → error.
 
 ### 4.3 Capability by reference (named profiles)
 
@@ -219,7 +234,10 @@ deepseek-anthropic:
 
 An endpoint's `capability:` is **either** a profile name (string → looked up in
 `capabilities.yaml`) **or** an inline descriptor (dict → constructed directly,
-for one-offs). The loader resolves both into a cubepi `CapabilityDescriptor`.
+for one-offs). Discrimination is by YAML type: a scalar string is a profile
+reference; a mapping is inline. The loader resolves both into a cubepi
+`CapabilityDescriptor`. **A string that names no profile in `capabilities.yaml`
+fails loudly at load** (not a silent empty descriptor).
 
 ### 4.4 `preset_key` (catalog identity)
 
@@ -236,6 +254,14 @@ preset_key = vendor / region / protocol [ / plan ]
 `provider.preset_slug` records and the seeder matches on (§6). An endpoint may
 set an optional `key:` override for a prettier public id; otherwise the
 composed key is used.
+
+**Uniqueness (loader validations, fail loudly at load):**
+- No two endpoints may produce the same `preset_key` (whether composed or
+  `key:`-overridden). For tiered vendors this is guaranteed by the unique
+  `(region, protocol, plan)` rule in §4.2; for untagged vendors by the unique
+  `(region, protocol)` rule.
+- A `key:` override may not collide with any other endpoint's composed key or
+  override across the whole catalog.
 
 ---
 
@@ -259,10 +285,12 @@ Clean cutover, no shim. Ordered so each step is independently reviewable.
    - `provider_seeder.py` → resolve the config provider's `preset:` to a catalog
      endpoint and inherit base_url/api/capability/**model pool** with the §6.2
      precedence + §6.3 validation (no longer just a capability backfill).
-   - **Rewrite the seed config** (`config.yaml` / `config.development.local.yaml`)
-     for the seeded providers (deepseek/arkcode/alicode/sensedeal/…) to the §6.1
-     `preset:` + `api_key` form. New catalog vendor/endpoint/model+pricing entries
-     are added for any seeded model not already in the ported catalog.
+   - **Rewrite the seed config exhaustively** (`config.yaml` /
+     `config.development.local.yaml` / any env seed) to the §6.1 `preset:` +
+     `api_key` form, following the **§6.4 inventory** — every existing provider
+     is mapped to a `preset:` or deliberately kept custom with a reason. New
+     catalog vendor/endpoint/model+pricing entries are added for any seeded model
+     not already in the ported catalog.
 4. **Frontend wizard (two-step preset selection):**
    - **Step 1 (`PresetPicker`)** lists **vendors** (~15) instead of 37 flat
      presets. `pickPreset` → `pickVendor`.
@@ -276,14 +304,35 @@ Clean cutover, no shim. Ordered so each step is independently reviewable.
 
 ### 5.1 API contract change
 
-`GET /api/v1/admin/llm/presets` changes shape: flat `ProviderPreset[]` →
-either the nested vendor list or the flattened endpoint presets (with
-`preset_key`, composed `base_url`, pricing on models). Since nothing has
-shipped, change it in place; frontend types follow.
+`GET /api/v1/admin/llm/presets` changes shape, decided here (not left open):
+it returns a **nested vendor list**, so the wizard's step 1 lists vendors and
+step 2 reads `vendor.endpoints`. Concrete shape:
 
-**Likely shape:** return **vendors nested** (so step 1 lists vendors, step 2
-reads `vendor.endpoints`), with the loader also able to produce a flat
-`preset_key`-keyed lookup server-side for the seeder/logo paths.
+```jsonc
+[
+  {
+    "vendor": "zhipu", "display_name": "Zhipu / GLM", "short_name": "Zhipu",
+    "logo": "zhipu", "category": "saas", "description": "…",
+    "endpoints": [
+      { "preset_key": "zhipu/cn/openai-completions/coding",
+        "region": "cn", "protocol": "openai-completions", "plan": "coding",
+        "base_url": "https://open.bigmodel.cn/api/coding/paas/v4",   // already composed server-side
+        "model_ids": ["glm-4.6-coding"] }    // loader-DERIVED from plan intersection (§4 intro); not in source YAML
+    ],
+    "models": [
+      { "model_id": "glm-4.6-coding", "display_name": "GLM-4.6 Coding",
+        "plan": ["coding"], "context_window": 200000, "max_tokens": 8192,
+        "input_modalities": ["text"], "reasoning": true,
+        "pricing": { "input": 0.60, "output": 2.20 } }
+    ]
+  }
+]
+```
+
+`base_url` is composed server-side (the frontend never composes). The loader
+also exposes a flat `preset_key → endpoint` lookup **in-process** for the
+seeder and logo paths (not a separate HTTP shape). The `@cubebox/core` types
+mirror this nested structure.
 
 ---
 
@@ -325,9 +374,21 @@ For each configured provider:
 2. **Model selection:** if config lists `models: [...]` (ids, or id+overrides),
    seed that subset from the pool; **omit `models` → seed all** of the endpoint's
    models.
-3. **Field precedence:** an explicitly set config field wins over the catalog
-   (e.g. a self-hosted `base_url`, a `cost` override on one model). `api_key`
-   always comes from config. Unset config fields inherit from the catalog.
+3. **Field precedence (explicit, per field):**
+   - `api_key` — always from config; never in the catalog.
+   - `base_url` — config override allowed (self-hosted / proxy). Overriding the
+     host does **not** change the protocol, so the inherited `capability` still
+     applies.
+   - `api` (protocol) and `capability` — **not** independently overridable under
+     `preset:`. The protocol is intrinsic to the chosen endpoint, and capability
+     is protocol-specific; to use a different protocol, reference a different
+     `preset_key`. Setting `api` alongside `preset:` is a **validation error**
+     (caught at boot), rather than a silent capability mismatch.
+   - per-model `cost`/`pricing` — config override **deep-merges by leaf**: a
+     config `cost: { input: 0.5 }` replaces only `input` and inherits the
+     catalog's `output`/`cache_*`. (A whole-object replace would silently zero
+     the unspecified legs.)
+   - any other unset config field inherits from the catalog.
 4. **No `preset:`** → behaves like today: config must supply `base_url`, `api`,
    and full `models`; no catalog backfill. (Custom/self-hosted providers.)
 
@@ -337,9 +398,37 @@ catalog now backfills the whole model set, not just the capability descriptor.
 
 ### 6.3 Validation
 
+Catalog-load validations (§4.2 plan/membership, §4.3 capability profile, §4.4
+`preset_key` uniqueness) run first, at import. Then, per config provider:
+
 - A `preset:` that names no catalog endpoint → seed fails loudly (not silent
   skip), so a typo'd `preset_key` is caught at boot.
 - A `models:` subset id not present in the endpoint's pool → fail loudly.
+- `api` set alongside `preset:` → fail loudly (§6.2.3).
+- **No silent custom-downgrade:** see §6.4 — a provider that *used* to receive
+  capability backfill must not become an un-backfilled "custom" provider just
+  because it was overlooked in the rewrite.
+
+### 6.4 Exhaustive migration inventory (no silent backfill loss)
+
+Under the new rule, a provider with no `preset:` gets no catalog inheritance.
+The old rule backfilled capability for any provider whose name matched a flat
+slug. So an existing seeded provider that is *omitted* from the rewrite would
+**silently** drop from "capability-backfilled" to "custom."
+
+To prevent that, the migration is **exhaustive, not illustrative**:
+
+- Enumerate **every** provider in the seed configs (`config.yaml`,
+  `config.development.local.yaml`, and any env-specific seed). The
+  deepseek/arkcode/alicode/sensedeal list in §5/§6.1 is illustrative; the plan
+  must inventory the full set.
+- Each one is **either** given a `preset:` (and a matching catalog endpoint is
+  added if missing) **or** explicitly and deliberately left as `preset:`-less
+  custom, recorded in the plan with a one-line reason.
+- A migration test asserts: for every provider that resolved to a capability
+  snapshot under the *old* name-match rule, the *new* config still yields a
+  capability snapshot (via `preset:`). This is the regression guard for the P1
+  risk.
 
 ---
 
@@ -353,7 +442,14 @@ catalog now backfills the whole model set, not just the capability descriptor.
 - **Seeder test:** `preset:`-referenced providers (deepseek/arkcode/alicode/
   sensedeal) seed the right base_url + full model pool + pricing + capability;
   `models:` subset filters correctly; a config field override beats the catalog;
-  an unknown `preset_key` or unknown subset model id fails loudly (§6.3).
+  an unknown `preset_key` or unknown subset model id fails loudly (§6.3); a
+  partial `cost` override deep-merges (inherits the unspecified legs); `api`
+  alongside `preset:` is rejected.
+- **Backfill-parity test (§6.4):** every provider that got a capability snapshot
+  under the old name-match rule still gets one under the new `preset:` config.
+- **Catalog-load validation tests (§4.2/§4.3/§4.4):** dangling endpoint,
+  unreachable model, mixed tagged/untagged vendor, duplicate `preset_key`,
+  unknown capability-profile name — each fails loudly at load.
 - **Wizard E2E:** Add-Provider — pick vendor (step 1), choose region/protocol/
   plan (step 2), confirm composed base_url + filtered models (+ prefilled
   pricing).
@@ -364,9 +460,11 @@ catalog now backfills the whole model set, not just the capability descriptor.
 
 1. **cubepi catalog removed entirely** — data + loader move to cubebox; cubepi
    keeps only `CapabilityDescriptor` + `WireApi`.
-2. **`plan` dimension** — optional; display label + model-membership selector +
+2. **`plan` dimension** — all-or-nothing per vendor (untagged vs tiered); the
+   model `plan` tag is the *sole* membership mechanism; display label +
    `preset_key` disambiguator. coding-plan URL differences handled by host/path
-   overrides on the endpoint (§4.1).
+   overrides on the endpoint (§4.1). Loader validates uniqueness + no
+   dangling/unreachable (§4.2).
 3. **Named capability profiles** in `capabilities.yaml`, referenced by name;
    inline still allowed for one-offs.
 4. **`preset_key = vendor/region/protocol[/plan]`**, optional `key:` override.
