@@ -15,9 +15,11 @@ artifact 持久化、在右侧 artifact 预览面板展示,并回传给模型供
 
 | 项 | 决策 |
 |---|---|
-| 后端模型 | OpenAI `gpt-image-1`,复用现有 openai 凭证 |
+| 后端模型 | 默认 `gpt-image-2`;通过 `image_generation.model` config 配置 |
+| 凭证 | 独立 `image_generation` config block(非复用 LLM provider);`resolve_openai_image_credentials` 已移除 |
 | 能力面 | 文生图 + 图编辑(输入已有图 + 提示词) |
-| provider 归属 | cubepi 新建 images 子系统(对齐 pi-agent-core,upstream-first);cubebox 零 vendor 代码 |
+| provider 归属 | cubepi `providers/images/` 子系统;cubebox 零 vendor 代码 |
+| cubepi 接口 | `ImagesModel(id, provider, api)` 仅 identity;尺寸/质量等通过 `options: dict` 传给 `generate_images` |
 | 产物存储 | **artifact**(非 attachment);复用 `Artifact` + `ArtifactVersion` |
 | 前端渲染 | 复用右侧 `ArtifactPanel` + `ImagePreview.tsx`,经 `ArtifactCard`/`ArtifactGallery` 打开 |
 | 成本/配额 | 本期不追踪、不限额(后续另开) |
@@ -31,62 +33,72 @@ provider 上。参考实现:pi-agent-core `packages/ai/src/images.ts` +
 
 ```
 模型决定生图
-  → generate_image 工具(cubebox)
-      → cubepi.images.generate_images(model, context)   # 调 gpt-image-1
-      → 写 PNG 进 sandbox
-      → 注册为 artifact(type="image",复用 save_artifact 核心)
-      → 返回 AgentToolResult: ImageContent(模型可见) + artifact 元数据
+  → generate_image 工具(cubebox,sandbox-gated)
+      → cubepi.providers.images.generate_images(model, context)   # 调 gpt-image-1
+      → 全分辨率 PNG 写进 sandbox
+      → register_artifact_from_sandbox(...) 注册为 artifact(type="image")
+      → 返回 AgentToolResult: 降采样 JPEG 的 ImageContent(模型可见) + artifact 元数据
   → 前端: ArtifactCard → 右侧 ArtifactPanel/ImagePreview
 ```
 
+生图工具**需要 sandbox**(像 sandbox 工具一样门控):生成图作为真实文件
+落在 sandbox,下游(PPT skill 组装 deck、后续代码处理)才能直接用,且
+"编辑=新版本"靠写回同一 sandbox 路径自然成立。无 sandbox 的会话不挂载此
+工具。
+
 ## cubepi 侧:images 子系统
 
-位置:`~/cubepi/cubepi/images/`(与 `cubepi/providers/` 平行)。
+位置:`~/cubepi/cubepi/providers/images/`(与现有 chat provider 同住 `providers/` 下)。
 
 组件:
-- **类型**:`ImagesModel`、`ImagesContext`(输入内容 = text + `ImageContent`)、
-  `AssistantImages`(输出内容 = `ImageContent` + text)。复用
-  `cubepi/providers/base.py` 现有的 `ImageContent` / `TextContent`,不另造。
-- **`ImagesProvider` Protocol**:`generate_images(model, context, options)`。
-- **注册表**:`api -> provider`,对齐 pi 的 `images-api-registry.ts`。
-- **openai gpt-image-1 provider**:封装 OpenAI `images.generate`(文生图)与
-  `images.edit`(编辑;输入图作为 image 入参)。
-- **顶层入口**:`cubepi.images.generate_images(model, context, options)`。
-- **model catalog 条目**:登记 gpt-image-1 的能力(支持尺寸/质量等)。
+- **类型**:`ImagesModel(id, provider, api)` — 纯 identity,不含 size/quality 等参数;
+  `ImagesContext(prompt, input_images)`; `AssistantImages` 输出。
+- **`ImagesProvider` Protocol**:`generate_images(model, context, options: dict|None)`。
+  size/quality 等 provider-specific 参数通过 `options` 传入。
+- **注册表**:`api -> provider class`,通过 `create_images_provider(api, **kwargs)` 实例化;
+  `register_images_provider_class(api, cls)` 供测试注入 fake。
+- **OpenAI provider**:封装 `/images/generations` 和 `/images/edits`。
 
 ## cubebox 侧:`generate_image` 工具
 
-文件:`backend/cubebox/tools/builtin/generate_image.py`。沿用 `view_images`
-的工厂 + DI 模式。
+文件:`backend/cubebox/tools/builtin/generate_image.py`。工厂 + DI 模式。
 
-工厂签名(run-scoped 绑定):
-`make_generate_image_tool(org_id, workspace_id, conversation_id, sandbox, artifact_repo, version_repo, objectstore, model_config)`
+工厂签名:`make_generate_image_tool(org_id, workspace_id, conversation_id, sandbox, images_provider, images_model)`
 
 输入 schema:
 ```
 prompt: str                       # 必填:生图或编辑指令
-edit_source_paths: list[str] = [] # 可选:已有图的 sandbox 路径(走编辑分支)
-size: "1024x1024"|"1536x1024"|"1024x1536"|"auto" = "auto"
-quality: "low"|"medium"|"high"|"auto" = "auto"
-n: int = 1                        # 1-4
+edit_source_paths: list[str] = [] # 可选:已有图的 sandbox 路径
+size: str | None = None           # 可选:如 "1024x1024"、"1536x864"、"16:9" — 透传给 provider
+quality: str | None = None        # 可选:如 "low"/"medium"/"high" — 透传给 provider
 ```
 
+`size`/`quality` 非空时组成 `options: dict` 传给 `generate_images(model, context, options)`;
+两者均为 None 时 `options=None`(provider 自行决定)。`ImagesModel` 仅保存 identity。
+
 `_execute` 流程:
-1. 调 `cubepi.images.generate_images(...)`。编辑分支先从 objectstore/sandbox
-   读 `edit_source_paths` 原图作为输入。
-2. 把返回的 PNG 写进 sandbox 路径。
-3. 注册为 artifact(`artifact_type="image"`)。编辑同一来源图时写成该
-   artifact 的**新版本**(版本机制已就绪)。
-4. 返回 `AgentToolResult`:`ImageContent`(模型看得到、可继续编辑)+
-   `TextContent`(artifact id / sandbox 路径,供后续轮次引用)。
+1. 读 `edit_source_paths` 原图(fail-fast on missing)。
+2. 调 `images_provider.generate_images(images_model, ImagesContext(...), options=options)`.
+3. 全分辨率 PNG 写进 sandbox 路径。
+4. 调 `register_artifact_from_sandbox(...)` 注册为 artifact (`artifact_type="image"`)。
+5. 返回降采样 JPEG `ImageContent` + `TextContent`(artifact id / sandbox 路径)。
 
-**共享重构**:把现有 `middleware/artifacts.py` 中 `save_artifact` 的核心
-(建 artifact + version + sandbox→objectstore 上传)抽成共享函数,
-`generate_image` 与 `save_artifact` 共用。这是为本功能服务的 targeted 重构,
-不做无关清理。
+**凭证/config 接线**(`streams/run_manager.py`):
+- 读 `cubebox.llm.config.get_image_generation_config()` → `ImageGenerationConfig`.
+- config block (`config.yaml`):
+  ```yaml
+  image_generation:
+    enabled: false
+    api: "openai-images"
+    model: "gpt-image-2"
+    api_key: null
+    base_url: null
+  ```
+- 若 `enabled=False` 或 `api_key` 为空 → info log + 跳过(不装载工具)。
+- 否则:`create_images_provider(cfg.api, api_key=..., base_url=...)` + `ImagesModel(id=cfg.model, ...)` → `make_generate_image_tool(...)`.
+- `resolve_openai_image_credentials` 已从 `LLMFactory` 移除(不再需要)。
 
-**工具注册**:在 `streams/run_manager.py` 的工具装配处,**append 到现有工具
-顺序末尾**(`view_images` / MCP 之后),避免冲掉已有会话的 prompt cache 前缀。
+**工具注册**:sandbox-gated,排在 `view_images` 之后、MCP 之前。
 
 ## 前端
 

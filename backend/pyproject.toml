@@ -158,6 +158,8 @@ exclude_lines = [
 ]
 
 [tool.uv.sources]
+# a539d81 is cubepi main HEAD: it contains main's images interface (37bfcc6)
+# plus the inject-after-tool_results fix (#113), so it supersedes both sides.
 cubepi = { git = "https://github.com/cubeplexai/cubepi.git", rev = "a539d81" }
 
 [dependency-groups]

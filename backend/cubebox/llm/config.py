@@ -11,6 +11,24 @@ from pydantic import BaseModel, Field, model_validator
 _log = logging.getLogger(__name__)
 
 
+class ImageGenerationConfig(BaseModel):
+    """Configuration for the dedicated image-generation credential block."""
+
+    enabled: bool = False
+    api: str = "openai-images"
+    model: str = "gpt-image-2"
+    api_key: str | None = None
+    base_url: str | None = None
+
+
+def get_image_generation_config() -> ImageGenerationConfig:
+    """Return the effective ImageGenerationConfig from cubebox config."""
+    from cubebox.config import config
+
+    raw = config.get("image_generation", {}) or {}
+    return ImageGenerationConfig(**(raw if isinstance(raw, dict) else dict(raw)))
+
+
 class ModelCost(BaseModel):
     """Cost configuration for a model"""
 
