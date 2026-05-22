@@ -80,8 +80,10 @@ denormalizes all of it.
 - Changing the `CapabilityDescriptor` schema or the cubepi wire runtime.
 - Changing the `Provider` / `Model` DB tables or the provider-instance `slug`
   (separate, already-merged feature).
-- Changing how operators declare *deployed* providers in `config.yaml`. The
-  catalog is the **menu**; `config.yaml` stays the **deployment manifest** (§6).
+- Changing the `config.yaml` *file format* beyond adding a `preset:` reference
+  and making model/base_url/pricing fields optional (inherited from the
+  catalog). The catalog is the **menu**; `config.yaml` stays the **deployment
+  manifest** but is simplified to reference the menu rather than restate it (§6).
 
 ---
 
@@ -254,8 +256,13 @@ Clean cutover, no shim. Ordered so each step is independently reviewable.
    - `admin_llm.py:list_provider_presets` → return the flattened endpoint
      presets (new shape; §5.1).
    - `admin_providers.py` logo lookup → resolve via vendor.
-   - `provider_seeder.py` capability backfill → match on the config provider's
-     explicit `preset:` field (§6) instead of name==flat-slug.
+   - `provider_seeder.py` → resolve the config provider's `preset:` to a catalog
+     endpoint and inherit base_url/api/capability/**model pool** with the §6.2
+     precedence + §6.3 validation (no longer just a capability backfill).
+   - **Rewrite the seed config** (`config.yaml` / `config.development.local.yaml`)
+     for the seeded providers (deepseek/arkcode/alicode/sensedeal/…) to the §6.1
+     `preset:` + `api_key` form. New catalog vendor/endpoint/model+pricing entries
+     are added for any seeded model not already in the ported catalog.
 4. **Frontend wizard (two-step preset selection):**
    - **Step 1 (`PresetPicker`)** lists **vendors** (~15) instead of 37 flat
      presets. `pickPreset` → `pickVendor`.
@@ -280,30 +287,59 @@ reads `vendor.endpoints`), with the loader also able to produce a flat
 
 ---
 
-## 6. Catalog vs config.yaml (kept separate)
+## 6. Catalog ⇄ config.yaml: reference, don't restate
 
-- **Catalog** (this doc) = the **menu** the wizard prefills from + the source of
-  capability snapshots.
-- **`config.yaml` `llm.providers`** = the **deployment manifest** the seeder
-  instantiates (real keys, real cost overrides). Unchanged.
+- **Catalog** (this doc) = the **menu**: per endpoint it knows `base_url`
+  (composed), `api`, `capability`, and the full model list with `pricing`,
+  `context_window`, `max_tokens`, `input_modalities`, `reasoning`.
+- **`config.yaml` `llm.providers`** = the **deployment manifest**: which
+  endpoints this deployment actually turns on, and the secrets to reach them.
 
-The seeder links the two to backfill a provider's capability snapshot. Today it
-matches `config provider name == flat preset slug`. **New rule:** a configured
-provider gains an explicit `preset:` field naming its `preset_key`:
+Today config restates everything the catalog already knows (base_url, every
+model, every cost). The redesign lets config **reference a `preset:` and inherit
+the rest**, so a seeded provider shrinks to a `preset` + an `api_key`.
+
+### 6.1 Simplified config shape
 
 ```yaml
 llm:
   providers:
     alicode:
-      preset: qwen/cn/openai-completions/coding   # explicit catalog link
-      base_url: https://coding.dashscope.aliyuncs.com/v1
-      api: openai-completions
-      models: [...]
+      preset: qwen/cn/openai-completions/coding   # → base_url, api, models, pricing, capability
+      api_key: ${ALICODE_KEY}                      # secret: always from config, never in catalog
+      # models: [qwen3.6-plus]                     # OPTIONAL subset filter; omit = all preset models
 ```
 
-The seeder resolves `preset` → catalog entry → capability snapshot. No more
-name-guessing. Providers with no `preset` get no catalog-backfilled capability
-(unchanged fallback behavior).
+vs today's ~15-line block per provider (base_url + api + per-model id/name/cost/
+context_window/max_tokens). The seeded set (deepseek/arkcode/alicode/sensedeal/…)
+is rewritten to this form as part of this change.
+
+### 6.2 Resolution & precedence (seeder)
+
+For each configured provider:
+
+1. If `preset:` is set, resolve it to a catalog endpoint. Pull `base_url`, `api`
+   (`provider_type`), `capability` snapshot, and the **candidate model pool**
+   (the endpoint's models, each with pricing + window + max_tokens + modalities +
+   reasoning).
+2. **Model selection:** if config lists `models: [...]` (ids, or id+overrides),
+   seed that subset from the pool; **omit `models` → seed all** of the endpoint's
+   models.
+3. **Field precedence:** an explicitly set config field wins over the catalog
+   (e.g. a self-hosted `base_url`, a `cost` override on one model). `api_key`
+   always comes from config. Unset config fields inherit from the catalog.
+4. **No `preset:`** → behaves like today: config must supply `base_url`, `api`,
+   and full `models`; no catalog backfill. (Custom/self-hosted providers.)
+
+This supersedes the old "match by name, backfill only capability" rule — the
+catalog now backfills the whole model set, not just the capability descriptor.
+`provider.preset_slug` records the resolved `preset_key`.
+
+### 6.3 Validation
+
+- A `preset:` that names no catalog endpoint → seed fails loudly (not silent
+  skip), so a typo'd `preset_key` is caught at boot.
+- A `models:` subset id not present in the endpoint's pool → fail loudly.
 
 ---
 
@@ -314,8 +350,10 @@ name-guessing. Providers with no `preset` get no catalog-backfilled capability
 - **Loader unit tests:** flattening to `preset_key` (with/without plan segment),
   capability profile resolution (named + inline), model→plan membership, pricing
   parse, host-override and full-`base_url`-override paths.
-- **Seeder test:** capability backfill resolves for the seeded providers
-  (deepseek/arkcode/alicode/sensedeal) via the new `preset:` field.
+- **Seeder test:** `preset:`-referenced providers (deepseek/arkcode/alicode/
+  sensedeal) seed the right base_url + full model pool + pricing + capability;
+  `models:` subset filters correctly; a config field override beats the catalog;
+  an unknown `preset_key` or unknown subset model id fails loudly (§6.3).
 - **Wizard E2E:** Add-Provider — pick vendor (step 1), choose region/protocol/
   plan (step 2), confirm composed base_url + filtered models (+ prefilled
   pricing).
@@ -336,3 +374,7 @@ name-guessing. Providers with no `preset` get no catalog-backfilled capability
    plan) selectors added to the existing Configure step.
 6. **Seeder match via explicit `config.yaml` `preset:` field** — no name
    heuristic.
+7. **Config references the catalog instead of restating it** — a `preset:` +
+   `api_key` is enough; base_url/models/pricing/capability inherit, with config
+   fields overriding and an optional `models:` subset filter (§6). The seeded
+   config is rewritten to this form.
