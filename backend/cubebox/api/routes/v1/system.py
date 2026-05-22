@@ -34,10 +34,13 @@ async def get_system_info(
     mode = getattr(request.app.state, "deployment_mode", "single_tenant")
     count = (await session.execute(select(func.count()).select_from(Organization))).scalar_one()
     needs_setup = mode == "single_tenant" and int(count) == 0
+    from cubebox.config import config
+
     return SystemInfoResponse(
         deployment_mode=mode,  # type: ignore[arg-type]
         version=_CUBEBOX_VERSION,
         needs_org_setup=needs_setup,
+        sandbox_enabled=config.get("sandbox.enabled", False),
     )
 
 

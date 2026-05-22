@@ -4,6 +4,7 @@ export interface SystemInfoResponse {
   deployment_mode: 'single_tenant' | 'multi_tenant'
   version: string
   needs_org_setup: boolean
+  sandbox_enabled?: boolean
 }
 
 export interface SetupRequest {

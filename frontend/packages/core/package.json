@@ -27,6 +27,12 @@
       "source": "./src/types/index.ts",
       "import": "./src/types/index.ts",
       "default": "./src/types/index.ts"
+    },
+    "./hooks/useDeploymentMode": {
+      "types": "./src/hooks/useDeploymentMode.ts",
+      "source": "./src/hooks/useDeploymentMode.ts",
+      "import": "./src/hooks/useDeploymentMode.ts",
+      "default": "./src/hooks/useDeploymentMode.ts"
     }
   },
   "main": "dist/index.js",

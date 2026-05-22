@@ -10,6 +10,7 @@ import { AttachmentPreviewView } from '@/components/panel/AttachmentPreviewView'
 import { BrowserView } from '@/components/panel/BrowserView'
 import { useWorkspaceContext } from '@/hooks/useWorkspaceContext'
 import { usePanelStore } from '@cubebox/core'
+import { useDeploymentMode } from '@cubebox/core/hooks/useDeploymentMode'
 
 interface AppShellProps {
   children: ReactNode
@@ -20,6 +21,9 @@ export function AppShell({ children, headerTitle }: AppShellProps) {
   const view = usePanelStore((s) => s.view)
   const openBrowser = usePanelStore((s) => s.openBrowser)
   const { workspaceId } = useWorkspaceContext()
+  // Only offer the browser panel where the backend actually mounts /browser/*
+  // (sandbox support enabled); otherwise the button opens a panel that 404s.
+  const { sandboxEnabled } = useDeploymentMode()
   const panelOpen = view.type !== 'closed'
 
   return (
@@ -30,7 +34,7 @@ export function AppShell({ children, headerTitle }: AppShellProps) {
             <span className="text-sm text-muted-foreground truncate flex-1">
               {headerTitle || ''}
             </span>
-            {workspaceId && (
+            {workspaceId && sandboxEnabled && (
               <button
                 type="button"
                 onClick={openBrowser}
