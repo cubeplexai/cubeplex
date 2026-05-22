@@ -78,7 +78,8 @@ async def test_opensandbox_browser_endpoint_uses_signed_endpoint() -> None:
     from cubebox.sandbox.opensandbox import OpenSandbox
 
     class _FakeSigned:
-        endpoint = "https://signed.example/neko?token=abc"
+        # OpenSandbox returns a scheme-qualified host/path with no query string.
+        endpoint = "https://signed.example/sandboxes/sb-1/proxy/8080"
         headers: dict[str, str] = {}
 
     class _FakeInner:
@@ -95,7 +96,9 @@ async def test_opensandbox_browser_endpoint_uses_signed_endpoint() -> None:
     sb = OpenSandbox(sandbox=inner)  # type: ignore[arg-type]
     ep = await sb.get_browser_endpoint(expires_in=1800)
 
-    assert ep.url == "https://signed.example/neko?token=abc"
+    # A trailing slash is appended so the Neko client's relative asset/WS paths
+    # resolve under .../proxy/8080/ instead of dropping the port segment.
+    assert ep.url == "https://signed.example/sandboxes/sb-1/proxy/8080/"
     assert ep.headers == {}
     assert len(inner.calls) == 1
     port, _expires = inner.calls[0]
