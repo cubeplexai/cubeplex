@@ -198,11 +198,25 @@ COPY neko/start-browser.sh /usr/local/bin/start-browser.sh
 COPY neko/launch-chrome.sh /usr/local/bin/launch-chrome.sh
 RUN chmod +x /usr/local/bin/start-browser.sh /usr/local/bin/launch-chrome.sh
 
+# WebRTC needs a TURN server: the OpenSandbox gateway proxies HTTP/WS only, so
+# Neko's media (UDP) can't traverse it — without a relay, ICE fails and the live
+# view never shows a picture. Point Neko at a coturn reachable from both the
+# viewer's browser and the sandbox pod. These are build-time overridable:
+#   docker build --build-arg NEKO_TURN_URL=turn:<host>:3478 \
+#                --build-arg NEKO_TURN_USER=... --build-arg NEKO_TURN_CRED=...
+# Defaults target the test-cluster coturn; production MUST override them.
+ARG NEKO_TURN_URL=turn:192.168.1.208:3478
+ARG NEKO_TURN_USER=neko
+ARG NEKO_TURN_CRED=neko
+
 ENV USER=neko \
     DISPLAY=:99.0 \
     XDG_RUNTIME_DIR=/tmp/runtime-neko \
     NEKO_SERVER_BIND=:8080 \
     NEKO_PLUGINS_ENABLED=true \
-    NEKO_PLUGINS_DIR=/etc/neko/plugins/
+    NEKO_PLUGINS_DIR=/etc/neko/plugins/ \
+    NEKO_WEBRTC_ICELITE=false \
+    NEKO_WEBRTC_ICESERVERS_FRONTEND="[{\"urls\":[\"${NEKO_TURN_URL}\"],\"username\":\"${NEKO_TURN_USER}\",\"credential\":\"${NEKO_TURN_CRED}\"}]" \
+    NEKO_WEBRTC_ICESERVERS_BACKEND="[{\"urls\":[\"${NEKO_TURN_URL}\"],\"username\":\"${NEKO_TURN_USER}\",\"credential\":\"${NEKO_TURN_CRED}\"}]"
 
 WORKDIR /workspace
