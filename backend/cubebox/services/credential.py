@@ -48,6 +48,24 @@ class CredentialService:
         saved = await self._repo.add(cred)
         return saved.id
 
+    async def get_decrypted_system(self, *, credential_id: str, requesting_kind: str) -> str:
+        """Decrypt a SYSTEM (org_id NULL) credential regardless of caller org scope.
+
+        System providers' api keys live at ``org_id=NULL`` and are invisible to an
+        org-scoped repo, but an org admin must be able to test/use those providers.
+        The kind check is preserved.
+        """
+        sys_repo = CredentialRepository(self._repo.session, org_id=None)
+        cred = await sys_repo.get(credential_id)
+        if cred is None:
+            raise CredentialNotFound(credential_id)
+        if cred.kind != requesting_kind:
+            raise CredentialKindMismatch(
+                f"credential kind={cred.kind} but caller requested kind={requesting_kind}"
+            )
+        plaintext = await self._backend.decrypt(cred.value_encrypted)
+        return plaintext.decode("utf-8")
+
     async def get_decrypted(self, *, credential_id: str, requesting_kind: str) -> str:
         cred = await self._repo.get(credential_id)
         if cred is None:
