@@ -24,6 +24,28 @@ function formatCost(cost: number): string {
   return cost.toFixed(4)
 }
 
+interface TestIssue {
+  name: string
+  status: string
+  detail: string
+}
+
+// Pull the warn/fail probe steps (with their reason) out of last_test_summary so
+// a degraded/error model can explain itself instead of just showing a dot.
+function testIssues(summary: Record<string, unknown> | undefined): TestIssue[] {
+  const steps = (summary?.steps as Array<Record<string, unknown>> | undefined) ?? []
+  return steps
+    .filter((s) => s.status === 'warn' || s.status === 'fail')
+    .map((s) => {
+      const error = s.error as Record<string, unknown> | null | undefined
+      return {
+        name: String(s.name ?? ''),
+        status: String(s.status ?? ''),
+        detail: String(s.detail ?? error?.message ?? ''),
+      }
+    })
+}
+
 export function ModelRow({
   model,
   client,
@@ -36,6 +58,8 @@ export function ModelRow({
   const t = useTranslations('adminModels')
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [retesting, setRetesting] = useState(false)
+  const issues = testIssues(model.last_test_summary)
+  const hasFail = issues.some((i) => i.status === 'fail')
 
   async function handleRetest() {
     setRetesting(true)
@@ -71,6 +95,16 @@ export function ModelRow({
         </div>
         {model.display_name && model.display_name !== model.model_id && (
           <span className="mt-0.5 block truncate text-muted-foreground">{model.display_name}</span>
+        )}
+        {issues.length > 0 && (
+          <span
+            className={cn(
+              'mt-0.5 block text-[11px]',
+              hasFail ? 'text-destructive' : 'text-amber-700 dark:text-amber-300',
+            )}
+          >
+            {issues.map((i) => (i.detail ? `${i.name} — ${i.detail}` : i.name)).join(' · ')}
+          </span>
         )}
       </div>
 

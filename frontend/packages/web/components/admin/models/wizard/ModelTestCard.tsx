@@ -57,8 +57,12 @@ const OUTCOME_TONE: Record<ProbeResult['overall'], string> = {
 
 export function ModelTestCard({ state, onRetest }: ModelTestCardProps) {
   const t = useTranslations('adminModels.wizard.test')
-  const failed = state.overall === 'fail' || state.overall === 'unavailable'
-  const reason = state.steps.find((s) => s.status === 'fail')?.error?.message
+  // Surface the *why* for any non-passing check (warn → degraded, fail → blocked).
+  // Without this, a "degraded" outcome shows only coloured chips and no reason.
+  const issues = state.steps.filter((s) => s.status === 'warn' || s.status === 'fail')
+  const showRetest =
+    onRetest &&
+    (state.overall === 'fail' || state.overall === 'unavailable' || state.overall === 'warn')
 
   return (
     <div className="flex flex-col gap-2 rounded-lg border border-border/70 bg-card p-3">
@@ -73,21 +77,33 @@ export function ModelTestCard({ state, onRetest }: ModelTestCardProps) {
           <StepChip key={s.name} step={s} />
         ))}
       </div>
-      {failed && (
-        <div className="flex items-center justify-between gap-2">
-          {reason && <span className="truncate text-xs text-destructive">{reason}</span>}
-          {onRetest && (
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="ml-auto"
-              onClick={onRetest}
-            >
-              {t('retest')}
-            </Button>
-          )}
-        </div>
+      {issues.length > 0 && (
+        <ul className="flex flex-col gap-1 border-t border-border/60 pt-2">
+          {issues.map((s) => {
+            const isFail = s.status === 'fail'
+            const detail = s.detail ?? s.error?.message
+            return (
+              <li key={s.name} className="flex items-start gap-1.5 text-xs">
+                {isFail ? (
+                  <X className="mt-0.5 size-3 shrink-0 text-destructive" />
+                ) : (
+                  <TriangleAlert className="mt-0.5 size-3 shrink-0 text-amber-600 dark:text-amber-400" />
+                )}
+                <span
+                  className={cn(isFail ? 'text-destructive' : 'text-amber-700 dark:text-amber-300')}
+                >
+                  <span className="font-medium">{s.name}</span>
+                  {detail ? ` — ${detail}` : ''}
+                </span>
+              </li>
+            )
+          })}
+        </ul>
+      )}
+      {showRetest && (
+        <Button type="button" variant="outline" size="sm" className="ml-auto" onClick={onRetest}>
+          {t('retest')}
+        </Button>
       )}
     </div>
   )
