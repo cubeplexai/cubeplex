@@ -47,9 +47,10 @@ def test_aggregate_liveness_fail_is_blocking():
 class _StubProvider:
     """Fake cubepi.Provider for probe tests. Records calls, returns canned events."""
 
-    def __init__(self, *, events=None, raise_error=None):
+    def __init__(self, *, events=None, raise_error=None, result_content=None):
         self._events = events or []
         self._raise_error = raise_error
+        self._result_content = result_content or []
         self.calls: list[dict] = []
 
     async def stream(self, model, messages, *, options=None, system_prompt="", tools=None):
@@ -57,6 +58,7 @@ class _StubProvider:
         if self._raise_error is not None:
             raise self._raise_error
         events = self._events
+        result_content = self._result_content
 
         class _Stream:
             def __aiter__(_self):
@@ -68,10 +70,13 @@ class _StubProvider:
 
             async def result(_self):
                 # Default: report non-zero usage so the advisory usage probe
-                # passes for the orchestrator happy-path tests.
+                # passes for the orchestrator happy-path tests. ``result_content``
+                # lets a test return e.g. a ToolCall block.
                 from cubepi.providers.base import AssistantMessage, Usage
 
-                return AssistantMessage(content=[], usage=Usage(input_tokens=5, output_tokens=2))
+                return AssistantMessage(
+                    content=result_content, usage=Usage(input_tokens=5, output_tokens=2)
+                )
 
         return _Stream()
 
@@ -120,24 +125,39 @@ async def test_probe_reasoning_runs_both_off_and_on():
     assert provider.calls[1]["thinking"] == "medium"
 
 
-def test_aggregate_advisory_step_fail_warns_not_blocks():
+def test_aggregate_tools_fail_is_blocking():
     steps = [
         ProbeStep(name="liveness", status="pass"),
         ProbeStep(name="tools", status="fail"),
     ]
     overall, blocked = _aggregate_overall(steps)
-    assert overall == "warn"
-    assert blocked is False
+    assert overall == "fail"
+    assert blocked is True
 
 
-def test_aggregate_reasoning_fail_is_blocking():
+def test_aggregate_streaming_fail_is_blocking():
     steps = [
         ProbeStep(name="liveness", status="pass"),
-        ProbeStep(name="reasoning", status="fail"),
+        ProbeStep(name="streaming", status="fail"),
     ]
     overall, blocked = _aggregate_overall(steps)
     assert overall == "fail"
     assert blocked is True
+
+
+def test_aggregate_advisory_fail_does_not_block_or_degrade():
+    # reasoning/temperature/usage are advisory: a live model that streams + calls
+    # tools is usable even if these warn/fail, so overall stays "pass".
+    steps = [
+        ProbeStep(name="liveness", status="pass"),
+        ProbeStep(name="tools", status="pass"),
+        ProbeStep(name="streaming", status="pass"),
+        ProbeStep(name="reasoning", status="fail"),
+        ProbeStep(name="usage", status="warn"),
+    ]
+    overall, blocked = _aggregate_overall(steps)
+    assert overall == "pass"
+    assert blocked is False
 
 
 @pytest.mark.asyncio
@@ -162,32 +182,45 @@ async def test_probe_temperature_skips_when_ignored():
 
 @pytest.mark.asyncio
 async def test_probe_tools_pass_on_toolcall_event():
-    from cubepi.providers.capability import CapabilityDescriptor
-
-    cap = CapabilityDescriptor(supports_tools=True)
     provider = _StubProvider(events=[type("E", (), {"type": "toolcall_start"})()])
-    step = await probe_tools(provider, model_id="m", capability=cap)
+    step = await probe_tools(provider, model_id="m")
     assert step.name == "tools"
     assert step.status == "pass"
 
 
 @pytest.mark.asyncio
-async def test_probe_tools_skips_when_unsupported():
-    from cubepi.providers.capability import CapabilityDescriptor
+async def test_probe_tools_pass_on_result_toolcall_without_stream_event():
+    # Buffering gateway: no per-chunk toolcall_* event, but the assembled result
+    # carries a ToolCall block. Must still pass.
+    from cubepi.providers.base import ToolCall
 
-    cap = CapabilityDescriptor(supports_tools=False)
-    step = await probe_tools(_StubProvider(), model_id="m", capability=cap)
-    assert step.status == "skip"
-
-
-def test_probe_streaming_warns_on_zero_chunks():
-    assert probe_streaming(observed_chunks=0).status == "warn"
-
-
-def test_probe_streaming_passes_on_chunks():
-    step = probe_streaming(observed_chunks=3)
+    provider = _StubProvider(
+        events=[type("E", (), {"type": "text_delta", "delta": "ok"})()],
+        result_content=[ToolCall(id="t1", name="echo", arguments={"text": "ping"})],
+    )
+    step = await probe_tools(provider, model_id="m")
     assert step.status == "pass"
-    assert "3" in step.detail
+
+
+@pytest.mark.asyncio
+async def test_probe_tools_fails_when_no_toolcall():
+    provider = _StubProvider(events=[type("E", (), {"type": "text_delta", "delta": "hi"})()])
+    step = await probe_tools(provider, model_id="m")
+    assert step.status == "fail"
+
+
+@pytest.mark.asyncio
+async def test_probe_streaming_passes_on_chunks():
+    provider = _StubProvider(events=[type("E", (), {"type": "text_delta", "delta": "OK"})()])
+    step = await probe_streaming(provider, model_id="m")
+    assert step.status == "pass"
+    assert "1" in step.detail
+
+
+@pytest.mark.asyncio
+async def test_probe_streaming_fails_on_zero_chunks():
+    step = await probe_streaming(_StubProvider(events=[]), model_id="m")
+    assert step.status == "fail"
 
 
 # --- Task 9: orchestrators + model_not_found classifier ---------------------

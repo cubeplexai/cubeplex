@@ -15,6 +15,7 @@ from cubepi.providers.base import (
     StreamOptions,
     TextContent,
     ThinkingLevel,
+    ToolCall,
     ToolDefinition,
     UserMessage,
 )
@@ -37,10 +38,6 @@ class ProbeStep(BaseModel):
     latency_ms: int | None = None
     detail: str = ""
     error: ProbeError | None = None
-    # Count of SSE chunks observed during this step's stream. Lets the
-    # streaming check (Tasks 8/9) verify a chunk arrived without re-streaming.
-    # Excluded from the API payload — internal probe plumbing only.
-    observed_chunks: int = Field(default=0, exclude=True)
 
 
 class ProbeResult(BaseModel):
@@ -55,16 +52,24 @@ class ProbeResult(BaseModel):
 # Phase-agnostic: phase A passes [liveness]; phase B passes the model steps.
 # Each phase only ever feeds its own step names, so keeping both blocking
 # names in one set is harmless and keeps the helper reusable.
-_BLOCKING_STEPS: set[ProbeStepName] = {"liveness", "reasoning"}
+# An agent-platform model MUST be reachable, stream, and call tools — those are
+# the runtime's hard requirements. Reasoning is optional (plenty of usable models
+# aren't reasoning models), and temperature/usage are advisory niceties.
+_BLOCKING_STEPS: set[ProbeStepName] = {"liveness", "tools", "streaming"}
 
 
 def _aggregate_overall(steps: list[ProbeStep]) -> tuple[str, bool]:
-    """Roll up per-step statuses into (overall, blocking_failed)."""
+    """Roll up per-step statuses into (overall, blocking_failed).
+
+    A blocking step (liveness/tools/streaming) failing → "fail" (model unusable).
+    Otherwise the model is usable → "pass"; warns on advisory steps
+    (reasoning/temperature/usage) are surfaced as notes per-step but do NOT
+    downgrade the model — a live model that streams and calls tools is usable
+    even if it doesn't report token usage or isn't a reasoning model.
+    """
     blocked = any(s.status == "fail" and s.name in _BLOCKING_STEPS for s in steps)
     if blocked:
         return "fail", True
-    if any(s.status in ("fail", "warn") for s in steps):
-        return "warn", False
     return "pass", False
 
 
@@ -92,8 +97,13 @@ async def _drain_stream(
     max_seconds: float = 15.0,
     temperature: float | None = None,
     tools: list[ToolDefinition] | None = None,
-) -> tuple[list[Any], float]:
-    """Run a minimal stream, draining events. Return (events, elapsed_seconds)."""
+) -> tuple[list[Any], float, Any]:
+    """Run a minimal stream. Return (events, elapsed_seconds, result_message).
+
+    ``result_message`` is the assembled AssistantMessage (or None if it can't be
+    resolved) so callers can inspect final content — e.g. a ``ToolCall`` block
+    that a buffering gateway returns without emitting per-chunk tool-call events.
+    """
     start = time.perf_counter()
     model = Model(id=model_id, provider="probe", context_window=8192, max_tokens=max_output)
     if temperature is not None:
@@ -112,14 +122,18 @@ async def _drain_stream(
         events.append(evt)
         if getattr(evt, "type", None) == "done":
             break
-    return events, time.perf_counter() - start
+    try:
+        result = await stream.result()
+    except Exception:
+        result = None
+    return events, time.perf_counter() - start, result
 
 
 async def probe_liveness(provider: Any, *, model_id: str) -> ProbeStep:
     # Spec §4.4 step 1: minimal completion — max_tokens=1, prompt ".",
     # 5s timeout. Proves base_url + key + network reach the endpoint.
     try:
-        events, elapsed = await _drain_stream(
+        events, elapsed, _ = await _drain_stream(
             provider,
             model_id,
             thinking="off",
@@ -148,17 +162,12 @@ async def probe_reasoning_toggle(
         )
     try:
         await _drain_stream(provider, model_id, thinking="off")
-        on_events, _ = await _drain_stream(provider, model_id, thinking="medium")
+        await _drain_stream(provider, model_id, thinking="medium")
     except Exception as exc:
         # A model-not-found error here is what Task 9's _is_model_not_found keys
         # on to short-circuit to "unavailable" — keep type/raw_status in the error.
         return ProbeStep(name="reasoning", status="fail", error=_probe_error(exc))
-    return ProbeStep(
-        name="reasoning",
-        status="pass",
-        detail="off + on payload both accepted",
-        observed_chunks=len(on_events),
-    )
+    return ProbeStep(name="reasoning", status="pass", detail="off + on payload both accepted")
 
 
 # Stream event types that signal the endpoint emitted a tool call. cubepi's
@@ -192,14 +201,12 @@ async def probe_temperature(
     return ProbeStep(name="temperature", status="pass", detail=f"accepted temperature={value}")
 
 
-async def probe_tools(
-    provider: Any, *, model_id: str, capability: CapabilityDescriptor
-) -> ProbeStep:
-    # Spec §4.4 step 4 (advisory): if the endpoint claims tool support, send a
-    # one-tool probe and confirm a tool-call event came back. Failures only WARN
-    # so an over-eager supports_tools flag doesn't block save.
-    if not capability.supports_tools:
-        return ProbeStep(name="tools", status="skip", detail="capability has supports_tools=False")
+async def probe_tools(provider: Any, *, model_id: str) -> ProbeStep:
+    # Tool calling is a hard requirement for the agent runtime, so always test it
+    # (modern endpoints support tools). A buffering gateway may deliver the tool
+    # call only in the assembled result — no per-chunk toolcall_* events — so we
+    # accept EITHER a toolcall stream event OR a ToolCall block in the result.
+    # Failure here is BLOCKING (the model is unusable for the agent).
     tool = ToolDefinition(
         name="echo",
         description="Echo the provided text back to the caller.",
@@ -210,7 +217,7 @@ async def probe_tools(
         },
     )
     try:
-        events, _ = await _drain_stream(
+        events, _, result = await _drain_stream(
             provider,
             model_id,
             prompt="Call the echo tool with text='ping'.",
@@ -218,28 +225,35 @@ async def probe_tools(
         )
     except Exception as exc:
         return ProbeStep(
-            name="tools",
-            status="warn",
-            detail="endpoint did not emit tool call; consider unchecking supports_tools",
+            name="tools", status="fail", detail="tool-call request failed", error=_probe_error(exc)
+        )
+    saw_event = any(getattr(e, "type", None) in _TOOLCALL_EVENT_TYPES for e in events)
+    result_content = getattr(result, "content", None) or []
+    saw_result_toolcall = any(isinstance(c, ToolCall) for c in result_content)
+    if saw_event or saw_result_toolcall:
+        return ProbeStep(name="tools", status="pass", detail="endpoint returned a tool call")
+    return ProbeStep(name="tools", status="fail", detail="endpoint did not return a tool call")
+
+
+async def probe_streaming(provider: Any, *, model_id: str) -> ProbeStep:
+    # Streaming is a hard requirement for the agent runtime, so run an
+    # INDEPENDENT minimal stream and require at least one chunk. (Previously this
+    # borrowed the reasoning probe's chunk count, which is 0 whenever reasoning is
+    # skipped — the false "no SSE chunks" seen on empty-capability providers.)
+    # Failure here is BLOCKING.
+    try:
+        events, _, _ = await _drain_stream(provider, model_id, prompt="Reply with OK.")
+    except Exception as exc:
+        return ProbeStep(
+            name="streaming",
+            status="fail",
+            detail="streaming request failed",
             error=_probe_error(exc),
         )
-    saw_tool_call = any(getattr(e, "type", None) in _TOOLCALL_EVENT_TYPES for e in events)
-    if saw_tool_call:
-        return ProbeStep(name="tools", status="pass", detail="endpoint emitted a tool call")
-    return ProbeStep(
-        name="tools",
-        status="warn",
-        detail="endpoint did not emit tool call; consider unchecking supports_tools",
-    )
-
-
-def probe_streaming(*, observed_chunks: int, name: str = "streaming") -> ProbeStep:
-    # Spec §4.4 step 5 (advisory, pure): reuse the chunk count captured by the
-    # reasoning probe. Zero chunks means the endpoint answered but never streamed
-    # — surface a warning rather than silently passing an inert config.
-    if observed_chunks > 0:
-        return ProbeStep(name="streaming", status="pass", detail=f"{observed_chunks} chunks")
-    return ProbeStep(name="streaming", status="warn", detail="no SSE chunks observed")
+    chunks = len(events)
+    if chunks > 0:
+        return ProbeStep(name="streaming", status="pass", detail=f"{chunks} chunks")
+    return ProbeStep(name="streaming", status="fail", detail="no streaming chunks observed")
 
 
 async def probe_usage(provider: Any, *, model_id: str) -> ProbeStep:
@@ -348,26 +362,26 @@ async def run_model_probe(
     reasoning = await probe_reasoning_toggle(provider, model_id=model_id, capability=capability)
     if _is_model_not_found(reasoning):
         return ProbeResult(overall="unavailable", blocking_failed=True, steps=[reasoning])
-    temperature, tools, usage = await asyncio.gather(
+    temperature, tools, streaming, usage = await asyncio.gather(
         probe_temperature(provider, model_id=model_id, capability=capability),
-        probe_tools(provider, model_id=model_id, capability=capability),
+        probe_tools(provider, model_id=model_id),
+        probe_streaming(provider, model_id=model_id),
         probe_usage(provider, model_id=model_id),
         return_exceptions=False,
     )
     # ROBUSTNESS: when capability has no reasoning payloads, probe_reasoning_toggle
     # SKIPS (no real call), so it can't catch model_not_found. In that case the
-    # first real calls are temperature/tools — check them too. Those advisory
-    # steps only ever WARN (never block), so we inspect the carried error directly
-    # rather than via _is_model_not_found (which gates on a fail status).
+    # first real calls are temperature/tools/streaming — check them too via the
+    # carried error (a blocking tools/streaming fail would otherwise read as a
+    # capability gap rather than a missing model).
     if reasoning.status == "skip":
-        for s in (temperature, tools, usage):
+        for s in (temperature, tools, streaming, usage):
             if s.error is not None and _error_says_model_not_found(s.error):
                 return ProbeResult(
                     overall="unavailable",
                     blocking_failed=True,
-                    steps=[reasoning, temperature, tools, usage],
+                    steps=[reasoning, temperature, tools, streaming, usage],
                 )
-    streaming = probe_streaming(observed_chunks=reasoning.observed_chunks)
     steps = [reasoning, temperature, tools, streaming, usage]
     overall, blocked = _aggregate_overall(steps)
     # _aggregate_overall is typed str but only yields pass/fail/warn here; the
