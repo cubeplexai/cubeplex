@@ -56,6 +56,7 @@ export type PanelView =
       type: 'attachment'
       info: AttachmentPanelInfo
     }
+  | { type: 'browser' }
 
 export interface PanelStore {
   view: PanelView
@@ -72,6 +73,8 @@ export interface PanelStore {
   openArtifact: (conversationId: string, artifactId: string) => void
 
   openAttachment: (info: AttachmentPanelInfo) => void
+
+  openBrowser: () => void
 
   close: () => void
 }
@@ -104,6 +107,8 @@ export const usePanelStore = create<PanelStore>((set) => ({
     set({
       view: { type: 'attachment', info },
     }),
+
+  openBrowser: () => set({ view: { type: 'browser' } }),
 
   close: () => set({ view: { type: 'closed' } }),
 }))

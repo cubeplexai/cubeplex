@@ -1,12 +1,16 @@
 'use client'
 
 import { ReactNode } from 'react'
+import { Monitor } from 'lucide-react'
 import { ThemeToggle } from '@/components/ui/theme-toggle'
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from '@/components/ui/resizable'
 import { ToolDetailPanel } from '@/components/panel/ToolDetailPanel'
 import { ArtifactPanel } from '@/components/panel/artifact/ArtifactPanel'
 import { AttachmentPreviewView } from '@/components/panel/AttachmentPreviewView'
+import { BrowserView } from '@/components/panel/BrowserView'
+import { useWorkspaceContext } from '@/hooks/useWorkspaceContext'
 import { usePanelStore } from '@cubebox/core'
+import { useDeploymentMode } from '@cubebox/core/hooks/useDeploymentMode'
 
 interface AppShellProps {
   children: ReactNode
@@ -15,6 +19,11 @@ interface AppShellProps {
 
 export function AppShell({ children, headerTitle }: AppShellProps) {
   const view = usePanelStore((s) => s.view)
+  const openBrowser = usePanelStore((s) => s.openBrowser)
+  const { workspaceId } = useWorkspaceContext()
+  // Only offer the browser panel where the backend actually mounts /browser/*
+  // (sandbox support enabled); otherwise the button opens a panel that 404s.
+  const { sandboxEnabled } = useDeploymentMode()
   const panelOpen = view.type !== 'closed'
 
   return (
@@ -25,6 +34,17 @@ export function AppShell({ children, headerTitle }: AppShellProps) {
             <span className="text-sm text-muted-foreground truncate flex-1">
               {headerTitle || ''}
             </span>
+            {workspaceId && sandboxEnabled && (
+              <button
+                type="button"
+                onClick={openBrowser}
+                className="mr-1 rounded p-1.5 text-muted-foreground hover:bg-accent"
+                aria-label="Open sandbox browser"
+                title="Open sandbox browser"
+              >
+                <Monitor className="h-4 w-4" />
+              </button>
+            )}
             <ThemeToggle />
           </header>
           <main className="flex-1 flex flex-col overflow-hidden">{children}</main>
@@ -39,6 +59,8 @@ export function AppShell({ children, headerTitle }: AppShellProps) {
               <ArtifactPanel />
             ) : view.type === 'attachment' ? (
               <AttachmentPreviewView info={view.info} />
+            ) : view.type === 'browser' ? (
+              <BrowserView workspaceId={workspaceId} />
             ) : (
               <ToolDetailPanel />
             )}

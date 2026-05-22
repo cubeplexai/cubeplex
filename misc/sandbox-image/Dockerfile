@@ -1,3 +1,8 @@
+# Source of the Neko streaming runtime (server binary, HTML5 client, configs,
+# custom Xorg drivers). Pin/mirror this into the internal registry for builds
+# that cannot reach ghcr.
+FROM ghcr.io/m1k1o/neko/chromium:latest AS neko
+
 FROM hub.sensedeal.vip/library/ubuntu:24.04
 
 # Set build-time arguments
@@ -128,5 +133,90 @@ RUN python3 -m venv /opt/venv \
 # Create app directory
 RUN mkdir -p /workspace
 ENV HOME=/workspace
+
+# ---------------------------------------------------------------------------
+# Neko browser-takeover stack (started on demand, see neko/start-browser.sh).
+# Lets a user watch and take over the sandbox browser from the cubebox frontend
+# while the agent drives the same Chromium over CDP.
+# ---------------------------------------------------------------------------
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        xserver-xorg-core xserver-xorg-video-dummy x11-xserver-utils xauth \
+        openbox pulseaudio dbus-x11 supervisor xclip \
+        libgtk-3-0 libxtst6 libxcvt0 \
+        libgstreamer1.0-0 libgstreamer-plugins-base1.0-0 \
+        gstreamer1.0-plugins-base gstreamer1.0-plugins-good \
+        gstreamer1.0-plugins-bad gstreamer1.0-plugins-ugly gstreamer1.0-libav \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
+
+# agent-browser CLI: the agent drives the streamed Chromium via CDP with it
+# (`agent-browser connect 9222`). See the preinstalled `browser` skill.
+RUN npm install -g agent-browser
+
+# Neko runtime from the upstream image: server binary, configs, HTML5 client,
+# and the two custom Xorg modules (patched dummy video + the "neko" input driver
+# that exposes /tmp/xf86-input-neko.sock for event injection).
+COPY --from=neko /usr/bin/neko /usr/bin/neko
+COPY --from=neko /etc/neko /etc/neko
+COPY --from=neko /var/www /var/www
+COPY --from=neko /usr/lib/xorg/modules/drivers/dummy_drv.so /usr/lib/xorg/modules/drivers/dummy_drv.so
+COPY --from=neko /usr/lib/xorg/modules/input/neko_drv.so /usr/lib/xorg/modules/input/neko_drv.so
+# Trim the embedded Neko client UI:
+# - hide the "open in new window" (popout) control — useless in the panel;
+# - hide every n.eko logo (connect + loading splashes) so none flashes;
+# - hide the player-overlay (the "click to play / unmute" prompt).
+# The script forces the <video> muted so it autoplays (browser autoplay policy
+# only allows muted autoplay; volume=0 alone still triggers the prompt), making
+# the now-hidden overlay unnecessary. Keep clipboard + fullscreen.
+RUN sed -i 's#</head>#<style>.video-menu li:has(.fa-external-link-alt){display:none!important}.logo{display:none!important}.player-overlay{display:none!important}</style><script>setInterval(function(){var v=document.querySelector("video");if(v){try{v.muted=true;if(v.paused)v.play().catch(function(){});}catch(e){}}},250);</script></head>#' /var/www/index.html
+
+# neko user at uid 1000. Remove a pre-existing uid-1000 user conditionally so the
+# build stays deterministic across base-image variants (never hard-fail).
+RUN (getent passwd 1000 && userdel -r "$(getent passwd 1000 | cut -d: -f1)" 2>/dev/null || true) \
+    && (getent group 1000 && groupdel "$(getent group 1000 | cut -d: -f1)" 2>/dev/null || true) \
+    && groupadd -g 1000 neko \
+    && useradd -u 1000 -g 1000 -m -d /home/neko -s /bin/bash neko \
+    && usermod -aG audio,video neko \
+    && mkdir -p /var/log/neko /tmp/runtime-neko /home/neko/.config/chromium \
+    && chown -R neko:neko /var/log/neko /tmp/runtime-neko /home/neko \
+    && chmod 700 /tmp/runtime-neko
+
+# Run Xorg fully rootless (drop the setuid Xorg.wrap) so the neko input socket is
+# owned by the neko user, and load the dummy config from the default path
+# (Xorg.wrap rejects an absolute -config path).
+RUN rm -f /usr/lib/xorg/Xorg.wrap \
+    && cp /etc/neko/xorg.conf /etc/X11/xorg.conf \
+    && sed -i 's# -config /etc/neko/xorg.conf##' /etc/neko/supervisord.conf
+
+# Stream the image's own Playwright Chromium (version-matched to Playwright so
+# CDP per-page sessions work); stable symlink to the versioned binary.
+RUN ln -s "$(ls -d /ms-playwright/chromium-*/chrome-linux64 | head -1)/chrome" /ms-playwright/chrome
+
+COPY neko/chromium.conf /etc/neko/supervisord/chromium.conf
+COPY neko/start-browser.sh /usr/local/bin/start-browser.sh
+COPY neko/launch-chrome.sh /usr/local/bin/launch-chrome.sh
+RUN chmod +x /usr/local/bin/start-browser.sh /usr/local/bin/launch-chrome.sh
+
+# WebRTC needs a TURN server: the OpenSandbox gateway proxies HTTP/WS only, so
+# Neko's media (UDP) can't traverse it — without a relay, ICE fails and the live
+# view never shows a picture. Point Neko at a coturn reachable from both the
+# viewer's browser and the sandbox pod. These are build-time overridable:
+#   docker build --build-arg NEKO_TURN_URL=turn:<host>:3478 \
+#                --build-arg NEKO_TURN_USER=... --build-arg NEKO_TURN_CRED=...
+# Defaults target the test-cluster coturn; production MUST override them.
+ARG NEKO_TURN_URL=turn:192.168.1.208:3478
+ARG NEKO_TURN_USER=neko
+ARG NEKO_TURN_CRED=neko
+
+ENV USER=neko \
+    DISPLAY=:99.0 \
+    XDG_RUNTIME_DIR=/tmp/runtime-neko \
+    NEKO_SERVER_BIND=:8080 \
+    NEKO_PLUGINS_ENABLED=true \
+    NEKO_PLUGINS_DIR=/etc/neko/plugins/ \
+    NEKO_WEBRTC_ICELITE=false \
+    NEKO_WEBRTC_ICESERVERS_FRONTEND="[{\"urls\":[\"${NEKO_TURN_URL}\"],\"username\":\"${NEKO_TURN_USER}\",\"credential\":\"${NEKO_TURN_CRED}\"}]" \
+    NEKO_WEBRTC_ICESERVERS_BACKEND="[{\"urls\":[\"${NEKO_TURN_URL}\"],\"username\":\"${NEKO_TURN_USER}\",\"credential\":\"${NEKO_TURN_CRED}\"}]"
 
 WORKDIR /workspace

@@ -1,9 +1,11 @@
 """OpenSandbox implementation of the Sandbox base class."""
 
+import time
+
 import opensandbox
 from loguru import logger
 
-from cubebox.sandbox.base import ExecuteResult, Sandbox
+from cubebox.sandbox.base import BrowserEndpoint, ExecuteResult, Sandbox
 
 
 class OpenSandbox(Sandbox):
@@ -56,6 +58,22 @@ class OpenSandbox(Sandbox):
                 raise
             result.append((path, content))
         return result
+
+    async def get_browser_endpoint(self, *, expires_in: int = 3600) -> BrowserEndpoint:
+        expires = int(time.time()) + expires_in
+        endpoint = await self._sandbox.get_signed_endpoint(self.BROWSER_PORT, expires)
+        url = endpoint.endpoint
+        # OpenSandbox returns a scheme-less host/path; an iframe needs a full URL.
+        if not url.startswith(("http://", "https://")):
+            protocol = getattr(self._sandbox.connection_config, "protocol", "http")
+            url = f"{protocol}://{url}"
+        # A trailing slash after the .../proxy/<port> path is REQUIRED: the Neko
+        # client uses relative asset/WS paths, so without it they resolve against
+        # .../proxy/ (dropping the port) and the proxy returns 401 — the client JS
+        # never loads and only the static login shell shows.
+        if not url.endswith("/"):
+            url += "/"
+        return BrowserEndpoint(url=url, headers=dict(endpoint.headers or {}))
 
     async def close(self) -> None:
         pass

@@ -1423,6 +1423,29 @@ class RunManager:
             except Exception as exc:
                 logger.warning("Failed to load AgentConfig, using base prompt: {}", exc)
 
+            # Inject the available-skills list so the model knows what it can
+            # load via load_skill. Without this the load_skill tool exists but
+            # the agent never learns which skills are available, so it never
+            # uses them. Appended as a stable suffix (same enabled set across
+            # turns) to preserve the prompt-cache prefix.
+            try:
+                if skill_catalog is not None:
+                    _enabled_skills = await skill_catalog.list_enabled_for_workspace(
+                        ctx.workspace_id, org_id=ctx.org_id
+                    )
+                    if _enabled_skills:
+                        from cubebox.prompts.skills import SKILLS_PROMPT_TEMPLATE
+
+                        _skills_list = "\n".join(
+                            f"- `{s.name}` — {s.description}"
+                            for s in sorted(_enabled_skills, key=lambda s: s.name)
+                        )
+                        effective_system_prompt += "\n\n" + SKILLS_PROMPT_TEMPLATE.format(
+                            skills_list=_skills_list
+                        )
+            except Exception as exc:
+                logger.warning("Failed to inject available-skills list: {}", exc)
+
             await self._run_cubepi_path(
                 ctx=ctx,
                 run_id=run_id,

@@ -12,6 +12,9 @@ class SystemInfoResponse(BaseModel):
     deployment_mode: Literal["single_tenant", "multi_tenant"]
     version: str
     needs_org_setup: bool
+    # Whether sandbox support is enabled; gates sandbox-only UI (e.g. the
+    # browser live-view button) so it isn't shown where it can't work.
+    sandbox_enabled: bool = False
 
 
 class SetupRequest(BaseModel):
