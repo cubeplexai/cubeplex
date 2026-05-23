@@ -115,6 +115,19 @@ describe('ProviderConfigForm — create', () => {
     fireEvent.change(screen.getByLabelText('API key'), { target: { value: 'sk-1' } })
     expect(screen.getByRole('button', { name: 'Next' })).toBeEnabled()
   })
+
+  it('lets a keyless preset be created with auth_type none (no dummy key)', () => {
+    const { onSubmit } = renderForm({
+      preset: makeCreatePreset({ display_name: 'Ollama', base_url: 'http://localhost:11434/v1' }),
+    })
+    // Pick "None" auth → the API key field disappears and Next enables w/o a key.
+    fireEvent.click(screen.getByText('None'))
+    expect(screen.queryByLabelText('API key')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }))
+    const body = onSubmit.mock.calls[0][0] as ProviderCreate
+    expect(body.auth_type).toBe('none')
+    expect(body.api_key).toBeNull()
+  })
 })
 
 describe('ProviderConfigForm — edit', () => {

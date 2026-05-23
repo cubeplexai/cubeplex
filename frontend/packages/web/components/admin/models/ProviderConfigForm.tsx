@@ -104,12 +104,11 @@ export function ProviderConfigForm({
   const [advancedOpen, setAdvancedOpen] = useState(false)
   const [headersError, setHeadersError] = useState<string | null>(null)
 
-  // Effective auth_type sent to the backend.
-  const authType: 'api_key' | 'bearer_token' | 'none' = isCreate
-    ? 'api_key'
-    : authChoice === 'none'
-      ? 'none'
-      : 'api_key'
+  // Effective auth_type sent to the backend. The catalog no longer carries
+  // per-preset auth, so the user picks it (api_key default / none) in both
+  // modes — this preserves no-auth semantics for keyless endpoints (ollama,
+  // lm-studio, tgi, …) instead of forcing a dummy key (codex P1).
+  const authType: 'api_key' | 'bearer_token' | 'none' = authChoice === 'none' ? 'none' : 'api_key'
   const needsKey = authType !== 'none'
   // Key required in create (when the auth needs one); optional in edit.
   const keyRequired = isCreate && needsKey
@@ -227,7 +226,7 @@ export function ProviderConfigForm({
         </div>
       )}
 
-      {supported && !isCreate && (
+      {supported && (
         <div className="flex flex-col gap-1.5">
           <Label>{t('authType')}</Label>
           <RadioGroup
