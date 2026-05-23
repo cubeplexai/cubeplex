@@ -60,12 +60,14 @@
     intl: { host: https://dashscope-intl.aliyuncs.com }
     cn: { host: https://dashscope.aliyuncs.com }
   endpoints:
-    - { region: intl, protocol: openai-completions, path: /compatible-mode/v1, capability: qwen-compat }
-    - { region: cn, protocol: openai-completions, path: /compatible-mode/v1, capability: qwen-compat }
+    - { region: intl, protocol: openai-completions, plan: general, path: /compatible-mode/v1, capability: qwen-compat }
+    - { region: cn, protocol: openai-completions, plan: general, path: /compatible-mode/v1, capability: qwen-compat }
+    # Coding Plan lives on a different host (coding.dashscope), not just a path.
+    - { region: cn, protocol: openai-completions, plan: coding, host: https://coding.dashscope.aliyuncs.com, path: /v1, capability: qwen-compat }
   models:
-    - { model_id: qwen3-max, display_name: Qwen3 Max, context_window: 262144, max_tokens: 32768, input_modalities: [text, image], reasoning: true, pricing: { input: 0, output: 0 } }
-    - { model_id: qwen3.6-plus, display_name: Qwen 3.6 Plus, context_window: 262144, max_tokens: 32768, input_modalities: [text, image], reasoning: true, pricing: { input: 0, output: 0 } }
-    - { model_id: qwen3.6-flash, display_name: Qwen 3.6 Flash, context_window: 131072, max_tokens: 16384, input_modalities: [text, image], reasoning: false, pricing: { input: 0, output: 0 } }
+    - { model_id: qwen3-max, display_name: Qwen3 Max, plan: general, context_window: 262144, max_tokens: 32768, input_modalities: [text, image], reasoning: true, pricing: { input: 0, output: 0 } }
+    - { model_id: qwen3.6-plus, display_name: Qwen 3.6 Plus, plan: [general, coding], context_window: 262144, max_tokens: 32768, input_modalities: [text, image], reasoning: true, pricing: { input: 0, output: 0 } }
+    - { model_id: qwen3.6-flash, display_name: Qwen 3.6 Flash, plan: general, context_window: 131072, max_tokens: 16384, input_modalities: [text, image], reasoning: false, pricing: { input: 0, output: 0 } }
 
 - vendor: volcengine
   display_name: 豆包 (火山方舟)
@@ -76,12 +78,17 @@
   regions:
     cn: { host: https://ark.cn-beijing.volces.com }
   endpoints:
-    - { region: cn, protocol: openai-completions, path: /api/v3, capability: doubao-compat }
+    - { region: cn, protocol: openai-completions, plan: general, path: /api/v3, capability: doubao-compat }
+    # Coding Plan: OpenAI-compat wire on /api/coding/v3 (distinct from the
+    # anthropic-shape volcengine-coding placeholder vendor on /api/coding).
+    - { region: cn, protocol: openai-completions, plan: coding, path: /api/coding/v3, capability: doubao-compat }
   models:
-    - { model_id: doubao-seed-2.0-pro, display_name: Doubao Seed 2.0 Pro, context_window: 256000, max_tokens: 16384, input_modalities: [text, image], reasoning: true, pricing: { input: 0, output: 0 } }
-    - { model_id: doubao-seed-2.0-code, display_name: Doubao Seed 2.0 Code, context_window: 256000, max_tokens: 16384, input_modalities: [text], reasoning: true, pricing: { input: 0, output: 0 } }
-    - { model_id: doubao-seed-2.0-lite, display_name: Doubao Seed 2.0 Lite, context_window: 256000, max_tokens: 16384, input_modalities: [text, image], reasoning: true, pricing: { input: 0, output: 0 } }
-    - { model_id: doubao-seed-2.0-mini, display_name: Doubao Seed 2.0 Mini, context_window: 256000, max_tokens: 16384, input_modalities: [text], reasoning: false, pricing: { input: 0, output: 0 } }
+    - { model_id: doubao-seed-2.0-pro, display_name: Doubao Seed 2.0 Pro, plan: [general, coding], context_window: 256000, max_tokens: 16384, input_modalities: [text, image], reasoning: true, pricing: { input: 0, output: 0 } }
+    - { model_id: doubao-seed-2.0-code, display_name: Doubao Seed 2.0 Code, plan: general, context_window: 256000, max_tokens: 16384, input_modalities: [text], reasoning: true, pricing: { input: 0, output: 0 } }
+    - { model_id: doubao-seed-2.0-lite, display_name: Doubao Seed 2.0 Lite, plan: general, context_window: 256000, max_tokens: 16384, input_modalities: [text, image], reasoning: true, pricing: { input: 0, output: 0 } }
+    - { model_id: doubao-seed-2.0-mini, display_name: Doubao Seed 2.0 Mini, plan: general, context_window: 256000, max_tokens: 16384, input_modalities: [text], reasoning: false, pricing: { input: 0, output: 0 } }
+    - { model_id: doubao-seed-1-8-251228, display_name: DouBao Seed 1.8, plan: general, context_window: 256000, max_tokens: 32700, input_modalities: [text, image], reasoning: true, pricing: { input: 2.4, output: 24 } }
+    - { model_id: kimi-k2.6, display_name: Kimi K2.6, plan: coding, context_window: 256000, max_tokens: 32000, input_modalities: [text, image], reasoning: true, pricing: { input: 0, output: 0 } }
 
 - vendor: deepseek
   display_name: DeepSeek
@@ -187,7 +194,9 @@
     intl: { host: https://openrouter.ai }
   endpoints:
     - { region: intl, protocol: openai-completions, path: /api/v1, capability: openrouter-compat }
-  models: []
+  models:
+    - { model_id: "google/gemma-4-31b-it:free", display_name: Gemma 4 31B (free), context_window: 262000, max_tokens: 32000, input_modalities: [text, image], reasoning: true, pricing: { input: 0, output: 0 } }
+    - { model_id: "stepfun/step-3.5-flash:free", display_name: StepFun 3.5 Flash (free), context_window: 256000, max_tokens: 32000, input_modalities: [text, image], reasoning: true, pricing: { input: 0, output: 0 } }
 
 - vendor: together-ai
   display_name: Together AI
