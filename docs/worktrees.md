@@ -60,6 +60,44 @@ The frontend `pnpm dev` is wrapped via
 `frontend/scripts/with-worktree-env.mjs`. Bypassing the wrapper means
 PORT defaults to 3000 and silently collides with the main worktree.
 
+## Running tests in a worktree
+
+The dev server and the test suite use **separate** databases — the suite
+must never touch your dev data:
+
+| | dynaconf env | config | database |
+|---|---|---|---|
+| `python main.py` (dev server) | `development` | `config.development(.local).yaml` | dev DB (`cubebox_<slug>`, from `.worktree.env`) |
+| `pytest` / e2e | `test` | `config.test.yaml` | per-slot test DB (`cubebox_test_<slug>`) |
+
+`tests/conftest.py` handles the routing for you. In a worktree it reads
+`.worktree.env`'s dev DB name and **force-derives the per-slot test DB**
+(`cubebox_<slug>` → `cubebox_test_<slug>`), so a plain `uv run pytest`
+runs against the test DB and **cannot** clobber your dev data — no env
+juggling needed. (It also pins the object-store creds to the local rustfs
+values and refuses to start if the resolved DB name isn't a test DB.)
+
+```bash
+# Just works — routed to cubebox_test_<slug>, dev DB untouched:
+cd backend && uv run pytest tests/e2e/...
+```
+
+Prerequisites:
+
+- The per-slot test DB must be migrated. Worktree provisioning runs
+  `alembic upgrade head` on it; if it's behind, `worktree-env reseed-db`
+  (or `CUBEBOX_DATABASE__NAME=cubebox_test_<slug> uv run alembic upgrade
+  head`) fixes it.
+- S3-backed tests (skills, attachments) need the local **rustfs** object
+  store on `:9000` — see `~/infra/rustfs` (`docker compose up -d`). conftest
+  pins the `rustfsadmin` creds; the bucket is `cubebox-test`.
+
+Why conftest pins these: a dynaconf env var beats `config.test.yaml`, so a
+developer's `.env` (real dev DB name + real Aliyun OSS creds) would
+otherwise leak into the test env — the DB leak truncates your dev DB, the
+creds leak breaks S3 with `InvalidAccessKeyId`. The conftest force-set
+neutralizes both.
+
 ## Subcommands
 
 ```bash
