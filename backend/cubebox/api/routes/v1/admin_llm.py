@@ -17,7 +17,7 @@ async def list_provider_presets(
     *,
     user: Annotated[User, Depends(require_org_admin)],
 ) -> list[dict[str, Any]]:
-    """Return cubepi's bundled provider-preset catalog (read-only passthrough)."""
-    from cubepi.providers.catalog import list_provider_presets as _list_presets
+    """Return cubebox's provider-preset catalog as a nested vendor list (spec §5.1)."""
+    from cubebox.llm.catalog import load_catalog
 
-    return [p.model_dump(mode="json") for p in _list_presets()]
+    return load_catalog().to_api()

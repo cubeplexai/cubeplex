@@ -88,3 +88,44 @@ class Catalog(BaseModel):
         if preset_key not in self.endpoints:
             raise KeyError(preset_key)
         return self.endpoints[preset_key]
+
+    def to_api(self) -> list[dict[str, Any]]:
+        """Nested vendor list for GET /admin/llm/presets (spec §5.1)."""
+        out: list[dict[str, Any]] = []
+        for v in self.vendors:
+            v_eps = [e for e in self.endpoints.values() if e.vendor == v.vendor]
+            out.append(
+                {
+                    "vendor": v.vendor,
+                    "display_name": v.display_name,
+                    "short_name": v.short_name,
+                    "logo": v.logo,
+                    "category": v.category,
+                    "description": v.description,
+                    "endpoints": [
+                        {
+                            "preset_key": e.preset_key,
+                            "region": e.region,
+                            "protocol": e.protocol,
+                            "plan": e.plan,
+                            "base_url": e.base_url,
+                            "model_ids": [m.model_id for m in e.models],
+                        }
+                        for e in v_eps
+                    ],
+                    "models": [
+                        {
+                            "model_id": m.model_id,
+                            "display_name": m.display_name,
+                            "plan": m.plans(),
+                            "context_window": m.context_window,
+                            "max_tokens": m.max_tokens,
+                            "input_modalities": m.input_modalities,
+                            "reasoning": m.reasoning,
+                            "pricing": m.pricing.model_dump(),
+                        }
+                        for m in v.models
+                    ],
+                }
+            )
+        return out
