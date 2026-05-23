@@ -34,6 +34,18 @@ def _dedup_slug(base: str, taken: set[str]) -> str:
         n += 1
 
 
+def _merge_cost(
+    catalog_cost: dict[str, float], override: dict[str, Any] | None
+) -> dict[str, float]:
+    """Per-leg deep-merge: an override leg replaces only that leg (§6.2.3)."""
+    merged = dict(catalog_cost)
+    if override:
+        for leg in ("input", "output", "cache_read", "cache_write"):
+            if leg in override:
+                merged[leg] = float(override[leg])
+    return merged
+
+
 def _capability_for(slug: str) -> tuple[dict[str, Any], dict[str, Any]] | None:
     """Resolve a cubepi preset slug to its cached capability snapshot.
 
