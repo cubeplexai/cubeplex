@@ -212,6 +212,11 @@ Full details, role tables, operator CLI, system endpoints:
   `compress: false`.
 - **Worktree ports**: `8000` / `3000` are wrong inside worktrees — port
   collisions silently test the wrong code.
+- **Worktree test DB**: `tests/conftest.py` auto-routes worktree tests to
+  the per-slot `cubebox_test_<slug>` DB (and pins the rustfs object-store
+  creds), so plain `uv run pytest` is safe and never touches your dev DB.
+  S3 tests need rustfs on `:9000` (`~/infra/rustfs`). See
+  [docs/worktrees.md](docs/worktrees.md) → "Running tests in a worktree".
 
 ---
 
