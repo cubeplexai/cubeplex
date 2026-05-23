@@ -102,8 +102,17 @@ provider is constructed. So the split is clean:
 
 **Decision:** cubepi's `cubepi/providers/catalog/` package (loader + types +
 `providers.yaml` + tests) is **deleted**. Nothing outside cubebox consumes it.
-cubebox keeps its existing dependency on cubepi for `CapabilityDescriptor` and
-`WireApi`.
+cubebox keeps its dependency on cubepi for `CapabilityDescriptor` (the stable,
+non-catalog `cubepi.providers.capability` module).
+
+**`WireApi` decoupling (settled):** `WireApi` is just the 3-string protocol
+literal. To avoid a cubebox→cubepi-catalog import (the catalog package is being
+deleted) and to keep the cubebox work independent of the cubepi release,
+**cubebox declares its own `WireApi` literal** in `cubebox/llm/catalog/types.py`.
+cubepi keeps its own `WireApi` for its runtime; the two are intentionally
+parallel 3-value literals, not a shared import. (cubepi may relocate its
+`WireApi` out of the deleted catalog package — see plan Phase G — but cubebox
+does not depend on that.)
 
 ---
 
