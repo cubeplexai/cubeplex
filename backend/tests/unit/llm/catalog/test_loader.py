@@ -1,4 +1,6 @@
-from cubebox.llm.catalog.loader import preset_key_for
+import pytest
+
+from cubebox.llm.catalog.loader import preset_key_for, resolve_capability
 from cubebox.llm.catalog.types import Endpoint, Vendor
 
 
@@ -52,3 +54,23 @@ def test_preset_key_with_plan():
 def test_preset_key_override_wins():
     ep = Endpoint(region="cn", protocol="openai-completions", key="pretty-key", capability="x")
     assert preset_key_for("zhipu", ep) == "pretty-key"
+
+
+def test_resolve_capability_named():
+    profiles = {"openai-compat-basic": {"supports_tools": True, "supports_images": True}}
+    cap = resolve_capability("openai-compat-basic", profiles)
+    assert cap.supports_tools is True
+    assert cap.supports_images is True
+
+
+def test_resolve_capability_inline_dict():
+    cap = resolve_capability(
+        {"supports_images": True, "max_tokens_field": "max_completion_tokens"}, {}
+    )
+    assert cap.supports_images is True
+    assert cap.max_tokens_field == "max_completion_tokens"
+
+
+def test_resolve_capability_unknown_name_fails_loudly():
+    with pytest.raises(ValueError, match="unknown capability profile"):
+        resolve_capability("does-not-exist", {"openai-compat-basic": {}})
