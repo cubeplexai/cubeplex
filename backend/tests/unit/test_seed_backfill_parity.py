@@ -49,7 +49,7 @@ def test_no_provider_silently_loses_capability_backfill():
 # + at least one model from the catalog.
 PRESET_MAPPED = {
     "deepseek": "deepseek/cn/anthropic-messages",
-    "minimax": "minimax/cn/openai-completions",
+    "minimax": "minimax/cn/openai-completions/general",
     "arkcode": "volcengine/cn/openai-completions/coding",
     "alicode": "aliyun/cn/openai-completions/coding",
     "volengine": "volcengine/cn/openai-completions/general",
