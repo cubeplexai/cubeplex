@@ -1,4 +1,5 @@
-from cubebox.llm.catalog.types import Vendor
+from cubebox.llm.catalog.loader import preset_key_for
+from cubebox.llm.catalog.types import Endpoint, Vendor
 
 
 def test_vendor_parses_minimal():
@@ -36,3 +37,18 @@ def test_vendor_parses_minimal():
     assert v.endpoints[0].plan is None
     assert v.models[0].pricing.cache_read == 0.0
     assert v.models[0].plan is None
+
+
+def test_preset_key_without_plan():
+    ep = Endpoint(region="cn", protocol="anthropic-messages", capability="x")
+    assert preset_key_for("deepseek", ep) == "deepseek/cn/anthropic-messages"
+
+
+def test_preset_key_with_plan():
+    ep = Endpoint(region="cn", protocol="openai-completions", plan="coding", capability="x")
+    assert preset_key_for("zhipu", ep) == "zhipu/cn/openai-completions/coding"
+
+
+def test_preset_key_override_wins():
+    ep = Endpoint(region="cn", protocol="openai-completions", key="pretty-key", capability="x")
+    assert preset_key_for("zhipu", ep) == "pretty-key"

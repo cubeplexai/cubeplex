@@ -19,3 +19,13 @@ def compose_base_url(regions: dict[str, Region], endpoint: Endpoint) -> str:
             raise ValueError(f"endpoint references unknown region {endpoint.region!r}")
         host = region.host
     return host + endpoint.path
+
+
+def preset_key_for(vendor: str, endpoint: Endpoint) -> str:
+    """preset_key = vendor/region/protocol[/plan], or endpoint.key override (§4.4)."""
+    if endpoint.key is not None:
+        return endpoint.key
+    parts = [vendor, endpoint.region, endpoint.protocol]
+    if endpoint.plan is not None:
+        parts.append(endpoint.plan)
+    return "/".join(parts)
