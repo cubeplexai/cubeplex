@@ -398,8 +398,10 @@ For each configured provider:
      catalog's `output`/`cache_*`. (A whole-object replace would silently zero
      the unspecified legs.)
    - any other unset config field inherits from the catalog.
-4. **No `preset:`** → behaves like today: config must supply `base_url`, `api`,
-   and full `models`; no catalog backfill. (Custom/self-hosted providers.)
+4. **No `preset:`** → behaves like today: config must supply `base_url` and a
+   non-empty `models` list (validated, fail loudly); `api` keeps its
+   long-standing `openai-completions` default (most custom endpoints are
+   OpenAI-compatible). No catalog backfill. (Custom/self-hosted providers.)
 
 This supersedes the old "match by name, backfill only capability" rule — the
 catalog now backfills the whole model set, not just the capability descriptor.
