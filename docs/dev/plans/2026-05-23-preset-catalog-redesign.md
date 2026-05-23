@@ -504,6 +504,17 @@ def test_duplicate_preset_key_rejected():
     v1, v2 = _vendor(), _vendor()  # same vendor name → same composed key
     with pytest.raises(ValueError, match="duplicate preset_key"):
         build_catalog([v1, v2], PROFILES)
+
+
+def test_duplicate_endpoint_tuple_rejected_even_with_distinct_key_overrides():
+    # Two endpoints with the SAME (region, protocol, plan) but different key:
+    # overrides must still be rejected — preset_key dedup alone wouldn't catch it.
+    v = _vendor(endpoints=[
+        {"region": "cn", "protocol": "openai-completions", "key": "k1", "capability": "x"},
+        {"region": "cn", "protocol": "openai-completions", "key": "k2", "capability": "x"},
+    ])
+    with pytest.raises(ValueError, match="duplicate endpoint"):
+        build_catalog([v], PROFILES)
 ```
 
 - [ ] **Step 2: Run** `uv run pytest tests/unit/llm/catalog/test_loader.py -v` → the new tests FAIL (`build_catalog` undefined).
@@ -546,8 +557,15 @@ def build_catalog(raw_vendors: list[dict | Vendor], profiles: dict[str, dict]) -
     endpoints: dict[str, ResolvedEndpoint] = {}
     for v in vendors:
         _validate_plan_consistency(v)
-        # uniqueness of (region, protocol, plan) is enforced via preset_key dedup below
+        # (region, protocol, plan) tuple uniqueness — enforced INDEPENDENTLY of
+        # preset_key, because a `key:` override would otherwise let two identical
+        # tuples through the preset_key dedup (codex P2, spec §4.2).
+        seen_tuples: set[tuple[str, str, str | None]] = set()
         for ep in v.endpoints:
+            tup = (ep.region, ep.protocol, ep.plan)
+            if tup in seen_tuples:
+                raise ValueError(f"vendor {v.vendor!r} duplicate endpoint tuple {tup!r}")
+            seen_tuples.add(tup)
             models = _models_for(v, ep)
             if ep.plan is not None and not models:
                 raise ValueError(
@@ -704,6 +722,7 @@ git commit -m "feat(catalog): port flat providers.yaml to nested vendors + capab
 - [ ] **Step 1: Write the failing test**
 
 ```python
+from collections import Counter
 from pathlib import Path
 
 import yaml
@@ -714,22 +733,25 @@ _SNAPSHOT = Path(__file__).parent / "data" / "flat_providers_snapshot.yaml"
 
 
 def test_every_flat_base_url_is_reproduced():
-    """Each flat entry's (api, base_url) must be reproduced by some resolved endpoint.
+    """Each flat (api, base_url) must be reproduced with the SAME MULTIPLICITY.
 
-    Flat entries with base_url == "" (custom-*) are excluded — they have no
-    composed URL by design.
+    Multiplicity matters (codex P2): two flat entries can share an identical
+    (api, base_url) — e.g. moonshot vs moonshot-coding both
+    (openai-completions, https://api.moonshot.ai/v1). A plain set would let one
+    new endpoint satisfy both; a Counter requires the new catalog to produce
+    the same number of endpoints per (api, base_url). Flat entries with
+    base_url == "" (custom-*) are excluded — they have no composed URL.
     """
     flat = yaml.safe_load(_SNAPSHOT.read_text("utf-8"))
     catalog = load_catalog()
-    produced = {(e.protocol, e.base_url) for e in catalog.endpoints.values()}
-    missing = []
-    for entry in flat:
-        if not entry.get("base_url"):
-            continue
-        pair = (entry["api"], entry["base_url"])
-        if pair not in produced:
-            missing.append((entry["slug"], pair))
-    assert not missing, f"flat URLs not reproduced by composition: {missing}"
+    produced = Counter((e.protocol, e.base_url) for e in catalog.endpoints.values())
+    expected = Counter(
+        (entry["api"], entry["base_url"]) for entry in flat if entry.get("base_url")
+    )
+    # Every expected (api, base_url) must appear at least as many times as the
+    # flat catalog had it. (>= not == so genuinely new endpoints are allowed.)
+    deficits = {pair: (cnt, produced[pair]) for pair, cnt in expected.items() if produced[pair] < cnt}
+    assert not deficits, f"flat URLs under-reproduced (expected,got): {deficits}"
 ```
 
 - [ ] **Step 2: Run** `cd backend && uv run pytest tests/unit/llm/catalog/test_composition.py::test_every_flat_base_url_is_reproduced -v`
@@ -844,6 +866,14 @@ def test_resolve_logo_by_preset_key():
     assert _resolve_logo("deepseek/cn/anthropic-messages") == "deepseek"
 
 
+def test_resolve_logo_by_key_override():
+    # A `key:`-overridden preset_key does NOT start with the vendor — must still resolve.
+    # (Add a vendors.yaml endpoint with `key: pretty-deepseek` for this to pass, or
+    #  use whatever override exists; the point is resolution goes through the catalog,
+    #  not a string split.)
+    pass  # implementer: assert against a real key-override endpoint if one exists
+
+
 def test_resolve_logo_none_for_unknown():
     assert _resolve_logo("nope/x/y") is None
     assert _resolve_logo(None) is None
@@ -851,7 +881,7 @@ def test_resolve_logo_none_for_unknown():
 
 - [ ] **Step 2: Run** → FAIL (still uses cubepi `get_provider_preset`).
 
-- [ ] **Step 3: Implement** — replace the import `from cubepi.providers.catalog import get_provider_preset` and `_resolve_logo`:
+- [ ] **Step 3: Implement** — replace the import `from cubepi.providers.catalog import get_provider_preset` and `_resolve_logo`. Resolve the endpoint **through the catalog** (so `key:` overrides work — codex P2 — not a `split("/")` that assumes the key starts with the vendor):
 
 ```python
 def _resolve_logo(preset_slug: str | None) -> str | None:
@@ -859,11 +889,12 @@ def _resolve_logo(preset_slug: str | None) -> str | None:
     if not preset_slug:
         return None
     try:
-        vendor = preset_slug.split("/", 1)[0]
         from cubebox.llm.catalog import load_catalog
 
-        for v in load_catalog().vendors:
-            if v.vendor == vendor:
+        catalog = load_catalog()
+        ep = catalog.resolve(preset_slug)  # works for composed keys AND key: overrides
+        for v in catalog.vendors:
+            if v.vendor == ep.vendor:
                 return v.logo
     except Exception:
         return None
@@ -1049,6 +1080,24 @@ def test_resolve_api_override_with_preset_rejected():
                                              "api_key": "k", "api": "openai-completions"})
 
 
+def test_resolve_capability_override_with_preset_rejected():
+    with pytest.raises(ValueError, match="capability.*not overridable"):
+        resolve_provider_config("deepseek", {"preset": "deepseek/cn/anthropic-messages",
+                                             "api_key": "k", "capability": {"supports_tools": False}})
+
+
+def test_resolve_without_preset_requires_base_url_api_models():
+    # §6.2.4: no preset → config MUST supply base_url, api, and non-empty models.
+    for bad in (
+        {"api": "openai-completions", "models": [{"id": "m"}]},          # missing base_url
+        {"base_url": "http://x/v1", "models": [{"id": "m"}]},            # missing api
+        {"base_url": "http://x/v1", "api": "openai-completions"},        # missing models
+        {"base_url": "http://x/v1", "api": "openai-completions", "models": []},  # empty models
+    ):
+        with pytest.raises(ValueError, match="custom provider.*requires"):
+            resolve_provider_config("custom", bad)
+
+
 def test_resolve_base_url_override_allowed():
     cfg = {"preset": "deepseek/cn/anthropic-messages", "api_key": "k",
            "base_url": "https://proxy.internal/anthropic"}
@@ -1099,18 +1148,31 @@ def _model_from_preset(m: Any, cost_override: dict[str, Any] | None) -> dict[str
     }
 
 
+_OVERRIDABLE_UNDER_PRESET = "base_url"  # the ONLY catalog field a preset config may override
+
+
 def resolve_provider_config(name: str, cfg: dict[str, Any]) -> ResolvedProviderConfig:
     preset_key = cfg.get("preset")
     if not preset_key:
-        # No preset → config verbatim (custom/self-hosted). §6.2.4
+        # No preset → config must fully specify the provider (§6.2.4). Validate
+        # rather than default, so an under-specified custom provider fails loudly.
+        base_url = cfg.get("base_url")
+        api = cfg.get("api")
+        models = list(cfg.get("models", []))
+        if not base_url or not api or not models:
+            raise ValueError(
+                f"provider {name!r}: a custom provider (no 'preset:') requires "
+                f"'base_url', 'api', and a non-empty 'models' list (§6.2.4)"
+            )
         return ResolvedProviderConfig(
-            base_url=str(cfg.get("base_url", "")),
-            provider_type=str(cfg.get("api", "openai-completions")),
-            preset_key=None, capability={}, model_capability_overrides={},
-            models=list(cfg.get("models", [])),
+            base_url=str(base_url), provider_type=str(api),
+            preset_key=None, capability={}, model_capability_overrides={}, models=models,
         )
+    # §6.2.3: under a preset, neither 'api' (protocol) nor 'capability' is overridable.
     if cfg.get("api") is not None:
         raise ValueError(f"provider {name!r}: 'api' is not overridable under a preset (§6.2.3)")
+    if cfg.get("capability") is not None:
+        raise ValueError(f"provider {name!r}: 'capability' is not overridable under a preset (§6.2.3)")
     try:
         ep = load_catalog().resolve(preset_key)
     except KeyError:
@@ -1145,6 +1207,8 @@ def resolve_provider_config(name: str, cfg: dict[str, Any]) -> ResolvedProviderC
 
 - [ ] **Step 5: Wire the resolver into `seed_system_providers_from_config`.** Replace the inline `base_url` / `provider_type` / capability-backfill / models-loop derivation with a call to `resolve_provider_config(name, cfg_dict)`, then use `resolved.base_url`, `resolved.provider_type`, set `provider.preset_slug = resolved.preset_key`, `provider.capability = resolved.capability` (when non-empty and `provider.capability` empty), and iterate `resolved.models` (each already has `id/name/cost/context_window/max_tokens/reasoning/input`). Keep the existing credential-vault + stale-model-disable logic unchanged. Keep the "skip provider with no models" guard.
 
+  **Deployment-knob pass-through (codex P2 fix):** `extra_body` / `extra_headers` are *deployment* knobs, **not** catalog data — the resolver intentionally does not carry them. The seed loop continues to read **provider-level** `cfg_dict.get("extra_body")` / `cfg_dict.get("extra_headers")` directly onto the `Provider` row (unchanged from today, and it works the same whether or not `preset:` is set). For **model-level** extras on a preset-sourced model, the operator adds them via a config `models:` override entry (a dict with `id` + `extra_body`/`extra_headers`); extend `_model_from_preset` to merge those override keys when the subset item is a dict. Add a test: a config `models: [{id: X, extra_body: {...}}]` under a preset yields a model dict carrying that `extra_body`.
+
 - [ ] **Step 6: Run the seeder idempotency test** (existing): `uv run pytest tests/ -k seed -v`. Fix fallout.
 
 - [ ] **Step 7: Commit**
@@ -1158,13 +1222,25 @@ git commit -m "feat(seeder): resolve config preset: into base_url/api/capability
 
 ## Phase E — Exhaustive seed-config rewrite + backfill parity (§6.4)
 
-### Task E1: Inventory + rewrite `config.development.local.yaml`
+### Task E1: Inventory + rewrite ALL seed configs
 
 **Files:**
-- Modify: `backend/config.development.local.yaml` (lines 57–212, the `llm.providers` block)
+- Modify: `backend/config.development.local.yaml` (the `llm.providers` block)
+- Modify: any other seed config that declares `llm.providers` (see Step 0)
 - Modify: `cubebox/llm/catalog/data/vendors.yaml` (add any seeded model/endpoint not yet present)
 
-The 9 seeded providers and their mapping (§6.4 inventory):
+- [ ] **Step 0: Enumerate every seed config (codex P1 — §6.4 is exhaustive, not illustrative).** The inventory below covers `config.development.local.yaml` only; before rewriting, list **all** files that carry an `llm.providers` block and inventory each:
+
+```bash
+cd backend && git grep -l "^\s*providers:" -- 'config*.yaml' ; ls config*.yaml
+# Inspect each hit (config.yaml / config.development.yaml / config.development.local.yaml /
+# any env-specific seed). For EVERY provider in EACH file: map it to a preset_key OR
+# record it as deliberately-custom with a one-line reason. Record absent files explicitly.
+```
+
+Write the resulting full inventory into this task (extend the table) before editing — a provider silently left out is exactly the §6.4 backfill-loss this guards against.
+
+The seeded providers in `config.development.local.yaml` and their mapping (§6.4 inventory):
 
 | config name | base_url today | mapping |
 |---|---|---|
@@ -1234,14 +1310,43 @@ git commit -m "feat(config): rewrite seed providers to preset: refs; add seeded 
 **Files:**
 - Create: `tests/unit/test_seed_backfill_parity.py`
 
-- [ ] **Step 1: Write the test** — every preset-mapped provider yields a capability snapshot (the regression guard against silent custom-downgrade):
+**Codex P1:** a hand-written `PRESET_MAPPED` list cannot catch a provider that was silently dropped to custom. The guard must **derive** the at-risk set: every provider that received capability backfill under the *old* name-match rule must still resolve a capability under the *new* config. The old rule backfilled when the config provider **name matched a flat preset slug** (`get_provider_preset(name)` succeeded). So compute that set from the frozen flat snapshot + the actual seed configs, and assert each still resolves.
+
+- [ ] **Step 1: Write the test** — derive the old-backfilled set and assert new-config parity:
 
 ```python
-import pytest
+from pathlib import Path
 
+import pytest
+import yaml
+
+from cubebox.config import config as settings
 from cubebox.seeders.provider_seeder import resolve_provider_config
 
-# The §6.4 inventory: preset-mapped providers MUST resolve a capability.
+_SNAPSHOT = (
+    Path(__file__).parent / "llm" / "catalog" / "data" / "flat_providers_snapshot.yaml"
+)
+
+
+def _old_backfilled_provider_names() -> set[str]:
+    """Provider names that matched a flat preset slug under the OLD rule."""
+    flat_slugs = {e["slug"] for e in yaml.safe_load(_SNAPSHOT.read_text("utf-8"))}
+    cfg_providers = dict(dict(settings.get("llm", {})).get("providers", {}))
+    return {name for name in cfg_providers if name in flat_slugs}
+
+
+def test_no_provider_silently_loses_capability_backfill():
+    """§6.4: every provider backfilled under the old rule still resolves one now."""
+    cfg_providers = dict(dict(settings.get("llm", {})).get("providers", {}))
+    regressed = []
+    for name in _old_backfilled_provider_names():
+        r = resolve_provider_config(name, dict(cfg_providers[name]))
+        if r.preset_key is None or not r.capability:
+            regressed.append(name)
+    assert not regressed, f"providers lost capability backfill in the rewrite: {regressed}"
+
+
+# Also assert the preset-mapped providers resolve a capability + models.
 PRESET_MAPPED = {
     "deepseek": "deepseek/cn/anthropic-messages",
     "minimax": "minimax/cn/openai-completions",
@@ -1259,6 +1364,8 @@ def test_preset_mapped_providers_get_capability_and_models(name, key):
     assert r.capability is not None
     assert len(r.models) >= 1
 ```
+
+NOTE: `_old_backfilled_provider_names()` derives the at-risk set so a forgotten provider is caught automatically — the hand-written `PRESET_MAPPED` is a secondary, explicit check. If the loaded config's provider names don't match any flat slug (likely for the local config, whose names like `deepseek` differ from flat slugs like `deepseek-anthropic`), the derived set is empty and the guard matters most for the production `config.yaml` — which Step 0 of E1 must also inventory.
 
 - [ ] **Step 2: Run** `cd backend && uv run pytest tests/unit/test_seed_backfill_parity.py -v` → PASS (proves the inventory + catalog are wired).
 
@@ -1279,7 +1386,9 @@ git commit -m "test(seeder): backfill-parity guard for preset-mapped providers (
 - Modify: `frontend/packages/web/components/admin/models/wizard/wizardMachine.ts`
 - Test: `frontend/packages/web/components/admin/models/wizard/__tests__/wizardMachine.test.ts`
 
-- [ ] **Step 1: Write the failing test** — `pickVendor` sets vendor, `selectEndpoint` sets the chosen `preset_key`, step 1 advance requires both a vendor AND a selected endpoint:
+**Step ordering (codex P1 fix):** endpoint (region/protocol/plan) selection happens in **step 2** (ConfigureStep), not step 1. So **step 1 advance requires only `vendor`**; the `selectedPresetKey` is set during step 2 and gates the *create/confirm* action there (`canAdvance(step 2)` requires `selectedPresetKey != null && providerId == null`-pre-create → see F3). Requiring the endpoint to advance *from* step 1 would make step 2 unreachable.
+
+- [ ] **Step 1: Write the failing test** — `pickVendor` sets vendor and allows step-1 advance; `selectEndpoint` (used in step 2) sets the chosen `preset_key`:
 
 ```typescript
 import { describe, expect, it } from 'vitest'
@@ -1294,19 +1403,24 @@ const vendor = {
   ], models: [],
 } as VendorPreset
 
-it('requires a vendor and a selected endpoint to advance from step 1', () => {
+it('advances from step 1 once a vendor is picked', () => {
   let s = initialWizardState
   expect(canAdvance(s)).toBe(false)
   s = wizardReducer(s, { type: 'pickVendor', vendor })
-  expect(canAdvance(s)).toBe(false) // vendor but no endpoint yet
+  expect(canAdvance(s)).toBe(true) // vendor alone is enough to reach step 2
+})
+
+it('records the endpoint selected in step 2', () => {
+  let s = wizardReducer(initialWizardState, { type: 'pickVendor', vendor })
+  s = wizardReducer(s, { type: 'next' }) // now on step 2
   s = wizardReducer(s, { type: 'selectEndpoint', presetKey: 'zhipu/cn/openai-completions/coding' })
-  expect(canAdvance(s)).toBe(true)
+  expect(s.selectedPresetKey).toBe('zhipu/cn/openai-completions/coding')
 })
 ```
 
 - [ ] **Step 2: Run** `cd frontend && pnpm --filter @cubebox/web test wizardMachine` → FAIL.
 
-- [ ] **Step 3: Implement** — update `wizardMachine.ts`: replace `preset: ProviderPreset | null` with `vendor: VendorPreset | null` and `selectedPresetKey: string | null`; actions `pickVendor` / `selectEndpoint`; `canAdvance` step 1 → `vendor !== null && selectedPresetKey !== null`.
+- [ ] **Step 3: Implement** — update `wizardMachine.ts`: replace `preset: ProviderPreset | null` with `vendor: VendorPreset | null` and `selectedPresetKey: string | null`; actions `pickVendor` / `selectEndpoint`; `canAdvance` **step 1 → `vendor !== null`** (endpoint not required here); the step-2 create action in ConfigureStep is what requires `selectedPresetKey` (F3).
 
 - [ ] **Step 4: Run** → PASS.
 
