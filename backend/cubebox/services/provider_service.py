@@ -181,6 +181,20 @@ class ProviderService:
 
         slug = await self._resolve_slug(data.name, data.slug)
 
+        # Backfill the capability snapshot from the catalog when the client sent a
+        # `preset_slug` (preset_key) but no capability — the presets API no longer
+        # exposes capability (resolved server-side). Mirrors the seeder.
+        capability = data.capability
+        if data.preset_slug and not capability:
+            try:
+                from cubebox.llm.catalog import load_catalog
+
+                capability = (
+                    load_catalog().resolve(data.preset_slug).capability.model_dump(mode="json")
+                )
+            except Exception:
+                capability = data.capability
+
         credential_id: str | None = None
         if data.auth_type != "none" and data.api_key:
             credential_id = await self._credentials.create(
@@ -201,7 +215,7 @@ class ProviderService:
             extra_body=data.extra_body,
             extra_headers=data.extra_headers,
             preset_slug=data.preset_slug,
-            capability=data.capability,
+            capability=capability,
             model_capability_overrides=data.model_capability_overrides,
             created_by_user_id=self.actor_user_id,
         )
