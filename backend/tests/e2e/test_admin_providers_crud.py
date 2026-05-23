@@ -279,7 +279,7 @@ async def test_create_provider_persists_capability(
 async def test_provider_out_resolves_brand_logo_from_preset(
     admin_client: tuple[AsyncClient, str],
 ) -> None:
-    """A provider with a known preset_slug exposes its brand-icon id as `logo`."""
+    """A provider with a known preset_slug (preset_key) exposes its brand-icon id as `logo`."""
     client, _ = admin_client
     res = await client.post(
         "/api/v1/admin/providers",
@@ -289,7 +289,7 @@ async def test_provider_out_resolves_brand_logo_from_preset(
             "base_url": "https://example.com",
             "auth_type": "api_key",
             "api_key": "sk-x",
-            "preset_slug": "anthropic",
+            "preset_slug": "anthropic/intl/anthropic-messages",
         },
     )
     assert res.status_code == 201
