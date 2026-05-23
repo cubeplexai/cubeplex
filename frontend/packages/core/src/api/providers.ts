@@ -9,7 +9,7 @@ import type {
   ModelUpdate,
   OrgLLMSettings,
   OrgLLMSettingsUpdate,
-  ProviderPreset,
+  VendorPreset,
   ProbeStep,
   ProbeResult,
 } from '../types/provider'
@@ -92,10 +92,10 @@ export async function updateOrgLLMSettings(
   return res.json() as Promise<OrgLLMSettings>
 }
 
-export async function listPresets(client: ApiClient): Promise<ProviderPreset[]> {
+export async function listPresets(client: ApiClient): Promise<VendorPreset[]> {
   const res = await client.get('/api/v1/admin/llm/presets')
   if (!res.ok) throw await toApiError(res)
-  return res.json() as Promise<ProviderPreset[]>
+  return res.json() as Promise<VendorPreset[]>
 }
 
 interface LivenessBody {
