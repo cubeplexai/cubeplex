@@ -59,3 +59,30 @@ def test_compose_base_url_unknown_region_raises():
             {"cn": Region(host="https://x")},
             Endpoint(region="intl", protocol="openai-completions", capability="x"),
         )
+
+
+def test_every_flat_base_url_is_reproduced():
+    """Each flat (api, base_url) must be reproduced with the SAME MULTIPLICITY.
+
+    Multiplicity matters: two flat entries can share an identical (api, base_url)
+    (e.g. moonshot vs moonshot-coding both openai-completions on api.moonshot.ai/v1).
+    A plain set would let one new endpoint satisfy both; a Counter requires the new
+    catalog to produce at least as many endpoints per (api, base_url). Flat entries
+    with base_url == "" (custom-*) are excluded — they have no composed URL.
+    """
+    from collections import Counter
+    from pathlib import Path
+
+    import yaml
+
+    from cubebox.llm.catalog import load_catalog
+
+    snapshot = Path(__file__).parent / "data" / "flat_providers_snapshot.yaml"
+    flat = yaml.safe_load(snapshot.read_text("utf-8"))
+    catalog = load_catalog()
+    produced = Counter((e.protocol, e.base_url) for e in catalog.endpoints.values())
+    expected = Counter((entry["api"], entry["base_url"]) for entry in flat if entry.get("base_url"))
+    deficits = {
+        pair: (cnt, produced[pair]) for pair, cnt in expected.items() if produced[pair] < cnt
+    }
+    assert not deficits, f"flat URLs under-reproduced (expected, got): {deficits}"
