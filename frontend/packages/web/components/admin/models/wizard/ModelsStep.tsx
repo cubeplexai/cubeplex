@@ -1,9 +1,15 @@
 'use client'
 
-import { useRef, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { useTranslations } from 'next-intl'
 import { Plus, Trash2 } from 'lucide-react'
-import { createModel, type ApiClient, type ModelCreate, type ProviderPreset } from '@cubebox/core'
+import {
+  createModel,
+  type ApiClient,
+  type ModelCreate,
+  type ModelPresetEntry,
+  type VendorPreset,
+} from '@cubebox/core'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -19,23 +25,42 @@ interface ModelRow {
   max_tokens: number
   input_modalities: string[]
   reasoning: boolean
+  cost_input: number
+  cost_output: number
+  cost_cache_read: number
+  cost_cache_write: number
   checked: boolean
   custom: boolean
 }
 
 interface ModelsStepProps {
   client: ApiClient
-  preset: ProviderPreset
+  vendor: VendorPreset
+  /** The endpoint chosen in step 2 — its preset_key. */
+  presetKey: string
   providerId: string
   onModelsCreated: (models: CreatedModel[]) => void
 }
 
-export function ModelsStep({ client, preset, providerId, onModelsCreated }: ModelsStepProps) {
+export function ModelsStep({
+  client,
+  vendor,
+  presetKey,
+  providerId,
+  onModelsCreated,
+}: ModelsStepProps) {
   const t = useTranslations('adminModels.wizard.models')
   const tw = useTranslations('adminModels.wizard')
 
+  // Models the chosen endpoint serves (its model_ids mapped against the pool).
+  const endpointModels = useMemo<ModelPresetEntry[]>(() => {
+    const ep = vendor.endpoints.find((e) => e.preset_key === presetKey) ?? vendor.endpoints[0]
+    const ids = new Set(ep?.model_ids ?? [])
+    return vendor.models.filter((m) => ids.has(m.model_id))
+  }, [vendor, presetKey])
+
   const [rows, setRows] = useState<ModelRow[]>(() =>
-    preset.default_models.map((m, i) => ({
+    endpointModels.map((m, i) => ({
       key: `preset-${i}`,
       model_id: m.model_id,
       display_name: m.display_name,
@@ -43,6 +68,10 @@ export function ModelsStep({ client, preset, providerId, onModelsCreated }: Mode
       max_tokens: m.max_tokens,
       input_modalities: m.input_modalities,
       reasoning: m.reasoning,
+      cost_input: m.pricing.input,
+      cost_output: m.pricing.output,
+      cost_cache_read: m.pricing.cache_read ?? 0,
+      cost_cache_write: m.pricing.cache_write ?? 0,
       checked: true,
       custom: false,
     })),
@@ -74,6 +103,10 @@ export function ModelsStep({ client, preset, providerId, onModelsCreated }: Mode
         max_tokens: 4096,
         input_modalities: ['text'],
         reasoning: false,
+        cost_input: 0,
+        cost_output: 0,
+        cost_cache_read: 0,
+        cost_cache_write: 0,
         checked: true,
         custom: true,
       },
@@ -110,6 +143,10 @@ export function ModelsStep({ client, preset, providerId, onModelsCreated }: Mode
           max_tokens: r.max_tokens,
           input_modalities: r.input_modalities,
           reasoning: r.reasoning,
+          cost_input: r.cost_input,
+          cost_output: r.cost_output,
+          cost_cache_read: r.cost_cache_read,
+          cost_cache_write: r.cost_cache_write,
           enabled: false,
         }
         const model = await createModel(client, providerId, body)

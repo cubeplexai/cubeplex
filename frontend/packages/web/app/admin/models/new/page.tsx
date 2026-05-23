@@ -39,14 +39,16 @@ export default function AddProviderWizardPage() {
             {state.step === 1 && (
               <PresetPicker
                 client={client}
-                selectedSlug={state.preset?.slug ?? null}
-                onPick={(preset) => dispatch({ type: 'pickPreset', preset })}
+                selectedVendor={state.vendor?.vendor ?? null}
+                onPickVendor={(vendor) => dispatch({ type: 'pickVendor', vendor })}
               />
             )}
-            {state.step === 2 && state.preset && (
+            {state.step === 2 && state.vendor && (
               <ConfigureStep
                 client={client}
-                preset={state.preset}
+                vendor={state.vendor}
+                selectedPresetKey={state.selectedPresetKey}
+                onSelectEndpoint={(presetKey) => dispatch({ type: 'selectEndpoint', presetKey })}
                 existingProviderId={state.providerId}
                 onProviderCreated={(id) => {
                   dispatch({ type: 'providerCreated', providerId: id })
@@ -54,10 +56,11 @@ export default function AddProviderWizardPage() {
                 }}
               />
             )}
-            {state.step === 3 && state.preset && state.providerId && (
+            {state.step === 3 && state.vendor && state.selectedPresetKey && state.providerId && (
               <ModelsStep
                 client={client}
-                preset={state.preset}
+                vendor={state.vendor}
+                presetKey={state.selectedPresetKey}
                 providerId={state.providerId}
                 onModelsCreated={(models) => {
                   dispatch({ type: 'modelsCreated', models })
@@ -95,7 +98,7 @@ export default function AddProviderWizardPage() {
                 <Button
                   type="button"
                   size="sm"
-                  disabled={!state.preset}
+                  disabled={!state.vendor}
                   onClick={() => dispatch({ type: 'next' })}
                 >
                   {t('next')}

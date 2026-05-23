@@ -5,7 +5,7 @@ import type { ApiClient, Model } from '@cubebox/core'
 import * as core from '@cubebox/core'
 import en from '../../../../../messages/en.json'
 import { ModelsStep } from '../ModelsStep'
-import { makePreset } from './fixtures'
+import { makeVendor } from './fixtures'
 
 vi.mock('@cubebox/core', async (importOriginal) => {
   const actual = await importOriginal<typeof core>()
@@ -14,23 +14,39 @@ vi.mock('@cubebox/core', async (importOriginal) => {
 
 const fakeClient = {} as ApiClient
 
-const preset = makePreset({
-  default_models: [
+const PRESET_KEY = 'v/intl/openai-completions'
+const vendor = makeVendor({
+  vendor: 'v',
+  endpoints: [
+    {
+      preset_key: PRESET_KEY,
+      region: 'intl',
+      protocol: 'openai-completions',
+      plan: null,
+      base_url: 'https://x/v1',
+      model_ids: ['m-a', 'm-b'],
+    },
+  ],
+  models: [
     {
       model_id: 'm-a',
       display_name: 'Model A',
+      plan: null,
       context_window: 100,
       max_tokens: 50,
       input_modalities: ['text'],
       reasoning: true,
+      pricing: { input: 0, output: 0 },
     },
     {
       model_id: 'm-b',
       display_name: 'Model B',
+      plan: null,
       context_window: 200,
       max_tokens: 80,
       input_modalities: ['text', 'image'],
       reasoning: false,
+      pricing: { input: 0, output: 0 },
     },
   ],
 })
@@ -40,7 +56,8 @@ function renderStep(onModelsCreated = vi.fn()) {
     <NextIntlClientProvider locale="en" messages={en}>
       <ModelsStep
         client={fakeClient}
-        preset={preset}
+        vendor={vendor}
+        presetKey={PRESET_KEY}
         providerId="prv_1"
         onModelsCreated={onModelsCreated}
       />
@@ -59,7 +76,7 @@ describe('ModelsStep', () => {
     })
   })
 
-  it('renders default models checked by default', () => {
+  it('renders endpoint models checked by default', () => {
     renderStep()
     expect(screen.getByText('Model A')).toBeInTheDocument()
     expect(screen.getByText('Model B')).toBeInTheDocument()

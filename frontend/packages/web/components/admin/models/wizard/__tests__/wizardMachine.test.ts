@@ -1,22 +1,38 @@
 import { describe, expect, it } from 'vitest'
 import { canAdvance, initialWizardState, wizardReducer, type WizardState } from '../wizardMachine'
-import { makePreset } from './fixtures'
+import { makeVendor } from './fixtures'
 
 describe('wizardMachine', () => {
   it('starts at step 1 with empty state', () => {
     expect(initialWizardState).toEqual({
       step: 1,
-      preset: null,
+      vendor: null,
+      selectedPresetKey: null,
       providerId: null,
       models: [],
     })
   })
 
-  it('pickPreset stores the preset', () => {
-    const preset = makePreset()
-    const s = wizardReducer(initialWizardState, { type: 'pickPreset', preset })
-    expect(s.preset).toBe(preset)
+  it('pickVendor stores the vendor and resets the endpoint choice', () => {
+    const vendor = makeVendor()
+    let s = wizardReducer(initialWizardState, {
+      type: 'selectEndpoint',
+      presetKey: 'stale/key',
+    })
+    s = wizardReducer(s, { type: 'pickVendor', vendor })
+    expect(s.vendor).toBe(vendor)
+    expect(s.selectedPresetKey).toBeNull()
     expect(s.step).toBe(1)
+  })
+
+  it('selectEndpoint records the chosen preset_key (step 2)', () => {
+    let s = wizardReducer(initialWizardState, { type: 'pickVendor', vendor: makeVendor() })
+    s = wizardReducer(s, { type: 'next' })
+    s = wizardReducer(s, {
+      type: 'selectEndpoint',
+      presetKey: 'anthropic/intl/anthropic-messages',
+    })
+    expect(s.selectedPresetKey).toBe('anthropic/intl/anthropic-messages')
   })
 
   it('providerCreated stores the provider id', () => {
@@ -38,19 +54,20 @@ describe('wizardMachine', () => {
     ])
   })
 
-  it('next does not advance from step 1 without a preset', () => {
+  it('next does not advance from step 1 without a vendor', () => {
     const s = wizardReducer(initialWizardState, { type: 'next' })
     expect(s.step).toBe(1)
   })
 
-  it('next advances to step 2 once a preset is picked', () => {
-    let s = wizardReducer(initialWizardState, { type: 'pickPreset', preset: makePreset() })
+  it('advances to step 2 once a vendor is picked (endpoint chosen in step 2)', () => {
+    let s = wizardReducer(initialWizardState, { type: 'pickVendor', vendor: makeVendor() })
+    expect(canAdvance(s)).toBe(true)
     s = wizardReducer(s, { type: 'next' })
     expect(s.step).toBe(2)
   })
 
   it('cannot advance to step 3 unless providerId is set', () => {
-    const atStep2: WizardState = { ...initialWizardState, step: 2, preset: makePreset() }
+    const atStep2: WizardState = { ...initialWizardState, step: 2, vendor: makeVendor() }
     expect(canAdvance(atStep2)).toBe(false)
     expect(wizardReducer(atStep2, { type: 'next' }).step).toBe(2)
 
@@ -63,7 +80,7 @@ describe('wizardMachine', () => {
     const atStep3: WizardState = {
       ...initialWizardState,
       step: 3,
-      preset: makePreset(),
+      vendor: makeVendor(),
       providerId: 'prv_1',
     }
     expect(canAdvance(atStep3)).toBe(false)

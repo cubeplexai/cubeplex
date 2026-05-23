@@ -383,11 +383,15 @@
         "categoryCustom": "Custom",
         "reasoningBudget": "Budget reasoning",
         "reasoningEffort": "Effort reasoning",
-        "reasoningStandard": "Standard"
+        "reasoningStandard": "Standard",
+        "endpointCount": "{count} endpoints"
       },
       "configure": {
         "name": "Display name",
         "baseUrl": "Base URL",
+        "region": "Region",
+        "protocol": "Protocol",
+        "plan": "Plan",
         "apiKey": "API key",
         "apiKeyRequired": "An API key is required for this provider.",
         "noAuth": "This provider needs no credentials.",

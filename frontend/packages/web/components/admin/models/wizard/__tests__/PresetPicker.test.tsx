@@ -5,7 +5,7 @@ import type { ApiClient } from '@cubebox/core'
 import * as core from '@cubebox/core'
 import en from '../../../../../messages/en.json'
 import { PresetPicker } from '../PresetPicker'
-import { makePreset } from './fixtures'
+import { makeVendor } from './fixtures'
 
 vi.mock('@cubebox/core', async (importOriginal) => {
   const actual = await importOriginal<typeof core>()
@@ -13,34 +13,41 @@ vi.mock('@cubebox/core', async (importOriginal) => {
 })
 
 // ProviderLogo pulls @lobehub/icons, whose transitive @lobehub/ui has an ESM
-// resolution bug under vitest. Stub it — the picker test cares about behavior,
-// not the brand glyph.
+// resolution bug under vitest. Stub it — the picker test cares about behavior.
 vi.mock('@/components/admin/models/ProviderLogo', () => ({
   ProviderLogo: () => <div data-testid="provider-logo" aria-hidden />,
 }))
 
 const fakeClient = {} as ApiClient
 
-function renderPicker(onPick = vi.fn()): { onPick: ReturnType<typeof vi.fn> } {
+function renderPicker(onPickVendor = vi.fn()): { onPickVendor: ReturnType<typeof vi.fn> } {
   render(
     <NextIntlClientProvider locale="en" messages={en}>
-      <PresetPicker client={fakeClient} selectedSlug={null} onPick={onPick} />
+      <PresetPicker client={fakeClient} selectedVendor={null} onPickVendor={onPickVendor} />
     </NextIntlClientProvider>,
   )
-  return { onPick }
+  return { onPickVendor }
 }
 
-const anthropic = makePreset({ slug: 'anthropic', display_name: 'Anthropic', category: 'saas' })
-const ollama = makePreset({
-  slug: 'ollama',
+const anthropic = makeVendor({ vendor: 'anthropic', display_name: 'Anthropic', category: 'saas' })
+const ollama = makeVendor({
+  vendor: 'ollama',
   display_name: 'Ollama',
   short_name: 'Ollama',
   category: 'oss-framework',
   description: 'Local Ollama server.',
   logo: 'ollama',
-  api: 'openai-completions',
-  auth: { mode: 'none' },
-  capability: {},
+  endpoints: [
+    {
+      preset_key: 'ollama/local/openai-completions',
+      region: 'local',
+      protocol: 'openai-completions',
+      plan: null,
+      base_url: 'http://localhost:11434/v1',
+      model_ids: [],
+    },
+  ],
+  models: [],
 })
 
 describe('PresetPicker', () => {
@@ -48,18 +55,18 @@ describe('PresetPicker', () => {
     vi.mocked(core.listPresets).mockResolvedValue([anthropic, ollama])
   })
 
-  it('renders a card per preset from listPresets', async () => {
+  it('renders a card per vendor from listPresets', async () => {
     renderPicker()
     expect(await screen.findByText('Anthropic')).toBeInTheDocument()
     expect(screen.getByText('Ollama')).toBeInTheDocument()
     expect(core.listPresets).toHaveBeenCalledWith(fakeClient)
   })
 
-  it('calls onPick when a card is clicked', async () => {
-    const { onPick } = renderPicker()
+  it('calls onPickVendor when a card is clicked', async () => {
+    const { onPickVendor } = renderPicker()
     const card = await screen.findByRole('button', { name: /Anthropic/ })
     fireEvent.click(card)
-    expect(onPick).toHaveBeenCalledWith(anthropic)
+    expect(onPickVendor).toHaveBeenCalledWith(anthropic)
   })
 
   it('filters by search query', async () => {
@@ -82,10 +89,10 @@ describe('PresetPicker', () => {
     expect(screen.getByText('Ollama')).toBeInTheDocument()
   })
 
-  it('marks the selected preset', async () => {
+  it('marks the selected vendor', async () => {
     render(
       <NextIntlClientProvider locale="en" messages={en}>
-        <PresetPicker client={fakeClient} selectedSlug="anthropic" onPick={vi.fn()} />
+        <PresetPicker client={fakeClient} selectedVendor="anthropic" onPickVendor={vi.fn()} />
       </NextIntlClientProvider>,
     )
     const card = await screen.findByRole('button', { name: /Anthropic/ })

@@ -1,4 +1,4 @@
-import type { ProviderPreset } from '@cubebox/core'
+import type { VendorPreset } from '@cubebox/core'
 
 export type WizardStep = 1 | 2 | 3 | 4
 
@@ -13,13 +13,16 @@ export interface CreatedModel {
 
 export interface WizardState {
   step: WizardStep
-  preset: ProviderPreset | null
+  vendor: VendorPreset | null
+  /** Endpoint chosen in step 2 (region/protocol/plan) — its preset_key. */
+  selectedPresetKey: string | null
   providerId: string | null
   models: CreatedModel[]
 }
 
 export type WizardAction =
-  | { type: 'pickPreset'; preset: ProviderPreset }
+  | { type: 'pickVendor'; vendor: VendorPreset }
+  | { type: 'selectEndpoint'; presetKey: string }
   | { type: 'providerCreated'; providerId: string }
   | { type: 'modelsCreated'; models: CreatedModel[] }
   | { type: 'next' }
@@ -27,17 +30,19 @@ export type WizardAction =
 
 export const initialWizardState: WizardState = {
   step: 1,
-  preset: null,
+  vendor: null,
+  selectedPresetKey: null,
   providerId: null,
   models: [],
 }
 
-// Whether `next` may advance from the given state. Step 1 needs a preset,
-// step 2 needs a persisted provider, step 3 needs at least one model.
+// Whether `next` may advance from the given state. Step 1 needs a vendor (the
+// endpoint is chosen in step 2); step 2 needs a persisted provider; step 3 needs
+// at least one model.
 export function canAdvance(state: WizardState): boolean {
   switch (state.step) {
     case 1:
-      return state.preset !== null
+      return state.vendor !== null
     case 2:
       return state.providerId !== null
     case 3:
@@ -49,8 +54,11 @@ export function canAdvance(state: WizardState): boolean {
 
 export function wizardReducer(state: WizardState, action: WizardAction): WizardState {
   switch (action.type) {
-    case 'pickPreset':
-      return { ...state, preset: action.preset }
+    case 'pickVendor':
+      // Picking a (new) vendor resets the downstream endpoint choice.
+      return { ...state, vendor: action.vendor, selectedPresetKey: null }
+    case 'selectEndpoint':
+      return { ...state, selectedPresetKey: action.presetKey }
     case 'providerCreated':
       return { ...state, providerId: action.providerId }
     case 'modelsCreated':
