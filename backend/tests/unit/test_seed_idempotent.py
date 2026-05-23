@@ -99,23 +99,22 @@ async def test_seed_updates_existing_provider_url(
     assert updated.provider_type == "openai-completions"
 
 
-async def test_seed_backfills_capability_for_known_slug(
+async def test_seed_backfills_capability_for_preset_ref(
     clean_db: AsyncSession,
     backend: FernetBackend,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A provider whose name matches a cubepi preset slug gets its capability snapshot.
+    """A provider with a ``preset:`` ref gets its capability snapshot + preset_key.
 
-    ``vllm`` is a cubepi preset slug, so when the seed config declares a provider
-    named ``vllm`` the seeder must fill ``preset_slug`` + ``capability`` from the
-    catalog. A provider whose name has no matching preset is left empty.
+    Under the new rule (spec §6.2), backfill is driven by an explicit ``preset:``
+    reference into the cubebox catalog — not a name==slug match. A custom provider
+    (no preset) is left with no preset_slug and no capability.
     """
     fake_llm = {
         "providers": {
-            "vllm": {
-                "base_url": "http://localhost:8000/v1",
-                "api": "openai-completions",
-                "models": [{"id": "qwen", "name": "Qwen"}],
+            "ds": {
+                "preset": "deepseek/cn/openai-completions",
+                "api_key": "k",
             },
             "house-brand": {
                 "base_url": "http://localhost:9000/v1",
@@ -132,15 +131,15 @@ async def test_seed_backfills_capability_for_known_slug(
 
     await seed_system_providers_from_config(clean_db, backend)
 
-    vllm = (
-        await clean_db.execute(select(Provider).where(Provider.name == "vllm"))
+    ds = (
+        await clean_db.execute(select(Provider).where(Provider.name == "ds"))
     ).scalar_one_or_none()
-    assert vllm is not None, "expected a seeded 'vllm' provider"
-    assert vllm.preset_slug == "vllm"
-    assert vllm.capability, "capability snapshot must be populated for a known slug"
-    assert "supports_tools" in vllm.capability
+    assert ds is not None, "expected a seeded 'ds' provider"
+    assert ds.preset_slug == "deepseek/cn/openai-completions"
+    assert ds.capability, "capability snapshot must be populated for a preset ref"
+    assert ds.base_url == "https://api.deepseek.com"
 
-    # No preset matches this name -> capability stays empty.
+    # No preset -> custom provider, capability stays empty.
     house = (
         await clean_db.execute(select(Provider).where(Provider.name == "house-brand"))
     ).scalar_one()

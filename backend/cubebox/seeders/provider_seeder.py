@@ -6,15 +6,17 @@ Provider api keys are written to the credential vault as system credentials
 migration.
 """
 
+from dataclasses import dataclass, field
 from typing import Any
 
-from cubepi.providers.catalog import get_provider_preset
 from loguru import logger
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cubebox.config import config as settings
 from cubebox.credentials.encryption import EncryptionBackend
+from cubebox.llm.catalog import load_catalog
+from cubebox.llm.catalog.types import ModelPreset
 from cubebox.models import Credential
 from cubebox.models.provider import Model, Provider
 from cubebox.utils.slug import slugify
@@ -46,22 +48,93 @@ def _merge_cost(
     return merged
 
 
-def _capability_for(slug: str) -> tuple[dict[str, Any], dict[str, Any]] | None:
-    """Resolve a cubepi preset slug to its cached capability snapshot.
+@dataclass
+class ResolvedProviderConfig:
+    """The seed-ready shape of one configured provider after preset resolution."""
 
-    Returns ``(capability, model_capability_overrides)`` as JSON-ready dicts, or
-    ``None`` when the slug is not a known preset. The mapping key is the provider
-    ``name`` matched exactly against a preset slug.
-    """
-    try:
-        preset = get_provider_preset(slug)
-    except KeyError:
-        return None
-    capability = preset.capability.model_dump(mode="json")
-    overrides = {
-        mid: cap.model_dump(mode="json") for mid, cap in preset.model_capability_overrides.items()
+    base_url: str
+    provider_type: str
+    preset_key: str | None
+    capability: dict[str, Any]
+    model_capability_overrides: dict[str, Any] = field(default_factory=dict)
+    models: list[dict[str, Any]] = field(default_factory=list)
+
+
+def _model_from_preset(m: ModelPreset, override: dict[str, Any] | None) -> dict[str, Any]:
+    """Catalog ModelPreset -> the seeder's per-model dict, applying config overrides."""
+    out: dict[str, Any] = {
+        "id": m.model_id,
+        "name": m.display_name,
+        "reasoning": m.reasoning,
+        "input": list(m.input_modalities),
+        "context_window": m.context_window,
+        "max_tokens": m.max_tokens,
+        "cost": _merge_cost(m.pricing.model_dump(), (override or {}).get("cost")),
     }
-    return capability, overrides
+    # Model-level deployment knobs (not catalog data) pass through from config.
+    if override:
+        for knob in ("extra_body", "extra_headers"):
+            if knob in override:
+                out[knob] = override[knob]
+    return out
+
+
+def resolve_provider_config(name: str, cfg: dict[str, Any]) -> ResolvedProviderConfig:
+    """Resolve a configured provider, inheriting from its ``preset:`` (spec §6.2)."""
+    preset_key = cfg.get("preset")
+    if not preset_key:
+        # No preset -> config must specify the provider (§6.2.4). Validate the
+        # genuinely-required fields (base_url + a non-empty model list) so an
+        # under-specified custom provider fails loudly instead of silently
+        # seeding an empty base_url. `api` keeps its long-standing
+        # openai-completions default (most custom endpoints are OpenAI-compatible).
+        base_url = cfg.get("base_url")
+        models = list(cfg.get("models", []))
+        if not base_url or not models:
+            raise ValueError(
+                f"provider {name!r}: a custom provider (no 'preset:') requires "
+                f"'base_url' and a non-empty 'models' list (§6.2.4)"
+            )
+        return ResolvedProviderConfig(
+            base_url=str(base_url),
+            provider_type=str(cfg.get("api", "openai-completions")),
+            preset_key=None,
+            capability={},
+            models=models,
+        )
+    # §6.2.3: under a preset, neither 'api' (protocol) nor 'capability' is overridable.
+    if cfg.get("api") is not None:
+        raise ValueError(f"provider {name!r}: 'api' is not overridable under a preset (§6.2.3)")
+    if cfg.get("capability") is not None:
+        raise ValueError(
+            f"provider {name!r}: 'capability' is not overridable under a preset (§6.2.3)"
+        )
+    try:
+        ep = load_catalog().resolve(str(preset_key))
+    except KeyError:
+        raise ValueError(f"provider {name!r}: unknown preset {preset_key!r}") from None
+
+    pool = {m.model_id: m for m in ep.models}
+    subset = cfg.get("models")
+    overrides: dict[str, dict[str, Any]] = {}
+    if subset is None:
+        chosen = list(pool.keys())
+    else:
+        chosen = []
+        for item in subset:
+            mid = item if isinstance(item, str) else str(item["id"])
+            if mid not in pool:
+                raise ValueError(f"provider {name!r}: model {mid!r} not in preset {preset_key!r}")
+            chosen.append(mid)
+            if isinstance(item, dict):
+                overrides[mid] = item
+    return ResolvedProviderConfig(
+        base_url=str(cfg.get("base_url") or ep.base_url),  # base_url override allowed
+        provider_type=ep.protocol,
+        preset_key=str(preset_key),
+        capability=ep.capability.model_dump(mode="json"),
+        models=[_model_from_preset(pool[mid], overrides.get(mid)) for mid in chosen],
+    )
 
 
 async def _upsert_system_credential(
@@ -141,15 +214,21 @@ async def seed_system_providers_from_config(
     for name, cfg_dict_raw in config_providers.items():
         cfg_dict: dict[str, Any] = dict(cfg_dict_raw)
 
-        # Skip providers with no models declared. Why this guard exists:
-        # in the `test` env, dynaconf may surface a CUBEBOX_LLM__PROVIDERS__<NAME>__*
-        # env var (from operator's local .env) for a provider that the test
-        # yaml does not declare. Dynaconf creates a phantom entry with only
-        # the env-var fields (e.g. just api_key, no models). A Provider row
-        # with zero models is useless downstream and breaks the
-        # seed-idempotency assertion (every Provider must have >=1 Model).
-        if not list(cfg_dict.get("models", [])):
-            logger.debug("Provider '{}' has no models declared -- skipping seed", name)
+        # Skip phantom/incomplete providers: a provider with neither a `preset:`
+        # nor any declared models is useless. Why this guard exists: in the `test`
+        # env, dynaconf may surface a CUBEBOX_LLM__PROVIDERS__<NAME>__* env var
+        # (from the operator's local .env) for a provider the test yaml does not
+        # declare, creating a phantom entry with only an env-var api_key. A
+        # Provider row with zero models breaks the seed-idempotency assertion.
+        if not cfg_dict.get("preset") and not list(cfg_dict.get("models", [])):
+            logger.debug("Provider '{}' has no preset and no models -- skipping seed", name)
+            continue
+
+        # Resolve the config against the catalog: a `preset:` inherits
+        # base_url/api/capability/model-pool; no preset means config-verbatim (§6.2).
+        resolved = resolve_provider_config(name, cfg_dict)
+        if not resolved.models:
+            logger.debug("Provider '{}' resolved to zero models -- skipping seed", name)
             continue
 
         existing = await session.execute(
@@ -160,8 +239,8 @@ async def seed_system_providers_from_config(
         )
         provider: Provider | None = existing.scalar_one_or_none()
 
-        base_url: str = str(cfg_dict.get("base_url", ""))
-        provider_type: str = str(cfg_dict.get("api", "openai-completions"))
+        base_url: str = resolved.base_url
+        provider_type: str = resolved.provider_type
 
         if provider is None:
             slug = _dedup_slug(slugify(name), used_slugs)
@@ -188,18 +267,18 @@ async def seed_system_providers_from_config(
                 provider.slug = slug
             logger.debug("System provider '{}' already exists, updated", name)
 
-        # Backfill cached capability snapshot from the cubepi preset catalog.
-        # The mapping key is the provider name matched exactly against a preset
-        # slug. Only fill when the row's capability is still empty so re-seeding
-        # never clobbers admin edits.
-        if not provider.capability:
-            resolved = _capability_for(name)
-            if resolved is not None:
-                capability, overrides = resolved
-                provider.preset_slug = name
-                provider.capability = capability
-                provider.model_capability_overrides = overrides
-                logger.info("Seeded capability snapshot for provider '{}' (slug={})", name, name)
+        # Backfill the cached capability snapshot + preset_key from the catalog.
+        # Only fill when the row's capability is still empty so re-seeding never
+        # clobbers admin edits. Custom providers (no preset) get no backfill.
+        if not provider.capability and resolved.preset_key:
+            provider.preset_slug = resolved.preset_key
+            provider.capability = resolved.capability
+            provider.model_capability_overrides = resolved.model_capability_overrides
+            logger.info(
+                "Seeded capability snapshot for provider '{}' (preset={})",
+                name,
+                resolved.preset_key,
+            )
 
         api_key_raw = cfg_dict.get("api_key")
         api_key: str | None = (
@@ -213,7 +292,9 @@ async def seed_system_providers_from_config(
                 provider.credential_id = cred.id
 
         config_model_ids[name] = set()
-        models_list: list[dict[str, Any]] = list(cfg_dict.get("models", []))
+        # Resolved models: catalog pool (preset) or config-verbatim (custom), each
+        # already normalized to id/name/cost/context_window/max_tokens/reasoning/input.
+        models_list: list[dict[str, Any]] = resolved.models
 
         for mc_raw in models_list:
             mc: dict[str, Any] = dict(mc_raw)
