@@ -62,7 +62,9 @@
   endpoints:
     - { region: intl, protocol: openai-completions, plan: general, path: /compatible-mode/v1, capability: qwen-compat }
     - { region: cn, protocol: openai-completions, plan: general, path: /compatible-mode/v1, capability: qwen-compat }
-    # Coding Plan lives on a different host (coding.dashscope), not just a path.
+    # Coding Plan. CN lives on a different host (coding.dashscope) — the actual
+    # deployed endpoint; intl coding shares the compatible-mode endpoint.
+    - { region: intl, protocol: openai-completions, plan: coding, path: /compatible-mode/v1, capability: qwen-compat }
     - { region: cn, protocol: openai-completions, plan: coding, host: https://coding.dashscope.aliyuncs.com, path: /v1, capability: qwen-compat }
   models:
     - { model_id: qwen3-max, display_name: Qwen3 Max, plan: general, context_window: 262144, max_tokens: 32768, input_modalities: [text, image], reasoning: true, pricing: { input: 0, output: 0 } }
@@ -79,9 +81,10 @@
     cn: { host: https://ark.cn-beijing.volces.com }
   endpoints:
     - { region: cn, protocol: openai-completions, plan: general, path: /api/v3, capability: doubao-compat }
-    # Coding Plan: OpenAI-compat wire on /api/coding/v3 (distinct from the
-    # anthropic-shape volcengine-coding placeholder vendor on /api/coding).
+    # Coding Plan, two wires: OpenAI-compat on /api/coding/v3 (arkcode) and the
+    # Claude-Code-compatible anthropic wire on /api/coding.
     - { region: cn, protocol: openai-completions, plan: coding, path: /api/coding/v3, capability: doubao-compat }
+    - { region: cn, protocol: anthropic-messages, plan: coding, path: /api/coding, capability: volcengine-coding }
   models:
     - { model_id: doubao-seed-2.0-pro, display_name: Doubao Seed 2.0 Pro, plan: [general, coding], context_window: 256000, max_tokens: 16384, input_modalities: [text, image], reasoning: true, pricing: { input: 0, output: 0 } }
     - { model_id: doubao-seed-2.0-code, display_name: Doubao Seed 2.0 Code, plan: general, context_window: 256000, max_tokens: 16384, input_modalities: [text], reasoning: true, pricing: { input: 0, output: 0 } }
@@ -115,11 +118,14 @@
     intl: { host: https://api.moonshot.ai }
     cn: { host: https://api.moonshot.cn }
   endpoints:
-    - { region: intl, protocol: openai-completions, path: /v1, capability: moonshot-compat }
-    - { region: cn, protocol: openai-completions, path: /v1, capability: moonshot-compat }
+    - { region: intl, protocol: openai-completions, plan: general, path: /v1, capability: moonshot-compat }
+    - { region: cn, protocol: openai-completions, plan: general, path: /v1, capability: moonshot-compat }
+    # Coding Plan: same /v1 wire, separate subscription api_key.
+    - { region: intl, protocol: openai-completions, plan: coding, path: /v1, capability: moonshot-compat }
+    - { region: cn, protocol: openai-completions, plan: coding, path: /v1, capability: moonshot-compat }
   models:
-    - { model_id: kimi-k2.6, display_name: Kimi K2.6, context_window: 262144, max_tokens: 32768, input_modalities: [text], reasoning: true, pricing: { input: 0, output: 0 } }
-    - { model_id: kimi-k2, display_name: Kimi K2, context_window: 131072, max_tokens: 16384, input_modalities: [text], reasoning: false, pricing: { input: 0, output: 0 } }
+    - { model_id: kimi-k2.6, display_name: Kimi K2.6, plan: [general, coding], context_window: 262144, max_tokens: 32768, input_modalities: [text], reasoning: true, pricing: { input: 0, output: 0 } }
+    - { model_id: kimi-k2, display_name: Kimi K2, plan: [general, coding], context_window: 131072, max_tokens: 16384, input_modalities: [text], reasoning: false, pricing: { input: 0, output: 0 } }
 
 - vendor: zhipu
   display_name: 智谱 GLM
@@ -131,12 +137,15 @@
     intl: { host: https://api.z.ai }
     cn: { host: https://open.bigmodel.cn }
   endpoints:
-    - { region: intl, protocol: openai-completions, path: /api/paas/v4, capability: zhipu-compat }
-    - { region: cn, protocol: openai-completions, path: /api/paas/v4, capability: zhipu-compat }
+    - { region: intl, protocol: openai-completions, plan: general, path: /api/paas/v4, capability: zhipu-compat }
+    - { region: cn, protocol: openai-completions, plan: general, path: /api/paas/v4, capability: zhipu-compat }
+    # Coding Plan: dedicated /coding/ route, separate subscription api_key.
+    - { region: intl, protocol: openai-completions, plan: coding, path: /api/coding/paas/v4, capability: zhipu-compat }
+    - { region: cn, protocol: openai-completions, plan: coding, path: /api/coding/paas/v4, capability: zhipu-compat }
   models:
-    - { model_id: glm-5, display_name: GLM-5, context_window: 200000, max_tokens: 32768, input_modalities: [text, image], reasoning: true, pricing: { input: 0, output: 0 } }
-    - { model_id: glm-4.7, display_name: GLM-4.7, context_window: 200000, max_tokens: 16384, input_modalities: [text, image], reasoning: true, pricing: { input: 0, output: 0 } }
-    - { model_id: glm-4.7-flash, display_name: GLM-4.7 Flash, context_window: 128000, max_tokens: 16384, input_modalities: [text], reasoning: false, pricing: { input: 0, output: 0 } }
+    - { model_id: glm-5, display_name: GLM-5, plan: [general, coding], context_window: 200000, max_tokens: 32768, input_modalities: [text, image], reasoning: true, pricing: { input: 0, output: 0 } }
+    - { model_id: glm-4.7, display_name: GLM-4.7, plan: [general, coding], context_window: 200000, max_tokens: 16384, input_modalities: [text, image], reasoning: true, pricing: { input: 0, output: 0 } }
+    - { model_id: glm-4.7-flash, display_name: GLM-4.7 Flash, plan: general, context_window: 128000, max_tokens: 16384, input_modalities: [text], reasoning: false, pricing: { input: 0, output: 0 } }
 
 - vendor: minimax
   display_name: MiniMax
@@ -148,12 +157,15 @@
     intl: { host: https://api.minimax.io }
     cn: { host: https://api.minimaxi.com }
   endpoints:
-    - { region: intl, protocol: openai-completions, path: /v1, capability: minimax-compat }
-    - { region: cn, protocol: openai-completions, path: /v1, capability: minimax-compat }
+    - { region: intl, protocol: openai-completions, plan: general, path: /v1, capability: minimax-compat }
+    - { region: cn, protocol: openai-completions, plan: general, path: /v1, capability: minimax-compat }
+    # Coding Plan: anthropic-shape wire (/anthropic), separate subscription api_key.
+    - { region: intl, protocol: anthropic-messages, plan: coding, path: /anthropic, capability: minimax-anthropic }
+    - { region: cn, protocol: anthropic-messages, plan: coding, path: /anthropic, capability: minimax-anthropic }
   models:
-    - { model_id: MiniMax-M2.7, display_name: MiniMax M2.7, context_window: 204800, max_tokens: 131072, input_modalities: [text, image], reasoning: true, pricing: { input: 0, output: 0 } }
-    - { model_id: MiniMax-M2.7-highspeed, display_name: MiniMax M2.7 Highspeed, context_window: 204800, max_tokens: 131072, input_modalities: [text, image], reasoning: false, pricing: { input: 0, output: 0 } }
-    - { model_id: MiniMax-M2.5, display_name: MiniMax M2.5, context_window: 204800, max_tokens: 131072, input_modalities: [text, image], reasoning: true, pricing: { input: 0, output: 0 } }
+    - { model_id: MiniMax-M2.7, display_name: MiniMax M2.7, plan: [general, coding], context_window: 204800, max_tokens: 131072, input_modalities: [text, image], reasoning: true, pricing: { input: 0, output: 0 } }
+    - { model_id: MiniMax-M2.7-highspeed, display_name: MiniMax M2.7 Highspeed, plan: [general, coding], context_window: 204800, max_tokens: 131072, input_modalities: [text, image], reasoning: false, pricing: { input: 0, output: 0 } }
+    - { model_id: MiniMax-M2.5, display_name: MiniMax M2.5, plan: [general, coding], context_window: 204800, max_tokens: 131072, input_modalities: [text, image], reasoning: true, pricing: { input: 0, output: 0 } }
 
 - vendor: xai
   display_name: xAI
@@ -304,114 +316,6 @@
     intl: { host: https://chatgpt.com }
   endpoints:
     - { region: intl, protocol: openai-responses, path: /backend-api/codex, capability: openai-responses }
-  models: []
-
-- vendor: zhipu-coding
-  display_name: 智谱 GLM Coding Plan (国际)
-  short_name: GLM Coding
-  logo: zhipu
-  category: saas
-  description: Zhipu Coding Plan dedicated endpoint (Z.AI global), routed through /coding/.
-  regions:
-    intl: { host: https://api.z.ai }
-  endpoints:
-    - { region: intl, protocol: openai-completions, path: /api/coding/paas/v4, capability: zhipu-compat }
-  models: []
-
-- vendor: zhipu-coding-cn
-  display_name: 智谱 GLM Coding Plan (国内)
-  short_name: GLM Coding CN
-  logo: zhipu
-  category: saas
-  description: Zhipu Coding Plan 国内站 (open.bigmodel.cn) dedicated /coding/ endpoint.
-  regions:
-    cn: { host: https://open.bigmodel.cn }
-  endpoints:
-    - { region: cn, protocol: openai-completions, path: /api/coding/paas/v4, capability: zhipu-compat }
-  models: []
-
-- vendor: minimax-coding
-  display_name: MiniMax Coding Plan (国际)
-  short_name: MiniMax Coding
-  logo: minimax
-  category: saas
-  description: MiniMax Coding Plan — anthropic-shape wire on global (.minimax.io).
-  regions:
-    intl: { host: https://api.minimax.io }
-  endpoints:
-    - { region: intl, protocol: anthropic-messages, path: /anthropic, capability: minimax-anthropic }
-  models: []
-
-- vendor: minimax-coding-cn
-  display_name: MiniMax Coding Plan (国内)
-  short_name: MiniMax Coding CN
-  logo: minimax
-  category: saas
-  description: MiniMax Coding Plan 国内站 (minimaxi.com), anthropic-shape.
-  regions:
-    cn: { host: https://api.minimaxi.com }
-  endpoints:
-    - { region: cn, protocol: anthropic-messages, path: /anthropic, capability: minimax-anthropic }
-  models: []
-
-- vendor: moonshot-coding
-  display_name: Moonshot Kimi Coding (国际)
-  short_name: Kimi Coding
-  logo: moonshot
-  category: saas
-  description: Moonshot Kimi Coding subscription (.ai global). Shares /v1 with token API.
-  regions:
-    intl: { host: https://api.moonshot.ai }
-  endpoints:
-    - { region: intl, protocol: openai-completions, path: /v1, capability: moonshot-compat }
-  models: []
-
-- vendor: moonshot-coding-cn
-  display_name: Moonshot Kimi Coding (国内)
-  short_name: Kimi Coding CN
-  logo: moonshot
-  category: saas
-  description: Moonshot Kimi Coding subscription 国内站 (.cn). Shares /v1 with token API.
-  regions:
-    cn: { host: https://api.moonshot.cn }
-  endpoints:
-    - { region: cn, protocol: openai-completions, path: /v1, capability: moonshot-compat }
-  models: []
-
-- vendor: qwen-coding
-  display_name: 通义千问 Coding Plan (国际)
-  short_name: Qwen Coding
-  logo: qwen
-  category: saas
-  description: Alibaba Cloud Qwen Coding Plan (Singapore) subscription tier.
-  regions:
-    intl: { host: https://dashscope-intl.aliyuncs.com }
-  endpoints:
-    - { region: intl, protocol: openai-completions, path: /compatible-mode/v1, capability: qwen-compat }
-  models: []
-
-- vendor: qwen-coding-cn
-  display_name: 通义千问 Coding Plan (国内)
-  short_name: Qwen Coding CN
-  logo: qwen
-  category: saas
-  description: Alibaba Cloud Qwen Coding Plan 国内站 subscription tier.
-  regions:
-    cn: { host: https://dashscope.aliyuncs.com }
-  endpoints:
-    - { region: cn, protocol: openai-completions, path: /compatible-mode/v1, capability: qwen-compat }
-  models: []
-
-- vendor: volcengine-coding
-  display_name: 火山方舟 Coding Plan
-  short_name: Ark Coding
-  logo: doubao
-  category: saas
-  description: 火山方舟 Coding Plan — anthropic-shape wire serving Doubao + 3rd-party models.
-  regions:
-    cn: { host: https://ark.cn-beijing.volces.com }
-  endpoints:
-    - { region: cn, protocol: anthropic-messages, path: /api/coding, capability: volcengine-coding }
   models: []
 
 - vendor: custom-openai

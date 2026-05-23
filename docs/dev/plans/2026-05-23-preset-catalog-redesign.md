@@ -1262,7 +1262,7 @@ The seeded providers in `config.development.local.yaml` and their mapping (§6.4
 | config name | base_url today | mapping |
 |---|---|---|
 | `deepseek` | api.deepseek.com/anthropic | `preset: deepseek/cn/anthropic-messages` |
-| `minimax` | api.minimaxi.com/v1 | `preset: minimax/cn/openai-completions` (carry `extra_body`) |
+| `minimax` | api.minimaxi.com/v1 | `preset: minimax/cn/openai-completions/general` (carry `extra_body`) |
 | `arkcode` | ark…/api/coding/v3 (openai) | NEW catalog endpoint: volcengine coding **openai-completions** `/api/coding/v3` → `preset: volcengine/cn/openai-completions/coding` |
 | `alicode` | coding.dashscope…/v1 | `preset: aliyun/cn/openai-completions/coding` (host override in catalog) |
 | `volengine` | ark…/api/v3 | `preset: volcengine/cn/openai-completions` (general) |
@@ -1289,7 +1289,7 @@ The seeded providers in `config.development.local.yaml` and their mapping (§6.4
         preset: deepseek/cn/anthropic-messages
         api_key: key-in-env
       minimax:
-        preset: minimax/cn/openai-completions
+        preset: minimax/cn/openai-completions/general
         api_key: sk-cp-…
         extra_body: { "reasoning_split": true }
       arkcode:
@@ -1386,7 +1386,7 @@ def test_no_provider_silently_loses_capability_backfill():
 # Also assert the preset-mapped providers resolve a capability + models.
 PRESET_MAPPED = {
     "deepseek": "deepseek/cn/anthropic-messages",
-    "minimax": "minimax/cn/openai-completions",
+    "minimax": "minimax/cn/openai-completions/general",
     "arkcode": "volcengine/cn/openai-completions/coding",
     "alicode": "aliyun/cn/openai-completions/coding",
     "volengine": "volcengine/cn/openai-completions",

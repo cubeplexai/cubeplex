@@ -69,6 +69,11 @@ def test_every_flat_base_url_is_reproduced():
     A plain set would let one new endpoint satisfy both; a Counter requires the new
     catalog to produce at least as many endpoints per (api, base_url). Flat entries
     with base_url == "" (custom-*) are excluded — they have no composed URL.
+
+    INTENTIONAL_DIVERGENCE: a few flat coding-plan presets carried placeholder
+    URLs (identical to the general plan) that the consolidated catalog replaces
+    with the real, deployed coding-plan host. Those flat slugs are excluded — the
+    divergence is deliberate, not a porting regression.
     """
     from collections import Counter
     from pathlib import Path
@@ -77,11 +82,23 @@ def test_every_flat_base_url_is_reproduced():
 
     from cubebox.llm.catalog import load_catalog
 
+    # flat slug -> reason. The consolidated catalog folds coding plans into their
+    # parent vendor and uses the real coding host; these flat URLs were placeholders.
+    intentional_divergence = {
+        "qwen-coding-cn": "Aliyun coding plan lives on coding.dashscope.aliyuncs.com "
+        "(real deployment, folded into aliyun/cn/.../coding), not the flat placeholder "
+        "dashscope.aliyuncs.com/compatible-mode/v1",
+    }
+
     snapshot = Path(__file__).parent / "data" / "flat_providers_snapshot.yaml"
     flat = yaml.safe_load(snapshot.read_text("utf-8"))
     catalog = load_catalog()
     produced = Counter((e.protocol, e.base_url) for e in catalog.endpoints.values())
-    expected = Counter((entry["api"], entry["base_url"]) for entry in flat if entry.get("base_url"))
+    expected = Counter(
+        (entry["api"], entry["base_url"])
+        for entry in flat
+        if entry.get("base_url") and entry["slug"] not in intentional_divergence
+    )
     deficits = {
         pair: (cnt, produced[pair]) for pair, cnt in expected.items() if produced[pair] < cnt
     }
