@@ -241,3 +241,34 @@ def test_duplicate_endpoint_tuple_rejected_even_with_distinct_key_overrides():
     )
     with pytest.raises(ValueError, match="duplicate endpoint"):
         build_catalog([v], PROFILES)
+
+
+def test_catalog_to_api_shape():
+    from cubebox.llm.catalog import load_catalog
+
+    api = load_catalog().to_api()
+    assert isinstance(api, list)
+    v = next(x for x in api if x["vendor"] == "deepseek")
+    assert {
+        "vendor",
+        "display_name",
+        "short_name",
+        "logo",
+        "category",
+        "description",
+        "endpoints",
+        "models",
+    } <= v.keys()
+    ep = v["endpoints"][0]
+    assert {"preset_key", "region", "protocol", "plan", "base_url", "model_ids"} <= ep.keys()
+    m = v["models"][0]
+    assert {
+        "model_id",
+        "display_name",
+        "plan",
+        "context_window",
+        "max_tokens",
+        "input_modalities",
+        "reasoning",
+        "pricing",
+    } <= m.keys()

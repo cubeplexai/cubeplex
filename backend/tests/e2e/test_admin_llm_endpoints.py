@@ -5,15 +5,15 @@ from httpx import AsyncClient
 
 pytestmark = pytest.mark.e2e  # ensure marker even though conftest auto-adds
 
-# Tracks the cubepi bundled provider-preset catalog (feat branch). Bump if the
-# upstream catalog changes.
-EXPECTED_PRESET_COUNT = 37
+# Tracks the cubebox nested vendor catalog (cubebox/llm/catalog/data/vendors.yaml).
+# Bump if vendors are added/removed.
+EXPECTED_VENDOR_COUNT = 32
 
 
 async def test_list_provider_presets(
     admin_client: tuple[AsyncClient, str],
 ) -> None:
-    """Admin sees the full cubepi preset catalog with the expected shape."""
+    """Admin sees the nested vendor catalog with the expected shape (spec §5.1)."""
     client, _ws_id = admin_client
 
     res = await client.get("/api/v1/admin/llm/presets")
@@ -21,12 +21,15 @@ async def test_list_provider_presets(
     data = res.json()
 
     assert isinstance(data, list)
-    assert len(data) == EXPECTED_PRESET_COUNT
+    assert len(data) == EXPECTED_VENDOR_COUNT
 
-    anthropic = next(p for p in data if p["slug"] == "anthropic")
-    assert anthropic["api"] == "anthropic-messages"
+    anthropic = next(v for v in data if v["vendor"] == "anthropic")
     assert anthropic["logo"] == "anthropic"
-    assert anthropic["capability"]["reasoning_level"]["kind"] == "int_budget"
+    ep = anthropic["endpoints"][0]
+    assert ep["protocol"] == "anthropic-messages"
+    assert ep["preset_key"] == "anthropic/intl/anthropic-messages"
+    assert ep["base_url"] == "https://api.anthropic.com"
+    assert any(m["model_id"] == "claude-opus-4-7" for m in anthropic["models"])
 
 
 async def test_get_provider_returns_liveness_and_per_model_readiness(
