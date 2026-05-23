@@ -1,30 +1,40 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useTranslations } from 'next-intl'
 import {
   createProvider,
   updateProvider,
   type ApiClient,
+  type EndpointPreset,
   type ProviderCreate,
-  type ProviderPreset,
   type ProviderUpdate,
+  type VendorPreset,
 } from '@cubebox/core'
-import { ProviderConfigForm } from '../ProviderConfigForm'
+import { Label } from '@/components/ui/label'
+import { cn } from '@/lib/utils'
+import { ProviderConfigForm, type CreatePreset } from '../ProviderConfigForm'
 
 interface ConfigureStepProps {
   client: ApiClient
-  preset: ProviderPreset
-  // Set once the provider has been created (e.g. user went forward then back to
-  // this step). When present, Next updates the existing row instead of creating
-  // a second provider (which would 409 on the name or orphan a row).
+  vendor: VendorPreset
+  selectedPresetKey: string | null
+  onSelectEndpoint: (presetKey: string) => void
+  // Set once the provider has been created (revisit case): update instead of
+  // creating a second row.
   existingProviderId?: string | null
   onProviderCreated: (providerId: string) => void
 }
 
+function uniq<T>(xs: T[]): T[] {
+  return [...new Set(xs)]
+}
+
 export function ConfigureStep({
   client,
-  preset,
+  vendor,
+  selectedPresetKey,
+  onSelectEndpoint,
   existingProviderId,
   onProviderCreated,
 }: ConfigureStepProps) {
@@ -33,12 +43,54 @@ export function ConfigureStep({
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
+  // The currently-selected endpoint: the one matching selectedPresetKey, else
+  // the vendor's first endpoint.
+  const endpoint: EndpointPreset =
+    vendor.endpoints.find((e) => e.preset_key === selectedPresetKey) ?? vendor.endpoints[0]
+
+  const [region, setRegion] = useState(endpoint.region)
+  const [protocol, setProtocol] = useState<string>(endpoint.protocol)
+  const [plan, setPlan] = useState<string | null>(endpoint.plan)
+
+  const regions = useMemo(() => uniq(vendor.endpoints.map((e) => e.region)), [vendor])
+  const protocols = useMemo(
+    () => uniq(vendor.endpoints.filter((e) => e.region === region).map((e) => e.protocol)),
+    [vendor, region],
+  )
+  const plans = useMemo(
+    () =>
+      vendor.endpoints
+        .filter((e) => e.region === region && e.protocol === protocol)
+        .map((e) => e.plan),
+    [vendor, region, protocol],
+  )
+
+  // The endpoint resolved from the three selectors (falls back to first match).
+  const chosen: EndpointPreset =
+    vendor.endpoints.find(
+      (e) => e.region === region && e.protocol === protocol && e.plan === plan,
+    ) ??
+    vendor.endpoints.find((e) => e.region === region && e.protocol === protocol) ??
+    endpoint
+
+  // Keep the wizard state's selectedPresetKey in sync with the chosen endpoint.
+  useEffect(() => {
+    if (chosen.preset_key !== selectedPresetKey) onSelectEndpoint(chosen.preset_key)
+  }, [chosen.preset_key, selectedPresetKey, onSelectEndpoint])
+
+  const createPreset: CreatePreset = {
+    display_name: vendor.display_name,
+    base_url: chosen.base_url,
+    provider_type: chosen.protocol,
+    preset_key: chosen.preset_key,
+    category: vendor.category,
+  }
+
   async function handleSubmit(body: ProviderCreate | ProviderUpdate) {
     setSaving(true)
     setError(null)
     try {
       if (existingProviderId) {
-        // Revisit: update the already-created provider instead of creating again.
         await updateProvider(client, existingProviderId, body as ProviderUpdate)
         onProviderCreated(existingProviderId)
       } else {
@@ -51,16 +103,91 @@ export function ConfigureStep({
     }
   }
 
+  const showSelectors = regions.length > 1 || protocols.length > 1 || plans.length > 1
+
   return (
-    <div className="mx-auto w-full max-w-xl">
+    <div className="mx-auto flex w-full max-w-xl flex-col gap-4">
+      {showSelectors && (
+        <div className="grid grid-cols-3 gap-3 rounded-lg border border-border/70 p-3">
+          <Selector
+            label={t('region')}
+            value={region}
+            options={regions.map((r) => ({ value: r, label: r }))}
+            onChange={(v) => {
+              setRegion(v)
+              // reset downstream choices to the first valid value
+              const proto = vendor.endpoints.find((e) => e.region === v)?.protocol
+              if (proto) setProtocol(proto)
+              const pl = vendor.endpoints.find((e) => e.region === v && e.protocol === proto)?.plan
+              setPlan(pl ?? null)
+            }}
+          />
+          <Selector
+            label={t('protocol')}
+            value={protocol}
+            options={protocols.map((p) => ({ value: p, label: p }))}
+            onChange={(v) => {
+              setProtocol(v)
+              const pl = vendor.endpoints.find((e) => e.region === region && e.protocol === v)?.plan
+              setPlan(pl ?? null)
+            }}
+          />
+          <Selector
+            label={t('plan')}
+            value={plan ?? ''}
+            disabled={plans.length <= 1}
+            options={plans.map((p) => ({ value: p ?? '', label: p ?? '—' }))}
+            onChange={(v) => setPlan(v || null)}
+          />
+        </div>
+      )}
+
       <ProviderConfigForm
+        key={chosen.preset_key}
         mode="create"
-        preset={preset}
+        preset={createPreset}
         saving={saving}
         error={error}
         submitLabel={tw('next')}
         onSubmit={(body) => void handleSubmit(body)}
       />
+    </div>
+  )
+}
+
+function Selector({
+  label,
+  value,
+  options,
+  onChange,
+  disabled,
+}: {
+  label: string
+  value: string
+  options: { value: string; label: string }[]
+  onChange: (v: string) => void
+  disabled?: boolean
+}) {
+  const id = `endpoint-sel-${label.toLowerCase()}`
+  return (
+    <div className="flex flex-col gap-1.5">
+      <Label htmlFor={id}>{label}</Label>
+      <select
+        id={id}
+        value={value}
+        disabled={disabled}
+        onChange={(e) => onChange(e.target.value)}
+        className={cn(
+          'h-8 w-full rounded-lg border border-input bg-transparent px-2.5 py-1 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50',
+          disabled && 'opacity-60',
+        )}
+      >
+        {options.map((o) => (
+          <option key={o.value} value={o.value}>
+            {o.label}
+          </option>
+        ))}
+      </select>
     </div>
   )
 }

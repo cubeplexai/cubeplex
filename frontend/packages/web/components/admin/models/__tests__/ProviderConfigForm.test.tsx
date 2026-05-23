@@ -3,8 +3,18 @@ import { NextIntlClientProvider } from 'next-intl'
 import { describe, expect, it, vi } from 'vitest'
 import type { Provider, ProviderCreate, ProviderUpdate } from '@cubebox/core'
 import en from '../../../../messages/en.json'
-import { ProviderConfigForm } from '../ProviderConfigForm'
-import { makePreset } from '../wizard/__tests__/fixtures'
+import { ProviderConfigForm, type CreatePreset } from '../ProviderConfigForm'
+
+function makeCreatePreset(over: Partial<CreatePreset> = {}): CreatePreset {
+  return {
+    display_name: 'Anthropic',
+    base_url: 'https://api.anthropic.com',
+    provider_type: 'anthropic-messages',
+    preset_key: 'anthropic/intl/anthropic-messages',
+    category: 'saas',
+    ...over,
+  }
+}
 
 function renderForm(props: Partial<Parameters<typeof ProviderConfigForm>[0]> = {}) {
   const onSubmit = vi.fn()
@@ -12,7 +22,7 @@ function renderForm(props: Partial<Parameters<typeof ProviderConfigForm>[0]> = {
     <NextIntlClientProvider locale="en" messages={en}>
       <ProviderConfigForm
         mode="create"
-        preset={makePreset()}
+        preset={makeCreatePreset()}
         saving={false}
         error={null}
         submitLabel="Next"
@@ -49,7 +59,7 @@ function makeProvider(over: Partial<Provider> = {}): Provider {
 }
 
 describe('ProviderConfigForm — create', () => {
-  it('seeds from preset, locks provider_type, passes capability and preset_slug', () => {
+  it('seeds from the endpoint preset, locks provider_type, sends preset_slug', () => {
     const { onSubmit } = renderForm()
 
     // provider_type is read-only in create mode.
@@ -68,13 +78,14 @@ describe('ProviderConfigForm — create', () => {
       base_url: 'https://api.anthropic.com',
       auth_type: 'api_key',
       api_key: 'sk-123',
-      preset_slug: 'anthropic',
+      preset_slug: 'anthropic/intl/anthropic-messages',
     })
-    expect(body.capability).toEqual(makePreset().capability)
+    // capability resolves server-side from preset_slug -> not sent.
+    expect(body.capability).toBeUndefined()
   })
 
   it('typing name auto-fills slug field', () => {
-    renderForm({ preset: makePreset({ display_name: '' }) })
+    renderForm({ preset: makeCreatePreset({ display_name: '' }) })
     const nameInput = screen.getByLabelText('Name')
     const slugInput = screen.getByLabelText('Slug') as HTMLInputElement
     fireEvent.change(nameInput, { target: { value: 'My Provider' } })
@@ -82,35 +93,27 @@ describe('ProviderConfigForm — create', () => {
   })
 
   it('editing slug then changing name keeps the edited slug', () => {
-    renderForm({ preset: makePreset({ display_name: '' }) })
+    renderForm({ preset: makeCreatePreset({ display_name: '' }) })
     const nameInput = screen.getByLabelText('Name')
     const slugInput = screen.getByLabelText('Slug') as HTMLInputElement
-    // User edits slug manually
     fireEvent.change(slugInput, { target: { value: 'custom-slug' } })
-    // Then changes name — slug should remain unchanged
     fireEvent.change(nameInput, { target: { value: 'New Name' } })
     expect(slugInput.value).toBe('custom-slug')
   })
 
   it('submitted ProviderCreate body carries slug', () => {
-    const { onSubmit } = renderForm({ preset: makePreset({ display_name: 'Test Provider' }) })
+    const { onSubmit } = renderForm({ preset: makeCreatePreset({ display_name: 'Test Provider' }) })
     fireEvent.change(screen.getByLabelText('API key'), { target: { value: 'sk-1' } })
     fireEvent.click(screen.getByRole('button', { name: 'Next' }))
     const body = onSubmit.mock.calls[0][0] as ProviderCreate
     expect(body.slug).toBe('test-provider')
   })
 
-  it('requires a key for api_key presets', () => {
+  it('requires a key (auth defaults to api_key)', () => {
     renderForm()
     expect(screen.getByRole('button', { name: 'Next' })).toBeDisabled()
     fireEvent.change(screen.getByLabelText('API key'), { target: { value: 'sk-1' } })
     expect(screen.getByRole('button', { name: 'Next' })).toBeEnabled()
-  })
-
-  it('oauth preset is unsubmittable with the unsupported note', () => {
-    renderForm({ preset: makePreset({ auth: { mode: 'oauth' } }) })
-    expect(screen.getByText("OAuth/IAM presets aren't supported yet.")).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Next' })).toBeDisabled()
   })
 })
 
@@ -132,19 +135,16 @@ describe('ProviderConfigForm — edit', () => {
     )
 
     expect(screen.getByLabelText('Name')).toHaveValue('My OpenAI')
-    // provider_type is an editable select in edit mode.
     const ptSelect = screen.getByLabelText('Provider type') as HTMLSelectElement
     expect(ptSelect.tagName).toBe('SELECT')
     expect(ptSelect).toHaveValue('openai-completions')
     fireEvent.change(ptSelect, { target: { value: 'anthropic-messages' } })
 
-    // No key entered → submit without api_key (keep existing).
     fireEvent.click(screen.getByRole('button', { name: 'Save' }))
     expect(onSubmit).toHaveBeenCalledTimes(1)
     const body = onSubmit.mock.calls[0][0] as ProviderUpdate
     expect(body.api_key).toBeNull()
     expect(body.provider_type).toBe('anthropic-messages')
-    // Capability seeded from the existing provider.
     expect(body.capability).toEqual({ supports_tools: true })
     expect(body.model_capability_overrides).toEqual({ 'gpt-x': { reasoning: true } })
   })

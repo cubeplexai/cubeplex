@@ -3,13 +3,7 @@
 import { useState } from 'react'
 import { useTranslations } from 'next-intl'
 import { AlertTriangle, ChevronDown } from 'lucide-react'
-import type {
-  Provider,
-  ProviderCreate,
-  ProviderPreset,
-  ProviderUpdate,
-  WireApi,
-} from '@cubebox/core'
+import type { Provider, ProviderCreate, ProviderUpdate, WireApi } from '@cubebox/core'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -35,35 +29,30 @@ function slugifyTs(name: string): string {
 // wire shape, so it folds into 'api_key' in the radio (matching the old dialog).
 type AuthChoice = 'api_key' | 'none'
 
+// Create-mode seed: a single catalog endpoint selected in the wizard's step 2.
+// (The catalog no longer carries auth/capability — auth defaults to api_key and
+// capability is resolved server-side from preset_key.)
+export interface CreatePreset {
+  display_name: string
+  base_url: string
+  provider_type: WireApi
+  /** The endpoint's preset_key, recorded as Provider.preset_slug. */
+  preset_key: string
+  category: 'saas' | 'oss-framework' | 'custom'
+}
+
 interface ProviderConfigFormProps {
   mode: 'create' | 'edit'
-  // create: seeds fields; provider_type is locked to preset.api; auth derived
-  // from preset.auth.mode; capability seeded from preset.capability.
-  preset?: ProviderPreset
+  // create: seeds fields from the selected endpoint; provider_type is locked to
+  // the endpoint protocol; auth defaults to api_key; capability resolves
+  // server-side from preset_key.
+  preset?: CreatePreset
   // edit: seeds from the existing row; provider_type/auth editable; key optional.
   provider?: Provider
   saving: boolean
   error: string | null
   submitLabel: string
   onSubmit: (body: ProviderCreate | ProviderUpdate) => void
-}
-
-// Map preset auth mode → backend auth_type. Backend _validate_auth_creds
-// expects "bearer_token" (not "bearer"). oauth/iam are not yet supported.
-function authTypeForPreset(
-  mode: ProviderPreset['auth']['mode'],
-): 'api_key' | 'bearer_token' | 'none' | null {
-  switch (mode) {
-    case 'api_key':
-      return 'api_key'
-    case 'bearer':
-      return 'bearer_token'
-    case 'none':
-      return 'none'
-    case 'oauth':
-    case 'iam':
-      return null
-  }
 }
 
 export function ProviderConfigForm({
@@ -79,10 +68,9 @@ export function ProviderConfigForm({
   const tc = useTranslations('adminModels.wizard.configure')
   const isCreate = mode === 'create'
 
-  // Create: auth is fixed by the preset (and may be unsupported). Edit: auth is
-  // user-editable via the radio (api_key / none).
-  const presetAuthType = preset ? authTypeForPreset(preset.auth.mode) : null
-  const supported = isCreate ? presetAuthType !== null : true
+  // Create: auth defaults to api_key (the catalog no longer carries auth).
+  // Edit: auth is user-editable via the radio (api_key / none).
+  const supported = true
 
   const [name, setName] = useState(() =>
     isCreate ? (preset?.display_name ?? '') : (provider?.name ?? ''),
@@ -95,17 +83,17 @@ export function ProviderConfigForm({
     isCreate ? (preset?.base_url ?? '') : (provider?.base_url ?? ''),
   )
   const [providerType, setProviderType] = useState<WireApi>(() => {
-    if (isCreate) return (preset?.api ?? 'openai-completions') as WireApi
+    if (isCreate) return (preset?.provider_type ?? 'openai-completions') as WireApi
     return (provider?.provider_type ?? 'openai-completions') as WireApi
   })
   const [authChoice, setAuthChoice] = useState<AuthChoice>(() => {
-    if (isCreate) return presetAuthType === 'none' ? 'none' : 'api_key'
+    if (isCreate) return 'api_key'
     // bearer_token folds into api_key for the radio (same wire shape).
     return provider?.auth_type === 'none' ? 'none' : 'api_key'
   })
   const [apiKey, setApiKey] = useState('')
   const [capability, setCapability] = useState<Record<string, unknown>>(() =>
-    isCreate ? (preset?.capability ?? {}) : (provider?.capability ?? {}),
+    isCreate ? {} : (provider?.capability ?? {}),
   )
   const [logoUrl, setLogoUrl] = useState(() => (isCreate ? '' : (provider?.logo_url ?? '')))
   const [extraHeaders, setExtraHeaders] = useState(() =>
@@ -118,11 +106,11 @@ export function ProviderConfigForm({
 
   // Effective auth_type sent to the backend.
   const authType: 'api_key' | 'bearer_token' | 'none' = isCreate
-    ? (presetAuthType ?? 'none')
+    ? 'api_key'
     : authChoice === 'none'
       ? 'none'
       : 'api_key'
-  const needsKey = authType === 'api_key' || authType === 'bearer_token'
+  const needsKey = authType !== 'none'
   // Key required in create (when the auth needs one); optional in edit.
   const keyRequired = isCreate && needsKey
 
@@ -153,9 +141,10 @@ export function ProviderConfigForm({
         base_url: baseUrl.trim(),
         auth_type: authType,
         api_key: needsKey ? apiKey : null,
-        preset_slug: preset.slug,
-        capability,
-        model_capability_overrides: preset.model_capability_overrides,
+        preset_slug: preset.preset_key,
+        // capability is resolved server-side from preset_slug; only send it if
+        // the user explicitly edited the (initially empty) advanced editor.
+        capability: Object.keys(capability).length > 0 ? capability : undefined,
         logo_url: logoUrl.trim() || null,
         extra_headers: parsedHeaders,
       }

@@ -383,11 +383,15 @@
         "categoryCustom": "自定义",
         "reasoningBudget": "预算式推理",
         "reasoningEffort": "强度式推理",
-        "reasoningStandard": "标准"
+        "reasoningStandard": "标准",
+        "endpointCount": "{count} 个接入点"
       },
       "configure": {
         "name": "显示名称",
         "baseUrl": "Base URL",
+        "region": "区域",
+        "protocol": "协议",
+        "plan": "套餐",
         "apiKey": "API Key",
         "apiKeyRequired": "该 provider 需要 API Key。",
         "noAuth": "该 provider 无需凭证。",

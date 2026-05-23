@@ -1,11 +1,11 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { NextIntlClientProvider } from 'next-intl'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { ApiClient, Provider } from '@cubebox/core'
+import type { ApiClient, Provider, VendorPreset } from '@cubebox/core'
 import * as core from '@cubebox/core'
 import en from '../../../../../messages/en.json'
 import { ConfigureStep } from '../ConfigureStep'
-import { makePreset } from './fixtures'
+import { makeVendor } from './fixtures'
 
 vi.mock('@cubebox/core', async (importOriginal) => {
   const actual = await importOriginal<typeof core>()
@@ -19,22 +19,61 @@ function created(id: string): Provider {
 }
 
 function renderStep(
-  preset = makePreset(),
+  vendor: VendorPreset = makeVendor(),
   onProviderCreated = vi.fn(),
   existingProviderId?: string | null,
+  onSelectEndpoint = vi.fn(),
 ) {
   render(
     <NextIntlClientProvider locale="en" messages={en}>
       <ConfigureStep
         client={fakeClient}
-        preset={preset}
+        vendor={vendor}
+        selectedPresetKey={vendor.endpoints[0].preset_key}
+        onSelectEndpoint={onSelectEndpoint}
         existingProviderId={existingProviderId}
         onProviderCreated={onProviderCreated}
       />
     </NextIntlClientProvider>,
   )
-  return { onProviderCreated }
+  return { onProviderCreated, onSelectEndpoint }
 }
+
+// A tiered, multi-region vendor for exercising the endpoint selectors.
+const zhipu = makeVendor({
+  vendor: 'zhipu',
+  display_name: 'Zhipu',
+  endpoints: [
+    {
+      preset_key: 'zhipu/intl/openai-completions/general',
+      region: 'intl',
+      protocol: 'openai-completions',
+      plan: 'general',
+      base_url: 'https://api.z.ai/api/paas/v4',
+      model_ids: ['glm-5'],
+    },
+    {
+      preset_key: 'zhipu/cn/openai-completions/general',
+      region: 'cn',
+      protocol: 'openai-completions',
+      plan: 'general',
+      base_url: 'https://open.bigmodel.cn/api/paas/v4',
+      model_ids: ['glm-5'],
+    },
+  ],
+  models: [
+    {
+      model_id: 'glm-5',
+      display_name: 'GLM-5',
+      plan: ['general'],
+      context_window: 200000,
+      max_tokens: 32768,
+      input_modalities: ['text'],
+      reasoning: true,
+      pricing: { input: 0, output: 0 },
+    },
+  ],
+})
 
 describe('ConfigureStep', () => {
   beforeEach(() => {
@@ -44,24 +83,11 @@ describe('ConfigureStep', () => {
     vi.mocked(core.updateProvider).mockResolvedValue(created('prv_existing'))
   })
 
-  it('revisit: updates the existing provider instead of creating a second one', async () => {
-    const preset = makePreset({ auth: { mode: 'api_key', header_name: 'x-api-key' } })
-    const { onProviderCreated } = renderStep(preset, vi.fn(), 'prv_existing')
-    fireEvent.change(screen.getByLabelText('API key'), { target: { value: 'sk-123' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Next' }))
-    await waitFor(() => expect(core.updateProvider).toHaveBeenCalled())
-    expect(vi.mocked(core.updateProvider).mock.calls[0][1]).toBe('prv_existing')
-    expect(core.createProvider).not.toHaveBeenCalled()
-    await waitFor(() => expect(onProviderCreated).toHaveBeenCalledWith('prv_existing'))
-  })
-
-  it('api_key preset: requires a key, then creates provider with mapped body', async () => {
-    const preset = makePreset({ auth: { mode: 'api_key', header_name: 'x-api-key' } })
-    const { onProviderCreated } = renderStep(preset)
+  it('creates a provider with the selected endpoint mapped into the body', async () => {
+    const { onProviderCreated } = renderStep()
 
     const next = screen.getByRole('button', { name: 'Next' })
     expect(next).toBeDisabled()
-
     fireEvent.change(screen.getByLabelText('API key'), { target: { value: 'sk-123' } })
     expect(next).toBeEnabled()
     fireEvent.click(next)
@@ -74,36 +100,36 @@ describe('ConfigureStep', () => {
       base_url: 'https://api.anthropic.com',
       auth_type: 'api_key',
       api_key: 'sk-123',
-      preset_slug: 'anthropic',
+      preset_slug: 'anthropic/intl/anthropic-messages',
     })
-    expect(body.capability).toEqual(preset.capability)
+    // capability is resolved server-side -> not sent from the wizard.
+    expect(body.capability).toBeUndefined()
     await waitFor(() => expect(onProviderCreated).toHaveBeenCalledWith('prv_new'))
   })
 
-  it('bearer preset maps auth_type to bearer_token', async () => {
-    const preset = makePreset({ slug: 'tgi', auth: { mode: 'bearer' } })
-    renderStep(preset)
-    fireEvent.change(screen.getByLabelText('API key'), { target: { value: 'tok' } })
+  it('revisit: updates the existing provider instead of creating a second one', async () => {
+    const { onProviderCreated } = renderStep(makeVendor(), vi.fn(), 'prv_existing')
+    fireEvent.change(screen.getByLabelText('API key'), { target: { value: 'sk-123' } })
     fireEvent.click(screen.getByRole('button', { name: 'Next' }))
-    await waitFor(() => expect(core.createProvider).toHaveBeenCalled())
-    expect(vi.mocked(core.createProvider).mock.calls[0][1].auth_type).toBe('bearer_token')
+    await waitFor(() => expect(core.updateProvider).toHaveBeenCalled())
+    expect(vi.mocked(core.updateProvider).mock.calls[0][1]).toBe('prv_existing')
+    expect(core.createProvider).not.toHaveBeenCalled()
+    await waitFor(() => expect(onProviderCreated).toHaveBeenCalledWith('prv_existing'))
   })
 
-  it('none preset: no key input, Next enabled, auth_type none', async () => {
-    const preset = makePreset({ slug: 'ollama', auth: { mode: 'none' } })
-    renderStep(preset)
-    expect(screen.queryByLabelText('API key')).not.toBeInTheDocument()
-    const next = screen.getByRole('button', { name: 'Next' })
-    expect(next).toBeEnabled()
-    fireEvent.click(next)
-    await waitFor(() => expect(core.createProvider).toHaveBeenCalled())
-    expect(vi.mocked(core.createProvider).mock.calls[0][1].auth_type).toBe('none')
-  })
+  it('endpoint selectors drive the composed base_url + preset_key', async () => {
+    const { onSelectEndpoint } = renderStep(zhipu)
 
-  it('oauth preset: Next disabled with unsupported note', () => {
-    const preset = makePreset({ slug: 'anthropic-cc', auth: { mode: 'oauth' } })
-    renderStep(preset)
-    expect(screen.getByText("OAuth/IAM presets aren't supported yet.")).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Next' })).toBeDisabled()
+    // Default endpoint = first (intl) -> its base_url shows in the form.
+    const baseUrl = screen.getByLabelText('Base URL') as HTMLInputElement
+    expect(baseUrl.value).toBe('https://api.z.ai/api/paas/v4')
+
+    // Switch the Region selector to CN.
+    fireEvent.change(screen.getByLabelText('Region'), { target: { value: 'cn' } })
+    await waitFor(() =>
+      expect(onSelectEndpoint).toHaveBeenCalledWith('zhipu/cn/openai-completions/general'),
+    )
+    const baseUrlAfter = screen.getByLabelText('Base URL') as HTMLInputElement
+    expect(baseUrlAfter.value).toBe('https://open.bigmodel.cn/api/paas/v4')
   })
 })
