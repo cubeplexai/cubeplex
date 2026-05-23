@@ -78,3 +78,13 @@ class ResolvedEndpoint(BaseModel):
     base_url: str
     capability: CapabilityDescriptor
     models: list[ModelPreset]  # the subset serving this endpoint (§4 membership)
+
+
+class Catalog(BaseModel):
+    vendors: list[Vendor]
+    endpoints: dict[str, ResolvedEndpoint]  # keyed by preset_key
+
+    def resolve(self, preset_key: str) -> ResolvedEndpoint:
+        if preset_key not in self.endpoints:
+            raise KeyError(preset_key)
+        return self.endpoints[preset_key]

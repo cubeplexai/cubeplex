@@ -1,7 +1,34 @@
 import pytest
 
-from cubebox.llm.catalog.loader import preset_key_for, resolve_capability
+from cubebox.llm.catalog.loader import build_catalog, preset_key_for, resolve_capability
 from cubebox.llm.catalog.types import Endpoint, Vendor
+
+PROFILES: dict[str, dict[str, object]] = {"x": {}}
+
+
+def _vendor(**over):
+    base = {
+        "vendor": "v",
+        "display_name": "V",
+        "short_name": "V",
+        "logo": None,
+        "category": "saas",
+        "description": "d",
+        "regions": {"cn": {"host": "https://h"}},
+        "endpoints": [{"region": "cn", "protocol": "openai-completions", "capability": "x"}],
+        "models": [
+            {
+                "model_id": "m1",
+                "display_name": "M1",
+                "context_window": 1,
+                "max_tokens": 1,
+                "input_modalities": ["text"],
+                "pricing": {"input": 1, "output": 1},
+            }
+        ],
+    }
+    base.update(over)
+    return base
 
 
 def test_vendor_parses_minimal():
@@ -74,3 +101,143 @@ def test_resolve_capability_inline_dict():
 def test_resolve_capability_unknown_name_fails_loudly():
     with pytest.raises(ValueError, match="unknown capability profile"):
         resolve_capability("does-not-exist", {"openai-compat-basic": {}})
+
+
+def test_untagged_endpoint_serves_all_models():
+    cat = build_catalog([_vendor()], PROFILES)
+    ep = cat.resolve("v/cn/openai-completions")
+    assert [m.model_id for m in ep.models] == ["m1"]
+
+
+def test_tiered_membership_by_plan_intersection():
+    v = _vendor(
+        endpoints=[
+            {
+                "region": "cn",
+                "protocol": "openai-completions",
+                "plan": "general",
+                "capability": "x",
+            },
+            {
+                "region": "cn",
+                "protocol": "openai-completions",
+                "plan": "coding",
+                "path": "/coding",
+                "capability": "x",
+            },
+        ],
+        models=[
+            {
+                "model_id": "g",
+                "display_name": "G",
+                "context_window": 1,
+                "max_tokens": 1,
+                "input_modalities": ["text"],
+                "plan": "general",
+                "pricing": {"input": 1, "output": 1},
+            },
+            {
+                "model_id": "c",
+                "display_name": "C",
+                "context_window": 1,
+                "max_tokens": 1,
+                "input_modalities": ["text"],
+                "plan": "coding",
+                "pricing": {"input": 1, "output": 1},
+            },
+        ],
+    )
+    cat = build_catalog([v], PROFILES)
+    assert [m.model_id for m in cat.resolve("v/cn/openai-completions/general").models] == ["g"]
+    assert [m.model_id for m in cat.resolve("v/cn/openai-completions/coding").models] == ["c"]
+
+
+def test_mixed_tagged_untagged_rejected():
+    v = _vendor(
+        endpoints=[
+            {"region": "cn", "protocol": "openai-completions", "plan": "coding", "capability": "x"}
+        ],
+        models=[
+            {
+                "model_id": "m",
+                "display_name": "M",
+                "context_window": 1,
+                "max_tokens": 1,
+                "input_modalities": ["text"],
+                "pricing": {"input": 1, "output": 1},
+            }
+        ],
+    )
+    with pytest.raises(ValueError, match="mix"):
+        build_catalog([v], PROFILES)
+
+
+def test_dangling_endpoint_rejected():
+    v = _vendor(
+        endpoints=[
+            {
+                "region": "cn",
+                "protocol": "openai-completions",
+                "plan": "general",
+                "capability": "x",
+            },
+            {
+                "region": "cn",
+                "protocol": "openai-completions",
+                "plan": "coding",
+                "path": "/c",
+                "capability": "x",
+            },
+        ],
+        models=[
+            {
+                "model_id": "g",
+                "display_name": "G",
+                "context_window": 1,
+                "max_tokens": 1,
+                "input_modalities": ["text"],
+                "plan": "general",
+                "pricing": {"input": 1, "output": 1},
+            }
+        ],
+    )
+    with pytest.raises(ValueError, match="no model"):
+        build_catalog([v], PROFILES)
+
+
+def test_unreachable_model_rejected():
+    v = _vendor(
+        endpoints=[
+            {"region": "cn", "protocol": "openai-completions", "plan": "general", "capability": "x"}
+        ],
+        models=[
+            {
+                "model_id": "c",
+                "display_name": "C",
+                "context_window": 1,
+                "max_tokens": 1,
+                "input_modalities": ["text"],
+                "plan": "coding",
+                "pricing": {"input": 1, "output": 1},
+            }
+        ],
+    )
+    with pytest.raises(ValueError, match="no endpoint"):
+        build_catalog([v], PROFILES)
+
+
+def test_duplicate_preset_key_rejected():
+    v1, v2 = _vendor(), _vendor()  # same vendor name -> same composed key
+    with pytest.raises(ValueError, match="duplicate preset_key"):
+        build_catalog([v1, v2], PROFILES)
+
+
+def test_duplicate_endpoint_tuple_rejected_even_with_distinct_key_overrides():
+    v = _vendor(
+        endpoints=[
+            {"region": "cn", "protocol": "openai-completions", "key": "k1", "capability": "x"},
+            {"region": "cn", "protocol": "openai-completions", "key": "k2", "capability": "x"},
+        ]
+    )
+    with pytest.raises(ValueError, match="duplicate endpoint"):
+        build_catalog([v], PROFILES)
