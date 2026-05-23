@@ -755,7 +755,7 @@ def test_every_flat_base_url_is_reproduced():
 ```
 
 - [ ] **Step 2: Run** `cd backend && uv run pytest tests/unit/llm/catalog/test_composition.py::test_every_flat_base_url_is_reproduced -v`
-Expected: FAIL initially if any vendor entry is missing/mismatched — the failure message lists exactly which `(slug, api, base_url)` is not reproduced.
+Expected: FAIL initially if any vendor entry is missing/mismatched — the failure message lists the under-reproduced `(api, base_url)` pairs as `{pair: (expected_count, got_count)}`.
 
 - [ ] **Step 3: Fix `vendors.yaml`** until the test passes (adjust host/path/override for each listed miss). No code change — data only.
 
@@ -866,12 +866,29 @@ def test_resolve_logo_by_preset_key():
     assert _resolve_logo("deepseek/cn/anthropic-messages") == "deepseek"
 
 
-def test_resolve_logo_by_key_override():
-    # A `key:`-overridden preset_key does NOT start with the vendor — must still resolve.
-    # (Add a vendors.yaml endpoint with `key: pretty-deepseek` for this to pass, or
-    #  use whatever override exists; the point is resolution goes through the catalog,
-    #  not a string split.)
-    pass  # implementer: assert against a real key-override endpoint if one exists
+def test_resolve_logo_by_key_override(monkeypatch):
+    # A `key:`-overridden preset_key does NOT start with the vendor, so a split("/")
+    # approach would fail. Inject a catalog whose endpoint key is "pretty-id" and
+    # assert the logo still resolves via the vendor — a real regression guard.
+    from cubebox.llm.catalog import build_catalog
+    import cubebox.api.routes.v1.admin_providers as mod
+    import cubebox.llm.catalog as catmod  # _resolve_logo does `from cubebox.llm.catalog import load_catalog`
+
+    catalog = build_catalog(
+        [{
+            "vendor": "deepseek", "display_name": "DeepSeek", "short_name": "DeepSeek",
+            "logo": "deepseek", "category": "saas", "description": "d",
+            "regions": {"cn": {"host": "https://api.deepseek.com"}},
+            "endpoints": [{"region": "cn", "protocol": "openai-completions",
+                           "key": "pretty-id", "capability": "x"}],
+            "models": [{"model_id": "m", "display_name": "M", "context_window": 1,
+                        "max_tokens": 1, "input_modalities": ["text"],
+                        "pricing": {"input": 1, "output": 1}}],
+        }],
+        {"x": {}},
+    )
+    monkeypatch.setattr(catmod, "load_catalog", lambda: catalog)
+    assert mod._resolve_logo("pretty-id") == "deepseek"
 
 
 def test_resolve_logo_none_for_unknown():
@@ -1238,9 +1255,9 @@ cd backend && git grep -l "^\s*providers:" -- 'config*.yaml' ; ls config*.yaml
 # record it as deliberately-custom with a one-line reason. Record absent files explicitly.
 ```
 
-Write the resulting full inventory into this task (extend the table) before editing — a provider silently left out is exactly the §6.4 backfill-loss this guards against.
+Write the resulting full inventory into this task (extend the table) before editing — a provider silently left out is exactly the §6.4 backfill-loss this guards against. **Do not start Step 2 until the table below has a row for every provider in every file Step 0 found** (the table as written covers only `config.development.local.yaml`; add the rows for any other seed file, or explicitly record "no other seed file with llm.providers exists" if Step 0 finds none).
 
-The seeded providers in `config.development.local.yaml` and their mapping (§6.4 inventory):
+The seeded providers in `config.development.local.yaml` and their mapping (§6.4 inventory — **local-config slice; extend per Step 0**):
 
 | config name | base_url today | mapping |
 |---|---|---|
@@ -1250,9 +1267,11 @@ The seeded providers in `config.development.local.yaml` and their mapping (§6.4
 | `alicode` | coding.dashscope…/v1 | `preset: aliyun/cn/openai-completions/coding` (host override in catalog) |
 | `volengine` | ark…/api/v3 | `preset: volcengine/cn/openai-completions` (general) |
 | `openrouter` | openrouter.ai/api/v1 | `preset: openrouter/intl/openai-completions` |
-| `sensedeal` | private gateway | **custom** — keep verbatim (no preset); reason: private gateway, not in catalog |
-| `google` | local IP | **custom** — keep verbatim; reason: self-hosted test endpoint |
-| `vllm` | local IP | **custom** — keep verbatim; reason: self-hosted |
+| `sensedeal` | private gateway | **custom** — keep verbatim (no preset); reason: private gateway, not in catalog. (Did NOT match a flat slug → no backfill to lose.) |
+| `google` | local IP | **custom** — keep verbatim; reason: self-hosted test endpoint. (Did NOT match a flat slug → no backfill to lose.) |
+| `vllm` | local IP | **custom** + add to `DELIBERATE_CUSTOM` (E2). reason: self-hosted OSS framework — its model (`gemma-4-31b-it`) is deployment-specific and not a catalog entry, so the subset filter can't apply; it's openai-compatible, so empty capability → cubepi defaults is fine. |
+
+**Backfill note (codex):** `minimax`, `openrouter`, `vllm` config names match flat slugs (`minimax`/`openrouter`/`vllm`) so they were backfilled under the old rule. `minimax`/`openrouter` are preset-mapped above (backfill preserved). `vllm` is a **deliberate** downgrade to custom — it MUST be listed in `DELIBERATE_CUSTOM` in E2 (with the reason above) so the §6.4 guard treats it as intentional, not a silent loss. `sensedeal`/`google` never matched a flat slug, so custom loses nothing. **Self-hosted OSS frameworks (vllm/ollama/lm-studio) are custom by nature — their models aren't catalog data.**
 
 - [ ] **Step 1:** For each *preset-mapped* provider, ensure its real model ids exist in the catalog vendor pool with correct `context_window`/`max_tokens`/`input`/`reasoning` + a `pricing` (use the config's `cost` when present, else `{input:0,output:0}`). Add to `vendors.yaml`:
   - deepseek pool: `deepseek-v4-pro`, `deepseek-v4-flash`.
@@ -1301,7 +1320,9 @@ Expected: seed completes; `deepseek/minimax/arkcode/alicode/volengine/openrouter
 - [ ] **Step 4: Commit**
 
 ```bash
+# stage EVERY seed file Step 0 enumerated, not just the local one
 git add backend/config.development.local.yaml cubebox/llm/catalog/data/vendors.yaml
+# + any other seed config Step 0 found (e.g. backend/config.yaml / config.development.yaml)
 git commit -m "feat(config): rewrite seed providers to preset: refs; add seeded models to catalog (§6.4)"
 ```
 
@@ -1328,6 +1349,16 @@ _SNAPSHOT = (
 )
 
 
+# Providers that DID match a flat slug (so were backfilled) but are DELIBERATELY
+# downgraded to custom in the rewrite, each with a recorded §6.4 reason. A name
+# here is an intentional drop, not a silent one. Keep this list in lockstep with
+# the E1 inventory "custom" rows; an accidental omission must NOT be added here.
+DELIBERATE_CUSTOM = {
+    "vllm": "self-hosted OSS framework; model is deployment-specific (not catalog data), "
+            "openai-compatible so cubepi defaults suffice",
+}
+
+
 def _old_backfilled_provider_names() -> set[str]:
     """Provider names that matched a flat preset slug under the OLD rule."""
     flat_slugs = {e["slug"] for e in yaml.safe_load(_SNAPSHOT.read_text("utf-8"))}
@@ -1336,14 +1367,20 @@ def _old_backfilled_provider_names() -> set[str]:
 
 
 def test_no_provider_silently_loses_capability_backfill():
-    """§6.4: every provider backfilled under the old rule still resolves one now."""
+    """§6.4: every old-backfilled provider still resolves a capability now,
+    UNLESS it is an intentional, documented downgrade in DELIBERATE_CUSTOM."""
     cfg_providers = dict(dict(settings.get("llm", {})).get("providers", {}))
     regressed = []
     for name in _old_backfilled_provider_names():
+        if name in DELIBERATE_CUSTOM:
+            continue
         r = resolve_provider_config(name, dict(cfg_providers[name]))
         if r.preset_key is None or not r.capability:
             regressed.append(name)
-    assert not regressed, f"providers lost capability backfill in the rewrite: {regressed}"
+    assert not regressed, (
+        f"providers lost capability backfill in the rewrite (map to a preset, "
+        f"or add to DELIBERATE_CUSTOM with a reason): {regressed}"
+    )
 
 
 # Also assert the preset-mapped providers resolve a capability + models.
