@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from cubepi.providers.catalog import get_provider_preset
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy import func, select
@@ -146,13 +145,24 @@ def _model_readiness_out(m: Model, p: Provider) -> ModelReadinessOut:
 
 
 def _resolve_logo(preset_slug: str | None) -> str | None:
-    """Resolve the brand-icon id from the preset catalog. None if unknown."""
+    """Resolve the brand-icon id from the catalog vendor. None if unknown.
+
+    Goes through ``catalog.resolve`` so ``key:`` overrides (preset_keys that do
+    not start with the vendor) still resolve — not a ``split("/")`` shortcut.
+    """
     if not preset_slug:
         return None
     try:
-        return get_provider_preset(preset_slug).logo
+        from cubebox.llm.catalog import load_catalog
+
+        catalog = load_catalog()
+        ep = catalog.resolve(preset_slug)
+        for v in catalog.vendors:
+            if v.vendor == ep.vendor:
+                return v.logo
     except Exception:
         return None
+    return None
 
 
 def _provider_out(
