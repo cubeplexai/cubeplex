@@ -14,26 +14,35 @@ export interface AuthSpec {
   header_prefix?: string
 }
 
-export interface ProviderPreset {
-  slug: string
+export interface EndpointPreset {
+  preset_key: string
+  region: string
+  protocol: WireApi
+  plan: string | null
+  base_url: string
+  model_ids: string[]
+}
+
+export interface ModelPresetEntry {
+  model_id: string
+  display_name: string
+  plan: string[] | null
+  context_window: number
+  max_tokens: number
+  input_modalities: string[]
+  reasoning: boolean
+  pricing: { input: number; output: number; cache_read?: number; cache_write?: number }
+}
+
+export interface VendorPreset {
+  vendor: string
   display_name: string
   short_name: string
+  logo: string | null
   category: 'saas' | 'oss-framework' | 'custom'
   description: string
-  logo: string | null
-  api: WireApi
-  base_url: string
-  auth: AuthSpec
-  capability: Record<string, unknown>
-  model_capability_overrides: Record<string, Record<string, unknown>>
-  default_models: Array<{
-    model_id: string
-    display_name: string
-    context_window: number
-    max_tokens: number
-    input_modalities: string[]
-    reasoning: boolean
-  }>
+  endpoints: EndpointPreset[]
+  models: ModelPresetEntry[]
 }
 
 export interface ProbeStep {
