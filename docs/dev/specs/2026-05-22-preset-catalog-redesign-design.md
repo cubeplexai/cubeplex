@@ -30,7 +30,7 @@ top-level entries. From the live catalog:
 | Moonshot | `moonshot`, `moonshot-cn`, `moonshot-coding`, `moonshot-coding-cn` |
 | Zhipu | `zhipu`, `zhipu-cn`, `zhipu-coding`, `zhipu-coding-cn` |
 | MiniMax | `minimax`, `minimax-cn`, `minimax-coding`, `minimax-coding-cn` |
-| Qwen | `qwen-dashscope`, `qwen-dashscope-cn`, `qwen-coding`, `qwen-coding-cn` |
+| Aliyun (Qwen) | `qwen-dashscope`, `qwen-dashscope-cn`, `qwen-coding`, `qwen-coding-cn` |
 | Volcengine | `doubao-volcengine`, `volcengine-coding` |
 
 Each entry repeats the vendor's `logo`, `short_name`, `description`, and a
@@ -162,7 +162,7 @@ This expresses all four real shapes of a coding plan:
 - { region: cn, protocol: openai-completions, plan: coding, path: /api/coding/paas/v4 }
 
 # B. domain differs (Alibaba coding lives on coding.dashscope.aliyuncs.com) — override host
-- vendor: qwen
+- vendor: aliyun
   regions: { cn: { host: https://dashscope.aliyuncs.com }, intl: { host: https://dashscope-intl.aliyuncs.com } }
   endpoints:
     - { region: cn, protocol: openai-completions, plan: general, path: /compatible-mode/v1 }
@@ -354,7 +354,7 @@ the rest**, so a seeded provider shrinks to a `preset` + an `api_key`.
 llm:
   providers:
     alicode:
-      preset: qwen/cn/openai-completions/coding   # → base_url, api, models, pricing, capability
+      preset: aliyun/cn/openai-completions/coding   # → base_url, api, models, pricing, capability
       api_key: ${ALICODE_KEY}                      # secret: always from config, never in catalog
       # models: [qwen3.6-plus]                     # OPTIONAL subset filter; omit = all preset models
 ```

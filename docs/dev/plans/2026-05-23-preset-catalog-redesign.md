@@ -651,7 +651,7 @@ This is data entry, not logic — but it must reproduce every flat entry. Work v
 | anthropic | intl/anthropic-messages | api.anthropic.com |
 | openai | intl/openai-responses, intl/openai-completions (`openai-legacy`) | api.openai.com/v1 |
 | deepseek | cn/anthropic-messages (`/anthropic`), cn/openai-completions | api.deepseek.com |
-| qwen | intl & cn /openai-completions, +coding (intl & cn) | dashscope-intl / dashscope |
+| aliyun (Qwen models) | intl & cn /openai-completions, +coding (intl & cn) | dashscope-intl / dashscope |
 | doubao (volcengine) | cn/openai-completions (`/api/v3`), cn/anthropic-messages coding (`/api/coding`) | ark.cn-beijing.volces.com |
 | moonshot | intl & cn /openai-completions, +coding (same URL, diff models) | api.moonshot.ai / .cn |
 | zhipu | intl & cn /openai-completions, +coding (`/api/coding/paas/v4`) | api.z.ai / open.bigmodel.cn |
@@ -1171,7 +1171,7 @@ The 9 seeded providers and their mapping (§6.4 inventory):
 | `deepseek` | api.deepseek.com/anthropic | `preset: deepseek/cn/anthropic-messages` |
 | `minimax` | api.minimaxi.com/v1 | `preset: minimax/cn/openai-completions` (carry `extra_body`) |
 | `arkcode` | ark…/api/coding/v3 (openai) | NEW catalog endpoint: volcengine coding **openai-completions** `/api/coding/v3` → `preset: volcengine/cn/openai-completions/coding` |
-| `alicode` | coding.dashscope…/v1 | `preset: qwen/cn/openai-completions/coding` (host override in catalog) |
+| `alicode` | coding.dashscope…/v1 | `preset: aliyun/cn/openai-completions/coding` (host override in catalog) |
 | `volengine` | ark…/api/v3 | `preset: volcengine/cn/openai-completions` (general) |
 | `openrouter` | openrouter.ai/api/v1 | `preset: openrouter/intl/openai-completions` |
 | `sensedeal` | private gateway | **custom** — keep verbatim (no preset); reason: private gateway, not in catalog |
@@ -1182,7 +1182,7 @@ The 9 seeded providers and their mapping (§6.4 inventory):
   - deepseek pool: `deepseek-v4-pro`, `deepseek-v4-flash`.
   - minimax pool: `MiniMax-M2.7`.
   - volcengine general: `doubao-seed-1-8-251228` (cost input 2.4/output 24); coding: `doubao-seed-2.0-pro`, `kimi-k2.6`.
-  - qwen coding pool: `qwen3.6-plus`.
+  - aliyun coding pool: `qwen3.6-plus`.
   - openrouter pool: `google/gemma-4-31b-it:free`, `stepfun/step-3.5-flash:free`.
   - Add the `volcengine/cn/openai-completions/coding` endpoint (path `/api/coding/v3`) and make volcengine a **tiered** vendor (general + coding) — so tag its general models `plan: general` and coding models `plan: coding`.
 
@@ -1201,7 +1201,7 @@ The 9 seeded providers and their mapping (§6.4 inventory):
         preset: volcengine/cn/openai-completions/coding
         api_key: ark-…
       alicode:
-        preset: qwen/cn/openai-completions/coding
+        preset: aliyun/cn/openai-completions/coding
         api_key: sk-sp-…
       volengine:
         preset: volcengine/cn/openai-completions
@@ -1246,7 +1246,7 @@ PRESET_MAPPED = {
     "deepseek": "deepseek/cn/anthropic-messages",
     "minimax": "minimax/cn/openai-completions",
     "arkcode": "volcengine/cn/openai-completions/coding",
-    "alicode": "qwen/cn/openai-completions/coding",
+    "alicode": "aliyun/cn/openai-completions/coding",
     "volengine": "volcengine/cn/openai-completions",
     "openrouter": "openrouter/intl/openai-completions",
 }
