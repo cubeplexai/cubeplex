@@ -51,6 +51,7 @@ const zhipu = makeVendor({
       plan: 'general',
       base_url: 'https://api.z.ai/api/paas/v4',
       model_ids: ['glm-5'],
+      capability: { supports_tools: true, temperature: { mode: 'free', default: 0.7 } },
     },
     {
       preset_key: 'zhipu/cn/openai-completions/general',
@@ -59,6 +60,7 @@ const zhipu = makeVendor({
       plan: 'general',
       base_url: 'https://open.bigmodel.cn/api/paas/v4',
       model_ids: ['glm-5'],
+      capability: { supports_tools: true, temperature: { mode: 'free', default: 0.7 } },
     },
   ],
   models: [

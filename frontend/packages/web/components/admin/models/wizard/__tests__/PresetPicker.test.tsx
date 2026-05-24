@@ -45,6 +45,7 @@ const ollama = makeVendor({
       plan: null,
       base_url: 'http://localhost:11434/v1',
       model_ids: [],
+      capability: {},
     },
   ],
   models: [],

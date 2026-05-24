@@ -22,6 +22,9 @@ export interface EndpointPreset {
   plan: string | null
   base_url: string
   model_ids: string[]
+  /** Resolved capability descriptor for this endpoint. The wizard prefills the
+   *  capability editor with it and sends it back only when the user overrides it. */
+  capability: Record<string, unknown>
 }
 
 export interface ModelPresetEntry {

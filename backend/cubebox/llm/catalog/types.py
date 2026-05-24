@@ -110,6 +110,9 @@ class Catalog(BaseModel):
                             "plan": e.plan,
                             "base_url": e.base_url,
                             "model_ids": [m.model_id for m in e.models],
+                            # Resolved capability so the wizard can prefill the editor
+                            # and send it back only when the user overrides it.
+                            "capability": e.capability.model_dump(mode="json"),
                         }
                         for e in v_eps
                     ],

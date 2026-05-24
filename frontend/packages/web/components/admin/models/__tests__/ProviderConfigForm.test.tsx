@@ -12,6 +12,7 @@ function makeCreatePreset(over: Partial<CreatePreset> = {}): CreatePreset {
     provider_type: 'anthropic-messages',
     preset_key: 'anthropic/intl/anthropic-messages',
     category: 'saas',
+    capability: { supports_tools: true },
     ...over,
   }
 }
@@ -107,6 +108,34 @@ describe('ProviderConfigForm — create', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Next' }))
     const body = onSubmit.mock.calls[0][0] as ProviderCreate
     expect(body.slug).toBe('test-provider')
+  })
+
+  it('prefills capability from the preset and omits it on submit when unchanged', () => {
+    const { onSubmit } = renderForm({
+      preset: makeCreatePreset({ capability: { supports_tools: true } }),
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Advanced: capability' }))
+    // Editor is prefilled with the preset capability JSON.
+    const editor = screen.getByLabelText('Capability JSON') as HTMLTextAreaElement
+    expect(JSON.parse(editor.value)).toEqual({ supports_tools: true })
+    fireEvent.change(screen.getByLabelText('API key'), { target: { value: 'sk-1' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }))
+    const body = onSubmit.mock.calls[0][0] as ProviderCreate
+    // Unchanged → not sent; server resolves from preset_slug.
+    expect(body.capability).toBeUndefined()
+  })
+
+  it('sends capability as override when the user edits it', () => {
+    const { onSubmit } = renderForm({
+      preset: makeCreatePreset({ capability: { supports_tools: true } }),
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Advanced: capability' }))
+    const editor = screen.getByLabelText('Capability JSON') as HTMLTextAreaElement
+    fireEvent.change(editor, { target: { value: '{"supports_tools": false}' } })
+    fireEvent.change(screen.getByLabelText('API key'), { target: { value: 'sk-1' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }))
+    const body = onSubmit.mock.calls[0][0] as ProviderCreate
+    expect(body.capability).toEqual({ supports_tools: false })
   })
 
   it('requires a key (auth defaults to api_key)', () => {
