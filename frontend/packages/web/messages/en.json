@@ -399,7 +399,13 @@
         "unsupportedAuth": "OAuth/IAM presets aren't supported yet.",
         "advanced": "Advanced: capability",
         "creating": "Creating…",
-        "createFailed": "Failed to create provider"
+        "createFailed": "Failed to create provider",
+        "errors": {
+          "provider_slug_conflict": "This slug is already in use. Choose a different one.",
+          "provider_name_conflict": "A provider with this name already exists. Pick another name.",
+          "invalid_provider_slug": "Slug must be lowercase letters, numbers and hyphens (max 64 chars).",
+          "provider_oauth_not_implemented": "OAuth authentication isn't supported yet."
+        }
       },
       "capability": {
         "label": "Capability JSON",

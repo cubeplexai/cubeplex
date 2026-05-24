@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useTranslations } from 'next-intl'
 import {
+  ApiError,
   createProvider,
   updateProvider,
   type ApiClient,
@@ -99,9 +100,27 @@ export function ConfigureStep({
         onProviderCreated(provider.id)
       }
     } catch (e) {
-      setError((e as Error).message || t('createFailed'))
+      setError(errorMessage(e))
       setSaving(false)
     }
+  }
+
+  // Map the backend's stable error code (ApiError.code) to a human message —
+  // otherwise a slug/name conflict surfaces as a bare "HTTP 409".
+  function errorMessage(e: unknown): string {
+    if (e instanceof ApiError) {
+      switch (e.code) {
+        case 'provider_slug_conflict':
+          return t('errors.provider_slug_conflict')
+        case 'provider_name_conflict':
+          return t('errors.provider_name_conflict')
+        case 'invalid_provider_slug':
+          return t('errors.invalid_provider_slug')
+        case 'provider_oauth_not_implemented':
+          return t('errors.provider_oauth_not_implemented')
+      }
+    }
+    return (e as Error).message || t('createFailed')
   }
 
   const showSelectors = regions.length > 1 || protocols.length > 1 || plans.length > 1

@@ -119,6 +119,23 @@ describe('ConfigureStep', () => {
     await waitFor(() => expect(onProviderCreated).toHaveBeenCalledWith('prv_existing'))
   })
 
+  it('shows a friendly message on a slug conflict instead of a bare HTTP 409', async () => {
+    vi.mocked(core.createProvider).mockRejectedValueOnce(
+      new core.ApiError('HTTP 409', 409, 'provider_slug_conflict', {
+        code: 'provider_slug_conflict',
+      }),
+    )
+    renderStep()
+    fireEvent.change(screen.getByLabelText('API key'), { target: { value: 'sk-123' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }))
+    await waitFor(() =>
+      expect(
+        screen.getByText(en.adminModels.wizard.configure.errors.provider_slug_conflict),
+      ).toBeInTheDocument(),
+    )
+    expect(screen.queryByText('HTTP 409')).not.toBeInTheDocument()
+  })
+
   it('endpoint selectors drive the composed base_url + preset_key', async () => {
     const { onSelectEndpoint } = renderStep(zhipu)
 
