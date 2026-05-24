@@ -28,6 +28,7 @@ STALE = "stale"
 MODEL_ERROR = "model_error"
 UNAVAILABLE = "unavailable"
 PROVIDER_ERROR = "provider_error"
+AUTH_ERROR = "auth_error"
 
 
 def derive_readiness(
@@ -39,17 +40,23 @@ def derive_readiness(
     """Map (provider liveness, model test, capability-edit) → readiness enum.
 
     Precedence (spec §4.1), highest first:
-    1. provider liveness == "fail"             -> "provider_error" (all models)
-    2. model_test_status == "unavailable"      -> "unavailable"
-    3. model_test_status == "fail"             -> "model_error"
-    4. capability_changed_since_test           -> "stale"
-    5. model_test_status == "warn"             -> "degraded"
-    6. otherwise                               -> "ready"
+    1. provider liveness == "auth_error"       -> "auth_error" (all models)
+    2. provider liveness == "fail"             -> "provider_error" (all models)
+    3. model_test_status == "unavailable"      -> "unavailable"
+    4. model_test_status == "fail"             -> "model_error"
+    5. capability_changed_since_test           -> "stale"
+    6. model_test_status == "warn"             -> "degraded"
+    7. otherwise                               -> "ready"
+
+    ``auth_error`` and ``fail`` are both provider-grain (they black out every
+    model), but split so the UI can say "fix the key" vs "endpoint is down".
 
     Never-probed inputs are presumed healthy: ``liveness_status is None`` is
     treated as "not failed" and ``model_test_status is None`` falls through to
     "ready". See module docstring for the rationale.
     """
+    if liveness_status == "auth_error":
+        return AUTH_ERROR
     if liveness_status == "fail":
         return PROVIDER_ERROR
     if model_test_status == "unavailable":

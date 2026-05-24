@@ -11,6 +11,7 @@ from cubebox.services.provider_probe import (
     ProbeStep,
     _aggregate_overall,
     _is_model_not_found,
+    liveness_status_for,
     probe_liveness,
     probe_reasoning_toggle,
     probe_streaming,
@@ -305,6 +306,27 @@ async def test_liveness_no_status_is_provider_level_fail():
         _StubProvider(events=[_err_event("connection refused")]), model_id="m"
     )
     assert step.status == "fail"
+
+
+@pytest.mark.asyncio
+async def test_liveness_status_for_401_is_auth_error():
+    # A 401 liveness fail persists as "auth_error" so the badge says "fix key".
+    evt = _err_event("AuthenticationError: Error code: 401 - Missing Authentication header")
+    step = await probe_liveness(_StubProvider(events=[evt]), model_id="m")
+    assert liveness_status_for(step) == "auth_error"
+
+
+def test_liveness_status_for_pass_is_ok():
+    assert liveness_status_for(ProbeStep(name="liveness", status="pass")) == "ok"
+
+
+def test_liveness_status_for_non_auth_fail_is_fail():
+    step = ProbeStep(
+        name="liveness",
+        status="fail",
+        error=ProbeError(type="StreamError", message="503 service unavailable", raw_status=503),
+    )
+    assert liveness_status_for(step) == "fail"
 
 
 @pytest.mark.asyncio

@@ -355,6 +355,7 @@
       "degraded": "降级",
       "stale": "已过期",
       "providerError": "Provider 不可达",
+      "authError": "认证失败",
       "modelError": "模型测试失败",
       "unavailable": "不可用"
     },

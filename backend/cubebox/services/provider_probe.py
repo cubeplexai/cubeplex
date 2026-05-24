@@ -213,7 +213,7 @@ async def probe_liveness(provider: Any, *, model_id: str) -> ProbeStep:
         detail = _error_event_detail(err_evt)
         err = ProbeError(type="StreamError", message=detail, raw_status=_status_from_text(detail))
         if _liveness_error_is_provider_level(err):
-            return ProbeStep(name="liveness", status="fail", detail=detail)
+            return ProbeStep(name="liveness", status="fail", detail=detail, error=err)
         return ProbeStep(
             name="liveness",
             status="pass",
@@ -415,6 +415,22 @@ def _error_says_auth_failure(error: ProbeError) -> bool:
         return True
     haystack = f"{error.type} {error.message}".lower()
     return any(marker in haystack for marker in _AUTH_ERROR_MARKERS)
+
+
+def liveness_status_for(step: ProbeStep) -> Literal["ok", "auth_error", "fail"]:
+    """Map a liveness ProbeStep to the persisted provider liveness status.
+
+    Splits a provider-level failure into a rejected-credential case
+    (``auth_error``) and everything else (``fail``) so the UI can tell the user
+    to fix the key versus the endpoint. A pass is ``ok``. (A model-specific
+    failure already returns a passing step — see ``probe_liveness`` — so it
+    never reaches here as a fail.)
+    """
+    if step.status == "pass":
+        return "ok"
+    if step.error is not None and _error_says_auth_failure(step.error):
+        return "auth_error"
+    return "fail"
 
 
 def _is_model_not_found(step: ProbeStep) -> bool:
