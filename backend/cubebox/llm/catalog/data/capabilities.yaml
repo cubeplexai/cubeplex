@@ -120,6 +120,10 @@ volcengine-coding:
 
 custom-openai:
   temperature: { mode: free, min: 0.0, max: 2.0, default: 1.0 }
+  supports_tools: true
+  supports_images: true
 
 custom-anthropic:
   temperature: { mode: free, min: 0.0, max: 1.0, default: 1.0 }
+  supports_tools: true
+  supports_images: true
