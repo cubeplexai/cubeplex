@@ -7,7 +7,7 @@ pytestmark = pytest.mark.e2e  # ensure marker even though conftest auto-adds
 
 # Tracks the cubebox nested vendor catalog (cubebox/llm/catalog/data/vendors.yaml).
 # Bump if vendors are added/removed.
-EXPECTED_VENDOR_COUNT = 32
+EXPECTED_VENDOR_COUNT = 23
 
 
 async def test_list_provider_presets(
@@ -29,6 +29,9 @@ async def test_list_provider_presets(
     assert ep["protocol"] == "anthropic-messages"
     assert ep["preset_key"] == "anthropic/intl/anthropic-messages"
     assert ep["base_url"] == "https://api.anthropic.com"
+    # Resolved capability ships with each endpoint so the wizard can prefill it.
+    assert isinstance(ep["capability"], dict)
+    assert "supports_tools" in ep["capability"]
     assert any(m["model_id"] == "claude-opus-4-7" for m in anthropic["models"])
 
 

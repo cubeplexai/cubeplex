@@ -84,6 +84,7 @@ export function ConfigureStep({
     provider_type: chosen.protocol,
     preset_key: chosen.preset_key,
     category: vendor.category,
+    capability: chosen.capability,
   }
 
   async function handleSubmit(body: ProviderCreate | ProviderUpdate) {

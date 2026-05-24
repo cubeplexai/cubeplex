@@ -81,9 +81,11 @@ describe('ModelRow', () => {
         },
       }),
     )
-    expect(screen.getByText(/streaming — no SSE chunks observed/)).toBeInTheDocument()
+    // Issues render as a per-step list (name + cleaned detail).
+    const items = screen.getAllByRole('listitem')
+    expect(items.some((li) => li.textContent === 'streaming — no SSE chunks observed')).toBe(true)
     // passing steps are not listed as issues
-    expect(screen.queryByText(/temperature/)).not.toBeInTheDocument()
+    expect(items.some((li) => li.textContent?.includes('temperature'))).toBe(false)
   })
 
   it('clicking re-test calls testModel with the provider and model db ids', async () => {

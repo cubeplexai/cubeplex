@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useTranslations } from 'next-intl'
 import { AlertTriangle, ChevronDown } from 'lucide-react'
 import type { Provider, ProviderCreate, ProviderUpdate, WireApi } from '@cubebox/core'
@@ -30,8 +30,9 @@ function slugifyTs(name: string): string {
 type AuthChoice = 'api_key' | 'none'
 
 // Create-mode seed: a single catalog endpoint selected in the wizard's step 2.
-// (The catalog no longer carries auth/capability — auth defaults to api_key and
-// capability is resolved server-side from preset_key.)
+// (The catalog no longer carries auth — auth defaults to api_key. Capability is
+// prefilled from the endpoint and only sent back when the user overrides it;
+// otherwise the server resolves it from preset_key.)
 export interface CreatePreset {
   display_name: string
   base_url: string
@@ -39,6 +40,8 @@ export interface CreatePreset {
   /** The endpoint's preset_key, recorded as Provider.preset_slug. */
   preset_key: string
   category: 'saas' | 'oss-framework' | 'custom'
+  /** Resolved capability for the chosen endpoint; prefills the editor. */
+  capability: Record<string, unknown>
 }
 
 interface ProviderConfigFormProps {
@@ -93,7 +96,14 @@ export function ProviderConfigForm({
   })
   const [apiKey, setApiKey] = useState('')
   const [capability, setCapability] = useState<Record<string, unknown>>(() =>
-    isCreate ? {} : (provider?.capability ?? {}),
+    isCreate ? (preset?.capability ?? {}) : (provider?.capability ?? {}),
+  )
+  // The endpoint's resolved capability as first prefilled. On create we only send
+  // capability when the user edits it away from this; an untouched value lets the
+  // server resolve it from preset_slug (keeps the provider row preset-tracked).
+  const presetCapabilityJson = useMemo(
+    () => JSON.stringify(preset?.capability ?? {}),
+    [preset?.capability],
   )
   const [logoUrl, setLogoUrl] = useState(() => (isCreate ? '' : (provider?.logo_url ?? '')))
   const [extraHeaders, setExtraHeaders] = useState(() =>
@@ -141,9 +151,10 @@ export function ProviderConfigForm({
         auth_type: authType,
         api_key: needsKey ? apiKey : null,
         preset_slug: preset.preset_key,
-        // capability is resolved server-side from preset_slug; only send it if
-        // the user explicitly edited the (initially empty) advanced editor.
-        capability: Object.keys(capability).length > 0 ? capability : undefined,
+        // Capability is prefilled from the endpoint. Send it only when the user
+        // edited it away from the preset default; otherwise let the server
+        // resolve it from preset_slug.
+        capability: JSON.stringify(capability) !== presetCapabilityJson ? capability : undefined,
         logo_url: logoUrl.trim() || null,
         extra_headers: parsedHeaders,
       }

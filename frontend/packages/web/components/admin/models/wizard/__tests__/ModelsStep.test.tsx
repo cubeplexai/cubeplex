@@ -26,6 +26,7 @@ const vendor = makeVendor({
       plan: null,
       base_url: 'https://x/v1',
       model_ids: ['m-a', 'm-b'],
+      capability: { supports_tools: true },
     },
   ],
   models: [

@@ -16,6 +16,7 @@ export function makeVendor(over: Partial<VendorPreset> = {}): VendorPreset {
         plan: null,
         base_url: 'https://api.anthropic.com',
         model_ids: ['claude-opus-4-7'],
+        capability: { supports_tools: true },
       },
     ],
     models: [
