@@ -170,28 +170,28 @@ def _status_from_text(text: str) -> int | None:
 def _liveness_error_is_provider_level(error: ProbeError) -> bool:
     """Does a failed liveness probe mean the *provider* is bad, not just the model?
 
-    Liveness is provider-grain: it must only condemn the provider when the
-    failure is shared by every model, not when one probe model happens to be
-    dead. The deciding signal is whether the endpoint answered at all:
+    Liveness is provider-grain, so it defaults to a provider-level failure: a
+    network error, 5xx, rejected credential, wrong base_url/path (a bare 404), or
+    a malformed request (400) all break *every* model and must surface as
+    ``provider_error`` — masking them as healthy would hide a real outage.
 
-    - No HTTP status (network / DNS / timeout / connection refused) → provider
-      is unreachable → provider-level fail.
-    - 5xx → the provider's server is broken → provider-level fail.
-    - 401 / 403 → the credential is rejected, which breaks every model →
-      provider-level fail.
-    - Any other 4xx (402 out-of-credits, 404 model removed, 429 rate-limited,
-      400 bad request, …) → the provider ANSWERED, so it is reachable; the
-      problem is scoped to that model/request. NOT provider-level — the
-      per-model probe surfaces the model-specific verdict instead.
+    The only exceptions — where the endpoint clearly answered about the one probe
+    model, so the provider is reachable and the per-model probe should carry the
+    verdict instead — are:
+
+    - HTTP 402 (out-of-credits / insufficient quota) for that model/account, and
+    - an explicit model-not-found marker (e.g. OpenRouter's "no endpoints found
+      for <model>"). A *bare* 404 without such a marker is NOT model-scoped — it
+      is treated as a provider/config failure (matching ``_error_says_model_not_found``).
     """
     status = error.raw_status
     if status is None:
         status = _status_from_text(f"{error.type} {error.message}")
-    if status is None:
-        return True
-    if status in (401, 403):
-        return True
-    return status >= 500
+    if status == 402:
+        return False
+    if _error_says_model_not_found(error):
+        return False
+    return True
 
 
 async def probe_liveness(provider: Any, *, model_id: str) -> ProbeStep:
@@ -381,6 +381,7 @@ _MODEL_NOT_FOUND_MARKERS = (
     "unknown model",
     "no such model",
     "invalid model",
+    "no endpoints found for",  # OpenRouter's phrasing for a removed/unavailable model
 )
 
 
