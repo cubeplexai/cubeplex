@@ -138,6 +138,36 @@ describe('ProviderConfigForm — create', () => {
     expect(body.capability).toEqual({ supports_tools: false })
   })
 
+  it('restores entered values from initialValues instead of preset defaults', () => {
+    const onSubmit = vi.fn()
+    render(
+      <NextIntlClientProvider locale="en" messages={en}>
+        <ProviderConfigForm
+          mode="create"
+          preset={makeCreatePreset({ display_name: 'Anthropic' })}
+          initialValues={{
+            name: 'My Custom Name',
+            slug: 'my-custom-slug',
+            slugTouched: true,
+            baseUrl: 'https://api.anthropic.com',
+            apiKey: 'sk-kept',
+            authChoice: 'api_key',
+            capability: { supports_tools: true },
+            logoUrl: '',
+            extraHeaders: '',
+          }}
+          saving={false}
+          error={null}
+          submitLabel="Next"
+          onSubmit={onSubmit}
+        />
+      </NextIntlClientProvider>,
+    )
+    // Restored values win over the preset's default name/slug.
+    expect(screen.getByLabelText('Name')).toHaveValue('My Custom Name')
+    expect(screen.getByLabelText('Slug')).toHaveValue('my-custom-slug')
+  })
+
   it('requires a key (auth defaults to api_key)', () => {
     renderForm()
     expect(screen.getByRole('button', { name: 'Next' })).toBeDisabled()

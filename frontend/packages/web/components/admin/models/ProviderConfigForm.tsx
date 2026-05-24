@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslations } from 'next-intl'
 import { AlertTriangle, ChevronDown } from 'lucide-react'
 import type { Provider, ProviderCreate, ProviderUpdate, WireApi } from '@cubebox/core'
@@ -10,6 +10,7 @@ import { Label } from '@/components/ui/label'
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 import { cn } from '@/lib/utils'
 import { CapabilityEditor } from './wizard/CapabilityEditor'
+import type { ConfigFormValues } from './wizard/wizardMachine'
 
 const PROVIDER_TYPES: readonly WireApi[] = [
   'openai-completions',
@@ -52,6 +53,10 @@ interface ProviderConfigFormProps {
   preset?: CreatePreset
   // edit: seeds from the existing row; provider_type/auth editable; key optional.
   provider?: Provider
+  // create: restore previously-entered values (wizard step revisit) instead of
+  // re-seeding from the preset; emit edits so the wizard can persist them.
+  initialValues?: ConfigFormValues | null
+  onValuesChange?: (values: ConfigFormValues) => void
   saving: boolean
   error: string | null
   submitLabel: string
@@ -62,6 +67,8 @@ export function ProviderConfigForm({
   mode,
   preset,
   provider,
+  initialValues,
+  onValuesChange,
   saving,
   error,
   submitLabel,
@@ -75,28 +82,30 @@ export function ProviderConfigForm({
   // Edit: auth is user-editable via the radio (api_key / none).
   const supported = true
 
+  // In create mode, a restored draft (wizard revisit) wins over preset defaults.
+  const seed = isCreate ? initialValues : null
   const [name, setName] = useState(() =>
-    isCreate ? (preset?.display_name ?? '') : (provider?.name ?? ''),
+    isCreate ? (seed?.name ?? preset?.display_name ?? '') : (provider?.name ?? ''),
   )
   const [slug, setSlug] = useState(() =>
-    isCreate ? slugifyTs(preset?.display_name ?? '') : (provider?.slug ?? ''),
+    isCreate ? (seed?.slug ?? slugifyTs(preset?.display_name ?? '')) : (provider?.slug ?? ''),
   )
-  const [slugTouched, setSlugTouched] = useState(false)
+  const [slugTouched, setSlugTouched] = useState(() => seed?.slugTouched ?? false)
   const [baseUrl, setBaseUrl] = useState(() =>
-    isCreate ? (preset?.base_url ?? '') : (provider?.base_url ?? ''),
+    isCreate ? (seed?.baseUrl ?? preset?.base_url ?? '') : (provider?.base_url ?? ''),
   )
   const [providerType, setProviderType] = useState<WireApi>(() => {
     if (isCreate) return (preset?.provider_type ?? 'openai-completions') as WireApi
     return (provider?.provider_type ?? 'openai-completions') as WireApi
   })
   const [authChoice, setAuthChoice] = useState<AuthChoice>(() => {
-    if (isCreate) return 'api_key'
+    if (isCreate) return seed?.authChoice ?? 'api_key'
     // bearer_token folds into api_key for the radio (same wire shape).
     return provider?.auth_type === 'none' ? 'none' : 'api_key'
   })
-  const [apiKey, setApiKey] = useState('')
+  const [apiKey, setApiKey] = useState(() => seed?.apiKey ?? '')
   const [capability, setCapability] = useState<Record<string, unknown>>(() =>
-    isCreate ? (preset?.capability ?? {}) : (provider?.capability ?? {}),
+    isCreate ? (seed?.capability ?? preset?.capability ?? {}) : (provider?.capability ?? {}),
   )
   // The endpoint's resolved capability as first prefilled. On create we only send
   // capability when the user edits it away from this; an untouched value lets the
@@ -105,14 +114,49 @@ export function ProviderConfigForm({
     () => JSON.stringify(preset?.capability ?? {}),
     [preset?.capability],
   )
-  const [logoUrl, setLogoUrl] = useState(() => (isCreate ? '' : (provider?.logo_url ?? '')))
+  const [logoUrl, setLogoUrl] = useState(() =>
+    isCreate ? (seed?.logoUrl ?? '') : (provider?.logo_url ?? ''),
+  )
   const [extraHeaders, setExtraHeaders] = useState(() =>
-    !isCreate && provider?.extra_headers && Object.keys(provider.extra_headers).length > 0
-      ? JSON.stringify(provider.extra_headers, null, 2)
-      : '',
+    isCreate
+      ? (seed?.extraHeaders ?? '')
+      : provider?.extra_headers && Object.keys(provider.extra_headers).length > 0
+        ? JSON.stringify(provider.extra_headers, null, 2)
+        : '',
   )
   const [advancedOpen, setAdvancedOpen] = useState(false)
   const [headersError, setHeadersError] = useState<string | null>(null)
+
+  // Emit the current values so the wizard can persist them across step changes.
+  // Use a ref for the callback so its (unstable) identity doesn't retrigger the
+  // effect — it must fire on value changes only, never on parent re-renders.
+  const onValuesChangeRef = useRef(onValuesChange)
+  onValuesChangeRef.current = onValuesChange
+  useEffect(() => {
+    if (!isCreate) return
+    onValuesChangeRef.current?.({
+      name,
+      slug,
+      slugTouched,
+      baseUrl,
+      apiKey,
+      authChoice,
+      capability,
+      logoUrl,
+      extraHeaders,
+    })
+  }, [
+    isCreate,
+    name,
+    slug,
+    slugTouched,
+    baseUrl,
+    apiKey,
+    authChoice,
+    capability,
+    logoUrl,
+    extraHeaders,
+  ])
 
   // Effective auth_type sent to the backend. The catalog no longer carries
   // per-preset auth, so the user picks it (api_key default / none) in both

@@ -10,7 +10,25 @@ describe('wizardMachine', () => {
       selectedPresetKey: null,
       providerId: null,
       models: [],
+      configDraft: null,
     })
+  })
+
+  it('setConfigDraft stores the entered form values', () => {
+    const draft = {
+      presetKey: 'anthropic/intl/anthropic-messages',
+      name: 'My Provider',
+      slug: 'my-provider',
+      slugTouched: true,
+      baseUrl: 'https://api.anthropic.com',
+      apiKey: 'sk-1',
+      authChoice: 'api_key' as const,
+      capability: {},
+      logoUrl: '',
+      extraHeaders: '',
+    }
+    const s = wizardReducer(initialWizardState, { type: 'setConfigDraft', draft })
+    expect(s.configDraft).toEqual(draft)
   })
 
   it('pickVendor stores the vendor and resets the endpoint choice', () => {

@@ -11,6 +11,26 @@ export interface CreatedModel {
   display_name: string
 }
 
+/** The Configure-step form fields. Persisted in wizard state so stepping away
+ *  and back (which unmounts ConfigureStep) doesn't reset them to preset defaults. */
+export interface ConfigFormValues {
+  name: string
+  slug: string
+  slugTouched: boolean
+  baseUrl: string
+  apiKey: string
+  authChoice: 'api_key' | 'none'
+  capability: Record<string, unknown>
+  logoUrl: string
+  extraHeaders: string
+}
+
+/** Tagged with the endpoint it was entered under, so switching endpoints
+ *  (a different preset_key) correctly falls back to that endpoint's defaults. */
+export interface ConfigDraft extends ConfigFormValues {
+  presetKey: string
+}
+
 export interface WizardState {
   step: WizardStep
   vendor: VendorPreset | null
@@ -18,6 +38,8 @@ export interface WizardState {
   selectedPresetKey: string | null
   providerId: string | null
   models: CreatedModel[]
+  /** Last-entered Configure-step values, so a revisit restores them. */
+  configDraft: ConfigDraft | null
 }
 
 export type WizardAction =
@@ -25,6 +47,7 @@ export type WizardAction =
   | { type: 'selectEndpoint'; presetKey: string }
   | { type: 'providerCreated'; providerId: string }
   | { type: 'modelsCreated'; models: CreatedModel[] }
+  | { type: 'setConfigDraft'; draft: ConfigDraft }
   | { type: 'next' }
   | { type: 'back' }
 
@@ -34,6 +57,7 @@ export const initialWizardState: WizardState = {
   selectedPresetKey: null,
   providerId: null,
   models: [],
+  configDraft: null,
 }
 
 // Whether `next` may advance from the given state. Step 1 needs a vendor (the
@@ -63,6 +87,8 @@ export function wizardReducer(state: WizardState, action: WizardAction): WizardS
       return { ...state, providerId: action.providerId }
     case 'modelsCreated':
       return { ...state, models: action.models }
+    case 'setConfigDraft':
+      return { ...state, configDraft: action.draft }
     case 'next': {
       if (!canAdvance(state)) return state
       return { ...state, step: (state.step + 1) as WizardStep }

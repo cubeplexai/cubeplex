@@ -15,6 +15,7 @@ import {
 import { Label } from '@/components/ui/label'
 import { cn } from '@/lib/utils'
 import { ProviderConfigForm, type CreatePreset } from '../ProviderConfigForm'
+import type { ConfigDraft, ConfigFormValues } from './wizardMachine'
 
 interface ConfigureStepProps {
   client: ApiClient
@@ -25,6 +26,9 @@ interface ConfigureStepProps {
   // creating a second row.
   existingProviderId?: string | null
   onProviderCreated: (providerId: string) => void
+  // Persisted form values, so stepping back into this step restores them.
+  configDraft: ConfigDraft | null
+  onConfigDraftChange: (draft: ConfigDraft) => void
 }
 
 function uniq<T>(xs: T[]): T[] {
@@ -38,6 +42,8 @@ export function ConfigureStep({
   onSelectEndpoint,
   existingProviderId,
   onProviderCreated,
+  configDraft,
+  onConfigDraftChange,
 }: ConfigureStepProps) {
   const t = useTranslations('adminModels.wizard.configure')
   const tw = useTranslations('adminModels.wizard')
@@ -166,6 +172,12 @@ export function ConfigureStep({
         key={chosen.preset_key}
         mode="create"
         preset={createPreset}
+        // Restore the draft only when it belongs to the current endpoint; a
+        // different endpoint should fall back to that endpoint's defaults.
+        initialValues={configDraft?.presetKey === chosen.preset_key ? configDraft : null}
+        onValuesChange={(values: ConfigFormValues) =>
+          onConfigDraftChange({ ...values, presetKey: chosen.preset_key })
+        }
         saving={saving}
         error={error}
         submitLabel={tw('next')}
