@@ -438,6 +438,7 @@ class RunManager:
         self._run_event_ttl_seconds = run_event_ttl_seconds
         self._run_stream_max_events = run_stream_max_events
         self._tasks: dict[str, asyncio.Task[None]] = {}
+        self._agents: dict[str, Any] = {}
         self._tasks_empty: asyncio.Event = asyncio.Event()
         self._tasks_empty.set()
 
@@ -516,6 +517,23 @@ class RunManager:
         task.cancel()
         with suppress(asyncio.CancelledError):
             await task
+        return True
+
+    async def steer_run(self, run_id: str, content: str) -> bool:
+        """Inject a steering message into a live run's agent.
+
+        Returns False when the run has no live agent in this process (already
+        finished, or running in a different worker — the same single-process
+        limitation as cancel_run). The agent's loop drains the message at its
+        next safe point; we do not block on delivery.
+        """
+        agent = self._agents.get(run_id)
+        if agent is None:
+            return False
+
+        from cubepi.providers.base import TextContent, UserMessage
+
+        agent.steer(UserMessage(content=[TextContent(text=content)]))
         return True
 
     async def drain(self, timeout_seconds: float) -> None:
@@ -1185,6 +1203,7 @@ class RunManager:
                     sse_queue.put_nowait(d)
 
             agent.subscribe(_on_event)
+            self._agents[run_id] = agent
             drainer = asyncio.create_task(_drain_cubepi_sse_queue(sse_queue, publish_stream_event))
 
             # Compute relevance-memory snapshot before the agent loop starts
@@ -1263,6 +1282,8 @@ class RunManager:
                     exc=None,
                 )
             finally:
+                # Stop accepting steers for this run before tearing down.
+                self._agents.pop(run_id, None)
                 # Signal drainer and wait for it to flush remaining events so
                 # all SSE dicts are published before citation buffers flush.
                 await sse_queue.put(None)
@@ -1677,6 +1698,7 @@ class RunManager:
                 with suppress(Exception):
                     await catalog_session_ctx.__aexit__(None, None, None)
 
+            self._agents.pop(run_id, None)
             await clear_active_run(
                 self._redis,
                 prefix=self._key_prefix,
