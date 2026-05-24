@@ -33,6 +33,8 @@ function renderStep(
         onSelectEndpoint={onSelectEndpoint}
         existingProviderId={existingProviderId}
         onProviderCreated={onProviderCreated}
+        configDraft={null}
+        onConfigDraftChange={vi.fn()}
       />
     </NextIntlClientProvider>,
   )
@@ -134,6 +136,69 @@ describe('ConfigureStep', () => {
       ).toBeInTheDocument(),
     )
     expect(screen.queryByText('HTTP 409')).not.toBeInTheDocument()
+  })
+
+  it('restores a saved draft for the current endpoint (revisit)', () => {
+    const vendor = makeVendor()
+    const draft = {
+      presetKey: vendor.endpoints[0].preset_key,
+      name: 'Restored Name',
+      slug: 'restored-slug',
+      slugTouched: true,
+      baseUrl: 'https://api.anthropic.com',
+      apiKey: 'sk-kept',
+      authChoice: 'api_key' as const,
+      capability: {},
+      logoUrl: '',
+      extraHeaders: '',
+    }
+    render(
+      <NextIntlClientProvider locale="en" messages={en}>
+        <ConfigureStep
+          client={fakeClient}
+          vendor={vendor}
+          selectedPresetKey={vendor.endpoints[0].preset_key}
+          onSelectEndpoint={vi.fn()}
+          existingProviderId="prv_1"
+          onProviderCreated={vi.fn()}
+          configDraft={draft}
+          onConfigDraftChange={vi.fn()}
+        />
+      </NextIntlClientProvider>,
+    )
+    expect(screen.getByLabelText('Name')).toHaveValue('Restored Name')
+  })
+
+  it('ignores a draft from a different endpoint (falls back to preset default)', () => {
+    const vendor = makeVendor()
+    const draft = {
+      presetKey: 'some/other/endpoint',
+      name: 'Restored Name',
+      slug: 'restored-slug',
+      slugTouched: true,
+      baseUrl: 'x',
+      apiKey: '',
+      authChoice: 'api_key' as const,
+      capability: {},
+      logoUrl: '',
+      extraHeaders: '',
+    }
+    render(
+      <NextIntlClientProvider locale="en" messages={en}>
+        <ConfigureStep
+          client={fakeClient}
+          vendor={vendor}
+          selectedPresetKey={vendor.endpoints[0].preset_key}
+          onSelectEndpoint={vi.fn()}
+          existingProviderId={null}
+          onProviderCreated={vi.fn()}
+          configDraft={draft}
+          onConfigDraftChange={vi.fn()}
+        />
+      </NextIntlClientProvider>,
+    )
+    // Mismatched endpoint → preset default name, not the stale draft.
+    expect(screen.getByLabelText('Name')).toHaveValue('Anthropic')
   })
 
   it('endpoint selectors drive the composed base_url + preset_key', async () => {

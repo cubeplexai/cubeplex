@@ -76,6 +76,8 @@ export default function AddProviderWizardPage() {
                   dispatch({ type: 'providerCreated', providerId: id })
                   dispatch({ type: 'next' })
                 }}
+                configDraft={state.configDraft}
+                onConfigDraftChange={(draft) => dispatch({ type: 'setConfigDraft', draft })}
               />
             )}
             {state.step === 3 && state.vendor && state.selectedPresetKey && state.providerId && (
