@@ -253,6 +253,60 @@ async def test_probe_liveness_surfaces_cubepi_error_message():
     assert "Authentication" in step.detail
 
 
+def _err_event(message: str):
+    return type("E", (), {"type": "error", "error_message": message})()
+
+
+@pytest.mark.asyncio
+async def test_liveness_402_is_provider_reachable():
+    # OpenRouter "out of credits" for one free model: the endpoint answered, so
+    # the provider is reachable — liveness must NOT condemn the whole provider.
+    evt = _err_event(
+        "[probe/deepseek:free @ .../] APIStatusError: Error code: 402 - "
+        "{'error': {'message': 'Provider returned error', 'code': 402}}"
+    )
+    step = await probe_liveness(_StubProvider(events=[evt]), model_id="deepseek:free")
+    assert step.status == "pass"
+    assert "reachable" in step.detail
+
+
+@pytest.mark.asyncio
+async def test_liveness_404_model_removed_is_provider_reachable():
+    # OpenRouter 404 "No endpoints found for <model>": model gone, provider up.
+    evt = _err_event(
+        "[probe/stepfun:free @ .../] NotFoundError: Error code: 404 - "
+        "{'error': {'message': 'No endpoints found for stepfun:free.', 'code': 404}}"
+    )
+    step = await probe_liveness(_StubProvider(events=[evt]), model_id="stepfun:free")
+    assert step.status == "pass"
+    assert "reachable" in step.detail
+
+
+@pytest.mark.asyncio
+async def test_liveness_401_is_provider_level_fail():
+    # A rejected credential breaks every model → provider-grain fail.
+    evt = _err_event("AuthenticationError: Error code: 401 - Missing Authentication header")
+    step = await probe_liveness(_StubProvider(events=[evt]), model_id="m")
+    assert step.status == "fail"
+    assert "401" in step.detail
+
+
+@pytest.mark.asyncio
+async def test_liveness_5xx_is_provider_level_fail():
+    evt = _err_event("APIStatusError: Error code: 503 - service unavailable")
+    step = await probe_liveness(_StubProvider(events=[evt]), model_id="m")
+    assert step.status == "fail"
+
+
+@pytest.mark.asyncio
+async def test_liveness_no_status_is_provider_level_fail():
+    # No HTTP status at all (network/DNS/timeout) → unreachable.
+    step = await probe_liveness(
+        _StubProvider(events=[_err_event("connection refused")]), model_id="m"
+    )
+    assert step.status == "fail"
+
+
 @pytest.mark.asyncio
 async def test_probe_streaming_fails_on_error_event():
     err = type("E", (), {"type": "error", "error": "boom"})()
