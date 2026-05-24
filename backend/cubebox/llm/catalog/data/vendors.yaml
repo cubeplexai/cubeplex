@@ -247,7 +247,7 @@
   models: []
 
 - vendor: vllm
-  display_name: vLLM (self-hosted)
+  display_name: vLLM
   short_name: vLLM
   logo: vllm
   category: oss-framework
