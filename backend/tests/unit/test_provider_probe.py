@@ -284,6 +284,23 @@ async def test_liveness_404_model_removed_is_provider_reachable():
 
 
 @pytest.mark.asyncio
+async def test_liveness_bare_404_is_provider_level_fail():
+    # A 404 WITHOUT a model-not-found marker is a wrong base_url/path (config), which
+    # breaks every model → must surface as provider_error, not a passing liveness.
+    evt = _err_event("NotFoundError: Error code: 404 - {'detail': 'Not Found'}")
+    step = await probe_liveness(_StubProvider(events=[evt]), model_id="m")
+    assert step.status == "fail"
+
+
+@pytest.mark.asyncio
+async def test_liveness_400_bad_request_is_provider_level_fail():
+    # A 400 request-shape mismatch affects every model → provider-grain fail.
+    evt = _err_event("BadRequestError: Error code: 400 - {'error': 'unsupported parameter'}")
+    step = await probe_liveness(_StubProvider(events=[evt]), model_id="m")
+    assert step.status == "fail"
+
+
+@pytest.mark.asyncio
 async def test_liveness_401_is_provider_level_fail():
     # A rejected credential breaks every model → provider-grain fail.
     evt = _err_event("AuthenticationError: Error code: 401 - Missing Authentication header")
