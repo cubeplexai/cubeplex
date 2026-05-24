@@ -22,6 +22,16 @@ describe('formatProbeDetail', () => {
     expect(formatProbeDetail(raw)).toBe('HTTP 401 · Missing Authentication header')
   })
 
+  it('extracts a 401 auth message that contains a URL', () => {
+    const raw =
+      '[probe/qwen3-max @ https://dashscope-intl.aliyuncs.com/compatible-mode/v1/] ' +
+      "AuthenticationError: Error code: 401 - {'error': {'message': 'Incorrect API key provided. " +
+      "For details, see: https://www.alibabacloud.com/help/x', 'type': 'invalid_request_error'}}"
+    expect(formatProbeDetail(raw)).toBe(
+      'HTTP 401 · Incorrect API key provided. For details, see: https://www.alibabacloud.com/help/x',
+    )
+  })
+
   it('falls back to HTTP status when no message is extractable', () => {
     expect(formatProbeDetail('APIStatusError: Error code: 503 - {garbage')).toBe(
       'APIStatusError: Error code: 503',
