@@ -62,6 +62,7 @@ export default function AddProviderWizardPage() {
                 vendor={state.vendor}
                 presetKey={state.selectedPresetKey}
                 providerId={state.providerId}
+                existingModels={state.models}
                 onModelsCreated={(models) => {
                   dispatch({ type: 'modelsCreated', models })
                   dispatch({ type: 'next' })

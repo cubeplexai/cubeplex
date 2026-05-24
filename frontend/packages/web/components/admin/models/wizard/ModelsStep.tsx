@@ -39,6 +39,10 @@ interface ModelsStepProps {
   /** The endpoint chosen in step 2 — its preset_key. */
   presetKey: string
   providerId: string
+  /** Models persisted on a prior visit to this step (the wizard keeps them when
+   *  the user steps back). Seeds the dedupe cache so re-entering doesn't re-POST
+   *  and 409 on the already-created ids. */
+  existingModels: CreatedModel[]
   onModelsCreated: (models: CreatedModel[]) => void
 }
 
@@ -47,6 +51,7 @@ export function ModelsStep({
   vendor,
   presetKey,
   providerId,
+  existingModels,
   onModelsCreated,
 }: ModelsStepProps) {
   const t = useTranslations('adminModels.wizard.models')
@@ -80,9 +85,13 @@ export function ModelsStep({
   const [draftName, setDraftName] = useState('')
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  // Models already created in a prior (failed) attempt, keyed by model_id, so a
-  // retry skips them instead of re-POSTing and 409-ing on the duplicate id.
-  const createdByModelId = useRef<Map<string, CreatedModel>>(new Map())
+  // Models already created — by a prior (failed) attempt within this mount, or by
+  // an earlier visit before the user stepped back (seeded from existingModels) —
+  // keyed by model_id, so a retry/re-entry skips them instead of re-POSTing and
+  // 409-ing on the duplicate id.
+  const createdByModelId = useRef<Map<string, CreatedModel>>(
+    new Map(existingModels.map((m) => [m.model_id, m])),
+  )
 
   const checkedCount = rows.filter((r) => r.checked).length
 

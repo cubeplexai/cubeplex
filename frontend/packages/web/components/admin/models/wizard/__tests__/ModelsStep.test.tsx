@@ -5,6 +5,7 @@ import type { ApiClient, Model } from '@cubebox/core'
 import * as core from '@cubebox/core'
 import en from '../../../../../messages/en.json'
 import { ModelsStep } from '../ModelsStep'
+import type { CreatedModel } from '../wizardMachine'
 import { makeVendor } from './fixtures'
 
 vi.mock('@cubebox/core', async (importOriginal) => {
@@ -51,7 +52,7 @@ const vendor = makeVendor({
   ],
 })
 
-function renderStep(onModelsCreated = vi.fn()) {
+function renderStep(onModelsCreated = vi.fn(), existingModels: CreatedModel[] = []) {
   render(
     <NextIntlClientProvider locale="en" messages={en}>
       <ModelsStep
@@ -59,6 +60,7 @@ function renderStep(onModelsCreated = vi.fn()) {
         vendor={vendor}
         presetKey={PRESET_KEY}
         providerId="prv_1"
+        existingModels={existingModels}
         onModelsCreated={onModelsCreated}
       />
     </NextIntlClientProvider>,
@@ -118,6 +120,20 @@ describe('ModelsStep', () => {
         { id: 'mdl_1', model_id: 'm-a', display_name: 'Model A' },
       ]),
     )
+  })
+
+  it('re-entering after stepping back does not re-create models already persisted', async () => {
+    // The wizard unmounts this step on "back" and remounts on "next", passing the
+    // previously-created models as existingModels. handleNext must reuse them
+    // instead of re-POSTing (which 409s "already exists in this provider").
+    const existing: CreatedModel[] = [
+      { id: 'mdl_1', model_id: 'm-a', display_name: 'Model A' },
+      { id: 'mdl_2', model_id: 'm-b', display_name: 'Model B' },
+    ]
+    const { onModelsCreated } = renderStep(vi.fn(), existing)
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }))
+    await waitFor(() => expect(onModelsCreated).toHaveBeenCalledWith(existing))
+    expect(core.createModel).not.toHaveBeenCalled()
   })
 
   it('retry after a mid-import failure skips already-created models', async () => {
