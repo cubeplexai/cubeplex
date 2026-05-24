@@ -2,11 +2,12 @@
 
 import { useState } from 'react'
 import { useTranslations } from 'next-intl'
-import { Brain, Check, Loader2, Pencil, RotateCw, Trash2, X } from 'lucide-react'
+import { Brain, Check, Loader2, Pencil, RotateCw, TriangleAlert, Trash2, X } from 'lucide-react'
 import { testModel, type ApiClient, type Model } from '@cubebox/core'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
+import { formatProbeDetail } from '@/lib/probeDetail'
 import { ReadinessBadge } from './ReadinessBadge'
 
 interface ModelRowProps {
@@ -41,7 +42,7 @@ function testIssues(summary: Record<string, unknown> | undefined): TestIssue[] {
       return {
         name: String(s.name ?? ''),
         status: String(s.status ?? ''),
-        detail: String(s.detail ?? error?.message ?? ''),
+        detail: formatProbeDetail(String(s.detail ?? error?.message ?? '')),
       }
     })
 }
@@ -59,7 +60,6 @@ export function ModelRow({
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [retesting, setRetesting] = useState(false)
   const issues = testIssues(model.last_test_summary)
-  const hasFail = issues.some((i) => i.status === 'fail')
 
   async function handleRetest() {
     setRetesting(true)
@@ -97,14 +97,29 @@ export function ModelRow({
           <span className="mt-0.5 block truncate text-muted-foreground">{model.display_name}</span>
         )}
         {issues.length > 0 && (
-          <span
-            className={cn(
-              'mt-0.5 block text-[11px]',
-              hasFail ? 'text-destructive' : 'text-amber-700 dark:text-amber-300',
-            )}
-          >
-            {issues.map((i) => (i.detail ? `${i.name} — ${i.detail}` : i.name)).join(' · ')}
-          </span>
+          <ul className="mt-1 flex flex-col gap-0.5">
+            {issues.map((i) => {
+              const isFail = i.status === 'fail'
+              return (
+                <li key={i.name} className="flex items-start gap-1.5 text-[11px]">
+                  {isFail ? (
+                    <X className="mt-px size-3 shrink-0 text-destructive" />
+                  ) : (
+                    <TriangleAlert className="mt-px size-3 shrink-0 text-amber-600 dark:text-amber-400" />
+                  )}
+                  <span
+                    className={cn(
+                      'min-w-0',
+                      isFail ? 'text-destructive' : 'text-amber-700 dark:text-amber-300',
+                    )}
+                  >
+                    <span className="font-medium">{i.name}</span>
+                    {i.detail ? ` — ${i.detail}` : ''}
+                  </span>
+                </li>
+              )
+            })}
+          </ul>
         )}
       </div>
 

@@ -6,6 +6,7 @@ import type { ProbeResult, ProbeStep } from '@cubebox/core'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
+import { formatProbeDetail } from '@/lib/probeDetail'
 
 export interface ModelTestState extends ProbeResult {
   model_db_id: string
@@ -36,7 +37,7 @@ function StepChip({ step }: { step: ProbeStep }) {
           : Minus
   return (
     <span
-      title={step.detail ?? step.error?.message ?? step.name}
+      title={formatProbeDetail(step.detail ?? step.error?.message) || step.name}
       className={cn(
         'inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium',
         tone,
@@ -81,7 +82,7 @@ export function ModelTestCard({ state, onRetest }: ModelTestCardProps) {
         <ul className="flex flex-col gap-1 border-t border-border/60 pt-2">
           {issues.map((s) => {
             const isFail = s.status === 'fail'
-            const detail = s.detail ?? s.error?.message
+            const detail = formatProbeDetail(s.detail ?? s.error?.message)
             return (
               <li key={s.name} className="flex items-start gap-1.5 text-xs">
                 {isFail ? (
