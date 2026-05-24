@@ -415,7 +415,7 @@ class ProviderService:
         system-readonly guard — instead of going through ``_check_not_system``.
         """
         provider.last_liveness_at = datetime.now(UTC)
-        provider.last_liveness_status = "ok" if step.status == "pass" else "fail"
+        provider.last_liveness_status = provider_probe.liveness_status_for(step)
         provider.last_liveness_summary = step.model_dump(mode="json")
         await self._providers.update(provider)
 

@@ -5,6 +5,7 @@ export type Readiness =
   | 'degraded'
   | 'stale'
   | 'provider_error'
+  | 'auth_error'
   | 'model_error'
   | 'unavailable'
 

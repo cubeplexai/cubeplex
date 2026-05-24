@@ -22,8 +22,8 @@ import { useAllModels, type ProviderModelOption } from '@/hooks/useAllModels'
 import { cn } from '@/lib/utils'
 
 // A model is selectable when it is enabled and not in a hard-error/unavailable
-// state. ready/degraded/stale stay usable; provider_error/model_error/unavailable
-// (or a disabled model) are shown but not selectable.
+// state. ready/degraded/stale stay usable; provider_error/auth_error/model_error/
+// unavailable (or a disabled model) are shown but not selectable.
 function isUsable(opt: ProviderModelOption): boolean {
   if (!opt.enabled) return false
   return opt.readiness === 'ready' || opt.readiness === 'degraded' || opt.readiness === 'stale'

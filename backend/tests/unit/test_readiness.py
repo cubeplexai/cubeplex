@@ -33,6 +33,19 @@ def test_provider_fail_with_never_tested_model() -> None:
     )
 
 
+def test_auth_error_is_distinct_from_provider_error() -> None:
+    # A rejected credential is provider-grain like "fail", but must surface as a
+    # separate enum so the UI says "fix the key", not "endpoint unreachable".
+    assert (
+        derive_readiness(
+            liveness_status="auth_error",
+            model_test_status="ok",
+            capability_changed_since_test=True,
+        )
+        == "auth_error"
+    )
+
+
 def test_model_unavailable() -> None:
     assert (
         derive_readiness(

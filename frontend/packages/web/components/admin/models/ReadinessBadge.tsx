@@ -6,6 +6,7 @@ const MAP = {
   degraded: { dot: 'bg-amber-500', key: 'degraded' },
   stale: { dot: 'bg-amber-400', key: 'stale' },
   provider_error: { dot: 'bg-red-500', key: 'providerError' },
+  auth_error: { dot: 'bg-red-500', key: 'authError' },
   model_error: { dot: 'bg-red-500', key: 'modelError' },
   unavailable: { dot: 'bg-zinc-400', key: 'unavailable' },
 } as const satisfies Record<Readiness, { dot: string; key: string }>

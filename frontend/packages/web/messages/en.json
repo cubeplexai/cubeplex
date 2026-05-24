@@ -355,6 +355,7 @@
       "degraded": "Degraded",
       "stale": "Stale",
       "providerError": "Provider unreachable",
+      "authError": "Authentication failed",
       "modelError": "Model test failed",
       "unavailable": "Unavailable"
     },

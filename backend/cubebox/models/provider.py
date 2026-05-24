@@ -55,7 +55,9 @@ class Provider(CubeboxBase, table=True):
     model_capability_overrides: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
     # Provider-level test = liveness/credential ONLY (spec §4.1).
     last_liveness_at: datetime | None = Field(default=None)
-    last_liveness_status: str | None = Field(default=None, max_length=16)  # "ok" | "fail"
+    last_liveness_status: str | None = Field(
+        default=None, max_length=16
+    )  # "ok" | "auth_error" | "fail"
     last_liveness_summary: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
     enabled: bool = Field(default=True)
     created_by_user_id: str | None = Field(
