@@ -14,7 +14,6 @@ from typing import Sequence, Union
 
 import sqlalchemy as sa
 from alembic import op
-from cubepi.providers.catalog import list_provider_presets
 
 # revision identifiers, used by Alembic.
 revision: str = 'eef196f4c8f9'
@@ -24,7 +23,17 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    """Backfill preset_slug + capability + overrides on rows with empty capability."""
+    """Backfill preset_slug + capability + overrides on rows with empty capability.
+
+    The preset catalog was later removed from cubepi (provider presets dropped
+    upstream), so the import is local and the backfill is a no-op when the
+    catalog is unavailable — every existing DB already ran this revision, and a
+    fresh DB on the catalog-less cubepi has no presets to backfill from.
+    """
+    try:
+        from cubepi.providers.catalog import list_provider_presets
+    except ImportError:
+        return
     presets = {p.slug: p for p in list_provider_presets()}
 
     bind = op.get_bind()
