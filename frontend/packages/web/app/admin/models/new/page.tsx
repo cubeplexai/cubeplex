@@ -1,9 +1,9 @@
 'use client'
 
-import { useMemo, useReducer } from 'react'
+import { useMemo, useReducer, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { useTranslations } from 'next-intl'
-import { createApiClient } from '@cubebox/core'
+import { createApiClient, deleteProvider } from '@cubebox/core'
 import { Button } from '@/components/ui/button'
 import { WizardStepRail } from '@/components/admin/models/wizard/WizardStepRail'
 import { PresetPicker } from '@/components/admin/models/wizard/PresetPicker'
@@ -17,9 +17,31 @@ export default function AddProviderWizardPage() {
   const router = useRouter()
   const client = useMemo(() => createApiClient(''), [])
   const [state, dispatch] = useReducer(wizardReducer, initialWizardState)
+  const [confirmingDiscard, setConfirmingDiscard] = useState(false)
+  const [discarding, setDiscarding] = useState(false)
 
+  // Leave the wizard but keep the provider (created at step 2). Its models stay
+  // disabled until a passing test enables them — the user can finish from the
+  // models page later. Also the success path (TestStep "Finish").
   function finish() {
     router.push('/admin/models')
+  }
+
+  // Throw away a provider created in this wizard session (and its models), then
+  // leave. Best-effort: navigate even if the delete fails so the user isn't stuck.
+  async function discard() {
+    if (!state.providerId) {
+      finish()
+      return
+    }
+    setDiscarding(true)
+    try {
+      await deleteProvider(client, state.providerId)
+    } catch {
+      // ignore — nothing actionable for the user on a cleanup delete
+    } finally {
+      router.push('/admin/models')
+    }
   }
 
   return (
@@ -80,10 +102,54 @@ export default function AddProviderWizardPage() {
             )}
           </div>
 
-          <footer className="flex items-center justify-between border-t border-border/70 px-6 py-3">
-            <Button type="button" variant="ghost" size="sm" onClick={finish}>
-              {t('cancel')}
-            </Button>
+          <footer className="flex items-center justify-between gap-3 border-t border-border/70 px-6 py-3">
+            <div className="flex items-center gap-2">
+              {state.providerId == null ? (
+                // Nothing persisted yet — plain cancel just leaves.
+                <Button type="button" variant="ghost" size="sm" onClick={finish}>
+                  {t('cancel')}
+                </Button>
+              ) : confirmingDiscard ? (
+                <>
+                  <span className="text-xs text-muted-foreground">{t('discardPrompt')}</span>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="text-destructive hover:text-destructive"
+                    disabled={discarding}
+                    onClick={() => void discard()}
+                  >
+                    {t('discardYes')}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={discarding}
+                    onClick={() => setConfirmingDiscard(false)}
+                  >
+                    {t('discardNo')}
+                  </Button>
+                </>
+              ) : (
+                // Provider exists: discard (delete) or keep it disabled and finish later.
+                <>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="text-destructive hover:text-destructive"
+                    onClick={() => setConfirmingDiscard(true)}
+                  >
+                    {t('discard')}
+                  </Button>
+                  <Button type="button" variant="ghost" size="sm" onClick={finish}>
+                    {t('finishLater')}
+                  </Button>
+                </>
+              )}
+            </div>
             <div className="flex items-center gap-2">
               {state.step > 1 && (
                 <Button

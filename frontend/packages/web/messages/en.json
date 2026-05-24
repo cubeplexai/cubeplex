@@ -366,6 +366,11 @@
       "next": "Next",
       "cancel": "Cancel",
       "finish": "Finish",
+      "discard": "Discard",
+      "finishLater": "Finish later",
+      "discardPrompt": "Discard this provider? It and its models will be deleted.",
+      "discardYes": "Delete",
+      "discardNo": "Keep",
       "step": {
         "preset": { "label": "Preset", "hint": "Choose a provider" },
         "configure": { "label": "Configure", "hint": "Credentials & capability" },
