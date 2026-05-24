@@ -8,13 +8,14 @@ import {
   type ApiClient,
   type ModelCreate,
   type ModelPresetEntry,
+  type ModelUpdate,
   type VendorPreset,
 } from '@cubebox/core'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
-import { Input } from '@/components/ui/input'
 import { cn } from '@/lib/utils'
+import { ModelFormDialog } from '../ModelFormDialog'
 import type { CreatedModel } from './wizardMachine'
 
 interface ModelRow {
@@ -81,8 +82,7 @@ export function ModelsStep({
       custom: false,
     })),
   )
-  const [draftId, setDraftId] = useState('')
-  const [draftName, setDraftName] = useState('')
+  const [addOpen, setAddOpen] = useState(false)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   // Models already created — by a prior (failed) attempt within this mount, or by
@@ -99,29 +99,32 @@ export function ModelsStep({
     setRows((prev) => prev.map((r) => (r.key === key ? { ...r, checked: !r.checked } : r)))
   }
 
-  function addCustom() {
-    const id = draftId.trim()
-    if (!id) return
+  // Custom models use the same full form as the models-management page (model id,
+  // modalities, reasoning, context/limits, pricing) instead of a stripped id+name
+  // pair — the dialog collects a ModelCreate, which we stage as a row (the POST
+  // happens on Next, like every other selected row).
+  function handleAddCustom(body: ModelCreate | ModelUpdate): Promise<void> {
+    const m = body as ModelCreate
     setRows((prev) => [
       ...prev,
       {
         key: `custom-${Date.now()}`,
-        model_id: id,
-        display_name: draftName.trim() || id,
-        context_window: 128000,
-        max_tokens: 4096,
-        input_modalities: ['text'],
-        reasoning: false,
-        cost_input: 0,
-        cost_output: 0,
-        cost_cache_read: 0,
-        cost_cache_write: 0,
+        model_id: m.model_id,
+        display_name: m.display_name || m.model_id,
+        context_window: m.context_window ?? 0,
+        max_tokens: m.max_tokens ?? 0,
+        input_modalities: m.input_modalities ?? ['text'],
+        reasoning: m.reasoning ?? false,
+        cost_input: m.cost_input ?? 0,
+        cost_output: m.cost_output ?? 0,
+        cost_cache_read: m.cost_cache_read ?? 0,
+        cost_cache_write: m.cost_cache_write ?? 0,
         checked: true,
         custom: true,
       },
     ])
-    setDraftId('')
-    setDraftName('')
+    setAddOpen(false)
+    return Promise.resolve()
   }
 
   function removeRow(key: string) {
@@ -217,34 +220,23 @@ export function ModelsStep({
         ))}
       </div>
 
-      <div className="flex items-end gap-2 rounded-lg border border-dashed border-border/70 p-3">
-        <div className="flex flex-1 flex-col gap-1">
-          <Input
-            value={draftId}
-            onChange={(e) => setDraftId(e.target.value)}
-            placeholder={t('modelId')}
-            aria-label={t('modelId')}
-          />
-        </div>
-        <div className="flex flex-1 flex-col gap-1">
-          <Input
-            value={draftName}
-            onChange={(e) => setDraftName(e.target.value)}
-            placeholder={t('displayName')}
-            aria-label={t('displayName')}
-          />
-        </div>
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          disabled={!draftId.trim()}
-          onClick={addCustom}
-        >
-          <Plus className="size-3.5" />
-          {t('add')}
-        </Button>
-      </div>
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        className="self-start"
+        onClick={() => setAddOpen(true)}
+      >
+        <Plus className="size-3.5" />
+        {t('addCustom')}
+      </Button>
+
+      <ModelFormDialog
+        open={addOpen}
+        onOpenChange={setAddOpen}
+        model={null}
+        onSave={handleAddCustom}
+      />
 
       {checkedCount === 0 && <p className="text-xs text-muted-foreground">{t('empty')}</p>}
 
