@@ -26,6 +26,11 @@ from pydantic import BaseModel, Field
 ProbeStepName = Literal["liveness", "reasoning", "temperature", "tools", "streaming", "usage"]
 ProbeStepStatus = Literal["pass", "fail", "skip", "warn"]
 
+# Cap stored error text so a verbose upstream body can't bloat last_test_summary,
+# while leaving enough room for the human message the UI extracts (the cubepi
+# "[probe/<model> @ <url>] ..." prefix alone eats ~80 chars).
+_MAX_DETAIL_CHARS = 500
+
 
 class ProbeError(BaseModel):
     type: str
@@ -85,7 +90,9 @@ def _probe_error(exc: Exception) -> ProbeError:
         raw_status = getattr(getattr(exc, "response", None), "status_code", None)
     if not isinstance(raw_status, int):
         raw_status = None
-    return ProbeError(type=type(exc).__name__, message=str(exc)[:200], raw_status=raw_status)
+    return ProbeError(
+        type=type(exc).__name__, message=str(exc)[:_MAX_DETAIL_CHARS], raw_status=raw_status
+    )
 
 
 async def _drain_stream(
@@ -145,7 +152,7 @@ def _error_event_detail(evt: Any) -> str:
     for attr in ("error_message", "error", "message", "detail"):
         v = getattr(evt, attr, None)
         if v:
-            return str(v)[:200]
+            return str(v)[:_MAX_DETAIL_CHARS]
     return "stream returned an error event"
 
 
