@@ -399,7 +399,13 @@
         "unsupportedAuth": "暂不支持 OAuth/IAM 类型的预设。",
         "advanced": "高级：能力配置",
         "creating": "创建中…",
-        "createFailed": "创建 provider 失败"
+        "createFailed": "创建 provider 失败",
+        "errors": {
+          "provider_slug_conflict": "该 slug 已被占用，请换一个。",
+          "provider_name_conflict": "已存在同名 provider，请换一个名称。",
+          "invalid_provider_slug": "slug 只能包含小写字母、数字和连字符（最长 64 字符）。",
+          "provider_oauth_not_implemented": "暂不支持 OAuth 认证。"
+        }
       },
       "capability": {
         "label": "Capability JSON",
