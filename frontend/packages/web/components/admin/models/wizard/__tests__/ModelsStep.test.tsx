@@ -85,6 +85,34 @@ describe('ModelsStep', () => {
     expect(screen.getByText('Model B')).toBeInTheDocument()
   })
 
+  it('adds a custom model via the full form dialog with config + pricing', async () => {
+    renderStep()
+    fireEvent.click(screen.getByRole('button', { name: en.adminModels.wizard.models.addCustom }))
+    // The shared model form dialog opens (same as the management page).
+    expect(await screen.findByTestId('model-form-dialog')).toBeInTheDocument()
+    fireEvent.change(screen.getByPlaceholderText('gpt-4o'), { target: { value: 'custom-x' } })
+    fireEvent.change(screen.getByPlaceholderText('GPT-4o'), { target: { value: 'Custom X' } })
+    fireEvent.change(screen.getByLabelText(en.adminModels.costInput), { target: { value: '1.5' } })
+    fireEvent.change(screen.getByLabelText(en.adminModels.contextWindow), {
+      target: { value: '64000' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: en.adminModels.save }))
+
+    // The new row is staged and included on Next, carrying its config + pricing.
+    expect(await screen.findByText('Custom X')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }))
+    await waitFor(() => {
+      const call = vi.mocked(core.createModel).mock.calls.find((c) => c[2].model_id === 'custom-x')
+      expect(call).toBeDefined()
+      expect(call?.[2]).toMatchObject({
+        model_id: 'custom-x',
+        cost_input: 1.5,
+        context_window: 64000,
+        enabled: false,
+      })
+    })
+  })
+
   it('Next creates a model per checked entry with enabled:false and collects ids', async () => {
     const { onModelsCreated } = renderStep()
     fireEvent.click(screen.getByRole('button', { name: 'Next' }))

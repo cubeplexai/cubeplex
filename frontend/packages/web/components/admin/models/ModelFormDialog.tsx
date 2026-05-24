@@ -210,7 +210,7 @@ export function ModelFormDialog({ open, onOpenChange, model, onSave }: ModelForm
               </div>
             </div>
 
-            <Accordion className="mt-1">
+            <Accordion className="mt-1" multiple defaultValue={['costs', 'limits']}>
               <AccordionItem value="costs">
                 <AccordionTrigger className="text-xs text-muted-foreground">
                   {t('costPerMillion')}
