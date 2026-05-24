@@ -6,6 +6,7 @@ See spec §4.4 for the two-phase sequence (liveness + per-model capability).
 from __future__ import annotations
 
 import asyncio
+import re
 import time
 from collections.abc import Callable
 from typing import Any, Literal, cast
@@ -148,6 +149,44 @@ def _error_event_detail(evt: Any) -> str:
     return "stream returned an error event"
 
 
+# Pull an HTTP status out of a cubepi error string. cubepi formats upstream
+# failures as "... Error code: 404 - {...}", so the status isn't a structured
+# field on the error event — we have to read it back out of the message.
+_ERROR_CODE_RE = re.compile(r"error code:\s*(\d{3})", re.IGNORECASE)
+
+
+def _status_from_text(text: str) -> int | None:
+    m = _ERROR_CODE_RE.search(text)
+    return int(m.group(1)) if m else None
+
+
+def _liveness_error_is_provider_level(error: ProbeError) -> bool:
+    """Does a failed liveness probe mean the *provider* is bad, not just the model?
+
+    Liveness is provider-grain: it must only condemn the provider when the
+    failure is shared by every model, not when one probe model happens to be
+    dead. The deciding signal is whether the endpoint answered at all:
+
+    - No HTTP status (network / DNS / timeout / connection refused) → provider
+      is unreachable → provider-level fail.
+    - 5xx → the provider's server is broken → provider-level fail.
+    - 401 / 403 → the credential is rejected, which breaks every model →
+      provider-level fail.
+    - Any other 4xx (402 out-of-credits, 404 model removed, 429 rate-limited,
+      400 bad request, …) → the provider ANSWERED, so it is reachable; the
+      problem is scoped to that model/request. NOT provider-level — the
+      per-model probe surfaces the model-specific verdict instead.
+    """
+    status = error.raw_status
+    if status is None:
+        status = _status_from_text(f"{error.type} {error.message}")
+    if status is None:
+        return True
+    if status in (401, 403):
+        return True
+    return status >= 500
+
+
 async def probe_liveness(provider: Any, *, model_id: str) -> ProbeStep:
     # Spec §4.4 step 1: minimal completion — max_tokens=1, prompt ".",
     # 5s timeout. Proves base_url + key + network reach the endpoint.
@@ -161,10 +200,25 @@ async def probe_liveness(provider: Any, *, model_id: str) -> ProbeStep:
             max_seconds=5.0,
         )
     except Exception as exc:
-        return ProbeStep(name="liveness", status="fail", error=_probe_error(exc))
-    err = _first_error_event(events)
-    if err is not None:
-        return ProbeStep(name="liveness", status="fail", detail=_error_event_detail(err))
+        err = _probe_error(exc)
+        if _liveness_error_is_provider_level(err):
+            return ProbeStep(name="liveness", status="fail", error=err)
+        return ProbeStep(
+            name="liveness",
+            status="pass",
+            detail=f"provider reachable; probe model '{model_id}' unusable: {err.message[:140]}",
+        )
+    err_evt = _first_error_event(events)
+    if err_evt is not None:
+        detail = _error_event_detail(err_evt)
+        err = ProbeError(type="StreamError", message=detail, raw_status=_status_from_text(detail))
+        if _liveness_error_is_provider_level(err):
+            return ProbeStep(name="liveness", status="fail", detail=detail)
+        return ProbeStep(
+            name="liveness",
+            status="pass",
+            detail=f"provider reachable; probe model '{model_id}' unusable: {detail[:140]}",
+        )
     return ProbeStep(
         name="liveness",
         status="pass",
