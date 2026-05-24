@@ -387,15 +387,24 @@ async def _repair_dangling_tool_calls(conversation_id: str) -> None:
         if data is None or not data.messages:
             return
 
-        last_assistant: AssistantMessage | None = None
-        for message in reversed(data.messages):
-            if isinstance(message, AssistantMessage):
-                last_assistant = message
+        last_idx = -1
+        for i in range(len(data.messages) - 1, -1, -1):
+            if isinstance(data.messages[i], AssistantMessage):
+                last_idx = i
                 break
-        if last_assistant is None:
+        if last_idx == -1:
             return
+        last_assistant = data.messages[last_idx]
+        assert isinstance(last_assistant, AssistantMessage)
 
-        answered = {m.tool_call_id for m in data.messages if isinstance(m, ToolResultMessage)}
+        # Only this turn's results count as answered — tool_call ids are not
+        # globally unique, so scanning all history could treat a reused id
+        # from an earlier turn as answered and skip the needed backfill.
+        answered = {
+            m.tool_call_id
+            for m in data.messages[last_idx + 1 :]
+            if isinstance(m, ToolResultMessage)
+        }
         synthetic: list[Any] = [
             ToolResultMessage(
                 tool_call_id=block.id,
