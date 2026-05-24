@@ -365,6 +365,52 @@ async def _build_attachment_content_blocks(
         return blocks
 
 
+async def _repair_dangling_tool_calls(conversation_id: str) -> None:
+    """Backfill synthetic tool_results for tool_calls a cancel left unanswered.
+
+    Mirrors cubepi's own cancel cleanup as a fallback. Loads the checkpointed
+    thread, finds tool_calls in the last assistant message that have no
+    ToolResultMessage, and appends a synthetic error result for each so the
+    next provider call sees a structurally valid history.
+    """
+    from cubepi.providers.base import (
+        AssistantMessage,
+        TextContent,
+        ToolCall,
+        ToolResultMessage,
+    )
+
+    from cubebox.agents.checkpointer import init_checkpointer
+
+    async with init_checkpointer() as cp:
+        data = await cp.load(conversation_id)
+        if data is None or not data.messages:
+            return
+
+        last_assistant: AssistantMessage | None = None
+        for message in reversed(data.messages):
+            if isinstance(message, AssistantMessage):
+                last_assistant = message
+                break
+        if last_assistant is None:
+            return
+
+        answered = {m.tool_call_id for m in data.messages if isinstance(m, ToolResultMessage)}
+        synthetic: list[Any] = [
+            ToolResultMessage(
+                tool_call_id=block.id,
+                tool_name=block.name,
+                content=[TextContent(text="[Tool execution cancelled by user]")],
+                is_error=True,
+                timestamp=datetime.now(UTC).timestamp(),
+            )
+            for block in last_assistant.content
+            if isinstance(block, ToolCall) and block.id not in answered
+        ]
+        if synthetic:
+            await cp.append(conversation_id, synthetic)
+
+
 class RunManager:
     """Owns background run execution and Redis persistence."""
 
@@ -1536,6 +1582,13 @@ class RunManager:
                 run_id=run_id,
                 status="cancelled",
             )
+            # Defense in depth: cubepi backfills tool_results for tool_calls
+            # left dangling by a cancel, but if that cleanup was itself cut
+            # short the persisted thread would still have orphan tool_calls
+            # and every later turn would 400. Repair here too — idempotent, so
+            # it's a no-op when cubepi already handled it.
+            with suppress(Exception):
+                await _repair_dangling_tool_calls(conversation_id)
             with suppress(Exception):
                 await self._append_error(run_id, conversation_id, "Run cancelled", "Run cancelled")
             raise

@@ -503,6 +503,7 @@ async function finalizeCompletedStream(
   get: () => MessageStore,
   set: (partial: Partial<MessageStore> | ((state: MessageStore) => Partial<MessageStore>)) => void,
   conversationId: string,
+  stopReason: AssistantMessageType['stop_reason'] = 'stop',
 ): Promise<void> {
   const agents = get().streamAgents
   const mainStream = agents[MAIN_AGENT_KEY]
@@ -526,7 +527,7 @@ async function finalizeCompletedStream(
     id: nextMessageId('assistant'),
     role: 'assistant',
     content: finalBlocks,
-    stop_reason: 'stop',
+    stop_reason: stopReason,
     usage: usage
       ? {
           input_tokens: usage.input_tokens,
@@ -946,15 +947,34 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
     const state = get()
     if (!state.isStreaming || state.streamingConversationId !== conversationId) return
 
-    set({
-      isStreaming: false,
-      streamingConversationId: null,
-      currentRunId: null,
-      statusPhase: null,
-    })
-
+    // Stop consuming the stream first so no late event mutates streamAgents
+    // after we snapshot it below.
     activeStreamController?.abort()
     activeStreamController = null
+
+    // Persist whatever was streamed so far as a cancelled assistant turn so
+    // the partial content stays visible — otherwise it vanishes the moment
+    // isStreaming flips false and only reappears after a reload (which reads
+    // the checkpointer). Skip when nothing was produced to avoid an empty
+    // bubble.
+    const mainStream = get().streamAgents[MAIN_AGENT_KEY]
+    const hasContent =
+      !!mainStream &&
+      (mainStream.blocks.length > 0 ||
+        mainStream.text.length > 0 ||
+        mainStream.thinking.length > 0 ||
+        mainStream.toolResults.length > 0)
+
+    if (hasContent) {
+      await finalizeCompletedStream(get, set, conversationId, 'aborted')
+    } else {
+      set({
+        isStreaming: false,
+        streamingConversationId: null,
+        currentRunId: null,
+        statusPhase: null,
+      })
+    }
 
     try {
       await cancelActiveRun(client, conversationId)
