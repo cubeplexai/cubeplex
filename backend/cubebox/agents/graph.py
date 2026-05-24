@@ -13,7 +13,7 @@ from typing import Any
 from cubepi import Agent, Model
 from cubepi.agent.types import AgentTool
 from cubepi.middleware.base import Middleware
-from cubepi.providers.base import Provider
+from cubepi.providers.base import Provider, ThinkingLevel
 
 from cubebox.middleware._compose import compose_after_tool_call
 
@@ -30,6 +30,8 @@ def create_cubebox_agent(
     middleware: list[Middleware] | None = None,
     max_tokens: int = 8192,
     temperature: float = 0.7,
+    reasoning: bool = False,
+    thinking: ThinkingLevel = "off",
 ) -> Agent[Any]:
     """Build a cubepi.Agent for cubebox's cubepi runtime path.
 
@@ -47,13 +49,23 @@ def create_cubebox_agent(
         max_tokens: Maximum output tokens forwarded to the provider (defaults to
             8192; callers should pass the model's configured max_tokens).
         temperature: Sampling temperature forwarded to the provider (default 0.7).
+        reasoning: Whether the model is reasoning-capable. Must be True for the
+            capability layer to apply the reasoning payload (cubepi guards the
+            thinking toggle on Model.reasoning).
+        thinking: Thinking level for the run ("off" disables it). Only takes
+            effect when ``reasoning`` is True.
     """
     mw_list = middleware or []
     return Agent(
         provider=provider,
         model=Model(
-            id=model_id, provider=provider_name, max_tokens=max_tokens, temperature=temperature
+            id=model_id,
+            provider=provider_name,
+            reasoning=reasoning,
+            max_tokens=max_tokens,
+            temperature=temperature,
         ),
+        thinking=thinking,
         system_prompt=system_prompt,
         tools=tools or [],
         checkpointer=checkpointer,

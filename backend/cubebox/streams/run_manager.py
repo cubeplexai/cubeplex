@@ -1112,6 +1112,10 @@ class RunManager:
                 middleware=cubepi_middleware,
                 max_tokens=_model_max_tokens,
                 temperature=_model_temperature,
+                # Reasoning-capable models think by default ("medium"); a
+                # per-conversation toggle (UI) can override this later.
+                reasoning=_model_config.reasoning,
+                thinking="medium" if _model_config.reasoning else "off",
             )
 
             # Late-bind extra_ref to the live agent._extra dict so compaction /
