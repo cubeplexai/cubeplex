@@ -366,6 +366,11 @@
       "next": "下一步",
       "cancel": "取消",
       "finish": "完成",
+      "discard": "丢弃",
+      "finishLater": "稍后完成",
+      "discardPrompt": "丢弃此 provider？将删除它及其模型。",
+      "discardYes": "删除",
+      "discardNo": "返回",
       "step": {
         "preset": { "label": "选择预设", "hint": "挑选 provider" },
         "configure": { "label": "配置", "hint": "凭证与能力" },
