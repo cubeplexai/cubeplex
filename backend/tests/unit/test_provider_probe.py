@@ -234,6 +234,26 @@ async def test_probe_liveness_fails_on_error_event():
 
 
 @pytest.mark.asyncio
+async def test_probe_liveness_surfaces_cubepi_error_message():
+    # cubepi's StreamEvent carries the upstream failure in `error_message` (see
+    # cubepi.providers.base.StreamEvent), NOT `error`/`message`/`detail`. The
+    # probe must read that field so a 401 reaches the UI instead of a generic
+    # "stream returned an error event".
+    err = type(
+        "E",
+        (),
+        {
+            "type": "error",
+            "error_message": "AuthenticationError: 401 - Missing Authentication header",
+        },
+    )()
+    step = await probe_liveness(_StubProvider(events=[err]), model_id="m")
+    assert step.status == "fail"
+    assert "401" in step.detail
+    assert "Authentication" in step.detail
+
+
+@pytest.mark.asyncio
 async def test_probe_streaming_fails_on_error_event():
     err = type("E", (), {"type": "error", "error": "boom"})()
     step = await probe_streaming(_StubProvider(events=[err]), model_id="m")

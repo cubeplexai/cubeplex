@@ -137,7 +137,11 @@ def _first_error_event(events: list[Any]) -> Any | None:
 
 
 def _error_event_detail(evt: Any) -> str:
-    for attr in ("error", "message", "detail"):
+    # cubepi's StreamEvent carries the upstream failure in `error_message` (see
+    # cubepi.providers.base.StreamEvent); the others are defensive fallbacks for
+    # differently-shaped event objects. Without error_message a 401/403 would be
+    # masked by the generic string below, making a wrong key look like a bug.
+    for attr in ("error_message", "error", "message", "detail"):
         v = getattr(evt, attr, None)
         if v:
             return str(v)[:200]
