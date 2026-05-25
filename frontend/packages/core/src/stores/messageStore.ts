@@ -1009,7 +1009,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
       }))
 
     try {
-      const res = await steerRun(client, conversationId, text)
+      const res = await steerRun(client, conversationId, text, crypto.randomUUID())
       if (res.status === 'no_active_run') rollback()
     } catch (err) {
       console.error('Failed to steer run:', err)

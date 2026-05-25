@@ -43,7 +43,12 @@ describe('messageStore.steer', () => {
     expect(msgs).toHaveLength(1)
     expect(msgs[0].role).toBe('user')
     expect(msgs[0].content).toEqual([{ type: 'text', text: 'go left instead' }])
-    expect(steerRun).toHaveBeenCalledWith(fakeClient, 'conv1', 'go left instead')
+    expect(steerRun).toHaveBeenCalledWith(
+      fakeClient,
+      'conv1',
+      'go left instead',
+      expect.any(String),
+    )
   })
 
   it('is a no-op for empty content', async () => {
