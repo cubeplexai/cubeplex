@@ -250,6 +250,7 @@ def cubepi_dict_to_agent_event(d: dict[str, Any], timestamp: str) -> AgentEvent 
     """
     from cubebox.agents.schemas import (
         ErrorEvent,
+        InjectedMessageEvent,
         ReasoningEvent,
         TextDeltaEvent,
         ToolCallEvent,
@@ -258,6 +259,11 @@ def cubepi_dict_to_agent_event(d: dict[str, Any], timestamp: str) -> AgentEvent 
     )
 
     t = d.get("type")
+    if t == "injected_message":
+        return InjectedMessageEvent(
+            timestamp=timestamp,
+            data={"content": d.get("content", ""), "steer_id": d.get("steer_id", "")},
+        )
     if t == "text_delta":
         return TextDeltaEvent(
             timestamp=timestamp,
@@ -1337,10 +1343,20 @@ class RunManager:
             # skills / todo middleware can read and write persistent state.
             extra_ref_holder["extra"] = agent._extra
 
+            from cubepi.agent.types import MessageEndEvent as _MsgEndEvent
+            from cubepi.providers.base import UserMessage as _UserMsg
+
+            _user_msg_seen = 0
+
             def _on_event(evt: Any, _signal: Any = None) -> None:
                 # Runs on the same event loop as _run_cubepi_path, so
                 # put_nowait is safe.  If we ever invoke the agent from a
                 # background thread, swap to loop.call_soon_threadsafe.
+                nonlocal _user_msg_seen
+                if isinstance(evt, _MsgEndEvent) and isinstance(evt.message, _UserMsg):
+                    _user_msg_seen += 1
+                    if _user_msg_seen == 1:
+                        return  # seed prompt — already shown optimistically
                 for d in convert_agent_event_to_sse(evt):
                     sse_queue.put_nowait(d)
 
