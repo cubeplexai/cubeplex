@@ -384,11 +384,25 @@ from cubebox.services import memory_consolidation as mc
 from cubebox.models.memory import MemoryScope, MemorySourceType, MemoryType
 
 
+class _Item:
+    def __init__(self, scope):
+        self.scope = scope
+
+
+class _FakeRepo:
+    def __init__(self, items):
+        self._items = items  # id -> _Item
+
+    async def get(self, memory_id):
+        return self._items.get(memory_id)
+
+
 class _FakeService:
-    def __init__(self):
+    def __init__(self, items=None):
         self.created = []
         self.updated = []
         self.archived = []
+        self.repo = _FakeRepo(items or {})
 
     async def create(self, inp):
         self.created.append(inp)
@@ -425,7 +439,10 @@ def test_parse_ops_filters_invalid_ops_keeps_valid():
 
 @pytest.mark.asyncio
 async def test_apply_ops_forces_personal_scope_and_source():
-    svc = _FakeService()
+    svc = _FakeService(items={
+        "m1": _Item(MemoryScope.PERSONAL),
+        "m2": _Item(MemoryScope.PERSONAL),
+    })
     ops = [
         {"action": "extract", "type": "preference", "content": "likes dark mode"},
         {"action": "merge", "id": "m1", "content": "merged"},
@@ -440,6 +457,19 @@ async def test_apply_ops_forces_personal_scope_and_source():
     assert inp.source_conversation_id == "conv1"
     assert svc.updated == [("m1", "merged")]
     assert svc.archived == ["m2"]
+
+
+@pytest.mark.asyncio
+async def test_apply_ops_skips_non_personal_or_missing_targets():
+    # m-ws is a workspace item the user can read; m-gone doesn't exist.
+    svc = _FakeService(items={"m-ws": _Item(MemoryScope.WORKSPACE)})
+    ops = [
+        {"action": "merge", "id": "m-ws", "content": "x"},   # shared → skip
+        {"action": "archive", "id": "m-gone"},               # missing → skip
+    ]
+    await mc.apply_ops(svc, ops, conversation_id="conv1", run_id=None)
+    assert svc.updated == []
+    assert svc.archived == []
 ```
 
 - [ ] **Step 2: Run it, confirm FAIL**
@@ -491,8 +521,10 @@ async def apply_ops(
     conversation_id: str,
     run_id: str | None,
 ) -> None:
-    """Apply ops. Scope is hard-coded PERSONAL (the op schema has no scope);
-    source is stamped CONSOLIDATION with conversation/run attribution."""
+    """Apply ops. Scope is hard-coded PERSONAL on create (the op schema has no
+    scope); merge/archive targets are verified to be the user's PERSONAL items
+    before mutation, so a hallucinated id can't touch a shared (workspace/org)
+    item the user merely has read access to. Source stamped CONSOLIDATION."""
     for op in ops:
         action = op["action"]
         try:
@@ -507,10 +539,15 @@ async def apply_ops(
                         source_run_id=run_id,
                     )
                 )
-            elif action == "merge":
-                await service.update(op["id"], content=op["content"].strip())
-            elif action == "archive":
-                await service.archive(op["id"])
+            elif action in ("merge", "archive"):
+                # Guard: only mutate the user's own PERSONAL items.
+                target = await service.repo.get(op["id"])
+                if target is None or target.scope != MemoryScope.PERSONAL:
+                    continue
+                if action == "merge":
+                    await service.update(op["id"], content=op["content"].strip())
+                else:
+                    await service.archive(op["id"])
         except Exception:
             # One bad op (e.g. id no longer accessible) must not abort the batch.
             logger.warning("consolidation op failed: {}", op, exc_info=True)
@@ -828,7 +865,7 @@ Run: `cd /home/chris/cubebox/.worktrees/feat/auto-memory && make check-ci`
 - **Spec coverage:** Layer 1 (always-inject authoring + per-type triggers + proactive-personal-only) → Task 1. CONSOLIDATION source → Task 2. Gate/lock/HWM → Task 3. Op schema/validate/cap + scope-hardcoded-PERSONAL + source attribution + window cap → Task 4. Post-run trigger + tracked/drained task → Task 5. Tests/E2E → Tasks 1/3/4/6.
 - **Per-conversation pivot** (spec Blocker 1): Tasks 3-5 key all gate state on `conversation_id` and load `cp.load(conversation_id)`.
 - **Atomic HWM** (spec Blocker 2): Task 3 `mark_consolidated` uses `DECRBY consumed` (not reset); Task 4 captures `cutoff`/`consumed` before the pass; failure path leaves `last` + counter so it retries.
-- **Personal-only enforcement** (spec Blocker 3): Task 1 prompt restricts proactive to personal; Task 4 `apply_ops` hard-codes `MemoryScope.PERSONAL` (op schema has no scope).
+- **Personal-only enforcement** (spec Blocker 3): Task 1 prompt restricts proactive to personal; Task 4 `apply_ops` hard-codes `MemoryScope.PERSONAL` on create AND guards merge/archive — it fetches the target via `repo.get` (which scopes by `_can_read`) and skips anything whose `scope != PERSONAL`, so a hallucinated id can't mutate a shared (workspace/org) item the user happens to have read access to.
 - **Type consistency:** `note_run`/`should_consolidate`/`acquire_lock`/`release_lock`/`mark_consolidated`/`get_last`/`_counter`/`parse_ops`/`apply_ops`/`run_consolidation` names are identical across Tasks 3-5 and the tests.
 - **Open question (window cap):** fixed at `HISTORY_MSG_CAP = 40` newest messages (Task 4); thresholds `min_hours=6`/`min_runs=5` config-overridable (Task 5).
 - **E2E caveat:** Task 6 Step 2 is intentionally adapt-to-conftest (the fixture's id exposure isn't known here) — the implementer must wire it against the real `tests/e2e/conftest.py`, asserting through the memory API if needed.
