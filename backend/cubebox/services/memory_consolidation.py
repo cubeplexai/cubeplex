@@ -10,7 +10,8 @@ from __future__ import annotations
 import json
 import time
 import uuid
-from typing import Any
+from collections.abc import Awaitable
+from typing import Any, cast
 
 from loguru import logger
 from redis.asyncio import Redis
@@ -63,15 +64,23 @@ async def acquire_lock(
     return token if ok else None
 
 
+# Atomic compare-and-delete: only delete the lock if WE still hold the token.
+# A separate GET+DELETE would race — if the TTL expired between them and another
+# worker took a fresh token, the stale DELETE would drop the new holder's lock.
+# Comparing raw stored bytes to the passed token works regardless of
+# decode_responses.
+_RELEASE_LUA = (
+    "if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('del', KEYS[1]) "
+    "else return 0 end"
+)
+
+
 async def release_lock(redis: Redis, prefix: str, conversation_id: str, token: str) -> None:
-    """Release only if we still hold it (compare-and-delete)."""
+    """Release the lock atomically, only if this caller still holds the token."""
     key = _k(prefix, "lock", conversation_id)
-    cur = await redis.get(key)
-    if cur is None:
-        return
-    cur_str = cur.decode() if isinstance(cur, (bytes, bytearray)) else cur
-    if cur_str == token:
-        await redis.delete(key)
+    # redis-py types eval() as a sync/async union; the async client returns an
+    # awaitable at runtime.
+    await cast("Awaitable[Any]", redis.eval(_RELEASE_LUA, 1, key, token))
 
 
 async def mark_consolidated(
