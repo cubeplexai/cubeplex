@@ -307,6 +307,18 @@ class OrgSkillInstallRepository:
         )
         return result.scalar_one_or_none()
 
+    async def get_workspace_private(
+        self, org_id: str, workspace_id: str, skill_id: str
+    ) -> OrgSkillInstall | None:
+        result = await self.session.execute(
+            select(OrgSkillInstall).where(
+                OrgSkillInstall.org_id == org_id,  # type: ignore[arg-type]
+                OrgSkillInstall.workspace_id == workspace_id,  # type: ignore[arg-type]
+                OrgSkillInstall.skill_id == skill_id,  # type: ignore[arg-type]
+            )
+        )
+        return result.scalar_one_or_none()
+
     async def create_for_workspace(
         self,
         *,
@@ -316,6 +328,15 @@ class OrgSkillInstallRepository:
         installed_version: str,
         installed_by_user_id: str,
     ) -> OrgSkillInstall:
+        existing = await self.get_workspace_private(org_id, workspace_id, skill_id)
+        if existing is not None:
+            existing.installed_version = installed_version
+            existing.installed_by_user_id = installed_by_user_id
+            existing.installed_at = datetime.now(UTC)
+            existing.auto_bind = True
+            await self.session.commit()
+            await self.session.refresh(existing)
+            return existing
         row = OrgSkillInstall(
             org_id=org_id,
             workspace_id=workspace_id,

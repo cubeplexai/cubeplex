@@ -147,6 +147,62 @@ async def test_publish_version_collision_raises(tmp_path, db_session) -> None:
 
 
 @pytest.mark.asyncio
+async def test_publish_twice_into_same_workspace_upserts_install(tmp_path, db_session) -> None:
+    """Re-publishing an org skill into the same workspace upserts the private install.
+
+    Regression: create_for_workspace did a bare INSERT, so the second publish
+    (a bumped version) hit uq_org_skill_install_ws → IntegrityError.
+    """
+    org_id = f"org-{secrets.token_hex(4)}"
+    org_slug = f"org-{secrets.token_hex(4)}"
+    ws_id = f"ws-{secrets.token_hex(4)}"
+    skill_name = f"x-{secrets.token_hex(4)}"
+    await _seed_org_and_user(db_session, org_id, "u")
+    await db_session.execute(
+        text(
+            "INSERT INTO workspaces (id, org_id, name, created_at)"
+            " VALUES (:id, :org_id, :name, NOW()) ON CONFLICT (id) DO NOTHING"
+        ),
+        {"id": ws_id, "org_id": org_id, "name": ws_id},
+    )
+    await db_session.commit()
+
+    publisher = SkillPublishService(
+        session=db_session, cache=SkillCache(cache_root=tmp_path / "cache")
+    )
+
+    def _zip(version: str) -> bytes:
+        return _make_zip(
+            {
+                "SKILL.md": f"---\nname: {skill_name}\ndescription: y\nversion: {version}\n---\n".encode()
+            }
+        )
+
+    await publisher.publish_from_zip(
+        org_id=org_id,
+        org_slug=org_slug,
+        actor_user_id="u",
+        zip_bytes=_zip("1.0.0"),
+        workspace_id=ws_id,
+    )
+    # Second publish with a bumped version must not raise on the install insert.
+    await publisher.publish_from_zip(
+        org_id=org_id,
+        org_slug=org_slug,
+        actor_user_id="u",
+        zip_bytes=_zip("1.0.1"),
+        workspace_id=ws_id,
+    )
+
+    skill = await SkillRepository(db_session).find_by_name(f"{org_slug}:{skill_name}")
+    assert skill is not None
+    installs = await OrgSkillInstallRepository(db_session).list_for_workspace_private(org_id, ws_id)
+    ws_installs = [i for i in installs if i.skill_id == skill.id]
+    assert len(ws_installs) == 1
+    assert ws_installs[0].installed_version == "1.0.1"
+
+
+@pytest.mark.asyncio
 async def test_publish_invalid_frontmatter_raises(tmp_path, db_session) -> None:
     from cubebox.skills.frontmatter import InvalidFrontmatterError
 
