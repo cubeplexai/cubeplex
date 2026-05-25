@@ -8,6 +8,7 @@ import { cn } from '@/lib/utils'
 import { useWorkspaceContext } from '@/hooks/useWorkspaceContext'
 import { AttachmentChips } from '@/components/chat/AttachmentChips'
 import { UploadDropzone } from '@/components/chat/UploadDropzone'
+import { PendingSteers } from '@/components/layout/PendingSteers'
 
 interface InputBarProps {
   conversationId?: string
@@ -199,6 +200,7 @@ export function InputBar({
 
   return (
     <div className="w-full max-w-3xl mx-auto">
+      {conversationId && <PendingSteers conversationId={conversationId} />}
       {conversationId && <UploadDropzone conversationId={conversationId} />}
       {conversationId && <AttachmentChips conversationId={conversationId} />}
       <input

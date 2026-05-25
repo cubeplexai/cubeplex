@@ -8,6 +8,7 @@ const storeMocks = vi.hoisted(() => ({
   send: vi.fn(),
   steer: vi.fn(),
   cancelStream: vi.fn(),
+  cancelSteer: vi.fn(),
   upload: vi.fn(),
   clear: vi.fn(),
   hydrate: vi.fn(),
@@ -24,6 +25,8 @@ vi.mock('@cubebox/core', () => ({
       send: typeof storeMocks.send
       steer: typeof storeMocks.steer
       cancelStream: typeof storeMocks.cancelStream
+      cancelSteer: typeof storeMocks.cancelSteer
+      pendingSteers: Record<string, unknown[]>
       isStreaming: boolean
       streamingConversationId: string | null
     }) => unknown,
@@ -32,6 +35,8 @@ vi.mock('@cubebox/core', () => ({
       send: storeMocks.send,
       steer: storeMocks.steer,
       cancelStream: storeMocks.cancelStream,
+      cancelSteer: storeMocks.cancelSteer,
+      pendingSteers: {},
       isStreaming: storeMocks.state.isStreaming,
       streamingConversationId: storeMocks.state.streamingConversationId,
     }),
