@@ -5,7 +5,7 @@ vi.mock('../../src/api', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../src/api')>()
   return {
     ...actual,
-    steerRun: vi.fn().mockResolvedValue({ steered: true, run_id: 'r1' }),
+    steerRun: vi.fn().mockResolvedValue({ status: 'steered', run_id: 'r1' }),
   }
 })
 
@@ -60,10 +60,19 @@ describe('messageStore.steer', () => {
 
   it('rolls back the optimistic bubble when the run was not steered', async () => {
     ;(steerRun as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
-      steered: false,
+      status: 'no_active_run',
       run_id: null,
     })
     await useMessageStore.getState().steer(fakeClient, 'conv1', 'too late')
     expect(useMessageStore.getState().messages.conv1).toHaveLength(0)
+  })
+
+  it('keeps the optimistic bubble when status is published', async () => {
+    ;(steerRun as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      status: 'published',
+      run_id: 'r1',
+    })
+    await useMessageStore.getState().steer(fakeClient, 'conv1', 'cross-instance steer')
+    expect(useMessageStore.getState().messages.conv1).toHaveLength(1)
   })
 })

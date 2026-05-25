@@ -4,7 +4,7 @@ import { CSRF_COOKIE_NAME } from './cookieNames'
 import { streamRun } from './runStreams'
 
 export interface CancelRunResponse {
-  cancelled: boolean
+  status: 'cancelled' | 'published' | 'no_active_run'
   run_id: string | null
 }
 
@@ -20,7 +20,7 @@ export async function cancelActiveRun(
 }
 
 export interface SteerRunResponse {
-  steered: boolean
+  status: 'steered' | 'published' | 'no_active_run'
   run_id: string | null
 }
 
