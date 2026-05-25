@@ -267,6 +267,12 @@ async def generate_title(
     return _serialize_conversation(conversation)
 
 
+class SteerMessageRequest(BaseModel):
+    """Request body for steering an in-flight run."""
+
+    content: str
+
+
 class SendMessageRequest(BaseModel):
     """Request body for sending a message."""
 
@@ -820,3 +826,45 @@ async def cancel_active_run(
     run_manager = raw_request.app.state.run_manager
     cancelled = await run_manager.cancel_run(active_run.run_id)
     return {"cancelled": cancelled, "run_id": active_run.run_id}
+
+
+@router.post("/{conversation_id}/steer", status_code=status.HTTP_202_ACCEPTED)
+async def steer_active_run(
+    conversation_id: str,
+    body: SteerMessageRequest,
+    raw_request: Request,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    ctx: Annotated[RequestContext, Depends(require_member)],
+    rds: Annotated[RedisHandle, Depends(redis_dep)],
+) -> dict[str, object]:
+    """Inject a steering message into the conversation's active run, if any."""
+    if not body.content.strip():
+        raise InvalidInputError(
+            message="Steering message must not be empty",
+            details="Provide non-empty content to steer the run",
+        )
+
+    conv_repo = ConversationRepository(
+        session,
+        org_id=ctx.org_id,
+        workspace_id=ctx.workspace_id,
+        user_id=ctx.user.id,
+    )
+    conversation = await conv_repo.get_by_id(conversation_id)
+    if not conversation:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Conversation {conversation_id} not found",
+        )
+
+    active_run = await get_active_run(
+        rds.client,
+        prefix=rds.key_prefix,
+        conversation_id=conversation_id,
+    )
+    if active_run is None or active_run.status != "running":
+        return {"steered": False, "run_id": None}
+
+    run_manager = raw_request.app.state.run_manager
+    steered = await run_manager.steer_run(active_run.run_id, body.content)
+    return {"steered": steered, "run_id": active_run.run_id}

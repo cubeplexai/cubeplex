@@ -23,7 +23,13 @@ import type {
 } from '../types'
 import { getTextContent } from '../types'
 import type { ApiClient } from '../api'
-import { cancelActiveRun, getConversationBootstrap, streamMessages, streamRun } from '../api'
+import {
+  cancelActiveRun,
+  getConversationBootstrap,
+  steerRun,
+  streamMessages,
+  streamRun,
+} from '../api'
 import { useCitationStore } from './citationStore'
 import { useConversationStore } from './conversationStore'
 
@@ -65,6 +71,7 @@ export interface MessageStore {
     attachments?: import('../types').MessageAttachment[],
   ): Promise<void>
   cancelStream(client: ApiClient, conversationId: string): Promise<void>
+  steer(client: ApiClient, conversationId: string, content: string): Promise<void>
   clearStream(): void
   clearLastRunStatus(): void
 }
@@ -241,13 +248,17 @@ function buildPendingUserMessage(runId: string, content: string): UserMessageTyp
  * message from a prior turn; we only bind to a history entry created at or
  * after the run was claimed.
  */
-function trimHistoryForActiveRun(
+export function trimHistoryForActiveRun(
   messages: Message[],
   runId: string,
   content: string,
   startedAt: string | null,
 ): Message[] {
   const startedAtMs = startedAt ? Date.parse(startedAt) : NaN
+  // Find the run's ORIGINAL user message: the last user turn matching `content`
+  // at-or-after the run start. Skipping non-matching newer user turns is what
+  // lets checkpointed steer messages (which appear after the original) avoid
+  // triggering a duplicate placeholder.
   for (let i = messages.length - 1; i >= 0; i--) {
     const msg = messages[i]
     if (msg.role !== 'user') continue
@@ -256,7 +267,7 @@ function trimHistoryForActiveRun(
       break
     }
     if (getTextContent(msg) === content) return messages.slice(0, i + 1)
-    break
+    // Not the original (e.g. a steer turn) — keep scanning back.
   }
   return [...messages, buildPendingUserMessage(runId, content)]
 }
@@ -940,6 +951,51 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
       if (!lastState.error) {
         await finalizeCompletedStream(get, set, conversationId)
       }
+    }
+  },
+
+  async steer(client, conversationId, content) {
+    const text = content.trim()
+    if (!text) return
+    const state = get()
+    if (!state.isStreaming || state.streamingConversationId !== conversationId) return
+
+    // Optimistically show the steered user message immediately for responsive
+    // feedback. cubepi emits the injected message to the checkpointer (not as
+    // SSE deltas), so this in-memory bubble is the live display; a reload after
+    // the run completes re-reads it from history. Streaming state is left
+    // untouched — the run keeps going and the model picks the message up at its
+    // next safe point. If the endpoint reports the run was NOT steered (already
+    // finished / not in this process), roll the bubble back.
+    const optimisticId = nextMessageId('user-steer')
+    const userMessage: UserMessageType = {
+      id: optimisticId,
+      role: 'user',
+      content: [{ type: 'text', text }],
+      timestamp: Date.now() / 1000,
+      metadata: {},
+    }
+    set((s) => ({
+      messages: {
+        ...s.messages,
+        [conversationId]: [...(s.messages[conversationId] ?? []), userMessage],
+      },
+    }))
+
+    const rollback = () =>
+      set((s) => ({
+        messages: {
+          ...s.messages,
+          [conversationId]: (s.messages[conversationId] ?? []).filter((m) => m.id !== optimisticId),
+        },
+      }))
+
+    try {
+      const res = await steerRun(client, conversationId, text)
+      if (!res.steered) rollback()
+    } catch (err) {
+      console.error('Failed to steer run:', err)
+      rollback()
     }
   },
 

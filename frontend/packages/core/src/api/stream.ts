@@ -19,6 +19,23 @@ export async function cancelActiveRun(
   return (await res.json()) as CancelRunResponse
 }
 
+export interface SteerRunResponse {
+  steered: boolean
+  run_id: string | null
+}
+
+export async function steerRun(
+  client: ApiClient,
+  conversationId: string,
+  content: string,
+): Promise<SteerRunResponse> {
+  const res = await client.post(`/api/v1/conversations/${conversationId}/steer`, { content })
+  if (!res.ok) {
+    throw new Error(`Failed to steer run: HTTP ${res.status}`)
+  }
+  return (await res.json()) as SteerRunResponse
+}
+
 async function* readLines(reader: ReadableStreamDefaultReader<Uint8Array>): AsyncGenerator<string> {
   let buffer = ''
   const decoder = new TextDecoder()

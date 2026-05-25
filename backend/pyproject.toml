@@ -158,9 +158,10 @@ exclude_lines = [
 ]
 
 [tool.uv.sources]
-# ca83242 is cubepi main HEAD: it adds the cancel-orphan-tool-results fix
-# (#116) that backfills tool_results when a run is cancelled mid-tool-call.
-cubepi = { git = "https://github.com/cubeplexai/cubepi.git", rev = "ca83242" }
+# 8e9e4b9 is cubepi main HEAD: adds turn-boundary steering drain (#117) on top
+# of the cancel-orphan-tool-results fix (#116). The steer-during-run feature
+# relies on tail steering being honored during a final/tool-less turn.
+cubepi = { git = "https://github.com/cubeplexai/cubepi.git", rev = "8e9e4b9" }
 
 [dependency-groups]
 dev = [

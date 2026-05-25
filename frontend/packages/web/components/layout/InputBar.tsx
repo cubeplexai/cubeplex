@@ -34,6 +34,7 @@ export function InputBar({
   const [isHandlingSubmit, setIsHandlingSubmit] = useState(false)
   const send = useMessageStore((s) => s.send)
   const cancelStream = useMessageStore((s) => s.cancelStream)
+  const steer = useMessageStore((s) => s.steer)
   const { workspaceId } = useWorkspaceContext()
   const messageIsStreaming =
     useMessageStore((s) =>
@@ -60,7 +61,11 @@ export function InputBar({
   }, [conversationId, workspaceId, hydrate])
 
   const uploadInFlight = stagingItems.some((u) => u.status === 'uploading')
-  const isSubmitting = isLoading || messageIsStreaming || isHandlingSubmit
+  // Streaming no longer locks the textarea — the user can type to steer.
+  // handleSubmit still guards against starting a *new* turn mid-stream via
+  // `messageIsStreaming` directly (see handleSubmit).
+  const isSubmitting = isLoading || isHandlingSubmit
+  const hasText = content.trim().length > 0
   const stagedFileCount = conversationId ? attachedIds.length : pendingFiles.length
 
   const resetTextareaHeight = (): void => {
@@ -68,7 +73,13 @@ export function InputBar({
   }
 
   const handleSubmit = async (): Promise<void> => {
-    if (isSubmitting || uploadInFlight || (!content.trim() && stagedFileCount === 0)) return
+    if (
+      isSubmitting ||
+      messageIsStreaming ||
+      uploadInFlight ||
+      (!content.trim() && stagedFileCount === 0)
+    )
+      return
     if (!conversationId && !onSubmit) return
 
     try {
@@ -115,7 +126,11 @@ export function InputBar({
     if (e.nativeEvent.isComposing) return
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
-      void handleSubmit()
+      if (messageIsStreaming && hasText) {
+        void handleSteer()
+      } else {
+        void handleSubmit()
+      }
     }
   }
 
@@ -159,14 +174,27 @@ export function InputBar({
     setPendingFiles((current) => current.filter((_, currentIndex) => currentIndex !== index))
   }
 
-  const canAttach = Boolean(conversationId || onSubmit) && !isSubmitting
-  const canCancel = messageIsStreaming && Boolean(conversationId)
+  // Steering is text-only; don't allow new attachment uploads mid-run.
+  const canAttach = Boolean(conversationId || onSubmit) && !isSubmitting && !messageIsStreaming
+  // Show Stop only while streaming AND the box is empty; once the user types,
+  // the button becomes Send (which steers the live run).
+  const showStop = messageIsStreaming && Boolean(conversationId) && !hasText
 
   const handleCancel = async (): Promise<void> => {
     if (!conversationId) return
     const client = createApiClient('')
     if (workspaceId) client.setWorkspaceId(workspaceId)
     await cancelStream(client, conversationId)
+  }
+
+  const handleSteer = async (): Promise<void> => {
+    if (!conversationId || !hasText) return
+    const client = createApiClient('')
+    if (workspaceId) client.setWorkspaceId(workspaceId)
+    const text = content
+    setContent('')
+    resetTextareaHeight()
+    await steer(client, conversationId, text)
   }
 
   return (
@@ -232,7 +260,7 @@ export function InputBar({
           className="flex-1 bg-transparent resize-none outline-none text-sm text-foreground placeholder:text-muted-foreground/40 leading-relaxed min-h-7 max-h-[180px] overflow-y-auto py-0.5"
           disabled={isSubmitting}
         />
-        {canCancel ? (
+        {showStop ? (
           <button
             data-testid="stop-button"
             type="button"
@@ -246,7 +274,7 @@ export function InputBar({
         ) : (
           <button
             data-testid="send-button"
-            onClick={() => void handleSubmit()}
+            onClick={() => void (messageIsStreaming ? handleSteer() : handleSubmit())}
             disabled={(!content.trim() && stagedFileCount === 0) || isSubmitting || uploadInFlight}
             className={cn(
               'flex size-7 shrink-0 items-center justify-center rounded-lg bg-primary text-white transition-all hover:bg-primary/80',
