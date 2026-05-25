@@ -229,7 +229,7 @@ Add to `RunManager` (near `cancel_run`/`steer_run`):
 - [ ] **Step 5: Supervised reconnecting listeners + lifecycle**
 
 ```python
-    async def _subscribe_loop(self, channel: str, handler: Any) -> None:
+    async def _subscribe_loop(self, channel: str, handler: Any, ready: asyncio.Event) -> None:
         import json
 
         backoff = 0.5
@@ -237,12 +237,15 @@ Add to `RunManager` (near `cancel_run`/`steer_run`):
             pubsub = self._redis.pubsub()
             try:
                 await pubsub.subscribe(channel)
+                ready.set()  # signal first (and every) successful subscribe
                 backoff = 0.5
                 async for msg in pubsub.listen():
                     if self._control_stopping:
                         break
                     if msg.get("type") != "message":
                         continue
+                    # Per-message containment: a bad payload or handler fault must
+                    # never break the read loop and deafen the instance.
                     try:
                         await handler(json.loads(msg["data"]))
                     except Exception:
@@ -257,18 +260,27 @@ Add to `RunManager` (near `cancel_run`/`steer_run`):
                 with suppress(Exception):
                     await pubsub.aclose()
 
-    async def start_control_listeners(self) -> None:
+    async def start_control_listeners(self, ready_timeout: float = 5.0) -> None:
         self._control_stopping = False
+        ctrl_ready = asyncio.Event()
+        ack_ready = asyncio.Event()
         self._control_tasks = [
             asyncio.create_task(
-                self._subscribe_loop(self._control_channel, self._handle_control),
+                self._subscribe_loop(self._control_channel, self._handle_control, ctrl_ready),
                 name="run-control-listener",
             ),
             asyncio.create_task(
-                self._subscribe_loop(self._ack_channel, self._handle_ack),
+                self._subscribe_loop(self._ack_channel, self._handle_ack, ack_ready),
                 name="run-control-ack-listener",
             ),
         ]
+        # Don't return until both channels are actually subscribed, so controls
+        # published right after startup aren't lost. Bounded so a Redis hiccup
+        # can't hang boot.
+        with suppress(TimeoutError):
+            await asyncio.wait_for(
+                asyncio.gather(ctrl_ready.wait(), ack_ready.wait()), timeout=ready_timeout
+            )
 
     async def stop_control_listeners(self) -> None:
         self._control_stopping = True

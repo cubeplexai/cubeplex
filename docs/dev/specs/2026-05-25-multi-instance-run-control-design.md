@@ -210,12 +210,13 @@ Pin the ack design so it doesn't hold a subscriber connection per request:
   present; unknown `run_id`s are ignored (the requester is on another instance
   or already timed out).
 - Future resolved → endpoint returns `cancelled`; `wait_for` timeout → returns
-  `published` (owner slow or gone). `run_id` is a unique uuid7, so two concurrent
-  cancels of the same run both wait on… (note) two different `Future`s only if
-  they're on the same instance keyed by the same `run_id` — use a small list /
-  resolve-all, or accept that concurrent same-run cancels on one instance are
-  rare; simplest correct choice: store a list of waiters per `run_id` and resolve
-  all. No per-request Redis subscription is created.
+  `published` (owner slow or gone).
+- **Waiter map = `run_id → list[Future]`** (a list, so two concurrent cancels of
+  the same `run_id` on one instance each get their own future; one ack resolves
+  all). **Cleanup removes only this request's future**, and pops the `run_id`
+  key only when its list becomes empty — a timed-out waiter must NOT erase the
+  whole entry (that would orphan sibling waiters / a later valid ack). No
+  per-request Redis subscription is created.
 
 This keeps cross-instance cancel to **two extra pub/sub messages** (cancel +
 ack) and zero per-request connections.
@@ -225,11 +226,24 @@ ack) and zero per-request connections.
 The control listener and the ack listener are long-lived pub/sub subscribers. A
 dropped Redis connection must **reconnect and re-subscribe** — otherwise an
 instance silently goes deaf to control/acks after a blip while still serving
-traffic (a production multi-instance hazard). The listeners run as supervised
-tasks that, on connection error, reconnect with backoff and re-issue
-`SUBSCRIBE` before resuming. Tie their lifecycle to the app lifespan: start on
-startup; on shutdown, stop them **after** in-flight runs drain (so graceful
-drain can still receive controls).
+traffic (a production multi-instance hazard). Requirements:
+
+- **Reconnect with backoff + re-`SUBSCRIBE`** on any connection error, then
+  resume the read loop.
+- **Per-message exception containment:** wrap each message's decode + handler in
+  `try/except` so one bad payload (malformed JSON, schema drift) or a handler
+  fault logs and is skipped — it must NOT break out of the read loop and kill
+  the long-lived listener (which would silently deafen the instance until
+  restart). Only connection-level errors trigger the reconnect path.
+- **Await readiness on startup:** `start_control_listeners` must not return until
+  the first `SUBSCRIBE` for **both** channels has completed (each loop signals an
+  `asyncio.Event` after subscribing; startup awaits both, **bounded** by a short
+  timeout so a Redis hiccup can't hang boot). Otherwise the listeners are
+  fire-and-forget and a control published in the gap between "app ready" and
+  "subscriber live" is silently lost.
+- **Lifecycle = app lifespan:** start on startup (after readiness); on shutdown,
+  stop them **after** in-flight runs drain (so graceful drain can still receive
+  controls).
 
 ## Failure modes & edge cases
 
@@ -257,8 +271,20 @@ drain can still receive controls).
   puts the task into `_tasks` immediately, but `_agents[run_id]` is only set deep
   in `_run_cubepi_path` after the agent (LLM + tools + sandbox) is built — a
   multi-second gap during which the run is already "active" in Redis. So a
-  control arriving in that window: **cancel works** (owner has `_tasks[run_id]`),
-  but **steer is dropped** (owner has no `_agents[run_id]` yet → filter misses).
+  control arriving in that window: **cancel works**, but **steer is dropped**
+  (owner has no `_agents[run_id]` yet → filter misses).
+
+  Why cancel is safe even though `create_run` commits the active-run key
+  *before* the `_tasks` assignment (`run_manager.py:462-493`): on the owner's
+  single event loop there is **no `await` between** `create_run` resolving and
+  `self._tasks[run_id] = task`, so that assignment completes in the same
+  synchronous slice — the control listener (another task on the same loop)
+  cannot run until `start_run` next yields, by which point `_tasks` already has
+  the id. A cross-instance cancel can only reach the owner after a Redis
+  round-trip (B observes the key → publish → owner listener), which necessarily
+  happens after that slice. So the owner never processes a cancel while `_tasks`
+  lacks the run. (`_agents` is different: it's set deep inside `_run_cubepi_path`
+  after many awaits, hence the steer window is real.)
   This is not multi-instance-specific — single-instance steer in this window also
   no-ops via the fast-path (`steered:false` → `no_active_run`/`published`); there
   is simply no agent to steer yet. Documented, not fixed: the frontend treats it
@@ -367,16 +393,15 @@ B2's targeted delivery removes it.
    and recoverable.
 
    *Option B — bounded ack round-trip.* Restore the synchronous guarantee
-   cross-instance: the publishing endpoint (B) **subscribes to an ack channel
-   `{key_prefix}:control:ack` (or a per-run ack key) BEFORE publishing the
-   cancel** (subscribe-before-publish, else A's ack could fire before B is
-   listening and be missed), publishes the cancel, then `await
-   asyncio.wait_for(ack, timeout≈2–3s)`. After A's `cancel_run` cleanup
-   completes (key cleared), A publishes the ack `{run_id}`. B returns
-   `cancelled` (200) on ack — safe to resend — or `published` (202) on timeout
-   (best-effort; A slow or gone). Cost: B holds a subscriber wait per
-   cross-instance cancel (fine at this rate) and A emits one extra publish on
-   cleanup. Surgical, cancel-only, and it preserves today's behavior exactly
+   cross-instance. The mechanics are pinned in "Cross-instance cancel ack" above
+   (one **startup** ack subscriber per instance + a `run_id → list[Future]` map;
+   the endpoint **registers a future before publishing**, publishes the cancel,
+   then `await asyncio.wait_for(future, timeout≈2–3s)`; the owner publishes the
+   ack after its `cancel_run` cleanup clears the active-run key). B returns
+   `cancelled` on ack — safe to resend — or `published` on timeout (best-effort;
+   owner slow or gone); both are HTTP `202` (`200` is only `no_active_run`). Cost
+   is two extra pub/sub messages per cross-instance cancel and **no** per-request
+   subscription. Surgical, cancel-only, and it preserves today's behavior exactly
    when the owner is responsive.
 
    *UX difference (this is the deciding lens).* In almost every interaction A
