@@ -16,14 +16,22 @@ async function startRun(page: Page, prompt: string): Promise<void> {
   await input.fill(prompt)
   await input.press('Enter')
   await expect(page).toHaveURL(/\/w\/[^/]+\/conversations\//)
-  await expect(page.getByTestId('loading-indicator')).toBeVisible({ timeout: 10_000 })
+  await expect(page.getByTestId('loading-indicator')).toBeVisible({ timeout: 20_000 })
 }
+
+// A prompt that streams steadily for a clear mid-run window but still finishes
+// well within the test budget — and is purely conversational so it won't pull
+// in tools (the E2E env has no sandbox). The steer drains at the run's tail.
+const STREAMY_PROMPT =
+  'Tell me a slow, gentle bedtime story about a small robot exploring a ' +
+  'quiet forest. At least 400 words. Do not use any tools — just write prose.'
 
 test('steer shows a pending chip, then commits into the transcript at a stable position', async ({
   page,
 }) => {
+  test.setTimeout(240_000)
   await registerAndLand(page)
-  await startRun(page, 'Count slowly from 1 to 20, one number per line.')
+  await startRun(page, STREAMY_PROMPT)
 
   // Type a steer while the run is streaming.
   const input = page.getByPlaceholder('How can I help you?')
@@ -37,7 +45,7 @@ test('steer shows a pending chip, then commits into the transcript at a stable p
 
   // Once cubepi drains the steer, the chip disappears and the steer becomes a
   // real user message in the transcript.
-  await expect(chip).toBeHidden({ timeout: 50_000 })
+  await expect(chip).toBeHidden({ timeout: 150_000 })
   const steerInTranscript = page
     .locator('[data-role="user"]')
     .filter({ hasText: 'Actually, also say hello at the end.' })
@@ -45,7 +53,7 @@ test('steer shows a pending chip, then commits into the transcript at a stable p
 
   // Capture the ordered role sequence, then reload and assert it is unchanged
   // (the committed steer must not jump position on refresh).
-  await expect(page.getByTestId('loading-indicator')).toBeHidden({ timeout: 50_000 })
+  await expect(page.getByTestId('loading-indicator')).toBeHidden({ timeout: 150_000 })
   const rolesBefore = await page
     .locator('[data-role]')
     .evaluateAll((els) => els.map((e) => e.getAttribute('data-role')))
@@ -59,8 +67,9 @@ test('steer shows a pending chip, then commits into the transcript at a stable p
 })
 
 test('cancelling a pending steer removes the chip before it is injected', async ({ page }) => {
+  test.setTimeout(240_000)
   await registerAndLand(page)
-  await startRun(page, 'Count slowly from 1 to 30, one number per line.')
+  await startRun(page, STREAMY_PROMPT)
 
   const input = page.getByPlaceholder('How can I help you?')
   await input.fill('Never mind this instruction.')
@@ -74,7 +83,7 @@ test('cancelling a pending steer removes the chip before it is injected', async 
   await expect(chip).toBeHidden({ timeout: 5_000 })
 
   // It must never appear as a committed user message in the transcript.
-  await expect(page.getByTestId('loading-indicator')).toBeHidden({ timeout: 50_000 })
+  await expect(page.getByTestId('loading-indicator')).toBeHidden({ timeout: 150_000 })
   await expect(
     page.locator('[data-role="user"]').filter({ hasText: 'Never mind this instruction.' }),
   ).toHaveCount(0)
