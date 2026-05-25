@@ -74,8 +74,12 @@ Make the **existing** `memory_save` tool fire proactively by adding a standing
   remember, save immediately; don't save what's trivially derivable from
   code/history; prefer updating an existing item (via `memory_update`) over
   creating a contradictory new one.
-- **Scope guidance:** default `personal`; the tool description already explains
-  `workspace`/`org`.
+- **Scope guidance:** *proactive* saves go to `personal` ONLY. The model may use
+  `workspace`/`org` scope solely when the user explicitly asks to share — the
+  prompt must say this directly (a bare "default personal" is too weak; see B3 in
+  the Layer 2 scope discussion). Layer 2 enforces personal server-side; Layer 1's
+  shared-scope restriction is prompt-level (the tool stays capable for explicit
+  user requests).
 
 This is mostly prompt authoring. Reliability is model-driven (not 100%) but is
 exactly what Claude Code relies on for its proactive saves; Layer 2 backstops it.
@@ -85,75 +89,120 @@ exactly what Claude Code relies on for its proactive saves; Layer 2 backstops it
 A periodic per-user pass that extracts what Layer 1 missed, dedups, and prunes —
 decoupled from the live turn so it adds no latency.
 
-**Scheduling — post-run self-check (decided).** At the end of each run,
-`_execute_run` does a cheap check for that run's user: read `last_consolidated_at`
-and the count of new runs since, both from Redis. Fire a background
-consolidation task only when **both**: time since last ≥ `minHours` **and** new
-runs since ≥ `minRuns`. Otherwise do nothing (a couple of Redis reads). No cron,
-no new worker — active users naturally trigger it (mirrors Claude Code's
-per-turn stat gate).
+**Granularity — per CONVERSATION, not per user.** The checkpointer is keyed by
+conversation (`cp.load(conversation_id)`); there is no per-user "history since T"
+query, and a user has many conversations. So consolidation is **scoped to the
+conversation that just ran**: it loads *that* conversation's recent history (the
+API we already have) and distills into the user's `personal` memory. Dedup still
+runs against the user's *entire* personal memory (read via `MemoryRepository`),
+so source granularity doesn't fragment dedup. Cross-conversation aggregation is a
+future enhancement, explicitly out of scope for v1.
 
-**Per-user lock (decided multi-instance-safe).** A Redis lock keyed per user
-(holder id + TTL, stale reclaim) prevents piled-up runs and multiple instances
-from consolidating the same user concurrently. The lock's value carries
-`last_consolidated_at` semantics (set on successful completion).
+**Scheduling — post-run self-check (decided).** At the end of each run,
+`_execute_run` does a cheap per-conversation check: read this conversation's
+`last_consolidated_at` and new-run counter from Redis. Fire a background
+consolidation task only when **both**: `now − last ≥ minHours` **and**
+`counter ≥ minRuns`. Otherwise do nothing (a couple of Redis reads). No cron, no
+new worker.
+
+**Per-conversation lock + atomic high-water-mark (multi-instance-safe).**
+- A Redis lock keyed per conversation (holder id + TTL, stale reclaim) prevents
+  piled-up runs and multiple instances consolidating the same conversation
+  concurrently. The lock value is **holder identity only** — it is NOT the source
+  of `last_consolidated_at`.
+- `last_consolidated_at` is its own durable Redis key, the canonical truth.
+- **Avoid losing runs that finish during consolidation** (the reset race): at the
+  start, atomically capture `cutoff = now` and the current counter value `N`
+  (Redis `GET`+`DECRBY` / Lua). Load history with `started_at ≤ cutoff`. On
+  success, set `last = cutoff` and `DECRBY counter N` (not reset-to-0). Runs that
+  arrive during consolidation increment the counter and have `started_at > cutoff`
+  → counted next time, never erased. On failure, re-`INCRBY N` (restore) and leave
+  `last` unchanged so it retries.
 
 **Consolidation runtime — OneShotLLM (decided).** A single LLM call via
-`cubebox.llm.oneshot.OneShotLLM` (already used by compaction/title) with a cheap
-model — not a forked agent. Inputs:
-- the user's conversation history since `last_consolidated_at` (already in the
-  checkpointer — free), and
-- the user's existing active memory items (from `MemoryRepository`).
+`cubebox.llm.oneshot.OneShotLLM` (cheap model). Inputs: this conversation's
+history up to `cutoff` (**bounded** — see window cap) + the user's existing active
+personal memory items.
 
-The call returns a structured set of operations, applied via `MemoryService`/
-`MemoryRepository`:
-- **extract** — salient durable facts Layer 1 missed (same taxonomy/types);
-- **dedup/merge** — fold duplicates into existing items rather than adding
-  contradictory ones;
-- **prune/archive** — mark stale/superseded/low-value items `archived`.
+**Structured ops — explicit schema, validated, capped.** `OneShotLLM` returns raw
+text, so the pass MUST: instruct a strict JSON op envelope, parse + schema-validate
+it, reject malformed output (log + no-op), and enforce a server-side **max op
+count** before applying anything. Op kinds:
+- **extract** — a new durable fact Layer 1 missed (same taxonomy: `preference`,
+  `correction`, `procedure`, `project_fact`, `decision`, `org_policy`);
+- **merge/update** — fold into an existing item id (dedup) instead of adding a
+  contradictory one;
+- **archive** — mark an existing item id stale/superseded.
+The op schema **omits `scope`** entirely; the service hard-codes
+`MemoryScope.PERSONAL` when applying — model output cannot escalate to
+`workspace`/`org`. Each written/updated item is stamped with source attribution
+(`source_type=consolidation`, `source_conversation_id`, and the consolidation
+window/run metadata) using the existing `source_*` fields on the memory model.
 
-**Scope — personal only, v1 (decided).** The pass reads/writes only the
-`personal` tier for that user. `workspace`/`org` memory stays explicit
-(`memory_save`) — auto-writing shared/sensitive scopes is deferred.
+**History window cap (required, not optional).** Even within "since `last`," a
+busy conversation can blow context/cost. The pass caps input by a configured
+message/token budget, keeping the **most recent** messages (truncate older);
+`cutoff` still advances to `now` so skipped-old content isn't re-scanned next time.
+
+**Scope — personal only, v1 (decided + server-enforced).** Reads and writes only
+the `personal` tier for that user, enforced in the service (not by prompt). For
+**Layer 1**, the authoring prompt explicitly restricts *proactive* saves to
+`personal`; `workspace`/`org` saves happen only when the user explicitly asks
+(the `memory_save` tool stays capable for that deliberate case — we do not hard-
+disable it, which would break explicit shared saves).
 
 ## Components / files
 
-- **Layer 1:** `backend/cubebox/prompts/memory.py` (add the authoring block +
-  per-type triggers) and `backend/cubebox/middleware/memory.py`
-  (`transform_system_prompt` always injects the authoring block; pinned block
-  stays conditional).
-- **Layer 2 scheduling:** `backend/cubebox/streams/run_manager.py`
-  (`_execute_run` post-run cheap check → fire background task).
-- **Layer 2 service:** a new `backend/cubebox/services/memory_consolidation.py`
-  — the gate read, the lock, the OneShotLLM pass, and applying ops via
-  `MemoryService`. (New file = one clear responsibility; keeps `run_manager` thin.)
-- **State:** Redis keys per user — `…:memcons:last:{user_id}` (last consolidated
-  at), `…:memcons:runs:{user_id}` (new-run counter, incremented per run),
-  `…:memcons:lock:{user_id}` (lock). Counter resets on successful consolidation.
+- **Layer 1:** `backend/cubebox/prompts/memory.py` (authoring block + per-type
+  triggers + "proactive saves are personal-only") and
+  `backend/cubebox/middleware/memory.py` (`transform_system_prompt` always injects
+  the **static** authoring block; the variable pinned block stays conditional —
+  see cache note).
+- **Layer 2 scheduling:** `backend/cubebox/streams/run_manager.py` — `_execute_run`
+  per-conversation cheap check → spawn a background task tracked in an app-level
+  registry (see drain-safety) with `conversation_id` + `user_id`.
+- **Layer 2 service:** new `backend/cubebox/services/memory_consolidation.py` —
+  gate read, lock + atomic high-water-mark, OneShotLLM call, op
+  parse/validate/cap, and applying ops via `MemoryService` (scope hard-coded
+  PERSONAL, source stamped).
+- **State (Redis, per conversation):** `…:memcons:last:{conversation_id}`
+  (durable last-consolidated timestamp — canonical), `…:memcons:runs:{conversation_id}`
+  (new-run counter, `INCR` per run, `DECRBY N` on success), `…:memcons:lock:{conversation_id}`
+  (holder id + TTL).
 
 ## Data flow
 
-1. Run completes → `_execute_run` increments the per-user run counter; reads
-   `last` + counter; if `now-last ≥ minHours AND counter ≥ minRuns` → spawn a
-   background consolidation task (fire-and-forget, like the existing drainers).
-2. Task acquires the per-user lock (skip if held). 
-3. Loads recent history (since `last`) + existing personal memory items.
-4. OneShotLLM pass → ops (extract/merge/archive).
-5. Apply ops via `MemoryService`; set `last = now`, reset counter; release lock.
+1. Run completes → `_execute_run` `INCR`s the per-conversation counter; reads
+   `last` + counter; if `now−last ≥ minHours AND counter ≥ minRuns` → spawn a
+   tracked background consolidation task.
+2. Task tries the per-conversation lock (skip if held by a live holder).
+3. Atomically capture `cutoff = now` and counter value `N`.
+4. Load this conversation's history up to `cutoff` (window-capped) + the user's
+   existing personal memory items.
+5. OneShotLLM → JSON ops; parse, validate, cap.
+6. Apply ops via `MemoryService` (scope=PERSONAL, source stamped).
+7. On success: `last = cutoff`, `DECRBY counter N`, release lock. On failure:
+   restore counter, leave `last`, release lock.
 
 ## Failure modes
 
-- **Consolidation LLM fails / times out:** best-effort — log, release lock, leave
-  `last`/counter unchanged so it retries next eligible run. Never affects the
-  live run (it's a detached background task).
+- **Consolidation LLM fails / times out / malformed JSON:** best-effort — log,
+  restore counter, leave `last`, release lock; retries next eligible run. Never
+  affects the live run (detached, tracked task).
 - **Instance dies mid-consolidation:** lock TTL + stale reclaim lets the next
-  eligible run retry; counter unchanged so nothing is lost.
-- **Duplicate/contradictory writes:** the pass dedups against existing items and
-  prefers merge/update; the prompt forbids creating contradictory items.
-- **Cost runaway:** the time+run gate bounds frequency per user; OneShotLLM uses
-  the cheap model; history window is bounded to "since last_consolidated_at".
-- **Layer 1 over-saving (noise):** Layer 2's dedup/prune is the cleanup; the
-  Layer 1 prompt also lists "what NOT to save".
+  eligible run retry; counter was only decremented on success, so nothing is lost.
+- **Runs finishing during consolidation:** handled by the captured-`cutoff` +
+  `DECRBY N` high-water-mark (not reset-to-0) — those runs stay counted.
+- **Shutdown:** the consolidation task is tracked in an app-level registry and
+  cancelled (best-effort) on shutdown — not silently abandoned like a bare
+  fire-and-forget task.
+- **Duplicate/contradictory/scope-escalating output:** dedup/merge against
+  existing items; op schema omits `scope` and the service hard-codes PERSONAL;
+  op-count cap bounds blast radius; malformed ops rejected.
+- **Cost runaway:** time+run gate bounds frequency; cheap model; required window
+  cap bounds input size per pass.
+- **Layer 1 over-saving (noise):** Layer 2 dedup/prune is the cleanup; the Layer 1
+  prompt also lists "what NOT to save."
 
 ## Testing strategy
 
@@ -161,12 +210,15 @@ The call returns a structured set of operations, applied via `MemoryService`/
   the composed system prompt even with no pinned memory. A real-LLM E2E: a
   conversation that states a durable preference → assert a `memory_save` (or a
   resulting memory item) without an explicit "remember" ask.
-- **Layer 2 gate (unit, fakeredis):** counter increments per run; fires only when
-  both thresholds met; lock prevents concurrent runs; counter resets + `last`
-  advances on success; unchanged on failure.
-- **Layer 2 pass (unit):** given a fake history + existing items and a stubbed
-  OneShotLLM returning ops, assert extract/merge/archive are applied via a fake
-  `MemoryService`.
+- **Layer 2 gate (unit, fakeredis):** per-conversation counter increments per run;
+  fires only when both thresholds met; lock prevents concurrent runs; the
+  captured-`cutoff` + `DECRBY N` high-water-mark keeps runs that arrive during
+  consolidation counted (assert a run added mid-pass is not lost); `last`
+  advances only on success; counter restored on failure.
+- **Layer 2 pass (unit):** given a fake conversation history + existing items and a
+  stubbed OneShotLLM, assert: malformed/over-cap output is rejected (no writes);
+  valid ops apply via a fake `MemoryService`; every write is scope=PERSONAL with
+  source attribution stamped (model cannot set scope).
 - **Real-LLM E2E (opt-in):** seed history with salient facts, force-run
   consolidation, assert personal memory items created + a duplicate merged.
 
@@ -176,10 +228,19 @@ The call returns a structured set of operations, applied via `MemoryService`/
 - A forked consolidation agent with tools (OneShotLLM one-shot for v1).
 - A cron/worker scheduler (post-run self-check only).
 - Changing the read/relevance side (`compute_relevance_snapshot`, pinned block).
+- Cross-conversation per-user aggregation (v1 consolidates per conversation).
+
+## Prompt-cache note
+
+The Layer 1 authoring block is **static** — no timestamps, per-user counts, or
+thresholds — so always-injecting it keeps the cache-eligible system-prompt prefix
+byte-stable. The variable pinned-memory block remains the only memory-driven
+suffix (unchanged from today). See `backend/docs/prompt-cache-discipline.md`.
 
 ## Open questions
 
 - Default thresholds (`minHours`, `minRuns`) — start conservative (e.g. minHours
   ≈ 6, minRuns ≈ 5) and tune; expose via config.
-- History window cap for very active users (cap messages/tokens fed to the pass
-  even within "since last").
+- Window-cap budget (message count vs token budget) and exact value — required
+  parameter (see Layer 2); default needs picking (e.g. last ~40 messages or a
+  token budget aligned with the cheap model's context).
