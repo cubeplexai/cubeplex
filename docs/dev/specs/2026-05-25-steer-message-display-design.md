@@ -67,9 +67,12 @@ is the single join key across the whole flow:
 - Cancel targets a `steer_id`; cubepi's steering queue removes the queued
   message whose `metadata["steer_id"]` matches.
 
-The persisted message id (assigned by cubebox when it stores history) and the
-live committed message id may differ; this is fine — `steer_id` is the live
-join key, and a reload does a full re-render from authoritative history.
+cubepi messages have no id and cubebox does not assign one — history is the raw
+`model_dump()` of each message (`conversations.py:602`), and the frontend
+synthesizes a React-key id locally when one is missing (`messageStore.ts:124`).
+So the live committed message id and the post-reload synthesized id will differ;
+this is fine — `steer_id` (carried in `metadata`, which *is* persisted) is the
+durable join key, and a reload does a full re-render from authoritative history.
 
 ## Architecture & changes
 
@@ -86,22 +89,42 @@ No change to the `UserMessage` schema. No change to drain/injection behavior.
 
 ### B. cubebox backend — `injected_message` SSE event
 
-`backend/cubebox/agents/stream.py` (`convert_agent_event_to_sse`) +
-`backend/cubebox/streams/run_manager.py` (`_on_event`):
+There are **two** translation layers; the event must be wired through both, or
+it is silently dropped:
 
-- When a `MessageEndEvent` wraps a `UserMessage`, emit:
+1. `backend/cubebox/agents/stream.py` — `convert_agent_event_to_sse(evt)` turns
+   a cubepi `AgentEvent` into a wire dict.
+2. `backend/cubebox/streams/run_manager.py:243` — `cubepi_dict_to_agent_event(d)`
+   turns that dict into a typed cubebox `AgentEvent` (from
+   `cubebox/agents/schemas.py`) before it reaches `publish_stream_event`. It
+   returns `None` for unknown `type`, so an unhandled `injected_message` is
+   dropped here.
+
+Changes:
+
+- **`cubebox/agents/schemas.py`** — add `InjectedMessageEvent` with
+  `type="injected_message"` and the same `timestamp` / `data` envelope every
+  other event uses (events are NOT flat — they carry `data: {...}`):
   ```json
-  {"type": "injected_message", "role": "user",
-   "content": "<text>", "steer_id": "<from metadata>"}
+  {"type": "injected_message", "timestamp": "...",
+   "data": {"content": "<text>", "steer_id": "<from metadata>"}}
   ```
-  (Text extracted from `TextContent` blocks; steer is text-only.)
-- **Seed-message dedup:** cubepi emits `MessageStart`/`MessageEnd` for the
-  run's seed prompt at loop start (`cubepi/agent/loop.py:62-64`). cubebox sends
-  exactly one seed user message per run, and the frontend already shows it
-  optimistically. `_on_event` keeps a per-run counter and **skips the first
-  user-message event**, forwarding only subsequent injected ones. (A steer
-  drained by the start-poll before the first assistant turn is the 2nd
-  user-message event → forwarded correctly.)
+- **`convert_agent_event_to_sse`** — add a branch: a `MessageEndEvent` whose
+  `message` is a `UserMessage` → wire dict
+  `{"type": "injected_message", "content": <text>, "steer_id": <metadata.steer_id>}`
+  (text from `TextContent` blocks; steer is text-only).
+- **`cubepi_dict_to_agent_event`** — add a `type == "injected_message"` branch
+  that builds `InjectedMessageEvent`.
+- **Seed-message dedup lives in ONE place: `_on_event`** (the only layer with
+  per-run state). cubepi emits `MessageStart`/`MessageEnd` for the run's seed
+  prompt at loop start (`cubepi/agent/loop.py:62-64`) using the same shape as an
+  injected steer. cubebox sends exactly one seed user message per run, and the
+  frontend already shows it optimistically. `_on_event` keeps a per-run
+  user-message counter and **suppresses the first** user-message `MessageEnd`
+  before it is converted/forwarded; subsequent ones are injected steers. (A
+  steer drained by the start-poll before the first assistant turn is the 2nd
+  user-message event → forwarded correctly.) The pure converters do NOT do
+  seed-dedup — they have no run state.
 
 ### C. cubebox backend — cancel-steer endpoint + control plane
 
@@ -144,18 +167,35 @@ No change to the `UserMessage` schema. No change to drain/injection behavior.
     commit it normally — acceptable best-effort behavior.
 - Handle `injected_message` in **both** stream consumers (`send()` loop and
   `consumeRunStream()`), via a shared helper `commitTurnAndInject(injected)`:
-  1. Build the current main turn's messages from `streamAgents['main']` using a
-     pure helper `buildTurnMessages(agents, toolResultMap, turnUsage)` extracted
-     from `finalizeCompletedStream` (so assistant + tool_result + subagent
-     handling is identical), append them to `messages[convId]`.
-  2. Append the injected steer user message (id derived from `steer_id`).
-  3. Reset `streamAgents['main']` to empty so subsequent deltas form a fresh
-     bubble. Leave `toolResultMap`/`toolStartedMap` intact (keyed globally by
-     tool_call_id).
-  4. Remove the matching `steerId` from `pendingSteers`.
+  1. **Idempotency:** `injected_message` carries `event_id` and goes through the
+     same `lastAppliedEventId` ordering/skip guard the consumers already apply to
+     `done`/`error` (those are handled outside `applyStreamEvent`, so the guard
+     is inline in each consumer). Additionally, if `steer_id` is already present
+     in `messages[convId]` (matched via `metadata.steer_id`), the commit is a
+     no-op — this makes replay on reconnect safe.
+  2. **Empty-turn guard:** build the current turn's messages from *all*
+     `streamAgents` buckets via a pure helper
+     `buildTurnMessages(agents, toolResultMap, turnUsage)` extracted from
+     `finalizeCompletedStream` (identical assistant + tool_result + subagent
+     handling), append to `messages[convId]`. If the current main bucket has **no
+     content** (e.g. a steer drained by the start-poll at `loop.py:165` before
+     any assistant output), skip building an assistant message entirely — do not
+     append an empty bubble.
+  3. Append the injected steer user message (carrying `metadata.steer_id`; id
+     synthesized locally).
+  4. Reset **all** `streamAgents` buckets to a fresh `{main: empty}` — not just
+     `main` — so any settled subagent streams are cleared along with the main
+     bubble (they were just persisted in step 2). Leave
+     `toolResultMap`/`toolStartedMap` intact (keyed globally by tool_call_id).
+  5. Remove the matching `steerId` from `pendingSteers`.
 - `finalizeCompletedStream()` — refactor to reuse `buildTurnMessages`. On run
   finalize, clear `pendingSteers[convId]` (run is over; any still-pending were
   not injected, and reload is authoritative if that's wrong).
+- **Pending cleanup on every run-ending path:** the error branches in `send()`
+  and `consumeRunStream()` (`messageStore.ts:679,913`), `cancelStream()`, and
+  `clearStream()` currently touch only stream fields — each must also clear
+  `pendingSteers[convId]`, or a chip is stranded when a run errors/aborts
+  mid-steer.
 - `loadMessages()` — clear `pendingSteers[convId]` on (re)load; committed steers
   come back from checkpointer history naturally → no transcript duplication.
 
@@ -219,9 +259,12 @@ user clicks X on a pending chip
 
 - **cubepi unit:** `_MessageQueue.remove` (match/no-match, mode=all & one);
   `Agent.cancel_steer` returns correct bool.
-- **cubebox backend unit:** `convert_agent_event_to_sse` emits
-  `injected_message` for an injected UserMessage and **not** for the seed;
-  `_on_event` seed-skip counter; cancel endpoint status mapping.
+- **cubebox backend unit:** `convert_agent_event_to_sse` emits the
+  `injected_message` wire dict for a UserMessage `MessageEndEvent`;
+  `cubepi_dict_to_agent_event` maps that dict to `InjectedMessageEvent`;
+  `_on_event` suppresses the first (seed) user-message event and forwards
+  subsequent ones (seed-dedup is asserted here, NOT in the pure converter);
+  cancel endpoint status mapping (`cancelled` / `not_found`).
 - **frontend core unit (vitest):** `steer()` writes to `pendingSteers` not
   `messages`; `injected_message` commits the current turn, inserts the user
   message, resets `main`, removes the pending entry; `cancelSteer` removes
@@ -242,7 +285,7 @@ user clicks X on a pending chip
 | Area | File |
 |---|---|
 | cubepi | `cubepi/agent/agent.py` (`_MessageQueue.remove`, `Agent.cancel_steer`) |
-| backend | `cubebox/agents/stream.py`, `cubebox/streams/run_manager.py`, `cubebox/api/routes/v1/conversations.py` |
+| backend | `cubebox/agents/schemas.py` (`InjectedMessageEvent`), `cubebox/agents/stream.py`, `cubebox/streams/run_manager.py` (`cubepi_dict_to_agent_event` + `_on_event`), `cubebox/api/routes/v1/conversations.py` |
 | core | `src/types`, `src/api/stream.ts`, `src/stores/messageStore.ts` |
 | web | `components/layout/InputBar.tsx` (+ new pending component), `components/chat/MessageList.tsx` (remove optimistic), tests |
 
