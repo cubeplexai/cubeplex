@@ -62,6 +62,8 @@ interface MessageBase {
     memory_snapshot?: unknown
     citations?: CitationData[]
     subagent_events?: SubagentSummary
+    // Set on a steer user message committed mid-run; used for replay idempotency.
+    steer_id?: string
   }
 }
 

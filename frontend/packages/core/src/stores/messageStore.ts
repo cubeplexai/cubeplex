@@ -75,6 +75,7 @@ export interface MessageStore {
   cancelStream(client: ApiClient, conversationId: string): Promise<void>
   steer(client: ApiClient, conversationId: string, content: string): Promise<void>
   cancelSteer(client: ApiClient, conversationId: string, steerId: string): Promise<void>
+  __commitTurnAndInject(conversationId: string, data: { content: string; steer_id: string }): void
   clearStream(): void
   clearLastRunStatus(): void
 }
@@ -639,12 +640,13 @@ async function finalizeCompletedStream(
   )
 
   if (!assistantMessage) {
-    set({
+    set((state) => ({
       isStreaming: false,
       streamingConversationId: null,
       currentRunId: null,
       statusPhase: null,
-    })
+      pendingSteers: { ...state.pendingSteers, [conversationId]: [] },
+    }))
     return
   }
 
@@ -661,6 +663,7 @@ async function finalizeCompletedStream(
     streamingConversationId: null,
     currentRunId: null,
     statusPhase: null,
+    pendingSteers: { ...state.pendingSteers, [conversationId]: [] },
   }))
 }
 
@@ -701,14 +704,15 @@ async function consumeRunStream(
         useCitationStore.getState().addCitation(conversationId, citationData)
       } else if (event.type === 'error') {
         const errData = event.data as { message: string; details?: string }
-        set({
+        set((s) => ({
           error: errData.details || errData.message,
           isStreaming: false,
           streamingConversationId: null,
           currentRunId: null,
           statusPhase: null,
-          lastAppliedEventId: nextEventId(get().lastAppliedEventId, event.event_id),
-        })
+          lastAppliedEventId: nextEventId(s.lastAppliedEventId, event.event_id),
+          pendingSteers: { ...s.pendingSteers, [conversationId]: [] },
+        }))
         break
       } else if (event.type === 'done') {
         const usage = (event.data as Record<string, unknown>).usage as
@@ -734,6 +738,16 @@ async function consumeRunStream(
         set(usageUpdate)
         sawDone = true
         break
+      } else if (event.type === 'injected_message') {
+        const d = event.data as { content: string; steer_id: string }
+        // Flush batched stream mutations so the commit reads fully-applied
+        // streamAgents, not a stale snapshot.
+        flush()
+        set((s) => ({
+          lastAppliedEventId: nextEventId(s.lastAppliedEventId, event.event_id),
+        }))
+        get().__commitTurnAndInject(conversationId, d)
+        continue
       }
 
       batchedSet((s) => applyStreamEvent(s, event))
@@ -810,6 +824,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
         error: null,
         lastRunStatus: bootstrap.last_run_status ?? null,
         streamAgents: nextStreamAgents,
+        pendingSteers: { ...s.pendingSteers, [conversationId]: [] },
         toolStartedMap: {},
         toolResultMap: {},
         isStreaming: !!bootstrap.active_run,
@@ -934,14 +949,15 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
               )
               continue outer
             }
-            set({
+            set((s) => ({
               error: errData.details || errData.message,
               isStreaming: false,
               streamingConversationId: null,
               currentRunId: null,
               statusPhase: null,
-              lastAppliedEventId: nextEventId(get().lastAppliedEventId, event.event_id),
-            })
+              lastAppliedEventId: nextEventId(s.lastAppliedEventId, event.event_id),
+              pendingSteers: { ...s.pendingSteers, [conversationId]: [] },
+            }))
             break outer
           } else if (event.type === 'done') {
             const usage = (event.data as Record<string, unknown>).usage as
@@ -967,6 +983,16 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
             set(usageUpdate)
             sawDone = true
             break outer
+          } else if (event.type === 'injected_message') {
+            const d = event.data as { content: string; steer_id: string }
+            // Flush batched stream mutations so the commit reads fully-applied
+            // streamAgents, not a stale snapshot.
+            flush()
+            set((s) => ({
+              lastAppliedEventId: nextEventId(s.lastAppliedEventId, event.event_id),
+            }))
+            get().__commitTurnAndInject(conversationId, d)
+            continue
           }
 
           batchedSet((s) => applyStreamEvent(s, event))
@@ -974,12 +1000,13 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
         break outer
       }
     } catch (err) {
-      set({
+      set((s) => ({
         error: (err as Error).message,
         isStreaming: false,
         streamingConversationId: null,
         currentRunId: null,
-      })
+        pendingSteers: { ...s.pendingSteers, [conversationId]: [] },
+      }))
       return
     } finally {
       flush()
@@ -1052,6 +1079,53 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
     }
   },
 
+  // Commit the in-flight assistant turn into history at the point cubepi
+  // injected the steer, then append the steer user message right after, reset
+  // the streaming buckets so subsequent deltas form a fresh bubble, and drop the
+  // matching pending entry. This keeps the live transcript ordering identical to
+  // a reload from the checkpointer (steer interleaved between assistant turns).
+  __commitTurnAndInject(conversationId, data) {
+    const state = get()
+    // Idempotency: if this steer is already committed, no-op (replay-safe).
+    const already = (state.messages[conversationId] ?? []).some(
+      (m) => m.role === 'user' && m.metadata?.steer_id === data.steer_id,
+    )
+    if (already) return
+
+    const { assistantMessage, toolMessages } = buildTurnMessages(
+      state.streamAgents,
+      state.toolResultMap,
+      state.turnUsage[conversationId] ?? null,
+    )
+    const mainHasContent = !!assistantMessage && assistantMessage.content.length > 0
+
+    const steerMessage: UserMessageType = {
+      id: nextMessageId('user-steer'),
+      role: 'user',
+      content: [{ type: 'text', text: data.content }],
+      timestamp: Date.now() / 1000,
+      metadata: { steer_id: data.steer_id },
+    }
+
+    set((s) => ({
+      messages: {
+        ...s.messages,
+        [conversationId]: [
+          ...(s.messages[conversationId] ?? []),
+          ...(mainHasContent ? [assistantMessage as AssistantMessageType, ...toolMessages] : []),
+          steerMessage,
+        ],
+      },
+      streamAgents: { [MAIN_AGENT_KEY]: emptyStream() },
+      pendingSteers: {
+        ...s.pendingSteers,
+        [conversationId]: (s.pendingSteers[conversationId] ?? []).filter(
+          (p) => p.steerId !== data.steer_id,
+        ),
+      },
+    }))
+  },
+
   async cancelStream(client, conversationId) {
     const state = get()
     if (!state.isStreaming || state.streamingConversationId !== conversationId) return
@@ -1077,12 +1151,13 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
     if (hasContent) {
       await finalizeCompletedStream(get, set, conversationId, 'aborted')
     } else {
-      set({
+      set((s) => ({
         isStreaming: false,
         streamingConversationId: null,
         currentRunId: null,
         statusPhase: null,
-      })
+        pendingSteers: { ...s.pendingSteers, [conversationId]: [] },
+      }))
     }
 
     try {
@@ -1095,6 +1170,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
   clearStream() {
     set({
       streamAgents: {},
+      pendingSteers: {},
       isStreaming: false,
       streamingConversationId: null,
       currentRunId: null,
