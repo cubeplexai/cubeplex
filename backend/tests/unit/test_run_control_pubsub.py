@@ -89,3 +89,18 @@ async def test_dispatch_cancel_remote_times_out_to_published(redis):
     m = _mgr(redis)
     assert await m.dispatch_cancel("r-remote", ack_timeout=0.2) == "published"
     assert m._ack_waiters.get("r-remote") in (None, [])
+
+
+@pytest.mark.asyncio
+async def test_start_listeners_does_not_raise_when_subscribe_never_ready(redis, monkeypatch):
+    # Persistent subscribe failure (e.g. Redis ACL) must NOT hang or crash boot:
+    # start_control_listeners logs a warning and returns; the background loop
+    # keeps retrying.
+    m = _mgr(redis)
+
+    async def _never_ready(channel, handler, ready):
+        await asyncio.sleep(10)  # never sets `ready`
+
+    monkeypatch.setattr(m, "_subscribe_loop", _never_ready)
+    await m.start_control_listeners(ready_timeout=0.05)  # returns despite no readiness
+    await m.stop_control_listeners()

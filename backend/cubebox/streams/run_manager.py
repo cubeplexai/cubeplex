@@ -651,9 +651,22 @@ class RunManager:
                 name="run-control-ack-listener",
             ),
         ]
-        with suppress(TimeoutError):
+        try:
             await asyncio.wait_for(
                 asyncio.gather(ctrl_ready.wait(), ack_ready.wait()), timeout=ready_timeout
+            )
+        except TimeoutError:
+            # Don't fail startup: single-instance deployments don't need pub/sub
+            # at all (control runs via the local fast-path), and a transient Redis
+            # blip shouldn't block boot. But don't fail *silently* either — the
+            # listeners keep retrying in the background (_subscribe_loop), so a
+            # persistent failure here (e.g. Redis ACL/connectivity) means
+            # cross-instance cancel/steer is degraded until they connect.
+            logger.warning(
+                "Run-control pub/sub listeners not subscribed within {}s; "
+                "cross-instance cancel/steer degraded until they connect "
+                "(listeners keep retrying in the background)",
+                ready_timeout,
             )
 
     async def stop_control_listeners(self) -> None:
