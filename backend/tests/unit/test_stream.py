@@ -8,6 +8,7 @@ from cubepi.providers.base import (
     TextContent,
     ToolCall,
     Usage,
+    UserMessage,
 )
 
 from cubebox.agents.stream import convert_agent_event_to_sse, convert_event_to_sse
@@ -233,3 +234,18 @@ def test_tool_result_prefers_details_original_content_for_sse() -> None:
     out = convert_agent_event_to_sse(evt)
     assert out[0]["result"] == '{"query":"q","results":[{"url":"http://x","title":"X"}]}'
     assert out[0]["details"]["citations"] == [{"citation_id": 1}]
+
+
+# ---------------------------------------------------------------------------
+# convert_agent_event_to_sse — injected steer UserMessage → injected_message
+
+
+def test_injected_user_message_becomes_injected_message_dict() -> None:
+    msg = UserMessage(content=[TextContent(text="do X instead")], metadata={"steer_id": "s1"})
+    out = convert_agent_event_to_sse(MessageEndEvent(message=msg))
+    assert out == [{"type": "injected_message", "content": "do X instead", "steer_id": "s1"}]
+
+
+def test_injected_user_message_without_steer_id_is_dropped() -> None:
+    msg = UserMessage(content=[TextContent(text="seed prompt")])
+    assert convert_agent_event_to_sse(MessageEndEvent(message=msg)) == []

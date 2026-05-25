@@ -27,7 +27,13 @@ from cubepi.agent.types import (
     MessageUpdateEvent,
     ToolExecutionEndEvent,
 )
-from cubepi.providers.base import AssistantMessage, StreamEvent, TextContent, ToolCall
+from cubepi.providers.base import (
+    AssistantMessage,
+    StreamEvent,
+    TextContent,
+    ToolCall,
+    UserMessage,
+)
 
 
 def _stringify_tool_result(result: Any) -> tuple[str, Any]:
@@ -145,6 +151,12 @@ def convert_agent_event_to_sse(evt: AgentEvent) -> list[dict[str, Any]]:
                     "cache_write_tokens": msg.usage.cache_write_tokens or 0,
                 }
             ]
+
+    if isinstance(evt, MessageEndEvent) and isinstance(evt.message, UserMessage):
+        steer_id = evt.message.metadata.get("steer_id")
+        if steer_id:
+            text = "".join(c.text for c in evt.message.content if isinstance(c, TextContent))
+            return [{"type": "injected_message", "content": text, "steer_id": steer_id}]
 
     # Silently drop all other AgentEvent types:
     # AgentStartEvent, AgentEndEvent (done is emitted by run_manager with usage),

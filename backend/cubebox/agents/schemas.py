@@ -160,3 +160,13 @@ class UsageEvent(AgentEvent):
             "Usage payload: input_tokens, output_tokens, cache_read_tokens, cache_write_tokens"
         )
     )
+
+
+class InjectedMessageEvent(AgentEvent):
+    """A user message injected mid-run (a steer) that cubepi has now drained
+    into the thread. Carries the join key so the frontend can match it to a
+    pending chip and commit it at the real transcript position.
+    """
+
+    type: Literal["injected_message"] = "injected_message"
+    data: dict[str, Any] = Field(description="Event data with content and steer_id")
