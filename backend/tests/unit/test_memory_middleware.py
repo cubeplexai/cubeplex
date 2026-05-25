@@ -214,32 +214,38 @@ async def test_transform_system_prompt_appends_pinned_memory() -> None:
 
 
 @pytest.mark.asyncio
-async def test_transform_system_prompt_passthrough_when_no_pinned_items() -> None:
-    """System prompt unchanged when no pinned memory items exist."""
-    # Repo has only RELEVANCE-type items → pinned filter produces empty list
+async def test_transform_system_prompt_appends_authoring_when_no_pinned_items() -> None:
+    """No pinned items → no pinned block, but the authoring block is always appended."""
+    # Repo has only relevance-tier items → pinned filter produces empty list
     items = [
         _mk_item(type_=MemoryType.PROJECT_FACT, content="Backend runs on FastAPI."),
     ]
     mw = _make_middleware(items)
     original = "You are a helpful assistant."
     result = await mw.transform_system_prompt(original)
-    assert result == original
+    assert result.startswith(original)
+    assert "memory_save" in result  # authoring block always injected
+    assert "Backend runs on FastAPI." not in result  # not pinned
 
 
 @pytest.mark.asyncio
-async def test_transform_system_prompt_passthrough_when_repo_empty() -> None:
+async def test_transform_system_prompt_appends_authoring_when_repo_empty() -> None:
+    """Empty repo → original prompt + authoring block (no pinned header)."""
     mw = _make_middleware([])
     original = "System prompt."
     result = await mw.transform_system_prompt(original)
-    assert result == original
+    assert result.startswith(original)
+    assert "memory_save" in result
 
 
 @pytest.mark.asyncio
-async def test_transform_system_prompt_works_with_empty_prompt() -> None:
-    """Empty system prompt stays empty when no pinned items."""
+async def test_transform_system_prompt_authoring_only_with_empty_prompt() -> None:
+    """Empty system prompt → just the authoring block."""
+    from cubebox.prompts.memory import MEMORY_AUTHORING_BLOCK
+
     mw = _make_middleware([])
     result = await mw.transform_system_prompt("")
-    assert result == ""
+    assert result == MEMORY_AUTHORING_BLOCK
 
 
 @pytest.mark.asyncio
