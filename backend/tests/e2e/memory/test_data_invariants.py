@@ -8,11 +8,33 @@ from cubebox.models import User
 from cubebox.models.memory import (
     MemoryItem,
     MemoryScope,
+    MemorySourceType,
     MemoryType,
 )
 from cubebox.models.workspace import Workspace
 from cubebox.repositories.memory import MemoryRepository
 from cubebox.services.memory import CreateMemoryInput, MemoryService
+
+
+async def test_consolidation_source_type_persists(
+    db_session: AsyncSession, seed_user: User
+) -> None:
+    """Regression: the `memorysourcetype` Postgres enum must include
+    'consolidation' (background consolidation writes it). Without the enum
+    migration, this insert fails with an invalid-enum-value error."""
+    repo = MemoryRepository(db_session, user_id=seed_user.id, org_id=None, workspace_id=None)
+    svc = MemoryService(repo, user_id=seed_user.id, org_id=None, workspace_id=None)
+    item = await svc.create(
+        CreateMemoryInput(
+            scope=MemoryScope.PERSONAL,
+            type=MemoryType.PREFERENCE,
+            content="prefers metric units",
+            source_type=MemorySourceType.CONSOLIDATION,
+            source_conversation_id="conv-x",
+        )
+    )
+    assert item.source_type == MemorySourceType.CONSOLIDATION
+    assert item.scope == MemoryScope.PERSONAL
 
 
 async def test_personal_scope_invariant_violation_rejected(

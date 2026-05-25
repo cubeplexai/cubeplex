@@ -439,6 +439,7 @@ class RunManager:
         self._run_stream_max_events = run_stream_max_events
         self._tasks: dict[str, asyncio.Task[None]] = {}
         self._agents: dict[str, Any] = {}
+        self._consolidation_tasks: set[asyncio.Task[None]] = set()
         self._ack_waiters: dict[str, list[asyncio.Future[bool]]] = {}
         self._control_channel = f"{key_prefix}:control"
         self._ack_channel = f"{key_prefix}:control:ack"
@@ -688,6 +689,14 @@ class RunManager:
         Logs a status line on entry when there's anything to wait for, plus
         a progress line every 30 seconds while waiting.
         """
+        # Best-effort: stop background consolidation first, regardless of whether
+        # any run tasks remain (drain returns early below when _tasks is empty).
+        for t in list(self._consolidation_tasks):
+            t.cancel()
+        for t in list(self._consolidation_tasks):
+            with suppress(asyncio.CancelledError):
+                await t
+
         if self._tasks_empty.is_set():
             return
 
@@ -1434,6 +1443,68 @@ class RunManager:
         for agent_key in list(citation_buffers):
             await flush_citation_buffer(agent_key, agent_key)
 
+    async def _maybe_consolidate_memory(self, *, conversation_id: str, ctx: RunContext) -> None:
+        """Cheap per-run gate; spawn a tracked background consolidation task when
+        due. Never raises into the run path."""
+        try:
+            from cubebox.config import config as _cfg
+            from cubebox.services import memory_consolidation as mc
+
+            if not _cfg.get("memory.consolidation.enabled", True):
+                return
+            await mc.note_run(self._redis, self._key_prefix, conversation_id)
+            min_hours = float(_cfg.get("memory.consolidation.min_hours", mc.DEFAULT_MIN_HOURS))
+            min_runs = int(_cfg.get("memory.consolidation.min_runs", mc.DEFAULT_MIN_RUNS))
+            if not await mc.should_consolidate(
+                self._redis,
+                self._key_prefix,
+                conversation_id,
+                min_hours=min_hours,
+                min_runs=min_runs,
+            ):
+                return
+
+            from cubepi import Model
+
+            from cubebox.db.engine import async_session_maker
+            from cubebox.llm.factory import LLMFactory
+            from cubebox.llm.oneshot import OneShotLLM
+
+            async with async_session_maker() as _llm_session:
+                factory = LLMFactory(
+                    session=_llm_session,
+                    org_id=ctx.org_id,
+                    encryption_backend=self._app.state.encryption_backend,
+                )
+                (
+                    provider_name,
+                    model_id,
+                    provider_config,
+                ) = await factory.resolve_default_provider_and_config()
+                await _llm_session.commit()
+            provider = factory.build_cubepi_provider(provider_config, cache_policy=None)
+            one_shot = OneShotLLM(provider, Model(id=model_id, provider=provider_name))
+
+            task = asyncio.create_task(
+                mc.run_consolidation(
+                    redis=self._redis,
+                    prefix=self._key_prefix,
+                    conversation_id=conversation_id,
+                    user_id=ctx.user_id,
+                    org_id=ctx.org_id,
+                    workspace_id=ctx.workspace_id,
+                    one_shot=one_shot,
+                    session_maker=async_session_maker,
+                    min_hours=min_hours,
+                    min_runs=min_runs,
+                ),
+                name=f"memcons:{conversation_id}",
+            )
+            self._consolidation_tasks.add(task)
+            task.add_done_callback(self._consolidation_tasks.discard)
+        except Exception:
+            logger.warning("memory consolidation gate failed", exc_info=True)
+
     async def _execute_run(
         self,
         *,
@@ -1747,6 +1818,7 @@ class RunManager:
                 run_id=run_id,
                 status="completed",
             )
+            await self._maybe_consolidate_memory(conversation_id=conversation_id, ctx=ctx)
         except asyncio.CancelledError:
             await update_run_meta(
                 self._redis,
