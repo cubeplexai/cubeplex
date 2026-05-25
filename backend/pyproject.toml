@@ -158,11 +158,10 @@ exclude_lines = [
 ]
 
 [tool.uv.sources]
-# TEMPORARY: pinned to the feat/cancel-steer branch commit (cubepi PR #120),
-# which adds Agent.cancel_steer / _MessageQueue.remove for the steer-cancel
-# feature. Re-pin to main once #120 merges, and before merging this cubebox
-# branch. Built on #117 (turn-boundary steering drain) + #116.
-cubepi = { git = "https://github.com/cubeplexai/cubepi.git", rev = "9533540" }
+# da9d792 is cubepi main HEAD: adds Agent.cancel_steer / _MessageQueue.remove
+# (#120) for the steer-cancel feature, on top of turn-boundary steering drain
+# (#117) + the cancel-orphan-tool-results fix (#116).
+cubepi = { git = "https://github.com/cubeplexai/cubepi.git", rev = "da9d792" }
 
 [dependency-groups]
 dev = [
