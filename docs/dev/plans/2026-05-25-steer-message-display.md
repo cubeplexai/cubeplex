@@ -109,17 +109,18 @@ Expected: PASS (3 tests)
 import pytest
 from cubepi.agent.agent import Agent
 from cubepi.providers.base import Model
+from cubepi.providers.faux import FauxProvider  # already used by this test file
 
 
 @pytest.mark.asyncio
 async def test_agent_cancel_steer_removes_queued_steer():
-    agent = Agent(provider=DummyProvider(), model=Model(id="m", provider="p"))
+    agent = Agent(provider=FauxProvider(), model=Model(id="m", provider="p"))
     agent.steer(_steer_msg("hi", "s1"))
     assert agent.cancel_steer("s1") is True
     assert agent.cancel_steer("s1") is False
 ```
 
-> Reuse the existing test's provider double for `DummyProvider`. If none exists in this file, copy the minimal provider stub already used by other `Agent` tests in `tests/agent/`.
+> `FauxProvider` is imported from `cubepi.providers.faux` (the existing `test_agent.py` already uses it at line 13). Match how other `Agent` tests in this file construct the agent.
 
 - [ ] **Step 6: Run to verify it fails**
 
@@ -162,7 +163,7 @@ git commit -m "feat(agent): cancel a not-yet-drained steering message by steer_i
 **Files:**
 - Modify: `backend/cubebox/agents/schemas.py` (after `UsageEvent` ~line 158)
 - Modify: `backend/cubebox/agents/stream.py` (`convert_agent_event_to_sse` ~line 136)
-- Test: `backend/tests/agents/test_stream.py` (create if absent)
+- Test: add cases to the existing `backend/tests/unit/test_stream.py`
 
 - [ ] **Step 1: Add the schema**
 
@@ -182,8 +183,8 @@ class InjectedMessageEvent(AgentEvent):
 - [ ] **Step 2: Write the failing converter test**
 
 ```python
-# backend/tests/agents/test_stream.py
-from cubepi.agent.events import MessageEndEvent
+# backend/tests/unit/test_stream.py — add these cases
+from cubepi.agent.types import MessageEndEvent
 from cubepi.providers.base import TextContent, UserMessage
 from cubebox.agents.stream import convert_agent_event_to_sse
 
@@ -203,7 +204,7 @@ def test_injected_user_message_without_steer_id_is_dropped():
 
 - [ ] **Step 3: Run to verify it fails**
 
-Run: `cd /home/chris/cubebox/.worktrees/feat/steer-message-display/backend && uv run pytest tests/agents/test_stream.py -v`
+Run: `cd /home/chris/cubebox/.worktrees/feat/steer-message-display/backend && uv run pytest tests/unit/test_stream.py -v`
 Expected: FAIL (returns `[]`, not the injected_message dict)
 
 - [ ] **Step 4: Implement the converter branch**
@@ -224,13 +225,13 @@ In `stream.py`, add `UserMessage` to the existing cubepi imports, then insert th
 
 - [ ] **Step 5: Run to verify it passes**
 
-Run: `cd .../backend && uv run pytest tests/agents/test_stream.py -v`
+Run: `cd .../backend && uv run pytest tests/unit/test_stream.py -v`
 Expected: PASS (2 tests)
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add backend/cubebox/agents/schemas.py backend/cubebox/agents/stream.py backend/tests/agents/test_stream.py
+git add backend/cubebox/agents/schemas.py backend/cubebox/agents/stream.py backend/tests/unit/test_stream.py
 git commit -m "feat(agents): translate injected steer UserMessage into injected_message SSE dict"
 ```
 
@@ -238,12 +239,12 @@ git commit -m "feat(agents): translate injected steer UserMessage into injected_
 
 **Files:**
 - Modify: `backend/cubebox/streams/run_manager.py` (`cubepi_dict_to_agent_event` ~line 243; `_on_event` ~line 1340)
-- Test: `backend/tests/streams/test_run_manager_translate.py` (create if absent)
+- Test: `backend/tests/unit/test_run_manager_translate.py` (create if absent)
 
 - [ ] **Step 1: Write the failing translator test**
 
 ```python
-# backend/tests/streams/test_run_manager_translate.py
+# backend/tests/unit/test_run_manager_translate.py
 from cubebox.streams.run_manager import cubepi_dict_to_agent_event
 from cubebox.agents.schemas import InjectedMessageEvent
 
@@ -259,7 +260,7 @@ def test_injected_message_dict_becomes_typed_event():
 
 - [ ] **Step 2: Run to verify it fails**
 
-Run: `cd .../backend && uv run pytest tests/streams/test_run_manager_translate.py -v`
+Run: `cd .../backend && uv run pytest tests/unit/test_run_manager_translate.py -v`
 Expected: FAIL (`cubepi_dict_to_agent_event` returns `None` for the unknown type)
 
 - [ ] **Step 3: Implement the translator branch**
@@ -276,7 +277,7 @@ In `cubepi_dict_to_agent_event`, add `InjectedMessageEvent` to the local schema 
 
 - [ ] **Step 4: Run to verify it passes**
 
-Run: `cd .../backend && uv run pytest tests/streams/test_run_manager_translate.py -v`
+Run: `cd .../backend && uv run pytest tests/unit/test_run_manager_translate.py -v`
 Expected: PASS
 
 - [ ] **Step 5: Implement `_on_event` seed-skip**
@@ -284,7 +285,7 @@ Expected: PASS
 In `_run_cubepi_path`, just before the `_on_event` definition (~line 1340), add a counter, and skip the first user-message `MessageEnd`:
 
 ```python
-            from cubepi.agent.events import MessageEndEvent as _MsgEndEvent
+            from cubepi.agent.types import MessageEndEvent as _MsgEndEvent
             from cubepi.providers.base import UserMessage as _UserMsg
 
             _user_msg_seen = 0
@@ -309,7 +310,7 @@ Expected: no errors
 - [ ] **Step 7: Commit**
 
 ```bash
-git add backend/cubebox/streams/run_manager.py backend/tests/streams/test_run_manager_translate.py
+git add backend/cubebox/streams/run_manager.py backend/tests/unit/test_run_manager_translate.py
 git commit -m "feat(streams): forward injected_message through translator; skip seed user message"
 ```
 
@@ -318,56 +319,79 @@ git commit -m "feat(streams): forward injected_message through translator; skip 
 **Files:**
 - Modify: `backend/cubebox/api/routes/v1/conversations.py` (`SteerMessageRequest` ~line 270; steer route ~line 829; add cancel route)
 - Modify: `backend/cubebox/streams/run_manager.py` (`dispatch_steer`, `_publish_control`, `_handle_control`, add `dispatch_cancel_steer`)
-- Test: `backend/tests/streams/test_run_manager_steer.py` (create if absent)
+- Test: extend the existing `backend/tests/unit/test_run_manager_steer.py`
 
-- [ ] **Step 1: Write the failing dispatch test**
+- [ ] **Step 1: Write the failing dispatch tests**
+
+The existing file already has a `_FakeAgent` (with `.steer`) and a `_make_manager()`
+helper using `RunManager.__new__(RunManager)`. Extend `_FakeAgent` with
+`cancel_steer`, and add a tiny redis stub for the publish path:
 
 ```python
-# backend/tests/streams/test_run_manager_steer.py
-import pytest
-
-
+# backend/tests/unit/test_run_manager_steer.py — extend the existing _FakeAgent
 class _FakeAgent:
-    def __init__(self):
-        self.steered = []
-        self.cancelled = []
+    def __init__(self) -> None:
+        self.steered: list = []
+        self.cancelled: list[str] = []
 
-    def steer(self, msg):
-        self.steered.append(msg)
+    def steer(self, message) -> None:  # noqa: ANN001
+        self.steered.append(message)
 
-    def cancel_steer(self, steer_id):
+    def cancel_steer(self, steer_id: str) -> bool:  # noqa: ANN001
         self.cancelled.append(steer_id)
         return True
 
 
+class _FakeRedis:
+    def __init__(self) -> None:
+        self.published: list[str] = []
+
+    async def publish(self, channel: str, payload: str) -> None:
+        self.published.append(payload)
+
+
+# add these tests to the file
 @pytest.mark.asyncio
-async def test_dispatch_steer_threads_steer_id_into_metadata(run_manager_with_agent):
-    rm, agent, run_id = run_manager_with_agent
-    status = await rm.dispatch_steer(run_id, "do X", steer_id="s1")
+async def test_dispatch_steer_threads_steer_id_into_metadata() -> None:
+    mgr = _make_manager()
+    mgr._agents = {}
+    agent = _FakeAgent()
+    mgr._agents["run-1"] = agent
+    status = await mgr.dispatch_steer("run-1", "do X", steer_id="s1")
     assert status == "steered"
     assert agent.steered[0].metadata["steer_id"] == "s1"
 
 
 @pytest.mark.asyncio
-async def test_dispatch_cancel_steer_calls_agent(run_manager_with_agent):
-    rm, agent, run_id = run_manager_with_agent
-    status = await rm.dispatch_cancel_steer(run_id, "s1")
+async def test_dispatch_cancel_steer_calls_agent() -> None:
+    mgr = _make_manager()
+    mgr._agents = {}
+    agent = _FakeAgent()
+    mgr._agents["run-1"] = agent
+    status = await mgr.dispatch_cancel_steer("run-1", "s1")
     assert status == "cancelled"
     assert agent.cancelled == ["s1"]
 
 
 @pytest.mark.asyncio
-async def test_dispatch_cancel_steer_no_local_agent_publishes(run_manager_no_agent):
-    rm = run_manager_no_agent
-    status = await rm.dispatch_cancel_steer("missing-run", "s1")
+async def test_dispatch_cancel_steer_no_local_agent_publishes() -> None:
+    mgr = _make_manager()
+    mgr._agents = {}
+    mgr._redis = _FakeRedis()
+    mgr._control_channel = "ctrl"
+    status = await mgr.dispatch_cancel_steer("missing-run", "s1")
     assert status == "published"
 ```
 
-> Add `run_manager_with_agent` / `run_manager_no_agent` fixtures: construct the `RunManager` the way existing run_manager tests do (check `backend/tests/streams/` for an existing fixture to copy), inject a `_FakeAgent` into `rm._agents[run_id]`, and stub `rm._redis` with an object whose `publish` is an async no-op.
+> The existing `_FakeAgent` in this file currently records `message.content[0].text`
+> in `steered`; change it to append the whole `message` (as shown) so the metadata
+> assertion works, and update the pre-existing `steer_run` tests' assertions
+> accordingly (they read `agent.steered == ["..."]` → change to
+> `agent.steered[0].content[0].text == "..."`).
 
 - [ ] **Step 2: Run to verify it fails**
 
-Run: `cd .../backend && uv run pytest tests/streams/test_run_manager_steer.py -v`
+Run: `cd .../backend && uv run pytest tests/unit/test_run_manager_steer.py -v`
 Expected: FAIL (`dispatch_steer` has no `steer_id` kwarg; no `dispatch_cancel_steer`)
 
 - [ ] **Step 3: Thread `steer_id` through `dispatch_steer` + control**
@@ -435,11 +459,13 @@ Then extend `_handle_control` (add `steer_id` to the steer branch and a new `can
                 agent.cancel_steer(data.get("steer_id") or "")
 ```
 
-> Delete the now-redundant older `steer_run` method (line ~527) only if nothing references it — grep first: `grep -rn "steer_run" backend/cubebox`. If referenced, leave it.
+> Leave the older `steer_run` method (line ~527) in place — it is still covered by
+> the existing tests in `test_run_manager_steer.py`. Only `dispatch_steer` (used by
+> the route) needs the `steer_id` change. Do not delete `steer_run`.
 
 - [ ] **Step 4: Run to verify it passes**
 
-Run: `cd .../backend && uv run pytest tests/streams/test_run_manager_steer.py -v`
+Run: `cd .../backend && uv run pytest tests/unit/test_run_manager_steer.py -v`
 Expected: PASS (3 tests)
 
 - [ ] **Step 5: Add `steer_id` to the request model + steer route + cancel route**
@@ -514,7 +540,7 @@ Expected: no errors
 - [ ] **Step 7: Commit**
 
 ```bash
-git add backend/cubebox/streams/run_manager.py backend/cubebox/api/routes/v1/conversations.py backend/tests/streams/test_run_manager_steer.py
+git add backend/cubebox/streams/run_manager.py backend/cubebox/api/routes/v1/conversations.py backend/tests/unit/test_run_manager_steer.py
 git commit -m "feat(api): thread steer_id through steer; add best-effort cancel-steer endpoint"
 ```
 
@@ -576,7 +602,7 @@ describe('steer api', () => {
 
 - [ ] **Step 3: Run to verify it fails**
 
-Run: `cd frontend/packages/core && npx vitest run __tests__/api/stream.test.ts`
+Run: `cd frontend/packages/core && pnpm exec vitest run __tests__/api/stream.test.ts`
 Expected: FAIL (`cancelSteer` not exported; `steerRun` ignores 4th arg)
 
 - [ ] **Step 4: Implement the API changes**
@@ -622,7 +648,7 @@ export async function cancelSteer(
 
 - [ ] **Step 5: Run to verify it passes**
 
-Run: `cd frontend/packages/core && npx vitest run __tests__/api/stream.test.ts`
+Run: `cd frontend/packages/core && pnpm exec vitest run __tests__/api/stream.test.ts`
 Expected: PASS
 
 - [ ] **Step 6: Commit**
@@ -685,7 +711,7 @@ describe('pending steers', () => {
 
 - [ ] **Step 2: Run to verify it fails**
 
-Run: `cd frontend/packages/core && npx vitest run __tests__/stores/messageStorePendingSteer.test.ts`
+Run: `cd frontend/packages/core && pnpm exec vitest run __tests__/stores/messageStorePendingSteer.test.ts`
 Expected: FAIL (`pendingSteers` undefined; `cancelSteer` not a function)
 
 - [ ] **Step 3: Add state + interface members**
@@ -762,13 +788,13 @@ Replace the existing `steer` action body:
 
 - [ ] **Step 5: Run to verify it passes**
 
-Run: `cd frontend/packages/core && npx vitest run __tests__/stores/messageStorePendingSteer.test.ts`
+Run: `cd frontend/packages/core && pnpm exec vitest run __tests__/stores/messageStorePendingSteer.test.ts`
 Expected: PASS
 
 - [ ] **Step 6: Update the existing steer test**
 
 `__tests__/stores/messageStoreSteer.test.ts` asserts the old optimistic-message behavior. Update its assertions to expect `pendingSteers` instead of an appended message. Run:
-`cd frontend/packages/core && npx vitest run __tests__/stores/messageStoreSteer.test.ts`
+`cd frontend/packages/core && pnpm exec vitest run __tests__/stores/messageStoreSteer.test.ts`
 Expected: PASS
 
 - [ ] **Step 7: Commit**
@@ -803,7 +829,7 @@ function buildTurnMessages(
 ```
 
 Refactor `finalizeCompletedStream` to call it and then `set(...)` the messages + clear streaming state exactly as before. Run the full core suite to confirm no regressions:
-`cd frontend/packages/core && npx vitest run`
+`cd frontend/packages/core && pnpm exec vitest run`
 Expected: PASS (unchanged behavior)
 
 - [ ] **Step 2: Commit the refactor**
@@ -868,7 +894,7 @@ describe('commit on injected_message', () => {
 
 - [ ] **Step 4: Run to verify it fails**
 
-Run: `cd frontend/packages/core && npx vitest run __tests__/stores/messageStoreCommitSteer.test.ts`
+Run: `cd frontend/packages/core && pnpm exec vitest run __tests__/stores/messageStoreCommitSteer.test.ts`
 Expected: FAIL (`__commitTurnAndInject` not a function)
 
 - [ ] **Step 5: Implement `__commitTurnAndInject` + wire into both consumers**
@@ -931,6 +957,10 @@ Then, in BOTH stream consumers, handle the event. In `send()`'s event loop and i
 ```typescript
           } else if (event.type === 'injected_message') {
             const d = event.data as { content: string; steer_id: string }
+            // Both consumers buffer mutations through createBatcher (batchedSet);
+            // flush so __commitTurnAndInject reads the fully-applied streamAgents,
+            // not a stale snapshot with pending batched deltas.
+            flush()
             set((s) => ({
               lastAppliedEventId: nextEventId(s.lastAppliedEventId, event.event_id),
             }))
@@ -939,16 +969,21 @@ Then, in BOTH stream consumers, handle the event. In `send()`'s event loop and i
           }
 ```
 
-> Place it so it shares the same `lastAppliedEventId` skip guard the loop already applies. In `consumeRunStream`, use the same shape.
+> `flush` is the function returned by `createBatcher` in each consumer (`send()` and
+> `consumeRunStream()` both destructure `{ batchedSet, flush }`). Calling it here is
+> mandatory — the commit reads `streamAgents` synchronously, and unflushed
+> `batchedSet` deltas would otherwise be dropped/reordered relative to the commit.
+> Place the branch so it shares the same `lastAppliedEventId` skip guard the loop
+> already applies. In `consumeRunStream`, use the same shape.
 
 - [ ] **Step 6: Run to verify it passes**
 
-Run: `cd frontend/packages/core && npx vitest run __tests__/stores/messageStoreCommitSteer.test.ts`
+Run: `cd frontend/packages/core && pnpm exec vitest run __tests__/stores/messageStoreCommitSteer.test.ts`
 Expected: PASS (2 tests)
 
 - [ ] **Step 7: Add pending cleanup on run-ending paths**
 
-In `loadMessages` (the big `set(...)` that resets state), add `pendingSteers: { ...get().pendingSteers, [conversationId]: [] },`. In `finalizeCompletedStream`'s final `set`, add the same clear. In the `error` branches of `send()` and `consumeRunStream()`, in `cancelStream`, and in `clearStream()`, clear `pendingSteers` for the conversation (in `clearStream`, reset to `{}`). Write a quick test:
+In `loadMessages` (the big `set(...)` that resets state), add `pendingSteers: { ...get().pendingSteers, [conversationId]: [] },`. In `finalizeCompletedStream` clear the same — note it has **two** `set(...)` exit points: the early-return branch when `mainStream` is absent (~line 522) AND the final `set` (~line 628); add the clear to **both**. In the `error` branches of `send()` and `consumeRunStream()`, in `cancelStream`, and in `clearStream()`, clear `pendingSteers` for the conversation (in `clearStream`, reset to `{}`). Write a quick test:
 
 ```typescript
 // append to messageStoreCommitSteer.test.ts
@@ -964,12 +999,12 @@ it('clears pending steers on finalize', () => {
 })
 ```
 
-Run: `cd frontend/packages/core && npx vitest run __tests__/stores/messageStoreCommitSteer.test.ts`
+Run: `cd frontend/packages/core && pnpm exec vitest run __tests__/stores/messageStoreCommitSteer.test.ts`
 Expected: PASS
 
 - [ ] **Step 8: Run the full core suite + build**
 
-Run: `cd frontend/packages/core && npx vitest run && pnpm build`
+Run: `cd frontend/packages/core && pnpm exec vitest run && pnpm build`
 Expected: PASS + clean build (so `@cubebox/web` sees the new types).
 
 - [ ] **Step 9: Commit**
@@ -1034,7 +1069,7 @@ describe('PendingSteers', () => {
 
 - [ ] **Step 2: Run to verify it fails**
 
-Run: `cd frontend/packages/web && npx vitest run __tests__/components/PendingSteers.test.tsx`
+Run: `cd frontend/packages/web && pnpm exec vitest run __tests__/components/PendingSteers.test.tsx`
 Expected: FAIL (module not found)
 
 - [ ] **Step 3: Implement `PendingSteers.tsx`**
@@ -1089,7 +1124,7 @@ export function PendingSteers({ conversationId }: PendingSteersProps): React.Rea
 
 - [ ] **Step 4: Run to verify it passes**
 
-Run: `cd frontend/packages/web && npx vitest run __tests__/components/PendingSteers.test.tsx`
+Run: `cd frontend/packages/web && pnpm exec vitest run __tests__/components/PendingSteers.test.tsx`
 Expected: PASS (2 tests)
 
 - [ ] **Step 5: Render it in InputBar**
@@ -1100,15 +1135,36 @@ In `InputBar.tsx`, import `PendingSteers` and render it inside the top-level wra
       {conversationId && <PendingSteers conversationId={conversationId} />}
 ```
 
-- [ ] **Step 6: Verify web suite + typecheck**
+- [ ] **Step 6: Fix the existing `InputBar.test.tsx` mock (it will otherwise crash)**
 
-Run: `cd frontend/packages/web && npx vitest run __tests__/components && npx tsc --noEmit`
-Expected: PASS + no type errors. (The existing `InputBar.test.tsx` steer-path expectations still hold; the store mock there does not exercise pendingSteers.)
+`InputBar` now renders `<PendingSteers>`, which selects `s.pendingSteers[conversationId]`
+and `s.cancelSteer`. The existing `InputBar.test.tsx` `useMessageStore` mock returns a
+fixed object without those keys, so `s.pendingSteers` is `undefined` and the render
+throws. Add the two keys to that mock's `selector({...})` call:
 
-- [ ] **Step 7: Commit**
+```typescript
+    selector({
+      send: storeMocks.send,
+      steer: storeMocks.steer,
+      cancelStream: storeMocks.cancelStream,
+      cancelSteer: storeMocks.cancelSteer ?? (() => {}),
+      pendingSteers: {},
+      isStreaming: storeMocks.state.isStreaming,
+      streamingConversationId: storeMocks.state.streamingConversationId,
+    }),
+```
+
+(Add `cancelSteer: vi.fn()` to the `storeMocks` hoisted object too.)
+
+- [ ] **Step 7: Verify web suite + typecheck**
+
+Run: `cd frontend/packages/web && pnpm exec vitest run __tests__/components && pnpm exec tsc --noEmit`
+Expected: PASS + no type errors.
+
+- [ ] **Step 8: Commit**
 
 ```bash
-git add frontend/packages/web/components/layout/PendingSteers.tsx frontend/packages/web/components/layout/InputBar.tsx frontend/packages/web/__tests__/components/PendingSteers.test.tsx
+git add frontend/packages/web/components/layout/PendingSteers.tsx frontend/packages/web/components/layout/InputBar.tsx frontend/packages/web/__tests__/components/PendingSteers.test.tsx frontend/packages/web/__tests__/components/InputBar.test.tsx
 git commit -m "feat(web): dimmed pending-steer chips above the input with cancel"
 ```
 
@@ -1119,7 +1175,7 @@ git commit -m "feat(web): dimmed pending-steer chips above the input with cancel
 ### Task 9: Steer pending → commit → cancel E2E
 
 **Files:**
-- Modify/extend: the existing steer E2E under `frontend/packages/web/tests/e2e/` (find it: `grep -rln "steer" frontend/packages/web/tests`)
+- Modify/extend: the existing steer E2E under `frontend/packages/web/__tests__/e2e/` (find it: `grep -rln "steer" frontend/packages/web/__tests__/e2e`)
 - Prereq: copy `backend/.env` + `backend/config.development.local.yaml` into the worktree backend dir; start backend on 8059 and frontend on 3059 (see `.worktree.env`).
 
 - [ ] **Step 1: Write the E2E spec**
@@ -1139,13 +1195,13 @@ In `PendingSteers.tsx`, add `data-testid="pending-steer"` to the chip `<div>`.
 
 - [ ] **Step 3: Run the E2E**
 
-Run (from worktree, with servers up): `cd frontend/packages/web && npx playwright test <steer-spec-file>`
+Run (from worktree, with servers up): `cd frontend/packages/web && pnpm exec playwright test <steer-spec-file>`
 Expected: PASS. If the model/run timing is flaky, gate waits on conditions (chip present, chip absent, message present) rather than fixed timeouts.
 
 - [ ] **Step 4: Commit**
 
 ```bash
-git add frontend/packages/web/components/layout/PendingSteers.tsx frontend/packages/web/tests/e2e/<steer-spec-file>
+git add frontend/packages/web/components/layout/PendingSteers.tsx frontend/packages/web/__tests__/e2e/<steer-spec-file>
 git commit -m "test(e2e): steer pending chip → inline commit → reload-stable position → cancel"
 ```
 
