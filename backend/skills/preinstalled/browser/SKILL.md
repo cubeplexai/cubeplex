@@ -1,7 +1,7 @@
 ---
 name: browser
 description: Use when the user wants to open or control a web browser — navigate to a site, click, fill forms, log in, search, scrape a page, or do any interactive web task that plain HTTP fetch can't (JS-rendered pages, logins, OAuth, CAPTCHA). The user watches this browser live and can take over for steps only a human can do.
-version: 1.0.1
+version: 1.0.2
 keywords:
   - browser
   - 浏览器
@@ -37,6 +37,39 @@ If `connect` fails with "connection refused", the stack isn't up yet — run
 browser — the user would see nothing and the session wouldn't be theirs.
 
 Tell the user they can watch and take over in the cubebox **browser panel**.
+
+## CRITICAL: Keep the user's visual tab in sync with the agent's active tab
+
+The user watches Chromium live through a streaming panel. If the agent switches
+to a different tab via CDP, the visual display MUST follow — otherwise the user
+sees the wrong page while the agent is working elsewhere, causing confusion and
+missed takeover opportunities.
+
+**After EVERY `connect`, `goto`, `tab new`, or `tab <id>` switch, the agent MUST
+re-focus the active tab to bring it to the foreground in the live display:**
+
+```bash
+# After connect, list tabs and explicitly switch to the active one to force visual focus:
+agent-browser tab               # list all tabs
+agent-browser tab t1            # force-switch to the tab you're about to work on
+
+# After goto, verify the URL is what you expect:
+agent-browser get url
+
+# After creating a new tab, switch to it explicitly:
+agent-browser tab new https://example.com
+agent-browser tab t2            # re-focus — brings it to the foreground visually
+```
+
+**Rule of thumb**: after any action that changes the active page (navigate,
+switch tab, open new tab), run `agent-browser get url` to confirm you're on
+the right page AND that the visual display has followed. If the user reports
+seeing a different tab, immediately run `agent-browser tab` to list tabs and
+`agent-browser tab <id>` to re-sync.
+
+**When taking over from a previous session**: always start by listing tabs and
+explicitly focusing the tab you intend to work on. The previous agent may have
+left a different tab visible.
 
 ## Learn the commands from the CLI (don't guess)
 
@@ -75,3 +108,5 @@ Do **not** try to type passwords or solve CAPTCHAs yourself; hand those to the u
   the user (the panel and the next task reuse it).
 - Don't fall back to `curl`/HTTP fetch for pages that need JS or a login — use the
   browser.
+- Don't let the user stare at a blank/stale tab while you're operating on a
+  different one — always sync the visual tab.
