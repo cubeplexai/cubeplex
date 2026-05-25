@@ -10,7 +10,7 @@
 
 **Key existing APIs (verified):**
 - Enums (`cubebox/models/memory.py`): `MemoryScope.{PERSONAL,WORKSPACE,ORG}`, `MemoryType.{PREFERENCE,PROJECT_FACT,PROCEDURE,CORRECTION,DECISION,ORG_POLICY}`, `MemoryStatus.{ACTIVE,ARCHIVED}`, `MemorySourceType.{CONVERSATION,TOOL_RESULT,ARTIFACT,MANUAL,IMPORT}`.
-- `MemoryService(repo, *, user_id, org_id, workspace_id)` → `create(CreateMemoryInput)`, `update(memory_id, *, content=, type_=, confidence=, status=)`, `archive(memory_id)`. `CreateMemoryInput(scope, type, content, confidence=0.8, source_type=MANUAL, source_conversation_id=None, source_run_id=None, source_excerpt=None)`.
+- `MemoryService(repo, *, user_id, org_id, workspace_id)` → `create(CreateMemoryInput)`, `update(memory_id, *, content=, type_=, confidence=, status=)`, `archive(memory_id)`. `CreateMemoryInput(scope, type, content, confidence=0.8, source_type=MANUAL, source_conversation_id=None, source_run_id=None, source_artifact_id=None, source_excerpt=None)`.
 - `MemoryRepository(session, *, user_id, org_id, workspace_id).list(*, scope=, status=MemoryStatus.ACTIVE, limit=200)`.
 - `OneShotLLM(provider, model).generate_once(*, system, messages, max_output_tokens) -> str`.
 - `cubebox.agents.checkpointer.init_checkpointer()` → `cp.load(conversation_id)` → `CheckpointData | None` with `.messages`.
@@ -220,16 +220,21 @@ async def test_note_run_increments_counter(redis):
 
 @pytest.mark.asyncio
 async def test_should_consolidate_requires_both_gates(redis):
-    # Fresh conv: last=0 (long ago) but counter below minRuns → no.
+    import time as _t
+
+    # Run gate: below minRuns → no (last=0 means "never", so the time gate is
+    # already satisfied — only the run count is short here).
     await mc.note_run(redis, "t", "conv1")
     assert await mc.should_consolidate(redis, "t", "conv1", min_hours=0, min_runs=5) is False
-    # Enough runs + min_hours=0 → yes.
+    # Enough runs + never-consolidated → yes.
+    for _ in range(4):
+        await mc.note_run(redis, "t", "conv1")  # 5 total
+    assert await mc.should_consolidate(redis, "t", "conv1", min_hours=0, min_runs=5) is True
+    # Time gate: just consolidated (last≈now) → too soon, even with enough runs → no.
+    await mc.mark_consolidated(redis, "t", "conv1", cutoff=_t.time(), consumed=0)
     for _ in range(5):
         await mc.note_run(redis, "t", "conv1")
-    assert await mc.should_consolidate(redis, "t", "conv1", min_hours=0, min_runs=5) is True
-    # min_hours high → no (just consolidated semantics: last is 0 = epoch, now-0 huge,
-    # so use a fresh conv to test the time gate).
-    assert await mc.should_consolidate(redis, "t", "conv-fresh", min_hours=999, min_runs=0) is False
+    assert await mc.should_consolidate(redis, "t", "conv1", min_hours=999, min_runs=1) is False
 
 
 @pytest.mark.asyncio
@@ -273,10 +278,12 @@ conversation's recent history into the user's personal memory.
 
 from __future__ import annotations
 
+import json
 import time
 import uuid
 from typing import Any
 
+from loguru import logger
 from redis.asyncio import Redis
 
 _TTL_S = 7 * 24 * 3600  # keep gate keys ~a week of inactivity
@@ -333,7 +340,11 @@ async def release_lock(
     """Release only if we still hold it (compare-and-delete)."""
     key = _k(prefix, "lock", conversation_id)
     cur = await redis.get(key)
-    if cur is not None and cur.decode() == token:
+    if cur is None:
+        return
+    # The injected Redis client may or may not use decode_responses; handle both.
+    cur_str = cur.decode() if isinstance(cur, (bytes, bytearray)) else cur
+    if cur_str == token:
         await redis.delete(key)
 
 
@@ -551,13 +562,9 @@ async def apply_ops(
         except Exception:
             # One bad op (e.g. id no longer accessible) must not abort the batch.
             logger.warning("consolidation op failed: {}", op, exc_info=True)
-
-
-# put this import at the top of the file with the others
-from loguru import logger  # noqa: E402
 ```
 
-(Move the `from loguru import logger` to the top import block when implementing — shown here for locality.)
+(`json` and `logger` are in the module header imports added in Task 3 Step 3.)
 
 - [ ] **Step 4: Run tests + mypy**
 
@@ -720,10 +727,21 @@ Add a method on `RunManager`:
             from cubebox.db.engine import async_session_maker
             from cubebox.llm.factory import LLMFactory
 
-            factory = LLMFactory()
-            provider_name, model_id, provider_config = (
-                await factory.resolve_default_provider_and_config()
-            )
+            # Resolve the provider with ORG context (session + org_id +
+            # encryption_backend) exactly like the live run path
+            # (run_manager.py:796) — a bare LLMFactory() would ignore per-org
+            # provider config and encrypted credentials.
+            async with async_session_maker() as _llm_session:
+                factory = LLMFactory(
+                    session=_llm_session,
+                    org_id=ctx.org_id,
+                    encryption_backend=self._app.state.encryption_backend,
+                )
+                provider_name, model_id, provider_config = (
+                    await factory.resolve_default_provider_and_config()
+                )
+                await _llm_session.commit()
+
             from cubepi import Model
 
             provider = factory.build_cubepi_provider(provider_config, cache_policy=None)
@@ -762,15 +780,21 @@ In `_execute_run`, after the DoneEvent + `update_run_meta(status="completed")` b
 
 - [ ] **Step 4: Drain consolidation tasks on shutdown**
 
-In `drain` (or `cancel_all`), after the existing run-task drain, cancel any
-in-flight consolidation tasks (best-effort):
+Cancel in-flight consolidation tasks at the **very start of `drain`**, BEFORE its
+`if self._tasks_empty.is_set(): return` early-return — otherwise, when no run
+tasks remain (the common case at shutdown), `drain` returns immediately and the
+consolidation cancellation is skipped:
 
 ```python
+    async def drain(self, timeout_seconds: float) -> None:
+        # Best-effort: stop background consolidation first, regardless of whether
+        # any run tasks remain (drain returns early below when _tasks is empty).
         for t in list(self._consolidation_tasks):
             t.cancel()
         for t in list(self._consolidation_tasks):
             with suppress(asyncio.CancelledError):
                 await t
+        # ... existing drain body (the _tasks_empty early-return + run-task wait) ...
 ```
 
 - [ ] **Step 5: Typecheck + the gate's own tests still pass**
