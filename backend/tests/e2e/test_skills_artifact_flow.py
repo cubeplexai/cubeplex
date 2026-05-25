@@ -32,6 +32,31 @@ async def test_publish_from_artifact_creates_marketplace_version(
 
 
 @pytest.mark.asyncio
+async def test_publish_from_artifact_enables_skill_in_workspace(
+    member_client_with_artifact: tuple[httpx.AsyncClient, str, str],
+) -> None:
+    """Publishing from an artifact must make the skill enabled in that workspace.
+
+    Regression: publish_from_artifact dropped workspace_id, so the skill landed
+    org-wide with auto_bind=False and no workspace binding — invisible to the
+    publishing workspace.
+    """
+    client, ws_id, artifact_id = member_client_with_artifact
+
+    pub = await client.post(
+        f"/api/v1/ws/{ws_id}/skills/publish",
+        json={"artifact_id": artifact_id},
+    )
+    assert pub.status_code == 201, pub.text
+    published_skill_id = pub.json()["skill_id"]
+
+    listed = await client.get(f"/api/v1/ws/{ws_id}/skills", params={"scope": "workspace"})
+    assert listed.status_code == 200, listed.text
+    skill_ids = {s["id"] for s in listed.json()}
+    assert published_skill_id in skill_ids
+
+
+@pytest.mark.asyncio
 async def test_publish_from_artifact_with_invalid_skill_md_returns_400(
     member_client_with_bad_artifact: tuple[httpx.AsyncClient, str, str],
 ) -> None:

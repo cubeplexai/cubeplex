@@ -237,6 +237,7 @@ class SkillPublishService:
             org_slug=org_slug,
             actor_user_id=actor_user_id,
             files=files,
+            workspace_id=workspace_id,
         )
 
     async def publish_from_zip(
