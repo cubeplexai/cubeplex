@@ -513,30 +513,26 @@ function applyStreamEvent(state: MessageStore, event: AgentEvent): Partial<Messa
   return base
 }
 
-async function finalizeCompletedStream(
-  get: () => MessageStore,
-  set: (partial: Partial<MessageStore> | ((state: MessageStore) => Partial<MessageStore>)) => void,
-  conversationId: string,
+/**
+ * Build the assistant (+ tool) messages for a finished/interrupted turn from the
+ * current streaming buckets. Pure — reads its inputs, allocates message ids, and
+ * returns the pieces; the caller decides how to append them and clear state.
+ * Returns `assistantMessage: null` when there is no main stream to finalize.
+ */
+function buildTurnMessages(
+  agents: Record<string, AgentStream>,
+  toolResultMap: MessageStore['toolResultMap'],
+  turnUsage: import('../types').TurnUsage | null,
   stopReason: AssistantMessageType['stop_reason'] = 'stop',
-): Promise<void> {
-  const agents = get().streamAgents
+): { assistantMessage: AssistantMessageType | null; toolMessages: ToolResultMessageType[] } {
   const mainStream = agents[MAIN_AGENT_KEY]
-
-  if (!mainStream) {
-    set({
-      isStreaming: false,
-      streamingConversationId: null,
-      currentRunId: null,
-      statusPhase: null,
-    })
-    return
-  }
+  if (!mainStream) return { assistantMessage: null, toolMessages: [] }
 
   const finalBlocks = finalizeLastThinking(mainStream.blocks).filter(
     (block) => block.type !== 'tool_call_streaming',
   )
 
-  const usage = get().turnUsage[conversationId]
+  const usage = turnUsage
   const assistantMessage: AssistantMessageType = {
     id: nextMessageId('assistant'),
     role: 'assistant',
@@ -568,11 +564,10 @@ async function finalizeCompletedStream(
   // Persist main-agent tool results into history so the just-finished message
   // remains interactive after streamingConversationId clears. Skip subagent
   // tool results — those get richer messages from the loop below.
-  const mainToolResultMap = get().toolResultMap
   for (const tr of mainStream.toolResults) {
     const tcId = tr.data.tool_call_id
     if (!tcId || tr.data.tool_name === 'subagent') continue
-    const mapEntry = mainToolResultMap[tcId]
+    const mapEntry = toolResultMap[tcId]
     const receivedAtMs =
       mapEntry?.receivedAt ?? (tr.timestamp ? new Date(tr.timestamp).getTime() : Date.now())
     toolMessages.push({
@@ -590,7 +585,6 @@ async function finalizeCompletedStream(
     if (key === MAIN_AGENT_KEY) continue
     const toolCallId = key.startsWith('subagent:') ? key.slice(9) : key
     const args = subagentArgs[key]
-    const currentToolResultMap = get().toolResultMap
     toolMessages.push({
       id: nextMessageId('tool'),
       role: 'tool_result',
@@ -609,7 +603,7 @@ async function finalizeCompletedStream(
           })),
           tool_results: agentStream.toolResults
             .map((tr) => {
-              const mapEntry = currentToolResultMap[tr.data.tool_call_id ?? '']
+              const mapEntry = toolResultMap[tr.data.tool_call_id ?? '']
               return {
                 tool_name: tr.data.tool_name ?? '',
                 tool_call_id: tr.data.tool_call_id ?? '',
@@ -626,6 +620,32 @@ async function finalizeCompletedStream(
         },
       },
     })
+  }
+
+  return { assistantMessage, toolMessages }
+}
+
+async function finalizeCompletedStream(
+  get: () => MessageStore,
+  set: (partial: Partial<MessageStore> | ((state: MessageStore) => Partial<MessageStore>)) => void,
+  conversationId: string,
+  stopReason: AssistantMessageType['stop_reason'] = 'stop',
+): Promise<void> {
+  const { assistantMessage, toolMessages } = buildTurnMessages(
+    get().streamAgents,
+    get().toolResultMap,
+    get().turnUsage[conversationId] ?? null,
+    stopReason,
+  )
+
+  if (!assistantMessage) {
+    set({
+      isStreaming: false,
+      streamingConversationId: null,
+      currentRunId: null,
+      statusPhase: null,
+    })
+    return
   }
 
   set((state) => ({
