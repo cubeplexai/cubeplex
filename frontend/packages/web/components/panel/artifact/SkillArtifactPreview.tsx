@@ -64,37 +64,39 @@ export function SkillArtifactPreview({
   }
 
   return (
-    <div className="flex flex-col gap-3 p-4">
-      <header className="flex flex-wrap items-baseline gap-2">
-        <span className="font-mono font-semibold">{artifact.name}</span>
-        <span className="text-xs text-muted-foreground">entry: SKILL.md</span>
-        <span className="text-xs text-muted-foreground">v{artifact.version}</span>
-      </header>
+    <div className="flex h-full flex-col">
+      <div className="flex flex-1 flex-col gap-3 overflow-y-auto p-4">
+        <header className="flex flex-wrap items-baseline gap-2">
+          <span className="font-mono font-semibold">{artifact.name}</span>
+          <span className="text-xs text-muted-foreground">entry: SKILL.md</span>
+          <span className="text-xs text-muted-foreground">v{artifact.version}</span>
+        </header>
 
-      {result && (
-        <p
-          className={cn(
-            'rounded-md px-3 py-2 text-sm',
-            result.ok
-              ? 'bg-green-50 text-green-700 dark:bg-green-950 dark:text-green-300'
-              : 'bg-destructive/10 text-destructive',
-          )}
-        >
-          {result.message}
-        </p>
-      )}
-
-      <div className={proseClasses}>
-        {isLoading ? (
-          <p className="text-sm text-muted-foreground">{t('previewLoading')}</p>
-        ) : skillMd ? (
-          <ReactMarkdown remarkPlugins={[remarkGfm]}>{skillMd}</ReactMarkdown>
-        ) : (
-          <p className="text-sm text-muted-foreground">{t('noSkillMd')}</p>
+        {result && (
+          <p
+            className={cn(
+              'rounded-md px-3 py-2 text-sm',
+              result.ok
+                ? 'bg-green-50 text-green-700 dark:bg-green-950 dark:text-green-300'
+                : 'bg-destructive/10 text-destructive',
+            )}
+          >
+            {result.message}
+          </p>
         )}
+
+        <div className={proseClasses}>
+          {isLoading ? (
+            <p className="text-sm text-muted-foreground">{t('previewLoading')}</p>
+          ) : skillMd ? (
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>{skillMd}</ReactMarkdown>
+          ) : (
+            <p className="text-sm text-muted-foreground">{t('noSkillMd')}</p>
+          )}
+        </div>
       </div>
 
-      <div className="border-t pt-3">
+      <div className="shrink-0 border-t p-4">
         <Button size="sm" onClick={() => setConfirmOpen(true)} disabled={!!result?.ok}>
           {t('publishButton')}
         </Button>
