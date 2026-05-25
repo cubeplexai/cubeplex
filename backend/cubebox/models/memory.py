@@ -39,6 +39,7 @@ class MemorySourceType(StrEnum):
     ARTIFACT = "artifact"
     MANUAL = "manual"
     IMPORT = "import"
+    CONSOLIDATION = "consolidation"
 
 
 class MemoryItem(CubeboxBase, table=True):
