@@ -124,23 +124,28 @@ class MemoryMiddleware(Middleware):
         *,
         signal: object = None,
     ) -> str:
-        """Append pinned-memory block to the system prompt.
+        """Append pinned-memory block and authoring guidance to the system prompt.
 
         The pinned block is sorted deterministically (scope → type →
         created_at ASC) so cache-eligible prefix bytes are identical
         across turns for the same set of memory items.  New pinned items
         always append to the end, never re-ordering existing ones.
+
+        The authoring block (MEMORY_AUTHORING_BLOCK) is appended
+        unconditionally so the agent always knows when and how to call
+        memory_save, even before any pinned memory exists.
         """
         del signal  # not used
+        from cubebox.prompts.memory import MEMORY_AUTHORING_BLOCK
 
         async with self._repo_factory() as repo:
             pinned_text = await _render_pinned(repo)
 
-        if not pinned_text:
-            return system_prompt
-
-        separator = "\n\n" if system_prompt else ""
-        return system_prompt + separator + MEMORY_PROMPT_HEADER + pinned_text
+        parts = [system_prompt] if system_prompt else []
+        if pinned_text:
+            parts.append(MEMORY_PROMPT_HEADER + pinned_text)
+        parts.append(MEMORY_AUTHORING_BLOCK)
+        return "\n\n".join(parts)
 
     async def transform_context(
         self,
