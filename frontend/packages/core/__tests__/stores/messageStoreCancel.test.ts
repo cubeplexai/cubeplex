@@ -6,7 +6,7 @@ vi.mock('../../src/api', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../src/api')>()
   return {
     ...actual,
-    cancelActiveRun: vi.fn().mockResolvedValue({ cancelled: true, run_id: 'r1' }),
+    cancelActiveRun: vi.fn().mockResolvedValue({ status: 'cancelled', run_id: 'r1' }),
   }
 })
 

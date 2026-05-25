@@ -439,6 +439,11 @@ class RunManager:
         self._run_stream_max_events = run_stream_max_events
         self._tasks: dict[str, asyncio.Task[None]] = {}
         self._agents: dict[str, Any] = {}
+        self._ack_waiters: dict[str, list[asyncio.Future[bool]]] = {}
+        self._control_channel = f"{key_prefix}:control"
+        self._ack_channel = f"{key_prefix}:control:ack"
+        self._control_stopping = False
+        self._control_tasks: list[asyncio.Task[None]] = []
         self._tasks_empty: asyncio.Event = asyncio.Event()
         self._tasks_empty.set()
 
@@ -535,6 +540,143 @@ class RunManager:
 
         agent.steer(UserMessage(content=[TextContent(text=content)]))
         return True
+
+    async def _publish_control(self, run_id: str, type_: str, content: str | None = None) -> None:
+        import json
+
+        payload: dict[str, Any] = {"run_id": run_id, "type": type_}
+        if content is not None:
+            payload["content"] = content
+        await self._redis.publish(self._control_channel, json.dumps(payload))
+
+    async def _publish_ack(self, run_id: str) -> None:
+        import json
+
+        await self._redis.publish(self._ack_channel, json.dumps({"run_id": run_id}))
+
+    async def dispatch_steer(self, run_id: str, content: str) -> str:
+        agent = self._agents.get(run_id)
+        if agent is not None:
+            from cubepi.providers.base import TextContent, UserMessage
+
+            agent.steer(UserMessage(content=[TextContent(text=content)]))
+            return "steered"
+        await self._publish_control(run_id, "steer", content)
+        return "published"
+
+    async def dispatch_cancel(self, run_id: str, ack_timeout: float = 3.0) -> str:
+        if run_id in self._tasks:
+            await self.cancel_run(run_id)
+            return "cancelled"
+
+        fut: asyncio.Future[bool] = asyncio.get_running_loop().create_future()
+        self._ack_waiters.setdefault(run_id, []).append(fut)
+        try:
+            await self._publish_control(run_id, "cancel")
+            await asyncio.wait_for(fut, timeout=ack_timeout)
+            return "cancelled"
+        except TimeoutError:
+            return "published"
+        finally:
+            waiters = self._ack_waiters.get(run_id)
+            if waiters and fut in waiters:
+                waiters.remove(fut)
+                if not waiters:
+                    self._ack_waiters.pop(run_id, None)
+
+    async def _handle_control(self, data: dict[str, Any]) -> None:
+        run_id = data.get("run_id")
+        type_ = data.get("type")
+        if not isinstance(run_id, str):
+            return
+        if type_ == "cancel":
+            if run_id in self._tasks:
+                await self.cancel_run(run_id)
+                await self._publish_ack(run_id)
+        elif type_ == "steer":
+            agent = self._agents.get(run_id)
+            if agent is not None:
+                from cubepi.providers.base import TextContent, UserMessage
+
+                agent.steer(UserMessage(content=[TextContent(text=data.get("content") or "")]))
+
+    async def _handle_ack(self, data: dict[str, Any]) -> None:
+        run_id = data.get("run_id")
+        if not isinstance(run_id, str):
+            return
+        for fut in self._ack_waiters.get(run_id, []):
+            if not fut.done():
+                fut.set_result(True)
+
+    async def _subscribe_loop(self, channel: str, handler: Any, ready: asyncio.Event) -> None:
+        import json
+
+        backoff = 0.5
+        while not self._control_stopping:
+            pubsub = self._redis.pubsub()
+            try:
+                await pubsub.subscribe(channel)
+                ready.set()
+                backoff = 0.5
+                async for msg in pubsub.listen():
+                    if self._control_stopping:
+                        break
+                    if msg.get("type") != "message":
+                        continue
+                    try:
+                        await handler(json.loads(msg["data"]))
+                    except Exception:
+                        logger.warning("control handler error on {}", channel, exc_info=True)
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.warning("control listener {} dropped; reconnecting", channel, exc_info=True)
+                await asyncio.sleep(backoff)
+                backoff = min(backoff * 2, 5.0)
+            finally:
+                with suppress(Exception):
+                    await pubsub.aclose()  # type: ignore[no-untyped-call]
+
+    async def start_control_listeners(self, ready_timeout: float = 5.0) -> None:
+        self._control_stopping = False
+        ctrl_ready = asyncio.Event()
+        ack_ready = asyncio.Event()
+        self._control_tasks = [
+            asyncio.create_task(
+                self._subscribe_loop(self._control_channel, self._handle_control, ctrl_ready),
+                name="run-control-listener",
+            ),
+            asyncio.create_task(
+                self._subscribe_loop(self._ack_channel, self._handle_ack, ack_ready),
+                name="run-control-ack-listener",
+            ),
+        ]
+        try:
+            await asyncio.wait_for(
+                asyncio.gather(ctrl_ready.wait(), ack_ready.wait()), timeout=ready_timeout
+            )
+        except TimeoutError:
+            # Don't fail startup: single-instance deployments don't need pub/sub
+            # at all (control runs via the local fast-path), and a transient Redis
+            # blip shouldn't block boot. But don't fail *silently* either — the
+            # listeners keep retrying in the background (_subscribe_loop), so a
+            # persistent failure here (e.g. Redis ACL/connectivity) means
+            # cross-instance cancel/steer is degraded until they connect.
+            logger.warning(
+                "Run-control pub/sub listeners not subscribed within {}s; "
+                "cross-instance cancel/steer degraded until they connect "
+                "(listeners keep retrying in the background)",
+                ready_timeout,
+            )
+
+    async def stop_control_listeners(self) -> None:
+        self._control_stopping = True
+        for t in self._control_tasks:
+            t.cancel()
+        for t in self._control_tasks:
+            with suppress(asyncio.CancelledError):
+                await t
+        self._control_tasks = []
 
     async def drain(self, timeout_seconds: float) -> None:
         """Wait for in-flight runs to finish, then return.

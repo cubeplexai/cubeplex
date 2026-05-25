@@ -871,65 +871,83 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
     const controller = new AbortController()
     activeStreamController = controller
 
+    let retried = false
+    let streamSource = streamMessages(
+      client,
+      conversationId,
+      content,
+      attachmentIds,
+      controller.signal,
+    )
+
     try {
-      for await (const event of streamMessages(
-        client,
-        conversationId,
-        content,
-        attachmentIds,
-        controller.signal,
-      )) {
-        if (event.event_id && get().lastAppliedEventId) {
-          if (compareEventIds(event.event_id, get().lastAppliedEventId!) <= 0) continue
-        }
+      outer: for (;;) {
+        for await (const event of streamSource) {
+          if (event.event_id && get().lastAppliedEventId) {
+            if (compareEventIds(event.event_id, get().lastAppliedEventId!) <= 0) continue
+          }
 
-        if (event.type === 'artifact') {
-          const artifactData = event.data as unknown as ArtifactEventData
-          if (artifactData.artifact) {
-            const { useArtifactStore } = await import('./artifactStore')
-            useArtifactStore.getState().addOrUpdate(conversationId, artifactData.artifact)
-          }
-        } else if (event.type === 'citation') {
-          const citationData = event.data as unknown as import('../types').CitationData
-          useCitationStore.getState().addCitation(conversationId, citationData)
-        } else if (event.type === 'error') {
-          const errData = event.data as { message: string; details?: string }
-          set({
-            error: errData.details || errData.message,
-            isStreaming: false,
-            streamingConversationId: null,
-            currentRunId: null,
-            statusPhase: null,
-            lastAppliedEventId: nextEventId(get().lastAppliedEventId, event.event_id),
-          })
-          break
-        } else if (event.type === 'done') {
-          const usage = (event.data as Record<string, unknown>).usage as
-            | import('../types').UsageSummary
-            | undefined
-          const usageUpdate: Partial<MessageStore> = {
-            lastAppliedEventId: nextEventId(get().lastAppliedEventId, event.event_id),
-          }
-          if (usage) {
-            usageUpdate.turnUsage = {
-              ...get().turnUsage,
-              [conversationId]: usage.turn,
+          if (event.type === 'artifact') {
+            const artifactData = event.data as unknown as ArtifactEventData
+            if (artifactData.artifact) {
+              const { useArtifactStore } = await import('./artifactStore')
+              useArtifactStore.getState().addOrUpdate(conversationId, artifactData.artifact)
             }
-            usageUpdate.sessionUsage = {
-              ...get().sessionUsage,
-              [conversationId]: usage.session,
+          } else if (event.type === 'citation') {
+            const citationData = event.data as unknown as import('../types').CitationData
+            useCitationStore.getState().addCitation(conversationId, citationData)
+          } else if (event.type === 'error') {
+            const errData = event.data as { message: string; details?: string }
+            if (!retried && !sawDone && errData.message.includes('409')) {
+              retried = true
+              await new Promise((r) => setTimeout(r, 400))
+              streamSource = streamMessages(
+                client,
+                conversationId,
+                content,
+                attachmentIds,
+                controller.signal,
+              )
+              continue outer
             }
-            usageUpdate.contextWindow = {
-              ...get().contextWindow,
-              [conversationId]: usage.context_window,
+            set({
+              error: errData.details || errData.message,
+              isStreaming: false,
+              streamingConversationId: null,
+              currentRunId: null,
+              statusPhase: null,
+              lastAppliedEventId: nextEventId(get().lastAppliedEventId, event.event_id),
+            })
+            break outer
+          } else if (event.type === 'done') {
+            const usage = (event.data as Record<string, unknown>).usage as
+              | import('../types').UsageSummary
+              | undefined
+            const usageUpdate: Partial<MessageStore> = {
+              lastAppliedEventId: nextEventId(get().lastAppliedEventId, event.event_id),
             }
+            if (usage) {
+              usageUpdate.turnUsage = {
+                ...get().turnUsage,
+                [conversationId]: usage.turn,
+              }
+              usageUpdate.sessionUsage = {
+                ...get().sessionUsage,
+                [conversationId]: usage.session,
+              }
+              usageUpdate.contextWindow = {
+                ...get().contextWindow,
+                [conversationId]: usage.context_window,
+              }
+            }
+            set(usageUpdate)
+            sawDone = true
+            break outer
           }
-          set(usageUpdate)
-          sawDone = true
-          break
-        }
 
-        batchedSet((s) => applyStreamEvent(s, event))
+          batchedSet((s) => applyStreamEvent(s, event))
+        }
+        break outer
       }
     } catch (err) {
       set({
@@ -992,7 +1010,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
 
     try {
       const res = await steerRun(client, conversationId, text)
-      if (!res.steered) rollback()
+      if (res.status === 'no_active_run') rollback()
     } catch (err) {
       console.error('Failed to steer run:', err)
       rollback()

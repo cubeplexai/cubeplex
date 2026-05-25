@@ -173,6 +173,7 @@ async def lifespan(_app: FastAPI):  # type: ignore
             run_stream_max_events=config.get("streaming.run_stream_max_events", 1000000),
         )
         _app.state.run_manager = run_manager
+        await run_manager.start_control_listeners()
         logger.info(
             "Redis streaming runtime initialized (prefix={})",
             _app.state.redis_key_prefix,
@@ -314,6 +315,9 @@ async def lifespan(_app: FastAPI):  # type: ignore
         _app.state.drain_state.enter_draining()
         drain_timeout = _lifecycle_config.get("lifecycle.graceful_drain_timeout_seconds", 3600)
         await run_manager.drain(timeout_seconds=float(drain_timeout))
+        # Stop control listeners AFTER draining so in-flight runs can still be
+        # cancelled/steered during graceful shutdown.
+        await run_manager.stop_control_listeners()
     tracer = getattr(_app.state, "tracer", None)
     if tracer is not None:
         try:

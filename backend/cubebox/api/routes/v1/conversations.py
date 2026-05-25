@@ -816,16 +816,14 @@ async def cancel_active_run(
         )
 
     active_run = await get_active_run(
-        rds.client,
-        prefix=rds.key_prefix,
-        conversation_id=conversation_id,
+        rds.client, prefix=rds.key_prefix, conversation_id=conversation_id
     )
     if active_run is None or active_run.status != "running":
-        return {"cancelled": False, "run_id": None}
+        return {"status": "no_active_run", "run_id": None}
 
     run_manager = raw_request.app.state.run_manager
-    cancelled = await run_manager.cancel_run(active_run.run_id)
-    return {"cancelled": cancelled, "run_id": active_run.run_id}
+    dispatch_status = await run_manager.dispatch_cancel(active_run.run_id)
+    return {"status": dispatch_status, "run_id": active_run.run_id}
 
 
 @router.post("/{conversation_id}/steer", status_code=status.HTTP_202_ACCEPTED)
@@ -858,13 +856,11 @@ async def steer_active_run(
         )
 
     active_run = await get_active_run(
-        rds.client,
-        prefix=rds.key_prefix,
-        conversation_id=conversation_id,
+        rds.client, prefix=rds.key_prefix, conversation_id=conversation_id
     )
     if active_run is None or active_run.status != "running":
-        return {"steered": False, "run_id": None}
+        return {"status": "no_active_run", "run_id": None}
 
     run_manager = raw_request.app.state.run_manager
-    steered = await run_manager.steer_run(active_run.run_id, body.content)
-    return {"steered": steered, "run_id": active_run.run_id}
+    dispatch_status = await run_manager.dispatch_steer(active_run.run_id, body.content)
+    return {"status": dispatch_status, "run_id": active_run.run_id}
