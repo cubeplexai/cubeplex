@@ -260,7 +260,16 @@ async def run_consolidation(
             max_output_tokens=EXTRACT_MODEL_MAX_TOKENS,
         )
         ops = parse_ops(raw, max_ops=MAX_OPS)
-        if ops:
+        if ops is None:
+            # Malformed / over-cap LLM output = a FAILED pass. Do NOT advance the
+            # high-water-mark — leave last/counter so this window retries next
+            # eligible run (otherwise those turns' memories are lost forever).
+            logger.warning(
+                "memory consolidation produced malformed ops for {}; leaving for retry",
+                conversation_id,
+            )
+            return
+        if ops:  # ops == [] is a valid "nothing worth saving" → advance below
             async with session_maker() as s:
                 repo = MemoryRepository(
                     s, user_id=user_id, org_id=org_id, workspace_id=workspace_id
