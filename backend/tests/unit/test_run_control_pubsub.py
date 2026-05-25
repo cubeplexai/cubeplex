@@ -23,10 +23,10 @@ def _mgr(redis) -> RunManager:
 
 class _FakeAgent:
     def __init__(self) -> None:
-        self.steered: list[str] = []
+        self.steered: list = []
 
     def steer(self, message) -> None:  # noqa: ANN001
-        self.steered.append(message.content[0].text)
+        self.steered.append(message)
 
 
 @pytest.fixture
@@ -39,8 +39,9 @@ async def test_dispatch_steer_local_calls_agent(redis):
     m = _mgr(redis)
     agent = _FakeAgent()
     m._agents["r1"] = agent
-    assert await m.dispatch_steer("r1", "go left") == "steered"
-    assert agent.steered == ["go left"]
+    assert await m.dispatch_steer("r1", "go left", steer_id="s1") == "steered"
+    assert agent.steered[0].content[0].text == "go left"
+    assert agent.steered[0].metadata["steer_id"] == "s1"
 
 
 @pytest.mark.asyncio
@@ -49,14 +50,19 @@ async def test_dispatch_steer_remote_publishes(redis):
     pubsub = redis.pubsub()
     await pubsub.subscribe("t:control")
     await asyncio.sleep(0)
-    assert await m.dispatch_steer("r-remote", "hello") == "published"
+    assert await m.dispatch_steer("r-remote", "hello", steer_id="s1") == "published"
     got = None
     for _ in range(20):
         msg = await pubsub.get_message(ignore_subscribe_messages=True, timeout=0.1)
         if msg:
             got = json.loads(msg["data"])
             break
-    assert got == {"run_id": "r-remote", "type": "steer", "content": "hello"}
+    assert got == {
+        "run_id": "r-remote",
+        "type": "steer",
+        "content": "hello",
+        "steer_id": "s1",
+    }
 
 
 @pytest.mark.asyncio
@@ -65,7 +71,7 @@ async def test_handle_control_steer_dispatches_locally(redis):
     agent = _FakeAgent()
     m._agents["r1"] = agent
     await m._handle_control({"run_id": "r1", "type": "steer", "content": "x"})
-    assert agent.steered == ["x"]
+    assert agent.steered[0].content[0].text == "x"
 
 
 @pytest.mark.asyncio

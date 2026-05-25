@@ -35,7 +35,10 @@ async def test_steer_injects_user_message_into_active_run(member_client) -> None
         if b.json().get("active_run"):
             s = await client.post(
                 f"/api/v1/ws/{ws_id}/conversations/{conv_id}/steer",
-                json={"content": "STEER_MARKER_42: also print 'hello from steer'"},
+                json={
+                    "content": "STEER_MARKER_42: also print 'hello from steer'",
+                    "steer_id": "steer-e2e-1",
+                },
             )
             assert s.status_code == 202
             steered = s.json()["status"] == "steered"
