@@ -38,7 +38,7 @@ async def test_steer_injects_user_message_into_active_run(member_client) -> None
                 json={"content": "STEER_MARKER_42: also print 'hello from steer'"},
             )
             assert s.status_code == 202
-            steered = s.json()["steered"]
+            steered = s.json()["status"] == "steered"
             break
         await asyncio.sleep(0.1)
     assert steered is True, "run never became active / agent not registered"
