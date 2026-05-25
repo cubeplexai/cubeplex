@@ -258,7 +258,7 @@ export function InputBar({
           placeholder={t('placeholder')}
           rows={1}
           className="flex-1 bg-transparent resize-none outline-none text-sm text-foreground placeholder:text-muted-foreground/40 leading-relaxed min-h-7 max-h-[180px] overflow-y-auto py-0.5"
-          disabled={isSubmitting}
+          disabled={isSubmitting && !messageIsStreaming}
         />
         {showStop ? (
           <button
@@ -275,7 +275,11 @@ export function InputBar({
           <button
             data-testid="send-button"
             onClick={() => void (messageIsStreaming ? handleSteer() : handleSubmit())}
-            disabled={(!content.trim() && stagedFileCount === 0) || isSubmitting || uploadInFlight}
+            disabled={
+              (!content.trim() && stagedFileCount === 0) ||
+              (isSubmitting && !messageIsStreaming) ||
+              uploadInFlight
+            }
             className={cn(
               'flex size-7 shrink-0 items-center justify-center rounded-lg bg-primary text-white transition-all hover:bg-primary/80',
               'disabled:cursor-not-allowed disabled:opacity-25',

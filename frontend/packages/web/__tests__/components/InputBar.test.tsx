@@ -6,10 +6,13 @@ import { InputBar } from '../../components/layout/InputBar'
 
 const storeMocks = vi.hoisted(() => ({
   send: vi.fn(),
+  steer: vi.fn(),
+  cancelStream: vi.fn(),
   upload: vi.fn(),
   clear: vi.fn(),
   hydrate: vi.fn(),
   setWorkspaceId: vi.fn(),
+  state: { isStreaming: false, streamingConversationId: null as string | null },
 }))
 
 vi.mock('@cubebox/core', () => ({
@@ -19,14 +22,18 @@ vi.mock('@cubebox/core', () => ({
   useMessageStore: (
     selector: (state: {
       send: typeof storeMocks.send
+      steer: typeof storeMocks.steer
+      cancelStream: typeof storeMocks.cancelStream
       isStreaming: boolean
       streamingConversationId: string | null
     }) => unknown,
   ) =>
     selector({
       send: storeMocks.send,
-      isStreaming: false,
-      streamingConversationId: null,
+      steer: storeMocks.steer,
+      cancelStream: storeMocks.cancelStream,
+      isStreaming: storeMocks.state.isStreaming,
+      streamingConversationId: storeMocks.state.streamingConversationId,
     }),
   useAttachmentStore: (
     selector: (state: {
@@ -61,6 +68,32 @@ function renderWithIntl(ui: React.ReactElement): ReturnType<typeof render> {
 describe('InputBar', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    storeMocks.state.isStreaming = false
+    storeMocks.state.streamingConversationId = null
+  })
+
+  it('keeps the textarea editable once a streamed run is in flight (for steering)', async () => {
+    // The real store's send() only resolves when the SSE stream finishes, so
+    // the submit handler stays "in flight" for the whole run. Mirror that: send
+    // flips streaming on and returns a never-resolving promise.
+    storeMocks.send.mockImplementation(() => {
+      storeMocks.state.isStreaming = true
+      storeMocks.state.streamingConversationId = 'conv-1'
+      return new Promise<void>(() => {})
+    })
+
+    renderWithIntl(<InputBar conversationId="conv-1" />)
+    const textarea = screen.getByTestId('chat-input')
+
+    fireEvent.change(textarea, { target: { value: 'hello' } })
+    fireEvent.click(screen.getByTestId('send-button'))
+
+    await waitFor(() => {
+      expect(storeMocks.send).toHaveBeenCalled()
+    })
+    await waitFor(() => {
+      expect(textarea).not.toBeDisabled()
+    })
   })
 
   it('focuses the textarea when clicking the visible input shell padding', () => {
