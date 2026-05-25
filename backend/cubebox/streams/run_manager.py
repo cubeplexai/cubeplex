@@ -250,6 +250,7 @@ def cubepi_dict_to_agent_event(d: dict[str, Any], timestamp: str) -> AgentEvent 
     """
     from cubebox.agents.schemas import (
         ErrorEvent,
+        InjectedMessageEvent,
         ReasoningEvent,
         TextDeltaEvent,
         ToolCallEvent,
@@ -258,6 +259,11 @@ def cubepi_dict_to_agent_event(d: dict[str, Any], timestamp: str) -> AgentEvent 
     )
 
     t = d.get("type")
+    if t == "injected_message":
+        return InjectedMessageEvent(
+            timestamp=timestamp,
+            data={"content": d.get("content", ""), "steer_id": d.get("steer_id", "")},
+        )
     if t == "text_delta":
         return TextDeltaEvent(
             timestamp=timestamp,
@@ -542,12 +548,20 @@ class RunManager:
         agent.steer(UserMessage(content=[TextContent(text=content)]))
         return True
 
-    async def _publish_control(self, run_id: str, type_: str, content: str | None = None) -> None:
+    async def _publish_control(
+        self,
+        run_id: str,
+        type_: str,
+        content: str | None = None,
+        steer_id: str | None = None,
+    ) -> None:
         import json
 
         payload: dict[str, Any] = {"run_id": run_id, "type": type_}
         if content is not None:
             payload["content"] = content
+        if steer_id is not None:
+            payload["steer_id"] = steer_id
         await self._redis.publish(self._control_channel, json.dumps(payload))
 
     async def _publish_ack(self, run_id: str) -> None:
@@ -555,14 +569,27 @@ class RunManager:
 
         await self._redis.publish(self._ack_channel, json.dumps({"run_id": run_id}))
 
-    async def dispatch_steer(self, run_id: str, content: str) -> str:
+    async def dispatch_steer(self, run_id: str, content: str, steer_id: str) -> str:
         agent = self._agents.get(run_id)
         if agent is not None:
             from cubepi.providers.base import TextContent, UserMessage
 
-            agent.steer(UserMessage(content=[TextContent(text=content)]))
+            agent.steer(
+                UserMessage(
+                    content=[TextContent(text=content)],
+                    metadata={"steer_id": steer_id},
+                )
+            )
             return "steered"
-        await self._publish_control(run_id, "steer", content)
+        await self._publish_control(run_id, "steer", content, steer_id=steer_id)
+        return "published"
+
+    async def dispatch_cancel_steer(self, run_id: str, steer_id: str) -> str:
+        agent = self._agents.get(run_id)
+        if agent is not None:
+            removed = agent.cancel_steer(steer_id)
+            return "cancelled" if removed else "not_found"
+        await self._publish_control(run_id, "cancel_steer", steer_id=steer_id)
         return "published"
 
     async def dispatch_cancel(self, run_id: str, ack_timeout: float = 3.0) -> str:
@@ -599,7 +626,16 @@ class RunManager:
             if agent is not None:
                 from cubepi.providers.base import TextContent, UserMessage
 
-                agent.steer(UserMessage(content=[TextContent(text=data.get("content") or "")]))
+                agent.steer(
+                    UserMessage(
+                        content=[TextContent(text=data.get("content") or "")],
+                        metadata={"steer_id": data.get("steer_id") or ""},
+                    )
+                )
+        elif type_ == "cancel_steer":
+            agent = self._agents.get(run_id)
+            if agent is not None:
+                agent.cancel_steer(data.get("steer_id") or "")
 
     async def _handle_ack(self, data: dict[str, Any]) -> None:
         run_id = data.get("run_id")
@@ -1346,10 +1382,20 @@ class RunManager:
             # skills / todo middleware can read and write persistent state.
             extra_ref_holder["extra"] = agent._extra
 
+            from cubepi.agent.types import MessageEndEvent as _MsgEndEvent
+            from cubepi.providers.base import UserMessage as _UserMsg
+
+            _user_msg_seen = 0
+
             def _on_event(evt: Any, _signal: Any = None) -> None:
                 # Runs on the same event loop as _run_cubepi_path, so
                 # put_nowait is safe.  If we ever invoke the agent from a
                 # background thread, swap to loop.call_soon_threadsafe.
+                nonlocal _user_msg_seen
+                if isinstance(evt, _MsgEndEvent) and isinstance(evt.message, _UserMsg):
+                    _user_msg_seen += 1
+                    if _user_msg_seen == 1:
+                        return  # seed prompt — already shown optimistically
                 for d in convert_agent_event_to_sse(evt):
                     sse_queue.put_nowait(d)
 

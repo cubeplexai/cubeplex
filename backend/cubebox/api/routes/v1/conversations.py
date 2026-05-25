@@ -271,6 +271,13 @@ class SteerMessageRequest(BaseModel):
     """Request body for steering an in-flight run."""
 
     content: str
+    steer_id: str
+
+
+class CancelSteerRequest(BaseModel):
+    """Request body for cancelling a not-yet-drained steer."""
+
+    steer_id: str
 
 
 class SendMessageRequest(BaseModel):
@@ -862,5 +869,41 @@ async def steer_active_run(
         return {"status": "no_active_run", "run_id": None}
 
     run_manager = raw_request.app.state.run_manager
-    dispatch_status = await run_manager.dispatch_steer(active_run.run_id, body.content)
+    dispatch_status = await run_manager.dispatch_steer(
+        active_run.run_id, body.content, steer_id=body.steer_id
+    )
+    return {"status": dispatch_status, "run_id": active_run.run_id}
+
+
+@router.post("/{conversation_id}/steer/cancel", status_code=status.HTTP_202_ACCEPTED)
+async def cancel_steer(
+    conversation_id: str,
+    body: CancelSteerRequest,
+    raw_request: Request,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    ctx: Annotated[RequestContext, Depends(require_member)],
+    rds: Annotated[RedisHandle, Depends(redis_dep)],
+) -> dict[str, object]:
+    """Best-effort cancel of a not-yet-drained steer on the active run."""
+    conv_repo = ConversationRepository(
+        session,
+        org_id=ctx.org_id,
+        workspace_id=ctx.workspace_id,
+        user_id=ctx.user.id,
+    )
+    conversation = await conv_repo.get_by_id(conversation_id)
+    if not conversation:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Conversation {conversation_id} not found",
+        )
+
+    active_run = await get_active_run(
+        rds.client, prefix=rds.key_prefix, conversation_id=conversation_id
+    )
+    if active_run is None or active_run.status != "running":
+        return {"status": "no_active_run", "run_id": None}
+
+    run_manager = raw_request.app.state.run_manager
+    dispatch_status = await run_manager.dispatch_cancel_steer(active_run.run_id, body.steer_id)
     return {"status": dispatch_status, "run_id": active_run.run_id}

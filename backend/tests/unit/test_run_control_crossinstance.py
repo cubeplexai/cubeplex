@@ -22,10 +22,10 @@ def _mgr(redis: fakeredis.aioredis.FakeRedis) -> RunManager:
 
 class _FakeAgent:
     def __init__(self) -> None:
-        self.steered: list[str] = []
+        self.steered: list = []
 
     def steer(self, message) -> None:  # noqa: ANN001
-        self.steered.append(message.content[0].text)
+        self.steered.append(message)
 
 
 @pytest.mark.asyncio
@@ -39,12 +39,13 @@ async def test_cross_instance_steer() -> None:
     a._agents["r1"] = agent  # owner is A
     await a.start_control_listeners()
     try:
-        assert await b.dispatch_steer("r1", "redirect") == "published"
+        assert await b.dispatch_steer("r1", "redirect", steer_id="s1") == "published"
         for _ in range(50):
             if agent.steered:
                 break
             await asyncio.sleep(0.05)
-        assert agent.steered == ["redirect"]
+        assert agent.steered[0].content[0].text == "redirect"
+        assert agent.steered[0].metadata["steer_id"] == "s1"
     finally:
         await a.stop_control_listeners()
 

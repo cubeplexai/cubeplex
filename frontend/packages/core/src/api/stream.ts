@@ -28,12 +28,35 @@ export async function steerRun(
   client: ApiClient,
   conversationId: string,
   content: string,
+  steerId: string,
 ): Promise<SteerRunResponse> {
-  const res = await client.post(`/api/v1/conversations/${conversationId}/steer`, { content })
+  const res = await client.post(`/api/v1/conversations/${conversationId}/steer`, {
+    content,
+    steer_id: steerId,
+  })
   if (!res.ok) {
     throw new Error(`Failed to steer run: HTTP ${res.status}`)
   }
   return (await res.json()) as SteerRunResponse
+}
+
+export interface CancelSteerResponse {
+  status: 'cancelled' | 'not_found' | 'published' | 'no_active_run'
+  run_id: string | null
+}
+
+export async function cancelSteer(
+  client: ApiClient,
+  conversationId: string,
+  steerId: string,
+): Promise<CancelSteerResponse> {
+  const res = await client.post(`/api/v1/conversations/${conversationId}/steer/cancel`, {
+    steer_id: steerId,
+  })
+  if (!res.ok) {
+    throw new Error(`Failed to cancel steer: HTTP ${res.status}`)
+  }
+  return (await res.json()) as CancelSteerResponse
 }
 
 async function* readLines(reader: ReadableStreamDefaultReader<Uint8Array>): AsyncGenerator<string> {

@@ -60,6 +60,7 @@ export type AgentEventType =
   | 'citation'
   | 'status'
   | 'usage'
+  | 'injected_message'
 
 export interface AgentEvent {
   type: AgentEventType
@@ -156,6 +157,11 @@ export interface ErrorEvent extends AgentEvent {
 export interface DoneEvent extends AgentEvent {
   type: 'done'
   data: Record<string, unknown>
+}
+
+export interface InjectedMessageEvent extends AgentEvent {
+  type: 'injected_message'
+  data: { content: string; steer_id: string }
 }
 
 export type StatusPhase = 'sandbox_creating' | 'sandbox_ready' | 'sandbox_failed'

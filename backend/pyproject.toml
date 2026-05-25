@@ -158,10 +158,10 @@ exclude_lines = [
 ]
 
 [tool.uv.sources]
-# 8e9e4b9 is cubepi main HEAD: adds turn-boundary steering drain (#117) on top
-# of the cancel-orphan-tool-results fix (#116). The steer-during-run feature
-# relies on tail steering being honored during a final/tool-less turn.
-cubepi = { git = "https://github.com/cubeplexai/cubepi.git", rev = "8e9e4b9" }
+# da9d792 is cubepi main HEAD: adds Agent.cancel_steer / _MessageQueue.remove
+# (#120) for the steer-cancel feature, on top of turn-boundary steering drain
+# (#117) + the cancel-orphan-tool-results fix (#116).
+cubepi = { git = "https://github.com/cubeplexai/cubepi.git", rev = "da9d792" }
 
 [dependency-groups]
 dev = [

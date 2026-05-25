@@ -11,6 +11,7 @@ const storeMocks = vi.hoisted(() => ({
   setConversationState: vi.fn(),
   renameConversation: vi.fn(),
   send: vi.fn(),
+  cancelSteer: vi.fn(),
   upload: vi.fn(),
   clear: vi.fn(),
   hydrate: vi.fn(),
@@ -59,12 +60,16 @@ vi.mock('@cubebox/core', () => {
     useMessageStore: (
       selector: (state: {
         send: typeof storeMocks.send
+        cancelSteer: typeof storeMocks.cancelSteer
+        pendingSteers: Record<string, unknown[]>
         isStreaming: boolean
         streamingConversationId: string | null
       }) => unknown,
     ) =>
       selector({
         send: storeMocks.send,
+        cancelSteer: storeMocks.cancelSteer,
+        pendingSteers: {},
         isStreaming: false,
         streamingConversationId: null,
       }),

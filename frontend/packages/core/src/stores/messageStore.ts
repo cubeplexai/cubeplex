@@ -25,6 +25,7 @@ import { getTextContent } from '../types'
 import type { ApiClient } from '../api'
 import {
   cancelActiveRun,
+  cancelSteer,
   getConversationBootstrap,
   steerRun,
   streamMessages,
@@ -44,6 +45,7 @@ export interface AgentStream {
 
 export interface MessageStore {
   messages: Record<string, Message[]>
+  pendingSteers: Record<string, { steerId: string; text: string }[]>
   streamAgents: Record<string, AgentStream> // "main" or "subagent:xxx"
   isStreaming: boolean
   streamingConversationId: string | null
@@ -72,6 +74,8 @@ export interface MessageStore {
   ): Promise<void>
   cancelStream(client: ApiClient, conversationId: string): Promise<void>
   steer(client: ApiClient, conversationId: string, content: string): Promise<void>
+  cancelSteer(client: ApiClient, conversationId: string, steerId: string): Promise<void>
+  __commitTurnAndInject(conversationId: string, data: { content: string; steer_id: string }): void
   clearStream(): void
   clearLastRunStatus(): void
 }
@@ -510,30 +514,26 @@ function applyStreamEvent(state: MessageStore, event: AgentEvent): Partial<Messa
   return base
 }
 
-async function finalizeCompletedStream(
-  get: () => MessageStore,
-  set: (partial: Partial<MessageStore> | ((state: MessageStore) => Partial<MessageStore>)) => void,
-  conversationId: string,
+/**
+ * Build the assistant (+ tool) messages for a finished/interrupted turn from the
+ * current streaming buckets. Pure — reads its inputs, allocates message ids, and
+ * returns the pieces; the caller decides how to append them and clear state.
+ * Returns `assistantMessage: null` when there is no main stream to finalize.
+ */
+function buildTurnMessages(
+  agents: Record<string, AgentStream>,
+  toolResultMap: MessageStore['toolResultMap'],
+  turnUsage: import('../types').TurnUsage | null,
   stopReason: AssistantMessageType['stop_reason'] = 'stop',
-): Promise<void> {
-  const agents = get().streamAgents
+): { assistantMessage: AssistantMessageType | null; toolMessages: ToolResultMessageType[] } {
   const mainStream = agents[MAIN_AGENT_KEY]
-
-  if (!mainStream) {
-    set({
-      isStreaming: false,
-      streamingConversationId: null,
-      currentRunId: null,
-      statusPhase: null,
-    })
-    return
-  }
+  if (!mainStream) return { assistantMessage: null, toolMessages: [] }
 
   const finalBlocks = finalizeLastThinking(mainStream.blocks).filter(
     (block) => block.type !== 'tool_call_streaming',
   )
 
-  const usage = get().turnUsage[conversationId]
+  const usage = turnUsage
   const assistantMessage: AssistantMessageType = {
     id: nextMessageId('assistant'),
     role: 'assistant',
@@ -565,11 +565,10 @@ async function finalizeCompletedStream(
   // Persist main-agent tool results into history so the just-finished message
   // remains interactive after streamingConversationId clears. Skip subagent
   // tool results — those get richer messages from the loop below.
-  const mainToolResultMap = get().toolResultMap
   for (const tr of mainStream.toolResults) {
     const tcId = tr.data.tool_call_id
     if (!tcId || tr.data.tool_name === 'subagent') continue
-    const mapEntry = mainToolResultMap[tcId]
+    const mapEntry = toolResultMap[tcId]
     const receivedAtMs =
       mapEntry?.receivedAt ?? (tr.timestamp ? new Date(tr.timestamp).getTime() : Date.now())
     toolMessages.push({
@@ -587,7 +586,6 @@ async function finalizeCompletedStream(
     if (key === MAIN_AGENT_KEY) continue
     const toolCallId = key.startsWith('subagent:') ? key.slice(9) : key
     const args = subagentArgs[key]
-    const currentToolResultMap = get().toolResultMap
     toolMessages.push({
       id: nextMessageId('tool'),
       role: 'tool_result',
@@ -606,7 +604,7 @@ async function finalizeCompletedStream(
           })),
           tool_results: agentStream.toolResults
             .map((tr) => {
-              const mapEntry = currentToolResultMap[tr.data.tool_call_id ?? '']
+              const mapEntry = toolResultMap[tr.data.tool_call_id ?? '']
               return {
                 tool_name: tr.data.tool_name ?? '',
                 tool_call_id: tr.data.tool_call_id ?? '',
@@ -625,6 +623,33 @@ async function finalizeCompletedStream(
     })
   }
 
+  return { assistantMessage, toolMessages }
+}
+
+async function finalizeCompletedStream(
+  get: () => MessageStore,
+  set: (partial: Partial<MessageStore> | ((state: MessageStore) => Partial<MessageStore>)) => void,
+  conversationId: string,
+  stopReason: AssistantMessageType['stop_reason'] = 'stop',
+): Promise<void> {
+  const { assistantMessage, toolMessages } = buildTurnMessages(
+    get().streamAgents,
+    get().toolResultMap,
+    get().turnUsage[conversationId] ?? null,
+    stopReason,
+  )
+
+  if (!assistantMessage) {
+    set((state) => ({
+      isStreaming: false,
+      streamingConversationId: null,
+      currentRunId: null,
+      statusPhase: null,
+      pendingSteers: { ...state.pendingSteers, [conversationId]: [] },
+    }))
+    return
+  }
+
   set((state) => ({
     messages: {
       ...state.messages,
@@ -638,6 +663,7 @@ async function finalizeCompletedStream(
     streamingConversationId: null,
     currentRunId: null,
     statusPhase: null,
+    pendingSteers: { ...state.pendingSteers, [conversationId]: [] },
   }))
 }
 
@@ -678,14 +704,15 @@ async function consumeRunStream(
         useCitationStore.getState().addCitation(conversationId, citationData)
       } else if (event.type === 'error') {
         const errData = event.data as { message: string; details?: string }
-        set({
+        set((s) => ({
           error: errData.details || errData.message,
           isStreaming: false,
           streamingConversationId: null,
           currentRunId: null,
           statusPhase: null,
-          lastAppliedEventId: nextEventId(get().lastAppliedEventId, event.event_id),
-        })
+          lastAppliedEventId: nextEventId(s.lastAppliedEventId, event.event_id),
+          pendingSteers: { ...s.pendingSteers, [conversationId]: [] },
+        }))
         break
       } else if (event.type === 'done') {
         const usage = (event.data as Record<string, unknown>).usage as
@@ -711,6 +738,16 @@ async function consumeRunStream(
         set(usageUpdate)
         sawDone = true
         break
+      } else if (event.type === 'injected_message') {
+        const d = event.data as { content: string; steer_id: string }
+        // Flush batched stream mutations so the commit reads fully-applied
+        // streamAgents, not a stale snapshot.
+        flush()
+        set((s) => ({
+          lastAppliedEventId: nextEventId(s.lastAppliedEventId, event.event_id),
+        }))
+        get().__commitTurnAndInject(conversationId, d)
+        continue
       }
 
       batchedSet((s) => applyStreamEvent(s, event))
@@ -727,6 +764,7 @@ async function consumeRunStream(
 
 export const useMessageStore = create<MessageStore>((set, get) => ({
   messages: {},
+  pendingSteers: {},
   streamAgents: {},
   isStreaming: false,
   streamingConversationId: null,
@@ -786,6 +824,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
         error: null,
         lastRunStatus: bootstrap.last_run_status ?? null,
         streamAgents: nextStreamAgents,
+        pendingSteers: { ...s.pendingSteers, [conversationId]: [] },
         toolStartedMap: {},
         toolResultMap: {},
         isStreaming: !!bootstrap.active_run,
@@ -910,14 +949,15 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
               )
               continue outer
             }
-            set({
+            set((s) => ({
               error: errData.details || errData.message,
               isStreaming: false,
               streamingConversationId: null,
               currentRunId: null,
               statusPhase: null,
-              lastAppliedEventId: nextEventId(get().lastAppliedEventId, event.event_id),
-            })
+              lastAppliedEventId: nextEventId(s.lastAppliedEventId, event.event_id),
+              pendingSteers: { ...s.pendingSteers, [conversationId]: [] },
+            }))
             break outer
           } else if (event.type === 'done') {
             const usage = (event.data as Record<string, unknown>).usage as
@@ -943,6 +983,16 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
             set(usageUpdate)
             sawDone = true
             break outer
+          } else if (event.type === 'injected_message') {
+            const d = event.data as { content: string; steer_id: string }
+            // Flush batched stream mutations so the commit reads fully-applied
+            // streamAgents, not a stale snapshot.
+            flush()
+            set((s) => ({
+              lastAppliedEventId: nextEventId(s.lastAppliedEventId, event.event_id),
+            }))
+            get().__commitTurnAndInject(conversationId, d)
+            continue
           }
 
           batchedSet((s) => applyStreamEvent(s, event))
@@ -950,12 +1000,13 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
         break outer
       }
     } catch (err) {
-      set({
+      set((s) => ({
         error: (err as Error).message,
         isStreaming: false,
         streamingConversationId: null,
         currentRunId: null,
-      })
+        pendingSteers: { ...s.pendingSteers, [conversationId]: [] },
+      }))
       return
     } finally {
       flush()
@@ -978,43 +1029,106 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
     const state = get()
     if (!state.isStreaming || state.streamingConversationId !== conversationId) return
 
-    // Optimistically show the steered user message immediately for responsive
-    // feedback. cubepi emits the injected message to the checkpointer (not as
-    // SSE deltas), so this in-memory bubble is the live display; a reload after
-    // the run completes re-reads it from history. Streaming state is left
-    // untouched — the run keeps going and the model picks the message up at its
-    // next safe point. If the endpoint reports the run was NOT steered (already
-    // finished / not in this process), roll the bubble back.
-    const optimisticId = nextMessageId('user-steer')
-    const userMessage: UserMessageType = {
-      id: optimisticId,
-      role: 'user',
-      content: [{ type: 'text', text }],
-      timestamp: Date.now() / 1000,
-      metadata: {},
-    }
+    // A sent-but-not-yet-injected steer is held in pendingSteers (rendered as a
+    // chip above the input box), NOT in the transcript. cubepi injects it into
+    // history at its next safe point and emits an injected_message SSE event,
+    // at which point it gets committed into messages (handled elsewhere).
+    // Streaming state is left untouched — the run keeps going. If the endpoint
+    // reports the run was NOT steered (already finished / not in this process),
+    // remove the pending entry.
+    const steerId = nextMessageId('steer')
     set((s) => ({
-      messages: {
-        ...s.messages,
-        [conversationId]: [...(s.messages[conversationId] ?? []), userMessage],
+      pendingSteers: {
+        ...s.pendingSteers,
+        [conversationId]: [...(s.pendingSteers[conversationId] ?? []), { steerId, text }],
       },
     }))
 
-    const rollback = () =>
+    const removePending = () =>
       set((s) => ({
-        messages: {
-          ...s.messages,
-          [conversationId]: (s.messages[conversationId] ?? []).filter((m) => m.id !== optimisticId),
+        pendingSteers: {
+          ...s.pendingSteers,
+          [conversationId]: (s.pendingSteers[conversationId] ?? []).filter(
+            (p) => p.steerId !== steerId,
+          ),
         },
       }))
 
     try {
-      const res = await steerRun(client, conversationId, text)
-      if (res.status === 'no_active_run') rollback()
+      const res = await steerRun(client, conversationId, text, steerId)
+      if (res.status === 'no_active_run') removePending()
     } catch (err) {
       console.error('Failed to steer run:', err)
-      rollback()
+      removePending()
     }
+  },
+
+  async cancelSteer(client, conversationId, steerId) {
+    set((s) => ({
+      pendingSteers: {
+        ...s.pendingSteers,
+        [conversationId]: (s.pendingSteers[conversationId] ?? []).filter(
+          (p) => p.steerId !== steerId,
+        ),
+      },
+    }))
+    try {
+      await cancelSteer(client, conversationId, steerId)
+    } catch (err) {
+      console.error('Failed to cancel steer:', err)
+    }
+  },
+
+  // Commit the in-flight assistant turn into history at the point cubepi
+  // injected the steer, then append the steer user message right after, reset
+  // the streaming buckets so subsequent deltas form a fresh bubble, and drop the
+  // matching pending entry. This keeps the live transcript ordering identical to
+  // a reload from the checkpointer (steer interleaved between assistant turns).
+  __commitTurnAndInject(conversationId, data) {
+    const state = get()
+    // Idempotency: if this steer is already committed, no-op (replay-safe).
+    const already = (state.messages[conversationId] ?? []).some(
+      (m) => m.role === 'user' && m.metadata?.steer_id === data.steer_id,
+    )
+    if (already) return
+
+    const { assistantMessage, toolMessages } = buildTurnMessages(
+      state.streamAgents,
+      state.toolResultMap,
+      state.turnUsage[conversationId] ?? null,
+    )
+    const mainHasContent = !!assistantMessage && assistantMessage.content.length > 0
+
+    const steerMessage: UserMessageType = {
+      id: nextMessageId('user-steer'),
+      role: 'user',
+      content: [{ type: 'text', text: data.content }],
+      timestamp: Date.now() / 1000,
+      metadata: { steer_id: data.steer_id },
+    }
+
+    set((s) => ({
+      messages: {
+        ...s.messages,
+        [conversationId]: [
+          ...(s.messages[conversationId] ?? []),
+          // Only the assistant bubble is gated on having content (avoid an empty
+          // bubble when a steer drains before any text). Tool results always
+          // commit — they must not be lost from the live view if a steer lands
+          // right after a tool boundary.
+          ...(mainHasContent ? [assistantMessage as AssistantMessageType] : []),
+          ...toolMessages,
+          steerMessage,
+        ],
+      },
+      streamAgents: { [MAIN_AGENT_KEY]: emptyStream() },
+      pendingSteers: {
+        ...s.pendingSteers,
+        [conversationId]: (s.pendingSteers[conversationId] ?? []).filter(
+          (p) => p.steerId !== data.steer_id,
+        ),
+      },
+    }))
   },
 
   async cancelStream(client, conversationId) {
@@ -1042,12 +1156,13 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
     if (hasContent) {
       await finalizeCompletedStream(get, set, conversationId, 'aborted')
     } else {
-      set({
+      set((s) => ({
         isStreaming: false,
         streamingConversationId: null,
         currentRunId: null,
         statusPhase: null,
-      })
+        pendingSteers: { ...s.pendingSteers, [conversationId]: [] },
+      }))
     }
 
     try {
@@ -1060,6 +1175,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
   clearStream() {
     set({
       streamAgents: {},
+      pendingSteers: {},
       isStreaming: false,
       streamingConversationId: null,
       currentRunId: null,

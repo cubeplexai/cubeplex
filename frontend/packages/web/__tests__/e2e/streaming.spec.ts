@@ -28,7 +28,7 @@ test('loading animation appears while streaming', async ({ page }) => {
   expect(text!.length).toBeGreaterThan(20)
 })
 
-test('input is disabled while streaming', async ({ page }) => {
+test('input stays editable while streaming (so the user can steer)', async ({ page }) => {
   await registerAndLand(page)
 
   const input = page.getByPlaceholder('How can I help you?')
@@ -37,7 +37,10 @@ test('input is disabled while streaming', async ({ page }) => {
 
   await expect(page).toHaveURL(/\/w\/[^/]+\/conversations\//)
 
-  await expect(page.getByPlaceholder('How can I help you?')).toBeDisabled({ timeout: 5_000 })
+  // While the run streams, the composer must remain enabled — steering needs
+  // the user to type mid-run. (Previously the box was locked during streaming.)
+  await expect(page.getByTestId('loading-indicator')).toBeVisible({ timeout: 10_000 })
+  await expect(page.getByPlaceholder('How can I help you?')).toBeEnabled()
 
   await expect(page.getByTestId('loading-indicator')).toBeHidden({ timeout: 50_000 })
 
