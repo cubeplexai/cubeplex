@@ -1112,7 +1112,12 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
         ...s.messages,
         [conversationId]: [
           ...(s.messages[conversationId] ?? []),
-          ...(mainHasContent ? [assistantMessage as AssistantMessageType, ...toolMessages] : []),
+          // Only the assistant bubble is gated on having content (avoid an empty
+          // bubble when a steer drains before any text). Tool results always
+          // commit — they must not be lost from the live view if a steer lands
+          // right after a tool boundary.
+          ...(mainHasContent ? [assistantMessage as AssistantMessageType] : []),
+          ...toolMessages,
           steerMessage,
         ],
       },
