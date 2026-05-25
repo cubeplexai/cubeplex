@@ -25,6 +25,7 @@ import { getTextContent } from '../types'
 import type { ApiClient } from '../api'
 import {
   cancelActiveRun,
+  cancelSteer,
   getConversationBootstrap,
   steerRun,
   streamMessages,
@@ -44,6 +45,7 @@ export interface AgentStream {
 
 export interface MessageStore {
   messages: Record<string, Message[]>
+  pendingSteers: Record<string, { steerId: string; text: string }[]>
   streamAgents: Record<string, AgentStream> // "main" or "subagent:xxx"
   isStreaming: boolean
   streamingConversationId: string | null
@@ -72,6 +74,7 @@ export interface MessageStore {
   ): Promise<void>
   cancelStream(client: ApiClient, conversationId: string): Promise<void>
   steer(client: ApiClient, conversationId: string, content: string): Promise<void>
+  cancelSteer(client: ApiClient, conversationId: string, steerId: string): Promise<void>
   clearStream(): void
   clearLastRunStatus(): void
 }
@@ -727,6 +730,7 @@ async function consumeRunStream(
 
 export const useMessageStore = create<MessageStore>((set, get) => ({
   messages: {},
+  pendingSteers: {},
   streamAgents: {},
   isStreaming: false,
   streamingConversationId: null,
@@ -978,42 +982,53 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
     const state = get()
     if (!state.isStreaming || state.streamingConversationId !== conversationId) return
 
-    // Optimistically show the steered user message immediately for responsive
-    // feedback. cubepi emits the injected message to the checkpointer (not as
-    // SSE deltas), so this in-memory bubble is the live display; a reload after
-    // the run completes re-reads it from history. Streaming state is left
-    // untouched — the run keeps going and the model picks the message up at its
-    // next safe point. If the endpoint reports the run was NOT steered (already
-    // finished / not in this process), roll the bubble back.
-    const optimisticId = nextMessageId('user-steer')
-    const userMessage: UserMessageType = {
-      id: optimisticId,
-      role: 'user',
-      content: [{ type: 'text', text }],
-      timestamp: Date.now() / 1000,
-      metadata: {},
-    }
+    // A sent-but-not-yet-injected steer is held in pendingSteers (rendered as a
+    // chip above the input box), NOT in the transcript. cubepi injects it into
+    // history at its next safe point and emits an injected_message SSE event,
+    // at which point it gets committed into messages (handled elsewhere).
+    // Streaming state is left untouched — the run keeps going. If the endpoint
+    // reports the run was NOT steered (already finished / not in this process),
+    // remove the pending entry.
+    const steerId = nextMessageId('steer')
     set((s) => ({
-      messages: {
-        ...s.messages,
-        [conversationId]: [...(s.messages[conversationId] ?? []), userMessage],
+      pendingSteers: {
+        ...s.pendingSteers,
+        [conversationId]: [...(s.pendingSteers[conversationId] ?? []), { steerId, text }],
       },
     }))
 
-    const rollback = () =>
+    const removePending = () =>
       set((s) => ({
-        messages: {
-          ...s.messages,
-          [conversationId]: (s.messages[conversationId] ?? []).filter((m) => m.id !== optimisticId),
+        pendingSteers: {
+          ...s.pendingSteers,
+          [conversationId]: (s.pendingSteers[conversationId] ?? []).filter(
+            (p) => p.steerId !== steerId,
+          ),
         },
       }))
 
     try {
-      const res = await steerRun(client, conversationId, text, crypto.randomUUID())
-      if (res.status === 'no_active_run') rollback()
+      const res = await steerRun(client, conversationId, text, steerId)
+      if (res.status === 'no_active_run') removePending()
     } catch (err) {
       console.error('Failed to steer run:', err)
-      rollback()
+      removePending()
+    }
+  },
+
+  async cancelSteer(client, conversationId, steerId) {
+    set((s) => ({
+      pendingSteers: {
+        ...s.pendingSteers,
+        [conversationId]: (s.pendingSteers[conversationId] ?? []).filter(
+          (p) => p.steerId !== steerId,
+        ),
+      },
+    }))
+    try {
+      await cancelSteer(client, conversationId, steerId)
+    } catch (err) {
+      console.error('Failed to cancel steer:', err)
     }
   },
 
