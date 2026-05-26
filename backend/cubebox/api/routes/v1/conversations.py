@@ -20,17 +20,22 @@ from cubebox.db import get_session
 from cubebox.db.engine import _build_database_url, async_session_maker
 from cubebox.models import Conversation
 from cubebox.repositories import ConversationRepository
+from cubebox.streams.replay_coalescer import ReplayCoalescer
 from cubebox.streams.run_events import (
     get_active_run,
     get_latest_event_id,
     get_run_meta,
     is_stale_meta,
-    iter_run_events,
+    iter_run_events_chunked,
     mark_run_stale,
     read_run_events_after,
 )
 from cubebox.streams.run_manager import RunContext
 from cubebox.utils.time import utc_isoformat
+
+# Replay backlog is read in bounded batches so a large reconnect never stalls
+# the event loop. Tunable; ~1000 keeps each XRANGE + JSON decode cheap.
+REPLAY_CHUNK_SIZE = 1000
 
 router = APIRouter(prefix="/ws/{workspace_id}/conversations", tags=["conversations"])
 
@@ -324,15 +329,24 @@ def _build_run_streaming_response(
         replay_cursor = last_event_id
 
         if target_event_id is not None:
-            replay_events = await iter_run_events(
+            coalescer = ReplayCoalescer()
+            async for batch in iter_run_events_chunked(
                 redis,
                 prefix=prefix,
                 run_id=run_id,
                 start=replay_start,
                 stop=target_event_id,
-            )
-            for event in replay_events:
-                replay_cursor = event.event_id
+                count=REPLAY_CHUNK_SIZE,
+            ):
+                for event in coalescer.feed(batch):
+                    yield _format_sse_event(event.event_id, event.payload)
+                    if event.payload.get("type") in {"done", "error"}:
+                        return
+                # Advance the live-tail cursor by the ORIGINAL last id of the
+                # batch — coalesced events carry a synthetic (last-merged) id,
+                # so the original id is what keeps the tail gap-free.
+                replay_cursor = batch[-1].event_id
+            for event in coalescer.flush():
                 yield _format_sse_event(event.event_id, event.payload)
                 if event.payload.get("type") in {"done", "error"}:
                     return

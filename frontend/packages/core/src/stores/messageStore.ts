@@ -34,6 +34,14 @@ import {
 import { useCitationStore } from './citationStore'
 import { useConversationStore } from './conversationStore'
 
+const YIELD_EVERY = 200
+
+function yieldToEventLoop(): Promise<void> {
+  const sched = (globalThis as { scheduler?: { yield?: () => Promise<void> } }).scheduler
+  if (sched && typeof sched.yield === 'function') return sched.yield()
+  return new Promise((resolve) => setTimeout(resolve))
+}
+
 export interface AgentStream {
   text: string
   toolCalls: ToolCallEvent[]
@@ -681,6 +689,7 @@ async function consumeRunStream(
   )
   let shouldFinalize = true
   let sawDone = false
+  let processed = 0
 
   try {
     for await (const event of streamRun(client, conversationId, runId, lastEventId, signal)) {
@@ -751,6 +760,9 @@ async function consumeRunStream(
       }
 
       batchedSet((s) => applyStreamEvent(s, event))
+      if (++processed % YIELD_EVERY === 0) {
+        await yieldToEventLoop()
+      }
     }
   } catch (err) {
     set({ error: (err as Error).message })
@@ -919,6 +931,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
       controller.signal,
     )
 
+    let processed = 0
     try {
       outer: for (;;) {
         for await (const event of streamSource) {
@@ -996,6 +1009,9 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
           }
 
           batchedSet((s) => applyStreamEvent(s, event))
+          if (++processed % YIELD_EVERY === 0) {
+            await yieldToEventLoop()
+          }
         }
         break outer
       }
