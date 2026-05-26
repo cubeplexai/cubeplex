@@ -48,6 +48,12 @@ def _make_fake_sandbox(sandbox_id: str = "sbx-new") -> Any:
     return fake
 
 
+async def _fake_reconnect(sandbox_id: str, **kwargs: Any) -> Any:
+    """The create-new path reconnects (skip_health_check) after create to rebind
+    the per-command timeout; return a fake sandbox with the same id."""
+    return _make_fake_sandbox(sandbox_id)
+
+
 _RESOLVED_ENVS = [
     ResolvedEnv(
         env_name="GITHUB_TOKEN",
@@ -90,6 +96,7 @@ async def test_create_with_exchange_host_sets_run_env_and_persists_refs(
 
     with (
         patch("opensandbox.Sandbox.create", side_effect=fake_create),
+        patch("opensandbox.Sandbox.connect", side_effect=_fake_reconnect),
         patch(
             "cubebox.services.sandbox_env.SandboxEnvResolver.resolve",
             return_value=_RESOLVED_ENVS,
@@ -245,6 +252,7 @@ async def test_create_without_exchange_host_skips_injection(
 
     with (
         patch("opensandbox.Sandbox.create", side_effect=fake_create),
+        patch("opensandbox.Sandbox.connect", side_effect=_fake_reconnect),
         patch(
             "cubebox.repositories.user_sandbox.UserSandboxRepository.get_active_by_user",
             return_value=None,
@@ -253,8 +261,10 @@ async def test_create_without_exchange_host_skips_injection(
         backend = await manager.get_or_create("u-1", org_id="org-1", workspace_id="ws-1")
 
     assert "env" not in create_kwargs, "Without exchange_host, env must NOT be passed"
-    assert "network_policy" not in create_kwargs, (
-        "Without exchange_host, network_policy must NOT be passed"
+    # The unified create call passes network_policy=None when egress is disabled,
+    # which is semantically identical to omitting it (SDK default is None).
+    assert create_kwargs.get("network_policy") is None, (
+        "Without exchange_host, network_policy must be None (no allow-list)"
     )
 
     # Backend has an empty run env (no egress injection)
