@@ -33,6 +33,7 @@ class ExchangeIn(BaseModel):
 
 class ExchangeOut(BaseModel):
     secret: str
+    header_names: list[str] | None = None
 
 
 def get_sidecar_authenticator(request: Request) -> SidecarAuthenticator:
@@ -63,8 +64,10 @@ async def exchange(
         ),
     )
     try:
-        secret = await svc.exchange(identity=identity, placeholder=body.placeholder, host=body.host)
+        secret, header_names = await svc.exchange(
+            identity=identity, placeholder=body.placeholder, host=body.host
+        )
     except EgressExchangeError as exc:
         # Fail closed; do not leak which check failed.
         raise HTTPException(status.HTTP_403_FORBIDDEN, "exchange denied") from exc
-    return ExchangeOut(secret=secret)
+    return ExchangeOut(secret=secret, header_names=header_names)

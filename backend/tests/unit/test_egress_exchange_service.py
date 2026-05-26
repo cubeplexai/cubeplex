@@ -76,12 +76,13 @@ async def test_exchange_returns_secret_for_matching_sandbox_and_host(
     session: AsyncSession,
 ) -> None:
     svc, placeholder = await _seed(session)
-    secret = await svc.exchange(
+    secret, header_names = await svc.exchange(
         identity=SidecarIdentity(sandbox_id="sbx-1"),
         placeholder=placeholder,
         host="api.github.com",
     )
     assert secret == "ghp_real"
+    assert header_names is None
 
 
 async def test_rejects_sandbox_id_mismatch(session: AsyncSession) -> None:
@@ -155,7 +156,7 @@ async def test_exchange_succeeds_with_future_expiry(session: AsyncSession) -> No
     """A ref whose expires_at is in the future (tz-naive from DB) must succeed."""
     future = datetime.now(UTC) + timedelta(hours=1)
     svc, placeholder = await _seed_with_expiry(session, future)
-    secret = await svc.exchange(
+    secret, _header_names = await svc.exchange(
         identity=SidecarIdentity(sandbox_id="sbx-exp"),
         placeholder=placeholder,
         host="api.example.com",
