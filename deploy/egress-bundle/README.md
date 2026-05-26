@@ -74,4 +74,8 @@ deploy/egress-bundle/
     --namespace opensandbox \
     --dry-run=client -o yaml > k8s/addon-configmap.yaml
   ```
+- `exchange-networkpolicy.yaml` enforces that the exchange endpoint is reachable
+  only via the mTLS-terminating proxy (so the `x-egress-client-cn` trust holds).
+  Adapt its selectors/namespace/port to where the exchange + proxy run, and apply
+  it in that namespace (requires a NetworkPolicy-enforcing CNI).
 - OpenSandbox stays stock — no patches to the server or egress image.
