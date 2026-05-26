@@ -14,6 +14,20 @@ from __future__ import annotations
 import base64
 from typing import Any
 
+# Tracks whether the in-cluster config has been loaded. Loading it on every
+# admission call resets the kubernetes_asyncio global Configuration singleton
+# and races under concurrent requests, so we do it exactly once.
+_configured = False
+
+
+async def _ensure_configured() -> None:
+    global _configured
+    if not _configured:
+        from kubernetes_asyncio import config  # noqa: PLC0415
+
+        await config.load_incluster_config()
+        _configured = True
+
 
 async def create_client_cert_secret(
     *,
@@ -34,8 +48,10 @@ async def create_client_cert_secret(
     """
     # Deferred import: kubernetes_asyncio is only present in the cluster image,
     # not in the unit-test environment. The function is always mocked in tests.
-    from kubernetes_asyncio import client, config  # noqa: PLC0415
+    from kubernetes_asyncio import client  # noqa: PLC0415
     from kubernetes_asyncio.client import ApiClient  # noqa: PLC0415
+
+    await _ensure_configured()
 
     encoded = {k: base64.b64encode(v).decode() for k, v in data.items()}
 
@@ -61,7 +77,6 @@ async def create_client_cert_secret(
         data=encoded,
     )
 
-    await config.load_incluster_config()
     api_client = ApiClient()
     async with api_client:
         core_api = client.CoreV1Api(api_client)

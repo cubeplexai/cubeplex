@@ -21,4 +21,4 @@ COPY webhook/ ./webhook/
 # by the Deployment.
 CMD ["uvicorn", "webhook.app:app", \
      "--host", "0.0.0.0", "--port", "8443", \
-     "--ssl-certfile", "/tls/tls.crt", "--ssl-keyfile", "/tls/tls.key"]
+     "--ssl-certfile", "/etc/webhook-tls/tls.crt", "--ssl-keyfile", "/etc/webhook-tls/tls.key"]

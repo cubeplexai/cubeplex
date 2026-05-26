@@ -32,11 +32,9 @@ def _egress_index(pod: dict[str, Any]) -> int:
     raise ValueError("no egress container")
 
 
-def _app_index(pod: dict[str, Any]) -> int:
-    for i, c in enumerate(pod["spec"]["containers"]):
-        if c.get("name") != "egress":
-            return i
-    raise ValueError("no app container")
+def _app_indices(pod: dict[str, Any]) -> list[int]:
+    """Return indices of all non-egress containers (may be empty)."""
+    return [i for i, c in enumerate(pod["spec"]["containers"]) if c.get("name") != "egress"]
 
 
 def build_pod_patch(
@@ -83,13 +81,15 @@ def build_pod_patch(
     ]
     ops.append({"op": "add", "path": "/spec/initContainers", "value": init})
 
-    # 4) app container mounts the shared trust dir (so the updated bundle is visible)
-    aidx = _app_index(pod)
-    app = pod["spec"]["containers"][aidx]
-    app_mounts = app.get("volumeMounts", []) + [
-        {"name": "ca-trust", "mountPath": "/etc/ssl/certs"},
-    ]
-    ops.append({"op": "add", "path": f"/spec/containers/{aidx}/volumeMounts", "value": app_mounts})
+    # 4) ALL non-egress containers mount the shared trust dir (so the updated
+    # bundle is visible in each app container). Pods with no app containers are
+    # handled gracefully: this loop simply emits no ops.
+    for aidx in _app_indices(pod):
+        app_c = pod["spec"]["containers"][aidx]
+        app_mounts = app_c.get("volumeMounts", []) + [
+            {"name": "ca-trust", "mountPath": "/etc/ssl/certs"},
+        ]
+        ops.append({"op": "add", "path": f"/spec/containers/{aidx}/volumeMounts", "value": app_mounts})
 
     # 5) pod-level volumes
     volumes = pod["spec"].get("volumes", []) + [
