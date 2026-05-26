@@ -1,5 +1,12 @@
-"""Root conftest: put deploy/egress-bundle on sys.path so `import webhook.*` works."""
+"""Root conftest: put deploy/egress-bundle and deploy/egress-bundle/addon on sys.path.
+
+- `import webhook.*` resolves via the egress-bundle root (webhook is a package).
+- `import inject` resolves via the addon/ dir (inject.py is a top-level module there,
+  loaded directly by mitmproxy in production, so it cannot be a sub-package).
+"""
 import sys
 import pathlib
 
-sys.path.insert(0, str(pathlib.Path(__file__).parent))
+_root = pathlib.Path(__file__).parent
+sys.path.insert(0, str(_root))
+sys.path.insert(0, str(_root / "addon"))
