@@ -12,6 +12,8 @@ from typing import Annotated
 from urllib.parse import urlencode
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from loguru import logger
+from opensandbox.exceptions import SandboxException
 from pydantic import BaseModel
 
 from cubebox.auth.context import RequestContext
@@ -51,17 +53,27 @@ async def get_live_view(
     """Resolve the caller's sandbox, ensure the browser stack is running, and
     return an embeddable live-view URL."""
     manager = get_sandbox_manager()
-    sandbox = await manager.get_or_create(
-        ctx.user.id,
-        org_id=ctx.org_id,
-        workspace_id=ctx.workspace_id,
-    )
-    await sandbox.start_browser()
-    # Live-view / takeover traffic goes straight to Neko and bypasses the normal
-    # per-tool activity updates, so mark the sandbox active here too (the
-    # frontend also pings /keepalive while the view is open).
-    await manager.touch(sandbox.id, org_id=ctx.org_id, workspace_id=ctx.workspace_id)
-    endpoint = await sandbox.get_browser_endpoint()
+    try:
+        sandbox = await manager.get_or_create(
+            ctx.user.id,
+            org_id=ctx.org_id,
+            workspace_id=ctx.workspace_id,
+        )
+        await sandbox.start_browser()
+        # Live-view / takeover traffic goes straight to Neko and bypasses the normal
+        # per-tool activity updates, so mark the sandbox active here too (the
+        # frontend also pings /keepalive while the view is open).
+        await manager.touch(sandbox.id, org_id=ctx.org_id, workspace_id=ctx.workspace_id)
+        endpoint = await sandbox.get_browser_endpoint()
+    except SandboxException as exc:
+        # Provisioning the sandbox (or its browser) failed — e.g. the provider
+        # timed out waiting for a cold-starting pod. Surface a retryable 503 with a
+        # clear reason instead of a bare 500.
+        logger.warning("browser live-view unavailable for workspace {}: {}", ctx.workspace_id, exc)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="sandbox is starting up or temporarily unavailable; please retry shortly",
+        ) from exc
     if endpoint.headers:
         # The endpoint requires request headers a browser cannot attach to an
         # iframe navigation. A same-origin reverse proxy is the planned path; do

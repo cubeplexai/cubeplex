@@ -39,6 +39,10 @@ class SandboxManager:
         self._image: str = config.get("sandbox.image", "ubuntu:22.04")
         self._api_key: str | None = config.get("sandbox.api_key", None)
         self._request_timeout: int = config.get("sandbox.request_timeout", 60)
+        # Separate, longer budget for the synchronous create call: the server holds
+        # the POST /sandboxes open until the pod is ready, so a cold image pull can
+        # take minutes — far longer than the per-command request_timeout.
+        self._create_timeout: int = config.get("sandbox.create_timeout", 300)
         self._ttl: int = config.get("sandbox.ttl", 600)
         self._touch_interval: int = config.get("sandbox.touch_interval", 60)
         self._ready_timeout: int = config.get("sandbox.ready_timeout", 60)
@@ -60,12 +64,16 @@ class SandboxManager:
         self._volume_mount_path: str = config.get("sandbox.volume.mount_path", "/workspace")
         self._volume_pvc_prefix: str = config.get("sandbox.volume.pvc_prefix", "cubebox-user")
 
-    def _build_connection_config(self) -> ConnectionConfig:
-        """Build OpenSandbox ConnectionConfig from app config."""
+    def _build_connection_config(self, *, request_timeout: int | None = None) -> ConnectionConfig:
+        """Build OpenSandbox ConnectionConfig from app config.
+
+        ``request_timeout`` overrides the per-command HTTP timeout — used to give
+        the synchronous create call a longer budget than ordinary commands.
+        """
         return ConnectionConfig(
             domain=self._domain,
             api_key=self._api_key,
-            request_timeout=timedelta(seconds=self._request_timeout),
+            request_timeout=timedelta(seconds=request_timeout or self._request_timeout),
             use_server_proxy=self._use_server_proxy,
         )
 
@@ -158,9 +166,13 @@ class SandboxManager:
             else:
                 logger.info("Creating new sandbox for user {}", user_id)
 
+            # Use the longer create budget for the create call only; ordinary
+            # commands on the returned sandbox keep the normal request_timeout via
+            # the reuse/connect path on subsequent turns.
+            create_conn_config = self._build_connection_config(request_timeout=self._create_timeout)
             raw_sandbox = await opensandbox.Sandbox.create(
                 self._image,
-                connection_config=conn_config,
+                connection_config=create_conn_config,
                 timeout=None,
                 ready_timeout=timedelta(seconds=self._ready_timeout),
                 volumes=volumes,

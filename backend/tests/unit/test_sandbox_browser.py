@@ -103,3 +103,26 @@ async def test_opensandbox_browser_endpoint_uses_signed_endpoint() -> None:
     assert len(inner.calls) == 1
     port, _expires = inner.calls[0]
     assert port == 8080
+
+
+@pytest.mark.asyncio
+async def test_live_view_returns_503_when_sandbox_unavailable(monkeypatch) -> None:
+    """A provider failure (e.g. create timeout) surfaces as 503, not a bare 500."""
+    from types import SimpleNamespace
+
+    from fastapi import HTTPException
+    from opensandbox.exceptions.sandbox import SandboxInternalException
+
+    from cubebox.api.routes.v1 import ws_browser
+
+    class _Manager:
+        async def get_or_create(self, *args, **kwargs):
+            raise SandboxInternalException("Network connectivity error")
+
+    monkeypatch.setattr(ws_browser, "get_sandbox_manager", lambda: _Manager())
+    ctx = SimpleNamespace(user=SimpleNamespace(id="usr-1"), org_id="org-1", workspace_id="ws-1")
+
+    with pytest.raises(HTTPException) as exc_info:
+        await ws_browser.get_live_view(ctx)  # type: ignore[arg-type]
+
+    assert exc_info.value.status_code == 503
