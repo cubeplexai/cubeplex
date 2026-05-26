@@ -356,6 +356,13 @@ class SandboxManager:
         async with self._session_factory() as session:
             repo = UserSandboxRepository(session, org_id=org_id, workspace_id=workspace_id)
             await repo.update_activity_by_sandbox_id(sandbox_id)
+            # Keep egress placeholders alive for long, still-active runs: extend
+            # the sandbox's valid EgressRefs to now + ttl so a session that
+            # outlives the original create-time expiry can still exchange.
+            if self._exchange_host:
+                await EgressRefRepository(session).extend_expiry_for_sandbox(
+                    sandbox_id, now + timedelta(seconds=self._ttl)
+                )
 
     async def touch_active(
         self,

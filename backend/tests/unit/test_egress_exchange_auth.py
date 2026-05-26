@@ -124,6 +124,14 @@ def test_sandbox_id_from_peercert_returns_none_for_empty_subject():
 # --- integration: MtlsAuthenticator.verify ---
 
 
+async def test_mtls_verify_forwarded_cn_header_returns_identity():
+    """Production path: the mTLS-terminating proxy forwards the verified CN."""
+    auth = MtlsAuthenticator(forwarded_cn_header="x-egress-client-cn")
+    req = _Req(headers={"x-egress-client-cn": "sbx-7"})
+    ident = await auth.verify(req)
+    assert ident == SidecarIdentity(sandbox_id="sbx-7")
+
+
 async def test_mtls_verify_scope_transport_returns_identity():
     """Case (a): scope transport exposes peercert with CN=sbx-1 → SidecarIdentity."""
     auth = MtlsAuthenticator()
@@ -137,7 +145,7 @@ async def test_mtls_verify_no_peercert_raises():
     """Case (b): no peercert in scope → PermissionError."""
     auth = MtlsAuthenticator()
     req = _Req(headers={}, scope={"transport": _FakeTransport(None)})
-    with pytest.raises(PermissionError, match="no client certificate"):
+    with pytest.raises(PermissionError, match="no verified client identity"):
         await auth.verify(req)
 
 
@@ -145,7 +153,7 @@ async def test_mtls_verify_no_scope_raises():
     """Case (b) variant: no transport at all → PermissionError."""
     auth = MtlsAuthenticator()
     req = _Req(headers={})
-    with pytest.raises(PermissionError, match="no client certificate"):
+    with pytest.raises(PermissionError, match="no verified client identity"):
         await auth.verify(req)
 
 

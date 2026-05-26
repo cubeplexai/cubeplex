@@ -43,3 +43,19 @@ class EgressRefRepository:
             .values(status="revoked")
         )
         await self.session.commit()
+
+    async def extend_expiry_for_sandbox(self, sandbox_id: str, expires_at: datetime) -> None:
+        """Push out expires_at for a sandbox's still-valid refs.
+
+        Called when an active sandbox is touched so its placeholders don't expire
+        mid-run on long sessions that outlive the original TTL.
+        """
+        await self.session.execute(
+            update(EgressRef)
+            .where(
+                EgressRef.sandbox_id == sandbox_id,  # type: ignore[arg-type]
+                EgressRef.status == "valid",  # type: ignore[arg-type]
+            )
+            .values(expires_at=expires_at)
+        )
+        await self.session.commit()
