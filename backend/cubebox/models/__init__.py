@@ -7,6 +7,7 @@ from cubebox.models.attachment import Attachment
 from cubebox.models.billing import BillingEvent, LlmBillingEvent
 from cubebox.models.conversation import Conversation
 from cubebox.models.credential import Credential
+from cubebox.models.egress_ref import EgressRef  # noqa: F401
 from cubebox.models.invite_token import InviteToken
 from cubebox.models.mcp import (
     MCPConnectorInstall,
@@ -69,6 +70,7 @@ __all__ = [
     "OrganizationMembership",
     "Provider",
     "Role",
+    "EgressRef",
     "SandboxEnvVar",
     "Skill",
     "SkillVersion",

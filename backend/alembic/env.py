@@ -18,6 +18,7 @@ from cubebox.models import (  # noqa: F401
     BillingEvent,
     Conversation,
     Credential,
+    EgressRef,
     InviteToken,
     LlmBillingEvent,
     MCPConnectorInstall,
