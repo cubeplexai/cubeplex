@@ -1,0 +1,49 @@
+apiVersion: admissionregistration.k8s.io/v1
+kind: MutatingWebhookConfiguration
+metadata:
+  name: egress-inject
+  labels:
+    app.kubernetes.io/part-of: cubebox-egress
+webhooks:
+  - name: egress-inject.cubebox.io
+    # Scoped to the dedicated sandbox namespace so non-sandbox pods in other
+    # namespaces are never intercepted.
+    namespaceSelector:
+      matchLabels:
+        kubernetes.io/metadata.name: opensandbox
+    rules:
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: ["CREATE"]
+        resources: ["pods"]
+        scope: Namespaced
+    # failurePolicy: Ignore — a webhook outage must not block pod creation.
+    # New sandboxes will start without secret injection (placeholder stays literal)
+    # but the cluster keeps running.  Alert on webhook errors separately.
+    failurePolicy: Ignore
+    clientConfig:
+      service:
+        name: egress-webhook
+        namespace: opensandbox
+        path: /mutate
+        port: 443
+      # Base64-encoded PEM cert of the CA that signed the webhook's serving cert
+      # (i.e. the cert in egress-webhook-tls Secret or the cert-manager issuer CA).
+      # Replace WEBHOOK_SERVING_CA_BUNDLE_PLACEHOLDER with the actual value:
+      #
+      #   kubectl get secret egress-webhook-tls -n opensandbox \
+      #     -o jsonpath='{.data.ca\.crt}' | base64 -d > /tmp/ca.pem
+      #   # or if using cert-manager, use the issuer's CA cert
+      #   CA_B64=$(base64 -w0 /tmp/ca.pem)
+      #   # then patch this field:
+      #   kubectl patch mutatingwebhookconfiguration egress-inject \
+      #     --type='json' \
+      #     -p="[{\"op\":\"replace\",\"path\":\"/webhooks/0/clientConfig/caBundle\",\"value\":\"${CA_B64}\"}]"
+      caBundle: "WEBHOOK_SERVING_CA_BUNDLE_PLACEHOLDER"
+    # NoneOnDryRun: the webhook does not create Secrets during dry-run.
+    sideEffects: NoneOnDryRun
+    admissionReviewVersions: ["v1"]
+    # Only intercept pods that are actually being scheduled (not ephemeral containers,
+    # not server-side apply synthetic creates).
+    matchPolicy: Equivalent
+    timeoutSeconds: 10
