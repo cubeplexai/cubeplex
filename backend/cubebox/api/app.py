@@ -478,7 +478,7 @@ def create_app(
     _egress_auth_config = dict(_cubebox_config.get("egress_exchange.auth", {}) or {})
     app.state.sidecar_authenticator = build_sidecar_authenticator(
         _egress_auth_config,
-        deployment_mode=_mode,
+        env=_cubebox_config.current_env,
     )
     app.include_router(internal_egress.router, prefix="/api/v1")
 
