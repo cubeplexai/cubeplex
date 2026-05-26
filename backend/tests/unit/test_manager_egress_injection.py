@@ -13,6 +13,7 @@ network_policy still goes into Sandbox.create (egress allow-list is structural).
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -347,6 +348,95 @@ async def test_unhealthy_sandbox_revokes_refs(
     assert len(refs) == 1
     assert refs[0].sandbox_id == "sbx-old"
     assert refs[0].status == "revoked", f"Expected 'revoked', got {refs[0].status!r}"
+
+
+async def _seed_expiring_ref(
+    session_factory: async_sessionmaker[AsyncSession],
+    sandbox_id: str,
+    expires_at: datetime,
+) -> str:
+    """Seed a valid EgressRef whose expiry is about to lapse; return its ref_hash."""
+    async with session_factory() as session:
+        ref = EgressRef(
+            ref_hash=hash_placeholder(mint_placeholder()),
+            sandbox_id=sandbox_id,
+            org_id="org-1",
+            workspace_id="ws-1",
+            user_id="u-1",
+            run_id=None,
+            bindings=[],
+            status="valid",
+            expires_at=expires_at,
+        )
+        session.add(ref)
+        await session.commit()
+        return ref.ref_hash
+
+
+async def _get_ref(session_factory: async_sessionmaker[AsyncSession], ref_hash: str) -> EgressRef:
+    async with session_factory() as session:
+        return (
+            await session.execute(select(EgressRef).where(EgressRef.ref_hash == ref_hash))
+        ).scalar_one()
+
+
+async def test_touch_extends_egress_ref_expiry(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """touch() on an active sandbox pushes its valid refs' expires_at into the
+    future so long, still-active sessions don't lose placeholder substitution
+    mid-run (keepalive)."""
+    soon = datetime.now(UTC) + timedelta(seconds=5)
+    ref_hash = await _seed_expiring_ref(session_factory, "sbx-touch", soon)
+
+    manager = SandboxManager(session_factory)
+    manager._exchange_host = "egress-exchange.internal"
+
+    await manager.touch("sbx-touch", org_id="org-1", workspace_id="ws-1", force=True)
+
+    ref = await _get_ref(session_factory, ref_hash)
+    assert ref.status == "valid"
+    assert ref.expires_at is not None
+    extended = ref.expires_at
+    if extended.tzinfo is None:
+        extended = extended.replace(tzinfo=UTC)
+    assert extended > soon, "touch() must push expires_at beyond the original near-expiry"
+
+
+async def test_touch_active_extends_egress_ref_expiry(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """touch_active() (browser keepalive, keyed by user) extends the user's
+    active sandbox's valid refs the same way touch() does."""
+    soon = datetime.now(UTC) + timedelta(seconds=5)
+    ref_hash = await _seed_expiring_ref(session_factory, "sbx-active", soon)
+
+    record = MagicMock()
+    record.id = "rec-active"
+    record.sandbox_id = "sbx-active"
+
+    manager = SandboxManager(session_factory)
+    manager._exchange_host = "egress-exchange.internal"
+
+    with (
+        patch(
+            "cubebox.repositories.user_sandbox.UserSandboxRepository.get_active_by_user",
+            return_value=record,
+        ),
+        patch(
+            "cubebox.repositories.user_sandbox.UserSandboxRepository.update_activity",
+            return_value=None,
+        ),
+    ):
+        found = await manager.touch_active("u-1", org_id="org-1", workspace_id="ws-1")
+
+    assert found is True
+    ref = await _get_ref(session_factory, ref_hash)
+    extended = ref.expires_at
+    assert extended is not None
+    if extended.tzinfo is None:
+        extended = extended.replace(tzinfo=UTC)
+    assert extended > soon, "touch_active() must push expires_at beyond the near-expiry"
 
 
 async def test_cleanup_expired_revokes_refs(

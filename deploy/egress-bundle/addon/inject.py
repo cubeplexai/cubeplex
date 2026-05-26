@@ -71,14 +71,20 @@ def _exchange(placeholder: str, host: str) -> tuple[str, list[str] | None] | Non
 def request(flow: "http.HTTPFlow") -> None:
     # Only substitute on HTTPS. Two reasons:
     #  1. A real secret must never traverse plaintext.
-    #  2. For transparent HTTPS, flow.request.host is the SNI and the egress
-    #     sidecar verifies the upstream cert against it (ssl_insecure must stay
-    #     OFF — do NOT set OPENSANDBOX_EGRESS_MITMPROXY_SSL_INSECURE), so the host
-    #     we key on is cert-verified. On plaintext HTTP, flow.request.host can be
-    #     the client-controlled Host header and is not verifiable.
+    #  2. We key the exchange on the TLS SNI from the ClientHello
+    #     (flow.client_conn.sni), NOT flow.request.host. In mitmproxy transparent
+    #     mode flow.request.host is the original destination IP, and request
+    #     .pretty_host can fall back to the client-controlled Host header — neither
+    #     is the name the egress sidecar verifies the upstream cert against. The
+    #     SNI is what upstream-cert verification is performed against (ssl_insecure
+    #     must stay OFF — do NOT set OPENSANDBOX_EGRESS_MITMPROXY_SSL_INSECURE), so
+    #     keying on it makes the host cert-verified. No SNI → fail closed.
     if flow.request.scheme != "https":
         return
-    host = (flow.request.host or "").lower()  # SNI-verified upstream host (HTTPS)
+    sni = getattr(flow.client_conn, "sni", None)
+    if not sni:
+        return  # no verified SNI → cannot establish a cert-bound host; fail closed
+    host = sni.lower()
     for name in list(flow.request.headers.keys()):
         value = flow.request.headers[name]
         tokens = scan_placeholders(value)
