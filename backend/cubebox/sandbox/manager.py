@@ -195,10 +195,13 @@ class SandboxManager:
             # Rebind to the default per-command timeout: the create call's adapters
             # captured the longer create_timeout, but ordinary commands on this
             # sandbox must use request_timeout, not create_timeout. Reconnecting
-            # rebuilds the HTTP clients with the default budget.
+            # rebuilds the HTTP clients with the default budget. Skip the health
+            # check — create already gated on readiness (ready_timeout), so a second
+            # readiness probe here would only add a redundant failure path.
             raw_sandbox = await opensandbox.Sandbox.connect(
                 sandbox_id,
                 connection_config=conn_config,
+                skip_health_check=True,
             )
             return OpenSandbox(sandbox=raw_sandbox, workdir=self._workdir)
 
