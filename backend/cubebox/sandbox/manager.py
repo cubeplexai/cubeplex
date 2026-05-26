@@ -105,6 +105,54 @@ class SandboxManager:
             readOnly=False,
         )
 
+    async def _apply_egress(
+        self,
+        session: AsyncSession,
+        backend: OpenSandbox,
+        *,
+        org_id: str,
+        workspace_id: str,
+        user_id: str,
+        sandbox_id: str,
+    ) -> None:
+        """Resolve vault secrets, set run env on the backend, and refresh EgressRefs.
+
+        Called on both the reuse and create-new paths whenever egress injection is
+        enabled (``self._exchange_host != ""``).  On reuse, this makes env always
+        fresh without a recreate.  On create-new, this replaces the old inline
+        ref-persist block.
+
+        Network policy is NOT touched here — it is structural and can only be set
+        at sandbox creation time.
+        """
+        resolver = SandboxEnvResolver(SandboxEnvRepository(session, org_id=org_id))
+        resolved = await resolver.resolve(workspace_id=workspace_id, user_id=user_id)
+        injection = SandboxEnvInjector(exchange_host=self._exchange_host).build(resolved)
+
+        # Push the placeholder env into the backend — every subsequent execute call
+        # will pass these as per-command envs via RunCommandOpts.
+        backend.set_run_env(injection.env)
+
+        # Revoke any prior refs for this sandbox, then persist a fresh set.
+        # Revoke-then-add ensures the exchange endpoint never sees stale refs
+        # after a secret rotation or re-resolve.
+        ref_repo = EgressRefRepository(session)
+        await ref_repo.revoke_for_sandbox(sandbox_id)
+        expires_at = datetime.now(UTC) + timedelta(seconds=self._ttl)
+        for b in injection.bindings:
+            await ref_repo.add(
+                EgressRef(
+                    ref_hash=b["ref_hash"],
+                    sandbox_id=sandbox_id,
+                    org_id=org_id,
+                    workspace_id=workspace_id,
+                    user_id=user_id,
+                    run_id=None,
+                    bindings=[b],
+                    expires_at=expires_at,
+                )
+            )
+
     async def get_or_create(
         self,
         user_id: str,
@@ -117,8 +165,9 @@ class SandboxManager:
         Flow:
         1. Query DB for an existing RUNNING sandbox for this user in this workspace
         2. If found, try to connect and health-check it
-        3. If healthy, return it; otherwise mark terminated and create new
-        4. Sync skills to newly created sandboxes
+        3. If healthy, return it (after refreshing egress env + refs); otherwise
+           mark terminated and create new
+        4. Skill sync is the LazySandbox's responsibility post-M3.
 
         Args:
             user_id: The user identifier
@@ -148,7 +197,17 @@ class SandboxManager:
                     if await raw_sandbox.is_healthy():
                         await repo.update_activity(record.id)
                         logger.info("Reusing healthy sandbox {}", record.sandbox_id)
-                        return OpenSandbox(sandbox=raw_sandbox, workdir=self._workdir)
+                        backend = OpenSandbox(sandbox=raw_sandbox, workdir=self._workdir)
+                        if self._exchange_host:
+                            await self._apply_egress(
+                                session,
+                                backend,
+                                org_id=org_id,
+                                workspace_id=workspace_id,
+                                user_id=user_id,
+                                sandbox_id=record.sandbox_id,
+                            )
+                        return backend
                     else:
                         logger.warning(
                             "Sandbox {} is not healthy, will recreate",
@@ -189,6 +248,9 @@ class SandboxManager:
             # network policy. network_policy must be set at create time.
             injection = None
             if self._exchange_host:
+                # Resolve injection early to get network_policy for Sandbox.create.
+                # Env does NOT go into Sandbox.create — it flows via execute-time
+                # RunCommandOpts after _apply_egress sets it on the backend.
                 resolver = SandboxEnvResolver(SandboxEnvRepository(session, org_id=org_id))
                 resolved = await resolver.resolve(workspace_id=workspace_id, user_id=user_id)
                 injection = SandboxEnvInjector(exchange_host=self._exchange_host).build(resolved)
@@ -202,7 +264,6 @@ class SandboxManager:
                     volumes=volumes,
                     resource={"cpu": self._resource_cpu, "memory": self._resource_memory},
                     secure_access=True,
-                    env=injection.env if injection else None,
                     network_policy=injection.network_policy if injection else None,
                 )
                 sandbox_id = raw_sandbox.id
@@ -218,26 +279,6 @@ class SandboxManager:
                     ttl_seconds=self._ttl,
                 )
 
-                # Persist egress refs now that sandbox_id is known. expires_at is
-                # bounded by the sandbox TTL so a leaked placeholder cannot be
-                # redeemed indefinitely even if explicit revocation is missed.
-                if injection is not None:
-                    ref_repo = EgressRefRepository(session)
-                    expires_at = datetime.now(UTC) + timedelta(seconds=self._ttl)
-                    for b in injection.bindings:
-                        await ref_repo.add(
-                            EgressRef(
-                                ref_hash=b["ref_hash"],
-                                sandbox_id=sandbox_id,
-                                org_id=org_id,
-                                workspace_id=workspace_id,
-                                user_id=user_id,
-                                run_id=None,
-                                bindings=[b],
-                                expires_at=expires_at,
-                            )
-                        )
-
                 # Rebind to the default per-command timeout: the create call's adapters
                 # captured the longer create_timeout, but ordinary commands on this
                 # sandbox must use request_timeout, not create_timeout. Reconnecting
@@ -252,7 +293,20 @@ class SandboxManager:
             except ProviderSandboxError as exc:
                 # Don't leak the opensandbox driver's exception type to callers.
                 raise SandboxError(str(exc)) from exc
-            return OpenSandbox(sandbox=raw_sandbox, workdir=self._workdir)
+
+            backend = OpenSandbox(sandbox=raw_sandbox, workdir=self._workdir)
+            # Execute-time egress: set run env on the backend + persist EgressRefs.
+            # Env flows via execute (RunCommandOpts), not Sandbox.create.
+            if self._exchange_host:
+                await self._apply_egress(
+                    session,
+                    backend,
+                    org_id=org_id,
+                    workspace_id=workspace_id,
+                    user_id=user_id,
+                    sandbox_id=sandbox_id,
+                )
+            return backend
 
     async def release(
         self,

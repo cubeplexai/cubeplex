@@ -63,9 +63,34 @@ class Sandbox(ABC):
         ...
 
     @abstractmethod
-    async def execute(self, command: str, *, timeout: int | None = None) -> ExecuteResult:
-        """Execute a shell command. Returns combined stdout+stderr and exit code."""
+    async def execute(
+        self,
+        command: str,
+        *,
+        timeout: int | None = None,
+        envs: dict[str, str] | None = None,
+    ) -> ExecuteResult:
+        """Execute a shell command. Returns combined stdout+stderr and exit code.
+
+        Args:
+            command: Shell command to run.
+            timeout: Optional execution timeout in seconds.
+            envs: Per-call env overrides injected into the command process.
+                  Merged with any run-level env set via ``set_run_env``; per-call
+                  values win on conflict.
+        """
         ...
+
+    def set_run_env(self, env: dict[str, str]) -> None:
+        """Attach a persistent env dict injected into every subsequent execute call.
+
+        Called by SandboxManager after sandbox creation or reuse to load fresh
+        egress placeholders.  The default no-op is correct for backends that do
+        not support per-command env injection (e.g. LocalSandbox, LazySandbox
+        before the underlying backend is resolved).  Concrete backends that DO
+        support it (OpenSandbox) override this.
+        """
+        return  # no-op default; OpenSandbox overrides
 
     @abstractmethod
     async def upload(self, files: list[tuple[str, bytes]]) -> None:

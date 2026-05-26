@@ -26,7 +26,16 @@ class LocalSandbox(Sandbox):
     def workdir(self) -> str:
         return self._workdir
 
-    async def execute(self, command: str, *, timeout: int | None = None) -> ExecuteResult:
+    async def execute(
+        self,
+        command: str,
+        *,
+        timeout: int | None = None,
+        envs: dict[str, str] | None = None,
+    ) -> ExecuteResult:
+        # envs is accepted for interface compatibility but not applied: LocalSandbox
+        # runs in the host process environment and is not used in production.
+        del envs
         proc = await asyncio.create_subprocess_shell(
             command,
             stdout=asyncio.subprocess.PIPE,
