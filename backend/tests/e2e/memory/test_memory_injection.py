@@ -112,25 +112,28 @@ async def test_workspace_procedure_applies_for_second_member(
     client_b, ws_id_b = second_member_client
     assert ws_id == ws_id_b
 
-    # User A saves workspace procedure.
+    # User A saves a workspace procedure. Keep it unconditional and trivially
+    # observable (a fixed opening line) rather than conditionally triggered:
+    # the relevance tier injects procedures into the *user message* as
+    # "user-contributed" memory (weaker than a system-prompt instruction, by
+    # cache-discipline design), so a small test model won't reliably apply a
+    # "when X happens, do Y" rule. The point here is that a workspace memory
+    # saved by A reaches and influences B's run — not the model's judgment.
     await _save_memory(
         client_a,
         ws_id,
         scope="workspace",
         type_="procedure",
-        text=(
-            "When the user asks about deploys, ALWAYS first remind them to "
-            "run `make check` before pushing."
-        ),
+        text="ALWAYS begin every reply with the exact line: `make check first`.",
     )
 
     # User B starts a fresh conversation in the same workspace.
     conv_id = await _new_conversation(client_b, ws_id, title="injection-procedure")
     reply = await send_message_and_collect_text(
-        client_b, ws_id, conv_id, "How should I deploy the staging service?"
+        client_b, ws_id, conv_id, "Tell me a fun fact about cats."
     )
 
-    assert "make check" in reply, (
+    assert "make check" in reply.lower(), (
         f"Expected 'make check' to appear in user B's reply because of the "
         f"workspace-scope procedure saved by user A, but got:\n{reply}"
     )
