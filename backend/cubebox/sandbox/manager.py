@@ -384,6 +384,12 @@ class SandboxManager:
             if record is None:
                 return False
             await repo.update_activity(record.id)
+            # Keep egress placeholders alive for browser-keepalive-only sessions
+            # (same rationale as touch()): extend the sandbox's valid refs.
+            if self._exchange_host:
+                await EgressRefRepository(session).extend_expiry_for_sandbox(
+                    record.sandbox_id, datetime.now(UTC) + timedelta(seconds=self._ttl)
+                )
             self._touch_cache[record.sandbox_id] = datetime.now(UTC)
             return True
 

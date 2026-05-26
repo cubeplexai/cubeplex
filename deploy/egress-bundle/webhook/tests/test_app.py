@@ -164,6 +164,23 @@ async def test_non_sandbox_pod_is_allowed_no_patch(client: AsyncClient) -> None:
 
 
 @pytest.mark.asyncio
+async def test_dry_run_does_not_create_secret(client: AsyncClient) -> None:
+    """sideEffects: NoneOnDryRun — a dry-run admission must NOT create the Secret,
+    but still returns the patch (never applied for real on dry-run)."""
+    review = _make_review(SANDBOX_POD, uid="dry-1")
+    review["request"]["dryRun"] = True
+    with patch(
+        "webhook.app.k8s_client.create_client_cert_secret",
+        new_callable=AsyncMock,
+    ) as mock_create:
+        resp = await client.post("/mutate", json=review)
+
+    assert resp.status_code == 200
+    assert resp.json()["response"]["allowed"] is True
+    mock_create.assert_not_awaited()  # no side effect on dry-run
+
+
+@pytest.mark.asyncio
 async def test_healthz(client: AsyncClient) -> None:
     resp = await client.get("/healthz")
     assert resp.status_code == 200
