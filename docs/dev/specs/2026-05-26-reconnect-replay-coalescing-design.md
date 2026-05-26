@@ -1,0 +1,252 @@
+# Reconnect replay coalescing — design
+
+Date: 2026-05-26
+Status: approved (brainstorming), pending implementation plan
+
+## Problem
+
+When an agent run is producing a lot of output and the user refreshes the
+page mid-run, the browser freezes: it pops the "Page Unresponsive" dialog,
+and clicking "Wait" leaves the page stuck — clicks do nothing.
+
+### Root cause
+
+On refresh the frontend reconnects to the active run and **replays the entire
+event log from event 0**:
+
+- `messageStore.loadMessages` finds `active_run` in the bootstrap response and
+  reconnects via `consumeRunStream(..., lastEventId=undefined, ...)`
+  (`frontend/packages/core/src/stores/messageStore.ts:846`), resetting
+  `lastAppliedEventId` to `null` (`messageStore.ts:833`). bootstrap returns
+  `active_run.last_event_id` but it is **not used** — full replay is
+  intentional, because the in-flight assistant turn is not in the trimmed
+  bootstrap history (`trimHistoryForActiveRun`, `messageStore.ts:255`).
+- A long run emits tens of thousands of fine-grained `text_delta` /
+  `tool_call_delta` events. Each is folded by `applyStreamEvent` with
+  immutable spreads (`appendTextBlock` copies the blocks array,
+  `{...state.streamAgents}`, `{...toolResultMap}` —
+  `messageStore.ts:357-501`). Total client cost is **O(N²)** in event count,
+  plus a giant React re-render of the accumulated transcript.
+- The backend amplifies this: `iter_run_events` does a single
+  `redis.xrange(min, max)` over the whole stream (up to 1,000,000 events,
+  `run_manager.py:439`) and the replay loop yields every event with no pacing
+  (`conversations.py:327-338`).
+- The consume loop never yields to the event loop, so input/paint handlers
+  never run → the page is pinned → "Wait" re-enters the same blocked task.
+
+### What we are NOT doing (and why)
+
+An earlier idea was to render completed messages from the checkpointer and
+tail Redis from a cursor stamped into each checkpointed message (requiring a
+cubepi-generated run-scoped event id, an explicit-`XADD`-id scheme or a
+`token → stream-id` map, and special handling for compaction / synthetic /
+pre-migration messages). That precisely avoids *re-sending* completed content,
+but the freeze is not caused by re-sending — it is caused by re-sending
+**tens of thousands of 1-character deltas** and folding them O(N²) on the
+client. Coalescing the replayed events server-side removes the root cause with
+no cubepi change, no migration, and no checkpoint correlation. The
+checkpoint-cursor architecture is dropped.
+
+## Approach
+
+Two changes, server-side coalescing as the core fix and a frontend yield as a
+safety net.
+
+1. **Server-side replay coalescing (core).** When replaying the historical
+   backlog on reconnect, fold the fine-grained events into a compact set
+   before sending. Consecutive `text_delta` / `reasoning` per agent collapse
+   into one event; `tool_call_delta` per `(agent_id, index)` collapses into a
+   single `tool_call_streaming`; structural events pass through unchanged. The
+   replayed payload shrinks from tens of thousands of events to a few dozen.
+   The **live tail** (events after the reconnect snapshot point) stays
+   fine-grained so streaming feels smooth.
+
+2. **Frontend yield (safety net).** The consume loops yield to the event loop
+   periodically so the browser never shows "Page Unresponsive", even if a
+   single coalesced message is still very large.
+
+The replay read is **chunked and incremental** so the backend never blocks the
+asyncio event loop while handling a large backlog.
+
+## Component 1 — server-side replay coalescing
+
+### Where
+
+Only the **replay segment** of `event_generator`
+(`backend/cubebox/api/routes/v1/conversations.py:321-365`). The **live tail**
+segment (lines 341-365) is unchanged. The `done`/`error` short-circuit
+(`conversations.py:337`) is preserved.
+
+### `ReplayCoalescer` — stateful streaming folder
+
+A new pure (no IO) helper at `backend/cubebox/streams/replay_coalescer.py`,
+unit-testable in isolation. It is **streaming** (not list-in/list-out) so it can fold across
+read chunks without holding the whole backlog in memory:
+
+- `feed(events: list[RunEvent]) -> list[RunEvent]` — accept a chunk, return
+  the coalesced events that are now complete; hold in-progress runs in a
+  pending buffer.
+- `flush() -> list[RunEvent]` — emit everything still buffered (end of
+  replay).
+
+Pure-function equivalence holds: `feed(all) + flush()` produces the same
+output regardless of how `all` is split across `feed` calls.
+
+### Coalescing rules
+
+| Event type | Rule |
+|---|---|
+| `text_delta` | Per `agent_id`, concatenate `data.content` of a consecutive run into one event. |
+| `reasoning` | Per `agent_id`, concatenate `data.content` of a consecutive run into one event. |
+| `tool_call_delta` | Per `(agent_id, index)`, concatenate `data.args_delta` into one `tool_call_streaming`-shaped event (keeps a tool call that was mid-stream at the snapshot point visible). |
+| `tool_call`, `tool_result`, `usage`, `done`, `error`, `citation`, `artifact`, `injected_message`, `status` | Pass through unchanged. |
+
+A pending text/thinking run for an agent is flushed when a non-matching event
+for that agent arrives (different block type, or a structural event), or at
+`flush()`. A pending `tool_call_streaming` is flushed likewise.
+
+### Correctness
+
+1. Folding happens in stream order.
+2. The frontend already merges deltas into the **last block** of the agent's
+   stream (`appendTextBlock` / `appendThinkingBlock`,
+   `messageStore.ts:155-180`), so a few large coalesced events render
+   **identically** to many small ones. No frontend change in this component.
+3. Multi-agent interleaving: text/thinking runs accumulate **per `agent_id`**;
+   different agents never merge; relative order is preserved. Subagent events
+   (`agent_id="subagent:<tool_call_id>"`) fold independently from the main
+   agent.
+
+### Synthetic event ids
+
+Coalesced events have no real Redis entry id. Each emitted coalesced event is
+stamped with the `event_id` of the **last original event it merged**. This
+keeps the frontend's `compareEventIds` dedup monotonic
+(`messageStore.ts:95-106`): the first live-tail event's id is strictly greater
+than the last coalesced event's id, so nothing is wrongly deduped.
+
+### `done` / `error` in the replay segment
+
+The coalescer terminates immediately on `done`/`error`, emitting it as the
+final event; nothing after it is folded in. The route keeps its existing
+short-circuit `return`.
+
+### Chunked / incremental read (do not block the event loop)
+
+The current path loads the whole backlog at once: `iter_run_events` →
+`redis.xrange(min, max)` → `_decode_stream_entries` JSON-parses every entry
+synchronously (`run_events.py:413-421, 383-388`). For tens of thousands of
+events this is one large synchronous block that stalls the asyncio event loop
+and every other request on the worker.
+
+Change the replay segment to read in cursor-paginated chunks:
+
+- Add a chunked reader (e.g. `iter_run_events_chunked`) that pages with
+  `XRANGE (last_id <stop> COUNT N`, yielding one decoded batch at a time.
+  Do **not** change `iter_run_events` or its other callers.
+- Loop: read a chunk → `coalescer.feed(chunk)` → `yield` coalesced events →
+  advance cursor → repeat until the snapshot `target_event_id` is reached →
+  `coalescer.flush()` → `yield` remainder. Each `await xrange` returns control
+  to the event loop; memory is bounded to one chunk; the client starts
+  receiving coalesced output sooner.
+- `N` (chunk size) is a named constant, ≈1000, tunable.
+- The replay cursor advances by the **original** last event id seen (not a
+  synthetic coalesced id), so the live tail picks up exactly where the
+  snapshot ended — no gap, no duplicate.
+
+## Component 2 — frontend yield (safety net)
+
+### Where
+
+Both consume loops in `frontend/packages/core/src/stores/messageStore.ts`:
+`consumeRunStream` (`messageStore.ts:686`) and `send` (`messageStore.ts:924`).
+
+### Behavior
+
+Count processed events; every `YIELD_EVERY` events, yield to the event loop:
+
+```ts
+let processed = 0
+for await (const event of streamRun(...)) {
+  // existing artifact / citation / error / done / injected_message branches unchanged
+  batchedSet((s) => applyStreamEvent(s, event))
+  if (++processed % YIELD_EVERY === 0) {
+    await (globalThis.scheduler?.yield?.() ?? new Promise((r) => setTimeout(r)))
+  }
+}
+```
+
+- `YIELD_EVERY = 200` (named constant, tunable).
+- Prefer `scheduler.yield()` (less likely to be deprioritized); fall back to
+  `setTimeout(0)`.
+- The yield point sits **after** `batchedSet`, and must not split the
+  `injected_message` `flush()` → `__commitTurnAndInject` sequence
+  (`messageStore.ts:741-751`). Only yield between ordinary batched events.
+
+### Relationship to coalescing
+
+After coalescing, the normal case has few events and rarely reaches a yield
+point. The yield only matters when a single coalesced message is still very
+large (e.g. hundreds of thousands of characters) — then the worst case is
+"slow", not "frozen / unclickable". `send` gets the same treatment for
+consistency (zero cost; no backlog on a fresh turn).
+
+## Edge cases
+
+1. **Tool call mid-stream at reconnect.** Replay folds the arrived
+   `tool_call_delta`s into one `tool_call_streaming` (partial args); the live
+   tail continues the rest; the final `tool_call` event makes the frontend
+   replace the streaming block with the complete call
+   (`appendToolCallBlock`, `messageStore.ts:182-209`). No loss, eventually
+   consistent.
+2. **Empty stream / empty coalescer output.** `feed`/`flush` on no input
+   return nothing; existing live-tail / heartbeat logic runs unchanged.
+3. **compaction summary / synthetic / pre-migration messages.** Not special —
+   the replay reads the raw Redis stream and never correlates with the
+   checkpointer, so these "just work".
+4. **Chunk boundary splits a run.** Handled by the stateful coalescer: a
+   text/thinking run or a `tool_call_streaming` that spans chunks is held in
+   the pending buffer across `feed` calls and flushed at the right boundary.
+
+## Testing
+
+Per CLAUDE.md (E2E priority, incremental per-module tests). The reconnect E2E
+is intentionally **skipped** — the user will self-test the freeze-on-reload
+path manually.
+
+### Backend — `ReplayCoalescer` unit tests (primary)
+
+1. Consecutive `text_delta` (same agent) → one event, content concatenated.
+2. Consecutive `reasoning` (same agent) → one event, content concatenated.
+3. `tool_call_delta` per `(agent_id, index)` → one `tool_call_streaming`,
+   args concatenated (mid-stream tool call).
+4. `tool_call` / `tool_result` / `usage` / `done` / `error` / `citation` /
+   `artifact` / `injected_message` / `status` pass through unchanged.
+5. Multi-agent interleave: main + `subagent:<id>` fold independently, relative
+   order preserved.
+6. Coalesced event id = id of the last original event it merged (dedup
+   monotonicity).
+7. `done` / `error` terminates immediately and is the final event.
+8. Empty input → empty output.
+9. Text interrupted by a tool call → two separate text blocks (tool_call in
+   between).
+10. **Chunk-boundary invariance:** for the same event sequence, `feed`/`flush`
+    with arbitrary chunk splits yields the same output as feeding all at once
+    (especially text runs and `tool_call_streaming` spanning a boundary).
+
+### Frontend — yield loop unit test
+
+`consumeRunStream` processing more than `YIELD_EVERY` events hits a yield
+point (assert `scheduler.yield` / `setTimeout` invoked), and the yield does
+not break the `injected_message` flush/commit ordering.
+
+## Files touched
+
+- `backend/cubebox/streams/replay_coalescer.py` — `ReplayCoalescer` (new).
+- `backend/cubebox/streams/run_events.py` — add chunked reader; leave
+  `iter_run_events` and callers untouched.
+- `backend/cubebox/api/routes/v1/conversations.py` — replay segment of
+  `event_generator` uses the chunked reader + coalescer.
+- `frontend/packages/core/src/stores/messageStore.ts` — yield in both consume
+  loops.
+- Backend + frontend unit tests as above.
