@@ -84,11 +84,16 @@ def build_pod_patch(
     # 4) ALL non-egress containers mount the shared trust dir (so the updated
     # bundle is visible in each app container). Pods with no app containers are
     # handled gracefully: this loop simply emits no ops.
+    #
+    # Skip any container that already mounts /etc/ssl/certs: Kubernetes rejects a
+    # pod with duplicate volumeMounts.mountPath, so re-adding it would make
+    # admission succeed but pod creation fail (Codex P2).
     for aidx in _app_indices(pod):
         app_c = pod["spec"]["containers"][aidx]
-        app_mounts = app_c.get("volumeMounts", []) + [
-            {"name": "ca-trust", "mountPath": "/etc/ssl/certs"},
-        ]
+        existing = app_c.get("volumeMounts", [])
+        if any(m.get("mountPath") == "/etc/ssl/certs" for m in existing):
+            continue
+        app_mounts = existing + [{"name": "ca-trust", "mountPath": "/etc/ssl/certs"}]
         ops.append({"op": "add", "path": f"/spec/containers/{aidx}/volumeMounts", "value": app_mounts})
 
     # 5) pod-level volumes

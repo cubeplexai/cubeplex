@@ -118,6 +118,37 @@ def test_patch_mounts_ca_trust_on_all_app_containers():
     assert len(ca_trust_mounts) == 2  # one per app container
 
 
+def test_patch_skips_app_container_already_mounting_ssl_certs():
+    """P2: a container already mounting /etc/ssl/certs must NOT get a duplicate
+    ca-trust mount (Kubernetes rejects duplicate mountPath)."""
+    pod = {
+        "metadata": {
+            "ownerReferences": [
+                {"apiVersion": "sandbox.opensandbox.io/v1alpha1", "kind": "Sandbox", "name": "sbx-4"}
+            ],
+            "labels": {},
+        },
+        "spec": {
+            "containers": [
+                {
+                    "name": "sandbox",
+                    "image": "py:3.13",
+                    "volumeMounts": [{"name": "existing-certs", "mountPath": "/etc/ssl/certs"}],
+                },
+                {"name": "egress", "image": EGRESS_IMAGE},
+            ],
+            "volumes": [],
+        },
+    }
+    ops = build_pod_patch(
+        pod, sandbox_id="sbx-4", egress_image=EGRESS_IMAGE,
+        exchange_url="https://egress-exchange.internal/api/v1/internal/egress/exchange",
+    )
+    # No volumeMounts op should target the app container (index 0) — it already
+    # mounts /etc/ssl/certs, so adding ca-trust there would duplicate the path.
+    assert not any(op["path"] == "/spec/containers/0/volumeMounts" for op in ops)
+
+
 def test_patch_egress_only_pod_no_app_container_mounts():
     """I3: a sandbox pod with only the egress container produces no app volumeMount ops."""
     ops = build_pod_patch(

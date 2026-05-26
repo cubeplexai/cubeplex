@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import os
 import re
-import time
 from typing import TYPE_CHECKING
 
 import httpx
@@ -25,10 +24,10 @@ if TYPE_CHECKING:
 PLACEHOLDER_RE = re.compile(r"cbxref_[A-Z2-7]{32}")
 CLIENT_CERT = ("/etc/egress-client/tls.crt", "/etc/egress-client/tls.key")
 EXCHANGE_CA = "/etc/egress-client/exchange-ca.pem"  # CA that signed the exchange server cert
-_CACHE_TTL = 120.0
-
-# cache: (placeholder, host) -> (secret, header_names, expires_at)
-_cache: dict[tuple[str, str], tuple[str, list[str] | None, float]] = {}
+# No response caching: every substitution must call the exchange so that ref
+# revocation (sandbox recycle/cleanup) and expiry take effect immediately. A
+# cache here would let a revoked/expired placeholder still be substituted for
+# the cache window, weakening the fail-closed guarantee (Codex P1).
 
 # Lazily built so the pure helpers (scan/should_substitute) import without
 # cluster env vars or mounted cert files (unit-testable).
@@ -57,20 +56,15 @@ def should_substitute_header(header_name: str, header_names: list[str] | None) -
 
 
 def _exchange(placeholder: str, host: str) -> tuple[str, list[str] | None] | None:
-    now = time.monotonic()
-    hit = _cache.get((placeholder, host))
-    if hit and hit[2] > now:
-        return hit[0], hit[1]
     client, url = _client_and_url()
     try:
         resp = client.post(url, json={"placeholder": placeholder, "host": host})
     except httpx.HTTPError:
         return None
     if resp.status_code != 200:
-        return None  # fail closed (denied / unknown / wrong host)
+        return None  # fail closed (denied / unknown / wrong host / revoked / expired)
     data = resp.json()
     secret, header_names = data["secret"], data.get("header_names")
-    _cache[(placeholder, host)] = (secret, header_names, now + _CACHE_TTL)
     return secret, header_names
 
 
