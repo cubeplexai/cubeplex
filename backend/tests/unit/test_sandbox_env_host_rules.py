@@ -63,3 +63,9 @@ def test_wildcard_case_insensitive():
     assert host_matches("api.example.com", ["*.Example.com"])
     assert host_matches("api.EXAMPLE.COM", ["*.Example.com"])
     assert not host_matches("api.evil.com", ["*.Example.com"])
+
+
+def test_regex_case_insensitive():
+    """DNS is case-insensitive; an uppercase regex must still match the host."""
+    assert host_matches("api.example.com", [r"/^API\.Example\.COM$/"])
+    assert host_matches("API.EXAMPLE.COM", [r"/^api\.example\.com$/"])

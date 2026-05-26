@@ -101,7 +101,9 @@ def host_matches(host: str, patterns: list[str]) -> bool:
     host = host.lower()
     for pattern in patterns:
         if _is_regex(pattern):
-            if re.fullmatch(pattern[1:-1], host):
+            # DNS hostnames are case-insensitive; the exact/wildcard branches
+            # already lowercase, so match regex case-insensitively too.
+            if re.fullmatch(pattern[1:-1], host, re.IGNORECASE):
                 return True
         elif pattern.startswith("*."):
             suffix = pattern[1:].lower()  # ".example.com"
