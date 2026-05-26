@@ -10,7 +10,7 @@ import os
 from fastapi import FastAPI, Request
 
 from webhook.cert_minter import CertMinter, load_ca
-from webhook.patch import build_pod_patch, is_sandbox_pod
+from webhook.patch import build_pod_patch, is_sandbox_pod, sandbox_id_from_owners
 from webhook import k8s_client  # thin wrapper around the k8s API (create Secret, owner ref)
 
 logger = logging.getLogger(__name__)
@@ -59,14 +59,9 @@ async def mutate(request: Request) -> dict:  # type: ignore[type-arg]
     if not is_sandbox_pod(pod, egress_image=EGRESS_IMAGE):
         return _allow(uid)  # fail-open for non-sandbox pods (do NOT patch)
 
-    # Align with is_sandbox_pod: require the opensandbox.io apiVersion so a
-    # crafted second ownerRef with kind=Sandbox can't supply a foreign CN.
-    sandbox_id = next(
-        o["name"]
-        for o in pod["metadata"]["ownerReferences"]
-        if o.get("apiVersion", "").startswith("sandbox.opensandbox.io/")
-        and o.get("kind") == "Sandbox"
-    )
+    # Align with is_sandbox_pod: require the opensandbox.io apiVersion + a sandbox
+    # owner kind so a crafted second ownerRef can't supply a foreign CN.
+    sandbox_id = sandbox_id_from_owners(pod)
     key_pem, cert_pem = _minter.mint(sandbox_id=sandbox_id, ttl_minutes=CERT_TTL_MIN)
     # Honor the declared `sideEffects: NoneOnDryRun`: on a dry-run admission
     # (kubectl apply --dry-run=server) do NOT create the Secret — just return the

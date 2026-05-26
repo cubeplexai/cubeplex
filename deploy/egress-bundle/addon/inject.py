@@ -12,11 +12,13 @@ mitmproxy installation.
 
 from __future__ import annotations
 
+import http.client
+import json
 import os
 import re
+import ssl
+import urllib.parse
 from typing import TYPE_CHECKING
-
-import httpx
 
 if TYPE_CHECKING:
     from mitmproxy import http
@@ -28,20 +30,25 @@ EXCHANGE_CA = "/etc/egress-client/exchange-ca.pem"  # CA that signed the exchang
 # revocation (sandbox recycle/cleanup) and expiry take effect immediately. A
 # cache here would let a revoked/expired placeholder still be substituted for
 # the cache window, weakening the fail-closed guarantee (Codex P1).
+#
+# Only the Python stdlib is used here: the addon runs inside mitmproxy's bundled
+# interpreter, which does NOT ship third-party packages like httpx. The mTLS
+# call to the exchange uses http.client + an ssl context that presents the
+# per-sandbox client cert and verifies the exchange server against EXCHANGE_CA.
 
-# Lazily built so the pure helpers (scan/should_substitute) import without
-# cluster env vars or mounted cert files (unit-testable).
-_client: httpx.Client | None = None
+_ssl_ctx: ssl.SSLContext | None = None
 _exchange_url: str | None = None
 
 
-def _client_and_url() -> tuple[httpx.Client, str]:
-    global _client, _exchange_url
-    if _client is None:
+def _ctx_and_url() -> tuple[ssl.SSLContext, str]:
+    global _ssl_ctx, _exchange_url
+    if _ssl_ctx is None:
         _exchange_url = os.environ["EGRESS_EXCHANGE_URL"]
-        _client = httpx.Client(cert=CLIENT_CERT, verify=EXCHANGE_CA, timeout=5.0)
+        ctx = ssl.create_default_context(cafile=EXCHANGE_CA)
+        ctx.load_cert_chain(certfile=CLIENT_CERT[0], keyfile=CLIENT_CERT[1])
+        _ssl_ctx = ctx
     assert _exchange_url is not None
-    return _client, _exchange_url
+    return _ssl_ctx, _exchange_url
 
 
 def scan_placeholders(value: str) -> list[str]:
@@ -56,16 +63,24 @@ def should_substitute_header(header_name: str, header_names: list[str] | None) -
 
 
 def _exchange(placeholder: str, host: str) -> tuple[str, list[str] | None] | None:
-    client, url = _client_and_url()
+    ctx, url = _ctx_and_url()
+    parts = urllib.parse.urlsplit(url)
+    conn = http.client.HTTPSConnection(
+        parts.hostname, parts.port or 443, context=ctx, timeout=5.0
+    )
     try:
-        resp = client.post(url, json={"placeholder": placeholder, "host": host})
-    except httpx.HTTPError:
-        return None
-    if resp.status_code != 200:
-        return None  # fail closed (denied / unknown / wrong host / revoked / expired)
-    data = resp.json()
-    secret, header_names = data["secret"], data.get("header_names")
-    return secret, header_names
+        body = json.dumps({"placeholder": placeholder, "host": host})
+        path = parts.path + (f"?{parts.query}" if parts.query else "")
+        conn.request("POST", path, body=body, headers={"Content-Type": "application/json"})
+        resp = conn.getresponse()
+        if resp.status != 200:
+            return None  # fail closed (denied / unknown / wrong host / revoked / expired)
+        data = json.loads(resp.read())
+    except (OSError, ValueError):
+        return None  # network / TLS / JSON error → fail closed
+    finally:
+        conn.close()
+    return data["secret"], data.get("header_names")
 
 
 def request(flow: "http.HTTPFlow") -> None:
