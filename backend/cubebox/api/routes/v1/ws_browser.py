@@ -13,11 +13,11 @@ from urllib.parse import urlencode
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from loguru import logger
-from opensandbox.exceptions import SandboxException
 from pydantic import BaseModel
 
 from cubebox.auth.context import RequestContext
 from cubebox.auth.dependencies import require_member
+from cubebox.sandbox import SandboxError
 from cubebox.sandbox.manager import get_sandbox_manager
 
 router = APIRouter(prefix="/ws/{workspace_id}/browser", tags=["ws-browser"])
@@ -65,7 +65,7 @@ async def get_live_view(
         # frontend also pings /keepalive while the view is open).
         await manager.touch(sandbox.id, org_id=ctx.org_id, workspace_id=ctx.workspace_id)
         endpoint = await sandbox.get_browser_endpoint()
-    except SandboxException as exc:
+    except SandboxError as exc:
         # Provisioning the sandbox (or its browser) failed — e.g. the provider
         # timed out waiting for a cold-starting pod. Surface a retryable 503 with a
         # clear reason instead of a bare 500.

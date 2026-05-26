@@ -10,6 +10,16 @@ if TYPE_CHECKING:
     from cubebox.parsers import FileReadOutput, ParseOptions
 
 
+class SandboxError(Exception):
+    """Driver-agnostic sandbox failure.
+
+    Each backend driver translates its own provider-specific exceptions into
+    this type so callers above the driver layer (API routes, services) can
+    react to sandbox failures without importing or depending on a particular
+    driver (OpenSandbox, ...).
+    """
+
+
 @dataclass
 class ExecuteResult:
     """Result of a shell command execution."""

@@ -106,18 +106,41 @@ async def test_opensandbox_browser_endpoint_uses_signed_endpoint() -> None:
 
 
 @pytest.mark.asyncio
+async def test_opensandbox_translates_provider_error_to_sandbox_error() -> None:
+    """The driver must not leak opensandbox's own exception type to callers."""
+    from opensandbox.exceptions.sandbox import SandboxInternalException
+
+    from cubebox.sandbox.base import SandboxError
+    from cubebox.sandbox.opensandbox import OpenSandbox
+
+    class _FailingInner:
+        id = "sb-1"
+
+        async def get_signed_endpoint(self, port: int, expires: int):
+            raise SandboxInternalException("Network connectivity error")
+
+    sb = OpenSandbox(sandbox=_FailingInner())  # type: ignore[arg-type]
+    with pytest.raises(SandboxError):
+        await sb.get_browser_endpoint()
+
+
+@pytest.mark.asyncio
 async def test_live_view_returns_503_when_sandbox_unavailable(monkeypatch) -> None:
-    """A provider failure (e.g. create timeout) surfaces as 503, not a bare 500."""
+    """A provider failure (e.g. create timeout) surfaces as 503, not a bare 500.
+
+    The route depends only on the driver-agnostic ``SandboxError`` — never on a
+    specific backend driver's exception types.
+    """
     from types import SimpleNamespace
 
     from fastapi import HTTPException
-    from opensandbox.exceptions.sandbox import SandboxInternalException
 
     from cubebox.api.routes.v1 import ws_browser
+    from cubebox.sandbox import SandboxError
 
     class _Manager:
         async def get_or_create(self, *args, **kwargs):
-            raise SandboxInternalException("Network connectivity error")
+            raise SandboxError("sandbox provider timed out")
 
     monkeypatch.setattr(ws_browser, "get_sandbox_manager", lambda: _Manager())
     ctx = SimpleNamespace(user=SimpleNamespace(id="usr-1"), org_id="org-1", workspace_id="ws-1")
