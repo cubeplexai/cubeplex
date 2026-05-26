@@ -166,9 +166,10 @@ class SandboxManager:
             else:
                 logger.info("Creating new sandbox for user {}", user_id)
 
-            # Use the longer create budget for the create call only; ordinary
-            # commands on the returned sandbox keep the normal request_timeout via
-            # the reuse/connect path on subsequent turns.
+            # Give only the create call the longer budget: the create POST is held
+            # open server-side until the pod is ready, so it must survive a cold
+            # image pull. ``create_conn_config`` is otherwise identical to the
+            # default.
             create_conn_config = self._build_connection_config(request_timeout=self._create_timeout)
             raw_sandbox = await opensandbox.Sandbox.create(
                 self._image,
@@ -178,21 +179,28 @@ class SandboxManager:
                 volumes=volumes,
                 resource={"cpu": self._resource_cpu, "memory": self._resource_memory},
             )
+            sandbox_id = raw_sandbox.id
+            logger.info("Sandbox created: {}", sandbox_id)
 
-            backend = OpenSandbox(sandbox=raw_sandbox, workdir=self._workdir)
-            logger.info("Sandbox created: {}", backend.id)
-
+            # Persist before rebinding so a reconnect failure can't orphan the
+            # sandbox — the reuse path will find and health-check it next turn.
             # Skill sync is the LazySandbox's responsibility post-M3.
-
-            # Persist to DB
             await repo.create(
                 user_id=user_id,
-                sandbox_id=raw_sandbox.id,
+                sandbox_id=sandbox_id,
                 image=self._image,
                 ttl_seconds=self._ttl,
             )
 
-            return backend
+            # Rebind to the default per-command timeout: the create call's adapters
+            # captured the longer create_timeout, but ordinary commands on this
+            # sandbox must use request_timeout, not create_timeout. Reconnecting
+            # rebuilds the HTTP clients with the default budget.
+            raw_sandbox = await opensandbox.Sandbox.connect(
+                sandbox_id,
+                connection_config=conn_config,
+            )
+            return OpenSandbox(sandbox=raw_sandbox, workdir=self._workdir)
 
     async def release(
         self,
