@@ -9,7 +9,7 @@ explicitly.
 from datetime import datetime
 from typing import Any, ClassVar
 
-from sqlalchemy import JSON, CheckConstraint, Column, String, UniqueConstraint, event, text
+from sqlalchemy import JSON, CheckConstraint, Column, Index, String, UniqueConstraint, event, text
 from sqlmodel import Field
 
 from cubebox.models.mixins import CubeboxBase
@@ -85,6 +85,30 @@ class MCPConnectorInstall(CubeboxBase, table=True):
         CheckConstraint(
             "auth_method IN ('oauth','static','none')",
             name="ck_mcp_connector_installs_auth_method",
+        ),
+        # Partial unique indexes: only ACTIVE installs are unique per org. These
+        # match the DB created by migration 3fcdfc800664 — declared here (not
+        # migration-only) so autogenerate sees no drift.
+        Index(
+            "uq_mcp_connector_install_slug_per_org",
+            "org_id",
+            "slug_name",
+            unique=True,
+            postgresql_where="install_state = 'active'",
+        ),
+        Index(
+            "uq_mcp_connector_install_template_per_org",
+            "org_id",
+            "template_id",
+            unique=True,
+            postgresql_where="install_state = 'active' AND template_id IS NOT NULL",
+        ),
+        Index(
+            "uq_mcp_connector_install_url_per_org",
+            "org_id",
+            "server_url_hash",
+            unique=True,
+            postgresql_where="install_state = 'active'",
         ),
     )
 
@@ -217,6 +241,30 @@ class MCPCredentialGrant(CubeboxBase, table=True):
             " OR (grant_scope='workspace' AND workspace_id IS NOT NULL AND user_id IS NULL)"
             " OR (grant_scope='user' AND workspace_id IS NOT NULL AND user_id IS NOT NULL)",
             name="ck_mcp_credential_grants_scope_columns",
+        ),
+        # Partial unique indexes (one grant per install per scope). These match
+        # the DB created by migration 3fcdfc800664 — declared here (not
+        # migration-only) so autogenerate sees no drift.
+        Index(
+            "uq_mcp_credential_grant_org",
+            "install_id",
+            unique=True,
+            postgresql_where="grant_scope = 'org'",
+        ),
+        Index(
+            "uq_mcp_credential_grant_workspace",
+            "install_id",
+            "workspace_id",
+            unique=True,
+            postgresql_where="grant_scope = 'workspace'",
+        ),
+        Index(
+            "uq_mcp_credential_grant_user",
+            "install_id",
+            "workspace_id",
+            "user_id",
+            unique=True,
+            postgresql_where="grant_scope = 'user'",
         ),
     )
 

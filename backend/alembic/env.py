@@ -68,19 +68,6 @@ _CHECKPOINT_TABLES = {
     "cubepi_schema_version",
 }
 
-# Partial unique indexes that are "migration source of truth" only — the
-# SQLAlchemy models intentionally omit them from __table_args__ because
-# postgresql_where reflection round-trips inconsistently across SA versions.
-# Without this exclusion, autogenerate would emit spurious DROP INDEX ops.
-_MIGRATION_ONLY_INDEXES = {
-    "uq_mcp_credential_grant_org",
-    "uq_mcp_credential_grant_workspace",
-    "uq_mcp_credential_grant_user",
-    "uq_mcp_connector_install_slug_per_org",
-    "uq_mcp_connector_install_template_per_org",
-    "uq_mcp_connector_install_url_per_org",
-}
-
 
 def include_object(
     object: object,  # noqa: A002
@@ -89,14 +76,12 @@ def include_object(
     reflected: bool,
     compare_to: object,
 ) -> bool:
-    """Exclude cubepi-checkpointer-owned tables and migration-only indexes from autogenerate."""
+    """Exclude cubepi-checkpointer-owned tables from autogenerate."""
     if type_ == "table" and name is not None:
         if name in _CHECKPOINT_TABLES:
             return False
         if name.startswith("cubepi_messages_p"):
             return False
-    if type_ == "index" and name in _MIGRATION_ONLY_INDEXES:
-        return False
     return True
 
 
