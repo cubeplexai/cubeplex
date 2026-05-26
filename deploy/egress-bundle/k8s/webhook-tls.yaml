@@ -1,0 +1,61 @@
+# webhook-tls.yaml — TLS certificate for the admission webhook's HTTPS server.
+#
+# Option A (recommended, applied here): use cert-manager to provision and
+# auto-renew the cert.  Requires cert-manager >=1.13 in the cluster.
+# Create the self-signed Issuer first:
+#
+#   kubectl apply -f - <<EOF
+#   apiVersion: cert-manager.io/v1
+#   kind: Issuer
+#   metadata:
+#     name: egress-webhook-selfsigned
+#     namespace: opensandbox
+#   spec:
+#     selfSigned: {}
+#   EOF
+#
+# After applying this Certificate, cert-manager writes the TLS cert+key into
+# the Secret named below, and sets ca.crt = the issuer CA cert.  Use that
+# value to patch clientConfig.caBundle in mutatingwebhookconfiguration.yaml.
+#
+# Option B (bootstrap / no cert-manager): generate a self-signed cert manually.
+#
+#   # 1. Generate CA + serving cert:
+#   openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 \
+#     -keyout /tmp/wh-ca.key -out /tmp/wh-ca.crt -days 3650 \
+#     -subj "/CN=egress-webhook-ca" -nodes
+#   openssl req -newkey ec -pkeyopt ec_paramgen_curve:P-256 \
+#     -keyout /tmp/wh.key -out /tmp/wh.csr -subj "/CN=egress-webhook" -nodes
+#   openssl x509 -req -in /tmp/wh.csr -CA /tmp/wh-ca.crt -CAkey /tmp/wh-ca.key \
+#     -CAcreateserial -out /tmp/wh.crt -days 3650 \
+#     -extfile <(echo "subjectAltName=DNS:egress-webhook.opensandbox.svc,DNS:egress-webhook.opensandbox.svc.cluster.local")
+#
+#   # 2. Create the Secret:
+#   kubectl create secret tls egress-webhook-tls \
+#     --cert=/tmp/wh.crt --key=/tmp/wh.key -n opensandbox
+#
+#   # 3. Patch caBundle in MutatingWebhookConfiguration:
+#   CA_B64=$(base64 -w0 /tmp/wh-ca.crt)
+#   kubectl patch mutatingwebhookconfiguration egress-inject \
+#     --type='json' \
+#     -p="[{\"op\":\"replace\",\"path\":\"/webhooks/0/clientConfig/caBundle\",\"value\":\"${CA_B64}\"}]"
+#
+#   If using Option B, do not apply this file (skip the cert-manager Certificate).
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: egress-webhook-tls
+  namespace: opensandbox
+  labels:
+    app.kubernetes.io/part-of: cubebox-egress
+spec:
+  secretName: egress-webhook-tls
+  # DNS SANs that Kubernetes uses to reach the webhook Service.
+  dnsNames:
+    - egress-webhook.opensandbox.svc
+    - egress-webhook.opensandbox.svc.cluster.local
+  duration: 8760h    # 1 year
+  renewBefore: 720h  # renew 30 days before expiry
+  issuerRef:
+    name: egress-webhook-selfsigned
+    kind: Issuer
