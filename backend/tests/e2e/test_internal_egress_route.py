@@ -155,7 +155,10 @@ async def test_exchange_correct_token_and_host_returns_200(
         headers={"x-egress-dev-token": _DEV_TOKEN, "x-egress-sandbox-id": sandbox_id},
     )
     assert r.status_code == 200, r.text
-    assert r.json()["secret"] == "secret_value_e2e"
+    body = r.json()
+    assert body["secret"] == "secret_value_e2e"
+    assert "header_names" in body  # binding has header_names=None → serialised as null
+    assert body["header_names"] is None
 
 
 async def test_exchange_wrong_dev_token_returns_401(

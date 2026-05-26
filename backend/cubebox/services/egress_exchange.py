@@ -27,7 +27,14 @@ class EgressExchangeService:
         self._refs = ref_repo
         self._credentials_factory = credentials_factory
 
-    async def exchange(self, *, identity: SidecarIdentity, placeholder: str, host: str) -> str:
+    async def exchange(
+        self, *, identity: SidecarIdentity, placeholder: str, host: str
+    ) -> tuple[str, list[str] | None]:
+        """Return (secret, header_names) for the matched binding.
+
+        header_names is the binding's allow-list of HTTP header names the secret
+        may be substituted into, or None if the binding allows any header.
+        """
         ref = await self._refs.get_valid_by_hash(hash_placeholder(placeholder))
         if ref is None:
             raise EgressExchangeError("unknown/revoked/expired placeholder")
@@ -39,10 +46,12 @@ class EgressExchangeService:
             raise EgressExchangeError(f"host {host_norm!r} not allowed for this placeholder")
         creds = self._credentials_factory(ref.org_id)
         try:
-            return await creds.get_decrypted(
+            secret = await creds.get_decrypted(
                 credential_id=binding["credential_id"], requesting_kind=SANDBOX_ENV_KIND
             )
         except (CredentialNotFound, CredentialKindMismatch) as exc:
             # The vault entry/credential was deleted while a ref was still valid
             # (e.g. the env entry was removed mid-run). Fail closed (403), not 500.
             raise EgressExchangeError("bound credential is gone") from exc
+        header_names: list[str] | None = binding.get("header_names")
+        return secret, header_names
