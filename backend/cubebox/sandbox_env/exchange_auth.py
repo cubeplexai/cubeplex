@@ -58,14 +58,16 @@ class MtlsAuthenticator:
         return SidecarIdentity(sandbox_id=sandbox_id)
 
 
-def build_sidecar_authenticator(
-    config: dict[str, Any], *, deployment_mode: str
-) -> SidecarAuthenticator:
+_DEV_ALLOWED_ENVS = {"development", "testing", "test"}
+
+
+def build_sidecar_authenticator(config: dict[str, Any], *, env: str) -> SidecarAuthenticator:
     mode = config.get("mode", "mtls")
     if mode == "dev":
-        if deployment_mode == "production":
+        if env.lower() not in _DEV_ALLOWED_ENVS:
             raise RuntimeError(
-                "egress exchange dev authenticator selected in production deployment mode"
+                f"egress exchange dev authenticator is not allowed in env={env!r}; "
+                f"only {sorted(_DEV_ALLOWED_ENVS)} are permitted"
             )
         token = config.get("dev_token")
         if not token:
