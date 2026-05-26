@@ -1,7 +1,7 @@
 """sandbox env vars
 
 Revision ID: e74c8c264ad2
-Revises: 1890ff8246f4
+Revises: 538af47f81eb
 Create Date: 2026-05-26 00:41:36.021912
 
 """
@@ -14,7 +14,7 @@ import sqlmodel  # noqa: F401  (referenced by sqlmodel.sql.sqltypes.AutoString i
 
 # revision identifiers, used by Alembic.
 revision: str = 'e74c8c264ad2'
-down_revision: Union[str, Sequence[str], None] = '1890ff8246f4'
+down_revision: Union[str, Sequence[str], None] = '538af47f81eb'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
