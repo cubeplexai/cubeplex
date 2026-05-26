@@ -25,7 +25,10 @@ async def _ensure_configured() -> None:
     if not _configured:
         from kubernetes_asyncio import config  # noqa: PLC0415
 
-        await config.load_incluster_config()
+        # load_incluster_config() is synchronous in kubernetes_asyncio (it only
+        # reads the SA token/cert files and sets the global config); only
+        # load_kube_config() is a coroutine. Do NOT await this.
+        config.load_incluster_config()
         _configured = True
 
 

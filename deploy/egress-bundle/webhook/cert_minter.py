@@ -21,7 +21,7 @@ class CA:
 def generate_ca(common_name: str) -> tuple[bytes, bytes]:
     key = ec.generate_private_key(ec.SECP256R1())
     name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, common_name)])
-    now = dt.datetime.now(dt.UTC)
+    now = dt.datetime.now(dt.timezone.utc)
     cert = (
         x509.CertificateBuilder()
         .subject_name(name)
@@ -55,7 +55,7 @@ class CertMinter:
 
     def mint(self, *, sandbox_id: str, ttl_minutes: int) -> tuple[bytes, bytes]:
         key = ec.generate_private_key(ec.SECP256R1())
-        now = dt.datetime.now(dt.UTC)
+        now = dt.datetime.now(dt.timezone.utc)
         cert = (
             x509.CertificateBuilder()
             .subject_name(x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, sandbox_id)]))
