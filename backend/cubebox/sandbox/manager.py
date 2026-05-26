@@ -367,6 +367,8 @@ class SandboxManager:
                     workspace_id=record.workspace_id,
                 )
                 await scoped_repo.mark_terminated(record.id)
+                if self._exchange_host:
+                    await EgressRefRepository(session).revoke_for_sandbox(record.sandbox_id)
 
 
 # ---------------------------------------------------------------------------

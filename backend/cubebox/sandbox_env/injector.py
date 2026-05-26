@@ -36,7 +36,10 @@ class SandboxEnvInjector:
 
         for r in resolved:
             if r.is_secret:
-                assert r.hosts and r.credential_id  # Plan 1 value-shape guarantees
+                if not (r.hosts and r.credential_id):
+                    raise ValueError(
+                        f"Secret env var {r.env_name!r} is missing hosts or credential_id"
+                    )
                 placeholder = mint_placeholder()
                 env[r.env_name] = placeholder
                 bindings.append(
@@ -50,7 +53,8 @@ class SandboxEnvInjector:
                 )
                 targets.update(_allowlist_targets(r.hosts))
             else:
-                assert r.plain_value is not None
+                if r.plain_value is None:
+                    raise ValueError(f"Plain env var {r.env_name!r} has no plain_value")
                 env[r.env_name] = r.plain_value
 
         policy = NetworkPolicy(

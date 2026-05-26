@@ -1,4 +1,5 @@
 from collections.abc import AsyncIterator
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from cryptography.fernet import Fernet
@@ -100,4 +101,75 @@ async def test_rejects_non_declared_host(session: AsyncSession) -> None:
             identity=SidecarIdentity(sandbox_id="sbx-1"),
             placeholder=placeholder,
             host="api.attacker.net",
+        )
+
+
+async def _seed_with_expiry(
+    session: AsyncSession, expires_at: datetime
+) -> tuple[EgressExchangeService, str]:
+    """Seed a ref with an explicit expires_at (tz-naive, as Postgres stores it)."""
+    backend = FernetBackend([Fernet.generate_key()])
+    cred = CredentialService(
+        CredentialRepository(session, org_id="org-exp"),
+        backend,
+        org_id="org-exp",
+        actor_user_id="u-exp",
+    )
+    cred_id = await cred.create(kind=SANDBOX_ENV_KIND, name="t-exp", plaintext="tok_expiry")
+    placeholder = mint_placeholder()
+    # Store expires_at as tz-naive to simulate what Postgres DateTime() returns
+    naive_expires_at = expires_at.replace(tzinfo=None)
+    await EgressRefRepository(session).add(
+        EgressRef(
+            ref_hash=hash_placeholder(placeholder),
+            sandbox_id="sbx-exp",
+            org_id="org-exp",
+            workspace_id="ws-exp",
+            user_id="u-exp",
+            run_id=None,
+            bindings=[
+                {
+                    "ref_hash": hash_placeholder(placeholder),
+                    "env_name": "API_TOKEN",
+                    "hosts": ["api.example.com"],
+                    "header_names": None,
+                    "credential_id": cred_id,
+                }
+            ],
+            expires_at=naive_expires_at,
+        )
+    )
+    svc = EgressExchangeService(
+        ref_repo=EgressRefRepository(session),
+        credentials_factory=lambda org_id: CredentialService(
+            CredentialRepository(session, org_id=org_id),
+            backend,
+            org_id=org_id,
+            actor_user_id=None,
+        ),
+    )
+    return svc, placeholder
+
+
+async def test_exchange_succeeds_with_future_expiry(session: AsyncSession) -> None:
+    """A ref whose expires_at is in the future (tz-naive from DB) must succeed."""
+    future = datetime.now(UTC) + timedelta(hours=1)
+    svc, placeholder = await _seed_with_expiry(session, future)
+    secret = await svc.exchange(
+        identity=SidecarIdentity(sandbox_id="sbx-exp"),
+        placeholder=placeholder,
+        host="api.example.com",
+    )
+    assert secret == "tok_expiry"
+
+
+async def test_exchange_fails_with_past_expiry(session: AsyncSession) -> None:
+    """A ref whose expires_at is in the past (tz-naive from DB) must be rejected."""
+    past = datetime.now(UTC) - timedelta(hours=1)
+    svc, placeholder = await _seed_with_expiry(session, past)
+    with pytest.raises(EgressExchangeError):
+        await svc.exchange(
+            identity=SidecarIdentity(sandbox_id="sbx-exp"),
+            placeholder=placeholder,
+            host="api.example.com",
         )

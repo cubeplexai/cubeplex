@@ -7,10 +7,11 @@ from sqlalchemy import JSON, Column, Index
 from sqlmodel import Field
 
 from cubebox.models.mixins import CubeboxBase
+from cubebox.models.public_id import PREFIX_EGRESS_REF
 
 
 class EgressRef(CubeboxBase, table=True):
-    _PREFIX: ClassVar[str] = "eref"
+    _PREFIX: ClassVar[str] = PREFIX_EGRESS_REF
     __tablename__ = "egress_refs"
     __table_args__ = (
         Index("ix_egress_ref_hash", "ref_hash", unique=True),
@@ -18,7 +19,7 @@ class EgressRef(CubeboxBase, table=True):
     )
 
     ref_hash: str = Field(max_length=64)
-    sandbox_id: str = Field(max_length=64, index=True)
+    sandbox_id: str = Field(max_length=64)
     org_id: str = Field(foreign_key="organizations.id", max_length=20, index=True)
     workspace_id: str = Field(foreign_key="workspaces.id", max_length=20)
     user_id: str = Field(foreign_key="users.id", max_length=20)
