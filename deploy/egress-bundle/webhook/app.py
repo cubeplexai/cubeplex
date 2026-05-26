@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import json
+import logging
 import os
 
 from fastapi import FastAPI, Request
@@ -12,15 +13,29 @@ from webhook.cert_minter import CertMinter, load_ca
 from webhook.patch import build_pod_patch, is_sandbox_pod
 from webhook import k8s_client  # thin wrapper around the k8s API (create Secret, owner ref)
 
+logger = logging.getLogger(__name__)
+
 EGRESS_IMAGE = os.environ["EGRESS_IMAGE"]
 CERT_TTL_MIN = int(os.environ.get("CLIENT_CERT_TTL_MINUTES", "720"))
 EGRESS_EXCHANGE_URL = os.environ["EGRESS_EXCHANGE_URL"]  # injected into the sidecar + used by inject.py
-EXCHANGE_CA_PEM = open(os.environ["EXCHANGE_CA_PATH"], "rb").read()  # CA that signs the exchange server cert
+
+
+def _read_env_file(env_var: str) -> bytes:
+    path = os.environ.get(env_var)
+    if not path:
+        raise RuntimeError(f"Required env var {env_var!r} is not set")
+    try:
+        return open(path, "rb").read()
+    except OSError as exc:
+        raise RuntimeError(f"Cannot read file for {env_var!r} ({path!r}): {exc}") from exc
+
+
+EXCHANGE_CA_PEM = _read_env_file("EXCHANGE_CA_PATH")  # CA that signs the exchange server cert
 
 app = FastAPI()
 _ca = load_ca(
-    open(os.environ["CA_KEY_PATH"], "rb").read(),
-    open(os.environ["CA_CERT_PATH"], "rb").read(),
+    _read_env_file("CA_KEY_PATH"),
+    _read_env_file("CA_CERT_PATH"),
 )
 _minter = CertMinter(_ca)
 
@@ -44,8 +59,13 @@ async def mutate(request: Request) -> dict:  # type: ignore[type-arg]
     if not is_sandbox_pod(pod, egress_image=EGRESS_IMAGE):
         return _allow(uid)  # fail-open for non-sandbox pods (do NOT patch)
 
+    # Align with is_sandbox_pod: require the opensandbox.io apiVersion so a
+    # crafted second ownerRef with kind=Sandbox can't supply a foreign CN.
     sandbox_id = next(
-        o["name"] for o in pod["metadata"]["ownerReferences"] if o.get("kind") == "Sandbox"
+        o["name"]
+        for o in pod["metadata"]["ownerReferences"]
+        if o.get("apiVersion", "").startswith("sandbox.opensandbox.io/")
+        and o.get("kind") == "Sandbox"
     )
     key_pem, cert_pem = _minter.mint(sandbox_id=sandbox_id, ttl_minutes=CERT_TTL_MIN)
     # Per-sandbox client-cert Secret, owned by the Sandbox CR for auto-GC. It
@@ -62,9 +82,16 @@ async def mutate(request: Request) -> dict:  # type: ignore[type-arg]
         },
         owner=pod.get("metadata", {}).get("ownerReferences", []),
     )
-    ops = build_pod_patch(
-        pod, sandbox_id=sandbox_id, egress_image=EGRESS_IMAGE, exchange_url=EGRESS_EXCHANGE_URL
-    )
+    try:
+        ops = build_pod_patch(
+            pod, sandbox_id=sandbox_id, egress_image=EGRESS_IMAGE, exchange_url=EGRESS_EXCHANGE_URL
+        )
+    except ValueError:
+        # Degenerate pod: passed is_sandbox_pod but has no non-egress container.
+        # Allow without a patch rather than returning 500 (fail-open is safer
+        # than blocking a pod that Kubernetes already accepted).
+        logger.warning("sandbox pod %s has no app container; admitting without patch", sandbox_id)
+        return _allow(uid)
     return _allow(uid, ops)
 
 

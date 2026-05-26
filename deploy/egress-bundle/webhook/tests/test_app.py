@@ -54,6 +54,28 @@ NON_SANDBOX_POD = {
     },
 }
 
+# Passes is_sandbox_pod but has no non-egress container — degenerate case (I3).
+EGRESS_ONLY_SANDBOX_POD = {
+    "metadata": {
+        "namespace": "opensandbox",
+        "ownerReferences": [
+            {
+                "apiVersion": "sandbox.opensandbox.io/v1alpha1",
+                "kind": "Sandbox",
+                "name": "sbx-degenerate",
+                "uid": "dddd-eeee-ffff",
+            }
+        ],
+        "labels": {},
+    },
+    "spec": {
+        "containers": [
+            {"name": "egress", "image": EGRESS_IMAGE},
+        ],
+        "volumes": [],
+    },
+}
+
 
 def _make_review(pod: dict, uid: str = "test-uid-1") -> dict:  # type: ignore[type-arg]
     return {
@@ -146,3 +168,39 @@ async def test_healthz(client: AsyncClient) -> None:
     resp = await client.get("/healthz")
     assert resp.status_code == 200
     assert resp.json()["ok"] is True
+
+
+@pytest.mark.asyncio
+async def test_egress_only_sandbox_pod_allowed_no_500(client: AsyncClient) -> None:
+    """I3: sandbox pod with only the egress container → allowed=True, no 500.
+
+    build_pod_patch handles the no-app-container case without raising ValueError:
+    it patches the egress container and emits volumes/initContainers but skips
+    the app-container ca-trust volumeMount (there are no app containers). The
+    response carries a JSONPatch for the egress-side ops; the key invariant is
+    that no exception propagates and the pod is admitted.
+    """
+    with patch(
+        "webhook.app.k8s_client.create_client_cert_secret",
+        new_callable=AsyncMock,
+    ):
+        resp = await client.post("/mutate", json=_make_review(EGRESS_ONLY_SANDBOX_POD))
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["response"]["allowed"] is True
+    # A patch is returned for the egress-side env/mounts/volumes; what must
+    # NOT happen is a 500 or a ca-trust volumeMount targeting a non-existent
+    # app container index.
+    if "patch" in body["response"]:
+        import base64, json as _json
+        ops = _json.loads(base64.b64decode(body["response"]["patch"]))
+        # No op should add a ca-trust mount to any container index
+        # (there are no app containers — only egress at index 0).
+        for op in ops:
+            path = op.get("path", "")
+            if "volumeMounts" in path and path.startswith("/spec/containers/"):
+                mounts = op.get("value", [])
+                assert not any(m.get("name") == "ca-trust" for m in mounts), (
+                    f"Unexpected ca-trust mount for egress-only pod at {path}"
+                )

@@ -44,7 +44,8 @@ def generate_ca(common_name: str) -> tuple[bytes, bytes]:
 def load_ca(key_pem: bytes, cert_pem: bytes) -> CA:
     key = serialization.load_pem_private_key(key_pem, password=None)
     cert = x509.load_pem_x509_certificate(cert_pem)
-    assert isinstance(key, ec.EllipticCurvePrivateKey)
+    if not isinstance(key, ec.EllipticCurvePrivateKey):
+        raise TypeError("CA key must be an EC private key")
     return CA(key=key, cert=cert)
 
 
