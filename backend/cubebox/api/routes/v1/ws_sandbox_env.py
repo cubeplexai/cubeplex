@@ -2,10 +2,16 @@
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from cubebox.api.schemas.sandbox_env import CreateUserEnvIn, CreateWorkspaceEnvIn, EnvEntryOut
+from cubebox.api.schemas.sandbox_env import (
+    CreateUserEnvIn,
+    CreateWorkspaceEnvIn,
+    EnvEntryListOut,
+    EnvEntryOut,
+    UpdateSecretValueIn,
+)
 from cubebox.auth.context import RequestContext
 from cubebox.auth.dependencies import require_admin, require_member
 from cubebox.credentials.dependencies import get_encryption_backend
@@ -89,3 +95,125 @@ async def create_user_env(
     row = await SandboxEnvRepository(session, org_id=ctx.org_id).get(entry_id)
     assert row is not None
     return EnvEntryOut(**row.model_dump(include=set(EnvEntryOut.model_fields)))
+
+
+@router.get("/workspace", response_model=EnvEntryListOut)
+async def list_workspace_env(
+    workspace_id: str,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    ctx: Annotated[RequestContext, Depends(require_admin)],
+) -> EnvEntryListOut:
+    rows = await SandboxEnvRepository(session, org_id=ctx.org_id).list_scope(
+        scope="workspace", workspace_id=workspace_id
+    )
+    return EnvEntryListOut(
+        entries=[EnvEntryOut(**r.model_dump(include=set(EnvEntryOut.model_fields))) for r in rows]
+    )
+
+
+@router.get("/me", response_model=EnvEntryListOut)
+async def list_user_env(
+    workspace_id: str,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    ctx: Annotated[RequestContext, Depends(require_member)],
+) -> EnvEntryListOut:
+    rows = await SandboxEnvRepository(session, org_id=ctx.org_id).list_scope(
+        scope="user", workspace_id=workspace_id, user_id=ctx.user.id
+    )
+    return EnvEntryListOut(
+        entries=[EnvEntryOut(**r.model_dump(include=set(EnvEntryOut.model_fields))) for r in rows]
+    )
+
+
+@router.delete("/workspace/{entry_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_workspace_env(
+    workspace_id: str,
+    entry_id: str,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    backend: Annotated[EncryptionBackend, Depends(get_encryption_backend)],
+    ctx: Annotated[RequestContext, Depends(require_admin)],
+) -> None:
+    row = await SandboxEnvRepository(session, org_id=ctx.org_id).get(entry_id)
+    if not (
+        row is not None
+        and row.org_id == ctx.org_id
+        and row.scope == "workspace"
+        and row.workspace_id == workspace_id
+    ):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "not found")
+    await _service(session, backend, ctx).delete_entry(entry_id=entry_id)
+
+
+@router.delete("/me/{entry_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_user_env(
+    workspace_id: str,
+    entry_id: str,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    backend: Annotated[EncryptionBackend, Depends(get_encryption_backend)],
+    ctx: Annotated[RequestContext, Depends(require_member)],
+) -> None:
+    row = await SandboxEnvRepository(session, org_id=ctx.org_id).get(entry_id)
+    if not (
+        row is not None
+        and row.scope == "user"
+        and row.workspace_id == workspace_id
+        and row.user_id == ctx.user.id
+    ):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "not found")
+    await _service(session, backend, ctx).delete_entry(entry_id=entry_id)
+
+
+@router.patch("/workspace/{entry_id}", response_model=EnvEntryOut)
+async def rotate_workspace_env(
+    workspace_id: str,
+    entry_id: str,
+    body: UpdateSecretValueIn,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    backend: Annotated[EncryptionBackend, Depends(get_encryption_backend)],
+    ctx: Annotated[RequestContext, Depends(require_admin)],
+) -> EnvEntryOut:
+    row = await SandboxEnvRepository(session, org_id=ctx.org_id).get(entry_id)
+    if not (
+        row is not None
+        and row.org_id == ctx.org_id
+        and row.scope == "workspace"
+        and row.workspace_id == workspace_id
+    ):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "not found")
+    try:
+        await _service(session, backend, ctx).update_secret_value(
+            entry_id=entry_id, secret_value=body.secret_value
+        )
+    except SandboxEnvShapeError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+    updated = await SandboxEnvRepository(session, org_id=ctx.org_id).get(entry_id)
+    assert updated is not None
+    return EnvEntryOut(**updated.model_dump(include=set(EnvEntryOut.model_fields)))
+
+
+@router.patch("/me/{entry_id}", response_model=EnvEntryOut)
+async def rotate_user_env(
+    workspace_id: str,
+    entry_id: str,
+    body: UpdateSecretValueIn,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    backend: Annotated[EncryptionBackend, Depends(get_encryption_backend)],
+    ctx: Annotated[RequestContext, Depends(require_member)],
+) -> EnvEntryOut:
+    row = await SandboxEnvRepository(session, org_id=ctx.org_id).get(entry_id)
+    if not (
+        row is not None
+        and row.scope == "user"
+        and row.workspace_id == workspace_id
+        and row.user_id == ctx.user.id
+    ):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "not found")
+    try:
+        await _service(session, backend, ctx).update_secret_value(
+            entry_id=entry_id, secret_value=body.secret_value
+        )
+    except SandboxEnvShapeError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+    updated = await SandboxEnvRepository(session, org_id=ctx.org_id).get(entry_id)
+    assert updated is not None
+    return EnvEntryOut(**updated.model_dump(include=set(EnvEntryOut.model_fields)))

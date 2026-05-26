@@ -21,6 +21,10 @@ class CreateUserEnvIn(CreateOrgEnvIn):
     """user-scope: workspace_id from path; user_id from the authed user."""
 
 
+class UpdateSecretValueIn(BaseModel):
+    secret_value: str
+
+
 class EnvEntryOut(BaseModel):
     id: str
     env_name: str
