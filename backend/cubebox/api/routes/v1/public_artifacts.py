@@ -2,7 +2,6 @@
 
 import mimetypes
 from typing import Annotated
-from urllib.parse import quote
 
 import orjson
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -11,6 +10,7 @@ from loguru import logger
 
 from cubebox.cache import RedisHandle, redis_dep
 from cubebox.objectstore import get_objectstore_client
+from cubebox.utils.http import content_disposition
 
 router = APIRouter(prefix="/public/artifacts", tags=["public-artifacts"])
 
@@ -60,13 +60,8 @@ async def public_download(
     mime, _ = mimetypes.guess_type(stored_filename)
     media_type = mime or stored_content_type or "application/octet-stream"
 
-    ascii_fallback = stored_filename.encode("ascii", "ignore").decode() or "download"
-    disposition = (
-        f"inline; filename=\"{ascii_fallback}\"; filename*=UTF-8''{quote(stored_filename)}"
-    )
-
     return Response(
         content=data,
         media_type=media_type,
-        headers={"Content-Disposition": disposition},
+        headers={"Content-Disposition": content_disposition(stored_filename, inline=True)},
     )

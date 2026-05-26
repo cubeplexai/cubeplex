@@ -25,6 +25,7 @@ from cubebox.repositories import (
     ArtifactVersionRepository,
     ConversationRepository,
 )
+from cubebox.utils.http import content_disposition
 
 router = APIRouter(
     prefix="/ws/{workspace_id}/conversations/{conversation_id}/artifacts",
@@ -154,7 +155,7 @@ async def download_artifact(
             return Response(
                 content=data,
                 media_type=media_type,
-                headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+                headers={"Content-Disposition": content_disposition(filename)},
             )
 
         # Multiple files — create a tar archive in memory
@@ -172,7 +173,7 @@ async def download_artifact(
         return Response(
             content=buf.getvalue(),
             media_type="application/x-tar",
-            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+            headers={"Content-Disposition": content_disposition(filename)},
         )
 
     except HTTPException:
