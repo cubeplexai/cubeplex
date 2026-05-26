@@ -173,3 +173,55 @@ async def test_exchange_fails_with_past_expiry(session: AsyncSession) -> None:
             placeholder=placeholder,
             host="api.example.com",
         )
+
+
+async def test_stale_credential_fails_closed(session: AsyncSession) -> None:
+    """If the bound credential was deleted while a ref is still valid, the
+    exchange must raise EgressExchangeError (→ 403), not a raw CredentialNotFound
+    (→ 500)."""
+    backend = FernetBackend([Fernet.generate_key()])
+    cred = CredentialService(
+        CredentialRepository(session, org_id="org-stale"),
+        backend,
+        org_id="org-stale",
+        actor_user_id="u1",
+    )
+    cred_id = await cred.create(kind=SANDBOX_ENV_KIND, name="gone", plaintext="secret")
+    placeholder = mint_placeholder()
+    await EgressRefRepository(session).add(
+        EgressRef(
+            ref_hash=hash_placeholder(placeholder),
+            sandbox_id="sbx-stale",
+            org_id="org-stale",
+            workspace_id="ws-stale",
+            user_id="u1",
+            run_id=None,
+            bindings=[
+                {
+                    "ref_hash": hash_placeholder(placeholder),
+                    "env_name": "API_TOKEN",
+                    "hosts": ["api.example.com"],
+                    "header_names": None,
+                    "credential_id": cred_id,
+                }
+            ],
+        )
+    )
+    # Delete the credential out from under the still-valid ref.
+    await CredentialRepository(session, org_id="org-stale").delete(cred_id)
+
+    svc = EgressExchangeService(
+        ref_repo=EgressRefRepository(session),
+        credentials_factory=lambda org_id: CredentialService(
+            CredentialRepository(session, org_id=org_id),
+            backend,
+            org_id=org_id,
+            actor_user_id=None,
+        ),
+    )
+    with pytest.raises(EgressExchangeError):
+        await svc.exchange(
+            identity=SidecarIdentity(sandbox_id="sbx-stale"),
+            placeholder=placeholder,
+            host="api.example.com",
+        )
