@@ -299,10 +299,42 @@ async def lifespan(_app: FastAPI):  # type: ignore
                 "before starting."
             )
 
+    # Egress exchange mTLS listener (production only). Served on its own port so
+    # the per-sandbox client-cert identity cannot be reached via the public API.
+    _egress_listener = None
+    from cubebox.config import config as _egress_cfg
+
+    _egress_auth = dict(_egress_cfg.get("egress_exchange.auth", {}) or {})
+    if _egress_auth.get("mode", "mtls") == "mtls":
+        _lst = dict(_egress_cfg.get("egress_exchange.listener", {}) or {})
+        if _lst.get("enabled", False):
+            from cubebox.sandbox_env.exchange_listener import (
+                ExchangeListener,
+                build_exchange_app,
+            )
+
+            _exchange_app = build_exchange_app(
+                encryption_backend=_app.state.encryption_backend,
+                authenticator=_app.state.sidecar_authenticator,
+            )
+            _egress_listener = ExchangeListener(
+                _exchange_app,
+                host=_lst.get("host", "0.0.0.0"),
+                port=int(_lst["port"]),
+                certfile=_lst["certfile"],
+                keyfile=_lst["keyfile"],
+                ca_certs=_lst["ca_certs"],
+            )
+            await _egress_listener.start()
+    _app.state._egress_listener = _egress_listener
+
     yield
 
     # ==================== Shutdown ====================
     logger.info("Application shutting down")
+    _egress_listener = getattr(_app.state, "_egress_listener", None)
+    if _egress_listener is not None:
+        await _egress_listener.stop()
     if _attachment_cleanup_task is not None:
         _attachment_cleanup_task.cancel()
         try:
@@ -480,6 +512,12 @@ def create_app(
         _egress_auth_config,
         env=_cubebox_config.current_env,
     )
-    app.include_router(internal_egress.router, prefix="/api/v1")
+    # In dev (shared-secret) mode the exchange route is mounted on the public app
+    # — there is no mTLS terminator locally. In mtls mode it is served ONLY by
+    # the dedicated mTLS listener (started in the lifespan), never on the public
+    # app, so the cert-bound sandbox identity cannot be bypassed via the public
+    # port.
+    if _egress_auth_config.get("mode", "mtls") == "dev":
+        app.include_router(internal_egress.router, prefix="/api/v1")
 
     return app

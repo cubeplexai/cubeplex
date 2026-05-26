@@ -58,9 +58,19 @@ deploy/egress-bundle/
    kubectl apply -f k8s/mutatingwebhookconfiguration.yaml
    ```
 
-5. **Configure the exchange endpoint** (Plan 2) to trust the same CA:
+5. **Enable the exchange mTLS listener** in cubebox (Plan 2). The exchange
+   endpoint is served on its own port that terminates mTLS — the sandbox's
+   egress addon connects to it directly with the per-sandbox client cert, and
+   the listener reads the sandbox identity from that cert's CN. There is no
+   proxy and no forwarded header. Set in cubebox config:
    - `egress_exchange.auth.mode = mtls`
-   - `egress_exchange.auth.ca = <path to mitmproxy-ca-cert.pem>`
+   - `egress_exchange.listener.enabled = true`
+   - `egress_exchange.listener.certfile/keyfile` — the listener's server cert
+     (must be signed by a CA the addon trusts as `exchange-ca.pem`).
+   - `egress_exchange.listener.ca_certs = <egress CA cert>` — the same CA
+     `gen-ca.sh` produces; it signs the per-sandbox client certs, so
+     `CERT_REQUIRED` rejects any caller without a valid per-sandbox cert.
+   - Point the webhook's `EGRESS_EXCHANGE_URL` at this listener's address.
 
 ## Notes
 
@@ -74,8 +84,9 @@ deploy/egress-bundle/
     --namespace opensandbox \
     --dry-run=client -o yaml > k8s/addon-configmap.yaml
   ```
-- `exchange-networkpolicy.yaml` enforces that the exchange endpoint is reachable
-  only via the mTLS-terminating proxy (so the `x-egress-client-cn` trust holds).
-  Adapt its selectors/namespace/port to where the exchange + proxy run, and apply
-  it in that namespace (requires a NetworkPolicy-enforcing CNI).
+- The exchange endpoint terminates mTLS itself (`CERT_REQUIRED` against the
+  egress CA), so the caller's identity is cryptographically bound to a
+  per-sandbox client cert. No trusted proxy, no forwarded header, and no
+  NetworkPolicy is required for the trust to hold — a caller without a valid
+  per-sandbox client cert is rejected at the TLS layer.
 - OpenSandbox stays stock — no patches to the server or egress image.

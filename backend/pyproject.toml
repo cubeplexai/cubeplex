@@ -36,6 +36,7 @@ dependencies = [
     "orjson>=3.11.9",
     "pyyaml>=6.0.3",
     "tldextract>=5.3.1",
+    "httptools>=0.8.0",
 ]
 
 [project.optional-dependencies]

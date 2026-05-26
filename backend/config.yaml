@@ -24,6 +24,25 @@ default:
     reload: true
     public_url: ""
 
+  # Egress secret-injection exchange endpoint.
+  #   auth.mode "mtls"  → production: identity is the CN of the per-sandbox
+  #                       client cert, served on the dedicated mTLS listener.
+  #   auth.mode "dev"   → bare-local shared secret (only allowed in
+  #                       development/test envs); route mounted on the public app.
+  egress_exchange:
+    auth:
+      mode: mtls
+    # Dedicated mTLS listener (production). Disabled by default; the deployment
+    # that runs the egress bundle enables it and points at the server cert/key
+    # plus the egress CA that signed the per-sandbox client certs.
+    listener:
+      enabled: false
+      host: "0.0.0.0"
+      port: 8443
+      certfile: ""
+      keyfile: ""
+      ca_certs: ""
+
   # LLM Configuration
   # Note: For reasoning models, set reasoning config to enable reasoning output
   # Example: reasoning: {effort: "medium", summary: "auto"}

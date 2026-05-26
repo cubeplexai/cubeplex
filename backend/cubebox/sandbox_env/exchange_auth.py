@@ -91,54 +91,33 @@ def _sandbox_id_from_peercert(peercert: dict[str, Any]) -> str | None:
 
 class MtlsAuthenticator:
     """Production. Derives the verified sidecar identity (CN = sandbox_id) from
-    the client certificate.
+    the client certificate the egress sidecar presents.
 
-    # How to serve the exchange endpoint for mTLS — PRODUCTION
-    #
-    # Terminate mTLS at a proxy/ingress (nginx, Envoy, a mesh sidecar) configured
-    # with the egress CA and ``verify_client = on`` / ``CERT_REQUIRED``.  The
-    # proxy validates the client cert chain, then forwards the verified CN to the
-    # exchange app in a trusted header (``forwarded_cn_header``, default
-    # ``x-egress-client-cn``).  The exchange service must be reachable ONLY via
-    # that proxy, and the proxy MUST strip/overwrite the header on inbound
-    # requests so a sandbox cannot forge it.
-    #
-    # Rationale: with a plain uvicorn ``ssl_cert_reqs=CERT_REQUIRED`` setup the
-    # TLS handshake verifies the client cert, but uvicorn does NOT surface the
-    # peer certificate into the ASGI scope, so the app cannot read it directly.
-    # Hence the proxy-forwarded-header path is the supported production path.
-    #
-    # Chain validation is the proxy/TLS layer's job; this code only extracts the
-    # already-verified identity.
+    The exchange endpoint is served by :class:`ExchangeListener`, a dedicated
+    uvicorn listener that terminates mTLS (``CERT_REQUIRED`` against the egress
+    CA). The identity is therefore cryptographically bound to a per-sandbox
+    client cert — there is no forgeable header to trust, and no proxy in the
+    trust path. Chain validation is the TLS layer's job; this code only extracts
+    the already-verified CN.
 
     Lookup precedence:
 
-    1. ``forwarded_cn_header`` — the trusted proxy-forwarded CN (production).
-    2. ``request.client_cert`` dict — lets unit/integration tests inject a
+    1. ``request.client_cert`` dict — lets unit/integration tests inject a
        synthetic peercert without a live TLS socket.
-    3. ASGI scope transport / extensions peercert — best-effort fallback for
-       servers that do surface it.
+    2. ASGI scope peercert — populated by ``PeercertHttpToolsProtocol`` which
+       injects the TLS transport into the scope (uvicorn does not do this on its
+       own).
 
     Raises ``PermissionError`` if no verified identity can be derived.
     """
 
-    def __init__(self, *, forwarded_cn_header: str = "x-egress-client-cn") -> None:
-        self._cn_header = forwarded_cn_header.lower()
-
     async def verify(self, request: Any) -> SidecarIdentity:
-        # Path 1: trusted proxy-forwarded verified CN (production).
-        headers = getattr(request, "headers", None)
-        if headers is not None:
-            cn = headers.get(self._cn_header)
-            if cn:
-                return SidecarIdentity(sandbox_id=str(cn))
-
-        # Path 2: explicit dict attribute (unit tests, integration mocks).
+        # Path 1: explicit dict attribute (unit tests, integration mocks).
         explicit = getattr(request, "client_cert", None)
         if isinstance(explicit, dict) and explicit:
             peercert: dict[str, Any] = explicit
         else:
-            # Path 3: real ASGI scope transport / extensions (best effort).
+            # Path 2: real ASGI scope transport peercert.
             scope: dict[str, Any] = getattr(request, "scope", {})
             found = _peercert_from_scope(scope)
             if found is None:
@@ -167,7 +146,5 @@ def build_sidecar_authenticator(config: dict[str, Any], *, env: str) -> SidecarA
             raise RuntimeError("dev authenticator requires dev_token")
         return DevSharedSecretAuthenticator(token=token)
     if mode == "mtls":
-        return MtlsAuthenticator(
-            forwarded_cn_header=config.get("forwarded_cn_header", "x-egress-client-cn")
-        )
+        return MtlsAuthenticator()
     raise RuntimeError(f"unknown egress exchange auth mode: {mode!r}")
