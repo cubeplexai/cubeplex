@@ -37,24 +37,100 @@ class DevSharedSecretAuthenticator:
         return SidecarIdentity(sandbox_id=sandbox_id)
 
 
-class MtlsAuthenticator:
-    """Production. Reads the verified client cert; sandbox_id is its CN/SAN.
+def _peercert_from_scope(scope: dict[str, Any]) -> dict[str, Any] | None:
+    """Extract the verified peer certificate dict from an ASGI scope.
 
-    The TLS layer (uvicorn ssl_cert_reqs=CERT_REQUIRED + ssl_ca_certs=<our CA>)
-    has already verified the chain; here we just extract sandbox_id from the
-    peer certificate surfaced on the request.
+    Precedence (highest to lowest):
+    1. ``scope["transport"].get_extra_info("peercert")`` — uvicorn with
+       ``ssl_cert_reqs=CERT_REQUIRED`` populates this on the underlying asyncio
+       SSL transport.  Returns the standard Python ssl ``getpeercert()`` dict,
+       e.g. ``{"subject": ((("commonName", "sbx-1"),),), ...}``.
+    2. ``scope["extensions"]["tls"]["peercert"]`` — future / alternative ASGI
+       server convention; included defensively.
+
+    Chain validation is the TLS layer's responsibility (``CERT_REQUIRED`` +
+    ``ssl_ca_certs=<egress CA>``).  This function only surfaces the identity.
+    """
+    # Path 1: uvicorn / asyncio SSL transport
+    transport = scope.get("transport")
+    if transport is not None:
+        try:
+            cert = transport.get_extra_info("peercert")
+            if isinstance(cert, dict) and cert:
+                return cert
+        except Exception:  # noqa: BLE001 — defensive; non-SSL transports may raise
+            pass
+
+    # Path 2: ASGI extensions dict (less common; included for forward compat)
+    extensions = scope.get("extensions") or {}
+    tls_info = extensions.get("tls") if isinstance(extensions, dict) else None
+    if isinstance(tls_info, dict):
+        cert = tls_info.get("peercert")
+        if isinstance(cert, dict) and cert:
+            return cert
+
+    return None
+
+
+def _sandbox_id_from_peercert(peercert: dict[str, Any]) -> str | None:
+    """Parse a standard Python ssl.getpeercert() dict and return the CN, or None.
+
+    The dict has the shape::
+
+        {"subject": ((("commonName", "sbx-1"),), (("organizationName", "x"),)), ...}
+
+    Each element of ``subject`` is a tuple of (key, value) pairs (RFC 4514
+    multi-value RDNs are rare but legal, hence the double nesting).
+    """
+    for rdn in peercert.get("subject", ()):
+        for attr_type, attr_value in rdn:
+            if attr_type == "commonName":
+                return str(attr_value) if attr_value else None
+    return None
+
+
+class MtlsAuthenticator:
+    """Production. Reads the verified peer cert from the ASGI scope; extracts sandbox_id from its CN.
+
+    # How to serve the exchange endpoint for mTLS
+    #
+    # Run uvicorn with:
+    #   ssl_certfile=<server cert>  ssl_keyfile=<server key>
+    #   ssl_ca_certs=<egress CA public cert>
+    #   ssl_cert_reqs=ssl.CERT_REQUIRED
+    #
+    # Or point a TLS terminator (ingress/mesh) at it and have it forward the
+    # verified client cert — e.g. SPIFFE / X-Forwarded-Client-Cert — but trust
+    # that header ONLY from the terminator, never directly from the sandbox.
+    #
+    # The TLS layer performs chain validation.  This code only extracts identity.
+
+    Cert lookup precedence (documented for test authors and operators):
+
+    1. ``request.client_cert`` if it is already a non-empty dict — lets unit
+       tests and integration harnesses inject a synthetic peercert without
+       needing a live TLS socket.
+    2. The ASGI scope transport / extensions peercert (real uvicorn mTLS path).
+
+    Raises ``PermissionError`` if no peercert is present or if the CN is absent.
     """
 
-    def __init__(self, *, sandbox_id_field: str = "CN") -> None:
-        self._field = sandbox_id_field
-
     async def verify(self, request: Any) -> SidecarIdentity:
-        cert = getattr(request, "client_cert", None)
-        if not cert:
-            raise PermissionError("no client certificate")
-        sandbox_id = cert.get(self._field) if isinstance(cert, dict) else None
+        # Path 1: explicit dict attribute (unit tests, integration mocks).
+        explicit = getattr(request, "client_cert", None)
+        if isinstance(explicit, dict) and explicit:
+            peercert: dict[str, Any] = explicit
+        else:
+            # Path 2: real ASGI scope transport / extensions.
+            scope: dict[str, Any] = getattr(request, "scope", {})
+            found = _peercert_from_scope(scope)
+            if found is None:
+                raise PermissionError("no client certificate")
+            peercert = found
+
+        sandbox_id = _sandbox_id_from_peercert(peercert)
         if not sandbox_id:
-            raise PermissionError(f"client cert missing {self._field}")
+            raise PermissionError("client cert missing CN")
         return SidecarIdentity(sandbox_id=sandbox_id)
 
 
@@ -74,5 +150,5 @@ def build_sidecar_authenticator(config: dict[str, Any], *, env: str) -> SidecarA
             raise RuntimeError("dev authenticator requires dev_token")
         return DevSharedSecretAuthenticator(token=token)
     if mode == "mtls":
-        return MtlsAuthenticator(sandbox_id_field=config.get("sandbox_id_field", "CN"))
+        return MtlsAuthenticator()
     raise RuntimeError(f"unknown egress exchange auth mode: {mode!r}")
