@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
+from cubebox.credentials.exceptions import CredentialKindMismatch, CredentialNotFound
 from cubebox.repositories.egress_ref import EgressRefRepository
 from cubebox.sandbox_env.exchange_auth import SidecarIdentity
 from cubebox.sandbox_env.host_rules import host_matches
@@ -37,6 +38,11 @@ class EgressExchangeService:
         if binding is None:
             raise EgressExchangeError(f"host {host_norm!r} not allowed for this placeholder")
         creds = self._credentials_factory(ref.org_id)
-        return await creds.get_decrypted(
-            credential_id=binding["credential_id"], requesting_kind=SANDBOX_ENV_KIND
-        )
+        try:
+            return await creds.get_decrypted(
+                credential_id=binding["credential_id"], requesting_kind=SANDBOX_ENV_KIND
+            )
+        except (CredentialNotFound, CredentialKindMismatch) as exc:
+            # The vault entry/credential was deleted while a ref was still valid
+            # (e.g. the env entry was removed mid-run). Fail closed (403), not 500.
+            raise EgressExchangeError("bound credential is gone") from exc
