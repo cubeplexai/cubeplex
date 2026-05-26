@@ -56,7 +56,8 @@ safety net.
    backlog on reconnect, fold the fine-grained events into a compact set
    before sending. Consecutive `text_delta` / `reasoning` per agent collapse
    into one event; `tool_call_delta` per `(agent_id, index)` collapses into a
-   single `tool_call_streaming`; structural events pass through unchanged. The
+   single `tool_call_delta` (concatenated args); structural events pass
+   through unchanged. The
    replayed payload shrinks from tens of thousands of events to a few dozen.
    The **live tail** (events after the reconnect snapshot point) stays
    fine-grained so streaming feels smooth.
@@ -98,12 +99,30 @@ output regardless of how `all` is split across `feed` calls.
 |---|---|
 | `text_delta` | Per `agent_id`, concatenate `data.content` of a consecutive run into one event. |
 | `reasoning` | Per `agent_id`, concatenate `data.content` of a consecutive run into one event. |
-| `tool_call_delta` | Per `(agent_id, index)`, concatenate `data.args_delta` into one `tool_call_streaming`-shaped event (keeps a tool call that was mid-stream at the snapshot point visible). |
+| `tool_call_delta` | Per `(agent_id, index)`, concatenate `data.args_delta` into one event that stays `type: "tool_call_delta"` (keeps a tool call that was mid-stream at the snapshot point visible). **Not** `tool_call_streaming` — see below. |
 | `tool_call`, `tool_result`, `usage`, `done`, `error`, `citation`, `artifact`, `injected_message`, `status` | Pass through unchanged. |
 
-A pending text/thinking run for an agent is flushed when a non-matching event
-for that agent arrives (different block type, or a structural event), or at
-`flush()`. A pending `tool_call_streaming` is flushed likewise.
+**Flush is strictly stream-order, not per-agent.** A pending run (text /
+thinking for an agent, or a `tool_call_delta` accumulation for an
+`(agent_id, index)`) is flushed **before emitting any later event that would
+pass it in stream order** — i.e. coalesce only *adjacent* same-key deltas,
+never across an intervening event belonging to a different agent or key. This
+is the critical correctness rule: the frontend applies replayed events in SSE
+order and dedups by `event_id`, so merging a run *across* an intervening event
+would reorder or drop visible content. Concretely, for `main e1`, `subagent
+e2`, `main e3`, the coalescer flushes the `main` pending run (`e1`) before
+emitting `e2`, then starts a fresh `main` run for `e3` — yielding `e1`, `e2`,
+`e3` in order, never `e1+e3` around `e2`. All pending runs are also flushed at
+`flush()`.
+
+The `tool_call_delta` coalescing keeps the SSE `type` as `tool_call_delta`
+(with concatenated `args_delta`), **not** `tool_call_streaming`.
+`tool_call_streaming` is a frontend *content-block* type, not an SSE event
+type — `applyStreamEvent` only consumes `tool_call_delta` and builds the
+`tool_call_streaming` block locally (`messageStore.ts:422`). Emitting a
+`tool_call_streaming` event would be ignored by the frontend, so the
+already-streamed args prefix would not render until the final `tool_call`
+arrives.
 
 ### Correctness
 
@@ -112,10 +131,12 @@ for that agent arrives (different block type, or a structural event), or at
    stream (`appendTextBlock` / `appendThinkingBlock`,
    `messageStore.ts:155-180`), so a few large coalesced events render
    **identically** to many small ones. No frontend change in this component.
-3. Multi-agent interleaving: text/thinking runs accumulate **per `agent_id`**;
-   different agents never merge; relative order is preserved. Subagent events
-   (`agent_id="subagent:<tool_call_id>"`) fold independently from the main
-   agent.
+3. Multi-agent interleaving: a pending run is keyed per `agent_id`, but is
+   flushed the moment any event of a different key arrives (the strict
+   stream-order rule above), so different agents never merge and SSE order is
+   preserved exactly. Subagent events (`agent_id="subagent:<tool_call_id>"`)
+   thus fold independently from the main agent without ever reordering across
+   each other.
 
 ### Synthetic event ids
 
@@ -194,19 +215,21 @@ consistency (zero cost; no backlog on a fresh turn).
 ## Edge cases
 
 1. **Tool call mid-stream at reconnect.** Replay folds the arrived
-   `tool_call_delta`s into one `tool_call_streaming` (partial args); the live
-   tail continues the rest; the final `tool_call` event makes the frontend
-   replace the streaming block with the complete call
-   (`appendToolCallBlock`, `messageStore.ts:182-209`). No loss, eventually
-   consistent.
+   `tool_call_delta`s into one `tool_call_delta` event (concatenated
+   `args_delta`, same `type`); the frontend builds the `tool_call_streaming`
+   block locally from it; the live tail continues the rest; the final
+   `tool_call` event makes the frontend replace the streaming block with the
+   complete call (`appendToolCallBlock`, `messageStore.ts:182-209`). No loss,
+   eventually consistent.
 2. **Empty stream / empty coalescer output.** `feed`/`flush` on no input
    return nothing; existing live-tail / heartbeat logic runs unchanged.
 3. **compaction summary / synthetic / pre-migration messages.** Not special —
    the replay reads the raw Redis stream and never correlates with the
    checkpointer, so these "just work".
 4. **Chunk boundary splits a run.** Handled by the stateful coalescer: a
-   text/thinking run or a `tool_call_streaming` that spans chunks is held in
-   the pending buffer across `feed` calls and flushed at the right boundary.
+   text/thinking run or a `tool_call_delta` accumulation that spans chunks is
+   held in the pending buffer across `feed` calls and flushed at the right
+   boundary.
 
 ## Testing
 
@@ -218,12 +241,13 @@ path manually.
 
 1. Consecutive `text_delta` (same agent) → one event, content concatenated.
 2. Consecutive `reasoning` (same agent) → one event, content concatenated.
-3. `tool_call_delta` per `(agent_id, index)` → one `tool_call_streaming`,
-   args concatenated (mid-stream tool call).
+3. `tool_call_delta` per `(agent_id, index)` → one `tool_call_delta` (same
+   `type`), `args_delta` concatenated (mid-stream tool call).
 4. `tool_call` / `tool_result` / `usage` / `done` / `error` / `citation` /
    `artifact` / `injected_message` / `status` pass through unchanged.
-5. Multi-agent interleave: main + `subagent:<id>` fold independently, relative
-   order preserved.
+5. Multi-agent interleave preserves stream order: `main e1`, `subagent e2`,
+   `main e3` → emits `e1`, `e2`, `e3` (the `main` run is flushed before `e2`),
+   **never** `e1+e3` merged around or after `e2`.
 6. Coalesced event id = id of the last original event it merged (dedup
    monotonicity).
 7. `done` / `error` terminates immediately and is the final event.
@@ -232,7 +256,8 @@ path manually.
    between).
 10. **Chunk-boundary invariance:** for the same event sequence, `feed`/`flush`
     with arbitrary chunk splits yields the same output as feeding all at once
-    (especially text runs and `tool_call_streaming` spanning a boundary).
+    (especially text runs and `tool_call_delta` accumulations spanning a
+    boundary).
 
 ### Frontend — yield loop unit test
 
