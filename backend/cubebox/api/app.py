@@ -469,4 +469,17 @@ def create_app(
 
     app.include_router(health_router)
 
+    # Internal sidecar-authenticated egress exchange endpoint.
+    # The authenticator is built from config here (deployment_mode already set above)
+    # so the prod guardrail fires at startup, not at request time.
+    from cubebox.api.routes import internal_egress
+    from cubebox.sandbox_env.exchange_auth import build_sidecar_authenticator
+
+    _egress_auth_config = dict(_cubebox_config.get("egress_exchange.auth", {}) or {})
+    app.state.sidecar_authenticator = build_sidecar_authenticator(
+        _egress_auth_config,
+        deployment_mode=_mode,
+    )
+    app.include_router(internal_egress.router, prefix="/api/v1")
+
     return app
