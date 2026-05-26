@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass
 
 from cubebox.models import SandboxEnvVar
@@ -15,6 +16,10 @@ _SCOPE_RANK = {"user": 3, "workspace": 2, "org": 1}
 
 class SandboxEnvShapeError(ValueError):
     """Raised on invalid scope shape or value shape."""
+
+
+class SandboxEnvConflictError(SandboxEnvShapeError):
+    """Raised when an entry with the same scope+env_name already exists."""
 
 
 def _validate_scope_shape(scope: str, workspace_id: str | None, user_id: str | None) -> None:
@@ -92,12 +97,27 @@ class SandboxEnvService:
         _validate_scope_shape(scope, workspace_id, user_id)
         _validate_value_shape(is_secret, hosts, secret_value, plain_value)
 
+        # Preflight conflict check — before creating any credential so there is
+        # nothing to roll back on a name collision.
+        existing = await self._repo.get_in_scope(
+            scope=scope,
+            env_name=env_name,
+            workspace_id=workspace_id,
+            user_id=user_id,
+        )
+        if existing is not None:
+            raise SandboxEnvConflictError(
+                f"env entry {env_name!r} already exists in scope={scope!r}"
+            )
+
         credential_id: str | None = None
         if is_secret:
             assert secret_value is not None  # guaranteed by value-shape validation
+            _ident = f"{scope}:{workspace_id or '-'}:{user_id or '-'}:{env_name}"
+            _cred_name = f"sandbox_env:{hashlib.sha256(_ident.encode()).hexdigest()}"  # 76 chars
             credential_id = await self._credentials.create(
                 kind=SANDBOX_ENV_KIND,
-                name=f"{scope}:{workspace_id or '-'}:{user_id or '-'}:{env_name}",
+                name=_cred_name,
                 plaintext=secret_value,
             )
 
@@ -118,9 +138,10 @@ class SandboxEnvService:
             saved = await self._repo.add(row)
         except Exception:
             # The credential is committed before the row insert; if the insert
-            # fails (duplicate partial-unique index, FK, CHECK), delete the
-            # now-orphaned credential so we don't leave a dangling secret.
+            # fails (e.g. FK, CHECK constraint), roll back the broken session
+            # first then delete the now-orphaned credential.
             if credential_id is not None:
+                await self._repo.session.rollback()
                 await self._credentials.delete(credential_id=credential_id)
             raise
         return saved.id

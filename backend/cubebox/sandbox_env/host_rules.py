@@ -104,7 +104,7 @@ def host_matches(host: str, patterns: list[str]) -> bool:
             if re.fullmatch(pattern[1:-1], host):
                 return True
         elif pattern.startswith("*."):
-            suffix = pattern[1:]  # ".example.com"
+            suffix = pattern[1:].lower()  # ".example.com"
             if host.endswith(suffix) and host != suffix[1:]:
                 return True
         elif host == pattern.lower():

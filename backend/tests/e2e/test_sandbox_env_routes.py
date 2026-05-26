@@ -341,6 +341,52 @@ async def test_member_cannot_access_workspace_admin_routes(member_client):
     assert patch_resp.status_code == 403
 
 
+# ---------------------------------------------------------------------------
+# Fix A: duplicate create returns 409, not 500 (codex review)
+# ---------------------------------------------------------------------------
+
+
+async def test_duplicate_org_env_returns_409(admin_client):
+    """Creating the same org-scope env_name twice returns 409 on the second call."""
+    client, _ws = admin_client
+    payload = {
+        "env_name": "DUP_TEST_TOKEN",
+        "is_secret": True,
+        "hosts": ["api.example.com"],
+        "secret_value": "first",
+    }
+    first = await client.post("/api/v1/admin/sandbox-env", json=payload)
+    assert first.status_code == 201
+    entry_id = first.json()["id"]
+
+    second = await client.post("/api/v1/admin/sandbox-env", json=payload)
+    assert second.status_code == 409
+
+    # Cleanup
+    await client.delete(f"/api/v1/admin/sandbox-env/{entry_id}")
+
+
+async def test_duplicate_workspace_env_returns_409(admin_client):
+    """Creating the same workspace-scope env_name twice returns 409 on the second call."""
+    client, workspace_id = admin_client
+    payload = {
+        "env_name": "DUP_WS_TOKEN",
+        "is_secret": True,
+        "hosts": ["api.example.com"],
+        "secret_value": "first",
+    }
+    url = f"/api/v1/ws/{workspace_id}/sandbox-env/workspace"
+    first = await client.post(url, json=payload)
+    assert first.status_code == 201
+    entry_id = first.json()["id"]
+
+    second = await client.post(url, json=payload)
+    assert second.status_code == 409
+
+    # Cleanup
+    await client.delete(f"/api/v1/ws/{workspace_id}/sandbox-env/workspace/{entry_id}")
+
+
 async def test_member_cannot_delete_workspace_entry_via_me_path(admin_client, member_client):
     """A workspace entry created by admin cannot be deleted by a member via /me path.
 

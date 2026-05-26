@@ -2,15 +2,21 @@ from collections.abc import AsyncIterator
 
 import pytest
 from cryptography.fernet import Fernet
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlmodel import SQLModel
 
 from cubebox.credentials.encryption import FernetBackend
+from cubebox.models import Credential
 from cubebox.repositories.credential import CredentialRepository
 from cubebox.repositories.sandbox_env import SandboxEnvRepository
 from cubebox.sandbox_env.host_rules import HostPatternError
 from cubebox.services.credential import CredentialService
-from cubebox.services.sandbox_env import SandboxEnvService, SandboxEnvShapeError
+from cubebox.services.sandbox_env import (
+    SandboxEnvConflictError,
+    SandboxEnvService,
+    SandboxEnvShapeError,
+)
 
 
 # Self-contained in-memory session — the unit-test convention used by
@@ -117,3 +123,101 @@ async def test_bad_host_rejected(service):
             secret_value="v",
             plain_value=None,
         )
+
+
+# ---------------------------------------------------------------------------
+# Fix A tests: preflight conflict → SandboxEnvConflictError + no orphan cred
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+async def service_with_session(session: AsyncSession):
+    """Return (service, session) so tests can inspect DB state directly."""
+    org_id = "org-test"
+    cred_svc = CredentialService(
+        CredentialRepository(session, org_id=org_id),
+        FernetBackend([Fernet.generate_key()]),
+        org_id=org_id,
+        actor_user_id="user-1",
+    )
+    svc = SandboxEnvService(
+        repo=SandboxEnvRepository(session, org_id=org_id),
+        credentials=cred_svc,
+        org_id=org_id,
+        actor_user_id="user-1",
+    )
+    return svc, session
+
+
+async def _credential_count(session: AsyncSession) -> int:
+    result = await session.execute(select(Credential))
+    return len(result.scalars().all())
+
+
+async def test_duplicate_env_name_raises_conflict(service_with_session):
+    """Creating a secret with a colliding env_name raises SandboxEnvConflictError."""
+    svc, session = service_with_session
+    await svc.create_entry(
+        env_name="GITHUB_TOKEN",
+        is_secret=True,
+        scope="workspace",
+        workspace_id="ws-1",
+        user_id=None,
+        hosts=["api.github.com"],
+        header_names=None,
+        secret_value="ghp_first",
+        plain_value=None,
+    )
+    with pytest.raises(SandboxEnvConflictError):
+        await svc.create_entry(
+            env_name="GITHUB_TOKEN",
+            is_secret=True,
+            scope="workspace",
+            workspace_id="ws-1",
+            user_id=None,
+            hosts=["api.github.com"],
+            header_names=None,
+            secret_value="ghp_second",
+            plain_value=None,
+        )
+
+
+async def test_conflict_leaves_no_orphan_credential(service_with_session):
+    """On conflict, no extra credential row is left behind."""
+    svc, session = service_with_session
+    await svc.create_entry(
+        env_name="UNIQUE_TOKEN",
+        is_secret=True,
+        scope="org",
+        workspace_id=None,
+        user_id=None,
+        hosts=["api.example.com"],
+        header_names=None,
+        secret_value="original",
+        plain_value=None,
+    )
+    cred_count_before = await _credential_count(session)
+
+    with pytest.raises(SandboxEnvConflictError):
+        await svc.create_entry(
+            env_name="UNIQUE_TOKEN",
+            is_secret=True,
+            scope="org",
+            workspace_id=None,
+            user_id=None,
+            hosts=["api.example.com"],
+            header_names=None,
+            secret_value="duplicate",
+            plain_value=None,
+        )
+
+    cred_count_after = await _credential_count(session)
+    assert cred_count_after == cred_count_before, (
+        f"Expected no new credential rows, but count went from {cred_count_before} "
+        f"to {cred_count_after}"
+    )
+
+
+async def test_conflict_error_is_subclass_of_shape_error(service_with_session):
+    """SandboxEnvConflictError must be a subclass of SandboxEnvShapeError for route compat."""
+    assert issubclass(SandboxEnvConflictError, SandboxEnvShapeError)

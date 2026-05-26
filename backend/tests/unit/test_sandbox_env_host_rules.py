@@ -56,3 +56,10 @@ def test_anchored_regex_does_not_overmatch():
     pats = [r"/^api[0-9]+\.foo\.com$/"]
     assert host_matches("api1.foo.com", pats)
     assert not host_matches("api1.foo.com.attacker.net", pats)
+
+
+def test_wildcard_case_insensitive():
+    """Stored pattern with uppercase letters should match lowercase request host."""
+    assert host_matches("api.example.com", ["*.Example.com"])
+    assert host_matches("api.EXAMPLE.COM", ["*.Example.com"])
+    assert not host_matches("api.evil.com", ["*.Example.com"])
