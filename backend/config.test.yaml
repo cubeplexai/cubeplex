@@ -105,6 +105,13 @@ test:
       async_threshold_mb: 3
       poll_interval_seconds: 2
 
+  # Egress exchange: dev authenticator for e2e tests (deployment.mode is multi_tenant,
+  # so the production guardrail in build_sidecar_authenticator is not triggered).
+  egress_exchange:
+    auth:
+      mode: dev
+      dev_token: "test-egress-token"
+
   # Graceful Restart: fast test values
   # NOTE: stale_run_threshold_seconds is intentionally NOT lowered here.
   # The route-level stale tests plant timestamps 600s in the past and the
