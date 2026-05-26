@@ -3,7 +3,7 @@
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cubebox.credentials.dependencies import get_encryption_backend
@@ -12,6 +12,7 @@ from cubebox.db import get_session
 from cubebox.repositories.credential import CredentialRepository
 from cubebox.repositories.egress_ref import EgressRefRepository
 from cubebox.sandbox_env.exchange_auth import SidecarAuthenticator
+from cubebox.sandbox_env.placeholder import PLACEHOLDER_RE
 from cubebox.services.credential import CredentialService
 from cubebox.services.egress_exchange import EgressExchangeError, EgressExchangeService
 
@@ -21,6 +22,13 @@ router = APIRouter(prefix="/internal/egress", tags=["internal-egress"])
 class ExchangeIn(BaseModel):
     placeholder: str
     host: str
+
+    @field_validator("placeholder")
+    @classmethod
+    def validate_placeholder(cls, v: str) -> str:
+        if not PLACEHOLDER_RE.fullmatch(v):
+            raise ValueError("invalid placeholder format")
+        return v
 
 
 class ExchangeOut(BaseModel):

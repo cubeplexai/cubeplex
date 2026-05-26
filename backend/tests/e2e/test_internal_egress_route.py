@@ -192,3 +192,16 @@ async def test_exchange_non_declared_host_returns_403(
         headers={"x-egress-dev-token": _DEV_TOKEN, "x-egress-sandbox-id": sandbox_id},
     )
     assert r.status_code == 403, r.text
+
+
+async def test_exchange_malformed_placeholder_returns_422(
+    egress_client: tuple[httpx.AsyncClient, str, str],
+) -> None:
+    """A placeholder that doesn't match PLACEHOLDER_RE must be rejected with 422."""
+    client, _placeholder, sandbox_id = egress_client
+    r = await client.post(
+        "/api/v1/internal/egress/exchange",
+        json={"placeholder": "not-a-valid-placeholder", "host": "api.github.com"},
+        headers={"x-egress-dev-token": _DEV_TOKEN, "x-egress-sandbox-id": sandbox_id},
+    )
+    assert r.status_code == 422, r.text

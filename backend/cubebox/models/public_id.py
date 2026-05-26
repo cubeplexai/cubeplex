@@ -31,6 +31,8 @@ _BASE62_INDEX: dict[str, int] = {c: i for i, c in enumerate(_BASE62_ALPHABET)}
 _BODY_LEN: int = 14
 
 PREFIX_MEMORY: str = "mem"
+PREFIX_SANDBOX_ENV: str = "senv"
+PREFIX_EGRESS_REF: str = "eref"
 
 
 @dataclass

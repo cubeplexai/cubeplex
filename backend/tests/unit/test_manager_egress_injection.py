@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 from typing import Any
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from sqlalchemy import select
@@ -241,4 +241,57 @@ async def test_unhealthy_sandbox_revokes_refs(
 
     assert len(refs) == 1
     assert refs[0].sandbox_id == "sbx-old"
+    assert refs[0].status == "revoked", f"Expected 'revoked', got {refs[0].status!r}"
+
+
+async def test_cleanup_expired_revokes_refs(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """cleanup_expired must revoke EgressRefs for terminated sandboxes."""
+    # Seed an EgressRef for a sandbox that will be "expired"
+    async with session_factory() as seed_session:
+        placeholder = mint_placeholder()
+        expired_ref = EgressRef(
+            ref_hash=hash_placeholder(placeholder),
+            sandbox_id="sbx-expired",
+            org_id="org-1",
+            workspace_id="ws-1",
+            user_id="u-1",
+            run_id=None,
+            bindings=[],
+            status="valid",
+        )
+        seed_session.add(expired_ref)
+        await seed_session.commit()
+
+    # Build a fake expired record matching what list_expired_system returns
+    fake_record = MagicMock()
+    fake_record.sandbox_id = "sbx-expired"
+    fake_record.org_id = "org-1"
+    fake_record.workspace_id = "ws-1"
+    fake_record.id = "rec-expired"
+
+    manager = SandboxManager(session_factory)
+    manager._exchange_host = "egress-exchange.internal"
+
+    with (
+        patch(
+            "cubebox.repositories.user_sandbox.UserSandboxRepository.list_expired_system",
+            new=AsyncMock(return_value=[fake_record]),
+        ),
+        patch(
+            "cubebox.repositories.user_sandbox.UserSandboxRepository.mark_terminated",
+            new=AsyncMock(return_value=None),
+        ),
+        # Stub sandbox kill so no real network call is made
+        patch("opensandbox.Sandbox.connect", side_effect=Exception("no sandbox")),
+    ):
+        await manager.cleanup_expired()
+
+    # The ref for the expired sandbox must now be revoked
+    async with session_factory() as check_session:
+        refs = (await check_session.execute(select(EgressRef))).scalars().all()
+
+    assert len(refs) == 1
+    assert refs[0].sandbox_id == "sbx-expired"
     assert refs[0].status == "revoked", f"Expected 'revoked', got {refs[0].status!r}"

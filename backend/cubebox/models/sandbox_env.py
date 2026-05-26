@@ -13,10 +13,11 @@ from sqlalchemy import JSON, CheckConstraint, Column, Index, text
 from sqlmodel import Field
 
 from cubebox.models.mixins import CubeboxBase
+from cubebox.models.public_id import PREFIX_SANDBOX_ENV
 
 
 class SandboxEnvVar(CubeboxBase, table=True):
-    _PREFIX: ClassVar[str] = "senv"
+    _PREFIX: ClassVar[str] = PREFIX_SANDBOX_ENV
     __tablename__ = "sandbox_env_vars"
     __table_args__ = (
         CheckConstraint(
