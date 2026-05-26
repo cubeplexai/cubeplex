@@ -62,6 +62,24 @@ def test_recognizes_sandbox_pod():
     assert not is_sandbox_pod({"metadata": {}, "spec": {"containers": []}}, egress_image=EGRESS_IMAGE)
 
 
+def test_recognizes_batchsandbox_owned_pod():
+    """Real OpenSandbox pods are owned by a BatchSandbox CR, not Sandbox."""
+    pod = {
+        "metadata": {
+            "ownerReferences": [
+                {
+                    "apiVersion": "sandbox.opensandbox.io/v1alpha1",
+                    "kind": "BatchSandbox",
+                    "name": "54724310-91d0-4703-8062-943c312df4da",
+                }
+            ],
+            "labels": {},
+        },
+        "spec": {"containers": [{"name": "egress", "image": EGRESS_IMAGE}]},
+    }
+    assert is_sandbox_pod(pod, egress_image=EGRESS_IMAGE)
+
+
 def test_sandbox_pod_wrong_apiversion_not_recognized():
     """M2: kind=Sandbox but wrong apiVersion must not be treated as a sandbox pod."""
     pod = {

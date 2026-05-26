@@ -1,8 +1,9 @@
 # deploy/egress-bundle/webhook/patch.py
 """Build the JSON Patch applied to a sandbox pod at admission.
 
-Narrow match (spec §6.1): ownerReference Sandbox CR + an `egress` container with
-the expected image. Anything else is not patched (fail closed).
+Narrow match (spec §6.1): ownerReference to an OpenSandbox CR (BatchSandbox or
+Sandbox) + an `egress` container with the expected image. Anything else is not
+patched (fail closed).
 """
 
 from __future__ import annotations
@@ -12,12 +13,16 @@ from typing import Any
 _MITM_CONFDIR = "/var/lib/mitmproxy/.mitmproxy"
 _ADDON_PATH = "/etc/egress-inject/inject.py"
 
+# OpenSandbox owns sandbox pods via a BatchSandbox CR (the per-sandbox path also
+# uses Sandbox); both live under the sandbox.opensandbox.io API group.
+_SANDBOX_OWNER_KINDS = frozenset({"BatchSandbox", "Sandbox"})
+
 
 def is_sandbox_pod(pod: dict[str, Any], *, egress_image: str) -> bool:
     owners = pod.get("metadata", {}).get("ownerReferences", [])
     owned_by_sandbox = any(
         o.get("apiVersion", "").startswith("sandbox.opensandbox.io/")
-        and o.get("kind") == "Sandbox"
+        and o.get("kind") in _SANDBOX_OWNER_KINDS
         for o in owners
     )
     containers = pod.get("spec", {}).get("containers", [])
