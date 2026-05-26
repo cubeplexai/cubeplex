@@ -165,6 +165,19 @@ def test_chunk_boundary_invariance():
         chunked = c.feed(events[:split]) + c.feed(events[split:]) + c.flush()
         assert [(e.event_id, e.payload["type"], e.payload["data"]) for e in chunked] == \
                [(e.event_id, e.payload["type"], e.payload["data"]) for e in whole]
+
+
+def test_size_cap_splits_huge_run_into_bounded_events():
+    # 6 deltas of 4 chars (24 total) with a 10-char cap -> multiple bounded
+    # text_delta events whose contents concatenate back to the original.
+    c = ReplayCoalescer(max_chars=10)
+    events = [_ev(f"{i}-0", "text_delta", data={"content": "abcd"}) for i in range(6)]
+    out = c.feed(events) + c.flush()
+    assert len(out) >= 2
+    assert all(e.payload["type"] == "text_delta" for e in out)
+    assert "".join(e.payload["data"]["content"] for e in out) == "abcd" * 6
+    # No emitted chunk grossly exceeds the cap (cap + at most one delta).
+    assert all(len(e.payload["data"]["content"]) <= 10 + 4 for e in out)
 ```
 
 - [ ] **Step 2: Run tests to verify they fail**
@@ -187,6 +200,15 @@ same-key deltas so the replayed payload shrinks to roughly message
 granularity, while preserving SSE order (the frontend applies replayed events
 in order and dedups by ``event_id``).
 
+Two performance invariants:
+- Accumulation is O(N): delta pieces go into a list and are ``"".join()``ed
+  once when the run is emitted — never ``s = s + delta`` per event (that
+  copies the whole growing string each time, re-introducing the backend stall).
+- A run is also flushed when it reaches ``MAX_COALESCED_CHARS``, so one
+  enormous message becomes several bounded ``text_delta`` events. This keeps
+  each join + each frontend reducer/render step bounded and lets the
+  frontend's count-based yield fire (a single huge event would slip it).
+
 Streaming and stateful so it can fold across read chunks without holding the
 whole backlog in memory. Pure (no IO).
 """
@@ -194,11 +216,22 @@ whole backlog in memory. Pure (no IO).
 from __future__ import annotations
 
 from copy import deepcopy
+from dataclasses import dataclass, field
 from typing import Any
 
 from cubebox.streams.run_events import RunEvent
 
-_MERGEABLE = {"text_delta", "reasoning", "tool_call_delta"}
+# Max accumulated characters in one coalesced delta before it is flushed and a
+# fresh same-key run continues. ~64 KiB: large enough that normal messages
+# stay a single event, small enough that each join/render step is cheap.
+MAX_COALESCED_CHARS = 65536
+
+# Mergeable event type -> the data field whose value accumulates.
+_DELTA_FIELD = {
+    "text_delta": "content",
+    "reasoning": "content",
+    "tool_call_delta": "args_delta",
+}
 
 
 def _merge_key(event: RunEvent) -> tuple[Any, ...] | None:
@@ -213,69 +246,96 @@ def _merge_key(event: RunEvent) -> tuple[Any, ...] | None:
     return None
 
 
+@dataclass(slots=True)
+class _Pending:
+    """An in-progress coalesced run. ``pieces`` are joined once at emit time."""
+
+    key: tuple[Any, ...]
+    payload: dict[str, Any]  # mutable copy of the first event's payload
+    field: str  # "content" | "args_delta"
+    pieces: list[str] = field(default_factory=list)
+    size: int = 0
+    last_event_id: str = ""
+
+
 class ReplayCoalescer:
-    """Folds adjacent same-key deltas; flushes on any key change (strict order).
+    """Folds adjacent same-key deltas; flushes on key change or size cap.
 
     Holds at most one pending mergeable run. ``feed`` returns the events that
-    are now complete (the pending run is held back until a differing event
-    forces a flush); ``flush`` emits whatever remains at end of replay.
+    are now complete (the pending run is held back until a differing event, or
+    the size cap, forces a flush); ``flush`` emits whatever remains at end of
+    replay.
     """
 
-    def __init__(self) -> None:
-        self._pending: RunEvent | None = None
-        self._pending_key: tuple[Any, ...] | None = None
+    def __init__(self, max_chars: int = MAX_COALESCED_CHARS) -> None:
+        self._max_chars = max_chars
+        self._pending: _Pending | None = None
 
     def feed(self, events: list[RunEvent]) -> list[RunEvent]:
         out: list[RunEvent] = []
         for event in events:
             key = _merge_key(event)
-            if key is not None and key == self._pending_key:
+            if self._pending is not None and key == self._pending.key:
                 self._absorb(event)
+                if self._pending.size >= self._max_chars:
+                    out.append(self._finish())  # emit a bounded chunk
                 continue
             # Different key (or non-mergeable): flush the pending run first so
             # nothing is emitted out of stream order.
             if self._pending is not None:
-                out.append(self._pending)
-                self._pending = None
-                self._pending_key = None
+                out.append(self._finish())
             if key is not None:
-                # Start a fresh pending run from a copy we can mutate.
-                self._pending = RunEvent(event.event_id, deepcopy(event.payload))
-                self._pending_key = key
+                self._start(event, key)
             else:
                 out.append(event)
         return out
 
     def flush(self) -> list[RunEvent]:
-        if self._pending is None:
-            return []
-        out = [self._pending]
-        self._pending = None
-        self._pending_key = None
-        return out
+        return [self._finish()] if self._pending is not None else []
+
+    def _start(self, event: RunEvent, key: tuple[Any, ...]) -> None:
+        payload = deepcopy(event.payload)
+        fld = _DELTA_FIELD[payload["type"]]
+        data = payload.setdefault("data", {})
+        piece = data.get(fld) or ""
+        self._pending = _Pending(
+            key=key,
+            payload=payload,
+            field=fld,
+            pieces=[piece],
+            size=len(piece),
+            last_event_id=event.event_id,
+        )
 
     def _absorb(self, event: RunEvent) -> None:
         assert self._pending is not None
-        etype = self._pending.payload.get("type")
-        pdata: dict[str, Any] = self._pending.payload.setdefault("data", {})
         edata = event.payload.get("data") or {}
-        if etype in ("text_delta", "reasoning"):
-            pdata["content"] = (pdata.get("content") or "") + (edata.get("content") or "")
-        elif etype == "tool_call_delta":
-            pdata["args_delta"] = (pdata.get("args_delta") or "") + (edata.get("args_delta") or "")
+        piece = edata.get(self._pending.field) or ""
+        self._pending.pieces.append(piece)
+        self._pending.size += len(piece)
+        self._pending.last_event_id = event.event_id
+        if self._pending.payload["type"] == "tool_call_delta":
             # Latest non-None identity wins (mirrors the route-level backfill).
+            pdata = self._pending.payload["data"]
             if edata.get("tool_call_id") is not None:
                 pdata["tool_call_id"] = edata["tool_call_id"]
             if edata.get("name") is not None:
                 pdata["name"] = edata["name"]
+
+    def _finish(self) -> RunEvent:
+        assert self._pending is not None
+        p = self._pending
+        p.payload["data"][p.field] = "".join(p.pieces)
         # Stamp the last merged original id so frontend dedup stays monotonic.
-        self._pending.event_id = event.event_id
+        result = RunEvent(p.last_event_id, p.payload)
+        self._pending = None
+        return result
 ```
 
 - [ ] **Step 4: Run tests to verify they pass**
 
 Run: `cd backend && uv run pytest tests/unit/test_replay_coalescer.py -v`
-Expected: PASS (all 9 tests)
+Expected: PASS (all 10 tests)
 
 - [ ] **Step 5: Commit**
 

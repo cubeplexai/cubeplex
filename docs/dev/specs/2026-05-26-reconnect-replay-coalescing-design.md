@@ -137,6 +137,31 @@ arrives.
    preserved exactly. Subagent events (`agent_id="subagent:<tool_call_id>"`)
    thus fold independently from the main agent without ever reordering across
    each other.
+4. The accumulation itself must be O(N), not O(N²). A pending run holds its
+   delta pieces in a **list** and `"".join()`s once when the run is emitted —
+   never `accumulated = accumulated + delta` per event (that copies the whole
+   growing string each time and would re-introduce the very backend stall we
+   are removing).
+
+### Bounded coalesced size
+
+A pending text/thinking/tool-arg run is also flushed when its accumulated
+length reaches `MAX_COALESCED_CHARS` (a module constant, ~64 KiB), then a fresh
+run with the same key continues. So a single enormous message is emitted as a
+handful of bounded `text_delta` events rather than one giant one. This matters
+for two reasons:
+
+- It keeps each `"".join()` and each frontend reducer/render step bounded, and
+- it keeps the **frontend yield** (Component 2) effective: the yield is
+  count-based, so it only fires across multiple events. A single multi-hundred-
+  KB coalesced event would slip the net and still pin the main thread in one
+  `applyStreamEvent` + render. Capping size on the backend guarantees the
+  frontend always sees multiple bounded events for a large message.
+
+The split is invisible in the rendered transcript: the frontend merges
+consecutive same-agent `text_delta`s into the same block
+(`appendTextBlock`, `messageStore.ts:155-180`), so N bounded deltas render
+identically to one.
 
 ### Synthetic event ids
 
@@ -207,8 +232,11 @@ for await (const event of streamRun(...)) {
 ### Relationship to coalescing
 
 After coalescing, the normal case has few events and rarely reaches a yield
-point. The yield only matters when a single coalesced message is still very
-large (e.g. hundreds of thousands of characters) — then the worst case is
+point. The yield's effectiveness **depends on the backend size cap** (see
+"Bounded coalesced size"): because the yield is count-based, a single huge
+coalesced event would never trigger it. The cap guarantees a large message
+arrives as multiple bounded `text_delta`s, so the count yield fires between
+them and each `applyStreamEvent` + render step stays bounded — worst case is
 "slow", not "frozen / unclickable". `send` gets the same treatment for
 consistency (zero cost; no backlog on a fresh turn).
 
@@ -258,6 +286,10 @@ path manually.
     with arbitrary chunk splits yields the same output as feeding all at once
     (especially text runs and `tool_call_delta` accumulations spanning a
     boundary).
+11. **Size cap splits a huge run:** a single run far exceeding
+    `MAX_COALESCED_CHARS` is emitted as multiple bounded `text_delta` events
+    (each ≤ ~cap + one delta), and concatenating their content reproduces the
+    original — the one-huge-event case the frontend yield can't handle alone.
 
 ### Frontend — yield loop unit test
 
