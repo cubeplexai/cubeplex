@@ -67,7 +67,10 @@ async def create_client_cert_secret(
                     kind=ref["kind"],
                     name=ref["name"],
                     uid=ref["uid"],
-                    block_owner_deletion=True,
+                    # No block_owner_deletion: it would require the webhook SA to
+                    # also have `update` on the owner's finalizers subresource,
+                    # which our Role does not grant. Plain ownership still GCs the
+                    # Secret when the Sandbox CR is deleted.
                     controller=False,
                 )
                 for ref in owner

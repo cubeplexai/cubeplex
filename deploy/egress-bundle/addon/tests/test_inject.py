@@ -1,6 +1,30 @@
 # deploy/egress-bundle/addon/tests/test_inject.py
 # The addon module exposes pure helpers so it is testable without a live mitmproxy.
+import inject
 from inject import should_substitute_header, scan_placeholders
+
+
+class _FakeReq:
+    def __init__(self, scheme, host, headers):
+        self.scheme = scheme
+        self.host = host
+        self.headers = headers
+
+
+class _FakeFlow:
+    def __init__(self, scheme, host, headers):
+        self.request = _FakeReq(scheme, host, headers)
+
+
+def test_request_skips_plaintext_http():
+    """Security: secrets must never be substituted on plaintext HTTP. The http
+    flow must return early (before any exchange call), leaving the placeholder."""
+    placeholder = "cbxref_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+    flow = _FakeFlow("http", "api.github.com", {"Authorization": f"Bearer {placeholder}"})
+    # If request() did NOT return early it would call _exchange (no env/cert in
+    # the test env) and raise — so reaching the assertion proves the http guard.
+    inject.request(flow)  # type: ignore[arg-type]
+    assert flow.request.headers["Authorization"] == f"Bearer {placeholder}"  # unchanged
 
 
 def test_scan_finds_tokens():

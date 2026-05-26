@@ -68,20 +68,25 @@ async def mutate(request: Request) -> dict:  # type: ignore[type-arg]
         and o.get("kind") == "Sandbox"
     )
     key_pem, cert_pem = _minter.mint(sandbox_id=sandbox_id, ttl_minutes=CERT_TTL_MIN)
-    # Per-sandbox client-cert Secret, owned by the Sandbox CR for auto-GC. It
-    # carries tls.crt / tls.key (the client identity) AND exchange-ca.pem (the
-    # CA the addon uses to verify the exchange server) — both land in the single
-    # /etc/egress-client mount.
-    await k8s_client.create_client_cert_secret(
-        namespace=namespace,
-        name=f"egress-client-{sandbox_id}",
-        data={
-            "tls.crt": cert_pem,
-            "tls.key": key_pem,
-            "exchange-ca.pem": EXCHANGE_CA_PEM,
-        },
-        owner=pod.get("metadata", {}).get("ownerReferences", []),
-    )
+    # Honor the declared `sideEffects: NoneOnDryRun`: on a dry-run admission
+    # (kubectl apply --dry-run=server) do NOT create the Secret — just return the
+    # patch (which is never applied for real on dry-run). Otherwise every dry-run
+    # would leave a spurious per-sandbox Secret behind.
+    if not bool(req.get("dryRun", False)):
+        # Per-sandbox client-cert Secret, owned by the Sandbox CR for auto-GC. It
+        # carries tls.crt / tls.key (the client identity) AND exchange-ca.pem (the
+        # CA the addon uses to verify the exchange server) — both land in the
+        # single /etc/egress-client mount.
+        await k8s_client.create_client_cert_secret(
+            namespace=namespace,
+            name=f"egress-client-{sandbox_id}",
+            data={
+                "tls.crt": cert_pem,
+                "tls.key": key_pem,
+                "exchange-ca.pem": EXCHANGE_CA_PEM,
+            },
+            owner=pod.get("metadata", {}).get("ownerReferences", []),
+        )
     try:
         ops = build_pod_patch(
             pod, sandbox_id=sandbox_id, egress_image=EGRESS_IMAGE, exchange_url=EGRESS_EXCHANGE_URL
