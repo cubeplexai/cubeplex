@@ -1,0 +1,38 @@
+# cubebox/api/schemas/sandbox_env.py
+"""Schemas for sandbox env vault routes."""
+
+from pydantic import BaseModel, Field
+
+
+class CreateOrgEnvIn(BaseModel):
+    env_name: str = Field(max_length=128)
+    is_secret: bool = True
+    hosts: list[str] | None = None
+    header_names: list[str] | None = None
+    secret_value: str | None = None
+    plain_value: str | None = None
+
+
+class CreateWorkspaceEnvIn(CreateOrgEnvIn):
+    """workspace-scope: workspace_id from path; user_id stays None."""
+
+
+class CreateUserEnvIn(CreateOrgEnvIn):
+    """user-scope: workspace_id from path; user_id from the authed user."""
+
+
+class EnvEntryOut(BaseModel):
+    id: str
+    env_name: str
+    is_secret: bool
+    scope: str
+    workspace_id: str | None
+    user_id: str | None
+    hosts: list[str] | None
+    header_names: list[str] | None
+    status: str
+    # NOTE: never serialize secret value or credential_id plaintext.
+
+
+class EnvEntryListOut(BaseModel):
+    entries: list[EnvEntryOut]
