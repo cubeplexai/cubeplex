@@ -1,9 +1,13 @@
-"""Unit test: SandboxManager wires egress env injection into Sandbox.create.
+"""Unit test: SandboxManager wires egress env injection into execute-time env.
 
 Strategy: real SandboxManager + real in-memory SQLite session + monkeypatched
 opensandbox.Sandbox.create (avoids needing a live sandbox cluster). The resolver
 is also monkeypatched to return a deterministic secret + plain value without
 needing a seeded credential in the DB.
+
+Key invariant (Task B2): env flows via OpenSandbox._run_env (set at get_or_create
+time, injected into every commands.run via RunCommandOpts) — NOT via Sandbox.create.
+network_policy still goes into Sandbox.create (egress allow-list is structural).
 """
 
 from __future__ import annotations
@@ -44,34 +48,36 @@ def _make_fake_sandbox(sandbox_id: str = "sbx-new") -> Any:
     return fake
 
 
+_RESOLVED_ENVS = [
+    ResolvedEnv(
+        env_name="GITHUB_TOKEN",
+        is_secret=True,
+        hosts=["api.github.com"],
+        header_names=None,
+        credential_id="cred-1",
+        plain_value=None,
+    ),
+    ResolvedEnv(
+        env_name="LOG_LEVEL",
+        is_secret=False,
+        hosts=None,
+        header_names=None,
+        credential_id=None,
+        plain_value="info",
+    ),
+]
+
+
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
 
 
-async def test_create_with_exchange_host_injects_env_and_persists_refs(
+async def test_create_with_exchange_host_sets_run_env_and_persists_refs(
     session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
-    """With _exchange_host set, Sandbox.create receives env+policy and an EgressRef is persisted."""
-    resolved_envs = [
-        ResolvedEnv(
-            env_name="GITHUB_TOKEN",
-            is_secret=True,
-            hosts=["api.github.com"],
-            header_names=None,
-            credential_id="cred-1",
-            plain_value=None,
-        ),
-        ResolvedEnv(
-            env_name="LOG_LEVEL",
-            is_secret=False,
-            hosts=None,
-            header_names=None,
-            credential_id=None,
-            plain_value="info",
-        ),
-    ]
-
+    """With _exchange_host set, Sandbox.create gets network_policy (no env=); run env is
+    set on the backend via set_run_env; an EgressRef is persisted."""
     create_kwargs: dict[str, Any] = {}
 
     async def fake_create(image: str, **kwargs: Any) -> Any:
@@ -86,7 +92,7 @@ async def test_create_with_exchange_host_injects_env_and_persists_refs(
         patch("opensandbox.Sandbox.create", side_effect=fake_create),
         patch(
             "cubebox.services.sandbox_env.SandboxEnvResolver.resolve",
-            return_value=resolved_envs,
+            return_value=_RESOLVED_ENVS,
         ),
         # Stub get_active_by_user → None so we always take the create-new path
         patch(
@@ -100,27 +106,32 @@ async def test_create_with_exchange_host_injects_env_and_persists_refs(
             workspace_id="ws-1",
         )
 
-    # --- Sandbox.create was called with env + network_policy ---
-    assert "env" in create_kwargs, "Sandbox.create must receive env="
-    env = create_kwargs["env"]
-    assert isinstance(env, dict)
-
-    # Secret → cbxref_ placeholder
-    github_val = env.get("GITHUB_TOKEN", "")
-    assert PLACEHOLDER_RE.fullmatch(github_val), (
-        f"GITHUB_TOKEN must be a cbxref_ placeholder, got {github_val!r}"
+    # --- env= must NOT be passed to Sandbox.create (env moved to execute-time) ---
+    assert "env" not in create_kwargs, (
+        "Sandbox.create must NOT receive env= (env is now injected at execute-time)"
     )
 
-    # Plain value passes through verbatim
-    assert env.get("LOG_LEVEL") == "info"
-
-    # network_policy is non-empty
+    # --- network_policy IS still passed at creation time ---
     policy = create_kwargs.get("network_policy")
     assert policy is not None, "Sandbox.create must receive network_policy="
     assert hasattr(policy, "egress")
     targets = {r.target for r in policy.egress}
     assert "api.github.com" in targets
     assert "egress-exchange.internal" in targets
+
+    # --- run env was set on the returned backend ---
+    from cubebox.sandbox.opensandbox import OpenSandbox
+
+    assert isinstance(sandbox, OpenSandbox)
+    run_env = sandbox._run_env
+
+    # Secret → cbxref_ placeholder
+    github_val = run_env.get("GITHUB_TOKEN", "")
+    assert PLACEHOLDER_RE.fullmatch(github_val), (
+        f"GITHUB_TOKEN must be a cbxref_ placeholder, got {github_val!r}"
+    )
+    # Plain value passes through verbatim
+    assert run_env.get("LOG_LEVEL") == "info"
 
     # --- EgressRef was persisted in the DB ---
     async with session_factory() as session:
@@ -137,13 +148,91 @@ async def test_create_with_exchange_host_injects_env_and_persists_refs(
     assert len(ref.bindings) == 1
     assert ref.bindings[0]["env_name"] == "GITHUB_TOKEN"
 
-    _ = sandbox  # ensure sandbox was returned
+
+async def test_reuse_path_sets_run_env_and_refreshes_refs(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """Reusing a healthy sandbox: set_run_env is called with fresh placeholders
+    and prior EgressRefs are revoked then re-persisted."""
+    # Seed a stale EgressRef for the existing sandbox
+    async with session_factory() as seed_session:
+        old_placeholder = mint_placeholder()
+        stale_ref = EgressRef(
+            ref_hash=hash_placeholder(old_placeholder),
+            sandbox_id="sbx-reuse",
+            org_id="org-1",
+            workspace_id="ws-1",
+            user_id="u-1",
+            run_id=None,
+            bindings=[],
+            status="valid",
+        )
+        seed_session.add(stale_ref)
+        await seed_session.commit()
+
+    old_record = MagicMock()
+    old_record.id = "rec-reuse"
+    old_record.sandbox_id = "sbx-reuse"
+
+    async def fake_connect(sandbox_id: str, **kwargs: Any) -> Any:
+        fake = MagicMock()
+
+        async def healthy() -> bool:
+            return True
+
+        fake.is_healthy = healthy
+        fake.id = sandbox_id
+        return fake
+
+    manager = SandboxManager(session_factory)
+    manager._exchange_host = "egress-exchange.internal"
+
+    with (
+        patch("opensandbox.Sandbox.connect", side_effect=fake_connect),
+        patch(
+            "cubebox.repositories.user_sandbox.UserSandboxRepository.get_active_by_user",
+            return_value=old_record,
+        ),
+        patch(
+            "cubebox.repositories.user_sandbox.UserSandboxRepository.update_activity",
+            return_value=None,
+        ),
+        patch(
+            "cubebox.services.sandbox_env.SandboxEnvResolver.resolve",
+            return_value=_RESOLVED_ENVS,
+        ),
+    ):
+        backend = await manager.get_or_create("u-1", org_id="org-1", workspace_id="ws-1")
+
+    # run env must have been set on the returned backend
+    from cubebox.sandbox.opensandbox import OpenSandbox
+
+    assert isinstance(backend, OpenSandbox)
+    run_env = backend._run_env
+    github_val = run_env.get("GITHUB_TOKEN", "")
+    assert PLACEHOLDER_RE.fullmatch(github_val), (
+        f"GITHUB_TOKEN must be a cbxref_ placeholder, got {github_val!r}"
+    )
+
+    # Stale ref must be revoked; fresh ref persisted
+    async with session_factory() as check_session:
+        refs = (await check_session.execute(select(EgressRef))).scalars().all()
+
+    # One revoked (old) + one new valid ref
+    statuses = {r.ref_hash: r.status for r in refs}
+    assert any(s == "revoked" for s in statuses.values()), "Stale ref must be revoked"
+    assert any(s == "valid" for s in statuses.values()), "Fresh ref must be persisted"
+    valid_refs = [r for r in refs if r.status == "valid"]
+    assert len(valid_refs) == 1
+    assert valid_refs[0].sandbox_id == "sbx-reuse"
+    assert valid_refs[0].bindings[0]["env_name"] == "GITHUB_TOKEN"
 
 
 async def test_create_without_exchange_host_skips_injection(
     session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
-    """When _exchange_host is empty (egress disabled), Sandbox.create gets NO env/network_policy."""
+    """When _exchange_host is empty (egress disabled), Sandbox.create gets NO env/network_policy
+    and no run env is set."""
     create_kwargs: dict[str, Any] = {}
 
     async def fake_create(image: str, **kwargs: Any) -> Any:
@@ -161,12 +250,18 @@ async def test_create_without_exchange_host_skips_injection(
             return_value=None,
         ),
     ):
-        await manager.get_or_create("u-1", org_id="org-1", workspace_id="ws-1")
+        backend = await manager.get_or_create("u-1", org_id="org-1", workspace_id="ws-1")
 
     assert "env" not in create_kwargs, "Without exchange_host, env must NOT be passed"
     assert "network_policy" not in create_kwargs, (
         "Without exchange_host, network_policy must NOT be passed"
     )
+
+    # Backend has an empty run env (no egress injection)
+    from cubebox.sandbox.opensandbox import OpenSandbox
+
+    assert isinstance(backend, OpenSandbox)
+    assert backend._run_env == {}, f"Expected empty run env, got {backend._run_env!r}"
 
     # No EgressRef rows persisted
     async with session_factory() as session:

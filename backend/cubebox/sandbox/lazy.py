@@ -166,17 +166,34 @@ class LazySandbox(Sandbox):
     # Sandbox interface
     # ------------------------------------------------------------------
 
-    async def execute(self, command: str, *, timeout: int | None = None) -> ExecuteResult:
+    def set_run_env(self, env: dict[str, str]) -> None:
+        """Forward to the underlying backend if it has been resolved already.
+
+        Called by SandboxManager after get_or_create returns; at that point the
+        backend is always resolved (manager creates it before returning).  If for
+        any reason the backend is not yet resolved, the env is silently dropped —
+        the manager will set it again on the next get_or_create call.
+        """
+        if self._sandbox is not None:
+            self._sandbox.set_run_env(env)
+
+    async def execute(
+        self,
+        command: str,
+        *,
+        timeout: int | None = None,
+        envs: dict[str, str] | None = None,
+    ) -> ExecuteResult:
         sandbox = await self._ensure_with_retry()
         try:
-            return await sandbox.execute(command, timeout=timeout)
+            return await sandbox.execute(command, timeout=timeout, envs=envs)
         except Exception:
             # Sandbox may have died — invalidate and retry once
             async with self._lock:
                 self._sandbox = None
             logger.warning("Lazy sandbox: execute failed, recreating sandbox")
             sandbox = await self._ensure()
-            return await sandbox.execute(command, timeout=timeout)
+            return await sandbox.execute(command, timeout=timeout, envs=envs)
 
     async def upload(self, files: list[tuple[str, bytes]]) -> None:
         sandbox = await self._ensure_with_retry()

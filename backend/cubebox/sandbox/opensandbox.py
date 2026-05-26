@@ -3,10 +3,12 @@
 import time
 from collections.abc import Iterator
 from contextlib import contextmanager
+from datetime import timedelta
 
 import opensandbox
 from loguru import logger
 from opensandbox.exceptions import SandboxException as _ProviderError
+from opensandbox.models.execd import RunCommandOpts
 
 from cubebox.sandbox.base import BrowserEndpoint, ExecuteResult, Sandbox, SandboxError
 
@@ -27,6 +29,7 @@ class OpenSandbox(Sandbox):
     def __init__(self, *, sandbox: opensandbox.Sandbox, workdir: str = "/workspace") -> None:
         self._sandbox = sandbox
         self._workdir = workdir
+        self._run_env: dict[str, str] = {}
 
     @property
     def id(self) -> str:
@@ -36,9 +39,26 @@ class OpenSandbox(Sandbox):
     def workdir(self) -> str:
         return self._workdir
 
-    async def execute(self, command: str, *, timeout: int | None = None) -> ExecuteResult:
+    def set_run_env(self, env: dict[str, str]) -> None:
+        """Replace the run-level env dict injected into every execute call."""
+        self._run_env = env
+
+    async def execute(
+        self,
+        command: str,
+        *,
+        timeout: int | None = None,
+        envs: dict[str, str] | None = None,
+    ) -> ExecuteResult:
+        # Merge: run-level env (set by manager) is the base; per-call envs win.
+        merged = {**self._run_env, **(envs or {})}
+        opts = RunCommandOpts(
+            working_directory=self._workdir,
+            envs=merged if merged else None,
+            timeout=timedelta(seconds=timeout) if timeout is not None else None,
+        )
         with _as_sandbox_error():
-            execution = await self._sandbox.commands.run(command)
+            execution = await self._sandbox.commands.run(command, opts=opts)
 
             output_lines: list[str] = []
             for msg in execution.logs.stdout:
