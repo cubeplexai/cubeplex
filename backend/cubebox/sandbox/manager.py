@@ -180,6 +180,7 @@ class SandboxManager:
                     ready_timeout=timedelta(seconds=self._ready_timeout),
                     volumes=volumes,
                     resource={"cpu": self._resource_cpu, "memory": self._resource_memory},
+                    secure_access=True,
                 )
                 sandbox_id = raw_sandbox.id
                 logger.info("Sandbox created: {}", sandbox_id)
