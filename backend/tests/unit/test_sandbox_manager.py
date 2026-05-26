@@ -16,3 +16,16 @@ def test_build_user_volume_uses_stable_non_colliding_name():
     assert first.pvc.claim_name == repeated.pvc.claim_name
     assert first.pvc.claim_name != second.pvc.claim_name
     assert first.pvc.claim_name.startswith("cubebox-user-")
+
+
+def test_create_timeout_overrides_request_timeout_for_create_only():
+    manager = SandboxManager(MagicMock())
+
+    default = manager._build_connection_config()
+    create = manager._build_connection_config(request_timeout=manager._create_timeout)
+
+    # Ordinary commands keep the short per-command budget; the create call gets the
+    # longer budget so a cold image pull doesn't time out before the pod is ready.
+    assert default.request_timeout.total_seconds() == manager._request_timeout
+    assert create.request_timeout.total_seconds() == manager._create_timeout
+    assert manager._create_timeout > manager._request_timeout

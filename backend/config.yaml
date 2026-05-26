@@ -114,10 +114,15 @@ default:
     # ready_timeout: Maximum time to wait for sandbox to become ready after creation
     #   Used only during sandbox initialization. If the sandbox doesn't respond to
     #   health checks within this time, creation fails.
-    ready_timeout: 60 # 60 seconds
+    ready_timeout: 300 # 5 minutes — must cover a cold image pull
     # request_timeout: HTTP request timeout for sandbox API calls
     #   Timeout for individual commands (execute, upload, download, etc.)
     request_timeout: 60 # 60 seconds
+    # create_timeout: HTTP timeout for the synchronous create call only. The server
+    #   holds POST /sandboxes open until the pod is ready, so a cold image pull
+    #   (minutes) blows past request_timeout. Kept separate so ordinary commands
+    #   aren't forced to tolerate multi-minute hangs.
+    create_timeout: 300 # 5 minutes
     # ttl: Sandbox idle timeout (time since last activity before cleanup)
     #   SandboxManager's background cleanup task periodically checks for sandboxes
     #   that have been inactive (no commands) for this duration and terminates them.

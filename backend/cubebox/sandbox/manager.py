@@ -19,12 +19,13 @@ from datetime import UTC, datetime, timedelta
 import opensandbox
 from loguru import logger
 from opensandbox.config import ConnectionConfig
+from opensandbox.exceptions import SandboxException as ProviderSandboxError
 from opensandbox.models.sandboxes import PVC, Volume
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from cubebox.config import config
 from cubebox.repositories.user_sandbox import UserSandboxRepository
-from cubebox.sandbox.base import Sandbox
+from cubebox.sandbox.base import Sandbox, SandboxError
 from cubebox.sandbox.opensandbox import OpenSandbox
 
 
@@ -39,6 +40,10 @@ class SandboxManager:
         self._image: str = config.get("sandbox.image", "ubuntu:22.04")
         self._api_key: str | None = config.get("sandbox.api_key", None)
         self._request_timeout: int = config.get("sandbox.request_timeout", 60)
+        # Separate, longer budget for the synchronous create call: the server holds
+        # the POST /sandboxes open until the pod is ready, so a cold image pull can
+        # take minutes — far longer than the per-command request_timeout.
+        self._create_timeout: int = config.get("sandbox.create_timeout", 300)
         self._ttl: int = config.get("sandbox.ttl", 600)
         self._touch_interval: int = config.get("sandbox.touch_interval", 60)
         self._ready_timeout: int = config.get("sandbox.ready_timeout", 60)
@@ -60,12 +65,16 @@ class SandboxManager:
         self._volume_mount_path: str = config.get("sandbox.volume.mount_path", "/workspace")
         self._volume_pvc_prefix: str = config.get("sandbox.volume.pvc_prefix", "cubebox-user")
 
-    def _build_connection_config(self) -> ConnectionConfig:
-        """Build OpenSandbox ConnectionConfig from app config."""
+    def _build_connection_config(self, *, request_timeout: int | None = None) -> ConnectionConfig:
+        """Build OpenSandbox ConnectionConfig from app config.
+
+        ``request_timeout`` overrides the per-command HTTP timeout — used to give
+        the synchronous create call a longer budget than ordinary commands.
+        """
         return ConnectionConfig(
             domain=self._domain,
             api_key=self._api_key,
-            request_timeout=timedelta(seconds=self._request_timeout),
+            request_timeout=timedelta(seconds=request_timeout or self._request_timeout),
             use_server_proxy=self._use_server_proxy,
         )
 
@@ -158,29 +167,48 @@ class SandboxManager:
             else:
                 logger.info("Creating new sandbox for user {}", user_id)
 
-            raw_sandbox = await opensandbox.Sandbox.create(
-                self._image,
-                connection_config=conn_config,
-                timeout=None,
-                ready_timeout=timedelta(seconds=self._ready_timeout),
-                volumes=volumes,
-                resource={"cpu": self._resource_cpu, "memory": self._resource_memory},
-            )
+            # Give only the create call the longer budget: the create POST is held
+            # open server-side until the pod is ready, so it must survive a cold
+            # image pull. ``create_conn_config`` is otherwise identical to the
+            # default.
+            create_conn_config = self._build_connection_config(request_timeout=self._create_timeout)
+            try:
+                raw_sandbox = await opensandbox.Sandbox.create(
+                    self._image,
+                    connection_config=create_conn_config,
+                    timeout=None,
+                    ready_timeout=timedelta(seconds=self._ready_timeout),
+                    volumes=volumes,
+                    resource={"cpu": self._resource_cpu, "memory": self._resource_memory},
+                )
+                sandbox_id = raw_sandbox.id
+                logger.info("Sandbox created: {}", sandbox_id)
 
-            backend = OpenSandbox(sandbox=raw_sandbox, workdir=self._workdir)
-            logger.info("Sandbox created: {}", backend.id)
+                # Persist before rebinding so a reconnect failure can't orphan the
+                # sandbox — the reuse path will find and health-check it next turn.
+                # Skill sync is the LazySandbox's responsibility post-M3.
+                await repo.create(
+                    user_id=user_id,
+                    sandbox_id=sandbox_id,
+                    image=self._image,
+                    ttl_seconds=self._ttl,
+                )
 
-            # Skill sync is the LazySandbox's responsibility post-M3.
-
-            # Persist to DB
-            await repo.create(
-                user_id=user_id,
-                sandbox_id=raw_sandbox.id,
-                image=self._image,
-                ttl_seconds=self._ttl,
-            )
-
-            return backend
+                # Rebind to the default per-command timeout: the create call's adapters
+                # captured the longer create_timeout, but ordinary commands on this
+                # sandbox must use request_timeout, not create_timeout. Reconnecting
+                # rebuilds the HTTP clients with the default budget. Skip the health
+                # check — create already gated on readiness (ready_timeout), so a
+                # second readiness probe here would only add a redundant failure path.
+                raw_sandbox = await opensandbox.Sandbox.connect(
+                    sandbox_id,
+                    connection_config=conn_config,
+                    skip_health_check=True,
+                )
+            except ProviderSandboxError as exc:
+                # Don't leak the opensandbox driver's exception type to callers.
+                raise SandboxError(str(exc)) from exc
+            return OpenSandbox(sandbox=raw_sandbox, workdir=self._workdir)
 
     async def release(
         self,
