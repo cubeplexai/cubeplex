@@ -175,3 +175,20 @@ class CredentialService:
                 f"credential {credential_id} referenced by Provider: "
                 f"{[p.id for p in provider_refs]}"
             )
+        from cubebox.models import SandboxEnvVar
+
+        env_refs = (
+            (
+                await session.execute(
+                    select(SandboxEnvVar).where(
+                        SandboxEnvVar.credential_id == credential_id  # type: ignore[arg-type]
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        if env_refs:
+            raise CredentialInUseError(
+                f"credential {credential_id} referenced by SandboxEnvVar: {[e.id for e in env_refs]}"
+            )
