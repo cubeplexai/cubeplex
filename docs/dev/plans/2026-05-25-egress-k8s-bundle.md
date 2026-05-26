@@ -212,7 +212,10 @@ def test_recognizes_sandbox_pod():
 
 
 def test_patch_sets_mitm_env_and_mounts_and_initcontainer():
-    ops = build_pod_patch(POD, sandbox_id="sbx-1", egress_image=EGRESS_IMAGE)
+    ops = build_pod_patch(
+        POD, sandbox_id="sbx-1", egress_image=EGRESS_IMAGE,
+        exchange_url="https://egress-exchange.internal/api/v1/internal/egress/exchange",
+    )
     paths = [op["path"] for op in ops]
     # env appended to the egress container (index 1)
     assert any(p.startswith("/spec/containers/1/env") for p in paths)
@@ -220,9 +223,10 @@ def test_patch_sets_mitm_env_and_mounts_and_initcontainer():
     assert any(p.startswith("/spec/volumes") for p in paths)
     # an initContainer added for CA trust on the app container
     assert any(p.startswith("/spec/initContainers") for p in paths)
-    # the minted client cert volume is referenced
+    # required env + addon mount + exchange URL present
     blob = str(ops)
     assert "OPENSANDBOX_EGRESS_MITMPROXY_TRANSPARENT" in blob
+    assert "EGRESS_EXCHANGE_URL" in blob
     assert "egress-inject" in blob  # addon configmap mount
 ```
 
@@ -275,17 +279,23 @@ def _app_index(pod: dict[str, Any]) -> int:
     raise ValueError("no app container")
 
 
-def build_pod_patch(pod: dict[str, Any], *, sandbox_id: str, egress_image: str) -> list[dict[str, Any]]:
+def build_pod_patch(
+    pod: dict[str, Any], *, sandbox_id: str, egress_image: str, exchange_url: str
+) -> list[dict[str, Any]]:
     eidx = _egress_index(pod)
     ops: list[dict[str, Any]] = []
 
-    # 1) env on the egress container (append; create the array if absent)
+    # 1) env on the egress container (append; create the array if absent).
+    # EGRESS_EXCHANGE_URL is required by inject.py — the stock egress image does
+    # not define it, so it MUST be injected here or mitmproxy fails to load the
+    # addon with KeyError.
     egress = pod["spec"]["containers"][eidx]
     env = egress.get("env", [])
     new_env = env + [
         {"name": "OPENSANDBOX_EGRESS_MITMPROXY_TRANSPARENT", "value": "true"},
         {"name": "OPENSANDBOX_EGRESS_MITMPROXY_SCRIPT", "value": _ADDON_PATH},
         {"name": "OPENSANDBOX_EGRESS_MITMPROXY_CONFDIR", "value": _MITM_CONFDIR},
+        {"name": "EGRESS_EXCHANGE_URL", "value": exchange_url},
     ]
     ops.append({"op": "add", "path": f"/spec/containers/{eidx}/env", "value": new_env})
 
@@ -379,6 +389,8 @@ from webhook import k8s_client  # thin wrapper around the k8s API (create Secret
 
 EGRESS_IMAGE = os.environ["EGRESS_IMAGE"]
 CERT_TTL_MIN = int(os.environ.get("CLIENT_CERT_TTL_MINUTES", "720"))
+EGRESS_EXCHANGE_URL = os.environ["EGRESS_EXCHANGE_URL"]  # injected into the sidecar + used by inject.py
+EXCHANGE_CA_PEM = open(os.environ["EXCHANGE_CA_PATH"], "rb").read()  # CA that signs the exchange server cert
 
 app = FastAPI()
 _ca = load_ca(
@@ -411,15 +423,23 @@ async def mutate(request: Request) -> dict:
         o["name"] for o in pod["metadata"]["ownerReferences"] if o.get("kind") == "Sandbox"
     )
     key_pem, cert_pem = _minter.mint(sandbox_id=sandbox_id, ttl_minutes=CERT_TTL_MIN)
-    # Create the per-sandbox client-cert Secret, owned by the pod for auto-GC.
+    # Per-sandbox client-cert Secret, owned by the Sandbox CR for auto-GC. It
+    # carries tls.crt / tls.key (the client identity) AND exchange-ca.pem (the
+    # CA the addon uses to verify the exchange server) — both land in the single
+    # /etc/egress-client mount.
     k8s_client.create_client_cert_secret(
         namespace=namespace,
         name=f"egress-client-{sandbox_id}",
-        cert_pem=cert_pem,
-        key_pem=key_pem,
+        data={
+            "tls.crt": cert_pem,
+            "tls.key": key_pem,
+            "exchange-ca.pem": EXCHANGE_CA_PEM,
+        },
         owner=pod.get("metadata", {}).get("ownerReferences", []),
     )
-    ops = build_pod_patch(pod, sandbox_id=sandbox_id, egress_image=EGRESS_IMAGE)
+    ops = build_pod_patch(
+        pod, sandbox_id=sandbox_id, egress_image=EGRESS_IMAGE, exchange_url=EGRESS_EXCHANGE_URL
+    )
     return _allow(uid, ops)
 
 
@@ -428,7 +448,13 @@ async def healthz() -> dict:
     return {"ok": True}
 ```
 
-> NOTE for implementer: write the thin `webhook/k8s_client.py` (`create_client_cert_secret`) using the official `kubernetes` async client; set the Secret's `ownerReferences` to the Sandbox CR (or the pod) so it is garbage-collected with the sandbox. Add a unit test feeding a synthetic AdmissionReview (mock `k8s_client.create_client_cert_secret`) asserting the response shape.
+> NOTE for implementer: write the thin `webhook/k8s_client.py`
+> (`create_client_cert_secret(*, namespace, name, data: dict[str, bytes], owner)`)
+> using the official `kubernetes` async client; base64-encode each value into the
+> Secret's `data`, and set `ownerReferences` to the Sandbox CR so the Secret is
+> GC'd with the sandbox. Add a unit test feeding a synthetic AdmissionReview
+> (mock `k8s_client.create_client_cert_secret`, and set `EGRESS_EXCHANGE_URL` /
+> `EXCHANGE_CA_PATH` env in the test) asserting the response shape.
 
 - [ ] **Step 2: Dockerfile** — minimal FastAPI image (uvicorn with TLS for the webhook server cert; webhook server TLS is separate from the mTLS-to-exchange concern and is the standard admission-webhook serving cert, provisioned in Task 5).
 
@@ -474,6 +500,9 @@ def test_header_names_gate():
     assert should_substitute_header("Authorization", ["Authorization"])
     assert should_substitute_header("Authorization", None)  # null = any header
     assert not should_substitute_header("X-Other", ["Authorization"])
+    # HTTP header names are case-insensitive
+    assert should_substitute_header("authorization", ["Authorization"])
+    assert should_substitute_header("AUTHORIZATION", ["authorization"])
 ```
 
 - [ ] **Step 3: Run test to verify it fails**
@@ -503,14 +532,26 @@ import httpx
 from mitmproxy import http
 
 PLACEHOLDER_RE = re.compile(r"cbxref_[A-Z2-7]{32}")
-EXCHANGE_URL = os.environ["EGRESS_EXCHANGE_URL"]  # https://egress-exchange.internal/api/v1/internal/egress/exchange
 CLIENT_CERT = ("/etc/egress-client/tls.crt", "/etc/egress-client/tls.key")
 EXCHANGE_CA = "/etc/egress-client/exchange-ca.pem"  # CA that signed the exchange server cert
 _CACHE_TTL = 120.0
 
 # cache: (placeholder, host) -> (secret, header_names, expires_at)
 _cache: dict[tuple[str, str], tuple[str, list[str] | None, float]] = {}
-_client = httpx.Client(cert=CLIENT_CERT, verify=EXCHANGE_CA, timeout=5.0)
+
+# Lazily built so the pure helpers (scan/should_substitute) import without
+# cluster env vars or mounted cert files (unit-testable).
+_client: httpx.Client | None = None
+_exchange_url: str | None = None
+
+
+def _client_and_url() -> tuple[httpx.Client, str]:
+    global _client, _exchange_url
+    if _client is None:
+        _exchange_url = os.environ["EGRESS_EXCHANGE_URL"]
+        _client = httpx.Client(cert=CLIENT_CERT, verify=EXCHANGE_CA, timeout=5.0)
+    assert _exchange_url is not None
+    return _client, _exchange_url
 
 
 def scan_placeholders(value: str) -> list[str]:
@@ -520,7 +561,8 @@ def scan_placeholders(value: str) -> list[str]:
 def should_substitute_header(header_name: str, header_names: list[str] | None) -> bool:
     if header_names is None:
         return True
-    return header_name in header_names
+    # HTTP header names are case-insensitive; normalize both sides.
+    return header_name.lower() in {h.lower() for h in header_names}
 
 
 def _exchange(placeholder: str, host: str) -> tuple[str, list[str] | None] | None:
@@ -528,8 +570,9 @@ def _exchange(placeholder: str, host: str) -> tuple[str, list[str] | None] | Non
     hit = _cache.get((placeholder, host))
     if hit and hit[2] > now:
         return hit[0], hit[1]
+    client, url = _client_and_url()
     try:
-        resp = _client.post(EXCHANGE_URL, json={"placeholder": placeholder, "host": host})
+        resp = client.post(url, json={"placeholder": placeholder, "host": host})
     except httpx.HTTPError:
         return None
     if resp.status_code != 200:
@@ -583,7 +626,7 @@ git commit -m "feat(egress-bundle): inject.py addon + header_names in exchange r
 
 - [ ] **Step 2: `addon-configmap.yaml`** — `egress-inject-addon` ConfigMap with `inject.py` from Task 4 (generate from the file; document the `kubectl create configmap --from-file` command so the ConfigMap stays in sync with the source).
 
-- [ ] **Step 3: webhook Deployment + Service + MutatingWebhookConfiguration** — `mutatingwebhookconfiguration.yaml` scoped to the dedicated namespace via `namespaceSelector`, `rules` for `CREATE pods`, `failurePolicy: Ignore` (spec §6.1), `clientConfig.caBundle` = the webhook serving CA. Webhook serving TLS via cert-manager or a bootstrap cert (`webhook-tls.yaml`).
+- [ ] **Step 3: webhook Deployment + Service + MutatingWebhookConfiguration** — `mutatingwebhookconfiguration.yaml` scoped to the dedicated namespace via `namespaceSelector`, `rules` for `CREATE pods`, `failurePolicy: Ignore` (spec §6.1), `clientConfig.caBundle` = the webhook serving CA. Webhook serving TLS via cert-manager or a bootstrap cert (`webhook-tls.yaml`). The webhook Deployment must set env: `EGRESS_IMAGE` (the configured egress image to match on + use for the CA-trust initContainer), `EGRESS_EXCHANGE_URL` (the full exchange endpoint URL injected into each sidecar), `EXCHANGE_CA_PATH` + `CA_KEY_PATH` + `CA_CERT_PATH` (mounted from the `egress-mitm-ca` Secret and the exchange-server CA), and `CLIENT_CERT_TTL_MINUTES`. Mount the `egress-mitm-ca` Secret (for `CA_KEY_PATH`/`CA_CERT_PATH`) and the exchange-server CA (for `EXCHANGE_CA_PATH`) into the webhook pod.
 
 - [ ] **Step 4: Validate manifests render**
 
