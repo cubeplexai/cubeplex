@@ -881,9 +881,11 @@ Expected: FAIL.
 In `cubebox/sandbox/manager.py`, inside `get_or_create` just before the `opensandbox.Sandbox.create(...)` call (the create-new path), resolve + build:
 
 ```python
+from datetime import UTC, datetime, timedelta  # timedelta likely already imported at top
+
+from cubebox.models import EgressRef
 from cubebox.repositories.egress_ref import EgressRefRepository
 from cubebox.repositories.sandbox_env import SandboxEnvRepository
-from cubebox.models import EgressRef
 from cubebox.sandbox_env.injector import SandboxEnvInjector
 from cubebox.services.sandbox_env import SandboxEnvResolver
 
@@ -903,20 +905,33 @@ raw_sandbox = await opensandbox.Sandbox.create(
     network_policy=injection.network_policy,
 )
 
-# Persist refs now that sandbox_id is known; revoke any prior refs first.
+# Persist refs now that sandbox_id is known. expires_at is bounded by the
+# sandbox TTL so a leaked placeholder cannot be redeemed indefinitely even if
+# explicit revocation is missed (Codex P2).
 ref_repo = EgressRefRepository(session)
-await ref_repo.revoke_for_sandbox(raw_sandbox.id)
+expires_at = datetime.now(UTC) + timedelta(seconds=self._ttl)
 for b in injection.bindings:
     await ref_repo.add(
         EgressRef(
             ref_hash=b["ref_hash"], sandbox_id=raw_sandbox.id, org_id=org_id,
             workspace_id=workspace_id, user_id=user_id, run_id=None,
-            bindings=[b], expires_at=None,
+            bindings=[b], expires_at=expires_at,
         )
     )
 ```
 
-Add `self._exchange_host = config.get("sandbox.egress_exchange_host", "")` in `__init__` (read from the same config object the manager already uses). When empty (egress disabled), skip injection and call `Sandbox.create` without `env`/`network_policy` (preserve current behavior).
+**Revoke the OLD sandbox's refs when abandoning it (Codex P1).** In the
+reuse/unhealthy branch, at the point the manager already calls
+`await repo.mark_terminated(record.id)` for an unhealthy/unreachable sandbox,
+also revoke that sandbox's refs so its placeholders stop being redeemable even
+if the old pod/sidecar is still alive:
+
+```python
+# right next to the existing `await repo.mark_terminated(record.id)`:
+await EgressRefRepository(session).revoke_for_sandbox(record.sandbox_id)
+```
+
+Add `self._exchange_host = config.get("sandbox.egress_exchange_host", "")` in `__init__` (read from the same config object the manager already uses). `self._ttl` is the existing sandbox TTL field (config `sandbox.ttl`). When `_exchange_host` is empty (egress disabled), skip injection and call `Sandbox.create` without `env`/`network_policy` (preserve current behavior).
 
 > NOTE for implementer: gate the whole block on `if self._exchange_host:` so deployments without the egress feature behave exactly as today. Confirm `user_id` is in scope in the create branch (the method signature has it). The per-run refresh-on-reuse refinement (spec §6.5) is deferred: v1 mints refs at sandbox creation; wiring a run-start refresh hook is a follow-up once the run/turn boundary calls into the manager (grep where `get_or_create` is invoked at turn start).
 
