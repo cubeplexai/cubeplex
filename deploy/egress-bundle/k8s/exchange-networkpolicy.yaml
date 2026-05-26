@@ -1,0 +1,44 @@
+# NetworkPolicy: the egress exchange endpoint must be reachable ONLY through the
+# mTLS-terminating proxy — never directly by sandbox pods.
+#
+# WHY: MtlsAuthenticator trusts the `x-egress-client-cn` header that the proxy
+# sets from the verified client cert. That trust is only sound if a sandbox can
+# never reach the exchange directly (it could otherwise forge the header and
+# impersonate any sandbox_id). This policy enforces that in-cluster, instead of
+# relying solely on documentation.
+#
+# DEPLOYMENT NOTE — adapt the selectors to your topology:
+#   * Apply this in the namespace where the EXCHANGE pods run (the cubebox
+#     backend / internal exchange service), not necessarily `opensandbox`.
+#   * `spec.podSelector` must select the exchange pods.
+#   * The ingress rule must select the mTLS-terminating PROXY pods (and only
+#     them). Replace the placeholder labels below.
+#   * This requires a CNI that enforces NetworkPolicy (Calico, Cilium, etc.).
+#
+# The proxy is what runs `ssl_cert_reqs=CERT_REQUIRED` against the egress CA,
+# strips any inbound `x-egress-client-cn`, and re-sets it from the verified cert.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: egress-exchange-proxy-only
+  # namespace: <namespace where the exchange pods run>
+  labels:
+    app.kubernetes.io/part-of: cubebox-egress
+spec:
+  # TODO: select the exchange pods (the cubebox internal exchange endpoint).
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/component: egress-exchange
+  policyTypes:
+    - Ingress
+  ingress:
+    # Allow ingress to the exchange ONLY from the mTLS-terminating proxy.
+    - from:
+        - podSelector:
+            matchLabels:
+              # TODO: set to the proxy's pod labels.
+              app.kubernetes.io/component: egress-exchange-proxy
+      ports:
+        - protocol: TCP
+          # TODO: the exchange's listen port.
+          port: 8443
