@@ -138,3 +138,29 @@ class SandboxEnvService:
         await self._repo.delete(entry_id)
         if row.is_secret and row.credential_id is not None:
             await self._credentials.delete(credential_id=row.credential_id)
+
+
+class SandboxEnvResolver:
+    """Resolve the effective env set for (workspace, user) by scope precedence."""
+
+    def __init__(self, repo: SandboxEnvRepository) -> None:
+        self._repo = repo
+
+    async def resolve(self, *, workspace_id: str, user_id: str) -> list[ResolvedEnv]:
+        rows = await self._repo.list_for_resolution(workspace_id=workspace_id, user_id=user_id)
+        best: dict[str, SandboxEnvVar] = {}
+        for row in rows:
+            cur = best.get(row.env_name)
+            if cur is None or _SCOPE_RANK[row.scope] > _SCOPE_RANK[cur.scope]:
+                best[row.env_name] = row
+        return [
+            ResolvedEnv(
+                env_name=r.env_name,
+                is_secret=r.is_secret,
+                hosts=r.hosts,
+                header_names=r.header_names,
+                credential_id=r.credential_id,
+                plain_value=r.plain_value,
+            )
+            for r in best.values()
+        ]

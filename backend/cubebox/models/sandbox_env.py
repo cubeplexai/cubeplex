@@ -9,7 +9,7 @@ plain UNIQUE does not do in Postgres).
 
 from typing import ClassVar
 
-from sqlalchemy import JSON, CheckConstraint, Column, Index
+from sqlalchemy import JSON, CheckConstraint, Column, Index, text
 from sqlmodel import Field
 
 from cubebox.models.mixins import CubeboxBase
@@ -42,6 +42,7 @@ class SandboxEnvVar(CubeboxBase, table=True):
             "env_name",
             unique=True,
             postgresql_where="scope = 'org'",
+            sqlite_where=text("scope = 'org'"),
         ),
         Index(
             "uq_sandbox_env_workspace",
@@ -49,6 +50,7 @@ class SandboxEnvVar(CubeboxBase, table=True):
             "env_name",
             unique=True,
             postgresql_where="scope = 'workspace'",
+            sqlite_where=text("scope = 'workspace'"),
         ),
         Index(
             "uq_sandbox_env_user",
@@ -57,6 +59,7 @@ class SandboxEnvVar(CubeboxBase, table=True):
             "env_name",
             unique=True,
             postgresql_where="scope = 'user'",
+            sqlite_where=text("scope = 'user'"),
         ),
     )
 
