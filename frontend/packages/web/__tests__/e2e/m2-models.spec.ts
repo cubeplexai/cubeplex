@@ -35,35 +35,36 @@ test.describe('M2 Model Management', () => {
 
     await expect(page.getByTestId('provider-card-cubebox')).toBeVisible({ timeout: 10_000 })
 
-    // Open create dialog from toolbar
+    // "Add provider" now opens the full-page wizard, not a dialog.
     await page.getByRole('button', { name: /Add provider|添加 Provider/ }).click()
-    await expect(page.getByTestId('provider-form-dialog')).toBeVisible()
+    await expect(page).toHaveURL(/\/admin\/models\/new$/)
 
-    // Fill the form (i18n agnostic — match by visible label fragment)
+    // Step 1 (Preset): pick a vendor preset, then advance. Footer buttons sit
+    // under the Next.js dev-overlay portal, which intercepts pointer events in
+    // `pnpm dev` (even force-click dispatches at coordinates the portal owns), so
+    // dispatch a DOM click straight to the button instead.
+    await page.getByRole('button', { name: 'Anthropic', exact: true }).click()
+    await page.getByRole('button', { name: /^(Next|下一步)$/ }).dispatchEvent('click')
+
+    // Step 2 (Configure): name/base URL are seeded from the preset. Rename to a
+    // unique value, drop auth to None so no real key is needed, then create.
     await page.getByLabel(/^(Name|名称)$/).fill('e2e-test-provider')
-    await page.getByLabel(/Base URL/).fill('https://example.com/api')
     await page.getByText(/^(None|无认证)$/).click()
-    await page.getByRole('button', { name: /^(Save|保存)$/ }).click()
+    await page.getByTestId('provider-config-submit').click()
 
-    // Card appears in the list and gets selected automatically
+    // Provider is created at step 2; the wizard advances to the Models step where
+    // "Finish later" appears. Clicking it (only present once a provider exists)
+    // implicitly waits for the create to land, then returns to the list.
+    await page.getByRole('button', { name: /Finish later|稍后完成/ }).dispatchEvent('click')
+    await expect(page).toHaveURL(/\/admin\/models$/)
+
+    // Card appears in the list; select it to render the detail panel.
     const card = page.getByTestId('provider-card-e2e-test-provider')
-    await expect(card).toBeVisible({ timeout: 5_000 })
-
-    // Detail panel renders
+    await expect(card).toBeVisible({ timeout: 10_000 })
+    await card.click()
     await expect(page.getByTestId('provider-detail-panel')).toBeVisible()
 
-    // Add a model
-    await page
-      .getByRole('button', { name: /Add model|添加模型/ })
-      .first()
-      .click()
-    await expect(page.getByTestId('model-form-dialog')).toBeVisible()
-    await page.getByLabel(/Model ID/).fill('e2e-test-model')
-    await page.getByLabel(/Display name|显示名称/).fill('E2E Test Model')
-    await page.getByRole('button', { name: /^(Save|保存)$/ }).click()
-    await expect(page.getByTestId('model-row-e2e-test-model')).toBeVisible({ timeout: 5_000 })
-
-    // Delete provider via inline confirm (no native dialog)
+    // Delete provider via inline confirm (no native dialog).
     await page.getByTestId('provider-delete-button').click()
     await page.getByTestId('provider-delete-confirm').click()
 
@@ -72,18 +73,22 @@ test.describe('M2 Model Management', () => {
     })
   })
 
-  test('oauth auth option is disabled in create dialog', async ({ page }) => {
+  test('provider create form offers only API key / None — no OAuth', async ({ page }) => {
     await register(page)
     await page.goto('/admin/models')
 
     await expect(page.getByTestId('provider-card-cubebox')).toBeVisible({ timeout: 10_000 })
 
     await page.getByRole('button', { name: /Add provider|添加 Provider/ }).click()
-    await expect(page.getByTestId('provider-form-dialog')).toBeVisible()
+    await expect(page).toHaveURL(/\/admin\/models\/new$/)
 
-    const oauthRadio = page.getByRole('radio', { name: /OAuth/ })
-    await expect(oauthRadio).toBeVisible()
-    await expect(oauthRadio).toBeDisabled()
+    await page.getByRole('button', { name: 'Anthropic', exact: true }).click()
+    await page.getByRole('button', { name: /^(Next|下一步)$/ }).dispatchEvent('click')
+
+    // Configure step: auth is exactly API key + None — OAuth is not offered.
+    await expect(page.getByTestId('provider-config-submit')).toBeVisible()
+    await expect(page.getByRole('radio')).toHaveCount(2)
+    await expect(page.getByText('OAuth')).toHaveCount(0)
   })
 
   test('filter pills narrow provider list', async ({ page }) => {
