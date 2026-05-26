@@ -15,7 +15,9 @@ import re
 
 import tldextract
 
-_extract = tldextract.TLDExtract(suffix_list_urls=())  # offline; bundled snapshot
+# offline (bundled snapshot) + no disk cache: cache_dir=None avoids writing a
+# lock under ~/.cache, which would raise OSError in read-only containers.
+_extract = tldextract.TLDExtract(suffix_list_urls=(), cache_dir=None)
 
 
 class HostPatternError(ValueError):

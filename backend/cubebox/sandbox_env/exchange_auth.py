@@ -90,42 +90,59 @@ def _sandbox_id_from_peercert(peercert: dict[str, Any]) -> str | None:
 
 
 class MtlsAuthenticator:
-    """Production. Reads the verified peer cert from the ASGI scope; extracts sandbox_id from its CN.
+    """Production. Derives the verified sidecar identity (CN = sandbox_id) from
+    the client certificate.
 
-    # How to serve the exchange endpoint for mTLS
+    # How to serve the exchange endpoint for mTLS — PRODUCTION
     #
-    # Run uvicorn with:
-    #   ssl_certfile=<server cert>  ssl_keyfile=<server key>
-    #   ssl_ca_certs=<egress CA public cert>
-    #   ssl_cert_reqs=ssl.CERT_REQUIRED
+    # Terminate mTLS at a proxy/ingress (nginx, Envoy, a mesh sidecar) configured
+    # with the egress CA and ``verify_client = on`` / ``CERT_REQUIRED``.  The
+    # proxy validates the client cert chain, then forwards the verified CN to the
+    # exchange app in a trusted header (``forwarded_cn_header``, default
+    # ``x-egress-client-cn``).  The exchange service must be reachable ONLY via
+    # that proxy, and the proxy MUST strip/overwrite the header on inbound
+    # requests so a sandbox cannot forge it.
     #
-    # Or point a TLS terminator (ingress/mesh) at it and have it forward the
-    # verified client cert — e.g. SPIFFE / X-Forwarded-Client-Cert — but trust
-    # that header ONLY from the terminator, never directly from the sandbox.
+    # Rationale: with a plain uvicorn ``ssl_cert_reqs=CERT_REQUIRED`` setup the
+    # TLS handshake verifies the client cert, but uvicorn does NOT surface the
+    # peer certificate into the ASGI scope, so the app cannot read it directly.
+    # Hence the proxy-forwarded-header path is the supported production path.
     #
-    # The TLS layer performs chain validation.  This code only extracts identity.
+    # Chain validation is the proxy/TLS layer's job; this code only extracts the
+    # already-verified identity.
 
-    Cert lookup precedence (documented for test authors and operators):
+    Lookup precedence:
 
-    1. ``request.client_cert`` if it is already a non-empty dict — lets unit
-       tests and integration harnesses inject a synthetic peercert without
-       needing a live TLS socket.
-    2. The ASGI scope transport / extensions peercert (real uvicorn mTLS path).
+    1. ``forwarded_cn_header`` — the trusted proxy-forwarded CN (production).
+    2. ``request.client_cert`` dict — lets unit/integration tests inject a
+       synthetic peercert without a live TLS socket.
+    3. ASGI scope transport / extensions peercert — best-effort fallback for
+       servers that do surface it.
 
-    Raises ``PermissionError`` if no peercert is present or if the CN is absent.
+    Raises ``PermissionError`` if no verified identity can be derived.
     """
 
+    def __init__(self, *, forwarded_cn_header: str = "x-egress-client-cn") -> None:
+        self._cn_header = forwarded_cn_header.lower()
+
     async def verify(self, request: Any) -> SidecarIdentity:
-        # Path 1: explicit dict attribute (unit tests, integration mocks).
+        # Path 1: trusted proxy-forwarded verified CN (production).
+        headers = getattr(request, "headers", None)
+        if headers is not None:
+            cn = headers.get(self._cn_header)
+            if cn:
+                return SidecarIdentity(sandbox_id=str(cn))
+
+        # Path 2: explicit dict attribute (unit tests, integration mocks).
         explicit = getattr(request, "client_cert", None)
         if isinstance(explicit, dict) and explicit:
             peercert: dict[str, Any] = explicit
         else:
-            # Path 2: real ASGI scope transport / extensions.
+            # Path 3: real ASGI scope transport / extensions (best effort).
             scope: dict[str, Any] = getattr(request, "scope", {})
             found = _peercert_from_scope(scope)
             if found is None:
-                raise PermissionError("no client certificate")
+                raise PermissionError("no verified client identity")
             peercert = found
 
         sandbox_id = _sandbox_id_from_peercert(peercert)
@@ -150,5 +167,7 @@ def build_sidecar_authenticator(config: dict[str, Any], *, env: str) -> SidecarA
             raise RuntimeError("dev authenticator requires dev_token")
         return DevSharedSecretAuthenticator(token=token)
     if mode == "mtls":
-        return MtlsAuthenticator()
+        return MtlsAuthenticator(
+            forwarded_cn_header=config.get("forwarded_cn_header", "x-egress-client-cn")
+        )
     raise RuntimeError(f"unknown egress exchange auth mode: {mode!r}")

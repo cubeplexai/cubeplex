@@ -176,6 +176,34 @@ async def test_exchange_fails_with_past_expiry(session: AsyncSession) -> None:
         )
 
 
+async def test_extend_expiry_revives_a_soon_to_expire_ref(session: AsyncSession) -> None:
+    """A long-running sandbox: extending expiry keeps a near-expired ref valid."""
+    from cubebox.repositories.egress_ref import EgressRefRepository
+
+    placeholder = mint_placeholder()
+    ref_hash = hash_placeholder(placeholder)
+    await EgressRefRepository(session).add(
+        EgressRef(
+            ref_hash=ref_hash,
+            sandbox_id="sbx-long",
+            org_id="org-1",
+            workspace_id="ws-1",
+            user_id="u1",
+            run_id=None,
+            bindings=[],
+            expires_at=(datetime.now(UTC) - timedelta(seconds=1)).replace(tzinfo=None),
+        )
+    )
+    repo = EgressRefRepository(session)
+    # Expired → not valid.
+    assert await repo.get_valid_by_hash(ref_hash) is None
+    # Extend → valid again.
+    await repo.extend_expiry_for_sandbox(
+        "sbx-long", (datetime.now(UTC) + timedelta(hours=1)).replace(tzinfo=None)
+    )
+    assert await repo.get_valid_by_hash(ref_hash) is not None
+
+
 async def test_stale_credential_fails_closed(session: AsyncSession) -> None:
     """If the bound credential was deleted while a ref is still valid, the
     exchange must raise EgressExchangeError (→ 403), not a raw CredentialNotFound

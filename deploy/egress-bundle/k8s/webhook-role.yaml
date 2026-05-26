@@ -1,0 +1,17 @@
+# Role allowing the webhook to manage per-sandbox client-cert Secrets.
+#
+# On each sandbox admission the webhook creates an `egress-client-<sandbox_id>`
+# Secret via create_client_cert_secret(); get/update/patch let a re-admitted pod
+# (same sandbox_id) refresh its cert idempotently. Namespace-scoped (least
+# privilege) — the webhook only ever touches the sandbox namespace.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: egress-webhook
+  namespace: opensandbox
+  labels:
+    app.kubernetes.io/part-of: cubebox-egress
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["create", "get", "update", "patch"]

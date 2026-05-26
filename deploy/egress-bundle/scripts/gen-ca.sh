@@ -46,10 +46,12 @@ echo "Generating egress MITM CA ..."
 TMPDIR="$(mktemp -d)"
 trap 'rm -rf "${TMPDIR}"' EXIT
 
-python3 - "${TMPDIR}" <<'PYEOF'
+python3 - "${TMPDIR}" "${BUNDLE_DIR}/webhook" <<'PYEOF'
 import sys
 import os
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "webhook"))
+# __file__ is "<stdin>" for a piped heredoc, so the webhook dir is passed in
+# from bash (argv[2]) rather than derived from __file__.
+sys.path.insert(0, sys.argv[2])
 from cert_minter import generate_ca  # type: ignore[import-untyped]
 
 out = sys.argv[1]

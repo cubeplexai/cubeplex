@@ -1,0 +1,16 @@
+# Binds the egress-webhook Role to the egress-webhook ServiceAccount.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: egress-webhook
+  namespace: opensandbox
+  labels:
+    app.kubernetes.io/part-of: cubebox-egress
+subjects:
+  - kind: ServiceAccount
+    name: egress-webhook
+    namespace: opensandbox
+roleRef:
+  kind: Role
+  name: egress-webhook
+  apiGroup: rbac.authorization.k8s.io
