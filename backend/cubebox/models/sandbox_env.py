@@ -70,8 +70,8 @@ class SandboxEnvVar(CubeboxBase, table=True):
     user_id: str | None = Field(
         default=None, foreign_key="users.id", max_length=20, index=True, nullable=True
     )
-    hosts: list[str] | None = Field(default=None, sa_column=Column(JSON))
-    header_names: list[str] | None = Field(default=None, sa_column=Column(JSON))
+    hosts: list[str] | None = Field(default=None, sa_column=Column(JSON(none_as_null=True)))
+    header_names: list[str] | None = Field(default=None, sa_column=Column(JSON(none_as_null=True)))
     credential_id: str | None = Field(
         default=None, foreign_key="credentials.id", max_length=20, nullable=True
     )
