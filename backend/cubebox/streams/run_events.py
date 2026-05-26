@@ -17,6 +17,7 @@ meta field updates.
 from __future__ import annotations
 
 import json
+from collections.abc import AsyncIterator
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from typing import Any, cast
@@ -418,6 +419,35 @@ async def iter_run_events(
     max_id = stop or "+"
     entries = await redis.xrange(stream_key, min=min_id, max=max_id)
     return _decode_stream_entries(entries)
+
+
+async def iter_run_events_chunked(
+    redis: Redis,
+    *,
+    prefix: str,
+    run_id: str,
+    start: str | None = None,
+    stop: str | None = None,
+    count: int = 1000,
+) -> AsyncIterator[list[RunEvent]]:
+    """Yield decoded run events in ``[start, stop]`` in batches of ~``count``.
+
+    Paginates with ``XRANGE`` using a ``(<id>`` exclusive cursor between pages,
+    so each ``await`` hands control back to the event loop and memory stays
+    bounded to one batch. ``start`` may be None (from the beginning), a bare
+    id, or an already-exclusive ``(<id>`` form. ``stop`` is inclusive.
+    """
+    stream_key = _run_events_key(prefix, run_id)
+    min_id = start if start is not None else "-"
+    max_id = stop if stop is not None else "+"
+    while True:
+        entries = await redis.xrange(stream_key, min=min_id, max=max_id, count=count)
+        if not entries:
+            return
+        yield _decode_stream_entries(entries)
+        if len(entries) < count:
+            return
+        min_id = f"({entries[-1][0]}"
 
 
 async def read_run_events_after(
