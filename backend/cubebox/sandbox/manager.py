@@ -24,9 +24,14 @@ from opensandbox.models.sandboxes import PVC, Volume
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from cubebox.config import config
+from cubebox.models import EgressRef
+from cubebox.repositories.egress_ref import EgressRefRepository
+from cubebox.repositories.sandbox_env import SandboxEnvRepository
 from cubebox.repositories.user_sandbox import UserSandboxRepository
 from cubebox.sandbox.base import Sandbox, SandboxError
 from cubebox.sandbox.opensandbox import OpenSandbox
+from cubebox.sandbox_env.injector import SandboxEnvInjector
+from cubebox.services.sandbox_env import SandboxEnvResolver
 
 
 class SandboxManager:
@@ -64,6 +69,10 @@ class SandboxManager:
         self._volume_enabled: bool = config.get("sandbox.volume.enabled", False)
         self._volume_mount_path: str = config.get("sandbox.volume.mount_path", "/workspace")
         self._volume_pvc_prefix: str = config.get("sandbox.volume.pvc_prefix", "cubebox-user")
+
+        # Egress injection: when empty, injection is disabled and Sandbox.create is
+        # called without env/network_policy (preserving existing behavior).
+        self._exchange_host: str = config.get("sandbox.egress_exchange_host", "")
 
     def _build_connection_config(self, *, request_timeout: int | None = None) -> ConnectionConfig:
         """Build OpenSandbox ConnectionConfig from app config.
@@ -151,8 +160,11 @@ class SandboxManager:
                         record.sandbox_id,
                         e,
                     )
-                # Mark the unhealthy/unreachable sandbox as terminated
+                # Mark the unhealthy/unreachable sandbox as terminated and revoke
+                # any egress refs tied to it so its placeholders stop being redeemable.
                 await repo.mark_terminated(record.id)
+                if self._exchange_host:
+                    await EgressRefRepository(session).revoke_for_sandbox(record.sandbox_id)
 
             # Create a new sandbox
             volumes: list[Volume] | None = None
@@ -172,6 +184,15 @@ class SandboxManager:
             # image pull. ``create_conn_config`` is otherwise identical to the
             # default.
             create_conn_config = self._build_connection_config(request_timeout=self._create_timeout)
+
+            # Egress injection (when enabled): resolve the vault for env +
+            # network policy. network_policy must be set at create time.
+            injection = None
+            if self._exchange_host:
+                resolver = SandboxEnvResolver(SandboxEnvRepository(session, org_id=org_id))
+                resolved = await resolver.resolve(workspace_id=workspace_id, user_id=user_id)
+                injection = SandboxEnvInjector(exchange_host=self._exchange_host).build(resolved)
+
             try:
                 raw_sandbox = await opensandbox.Sandbox.create(
                     self._image,
@@ -181,6 +202,8 @@ class SandboxManager:
                     volumes=volumes,
                     resource={"cpu": self._resource_cpu, "memory": self._resource_memory},
                     secure_access=True,
+                    env=injection.env if injection else None,
+                    network_policy=injection.network_policy if injection else None,
                 )
                 sandbox_id = raw_sandbox.id
                 logger.info("Sandbox created: {}", sandbox_id)
@@ -194,6 +217,26 @@ class SandboxManager:
                     image=self._image,
                     ttl_seconds=self._ttl,
                 )
+
+                # Persist egress refs now that sandbox_id is known. expires_at is
+                # bounded by the sandbox TTL so a leaked placeholder cannot be
+                # redeemed indefinitely even if explicit revocation is missed.
+                if injection is not None:
+                    ref_repo = EgressRefRepository(session)
+                    expires_at = datetime.now(UTC) + timedelta(seconds=self._ttl)
+                    for b in injection.bindings:
+                        await ref_repo.add(
+                            EgressRef(
+                                ref_hash=b["ref_hash"],
+                                sandbox_id=sandbox_id,
+                                org_id=org_id,
+                                workspace_id=workspace_id,
+                                user_id=user_id,
+                                run_id=None,
+                                bindings=[b],
+                                expires_at=expires_at,
+                            )
+                        )
 
                 # Rebind to the default per-command timeout: the create call's adapters
                 # captured the longer create_timeout, but ordinary commands on this
