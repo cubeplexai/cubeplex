@@ -54,6 +54,25 @@ class SandboxEnvRepository:
             or (r.scope == "user" and r.workspace_id == workspace_id and r.user_id == user_id)
         ]
 
+    async def get_in_scope(
+        self,
+        *,
+        scope: str,
+        env_name: str,
+        workspace_id: str | None = None,
+        user_id: str | None = None,
+    ) -> SandboxEnvVar | None:
+        stmt = select(SandboxEnvVar).where(
+            SandboxEnvVar.org_id == self.org_id,  # type: ignore[arg-type]
+            SandboxEnvVar.scope == scope,  # type: ignore[arg-type]
+            SandboxEnvVar.env_name == env_name,  # type: ignore[arg-type]
+        )
+        if scope in ("workspace", "user"):
+            stmt = stmt.where(SandboxEnvVar.workspace_id == workspace_id)  # type: ignore[arg-type]
+        if scope == "user":
+            stmt = stmt.where(SandboxEnvVar.user_id == user_id)  # type: ignore[arg-type]
+        return (await self.session.execute(stmt)).scalar_one_or_none()
+
     async def add(self, row: SandboxEnvVar) -> SandboxEnvVar:
         row.org_id = self.org_id
         self.session.add(row)

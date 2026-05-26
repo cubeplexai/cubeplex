@@ -20,7 +20,11 @@ from cubebox.repositories.credential import CredentialRepository
 from cubebox.repositories.sandbox_env import SandboxEnvRepository
 from cubebox.sandbox_env.host_rules import HostPatternError
 from cubebox.services.credential import CredentialService
-from cubebox.services.sandbox_env import SandboxEnvService, SandboxEnvShapeError
+from cubebox.services.sandbox_env import (
+    SandboxEnvConflictError,
+    SandboxEnvService,
+    SandboxEnvShapeError,
+)
 
 router = APIRouter(prefix="/admin/sandbox-env", tags=["admin-sandbox-env"])
 
@@ -62,6 +66,8 @@ async def create_org_env(
             secret_value=body.secret_value,
             plain_value=body.plain_value,
         )
+    except SandboxEnvConflictError as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
     except (SandboxEnvShapeError, HostPatternError) as exc:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
     row = await SandboxEnvRepository(session, org_id=ctx.org_id).get(entry_id)
