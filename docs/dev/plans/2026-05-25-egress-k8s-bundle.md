@@ -22,6 +22,32 @@
 
 ---
 
+## Backend completion tasks (carried from the Plan 2 Codex review — MUST do before production)
+
+Plan 2 deferred two backend items that this feature is **not production-correct** without. Do these as part of Plan 3 (they gate the mTLS path and ref freshness that the cluster bundle relies on).
+
+### Task B1 (P1): `MtlsAuthenticator` must read the real client cert from the ASGI scope
+
+File: `cubebox/sandbox_env/exchange_auth.py` (`MtlsAuthenticator.verify`), plus the exchange service's serving config.
+
+Today `MtlsAuthenticator.verify` reads `request.client_cert`, which **FastAPI/Starlette never populate** — so in production (`mode=mtls`) every sidecar request hits `cert is None` → 401, and the endpoint is unusable outside the dev-token path. Wire it to the real peer certificate:
+
+- Serve the exchange endpoint with client-cert verification enabled. With uvicorn: `ssl_certfile`/`ssl_keyfile` for the server cert + `ssl_ca_certs=<egress CA>` + `ssl_cert_reqs=ssl.CERT_REQUIRED`. Confirm how cubebox's exchange service is served (its own uvicorn process / a sidecar TLS terminator) and enable mTLS there. If TLS is terminated by an ingress/mesh instead, have it pass the verified client cert (e.g. `X-Forwarded-Client-Cert` / SPIFFE) and read that header instead — but only trust it from the terminator, never from the sandbox.
+- In `MtlsAuthenticator.verify`, read the verified peer cert from the ASGI scope (uvicorn exposes the peercert via `request.scope["transport"].get_extra_info("peercert")` / the `extensions` transport info, depending on version) and extract `sandbox_id` from its CN (matching what Task 1's `CertMinter` puts in the CN). Verify CHAIN validation is done by the TLS layer (CERT_REQUIRED + the egress CA), not in Python.
+- Test: a unit/integration test that constructs a request scope carrying a peer cert with `CN=sbx-1` and asserts `verify(...)` returns `SidecarIdentity(sandbox_id="sbx-1")`; and that a missing/invalid cert → `PermissionError` → 401. Add a cluster-E2E assertion (Task 6) that a real sidecar mTLS call succeeds and a call without the client cert is rejected.
+
+### Task B2 (P2): refresh egress refs when an existing sandbox is **reused**
+
+File: `cubebox/sandbox/manager.py` (`get_or_create`, the healthy-reuse branch that returns before the create-new block).
+
+Refs are currently minted only in the create-new branch. A reused sandbox keeps its **creation-time** placeholders + network policy + `EgressRef`, so: (a) Env Vault changes are ignored for the life of the sandbox, and (b) once `EgressRef.expires_at` (creation TTL) passes, exchanges start failing **even though the sandbox is still reused** and still holds the same `cbxref_` env values. Implement the per-run refresh the spec (§6.5) intended:
+
+- On the reuse path, when `self._exchange_host` is set: re-resolve the vault, **re-mint** fresh placeholders, push the new env into the running sandbox (the sandbox env-var update path — confirm OpenSandbox SDK supports updating env on a live sandbox; if not, this must happen at run-start before the turn uses the sandbox, or the sandbox must be recreated), persist new `EgressRef`(s) with a fresh `expires_at`, and **revoke the prior refs for that sandbox_id**.
+- If live env update is not supported by the SDK, document the chosen alternative (recreate-on-stale, or refresh only the refs+expiry while keeping the same placeholders — note that keeping the same placeholder means the env value in the container must remain the mapped one, so only `expires_at` extension + re-validation is safe). Pick one and make the invariant explicit.
+- Tests: reuse path with a changed vault value reflects the new secret at exchange time; a reused sandbox past its original TTL still exchanges successfully after refresh; the prior ref is revoked.
+
+---
+
 ## File Structure (new directory: `deploy/egress-bundle/` + webhook app)
 
 - Create `deploy/egress-bundle/webhook/app.py` — FastAPI admission webhook.
