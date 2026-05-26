@@ -415,6 +415,7 @@ def create_app(
         admin_members,
         admin_providers,
         admin_router,
+        admin_sandbox_env,
         admin_skills,
         artifacts_router,
         attachments_router,
@@ -427,6 +428,7 @@ def create_app(
         ws_browser,
         ws_mcp,
         ws_members,
+        ws_sandbox_env,
         ws_settings,
         ws_skills,
     )
@@ -441,12 +443,14 @@ def create_app(
     app.include_router(admin_router, prefix="/api/v1")
     app.include_router(admin_members.router, prefix="/api/v1")
     app.include_router(admin_mcp.router, prefix="/api/v1")
+    app.include_router(admin_sandbox_env.router, prefix="/api/v1")
     # Public template list (authenticated, not org-admin gated).
     app.include_router(admin_mcp.public_templates_router, prefix="/api/v1")
     app.include_router(mcp_oauth.oauth_callback_router, prefix="/api/v1")
     app.include_router(admin_skills.router, prefix="/api/v1")
     app.include_router(admin_skills.bindings_router, prefix="/api/v1")
     app.include_router(ws_mcp.router, prefix="/api/v1")
+    app.include_router(ws_sandbox_env.router, prefix="/api/v1")
     app.include_router(ws_members.router, prefix="/api/v1")
     app.include_router(ws_settings.router, prefix="/api/v1")
     app.include_router(admin_providers.router, prefix="/api/v1")

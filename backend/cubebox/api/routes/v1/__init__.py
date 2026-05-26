@@ -6,12 +6,14 @@ Exports all v1 API routers.
 from cubebox.api.routes.v1 import (
     admin_mcp,
     admin_members,
+    admin_sandbox_env,
     admin_skills,
     mcp_oauth,
     public_artifacts,
     ws_browser,
     ws_mcp,
     ws_members,
+    ws_sandbox_env,
     ws_settings,
     ws_skills,
 )
@@ -27,6 +29,7 @@ __all__ = [
     "admin_router",
     "admin_mcp",
     "admin_members",
+    "admin_sandbox_env",
     "admin_skills",
     "mcp_oauth",
     "artifacts_router",
@@ -39,6 +42,7 @@ __all__ = [
     "ws_browser",
     "ws_mcp",
     "ws_members",
+    "ws_sandbox_env",
     "ws_settings",
     "ws_skills",
 ]
