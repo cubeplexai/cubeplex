@@ -124,14 +124,6 @@ def test_sandbox_id_from_peercert_returns_none_for_empty_subject():
 # --- integration: MtlsAuthenticator.verify ---
 
 
-async def test_mtls_verify_forwarded_cn_header_returns_identity():
-    """Production path: the mTLS-terminating proxy forwards the verified CN."""
-    auth = MtlsAuthenticator(forwarded_cn_header="x-egress-client-cn")
-    req = _Req(headers={"x-egress-client-cn": "sbx-7"})
-    ident = await auth.verify(req)
-    assert ident == SidecarIdentity(sandbox_id="sbx-7")
-
-
 async def test_mtls_verify_scope_transport_returns_identity():
     """Case (a): scope transport exposes peercert with CN=sbx-1 → SidecarIdentity."""
     auth = MtlsAuthenticator()
@@ -163,6 +155,18 @@ async def test_mtls_verify_peercert_without_cn_raises():
     no_cn = {"subject": ((("organizationName", "Acme"),),)}
     req = _Req(headers={}, scope={"transport": _FakeTransport(no_cn)})
     with pytest.raises(PermissionError, match="missing CN"):
+        await auth.verify(req)
+
+
+async def test_mtls_verify_ignores_forged_cn_header():
+    """Regression (codex P1): a plain x-egress-client-cn header is NOT trusted.
+
+    Identity must come only from the verified client cert. A request carrying
+    just the old forwarded-CN header (and no peercert) must fail closed, so a
+    caller cannot impersonate another sandbox by forging the header."""
+    auth = MtlsAuthenticator()
+    req = _Req(headers={"x-egress-client-cn": "sbx-victim"})
+    with pytest.raises(PermissionError, match="no verified client identity"):
         await auth.verify(req)
 
 
