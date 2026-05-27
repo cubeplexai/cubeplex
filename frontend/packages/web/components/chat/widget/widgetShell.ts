@@ -39,17 +39,36 @@ body{margin:0;padding:1rem;font-family:system-ui,-apple-system,sans-serif;backgr
     post({type:'resize', height: document.body.scrollHeight});
   }
 
-  function runScripts(){
-    document.querySelectorAll('#root script').forEach(function(old){
+  // Run #root scripts in document order. External (src) scripts are awaited
+  // before the next script runs, so an inline initializer (e.g. new Chart(...))
+  // never executes before its CDN library has loaded. Attributes are preserved.
+  function runScripts(done){
+    var scripts = Array.prototype.slice.call(document.querySelectorAll('#root script'));
+    var i = 0;
+    function next(){
+      if (i >= scripts.length) { if (done) done(); return; }
+      var old = scripts[i++];
       var s = document.createElement('script');
-      if (old.src) { s.src = old.src; } else { s.textContent = old.textContent; }
-      old.parentNode.replaceChild(s, old);
-    });
+      for (var a = 0; a < old.attributes.length; a++) {
+        s.setAttribute(old.attributes[a].name, old.attributes[a].value);
+      }
+      if (old.src) {
+        s.onload = next;
+        s.onerror = next; // proceed even if a CDN script fails
+        old.parentNode.replaceChild(s, old);
+      } else {
+        s.textContent = old.textContent;
+        old.parentNode.replaceChild(s, old); // inline runs synchronously
+        next();
+      }
+    }
+    next();
   }
 
   window.addEventListener('message', function(e){
     if (e.source !== parent) return;
-    var d = e.data || {};
+    var d = e.data;
+    if (!d || typeof d !== 'object') return;
     if (d.widgetId !== WIDGET_ID) return;
     if (typeof d.seq !== 'number' || d.seq <= lastSeq) return; // latest-wins
     lastSeq = d.seq;
@@ -60,8 +79,7 @@ body{margin:0;padding:1rem;font-family:system-ui,-apple-system,sans-serif;backgr
       } else if (d.type === 'finalize') {
         if (finalized) return;
         finalized = true;
-        runScripts();
-        post({type:'resize', height: document.body.scrollHeight});
+        runScripts(function(){ post({type:'resize', height: document.body.scrollHeight}); });
       }
     } catch (err) {
       post({type:'error', message: String(err && err.message || err).slice(0, 500)});

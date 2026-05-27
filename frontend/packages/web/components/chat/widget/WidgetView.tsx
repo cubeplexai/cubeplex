@@ -48,6 +48,7 @@ export function WidgetView({
   useEffect(() => {
     function onMessage(e: MessageEvent) {
       if (e.source !== iframeRef.current?.contentWindow) return
+      if (!e.data || typeof e.data !== 'object') return
       const d = e.data as { widgetId?: string; type?: string; height?: number; message?: string }
       if (d.widgetId !== widgetId) return
       if (d.type === 'ready') setReady(true)

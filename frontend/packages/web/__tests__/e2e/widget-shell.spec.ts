@@ -61,6 +61,18 @@ test('latest-wins: a stale lower-seq morph is ignored', async ({ page }) => {
   await expect(frame.locator('#w')).toHaveText('new') // unchanged
 })
 
+test('a stale morph arriving AFTER finalize does not regress the DOM', async ({ page }) => {
+  await mountShell(page)
+  const frame = page.frameLocator('#wf')
+  await send(page, { widgetId: WIDGET_ID, seq: 10, type: 'morph', html: '<p id="w">final</p>' })
+  await expect(frame.locator('#w')).toHaveText('final')
+  await send(page, { widgetId: WIDGET_ID, seq: 11, type: 'finalize' })
+  // a delayed morph with a LOWER seq lands after finalize — must be ignored
+  await send(page, { widgetId: WIDGET_ID, seq: 9, type: 'morph', html: '<p id="w">stale</p>' })
+  await page.waitForTimeout(200)
+  await expect(frame.locator('#w')).toHaveText('final') // unchanged
+})
+
 test('widget cannot reach parent (opaque origin) nor fetch (connect-src none)', async ({
   page,
 }) => {

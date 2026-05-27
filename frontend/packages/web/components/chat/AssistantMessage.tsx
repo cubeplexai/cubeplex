@@ -306,6 +306,7 @@ function ContentBlockRenderer({
     const a = block.arguments ?? {}
     return (
       <WidgetView
+        key={block.id}
         widgetId={block.id}
         widgetCode={typeof a.widget_code === 'string' ? a.widget_code : ''}
         status="complete"
@@ -327,11 +328,21 @@ function ContentBlockRenderer({
     )
   }
   if (block.type === 'tool_call_streaming' && block.name === 'show_widget') {
+    const widgetId = block.tool_call_id ?? `idx-${block.index}`
+    const code = extractWidgetCode(block.args_text)
     const title = extractJsonStringPrefix(block.args_text, 'title') || undefined
+    if (!code) {
+      return (
+        <div className="rounded-lg border border-border bg-muted p-3 text-sm text-muted-foreground">
+          {`Preparing widget${title ? ` (${title})` : ''}…`}
+        </div>
+      )
+    }
     return (
       <WidgetView
-        widgetId={block.tool_call_id ?? `idx-${block.index}`}
-        widgetCode={extractWidgetCode(block.args_text)}
+        key={widgetId}
+        widgetId={widgetId}
+        widgetCode={code}
         status="streaming"
         title={title}
       />
