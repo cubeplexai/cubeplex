@@ -212,9 +212,19 @@ Per `CLAUDE.md` scope-isolation, routes are **separate handlers**, never a `?sco
 - Workspace authoring/listing: `/api/v1/ws/{ws}/agents/...`
 - Org-admin shared management: `/api/v1/admin/agents/...`
 
-Reuse lives one layer down: a shared `AgentDefinitionService` + `ScopedRepository` backs both
-handler sets. Frontend gets separate Next routes/pages per scope; shared `<List>` /
-`<DetailPanel>` / `<Editor>` modules are the reuse boundary (no `mode` prop on pages).
+Reuse lives one layer down: a shared `AgentDefinitionService` backs both handler sets. The
+service uses a dedicated `AgentDefinitionRepository` — **not** `ScopedRepository`. Because
+`workspace_id` is nullable here (NULL ⇒ org-shared), `ScopedRepository` is the wrong base:
+it always filters `workspace_id == <current workspace>` and force-sets that workspace on
+`add()`, which would hide org-shared rows from listings and save them as workspace-private.
+Instead `AgentDefinitionRepository` follows the MCP-connector precedent
+(`MCPConnectorInstallRepository`): the constructor takes `org_id` and enforces it on every
+query, with separate methods for the two scopes — `list_org_shared()` (`workspace_id IS NULL`)
+and `list_workspace(workspace_id)` (`workspace_id == <ws>`), plus a `list_visible(workspace_id)`
+that unions both for the workspace-authoring view. `add()` persists the `workspace_id` the
+caller passes (NULL for org-shared) rather than overriding it. Frontend gets separate Next
+routes/pages per scope; shared `<List>` / `<DetailPanel>` / `<Editor>` modules are the reuse
+boundary (no `mode` prop on pages).
 
 ### Invocation surfaces
 
@@ -235,7 +245,10 @@ handler sets. Frontend gets separate Next routes/pages per scope; shared `<List>
 ## Data model
 
 New tables (public-id prefixes via the `_PREFIX` ClassVar pattern in `models/public_id.py`).
-All carry `(org_id, workspace_id)` where workspace-scoped, following `OrgScopedMixin`.
+All carry `(org_id, workspace_id)`. `agent_definitions` keeps `org_id` NOT NULL but
+`workspace_id` **nullable** (NULL ⇒ org-shared), so it does not use `OrgScopedMixin` /
+`ScopedRepository` — it mirrors `MCPConnectorInstall`'s nullable-workspace shape and its
+dedicated repository (see Sharing & scope above).
 
 - **`agent_definitions`** (`_PREFIX = "agtd"`) — the mutable head.
   - `org_id`, `workspace_id` (NULL ⇒ org-shared, mirroring `OrgSkillInstall`).
@@ -350,6 +363,8 @@ Per `CLAUDE.md`, E2E over mocks. Primary gates:
   `WorkspaceSkillBinding`; the catalog/version/install/scope pattern reused here.
 - `backend/cubebox/models/mixins.py`, `models/public_id.py` — `CubeboxBase`,
   `OrgScopedMixin`, `_PREFIX` public-id pattern.
+- `backend/cubebox/repositories/mcp.py` — `MCPConnectorInstallRepository`; the
+  nullable-`workspace_id` (org-shared + workspace-private) repository shape reused here.
 - `backend/docs/prompt-cache-discipline.md` — stable-prefix rules the resolver must honor.
 - `backend/docs/agent-system-design.md` — (note: stale DeepAgents-era doc; the live runtime
   is cubepi as wired in `run_manager.py` / `agents/graph.py`).
