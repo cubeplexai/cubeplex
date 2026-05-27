@@ -867,7 +867,9 @@ import { test, expect, type Page } from '@playwright/test'
 import { WIDGET_SHELL_HTML } from '../../components/chat/widget/widgetShell'
 
 const WIDGET_ID = 'w-test'
-const SHELL = WIDGET_SHELL_HTML.replace('%%WIDGET_ID%%', WIDGET_ID)
+// Must match WidgetView's production injection: JSON.stringify supplies the
+// quotes (the shell has `var WIDGET_ID = %%WIDGET_ID%%;` with no quotes).
+const SHELL = WIDGET_SHELL_HTML.replace('%%WIDGET_ID%%', JSON.stringify(WIDGET_ID))
 
 async function mountShell(page: Page) {
   await page.setContent('<div id="host"></div>')
