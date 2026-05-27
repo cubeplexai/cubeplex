@@ -166,9 +166,30 @@ The model is already keyed correctly; the work is hardening + backfill.
   tests, matching the `sandbox_env` pattern). This removes the need for
   "newest wins" `order_by` and makes a duplicate-create attempt a catchable
   integrity error instead of a silent second sandbox.
-- **Race handling in `get_or_create`.** On the create path, catch the unique-
-  violation, roll back, re-query the now-winning row, and reuse it (after a health
-  check). This turns the concurrency window into a reuse, not a 500.
+- **Race handling in `get_or_create`.** The naive fix — call
+  `opensandbox.Sandbox.create` first, then `repo.create` and catch the unique
+  violation — leaks: the losing request has already provisioned a real provider
+  sandbox before the violation fires, and after we roll back the DB and reuse the
+  winner's row, that just-created provider sandbox has no DB row at all, so the
+  TTL reaper (which iterates DB rows) never finds it and the resources leak. So
+  the create path must be leak-free in one of two ways, and the plan should pick
+  one before coding:
+  - **Reserve the row first (preferred).** Insert the `UserSandbox` row in a
+    `provisioning` (or `pending`) status *before* calling
+    `opensandbox.Sandbox.create`, with the partial unique index covering
+    `running`/`provisioning` so the insert itself loses the race and raises the
+    integrity error. The loser never provisions a provider sandbox; it rolls
+    back, re-queries the winner, and reuses it. The winner provisions, then flips
+    its row to `running`. A row stuck in `provisioning` (e.g. crash mid-create)
+    is swept by the reaper like any other row — no orphan is possible.
+  - **Clean up the orphan (fallback).** If we keep create-then-insert, the race
+    handler must explicitly call the provider to destroy the just-created
+    `raw_sandbox` before rolling back and reusing the winner, so no provider
+    sandbox is ever left without a DB row. This couples the hot path to the
+    provider being reachable for the cleanup call; the reserve-row-first approach
+    avoids that.
+  Either way the concurrency window becomes a reuse (after a health check on the
+  winner), not a 500 and not a leak.
 - **Backfill.** Pre-existing rows already carry `workspace_id` (the column was
   always present via `OrgScopedMixin`), so the migration is mostly a constraint
   add. Before adding the unique index, the migration must collapse any duplicate
@@ -182,8 +203,13 @@ The model is already keyed correctly; the work is hardening + backfill.
 ### (b) Org-admin policy model: image, network rules, command rules
 
 **Where stored.** One row per org in a new table `sandbox_policies`
-(`SandboxPolicy`, `OrgScopedMixin`, new public-ID prefix `PREFIX_SANDBOX_POLICY
-= "sbxp"`). One-per-org enforced by a unique index on `org_id`. Fields:
+(`SandboxPolicy`, new public-ID prefix `PREFIX_SANDBOX_POLICY = "sbxp"`). This
+table is org-only: it carries an `org_id` FK directly and does **not** use
+`OrgScopedMixin`, because that mixin adds a required `workspace_id` FK and a
+per-org policy has no workspace — the admin route context has no real workspace
+id to supply, so a `workspace_id` column would force a fake value or trip the
+not-null/FK constraint. One-per-org is enforced by a unique index on `org_id`
+(the same shape `OrgSettings` already uses for org-wide rows). Fields:
 
 - `default_image: str` — the image used at sandbox creation for this org.
 - `allowed_images: list[str] | None` (JSON) — optional allowlist the
@@ -213,9 +239,15 @@ There is **no** workspace-scoped counterpart in v1 (policy is org-wide). If v2
 adds per-workspace overrides, that becomes a separate `ws_sandbox_policy.py`
 handler — not a `?scope=` parameter on this one.
 
-A `SandboxPolicyService` (`services/sandbox_policy.py`) does CRUD + validation;
-a `SandboxPolicyResolver` returns the effective policy for an org (policy row or
-built-in defaults), used by both the manager and the middleware.
+A `SandboxPolicyRepository` keyed by `org_id` only (no workspace dimension)
+handles persistence — modeled on `OrgSettingsRepository`
+(`repositories/org_settings.py`), which takes `session` + `org_id` and filters
+on `org_id` alone, **not** the workspace-scoped `ScopedRepository[T]` /
+`OrgScopedMixin` path that every business-table repo uses. A
+`SandboxPolicyService` (`services/sandbox_policy.py`) does CRUD + validation on
+top of that repo; a `SandboxPolicyResolver` returns the effective policy for an
+org (policy row or built-in defaults), used by both the manager and the
+middleware.
 
 **Delivery to creation (image + network rules).** In
 `SandboxManager.get_or_create`, before `opensandbox.Sandbox.create`:
@@ -258,11 +290,14 @@ in isolation from the middleware.
 
 New table `sandbox_policies`:
 
+Org-only table — `org_id` FK declared directly, no `OrgScopedMixin` and no
+`workspace_id` column (see "Where stored" above for why):
+
 ```
-SandboxPolicy(CubeboxBase, OrgScopedMixin, table=True)
+SandboxPolicy(CubeboxBase, table=True)   # NOT OrgScopedMixin
   _PREFIX = PREFIX_SANDBOX_POLICY  # "sbxp"
   __tablename__ = "sandbox_policies"
-  org_id: str (FK organizations.id)         # from OrgScopedMixin
+  org_id: str = Field(foreign_key="organizations.id", index=True)  # declared here
   default_image: str
   allowed_images: list[str] | None   (JSON)
   network_rules: list[dict] | None   (JSON)  # [{action, target}, ...]
@@ -370,6 +405,13 @@ E2E (per the "no fake E2E for unsimulatable systems" discipline).
   marks duplicate rows `terminated` in the DB; should it also call the provider to
   destroy the orphaned sandboxes, or rely on the TTL reaper? Active kill is cleaner
   but couples a migration to the provider being reachable.
+- **Create-race strategy: reserve-row-first vs orphan-cleanup.** The spec
+  prefers inserting a `provisioning` row before provider-create so a loser never
+  provisions and no orphan is possible, but that needs a new `provisioning`
+  status in the `UserSandbox` status enum, the partial unique index widened to
+  cover `provisioning` as well as `running`, and a reaper that sweeps rows stuck
+  in `provisioning` (crash mid-create). Confirm the status-enum and index change
+  are acceptable, or fall back to orphan-cleanup, before implementation.
 - **Command matcher scope.** Do command rules also apply to `write_file` /
   `edit_file` (e.g. deny writing to `~/.bashrc` / dotfiles, per NVIDIA's
   config-file-protection control), or only to `execute`? v1 sketch covers
