@@ -151,17 +151,21 @@ Each unit is bounded so it can be understood and tested independently.
 **iframe shell runtime** (new `widgetShell.ts`, exports the srcDoc string)
 - **Does:** inside the iframe, listens for parent messages — `morph` → morphdom
   diff `#root` + fade-in new nodes; `finalize` → clone-and-run `<script>` tags.
-- **Interface (postMessage protocol):** every message carries `{ widgetId, seq }`
-  (a monotonically increasing sequence number) so the shell can apply
-  **latest-wins** and stay idempotent.
+- **Interface (postMessage protocol):** every message carries `widgetId`.
+  **Parent → child** messages additionally carry a monotonically increasing
+  `seq` (the ordering token); **child → parent** messages do not need `seq`
+  (they are status notifications, not an ordered stream). The canonical shapes:
   - parent → child: `{widgetId, seq, type:'morph', html}` / `{widgetId, seq, type:'finalize'}`
   - child → parent: `{widgetId, type:'ready'}` / `{widgetId, type:'error', message}` /
     `{widgetId, type:'resize', height}` (height auto-fit)
-  - **Latest-wins:** the shell tracks the highest `seq` it has applied. A `morph`
-    or `finalize` with a `seq` ≤ the last applied is **ignored** — this defuses
-    the debounce/finalize race (a delayed `morph` landing after `finalize` cannot
-    regress the DOM). `finalize` runs `<script>` exactly once; later `morph`s
-    below the finalized `seq` are dropped.
+  - **Latest-wins (parent → child only):** the shell tracks the highest `seq` it
+    has applied. A `morph` or `finalize` with `seq` ≤ the last applied is
+    **ignored** — this defuses the debounce/finalize race (a delayed `morph`
+    landing after `finalize` cannot regress the DOM). `finalize` runs `<script>`
+    exactly once; later `morph`s below the finalized `seq` are dropped.
+  - **Note on shorthand:** prose and the lifecycle/diagram examples elsewhere in
+    this doc abbreviate messages by `type` (e.g. "a `morph`", "`{type:'ready'}`")
+    for readability; the shapes above are authoritative.
 - **Depends on:** morphdom, loaded from the CDN allowlist.
 - **Boundary:** runs inside the sandbox; cannot reach parent DOM/data; only
   responds to postMessage. `error.message` from the child is length-clamped and
@@ -207,7 +211,7 @@ toolcall_delta ×N
 toolcall_end → SSE tool_call (full arguments)
   → store: tool_call_streaming converges to a tool_call block
   → WidgetView status='complete', widgetCode=final
-  → postMessage({widgetId, seq, type:'morph', html=final}) then postMessage({widgetId, seq, type:'finalize'})
+  → postMessage({widgetId, seq, type:'morph', html}) with the final html, then postMessage({widgetId, seq, type:'finalize'})
   → shell: run <script> (Chart.js etc. execute only now)
 ```
 
