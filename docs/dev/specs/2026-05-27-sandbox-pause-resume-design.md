@@ -162,8 +162,11 @@ cubebox-side states stored in `UserSandbox.status`:
      └──────────────(idle-kill / explicit kill / failure)───────┴───┴──▶ terminated
 ```
 
-- `running` — usable; agent can execute. (unchanged)
-- `pausing` — pause requested, provider transitioning. Transient; reconcile if stuck.
+- `running` — usable; agent can execute. The **only** state `get_or_create`'s in-use
+  acquisition will hand back for direct use (after a health check). (unchanged)
+- `pausing` — pause claimed, provider suspend in flight. Transient; not acquirable by
+  `get_or_create` or any reaper, so a concurrent path can never use a sandbox that is being
+  suspended. Reconcile if stuck.
 - `paused` — compute frozen, state preserved. Not returned by `get_active_by_user` as
   directly usable, but **resumable**.
 - `resuming` — resume in flight; provider re-resolving endpoints + readiness.
@@ -174,6 +177,14 @@ cubebox-side states stored in `UserSandbox.status`:
 `pausing` and `resuming` are short-lived "in-flight" guards so two concurrent requests
 don't both drive a transition. They map to the provider's `Pausing` / (implicit) resuming
 states. We persist them so a crash mid-transition is reconcilable by the reaper.
+
+Critically, the pause flow **claims `pausing` before** it calls the provider, not after.
+The reaper does one atomic `running` + unleased → `pausing` UPDATE (conditioned on the
+current row still being `running` with no live lease) and only proceeds to call the provider
+`pause()` if that UPDATE changed a row. So the row never sits in `running` while the provider
+suspend is in flight: by the time the (slow) `connect → pause()` runs, the row already reads
+`pausing`, which acquisition refuses. This closes the window where a concurrent tool call or
+a second reaper could see a still-`running` row and acquire/use the sandbox mid-suspend.
 
 Pause only happens between agent turns. The manager never pauses a sandbox with an
 in-flight operation — and this guarantee cannot rest on `last_activity_at` alone. Today
@@ -211,12 +222,26 @@ Keep `(workspace_id, user_id)` ownership (#144) intact: all new queries stay sco
 `OrgScopedMixin` + the `user_id` filter; no transition crosses the (org, workspace) boundary.
 
 Repository additions (`UserSandboxRepository`):
-- `mark_pausing` / `mark_paused(paused_at)` / `mark_resuming` / `mark_running` —
-  explicit transitions, each asserting the prior state to avoid illegal jumps.
-- `get_resumable_by_user(user_id)` — returns a `paused` (or `running`) row for reuse.
+- `claim_pausing(id)` — the atomic pause claim: a single conditional UPDATE that sets
+  `status = 'pausing'` only `WHERE id = :id AND status = 'running' AND (in_use_until IS NULL
+  OR in_use_until < now())`. Returns whether a row was claimed. The reaper calls the provider
+  `pause()` **only** on a successful claim, so the row is already `pausing` (and thus
+  unacquirable) before the suspend starts. This replaces a plain `mark_pausing` that would
+  have asserted-then-set in two steps; the claim must be one atomic statement so two reapers
+  can't both win.
+- `mark_paused(paused_at)` (on success) / `mark_running` (revert on failure, from `pausing`)
+  / `mark_resuming` / `mark_running` — explicit transitions, each asserting the prior state to
+  avoid illegal jumps.
+- `get_resumable_by_user(user_id)` — returns a `paused` (or `running`) row for reuse. Never
+  returns `pausing` / `resuming` rows — a mid-transition row is not handed out.
+- `get_active_by_user` (existing) tightens to `status == 'running'` only; it must **not**
+  match `pausing`, so the in-use acquisition path can't pick up a suspending sandbox.
 - `list_idle_to_pause_system` — running rows past idle `ttl_seconds` **and** with no active
-  in-use lease (`in_use_until` null or in the past). Replaces the kill selection for capable
-  providers. The lease check is part of the WHERE clause so an in-flight op is never selected.
+  in-use lease (`in_use_until` null or in the past). Selection only finds *candidates*; the
+  reaper still re-claims each one via `claim_pausing` before pausing, so a candidate that was
+  acquired or already claimed between selection and claim is safely skipped. Replaces the kill
+  selection for capable providers. The lease check is part of the WHERE clause so an in-flight
+  op is never selected.
 - `acquire_in_use(id, lease_window)` / `release_in_use(id)` — set / clear the `in_use_until`
   lease around an operation that holds the sandbox.
 - `list_paused_expired_system` — paused rows past `paused_at + paused_ttl_seconds` (the new
@@ -244,9 +269,14 @@ Keep them on the abstraction so the manager never imports a concrete driver:
   treating it as missing. If `running`, behave as today (connect + health-check). If
   resume fails, fall through to create-new (and mark the old row `terminated`/`failed`).
 - New `pause(user_id, ...)` / a reaper entry point `pause_idle()` mirroring
-  `cleanup_expired`: for capable providers, connect → `pause()` → `mark_paused`. Egress
-  refs are **kept** (the sandbox will be resumed and reuse them), but their expiry is not
-  extended while paused — on resume we re-apply egress and refresh them.
+  `cleanup_expired`: for capable providers, per candidate row, `claim_pausing` (atomic
+  `running` + unleased → `pausing`) → connect → `pause()` → `mark_paused`. The claim happens
+  **before** the provider call, so the row is already `pausing` (unacquirable) for the whole
+  suspend. If the claim doesn't change a row (already acquired, or another reaper won), skip
+  it. If `pause()` raises, revert `pausing → running` via `mark_running` (then fall back to
+  kill per "capability-gap handling") so a failed suspend never strands the row. Egress refs
+  are **kept** (the sandbox will be resumed and reuse them), but their expiry is not extended
+  while paused — on resume we re-apply egress and refresh them.
 - New `reap_paused()`: kill paused rows past their paused-TTL (real `kill()` + revoke
   egress + `mark_terminated`), bounding stored state.
 
@@ -294,8 +324,10 @@ Replace the idle reaper's behaviour by capability:
 
 - **Provider supports pause** → `pause_idle()` runs in the existing `sandbox_cleanup_loop`
   (or a sibling loop): select running rows that are past `ttl_seconds` idle **and** carry no
-  active in-use lease (`in_use_until` null or in the past), pause them, mark `paused` with
-  `paused_at = now`. Compute is freed; state preserved.
+  active in-use lease (`in_use_until` null or in the past), then for each one `claim_pausing`
+  (atomic `running` → `pausing`) before the provider `pause()`, and `mark_paused` with
+  `paused_at = now` on success. Because the row is `pausing` for the whole suspend, no
+  concurrent acquire can use it mid-pause. Compute is freed; state preserved.
 - **Provider can't pause** → keep today's `cleanup_expired` kill behaviour.
 - A second, slower pass `reap_paused()` kills paused rows past `paused_ttl_seconds` so paused
   state doesn't accumulate forever (mirrors e2b's 30-day deletion).
@@ -319,9 +351,10 @@ The whole design is gated on `Sandbox.supports_pause()`:
 - A driver with no native pause (`LocalSandbox`, a future minimal provider) returns `False`;
   its rows never enter `paused`, and the idle reaper kills as today. No code path assumes
   pause exists.
-- If `pause()` raises at runtime, the reaper logs and **falls back to kill** for that row
-  (don't leave a sandbox half-transitioned). If `resume_by_id` raises, `get_or_create`
-  falls back to create-new. Both keep the state machine consistent.
+- If `pause()` raises at runtime, the reaper reverts the row `pausing → running`
+  (`mark_running`), logs, and **falls back to kill** for that row (don't leave a sandbox
+  half-transitioned). If `resume_by_id` raises, `get_or_create` falls back to create-new.
+  Both keep the state machine consistent.
 
 ### v1 scope
 
@@ -358,7 +391,10 @@ resume re-resolves endpoints, and the filesystem survives):
 Unit tests for the repository transition guards (illegal jumps rejected) and manager
 fallback logic (pause-raises → kill; resume-raises → create-new). Concurrency: two
 overlapping `get_or_create` on a paused row must resume exactly once (lock / `resuming`
-guard) — covered by a unit/integration test on the manager.
+guard) — covered by a unit/integration test on the manager. Also: a `claim_pausing` race —
+two reapers (or a reaper + an in-flight `get_or_create`) target the same `running` row; only
+one claim wins (`running → pausing`), the loser sees no row changed and skips, and no path
+hands out a `pausing` row for use.
 
 Run worktree tests on the per-slot DB (`uv run pytest`, ports from `.worktree.env`).
 
