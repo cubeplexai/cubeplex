@@ -197,38 +197,47 @@ already present, reuse it, and call `start_run` again — duplicating the reply,
 tool side effects, and double-billing one IM message. The thread-link uniqueness check is
 not dedupe: it prevents two conversations for one thread, not two runs for one event.
 
-So the ingress persists an **idempotency receipt keyed by the platform event id** and
-checks it *before* creating/reusing the thread or calling `start_run`:
+So the ingress persists an **idempotency receipt keyed by the platform event id** in the
+**same database transaction** that durably commits the run to be processed — a
+transactional outbox. Receipt and "this event will be run" are one atomic fact: either both
+commit (a worker will pick the run up, even after a crash) or neither does (the platform
+retry re-delivers and we start over). This is the durable resolution; it does *not* lean on
+in-process timing or the lease to avoid dropping an unstarted event.
 
 - A new `IMWebhookReceipt` table records each processed event by
   `(account_id, platform_event_id)` with a unique constraint. `platform_event_id` is
   Slack's `event_id` (preferred over `event_ts`, which retries preserve) / Feishu's event
-  `event_id`. The row carries a `status` (`processing` | `completed`) and a `lease_expires_at`
-  timestamp, so a receipt is not a permanent "handled" flag — it is recoverable.
+  `event_id`. The row carries a `status` (`pending` | `completed`) and a `lease_expires_at`
+  timestamp used only as a *secondary* guard against two workers grabbing the same `pending`
+  row — not as the mechanism that keeps an event from being dropped.
 - On every inbound event, after signature verification and account lookup but **before**
-  any thread/conversation/run work, attempt to insert the receipt row (`status=processing`,
-  `lease_expires_at = now + lease`) in its own transaction:
-  - **Insert succeeds** → "first time, proceed": create/reuse the thread and call
-    `start_run`, then mark the receipt `completed`.
+  any thread/conversation/run work, open one transaction that does both:
+  1. Insert the receipt row (`status=pending`).
+  2. Create/reuse the `Conversation` + `IMThreadLink`, then **enqueue a durable run record**
+     (a row in the run queue / outbox table) referencing that conversation and event.
+  Commit them together. The webhook handler then acks 200; it does **not** itself execute
+  the run. A separate worker drains the queue, calls `RunManager.start_run`, and on success
+  flips the receipt to `completed`.
+  - **Insert succeeds + commit** → the event is now durably owned by the queue. Even if the
+    web process dies the instant after commit, the queued run survives and a worker runs it.
   - **Unique violation, existing row is `completed`** → genuine duplicate of a finished
     event → **ack 200 and stop**, no side effects. This is the ack-without-side-effects
     behavior platforms expect for retries.
-  - **Unique violation, existing row is `processing` with a live lease** → a first delivery
-    is still in flight → **ack 200 and stop** (don't start a second concurrent run).
-  - **Unique violation, existing row is `processing` with an *expired* lease** → the first
-    delivery crashed/timed out before reaching `completed` → **take over**: refresh the
-    lease (`processing`, new `lease_expires_at`) and proceed with thread + `start_run`.
-    This is what makes a crash before `start_run` retry-recoverable instead of a silent drop.
-- The receipt is written before the run (not after) so even a retry that races a
-  *still-running* first delivery is rejected while the lease is live, rather than starting a
-  second run. But because `processing` is a leased, expirable state — not a permanent flag —
-  a crash between "receipt committed" and "`start_run` issued" no longer swallows every
-  subsequent retry; the next retry past the lease window recovers the event. The receipt is
-  the source of truth for "have we acted on this event"; the thread link only maps thread →
-  conversation.
-- The lease must be short enough that a real crash is recovered within the platform retry
-  window, yet long enough that a slow-but-healthy first delivery isn't double-run (exact
-  value in Open Questions).
+  - **Unique violation, existing row is `pending`** → the event is already durably enqueued
+    (or in flight) → **ack 200 and stop**; the queue, not this retry, will run it. The
+    lease only decides whether a *worker* may re-claim a stalled `pending` run, never whether
+    the platform's retry is allowed to drop the event.
+- Because the receipt and the durable run enqueue commit atomically, the crash window codex
+  flagged is closed: there is no interval where the receipt says "seen" but no run is
+  guaranteed to happen. A crash before the commit rolls back both (platform retry recovers);
+  a crash after the commit leaves a queued run for any worker to drain. The receipt is the
+  source of truth for "have we acted on this event"; the thread link only maps thread →
+  conversation; the run queue is the source of truth for "this will be executed".
+- **Dependency:** this requires a durable run queue / outbox that a worker drains
+  independently of the web process. cubebox today starts runs in-process
+  (`RunManager.start_run` → `asyncio.create_task` over Redis run state), so this durable
+  queue does not exist yet — see Open Questions. Until it lands, the lease-based receipt is
+  the fallback, but it is explicitly a *narrowed*, not closed, window.
 - Receipts are short-lived bookkeeping: a periodic prune drops rows older than the longest
   platform retry window (Slack retries over ~minutes/hours; we keep a conservative window —
   exact retention in Open Questions). They are `OrgScopedMixin` like the other tables.
@@ -303,11 +312,13 @@ Public ID prefixes (add to `backend/cubebox/models/public_id.py`): `imac` (accou
 - **`IMIdentityLink`** (`OrgScopedMixin`): `account_id` (FK), `im_user_id`, `user_id`
   (FK). Unique on `(account_id, im_user_id)`.
 - **`IMWebhookReceipt`** (`OrgScopedMixin`): `account_id` (FK), `platform_event_id`,
-  `status` (`processing` | `completed`), `lease_expires_at`, `created_at`. Unique on
-  `(account_id, platform_event_id)` — the dedupe key inserted before any thread/run work,
-  so a redelivered event hits the index. A `completed` row or a `processing` row with a
-  live lease → ack and stop; a `processing` row with an expired lease → take over and
-  recover (a crash before `start_run` isn't a silent drop). Pruned past the retry window.
+  `status` (`pending` | `completed`), `lease_expires_at`, `created_at`. Unique on
+  `(account_id, platform_event_id)`. Inserted **in the same transaction** that durably
+  enqueues the run (transactional outbox), so receipt and queued run commit or roll back
+  together — a redelivered event hits the index and is acked without re-running, while a
+  crash after commit still leaves a queued run for a worker to drain. `lease_expires_at` is
+  only a secondary guard so two workers don't claim the same `pending` queued run; it is not
+  what prevents an event from being dropped. Pruned past the retry window.
 
 All `OrgScopedMixin` so `(org_id, workspace_id)` filtering is structural. Migrations via
 `alembic revision --autogenerate`.
@@ -443,13 +454,27 @@ Slack server and call it E2E.
   cubebox" deep link? Default: compact summary + deep link.
 - **Attachments / files.** Inbound IM file uploads and outbound artifacts — in scope for
   v1 or deferred? (Web already has an attachment path to reuse.)
-- **Receipt processing lease duration.** How long should a `processing` receipt's lease
-  run before a retry may take over? Too short double-runs a slow-but-healthy first delivery;
-  too long delays recovery of a genuine crash past the platform's retry window. A value
-  bounded by the run timeout (with margin) is the starting assumption.
+- **Durable run queue / outbox (dependency).** The idempotency design commits the receipt
+  and the run enqueue in one transaction, then a worker drains the queue and calls
+  `start_run`. cubebox today starts runs in-process (`asyncio.create_task` over Redis run
+  state) with no durable queue, so this table + drainer must be built (or adopted from
+  whatever #152 triggers introduce) before the crash window is truly closed. Open: does the
+  outbox row live in the same DB so it joins the receipt transaction, with a poller flipping
+  Redis-backed runs, or do we make run creation itself transactional? Until it lands, the
+  lease-based receipt narrows but does not close the window.
+- **Worker re-claim lease duration.** Once a durable queue exists, how long may a `pending`
+  queued run sit before another worker re-claims it (the secondary lease)? Too short
+  double-runs a slow-but-healthy worker; too long delays recovery of a crashed worker. A
+  value bounded by the run timeout (with margin) is the starting assumption. This lease only
+  governs worker-vs-worker hand-off, not whether platform retries drop the event.
 - **Webhook receipt retention.** How long do we keep `IMWebhookReceipt` rows before
   pruning? Must exceed the longest platform retry window (Slack retries can span hours);
   a conservative fixed window (e.g. 24–72h) vs a platform-specific one is undecided.
+- **Finite platform retry windows.** Slack/Feishu stop retrying after a bounded window, so
+  the transactional outbox (not retries) is what guarantees an accepted-and-committed event
+  still runs after a crash. Any event whose receipt+enqueue transaction never commits before
+  the platform gives up is genuinely lost; the outbox is what shrinks that to "we never
+  durably accepted it" rather than "we accepted then dropped it".
 - **Single-process run affinity.** `steer_run`/`cancel_run` only work in the process
   hosting the run; does the outbound consumer need to live in the same process as the run,
   or can it tail Redis from any worker? (Tailing is cross-process; control is not.)
