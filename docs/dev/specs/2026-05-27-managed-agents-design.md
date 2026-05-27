@@ -194,9 +194,13 @@ resolved values into its existing parameters:
    - Skill set ← `skill_refs`, applied to `load_skill` + skills-list suffix. The resolver loads
      each ref by its pinned `skill_version_id` directly (not via the
      `installed_version` join the workspace path uses), so the bound skill content is the exact
-     version captured at publish time and cannot drift on a later install upgrade. It first
-     checks the paired `OrgSkillInstall` is still present/visible in the (org, workspace); a
-     missing/uninstalled ref is surfaced (hard-fail vs skip is an Open Question).
+     version captured at publish time and cannot drift on a later install upgrade. Before
+     loading, the resolver verifies the pinned `skill_version_id` belongs to a visible
+     `OrgSkillInstall` in the caller's org — i.e. that version's skill matches that install's
+     skill within (org, workspace). `fetch_skill_md()` has no scope check, so a malformed/
+     attacker-controlled ref could otherwise load a SkillVersion from another org; never trust
+     the stored id alone. A missing/uninstalled/mismatched ref is surfaced (hard-fail vs skip
+     is an Open Question).
    - `sandbox_policy` → whether/how to build the sandbox.
    - `tool_policy` → which builtin/middleware tool groups to include (still in fixed order).
 3. `_run_cubepi_path` consumes `ResolvedAgentConfig` instead of reading workspace singletons.
