@@ -175,9 +175,16 @@ cubebox-side states stored in `UserSandbox.status`:
 don't both drive a transition. They map to the provider's `Pausing` / (implicit) resuming
 states. We persist them so a crash mid-transition is reconcilable by the reaper.
 
-Pause only happens between agent turns. The manager never pauses a sandbox that a turn is
-actively using (the per-turn `touch` keeps `last_activity_at` fresh, so the idle reaper
-won't select it).
+Pause only happens between agent turns. The manager never pauses a sandbox with an
+in-flight operation — and this guarantee cannot rest on `last_activity_at` alone. Today
+`LazySandbox` refreshes activity *before* a tool call, so a single `execute` or browser
+startup that runs longer than `ttl_seconds` would leave `last_activity_at` stale while the
+op is still running, and the idle reaper could select and pause a live operation. We add an
+explicit **in-use guard**: an `in_use_until` lease column (see DB fields) that an operation
+sets when it acquires the sandbox and clears (or lets expire) when it finishes. The idle
+reaper requires *both* `last_activity_at + ttl_seconds` in the past *and* no active lease
+(`in_use_until` null or in the past). So eligibility is "idle by clock AND not in-flight",
+not just timestamp freshness.
 
 ### DB fields (UserSandbox)
 
@@ -193,6 +200,12 @@ Add to `backend/cubebox/models/user_sandbox.py` (migration via
   Lets a mixed fleet be reaped correctly and is needed once #146 lands. Default
   `"opensandbox"`.
 - `last_resumed_at: datetime | None` — diagnostics / metrics on resume frequency.
+- `in_use_until: datetime | None` — the in-use lease. An operation that holds the sandbox
+  (an agent turn, a long `execute`, browser startup) sets this to `now + lease_window` when
+  it acquires the sandbox and clears it (or lets it expire) on completion. A live lease
+  (`in_use_until` in the future) makes the row ineligible for idle pause regardless of
+  `last_activity_at`. Long ops renew the lease so it outlives them; a TTL on the lease means
+  a crashed holder can't pin a sandbox forever.
 
 Keep `(workspace_id, user_id)` ownership (#144) intact: all new queries stay scoped by
 `OrgScopedMixin` + the `user_id` filter; no transition crosses the (org, workspace) boundary.
@@ -201,8 +214,11 @@ Repository additions (`UserSandboxRepository`):
 - `mark_pausing` / `mark_paused(paused_at)` / `mark_resuming` / `mark_running` —
   explicit transitions, each asserting the prior state to avoid illegal jumps.
 - `get_resumable_by_user(user_id)` — returns a `paused` (or `running`) row for reuse.
-- `list_idle_to_pause_system` — running rows past idle `ttl_seconds` (replaces the kill
-  selection for capable providers).
+- `list_idle_to_pause_system` — running rows past idle `ttl_seconds` **and** with no active
+  in-use lease (`in_use_until` null or in the past). Replaces the kill selection for capable
+  providers. The lease check is part of the WHERE clause so an in-flight op is never selected.
+- `acquire_in_use(id, lease_window)` / `release_in_use(id)` — set / clear the `in_use_until`
+  lease around an operation that holds the sandbox.
 - `list_paused_expired_system` — paused rows past `paused_at + paused_ttl_seconds` (the new
   hard-kill reaper).
 
@@ -277,8 +293,9 @@ egress endpoints itself). So:
 Replace the idle reaper's behaviour by capability:
 
 - **Provider supports pause** → `pause_idle()` runs in the existing `sandbox_cleanup_loop`
-  (or a sibling loop): select running rows past `ttl_seconds` idle, pause them, mark
-  `paused` with `paused_at = now`. Compute is freed; state preserved.
+  (or a sibling loop): select running rows that are past `ttl_seconds` idle **and** carry no
+  active in-use lease (`in_use_until` null or in the past), pause them, mark `paused` with
+  `paused_at = now`. Compute is freed; state preserved.
 - **Provider can't pause** → keep today's `cleanup_expired` kill behaviour.
 - A second, slower pass `reap_paused()` kills paused rows past `paused_ttl_seconds` so paused
   state doesn't accumulate forever (mirrors e2b's 30-day deletion).
@@ -288,8 +305,11 @@ Config knobs (under `sandbox.*`, consistent with existing ones):
 - `sandbox.paused_ttl` (default e.g. `604800` = 7d).
 - `sandbox.resume_timeout` (default `30`).
 
-Touch semantics unchanged: an active agent turn or an open browser panel keeps
-`last_activity_at` fresh, so the idle pass won't select an in-use sandbox.
+Touch semantics unchanged for *freshness*, but freshness is no longer the only safety net.
+An active agent turn or open browser panel keeps `last_activity_at` fresh **and** holds an
+in-use lease (`in_use_until`) for the duration of the operation. The idle pass selects only
+rows that are both stale by clock and unleased, so a long-running op — even one that outlives
+`ttl_seconds` between touches — is never paused mid-flight.
 
 ### Capability-gap handling
 
@@ -366,6 +386,12 @@ Run worktree tests on the per-slot DB (`uv run pytest`, ports from `.worktree.en
 6. **Snapshots (`create_snapshot`).** Out of scope here, but should paused-then-reaped
    sandboxes optionally snapshot-on-kill so a long-idle user can still get state back? Or is
    that a separate "templates" feature entirely?
+7. **In-use lease window vs. renewal.** What lease window balances "long op never gets
+   paused" against "crashed holder can't pin a sandbox forever"? A short window forces
+   renewal mid-op (a heartbeat) while a long one delays reclaim after a crash. Decide the
+   default window, the renewal cadence, and where it lives (`LazySandbox` wrapper vs. the
+   tool-execution boundary) when implementing — and confirm the renewal point sees every
+   long op (`execute`, browser startup, file transfer), not just agent-turn boundaries.
 
 ## References
 
