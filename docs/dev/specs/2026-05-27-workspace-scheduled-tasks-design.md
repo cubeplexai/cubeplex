@@ -234,7 +234,21 @@ prefix is 2–5 lowercase chars per `public_id.py`):
   - `attachments` — none in v1 (scheduled prompts are text-only).
 - Target conversation policy:
   - `target_mode` — `fixed` | `new_each_run`.
-  - `target_conversation_id` (nullable FK) — required when `fixed`.
+  - `target_conversation_id` (nullable FK) — required when `fixed`. **Must be a
+    conversation owned by `owner_user_id`** (the run-identity user). Conversations
+    are per-user — `ConversationRepository._scoped_select` filters by
+    `creator_user_id`, and `start_run` appends to whatever `conversation_id` it is
+    handed. A plain FK would let a member point a task at another member's
+    conversation; the scheduled run (executing as the owner) would then write into
+    a different user's thread. So ownership is enforced two ways:
+    - **At create/edit**: the create/PATCH handler resolves the target through the
+      owner-scoped `ConversationRepository` (filtered by `creator_user_id =
+      owner_user_id`) and rejects with 404/422 if the conversation is not the
+      owner's. The FK alone is not trusted for this check.
+    - **At dispatch**: `resolve_target` re-validates ownership at fire time (the
+      conversation could have been deleted or reassigned since create). If the
+      fixed target is no longer owned by `owner_user_id`, the occurrence is
+      recorded `failed` with a reason instead of writing into a foreign thread.
 - Scheduler bookkeeping:
   - `next_fire_at` (UTC, indexed) — the next occurrence the poller will claim.
     NULL once a `once` task has fired or a task is paused.
@@ -247,16 +261,51 @@ New table `scheduled_task_runs` (history; `CubeboxBase` + `OrgScopedMixin`,
 
 - `scheduled_task_id` (FK), `org_id`, `workspace_id`.
 - `scheduled_for` (UTC) — the occurrence time this row represents.
-- `fired_at` (UTC) — when the poller actually claimed/started it.
-- `outcome` — `started` | `skipped_missed` | `skipped_active` | `failed`.
-- `run_id` (nullable) — the `RunManager` run id, when one started.
+- `claimed_at` (UTC) — when a poller first claimed the occurrence (inserted the row).
+- `started_at` (UTC, nullable) — when `start_run` actually succeeded.
+- `state` — the occurrence lifecycle (see state machine below):
+  `claimed` | `started` | `succeeded` | `failed` | `skipped_missed` |
+  `skipped_active`.
+- `claim_count` (int, default 1) — how many times this occurrence has been
+  claimed; bounds re-claim retries after a dispatch crash.
+- `run_id` (nullable) — the `RunManager` run id, set once `start_run` returns.
 - `conversation_id` (nullable) — where it ran.
 - `detail` (nullable text) — error / skip reason.
 - **Unique constraint `(scheduled_task_id, scheduled_for)`** — the
   occurrence-idempotency key. Inserting this history row is the act that claims
-  an occurrence; a duplicate insert violates the constraint and the second
-  attempt knows the occurrence is already handled. This is the backstop that
-  makes a double-claim (Option C's rare race) produce one run, not two.
+  an occurrence; a duplicate insert violates the constraint, so two pollers
+  racing the same occurrence produce one row, not two. (Re-claim after a crash
+  is an UPDATE of this row, not a second insert — see below.)
+
+#### Occurrence state machine — at-least-once across dispatch crashes
+
+The dangerous case is a replica that commits the claim and then dies before
+`start_run` runs. If the only states were a terminal `started`, the occurrence
+would look handled while no run ever started — dropped, not at-least-once. To
+keep at-least-once, an occurrence row moves through states and a stale `claimed`
+row is **re-claimable**:
+
+- `claimed` — row inserted, the task's `next_fire_at` advanced, transaction
+  committed. The occurrence is reserved but no run has started yet. `claimed` is
+  **not** terminal.
+- `started` — `start_run` returned a `run_id`; `run_id` + `started_at` recorded.
+- `succeeded` / `failed` — terminal; the run finished, or it errored / was
+  rejected (e.g. owner lost membership, fixed target not owner-owned).
+- `skipped_missed` / `skipped_active` — terminal skip outcomes (missed-run
+  policy / busy fixed conversation).
+
+Re-claim rule: a poller, in its claim transaction, also picks up
+`scheduled_task_runs` rows still in `claimed` whose `claimed_at` is older than a
+`claim_timeout` (a few poll intervals, default ~2 min) and whose `run_id` is
+null. It re-claims such a row by `UPDATE … SET claimed_at = now(),
+claim_count = claim_count + 1` (guarded by `FOR UPDATE SKIP LOCKED` so two
+pollers don't both grab it), then dispatches it after commit. A row that
+reaches `started`/terminal is never re-claimed. `claim_count` caps retries: past
+a small bound (default 3) the row is set `failed` with a "max re-claims" reason
+rather than retried forever. This gives at-least-once delivery — a crash before
+`start_run` is retried by the next poller — at the cost of a rare duplicate if a
+replica started the run but died before writing `run_id`; that duplicate window
+is the explicit trade recorded in Open Question 6.
 
 ### Scheduler component
 
@@ -266,33 +315,46 @@ A new `ScheduledTaskPoller`, started in the FastAPI lifespan
 Loop (every ~15–30s, jittered to avoid replica thundering-herd):
 
 1. `BEGIN`.
-2. `SELECT * FROM scheduled_tasks WHERE status='active' AND next_fire_at <=
-   now() ORDER BY next_fire_at FOR UPDATE SKIP LOCKED LIMIT k`. Other replicas
-   skip these locked rows.
-3. For each claimed task:
-   - Determine the occurrence time `scheduled_for` (= the `next_fire_at` we
-     read).
+2. Claim work, in two parts of the same transaction, each `FOR UPDATE SKIP
+   LOCKED` so concurrent pollers never grab the same row:
+   - **Due tasks**: `SELECT * FROM scheduled_tasks WHERE status='active' AND
+     next_fire_at <= now() ORDER BY next_fire_at FOR UPDATE SKIP LOCKED LIMIT k`.
+   - **Stale claims** (re-claim path): `scheduled_task_runs` rows still in
+     `state='claimed'` with `run_id IS NULL` and `claimed_at < now() -
+     claim_timeout` — occurrences a crashed replica reserved but never started.
+3. For each due task:
+   - Determine the occurrence time `scheduled_for` (= the `next_fire_at` we read).
    - Apply **missed-run policy** (below) to decide fire vs skip.
-   - Insert a `scheduled_task_runs` row keyed `(task_id, scheduled_for)`. If the
-     unique constraint trips, another path already handled this occurrence —
-     skip.
-   - Recompute and write the task's next `next_fire_at` (cron → next match in
-     tz; interval → `scheduled_for + interval`; once → NULL + status stays
-     active but with no next fire). Do this **in the same transaction** so the
-     row's lock + next-fire advance commit atomically.
-4. `COMMIT`. Releasing the lock with `next_fire_at` already advanced means no
-   other replica can re-claim this occurrence.
-5. **After commit**, for each row marked `started`, call
-   `run_manager.start_run(...)` on this replica with a reconstructed
-   `RunContext` and the resolved target conversation. The actual run then lives
+   - Insert a `scheduled_task_runs` row keyed `(task_id, scheduled_for)` in state
+     `claimed` (or a terminal skip state for skipped occurrences). If the unique
+     constraint trips, another poller already claimed this occurrence — skip.
+   - Recompute and write the task's next `next_fire_at` (cron → next match in tz;
+     interval → `scheduled_for + interval`; once → NULL + status stays active but
+     with no next fire). Do this **in the same transaction** so the claim row +
+     next-fire advance commit atomically.
+4. For each stale `claimed` row: if `claim_count < max_claims`, `UPDATE` it to
+   `claimed_at = now(), claim_count = claim_count + 1` (stays `claimed`, to be
+   dispatched after commit); otherwise set it `failed` ("max re-claims").
+5. `COMMIT`. The task's `next_fire_at` is advanced and every claimed/re-claimed
+   occurrence row is `claimed`-and-locked-then-released, so no other replica
+   re-claims it until `claim_timeout` lapses (which only happens if this replica
+   crashes before starting the run).
+6. **After commit**, for each `claimed` occurrence (newly claimed or re-claimed),
+   call `run_manager.start_run(...)` on this replica with a reconstructed
+   `RunContext` and the resolved target conversation, then `UPDATE` the row to
+   `state='started'` with the returned `run_id` + `started_at`. The run then lives
    as a normal in-process task on this replica, identical to an interactive run.
+   If `start_run` itself errors (e.g. conversation busy, owner-membership /
+   owner-ownership check fails), set the row to the matching terminal state
+   (`skipped_active` / `failed`) instead.
 
-Why fire after commit, not inside the transaction: `start_run` does Redis +
+Why dispatch after commit, not inside the transaction: `start_run` does Redis +
 async work and may run for a long time; holding a Postgres row lock across it
-would be wrong. The history row (committed in step 3) is the durable record
-that the occurrence was claimed; if this replica dies between commit and
-`start_run`, the history row shows `started` with a null `run_id`, which a
-reaper can detect and the next poll can optionally retry once (bounded).
+would be wrong. The claim row (committed in step 5) is the durable reservation;
+because it stays in non-terminal `claimed` until `start_run` succeeds, a replica
+that dies between commit and `start_run` leaves a stale `claimed` row that the
+next poller re-claims (step 2/4) and dispatches — at-least-once, not silently
+dropped. The reaper below is the bound on retries, not the recovery mechanism.
 
 #### Missed-run policy (v1)
 
@@ -326,11 +388,20 @@ Dispatch is deliberately thin: resolve/create the target conversation, build a
 
 ```
 dispatch_scheduled_run(task, occurrence) ->
-    conversation = resolve_target(task)          # fixed or create new
+    conversation = resolve_target(task)          # fixed (owner-checked) or create new
     ctx = RunContext(task.owner_user_id, task.org_id, task.workspace_id)
     run_id = run_manager.start_run(conversation_id, task.prompt, ctx=ctx)
     return run_id
 ```
+
+For `target_mode=fixed`, `resolve_target` looks up `target_conversation_id`
+through the owner-scoped `ConversationRepository` (`creator_user_id =
+owner_user_id`); if that lookup returns nothing the target is missing or not the
+owner's, so the occurrence is recorded `failed` and no `start_run` happens. This
+re-check at dispatch backstops the create-time check (the conversation may have
+been deleted or its ownership changed in between). For `new_each_run`, the fresh
+conversation is created with `creator_user_id = owner_user_id`, so it is owned by
+the run identity by construction.
 
 `resolve_target` and `RunContext` assembly are the only scheduled-task-specific
 bits; everything downstream (tools, memory, cost, tracing, sandbox) is the
@@ -346,9 +417,11 @@ to run and with what prompt/identity" differs.
   a scheduled run is inspectable exactly like an interactive one (same
   `CostMiddleware` billing, same tracer spans stamped with conversation/user/
   org/workspace).
-- A reaper (piggybacks on the poller) flips `started`-with-null-`run_id` rows
-  older than a threshold to `failed` so a replica crash between commit and
-  `start_run` is visible, not silently lost.
+- Crash recovery is the re-claim path (above), not the reaper: a stale `claimed`
+  row is re-dispatched, giving at-least-once delivery. The reaper only bounds it —
+  it flips `claimed` rows whose `claim_count` hit `max_claims` to `failed` so a
+  repeatedly-failing occurrence is visible and stops being retried, rather than
+  looping forever.
 
 ### Scope-isolated workspace routes
 
@@ -461,10 +534,14 @@ genuinely can't be simulated.
    same user firing at the same minute share one workspace sandbox — is that
    acceptable, or does scheduled/managed-agent work need its own sandbox
    identity? This likely must be resolved jointly with #153.
-6. **Reaper retry semantics.** When a replica dies between history-commit and
-   `start_run`, do we retry that occurrence once on the next poll, or just mark
-   it `failed`? Retry risks a late duplicate; no-retry risks a silently dropped
-   scheduled report.
+6. **Re-claim duplicate window.** The re-claim path gives at-least-once: a stale
+   `claimed` row is re-dispatched after `claim_timeout`. The unavoidable
+   duplicate window is a replica that *did* call `start_run` (a run is live) but
+   died before writing `run_id`, so a later poller re-claims and starts a second
+   run for the same occurrence. Is that rare double-fire acceptable for v1, or do
+   we want a tighter signal (e.g. mark `started` *before* `start_run` returns and
+   reconcile via the run event stream) to shrink it further? What are the right
+   `claim_timeout` / `max_claims` defaults?
 7. **Shared trigger seam shape (#152).** Is `dispatch_*_run(...) -> run_id` the
    right contract, or should #152 define a richer `TriggerEvent` envelope now so
    scheduled tasks emit it from day one rather than being retrofitted?
