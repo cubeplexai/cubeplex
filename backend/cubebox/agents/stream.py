@@ -18,6 +18,7 @@ cubebox SSE event types (consumed by frontend):
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from cubepi import AgentToolResult
@@ -65,6 +66,34 @@ def _stringify_tool_result(result: Any) -> tuple[str, Any]:
     if result is None:
         return "", None
     return str(result), None
+
+
+def _artifact_event_from_tool_result(
+    tool_name: str, is_error: bool, result_text: str
+) -> dict[str, Any] | None:
+    """Build an artifact SSE dict from a save_artifact tool result, or None.
+
+    save_artifact returns ``{"action": ..., "artifact": {...}}`` as its result
+    content. We surface that as a standalone ``artifact`` event so the frontend
+    store is updated during the live run; the same dict is persisted to the run
+    event stream so reconnect/replay stays consistent.
+    """
+    if tool_name != "save_artifact" or is_error:
+        return None
+    try:
+        parsed = json.loads(result_text)
+    except (json.JSONDecodeError, TypeError):
+        return None
+    if not isinstance(parsed, dict):
+        return None
+    artifact = parsed.get("artifact")
+    if not isinstance(artifact, dict):
+        return None
+    return {
+        "type": "artifact",
+        "action": parsed.get("action", "created"),
+        "artifact": artifact,
+    }
 
 
 def convert_event_to_sse(evt: StreamEvent) -> list[dict[str, Any]]:
@@ -128,7 +157,7 @@ def convert_agent_event_to_sse(evt: AgentEvent) -> list[dict[str, Any]]:
 
     if isinstance(evt, ToolExecutionEndEvent):
         text, details = _stringify_tool_result(evt.result)
-        return [
+        out: list[dict[str, Any]] = [
             {
                 "type": "tool_result",
                 "tool_call_id": evt.tool_call_id,
@@ -138,6 +167,13 @@ def convert_agent_event_to_sse(evt: AgentEvent) -> list[dict[str, Any]]:
                 "is_error": evt.is_error,
             }
         ]
+        # save_artifact embeds the registered artifact in its result content.
+        # Emit a standalone artifact event so the frontend artifact store is
+        # populated live (not only after a page reload via loadArtifacts).
+        artifact_event = _artifact_event_from_tool_result(evt.tool_name, evt.is_error, text)
+        if artifact_event is not None:
+            out.append(artifact_event)
+        return out
 
     if isinstance(evt, MessageEndEvent) and isinstance(evt.message, AssistantMessage):
         msg = evt.message

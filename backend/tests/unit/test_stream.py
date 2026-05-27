@@ -1,5 +1,7 @@
 """stream tests — cubepi StreamEvent → cubebox SSE (M1.3)."""
 
+import json
+
 from cubepi import AgentToolResult
 from cubepi.agent.types import MessageEndEvent, ToolExecutionEndEvent
 from cubepi.providers.base import (
@@ -169,6 +171,50 @@ def test_tool_result_extracts_text_from_agent_tool_result() -> None:
     assert d["name"] == "save_artifact"
     assert d["result"] == '{"action":"created"}'
     assert d["is_error"] is False
+
+
+def test_save_artifact_emits_artifact_event_after_tool_result() -> None:
+    """save_artifact result carrying an artifact → tool_result + artifact event.
+
+    Regression: the artifact event was never emitted live, so the frontend
+    store stayed empty until a page reload triggered loadArtifacts.
+    """
+    artifact = {"id": "art_1", "conversation_id": "conv_1", "name": "x", "version": 1}
+    payload = AgentToolResult(
+        content=[TextContent(text=json.dumps({"action": "created", "artifact": artifact}))]
+    )
+    evt = ToolExecutionEndEvent(tool_call_id="tc-art", tool_name="save_artifact", result=payload)
+    out = convert_agent_event_to_sse(evt)
+    assert [d["type"] for d in out] == ["tool_result", "artifact"]
+    art_evt = out[1]
+    assert art_evt["action"] == "created"
+    assert art_evt["artifact"] == artifact
+
+
+def test_save_artifact_error_does_not_emit_artifact_event() -> None:
+    """An errored save_artifact result must not produce an artifact event."""
+    payload = AgentToolResult(content=[TextContent(text='{"error": "Path not found"}')])
+    evt = ToolExecutionEndEvent(
+        tool_call_id="tc-err", tool_name="save_artifact", result=payload, is_error=True
+    )
+    out = convert_agent_event_to_sse(evt)
+    assert [d["type"] for d in out] == ["tool_result"]
+
+
+def test_non_artifact_tool_result_emits_only_tool_result() -> None:
+    """A non-save_artifact tool never produces an artifact event."""
+    payload = AgentToolResult(content=[TextContent(text='{"artifact": {"id": "x"}}')])
+    evt = ToolExecutionEndEvent(tool_call_id="tc-o", tool_name="echo", result=payload)
+    out = convert_agent_event_to_sse(evt)
+    assert [d["type"] for d in out] == ["tool_result"]
+
+
+def test_save_artifact_non_json_result_emits_only_tool_result() -> None:
+    """Defensive: unparseable save_artifact result → no artifact event, no raise."""
+    payload = AgentToolResult(content=[TextContent(text="not json")])
+    evt = ToolExecutionEndEvent(tool_call_id="tc-nj", tool_name="save_artifact", result=payload)
+    out = convert_agent_event_to_sse(evt)
+    assert [d["type"] for d in out] == ["tool_result"]
 
 
 def test_tool_result_concatenates_multiple_text_blocks() -> None:

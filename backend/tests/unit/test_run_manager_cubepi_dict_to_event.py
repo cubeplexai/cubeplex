@@ -10,6 +10,7 @@ of a normal SSE error event).
 from __future__ import annotations
 
 from cubebox.agents.schemas import (
+    ArtifactEvent,
     ErrorEvent,
     ReasoningEvent,
     TextDeltaEvent,
@@ -20,6 +21,20 @@ from cubebox.agents.schemas import (
 from cubebox.streams.run_manager import cubepi_dict_to_agent_event
 
 TS = "2026-05-14T00:00:00+00:00"
+
+
+def test_artifact_dict_maps_to_artifact_event() -> None:
+    """Live artifact dict → typed ArtifactEvent (persisted + published).
+
+    Without this branch the dict was dropped, so the artifact store was
+    never populated during a live run.
+    """
+    artifact = {"id": "art_1", "conversation_id": "conv_1", "name": "x", "version": 1}
+    evt = cubepi_dict_to_agent_event(
+        {"type": "artifact", "action": "created", "artifact": artifact}, TS
+    )
+    assert isinstance(evt, ArtifactEvent)
+    assert evt.data == {"action": "created", "artifact": artifact}
 
 
 def test_text_delta_dict_maps_to_text_delta_event() -> None:

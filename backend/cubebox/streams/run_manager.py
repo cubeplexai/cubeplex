@@ -249,6 +249,7 @@ def cubepi_dict_to_agent_event(d: dict[str, Any], timestamp: str) -> AgentEvent 
     caller emits done with usage data; unknown types).
     """
     from cubebox.agents.schemas import (
+        ArtifactEvent,
         ErrorEvent,
         InjectedMessageEvent,
         ReasoningEvent,
@@ -298,6 +299,14 @@ def cubepi_dict_to_agent_event(d: dict[str, Any], timestamp: str) -> AgentEvent 
                 "content": str(d.get("result", "")),
                 "is_error": d.get("is_error", False),
                 "details": d.get("details"),
+            },
+        )
+    if t == "artifact":
+        return ArtifactEvent(
+            timestamp=timestamp,
+            data={
+                "action": d.get("action", "created"),
+                "artifact": d.get("artifact", {}),
             },
         )
     if t == "usage":
