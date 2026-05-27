@@ -162,7 +162,9 @@ The model is already keyed correctly; the work is hardening + backfill.
 
 - **Add a partial unique index** enforcing one running sandbox per identity:
   `uq_user_sandbox_active` on `(org_id, workspace_id, user_id)` where
-  `status = 'running'` (Postgres partial unique; mirror with `sqlite_where` for
+  `status IN ('provisioning','running')` — both active/in-flight states, so a
+  reserved `provisioning` row already blocks a concurrent create (Postgres
+  partial unique; mirror with `sqlite_where` for
   tests, matching the `sandbox_env` pattern). This removes the need for
   "newest wins" `order_by` and makes a duplicate-create attempt a catchable
   integrity error instead of a silent second sandbox.
@@ -341,9 +343,13 @@ hand-edit; the data-collapse step below is the one place autogen needs a manual
 data op appended):
 
 1. **Ownership hardening** — add partial unique index `uq_user_sandbox_active`
-   on `user_sandboxes (org_id, workspace_id, user_id)` where `status='running'`.
-   Prepend a data step that demotes duplicate running rows to `terminated`
-   (keep newest by `created_at`) so the index can be created without violation.
+   on `user_sandboxes (org_id, workspace_id, user_id)` where
+   `status IN ('provisioning','running')` — covering in-flight states too, so the
+   reserve-row-first insert is genuinely single-flight and two concurrent
+   `provisioning` rows can't both slip through and provision (the leak the index
+   is meant to prevent). Prepend a data step that demotes duplicate active rows
+   (provisioning or running) to `terminated` (keep newest by `created_at`) so the
+   index can be created without violation.
 2. **Policy table** — create `sandbox_policies` with the unique-on-`org_id`
    index. No seed rows; absence means "use defaults".
 
