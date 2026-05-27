@@ -187,6 +187,41 @@ account.
   the caller is the platform, not a cubebox member; the workspace is *derived* from the
   account, not asserted by the URL. Management routes (below) stay scope-isolated.
 
+### Inbound idempotency (dedupe before any run)
+
+Both platforms redeliver: Slack retries failed/slow deliveries with an `x-slack-retry-num`
+header (the event itself carries a stable `event_id`), and Feishu callbacks can also be
+redelivered (each event carries a stable `event_id` / message id). Without dedupe, a retry
+arriving *after* the first run already finished would find the `IMThreadLink` conversation
+already present, reuse it, and call `start_run` again — duplicating the reply, re-running
+tool side effects, and double-billing one IM message. The thread-link uniqueness check is
+not dedupe: it prevents two conversations for one thread, not two runs for one event.
+
+So the ingress persists an **idempotency receipt keyed by the platform event id** and
+checks it *before* creating/reusing the thread or calling `start_run`:
+
+- A new `IMWebhookReceipt` table records each processed event by
+  `(account_id, platform_event_id)` with a unique constraint. `platform_event_id` is
+  Slack's `event_id` (preferred over `event_ts`, which retries preserve) / Feishu's event
+  `event_id`.
+- On every inbound event, after signature verification and account lookup but **before**
+  any thread/conversation/run work, attempt to insert the receipt row in its own
+  transaction. A successful insert means "first time, proceed". A unique-constraint
+  violation means "already seen" → **ack with 200 and stop**, doing no side effects (no
+  thread create/reuse, no `start_run`, no outbound message). This is the standard
+  ack-without-side-effects behavior platforms expect for retries.
+- The receipt is written before the run, not after, so even a retry that races a
+  *still-running* first delivery is rejected by the unique index rather than starting a
+  second run. The receipt is the source of truth for "have we acted on this event"; the
+  thread link only maps thread → conversation.
+- Receipts are short-lived bookkeeping: a periodic prune drops rows older than the longest
+  platform retry window (Slack retries over ~minutes/hours; we keep a conservative window —
+  exact retention in Open Questions). They are `OrgScopedMixin` like the other tables.
+
+This is the same dedup seam the triggers work (#152) needs for its own webhook sources, so
+if #152's "event → run" entry lands first, the receipt check belongs *in that shared seam*
+rather than duplicated per connector (see "Relationship to triggers").
+
 ### Thread ↔ conversation mapping
 
 A new `IMThreadLink` table is the durable map. Key insight from OpenClaw: derive a stable
@@ -232,7 +267,7 @@ IM thread key and pin it to one conversation.
 ### Data model (new tables)
 
 Public ID prefixes (add to `backend/cubebox/models/public_id.py`): `imac` (account),
-`imtl` (thread link), `imil` (identity link).
+`imtl` (thread link), `imil` (identity link), `imwr` (webhook receipt).
 
 - **`IMConnectorAccount`** (`OrgScopedMixin`): `platform` (`slack`|`feishu`),
   `external_account_id` (Slack team/app id, Feishu app id), `workspace_id` (the bound
@@ -245,6 +280,10 @@ Public ID prefixes (add to `backend/cubebox/models/public_id.py`): `imac` (accou
   thread_root_id)`.
 - **`IMIdentityLink`** (`OrgScopedMixin`): `account_id` (FK), `im_user_id`, `user_id`
   (FK). Unique on `(account_id, im_user_id)`.
+- **`IMWebhookReceipt`** (`OrgScopedMixin`): `account_id` (FK), `platform_event_id`,
+  `created_at`. Unique on `(account_id, platform_event_id)` — the dedupe key inserted
+  before any thread/run work, so a redelivered event is rejected by the index. Pruned
+  past the platform retry window.
 
 All `OrgScopedMixin` so `(org_id, workspace_id)` filtering is structural. Migrations via
 `alembic revision --autogenerate`.
@@ -316,7 +355,10 @@ webhooks, etc.). IM connectors are a *specialized, bidirectional* trigger:
 - Inbound IM is a trigger source — both ultimately call `RunManager.start_run` with a
   `RunContext`. If #152 lands first with a clean "event → run" entry, the IM inbound core
   should call *that* seam rather than `start_run` directly, so triggers and IM share
-  routing/attribution/rate-limit policy.
+  routing/attribution/rate-limit policy. The inbound idempotency receipt (dedupe by
+  platform event id before run creation) is part of that shared seam — any webhook trigger
+  source faces the same retry/redelivery problem, so the receipt check should live with the
+  "event → run" entry, not be reimplemented per connector.
 - What IM adds beyond a generic trigger is the **outbound** half: tailing the run stream
   and rendering it back into the *same* IM thread. That is IM-specific and stays in the
   connector. Recommendation: design the inbound core against a small "start a run from an
@@ -377,6 +419,9 @@ Slack server and call it E2E.
   cubebox" deep link? Default: compact summary + deep link.
 - **Attachments / files.** Inbound IM file uploads and outbound artifacts — in scope for
   v1 or deferred? (Web already has an attachment path to reuse.)
+- **Webhook receipt retention.** How long do we keep `IMWebhookReceipt` rows before
+  pruning? Must exceed the longest platform retry window (Slack retries can span hours);
+  a conservative fixed window (e.g. 24–72h) vs a platform-specific one is undecided.
 - **Single-process run affinity.** `steer_run`/`cancel_run` only work in the process
   hosting the run; does the outbound consumer need to live in the same process as the run,
   or can it tail Redis from any worker? (Tailing is cross-process; control is not.)
