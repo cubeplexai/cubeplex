@@ -205,7 +205,10 @@ def test_guidelines_mention_tool_and_constraints():
 - [ ] **Step 2: Run it, verify it passes** (the prompt already exists from Task 1)
 
 Run: `uv run pytest tests/tools/test_show_widget.py::test_guidelines_mention_tool_and_constraints -v`
-Expected: PASS. (This locks the guideline content; the registration wiring below is verified by the Task 8 E2E, which exercises the full run path.)
+Expected: PASS. (This locks the guideline content. The registration/prompt
+wiring itself is verified by the Step 5 import smoke + the manual model→widget
+run in Task 9 — Task 8 is deterministic frontend-only testing and does not
+exercise the backend run path.)
 
 - [ ] **Step 3: Register the tool in run_manager**
 
@@ -417,11 +420,14 @@ body{margin:0;padding:1rem;font-family:system-ui,-apple-system,sans-serif;backgr
 <body><div id="root"></div>
 <script>
 (function(){
-  // WidgetView replaces the placeholder below with the real id at mount, so the
-  // shell knows its identity from the start (no learn-from-first-message
-  // handshake -> no deadlock). The placeholder appears exactly ONCE in this
-  // whole srcDoc string (here), so a single string replace is unambiguous.
-  var WIDGET_ID = "%%WIDGET_ID%%";
+  // WidgetView replaces the placeholder below with JSON.stringify(widgetId) at
+  // mount (note: NO surrounding quotes here — JSON.stringify supplies them and
+  // escapes any special chars, so an id with quotes/backslashes can't break out
+  // of the literal). The placeholder appears exactly ONCE in this whole srcDoc
+  // string (here), so a single string replace is unambiguous. The shell knows
+  // its identity from the start (no learn-from-first-message handshake → no
+  // deadlock).
+  var WIDGET_ID = %%WIDGET_ID%%;
   var lastSeq = -1;
   var finalized = false;
 
@@ -487,8 +493,9 @@ body{margin:0;padding:1rem;font-family:system-ui,-apple-system,sans-serif;backgr
 > The CSP `meta` is the first `<head>` child, before the inline `<style>`/`<script>`.
 > `%%WIDGET_ID%%` is a literal placeholder appearing exactly once in the string
 > (in the `var WIDGET_ID` assignment, not in any comment), so `WidgetView`'s
-> single `.replace('%%WIDGET_ID%%', widgetId)` is unambiguous. `ready` fires only
-> after morphdom loads, and the parent sends nothing before `ready`, so no
+> single `.replace('%%WIDGET_ID%%', JSON.stringify(widgetId))` is unambiguous and
+> injection-safe (JSON.stringify provides the quotes + escaping). `ready` fires
+> only after morphdom loads, and the parent sends nothing before `ready`, so no
 > pre-ready buffering is needed.
 
 - [ ] **Step 2: Type-check**
@@ -548,9 +555,13 @@ export function WidgetView({
   const latestRef = useRef('')
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  // Inject the real id into the shell (stable per widgetId). The placeholder
-  // appears exactly once in WIDGET_SHELL_HTML, so a single replace is safe.
-  const srcDoc = useMemo(() => WIDGET_SHELL_HTML.replace('%%WIDGET_ID%%', widgetId), [widgetId])
+  // Inject the real id into the shell (stable per widgetId). JSON.stringify
+  // supplies quotes + escaping, so an id with special chars can't break the JS
+  // literal. The placeholder appears exactly once in WIDGET_SHELL_HTML.
+  const srcDoc = useMemo(
+    () => WIDGET_SHELL_HTML.replace('%%WIDGET_ID%%', JSON.stringify(widgetId)),
+    [widgetId],
+  )
 
   const tooBig = new Blob([widgetCode]).size > MAX_CODE_BYTES
   latestRef.current = widgetCode
@@ -672,9 +683,11 @@ generic `write_file` handling, add:
 ```
 
 > `width`/`height` are integers that may not have streamed yet mid-call; they
-> are left `undefined` during streaming and applied when the completed branch
-> re-renders the same widget (same `widgetId` → same iframe, no remount). Only
-> `title` (a leading string field) is cheap to extract live.
+> are left `undefined` during streaming. They are only *initial hints*: the
+> shell posts a `resize` message (scrollHeight) after every morph and after
+> finalize, and that drives the authoritative height via `setHeight` — so the
+> rendered height self-corrects regardless of the `height` prop, with no remount
+> needed. Only `title` (a leading string field) is cheap to extract live.
 
 - [ ] **Step 2: Exclude `show_widget` from `groupBlocks` (REQUIRED — the real fix)**
 
@@ -761,10 +774,20 @@ still includes it from `_builtin_tools`.)
 **Files:**
 - Modify: `backend/cubebox/streams/run_manager.py` (SubAgentMiddleware construction, `:1292-1300`)
 
-- [ ] **Step 1: Exclude `show_widget` from the subagent `shared_tools`**
+- [ ] **Step 1: Extract a tiny pure helper (so it is unit-testable)**
 
-At the `SubAgentMiddleware(...)` construction (`:1299`), filter the
-`shared_tools` argument:
+The filter is currently inline at `SubAgentMiddleware(...)` (`:1299`). Make it a
+named module-level pure function in `run_manager.py` (above `_execute_run`) so it
+has a unit seam:
+
+```python
+# backend/cubebox/streams/run_manager.py (module level)
+def _subagent_shared_tools(tools: list[AgentTool[Any]]) -> list[AgentTool[Any]]:
+    """Tools shared into subagents. show_widget is top-level only (v1)."""
+    return [t for t in tools if t.name != "show_widget"]
+```
+
+- [ ] **Step 2: Use it at the SubAgentMiddleware construction (`:1299`)**
 
 ```python
             subagent_mw = SubAgentMiddleware(
@@ -772,35 +795,39 @@ At the `SubAgentMiddleware(...)` construction (`:1299`), filter the
                 default_provider=provider,
                 default_model_id=model_id,
                 default_provider_name=provider_name,
-                shared_tools=[
-                    t
-                    for t in (_sandbox_tools + _artifact_tools + _builtin_tools)
-                    if t.name != "show_widget"
-                ],
+                shared_tools=_subagent_shared_tools(
+                    _sandbox_tools + _artifact_tools + _builtin_tools
+                ),
                 inherited_middleware=_cost_mw_for_inherit,
             )
 ```
 
-> This is the list actually handed to subagents. (`SubAgentMiddleware` already
-> drops self-referential tools internally, but `show_widget` isn't one of those,
-> so we exclude it here.)
+> This is the list actually handed to subagents. (`SubAgentMiddleware` also drops
+> self-referential tools internally, but `show_widget` isn't one of those.)
 
-- [ ] **Step 2: Add a backend test**
+- [ ] **Step 3: Add a concrete backend test**
 
 ```python
 # backend/tests/tools/test_show_widget.py
-def test_show_widget_excluded_from_subagent_tools():
-    # Build the subagent tool list the way run_manager does and assert
-    # no tool named "show_widget" is present. (Use the helper/path that
-    # run_manager uses to assemble _subagent_tools.)
-    ...
+from types import SimpleNamespace
+
+from cubebox.streams.run_manager import _subagent_shared_tools
+from cubebox.tools.builtin.show_widget import make_show_widget_tool
+
+
+def test_subagent_shared_tools_drops_show_widget():
+    sw = make_show_widget_tool()
+    keep = SimpleNamespace(name="execute")  # helper only reads .name
+    result = _subagent_shared_tools([sw, keep])  # type: ignore[list-item]
+    assert sw not in result          # show_widget removed
+    assert keep in result            # other tools retained
 ```
 
-> Fill in using the actual assembly helper. If a direct unit seam isn't
-> available, assert it via the Task 8 E2E instead (a subagent prompt that would
-> trigger a widget produces no iframe).
+> `_subagent_shared_tools` only reads `t.name`, so a `SimpleNamespace` stand-in
+> is enough to prove a non-widget tool is retained without constructing a second
+> real `AgentTool`.
 
-- [ ] **Step 3: Run + commit**
+- [ ] **Step 4: Run + commit**
 
 Run: `uv run pytest tests/tools/test_show_widget.py -v`
 
@@ -876,6 +903,10 @@ test('morph applies, then finalize runs scripts exactly once', async ({ page }) 
   await expect(frame.locator('#w')).toHaveText('hi')         // script not run yet
   await send(page, { widgetId: WIDGET_ID, seq: 2, type: 'finalize' })
   await expect(frame.locator('#w')).toHaveText('done1')      // ran once
+  // a second (higher-seq) finalize must NOT re-run scripts (idempotent)
+  await send(page, { widgetId: WIDGET_ID, seq: 3, type: 'finalize' })
+  await page.waitForTimeout(200)
+  await expect(frame.locator('#w')).toHaveText('done1')      // still 1, not done2
 })
 
 test('latest-wins: a stale lower-seq morph is ignored', async ({ page }) => {
@@ -1002,11 +1033,13 @@ git commit -m "test(widget): deterministic shell (playwright) + WidgetView (vite
   (`AssistantMessage.tsx:361`), E2E dir (`__tests__/e2e/`) + runner
   (`frontend/package.json` `test:e2e`).
 - **Handshake:** the deadlock is removed — the shell gets its id via
-  `__WIDGET_ID__` replacement at mount and posts `ready` (with the right id)
-  after morphdom loads; the parent sends only after `ready`.
-- **Placeholders:** the E2E navigation/faux-wiring steps intentionally defer to
-  sibling-spec patterns rather than inventing harness APIs; all code units have
-  complete implementations.
+  `%%WIDGET_ID%%` → `JSON.stringify(widgetId)` replacement at mount (injection-safe)
+  and posts `ready` (with the right id) after morphdom loads; the parent sends
+  only after `ready`.
+- **Placeholders:** none blocking. Task 8 is fully concrete (shell driven via
+  `setContent`, WidgetView via vitest); the only deferral is the *manual* Task 9
+  model→widget/reload check, which is manual by necessity (the frontend harness
+  uses a real model). All code units have complete implementations.
 - **Type consistency:** message shape `{widgetId, seq, type, html?}` (parent→child)
   and `{widgetId, type, ...}` (child→parent) is identical in `widgetShell.ts` and
   `WidgetView.tsx`; `extractWidgetCode` signature matches its callers; `WidgetViewProps`
