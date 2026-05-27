@@ -274,8 +274,13 @@ POST /api/v1/ws/{workspace_id}/triggers/{trigger_id}/ingest
 Pipeline at ingest (cheap-reject ordering — reject before doing expensive work):
 
 1. **Read raw body bytes** (before any JSON parsing) — needed for signature.
-2. **Look up the trigger** by `(workspace_id, trigger_id)`; 404 if missing, 410/disabled
-   if `enabled == false`. (Constant-shape response to avoid trigger-existence oracle.)
+2. **Look up the trigger** by `(workspace_id, trigger_id)`. Every pre-auth lookup failure —
+   trigger missing OR `enabled == false` — returns the **same status and body** (a flat
+   `404 {"error": "not_found"}`). Because this happens before the caller proves knowledge of
+   the HMAC secret, a different code for "disabled" vs "missing" would leak whether a trigger
+   id is real, turning the unauthenticated path into a trigger-existence oracle. Disabled
+   triggers are only distinguishable *after* a valid signature, and even then we just stop
+   silently — we never confirm existence to an unsigned caller.
 3. **Signature verification.** Compute `HMAC-SHA256(secret, timestamp + "." + raw_body)`
    and `hmac.compare_digest` against the header signature. Reject on mismatch. The
    secret is resolved from the vault via the trigger's `cred` ref.
@@ -285,9 +290,13 @@ Pipeline at ingest (cheap-reject ordering — reject before doing expensive work
    valid signature *is* the proof this caller is allowed to fire *this* trigger in *this*
    workspace. There is no cross-workspace ambiguity because the route path and the secret
    both pin the workspace.
-6. **Dedup.** Derive `dedup_key` (provider event-id header if present, else hash of
-   `timestamp + body`). Attempt `trigger_events` insert; on unique-constraint hit, return
-   `200` with `duplicate` (idempotent ack).
+6. **Dedup.** Derive `dedup_key` from a *stable* identity of the event: the provider
+   event-id header when present, else a SHA-256 content hash of the raw body bytes alone.
+   The fallback **must not** include the signed freshness timestamp — that timestamp changes
+   on every re-sign, so a provider replaying the identical event with a fresh signature would
+   otherwise produce a new `dedup_key` and spawn a duplicate run. Hashing the body keeps the
+   key constant across retries of the same payload. Attempt `trigger_events` insert; on
+   unique-constraint hit, return `200` with `duplicate` (idempotent ack).
 7. **Rate limit.** Token-bucket per trigger in Redis (reuse the `RedisHandle` infra). On
    exhaustion, log `rate_limited` and return `429` (or `202` + drop, per config) so a
    noisy source can't fan out into unbounded runs.
@@ -484,6 +493,11 @@ E2E covers the shared pipeline by way of the webhook source.
   conversation-reuse/GC policy?
 - **Org-level run capacity / cost ceiling** interaction with cost tracking (#cost) — where
   is the authoritative budget enforced?
+- **Body-hash dedup false-merge.** The timestamp-free fallback hashes the body alone, so two
+  *distinct* logical events that legitimately carry byte-identical bodies (no provider
+  event-id to tell them apart) would collide into one `dedup_key` and the second is dropped
+  as a duplicate. Acceptable for v1 (rare without an id); revisit if a real source needs a
+  bounded time bucket or a per-trigger "allow identical bodies" opt-out.
 
 ## References
 
