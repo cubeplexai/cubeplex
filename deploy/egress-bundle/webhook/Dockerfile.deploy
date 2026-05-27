@@ -1,0 +1,8 @@
+FROM hub.sensedeal.vip/library/python:3.10-slim
+WORKDIR /app
+RUN pip install --no-cache-dir \
+    -i http://mirrors.aliyun.com/pypi/simple --trusted-host mirrors.aliyun.com \
+    fastapi "uvicorn[standard]" cryptography kubernetes-asyncio httpx
+COPY webhook/ ./webhook/
+CMD ["uvicorn", "webhook.app:app", "--host", "0.0.0.0", "--port", "8443", \
+     "--ssl-certfile", "/etc/webhook-tls/tls.crt", "--ssl-keyfile", "/etc/webhook-tls/tls.key"]

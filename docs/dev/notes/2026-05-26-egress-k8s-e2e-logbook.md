@@ -115,6 +115,44 @@ OpenSandbox server config is NOT modified (bundle keeps it stock), so no restore
 needed there. `failurePolicy: Ignore` on the webhook means even a broken webhook
 never blocks sandbox pod creation.
 
+## 2026-05-27 — Node 207 Calico cert-expiry fix (cluster mutation, user-directed)
+
+Root cause of the earlier "egress broken on 207" symptom: `tigera-operator` was
+scaled to `0/0`, so the Calico Typha mTLS certs (`typha-certs` CN=typha-server,
+`node-certs` CN=typha-client) — both expired `Apr 30 14:14:16 2026 GMT` — were
+never rotated. Felix on 207 (`calico-node-jpqcs`, 0/1) couldn't connect to Typha
+(`x509: certificate has expired`), so its `cali40all-hosts-net` ipset was empty
+(count=0) and the IPIP input firewall DROPped all cross-node pod traffic →
+pods on 207 had no DNS / no internet.
+
+Mutations applied (user said "恢复 tigera operator 然后检查机器状态"):
+
+1. **Recorded rollback point:** `tigera-operator` was `spec.replicas: 0`
+   (image `quay.io/tigera/operator:v1.28.15`). To revert:
+   `kubectl -n tigera-operator scale deploy tigera-operator --replicas=0`.
+2. `kubectl -n tigera-operator scale deploy tigera-operator --replicas=1`
+   → operator acquired the leader lease and reconciled. It **rotated** the certs:
+   `typha-certs`/`node-certs` now `notBefore May 27 02:03:15 2026`,
+   `notAfter Aug 29 02:03:16 2028`.
+3. `kubectl -n calico-system rollout restart deploy/calico-typha` (serve new
+   server cert) + `kubectl -n calico-system delete pod calico-node-jpqcs`
+   (207 picks up new client cert). New 207 node pod `calico-node-sbfnf` came up
+   `1/1`, Felix logged `Connected to Typha … 192.168.1.208:5473`, no x509 errors.
+
+Verification (root cause cleared):
+- `cali40all-hosts-net` ipset on 207 went from empty → 3 entries (`.207/.208/.217`).
+- Plain probe pod pinned to 207 (`net-probe-207`, since deleted): cluster DNS
+  resolves (`kubernetes.default → 10.2.0.1`), external DNS resolves
+  (`httpbin.org`), and HTTPS egress works (`GET https://httpbin.org/ip → 200`,
+  origin `106.38.109.10`). Previously all three timed out.
+- `kubectl get nodes` all `Ready`; all `calico-system` pods Ready;
+  `tigera-operator` `1/1`.
+
+Note: re-enabling the operator means it will now keep reconciling Calico config
+(it was deliberately at 0 before). If the cluster owner wants it back at 0 after
+the certs are valid, use the revert command in step 1 — but the certs will then
+drift toward expiry again in ~2 years with no rotation.
+
 ## Rollback procedure (summary)
 
 1. `kubectl delete mutatingwebhookconfiguration egress-inject-webhook` (the one
