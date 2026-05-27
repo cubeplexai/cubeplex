@@ -201,12 +201,14 @@ it to call `expand_mcp_server(server)`.
 
 A new middleware modeled almost exactly on `SkillsMiddleware`:
 
-- **`after_tool_call`**: when the tool is `expand_mcp_server` and it succeeded, add the server slug
-  to `extra["expanded_mcp_servers"]` (a set, stored as a sorted list for determinism).
-- **`transform_system_prompt`**: for each expanded server (sorted by slug), append a stable
+- **`after_tool_call`**: when the tool is `expand_mcp_server` and it succeeded, append the server
+  slug to `extra["expanded_mcp_servers"]` **in expansion order** (an ordered list, de-duplicated,
+  preserving first-expanded-first). Do **not** sort it — expansion order *is* the cache order.
+- **`transform_system_prompt`**: for each expanded server **in expansion order**, append a stable
   section listing that server's full tool definitions (namespaced name + description + input
-  schema), rendered from the **cached** `tools_cache` for that install. Sorting + append-only
-  growth keeps the prefix monotonic and cache-stable, identical to the skills approach.
+  schema), rendered from the **cached** `tools_cache` for that install. Appending in expansion
+  order keeps the prefix monotonic and cache-stable: a newly expanded server's block always lands
+  *after* every already-rendered block, so earlier cache segments stay byte-identical.
 
 Why schemas go in the **system-prompt suffix**, not the tool list: the tool *list* (`tools=...`) is
 fixed before the agent loop starts and is the most cache-sensitive region; mutating it mid-run is
@@ -249,9 +251,12 @@ carrying every schema every turn from turn one).
 ### 5. How the prompt-cache prefix stays intact
 
 - The **catalog** is derived purely from DB state, sorted by slug → byte-identical every turn.
-- **Expanded-server schema text** is appended to the system-prompt **suffix**, sorted by slug, and
-  only ever grows (append-only) within a conversation → matches the skills cache pattern, which the
-  cache E2E test already protects.
+- **Expanded-server schema text** is appended to the system-prompt **suffix** in **expansion
+  order** (never re-sorted), and only ever grows (append-only) within a conversation → matches the
+  skills cache pattern, which the cache E2E test already protects. (Skills can sort by name because
+  the enabled set is fixed up front and identical every turn; MCP servers expand incrementally
+  mid-conversation, so slug-sorting could insert a later expansion *before* an already-cached block
+  and invalidate that prefix — expansion order avoids this.)
 - If we go with deferral (B), expansion is explicitly modeled as a **cache re-establishment point**
   (treated like the documented "new conversation" case), never as a silent mid-prefix mutation.
 - No timestamps, nonces, or per-user dynamic data enter the catalog or schema text.
@@ -305,8 +310,10 @@ fall back to fake-server-only unit coverage.
   (4) citations still attach for expanded servers.
 - **Threshold behavior.** Below `min_servers`, behavior is byte-identical to today (no catalog, all
   tools loaded) — guards the small-workspace path.
-- **Determinism unit tests.** Catalog rendering and expanded-schema rendering are sorted and stable
-  for a fixed input set (cheap to unit-test alongside the E2E).
+- **Determinism unit tests.** Catalog rendering is sorted by slug and stable for a fixed input set;
+  expanded-schema rendering is stable for a fixed **expansion sequence** (same servers expanded in
+  the same order → byte-identical output, and adding one more expansion only appends). Cheap to
+  unit-test alongside the E2E.
 - **Per-task incremental runs during dev**, full suite in the pre-PR sweep, per CLAUDE.md.
 
 ## Open Questions
@@ -330,7 +337,11 @@ fall back to fake-server-only unit coverage.
   token-cost measurement on representative workspaces.
 - **Expanded state persistence across turns.** `extra["expanded_mcp_servers"]` lives in agent
   extra and is persisted like `loaded_skills` — confirm it replays correctly so a server expanded
-  on turn 1 stays expanded on turn 5 without re-triggering a cache reset each turn.
+  on turn 1 stays expanded on turn 5 without re-triggering a cache reset each turn. Because the
+  cache invariant now depends on **expansion order** (not slug sort), persistence must preserve that
+  order too: serialize as an ordered list and replay it unchanged. If a future store reloads it as
+  an unordered set, the rendered prefix could reorder across turns and silently break the cache —
+  call this out as a constraint on however `extra` is persisted.
 - **Stale `tools_cache`.** If a server's real tools drift from the cached schemas we render in the
   catalog/expansion, the model may call a tool that no longer exists (or miss a new one). Do we
   trust the cache, or live-discover on expand? Trusting the cache is cheaper and cache-stable;
