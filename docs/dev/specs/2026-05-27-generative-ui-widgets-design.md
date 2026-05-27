@@ -185,10 +185,10 @@ Each unit is bounded so it can be understood and tested independently.
 - **Boundary:** sits alongside the existing `write_file` / `subagent` /
   `save_artifact` branches; they don't interfere.
 
-**Key interface rule:** parent↔child exchange **structured data only** — the
-canonical message shape is `{ widgetId, seq, type, html? }` (see the postMessage
-protocol above). The shell does its own morphdom. We never concatenate HTML into
-a JS string for injection — this is the security improvement over
+**Key interface rule:** parent↔child exchange **structured data only**, in the
+shapes defined by the postMessage protocol above (parent→child carry `seq`,
+child→parent do not). The shell does its own morphdom. We never concatenate HTML
+into a JS string for injection — this is the security improvement over
 pi-generative-ui's `escapeJS(...)` `win.send(jsString)` approach.
 
 ## Data flow and lifecycle
