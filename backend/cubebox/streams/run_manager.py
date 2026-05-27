@@ -1298,6 +1298,7 @@ class RunManager:
                 # as shared tools for subagent spawning.
                 shared_tools=_sandbox_tools + _artifact_tools + _builtin_tools,
                 inherited_middleware=_cost_mw_for_inherit,
+                tracer=getattr(self._app.state, "tracer", None),
             )
             cubepi_middleware.append(subagent_mw)
             _subagent_tools.extend(subagent_mw.tools)

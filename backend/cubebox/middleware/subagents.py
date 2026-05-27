@@ -92,6 +92,7 @@ class SubAgentMiddleware(Middleware):
         default_provider_name: str,
         shared_tools: Sequence[AgentTool[Any]] = (),
         inherited_middleware: Sequence[Any] = (),
+        tracer: Any = None,
     ) -> None:
         # Ensure general-purpose fallback is always available
         if "general-purpose" not in subagent_map:
@@ -113,6 +114,7 @@ class SubAgentMiddleware(Middleware):
             t for t in shared_tools if t.name not in _excluded
         )
         self._inherited_middleware: tuple[Any, ...] = tuple(inherited_middleware)
+        self._tracer = tracer
 
         self.tools: list[AgentTool[Any]] = [self._make_subagent_tool()]
 
@@ -232,25 +234,44 @@ class SubAgentMiddleware(Middleware):
 
             inner.subscribe(_listener)
 
-            try:
-                await inner.prompt(args.prompt)
-            except Exception as exc:
-                logger.error(
-                    "Subagent '{}' failed (tool_call_id={}): {}",
-                    args.subagent_type,
-                    tool_call_id,
-                    exc,
-                )
-                return AgentToolResult(
-                    content=[TextContent(text=f"[error: {exc}]")],
-                    is_error=True,
-                )
+            # Attach the process-level Tracer so the inner subagent run is
+            # recorded. Best-effort: tracing must never break the run.
+            detach: Any = None
+            if self._tracer is not None:
+                try:
+                    detach = self._tracer.attach(inner)
+                except Exception as exc:
+                    logger.debug("subagent tracer.attach failed: {}", exc)
+                    detach = None
 
-            final_content = "".join(last_ai_text) or "[subagent produced no output]"
-            return AgentToolResult(
-                content=[TextContent(text=final_content)],
-                details={"subagent_events": subagent_events},
-            )
+            try:
+                try:
+                    await inner.prompt(args.prompt)
+                except Exception as exc:
+                    logger.error(
+                        "Subagent '{}' failed (tool_call_id={}): {}",
+                        args.subagent_type,
+                        tool_call_id,
+                        exc,
+                    )
+                    return AgentToolResult(
+                        content=[TextContent(text=f"[error: {exc}]")],
+                        is_error=True,
+                    )
+
+                final_content = "".join(last_ai_text) or "[subagent produced no output]"
+                return AgentToolResult(
+                    content=[TextContent(text=final_content)],
+                    details={"subagent_events": subagent_events},
+                )
+            finally:
+                if detach is not None:
+                    try:
+                        res = detach()
+                        if res is not None:
+                            await res
+                    except Exception as exc:
+                        logger.debug("subagent tracer.detach failed: {}", exc)
 
         return AgentTool(
             name="subagent",
