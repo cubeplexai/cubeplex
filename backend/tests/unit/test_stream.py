@@ -67,6 +67,43 @@ def test_toolcall_delta_emits_tool_call_delta() -> None:
     out = convert_event_to_sse(evt)
     assert out[0]["type"] == "tool_call_delta"
     assert out[0]["delta"] == '{"q": "x"'
+    # identity carried so the live SSE path can route the chunk to its card
+    assert out[0]["index"] == 0
+    assert out[0]["id"] == "tc1"
+    assert out[0]["name"] == "search"
+
+
+def test_live_chain_toolcall_delta_reaches_frontend_shape() -> None:
+    """End-to-end live seam: a streamed ``toolcall_delta`` must survive both
+    translation hops (``convert_agent_event_to_sse`` then
+    ``cubepi_dict_to_agent_event``) and arrive as a ``ToolCallDeltaEvent`` in
+    the exact shape the frontend reducer consumes. This is the regression that
+    broke during the langgraph→cubepi migration: the live drainer dropped
+    tool_call_delta, so file_write / subagent previews only appeared at
+    toolcall_end instead of streaming."""
+    from cubepi.agent.types import MessageUpdateEvent
+
+    from cubebox.agents.schemas import ToolCallDeltaEvent
+    from cubebox.streams.run_manager import cubepi_dict_to_agent_event
+
+    partial = _mk_assistant(tool_calls=[ToolCall(id="tc1", name="file_write", arguments={})])
+    stream_evt = StreamEvent(
+        type="toolcall_delta",
+        delta='{"path": "a.txt"',
+        partial=partial,
+        content_index=0,
+    )
+    dicts = convert_agent_event_to_sse(MessageUpdateEvent(message=partial, stream_event=stream_evt))
+    assert len(dicts) == 1
+
+    evt = cubepi_dict_to_agent_event(dicts[0], "2026-05-27T00:00:00+00:00")
+    assert isinstance(evt, ToolCallDeltaEvent)
+    assert evt.data == {
+        "tool_call_id": "tc1",
+        "name": "file_write",
+        "args_delta": '{"path": "a.txt"',
+        "index": 0,
+    }
 
 
 def test_done_translates_to_done() -> None:

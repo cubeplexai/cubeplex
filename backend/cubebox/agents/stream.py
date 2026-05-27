@@ -107,7 +107,20 @@ def convert_event_to_sse(evt: StreamEvent) -> list[dict[str, Any]]:
         return [{"type": "reasoning", "delta": evt.delta or ""}]
 
     if t == "toolcall_delta":
-        return [{"type": "tool_call_delta", "delta": evt.delta or ""}]
+        out: dict[str, Any] = {
+            "type": "tool_call_delta",
+            "delta": evt.delta or "",
+            "index": evt.content_index,
+        }
+        if evt.partial is not None and evt.content_index is not None:
+            try:
+                block = evt.partial.content[evt.content_index]
+            except (IndexError, TypeError):
+                block = None
+            if isinstance(block, ToolCall):
+                out["id"] = block.id
+                out["name"] = block.name
+        return [out]
 
     if t == "toolcall_end":
         if evt.partial is None or evt.content_index is None:
