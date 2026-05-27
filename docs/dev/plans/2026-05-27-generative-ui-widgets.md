@@ -493,8 +493,9 @@ body{margin:0;padding:1rem;font-family:system-ui,-apple-system,sans-serif;backgr
 > The CSP `meta` is the first `<head>` child, before the inline `<style>`/`<script>`.
 > `%%WIDGET_ID%%` is a literal placeholder appearing exactly once in the string
 > (in the `var WIDGET_ID` assignment, not in any comment), so `WidgetView`'s
-> single `.replace('%%WIDGET_ID%%', JSON.stringify(widgetId))` is unambiguous and
-> injection-safe (JSON.stringify provides the quotes + escaping). `ready` fires
+> single replace is unambiguous and injection-safe: `WidgetView` substitutes
+> `JSON.stringify(widgetId)` with every `<` further escaped to the JS sequence
+> `<` (so a hypothetical `</script>` can't close this block). `ready` fires
 > only after morphdom loads, and the parent sends nothing before `ready`, so no
 > pre-ready buffering is needed.
 
@@ -555,13 +556,16 @@ export function WidgetView({
   const latestRef = useRef('')
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  // Inject the real id into the shell (stable per widgetId). JSON.stringify
-  // supplies quotes + escaping, so an id with special chars can't break the JS
-  // literal. The placeholder appears exactly once in WIDGET_SHELL_HTML.
-  const srcDoc = useMemo(
-    () => WIDGET_SHELL_HTML.replace('%%WIDGET_ID%%', JSON.stringify(widgetId)),
-    [widgetId],
-  )
+  // Inject the real id into the shell (stable per widgetId). widgetId is a
+  // public id (alphanumeric + `_`) or `idx-<n>`, so it cannot contain quotes or
+  // an angle bracket. We still harden defensively: JSON.stringify supplies
+  // quotes + standard escaping, then we replace every "<" with the JS escape
+  // "\\u003c" so a hypothetical "</script>" can't close the shell's script
+  // block. A function replacement avoids String.replace's "$" special-handling.
+  const srcDoc = useMemo(() => {
+    const idLiteral = JSON.stringify(widgetId).replace(/</g, '\\u003c')
+    return WIDGET_SHELL_HTML.replace('%%WIDGET_ID%%', () => idLiteral)
+  }, [widgetId])
 
   const tooBig = new Blob([widgetCode]).size > MAX_CODE_BYTES
   latestRef.current = widgetCode
@@ -782,10 +786,15 @@ has a unit seam:
 
 ```python
 # backend/cubebox/streams/run_manager.py (module level)
-def _subagent_shared_tools(tools: list[AgentTool[Any]]) -> list[AgentTool[Any]]:
+# Annotated `list[Any]` to match this file's convention (it does not import
+# AgentTool at module level — tools are built via lazy imports inside functions).
+def _subagent_shared_tools(tools: list[Any]) -> list[Any]:
     """Tools shared into subagents. show_widget is top-level only (v1)."""
     return [t for t in tools if t.name != "show_widget"]
 ```
+
+> `Any` avoids adding a new top-level `AgentTool` import to `run_manager.py`,
+> which uses lazy imports throughout. The helper only reads `t.name`.
 
 - [ ] **Step 2: Use it at the SubAgentMiddleware construction (`:1299`)**
 
@@ -867,9 +876,11 @@ import { test, expect, type Page } from '@playwright/test'
 import { WIDGET_SHELL_HTML } from '../../components/chat/widget/widgetShell'
 
 const WIDGET_ID = 'w-test'
-// Must match WidgetView's production injection: JSON.stringify supplies the
-// quotes (the shell has `var WIDGET_ID = %%WIDGET_ID%%;` with no quotes).
-const SHELL = WIDGET_SHELL_HTML.replace('%%WIDGET_ID%%', JSON.stringify(WIDGET_ID))
+// Must match WidgetView's production injection exactly: JSON.stringify supplies
+// the quotes (the shell has `var WIDGET_ID = %%WIDGET_ID%%;` with no quotes),
+// and `<` is escaped to <.
+const ID_LITERAL = JSON.stringify(WIDGET_ID).replace(/</g, '\\u003c')
+const SHELL = WIDGET_SHELL_HTML.replace('%%WIDGET_ID%%', () => ID_LITERAL)
 
 async function mountShell(page: Page) {
   await page.setContent('<div id="host"></div>')
