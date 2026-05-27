@@ -232,9 +232,14 @@ deferral (register-on-first-expand)**:
   `expand_mcp_server`, and the tools of any servers already expanded earlier in this conversation
   (replayed from `extra["expanded_mcp_servers"]`). Collapsed servers contribute **zero** tool
   definitions and zero schema text.
-- When the model calls `expand_mcp_server(server)`, that server's tools (built from `tools_cache`)
-  become callable `AgentTool`s for the remainder of the conversation, and its schema text is
-  appended to the system-prompt suffix per the middleware above.
+- When the model calls `expand_mcp_server(server)`, that server's **callable** `AgentTool`s are
+  obtained through the real runtime loader — `load_workspace_mcp_tools_for_cubepi`-style path,
+  which live-discovers via `load_mcp_tools_http(...)` with resolved auth — **filtered to the
+  expanded server(s)**, for the remainder of the conversation. `tools_cache` is *not* a tool
+  source: cached JSON schemas are not executable. The cache feeds only the lightweight catalog
+  index and the expansion preview/schema text appended to the system-prompt suffix per the
+  middleware above. So the runtime tool-load path that today loads all servers is **filtered to
+  expanded servers**, not replaced by synthesizing `AgentTool`s from `tools_cache`.
 - Because the cache discipline treats the tool block as fixed per conversation, *adding* tools
   mid-conversation changes that block. We model each expansion as a **cache re-establishment
   point** — the same treatment the discipline doc gives the "new conversation" case — not as a
@@ -257,10 +262,12 @@ pre-register-all is not on the table — it saves nothing.
 
 - `run_manager.py` system-prompt section (~line 1799, beside the skills index): add the MCP
   catalog suffix when the feature is enabled and the workspace has ≥ N usable servers.
-- `run_manager.py` tool assembly (~line 1034): replace the unconditional "load all MCP tools" with
-  the deferral-aware path — load only the tools of servers expanded so far this conversation
-  (from `extra["expanded_mcp_servers"]`), never the collapsed ones, so `tools=all_tools` never
-  carries a collapsed server's schema.
+- `run_manager.py` tool assembly (~line 1034): replace the unconditional "load all MCP tools" call
+  to `load_workspace_mcp_tools_for_cubepi` with a **filtered** invocation of that same live loader —
+  it still live-discovers callable tools via `load_mcp_tools_http`, but restricted to the servers
+  expanded so far this conversation (from `extra["expanded_mcp_servers"]`), never the collapsed
+  ones. Filtering the live loader (not building tools from `tools_cache`) is what makes expanded
+  tools callable while keeping collapsed servers' schemas out of `tools=all_tools`.
 - Register `expand_mcp_server` builtin in the fixed order slot.
 - Append `MCPDisclosureMiddleware` to `cubepi_middleware` with an `extra_ref` closure, mirroring
   `SkillsMiddleware` (~line 1263).
@@ -284,8 +291,9 @@ pre-register-all is not on the table — it saves nothing.
 
 Mostly reuses existing columns; minimal additions.
 
-- **Reuse:** `MCPConnectorInstall.tools_cache` (schemas), `.discovery_metadata`, `.description`
-  (via template), `.slug_name` (catalog key). No new schema table strictly required for v1.
+- **Reuse:** `MCPConnectorInstall.tools_cache` (schemas — index/preview only, never a tool
+  source), `.discovery_metadata`, `.description` (via template), `.slug_name` (catalog key). No
+  new schema table strictly required for v1.
 - **Possible new field (open):** `trigger_hints: str | None` on `MCPConnectorInstall` (and/or
   template) to author the "Use when:" line, instead of deriving it. If added, follow the migration
   rule: `alembic revision --autogenerate`.
@@ -363,10 +371,13 @@ fall back to fake-server-only unit coverage.
   order too: serialize as an ordered list and replay it unchanged. If a future store reloads it as
   an unordered set, the rendered prefix could reorder across turns and silently break the cache —
   call this out as a constraint on however `extra` is persisted.
-- **Stale `tools_cache`.** If a server's real tools drift from the cached schemas we render in the
-  catalog/expansion, the model may call a tool that no longer exists (or miss a new one). Do we
-  trust the cache, or live-discover on expand? Trusting the cache is cheaper and cache-stable;
-  live-discovery is fresher but reintroduces per-run network + nondeterminism.
+- **Stale `tools_cache`.** Callable tools always come from live discovery on expand (the filtered
+  runtime loader), so a stale cache cannot make the model call a non-existent tool — the live tool
+  set is authoritative. The residual staleness risk is only the **catalog index + expansion
+  preview text** rendered from the cache: drift there can make the model expand the wrong server or
+  see a description that no longer matches. Open: re-render the preview from the live discovery
+  result on expand (perfectly consistent, but couples preview text to per-run discovery and could
+  perturb the suffix), or accept cache-rendered preview and refresh `tools_cache` out of band.
 - **Interaction with subagents.** Subagents get their own tool/middleware assembly — should they
   inherit the parent's expanded set, start collapsed, or be configured independently?
 - **Disabling mid-conversation / re-collapse.** Is there ever a need to collapse an expanded server
