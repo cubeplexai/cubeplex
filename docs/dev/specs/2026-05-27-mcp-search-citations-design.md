@@ -144,26 +144,37 @@ Notes:
 
 ### Which connectors to add (v1)
 
-Add three catalog entries, covering the four verticals via Exa's multi-tool
-surface plus dedicated news/Chinese coverage:
+Add catalog entries for servers that authenticate via `Authorization: Bearer`
+(the only static-auth path the runtime supports — see caveat below). Each is
+verified against its live endpoint with a bearer key before seeding:
 
-1. **Exa** (slug `exa`) — web + academic/research + code search. Hosted,
-   Streamable HTTP, API key. Primary default.
-2. **Tavily** (slug `tavily`) — web + news + extract. Hosted, Streamable HTTP,
-   API key. Complements Exa with a strong news mode.
-3. **Bocha / 博查** (slug `bocha`) — Chinese web + AI search. Hosted, API key.
-   Covers the gap Exa/Tavily leave for Chinese-language queries.
+1. **Tavily** (slug `tavily`) — web + news + extract. Hosted, Streamable HTTP.
+   Documented to accept the API key in the `Authorization` header, so it works
+   over the bearer path today. Primary v1 default.
+2. **Exa** (slug `exa`) — web + academic/research + code search. Hosted,
+   Streamable HTTP. **Ships only if** its endpoint is confirmed to accept the
+   key as `Authorization: Bearer`; if it requires `x-api-key` or a `server_url`
+   query token, it's deferred with Bocha until the auth plumbing exists.
+3. **Bocha / 博查** (slug `bocha`) — Chinese web + AI search. **Deferred from
+   v1** unless verified to accept `Authorization: Bearer`; its auth mechanism
+   isn't confirmed, and we won't seed a connector whose auth silently fails.
 
 Each is added to `CATALOG` as an `MCPConnectorTemplateSeedEntry` shaped like
 the existing connectors:
 
 - `transport="streamable_http"`.
-- `supported_auth_methods=["static"]` with `static_form_schema=_TOKEN_FIELD`
-  and a header template. **Caveat:** Exa/Tavily take the key as a URL query
-  param, not a bearer header. If `static_auth_header_template` can only express
-  a header, either (a) bake the key into the `server_url` query string at
-  install time, or (b) confirm both servers also accept
-  `Authorization: Bearer`/`x-api-key`. This is OQ-1 — resolve before coding.
+- `supported_auth_methods=["static"]` with `static_form_schema=_TOKEN_FIELD`.
+  **v1 decision (was OQ-1):** the runtime sends static creds *only* as
+  `Authorization: Bearer <key>` — `cubepi_runtime.py` (the static branch around
+  line 244) hard-codes that header and ignores any `static_auth_header_template`
+  or query-param substitution. There is no custom-header or URL-query plumbing
+  today. So **v1 ships only search servers that authenticate via
+  `Authorization: Bearer`**, and the seed entry must NOT depend on a header
+  template the runtime won't apply. Each candidate gets verified against its
+  live endpoint with a bearer key before it's seeded; any server that requires
+  `x-api-key` or a `server_url` query-string token is deferred until the auth
+  plumbing exists (see Open Questions). This keeps the feature scoped to
+  citations and avoids shipping a connector whose auth silently fails.
 - `default_credential_policy="org"` (one org key, shared across the workspace),
   matching `webtools`.
 - `tool_citation_defaults` filled per the tool schemas below.
@@ -292,15 +303,19 @@ verified by E2E (below).
 
 ### v1 scope
 
-- Three new catalog seed entries: `exa`, `tavily`, `bocha`, each with
+- New catalog seed entries for bearer-auth-capable search servers (`tavily`,
+  plus `exa` if confirmed bearer-compatible), each with
   `tool_citation_defaults`.
 - Calibrated `CITATION_PROMPT` (reinforced visible-answer rule + worked search
   example, still server-agnostic and constant).
-- Resolve OQ-1 (auth-as-query-param) and OQ-5 (Bocha nested result path) — these
-  may require a tiny, isolated helper change but no new subsystem.
+- Resolve OQ-5 (Bocha nested result path) only for connectors that ship — a
+  tiny isolated helper change at most, no new subsystem.
 - Tests per below.
 
-Explicitly **out** of v1: Brave/Perplexity/Kagi/SearXNG entries, per-vertical
+Explicitly **out** of v1: any auth plumbing (custom-header or `server_url`
+query-token substitution) and the connectors that need it
+(Bocha, and Exa if it isn't bearer-compatible);
+Brave/Perplexity/Kagi/SearXNG entries; per-vertical
 `source_type` splitting beyond what the result schema gives for free, any
 frontend change, any re-ranking.
 
@@ -344,11 +359,16 @@ prose lacks markers.
 
 ## Open Questions
 
-- **OQ-1 — Auth as URL query param vs header.** Exa/Tavily take the API key in
-  the `server_url` query string (and/or `x-api-key`), but the existing template
-  shape models static auth as a header template. Do we bake the key into
-  `server_url` at install, confirm a bearer/`x-api-key` path, or extend the
-  template to support query-param auth? Resolve before coding.
+- **OQ-1 — RESOLVED: v1 is Bearer-only; query-param/custom-header auth is
+  deferred.** The runtime (`cubepi_runtime.py` static branch) always sends
+  static creds as `Authorization: Bearer <key>` and ignores any
+  `static_auth_header_template` or query-string token, so a header template
+  alone would not make Exa/Tavily auth work. v1 therefore ships only servers
+  confirmed to authenticate via `Authorization: Bearer`. **Rejected alternative
+  (future work):** add real auth plumbing — `x-api-key`/custom-header support
+  and `server_url` query-param token substitution in the runtime — so query-key
+  servers (Exa via `x-api-key`, Bocha) can be seeded. That's a separate
+  runtime/auth change, out of this citation feature's scope.
 - **OQ-2 — Which connectors ship in v1.** Spec proposes Exa + Tavily + Bocha.
   Is Bocha worth shipping day one, or defer until there's China-facing demand?
   Do we want a paid option (Perplexity) in v1 for users who already pay?
