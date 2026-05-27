@@ -199,6 +199,33 @@ The model is already keyed correctly; the work is hardening + backfill.
   them). If the platform truly has not shipped, this may be a no-op in practice,
   but the migration must be safe either way.
 - No public-ID change: `UserSandbox._PREFIX = "sbx"` already exists.
+- **Key the persistent volume on `(workspace_id, user_id)`, not just `user_id`.**
+  When `sandbox.volume.enabled` is true, `SandboxManager._build_user_volume(user_id)`
+  builds the PVC claim name from the user id alone, and `get_or_create` passes only
+  that. So even after we enforce one `UserSandbox` row per `(workspace, user)`, the
+  same user in two workspaces mounts the *same* `/workspace` PVC — files, browser
+  profiles, and anything written to disk leak across workspaces, and the
+  "file written in workspace A is absent in workspace B" isolation E2E would fail.
+  The fix is to make the volume identity carry the workspace too: `_build_user_volume`
+  takes `(workspace_id, user_id)` and the claim name includes both (e.g. a
+  `ws-<workspace_id>-user-<user_id>` shape, sanitised to the provider's PVC
+  naming rules), and `get_or_create` passes both. A given `(workspace, user)` then
+  gets its own durable volume; two workspaces never share storage. This is the
+  storage-layer half of the same ownership boundary the unique index enforces in
+  the DB — without it the row-level isolation is cosmetic.
+- **Volume back-compat / migration.** Existing PVCs are named from `user_id` only,
+  so a user who already has a persistent volume in one workspace will, after the
+  rename, get a *new* empty volume keyed on `(workspace, user)` and lose access to
+  the old data through the sandbox. The old PVC is not deleted by the rename; it
+  is simply orphaned (no sandbox references it). The migration story has two parts,
+  both of which the plan must settle (see Open Questions): (1) decide whether to
+  leave old single-user PVCs in place for manual recovery / cleanup, or reap them;
+  and (2) decide whether to actively migrate any existing user-only volume into one
+  of the user's workspaces (only safe if the user has exactly one workspace — with
+  multiple, there is no single correct target, so the safe default is "start fresh
+  per workspace and leave the old PVC orphaned for an operator to clean up"). If the
+  platform truly has not shipped, there may be no real PVCs to migrate and this is a
+  no-op — but the claim-name change must still ship so future volumes are scoped.
 
 ### (b) Org-admin policy model: image, network rules, command rules
 
@@ -327,6 +354,9 @@ in the service layer); revisit if we want DB-level guarantees like `sandbox_env`
 
 - `UserSandbox` partial unique index + race handling + duplicate-collapse
   migration.
+- Persistent volume claim-name re-keyed on `(workspace_id, user_id)` in
+  `SandboxManager._build_user_volume` / `get_or_create` (plus the orphaned-PVC
+  decision from Open Questions).
 - `SandboxPolicy` table + public-ID prefix + migration.
 - `SandboxPolicyService` / `SandboxPolicyResolver` + `sandbox_policy/rules.py`
   matcher (network + command).
@@ -412,6 +442,12 @@ E2E (per the "no fake E2E for unsimulatable systems" discipline).
   cover `provisioning` as well as `running`, and a reaper that sweeps rows stuck
   in `provisioning` (crash mid-create). Confirm the status-enum and index change
   are acceptable, or fall back to orphan-cleanup, before implementation.
+- **Orphaned single-user PVCs after the volume rename.** Re-keying the PVC claim
+  name on `(workspace, user)` leaves any existing user-only PVCs unreferenced. Do we
+  reap them (and how do we know none hold data a user still wants), leave them for an
+  operator to clean up manually, or attempt a one-time migration into the user's
+  single workspace where that is unambiguous? Settle this before the volume rename
+  ships, since it changes how durable storage is mounted for existing users.
 - **Command matcher scope.** Do command rules also apply to `write_file` /
   `edit_file` (e.g. deny writing to `~/.bashrc` / dotfiles, per NVIDIA's
   config-file-protection control), or only to `execute`? v1 sketch covers
