@@ -41,6 +41,16 @@ def _ns_to_agent_id(ns: tuple[Any, ...]) -> str | None:
     return ":".join(str(part) for part in ns)
 
 
+def _subagent_shared_tools(tools: list[Any]) -> list[Any]:
+    """Tools shared into subagents. show_widget is top-level only (v1).
+
+    Annotated ``list[Any]`` to match this module's convention (it builds tools
+    via lazy imports inside functions and does not import ``AgentTool`` at module
+    level). The helper only reads ``t.name``.
+    """
+    return [t for t in tools if t.name != "show_widget"]
+
+
 def _backfill_tool_call_delta_identity(
     evt_dict: dict[str, Any],
     delta_context: dict[tuple[str | None, int], dict[str, Any]],
@@ -993,6 +1003,15 @@ class RunManager:
         except Exception as _exc:
             logger.warning("view_images unavailable for cubepi run: {}", _exc)
 
+        # show_widget — UI-only tool; no DI. Fixed position in the builtin tool
+        # order to keep the prompt-cache prefix stable.
+        try:
+            from cubebox.tools.builtin.show_widget import make_show_widget_tool
+
+            _builtin_tools.append(make_show_widget_tool())
+        except Exception as _exc:
+            logger.warning("show_widget unavailable for cubepi run: {}", _exc)
+
         # generate_image — sandbox-gated; enabled only when image_generation config is active.
         # Builds a per-run provider instance via create_images_provider — never the global registry.
         if sandbox is not None:
@@ -1295,8 +1314,11 @@ class RunManager:
                 default_model_id=model_id,
                 default_provider_name=provider_name,
                 # Pass all tools (sandbox + artifact + builtin) collected so far
-                # as shared tools for subagent spawning.
-                shared_tools=_sandbox_tools + _artifact_tools + _builtin_tools,
+                # as shared tools for subagent spawning, minus show_widget
+                # (top-level only in v1).
+                shared_tools=_subagent_shared_tools(
+                    _sandbox_tools + _artifact_tools + _builtin_tools
+                ),
                 inherited_middleware=_cost_mw_for_inherit,
                 tracer=getattr(self._app.state, "tracer", None),
             )
@@ -1818,6 +1840,13 @@ class RunManager:
                         )
             except Exception as exc:
                 logger.warning("Failed to inject available-skills list: {}", exc)
+
+            # show_widget guidelines — appended unconditionally at a fixed spot
+            # so the cache prefix stays deterministic (the tool is always
+            # registered). See backend/docs/prompt-cache-discipline.md.
+            from cubebox.prompts.widget import WIDGET_GUIDELINES
+
+            effective_system_prompt += "\n\n" + WIDGET_GUIDELINES
 
             await self._run_cubepi_path(
                 ctx=ctx,
