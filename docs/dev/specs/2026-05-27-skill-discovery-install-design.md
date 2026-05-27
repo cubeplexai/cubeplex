@@ -216,10 +216,21 @@ source by `{kind, base_url/repo, trust_tier, enabled}`. This mirrors the
 pluggable-backend pattern used elsewhere (unified interface + per-kind subclass
 + factory + config-driven selection).
 
-Each candidate normalizes to: `name, description, keywords, source_kind,
-source_ref, version, trust` where `trust` carries the signals research
-surfaced (official-source flag, stars/install-count if the registry exposes
-them, "already in your org catalog" boolean).
+Each candidate normalizes to: `candidate_id, name, description, keywords,
+source_kind, source_ref, version, trust` where `trust` carries the signals
+research surfaced (official-source flag, stars/install-count if the registry
+exposes them, "already in your org catalog" boolean).
+
+`candidate_id` is an **opaque, URL-safe** identifier the registry mints for each
+candidate — it is the only handle clients pass back to preview/install. We do
+**not** route on `source_ref`: a remote `source_ref` is a GitHub repo/subpath
+like `owner/repo/tree/main/skills/foo`, full of slashes that won't fit one
+FastAPI path segment (the route would 404 or truncate the ref). The opaque id
+sidesteps that entirely. Concretely it's a short base64url-encoded token (or a
+DB-row id once a candidate is persisted) that the service can decode back to
+`(source_kind, source_ref)`; it carries no slashes and is safe in a query string
+or JSON body. `source_ref` stays in the candidate payload for display and for
+the eventual import, but never appears in a URL path.
 
 `name` here is the human-facing display name (for remote candidates the upstream
 skill slug). It is **not** necessarily the name `load_skill` resolves against. The
@@ -243,8 +254,10 @@ Add a builtin tool `find_skills(query, [limit])` (sits next to `load_skill` in
    higher trust).
 3. Ranks: exact/keyword match first, then trust tier, then install-count/stars.
    (v1 keyword; semantic is a later swap behind the same interface.)
-4. Returns a short ranked list (default ~5) of `{name, canonical_name,
-   description, source, trust, install_state}` — **descriptions only, not full
+4. Returns a short ranked list (default ~5) of `{candidate_id, name,
+   canonical_name, description, source, trust, install_state}` — the
+   `candidate_id` is the opaque handle later passed to preview/install;
+   **descriptions only, not full
    SKILL.md** (keeps it cheap; the model previews on demand). This is the
    discovery counterpart to #143's on-demand index.
 
@@ -323,11 +336,14 @@ one layer down in services):
 
 - **Member (workspace) routes** under `/api/v1/ws/{ws}/skills/`:
   - `GET …/discover?q=` — ranked search across sources (powers both the
-    `find_skills` tool and the chat UI).
-  - `GET …/discover/{source}/{ref}/preview` — preview a remote candidate
-    without importing.
+    `find_skills` tool and the chat UI); each result carries its opaque
+    `candidate_id`.
+  - `GET …/discover/preview?candidate_id=` — preview a remote candidate
+    without importing. The opaque `candidate_id` rides in the query string,
+    so the slash-laden remote `source_ref` never has to fit a path segment.
   - `POST …/install` — install a chosen candidate into **this workspace**
-    (workspace-private). Authenticated user action = the "confirm".
+    (workspace-private). Body carries `{candidate_id}` (the opaque handle),
+    not the raw ref. Authenticated user action = the "confirm".
 - **Admin routes** under `/api/v1/admin/skills/` and
   `/api/v1/admin/skill-sources/`:
   - source management (register/list/enable/disable remote sources, set trust
@@ -416,7 +432,13 @@ system can't be simulated.
    it's now a static copy. How/when do we offer updates when the upstream repo
    moves — manual re-import, or a tracked `source_ref` we can re-pull
    (re: `npx skills update` subpath bug, issue #1015)?
-7. **Duplicate/name collisions.** A remote skill named `frontend-design` may
+7. **Candidate-id encoding + lifetime.** Is `candidate_id` a stateless token
+   that encodes `(source_kind, source_ref)` (no server state, but the client
+   round-trips an opaque blob), or a short-lived DB/cache row id (cleaner URLs,
+   but needs a lookup table and an expiry/GC story)? Either keeps refs out of
+   the URL path; the encoding choice is an implementation detail to settle
+   before coding.
+8. **Duplicate/name collisions.** A remote skill named `frontend-design` may
    collide with a preinstalled one. Local-wins is the v1 rule, but do we ever
    want to let a user install a remote variant alongside, and how is it named
    (`<source>:<slug>`)?
