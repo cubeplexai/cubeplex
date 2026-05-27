@@ -1469,16 +1469,30 @@ class RunManager:
             # best-effort scope: it swallows every tracing fault (attach,
             # detach, flush) so tracing can never break the run, and is a
             # no-op when tracing is disabled (tracer is None).
-            from cubepi.tracing import trace
+            from cubepi.tracing import trace, tracing_context
 
             from cubebox.llm.runtime_writeback import (
                 schedule_runtime_status_writeback as _schedule_writeback,
             )
 
             tracer = getattr(self._app.state, "tracer", None)
+            # Stamp the run's identity onto the trace spans (recorder writes
+            # these as cubepi.metadata.* on the invoke_agent span). Skip None
+            # and stringify so OTel attribute typing is always satisfied.
+            _trace_meta = {
+                k: str(v)
+                for k, v in (
+                    ("conversation_id", conversation_id),
+                    ("user_id", ctx.user_id),
+                    ("org_id", ctx.org_id),
+                    ("workspace_id", ctx.workspace_id),
+                )
+                if v is not None
+            }
             try:
-                async with trace(tracer, agent):
-                    await agent.prompt(_user_msg)
+                with tracing_context(metadata=_trace_meta):
+                    async with trace(tracer, agent):
+                        await agent.prompt(_user_msg)
             except BaseException as _run_exc:
                 # Out-of-band, best-effort: a 401/403 flips provider liveness to
                 # "fail"; a model_not_found flips this model to "unavailable".
