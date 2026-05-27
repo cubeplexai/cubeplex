@@ -27,7 +27,11 @@ export const nextConfig: NextConfig = {
   allowedDevOrigins: ['localhost', '127.0.0.1', '[::1]', '192.168.1.111', '192.168.1.150'],
   compress: false,
   transpilePackages: ['katex', '@cubebox/core'],
-  turbopack: {},
+  // Pin the workspace root to the frontend monorepo. Otherwise Next walks up,
+  // finds the user's global ~/pnpm-lock.yaml (for global CLI tools), and picks
+  // /home/chris as the root — which misroots module resolution (e.g. resolving
+  // `tailwindcss` from frontend/packages instead of packages/web, so it 404s).
+  turbopack: { root: path.resolve(__dirname, '../..') },
   // Inline cookie-name overrides into the client bundle. Worktrees set these
   // in .worktree.env so each worktree's browser cookies don't collide on
   // localhost (cookies are host-scoped, not port-scoped).
