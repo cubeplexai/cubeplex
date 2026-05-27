@@ -290,7 +290,9 @@ row is **re-claimable**:
   **not** terminal.
 - `started` — `start_run` returned a `run_id`; `run_id` + `started_at` recorded.
 - `succeeded` / `failed` — terminal; the run finished, or it errored / was
-  rejected (e.g. owner lost membership, fixed target not owner-owned).
+  rejected (e.g. owner lost membership, fixed target not owner-owned). These are
+  **not** set by the dispatch loop (which stops at `started`); see "Reaching a
+  terminal state" below for how the run's outcome is copied back.
 - `skipped_missed` / `skipped_active` — terminal skip outcomes (missed-run
   policy / busy fixed conversation).
 
@@ -307,6 +309,23 @@ rather than retried forever. This gives at-least-once delivery — a crash befor
 replica started the run but died before writing `run_id`; that duplicate window
 is the explicit trade recorded in Open Question 6.
 
+#### Reaching a terminal state — run-completion writes the outcome back
+
+The dispatch loop only advances the occurrence to `started`; it never sees the
+run finish. The occurrence reaches `succeeded`/`failed` from the run's own
+terminal event: every `RunManager` run already ends by writing a terminal status
+(`completed` / `failed` / `cancelled`) to its Redis run metadata. A run-
+completion hook on that terminal event — the same place run metadata is
+finalized — looks up the `scheduled_task_runs` row by `run_id` and `UPDATE`s it
+to `succeeded` (on `completed`) or `failed` (on `failed`/`cancelled`, with the
+reason in `detail`). Because the lookup is by `run_id`, interactive runs (no such
+row) are a no-op. A run whose replica dies after `started` but before the
+terminal event is left to the reaper, which bounds it (`max_claims` → `failed`)
+rather than letting it sit in `started` forever. Exact hook placement (subscriber
+vs inline finalizer) is implementation detail; the contract is that the run's
+terminal event, not the dispatch loop, owns the `started → succeeded/failed`
+transition.
+
 ### Scheduler component
 
 A new `ScheduledTaskPoller`, started in the FastAPI lifespan
@@ -318,7 +337,10 @@ Loop (every ~15–30s, jittered to avoid replica thundering-herd):
 2. Claim work, in two parts of the same transaction, each `FOR UPDATE SKIP
    LOCKED` so concurrent pollers never grab the same row:
    - **Due tasks**: `SELECT * FROM scheduled_tasks WHERE status='active' AND
-     next_fire_at <= now() ORDER BY next_fire_at FOR UPDATE SKIP LOCKED LIMIT k`.
+     deleted_at IS NULL AND next_fire_at <= now() ORDER BY next_fire_at FOR
+     UPDATE SKIP LOCKED LIMIT k`. The `deleted_at IS NULL` filter is required:
+     soft delete only stamps `deleted_at` and does not flip `status`, so without
+     it the poller would keep firing a deleted task.
    - **Stale claims** (re-claim path): `scheduled_task_runs` rows still in
      `state='claimed'` with `run_id IS NULL` and `claimed_at < now() -
      claim_timeout` — occurrences a crashed replica reserved but never started.
@@ -346,7 +368,9 @@ Loop (every ~15–30s, jittered to avoid replica thundering-herd):
    as a normal in-process task on this replica, identical to an interactive run.
    If `start_run` itself errors (e.g. conversation busy, owner-membership /
    owner-ownership check fails), set the row to the matching terminal state
-   (`skipped_active` / `failed`) instead.
+   (`skipped_active` / `failed`) instead. The loop stops at `started`; the
+   `succeeded`/`failed` outcome is written later by the run-completion hook
+   (see "Reaching a terminal state" above), not here.
 
 Why dispatch after commit, not inside the transaction: `start_run` does Redis +
 async work and may run for a long time; holding a Postgres row lock across it
@@ -365,21 +389,28 @@ still due — and skip everything older. Concretely, from the claimed
 `<= now()` (the last occurrence the task would have fired had the poller never
 slept); call it `latest_due`.
 
+Catch-up fast-forwards in arithmetic only: it computes `latest_due` directly
+(cron → last match `<= now()`; interval → `floor((now-anchor)/interval)`), it
+does **not** walk and write one row per missed slot. At most **one** summary
+history row is recorded for the whole skipped stretch — `skipped_missed` with a
+`detail` carrying the skipped range/count (first..last, N occurrences) — never
+one row per occurrence. This is what keeps a long pause/outage from recreating
+the backlog/write-storm the v1 non-goal forbids.
+
 - If `now() - latest_due <= misfire_grace` (default 5 min, configurable):
-  record `skipped_missed` for every occurrence strictly before `latest_due`,
-  fire `latest_due`, then advance `next_fire_at` to the next occurrence after
-  `latest_due`.
+  fire `latest_due`, record one `skipped_missed` summary for the older stretch
+  (if any), then advance `next_fire_at` to the next occurrence after `latest_due`.
 - If `now() - latest_due > misfire_grace`: even the latest due occurrence is too
-  stale to be useful (e.g. the next fire is already imminent), so record
-  `skipped_missed` for it and the older ones, fire nothing, and advance
-  `next_fire_at` to the next future occurrence.
+  stale to be useful (e.g. the next fire is already imminent), so record one
+  `skipped_missed` summary covering it and the older ones, fire nothing, and
+  advance `next_fire_at` to the next future occurrence.
 
 The catch-up step must compute `latest_due` *before* deciding to fast-forward —
 the bug to avoid is treating the *first* stale occurrence (`08:00` for an hourly
 task the poller wakes at `10:02`) as the grace test and skipping straight to a
 future slot, dropping the `10:00` occurrence that is actually within grace and
-should fire. No backfill of the full missed series; only the single latest due
-occurrence fires. Every skip is recorded in history so it is observable.
+should fire. Only the single latest due occurrence fires; the skipped stretch is
+observable through the one summary row, not a per-occurrence backfill.
 
 `once` tasks past grace are recorded `skipped_missed` and never fire.
 
@@ -448,7 +479,9 @@ below). Endpoints:
 - `GET    /ws/{ws}/scheduled-tasks/{id}` — detail (member).
 - `PATCH  /ws/{ws}/scheduled-tasks/{id}` — edit schedule/prompt/target (owner or admin).
 - `POST   /ws/{ws}/scheduled-tasks/{id}/pause` / `.../resume` (owner or admin).
-- `DELETE /ws/{ws}/scheduled-tasks/{id}` — soft delete (owner or admin).
+- `DELETE /ws/{ws}/scheduled-tasks/{id}` — soft delete (owner or admin); stamps
+  `deleted_at` only, so the poller's `deleted_at IS NULL` filter is what stops
+  future fires.
 - `GET    /ws/{ws}/scheduled-tasks/{id}/runs` — run history (member).
 
 Persistence goes through a `ScheduledTaskRepository(ScopedRepository)` so
