@@ -161,10 +161,11 @@ exclude_lines = [
 ]
 
 [tool.uv.sources]
-# da9d792 is cubepi main HEAD: adds Agent.cancel_steer / _MessageQueue.remove
-# (#120) for the steer-cancel feature, on top of turn-boundary steering drain
-# (#117) + the cancel-orphan-tool-results fix (#116).
-cubepi = { git = "https://github.com/cubeplexai/cubepi.git", rev = "da9d792" }
+# 9cb6817 is cubepi main HEAD: subagent runs now nest under their
+# execute_tool span (#122 — per-task active-run gate, invoke_agent parented at
+# the active tool span, JSONL sharded by trace_id) + span_id in trace view
+# (#121), on top of the steer-cancel feature (#120).
+cubepi = { git = "https://github.com/cubeplexai/cubepi.git", rev = "9cb6817" }
 
 [dependency-groups]
 dev = [
