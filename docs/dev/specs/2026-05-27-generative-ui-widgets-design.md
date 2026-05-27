@@ -64,8 +64,8 @@ model decides to visualize
    │
    ▼
 [new] <WidgetView>  sandboxed iframe (srcDoc = shell runtime)
-   │      parent → child: postMessage({type:'morph', html})  per frame
-   │      parent → child: postMessage({type:'finalize'})      on toolcall end
+   │      parent → child: postMessage({widgetId, seq, type:'morph', html})  per frame
+   │      parent → child: postMessage({widgetId, seq, type:'finalize'})      on toolcall end
    ▼
 [new] iframe shell runtime: morphdom diff + fade-in + run <script> on finalize
 ```
@@ -181,9 +181,10 @@ Each unit is bounded so it can be understood and tested independently.
 - **Boundary:** sits alongside the existing `write_file` / `subagent` /
   `save_artifact` branches; they don't interfere.
 
-**Key interface rule:** parent↔child exchange **structured data only**
-(`{type, html}`). The shell does its own morphdom. We never concatenate HTML
-into a JS string for injection — this is the security improvement over
+**Key interface rule:** parent↔child exchange **structured data only** — the
+canonical message shape is `{ widgetId, seq, type, html? }` (see the postMessage
+protocol above). The shell does its own morphdom. We never concatenate HTML into
+a JS string for injection — this is the security improvement over
 pi-generative-ui's `escapeJS(...)` `win.send(jsString)` approach.
 
 ## Data flow and lifecycle
@@ -200,13 +201,13 @@ toolcall_delta ×N
   → store: args_text += partial_json fragment
   → extractWidgetCode(args_text) → current HTML prefix
   → WidgetView receives new widgetCode prop
-  → debounce ~120ms → postMessage({type:'morph', html})
+  → debounce ~120ms → postMessage({widgetId, seq, type:'morph', html})
   → shell: morphdom diff #root, fade-in new nodes
 
 toolcall_end → SSE tool_call (full arguments)
   → store: tool_call_streaming converges to a tool_call block
   → WidgetView status='complete', widgetCode=final
-  → postMessage({type:'morph', html=final}) then postMessage({type:'finalize'})
+  → postMessage({widgetId, seq, type:'morph', html=final}) then postMessage({widgetId, seq, type:'finalize'})
   → shell: run <script> (Chart.js etc. execute only now)
 ```
 
