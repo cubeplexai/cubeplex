@@ -29,6 +29,7 @@ node_modules/
 .superpowers/
 settings.local.json
 .claude/scheduled_tasks.lock
+backend/.claude/
 
 
 # TEMP FILES
