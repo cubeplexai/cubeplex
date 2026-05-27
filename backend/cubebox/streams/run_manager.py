@@ -245,14 +245,14 @@ def cubepi_dict_to_agent_event(d: dict[str, Any], timestamp: str) -> AgentEvent 
     into a typed cubebox ``AgentEvent``.
 
     Returns ``None`` for dicts that should be silently dropped at this layer
-    (tool_call_delta — frontend only consumes complete tool_call; done — the
-    caller emits done with usage data; unknown types).
+    (done — the caller emits done with usage data; unknown types).
     """
     from cubebox.agents.schemas import (
         ErrorEvent,
         InjectedMessageEvent,
         ReasoningEvent,
         TextDeltaEvent,
+        ToolCallDeltaEvent,
         ToolCallEvent,
         ToolResultEvent,
         UsageEvent,
@@ -273,6 +273,16 @@ def cubepi_dict_to_agent_event(d: dict[str, Any], timestamp: str) -> AgentEvent 
         return ReasoningEvent(
             timestamp=timestamp,
             data={"content": d.get("delta", "")},
+        )
+    if t == "tool_call_delta":
+        return ToolCallDeltaEvent(
+            timestamp=timestamp,
+            data={
+                "tool_call_id": d.get("id"),
+                "name": d.get("name"),
+                "args_delta": d.get("delta", ""),
+                "index": d.get("index"),
+            },
         )
     if t == "tool_call":
         return ToolCallEvent(

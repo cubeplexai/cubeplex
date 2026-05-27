@@ -13,6 +13,7 @@ from cubebox.agents.schemas import (
     ErrorEvent,
     ReasoningEvent,
     TextDeltaEvent,
+    ToolCallDeltaEvent,
     ToolCallEvent,
     ToolResultEvent,
     UsageEvent,
@@ -126,10 +127,41 @@ def test_done_dict_returns_none() -> None:
     assert cubepi_dict_to_agent_event({"type": "done"}, TS) is None
 
 
-def test_tool_call_delta_dict_returns_none() -> None:
-    """``tool_call_delta`` dicts are dropped — the frontend consumes the
-    complete ``tool_call`` once toolcall_end arrives."""
-    assert cubepi_dict_to_agent_event({"type": "tool_call_delta", "delta": "{"}, TS) is None
+def test_tool_call_delta_dict_maps_to_tool_call_delta_event() -> None:
+    """``tool_call_delta`` carries the streaming arg chunk plus the identity
+    (index/id/name) the frontend needs to route it to the right card so the
+    file_write / subagent preview streams live instead of appearing only at
+    toolcall_end."""
+    evt = cubepi_dict_to_agent_event(
+        {
+            "type": "tool_call_delta",
+            "delta": '{"path": "a.txt"',
+            "index": 2,
+            "id": "tc_1",
+            "name": "file_write",
+        },
+        TS,
+    )
+    assert isinstance(evt, ToolCallDeltaEvent)
+    assert evt.data == {
+        "tool_call_id": "tc_1",
+        "name": "file_write",
+        "args_delta": '{"path": "a.txt"',
+        "index": 2,
+    }
+
+
+def test_tool_call_delta_dict_without_identity_is_tolerated() -> None:
+    """Mid-stream chunks may omit id/name (only the first chunk carries them);
+    the event still maps, with nulls the frontend backfills by index."""
+    evt = cubepi_dict_to_agent_event({"type": "tool_call_delta", "delta": ": 1}", "index": 2}, TS)
+    assert isinstance(evt, ToolCallDeltaEvent)
+    assert evt.data == {
+        "tool_call_id": None,
+        "name": None,
+        "args_delta": ": 1}",
+        "index": 2,
+    }
 
 
 def test_unknown_type_returns_none() -> None:

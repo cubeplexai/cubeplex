@@ -19,15 +19,21 @@ if __name__ == "__main__":
         # exclude as a whole-subtree skip when it's an existing absolute dir
         # (it checks `dir in path.parents`); a glob like ".venv/*" only matches
         # one level and misses .venv/lib64/.../x.py, so anchor to absolute paths.
+        #
+        # An absolute exclude that doesn't exist yet is fatal, not ignored:
+        # uvicorn falls back to `Path.cwd().glob(pattern)`, and pathlib refuses
+        # an absolute glob pattern (NotImplementedError on 3.13). cubepi-traces
+        # is gitignored and created lazily on the first agent run, so a fresh
+        # checkout / worktree would crash on `python main.py` before it exists.
+        # mkdir it up front so the existing-dir short-circuit always applies.
         backend_dir = Path(__file__).resolve().parent
+        excluded_dirs = [backend_dir / ".venv", backend_dir / "cubepi-traces"]
+        for d in excluded_dirs:
+            d.mkdir(parents=True, exist_ok=True)
         reload_kwargs = {
             "reload_dirs": [str(backend_dir)],
             "reload_includes": ["*.py", "config*.yaml", ".env"],
-            "reload_excludes": [
-                str(backend_dir / ".venv"),
-                str(backend_dir / "cubepi-traces"),
-                "*.py[cod]",
-            ],
+            "reload_excludes": [str(d) for d in excluded_dirs] + ["*.py[cod]"],
         }
 
     uvicorn.run(
