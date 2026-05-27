@@ -140,8 +140,10 @@ An `AgentDefinition` is the named, mutable head; each save publishes an immutabl
 `AgentDefinitionVersion`. This mirrors the existing `Skill` / `SkillVersion` split
 (`models/skill.py`) so we reuse a proven catalog/version pattern.
 
-A **version** carries the resolvable config (all fields are *references*, not copies of the
-underlying objects, so a renamed MCP connector or upgraded skill is followed by ref):
+A **version** carries the resolvable config. Most fields are *references* to underlying
+objects (a renamed MCP connector is followed by ref), **except** skill refs, which pin a
+concrete immutable `SkillVersion` so an admin's skill upgrade can't change a published agent's
+skill content (see `skill_refs` below):
 
 - `name` / `description` — identity; description doubles as the "when to use this agent"
   hint for invocation surfaces.
@@ -155,9 +157,18 @@ underlying objects, so a renamed MCP connector or upgraded skill is followed by 
   **tool order remains the fixed cache-stable order** for whatever subset is enabled.
 - `mcp_refs` — list of MCP connector install ids (scoped to the workspace/org). At run start
   these filter the four-layer effective-connector resolution to just the referenced set.
-- `skill_refs` — list of `OrgSkillInstall` ids the agent may load (the skills-list prompt
-  suffix and `load_skill` allowlist are built from this set instead of "all enabled in
-  workspace").
+- `skill_refs` — the skills the agent may load (the skills-list prompt suffix and
+  `load_skill` allowlist are built from this set instead of "all enabled in workspace").
+  Each ref pins a **concrete `SkillVersion`** (store `skill_version_id` + the resolved
+  `version` string), not just the `OrgSkillInstall` id. This matters because the live skills
+  loader resolves content by joining `SkillVersion.version == OrgSkillInstall.installed_version`
+  (`skills/service.py` L74–81, L107–113) — the install row's `installed_version` is mutable, so
+  pinning only the install id would let an admin's skill upgrade silently change a pinned
+  agent's skill instructions/tools mid-conversation. Pinning the `SkillVersion` makes the
+  snapshot's skill content immutable, matching the reproducibility + cache-stability goals. We
+  still keep the `OrgSkillInstall` id alongside, so the resolver can verify the skill is still
+  installed/visible in the workspace before binding the pinned version (see resolution note
+  below).
 - `sandbox_policy` — `none` | `default` | (future) named profile. Gates whether a
   `LazySandbox` is created and which workdir/limits apply.
 - `permission_scope` — execution posture: which tool calls auto-run vs require approval
@@ -180,7 +191,12 @@ resolved values into its existing parameters:
      or `resolve_default_provider_and_config()` when "workspace default."
    - MCP filter set ← `mcp_refs`, applied inside the existing
      `load_workspace_mcp_tools_for_cubepi` call.
-   - Skill set ← `skill_refs`, applied to `load_skill` + skills-list suffix.
+   - Skill set ← `skill_refs`, applied to `load_skill` + skills-list suffix. The resolver loads
+     each ref by its pinned `skill_version_id` directly (not via the
+     `installed_version` join the workspace path uses), so the bound skill content is the exact
+     version captured at publish time and cannot drift on a later install upgrade. It first
+     checks the paired `OrgSkillInstall` is still present/visible in the (org, workspace); a
+     missing/uninstalled ref is surfaced (hard-fail vs skip is an Open Question).
    - `sandbox_policy` → whether/how to build the sandbox.
    - `tool_policy` → which builtin/middleware tool groups to include (still in fixed order).
 3. `_run_cubepi_path` consumes `ResolvedAgentConfig` instead of reading workspace singletons.
@@ -265,7 +281,10 @@ dedicated repository (see Sharing & scope above).
 - **`agent_definition_mcp_refs`** (association; composite PK, no public_id — like
   `WorkspaceSkillBinding`): `(agent_definition_version_id, mcp_connector_install_id)`.
 - **`agent_definition_skill_refs`** (association; composite PK):
-  `(agent_definition_version_id, org_skill_install_id)`.
+  `(agent_definition_version_id, skill_version_id)`. Carries the pinned concrete skill version
+  so the snapshot is immutable. Also stores `org_skill_install_id` (the install the version was
+  selected through) so the resolver can confirm the skill is still installed/visible before
+  binding; the install row's mutable `installed_version` is **not** used for resolution here.
 - **Conversation pin** — add `agent_definition_id` + `agent_definition_version_id` (nullable)
   to `conversations`, recording the pinned target for the thread. Nullable ⇒ default
   workspace-persona behavior, so existing rows are unaffected.
@@ -279,10 +298,10 @@ Migration: `alembic revision --autogenerate` (no hand-edits), per `CLAUDE.md`.
 Ship the smallest thing that makes a managed agent real and gives #150/#152/#149 a target:
 
 1. **`AgentDefinition` + `AgentDefinitionVersion` (workspace-private only)** with
-   `name`, `description`, `instructions`, `model_ref`, `skill_refs`, `mcp_refs`,
-   `sandbox_policy` (`none` | `default`). **Defer** `tool_policy` granularity and
-   `permission_scope` to a fast-follow — v1 enables the standard tool set and current
-   approval behavior.
+   `name`, `description`, `instructions`, `model_ref`, `skill_refs` (each pinning a concrete
+   `skill_version_id`), `mcp_refs`, `sandbox_policy` (`none` | `default`). **Defer**
+   `tool_policy` granularity and `permission_scope` to a fast-follow — v1 enables the standard
+   tool set and current approval behavior.
 2. **`AgentResolver` + run-path wiring**: `start_run(agent_definition_id, version_id?)`
    resolves to `ResolvedAgentConfig` and threads it through `_run_cubepi_path`, replacing the
    workspace-singleton lookups for prompt/model/MCP/skills/sandbox. Absent id ⇒ today's path.
@@ -335,6 +354,12 @@ Per `CLAUDE.md`, E2E over mocks. Primary gates:
   conversation? If yes, is it a new cache epoch (new conversation semantics), or forbidden?
 - **`model_ref` resolution when the referenced model is unavailable** (org override removed,
   provider down). Fall back to workspace default, or hard-fail the run?
+- **Pinned skill version no longer installed.** A `skill_ref` pins a `skill_version_id`, but the
+  admin may later uninstall that skill or remove the version's stored artifact. Does the
+  resolver hard-fail the run, skip the missing skill (and warn), or fall back to the install's
+  current `installed_version` (which reintroduces drift)? Also: should publishing a new
+  agent version "re-pin" to each skill's latest installed version, or always require an
+  explicit version choice?
 - **Relationship to the workspace `AgentConfig` singleton.** Does the per-workspace persona
   become "the default managed agent," or stay a separate fallback? Long-term, do we migrate
   `AgentConfig` into an `AgentDefinition` row?
