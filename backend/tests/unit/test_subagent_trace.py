@@ -30,9 +30,34 @@ class _FakeTracer:
     def attach(self, agent: Any) -> Any:
         self.attached.append(agent)
 
-        def _detach() -> None:  # mirror cubepi Tracer.attach: sync, may return awaitable
+        def _detach() -> None:  # this fake's detach is sync (returns None)
             self.detached += 1
             return None
+
+        return _detach
+
+
+class _AwaitableDetachTracer:
+    """Fake whose ``detach()`` returns an awaitable — mirrors the real
+    cubepi ``Tracer.attach`` contract, where ``detach()`` runs sync cleanup
+    then returns the scheduled-flush ``asyncio.Task``. Exercises the
+    ``if res is not None: await res`` branch in the middleware's finally."""
+
+    def __init__(self) -> None:
+        self.attached: list[Any] = []
+        self.detached = 0
+        self.awaited = False
+
+    def attach(self, agent: Any) -> Any:
+        self.attached.append(agent)
+
+        def _detach() -> Any:
+            self.detached += 1
+
+            async def _flush() -> None:
+                self.awaited = True
+
+            return _flush()
 
         return _detach
 
@@ -90,6 +115,26 @@ async def test_subagent_attaches_and_detaches_tracer_on_success() -> None:
 
 
 @pytest.mark.asyncio
+async def test_subagent_awaits_awaitable_detach() -> None:
+    """When detach() returns an awaitable (the real Tracer schedules a flush
+    Task), the middleware awaits it in finally."""
+    tracer = _AwaitableDetachTracer()
+    provider = FauxProvider()
+    provider.set_responses([faux_assistant_message("subagent reply")])
+
+    mw = _make_mw(tracer, provider=provider)
+    [sub_tool] = mw.tools
+
+    result = await sub_tool.execute(
+        "tc-await", _args(sub_tool, "please reply"), signal=None, on_update=None
+    )
+
+    assert not result.is_error
+    assert tracer.detached == 1
+    assert tracer.awaited is True, "awaitable returned by detach() was not awaited"
+
+
+@pytest.mark.asyncio
 async def test_subagent_detaches_tracer_when_inner_run_fails() -> None:
     """Inner run raises a normal Exception: tool returns is_error, still detaches."""
     tracer = _FakeTracer()
@@ -139,13 +184,15 @@ async def test_subagent_detaches_tracer_when_inner_run_cancelled() -> None:
 def test_run_manager_passes_process_tracer_to_subagent_middleware() -> None:
     """The process Tracer read off ``app.state.tracer`` reaches the middleware.
 
-    Fully driving run_manager's construction site requires standing up the
-    whole run pipeline (provider resolution, tool collection, conversation
-    context), so per the task fallback we assert narrowly: a tracer read via
-    the same ``getattr(app.state, "tracer", None)`` pattern run_manager uses
-    flows through the ``tracer=`` kwarg into ``SubAgentMiddleware._tracer``.
-    This guards the kwarg name and storage; the literal run_manager line is
-    covered by inspection (see report).
+    Driving run_manager's real construction site is impractical because the
+    surrounding setup (provider resolution, tool collection, conversation
+    context) is heavy to stand up in a unit test — not because of the lazy
+    import (that re-resolves the module-level class and is patchable). So we
+    assert narrowly: a tracer read via the same
+    ``getattr(app.state, "tracer", None)`` pattern run_manager uses flows
+    through the ``tracer=`` kwarg into ``SubAgentMiddleware._tracer``. This
+    guards the kwarg name and storage; the literal run_manager line is covered
+    by inspection.
     """
     sentinel = object()
 
