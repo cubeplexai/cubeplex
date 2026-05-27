@@ -12,7 +12,7 @@
 
 **Read before touching:** `backend/docs/prompt-cache-discipline.md` (tool order + system-prompt injection are cache-sensitive), `backend/docs/agent-system-design.md` (tool/middleware assembly).
 
-**Worktree:** `/home/chris/cubebox/.worktrees/feat/generative-ui-widgets` (ports 8075/3075). `cat .worktree.env` first. Backend tests: `uv run pytest`. Frontend unit: `pnpm --filter web test`. E2E: `pnpm --filter web test:e2e` (or the repo's Playwright command).
+**Worktree:** `/home/chris/cubebox/.worktrees/feat/generative-ui-widgets` (ports 8075/3075). `cat .worktree.env` first. Backend tests: `uv run pytest`. Frontend unit: `pnpm --filter web test`. E2E: `cd frontend && pnpm test:e2e` (the `test:e2e` script lives in `frontend/package.json`; `packages/web/package.json` has no such script).
 
 ---
 
@@ -37,7 +37,8 @@
 **Tests (create):**
 - `backend/tests/tools/test_show_widget.py`
 - `frontend/packages/web/lib/__tests__/partialJson.test.ts`
-- `frontend/packages/web/__tests__/e2e/generative-ui-widgets.spec.ts`
+- `frontend/packages/web/__tests__/e2e/widget-shell.spec.ts` (shell protocol, Playwright)
+- `frontend/packages/web/components/chat/widget/__tests__/WidgetView.test.tsx` (vitest)
 
 ---
 
@@ -93,7 +94,8 @@ WIDGET_TOOL_DESCRIPTION = (
     "Render an interactive HTML widget inline in the conversation. Use for "
     "visual/explanatory answers: charts, diagrams, sliders, animations. "
     "widget_code is an HTML fragment (no <html>/<body>); it renders in a "
-    "sandboxed iframe with no network access and no localStorage."
+    "sandboxed iframe. It cannot fetch/XHR/WebSocket (no data fetching) and "
+    "cannot use localStorage, but it MAY load JS libraries from the allowed CDNs."
 )
 
 WIDGET_GUIDELINES = """\
@@ -106,8 +108,9 @@ When a visual or interactive explanation is clearly better than text, call
   `<!DOCTYPE>`, `<html>`, `<head>`, or `<body>`.
 - Order content for streaming: `<style>` (short) first, then visible HTML,
   then `<script>` last. Scripts run only after the widget finishes streaming.
-- No network requests (fetch/XHR/WebSocket are blocked). Embed all data
-  directly in the code.
+- No data fetching: fetch/XHR/WebSocket are blocked (CSP `connect-src 'none'`).
+  Embed all data directly in the code. (Loading JS libraries from the allowed
+  CDNs below IS permitted — that is `script-src`, not `connect-src`.)
 - No `localStorage`/`sessionStorage` (they throw). Use in-memory variables.
 - Use CSS variables for colors; support a dark background (#1a1a1a-ish).
   Two font weights max (400, 500). Avoid gradients, shadows, and blur.
@@ -414,10 +417,11 @@ body{margin:0;padding:1rem;font-family:system-ui,-apple-system,sans-serif;backgr
 <body><div id="root"></div>
 <script>
 (function(){
-  // WidgetView injects the real id by replacing the __WIDGET_ID__ token in the
-  // srcDoc at mount, so the shell knows its identity from the start (no
-  // learn-from-first-message handshake → no deadlock).
-  var WIDGET_ID = "__WIDGET_ID__";
+  // WidgetView replaces the placeholder below with the real id at mount, so the
+  // shell knows its identity from the start (no learn-from-first-message
+  // handshake -> no deadlock). The placeholder appears exactly ONCE in this
+  // whole srcDoc string (here), so a single string replace is unambiguous.
+  var WIDGET_ID = "%%WIDGET_ID%%";
   var lastSeq = -1;
   var finalized = false;
 
@@ -481,9 +485,11 @@ body{margin:0;padding:1rem;font-family:system-ui,-apple-system,sans-serif;backgr
 ```
 
 > The CSP `meta` is the first `<head>` child, before the inline `<style>`/`<script>`.
-> `__WIDGET_ID__` is a literal placeholder that `WidgetView` replaces with the
-> real id at mount (Task 5). `ready` fires only after morphdom loads, and the
-> parent sends nothing before `ready`, so no pre-ready buffering is needed.
+> `%%WIDGET_ID%%` is a literal placeholder appearing exactly once in the string
+> (in the `var WIDGET_ID` assignment, not in any comment), so `WidgetView`'s
+> single `.replace('%%WIDGET_ID%%', widgetId)` is unambiguous. `ready` fires only
+> after morphdom loads, and the parent sends nothing before `ready`, so no
+> pre-ready buffering is needed.
 
 - [ ] **Step 2: Type-check**
 
@@ -542,8 +548,9 @@ export function WidgetView({
   const latestRef = useRef('')
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  // Inject the real id into the shell (stable per widgetId).
-  const srcDoc = useMemo(() => WIDGET_SHELL_HTML.replace('__WIDGET_ID__', widgetId), [widgetId])
+  // Inject the real id into the shell (stable per widgetId). The placeholder
+  // appears exactly once in WIDGET_SHELL_HTML, so a single replace is safe.
+  const srcDoc = useMemo(() => WIDGET_SHELL_HTML.replace('%%WIDGET_ID%%', widgetId), [widgetId])
 
   const tooBig = new Blob([widgetCode]).size > MAX_CODE_BYTES
   latestRef.current = widgetCode
@@ -652,15 +659,22 @@ generic `write_file` handling, add:
 
 ```tsx
   if (block.type === 'tool_call_streaming' && block.name === 'show_widget') {
+    const title = extractJsonStringPrefix(block.args_text, 'title') || undefined
     return (
       <WidgetView
         widgetId={block.tool_call_id ?? `idx-${block.index}`}
         widgetCode={extractWidgetCode(block.args_text)}
         status="streaming"
+        title={title}
       />
     )
   }
 ```
+
+> `width`/`height` are integers that may not have streamed yet mid-call; they
+> are left `undefined` during streaming and applied when the completed branch
+> re-renders the same widget (same `widgetId` → same iframe, no remount). Only
+> `title` (a leading string field) is cheap to extract live.
 
 - [ ] **Step 2: Exclude `show_widget` from `groupBlocks` (REQUIRED — the real fix)**
 
@@ -713,7 +727,7 @@ and renders as a widget instead of collapsing into the tool-call list.
 
 ```tsx
 import { WidgetView } from '@/components/chat/widget/WidgetView'
-import { extractWidgetCode } from '@/lib/partialJson'
+import { extractWidgetCode, extractJsonStringPrefix } from '@/lib/partialJson'
 ```
 
 - [ ] **Step 5: Type-check + existing component tests**
@@ -733,29 +747,43 @@ git commit -m "feat(widget): mount WidgetView for streaming + completed show_wid
 
 ## Task 7: Subagent scope — exclude `show_widget` from subagent tools (v1)
 
-**Context:** `SubAgentMiddleware` shares the same `_builtin_tools` list
-(`run_manager.py:1292-1300`), so registering `show_widget` in builtins makes it
-callable from inside subagents too. Rendering widgets inside `SubAgentCard.tsx`
+**Context:** `SubAgentMiddleware` is constructed with
+`shared_tools=_sandbox_tools + _artifact_tools + _builtin_tools`
+(`run_manager.py:1299`), so registering `show_widget` in `_builtin_tools` makes
+it callable from inside subagents too. Rendering widgets inside `SubAgentCard.tsx`
 (which has its own block-rendering path) is extra surface we don't want in v1.
 
 **v1 decision:** keep widgets a **top-level assistant feature only**. The
-cleanest way is to **not expose `show_widget` to subagents**, so subagent output
-can never contain a widget block to render.
+cleanest way is to **not pass `show_widget` to subagents** via `shared_tools`, so
+subagent output can never contain a widget block to render. (The top-level run
+still includes it from `_builtin_tools`.)
 
 **Files:**
-- Modify: `backend/cubebox/streams/run_manager.py` (subagent tool assembly, ~`:1292-1303`)
+- Modify: `backend/cubebox/streams/run_manager.py` (SubAgentMiddleware construction, `:1292-1300`)
 
-- [ ] **Step 1: Exclude `show_widget` from the subagent tool set**
+- [ ] **Step 1: Exclude `show_widget` from the subagent `shared_tools`**
 
-Where `_subagent_tools` / the SubAgentMiddleware tool list is built from the
-shared builtins (~`:1292-1303`), filter it out:
+At the `SubAgentMiddleware(...)` construction (`:1299`), filter the
+`shared_tools` argument:
 
 ```python
-        _subagent_tools = [t for t in _subagent_tools if t.name != "show_widget"]
+            subagent_mw = SubAgentMiddleware(
+                subagent_map={},
+                default_provider=provider,
+                default_model_id=model_id,
+                default_provider_name=provider_name,
+                shared_tools=[
+                    t
+                    for t in (_sandbox_tools + _artifact_tools + _builtin_tools)
+                    if t.name != "show_widget"
+                ],
+                inherited_middleware=_cost_mw_for_inherit,
+            )
 ```
 
-> Verify the exact variable that feeds `SubAgentMiddleware` and filter that one.
-> The goal: the top-level run includes `show_widget`; subagent runs do not.
+> This is the list actually handed to subagents. (`SubAgentMiddleware` already
+> drops self-referential tools internally, but `show_widget` isn't one of those,
+> so we exclude it here.)
 
 - [ ] **Step 2: Add a backend test**
 
@@ -783,104 +811,157 @@ git commit -m "feat(widget): keep show_widget out of subagent tool set (v1 top-l
 
 ---
 
-## Task 8: E2E — streaming, latest-wins, reload, fallback, multi, security
+## Task 8: Deterministic widget tests (shell + WidgetView)
+
+**Why not a model-driven E2E:** the frontend E2E harness drives a **real model**
+(`streaming.spec.ts` registers a user and waits up to 50s for a real haiku) — it
+does not use the faux provider. A real model will not reliably emit a
+`show_widget` call, so a model-driven assertion would be flaky. Instead we test
+the widget machinery directly and deterministically, and leave the true
+model→widget path to manual verification (Task 9).
+
+Two layers:
+- **8A — shell** (Playwright via `setContent` + a real `<iframe srcdoc>`): drives
+  the postMessage protocol against a real browser/morphdom. Covers ready,
+  morph, latest-wins, finalize-once, opaque-origin, `connect-src 'none'`.
+- **8B — WidgetView** (vitest + jsdom, the repo's component-test setup): the
+  parent-side logic — ready-timeout fallback, size-cap fallback, posts-after-ready,
+  forged-source rejection.
 
 **Files:**
-- Create: `frontend/packages/web/__tests__/e2e/generative-ui-widgets.spec.ts`
+- Create: `frontend/packages/web/__tests__/e2e/widget-shell.spec.ts`
+- Create: `frontend/packages/web/components/chat/widget/__tests__/WidgetView.test.tsx`
 
-> Verified repo layout: frontend E2E specs live in
-> `frontend/packages/web/__tests__/e2e/` (e.g. `admin-settings.spec.ts`), and the
-> Playwright runner is `test:e2e` in **`frontend/package.json`** (`playwright test`),
-> run as `cd frontend && pnpm test:e2e`. There is no `test:e2e` in
-> `packages/web/package.json` (that only has `test` = vitest).
-
-Uses the faux provider (`cubepi/providers/faux.py`) to script a `show_widget`
-tool call streamed across frames. Wire the faux script via the existing E2E
-config switch (match how a sibling spec in `__tests__/e2e/` selects faux and
-sends a prompt — reuse those exact helpers; do not invent harness APIs).
-
-- [ ] **Step 1: Write the E2E spec**
+- [ ] **Step 1: Write the shell Playwright spec (8A)**
 
 ```typescript
-// frontend/packages/web/__tests__/e2e/generative-ui-widgets.spec.ts
-import { test, expect } from '@playwright/test'
+// frontend/packages/web/__tests__/e2e/widget-shell.spec.ts
+import { test, expect, type Page } from '@playwright/test'
+import { WIDGET_SHELL_HTML } from '../../components/chat/widget/widgetShell'
 
-// Helper: the faux script emits a show_widget tool call whose widget_code is:
-//   <style>...</style><p id="w">hi</p><script>window.__c=(window.__c||0)+1;
-//     document.getElementById('w').textContent='done'+window.__c;</script>
-// streamed across several deltas. (See faux fixture wiring.)
+const WIDGET_ID = 'w-test'
+const SHELL = WIDGET_SHELL_HTML.replace('%%WIDGET_ID%%', WIDGET_ID)
 
-test('streams a widget and finalizes scripts once', async ({ page }) => {
-  await page.goto('/')             // adjust to the conversation URL the suite uses
-  // ...send the prompt that triggers the faux show_widget script...
-  const frame = page.frameLocator('iframe[title]')
-  // sandbox attribute is hardened
-  const sandbox = await page.locator('iframe[title]').getAttribute('sandbox')
-  expect(sandbox).toBe('allow-scripts')
-  // mid-stream partial node appears
-  await expect(frame.locator('#w')).toBeVisible()
-  // after finalize the script ran exactly once
-  await expect(frame.locator('#w')).toHaveText('done1')
+async function mountShell(page: Page) {
+  await page.setContent('<div id="host"></div>')
+  await page.evaluate((srcdoc) => {
+    ;(window as unknown as { __ready: boolean }).__ready = false
+    window.addEventListener('message', (e) => {
+      if ((e.data || {}).type === 'ready') (window as unknown as { __ready: boolean }).__ready = true
+    })
+    const f = document.createElement('iframe')
+    f.id = 'wf'
+    f.setAttribute('sandbox', 'allow-scripts')
+    f.srcdoc = srcdoc
+    document.getElementById('host')!.appendChild(f)
+  }, SHELL)
+  await page.waitForFunction(() => (window as unknown as { __ready: boolean }).__ready === true, {
+    timeout: 15_000,
+  })
+}
+
+async function send(page: Page, msg: Record<string, unknown>) {
+  await page.evaluate((m) => {
+    ;(document.getElementById('wf') as HTMLIFrameElement).contentWindow!.postMessage(m, '*')
+  }, msg)
+}
+
+test('morph applies, then finalize runs scripts exactly once', async ({ page }) => {
+  await mountShell(page)
+  const frame = page.frameLocator('#wf')
+  await send(page, {
+    widgetId: WIDGET_ID, seq: 1, type: 'morph',
+    html: '<p id="w">hi</p><script>window.__c=(window.__c||0)+1;document.getElementById("w").textContent="done"+window.__c;</script>',
+  })
+  await expect(frame.locator('#w')).toHaveText('hi')         // script not run yet
+  await send(page, { widgetId: WIDGET_ID, seq: 2, type: 'finalize' })
+  await expect(frame.locator('#w')).toHaveText('done1')      // ran once
 })
 
-test('reload renders finished widget without streaming', async ({ page }) => {
-  // ...after a completed widget exists, reload...
-  await page.reload()
-  const frame = page.frameLocator('iframe[title]')
-  await expect(frame.locator('#w')).toHaveText('done1')
+test('latest-wins: a stale lower-seq morph is ignored', async ({ page }) => {
+  await mountShell(page)
+  const frame = page.frameLocator('#wf')
+  await send(page, { widgetId: WIDGET_ID, seq: 5, type: 'morph', html: '<p id="w">new</p>' })
+  await expect(frame.locator('#w')).toHaveText('new')
+  await send(page, { widgetId: WIDGET_ID, seq: 2, type: 'morph', html: '<p id="w">stale</p>' })
+  await expect(frame.locator('#w')).toHaveText('new')        // unchanged
 })
 
-test('latest-wins: a late lower-seq morph does not regress', async ({ page }) => {
-  // Drive WidgetView with a complete widget, then inject a stale morph via
-  // page.evaluate(postMessage with seq=0); assert content unchanged.
-})
-
-test('readiness timeout falls back to source block', async ({ page }) => {
-  // Block the morphdom CDN (route.abort) so ready never fires; assert the
-  // <details> source fallback appears within ~6s, not a blank iframe body.
-})
-
-test('two widgets render in independent iframes', async ({ page }) => {
-  // faux emits two show_widget calls; assert two iframes, each with its content.
-})
-
-test('widget cannot reach parent or network', async ({ page }) => {
-  const frame = page.frameLocator('iframe[title]')
-  // inside the widget, reading parent.document throws (opaque origin);
-  // fetch() is blocked by connect-src 'none'. Assert via a widget that posts
-  // its probe result, or via console/network assertions.
-})
-
-test('parent ignores a forged-source message', async ({ page }) => {
-  // From the page (not the iframe), postMessage a {widgetId, type:'resize',
-  // height: 9999} directly to window. Because WidgetView checks
-  // e.source === iframe.contentWindow, the forged message (source = top window)
-  // must be ignored — assert the iframe height does NOT jump to 9999.
-})
-
-// Subagent scope (Task 7): a subagent prompt that would otherwise trigger a
-// widget produces NO iframe, since show_widget is excluded from subagent tools.
-test('subagents do not render widgets', async ({ page }) => {
-  // drive a faux subagent run that would call show_widget; assert no iframe[title].
+test('widget cannot reach parent (opaque origin) nor fetch (connect-src none)', async ({ page }) => {
+  await mountShell(page)
+  const frame = page.frameLocator('#wf')
+  await send(page, {
+    widgetId: WIDGET_ID, seq: 1, type: 'morph',
+    html: `<p id="probe"></p><script>
+      var r='';
+      try { void parent.document; r+='PARENT_OK'; } catch(e){ r+='PARENT_BLOCKED'; }
+      fetch('https://example.com').then(function(){document.getElementById('probe').textContent=r+' FETCH_OK';})
+        .catch(function(){document.getElementById('probe').textContent=r+' FETCH_BLOCKED';});
+    </script>`,
+  })
+  await send(page, { widgetId: WIDGET_ID, seq: 2, type: 'finalize' })
+  await expect(frame.locator('#probe')).toHaveText('PARENT_BLOCKED FETCH_BLOCKED')
 })
 ```
 
-> The exact navigation/prompt-send steps and faux wiring follow the patterns in
-> a sibling spec in `__tests__/e2e/`. Fill those in from that spec; do not
-> invent new harness APIs.
+> 8A loads morphdom from the real CDN (same as production). If CI has no network,
+> mark this spec to run only where outbound HTTPS to the CDN allowlist is
+> available; the CDN-failure path itself is covered in 8B by a timeout.
 
-- [ ] **Step 2: Run the E2E on worktree ports**
+- [ ] **Step 2: Write the WidgetView vitest spec (8B)**
 
-Run: `cd frontend && pnpm test:e2e generative-ui-widgets` (the `test:e2e` script
-is in `frontend/package.json`). Ensure backend (8075) + frontend (3075) are up
-via the worktree env (`cat .worktree.env`).
-Expected: all specs PASS.
+```tsx
+// frontend/packages/web/components/chat/widget/__tests__/WidgetView.test.tsx
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { render, screen, fireEvent, act } from '@testing-library/react'
+import { WidgetView } from '../WidgetView'
 
-- [ ] **Step 3: Commit**
+describe('WidgetView', () => {
+  beforeEach(() => vi.useFakeTimers())
+  afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks() })
+
+  it('falls back to a source block when widget_code exceeds the size cap', () => {
+    const big = 'x'.repeat(256 * 1024 + 1)
+    render(<WidgetView widgetId="a" widgetCode={big} status="complete" />)
+    expect(screen.getByText(/too large/i)).toBeInTheDocument()
+  })
+
+  it('falls back when no ready arrives before the timeout', () => {
+    render(<WidgetView widgetId="a" widgetCode="<p>x</p>" status="complete" />)
+    act(() => { vi.advanceTimersByTime(5001) })
+    expect(screen.getByText(/failed to render/i)).toBeInTheDocument()
+  })
+
+  it('posts a morph only after a ready from the iframe', () => {
+    const { container } = render(<WidgetView widgetId="a" widgetCode="<p>x</p>" status="complete" />)
+    const iframe = container.querySelector('iframe') as HTMLIFrameElement
+    const post = vi.spyOn(iframe.contentWindow as Window, 'postMessage')
+    // forged source (window, not the iframe) → ignored
+    act(() => { window.dispatchEvent(new MessageEvent('message', { data: { widgetId: 'a', type: 'ready' }, source: window })) })
+    expect(post).not.toHaveBeenCalled()
+    // real ready (source === iframe.contentWindow) → morph is sent
+    act(() => { window.dispatchEvent(new MessageEvent('message', { data: { widgetId: 'a', type: 'ready' }, source: iframe.contentWindow })) })
+    expect(post).toHaveBeenCalledWith(expect.objectContaining({ type: 'morph' }), '*')
+  })
+})
+```
+
+> `@testing-library/react` is already used by the repo's component tests; match
+> the existing test setup (jsdom env). jsdom does not execute the iframe's inline
+> scripts, which is fine — 8B verifies only WidgetView's parent-side behavior;
+> the in-iframe behavior is 8A's job.
+
+- [ ] **Step 3: Run both layers**
+
+Run: `pnpm --filter web test WidgetView`
+Run: `cd frontend && pnpm test:e2e widget-shell`  (backend not required — shell is self-contained)
+Expected: all PASS.
+
+- [ ] **Step 4: Commit**
 
 ```bash
-git add frontend/packages/web/__tests__/e2e/generative-ui-widgets.spec.ts
-git commit -m "test(widget): E2E for streaming, latest-wins, reload, fallback, security, subagent-scope"
+git add frontend/packages/web/__tests__/e2e/widget-shell.spec.ts frontend/packages/web/components/chat/widget/__tests__/WidgetView.test.tsx
+git commit -m "test(widget): deterministic shell (playwright) + WidgetView (vitest) tests"
 ```
 
 ---
@@ -891,7 +972,10 @@ git commit -m "test(widget): E2E for streaming, latest-wins, reload, fallback, s
   browser (bind 0.0.0.0; report IP:port — user is remote), trigger a real
   `show_widget` (e.g. "show me how compound interest works"). Confirm: it
   streams in, morphs smoothly, scripts run once, dark theme reads well, resize
-  fits. Check both light and dark app themes.
+  fits. Check both light and dark app themes. **Then reload the page** and
+  confirm the completed widget re-renders from message history (one-shot, no
+  streaming animation) — this is the reload path (deterministic E2E can't cover
+  it because it needs a real model-produced widget in history).
 - [ ] **Step 2:** Run changed-module tests:
   - `uv run pytest tests/tools/test_show_widget.py -v`
   - `pnpm --filter web test partialJson writeFilePreview`
@@ -903,12 +987,15 @@ git commit -m "test(widget): E2E for streaming, latest-wins, reload, fallback, s
 ## Self-Review
 
 - **Spec coverage:** tool (T1) + registration/prompt-injection-in-`_execute_run`
-  (T2) + extract reuse (T3) + shell with `__WIDGET_ID__` injection (T4) +
+  (T2) + extract reuse (T3) + shell with `%%WIDGET_ID%%` injection (T4) +
   WidgetView with id-injected srcDoc, seq/debounce/ready-timeout/fallback/limits,
   height applied (T5) + mount with `groupBlocks` exclusion + completed branch (T6)
-  + subagent exclusion (T7) + E2E incl. latest-wins/reload/fallback/multi/security/
-  forged-source/subagent-scope (T8) + manual + theme check (T9).
-  Interrupted-widget non-persistence is inherited behavior (no task needed).
+  + subagent exclusion via `shared_tools` (T7) + deterministic tests: shell
+  morph/latest-wins/finalize-once/opaque-origin/connect-src (8A) and WidgetView
+  size-cap/ready-timeout/forged-source/posts-after-ready (8B) + manual model→widget
+  + reload + theme check (T9). Multi-widget isolation is structural (one
+  `WidgetView`/iframe per `tool_call_streaming` block, keyed by `index`) — no
+  dedicated test needed. Interrupted-widget non-persistence is inherited behavior.
 - **Verified against real code:** cubepi imports (`cubepi.agent.types` /
   `cubepi.providers.base`), builtin registration order (`run_manager.py:977-996`),
   prompt site (`_execute_run` `:1760-1807`), `groupBlocks` name-exclusion
