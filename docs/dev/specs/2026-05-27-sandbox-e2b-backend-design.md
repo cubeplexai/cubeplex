@@ -134,8 +134,8 @@ Capability mapping against the cubebox `Sandbox` interface:
 | `set_run_env(env)` | no run-level env store; pass `envs=` per `commands.run` | Driver holds `_run_env` and merges per call (mirror OpenSandbox). |
 | `close()` / kill | `sandbox.kill()` (also `Sandbox.kill(sandbox_id)`) | Fit. `close()` stays a no-op; cleanup task calls kill, as today. |
 | Lifetime / TTL | `sandbox.set_timeout(seconds)` | e2b enforces its own max lifetime; cubebox TTL must stay **≤** the e2b ceiling, and `touch` should call `set_timeout` to extend. |
-| Port exposure (browser live view, port 8080) | `host = sandbox.get_host(8080)` → `https://{host}` | Fit, but **e2b URLs are public by default**. Restrict via `allow_public_traffic=False` + `e2b-traffic-access-token` header (`sandbox.traffic_access_token`). Maps to `BrowserEndpoint(url, headers)` — non-empty headers means the frontend needs the same-origin injecting proxy the interface already anticipates. |
-| Network egress rules (#144) | `allow_internet_access` bool at create; fine-grained `allow_out` / `deny_out` (IP/CIDR + `*.domain` wildcards); `update_network()` on a running sandbox; per-host request transforms (private beta) | Strong fit for #144 domain allowlists. **Differs** from OpenSandbox's `network_policy` + egress-exchange model — see Capability gaps. |
+| Port exposure (browser live view, port 8080) | `host = sandbox.get_host(8080)` → `https://{host}` | Fit, but **e2b URLs are public by default**. Restrict via the `network` create option — `Sandbox.create(network={"allow_public_traffic": False})`, **not** a top-level kwarg — then send the `e2b-traffic-access-token` header (`sandbox.traffic_access_token`) on every request. Maps to `BrowserEndpoint(url, headers)` — non-empty headers means the frontend needs the same-origin injecting proxy the interface already anticipates. |
+| Network egress rules (#144) | All egress/public-traffic policy lives under the `network` create option: `network={"allow_internet_access": bool, "allow_out": [...], "deny_out": [...], "allow_public_traffic": bool}` (IP/CIDR + `*.domain` wildcards). `update_network()` mutates it on a running sandbox; per-host request transforms are private beta. | Strong fit for #144 domain allowlists. **Differs** from OpenSandbox's `network_policy` + egress-exchange model — see Capability gaps. |
 | Pause / resume (#145) | `sandbox.beta_pause()`; resume by `Sandbox.connect()` (auto-resumes); `beta_create(auto_pause=...)` for idle auto-suspend | Beta. Preserves filesystem **and** memory. Known bug: repeated pause/resume can drop later file changes (e2b-dev/E2B #884). Treat as best-effort for #145. |
 | Custom image | e2b "templates" built from a Dockerfile via the `e2b template build` CLI, referenced by template name/id at create | **Structurally different** from OpenSandbox image refs. Browser/Neko stack + `start-browser.sh` must be baked into a custom e2b template, or the browser live view is unavailable on e2b. |
 | Auth | `api_key` (env `E2B_API_KEY` or `create(api_key=...)`) | Single API key per e2b account. Store in the credential vault. |
@@ -180,9 +180,14 @@ refs, cleanup).
 ### 2. e2b backend mapping
 
 - `E2BProvider(SandboxProvider)` — wraps the e2b SDK; `create` →
-  `Sandbox.create(template=image, timeout=, envs=, allow_internet_access=,
-  allow_public_traffic=False)`; `connect` → `Sandbox.connect(id)`; `kill` →
-  `Sandbox.kill(id)`; `set_lifetime` → `sandbox.set_timeout`.
+  `Sandbox.create(template=image, timeout=, envs=, network=...)`. The
+  public-traffic and egress policy go **inside the `network` option**, not as
+  top-level create kwargs: `network={"allow_public_traffic": False,
+  "allow_internet_access": ..., "allow_out": [...]}`. (A top-level
+  `allow_public_traffic=` would raise an unexpected-argument error or be
+  silently dropped, leaving live-view URLs public — see References.) `connect`
+  → `Sandbox.connect(id)`; `kill` → `Sandbox.kill(id)`; `set_lifetime` →
+  `sandbox.set_timeout`.
 - `E2BSandbox(Sandbox)` — wraps an e2b sandbox handle; `execute` →
   `commands.run`; `upload`/`download` → `files.write`/`files.read`;
   `set_run_env` merges per call; `get_browser_endpoint` → `get_host(8080)` +
@@ -192,7 +197,9 @@ refs, cleanup).
 
 - New config key `sandbox.provider: opensandbox | e2b` (default `opensandbox`).
   Provider-specific settings live under `sandbox.opensandbox.*` and
-  `sandbox.e2b.*` (template, timeout ceiling, allow_public_traffic). Existing
+  `sandbox.e2b.*` (template, timeout ceiling, `allow_public_traffic` — which the
+  provider maps into the SDK's `network` option, never a top-level kwarg).
+  Existing
   flat keys that are truly cross-provider (`ttl`, `touch_interval`, `workdir`,
   `cleanup_interval`) stay at `sandbox.*`.
 - A `build_sandbox_provider(config) -> SandboxProvider` factory reads
@@ -225,10 +232,13 @@ production path is the vault.
   `OpenSandboxProvider` keeps PVC support; `E2BProvider` ignores `volumes`.
   Persistence on e2b comes from pause/resume + reconnect (#145), not a mount.
 - **Network egress (#144).** OpenSandbox uses a `network_policy` set at create
-  + the egress-exchange placeholder model. e2b uses `allow_out`/`deny_out` +
-  `update_network()`. #144's neutral "domain allowlist / egress rules" must map
-  to *both*; the neutral `network` argument carries the allowlist, and each
-  provider translates. e2b's per-host request transforms (header injection) are
+  + the egress-exchange placeholder model. e2b puts everything under the
+  `network` create option (`allow_internet_access` / `allow_out` / `deny_out` /
+  `allow_public_traffic`) plus `update_network()` on a running sandbox. #144's
+  neutral "domain allowlist / egress rules" must map to *both*; the neutral
+  `network` argument carries the allowlist, and each provider translates it into
+  its own shape (OpenSandbox `network_policy`, e2b `network` option). e2b's
+  per-host request transforms (header injection) are
   private beta — the egress-exchange secret-swap model is **not** portable to
   e2b in v1; e2b runs without the exchange (env injected directly), which is
   acceptable because e2b is a trusted hosted service.
@@ -302,6 +312,11 @@ a real API key and billing — it has no local test mode. So:
 6. **Self-hosted vs cloud e2b.** Target e2b cloud only, or also support
    self-hosted e2b (`domain`/base-URL override)? Affects whether `sandbox.e2b`
    needs a base-URL key.
+7. **Exact `network` option type.** Docs show `network={"allow_public_traffic":
+   False, ...}` as a dict, but newer SDK versions may expose a typed config
+   object instead. Pin the e2b SDK version and confirm the precise field shape
+   (dict vs dataclass) and the public-URL header name (`e2b-traffic-access-token`)
+   against that version before implementing `E2BProvider.create`.
 
 ## References
 
@@ -317,7 +332,9 @@ a real API key and billing — it has no local test mode. So:
   - Sandbox lifecycle / create / set_timeout / kill — https://e2b.dev/docs/sandbox
   - Commands — https://e2b.dev/docs/commands
   - Filesystem — https://e2b.dev/docs/filesystem
-  - Internet access / egress rules / update_network — https://e2b.dev/docs/sandbox/internet-access
+  - Internet access / egress rules / public-URL `network` option
+    (`network={"allow_public_traffic": False, ...}`, not a top-level create
+    kwarg) / update_network — https://e2b.dev/docs/sandbox/internet-access
   - Persistence (pause/resume, beta) — https://e2b.dev/docs/sandbox/persistence
   - Python SDK reference (AsyncSandbox) — https://e2b.dev/docs/sdk-reference/python-sdk/v2.0.1/sandbox_async
   - get_host / port exposure / public URLs — https://e2b.dev/docs/sdk-reference/js-sdk/v1.13.1/sandbox
