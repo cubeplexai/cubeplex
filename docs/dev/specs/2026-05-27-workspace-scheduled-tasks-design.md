@@ -358,16 +358,28 @@ dropped. The reaper below is the bound on retries, not the recovery mechanism.
 
 #### Missed-run policy (v1)
 
-When the poller claims a row whose `next_fire_at` is in the past:
+When the poller claims a row whose `next_fire_at` is in the past, v1 policy is
+**run-latest-once**: fire at most one run — the most recent occurrence that is
+still due — and skip everything older. Concretely, from the claimed
+`next_fire_at`, walk the schedule forward to find the *latest* scheduled time
+`<= now()` (the last occurrence the task would have fired had the poller never
+slept); call it `latest_due`.
 
-- If `now() - scheduled_for <= misfire_grace` (default 5 min, configurable):
-  fire normally.
-- If `now() - scheduled_for > misfire_grace`: this occurrence was missed (system
-  down / paused-then-resumed across the boundary). v1 policy is
-  **run-latest-once**: record `skipped_missed` for the stale occurrence, fast-
-  forward `next_fire_at` to the *next* future occurrence, and fire at most the
-  single most-recent due occurrence if it is within grace. No backfill of the
-  full missed series. This is recorded in history so it is observable.
+- If `now() - latest_due <= misfire_grace` (default 5 min, configurable):
+  record `skipped_missed` for every occurrence strictly before `latest_due`,
+  fire `latest_due`, then advance `next_fire_at` to the next occurrence after
+  `latest_due`.
+- If `now() - latest_due > misfire_grace`: even the latest due occurrence is too
+  stale to be useful (e.g. the next fire is already imminent), so record
+  `skipped_missed` for it and the older ones, fire nothing, and advance
+  `next_fire_at` to the next future occurrence.
+
+The catch-up step must compute `latest_due` *before* deciding to fast-forward —
+the bug to avoid is treating the *first* stale occurrence (`08:00` for an hourly
+task the poller wakes at `10:02`) as the grace test and skipping straight to a
+future slot, dropping the `10:00` occurrence that is actually within grace and
+should fire. No backfill of the full missed series; only the single latest due
+occurrence fires. Every skip is recorded in history so it is observable.
 
 `once` tasks past grace are recorded `skipped_missed` and never fire.
 
@@ -427,15 +439,17 @@ to run and with what prompt/identity" differs.
 
 New router `ws_scheduled_tasks.py` under
 `backend/cubebox/api/routes/v1/`, prefix `/ws/{workspace_id}/scheduled-tasks`,
-guarded by `require_member` — mirrors the existing `ws_*` routers. Endpoints:
+guarded by `require_member` — mirrors the existing `ws_*` routers. Reads need
+membership; mutations additionally need owner-or-admin (see Identity / permission
+below). Endpoints:
 
-- `POST   /ws/{ws}/scheduled-tasks` — create.
-- `GET    /ws/{ws}/scheduled-tasks` — list.
-- `GET    /ws/{ws}/scheduled-tasks/{id}` — detail.
-- `PATCH  /ws/{ws}/scheduled-tasks/{id}` — edit schedule/prompt/target.
-- `POST   /ws/{ws}/scheduled-tasks/{id}/pause` / `.../resume`.
-- `DELETE /ws/{ws}/scheduled-tasks/{id}` — soft delete.
-- `GET    /ws/{ws}/scheduled-tasks/{id}/runs` — run history.
+- `POST   /ws/{ws}/scheduled-tasks` — create (member).
+- `GET    /ws/{ws}/scheduled-tasks` — list (member).
+- `GET    /ws/{ws}/scheduled-tasks/{id}` — detail (member).
+- `PATCH  /ws/{ws}/scheduled-tasks/{id}` — edit schedule/prompt/target (owner or admin).
+- `POST   /ws/{ws}/scheduled-tasks/{id}/pause` / `.../resume` (owner or admin).
+- `DELETE /ws/{ws}/scheduled-tasks/{id}` — soft delete (owner or admin).
+- `GET    /ws/{ws}/scheduled-tasks/{id}/runs` — run history (member).
 
 Persistence goes through a `ScheduledTaskRepository(ScopedRepository)` so
 `(org_id, workspace_id)` scoping is structural, not bolted-on ACL. No
@@ -466,11 +480,21 @@ list / editor / run-history modules.
   (captured from `RequestContext` at create time). All run machinery
   (tools, MCP grants, memory, cost) keys off `RunContext(user_id, org_id,
   workspace_id)`, so the run sees exactly what that user would see interactively.
-- RBAC: creating/editing a scheduled task requires workspace membership
-  (`require_member`); v1 does not add a separate finer permission. If the owner
-  later loses membership, the poller must skip the task (record `failed` /
-  auto-pause) rather than run as a removed user — checked at fire time against
-  current membership.
+- RBAC: *creating* a scheduled task requires workspace membership
+  (`require_member`); the creator becomes `owner_user_id`. *Mutating* an existing
+  task — edit (schedule/prompt/target), pause/resume, delete — requires being
+  the task's owner **or** a workspace admin. List/detail/run-history reads stay
+  at plain membership. The reason mutation is owner-or-admin and not any member:
+  a scheduled run executes as `owner_user_id` and inherits that user's tools, MCP
+  grants, memory, and sandbox, so letting any member rewrite another member's
+  prompt or target would let them run arbitrary instructions under the owner's
+  identity. The check lives in the route handler (membership + ownership /
+  admin-role) and is enforced again at the repository layer through the
+  `(org_id, workspace_id)` scope; v1 has no ownership-reassignment flow, so an
+  admin can pause/delete a task but not retarget its run identity to themselves.
+- If the owner later loses membership, the poller must skip the task (record
+  `failed` / auto-pause) rather than run as a removed user — checked at fire time
+  against current membership.
 - Sandbox ownership (#144): the existing model is one running sandbox per
   `(user_id, workspace_id)` (`user_sandbox.py`). A scheduled run reuses that
   user's workspace sandbox, same as an interactive run for that user. Two
@@ -484,7 +508,8 @@ list / editor / run-history modules.
 In: the data model, the poller with `SKIP LOCKED` claim + occurrence-idempotency
 key, the three schedule kinds, fixed/new-each-run targets, run-latest-once
 missed-run policy, run history, workspace CRUD + pause/resume routes + page,
-membership-checked owner identity, reuse of `start_run`. Out: everything in the
+member-read / owner-or-admin-mutate authorization, membership-checked owner
+identity, reuse of `start_run`. Out: everything in the
 Non-goals list (admin surface, backfill, sub-minute, generic triggers, managed-
 agent loop, per-task sandbox isolation).
 
@@ -527,9 +552,14 @@ genuinely can't be simulated.
 3. **`fixed` target + busy conversation.** Is `skipped_active` (drop the
    occurrence) correct, or should it queue and run when the conversation frees
    up? Queuing reintroduces backlog/ordering complexity we deliberately avoided.
-4. **Owner-left-workspace behavior.** Auto-pause the task, hard-fail each fire,
-   or allow a workspace admin to reassign ownership? Ties into whether tasks are
-   truly user-owned or workspace-owned-with-a-runner-identity.
+4. **Owner-left-workspace behavior + ownership reassignment.** Auto-pause the
+   task, hard-fail each fire, or allow a workspace admin to reassign ownership?
+   v1 lets an admin pause/delete a task but deliberately has *no* reassignment
+   flow (an admin can't retarget a task's run identity to themselves), because
+   reassigning would silently change which user's tools/MCP/memory/sandbox the
+   runs inherit. If reassignment is wanted later it needs explicit
+   confirmation-of-identity semantics. Ties into whether tasks are truly
+   user-owned or workspace-owned-with-a-runner-identity.
 5. **Concurrent fires into one user's single sandbox (#144).** Two tasks for the
    same user firing at the same minute share one workspace sandbox — is that
    acceptable, or does scheduled/managed-agent work need its own sandbox
