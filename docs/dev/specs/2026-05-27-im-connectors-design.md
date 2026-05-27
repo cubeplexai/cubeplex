@@ -203,17 +203,32 @@ checks it *before* creating/reusing the thread or calling `start_run`:
 - A new `IMWebhookReceipt` table records each processed event by
   `(account_id, platform_event_id)` with a unique constraint. `platform_event_id` is
   Slack's `event_id` (preferred over `event_ts`, which retries preserve) / Feishu's event
-  `event_id`.
+  `event_id`. The row carries a `status` (`processing` | `completed`) and a `lease_expires_at`
+  timestamp, so a receipt is not a permanent "handled" flag — it is recoverable.
 - On every inbound event, after signature verification and account lookup but **before**
-  any thread/conversation/run work, attempt to insert the receipt row in its own
-  transaction. A successful insert means "first time, proceed". A unique-constraint
-  violation means "already seen" → **ack with 200 and stop**, doing no side effects (no
-  thread create/reuse, no `start_run`, no outbound message). This is the standard
-  ack-without-side-effects behavior platforms expect for retries.
-- The receipt is written before the run, not after, so even a retry that races a
-  *still-running* first delivery is rejected by the unique index rather than starting a
-  second run. The receipt is the source of truth for "have we acted on this event"; the
-  thread link only maps thread → conversation.
+  any thread/conversation/run work, attempt to insert the receipt row (`status=processing`,
+  `lease_expires_at = now + lease`) in its own transaction:
+  - **Insert succeeds** → "first time, proceed": create/reuse the thread and call
+    `start_run`, then mark the receipt `completed`.
+  - **Unique violation, existing row is `completed`** → genuine duplicate of a finished
+    event → **ack 200 and stop**, no side effects. This is the ack-without-side-effects
+    behavior platforms expect for retries.
+  - **Unique violation, existing row is `processing` with a live lease** → a first delivery
+    is still in flight → **ack 200 and stop** (don't start a second concurrent run).
+  - **Unique violation, existing row is `processing` with an *expired* lease** → the first
+    delivery crashed/timed out before reaching `completed` → **take over**: refresh the
+    lease (`processing`, new `lease_expires_at`) and proceed with thread + `start_run`.
+    This is what makes a crash before `start_run` retry-recoverable instead of a silent drop.
+- The receipt is written before the run (not after) so even a retry that races a
+  *still-running* first delivery is rejected while the lease is live, rather than starting a
+  second run. But because `processing` is a leased, expirable state — not a permanent flag —
+  a crash between "receipt committed" and "`start_run` issued" no longer swallows every
+  subsequent retry; the next retry past the lease window recovers the event. The receipt is
+  the source of truth for "have we acted on this event"; the thread link only maps thread →
+  conversation.
+- The lease must be short enough that a real crash is recovered within the platform retry
+  window, yet long enough that a slow-but-healthy first delivery isn't double-run (exact
+  value in Open Questions).
 - Receipts are short-lived bookkeeping: a periodic prune drops rows older than the longest
   platform retry window (Slack retries over ~minutes/hours; we keep a conservative window —
   exact retention in Open Questions). They are `OrgScopedMixin` like the other tables.
@@ -229,8 +244,13 @@ IM thread key and pin it to one conversation.
 
 - Thread key = `(account_id, channel_id, thread_root_id)`. For a channel mention, the
   thread root is the mentioned message ts (Slack) / root message id (Feishu). For a DM
-  with no thread, the channel itself is the key (one rolling conversation per DM, or
-  per-day — see Open Questions).
+  with no platform thread, `thread_root_id` is **normalized to a non-null sentinel** (the
+  channel/DM id, or a reserved literal like `__dm__`) — never stored as `NULL`. This
+  matters because the uniqueness guarantee below is a Postgres unique index, and Postgres
+  treats `NULL` as distinct: two `(account_id, channel_id, NULL)` rows would both be
+  allowed, so repeated DMs would spawn separate conversations instead of reusing one. A
+  non-null sentinel makes the DM thread key collide as intended, giving one rolling
+  conversation per DM (or per-day — see Open Questions).
 - First message for a thread key → create a `Conversation` (title seeded from the first
   line) and insert an `IMThreadLink` row binding the thread key to `conversation_id`.
 - Subsequent messages on that thread key → reuse the existing conversation, so the agent
@@ -276,14 +296,18 @@ Public ID prefixes (add to `backend/cubebox/models/public_id.py`): `imac` (accou
   `(platform, external_account_id)` so an external IM account binds to at most one cubebox
   account row.
 - **`IMThreadLink`** (`OrgScopedMixin`): `account_id` (FK), `channel_id`,
-  `thread_root_id`, `conversation_id` (FK). Unique on `(account_id, channel_id,
-  thread_root_id)`.
+  `thread_root_id` (**non-null**; DMs with no platform thread are normalized to a sentinel
+  such as the channel id or `__dm__`), `conversation_id` (FK). Unique on
+  `(account_id, channel_id, thread_root_id)` — relying on uniqueness requires the column be
+  non-null, since Postgres would otherwise allow duplicate `(…, NULL)` rows.
 - **`IMIdentityLink`** (`OrgScopedMixin`): `account_id` (FK), `im_user_id`, `user_id`
   (FK). Unique on `(account_id, im_user_id)`.
 - **`IMWebhookReceipt`** (`OrgScopedMixin`): `account_id` (FK), `platform_event_id`,
-  `created_at`. Unique on `(account_id, platform_event_id)` — the dedupe key inserted
-  before any thread/run work, so a redelivered event is rejected by the index. Pruned
-  past the platform retry window.
+  `status` (`processing` | `completed`), `lease_expires_at`, `created_at`. Unique on
+  `(account_id, platform_event_id)` — the dedupe key inserted before any thread/run work,
+  so a redelivered event hits the index. A `completed` row or a `processing` row with a
+  live lease → ack and stop; a `processing` row with an expired lease → take over and
+  recover (a crash before `start_run` isn't a silent drop). Pruned past the retry window.
 
 All `OrgScopedMixin` so `(org_id, workspace_id)` filtering is structural. Migrations via
 `alembic revision --autogenerate`.
@@ -419,6 +443,10 @@ Slack server and call it E2E.
   cubebox" deep link? Default: compact summary + deep link.
 - **Attachments / files.** Inbound IM file uploads and outbound artifacts — in scope for
   v1 or deferred? (Web already has an attachment path to reuse.)
+- **Receipt processing lease duration.** How long should a `processing` receipt's lease
+  run before a retry may take over? Too short double-runs a slow-but-healthy first delivery;
+  too long delays recovery of a genuine crash past the platform's retry window. A value
+  bounded by the run timeout (with margin) is the starting assumption.
 - **Webhook receipt retention.** How long do we keep `IMWebhookReceipt` rows before
   pruning? Must exceed the longest platform retry window (Slack retries can span hours);
   a conservative fixed window (e.g. 24–72h) vs a platform-specific one is undecided.
