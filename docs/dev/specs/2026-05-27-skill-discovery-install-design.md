@@ -221,6 +221,18 @@ source_ref, version, trust` where `trust` carries the signals research
 surfaced (official-source flag, stars/install-count if the registry exposes
 them, "already in your org catalog" boolean).
 
+`name` here is the human-facing display name (for remote candidates the upstream
+skill slug). It is **not** necessarily the name `load_skill` resolves against. The
+catalog stores each skill under a canonical `Skill.name`, and for an imported
+remote skill that canonical name is `<org-slug>:<skill-slug>` (the namespaced form
+the import path mints), not the bare upstream slug. So the candidate also carries a
+`canonical_name` field: for local candidates it's the existing catalog name; for
+remote candidates that aren't imported yet it's the name the import **will** produce
+(`<org-slug>:<skill-slug>`), computed up front from the installing org's slug. Every
+later step (install response, the "load it now" hint) uses `canonical_name`, never
+the display `name`, because `load_skill` resolves by exact canonical name via
+`find_enabled_by_name`.
+
 ### 2. Discovery — an agent tool
 
 Add a builtin tool `find_skills(query, [limit])` (sits next to `load_skill` in
@@ -231,13 +243,14 @@ Add a builtin tool `find_skills(query, [limit])` (sits next to `load_skill` in
    higher trust).
 3. Ranks: exact/keyword match first, then trust tier, then install-count/stars.
    (v1 keyword; semantic is a later swap behind the same interface.)
-4. Returns a short ranked list (default ~5) of `{name, description, source,
-   trust, install_state}` — **descriptions only, not full SKILL.md** (keeps it
-   cheap; the model previews on demand). This is the discovery counterpart to
-   #143's on-demand index.
+4. Returns a short ranked list (default ~5) of `{name, canonical_name,
+   description, source, trust, install_state}` — **descriptions only, not full
+   SKILL.md** (keeps it cheap; the model previews on demand). This is the
+   discovery counterpart to #143's on-demand index.
 
 The tool is **read-only**: it never installs. It returns candidates and, for
-already-enabled skills, tells the agent it can `load_skill` directly.
+already-enabled skills, tells the agent it can `load_skill(canonical_name)`
+directly — using `canonical_name`, not the display `name`, so the call resolves.
 
 ### 3. Preview → confirm → install flow
 
@@ -255,13 +268,19 @@ already-enabled skills, tells the agent it can `load_skill` directly.
   - **Remote candidate:** import the fetched files into the object store as a
     new `uploaded` catalog skill owned by the installing org (reusing
     `SkillPublishService` / `publish_from_zip`-style path), then create the
-    workspace-private install.
+    workspace-private install. The import mints the canonical `Skill.name` as
+    `<org-slug>:<skill-slug>`.
+- **Install response returns the canonical name.** The install service returns the
+  actual installed `Skill.name` it created — the canonical `<org-slug>:<skill-slug>`
+  for remote imports, the existing catalog name for local. The agent must use this
+  returned name (which equals the candidate's pre-computed `canonical_name`) for the
+  follow-up `load_skill`, not the bare display name.
 - **Immediately loadable.** Because install produces a normal catalog +
-  workspace-private install row, the next `load_skill` resolves it. For the
-  *current* run, the agent re-queries the enabled set after a successful
-  install so the freshly installed skill is visible without a new conversation
-  (the available-skills suffix is recomputed; loaded content still flows through
-  `SkillsMiddleware` as today).
+  workspace-private install row, the next `load_skill(canonical_name)` resolves it
+  via `find_enabled_by_name`. For the *current* run, the agent re-queries the enabled
+  set after a successful install so the freshly installed skill is visible without a
+  new conversation (the available-skills suffix is recomputed; loaded content still
+  flows through `SkillsMiddleware` as today).
 
 ### 4. Install scope & isolation + trust/review
 
