@@ -224,7 +224,10 @@ Keep `(workspace_id, user_id)` ownership (#144) intact: all new queries stay sco
 Repository additions (`UserSandboxRepository`):
 - `claim_pausing(id)` — the atomic pause claim: a single conditional UPDATE that sets
   `status = 'pausing'` only `WHERE id = :id AND status = 'running' AND (in_use_until IS NULL
-  OR in_use_until < now())`. Returns whether a row was claimed. The reaper calls the provider
+  OR in_use_until < now()) AND last_activity_at + ttl_seconds <= now()`. The idleness term is
+  re-asserted here (not just at selection) so a concurrent keepalive/touch that refreshes
+  `last_activity_at` between selection and claim makes the claim a no-op. Returns whether a row
+  was claimed. The reaper calls the provider
   `pause()` **only** on a successful claim, so the row is already `pausing` (and thus
   unacquirable) before the suspend starts. This replaces a plain `mark_pausing` that would
   have asserted-then-set in two steps; the claim must be one atomic statement so two reapers
@@ -239,7 +242,8 @@ Repository additions (`UserSandboxRepository`):
 - `list_idle_to_pause_system` — running rows past idle `ttl_seconds` **and** with no active
   in-use lease (`in_use_until` null or in the past). Selection only finds *candidates*; the
   reaper still re-claims each one via `claim_pausing` before pausing, so a candidate that was
-  acquired or already claimed between selection and claim is safely skipped. Replaces the kill
+  acquired, touched (re-activated), or already claimed between selection and claim is safely
+  skipped. Replaces the kill
   selection for capable providers. The lease check is part of the WHERE clause so an in-flight
   op is never selected.
 - `acquire_in_use(id, lease_window)` / `release_in_use(id)` — set / clear the `in_use_until`
