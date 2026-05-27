@@ -71,3 +71,102 @@
     --color-ring: hsl(210 100% 62%);
   }
 }
+
+/* rehype-highlight token colors (GitHub palette). Container bg/border come from
+   prose-pre:bg-muted; here we only colour the syntax spans, light + .dark. */
+.hljs-comment,
+.hljs-quote {
+  color: #6e7781;
+  font-style: italic;
+}
+.hljs-keyword,
+.hljs-selector-tag,
+.hljs-literal,
+.hljs-doctag,
+.hljs-formula {
+  color: #cf222e;
+}
+.hljs-string,
+.hljs-regexp,
+.hljs-meta .hljs-string {
+  color: #0a3069;
+}
+.hljs-number,
+.hljs-variable,
+.hljs-template-variable,
+.hljs-attr,
+.hljs-attribute,
+.hljs-symbol,
+.hljs-bullet,
+.hljs-link {
+  color: #0550ae;
+}
+.hljs-title,
+.hljs-title.function_,
+.hljs-section,
+.hljs-name {
+  color: #8250df;
+}
+.hljs-built_in,
+.hljs-type,
+.hljs-class .hljs-title,
+.hljs-params {
+  color: #953800;
+}
+.hljs-tag {
+  color: #116329;
+}
+.hljs-meta {
+  color: #6e7781;
+}
+.hljs-emphasis {
+  font-style: italic;
+}
+.hljs-strong {
+  font-weight: 600;
+}
+
+.dark .hljs-comment,
+.dark .hljs-quote {
+  color: #8b949e;
+}
+.dark .hljs-keyword,
+.dark .hljs-selector-tag,
+.dark .hljs-literal,
+.dark .hljs-doctag,
+.dark .hljs-formula {
+  color: #ff7b72;
+}
+.dark .hljs-string,
+.dark .hljs-regexp,
+.dark .hljs-meta .hljs-string {
+  color: #a5d6ff;
+}
+.dark .hljs-number,
+.dark .hljs-variable,
+.dark .hljs-template-variable,
+.dark .hljs-attr,
+.dark .hljs-attribute,
+.dark .hljs-symbol,
+.dark .hljs-bullet,
+.dark .hljs-link {
+  color: #79c0ff;
+}
+.dark .hljs-title,
+.dark .hljs-title.function_,
+.dark .hljs-section,
+.dark .hljs-name {
+  color: #d2a8ff;
+}
+.dark .hljs-built_in,
+.dark .hljs-type,
+.dark .hljs-class .hljs-title,
+.dark .hljs-params {
+  color: #ffa657;
+}
+.dark .hljs-tag {
+  color: #7ee787;
+}
+.dark .hljs-meta {
+  color: #8b949e;
+}

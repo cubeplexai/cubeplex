@@ -1,15 +1,32 @@
 'use client'
 
 import ReactMarkdown from 'react-markdown'
+import type { ComponentProps } from 'react'
 import remarkGfm from 'remark-gfm'
+import remarkBreaks from 'remark-breaks'
 import remarkMath from 'remark-math'
 import rehypeKatex from 'rehype-katex'
+import rehypeHighlight from 'rehype-highlight'
+import rehypeExternalLinks from 'rehype-external-links'
 import 'katex/dist/katex.min.css'
 import { useConversationStore } from '@cubebox/core'
 import { renderWithCitations } from '@/lib/citations'
 import { CitationMarker } from '@/components/chat/CitationMarker'
 
 const CITATION_RE = /【\d+-\d+】/
+
+// singleTilde:false → only ~~text~~ is strikethrough, so "28~29℃" ranges render literally.
+const REMARK_PLUGINS: ComponentProps<typeof ReactMarkdown>['remarkPlugins'] = [
+  [remarkGfm, { singleTilde: false }],
+  remarkBreaks,
+  remarkMath,
+]
+
+const REHYPE_PLUGINS: ComponentProps<typeof ReactMarkdown>['rehypePlugins'] = [
+  rehypeKatex,
+  [rehypeHighlight, { detect: true, ignoreMissing: true }],
+  [rehypeExternalLinks, { target: '_blank', rel: ['noopener', 'noreferrer'] }],
+]
 
 /**
  * Move CJK quotes outside bold/italic markers so CommonMark flanking rules
@@ -45,7 +62,7 @@ export function MarkdownWithCitations({
   if (!hasCitations) {
     return (
       <div className={className}>
-        <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex]}>
+        <ReactMarkdown remarkPlugins={REMARK_PLUGINS} rehypePlugins={REHYPE_PLUGINS}>
           {md}
         </ReactMarkdown>
       </div>
@@ -55,8 +72,8 @@ export function MarkdownWithCitations({
   return (
     <div className={className}>
       <ReactMarkdown
-        remarkPlugins={[remarkGfm, remarkMath]}
-        rehypePlugins={[rehypeKatex]}
+        remarkPlugins={REMARK_PLUGINS}
+        rehypePlugins={REHYPE_PLUGINS}
         components={{
           p: ({ children: c }) => <p>{renderWithCitations(c, conversationId, CitationMarker)}</p>,
           li: ({ children: c }) => (
