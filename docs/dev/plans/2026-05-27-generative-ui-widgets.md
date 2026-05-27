@@ -37,7 +37,7 @@
 **Tests (create):**
 - `backend/tests/tools/test_show_widget.py`
 - `frontend/packages/web/lib/__tests__/partialJson.test.ts`
-- `frontend/packages/web/tests/e2e/generative-ui-widgets.spec.ts`
+- `frontend/packages/web/__tests__/e2e/generative-ui-widgets.spec.ts`
 
 ---
 
@@ -131,8 +131,8 @@ tool call in message history.
 
 from pydantic import BaseModel, Field
 
+from cubepi.agent.types import AgentTool, AgentToolResult
 from cubepi.providers.base import TextContent
-from cubepi.agent.tools import AgentTool, AgentToolResult
 
 from cubebox.prompts.widget import WIDGET_TOOL_DESCRIPTION
 
@@ -163,9 +163,9 @@ def make_show_widget_tool() -> AgentTool[_ShowWidgetArgs]:
     )
 ```
 
-> NOTE: confirm the exact import paths for `AgentTool`, `AgentToolResult`,
-> `TextContent` against `cubebox/middleware/sandbox.py` (it imports the same
-> symbols). Match that file's imports verbatim.
+> Verified against `cubebox/middleware/sandbox.py:21-23`: `AgentTool` /
+> `AgentToolResult` come from `cubepi.agent.types`, `TextContent` from
+> `cubepi.providers.base`. (Not `cubepi.agent.tools` — that module does not exist.)
 
 - [ ] **Step 5: Run tests, verify pass**
 
@@ -225,17 +225,25 @@ In `backend/cubebox/streams/run_manager.py`, after the `view_images` append bloc
 
 - [ ] **Step 4: Inject the guidelines into the system prompt**
 
-Find where `run_manager` assembles the system prompt for the cubepi run (search `transform_system_prompt` consumers / where builtin-tool prompt sections are appended). Append `WIDGET_GUIDELINES` **once**, unconditionally whenever `show_widget` is in the tool list, at a fixed position relative to other appended sections:
+The system prompt is assembled in `_execute_run` as `effective_system_prompt`
+(`run_manager.py:1760-1801`) and **passed into** `_run_cubepi_path` as a
+parameter (`run_manager.py:824`, called at `:1807`). Inject there — not inside
+`_run_cubepi_path`. Append `WIDGET_GUIDELINES` **once**, at a fixed position
+after the existing appends (e.g. after the `SKILLS_PROMPT_TEMPLATE` block at
+`~:1801`, before the `_run_cubepi_path` call at `:1807`):
 
 ```python
+        # backend/cubebox/streams/run_manager.py, in _execute_run, after the
+        # SKILLS_PROMPT_TEMPLATE append (~:1801), before _run_cubepi_path(...)
         from cubebox.prompts.widget import WIDGET_GUIDELINES
-        # appended after the other builtin-tool prompt sections, before sandbox
-        system_prompt = system_prompt + "\n\n" + WIDGET_GUIDELINES
+
+        effective_system_prompt += "\n\n" + WIDGET_GUIDELINES
 ```
 
-> Read `backend/docs/prompt-cache-discipline.md` first and match the existing
-> append style/position used for other builtin tools. The exact insertion
-> point is whatever keeps a deterministic, cache-stable prefix.
+> Read `backend/docs/prompt-cache-discipline.md` first. Append at a fixed,
+> deterministic position so the cache prefix stays stable across runs. v1
+> appends unconditionally (the tool is always registered), which keeps the
+> prompt deterministic.
 
 - [ ] **Step 5: Run the backend tool tests + a quick import smoke**
 
@@ -406,11 +414,12 @@ body{margin:0;padding:1rem;font-family:system-ui,-apple-system,sans-serif;backgr
 <body><div id="root"></div>
 <script>
 (function(){
-  var WIDGET_ID = null;
+  // WidgetView injects the real id by replacing the __WIDGET_ID__ token in the
+  // srcDoc at mount, so the shell knows its identity from the start (no
+  // learn-from-first-message handshake → no deadlock).
+  var WIDGET_ID = "__WIDGET_ID__";
   var lastSeq = -1;
   var finalized = false;
-  var morphReady = false;
-  var pending = null; // {seq, html}
 
   function post(msg){ parent.postMessage(Object.assign({widgetId: WIDGET_ID}, msg), '*'); }
 
@@ -439,21 +448,20 @@ body{margin:0;padding:1rem;font-family:system-ui,-apple-system,sans-serif;backgr
     });
   }
 
+  // WidgetView only sends after it receives {type:'ready'} (sent below, after
+  // morphdom loads), so every inbound morph/finalize arrives morph-ready.
   window.addEventListener('message', function(e){
     if (e.source !== parent) return;
     var d = e.data || {};
-    if (WIDGET_ID === null && d.widgetId != null) WIDGET_ID = d.widgetId;
     if (d.widgetId !== WIDGET_ID) return;
     if (typeof d.seq !== 'number' || d.seq <= lastSeq) return; // latest-wins
     lastSeq = d.seq;
     try {
       if (d.type === 'morph') {
         if (finalized) return;
-        if (!morphReady) { pending = {seq:d.seq, html:d.html}; return; }
         applyMorph(d.html);
       } else if (d.type === 'finalize') {
         if (finalized) return;
-        if (!morphReady) { pending = {seq:d.seq, html:null, finalize:true}; return; }
         finalized = true;
         runScripts();
         post({type:'resize', height: document.body.scrollHeight});
@@ -465,15 +473,7 @@ body{margin:0;padding:1rem;font-family:system-ui,-apple-system,sans-serif;backgr
 
   var s = document.createElement('script');
   s.src = 'https://cdn.jsdelivr.net/npm/morphdom@2.7.4/dist/morphdom-umd.min.js';
-  s.onload = function(){
-    morphReady = true;
-    post({type:'ready'});
-    if (pending) {
-      if (pending.html != null) applyMorph(pending.html);
-      if (pending.finalize) { finalized = true; runScripts(); }
-      pending = null;
-    }
-  };
+  s.onload = function(){ post({type:'ready'}); };
   s.onerror = function(){ post({type:'error', message:'morphdom failed to load'}); };
   document.head.appendChild(s);
 })();
@@ -481,8 +481,9 @@ body{margin:0;padding:1rem;font-family:system-ui,-apple-system,sans-serif;backgr
 ```
 
 > The CSP `meta` is the first `<head>` child, before the inline `<style>`/`<script>`.
-> The shell installs its message listener synchronously, but `WidgetView` still
-> waits for `ready` before sending (Task 5) — `pending` is belt-and-suspenders.
+> `__WIDGET_ID__` is a literal placeholder that `WidgetView` replaces with the
+> real id at mount (Task 5). `ready` fires only after morphdom loads, and the
+> parent sends nothing before `ready`, so no pre-ready buffering is needed.
 
 - [ ] **Step 2: Type-check**
 
@@ -509,7 +510,7 @@ git commit -m "feat(widget): iframe shell runtime (CSP + morphdom + postMessage)
 // frontend/packages/web/components/chat/widget/WidgetView.tsx
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { WIDGET_SHELL_HTML } from './widgetShell'
 
 const READY_TIMEOUT_MS = 5000
@@ -525,14 +526,24 @@ interface WidgetViewProps {
   height?: number
 }
 
-export function WidgetView({ widgetCode, status, widgetId, title, width }: WidgetViewProps) {
+export function WidgetView({
+  widgetCode,
+  status,
+  widgetId,
+  title,
+  width,
+  height: initialHeight,
+}: WidgetViewProps) {
   const iframeRef = useRef<HTMLIFrameElement | null>(null)
   const [ready, setReady] = useState(false)
   const [failed, setFailed] = useState(false)
-  const [height, setHeight] = useState(120)
+  const [height, setHeight] = useState(initialHeight ?? 120)
   const seqRef = useRef(0)
   const latestRef = useRef('')
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  // Inject the real id into the shell (stable per widgetId).
+  const srcDoc = useMemo(() => WIDGET_SHELL_HTML.replace('__WIDGET_ID__', widgetId), [widgetId])
 
   const tooBig = new Blob([widgetCode]).size > MAX_CODE_BYTES
   latestRef.current = widgetCode
@@ -603,7 +614,7 @@ export function WidgetView({ widgetCode, status, widgetId, title, width }: Widge
       ref={iframeRef}
       title={title ?? 'widget'}
       sandbox="allow-scripts"
-      srcDoc={WIDGET_SHELL_HTML}
+      srcDoc={srcDoc}
       style={{ width: width ? `${width}px` : '100%', height, border: 'none' }}
       className="rounded-lg border border-border bg-muted"
     />
@@ -651,7 +662,29 @@ generic `write_file` handling, add:
   }
 ```
 
-- [ ] **Step 2: Add the completed branch (before ToolCallGroup)**
+- [ ] **Step 2: Exclude `show_widget` from `groupBlocks` (REQUIRED — the real fix)**
+
+Completed `tool_call` blocks are grouped by `groupBlocks` (`:361`) **before**
+`ContentBlockRenderer` ever sees them (`:430` builds `grouped`, rendered at
+`:467`/`:478`). `groupBlocks` already exempts `subagent`/`save_artifact`/
+`write_todos` by name. Add `show_widget` to that exemption so it passes through
+ungrouped to `ContentBlockRenderer`:
+
+```tsx
+    if (
+      block.type === 'tool_call' &&
+      block.name !== 'subagent' &&
+      block.name !== 'save_artifact' &&
+      block.name !== 'write_todos' &&
+      block.name !== 'show_widget'        // <-- add
+    ) {
+      // ...existing grouping push...
+```
+
+Without this, a completed widget is swallowed into a `ToolCallGroup` and the
+custom branch below never runs.
+
+- [ ] **Step 3: Add the completed branch in `ContentBlockRenderer`**
 
 Alongside the existing `subagent` (~`:230`) and `save_artifact` (~`:256`)
 special cases, before the generic `if (block.type === 'tool_call')` →
@@ -659,35 +692,37 @@ special cases, before the generic `if (block.type === 'tool_call')` →
 
 ```tsx
   if (block.type === 'tool_call' && block.name === 'show_widget') {
+    const a = block.arguments ?? {}
     return (
       <WidgetView
         widgetId={block.id}
-        widgetCode={typeof block.arguments?.widget_code === 'string' ? block.arguments.widget_code : ''}
+        widgetCode={typeof a.widget_code === 'string' ? a.widget_code : ''}
         status="complete"
-        title={typeof block.arguments?.title === 'string' ? block.arguments.title : undefined}
+        title={typeof a.title === 'string' ? a.title : undefined}
+        width={typeof a.width === 'number' ? a.width : undefined}
+        height={typeof a.height === 'number' ? a.height : undefined}
       />
     )
   }
 ```
 
-This early return means a completed `show_widget` never reaches the generic
-`ToolCallGroup`, so it renders as a widget rather than collapsing into the
-tool-call list.
+Combined with Step 2, a completed `show_widget` reaches this branch ungrouped
+and renders as a widget instead of collapsing into the tool-call list.
 
-- [ ] **Step 3: Add imports**
+- [ ] **Step 4: Add imports**
 
 ```tsx
 import { WidgetView } from '@/components/chat/widget/WidgetView'
 import { extractWidgetCode } from '@/lib/partialJson'
 ```
 
-- [ ] **Step 4: Type-check + existing component tests**
+- [ ] **Step 5: Type-check + existing component tests**
 
 Run: `pnpm --filter web type-check`
 Run: `pnpm --filter web test AssistantMessage` (if present)
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 6: Commit**
 
 ```bash
 git add frontend/packages/web/components/chat/AssistantMessage.tsx
@@ -696,26 +731,54 @@ git commit -m "feat(widget): mount WidgetView for streaming + completed show_wid
 
 ---
 
-## Task 7: Frontend — `SubAgentCard` parity (if widgets can appear in subagent output)
+## Task 7: Subagent scope — exclude `show_widget` from subagent tools (v1)
+
+**Context:** `SubAgentMiddleware` shares the same `_builtin_tools` list
+(`run_manager.py:1292-1300`), so registering `show_widget` in builtins makes it
+callable from inside subagents too. Rendering widgets inside `SubAgentCard.tsx`
+(which has its own block-rendering path) is extra surface we don't want in v1.
+
+**v1 decision:** keep widgets a **top-level assistant feature only**. The
+cleanest way is to **not expose `show_widget` to subagents**, so subagent output
+can never contain a widget block to render.
 
 **Files:**
-- Modify: `frontend/packages/web/components/chat/SubAgentCard.tsx`
+- Modify: `backend/cubebox/streams/run_manager.py` (subagent tool assembly, ~`:1292-1303`)
 
-`SubAgentCard.tsx` also renders streamed tool blocks (it imports
-`getWriteFileSummary`). If subagents may emit widgets, mirror Task 6's two
-branches there.
+- [ ] **Step 1: Exclude `show_widget` from the subagent tool set**
 
-- [ ] **Step 1: Decide scope**
+Where `_subagent_tools` / the SubAgentMiddleware tool list is built from the
+shared builtins (~`:1292-1303`), filter it out:
 
-If subagents are not expected to call `show_widget` in v1, **skip this task**
-and note it: widgets render only in top-level assistant messages for v1.
-Otherwise mirror the streaming + completed branches from Task 6.
+```python
+        _subagent_tools = [t for t in _subagent_tools if t.name != "show_widget"]
+```
 
-- [ ] **Step 2 (if applying): add the branches + imports, type-check, commit**
+> Verify the exact variable that feeds `SubAgentMiddleware` and filter that one.
+> The goal: the top-level run includes `show_widget`; subagent runs do not.
+
+- [ ] **Step 2: Add a backend test**
+
+```python
+# backend/tests/tools/test_show_widget.py
+def test_show_widget_excluded_from_subagent_tools():
+    # Build the subagent tool list the way run_manager does and assert
+    # no tool named "show_widget" is present. (Use the helper/path that
+    # run_manager uses to assemble _subagent_tools.)
+    ...
+```
+
+> Fill in using the actual assembly helper. If a direct unit seam isn't
+> available, assert it via the Task 8 E2E instead (a subagent prompt that would
+> trigger a widget produces no iframe).
+
+- [ ] **Step 3: Run + commit**
+
+Run: `uv run pytest tests/tools/test_show_widget.py -v`
 
 ```bash
-git add frontend/packages/web/components/chat/SubAgentCard.tsx
-git commit -m "feat(widget): render show_widget inside subagent cards"
+git add backend/cubebox/streams/run_manager.py backend/tests/tools/test_show_widget.py
+git commit -m "feat(widget): keep show_widget out of subagent tool set (v1 top-level only)"
 ```
 
 ---
@@ -723,17 +786,23 @@ git commit -m "feat(widget): render show_widget inside subagent cards"
 ## Task 8: E2E — streaming, latest-wins, reload, fallback, multi, security
 
 **Files:**
-- Create: `frontend/packages/web/tests/e2e/generative-ui-widgets.spec.ts`
+- Create: `frontend/packages/web/__tests__/e2e/generative-ui-widgets.spec.ts`
+
+> Verified repo layout: frontend E2E specs live in
+> `frontend/packages/web/__tests__/e2e/` (e.g. `admin-settings.spec.ts`), and the
+> Playwright runner is `test:e2e` in **`frontend/package.json`** (`playwright test`),
+> run as `cd frontend && pnpm test:e2e`. There is no `test:e2e` in
+> `packages/web/package.json` (that only has `test` = vitest).
 
 Uses the faux provider (`cubepi/providers/faux.py`) to script a `show_widget`
 tool call streamed across frames. Wire the faux script via the existing E2E
-config switch (match how other E2E specs select faux — see existing specs in
-`tests/e2e/`).
+config switch (match how a sibling spec in `__tests__/e2e/` selects faux and
+sends a prompt — reuse those exact helpers; do not invent harness APIs).
 
 - [ ] **Step 1: Write the E2E spec**
 
 ```typescript
-// frontend/packages/web/tests/e2e/generative-ui-widgets.spec.ts
+// frontend/packages/web/__tests__/e2e/generative-ui-widgets.spec.ts
 import { test, expect } from '@playwright/test'
 
 // Helper: the faux script emits a show_widget tool call whose widget_code is:
@@ -781,22 +850,37 @@ test('widget cannot reach parent or network', async ({ page }) => {
   // fetch() is blocked by connect-src 'none'. Assert via a widget that posts
   // its probe result, or via console/network assertions.
 })
+
+test('parent ignores a forged-source message', async ({ page }) => {
+  // From the page (not the iframe), postMessage a {widgetId, type:'resize',
+  // height: 9999} directly to window. Because WidgetView checks
+  // e.source === iframe.contentWindow, the forged message (source = top window)
+  // must be ignored — assert the iframe height does NOT jump to 9999.
+})
+
+// Subagent scope (Task 7): a subagent prompt that would otherwise trigger a
+// widget produces NO iframe, since show_widget is excluded from subagent tools.
+test('subagents do not render widgets', async ({ page }) => {
+  // drive a faux subagent run that would call show_widget; assert no iframe[title].
+})
 ```
 
 > The exact navigation/prompt-send steps and faux wiring follow the patterns in
-> the existing `tests/e2e/` specs. Fill those in from a sibling spec; do not
+> a sibling spec in `__tests__/e2e/`. Fill those in from that spec; do not
 > invent new harness APIs.
 
 - [ ] **Step 2: Run the E2E on worktree ports**
 
-Run (from `frontend/`): the repo's Playwright command (e.g. `pnpm --filter web test:e2e generative-ui-widgets`). Ensure backend (8075) + frontend (3075) are up via the worktree env.
+Run: `cd frontend && pnpm test:e2e generative-ui-widgets` (the `test:e2e` script
+is in `frontend/package.json`). Ensure backend (8075) + frontend (3075) are up
+via the worktree env (`cat .worktree.env`).
 Expected: all specs PASS.
 
 - [ ] **Step 3: Commit**
 
 ```bash
-git add frontend/packages/web/tests/e2e/generative-ui-widgets.spec.ts
-git commit -m "test(widget): E2E for streaming, latest-wins, reload, fallback, security"
+git add frontend/packages/web/__tests__/e2e/generative-ui-widgets.spec.ts
+git commit -m "test(widget): E2E for streaming, latest-wins, reload, fallback, security, subagent-scope"
 ```
 
 ---
@@ -818,14 +902,25 @@ git commit -m "test(widget): E2E for streaming, latest-wins, reload, fallback, s
 
 ## Self-Review
 
-- **Spec coverage:** tool (T1) + registration/prompt (T2) + extract reuse (T3) +
-  shell (T4) + WidgetView with seq/debounce/ready-timeout/fallback/limits (T5) +
-  mount excluding ToolCallGroup (T6) + subagent parity decision (T7) + E2E incl.
-  latest-wins/reload/fallback/multi/security (T8) + manual + theme check (T9).
+- **Spec coverage:** tool (T1) + registration/prompt-injection-in-`_execute_run`
+  (T2) + extract reuse (T3) + shell with `__WIDGET_ID__` injection (T4) +
+  WidgetView with id-injected srcDoc, seq/debounce/ready-timeout/fallback/limits,
+  height applied (T5) + mount with `groupBlocks` exclusion + completed branch (T6)
+  + subagent exclusion (T7) + E2E incl. latest-wins/reload/fallback/multi/security/
+  forged-source/subagent-scope (T8) + manual + theme check (T9).
   Interrupted-widget non-persistence is inherited behavior (no task needed).
+- **Verified against real code:** cubepi imports (`cubepi.agent.types` /
+  `cubepi.providers.base`), builtin registration order (`run_manager.py:977-996`),
+  prompt site (`_execute_run` `:1760-1807`), `groupBlocks` name-exclusion
+  (`AssistantMessage.tsx:361`), E2E dir (`__tests__/e2e/`) + runner
+  (`frontend/package.json` `test:e2e`).
+- **Handshake:** the deadlock is removed — the shell gets its id via
+  `__WIDGET_ID__` replacement at mount and posts `ready` (with the right id)
+  after morphdom loads; the parent sends only after `ready`.
 - **Placeholders:** the E2E navigation/faux-wiring steps intentionally defer to
   sibling-spec patterns rather than inventing harness APIs; all code units have
   complete implementations.
 - **Type consistency:** message shape `{widgetId, seq, type, html?}` (parent→child)
   and `{widgetId, type, ...}` (child→parent) is identical in `widgetShell.ts` and
-  `WidgetView.tsx`; `extractWidgetCode` signature matches its callers.
+  `WidgetView.tsx`; `extractWidgetCode` signature matches its callers; `WidgetViewProps`
+  `width`/`height`/`title` are all passed from the mount branches.
