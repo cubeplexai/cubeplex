@@ -216,32 +216,51 @@ exactly the "toggling MCP tools mid-conversation" the cache doc warns against. A
 text to the system-prompt suffix is the same trick skills already use and is proven cache-safe.
 
 **The catch — actually calling an expanded tool.** Putting a tool's *schema text* in the prompt
-does not register a callable `AgentTool`. Two candidate resolutions (this is the central open
-question, see below):
+does not register a callable `AgentTool`. The naive shortcut — register *all* usable servers'
+tools as real `AgentTool`s up front and merely **omit collapsed servers from the catalog text** —
+does **not** save anything. Those tools still flow through `tools=all_tools` into
+`create_cubebox_agent`, so the model still receives every collapsed server's full schema in the
+tool block and pays the identical cache-write/cache-read and attention cost as today. Hiding a
+tool in the prose while still shipping its schema in `tools=` is not disclosure at all. So
+pre-register-all is **rejected**: it is the status quo with a shorter catalog, not a cost win.
 
-- **(A) Pre-register, hide via prompt.** Register *all* usable servers' tools as real `AgentTool`s
-  up front (so they're callable), but **omit collapsed servers from the catalog/prompt** and only
-  describe expanded ones. This keeps the callable set complete but does **not** shrink the
-  `tools=` block — so it reduces *attention dilution* and prompt-described surface but **not**
-  cache cost. Likely insufficient on its own.
-- **(B) True deferral.** Register only expanded servers' tools as callable `AgentTool`s. Because
-  the cube cache rule treats the tool block as fixed per conversation, expanding mid-conversation
-  would change the tool block — which the discipline doc says must be handled as a *new
-  conversation* (cache reset). That's acceptable if expansion is rare and front-loaded, but needs
-  cubepi support to add tools to a live agent and to re-mark the cache boundary. **This is the
-  design's load-bearing dependency on cubepi** and the main thing to validate before building.
+To realize the token/cache/attention savings the schemas of collapsed servers must be **absent
+from the tool set itself**, not just from the prompt text. v1 therefore commits to **true
+deferral (register-on-first-expand)**:
 
-A pragmatic v1 may combine them: catalog by default (cheap prompt), and on first
-`expand_mcp_server` for a server, register that server's tools and accept a one-time cache
-re-establish for the remainder of the conversation (a known, bounded cost, far cheaper than
-carrying every schema every turn from turn one).
+- The `tools=` block at agent-creation time contains **only**: the always-on builtins,
+  `expand_mcp_server`, and the tools of any servers already expanded earlier in this conversation
+  (replayed from `extra["expanded_mcp_servers"]`). Collapsed servers contribute **zero** tool
+  definitions and zero schema text.
+- When the model calls `expand_mcp_server(server)`, that server's tools (built from `tools_cache`)
+  become callable `AgentTool`s for the remainder of the conversation, and its schema text is
+  appended to the system-prompt suffix per the middleware above.
+- Because the cache discipline treats the tool block as fixed per conversation, *adding* tools
+  mid-conversation changes that block. We model each expansion as a **cache re-establishment
+  point** — the same treatment the discipline doc gives the "new conversation" case — not as a
+  silent mid-prefix mutation. This is a bounded, one-time cost per expanded server, far cheaper
+  than carrying every collapsed server's schema on every turn from turn one.
+
+**Load-bearing cubepi dependency.** True deferral requires cubepi to support changing a live
+agent's callable tool set mid-run (add the newly expanded server's `AgentTool`s) and to re-mark
+the cache boundary at that point. If cubepi cannot do this today, that is an **upstream cubepi
+change** (cubepi is self-authored, upstream-first) and must land before this feature ships.
+The **fallback that needs no cubepi change** is to keep the tool set fixed for the lifetime of a
+single agent run: expansions requested during a run take effect on the **next** run (next user
+turn), where the tool set is rebuilt to include all servers expanded so far. This still delivers
+the savings (collapsed servers are never in `tools=`) at the cost of a one-turn delay before a
+just-expanded server is callable. Validate cubepi's mid-run capability before building; if absent,
+ship the next-turn fallback for v1 and pursue the cubepi change as a follow-up. Either way,
+pre-register-all is not on the table — it saves nothing.
 
 ### 4. Where it plugs into assembly
 
 - `run_manager.py` system-prompt section (~line 1799, beside the skills index): add the MCP
   catalog suffix when the feature is enabled and the workspace has ≥ N usable servers.
 - `run_manager.py` tool assembly (~line 1034): replace the unconditional "load all MCP tools" with
-  the disclosure-aware path (per the A/B decision above).
+  the deferral-aware path — load only the tools of servers expanded so far this conversation
+  (from `extra["expanded_mcp_servers"]`), never the collapsed ones, so `tools=all_tools` never
+  carries a collapsed server's schema.
 - Register `expand_mcp_server` builtin in the fixed order slot.
 - Append `MCPDisclosureMiddleware` to `cubepi_middleware` with an `extra_ref` closure, mirroring
   `SkillsMiddleware` (~line 1263).
@@ -257,7 +276,7 @@ carrying every schema every turn from turn one).
   the enabled set is fixed up front and identical every turn; MCP servers expand incrementally
   mid-conversation, so slug-sorting could insert a later expansion *before* an already-cached block
   and invalidate that prefix — expansion order avoids this.)
-- If we go with deferral (B), expansion is explicitly modeled as a **cache re-establishment point**
+- With true deferral, expansion is explicitly modeled as a **cache re-establishment point**
   (treated like the documented "new conversation" case), never as a silent mid-prefix mutation.
 - No timestamps, nonces, or per-user dynamic data enter the catalog or schema text.
 
@@ -286,7 +305,11 @@ Mostly reuses existing columns; minimal additions.
 - `expand_mcp_server` builtin + `MCPDisclosureMiddleware` (skills-pattern port).
 - Config-gated by `enabled` + `min_servers`; off-by-default behavior identical to today below the
   threshold.
-- Decide and implement one of A / B / hybrid for making expanded tools callable.
+- **True deferral / register-on-first-expand**: collapsed servers' tools are never in `tools=`;
+  expanding a server registers its tools as callable for the rest of the conversation. If cubepi
+  cannot change a live agent's tool set mid-run, ship the next-turn fallback (expansions take
+  effect on the following user turn) and land the cubepi change as a follow-up. Pre-register-all
+  is explicitly **not** a v1 option — it saves no cache/attention cost.
 
 **Later:**
 - Per-tool (sub-server) disclosure for very large single servers.
@@ -318,14 +341,12 @@ fall back to fake-server-only unit coverage.
 
 ## Open Questions
 
-- **Callability of expanded tools (the central one).** A (pre-register all, hide in prompt — saves
-  attention but not cache cost), B (true deferral — needs cubepi support to add tools to a live
-  agent + re-mark the cache boundary), or a hybrid (catalog by default, register-on-first-expand +
-  one-time cache re-establish)? This determines whether we actually save cache cost or only reduce
-  attention dilution.
 - **Does cubepi support adding tools to a running agent** and re-establishing the cache boundary
-  mid-conversation? If not, is that an upstream cubepi change (cubepi is self-authored, upstream
-  first) or do we front-load all expansions before the loop? Validate before building.
+  mid-conversation? This is now the load-bearing residual (the callability approach is decided:
+  true deferral, not pre-register-all). If cubepi *can* change a live agent's tool set mid-run, a
+  just-expanded server is callable within the same turn. If it *cannot*, v1 ships the next-turn
+  fallback (expansion takes effect on the following user turn) and the cubepi change lands as a
+  follow-up (cubepi is self-authored, upstream-first). Validate this capability before building.
 - **What does `expand_mcp_server` return?** Just an acknowledgement (middleware injects schemas) vs
   the schema list in the tool result itself. Affects token placement and replay/cache behavior.
 - **Trigger hints source.** Derive from description automatically, or add an authored
