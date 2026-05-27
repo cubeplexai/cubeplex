@@ -18,6 +18,8 @@ import { TaskProgressCard } from './TaskProgressCard'
 import { ToolCallGroup } from './ToolCallGroup'
 import { ToolCallItem } from './ToolCallItem'
 import { getWriteFileSummary } from '@/lib/writeFilePreview'
+import { extractWidgetCode, extractJsonStringPrefix } from '@/lib/partialJson'
+import { WidgetView } from '@/components/chat/widget/WidgetView'
 import { MarkdownWithCitations } from '@/components/shared/MarkdownWithCitations'
 
 interface ReasoningBlockProps {
@@ -300,6 +302,20 @@ function ContentBlockRenderer({
       />
     )
   }
+  if (block.type === 'tool_call' && block.name === 'show_widget') {
+    const a = block.arguments ?? {}
+    return (
+      <WidgetView
+        key={block.id}
+        widgetId={block.id}
+        widgetCode={typeof a.widget_code === 'string' ? a.widget_code : ''}
+        status="complete"
+        title={typeof a.title === 'string' ? a.title : undefined}
+        width={typeof a.width === 'number' ? a.width : undefined}
+        height={typeof a.height === 'number' ? a.height : undefined}
+      />
+    )
+  }
   if (block.type === 'tool_call') {
     return (
       <ToolCallGroup
@@ -308,6 +324,27 @@ function ContentBlockRenderer({
         isStreaming={isStreaming}
         messageCreatedAt={messageCreatedAt}
         agentId={agentId}
+      />
+    )
+  }
+  if (block.type === 'tool_call_streaming' && block.name === 'show_widget') {
+    const widgetId = block.tool_call_id ?? `idx-${block.index}`
+    const code = extractWidgetCode(block.args_text)
+    const title = extractJsonStringPrefix(block.args_text, 'title') || undefined
+    if (!code) {
+      return (
+        <div className="rounded-lg border border-border bg-muted p-3 text-sm text-muted-foreground">
+          {`Preparing widget${title ? ` (${title})` : ''}…`}
+        </div>
+      )
+    }
+    return (
+      <WidgetView
+        key={widgetId}
+        widgetId={widgetId}
+        widgetCode={code}
+        status="streaming"
+        title={title}
       />
     )
   }
@@ -365,7 +402,8 @@ function groupBlocks(blocks: ContentBlock[]): (ContentBlock | ContentBlock[])[] 
       block.type === 'tool_call' &&
       block.name !== 'subagent' &&
       block.name !== 'save_artifact' &&
-      block.name !== 'write_todos'
+      block.name !== 'write_todos' &&
+      block.name !== 'show_widget'
     ) {
       const last = result[result.length - 1]
       if (
