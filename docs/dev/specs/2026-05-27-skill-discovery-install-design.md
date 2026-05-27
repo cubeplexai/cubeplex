@@ -19,8 +19,10 @@ say "I need to build a slide deck — is there a skill for that?" and get it.
 Two gaps:
 
 1. **No discovery surface.** The agent sees only the enabled set. It can't
-   search a wider catalog (other org skills, preinstalled-but-not-installed, or
-   remote registries like `skills.sh`) for something that *would* help.
+   search a wider catalog — preinstalled or own-org skills not yet enabled in
+   this workspace (the `list_visible_for_org` scope), or remote registries like
+   `skills.sh` — for something that *would* help. Local discovery never reads
+   other orgs' rows; cross-org reach is only via explicit remote sources.
 2. **No in-chat install.** Even when a relevant skill exists in the catalog,
    pulling it into the workspace requires leaving chat and using the admin UI.
 
