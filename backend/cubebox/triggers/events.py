@@ -22,6 +22,9 @@ class NormalizedEvent:
     dedup_key: str
 
 
+_DEDUP_KEY_MAX_LEN = 64
+
+
 def derive_dedup_key(raw_body: bytes, event_id_header: str | None) -> str:
     """Stable idempotency key for an inbound event.
 
@@ -29,7 +32,13 @@ def derive_dedup_key(raw_body: bytes, event_id_header: str | None) -> str:
     to SHA-256 of the raw body bytes. The fallback intentionally does
     NOT include the signed timestamp — a re-signed identical body must
     yield the same key so a provider replay doesn't spawn a duplicate run.
+
+    Provider event-ids that exceed ``trigger_events.dedup_key`` column
+    width (64) are hashed so the row insert never violates the column
+    constraint after a valid signature has been accepted.
     """
     if event_id_header:
-        return event_id_header
+        if len(event_id_header) <= _DEDUP_KEY_MAX_LEN:
+            return event_id_header
+        return hashlib.sha256(event_id_header.encode("utf-8")).hexdigest()
     return hashlib.sha256(raw_body).hexdigest()

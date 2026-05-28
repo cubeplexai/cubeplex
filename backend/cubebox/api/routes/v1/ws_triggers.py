@@ -21,7 +21,7 @@ from cubebox.api.schemas.trigger import (
     UpdateTriggerIn,
 )
 from cubebox.auth.context import RequestContext
-from cubebox.auth.dependencies import require_member
+from cubebox.auth.dependencies import require_admin, require_member
 from cubebox.credentials.dependencies import get_credential_service
 from cubebox.db.session import get_session
 from cubebox.models import Trigger, TriggerEvent
@@ -99,7 +99,7 @@ async def create_trigger(
     workspace_id: str,
     body: CreateTriggerIn,
     session: Annotated[AsyncSession, Depends(get_session)],
-    ctx: Annotated[RequestContext, Depends(require_member)],
+    ctx: Annotated[RequestContext, Depends(require_admin)],
     cred_service: Annotated[CredentialService, Depends(get_credential_service)],
 ) -> TriggerOut:
     # Validate run_as_user_id is a member of this workspace.
@@ -189,7 +189,7 @@ async def update_trigger(
     trigger_id: str,
     body: UpdateTriggerIn,
     session: Annotated[AsyncSession, Depends(get_session)],
-    ctx: Annotated[RequestContext, Depends(require_member)],
+    ctx: Annotated[RequestContext, Depends(require_admin)],
 ) -> TriggerOut:
     trig_repo = TriggerRepository(session, org_id=ctx.org_id, workspace_id=workspace_id)
     trigger = await trig_repo.get(trigger_id)
@@ -241,7 +241,7 @@ async def delete_trigger(
     workspace_id: str,
     trigger_id: str,
     session: Annotated[AsyncSession, Depends(get_session)],
-    ctx: Annotated[RequestContext, Depends(require_member)],
+    ctx: Annotated[RequestContext, Depends(require_admin)],
     cred_service: Annotated[CredentialService, Depends(get_credential_service)],
 ) -> None:
     trig_repo = TriggerRepository(session, org_id=ctx.org_id, workspace_id=workspace_id)
@@ -293,7 +293,7 @@ async def rotate_secret(
     trigger_id: str,
     body: RotateSecretIn,
     session: Annotated[AsyncSession, Depends(get_session)],
-    ctx: Annotated[RequestContext, Depends(require_member)],
+    ctx: Annotated[RequestContext, Depends(require_admin)],
     cred_service: Annotated[CredentialService, Depends(get_credential_service)],
 ) -> RotateSecretOut:
     trig_repo = TriggerRepository(session, org_id=ctx.org_id, workspace_id=workspace_id)
@@ -342,11 +342,9 @@ async def list_trigger_events(
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="not found")
 
     ev_repo = TriggerEventRepository(session, org_id=ctx.org_id, workspace_id=workspace_id)
-    events = await ev_repo.list_for_trigger(trigger_id, limit=limit, offset=offset)
-
-    if status_filter is not None:
-        events = [e for e in events if e.status == status_filter]
-
+    events = await ev_repo.list_for_trigger(
+        trigger_id, status=status_filter, limit=limit, offset=offset
+    )
     return TriggerEventListOut(events=[_event_out(e) for e in events])
 
 
@@ -366,7 +364,7 @@ async def replay_event(
     event_id: str,
     request: Request,
     session: Annotated[AsyncSession, Depends(get_session)],
-    ctx: Annotated[RequestContext, Depends(require_member)],
+    ctx: Annotated[RequestContext, Depends(require_admin)],
 ) -> TriggerEventOut:
     trig_repo = TriggerRepository(session, org_id=ctx.org_id, workspace_id=workspace_id)
     trigger = await trig_repo.get(trigger_id)

@@ -294,9 +294,18 @@ async def test_dedup(authenticated_client: tuple[httpx.AsyncClient, str]) -> Non
     event_id = r1.json()["event_id"]
     await _poll_event_accepted(client, ws_id, trigger_id, event_id)
 
-    t = await _get_trigger(client, ws_id, trigger_id)
-    assert t["events_total"] >= 2
-    assert t["events_dedup_dropped"] >= 1
+    # The counter bumps from pipeline.fire and from the dedup short-circuit
+    # are independent — poll until both have landed before asserting so a
+    # slow pipeline run doesn't flake the dedup-counter assertion.
+    deadline = time.monotonic() + 8.0
+    t: dict[str, Any] = {}
+    while time.monotonic() < deadline:
+        t = await _get_trigger(client, ws_id, trigger_id)
+        if t["events_total"] >= 2 and t["events_dedup_dropped"] >= 1:
+            break
+        await asyncio.sleep(0.15)
+    assert t["events_total"] >= 2, t
+    assert t["events_dedup_dropped"] >= 1, t
 
 
 # ---------------------------------------------------------------------------
