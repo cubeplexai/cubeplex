@@ -26,7 +26,10 @@ class InviteTokenRepository:
         if tok is None:
             return None
         now = datetime.now(UTC)
-        if tok.used_at is not None or tok.expires_at < now:
+        expires_at = tok.expires_at
+        if expires_at.tzinfo is None:  # SQLite discards tz on round-trip
+            expires_at = expires_at.replace(tzinfo=UTC)
+        if tok.used_at is not None or expires_at < now:
             return None
         tok.used_at = now
         await self.session.commit()
