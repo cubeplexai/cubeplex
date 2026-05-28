@@ -185,15 +185,23 @@ class TestScheduledTaskValidation:
         )
 
     def test_resume_past_one_shot_is_idempotent(self, client: TestClient) -> None:
-        """Regression for codex round-6 P2: pausing/resuming a one-shot
-        whose run_at is in the past must not 500 on the second resume.
+        """Regression for codex round-6 P2 + round-7 P2: pausing/resuming
+        an expired one-shot must stay idempotent against repeats AND against
+        a duplicate INSERT (any source of conflict on the unique key).
 
         First resume records a 'skipped_missed' summary row at
-        scheduled_for=run_at. Without an idempotency guard, the second
-        resume tries to insert another row at the same scheduled_for,
-        hitting the (scheduled_task_id, scheduled_for) unique constraint.
+        scheduled_for=run_at. The second pause+resume cycle would otherwise
+        hit the (scheduled_task_id, scheduled_for) unique constraint and
+        500. The fix uses a SAVEPOINT around the INSERT + catches
+        IntegrityError, so the second resume is a no-op for the row and
+        the outer commit (status=active) still lands.
+
+        The SAVEPOINT path also covers the concurrent-resume race (two
+        in-flight resumes both passing a SELECT-then-INSERT check) —
+        directly testing concurrent ASGI requests against the same
+        TestClient is awkward, so the sequential repeat below exercises
+        the same INSERT/conflict path the concurrent case would hit.
         """
-        # Create a once task scheduled in the past.
         from datetime import UTC as _utc
         from datetime import datetime as _dt
         from datetime import timedelta as _td
@@ -214,8 +222,12 @@ class TestScheduledTaskValidation:
         assert client.post(f"{BASE}/{tid}/pause").status_code == 200
         second = client.post(f"{BASE}/{tid}/resume")
         assert second.status_code == 200, second.text
-        # Run history should still contain exactly one skipped_missed row
-        # (the idempotency guard prevented the duplicate insert).
+        # And a third cycle for good measure (exercises the SAVEPOINT
+        # rollback path twice without leaking state).
+        assert client.post(f"{BASE}/{tid}/pause").status_code == 200
+        third = client.post(f"{BASE}/{tid}/resume")
+        assert third.status_code == 200, third.text
+        # Run history must still contain exactly one skipped_missed row.
         runs = client.get(f"{BASE}/{tid}/runs").json()
         skipped = [r for r in runs if r["state"] == "skipped_missed"]
         assert len(skipped) == 1, runs

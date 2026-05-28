@@ -8,10 +8,10 @@ non-owner editing the prompt would run code under the owner's identity.
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import Annotated, Any, cast
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cubebox.api.schemas.ws_scheduled_tasks import (
@@ -106,31 +106,31 @@ async def _resume_next_fire(session: AsyncSession, t: ScheduledTask) -> datetime
     if t.schedule_kind == "once":
         run_at = as_utc(t.run_at) if t.run_at is not None else None
         if run_at is not None and run_at <= now:
-            # Idempotency: a prior fire OR a prior resume of the same expired
-            # one-shot may have already recorded a row at scheduled_for=run_at.
-            # The unique (scheduled_task_id, scheduled_for) constraint would
-            # otherwise 500 the resume request on a repeat pause/resume cycle.
+            # Atomic, race-safe insert. The unique (scheduled_task_id,
+            # scheduled_for) constraint guards against duplicates from
+            # ALL three sources: a prior fire of the same one-shot, a
+            # prior resume that already recorded the row, or a concurrent
+            # resume request (e.g. double-click). A SAVEPOINT isolates
+            # the insert; if the constraint fires we swallow it as a
+            # no-op so the outer commit (status=active, next_fire_at=None)
+            # still lands.
             scheduled_for_naive = _to_utc_naive(run_at)
-            existing = (
-                await session.execute(
-                    select(cast(Any, ScheduledTaskRun.id)).where(
-                        cast(Any, ScheduledTaskRun.scheduled_task_id) == t.id,
-                        cast(Any, ScheduledTaskRun.scheduled_for) == scheduled_for_naive,
+            try:
+                async with session.begin_nested():
+                    session.add(
+                        ScheduledTaskRun(
+                            scheduled_task_id=t.id,
+                            org_id=t.org_id,
+                            workspace_id=t.workspace_id,
+                            scheduled_for=scheduled_for_naive,
+                            claimed_at=now,
+                            state="skipped_missed",
+                            detail="paused past its one-shot fire time",
+                        )
                     )
-                )
-            ).scalar_one_or_none()
-            if existing is None:
-                session.add(
-                    ScheduledTaskRun(
-                        scheduled_task_id=t.id,
-                        org_id=t.org_id,
-                        workspace_id=t.workspace_id,
-                        scheduled_for=scheduled_for_naive,
-                        claimed_at=now,
-                        state="skipped_missed",
-                        detail="paused past its one-shot fire time",
-                    )
-                )
+                    await session.flush()
+            except IntegrityError:
+                pass
             return None
         return run_at
     if anchor is None or anchor > now:
