@@ -375,7 +375,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, ClassVar
 
-from sqlalchemy import Index, UniqueConstraint, text
+from sqlalchemy import Column, Index, Integer, UniqueConstraint, text
 from sqlmodel import Field
 
 from cubebox.models.mixins import CubeboxBase, OrgScopedMixin
@@ -440,9 +440,18 @@ class ScheduledTaskRun(CubeboxBase, OrgScopedMixin, table=True):
     scheduled_for: datetime = Field()
     claimed_at: datetime = Field()
     started_at: datetime | None = Field(default=None)
-    # claimed | started | succeeded | failed | skipped_missed | skipped_active
-    state: str = Field(max_length=24)
+    # claimed | started | succeeded | failed | skipped_missed |
+    # skipped_busy_max_retries
+    state: str = Field(max_length=32)
     claim_count: int = Field(default=1)
+    # Busy-conversation retry path (spec §"One-run-per-conversation interaction"):
+    # on a busy fixed target, set next_retry_at = now + 5m, bump retry_count, leave
+    # the row re-claimable; after retry_count >= 3, mark skipped_busy_max_retries.
+    retry_count: int = Field(
+        default=0,
+        sa_column=Column(Integer(), nullable=False, server_default="0"),
+    )
+    next_retry_at: datetime | None = Field(default=None, nullable=True)
     run_id: str | None = Field(default=None, max_length=64)
     conversation_id: str | None = Field(default=None, max_length=20)
     detail: str | None = Field(default=None)
@@ -492,14 +501,19 @@ Expected: a new file under `backend/alembic/versions/` whose `upgrade()` creates
 `scheduled_tasks` and `scheduled_task_runs`, the `uq_stkrn_task_scheduled_for`
 unique constraint, the `ix_scheduled_tasks_status_next_fire` /
 `ix_stkrn_state_claimed_at` / `ix_stkrn_run_id` indexes, and the partial
-`ix_scheduled_tasks_deleted_at_partial` index.
+`ix_scheduled_tasks_deleted_at_partial` index. The `scheduled_task_runs` create
+must also include the busy-retry columns `retry_count INTEGER NOT NULL DEFAULT
+0` and `next_retry_at TIMESTAMP NULL` — autogenerate produces them from the
+SQLModel definition; **do not hand-edit** the generated migration to add them.
 
 - [ ] **Step 2: Read the generated file and confirm it matches the model**
 
 Open the generated file. Confirm: both `create_table` calls present, the unique
-constraint name is `uq_stkrn_task_scheduled_for`, and the partial index carries
-`postgresql_where=sa.text('deleted_at IS NOT NULL')`. If autogen produced an
-empty migration, the models aren't imported into metadata — re-check Task 3 Step 2.
+constraint name is `uq_stkrn_task_scheduled_for`, the partial index carries
+`postgresql_where=sa.text('deleted_at IS NOT NULL')`, and `scheduled_task_runs`
+includes `retry_count` (NOT NULL, server_default `'0'`) and `next_retry_at`
+(nullable). If autogen produced an empty migration, the models aren't imported
+into metadata — re-check Task 3 Step 2.
 
 - [ ] **Step 3: Apply and round-trip the migration**
 
@@ -526,6 +540,19 @@ git commit -m "feat(db): migration for scheduled_tasks tables"
 - Test: covered by the E2E firing test in Task 9 (the claim query needs a real
   Postgres connection; `SKIP LOCKED` cannot be simulated in SQLite, so per
   CLAUDE.md E2E-priority this is validated E2E, not unit-mocked).
+
+**Defaults locked in (spec §Open Questions resolutions):**
+- `claim_timeout = 2 min` — how long a row may sit in `claimed` (run_id NULL)
+  before another poller may re-pick it after a dispatch crash.
+- `max_claims = 3` — re-claim cap; past this the occurrence is set `failed`
+  with a "max re-claims exceeded" reason instead of being retried forever.
+- `busy_retry_delay = 5 min` and `max_busy_retries = 3` — used by the dispatch
+  step (Task 6) when a fixed target conversation is busy: postpone the
+  occurrence by 5 min, increment `retry_count`, leave the row re-claimable;
+  past the cap, set terminal `skipped_busy_max_retries`.
+
+These four constants are surfaced as `ScheduledTaskPoller.__init__` arguments
+(Task 8) so tests can shorten them.
 
 - [ ] **Step 1: Implement both repositories**
 
@@ -645,6 +672,31 @@ async def claim_stale_runs(
     return list((await session.execute(stmt)).scalars().all())
 
 
+async def claim_busy_postponed_runs(
+    session: AsyncSession, *, now: datetime, limit: int
+) -> list[ScheduledTaskRun]:
+    """Lock and return occurrence rows postponed because the fixed target was busy.
+
+    Rows in state 'claimed' with run_id IS NULL, next_retry_at IS NOT NULL,
+    next_retry_at <= now, retry_count < 3. Caller increments retry_count when
+    re-attempting dispatch (Task 8). ``FOR UPDATE SKIP LOCKED`` makes concurrent
+    pollers safe.
+    """
+    stmt = (
+        select(ScheduledTaskRun)
+        .where(
+            ScheduledTaskRun.state == "claimed",  # type: ignore[arg-type]
+            cast(Any, ScheduledTaskRun.run_id).is_(None),
+            cast(Any, ScheduledTaskRun.next_retry_at).is_not(None),
+            ScheduledTaskRun.next_retry_at <= now,  # type: ignore[operator]
+            ScheduledTaskRun.retry_count < 3,  # type: ignore[operator]
+        )
+        .limit(limit)
+        .with_for_update(skip_locked=True)
+    )
+    return list((await session.execute(stmt)).scalars().all())
+
+
 async def fail_stale_started_runs(
     session: AsyncSession, *, now: datetime, started_timeout: timedelta, limit: int
 ) -> int:
@@ -676,7 +728,7 @@ Add `from sqlalchemy import update` to the imports if not already present.
 
 - [ ] **Step 2: Verify it imports**
 
-Run: `uv run python -c "from cubebox.repositories.scheduled_task import claim_due_tasks, claim_stale_runs, fail_stale_started_runs, ScheduledTaskRepository, ScheduledTaskRunRepository; print('ok')"`
+Run: `uv run python -c "from cubebox.repositories.scheduled_task import claim_due_tasks, claim_stale_runs, claim_busy_postponed_runs, fail_stale_started_runs, ScheduledTaskRepository, ScheduledTaskRunRepository; print('ok')"`
 Expected: `ok`
 
 - [ ] **Step 3: Commit**
@@ -717,6 +769,15 @@ from cubebox.streams.run_manager import RunContext, RunManager
 
 class TargetUnavailableError(Exception):
     """Fixed target missing/not owner-owned, or owner lost membership."""
+
+
+class ConversationBusyError(Exception):
+    """Fixed target conversation already has a running run.
+
+    The poller (Task 8) catches this and applies the busy-retry policy
+    (spec §"One-run-per-conversation interaction"): postpone by 5m up to 3
+    times, then terminal ``skipped_busy_max_retries``.
+    """
 
 
 @dataclass(slots=True)
@@ -762,7 +823,15 @@ async def resolve_target(task: ScheduledTask) -> str:
 async def dispatch_scheduled_run(
     *, task: ScheduledTask, run_manager: RunManager
 ) -> DispatchResult:
-    """Start one run for one occurrence. Raises on owner/target/conversation issues."""
+    """Start one run for one occurrence.
+
+    Raises:
+      TargetUnavailableError -- owner is gone OR fixed target is missing /
+        no longer owner-owned. The poller marks the occurrence ``failed``.
+      ConversationBusyError -- ``fixed`` target already has a running run.
+        The poller applies the busy-retry policy (postpone 5m, retry up to 3,
+        then ``skipped_busy_max_retries``).
+    """
     if not await _owner_still_member(task):
         raise TargetUnavailableError("owner is no longer a workspace member")
     conversation_id = await resolve_target(task)
@@ -772,12 +841,23 @@ async def dispatch_scheduled_run(
         workspace_id=task.workspace_id,
         agent_config_id=task.agent_config_id,  # see the decision note below
     )
-    run_id = await run_manager.start_run(
-        conversation_id=conversation_id,
-        content=task.prompt,
-        attachments=[],
-        ctx=ctx,
-    )
+    try:
+        run_id = await run_manager.start_run(
+            conversation_id=conversation_id,
+            content=task.prompt,
+            attachments=[],
+            ctx=ctx,
+        )
+    except RuntimeError as exc:
+        # RunManager.start_run rejects a second run on a conversation that
+        # already has one running. For target_mode='fixed' this is the busy
+        # case the spec's 5m-retry policy handles; surface it distinctly so
+        # the poller can postpone instead of failing. For 'new_each_run' the
+        # conversation is brand-new so this branch is effectively unreachable;
+        # if it ever fires, fall through as a regular runtime error.
+        if task.target_mode == "fixed" and "already" in str(exc).lower():
+            raise ConversationBusyError(str(exc)) from exc
+        raise
     return DispatchResult(run_id=run_id, conversation_id=conversation_id)
 ```
 
@@ -804,7 +884,7 @@ async def dispatch_scheduled_run(
 
 - [ ] **Step 2: Verify it imports**
 
-Run: `uv run python -c "from cubebox.schedules.dispatch import dispatch_scheduled_run, resolve_target, TargetUnavailableError; print('ok')"`
+Run: `uv run python -c "from cubebox.schedules.dispatch import dispatch_scheduled_run, resolve_target, TargetUnavailableError, ConversationBusyError; print('ok')"`
 Expected: `ok`
 
 - [ ] **Step 3: Commit**
@@ -932,6 +1012,7 @@ from sqlalchemy.exc import IntegrityError
 from cubebox.db.engine import async_session_maker
 from cubebox.models.scheduled_task import ScheduledTask, ScheduledTaskRun
 from cubebox.repositories.scheduled_task import (
+    claim_busy_postponed_runs,
     claim_due_tasks,
     claim_stale_runs,
     fail_stale_started_runs,
@@ -943,7 +1024,11 @@ from cubebox.schedules.compute import (
     latest_due_before,
     next_fire_after,
 )
-from cubebox.schedules.dispatch import TargetUnavailableError, dispatch_scheduled_run
+from cubebox.schedules.dispatch import (
+    ConversationBusyError,
+    TargetUnavailableError,
+    dispatch_scheduled_run,
+)
 from cubebox.streams.run_manager import RunManager
 
 
@@ -952,12 +1037,18 @@ class ScheduledTaskPoller:
         self,
         *,
         run_manager: RunManager,
-        poll_interval_seconds: float = 20.0,
+        # OQ1: poll at 15s with jitter, minute-granularity v1.
+        poll_interval_seconds: float = 15.0,
         jitter_seconds: float = 5.0,
         misfire_grace_seconds: int = 300,
+        # OQ6: claim_timeout = 2 min, max_claims = 3 (accept rare double-fire).
         claim_timeout_seconds: int = 120,
-        started_timeout_seconds: int = 3600,  # fail 'started' rows stuck > 1h
         max_claims: int = 3,
+        started_timeout_seconds: int = 3600,  # fail 'started' rows stuck > 1h
+        # OQ3: busy-conversation postpone — 5 min delay, retry up to 3 times,
+        # then terminal skipped_busy_max_retries.
+        busy_retry_delay_seconds: int = 300,
+        max_busy_retries: int = 3,
         batch_limit: int = 50,
     ) -> None:
         self._run_manager = run_manager
@@ -967,6 +1058,8 @@ class ScheduledTaskPoller:
         self._claim_timeout = timedelta(seconds=claim_timeout_seconds)
         self._started_timeout = timedelta(seconds=started_timeout_seconds)
         self._max_claims = max_claims
+        self._busy_retry_delay = timedelta(seconds=busy_retry_delay_seconds)
+        self._max_busy_retries = max_busy_retries
         self._batch_limit = batch_limit
         self._task: asyncio.Task[None] | None = None
         self._stopping = False
@@ -1016,6 +1109,23 @@ class ScheduledTaskPoller:
                     row.claimed_at = now
                     row.claim_count += 1
                     to_dispatch.append(row.id)
+
+            # OQ3 busy-retry pickup: rows postponed by an earlier dispatch
+            # because the fixed target was busy. Re-pick once next_retry_at
+            # has passed and retry_count is still under the cap; the cap is
+            # enforced when we set next_retry_at in _dispatch_one (rows past
+            # the cap go straight to skipped_busy_max_retries there).
+            busy = await claim_busy_postponed_runs(
+                session, now=now, limit=self._batch_limit
+            )
+            for row in busy:
+                row.claimed_at = now
+                # OQ3: retry_count was already incremented when the postpone
+                # was recorded; clearing next_retry_at marks the row as a
+                # fresh dispatch attempt and lets _dispatch_one see it as a
+                # regular 'claimed' row.
+                row.next_retry_at = None
+                to_dispatch.append(row.id)
 
             # Recover rows stuck in 'started' (replica died after start_run but
             # before the completion hook). No live run to resume, so fail them
@@ -1129,10 +1239,27 @@ class ScheduledTaskPoller:
                 row.detail = str(exc)
                 await session.commit()
                 return
-            except RuntimeError as exc:
-                # start_run rejected: conversation already running.
-                row.state = "skipped_active"
-                row.detail = str(exc)
+            except ConversationBusyError as exc:
+                # OQ3: fixed target conversation is busy. Postpone by
+                # busy_retry_delay; bump retry_count. After max_busy_retries
+                # the row is terminal skipped_busy_max_retries.
+                if row.retry_count + 1 >= self._max_busy_retries:
+                    row.state = "skipped_busy_max_retries"
+                    row.retry_count = row.retry_count + 1
+                    row.next_retry_at = None
+                    row.detail = (
+                        f"target conversation busy after "
+                        f"{row.retry_count} retries: {exc}"
+                    )
+                else:
+                    # Leave state='claimed' (re-claimable) but flag for the
+                    # next poll cycle via next_retry_at.
+                    row.retry_count = row.retry_count + 1
+                    row.next_retry_at = datetime.now(UTC) + self._busy_retry_delay
+                    row.detail = (
+                        f"target conversation busy; retry {row.retry_count}"
+                        f"/{self._max_busy_retries} at {row.next_retry_at.isoformat()}"
+                    )
                 await session.commit()
                 return
             row.state = "started"
@@ -1152,8 +1279,12 @@ from cubebox.config import config as _sched_cfg
 
 poller = ScheduledTaskPoller(
     run_manager=run_manager,
-    poll_interval_seconds=float(_sched_cfg.get("scheduled_tasks.poll_interval_seconds", 20.0)),
+    poll_interval_seconds=float(_sched_cfg.get("scheduled_tasks.poll_interval_seconds", 15.0)),
     misfire_grace_seconds=int(_sched_cfg.get("scheduled_tasks.misfire_grace_seconds", 300)),
+    claim_timeout_seconds=int(_sched_cfg.get("scheduled_tasks.claim_timeout_seconds", 120)),
+    max_claims=int(_sched_cfg.get("scheduled_tasks.max_claims", 3)),
+    busy_retry_delay_seconds=int(_sched_cfg.get("scheduled_tasks.busy_retry_delay_seconds", 300)),
+    max_busy_retries=int(_sched_cfg.get("scheduled_tasks.max_busy_retries", 3)),
 )
 poller.start()
 _app.state.scheduled_task_poller = poller
@@ -1295,6 +1426,10 @@ class ScheduledTaskRunOut(BaseModel):
     claimed_at: str
     started_at: str | None
     state: str
+    # OQ3 busy-retry fields surfaced so the frontend can show why a fire was
+    # postponed and what the terminal skipped_busy_max_retries state means.
+    retry_count: int
+    next_retry_at: str | None
     run_id: str | None
     conversation_id: str | None
     detail: str | None
@@ -1605,7 +1740,8 @@ async def list_task_runs(
         ScheduledTaskRunOut(
             id=r.id, scheduled_for=utc_isoformat(r.scheduled_for),
             claimed_at=utc_isoformat(r.claimed_at), started_at=_iso(r.started_at),
-            state=r.state, run_id=r.run_id, conversation_id=r.conversation_id, detail=r.detail,
+            state=r.state, retry_count=r.retry_count, next_retry_at=_iso(r.next_retry_at),
+            run_id=r.run_id, conversation_id=r.conversation_id, detail=r.detail,
         )
         for r in rows
     ]
@@ -2011,6 +2147,12 @@ file, modules are the reuse boundary, no `mode?` prop).
   mirroring the conversations proxy; verify each forwards method + body + auth.
 - [ ] **Step 3: Page + modules.** Build the page assembling list/detail/form
   modules. Match the project's design quality bar (shadcn components, polish).
+  The run-history sub-view must surface the busy-retry path (spec OQ3): show
+  `retry_count` and `next_retry_at` (when a fire was postponed because its
+  fixed target conversation was busy), and render the terminal
+  `skipped_busy_max_retries` state with its `detail` so a user can see why a
+  fire never started. Treat the other terminal states (`succeeded`, `failed`,
+  `skipped_missed`) the same way — state badge + detail.
 - [ ] **Step 4: Verify.** `pnpm lint && pnpm type-check` clean; a Playwright
   smoke (create → see in list → pause → resume → delete) under the existing e2e
   harness. Keep selectors scoped per the project's e2e conventions.
@@ -2096,8 +2238,10 @@ git commit -m "chore(schedules): mypy/ruff sweep fixes"
 - Reuse `start_run`, no fork → Task 6.
 - Owner-left-workspace skip → Task 6 (`_owner_still_member` → `TargetUnavailableError`
   → occurrence `failed`).
-- `skipped_active` on busy fixed conversation → Task 8 (`RuntimeError` from
-  `start_run` → `skipped_active`).
+- Busy fixed conversation → 5m postpone, retry up to 3 times, then terminal
+  `skipped_busy_max_retries` (OQ3 resolution) → Task 6
+  (`ConversationBusyError` from `dispatch_scheduled_run`), Task 8
+  (`_dispatch_one` postpone branch + `claim_busy_postponed_runs` pickup).
 - Run history read API → Task 9 (`GET /{task_id}/runs`).
 - Poller started on every replica in lifespan + drained on shutdown → Task 8.
 - Naive DB datetimes normalized before schedule arithmetic → Task 2 (`as_utc`
@@ -2125,18 +2269,21 @@ non-`CubeboxBase` tables like memory/sandbox-env). So no edit to `public_id.py`
 is required; this is the correct interpretation of the "new table → public_id
 prefix" rule, not a gap.
 
-**Open Questions (spec §Open Questions):** defaults are taken (poll 20s+jitter,
-`misfire_grace=300s`, `claim_timeout=120s`, `max_claims=3`, `skipped_active` for
-busy fixed, no ownership reassignment, no per-task cost cap). These match the
-spec's stated v1 choices; the remaining open questions are explicitly out of v1
-scope and need no task.
+**Open Questions (spec §Open Questions):** all eight resolved 2026-05-28; the
+session-resolved defaults are baked into this plan (poll 15s+jitter,
+`misfire_grace=300s`, `claim_timeout=120s`, `max_claims=3`,
+`busy_retry_delay=300s`, `max_busy_retries=3`, owner-leaves auto-pauses task,
+no per-task cost cap — cost protection deferred to the project-wide
+`CostMiddleware`, no scheduler-level per-user serialization). See the spec's
+Open Questions section for the rationale on each.
 
 **Placeholder scan:** no TBD/TODO/"handle edge cases" steps; every code step
 contains complete code. **Type consistency:** `MissedDecision`, `next_fire_after`,
 `latest_due_before`, `decide_missed`, `DispatchResult`, `TargetUnavailableError`,
-`ScheduledTaskPoller.poll_once`, `record_scheduled_run_terminal_state`,
-`claim_due_tasks`/`claim_stale_runs` signatures are referenced identically across
-Tasks 2/5/6/7/8/9/11.
+`ConversationBusyError`, `ScheduledTaskPoller.poll_once`,
+`record_scheduled_run_terminal_state`,
+`claim_due_tasks`/`claim_stale_runs`/`claim_busy_postponed_runs` signatures
+are referenced identically across Tasks 2/5/6/7/8/9/11.
 
 ---
 
