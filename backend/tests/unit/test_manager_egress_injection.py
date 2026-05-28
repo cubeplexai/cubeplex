@@ -181,6 +181,10 @@ async def test_reuse_path_sets_run_env_and_refreshes_refs(
     old_record = MagicMock()
     old_record.id = "rec-reuse"
     old_record.sandbox_id = "sbx-reuse"
+    # The reuse branch is gated on status=="running" (see Task 6: provisioning
+    # rows fall through to the race-loss poll path).
+    old_record.status = "running"
+    old_record.image = "ubuntu:22.04"
 
     async def fake_connect(sandbox_id: str, **kwargs: Any) -> Any:
         fake = MagicMock()
@@ -262,10 +266,18 @@ async def test_create_without_exchange_host_skips_injection(
         backend = await manager.get_or_create("u-1", org_id="org-1", workspace_id="ws-1")
 
     assert "env" not in create_kwargs, "Without exchange_host, env must NOT be passed"
-    # The unified create call passes network_policy=None when egress is disabled,
-    # which is semantically identical to omitting it (SDK default is None).
-    assert create_kwargs.get("network_policy") is None, (
-        "Without exchange_host, network_policy must be None (no allow-list)"
+    # After Task 6: the create call always carries a NetworkPolicy so admin
+    # `network_rules` apply even when the egress exchange host is unset. With
+    # no admin rules AND no exchange host, the policy is the empty deny-default
+    # (no allow-list — strictly stricter than the old `network_policy=None`).
+    policy = create_kwargs.get("network_policy")
+    assert policy is not None, (
+        "Without exchange_host, network_policy is now the empty deny-default policy"
+    )
+    assert policy.default_action == "deny"
+    assert list(policy.egress) == [], (
+        f"Expected no egress rules when neither admin nor injection contributed, got "
+        f"{policy.egress!r}"
     )
 
     # Backend has an empty run env (no egress injection)
@@ -309,6 +321,8 @@ async def test_unhealthy_sandbox_revokes_refs(
     old_record = MagicMock()
     old_record.id = "rec-old"
     old_record.sandbox_id = "sbx-old"
+    old_record.status = "running"
+    old_record.image = "ubuntu:22.04"
 
     async def fake_connect(sandbox_id: str, **kwargs: Any) -> Any:
         fake = MagicMock()
