@@ -12,6 +12,7 @@ export * from './system'
 export * from './workspace-settings'
 export * from './workspaces'
 export * from './members'
+export * from './scheduled-tasks'
 export {
   fetchCostSummary,
   fetchWorkspaceCost,

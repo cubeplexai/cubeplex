@@ -38,6 +38,7 @@ dependencies = [
     "tldextract>=5.3.1",
     "httptools>=0.8.0",
     "watchfiles>=1.2.0",
+    "croniter>=6.2.2",
 ]
 
 [project.optional-dependencies]
