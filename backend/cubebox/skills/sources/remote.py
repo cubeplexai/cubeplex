@@ -22,6 +22,7 @@ from cubebox.skills.sources.base import (
 )
 
 _MAX_TREE_ENTRIES = 200
+_RAW_FILE_MAX_BYTES = 10 * 1024 * 1024  # same cap as validate_skill_files
 
 
 def _require_str(d: dict[str, object], key: str) -> str:
@@ -121,9 +122,10 @@ class RemoteRegistrySource:
             if not isinstance(tree_data, dict):
                 raise ValueError("remote registry returned non-object tree")
             entries = tree_data.get("files", [])
-            if not isinstance(entries, list) or len(entries) > _MAX_TREE_ENTRIES:
+            entry_count = len(entries) if isinstance(entries, list) else 0
+            if not isinstance(entries, list) or entry_count > _MAX_TREE_ENTRIES:
                 raise ValueError(
-                    f"skill tree has {len(entries)} files; cap {_MAX_TREE_ENTRIES}"
+                    f"skill tree has {entry_count} entries; cap {_MAX_TREE_ENTRIES}"
                 )
             for rel in entries:
                 if not isinstance(rel, str):
@@ -133,6 +135,17 @@ class RemoteRegistrySource:
                     raise ValueError(f"unsafe path in remote skill tree: {rel!r}")
                 resp = await client.get(f"/raw/{source_ref}/{rel}")
                 resp.raise_for_status()
+                # Reject oversized raw files before buffering resp.content so a
+                # malicious/broken registry can't exhaust worker memory. Uses the
+                # same cap _extract_zip + validate_skill_files enforce.
+                cl = resp.headers.get("Content-Length")
+                if cl is not None:
+                    size = int(cl)
+                    if size > _RAW_FILE_MAX_BYTES:
+                        raise ValueError(
+                            f"remote file {rel!r} is {size} bytes; cap "
+                            f"{_RAW_FILE_MAX_BYTES}"
+                        )
                 files[rel] = resp.content
         if "SKILL.md" not in files:
             raise ValueError("remote skill subpath has no SKILL.md")
