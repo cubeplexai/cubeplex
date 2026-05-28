@@ -1120,3 +1120,139 @@ async def four_layer_admin_and_member() -> AsyncIterator[
                     member_user_id,
                 ),
             )
+
+
+# ---------------------------------------------------------------------------
+# Sandbox scoping E2E fixtures (Task 9).
+#
+# ``fake_opensandbox`` monkeypatches ``opensandbox.Sandbox.create`` and
+# ``.connect`` with the same ``_FakeRaw`` shim used by Task 6's unit test, so
+# DB-level isolation assertions never touch a real provider. The fakes only
+# satisfy the calls SandboxManager.get_or_create makes on the no-egress /
+# no-volume default path (``id`` attr, ``is_healthy``, ``close``, ``kill``).
+# ---------------------------------------------------------------------------
+
+
+class _FakeRaw:
+    """Minimal stand-in for ``opensandbox.Sandbox`` used by Task 9 E2E.
+
+    IDs are randomized per-instance (``token_hex``) instead of a process-local
+    counter so re-running the E2E doesn't collide with leftover rows from a
+    prior run that survived in the persistent test DB.
+    """
+
+    def __init__(self) -> None:
+        self.id = f"prov-{secrets.token_hex(6)}"
+
+    async def is_healthy(self) -> bool:
+        return True
+
+    async def close(self) -> None:
+        return None
+
+    async def kill(self) -> None:
+        return None
+
+
+@pytest.fixture
+def fake_opensandbox(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    """Patch opensandbox.Sandbox.create/connect with ``_FakeRaw`` fakes."""
+    import opensandbox
+
+    async def _fake_create(image: str, **kwargs: Any) -> _FakeRaw:
+        del image, kwargs
+        return _FakeRaw()
+
+    async def _fake_connect(sandbox_id: str, **kwargs: Any) -> _FakeRaw:
+        del sandbox_id, kwargs
+        return _FakeRaw()
+
+    monkeypatch.setattr(opensandbox.Sandbox, "create", staticmethod(_fake_create))
+    monkeypatch.setattr(opensandbox.Sandbox, "connect", staticmethod(_fake_connect))
+    yield
+
+
+@pytest_asyncio.fixture
+async def seeded_org_ws_user() -> AsyncIterator[tuple[str, str, str, str]]:
+    """One org, two workspaces, one user (member of both).
+
+    Yields ``(org_id, ws_a_id, ws_b_id, user_id)``. Used by the
+    ownership-isolation E2E to drive ``SandboxManager.get_or_create`` for the
+    same user across two distinct workspaces. The user is wiped of any
+    bootstrap personal org/workspace so the only memberships are the two we
+    create here.
+    """
+    from sqlalchemy import delete
+
+    from cubebox.auth.users import _slugify_org_name
+    from cubebox.models import Membership as MembershipModel
+    from cubebox.models import OrganizationMembership, OrgRole
+    from cubebox.repositories import OrganizationMembershipRepository
+
+    test_engine = create_async_engine(_build_database_url(), poolclass=NullPool)
+    test_session_maker = async_sessionmaker(
+        test_engine, class_=AsyncSession, expire_on_commit=False
+    )
+    try:
+        async with test_session_maker() as session:
+            email = f"sbx-scope-{secrets.token_hex(4)}@example.com"
+            org_name = f"Org {email}"
+            org = await OrganizationRepository(session).create(
+                name=org_name, slug=_slugify_org_name(org_name)
+            )
+            ws_repo = WorkspaceRepository(session)
+            ws_a = await ws_repo.create(org_id=org.id, name=f"WS-A {email}")
+            ws_b = await ws_repo.create(org_id=org.id, name=f"WS-B {email}")
+
+            password = secrets.token_urlsafe(16)
+            user_db = SQLAlchemyUserDatabase(session, User)
+            manager = UserManager(user_db)
+            user = await manager.create(BaseUserCreate(email=email, password=password), safe=False)
+
+            # Wipe bootstrap personal org / memberships so the only scope is ours.
+            await session.execute(
+                delete(OrganizationMembership).where(
+                    OrganizationMembership.user_id == user.id,  # type: ignore[arg-type]
+                    OrganizationMembership.org_id != org.id,  # type: ignore[arg-type]
+                )
+            )
+            await session.execute(
+                delete(MembershipModel).where(
+                    MembershipModel.user_id == user.id,  # type: ignore[arg-type]
+                    MembershipModel.workspace_id.notin_([ws_a.id, ws_b.id]),  # type: ignore[attr-defined]
+                )
+            )
+            await session.commit()
+
+            mem_repo = MembershipRepository(session)
+            await mem_repo.grant(user_id=user.id, workspace_id=ws_a.id, role=Role.ADMIN)
+            await mem_repo.grant(user_id=user.id, workspace_id=ws_b.id, role=Role.ADMIN)
+            om_repo = OrganizationMembershipRepository(session)
+            existing_om = await om_repo.get_role(user_id=user.id, org_id=org.id)
+            if existing_om is None:
+                await om_repo.grant(user_id=user.id, org_id=org.id, role=OrgRole.OWNER)
+            await session.commit()
+
+            yield (org.id, ws_a.id, ws_b.id, str(user.id))
+    finally:
+        await test_engine.dispose()
+
+
+@pytest_asyncio.fixture
+async def admin_client_with_user_id() -> AsyncIterator[tuple[httpx.AsyncClient, str, str]]:
+    """Like ``admin_client`` but also exposes the logged-in user's id.
+
+    Yields ``(client, workspace_id, user_id)``. Used by the command-deny E2E
+    to bind the middleware/audit buffer to the same workspace the admin call
+    targets.
+    """
+    app, email, password, workspace_id = await _make_isolated_user(Role.ADMIN)
+    app.state.deployment_mode = "multi_tenant"
+    async with _lifespan_context(app):
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
+            await _login_and_attach(c, email, password)
+            me = await c.get("/api/v1/auth/me")
+            assert me.status_code == 200, me.text
+            user_id = me.json()["id"]
+            yield c, workspace_id, user_id
