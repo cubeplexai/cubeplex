@@ -89,7 +89,7 @@ class MemoryRepository:
             stmt = stmt.where(MemoryItem.type == type_)  # type: ignore[arg-type]
         if q:
             stmt = stmt.where(MemoryItem.content.ilike(f"%{q}%"))  # type: ignore[attr-defined]
-        stmt = stmt.order_by(MemoryItem.created_at.asc()).limit(limit).offset(offset)  # type: ignore[attr-defined]
+        stmt = stmt.order_by(MemoryItem.created_at.asc()).limit(limit).offset(offset)
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
 
