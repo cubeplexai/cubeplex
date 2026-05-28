@@ -423,6 +423,43 @@ class SandboxManager:
             self._touch_cache[record.sandbox_id] = datetime.now(UTC)
             return True
 
+    async def renew_lease(
+        self,
+        sandbox_id: str,
+        *,
+        org_id: str,
+        workspace_id: str,
+        lease_seconds: int | None = None,
+    ) -> None:
+        """Extend the in-use lease on a sandbox so the idle-pause reaper
+        skips it. ``lease_seconds`` defaults to ``sandbox.lease_seconds``.
+
+        Pair with :meth:`release_lease` in a ``finally`` for bounded operations;
+        for long-running flows, call repeatedly on a heartbeat shorter than
+        ``lease_seconds``.
+        """
+        window = lease_seconds if lease_seconds is not None else self._lease_seconds
+        async with self._session_factory() as session:
+            repo = UserSandboxRepository(session, org_id=org_id, workspace_id=workspace_id)
+            record = await repo.get_by_sandbox_id(sandbox_id)
+            if record:
+                await repo.acquire_in_use(record.id, window)
+
+    async def release_lease(
+        self,
+        sandbox_id: str,
+        *,
+        org_id: str,
+        workspace_id: str,
+    ) -> None:
+        """Clear ``in_use_until`` so the idle-pause reaper can pick the row up
+        once it goes stale-idle. Safe to call when no lease is held."""
+        async with self._session_factory() as session:
+            repo = UserSandboxRepository(session, org_id=org_id, workspace_id=workspace_id)
+            record = await repo.get_by_sandbox_id(sandbox_id)
+            if record:
+                await repo.release_in_use(record.id)
+
     async def cleanup_expired(self) -> None:
         """Find and terminate sandboxes that exceeded their TTL.
 

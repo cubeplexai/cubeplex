@@ -70,6 +70,7 @@ class LazySandbox(Sandbox):
         workspace_id: str,
         workdir: str = "/workspace",
         catalog: SkillCatalogService | None = None,
+        op_timeout_seconds: int | None = None,
     ) -> None:
         self._manager = manager
         self._user_id = user_id
@@ -77,6 +78,9 @@ class LazySandbox(Sandbox):
         self._workspace_id = workspace_id
         self._workdir = workdir
         self._catalog = catalog
+        # Sizes the in-use lease window passed to ``manager.renew_lease``. None
+        # falls back to the manager's default (``sandbox.lease_seconds``).
+        self._op_timeout_seconds = op_timeout_seconds
         self._sandbox: Sandbox | None = None
         self._lock = asyncio.Lock()
 
@@ -160,6 +164,19 @@ class LazySandbox(Sandbox):
             )
         except Exception:
             logger.exception("Lazy sandbox: touch failed (non-fatal)")
+
+        # Renew the in-use lease so the idle-pause reaper skips this sandbox
+        # while a tool call is in flight. Sized to op timeout when known;
+        # otherwise the manager falls back to its default lease window.
+        try:
+            await self._manager.renew_lease(
+                sandbox.id,
+                org_id=self._org_id,
+                workspace_id=self._workspace_id,
+                lease_seconds=self._op_timeout_seconds,
+            )
+        except Exception:
+            logger.exception("Lazy sandbox: lease renew failed (non-fatal)")
         return sandbox
 
     # ------------------------------------------------------------------
