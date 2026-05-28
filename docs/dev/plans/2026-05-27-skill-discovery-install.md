@@ -10,20 +10,7 @@
 
 **Spec:** `docs/dev/specs/2026-05-27-skill-discovery-install-design.md` — §1 source abstraction + opaque `candidate_id` + `canonical_name`; §2 `find_skills` read-only tool; §3 preview→confirm→install + immediate loadability; §4 scope/trust; §6 scope-isolated routes; §7 v1 scope.
 
-**Scope note:** v1 ships `SkillSource` + `LocalCatalogSource` + one `RemoteRegistrySource`, the `find_skills` tool, member discover/preview/install routes, admin source-management routes, and in-run enabled-set recompute. Remote-skill **trust enforcement** (allowlist gating / approval queue / injection scan) is the open security question in spec §Open-Questions 1; this plan ships the trust *signal* (tier on the candidate + "unvetted" flag) and a **guarded, deferred** enforcement task (Task 13) wired off by default. Semantic search, personal scope, and remote-import freshness are out of scope.
-
-> **KNOWN SPEC GAP — chat confirm-card frontend (spec §3, §6, §7).** The spec's
-> v1 scope lists a "confirm-card UI in chat" and its *primary* E2E is "user asks
-> the agent → candidate surfaced → **user confirms install from chat** →
-> `load_skill` succeeds." This plan ships the full backend that surface calls
-> (`find_skills` tool → `POST …/install` = the authenticated confirm) and E2Es
-> the install over HTTP, but it does **not** build the frontend confirm card, and
-> so the literal "user confirms *from chat*" path is **not** implemented or
-> E2E-tested here. This is a deliberate split (backend-first, one concern per PR),
-> not a silent drop — it is called out again in "Open follow-ups" as the required
-> follow-up PR. If reviewers want §3 closed in this slice, add a frontend
-> confirm-card task + a Playwright E2E driving chat → confirm → install before
-> merge; otherwise track it as the next PR.
+**Scope note:** v1 ships `SkillSource` + `LocalCatalogSource` + one `RemoteRegistrySource`, the `find_skills` tool, member discover/preview/install/refresh routes, admin source-management routes, in-run enabled-set recompute, **and** the workspace skills page (discover panel + Install button + "Check for update" + chat-fallback parser) — see Task 12. Remote-skill **trust enforcement** (allowlist gating / approval queue / injection scan) is deferred to a future dedicated security/gating module per spec OQ-1 resolution; this PR ships only the user-visible **"unvetted" badge** (in the frontend candidate card and on remote-imported skill detail). Semantic search, personal scope, automated update polling, and agent-initiated install via HITL are out of scope (see spec Future Work).
 
 ---
 
@@ -1892,63 +1879,587 @@ git commit -m "test(skills): remote discover→preview→install E2E via fake re
 
 ---
 
-## Task 13: Trust enforcement — GUARDED / DEFERRED (spec Open-Question 1)
+## Task 13: Trust enforcement — DEFERRED to future security module
 
-The minimum vetting before a member can pull a *remote* skill into their workspace (source allowlist only / admin approval queue / SKILL.md injection scan) is the open security question in the spec. v1 ships the trust **signal** (tier + `unvetted` flag, surfaced in the candidate and preview). v1 does **not** ship enforcement. This task is a **placeholder gate**, default-off, so the install path has a single seam to add enforcement later without re-plumbing.
+Source allowlist + content-scan + admin approval queue are deferred to a future dedicated security/gating module per spec OQ-1 resolution. This PR ships only the user-visible **"unvetted" banner** UX surfaced from the frontend task (Task 12 — candidate cards + remote-imported skill detail). No backend enforcement hook lands in v1; the install path stays a single endpoint with no policy gate. When the security module lands, it will introduce its own seam (allowlist table + approval queue) rather than inheriting a half-built kill-switch here.
+
+(No backend code, no commits.)
+
+---
+
+## Task 14: Workspace skills page — discover panel + install button + check-for-update + chat-fallback
+
+Build the user-facing skills surface in the workspace. Mirrors the spec §7 v1 inclusion of the workspace skills page and the OQ-5 two-surface confirm decision. The chat fallback parses `install <canonical_name>` from a user message **server-side in the conversation route** (not as a frontend UI confirm card) — see the "Chat-fallback design choice" subsection below. All three new HTTP surfaces — discover, install, refresh — are existing backend endpoints from Tasks 8 and 12; this task wires up the proxy routes, the page, the module components, the `@cubebox/core` types, and the Playwright smoke.
+
+> **Workspace-port reminder:** inside this worktree the frontend port is allocated in `.worktree.env`, NEVER 3000. `cat .worktree.env` before `pnpm dev` — the wrapper at `frontend/scripts/with-worktree-env.mjs` reads it.
+
+**Chat-fallback design choice — server-side message parser (not a UI confirm card).** The fallback's whole point is "pure-chat clients still work." A UI confirm card requires a UI client to render it; a server-side parser works in any client that sends a user message. The conversation route (`backend/cubebox/api/routes/v1/ws_conversations.py` — the existing user-message ingest) gets a small detector that, on a user message matching `^install <canonical_name>\s*$` (case-sensitive, single-line), looks up the candidate by `canonical_name` in the workspace's catalog + enabled-remote candidates, calls the same `SkillInstallService.install` the HTTP route calls, and rewrites the message before the agent loop sees it (e.g. replaces with an assistant-shaped system note: "Installed `<name>` (v<version>). Use `load_skill('<canonical_name>')`."). Single source of truth = `SkillInstallService.install`. The UI button on the candidate card is the primary path; the parser is the strict fallback. (Frontend does NOT render a confirm card; the candidate card itself IS the confirmation — clicking Install is the confirm.)
 
 **Files:**
-- Modify: `cubebox/skills/discovery.py` (`SkillInstallService._install_remote`)
-- (No test asserting denial in v1 — only that default behavior is unchanged.)
+- Create: `frontend/packages/core/src/api/skills.ts` — discover/install/refresh client + types.
+- Create: `frontend/packages/core/src/stores/skillsStore.ts` — Zustand store (list, candidates, status).
+- Modify: `frontend/packages/core/src/index.ts` — re-export new types + store.
+- Create: `frontend/packages/web/app/api/v1/ws/[wsId]/skills/discover/route.ts` — Next proxy (GET).
+- Create: `frontend/packages/web/app/api/v1/ws/[wsId]/skills/install/route.ts` — Next proxy (POST).
+- Create: `frontend/packages/web/app/api/v1/ws/[wsId]/skills/[skillId]/refresh/route.ts` — Next proxy (POST).
+- Create: `frontend/packages/web/app/(app)/w/[wsId]/skills/page.tsx` — workspace skills page (scope-isolated, NEW route).
+- Create: `frontend/packages/web/components/skills/SkillsList.tsx` — list module (name + source badge + enabled column + "Check for update").
+- Create: `frontend/packages/web/components/skills/DiscoverPanel.tsx` — search input + ranked candidate cards + Install button.
+- Create: `frontend/packages/web/components/skills/SkillCandidateCard.tsx` — single card (name, canonical_name, source, repo, trust badges, description, Install).
+- Modify: `frontend/packages/web/components/layout/WorkspaceNav.tsx` (or the existing workspace-sidebar component) — add "Skills" nav item linking to `/w/[wsId]/skills`.
+- Modify: `backend/cubebox/api/routes/v1/ws_conversations.py` — add the `install <canonical_name>` parser BEFORE the agent-loop kickoff; uses the existing `SkillInstallService` already wired in Task 8.
+- Test: `frontend/packages/web/e2e/skills-discover-install.spec.ts` — Playwright smoke.
 
-- [ ] **Step 1: Add a no-op guard hook**
+- [ ] **Step 1: Write the failing Playwright smoke**
 
-In `_install_remote`, before `source.fetch(...)`, add:
+```ts
+// frontend/packages/web/e2e/skills-discover-install.spec.ts
+import { test, expect } from "@playwright/test";
+import { loginAsMember } from "./helpers/login";
 
-```python
-        # Trust enforcement seam (spec Open-Question 1) — OFF by default in v1.
-        # When config `skills.remote_install_requires_trusted = true`, deny imports
-        # from sources whose trust tier is below "community". Default config absent
-        # → no gate, matching v1 "signal, not enforcement".
-        from cubebox.config import config as _cfg
+test("discover → install local skill → appears in workspace list", async ({ page }) => {
+  const { wsId } = await loginAsMember(page);
 
-        if _cfg.get("skills.remote_install_requires_trusted", False):
-            raise SkillInstallError(
-                "remote install blocked: org policy requires a trusted source "
-                "(admin must vet/allowlist this source)"
-            )
+  await page.goto(`/w/${wsId}/skills`);
+  await expect(page.getByRole("heading", { name: /Skills/i })).toBeVisible();
+
+  // Discover panel
+  await page.getByPlaceholder(/Search skills/i).fill("research");
+  await page.getByRole("button", { name: /Search/i }).click();
+
+  const card = page.getByTestId("skill-candidate-card").filter({ hasText: "deep-research" });
+  await expect(card).toBeVisible();
+  await expect(card.getByText(/preinstalled/i)).toBeVisible();
+
+  await card.getByRole("button", { name: /^Install$/ }).click();
+  await expect(page.getByText(/Installed deep-research/i)).toBeVisible();
+
+  // Now in the workspace list
+  await expect(
+    page.getByTestId("skills-list").getByText("deep-research"),
+  ).toBeVisible();
+});
+
+test("install remote variant of a same-name skill shows canonical suffix", async ({ page }) => {
+  const { wsId } = await loginAsMember(page);
+  // Test fixture pre-registers a fake remote source that exposes a "deep-research" skill.
+  await page.goto(`/w/${wsId}/skills`);
+  await page.getByPlaceholder(/Search skills/i).fill("research");
+  await page.getByRole("button", { name: /Search/i }).click();
+
+  const remoteCard = page
+    .getByTestId("skill-candidate-card")
+    .filter({ hasText: "deep-research" })
+    .filter({ hasText: /unvetted/i });
+  await expect(remoteCard).toBeVisible();
+  await remoteCard.getByRole("button", { name: /^Install$/ }).click();
+
+  // Canonical suffix on the toast + list row (e.g. "acme:deep-research").
+  await expect(page.getByText(/Installed .+:deep-research/i)).toBeVisible();
+  await expect(
+    page.getByTestId("skills-list").getByText(/:deep-research/i),
+  ).toBeVisible();
+});
+
+test("Check for update no-op on a remote-imported skill", async ({ page }) => {
+  const { wsId } = await loginAsMember(page);
+  await page.goto(`/w/${wsId}/skills`);
+  const row = page.getByTestId("skills-list").getByText(/:deep-research/i);
+  await row.click();
+  await page.getByRole("button", { name: /Check for update/i }).click();
+  await expect(page.getByText(/No new version|Up to date/i)).toBeVisible();
+});
 ```
 
-> This is intentionally coarse — it blocks **all** remote installs when the flag is on, as a kill-switch. A real allowlist/approval queue is future work; the seam is the contribution here. Leave the flag undocumented in default config so behavior is unchanged.
+- [ ] **Step 2: Run to confirm it fails**
 
-- [ ] **Step 2: Verify default path still installs (re-run remote E2E)**
+Run: `cd frontend && pnpm exec playwright test packages/web/e2e/skills-discover-install.spec.ts --reporter=line`
+Expected: FAIL — `/w/[wsId]/skills` 404s (page not yet created).
 
-Run: `cd backend && uv run pytest tests/e2e/test_skill_discovery_remote.py -q`
-Expected: still all PASS (flag absent → no gate).
+- [ ] **Step 3: `@cubebox/core` types + API module**
 
-- [ ] **Step 3: Commit**
+```ts
+// frontend/packages/core/src/api/skills.ts
+import { apiClient } from "./client";
+
+export interface SkillCandidateOut {
+  candidate_id: string;
+  name: string;
+  canonical_name: string;
+  description: string;
+  source_kind: "local" | "remote";
+  keywords: string[];
+  version: string | null;
+  trust: "official" | "community" | "untrusted";
+  install_state: "enabled" | "in_catalog" | "available";
+  stars: number | null;
+  install_count: number | null;
+  source_name: string;
+  repo: string | null;
+  unvetted: boolean;
+}
+
+export type SkillCandidateListResponse = SkillCandidateOut[];
+
+export interface SkillInstallResponse {
+  canonical_name: string;
+  skill_id: string;
+  installed_version: string;
+}
+
+export interface SkillRefreshResponse {
+  canonical_name: string;
+  skill_id: string;
+  installed_version: string;
+  changed: boolean;  // false when re-import produced no new version
+}
+
+export async function discoverSkills(
+  wsId: string,
+  q: string,
+  limit = 5,
+): Promise<SkillCandidateListResponse> {
+  const r = await apiClient.get(`/api/v1/ws/${wsId}/skills/discover`, {
+    params: { q, limit },
+  });
+  return r.data;
+}
+
+export async function installSkill(
+  wsId: string,
+  candidateId: string,
+): Promise<SkillInstallResponse> {
+  const r = await apiClient.post(`/api/v1/ws/${wsId}/skills/install`, {
+    candidate_id: candidateId,
+  });
+  return r.data;
+}
+
+export async function refreshSkill(
+  wsId: string,
+  skillId: string,
+): Promise<SkillRefreshResponse> {
+  const r = await apiClient.post(`/api/v1/ws/${wsId}/skills/${skillId}/refresh`);
+  return r.data;
+}
+```
+
+```ts
+// frontend/packages/core/src/stores/skillsStore.ts
+import { create } from "zustand";
+import {
+  discoverSkills,
+  installSkill,
+  refreshSkill,
+  type SkillCandidateOut,
+} from "../api/skills";
+
+interface SkillsState {
+  candidates: SkillCandidateOut[];
+  query: string;
+  installing: Record<string, boolean>;
+  lastInstalled: { canonical_name: string; version: string } | null;
+  search: (wsId: string, q: string) => Promise<void>;
+  install: (wsId: string, candidateId: string) => Promise<void>;
+  refresh: (wsId: string, skillId: string) => Promise<boolean>;
+  reset: () => void;
+}
+
+export const useSkillsStore = create<SkillsState>((set, get) => ({
+  candidates: [],
+  query: "",
+  installing: {},
+  lastInstalled: null,
+  search: async (wsId, q) => {
+    set({ query: q });
+    const candidates = await discoverSkills(wsId, q);
+    set({ candidates });
+  },
+  install: async (wsId, candidateId) => {
+    set((s) => ({ installing: { ...s.installing, [candidateId]: true } }));
+    try {
+      const r = await installSkill(wsId, candidateId);
+      set((s) => ({
+        lastInstalled: { canonical_name: r.canonical_name, version: r.installed_version },
+        installing: { ...s.installing, [candidateId]: false },
+      }));
+    } catch (e) {
+      set((s) => ({ installing: { ...s.installing, [candidateId]: false } }));
+      throw e;
+    }
+  },
+  refresh: async (wsId, skillId) => {
+    const r = await refreshSkill(wsId, skillId);
+    return r.changed;
+  },
+  reset: () => set({ candidates: [], query: "", installing: {}, lastInstalled: null }),
+}));
+```
+
+Re-export in `frontend/packages/core/src/index.ts`:
+
+```ts
+export * from "./api/skills";
+export { useSkillsStore } from "./stores/skillsStore";
+```
+
+Run: `cd frontend && pnpm build --filter @cubebox/core`
+Expected: clean build, types emitted.
+
+- [ ] **Step 4: Next proxy routes**
+
+```ts
+// frontend/packages/web/app/api/v1/ws/[wsId]/skills/discover/route.ts
+import { proxyJsonGet } from "@/lib/proxy";
+export async function GET(req: Request, { params }: { params: { wsId: string } }) {
+  return proxyJsonGet(req, `/api/v1/ws/${params.wsId}/skills/discover`);
+}
+```
+
+```ts
+// frontend/packages/web/app/api/v1/ws/[wsId]/skills/install/route.ts
+import { proxyJsonPost } from "@/lib/proxy";
+export async function POST(req: Request, { params }: { params: { wsId: string } }) {
+  return proxyJsonPost(req, `/api/v1/ws/${params.wsId}/skills/install`);
+}
+```
+
+```ts
+// frontend/packages/web/app/api/v1/ws/[wsId]/skills/[skillId]/refresh/route.ts
+import { proxyJsonPost } from "@/lib/proxy";
+export async function POST(
+  req: Request,
+  { params }: { params: { wsId: string; skillId: string } },
+) {
+  return proxyJsonPost(
+    req,
+    `/api/v1/ws/${params.wsId}/skills/${params.skillId}/refresh`,
+  );
+}
+```
+
+> Reuse the existing `proxyJsonGet` / `proxyJsonPost` helpers (same pattern as `app/api/v1/ws/[wsId]/conversations/[id]/route.ts`). These are plain JSON request/response — NOT SSE — so no special streaming buffering concerns.
+
+- [ ] **Step 5: Workspace skills page + modules**
+
+```tsx
+// frontend/packages/web/app/(app)/w/[wsId]/skills/page.tsx
+"use client";
+import { useEffect } from "react";
+import { useParams } from "next/navigation";
+import { SkillsList } from "@/components/skills/SkillsList";
+import { DiscoverPanel } from "@/components/skills/DiscoverPanel";
+
+export default function WorkspaceSkillsPage() {
+  const { wsId } = useParams<{ wsId: string }>();
+  useEffect(() => {
+    document.title = "Skills";
+  }, []);
+  return (
+    <div className="flex flex-col gap-6 p-6">
+      <h1 className="text-2xl font-semibold">Skills</h1>
+      <DiscoverPanel wsId={wsId} />
+      <SkillsList wsId={wsId} />
+    </div>
+  );
+}
+```
+
+```tsx
+// frontend/packages/web/components/skills/SkillCandidateCard.tsx
+"use client";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { useSkillsStore, type SkillCandidateOut } from "@cubebox/core";
+
+export function SkillCandidateCard({
+  wsId,
+  candidate,
+}: {
+  wsId: string;
+  candidate: SkillCandidateOut;
+}) {
+  const install = useSkillsStore((s) => s.install);
+  const installing = useSkillsStore((s) => s.installing[candidate.candidate_id] ?? false);
+  return (
+    <div data-testid="skill-candidate-card" className="rounded-lg border p-4">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <div className="font-medium">{candidate.name}</div>
+          <div className="text-muted-foreground text-xs">{candidate.canonical_name}</div>
+          <p className="mt-1 text-sm">{candidate.description}</p>
+          <div className="mt-2 flex flex-wrap gap-1">
+            <Badge variant="secondary">{candidate.source_name}</Badge>
+            {candidate.unvetted && <Badge variant="destructive">unvetted</Badge>}
+            {candidate.repo && (
+              <span className="text-muted-foreground text-xs">{candidate.repo}</span>
+            )}
+          </div>
+        </div>
+        <Button
+          disabled={installing || candidate.install_state === "enabled"}
+          onClick={() => install(wsId, candidate.candidate_id)}
+        >
+          {candidate.install_state === "enabled" ? "Installed" : "Install"}
+        </Button>
+      </div>
+    </div>
+  );
+}
+```
+
+```tsx
+// frontend/packages/web/components/skills/DiscoverPanel.tsx
+"use client";
+import { useState } from "react";
+import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
+import { useSkillsStore } from "@cubebox/core";
+import { SkillCandidateCard } from "./SkillCandidateCard";
+
+export function DiscoverPanel({ wsId }: { wsId: string }) {
+  const [q, setQ] = useState("");
+  const search = useSkillsStore((s) => s.search);
+  const candidates = useSkillsStore((s) => s.candidates);
+  const lastInstalled = useSkillsStore((s) => s.lastInstalled);
+  return (
+    <section className="flex flex-col gap-3">
+      <div className="flex items-center gap-2">
+        <Input
+          placeholder="Search skills"
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          className="max-w-md"
+        />
+        <Button onClick={() => search(wsId, q)} disabled={!q.trim()}>
+          Search
+        </Button>
+      </div>
+      {lastInstalled && (
+        <div className="rounded-md bg-emerald-50 px-3 py-2 text-sm">
+          Installed {lastInstalled.canonical_name} (v{lastInstalled.version}). Use in
+          conversation with <code>load_skill(&quot;{lastInstalled.canonical_name}&quot;)</code>.
+        </div>
+      )}
+      <div className="grid gap-3">
+        {candidates.map((c) => (
+          <SkillCandidateCard key={c.candidate_id} wsId={wsId} candidate={c} />
+        ))}
+      </div>
+    </section>
+  );
+}
+```
+
+```tsx
+// frontend/packages/web/components/skills/SkillsList.tsx
+"use client";
+// Renders the workspace-enabled skills. Reuses the EXISTING workspace skills
+// endpoint (`GET /api/v1/ws/{ws}/skills?scope=workspace`) — already proxied —
+// so this module just lists; per-row "Check for update" calls refreshSkill.
+import { useEffect, useState } from "react";
+import { useSkillsStore } from "@cubebox/core";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+
+interface EnabledSkill {
+  id: string;
+  name: string;
+  source: "preinstalled" | "uploaded";
+  source_ref?: string | null;  // remote-imported has this set
+}
+
+export function SkillsList({ wsId }: { wsId: string }) {
+  const refresh = useSkillsStore((s) => s.refresh);
+  const [rows, setRows] = useState<EnabledSkill[]>([]);
+  const [updateStatus, setUpdateStatus] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    (async () => {
+      const r = await fetch(`/api/v1/ws/${wsId}/skills?scope=workspace`);
+      setRows(await r.json());
+    })();
+  }, [wsId]);
+
+  return (
+    <section className="flex flex-col gap-2" data-testid="skills-list">
+      <h2 className="text-lg font-medium">Installed in this workspace</h2>
+      <ul className="divide-y rounded-lg border">
+        {rows.map((s) => (
+          <li key={s.id} className="flex items-center justify-between px-4 py-2">
+            <div>
+              <div className="font-medium">{s.name}</div>
+              <div className="flex gap-1">
+                <Badge variant="secondary">{s.source}</Badge>
+                {s.source_ref && <Badge variant="outline">remote · unvetted</Badge>}
+              </div>
+            </div>
+            {s.source_ref && (
+              <div className="flex items-center gap-2">
+                {updateStatus[s.id] && (
+                  <span className="text-muted-foreground text-xs">{updateStatus[s.id]}</span>
+                )}
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={async () => {
+                    const changed = await refresh(wsId, s.id);
+                    setUpdateStatus((u) => ({
+                      ...u,
+                      [s.id]: changed ? "Updated" : "Up to date",
+                    }));
+                  }}
+                >
+                  Check for update
+                </Button>
+              </div>
+            )}
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+```
+
+- [ ] **Step 6: Workspace nav entry**
+
+In the existing workspace sidebar (e.g. `frontend/packages/web/components/layout/WorkspaceNav.tsx`), append next to "Memory":
+
+```tsx
+<NavItem href={`/w/${wsId}/skills`} icon={SkillsIcon}>
+  Skills
+</NavItem>
+```
+
+Pick an icon already in the project's icon set (`Sparkles` / `BookOpen` work). Keep the existing nav ordering: Conversations → Memory → **Skills** → Settings.
+
+- [ ] **Step 7: Chat-fallback parser in the conversation route**
+
+In `backend/cubebox/api/routes/v1/ws_conversations.py`, in the user-message ingest handler, BEFORE the agent loop kicks off:
+
+```python
+import re
+
+_INSTALL_RE = re.compile(r"^install\s+([A-Za-z0-9_\-:]+)\s*$")
+
+async def _maybe_install_from_user_message(
+    *,
+    session: AsyncSession,
+    org: Organization,
+    workspace_id: str,
+    actor_user_id: str,
+    text: str,
+) -> str | None:
+    """If the user message is `install <canonical_name>`, install it and return
+    a replacement system note. Otherwise return None and let the message flow.
+
+    Resolves <canonical_name> against (a) the workspace's catalog (local skills
+    not yet installed) and (b) the live candidate set from registered remote
+    sources. The same SkillInstallService.install backs both surfaces so the
+    UI button and this parser share one code path."""
+    m = _INSTALL_RE.match(text.strip())
+    if m is None:
+        return None
+    canonical = m.group(1)
+    catalog = SkillCatalogService(session=session, cache=_cache())
+    registry = await SkillSourceRegistry.build(
+        session=session, catalog=catalog, org_id=org.id,
+        org_slug=org.slug, workspace_id=workspace_id,
+    )
+    cands = await SkillDiscoveryService(registry).discover(canonical, limit=20)
+    match = next((c for c in cands if c.canonical_name == canonical), None)
+    if match is None:
+        return f"Could not find a skill called `{canonical}` in your workspace catalog."
+    install = SkillInstallService(
+        session=session, registry=registry,
+        publisher=SkillPublishService(session=session, cache=_cache()),
+        org_id=org.id, org_slug=org.slug,
+        workspace_id=workspace_id, actor_user_id=actor_user_id,
+    )
+    result = await install.install(match.candidate_id)
+    return (
+        f"Installed `{result.canonical_name}` (v{result.installed_version}). "
+        f"Use `load_skill('{result.canonical_name}')` to load it in this conversation."
+    )
+```
+
+Call `_maybe_install_from_user_message(...)` once per user message; if it returns non-None, persist the result as a system/assistant note in the conversation history and **skip** the agent loop for that turn. If it returns None, behavior is unchanged.
+
+- [ ] **Step 8: Run frontend build + lint + type-check**
+
+Run: `cd frontend && pnpm build --filter @cubebox/core && pnpm lint --filter @cubebox/web && pnpm type-check --filter @cubebox/web`
+Expected: all clean.
+
+- [ ] **Step 9: Run the Playwright smoke**
+
+Run: `cd frontend && pnpm exec playwright test packages/web/e2e/skills-discover-install.spec.ts --reporter=line`
+Expected: all three tests PASS — discover surfaces candidate, install button works, list refreshes, remote variant lands under `<source>:<slug>`, "Check for update" round-trips.
+
+- [ ] **Step 10: Backend chat-fallback unit + E2E**
+
+Add `tests/e2e/test_chat_install_fallback.py`:
+
+```python
+import pytest
+
+@pytest.mark.asyncio
+async def test_user_message_install_command_installs_skill_and_replaces_message(
+    member_client_with_session,
+):
+    client, ws_id, session, _org_id = member_client_with_session
+    convo = await client.post(f"/api/v1/ws/{ws_id}/conversations", json={"title": "x"})
+    cid = convo.json()["id"]
+    resp = await client.post(
+        f"/api/v1/ws/{ws_id}/conversations/{cid}/messages",
+        json={"role": "user", "content": "install deep-research"},
+    )
+    assert resp.status_code in (200, 201)
+    # The agent loop was skipped; the conversation now contains an
+    # install-result system/assistant note (not the original "install ..." text
+    # nor any agent response).
+    msgs = (await client.get(
+        f"/api/v1/ws/{ws_id}/conversations/{cid}/messages"
+    )).json()
+    assert any("Installed `deep-research`" in m.get("content", "") for m in msgs)
+```
+
+Run: `cd backend && uv run pytest tests/e2e/test_chat_install_fallback.py -q`
+Expected: PASS.
+
+- [ ] **Step 11: Commit**
 
 ```bash
-git add backend/cubebox/skills/discovery.py
-git commit -m "feat(skills): off-by-default remote-install trust gate (deferred enforcement)"
+git add frontend/packages/core/src/api/skills.ts frontend/packages/core/src/stores/skillsStore.ts frontend/packages/core/src/index.ts
+git add frontend/packages/web/app/api/v1/ws/\[wsId\]/skills/ frontend/packages/web/app/\(app\)/w/\[wsId\]/skills/
+git add frontend/packages/web/components/skills/ frontend/packages/web/components/layout/WorkspaceNav.tsx
+git add frontend/packages/web/e2e/skills-discover-install.spec.ts
+git add backend/cubebox/api/routes/v1/ws_conversations.py backend/tests/e2e/test_chat_install_fallback.py
+git commit -m "feat(skills): workspace skills page + chat-install fallback parser"
 ```
 
 ---
 
-## Task 14: Pre-PR sweep
+## Task 15: Pre-PR sweep
 
 **Files:** none (verification only).
 
-- [ ] **Step 1: Full changed-area test run**
+- [ ] **Step 1: Full changed-area backend test run**
 
-Run: `cd backend && uv run pytest tests/unit/test_skill_candidate_id.py tests/unit/test_skill_discovery_ranking.py tests/unit/test_remote_registry_source.py tests/e2e/test_skill_discovery_local.py tests/e2e/test_skill_discovery_remote.py tests/e2e/test_skill_sources_admin.py tests/e2e/test_find_skills_tool.py tests/e2e/test_skills_marketplace.py tests/e2e/memory/test_prompt_cache.py -q`
+Run: `cd backend && uv run pytest tests/unit/test_skill_candidate_id.py tests/unit/test_skill_discovery_ranking.py tests/unit/test_remote_registry_source.py tests/e2e/test_skill_discovery_local.py tests/e2e/test_skill_discovery_remote.py tests/e2e/test_skill_sources_admin.py tests/e2e/test_find_skills_tool.py tests/e2e/test_chat_install_fallback.py tests/e2e/test_skills_marketplace.py tests/e2e/memory/test_prompt_cache.py -q`
 Expected: all PASS. `test_prompt_cache.py` is included because Task 9 adds `find_skills` to the builtin-tool list, changing the cached tool/prompt prefix — this guards against a cache-prefix regression (see `backend/docs/prompt-cache-discipline.md`); the tool MUST be appended after `load_skill` to keep the prefix stable.
 
-- [ ] **Step 2: Type + lint across new + touched modules**
+- [ ] **Step 2: Backend type + lint across new + touched modules**
 
-Run: `cd backend && uv run mypy cubebox/skills cubebox/tools/builtin/find_skills.py cubebox/api/routes/v1/admin_skill_sources.py cubebox/api/routes/v1/ws_skills.py cubebox/repositories/skill_source.py cubebox/models/skill_source.py cubebox/streams/run_manager.py && uv run ruff check cubebox/`
+Run: `cd backend && uv run mypy cubebox/skills cubebox/tools/builtin/find_skills.py cubebox/api/routes/v1/admin_skill_sources.py cubebox/api/routes/v1/ws_skills.py cubebox/api/routes/v1/ws_conversations.py cubebox/repositories/skill_source.py cubebox/models/skill_source.py cubebox/streams/run_manager.py && uv run ruff check cubebox/`
 Expected: no issues.
 
-- [ ] **Step 3: Migration sanity (no drift)**
+- [ ] **Step 3: Frontend build + lint + type-check + Playwright**
+
+Run: `cd frontend && pnpm build --filter @cubebox/core && pnpm lint && pnpm type-check && pnpm exec playwright test packages/web/e2e/skills-discover-install.spec.ts --reporter=line`
+Expected: clean across the board; Playwright smoke green.
+
+- [ ] **Step 4: Migration sanity (no drift)**
 
 Run: `cd backend && uv run alembic upgrade head && uv run alembic check`
 Expected: head applied; `alembic check` reports no new pending autogenerate diff.
@@ -1958,12 +2469,12 @@ Expected: head applied; `alembic check` reports no new pending autogenerate diff
 ## Self-Review Checklist (completed by plan author)
 
 - **Spec coverage:**
-  - §1 `SkillSource` interface + `LocalCatalogSource` (Task 3, scoped to `list_visible_for_org`) + `RemoteRegistrySource` (Task 4) + config-driven `SkillSourceRegistry`/`SkillSource` table (Tasks 2, 5). Opaque `candidate_id` codec, no path routing (Task 1); `canonical_name` carried on every candidate and used by install/load, never display `name` (Tasks 1, 3, 4, 7, 9).
+  - §1 `SkillSource` interface + `LocalCatalogSource` (Task 3, scoped to `list_visible_for_org`) + `RemoteRegistrySource` (Task 4) + config-driven `SkillSourceRegistry`/`SkillSource` table (Tasks 2, 5). HMAC-signed `candidate_id` codec, no path routing (Task 1; OQ-7 resolved); `canonical_name` carried on every candidate and used by install/load, never display `name` (Tasks 1, 3, 4, 7, 9).
   - §2 read-only `find_skills` tool returning `{candidate_id, name, canonical_name, description, source, trust, install_state}` descriptions-only; `load_skill(canonical_name)` hint for enabled (Task 9).
-  - §3 preview → user-confirmed install (authenticated POST = confirm); remote import via `_publish_from_files` minting `<org-slug>:<skill-slug>`; install returns canonical name; same-conversation loadability verified (Tasks 7, 8, 10, 12). **Gap:** the §3 *chat* confirm-card frontend + its chat-driven E2E are NOT in this slice — see the "KNOWN SPEC GAP" callout and "Open follow-ups"; this plan ships only the backend the card calls.
-  - §4 default workspace-private scope; trust tier + `unvetted` flag surfaced; admin-only source management; files stored not executed (Tasks 8, 11, 12).
-  - §6 scope-isolated routes — member `/ws/.../skills/discover|discover/preview|install` (`candidate_id` in query/body, not path) vs admin `/admin/skill-sources/`; shared logic in services only (Tasks 8, 11).
-  - §7 v1 scope matches Tasks 1–12 **except** the chat confirm-card UI, which §7 lists but this backend-first slice defers (see KNOWN SPEC GAP); trust *enforcement* kept guarded/deferred (Task 13) per Open-Question 1.
+  - §3 preview → user-confirmed install via two surfaces (OQ-5 resolved): authenticated POST = the UI Install button (Tasks 7, 8, 10, 12, 14) AND the chat-fallback `install <canonical_name>` parser in the conversation route (Task 14, Step 7). Remote import via `_publish_from_files` minting `<org-slug>:<skill-slug>`; install returns canonical name; same-conversation loadability verified.
+  - §4 default workspace-private scope (OQ-3); trust tier + `unvetted` flag surfaced in candidate, preview, and UI banner; admin-only source management; files stored not executed, subject to existing sandbox + #144 command_rules (OQ-2) (Tasks 8, 11, 12, 14).
+  - §6 scope-isolated routes — member `/ws/.../skills/{discover,discover/preview,install,{skill_id}/refresh}` (`candidate_id` in query/body, never path) vs admin `/admin/skill-sources/`; shared logic in services only (Tasks 8, 11, 14).
+  - §7 v1 scope matches Tasks 1–14: backend (1–12) + workspace skills page + chat fallback (14). Trust *enforcement* deferred to a future security/gating module (Task 13 is a note, no code) per OQ-1 resolution; semantic search, personal scope, auto-update polling, and agent-initiated install via HITL stay deferred per Future Work.
 - **Type consistency:** `SkillCandidate` fields are identical wherever constructed (base, local, remote, ranking test). `InstallResult.canonical_name` ↔ `InstallCandidateResponse.canonical_name` ↔ test assertions. `decode_candidate_id` returns the 3-tuple `(kind, source_id, source_ref)`, unpacked identically in install + preview, and both resolve the remote source via `registry.remote_source_by_id(source_id)` (never "first remote"). `SkillSourceRegistry.build(...)` signature identical across run_manager + all three routes.
 - **Reuse, not re-route:** install reuses `OrgSkillInstallRepository.create_for_workspace` (local) and `SkillPublishService._publish_from_files` (remote) — the exact existing publish path; load reuses `find_enabled_by_name` + `SkillsMiddleware` untouched.
 - **Resolved against the real repo:** `require_member` (`cubebox.auth.dependencies`) and `get_admin_request_context` (`cubebox.mcp.dependencies`) are the existing member/admin deps; e2e clients yield `(client, workspace_id)` / `(client, _)` tuples per `test_skills_marketplace.py` / `test_skills_artifact_flow.py`; `_publish_from_files` already accepts `workspace_id`; `list_visible_for_org` already excludes deprecated + scopes to own-org uploaded + preinstalled.
@@ -1972,6 +2483,10 @@ Expected: head applied; `alembic check` reports no new pending autogenerate diff
 
 ## Open follow-ups (out of this plan)
 
-- **Frontend confirm-card module** (chat install button → `POST …/install`) — workspace-scoped page/module per the page-isolation rule; this plan ships the backend the button calls. **Required to fully close spec §3/§6/§7** (see the KNOWN SPEC GAP callout near the top): needs the chat candidate card with the trust/source banner (using the new `source_name`/`repo`/`unvetted` fields) plus a Playwright E2E driving chat → confirm → install → `load_skill`. Treat as the immediate next PR, not indefinite backlog.
-- **Real trust enforcement** (allowlist / approval queue / SKILL.md injection scan) — spec Open-Question 1; Task 13 leaves the seam.
-- **Semantic search, personal scope, remote-import freshness/update** — spec deferred.
+See spec Future Work for the canonical list. The major items deferred past this PR:
+
+- **Source allowlist + content-scan + admin approval queue** — future dedicated security/gating module (spec OQ-1 resolution).
+- **Personal scope** — lands with #153 managed agents user-pinned definitions (spec OQ-3).
+- **Embedding-based semantic search** (spec OQ-4).
+- **Automated update polling** beyond the v1 manual "Check for update" button (spec OQ-6).
+- **Agent-initiated install via HITL** — gated on cubepi shipping HITL first (extends OQ-5).
