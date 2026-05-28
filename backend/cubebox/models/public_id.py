@@ -34,6 +34,7 @@ PREFIX_MEMORY: str = "mem"
 PREFIX_SANDBOX_ENV: str = "senv"
 PREFIX_EGRESS_REF: str = "eref"
 PREFIX_SANDBOX_POLICY: str = "sbxp"
+PREFIX_SKILL_SOURCE: str = "sksrc"
 PREFIX_TRIGGER: str = "trig"
 PREFIX_TRIGGER_EVENT: str = "trev"
 
