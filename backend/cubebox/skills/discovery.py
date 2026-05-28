@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
+import httpx
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cubebox.repositories.skill import (
@@ -79,8 +80,15 @@ def rank_candidates(
     for c in candidates:
         key = _dedupe_key(c)
         prev = by_slug.get(key)
-        if prev is None or (prev.source_kind != "local" and c.source_kind == "local"):
+        if prev is None:
             by_slug[key] = c
+        elif prev.source_kind != "local" and c.source_kind == "local":
+            # local always beats remote on the same slug
+            by_slug[key] = c
+        elif prev.source_kind == "remote" and c.source_kind == "remote":
+            # two remotes — pick the higher-scoring one by trust/popularity
+            if _score(c, query) < _score(prev, query):
+                by_slug[key] = c
     ordered = sorted(by_slug.values(), key=lambda c: _score(c, query))
     return ordered[:limit]
 
@@ -178,7 +186,14 @@ class SkillInstallService:
         source = self._registry.remote_source_by_id(source_id)
         if source is None:
             raise SkillInstallError("no enabled remote source for this candidate")
-        files = await source.fetch(source_ref)
+        try:
+            files = await source.fetch(source_ref)
+        except httpx.HTTPStatusError as e:
+            raise SkillInstallError(
+                f"remote source fetch failed: {e.response.status_code}"
+            ) from e
+        except (httpx.RequestError, ValueError) as e:
+            raise SkillInstallError(f"remote source fetch failed: {e}") from e
         if "SKILL.md" not in files:
             raise SkillInstallError("remote candidate has no SKILL.md")
         # remote bundle never went through _extract_zip's checks; enforce here.
