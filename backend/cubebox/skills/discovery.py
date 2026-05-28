@@ -13,7 +13,16 @@ from cubebox.repositories.skill import (
     OrgSkillInstallRepository,
     SkillRepository,
 )
-from cubebox.skills.service import SkillPublishService, validate_skill_files
+from cubebox.skills.frontmatter import InvalidFrontmatterError
+from cubebox.skills.service import (
+    FileTooLargeError,
+    InvalidSkillNameError,
+    InvalidZipPathError,
+    SkillMdMissingError,
+    SkillPublishService,
+    VersionCollisionError,
+    validate_skill_files,
+)
 from cubebox.skills.sources.base import (
     CandidateIdError,
     SkillCandidate,
@@ -197,14 +206,26 @@ class SkillInstallService:
         if "SKILL.md" not in files:
             raise SkillInstallError("remote candidate has no SKILL.md")
         # remote bundle never went through _extract_zip's checks; enforce here.
-        validate_skill_files(files)
-        sv = await self._publisher._publish_from_files(
-            org_id=self._org_id,
-            org_slug=self._org_slug,
-            actor_user_id=self._actor,
-            files=files,
-            workspace_id=self._workspace_id,
-        )
+        # Wrap all publish-path errors so both the HTTP install route and the
+        # chat-fallback parser return controlled errors instead of 500s.
+        try:
+            validate_skill_files(files)
+            sv = await self._publisher._publish_from_files(
+                org_id=self._org_id,
+                org_slug=self._org_slug,
+                actor_user_id=self._actor,
+                files=files,
+                workspace_id=self._workspace_id,
+            )
+        except (InvalidZipPathError, FileTooLargeError) as e:
+            raise SkillInstallError(str(e)) from e
+        except (
+            InvalidFrontmatterError,
+            InvalidSkillNameError,
+            SkillMdMissingError,
+            VersionCollisionError,
+        ) as e:
+            raise SkillInstallError(str(e)) from e
         skill = await SkillRepository(self._session).get(sv.skill_id)
         assert skill is not None
         return InstallResult(
