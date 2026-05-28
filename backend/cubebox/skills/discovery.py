@@ -7,7 +7,11 @@ from dataclasses import dataclass
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from cubebox.repositories.skill import OrgSkillInstallRepository, SkillRepository
+from cubebox.repositories.skill import (
+    OrgPreinstalledTombstoneRepository,
+    OrgSkillInstallRepository,
+    SkillRepository,
+)
 from cubebox.skills.service import SkillPublishService, validate_skill_files
 from cubebox.skills.sources.base import (
     CandidateIdError,
@@ -143,6 +147,18 @@ class SkillInstallService:
             skill.source == "preinstalled" or skill.owner_org_id == self._org_id
         ):
             raise SkillInstallError("candidate not visible to this org")
+        # If an org admin uninstalled this preinstalled skill, a tombstone row
+        # was recorded so the seeder won't restore it; honor that admin decision
+        # here too, otherwise a workspace member could reinstall via discovery
+        # (or a stale candidate_id) and undo the uninstall.
+        if skill.source == "preinstalled":
+            tombstone = await OrgPreinstalledTombstoneRepository(self._session).get(
+                self._org_id, skill.id
+            )
+            if tombstone is not None:
+                raise SkillInstallError(
+                    "preinstalled skill was uninstalled for this org"
+                )
         await OrgSkillInstallRepository(self._session).create_for_workspace(
             org_id=self._org_id,
             workspace_id=self._workspace_id,

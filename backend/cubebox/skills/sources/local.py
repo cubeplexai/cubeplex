@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from cubebox.repositories.skill import SkillRepository
+from cubebox.repositories.skill import OrgPreinstalledTombstoneRepository, SkillRepository
 from cubebox.skills.service import SkillCatalogService
 from cubebox.skills.sources.base import (
     SkillCandidate,
@@ -36,9 +36,18 @@ class LocalCatalogSource:
         enabled = await self._catalog.list_enabled_for_workspace(
             self._workspace_id, org_id=self._org_id
         )
+        # Honor admin "uninstall preinstalled" decisions: a tombstoned preinstalled
+        # skill must not resurface as a discovery candidate, otherwise a workspace
+        # member could re-introduce it via the install flow.
+        tombstones = await OrgPreinstalledTombstoneRepository(self._session).list_for_org(
+            self._org_id
+        )
+        tombstoned_ids = {t.skill_id for t in tombstones}
         enabled_names = {r.name for r in enabled}
         out: list[SkillCandidate] = []
         for s in visible:
+            if s.id in tombstoned_ids:
+                continue
             out.append(
                 SkillCandidate(
                     candidate_id=encode_candidate_id("local", s.id),
