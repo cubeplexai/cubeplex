@@ -70,15 +70,23 @@ schema in `tools=` while hiding it from the catalog prose saves nothing.
 - Tests: pytest + pytest-asyncio. E2E under `tests/e2e/`, unit under
   `tests/unit/` (directory marker is auto-applied by `tests/conftest.py`).
 - MCP E2E uses the existing `stub_discover_tools` fixture
-  (`tests/e2e/test_mcp_four_layer_runtime.py`) — a real simulated discovery, no
-  fake-server-only excuse.
+  (`tests/e2e/conftest.py:696`) **only to avoid the post-grant discovery network
+  probe** — it is a no-op that patches `run_post_grant_discovery`, nothing more.
+  It does **not** seed `tools_cache` and does **not** simulate a runtime MCP
+  server returning callable tools. The disclosure tests therefore additionally
+  need: (a) installs whose `tools_cache` is seeded directly (for catalog + expand
+  previews + schema text), and (b) a fake `load_mcp_tools_http` (or equivalent
+  monkeypatch in `cubepi_runtime`) that returns callable tools for the expanded
+  set so an expanded server's tools actually execute. Build these as part of
+  Task 6d; do not assume `stub_discover_tools` provides them.
 - Touch points (all confirmed by reading the code):
   - `backend/cubebox/streams/run_manager.py` — tool assembly (~1034), middleware
     stack (~1136–1353), final tool merge (~1359), `create_cubebox_agent` call
     (~1384), system-prompt suffix assembly (~1799).
   - `backend/cubebox/mcp/cubepi_runtime.py` — `load_workspace_mcp_tools_for_cubepi`.
   - `backend/cubebox/mcp/effective.py` — `list_runtime_specs`,
-    `MCPRuntimeConnectorSpec` (carries `install_id`, `tools_cache`).
+    `MCPRuntimeConnectorSpec` (carries `install_id`, `name`, `tools_cache`,
+    `discovery_metadata`; **note: no `description` field** — see Task 2).
   - `backend/cubebox/models/mcp.py` — `MCPConnectorInstall.tools_cache`,
     `.discovery_metadata`, `.slug_name`, `.description` (via template).
   - `backend/cubebox/middleware/skills.py`,
@@ -222,8 +230,18 @@ Expected: `3 passed`.
 ## Task 2 — Catalog renderer (unit, determinism + cache-stability)
 
 Render the compact catalog from data already in Postgres
-(`MCPRuntimeConnectorSpec.tools_cache` + spec `name`/`description`/`install_id`)
-— **no live discovery**. Sorted by slug → byte-identical every turn.
+(`MCPRuntimeConnectorSpec.tools_cache` + spec `name`/`install_id`) — **no live
+discovery**. Sorted by slug → byte-identical every turn.
+
+**Description source (important):** `MCPRuntimeConnectorSpec` has **no
+`description` field** (confirmed at `effective.py:206`). Do not call
+`spec.description`. Derive the one-line description from data the spec already
+carries: prefer a value pulled from `spec.discovery_metadata` (server
+description/summary captured at discovery), else fall back to the slug itself.
+If a richer source is wanted, widen `MCPRuntimeConnectorSpec` /
+`list_runtime_specs` to carry a `description` from the template/discovery row —
+but that is an explicit extra step, not assumed by the renderer. Pick one and
+make `render_catalog` take the resolved description string (or `None`).
 
 Files:
 - `backend/cubebox/mcp/disclosure.py` (extend).
@@ -257,18 +275,26 @@ def _one_line(text: str | None, limit: int = 140) -> str:
     return s if len(s) <= limit else s[: limit - 1].rstrip() + "…"
 
 
+def _spec_description(spec: MCPRuntimeConnectorSpec) -> str | None:
+    """No `description` field on the spec — derive from discovery_metadata."""
+    meta = spec.discovery_metadata or {}
+    return meta.get("description") or meta.get("summary")
+
+
 def render_catalog(specs: list[MCPRuntimeConnectorSpec]) -> str:
     """Compact, slug-sorted catalog. Never contains per-tool JSON schemas."""
     lines: list[str] = []
     for spec in sorted(specs, key=lambda s: slugify_for_namespace(s.name)):
         slug = slugify_for_namespace(spec.name)
         count = len(spec.tools_cache)
-        desc = _one_line(spec.description)
+        desc = _one_line(_spec_description(spec) or slug)
         lines.append(f"- `{slug}` — {desc} ({count} tools)")
     return MCP_CATALOG_HEADER + "\n" + "\n".join(lines) + "\n"
 ```
-(Trigger-hint line is derived from description for v1 — the spec leaves an
-authored `trigger_hints` field as a Later item; do **not** add a migration now.)
+(Confirm the actual `discovery_metadata` key by reading a real install row; the
+keys above are a guess. Trigger-hint line is derived from description for v1 —
+the spec leaves an authored `trigger_hints` field as a Later item; do **not**
+add a migration now.)
 
 Test (write first):
 ```python
@@ -277,15 +303,21 @@ from cubebox.mcp.effective import MCPRuntimeConnectorSpec
 
 
 def _spec(name: str, desc: str, n_tools: int) -> MCPRuntimeConnectorSpec:
+    # No `description` field — push the one-liner through discovery_metadata.
     return MCPRuntimeConnectorSpec(
-        install_id=f"inst-{name}", name=name, description=desc,
+        install_id=f"inst-{name}", name=name,
+        discovery_metadata={"description": desc},
         tools_cache=[{"name": f"t{i}"} for i in range(n_tools)],
         # ...remaining required fields filled with neutral defaults...
     )
 
 
 def test_catalog_sorted_by_slug_and_byte_stable() -> None:
-    specs = [_spec("Zeta", "z server", 2), _spec("Alpha", "a server", 5)]
+    # slugify_for_namespace PRESERVES case (`Alpha` → `Alpha`, not `alpha`):
+    # use lowercase names so expected slugs match, or assert on the actual
+    # slug. Sorting is by the slug as produced — confirm by reading
+    # _constants.py:38, do not assume lowercasing.
+    specs = [_spec("zeta", "z server", 2), _spec("alpha", "a server", 5)]
     out1 = render_catalog(specs)
     out2 = render_catalog(list(reversed(specs)))  # input order must not matter
     assert out1 == out2
@@ -312,6 +344,17 @@ Expected: `2 passed`.
 
 Render the full tool definitions of expanded servers, from `tools_cache`, in
 **expansion order** (never sorted). Adding one expansion must only **append**.
+
+**Names must match the real callable tools.** The runtime loader namespaces and
+may suffix/truncate each tool name via `_build_namespaced_name_with_prefix` +
+the collision/truncation logic in `cubepi_runtime.py` (~113–199): explicit slug
+collisions and risky truncations get a `_{last4}` suffix. The schema text the
+model reads here, the `tool_names` from Task 4, and the catalog must all use the
+**same** namespaced names the model will actually call — otherwise the model
+sees one name in the schema and a different name in `tools=`. Compute namespaced
+names by reusing that loader logic (extract a pure helper, or call the same
+namespacing pass over the spec's `tools_cache`), not by emitting raw
+`tools_cache["name"]` values.
 
 Files:
 - `backend/cubebox/mcp/disclosure.py` (extend).
@@ -378,7 +421,13 @@ Expected: `3 passed`.
 A sibling of `load_skill`. Validates the slug against the workspace's usable
 installs, returns a JSON summary (namespaced tool names + descriptions, **no
 schemas in the result** — middleware injects schema text). Placed in the fixed
-tool order **where MCP tools used to go** (after `load_skill`).
+tool order **where MCP tools used to go** — as the last builtin, immediately
+before the MCP tools (after `generate_image`); see Task 6b for exact placement.
+
+**`tool_names` must be the namespaced, collision-resolved names** the model will
+actually call (see Task 3) — not bare `tools_cache["name"]`. `list_usable_slugs`
+therefore returns the post-namespacing names per slug, computed with the same
+loader logic.
 
 Files:
 - `backend/cubebox/tools/builtin/expand_mcp_server.py` (new).
@@ -594,10 +643,14 @@ else:
     _new_tools, _new_citations = await load_workspace_mcp_tools_for_cubepi(...)
 ```
 
-`expand_mcp_server` is appended to `_builtin_tools` **after `load_skill`** so the
-fixed cache-prefix tool order (sandbox → artifact → todo → subagent →
-calculator/datetime → view_images → generate_image → memory → load_skill →
-**expand_mcp_server** → mcp_tools) is preserved.
+`expand_mcp_server` is appended to `_builtin_tools` **immediately before the MCP
+tools and after every existing builtin** — do not insert it right after
+`load_skill`, which would shift `view_images`/`generate_image`. The actual
+current order (confirmed in `run_manager.py` ~927–1032) is: memory → load_skill →
+view_images → generate_image → mcp_tools. Insert `expand_mcp_server` as the last
+builtin so the prefix becomes: … → memory → load_skill → view_images →
+generate_image → **expand_mcp_server** → mcp_tools. Everything before it stays
+byte-identical.
 
 Append `MCPDisclosureMiddleware(extra_ref=_extra_ref, specs_by_slug=specs_by_slug)`
 to `cubepi_middleware` immediately after `SkillsMiddleware` (~1267). The
@@ -613,19 +666,26 @@ prompt — append `render_catalog(specs)` to `effective_system_prompt` before
 
 ### 6c. The deferral branch (from Task 0)
 
-- **Next-turn fallback (`MID_RUN_UNSUPPORTED`, expected):** on each run, read
-  `expanded` from the **replayed** `agent._extra["expanded_mcp_servers"]` (the
-  checkpointer persists `_extra` via `save_extra` at `agent_end`, same as
-  `loaded_skills`). Because `_extra` is only available after `create_cubebox_agent`,
-  read the **persisted** prior-run extra before constructing the agent: load it
-  from the checkpointer history (`cp.load(conversation_id)`) — the same
-  `init_checkpointer()`/`cp.load` already used for citation seeding at ~1375. Build
-  `only_install_ids` from that replayed ordered list. A server expanded on turn N
-  becomes callable on turn N+1. The `expand_mcp_server` call on turn N still
-  records the slug into the live `_extra`, which is persisted and picked up next
-  turn. **Document this one-turn delay in the `expand_mcp_server` tool description**
-  so the model expects it ("the server's tools become available on your next
-  turn").
+- **Next-turn fallback (`MID_RUN_UNSUPPORTED`, expected):** on each run, build
+  `only_install_ids` from the **persisted prior-run** expanded set
+  (`expanded_mcp_servers` ordered list) before the MCP tools are loaded.
+  **Ordering problem to fix:** the MCP tool load is at ~1098 but the existing
+  `init_checkpointer()`/`cp.load(conversation_id)` (citation seeding) is at ~1375
+  — *after* the tool load. The live `agent._extra` is also only available after
+  `create_cubebox_agent` (~1384). So the fallback needs an **earlier** load of the
+  persisted `_extra` (an `init_checkpointer()`/`cp.load` call hoisted above the MCP
+  block at ~1041, or a small helper that reads just the persisted
+  `expanded_mcp_servers` for the conversation) so `only_install_ids` is known when
+  `load_workspace_mcp_tools_for_cubepi(..., only_install_ids=...)` runs. Do not
+  read the live `_extra` for this — it is empty until the agent is built and only
+  reflects this run. A server expanded on turn N becomes callable on turn N+1: the
+  `expand_mcp_server` call on turn N records the slug into the live `_extra`, which
+  is persisted (`save_extra` at `agent_end`, same as `loaded_skills`) and read back
+  on turn N+1's early load. **Document this one-turn delay in the
+  `expand_mcp_server` tool description** so the model expects it ("the server's
+  tools become available on your next turn"). Confirm `save_extra` actually
+  persists arbitrary `_extra` keys (verify `loaded_skills` round-trips today)
+  before relying on it for `expanded_mcp_servers`.
 - **True deferral (`MID_RUN_SUPPORTED`):** after `after_tool_call` records the
   slug, also load that server's callable tools via the filtered loader and add
   them to the live agent through cubepi's mid-run mechanism (whatever Task 0
@@ -636,8 +696,12 @@ prompt — append `render_catalog(specs)` to `effective_system_prompt` before
 
 ### 6d. E2E test (write first)
 
-`tests/e2e/test_mcp_disclosure_runtime.py`, using `stub_discover_tools` and the
-install-creation pattern from `tests/e2e/test_mcp_four_layer_runtime.py`:
+`tests/e2e/test_mcp_disclosure_runtime.py`, using `stub_discover_tools` (to skip
+the discovery probe) plus the install-creation pattern from
+`tests/e2e/test_mcp_four_layer_runtime.py`. Additionally seed each install's
+`tools_cache` directly and monkeypatch the runtime tool loader
+(`load_mcp_tools_http` / `cubepi_runtime`) to return callable tools for the
+expanded set — `stub_discover_tools` alone supplies neither (see Tech Stack):
 
 1. With disclosure enabled and ≥ `min_servers` usable servers installed: assert
    the assembled `tools=` contains `expand_mcp_server` and **no** namespaced MCP
