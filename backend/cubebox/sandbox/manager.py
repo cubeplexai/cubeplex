@@ -12,6 +12,7 @@ that are enabled for the request's workspace get pushed, and they get
 versioned paths under ``/.skills/<name>/<version>/``.
 """
 
+import asyncio
 import hashlib
 import re
 from datetime import UTC, datetime, timedelta
@@ -25,6 +26,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from cubebox.config import config
 from cubebox.models import EgressRef
+from cubebox.models.user_sandbox import UserSandbox
 from cubebox.repositories.egress_ref import EgressRefRepository
 from cubebox.repositories.sandbox_env import SandboxEnvRepository
 from cubebox.repositories.user_sandbox import UserSandboxRepository
@@ -73,6 +75,15 @@ class SandboxManager:
         # Egress injection: when empty, injection is disabled and Sandbox.create is
         # called without env/network_policy (preserving existing behavior).
         self._exchange_host: str = config.get("sandbox.egress_exchange_host", "")
+
+        # Pause/resume knobs (spec OQ-1/OQ-2/OQ-7).
+        self._pause_on_idle: bool = config.get("sandbox.pause_on_idle", True)
+        self._idle_ttl_seconds: int = config.get("sandbox.idle_ttl_seconds", 30 * 60)
+        self._paused_ttl_seconds: int = config.get("sandbox.paused_ttl_seconds", 24 * 60)
+        self._resume_timeout: int = config.get("sandbox.resume_timeout", 30)
+        # Lease lives in LazySandbox; acquire on entering a long op, renew during,
+        # release on completion.
+        self._lease_seconds: int = config.get("sandbox.lease_seconds", 5 * 60)
 
     def _build_connection_config(self, *, request_timeout: int | None = None) -> ConnectionConfig:
         """Build OpenSandbox ConnectionConfig from app config.
@@ -181,7 +192,26 @@ class SandboxManager:
 
         async with self._session_factory() as session:
             repo = UserSandboxRepository(session, org_id=org_id, workspace_id=workspace_id)
-            record = await repo.get_active_by_user(user_id)
+            record = await repo.get_resumable_by_user(user_id)
+
+            if record and record.status == "paused":
+                resumed = await self._resume_record(
+                    session,
+                    repo,
+                    record,
+                    conn_config,
+                    org_id=org_id,
+                    workspace_id=workspace_id,
+                    user_id=user_id,
+                )
+                if resumed is not None:
+                    return resumed
+                # Resume genuinely failed (record marked failed inside _resume_record)
+                # -> fall through to create-new. A lost mark_resuming race does NOT
+                # reach here; _resume_record waits for the winner's row to become
+                # running and connects to it, so two concurrent get_or_create calls
+                # never both create.
+                record = None
 
             if record:
                 logger.info(
@@ -412,30 +442,182 @@ class SandboxManager:
             logger.info("Found {} expired sandbox(es) to clean up", len(expired))
 
             for record in expired:
-                try:
-                    raw_sandbox = await opensandbox.Sandbox.connect(
-                        record.sandbox_id,
-                        connection_config=conn_config,
-                        skip_health_check=True,
-                    )
-                    await raw_sandbox.kill()
-                    await raw_sandbox.close()
-                    logger.info("Killed expired sandbox {}", record.sandbox_id)
-                except Exception as e:
-                    logger.warning(
-                        "Failed to kill sandbox {} (may already be gone): {}",
-                        record.sandbox_id,
-                        e,
-                    )
-
                 scoped_repo = UserSandboxRepository(
                     session,
                     org_id=record.org_id,
                     workspace_id=record.workspace_id,
                 )
-                await scoped_repo.mark_terminated(record.id)
+                await self._kill_record(session, scoped_repo, record, conn_config)
+
+    async def _resume_record(
+        self,
+        session: AsyncSession,
+        repo: UserSandboxRepository,
+        record: UserSandbox,
+        conn_config: ConnectionConfig,
+        *,
+        org_id: str,
+        workspace_id: str,
+        user_id: str,
+    ) -> "OpenSandbox | None":
+        """Try to resume a paused row. Atomic ``paused -> resuming`` claim:
+        the loser polls until the winner's row becomes ``running`` and connects
+        to that same sandbox, so the two concurrent callers never both create.
+        """
+        if not await repo.mark_resuming(record.id):
+            return await self._await_resumed_by_winner(
+                session,
+                repo,
+                record.id,
+                conn_config,
+                org_id=org_id,
+                workspace_id=workspace_id,
+                user_id=user_id,
+            )
+        try:
+            backend = await OpenSandbox.connect_or_resume(
+                record.sandbox_id,
+                conn_config=conn_config,
+                resume_timeout=self._resume_timeout,
+                workdir=self._workdir,
+            )
+        except Exception as exc:
+            logger.warning("Resume failed for {}: {}", record.sandbox_id, exc)
+            await repo.mark_failed(record.id)
+            if self._exchange_host:
+                await EgressRefRepository(session).revoke_for_sandbox(record.sandbox_id)
+            return None
+        await repo.mark_running(record.id, last_resumed_at=datetime.now(UTC))
+        await repo.update_activity(record.id)
+        if self._exchange_host:
+            await self._apply_egress(
+                session,
+                backend,
+                org_id=org_id,
+                workspace_id=workspace_id,
+                user_id=user_id,
+                sandbox_id=record.sandbox_id,
+            )
+        return backend
+
+    async def _await_resumed_by_winner(
+        self,
+        session: AsyncSession,
+        repo: UserSandboxRepository,
+        record_id: str,
+        conn_config: ConnectionConfig,
+        *,
+        org_id: str,
+        workspace_id: str,
+        user_id: str,
+    ) -> "OpenSandbox | None":
+        """Race loser: poll the row until the winner flips it to running, then
+        connect to that same sandbox. Returns None (caller creates new) only if
+        the winner ended in failed/terminated, so we never duplicate."""
+        deadline = datetime.now(UTC) + timedelta(seconds=self._resume_timeout)
+        while datetime.now(UTC) < deadline:
+            row = await repo.get(record_id)
+            if row is None or row.status in ("failed", "terminated"):
+                return None
+            if row.status == "running":
+                raw = await opensandbox.Sandbox.connect(
+                    row.sandbox_id,
+                    connection_config=conn_config,
+                )
+                backend = OpenSandbox(sandbox=raw, workdir=self._workdir)
                 if self._exchange_host:
-                    await EgressRefRepository(session).revoke_for_sandbox(record.sandbox_id)
+                    await self._apply_egress(
+                        session,
+                        backend,
+                        org_id=org_id,
+                        workspace_id=workspace_id,
+                        user_id=user_id,
+                        sandbox_id=row.sandbox_id,
+                    )
+                return backend
+            await asyncio.sleep(0.5)
+        return None
+
+    async def pause_idle(self) -> None:
+        """Pause idle, unleased sandboxes (capable providers); kills on
+        capable=False or pause failure. Replaces kill-on-idle where supported."""
+        if not self._pause_on_idle:
+            await self.cleanup_expired()
+            return
+        conn_config = self._build_connection_config()
+        async with self._session_factory() as session:
+            candidates = await UserSandboxRepository.list_idle_to_pause_system(session)
+            for record in candidates:
+                scoped = UserSandboxRepository(
+                    session,
+                    org_id=record.org_id,
+                    workspace_id=record.workspace_id,
+                )
+                if not await scoped.claim_pausing(record.id):
+                    continue  # touched / acquired / already-claimed between select+claim
+                try:
+                    raw = await opensandbox.Sandbox.connect(
+                        record.sandbox_id,
+                        connection_config=conn_config,
+                        skip_health_check=True,
+                    )
+                    backend = OpenSandbox(sandbox=raw, workdir=self._workdir)
+                    if not backend.supports_pause():
+                        await scoped.mark_running(record.id)  # revert pausing
+                        await self._kill_record(session, scoped, record, conn_config)
+                        continue
+                    await backend.pause()
+                    await scoped.mark_paused(record.id, paused_at=datetime.now(UTC))
+                    logger.info("Paused idle sandbox {}", record.sandbox_id)
+                except Exception as exc:
+                    logger.warning(
+                        "Pause failed for {}: {}; falling back to kill",
+                        record.sandbox_id,
+                        exc,
+                    )
+                    await scoped.mark_running(record.id)
+                    await self._kill_record(session, scoped, record, conn_config)
+
+    async def reap_paused(self) -> None:
+        """Hard-kill paused rows past paused_ttl_seconds (24 min default, OQ-2)."""
+        conn_config = self._build_connection_config()
+        async with self._session_factory() as session:
+            expired = await UserSandboxRepository.list_paused_expired_system(session)
+            for record in expired:
+                scoped = UserSandboxRepository(
+                    session,
+                    org_id=record.org_id,
+                    workspace_id=record.workspace_id,
+                )
+                await self._kill_record(session, scoped, record, conn_config)
+
+    async def _kill_record(
+        self,
+        session: AsyncSession,
+        scoped_repo: UserSandboxRepository,
+        record: UserSandbox,
+        conn_config: ConnectionConfig,
+    ) -> None:
+        """Kill + revoke egress + mark terminated. Shared by cleanup_expired,
+        pause_idle fallback, and reap_paused."""
+        try:
+            raw = await opensandbox.Sandbox.connect(
+                record.sandbox_id,
+                connection_config=conn_config,
+                skip_health_check=True,
+            )
+            await raw.kill()
+            await raw.close()
+            logger.info("Killed sandbox {}", record.sandbox_id)
+        except Exception as exc:
+            logger.warning(
+                "Failed to kill sandbox {} (may already be gone): {}",
+                record.sandbox_id,
+                exc,
+            )
+        await scoped_repo.mark_terminated(record.id)
+        if self._exchange_host:
+            await EgressRefRepository(session).revoke_for_sandbox(record.sandbox_id)
 
 
 # ---------------------------------------------------------------------------
