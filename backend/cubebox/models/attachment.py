@@ -3,7 +3,7 @@
 from datetime import datetime
 from typing import ClassVar
 
-from sqlalchemy import Index
+from sqlalchemy import Column, DateTime, Index
 from sqlmodel import Field
 
 from cubebox.models.mixins import CubeboxBase, OrgScopedMixin
@@ -41,4 +41,7 @@ class Attachment(CubeboxBase, OrgScopedMixin, table=True):
     height: int | None = None
 
     status: str = Field(default="pending", max_length=16)
-    attached_at: datetime | None = None
+    attached_at: datetime | None = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True),
+    )

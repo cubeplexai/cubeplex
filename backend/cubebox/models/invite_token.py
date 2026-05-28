@@ -2,7 +2,7 @@
 
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import Index
+from sqlalchemy import Column, DateTime, Index
 from sqlmodel import Field, SQLModel
 from uuid_utils import uuid7
 
@@ -19,5 +19,11 @@ class InviteToken(SQLModel, table=True):
     workspace_id: str = Field(foreign_key="workspaces.id", max_length=20)
     role: str = Field(max_length=32)
     created_by: str = Field(foreign_key="users.id", max_length=20)
-    expires_at: datetime = Field(default_factory=_default_expiry)
-    used_at: datetime | None = Field(default=None)
+    expires_at: datetime = Field(
+        default_factory=_default_expiry,
+        sa_column=Column(DateTime(timezone=True), nullable=False),
+    )
+    used_at: datetime | None = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True),
+    )

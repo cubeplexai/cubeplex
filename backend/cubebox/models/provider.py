@@ -3,7 +3,7 @@
 from datetime import datetime
 from typing import Any, ClassVar
 
-from sqlalchemy import Column, Index, UniqueConstraint
+from sqlalchemy import Column, DateTime, Index, UniqueConstraint
 from sqlalchemy.types import JSON
 from sqlmodel import Field
 
@@ -54,7 +54,10 @@ class Provider(CubeboxBase, table=True):
     capability: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
     model_capability_overrides: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
     # Provider-level test = liveness/credential ONLY (spec §4.1).
-    last_liveness_at: datetime | None = Field(default=None)
+    last_liveness_at: datetime | None = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True),
+    )
     last_liveness_status: str | None = Field(
         default=None, max_length=16
     )  # "ok" | "auth_error" | "fail"
@@ -90,7 +93,10 @@ class Model(CubeboxBase, table=True):
     extra_headers: dict[str, str] = Field(default_factory=dict, sa_column=Column(JSON))
     # Per-model test = capability probe + model existence (spec §4.1).
     # "ok" | "warn" | "fail" | "unavailable".
-    last_test_at: datetime | None = Field(default=None)
+    last_test_at: datetime | None = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True),
+    )
     last_test_status: str | None = Field(default=None, max_length=16)
     last_test_summary: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
     enabled: bool = Field(default=True)

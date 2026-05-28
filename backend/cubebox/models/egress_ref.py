@@ -3,7 +3,7 @@
 from datetime import datetime
 from typing import Any, ClassVar
 
-from sqlalchemy import JSON, Column, Index
+from sqlalchemy import JSON, Column, DateTime, Index
 from sqlmodel import Field
 
 from cubebox.models.mixins import CubeboxBase
@@ -26,4 +26,7 @@ class EgressRef(CubeboxBase, table=True):
     run_id: str | None = Field(default=None, max_length=64, nullable=True)
     bindings: list[dict[str, Any]] = Field(default_factory=list, sa_column=Column(JSON))
     status: str = Field(default="valid", max_length=16)
-    expires_at: datetime | None = Field(default=None, nullable=True)
+    expires_at: datetime | None = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True),
+    )

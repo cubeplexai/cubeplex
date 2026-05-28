@@ -3,7 +3,7 @@
 from datetime import UTC, datetime
 from typing import Any, ClassVar
 
-from sqlalchemy import Column, Index, text
+from sqlalchemy import Column, DateTime, Index, text
 from sqlalchemy.types import JSON
 from sqlmodel import Field
 
@@ -39,7 +39,10 @@ class UserSandbox(CubeboxBase, OrgScopedMixin, table=True):
     status: str = Field(default="running", max_length=20)
     image: str = Field(max_length=512)
     volumes_config: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))
-    last_activity_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    last_activity_at: datetime = Field(
+        default_factory=lambda: datetime.now(UTC),
+        sa_column=Column(DateTime(timezone=True), nullable=False),
+    )
     ttl_seconds: int = Field(default=3600)
     # server_default is required so the autogen migration backfills existing
     # non-null rows; a Python-side default alone won't touch rows already there.
@@ -48,11 +51,23 @@ class UserSandbox(CubeboxBase, OrgScopedMixin, table=True):
         max_length=32,
         sa_column_kwargs={"server_default": "opensandbox"},
     )
-    paused_at: datetime | None = Field(default=None)
+    paused_at: datetime | None = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True),
+    )
     paused_ttl_seconds: int = Field(
         default=24 * 60,
         sa_column_kwargs={"server_default": "1440"},
     )
-    last_resumed_at: datetime | None = Field(default=None)
-    in_use_until: datetime | None = Field(default=None, index=True)
-    last_provider_check: datetime | None = Field(default=None, index=True)
+    last_resumed_at: datetime | None = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True),
+    )
+    in_use_until: datetime | None = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True, index=True),
+    )
+    last_provider_check: datetime | None = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True, index=True),
+    )

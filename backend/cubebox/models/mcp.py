@@ -9,7 +9,17 @@ explicitly.
 from datetime import datetime
 from typing import Any, ClassVar
 
-from sqlalchemy import JSON, CheckConstraint, Column, Index, String, UniqueConstraint, event, text
+from sqlalchemy import (
+    JSON,
+    CheckConstraint,
+    Column,
+    DateTime,
+    Index,
+    String,
+    UniqueConstraint,
+    event,
+    text,
+)
 from sqlmodel import Field
 
 from cubebox.models.mixins import CubeboxBase
@@ -184,7 +194,10 @@ class MCPConnectorInstall(CubeboxBase, table=True):
     )
 
     last_error: str | None = Field(default=None, max_length=2048)
-    last_discovered_at: datetime | None = None
+    last_discovered_at: datetime | None = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True),
+    )
     timeout: float = Field(default=30.0)
     sse_read_timeout: float = Field(default=300.0)
 
@@ -282,7 +295,10 @@ class MCPCredentialGrant(CubeboxBase, table=True):
     refresh_credential_id: str | None = Field(
         default=None, foreign_key="credentials.id", max_length=20
     )
-    expires_at: datetime | None = None
+    expires_at: datetime | None = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True),
+    )
     grant_status: str = Field(
         default="valid",
         max_length=16,
