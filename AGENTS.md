@@ -63,6 +63,16 @@ cubebox is a full-stack agent platform.
   frontend.
 - **Line length: 100 chars.**
 - **Datetimes from DB → `utc_isoformat()`** so frontend sees the UTC offset.
+- **Time columns are tz-aware.** All `datetime` model fields use
+  `sa_column=Column(DateTime(timezone=True), ...)` (Postgres `timestamptz`).
+  Application code writes `datetime.now(UTC)` (tz-aware). Frontend gets
+  ISO 8601 with `+00:00` (via `utc_isoformat()`) or `Z` (via Pydantic
+  default) — both valid. No naive `datetime` ever crosses the DB or
+  service-API boundary. When introducing a new datetime column or
+  converting an existing one, the alembic migration must hand-add
+  `postgresql_using="<col> AT TIME ZONE 'UTC'"` on each `alter_column`
+  call — autogen omits it, and the default cast applies the session
+  `TimeZone` (wrong for our stored UTC values).
 - **New business table → public ID prefix** in
   `backend/cubebox/models/public_id.py`; `default_factory` uses
   `generate_public_id(PREFIX_X)`.
