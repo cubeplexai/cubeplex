@@ -4,9 +4,11 @@
 
 **Goal:** Let a workspace bind a Slack bot so an `@mention`/DM starts an agent run on a cubebox conversation and the run's streamed output flows back as a live-updating threaded Slack reply — reusing the existing run path, never forking it.
 
-**Architecture:** Slack POSTs events to one platform-signed, session-unauthenticated ingress (`POST /api/v1/im/slack/events`). The handler verifies the HMAC, resolves the `IMConnectorAccount` by `team_id`, and — in **one DB transaction** — inserts an idempotency receipt keyed by Slack's `event_id`, creates/reuses a `Conversation` + `IMThreadLink`, and enqueues a durable `IMRunQueueItem` row (transactional outbox). A separate in-process async worker polls that queue, claims a row via `SELECT … FOR UPDATE SKIP LOCKED`, and calls `RunManager.start_run(...)`. An outbound tailer reads the run's Redis event stream (`read_run_events_after`, the same tail SSE uses) and renders debounced `chat.update` edits into the originating Slack thread. Config is scope-isolated: workspace routes (`/ws/{ws}/im/...`, `require_member`) and org-admin routes (`/admin/im/...`, `require_admin`) are separate handlers sharing one `IMConnectorService`.
+**Architecture:** Slack POSTs events to one platform-signed, session-unauthenticated ingress (`POST /api/v1/im/slack/events`). The handler verifies the HMAC, resolves the `IMConnectorAccount` by `team_id`, and — in **one DB transaction** — inserts an idempotency receipt keyed by Slack's `event_id`, creates/reuses a `Conversation` + `IMThreadLink`, and enqueues a durable `IMRunQueueItem` row (transactional outbox). A separate in-process async worker polls that queue, claims a row via `SELECT … FOR UPDATE SKIP LOCKED`, and calls `RunManager.start_run(...)`. An outbound tailer reads the run's Redis event stream (`read_run_events_after`, the same tail SSE uses) and renders debounced `chat.update` edits into the originating Slack thread. Config is scope-isolated: workspace routes (`/ws/{ws}/im/...`, `require_member`) and org-admin routes (`/admin/im/...`, `get_admin_request_context`) are separate handlers sharing one `IMConnectorService`. Note: the org-admin routes have **no `{workspace_id}` in their path**, so they cannot use `require_admin` — that dependency is `require_role(Role.ADMIN)`, which checks a `workspace`-typed permission keyed on `ctx.workspace_id` resolved from the path, and there is no such path segment here. Use `get_admin_request_context` (backed by `require_org_admin`), the same dependency the existing `/admin/mcp/...` routes use.
 
 **Tech Stack:** FastAPI, SQLModel + Alembic (Postgres), Redis Streams (existing run-event log), the cubepi run path (`RunManager.start_run`), `CredentialService` (vault `kind="im_bot"`), `httpx` for Slack Web API calls, `hmac`/`hashlib` for signature verification. Tests: `pytest` against real Postgres + Redis (worktree-routed DB) with captured-real Slack payloads; no fake Slack server.
+
+**Scope note — this plan is backend-only.** The spec (§ "Scope-isolated config: separate workspace-scope and org-admin routes/**pages**") asks for frontend config pages too. This plan deliberately ships the backend (models, ingress, worker, routes) as one PR and **defers the Next.js workspace/admin IM config pages to a follow-up PR** (own route + page file per scope, per the scope-isolated-pages rule; `@cubebox/core` API client types + a Playwright/E2E pass). If a single PR is required instead, add those frontend tasks here before implementation. Either way the frontend is not silently dropped — it is an explicit, tracked follow-up.
 
 ---
 
@@ -25,7 +27,7 @@ New files (all paths under `backend/`):
 - `cubebox/im/outbound.py` — `OutboundRunTailer`: Redis tail → debounced render → Slack edits.
 - `cubebox/api/routes/v1/im_ingress.py` — `POST /api/v1/im/slack/events` (unauthenticated, platform-signed).
 - `cubebox/api/routes/v1/ws_im.py` — workspace-scope account/identity routes (`require_member`).
-- `cubebox/api/routes/v1/admin_im.py` — org-admin account listing/enable-disable (`require_admin`).
+- `cubebox/api/routes/v1/admin_im.py` — org-admin account listing/enable-disable (`get_admin_request_context`).
 - `cubebox/api/schemas/im_connector.py` — request/response pydantic models.
 
 Modified: `cubebox/models/public_id.py` (prefixes are set via `_PREFIX` on each table — no edit needed unless adding shared constants; see Task 2), `cubebox/models/__init__.py` (export new tables so Alembic + `_guard_references` see them), `cubebox/api/app.py` (register the three routers + start the worker on startup), `cubebox/services/credential.py` (`_guard_references`: refuse deleting an `im_bot` credential still referenced by an account).
@@ -254,7 +256,11 @@ class IMRunQueueItem(CubeboxBase, OrgScopedMixin, table=True):
     conversation_id: str = Field(foreign_key="conversations.id", max_length=20)
     content: str
     slack_channel_id: str = Field(max_length=128)
+    # Conversation dedup key (the thread root / DM sentinel) — NOT a reply target.
     slack_thread_ts: str = Field(max_length=64)
+    # Real Slack reply target: thread_ts to set on outbound, or NULL for an
+    # unthreaded DM (post without thread_ts). Never '__dm__'.
+    slack_reply_thread_ts: str | None = Field(default=None, max_length=64)
     status: str = Field(default="pending", max_length=16)  # 'pending' | 'started' | 'failed'
     claimed_at: datetime | None = Field(default=None)
     claim_lease_expires_at: datetime | None = Field(default=None)
@@ -511,6 +517,7 @@ def test_app_mention_strips_mention_and_uses_ts_as_root() -> None:
     assert ev.platform_event_id == "Ev0001"
     assert ev.channel_id == "C555"
     assert ev.thread_root_id == "1700000000.000100"
+    assert ev.reply_thread_ts == "1700000000.000100"  # channel mention replies in-thread
     assert ev.sender_ref == "U777"
     assert ev.text == "summarize the doc"
 
@@ -520,7 +527,8 @@ def test_dm_uses_sentinel_thread_root() -> None:
     ev = conn.parse_inbound(DM)
     assert ev is not None
     assert ev.channel_id == "D999"
-    assert ev.thread_root_id == "__dm__"
+    assert ev.thread_root_id == "__dm__"          # dedup key
+    assert ev.reply_thread_ts is None             # unthreaded DM ⇒ no reply thread_ts
     assert ev.text == "hello bot"
 
 
@@ -553,7 +561,15 @@ class InboundEvent:
     account_external_id: str  # Slack team_id; Feishu app_id
     platform_event_id: str  # Slack event_id (stable across retries)
     channel_id: str
-    thread_root_id: str  # never NULL; DM uses DM_THREAD_SENTINEL
+    # CONVERSATION KEY (dedup only): never NULL; a DM with no platform thread
+    # uses DM_THREAD_SENTINEL so repeated DMs map to one rolling conversation.
+    # This is NOT a Slack reply target — '__dm__' is a sentinel, never a real ts.
+    thread_root_id: str
+    # OUTBOUND REPLY TARGET (what to set as Slack thread_ts): the real message ts
+    # for a channel mention / threaded reply, or None for an unthreaded DM (post
+    # to the channel/DM without thread_ts). Kept SEPARATE from thread_root_id so
+    # we never send thread_ts='__dm__'.
+    reply_thread_ts: str | None
     sender_ref: str  # IM user id
     text: str
 
@@ -601,12 +617,20 @@ class SlackConnector:
         channel = event.get("channel", "")
         ts = event.get("ts", "")
         thread_ts = event.get("thread_ts")
+        is_dm = event.get("channel_type") == "im"
         if thread_ts:
+            # Threaded reply (channel or DM): key + reply target are both thread_ts.
             thread_root = thread_ts
-        elif event.get("channel_type") == "im":
+            reply_thread_ts: str | None = thread_ts
+        elif is_dm:
+            # Unthreaded DM: one rolling conversation (sentinel key), but reply
+            # with NO thread_ts (posting '__dm__' as thread_ts would be invalid).
             thread_root = DM_THREAD_SENTINEL
+            reply_thread_ts = None
         else:
+            # Channel mention starting a new thread: key + reply target = this ts.
             thread_root = ts
+            reply_thread_ts = ts
 
         text = _MENTION_RE.sub("", event.get("text", "")).strip()
 
@@ -616,6 +640,7 @@ class SlackConnector:
             platform_event_id=raw.get("event_id", ""),
             channel_id=channel,
             thread_root_id=thread_root,
+            reply_thread_ts=reply_thread_ts,
             sender_ref=event.get("user", ""),
             text=text,
         )
@@ -660,7 +685,8 @@ pytestmark = pytest.mark.asyncio
 def _event(event_id: str = "Ev1") -> InboundEvent:
     return InboundEvent(
         platform="slack", account_external_id="T123", platform_event_id=event_id,
-        channel_id="C1", thread_root_id="1700.0001", sender_ref="U1", text="hello",
+        channel_id="C1", thread_root_id="1700.0001", reply_thread_ts="1700.0001",
+        sender_ref="U1", text="hello",
     )
 
 
@@ -698,6 +724,7 @@ Add fixtures to `backend/tests/integration/conftest.py` (or a local conftest):
 import pytest_asyncio
 
 from cubebox.db.engine import async_session_maker
+from cubebox.models import Credential  # real FK target for credential_id
 from cubebox.models.im_connector import IMConnectorAccount
 
 
@@ -711,9 +738,18 @@ async def im_account(seeded_org_workspace_user):
     # seeded_org_workspace_user is the existing fixture giving (org_id, workspace_id, user_id).
     org_id, ws_id, user_id = seeded_org_workspace_user
     async with async_session_maker() as s:
+        # credential_id is a REAL FK to credentials.id — never a literal like
+        # "cred-fake" (that fails the FK). Insert a real Credential(kind="im_bot")
+        # first and point the account at it.
+        cred = Credential(
+            org_id=org_id, kind="im_bot", name="slack:T123",
+            value_encrypted=b"",  # match the real column type/shape
+        )
+        s.add(cred)
+        await s.flush()
         acc = IMConnectorAccount(
             org_id=org_id, workspace_id=ws_id, platform="slack",
-            external_account_id="T123", acting_user_id=user_id, credential_id="cred-fake",
+            external_account_id="T123", acting_user_id=user_id, credential_id=cred.id,
         )
         s.add(acc)
         await s.commit()
@@ -721,7 +757,21 @@ async def im_account(seeded_org_workspace_user):
         return acc
 ```
 
-> If `seeded_org_workspace_user` does not exist, reuse whichever existing integration fixture seeds an org/workspace/user (grep `tests/integration/conftest.py` for `workspace_id`); the IM account just needs valid FK targets.
+> **Resolve every fixture/guess against the real codebase before coding — the
+> snippets above are illustrative, not verified.** Concretely: (1)
+> `seeded_org_workspace_user` may not exist — grep `tests/integration/conftest.py`
+> / `tests/e2e/conftest.py` for the actual org/workspace/user seeding fixture and
+> use its real name and return shape. (2) `Credential(...)` must match the real
+> model's required fields and the encrypted-value column type (read
+> `cubebox/models/credential.py`); a real `im_bot` row is required because of the
+> FK. (3) `member_client` and similar e2e client fixtures yield **tuples**
+> `(client, workspace_id)` in this repo — unpack them, do not treat them as an
+> object with `.workspace_id`, and don't assume a bare `workspace_id` fixture
+> exists. (4) `app_instance` / `async_client` / `admin_client` / `two_im_accounts`
+> are placeholder names — confirm the real app + client + multi-tenant fixtures
+> (grep `tests/e2e/conftest.py` for `lifespan` / `app` / `admin`). (5)
+> `get_encryption_backend_app` may not be a real symbol — see the Task 9 note;
+> use `request.app.state.encryption_backend` if so.
 
 - [ ] **Step 2: Run test to verify it fails**
 
@@ -736,7 +786,7 @@ Expected: FAIL with `ModuleNotFoundError: No module named 'cubebox.im.inbound'`
 
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cubebox.models.im_connector import (
@@ -803,14 +853,31 @@ async def get_or_create_thread_link(
 
 
 async def claim_pending_queue_item(
-    session: AsyncSession, *, lease_seconds: int
+    session: AsyncSession, *, lease_seconds: int, max_attempts: int = 5
 ) -> IMRunQueueItem | None:
-    """Claim one pending (or lease-expired) queue row with SKIP LOCKED."""
+    """Claim one pending OR lease-expired in-progress row with SKIP LOCKED.
+
+    A claim sets status='started' + a lease and bumps attempts. If the worker
+    crashes or run-start fails, the row keeps status='started' but its
+    claim_lease_expires_at goes stale — this query reclaims such rows so a crash
+    can never strand them forever. The original 'pending only' filter was the
+    bug: a started-then-failed row was never re-selected. Rows past max_attempts
+    are left for a janitor to park as 'failed' (or extend max_attempts) rather
+    than spinning forever on a permanently-broken event.
+    """
     now = datetime.now(UTC)
     stmt = (
         select(IMRunQueueItem)
         .where(
-            IMRunQueueItem.status == "pending",
+            IMRunQueueItem.attempts < max_attempts,
+            or_(
+                IMRunQueueItem.status == "pending",
+                and_(  # reclaim a stalled in-progress row whose lease expired
+                    IMRunQueueItem.status == "started",
+                    IMRunQueueItem.claim_lease_expires_at.is_not(None),
+                    IMRunQueueItem.claim_lease_expires_at < now,
+                ),
+            ),
         )
         .order_by(IMRunQueueItem.created_at)
         .limit(1)
@@ -826,6 +893,13 @@ async def claim_pending_queue_item(
     session.add(item)
     return item
 ```
+
+The partial index `ix_im_run_queue_pending` (Task 2) is `WHERE status='pending'`,
+which no longer covers the reclaim path. Either widen it to also index expired
+`started` leases, or add a second partial index on
+`(status, claim_lease_expires_at) WHERE status='started'` so the reclaim query
+stays cheap. Add a worker test that fails the first `start_run`, then asserts a
+later poll re-claims the same row once its lease expires.
 
 - [ ] **Step 4: Write the transactional inbound core**
 
@@ -853,6 +927,22 @@ class IngestResult:
     conversation_id: str | None
 
 
+def _constraint_name(exc: IntegrityError) -> str:
+    """Best-effort constraint name from a psycopg/asyncpg IntegrityError."""
+    orig = getattr(exc, "orig", None)
+    diag = getattr(orig, "diag", None)
+    name = getattr(diag, "constraint_name", None)
+    return name or str(orig) or str(exc)
+
+
+def _is_receipt_unique_violation(exc: IntegrityError) -> bool:
+    return "uq_im_receipt_account_event" in _constraint_name(exc)
+
+
+def _is_thread_link_unique_violation(exc: IntegrityError) -> bool:
+    return "uq_im_thread_link" in _constraint_name(exc)
+
+
 async def ingest_inbound_event(
     event: InboundEvent,
     *,
@@ -875,8 +965,17 @@ async def ingest_inbound_event(
         session.add(receipt)
         try:
             await session.flush()  # surfaces the unique violation early
-        except IntegrityError:
+        except IntegrityError as exc:
             await session.rollback()
+            # ONLY the receipt's (account_id, platform_event_id) unique conflict
+            # means "duplicate". Any other IntegrityError (FK violation, a
+            # different constraint) is a real failure and must NOT be acked as a
+            # duplicate — that would silently drop a genuine event. Match the
+            # constraint name (uq_im_receipt_account_event) on the error and
+            # re-raise anything else so the ingress returns non-200 and Slack
+            # retries.
+            if not _is_receipt_unique_violation(exc):
+                raise
             return IngestResult(outcome="duplicate", conversation_id=None)
 
         async def _make_conversation_id() -> str:
@@ -908,14 +1007,26 @@ async def ingest_inbound_event(
             conversation_id=link.conversation_id,
             content=event.text,
             slack_channel_id=event.channel_id,
-            slack_thread_ts=event.thread_root_id,
+            slack_thread_ts=event.thread_root_id,        # dedup key
+            slack_reply_thread_ts=event.reply_thread_ts,  # real reply target (may be None)
         )
         session.add(item)
         try:
             await session.commit()
-        except IntegrityError:
-            # Concurrent duplicate raced past the flush check.
+        except IntegrityError as exc:
             await session.rollback()
+            # Same discrimination as above: a concurrent receipt duplicate that
+            # raced past the flush is a 'duplicate'; a concurrent IMThreadLink
+            # unique conflict (two first-messages in the same thread racing) is
+            # NOT a duplicate event — re-select the winning link and re-enqueue
+            # against its conversation. Anything else re-raises (real failure →
+            # Slack retries).
+            if _is_thread_link_unique_violation(exc):
+                return await ingest_inbound_event(  # retry: link now exists, reused
+                    event, account=account, session_maker=session_maker
+                )
+            if not _is_receipt_unique_violation(exc):
+                raise
             return IngestResult(outcome="duplicate", conversation_id=None)
         return IngestResult(outcome="enqueued", conversation_id=link.conversation_id)
 ```
@@ -972,7 +1083,8 @@ class _FakeRunManager:
 async def test_worker_starts_run_and_completes_receipt(im_account, session_maker):
     ev = InboundEvent(
         platform="slack", account_external_id="T123", platform_event_id="EvW",
-        channel_id="C1", thread_root_id="t.1", sender_ref="U1", text="do it",
+        channel_id="C1", thread_root_id="t.1", reply_thread_ts="t.1",
+        sender_ref="U1", text="do it",
     )
     await ingest_inbound_event(ev, account=im_account, session_maker=session_maker)
 
@@ -1337,15 +1449,17 @@ Append to `backend/cubebox/im/slack/connector.py`:
         """chat.postMessage as a thread reply; returns the message ts."""
         import httpx
 
+        # Omit thread_ts entirely for an unthreaded DM (self._thread_ts is None);
+        # sending thread_ts='__dm__' or a null would error. Channel/threaded
+        # replies set a real ts.
+        body_json: dict[str, object] = {"channel": self._channel_id, "text": text}
+        if self._thread_ts:
+            body_json["thread_ts"] = self._thread_ts
         async with httpx.AsyncClient(timeout=15.0) as client:
             resp = await client.post(
                 "https://slack.com/api/chat.postMessage",
                 headers={"Authorization": f"Bearer {self._bot_token}"},
-                json={
-                    "channel": self._channel_id,
-                    "thread_ts": self._thread_ts,
-                    "text": text,
-                },
+                json=body_json,
             )
         body = resp.json()
         if not body.get("ok"):
@@ -1659,7 +1773,8 @@ In `backend/cubebox/api/app.py`, inside the lifespan/startup block where `app.st
         connector = SlackConnector(
             bot_token=secrets["bot_token"],
             channel_id=item.slack_channel_id,
-            thread_ts=item.slack_thread_ts,
+            # Use the real reply target, NOT the dedup key. None ⇒ unthreaded DM.
+            thread_ts=item.slack_reply_thread_ts,
         )
         tailer = OutboundRunTailer(
             redis=app.state.run_manager._redis,
@@ -1790,7 +1905,20 @@ async def test_inbound_starts_run_and_outbound_tails_real_stream(
     assert item.conversation_id is not None
 ```
 
-> This test asserts the durable chain: signed inbound → receipt `completed` → queue row present, with a real run started on the real path. The outbound-tail assertion is intentionally minimal here because the run's exact text depends on the live LLM (covered structurally by Task 8's render unit tests). If the E2E fixtures expose the started `run_id` (via a test hook on the worker), strengthen the assertion to drive `OutboundRunTailer` against the real stream and assert `rec.posts` is non-empty. Do **not** stand up a fake Slack server.
+> **Strengthen this — capture `run_id` and actually tail the real stream.** As
+> written, the test never captures `run_id`, never runs `OutboundRunTailer`, and
+> never asserts a Slack post/edit, so it does not cover the outbound half at all.
+> Add a test hook so the chain is verified end to end: pass an `on_run_started`
+> (or a recording connector) into the worker for this test that records the
+> started `run_id`, then construct an `OutboundRunTailer(redis=rm._redis,
+> key_prefix=rm._key_prefix, run_id=<captured>, connector=_RecordingConnector())`,
+> run it against the **real** Redis run stream, and assert `rec.posts` is non-empty
+> and a final edit was emitted. The exact text varies with the LLM, but the
+> *existence* of at least one post + a finalizing edit is deterministic and must
+> be asserted (it's the whole point of the outbound path). Only the outermost
+> Slack HTTP call is faked (recording connector); everything else is real. Do
+> **not** stand up a fake Slack server, and do not leave the outbound assertion as
+> a no-op `assert item.conversation_id is not None`.
 
 - [ ] **Step 2: Run the test**
 
@@ -2134,7 +2262,7 @@ git commit -m "feat(im): workspace-scope IM account routes (connect/list/delete)
 - Modify: `backend/cubebox/api/app.py` (register `admin_im.router`)
 - Test: `backend/tests/e2e/test_admin_im_routes.py`
 
-A **separate handler** (not a `?scope=` flag): an org admin lists every IM account across the org's workspaces and can enable/disable them. Reuse goes through `IMConnectorService.list_for_org` / `set_enabled` — never the route layer. Guarded by `require_admin`.
+A **separate handler** (not a `?scope=` flag): an org admin lists every IM account across the org's workspaces and can enable/disable them. Reuse goes through `IMConnectorService.list_for_org` / `set_enabled` — never the route layer. Guarded by `get_admin_request_context` (NOT `require_admin`: these routes have no `{workspace_id}` path segment, so the workspace-scoped `require_admin`/`require_role` cannot resolve a workspace permission — use the org-admin context dependency the `/admin/mcp` routes use).
 
 - [ ] **Step 1: Write the failing E2E test**
 
@@ -2190,15 +2318,20 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from cubebox.api.schemas.im_connector import IMAccountListOut, IMAccountOut
 from cubebox.auth.context import RequestContext
-from cubebox.auth.dependencies import require_admin
 from cubebox.credentials.dependencies import get_encryption_backend
 from cubebox.credentials.encryption import EncryptionBackend
 from cubebox.db.session import get_session
+from cubebox.mcp.dependencies import get_admin_request_context
 from cubebox.repositories.credential import CredentialRepository
 from cubebox.services.credential import CredentialService
 from cubebox.services.im_connector import IMConnectorService
 
 router = APIRouter(prefix="/admin/im", tags=["admin-im"])
+
+# get_admin_request_context is backed by require_org_admin and resolves the
+# org_id without needing a {workspace_id} path segment — the org-admin pattern
+# used by /admin/mcp. (require_admin/require_role are workspace-scoped and would
+# fail here because ctx.workspace_id is unset on org-admin routes.)
 
 
 def _service(session: AsyncSession, backend: EncryptionBackend, ctx: RequestContext) -> IMConnectorService:
@@ -2220,7 +2353,7 @@ def _to_out(a) -> IMAccountOut:
 
 @router.get("/accounts", response_model=IMAccountListOut)
 async def list_org_accounts(
-    ctx: Annotated[RequestContext, Depends(require_admin)],
+    ctx: Annotated[RequestContext, Depends(get_admin_request_context)],
     session: Annotated[AsyncSession, Depends(get_session)],
     backend: Annotated[EncryptionBackend, Depends(get_encryption_backend)],
 ) -> IMAccountListOut:
@@ -2231,7 +2364,7 @@ async def list_org_accounts(
 @router.post("/accounts/{account_id}/disable", response_model=IMAccountOut)
 async def disable_account(
     account_id: str,
-    ctx: Annotated[RequestContext, Depends(require_admin)],
+    ctx: Annotated[RequestContext, Depends(get_admin_request_context)],
     session: Annotated[AsyncSession, Depends(get_session)],
     backend: Annotated[EncryptionBackend, Depends(get_encryption_backend)],
 ) -> IMAccountOut:
@@ -2245,7 +2378,7 @@ async def disable_account(
 @router.post("/accounts/{account_id}/enable", response_model=IMAccountOut)
 async def enable_account(
     account_id: str,
-    ctx: Annotated[RequestContext, Depends(require_admin)],
+    ctx: Annotated[RequestContext, Depends(get_admin_request_context)],
     session: Annotated[AsyncSession, Depends(get_session)],
     backend: Annotated[EncryptionBackend, Depends(get_encryption_backend)],
 ) -> IMAccountOut:
@@ -2311,7 +2444,7 @@ async def test_event_for_account_a_never_touches_workspace_b(
     ev = InboundEvent(
         platform="slack", account_external_id=account_a.external_account_id,
         platform_event_id="EvIso", channel_id="C-A", thread_root_id="t.a",
-        sender_ref="U-A", text="hello A",
+        reply_thread_ts="t.a", sender_ref="U-A", text="hello A",
     )
     res = await ingest_inbound_event(ev, account=account_a, session_maker=session_maker)
 
@@ -2355,6 +2488,20 @@ Per the spec's testing strategy, the Slack HTTP boundary is the genuinely unsimu
 
 Create `backend/docs/im-slack-setup.md` containing:
 1. **App manifest** (YAML) declaring scopes `app_mentions:read`, `chat:write`, `im:history`, `im:read`, `channels:history`; event subscriptions `app_mention`, `message.im`; request URL `https://<host>/api/v1/im/slack/events`.
+
+   **Caveat — channel thread replies are NOT received by this manifest.** With
+   only `app_mention` + `message.im` subscribed, a follow-up message in a channel
+   thread (no new @mention) never reaches the ingress, so the "second mention in
+   the same thread reuses the conversation" path only works for re-mentions, not
+   bare thread replies. Receiving bare channel thread replies requires subscribing
+   `message.channels`, which delivers EVERY channel message — the parser must then
+   accept only messages that (a) are replies in a thread whose root is a known
+   `IMThreadLink`, or (b) @mention the bot, and drop the rest. Decide explicitly:
+   either (i) document v1 as "channel = mention-only, threaded follow-ups need a
+   re-mention" (cheapest, matches the current manifest), or (ii) add the
+   `message.channels` subscription + a known-thread/mention filter in
+   `parse_inbound`. The current parser's `thread_ts` handling implies (ii) but the
+   manifest only enables (i) — make them consistent.
 2. **Install steps**: create app from manifest → install to workspace → copy bot token (`xoxb-`) + signing secret → POST them to `POST /api/v1/ws/{ws}/im/accounts`.
 3. **Manual smoke checklist** (the unsimulatable boundary):
    - [ ] `@mention` the bot in a channel → a threaded placeholder reply appears, then edits live, then finalizes.
