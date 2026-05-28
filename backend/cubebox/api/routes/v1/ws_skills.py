@@ -31,6 +31,7 @@ from cubebox.config import config as _config
 from cubebox.db import get_session
 from cubebox.repositories.organization import OrganizationRepository
 from cubebox.repositories.skill import (
+    OrgPreinstalledTombstoneRepository,
     OrgSkillInstallRepository,
     SkillRepository,
     SkillVersionRepository,
@@ -203,6 +204,12 @@ async def preview_candidate(
         skill = await SkillRepository(session).get(source_ref)
         if skill is None or not _visible(skill, ctx.org_id):
             raise HTTPException(status_code=404, detail="SKILL_NOT_FOUND")
+        # Tombstoned preinstalled skills are hidden in discover + refused on install;
+        # preview must match or it leaks SKILL.md after an admin uninstall.
+        if skill.source == "preinstalled":
+            tombstone = await OrgPreinstalledTombstoneRepository(session).get(ctx.org_id, skill.id)
+            if tombstone is not None:
+                raise HTTPException(status_code=404, detail="SKILL_NOT_FOUND")
         sv = await SkillVersionRepository(session).find(skill.id, skill.current_version)
         if sv is None:
             raise HTTPException(status_code=404, detail="SKILL_VERSION_NOT_FOUND")
