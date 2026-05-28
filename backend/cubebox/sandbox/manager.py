@@ -17,6 +17,7 @@ import hashlib
 import re
 import time
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 import opensandbox
 from loguru import logger
@@ -202,6 +203,20 @@ class SandboxManager:
                         expires_at=expires_at,
                     )
                 )
+
+    async def resolve_command_rules(self, org_id: str) -> list[dict[str, Any]]:
+        """Return the org's effective ``command_rules`` for middleware enforcement.
+
+        The middleware needs only this slice of the policy, so we expose it as a
+        thin helper that opens its own session. Keeps DB access inside the
+        manager (the stream layer doesn't get a session factory leaked into it).
+        """
+        async with self._session_factory() as session:
+            policy = await SandboxPolicyResolver(
+                SandboxPolicyRepository(session, org_id=org_id),
+                default_image=self._image,
+            ).resolve()
+        return list(policy.command_rules)
 
     async def get_or_create(
         self,
