@@ -1,8 +1,11 @@
 """Conversations API routes."""
 
 import json
+import re
+import time
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -16,10 +19,12 @@ from cubebox.api.exceptions import InvalidInputError
 from cubebox.auth.context import RequestContext
 from cubebox.auth.dependencies import require_member
 from cubebox.cache import RedisHandle, redis_dep
+from cubebox.config import config as _config
 from cubebox.db import get_session
 from cubebox.db.engine import _build_database_url, async_session_maker
 from cubebox.models import Conversation
 from cubebox.repositories import ConversationRepository
+from cubebox.skills.cache import SkillCache
 from cubebox.streams.replay_coalescer import ReplayCoalescer
 from cubebox.streams.run_events import (
     get_active_run,
@@ -32,6 +37,8 @@ from cubebox.streams.run_events import (
 )
 from cubebox.streams.run_manager import RunContext
 from cubebox.utils.time import utc_isoformat
+
+_INSTALL_RE = re.compile(r"^install\s+([A-Za-z0-9_\-:]+)\s*$")
 
 # Replay backlog is read in bounded batches so a large reconnect never stalls
 # the event loop. Tunable; ~1000 keeps each XRANGE + JSON decode cheap.
@@ -76,6 +83,74 @@ async def _update_conversation_timestamp(
             await save_conv_repo.mark_active(conversation_id)
     finally:
         await save_engine.dispose()
+
+
+def _skill_cache() -> SkillCache:
+    return SkillCache(cache_root=Path(_config.get("skills.cache_root", "skills_cache")))
+
+
+async def _maybe_install_from_user_message(
+    *,
+    session: AsyncSession,
+    org_id: str,
+    org_slug: str,
+    workspace_id: str,
+    actor_user_id: str,
+    text: str,
+) -> str | None:
+    """If the user message is `install <canonical_name>`, install it and return
+    a replacement assistant note. Otherwise return None and let the message flow.
+
+    Resolves <canonical_name> against the workspace's catalog (local skills not
+    yet installed) and any live candidates from registered remote sources. The
+    same SkillInstallService.install backs both surfaces so the UI button and
+    this parser share one code path.
+    """
+    m = _INSTALL_RE.match(text.strip())
+    if m is None:
+        return None
+    from cubebox.repositories.organization import OrganizationRepository
+    from cubebox.skills.discovery import (
+        SkillDiscoveryService,
+        SkillInstallError,
+        SkillInstallService,
+    )
+    from cubebox.skills.service import SkillCatalogService, SkillPublishService
+    from cubebox.skills.sources.registry import SkillSourceRegistry
+
+    canonical = m.group(1)
+    catalog = SkillCatalogService(session=session, cache=_skill_cache())
+    org = await OrganizationRepository(session).get(org_id)
+    if org is None:
+        return f"Could not find organization while trying to install `{canonical}`."
+    registry = await SkillSourceRegistry.build(
+        session=session,
+        catalog=catalog,
+        org_id=org_id,
+        org_slug=org_slug,
+        workspace_id=workspace_id,
+    )
+    cands = await SkillDiscoveryService(registry).discover(canonical, limit=20)
+    match_cand = next((c for c in cands if c.canonical_name == canonical), None)
+    if match_cand is None:
+        return f"Could not find a skill called `{canonical}` in your workspace catalog."
+    install_svc = SkillInstallService(
+        session=session,
+        registry=registry,
+        publisher=SkillPublishService(session=session, cache=_skill_cache()),
+        org_id=org_id,
+        org_slug=org_slug,
+        workspace_id=workspace_id,
+        actor_user_id=actor_user_id,
+    )
+    try:
+        result = await install_svc.install(match_cand.candidate_id)
+    except SkillInstallError as e:
+        return f"Failed to install `{canonical}`: {e}"
+    return (
+        f"Installed `{result.canonical_name}` (v{result.installed_version}). "
+        f"Use `load_skill('{result.canonical_name}')` to load it in this conversation."
+    )
 
 
 @router.post("", status_code=status.HTTP_201_CREATED)
@@ -536,6 +611,51 @@ async def send_message(
             message="Message must include content or attachments",
             details="Provide content text and/or one or more file attachments",
         )
+
+    # Chat-fallback skill-install parser: `install <canonical_name>` short-circuits the
+    # agent loop — persists a user + assistant message pair directly to the checkpointer
+    # and returns early, so the agent never runs for this turn.
+    if request_obj.content and not request_obj.attachments:
+        async with async_session_maker() as install_session:
+            from cubebox.repositories.organization import OrganizationRepository as _OrgRepo
+
+            _org = await _OrgRepo(install_session).get(ctx.org_id)
+            _org_slug = _org.slug if _org else ctx.org_id
+            install_note = await _maybe_install_from_user_message(
+                session=install_session,
+                org_id=ctx.org_id,
+                org_slug=_org_slug,
+                workspace_id=ctx.workspace_id,
+                actor_user_id=ctx.user.id,
+                text=request_obj.content,
+            )
+        if install_note is not None:
+            from cubepi.providers.base import AssistantMessage, TextContent, UserMessage
+
+            await _update_conversation_timestamp(
+                conversation_id,
+                org_id=ctx.org_id,
+                workspace_id=ctx.workspace_id,
+                user_id=ctx.user.id,
+            )
+            from cubebox.agents.checkpointer import init_checkpointer
+
+            now = time.time()
+            async with init_checkpointer() as _cp:
+                await _cp.append(
+                    conversation_id,
+                    [
+                        UserMessage(
+                            content=[TextContent(text=request_obj.content)],
+                            timestamp=now,
+                        ),
+                        AssistantMessage(
+                            content=[TextContent(text=install_note)],
+                            timestamp=now + 0.001,
+                        ),
+                    ],
+                )
+            return SendMessageResponse(run_id="install-fallback")
 
     from cubebox.api.exceptions import (
         AttachmentReferenceInvalidError,

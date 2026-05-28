@@ -37,3 +37,10 @@ class InstallCandidateResponse(BaseModel):
     canonical_name: str
     skill_id: str
     installed_version: str
+
+
+class SkillRefreshResponse(BaseModel):
+    canonical_name: str
+    skill_id: str
+    installed_version: str
+    changed: bool

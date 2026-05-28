@@ -227,10 +227,12 @@ function WorkspaceNav({ wsId }: { wsId: string }): React.ReactElement {
   const memoryPrefix = `/w/${wsId}/memory`
   const scheduledTasksPrefix = `/w/${wsId}/scheduled-tasks`
   const triggersPrefix = `/w/${wsId}/triggers`
+  const skillsPrefix = `/w/${wsId}/skills`
   const onSettings = pathname?.startsWith(settingsPrefix) ?? false
   const onMemory = pathname?.startsWith(memoryPrefix) ?? false
   const onScheduledTasks = pathname?.startsWith(scheduledTasksPrefix) ?? false
   const onTriggers = pathname?.startsWith(triggersPrefix) ?? false
+  const onSkills = pathname?.startsWith(skillsPrefix) ?? false
   const currentTab = searchParams.get('tab') ?? 'workspace'
 
   const entries: WorkspaceNavEntry[] = [
@@ -238,8 +240,8 @@ function WorkspaceNav({ wsId }: { wsId: string }): React.ReactElement {
       key: 'skills',
       labelKey: 'skills',
       icon: Sparkles,
-      href: `${settingsPrefix}?tab=skills`,
-      isActive: onSettings && currentTab === 'skills',
+      href: skillsPrefix,
+      isActive: onSkills,
     },
     {
       key: 'mcp',
