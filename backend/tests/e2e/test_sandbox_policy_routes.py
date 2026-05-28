@@ -90,3 +90,28 @@ async def test_put_warns_on_credential_host_conflict(
     # Confirm the policy DID save despite the warning.
     got = await client.get("/api/v1/admin/sandbox-policy")
     assert got.json()["network_rules"] == [{"action": "deny", "target": "api.github.com"}]
+
+
+async def test_put_warns_on_wildcard_credential_host_conflict(
+    admin_client, seeded_credential_with_host
+) -> None:
+    """Regression for codex P2 r3317630110: a wildcard deny rule that covers
+    the credential's required host (e.g. *.github.com vs api.github.com) must
+    surface the same warning shape as the exact-match case — otherwise the
+    runtime would block egress while the UI silently says nothing."""
+    client, _ws = admin_client
+    cred = seeded_credential_with_host  # required_hosts includes api.github.com
+    resp = await client.put(
+        "/api/v1/admin/sandbox-policy",
+        json={
+            "default_image": "ubuntu:22.04",
+            "network_rules": [{"action": "deny", "target": "*.github.com"}],
+            "command_rules": None,
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    warnings = resp.json().get("warnings") or []
+    assert any(
+        cred["id"] in str(w) or "api.github.com" in str(w) or "*.github.com" in str(w)
+        for w in warnings
+    ), f"Expected a wildcard-deny conflict warning, got: {warnings}"

@@ -56,6 +56,21 @@ def test_chaining_cannot_smuggle_a_denied_command() -> None:
     assert evaluate_command("echo $(rm x)", DENY_RM)[0] == "deny"
 
 
+def test_shell_grouping_cannot_hide_a_denied_command() -> None:
+    """Regression for codex P1 r3317630106: `(rm -rf /)`, `{ rm; }`,
+    `if …; then rm …; fi` and friends must be normalized so the rule glob
+    still matches the denied command underneath."""
+    assert evaluate_command("(rm -rf /workspace)", DENY_RM)[0] == "deny"
+    assert evaluate_command("{ rm -rf /workspace; }", DENY_RM)[0] == "deny"
+    assert evaluate_command("if true; then rm -rf /workspace; fi", DENY_RM)[0] == "deny"
+    assert evaluate_command("for f in *; do rm $f; done", DENY_RM)[0] == "deny"
+    assert evaluate_command("exec rm -rf /workspace", DENY_RM)[0] == "deny"
+    assert evaluate_command("time rm -rf /workspace", DENY_RM)[0] == "deny"
+    # Sanity: the same glob still passes through innocuous compound commands.
+    assert evaluate_command("(echo ok)", DENY_RM)[0] == "allow"
+    assert evaluate_command("if true; then echo ok; fi", DENY_RM)[0] == "allow"
+
+
 def test_confirm_subcommand_propagates_when_no_deny() -> None:
     assert evaluate_command("ls && git push origin", CONFIRM_PUSH)[0] == "confirm"
 
