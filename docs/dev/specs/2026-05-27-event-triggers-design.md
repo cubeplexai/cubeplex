@@ -481,6 +481,57 @@ structurally via the repository mixins. Per the scope-isolation rule, if an org-
 view of triggers is ever needed, it gets its own `/api/v1/admin/...` handlers — never a
 `?scope=` param on these.
 
+### Workspace UI (scope-isolated page)
+
+Workspace members manage their triggers from a dedicated page at
+`/w/{workspaceId}/triggers`. Per the scope-isolated-pages rule, this is its own Next
+route with its own page file; modules (`<List>`, `<DetailPanel>`, `<Form>`, …) are the
+reuse boundary, not a `mode?: 'admin' | 'workspace'` prop. If an org-admin cross-workspace
+view of triggers is ever introduced it gets a separate `/admin/triggers` page with its
+own page file, never a flag on this one.
+
+A "Triggers" entry sits under the workspace navigation alongside the other workspace
+sections (conversations, MCP, members, …) so the feature is discoverable.
+
+**List view.** A table of all triggers in the workspace with: name, source kind
+(generic webhook in v1), enabled/disabled toggle, last-event timestamp, and the four
+summary counters maintained on the trigger row (`events_total`, `events_success`,
+`events_failed`, `events_dedup_dropped`). Each row links to the detail view. A
+"Create trigger" action opens the create form.
+
+**Create / edit form.** Fields: name, prompt template, enable toggle, and the
+rate-limit-exceeded response choice (return `429` to tell the sender to back off, or
+return `202` and silently drop). The prompt-template editor has a side-panel listing
+the trigger's `payload_fields` whitelist as autocomplete tokens — users insert them
+into the template rather than free-typing JSON paths, which keeps templates within the
+whitelist enforced by the backend.
+
+Create-only: the form collects the **HMAC secret**. On submit, the response shows the
+secret **once** with a copy button and a "save it now, we won't show it again"
+warning. After save, the page shows the public **ingest URL** (the
+`POST /api/v1/ws/{ws}/triggers/{id}/ingest` endpoint) with a copy button — this is
+what the user pastes into the source provider's webhook settings.
+
+**Detail view.** Shows the trigger config (name, filter summary, prompt template
+preview, payload whitelist, run identity, busy policy, rate-limit settings) and the
+four summary counters from the list view. Below the config is an **audit feed** of
+recent `trigger_events` rows: timestamp, sender headers (User-Agent, signature header
+name), signature-verified Y/N, filter pass / fail, status (`accepted` /
+`signature_failed` / `duplicate` / `filtered_out` / `rate_limited` / `dead_lettered`),
+and — when present — a link to the resulting run.
+
+The detail view also hosts the mutating controls: **pause** / **resume** (toggle
+`enabled`), **delete**, and **rotate secret**. Rotate prompts for a new secret, then
+shows it once with a copy button just like create; the previous secret remains valid
+for the 24h overlap window (configurable via the spec's overlap default) so the user
+has time to swap the secret on the source provider side. All mutating controls are
+**owner-or-admin gated**; viewers see them disabled with a tooltip explaining why.
+
+**What v1 does NOT include in the UI.** Per-provider presets (GitHub / Stripe header
+shapes), schedule / IM source kinds (own specs), `managed_agent` target picker (#153),
+and the cross-workspace admin view. The list view shows only `source_kind=webhook`
+because that's the only kind the backend writes in v1.
+
 ### Security / abuse prevention
 
 - **Signature over raw body + constant-time compare + timestamp window** — the core
