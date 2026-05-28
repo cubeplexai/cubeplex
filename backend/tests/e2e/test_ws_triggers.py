@@ -1,0 +1,472 @@
+"""E2E tests for workspace trigger CRUD + events + replay + rotate-secret routes.
+
+TDD: tests written first; they fail with 404/500 until the routes are wired.
+"""
+
+from __future__ import annotations
+
+from datetime import UTC, datetime
+from typing import Any
+
+import httpx
+import pytest
+import pytest_asyncio
+
+from cubebox.models import Role
+from tests.e2e.conftest import _lifespan_context, _make_isolated_user
+
+# ---------------------------------------------------------------------------
+# Fixture helpers
+# ---------------------------------------------------------------------------
+
+
+@pytest_asyncio.fixture
+async def ws_client_a() -> Any:
+    """Fresh admin + fresh workspace A."""
+    app, email, password, ws_id = await _make_isolated_user(Role.ADMIN)
+    app.state.deployment_mode = "multi_tenant"
+    from tests.e2e.conftest import _login_and_attach
+
+    async with _lifespan_context(app):
+        import httpx as _httpx
+
+        transport = _httpx.ASGITransport(app=app)
+        async with _httpx.AsyncClient(transport=transport, base_url="http://test") as c:
+            await _login_and_attach(c, email, password)
+            yield c, ws_id
+
+
+@pytest_asyncio.fixture
+async def ws_client_b() -> Any:
+    """Fresh admin + fresh workspace B (different user, org, workspace)."""
+    app, email, password, ws_id = await _make_isolated_user(Role.ADMIN)
+    app.state.deployment_mode = "multi_tenant"
+    from tests.e2e.conftest import _login_and_attach
+
+    async with _lifespan_context(app):
+        import httpx as _httpx
+
+        transport = _httpx.ASGITransport(app=app)
+        async with _httpx.AsyncClient(transport=transport, base_url="http://test") as c:
+            await _login_and_attach(c, email, password)
+            yield c, ws_id
+
+
+async def _get_my_user_id(client: httpx.AsyncClient) -> str:
+    r = await client.get("/api/v1/auth/me")
+    assert r.status_code == 200
+    return r.json()["id"]
+
+
+async def _create_trigger(
+    client: httpx.AsyncClient,
+    ws_id: str,
+    **overrides: Any,
+) -> dict[str, Any]:
+    """Create a trigger with sensible defaults; returns parsed JSON."""
+    user_id = await _get_my_user_id(client)
+    body: dict[str, Any] = {
+        "name": "test-trigger",
+        "webhook_secret": "s3cret",
+        "prompt_template": "hi {{ event.action }}",
+        "payload_fields": ["event.action"],
+        "run_as_user_id": user_id,
+    }
+    body.update(overrides)
+    r = await client.post(f"/api/v1/ws/{ws_id}/triggers", json=body)
+    return r.json() if r.status_code in (200, 201) else {"_status": r.status_code, "_body": r.text}
+
+
+# ---------------------------------------------------------------------------
+# CRUD round-trip
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_crud_round_trip(authenticated_client: tuple[httpx.AsyncClient, str]) -> None:
+    client, ws_id = authenticated_client
+    user_id = await _get_my_user_id(client)
+
+    # POST → create
+    r_create = await client.post(
+        f"/api/v1/ws/{ws_id}/triggers",
+        json={
+            "name": "crud-trigger",
+            "webhook_secret": "s3cret",
+            "prompt_template": "hello {{ event.action }}",
+            "payload_fields": ["event.action"],
+            "run_as_user_id": user_id,
+        },
+    )
+    assert r_create.status_code == 201, r_create.text
+    data = r_create.json()
+    trig_id = data["id"]
+
+    # Shape checks
+    assert data["name"] == "crud-trigger"
+    assert data["enabled"] is True
+    assert data["source_type"] == "webhook"
+    assert data["target_type"] == "inline"
+    assert data["events_total"] == 0
+    assert data["events_success"] == 0
+    assert data["events_failed"] == 0
+    assert data["events_dedup_dropped"] == 0
+    assert "webhook_secret" not in data  # never echo plaintext
+    assert "current_secret_cred_id" in data
+
+    # GET list — trigger visible
+    r_list = await client.get(f"/api/v1/ws/{ws_id}/triggers")
+    assert r_list.status_code == 200
+    ids = [t["id"] for t in r_list.json()["triggers"]]
+    assert trig_id in ids
+
+    # GET detail
+    r_get = await client.get(f"/api/v1/ws/{ws_id}/triggers/{trig_id}")
+    assert r_get.status_code == 200
+    detail = r_get.json()
+    assert detail["id"] == trig_id
+    assert "webhook_secret" not in detail
+
+    # PATCH — disable
+    r_patch = await client.patch(
+        f"/api/v1/ws/{ws_id}/triggers/{trig_id}",
+        json={"enabled": False},
+    )
+    assert r_patch.status_code == 200
+    assert r_patch.json()["enabled"] is False
+
+    # List still returns it (disabled, not deleted)
+    r_list2 = await client.get(f"/api/v1/ws/{ws_id}/triggers")
+    ids2 = [t["id"] for t in r_list2.json()["triggers"]]
+    assert trig_id in ids2
+
+    # DELETE
+    r_del = await client.delete(f"/api/v1/ws/{ws_id}/triggers/{trig_id}")
+    assert r_del.status_code == 204
+
+    # GET /{id} → 404
+    r_gone = await client.get(f"/api/v1/ws/{ws_id}/triggers/{trig_id}")
+    assert r_gone.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# Workspace isolation
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_workspace_isolation(
+    ws_client_a: tuple[httpx.AsyncClient, str],
+    ws_client_b: tuple[httpx.AsyncClient, str],
+) -> None:
+    client_a, ws_a = ws_client_a
+    client_b, ws_b = ws_client_b
+
+    # Create in WS-A
+    created = await _create_trigger(client_a, ws_a, name="ws-a-trigger")
+    assert "id" in created, f"create failed: {created}"
+
+    # WS-B list → empty
+    r = await client_b.get(f"/api/v1/ws/{ws_b}/triggers")
+    assert r.status_code == 200
+    assert r.json()["triggers"] == []
+
+
+# ---------------------------------------------------------------------------
+# Validation — non-member run_as_user_id
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_non_member_run_as_user_id(
+    authenticated_client: tuple[httpx.AsyncClient, str],
+) -> None:
+    client, ws_id = authenticated_client
+    r = await client.post(
+        f"/api/v1/ws/{ws_id}/triggers",
+        json={
+            "name": "bad-trigger",
+            "webhook_secret": "s3cret",
+            "prompt_template": "hi",
+            "payload_fields": [],
+            "run_as_user_id": "usr-NOTAMEMBER",
+        },
+    )
+    assert r.status_code == 422
+
+
+# ---------------------------------------------------------------------------
+# Validation — conversation_policy literal
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_invalid_conversation_policy(
+    authenticated_client: tuple[httpx.AsyncClient, str],
+) -> None:
+    client, ws_id = authenticated_client
+    user_id = await _get_my_user_id(client)
+    r = await client.post(
+        f"/api/v1/ws/{ws_id}/triggers",
+        json={
+            "name": "bad-policy",
+            "webhook_secret": "s3cret",
+            "prompt_template": "hi",
+            "payload_fields": [],
+            "run_as_user_id": user_id,
+            "conversation_policy": "pinned",
+        },
+    )
+    assert r.status_code == 422
+
+
+# ---------------------------------------------------------------------------
+# Validation — rate_limit_response literal
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_invalid_rate_limit_response(
+    authenticated_client: tuple[httpx.AsyncClient, str],
+) -> None:
+    client, ws_id = authenticated_client
+    user_id = await _get_my_user_id(client)
+    r = await client.post(
+        f"/api/v1/ws/{ws_id}/triggers",
+        json={
+            "name": "bad-rl",
+            "webhook_secret": "s3cret",
+            "prompt_template": "hi",
+            "payload_fields": [],
+            "run_as_user_id": user_id,
+            "rate_limit_response": "999",
+        },
+    )
+    assert r.status_code == 422
+
+
+# ---------------------------------------------------------------------------
+# Rotate secret — happy path
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_rotate_secret_happy_path(
+    authenticated_client: tuple[httpx.AsyncClient, str],
+) -> None:
+    client, ws_id = authenticated_client
+    user_id = await _get_my_user_id(client)
+
+    # Create
+    r_create = await client.post(
+        f"/api/v1/ws/{ws_id}/triggers",
+        json={
+            "name": "rotate-trigger",
+            "webhook_secret": "oldsecret",
+            "prompt_template": "hi",
+            "payload_fields": [],
+            "run_as_user_id": user_id,
+        },
+    )
+    assert r_create.status_code == 201
+    trig_id = r_create.json()["id"]
+    original_cred_id = r_create.json()["current_secret_cred_id"]
+
+    # Rotate
+    overlap = 3600
+    r_rot = await client.post(
+        f"/api/v1/ws/{ws_id}/triggers/{trig_id}/rotate-secret",
+        json={"new_webhook_secret": "newsecret", "overlap_seconds": overlap},
+    )
+    assert r_rot.status_code == 200
+    rot_data = r_rot.json()
+    assert "previous_secret_expires_at" in rot_data
+    assert "current_secret_cred_id" in rot_data
+    assert rot_data["previous_secret_expires_at"] is not None
+
+    # GET detail — previous fields populated
+    r_get = await client.get(f"/api/v1/ws/{ws_id}/triggers/{trig_id}")
+    assert r_get.status_code == 200
+    d = r_get.json()
+    assert d["previous_secret_cred_id"] == original_cred_id
+    assert d["previous_secret_cred_id"] is not None
+    assert d["previous_secret_expires_at"] is not None
+
+    # previous_secret_expires_at ≈ now + overlap_seconds (within 30s tolerance)
+    expires_at = datetime.fromisoformat(d["previous_secret_expires_at"])
+    now = datetime.now(UTC)
+    diff = abs((expires_at - now).total_seconds() - overlap)
+    assert diff < 30, f"expires_at mismatch: diff={diff}s"
+
+
+# ---------------------------------------------------------------------------
+# Rotate secret — overlap_seconds=0
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_rotate_secret_zero_overlap(
+    authenticated_client: tuple[httpx.AsyncClient, str],
+) -> None:
+    client, ws_id = authenticated_client
+    user_id = await _get_my_user_id(client)
+
+    r_create = await client.post(
+        f"/api/v1/ws/{ws_id}/triggers",
+        json={
+            "name": "rotate-zero",
+            "webhook_secret": "oldsecret",
+            "prompt_template": "hi",
+            "payload_fields": [],
+            "run_as_user_id": user_id,
+        },
+    )
+    assert r_create.status_code == 201
+    trig_id = r_create.json()["id"]
+
+    r_rot = await client.post(
+        f"/api/v1/ws/{ws_id}/triggers/{trig_id}/rotate-secret",
+        json={"new_webhook_secret": "newsecret", "overlap_seconds": 0},
+    )
+    assert r_rot.status_code == 200
+
+    r_get = await client.get(f"/api/v1/ws/{ws_id}/triggers/{trig_id}")
+    d = r_get.json()
+    assert d["previous_secret_expires_at"] is not None
+    expires_at = datetime.fromisoformat(d["previous_secret_expires_at"])
+    # Expiry should be ≤ now (already expired, old secret no longer valid)
+    assert expires_at <= datetime.now(UTC)
+
+
+# ---------------------------------------------------------------------------
+# Replay — non-dead-lettered event → 409
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_replay_non_dead_lettered_event(
+    authenticated_client: tuple[httpx.AsyncClient, str],
+) -> None:
+    client, ws_id = authenticated_client
+    user_id = await _get_my_user_id(client)
+
+    # Create trigger
+    r_create = await client.post(
+        f"/api/v1/ws/{ws_id}/triggers",
+        json={
+            "name": "replay-trigger",
+            "webhook_secret": "s3cret",
+            "prompt_template": "hi",
+            "payload_fields": [],
+            "run_as_user_id": user_id,
+        },
+    )
+    assert r_create.status_code == 201
+    trig_id = r_create.json()["id"]
+
+    # Insert a TriggerEvent with status="accepted" directly via DB
+    from cubebox.models import TriggerEvent
+
+    # We need the org_id for the trigger — get from the detail
+    r_detail = await client.get(f"/api/v1/ws/{ws_id}/triggers/{trig_id}")
+    assert r_detail.status_code == 200
+
+    # Use async_session_maker to insert a trigger_event row
+    import cubebox.db as _db
+
+    async with _db.async_session_maker() as session:
+        # Get org_id for this workspace
+        from sqlalchemy import select
+
+        from cubebox.models import Workspace
+
+        ws_row = await session.execute(select(Workspace).where(Workspace.id == ws_id))
+        ws_obj = ws_row.scalar_one()
+        org_id = ws_obj.org_id
+
+        event_row = TriggerEvent(
+            trigger_id=trig_id,
+            org_id=org_id,
+            workspace_id=ws_id,
+            source_type="webhook",
+            dedup_key="test-dedup-key-replay",
+            status="accepted",
+            payload={},
+        )
+        session.add(event_row)
+        await session.commit()
+        await session.refresh(event_row)
+        eid = event_row.id
+
+    # POST replay → 409 because status != dead_lettered
+    r_replay = await client.post(f"/api/v1/ws/{ws_id}/triggers/{trig_id}/events/{eid}/replay")
+    assert r_replay.status_code == 409
+    assert "dead_lettered" in r_replay.json()["detail"]
+
+
+# ---------------------------------------------------------------------------
+# Events list
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_events_list(authenticated_client: tuple[httpx.AsyncClient, str]) -> None:
+    client, ws_id = authenticated_client
+    user_id = await _get_my_user_id(client)
+
+    # Create trigger
+    r_create = await client.post(
+        f"/api/v1/ws/{ws_id}/triggers",
+        json={
+            "name": "events-trigger",
+            "webhook_secret": "s3cret",
+            "prompt_template": "hi",
+            "payload_fields": [],
+            "run_as_user_id": user_id,
+        },
+    )
+    assert r_create.status_code == 201
+    trig_id = r_create.json()["id"]
+
+    # Events list starts empty
+    r_events = await client.get(f"/api/v1/ws/{ws_id}/triggers/{trig_id}/events")
+    assert r_events.status_code == 200
+    assert r_events.json()["events"] == []
+
+    # Insert an event
+    from sqlalchemy import select
+
+    import cubebox.db as _db
+    from cubebox.models import TriggerEvent, Workspace
+
+    async with _db.async_session_maker() as session:
+        ws_row = await session.execute(select(Workspace).where(Workspace.id == ws_id))
+        ws_obj = ws_row.scalar_one()
+        org_id = ws_obj.org_id
+        event_row = TriggerEvent(
+            trigger_id=trig_id,
+            org_id=org_id,
+            workspace_id=ws_id,
+            source_type="webhook",
+            dedup_key="test-dedup-events-list",
+            status="accepted",
+            payload={"hello": "world"},
+        )
+        session.add(event_row)
+        await session.commit()
+        await session.refresh(event_row)
+        eid = event_row.id
+
+    r_events2 = await client.get(f"/api/v1/ws/{ws_id}/triggers/{trig_id}/events")
+    assert r_events2.status_code == 200
+    events = r_events2.json()["events"]
+    assert len(events) == 1
+    assert events[0]["id"] == eid
+    assert events[0]["status"] == "accepted"
+
+    # Filter by status
+    r_filtered = await client.get(
+        f"/api/v1/ws/{ws_id}/triggers/{trig_id}/events?status=dead_lettered"
+    )
+    assert r_filtered.status_code == 200
+    assert r_filtered.json()["events"] == []
