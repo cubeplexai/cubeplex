@@ -1,8 +1,12 @@
-"""Unit test: ws_browser.get_live_view renews + releases the in-use lease.
+"""Unit test: ws_browser.get_live_view renews the in-use lease, and does
+NOT explicitly release it (codex review P2 round 13).
 
 The live-view direct path bypasses LazySandbox, so the route must call
-``manager.renew_lease`` (alongside the existing ``touch``) and
-``manager.release_lease`` in a finally — not just ``touch``.
+``manager.renew_lease`` alongside the existing ``touch``. It must NOT call
+``release_lease`` because an overlapping caller (e.g. the keepalive request)
+may have renewed the lease for a longer window in the meantime, and an
+unconditional null would erase that holder's protection. The lease expires
+naturally after ``lease_seconds``; keepalive renews while the panel is open.
 """
 
 from __future__ import annotations
@@ -82,6 +86,7 @@ class _FakeManager:
         )
 
     async def release_lease(self, sandbox_id: str, *, org_id: str, workspace_id: str) -> None:
+        # Recorded so the test can assert it is NOT called.
         self.calls.append(
             (
                 "release_lease",
@@ -91,7 +96,14 @@ class _FakeManager:
 
 
 @pytest.mark.asyncio
-async def test_get_live_view_renews_and_releases_lease(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_get_live_view_renews_lease_without_releasing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``get_live_view`` must renew the lease so the idle-pause reaper can't
+    snipe the sandbox mid-request, but it must NOT release the lease at the
+    end — an overlapping keepalive may have extended it, and an unconditional
+    release would erase that protection (codex P2 round 13).
+    """
     fake_mgr = _FakeManager()
     monkeypatch.setattr(ws_browser_routes, "get_sandbox_manager", lambda: fake_mgr)
 
@@ -103,16 +115,12 @@ async def test_get_live_view_renews_and_releases_lease(monkeypatch: pytest.Monke
 
     names = [c[0] for c in fake_mgr.calls]
     assert "renew_lease" in names, f"expected renew_lease in calls, got {names}"
-    assert "release_lease" in names, f"expected release_lease in calls, got {names}"
+    # Crucially, NO release_lease — natural expiry is the model now.
+    assert "release_lease" not in names, (
+        f"get_live_view must not call release_lease (codex P2 round 13); got {names}"
+    )
 
-    # renew_lease must target the same sandbox_id as touch.
     renew = next(c for c in fake_mgr.calls if c[0] == "renew_lease")
     assert renew[1]["sandbox_id"] == fake_mgr._sandbox.id
     assert renew[1]["org_id"] == "org-1"
     assert renew[1]["workspace_id"] == "ws-1"
-
-    release = next(c for c in fake_mgr.calls if c[0] == "release_lease")
-    assert release[1]["sandbox_id"] == fake_mgr._sandbox.id
-
-    # release must follow renew (finally runs last).
-    assert names.index("release_lease") > names.index("renew_lease")

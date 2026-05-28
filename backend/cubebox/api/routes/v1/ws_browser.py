@@ -53,14 +53,12 @@ async def get_live_view(
     """Resolve the caller's sandbox, ensure the browser stack is running, and
     return an embeddable live-view URL."""
     manager = get_sandbox_manager()
-    sandbox_id: str | None = None
     try:
         sandbox = await manager.get_or_create(
             ctx.user.id,
             org_id=ctx.org_id,
             workspace_id=ctx.workspace_id,
         )
-        sandbox_id = sandbox.id
         await sandbox.start_browser()
         # Live-view / takeover traffic goes straight to Neko and bypasses the normal
         # per-tool activity updates, so mark the sandbox active here too (the
@@ -68,8 +66,13 @@ async def get_live_view(
         await manager.touch(sandbox.id, org_id=ctx.org_id, workspace_id=ctx.workspace_id)
         # Lease the sandbox for this bounded request so the idle-pause reaper
         # can't snipe it between start_browser and the endpoint resolve. The
-        # finally below releases it; the natural lease window is the safety net
-        # if release itself fails, and keepalive carries the panel session.
+        # lease expires naturally after ``lease_seconds`` — we deliberately
+        # do NOT call ``release_lease`` because an overlapping caller (e.g.
+        # the keepalive request) may have renewed the lease for a longer
+        # window in the meantime, and a blind unconditional null would erase
+        # that holder's protection (codex review P2 round 13). The keepalive
+        # path renews while the panel stays open, so natural expiry is the
+        # right safety net.
         await manager.renew_lease(sandbox.id, org_id=ctx.org_id, workspace_id=ctx.workspace_id)
         endpoint = await sandbox.get_browser_endpoint()
     except SandboxError as exc:
@@ -81,17 +84,6 @@ async def get_live_view(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="sandbox is starting up or temporarily unavailable; please retry shortly",
         ) from exc
-    finally:
-        if sandbox_id is not None:
-            try:
-                await manager.release_lease(
-                    sandbox_id, org_id=ctx.org_id, workspace_id=ctx.workspace_id
-                )
-            except Exception:
-                logger.exception(
-                    "browser live-view: release_lease failed (non-fatal) for {}",
-                    sandbox_id,
-                )
     if endpoint.headers:
         # The endpoint requires request headers a browser cannot attach to an
         # iframe navigation. A same-origin reverse proxy is the planned path; do

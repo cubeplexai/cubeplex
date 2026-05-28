@@ -547,27 +547,23 @@ class SandboxManager:
                 workdir=self._workdir,
             )
         except Exception as exc:
-            logger.warning("Resume failed for {}: {}", record.sandbox_id, exc)
-            # The provider may have actually completed the resume despite the
-            # client-side exception (e.g. ``resume_timeout`` elapsed on our
-            # side while the server kept transitioning to ``Running``, and the
-            # reconciler then committed ``resuming -> running``).
-            # ``mark_failed_from_resuming`` is a single conditional UPDATE
-            # guarded by ``status = 'resuming'`` — if the reconciler beat us
-            # (or some other path moved the row), the claim returns False and
-            # we leave the row alone instead of overwriting a healthy
-            # ``running`` row to ``failed``. The caller (``get_or_create``)
-            # re-fetches and reuses any now-running row.
-            if await repo.mark_failed_from_resuming(record.id):
-                if self._exchange_host:
-                    await EgressRefRepository(session).revoke_for_sandbox(record.sandbox_id)
-            else:
-                logger.info(
-                    "Resume of {} raised on client but row is no longer "
-                    "resuming (reconciler may have completed it); deferring "
-                    "to next get_or_create",
-                    record.sandbox_id,
-                )
+            # Client-side exceptions (resume_timeout, network blip, transient
+            # SDK error) are ambiguous: the provider may still be transitioning
+            # to ``Running``. Terminalizing the row to ``failed`` here would
+            # remove it from ``list_transient_for_reconcile_system`` (which
+            # only matches ``pausing`` / ``resuming``), so the reconciler
+            # could never observe a late ``Running`` and the next
+            # ``get_or_create`` would provision a duplicate while the
+            # original sandbox is still alive. Leave the row at ``resuming``
+            # and let ``reconcile_transients`` settle it from provider state
+            # (it advances on ``Running`` / ``Paused``, marks ``failed`` on
+            # provider ``Failed``, kills on ``Terminated``/``Succeed``).
+            logger.warning(
+                "Resume failed for {}: {}; leaving row at ``resuming`` for "
+                "the reconciler to settle from provider state",
+                record.sandbox_id,
+                exc,
+            )
             return None
         # Race window between this caller's ``connect_or_resume`` returning and
         # ``mark_running`` landing. Two reconciler-driven outcomes can make

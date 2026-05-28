@@ -247,30 +247,37 @@ async def test_double_resume_guard_winner_succeeds_loser_connects(
     assert loser._sandbox is loser_raw
 
 
-async def test_double_resume_guard_winner_fails_loser_returns_none(
+async def test_double_resume_guard_winner_fails_reconciler_settles_loser_bails(
     scope: dict[str, str],
 ) -> None:
-    """Winner's provider resume raises → row is marked ``failed``. The loser's
-    poll observes ``failed`` and returns ``None`` so the caller may create a
-    fresh sandbox; no second ``connect_or_resume`` happens.
+    """Winner's provider resume raises → ``_resume_record`` returns None
+    WITHOUT terminalizing the row (codex P1 round 13: client exceptions are
+    ambiguous, so leave the row at ``resuming`` for the reconciler). The
+    reconciler later observes provider ``Failed`` and marks the row
+    ``failed``. The loser's wait helper observes ``failed`` and returns
+    None; no second ``connect_or_resume`` happens.
     """
     mgr, _poll_session = _make_manager()
     session = MagicMock(spec=AsyncSession)
     record = _paused_record(scope)
     conn_config = ConnectionConfig(domain="example.invalid")
 
-    # Winner's atomic ``mark_failed_from_resuming`` claim wins (DB row still
-    # ``resuming``). Once the row is ``failed``, the loser's wait helper
-    # observes ``failed`` and returns None.
+    # Sequence ``repo.get`` returns: the row sits at ``resuming`` while the
+    # reconciler is still working, then becomes ``failed`` once the reconciler
+    # commits. (In the unit test we don't run the reconciler; we just sequence
+    # the mock to reflect what the loser would observe over time.)
+    resuming_view = _paused_record(scope)
+    resuming_view.status = "resuming"
     failed_view = _paused_record(scope)
     failed_view.status = "failed"
 
     repo = MagicMock(spec=UserSandboxRepository)
     repo.mark_resuming = AsyncMock(side_effect=[True, False])
     repo.mark_failed_from_resuming = AsyncMock(return_value=True)
+    repo.mark_failed = AsyncMock()
     repo.mark_running = AsyncMock(return_value=True)
     repo.update_activity = AsyncMock()
-    repo.get = AsyncMock(return_value=failed_view)
+    repo.get = AsyncMock(side_effect=[resuming_view, failed_view, failed_view])
 
     def _raise(*_: Any, **__: Any) -> Any:
         raise RuntimeError("provider resume blew up")
@@ -307,11 +314,13 @@ async def test_double_resume_guard_winner_fails_loser_returns_none(
 
     assert winner is None
     assert loser is None
-    # Provider was attempted exactly once (winner only); loser never retried.
+    # Provider was attempted exactly once (winner only).
     assert cor.await_count == 1
-    # Loser saw failed via repo.get and bailed without connecting.
+    # Loser observed terminal state via repo.get; no plain connect either.
     assert raw_connect.await_count == 0
-    repo.mark_failed_from_resuming.assert_awaited_once_with(record.id)
+    # Winner did NOT terminalize the row — reconciler owns that transition.
+    repo.mark_failed_from_resuming.assert_not_called()
+    repo.mark_failed.assert_not_called()
 
 
 # ---------------------------------------------------------------------------

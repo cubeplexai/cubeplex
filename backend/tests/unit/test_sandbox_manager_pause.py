@@ -453,10 +453,15 @@ async def test_resume_record_returns_none_when_row_terminal() -> None:
 
 
 @pytest.mark.asyncio
-async def test_resume_record_failure_atomic_marks_failed_when_still_resuming() -> None:
-    """``connect_or_resume`` raises. The atomic
-    ``mark_failed_from_resuming`` UPDATE wins (DB row still ``resuming``),
-    so the row is moved to ``failed`` and the caller returns None.
+async def test_resume_record_exception_leaves_row_resuming_for_reconciler() -> None:
+    """``connect_or_resume`` raises. Client-side exceptions are ambiguous
+    (the provider may still be transitioning to ``Running`` after a
+    client timeout), so ``_resume_record`` must NOT terminalize the row
+    to ``failed`` here — that would remove it from
+    ``list_transient_for_reconcile_system`` and the reconciler could
+    never observe a late ``Running``. Leave the row at ``resuming`` and
+    return None; the reconciler settles state from the provider.
+    (codex P1 round 13)
     """
     factory, session = _make_session_factory()
     mgr = SandboxManager(factory)
@@ -469,6 +474,7 @@ async def test_resume_record_failure_atomic_marks_failed_when_still_resuming() -
     repo.mark_resuming = AsyncMock(return_value=True)
     repo.mark_running = AsyncMock(return_value=True)
     repo.mark_failed_from_resuming = AsyncMock(return_value=True)
+    repo.mark_failed = AsyncMock()
     repo.update_activity = AsyncMock()
 
     with patch(
@@ -487,44 +493,12 @@ async def test_resume_record_failure_atomic_marks_failed_when_still_resuming() -
 
     assert result is None
     repo.mark_resuming.assert_awaited_once_with(record.id)
-    repo.mark_failed_from_resuming.assert_awaited_once_with(record.id)
+    # Crucially: no terminal write happens here. The reconciler will
+    # settle state from the provider.
+    repo.mark_failed_from_resuming.assert_not_called()
+    repo.mark_failed.assert_not_called()
     repo.mark_running.assert_not_called()
-
-
-@pytest.mark.asyncio
-async def test_resume_record_exception_does_not_overwrite_reconciler_running() -> None:
-    """``connect_or_resume`` raises (client timeout / network blip) BUT the
-    reconciler has already moved the row to ``running``. The atomic
-    ``mark_failed_from_resuming`` claim returns False (prior-state guard
-    rejects ``running``), so we do NOT overwrite the healthy row.
-    """
-    factory, session = _make_session_factory()
-    mgr = SandboxManager(factory)
-    mgr._exchange_host = ""
-
-    record = _make_record()
-    record.status = "paused"
-
-    repo = MagicMock()
-    repo.mark_resuming = AsyncMock(return_value=True)
-    repo.mark_failed_from_resuming = AsyncMock(return_value=False)
-
-    with patch(
-        "cubebox.sandbox.manager.OpenSandbox.connect_or_resume",
-        new=AsyncMock(side_effect=RuntimeError("client timeout")),
-    ):
-        result = await mgr._resume_record(
-            session,
-            repo,
-            record,
-            conn_config=MagicMock(),
-            org_id="org-1",
-            workspace_id="ws-1",
-            user_id="user-1",
-        )
-
-    assert result is None  # caller (get_or_create) re-checks and reuses.
-    repo.mark_failed_from_resuming.assert_awaited_once_with(record.id)
+    repo.update_activity.assert_not_called()
 
 
 # -------------------------------------------------------------------------
