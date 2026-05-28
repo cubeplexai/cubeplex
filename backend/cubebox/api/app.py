@@ -174,6 +174,24 @@ async def lifespan(_app: FastAPI):  # type: ignore
         )
         _app.state.run_manager = run_manager
         await run_manager.start_control_listeners()
+        from cubebox.config import config as _sched_cfg
+        from cubebox.schedules.poller import ScheduledTaskPoller
+
+        poller = ScheduledTaskPoller(
+            run_manager=run_manager,
+            poll_interval_seconds=float(
+                _sched_cfg.get("scheduled_tasks.poll_interval_seconds", 15.0)
+            ),
+            misfire_grace_seconds=int(_sched_cfg.get("scheduled_tasks.misfire_grace_seconds", 300)),
+            claim_timeout_seconds=int(_sched_cfg.get("scheduled_tasks.claim_timeout_seconds", 120)),
+            max_claims=int(_sched_cfg.get("scheduled_tasks.max_claims", 3)),
+            busy_retry_delay_seconds=int(
+                _sched_cfg.get("scheduled_tasks.busy_retry_delay_seconds", 300)
+            ),
+            max_busy_retries=int(_sched_cfg.get("scheduled_tasks.max_busy_retries", 3)),
+        )
+        poller.start()
+        _app.state.scheduled_task_poller = poller
         logger.info(
             "Redis streaming runtime initialized (prefix={})",
             _app.state.redis_key_prefix,
@@ -343,7 +361,13 @@ async def lifespan(_app: FastAPI):  # type: ignore
             pass
     if run_manager is not None:
         from cubebox.config import config as _lifecycle_config
+        from cubebox.schedules.poller import ScheduledTaskPoller as _ScheduledTaskPoller
 
+        _shutdown_poller: _ScheduledTaskPoller | None = getattr(
+            _app.state, "scheduled_task_poller", None
+        )
+        if _shutdown_poller is not None:
+            await _shutdown_poller.stop()
         _app.state.drain_state.enter_draining()
         drain_timeout = _lifecycle_config.get("lifecycle.graceful_drain_timeout_seconds", 3600)
         await run_manager.drain(timeout_seconds=float(drain_timeout))
