@@ -1,7 +1,9 @@
+import asyncio
 import io
 import json as json_lib
 import os
 import secrets
+import socket
 from collections.abc import AsyncIterator, Iterator
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -10,7 +12,9 @@ from typing import Any
 import httpx
 import pytest
 import pytest_asyncio
-from fastapi import FastAPI
+import uvicorn
+from fastapi import FastAPI, HTTPException
+from fastapi.responses import PlainTextResponse
 from fastapi.testclient import TestClient
 from fastapi_users.db import SQLAlchemyUserDatabase
 from fastapi_users.schemas import BaseUserCreate
@@ -1359,3 +1363,73 @@ async def seeded_session_org_ws() -> AsyncIterator[tuple[AsyncSession, str, str,
             yield session, org_id, org_slug, ws_id
     finally:
         await test_engine.dispose()
+
+
+_FAKE_SKILL_MD = (
+    "---\nname: slide-deck\ndescription: Build slide decks\nversion: 1.0.0\n---\n# Slide deck\n"
+)
+
+
+@pytest_asyncio.fixture
+async def fake_registry_url() -> AsyncIterator[str]:
+    """Stand up a real local HTTP registry server and yield its base URL.
+
+    The server implements the three endpoints that RemoteRegistrySource calls:
+    GET /search, GET /tree/{ref:path}, GET /raw/{full:path}. Using a real
+    uvicorn server (not a MockTransport) exercises the full production httpx
+    code path inside RemoteRegistrySource.
+    """
+    registry_app = FastAPI()
+
+    @registry_app.get("/search")
+    async def _search(q: str = "", limit: int = 5) -> dict[str, object]:
+        return {
+            "skills": [
+                {
+                    "name": "slide-deck",
+                    "description": "Build slide decks",
+                    "keywords": ["slides", "deck"],
+                    "ref": "acme/skills/tree/main/skills/slide-deck",
+                    "stars": 1200,
+                    "installs": 50,
+                }
+            ]
+        }
+
+    @registry_app.get("/tree/{ref:path}")
+    async def _tree(ref: str) -> dict[str, object]:
+        return {"files": ["SKILL.md", "references/style.md"]}
+
+    @registry_app.get("/raw/{full:path}")
+    async def _raw(full: str) -> PlainTextResponse:
+        if full.endswith("/SKILL.md") or full == "SKILL.md":
+            return PlainTextResponse(_FAKE_SKILL_MD)
+        if full.endswith("style.md"):
+            return PlainTextResponse("# style guide\n")
+        raise HTTPException(status_code=404, detail="not found")
+
+    # Grab an ephemeral port before starting the server so we know the URL.
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    sock.bind(("127.0.0.1", 0))
+    port = sock.getsockname()[1]
+    sock.close()
+
+    cfg = uvicorn.Config(
+        registry_app, host="127.0.0.1", port=port, log_level="warning", lifespan="off"
+    )
+    server = uvicorn.Server(cfg)
+    task = asyncio.create_task(server.serve())
+
+    # Wait until uvicorn signals it has bound and is ready.
+    deadline = 5.0
+    elapsed = 0.0
+    while not server.started and elapsed < deadline:
+        await asyncio.sleep(0.02)
+        elapsed += 0.02
+
+    try:
+        yield f"http://127.0.0.1:{port}"
+    finally:
+        server.should_exit = True
+        await task
