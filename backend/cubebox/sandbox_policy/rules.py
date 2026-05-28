@@ -23,18 +23,65 @@ CommandAction = Literal["deny", "confirm", "allow"]
 _ACTION_RANK: dict[str, int] = {"deny": 0, "confirm": 1, "allow": 2}
 
 # Operators that chain or compose separate commands. Split on these to inspect
-# each constituent command independently.
-_CHAIN_SPLIT = re.compile(r"&&|\|\||[;\n|&]")
+# each constituent command independently. Includes shell grouping characters
+# `(`, `)`, `{`, `}`, `[`, `]` so commands hidden inside `(rm -rf /)` or
+# `{ rm -rf /; }` get extracted as their own fragments rather than treated as
+# opaque single-token strings the rule globs can never match.
+_CHAIN_SPLIT = re.compile(r"&&|\|\||[;\n|&(){}\[\]]")
 # $(...) and `...` command substitutions.
 _SUBST = re.compile(r"\$\(([^()]*)\)|`([^`]*)`")
+# Shell control / loop / function-definition keywords. After splitting, a
+# fragment like ``then rm -rf /`` should be reduced to ``rm -rf /`` before
+# matching against the rule glob so `if … ; then rm … ; fi`,
+# `for x in …; do rm …; done`, etc. can't smuggle a denied command past an
+# allow rule.
+_LEADING_CONTROL_KEYWORDS = (
+    "if",
+    "then",
+    "else",
+    "elif",
+    "fi",
+    "for",
+    "do",
+    "done",
+    "while",
+    "until",
+    "case",
+    "esac",
+    "select",
+    "function",
+    "in",
+    "time",
+    "exec",
+    "command",
+    "eval",
+)
+_LEADING_CONTROL = re.compile(r"^(?:" + "|".join(_LEADING_CONTROL_KEYWORDS) + r")\b\s*")
+
+
+def _strip_leading_control(fragment: str) -> str:
+    """Iteratively peel shell control keywords off the front of a fragment.
+
+    ``then rm -rf /`` → ``rm -rf /``;
+    ``exec time rm -rf /`` → ``rm -rf /``.
+    """
+    prev = ""
+    cur = fragment
+    while cur and cur != prev:
+        prev = cur
+        cur = _LEADING_CONTROL.sub("", cur).lstrip()
+    return cur
 
 
 def split_shell_command(command: str) -> list[str]:
     """Split a command line into the constituent commands a shell would run.
 
-    Handles &&, ||, ;, |, & and newline chaining, plus $(...) / backtick
-    substitutions. Returns trimmed non-empty fragments. Best-effort: the goal
-    is "no denied command hides inside a chain", not a full shell parser.
+    Handles &&, ||, ;, |, & and newline chaining, $(...) / backtick
+    substitutions, shell grouping (``()`` / ``{}`` / ``[]``), and peels
+    leading control keywords (``if``/``then``/``do``/``exec`` …) from each
+    fragment. Returns trimmed non-empty fragments. Best-effort: the goal is
+    "no denied command hides inside a chain or compound command", not a
+    full shell parser.
     """
     pieces: list[str] = []
     remaining = command
@@ -43,14 +90,14 @@ def split_shell_command(command: str) -> list[str]:
         def repl(m: re.Match[str]) -> str:
             inner = m.group(1) if m.group(1) is not None else m.group(2)
             if inner and inner.strip():
-                pieces.append(inner.strip())
+                pieces.append(_strip_leading_control(inner.strip()))
             return " "
 
         return _SUBST.sub(repl, text)
 
     remaining = _pull_substitutions(remaining)
     for frag in _CHAIN_SPLIT.split(remaining):
-        frag = frag.strip()
+        frag = _strip_leading_control(frag.strip())
         if frag:
             pieces.append(frag)
     return pieces
