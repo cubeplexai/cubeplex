@@ -295,13 +295,11 @@ async def test_resume_record_marks_running_and_stamps_last_resumed_at() -> None:
 
 
 @pytest.mark.asyncio
-async def test_resume_record_recovers_when_reconciler_reverts_mid_resume() -> None:
-    """Race: the reconciler observes provider ``Paused`` while
-    ``connect_or_resume`` is in flight and reverts the row ``resuming -> paused``.
-    The first ``mark_running`` then returns False (prior-state guard rejects
-    ``paused``). Provider IS running, so ``_resume_record`` re-claims
-    ``paused -> resuming`` and tries ``mark_running`` again — landing the row
-    in ``running`` rather than leaving it as ``paused`` (codex P1 round 5).
+async def test_resume_record_recovers_when_reconciler_reverts_to_paused() -> None:
+    """Race (a): the reconciler observes provider ``Paused`` mid-resume and
+    reverts the row ``resuming -> paused``. The first ``mark_running`` returns
+    False; the re-fetch probe sees status ``paused``; ``_resume_record``
+    re-claims ``paused -> resuming`` and the second ``mark_running`` wins.
     """
     factory, session = _make_session_factory()
     mgr = SandboxManager(factory)
@@ -311,20 +309,26 @@ async def test_resume_record_recovers_when_reconciler_reverts_mid_resume() -> No
     record.status = "paused"
 
     repo = MagicMock()
-    # First mark_resuming (paused -> resuming) succeeds at entry.
-    # Second mark_resuming is the recovery call after the reconciler reverted.
     repo.mark_resuming = AsyncMock(side_effect=[True, True])
-    # First mark_running fails (row is back at ``paused`` due to revert);
-    # the recovery path bounces resuming again, then second mark_running wins.
     repo.mark_running = AsyncMock(side_effect=[False, True])
     repo.mark_failed = AsyncMock()
     repo.update_activity = AsyncMock()
 
+    # Probe session re-fetches the row on a fresh session and observes the
+    # reconciler-reverted ``paused`` status.
+    paused_view = _make_record()
+    paused_view.status = "paused"
+    probe_repo = MagicMock()
+    probe_repo.get = AsyncMock(return_value=paused_view)
+
     backend = MagicMock(name="OpenSandbox-backend")
 
-    with patch(
-        "cubebox.sandbox.manager.OpenSandbox.connect_or_resume",
-        new=AsyncMock(return_value=backend),
+    with (
+        patch(
+            "cubebox.sandbox.manager.OpenSandbox.connect_or_resume",
+            new=AsyncMock(return_value=backend),
+        ),
+        patch("cubebox.sandbox.manager.UserSandboxRepository", return_value=probe_repo),
     ):
         result = await mgr._resume_record(
             session,
@@ -336,7 +340,7 @@ async def test_resume_record_recovers_when_reconciler_reverts_mid_resume() -> No
             user_id="user-1",
         )
 
-    assert result is backend  # Provider is running, caller gets the backend.
+    assert result is backend
     assert repo.mark_resuming.await_count == 2  # Entry + recovery.
     assert repo.mark_running.await_count == 2  # First fails, second wins.
     repo.update_activity.assert_awaited_once_with(record.id)
@@ -344,11 +348,13 @@ async def test_resume_record_recovers_when_reconciler_reverts_mid_resume() -> No
 
 
 @pytest.mark.asyncio
-async def test_resume_record_returns_none_when_recovery_also_fails() -> None:
-    """If even the recovery bounce can't land ``running`` (row went to
-    failed/terminated under us), ``_resume_record`` returns None so
-    ``get_or_create`` falls through to create-new — never returns a backend
-    whose DB row disagrees with the provider.
+async def test_resume_record_accepts_reconciler_won_running() -> None:
+    """Race (b): the reconciler observes provider ``Running`` and commits
+    ``resuming -> running`` itself before this caller's ``mark_running`` lands.
+    The first ``mark_running`` returns False (status is already ``running``,
+    not in the prior-state set); the re-fetch probe sees ``running``;
+    ``_resume_record`` accepts it instead of bouncing through ``paused`` (which
+    would fail because the row is ``running``, not ``paused``).
     """
     factory, session = _make_session_factory()
     mgr = SandboxManager(factory)
@@ -358,16 +364,75 @@ async def test_resume_record_returns_none_when_recovery_also_fails() -> None:
     record.status = "paused"
 
     repo = MagicMock()
-    repo.mark_resuming = AsyncMock(side_effect=[True, False])
-    repo.mark_running = AsyncMock(side_effect=[False, False])
-    repo.update_activity = AsyncMock()
+    repo.mark_resuming = AsyncMock(return_value=True)  # Only called at entry.
+    repo.mark_running = AsyncMock(return_value=False)  # Reconciler already won.
     repo.mark_failed = AsyncMock()
+    repo.update_activity = AsyncMock()
+
+    running_view = _make_record()
+    running_view.status = "running"
+    probe_repo = MagicMock()
+    probe_repo.get = AsyncMock(return_value=running_view)
 
     backend = MagicMock(name="OpenSandbox-backend")
 
-    with patch(
-        "cubebox.sandbox.manager.OpenSandbox.connect_or_resume",
-        new=AsyncMock(return_value=backend),
+    with (
+        patch(
+            "cubebox.sandbox.manager.OpenSandbox.connect_or_resume",
+            new=AsyncMock(return_value=backend),
+        ),
+        patch("cubebox.sandbox.manager.UserSandboxRepository", return_value=probe_repo),
+    ):
+        result = await mgr._resume_record(
+            session,
+            repo,
+            record,
+            conn_config=MagicMock(),
+            org_id="org-1",
+            workspace_id="ws-1",
+            user_id="user-1",
+        )
+
+    assert result is backend
+    repo.mark_resuming.assert_awaited_once_with(record.id)  # NO recovery bounce.
+    repo.mark_running.assert_awaited_once()
+    repo.update_activity.assert_awaited_once_with(record.id)
+    repo.mark_failed.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_resume_record_returns_none_when_row_terminal() -> None:
+    """If the probe sees the row already in a terminal state (failed /
+    terminated / row deleted), ``_resume_record`` returns None so
+    ``get_or_create`` falls through to create-new instead of returning a
+    backend whose DB row disagrees with the provider.
+    """
+    factory, session = _make_session_factory()
+    mgr = SandboxManager(factory)
+    mgr._exchange_host = ""
+
+    record = _make_record()
+    record.status = "paused"
+
+    repo = MagicMock()
+    repo.mark_resuming = AsyncMock(return_value=True)
+    repo.mark_running = AsyncMock(return_value=False)
+    repo.update_activity = AsyncMock()
+    repo.mark_failed = AsyncMock()
+
+    failed_view = _make_record()
+    failed_view.status = "failed"
+    probe_repo = MagicMock()
+    probe_repo.get = AsyncMock(return_value=failed_view)
+
+    backend = MagicMock(name="OpenSandbox-backend")
+
+    with (
+        patch(
+            "cubebox.sandbox.manager.OpenSandbox.connect_or_resume",
+            new=AsyncMock(return_value=backend),
+        ),
+        patch("cubebox.sandbox.manager.UserSandboxRepository", return_value=probe_repo),
     ):
         result = await mgr._resume_record(
             session,

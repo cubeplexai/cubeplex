@@ -541,28 +541,51 @@ class SandboxManager:
             if self._exchange_host:
                 await EgressRefRepository(session).revoke_for_sandbox(record.sandbox_id)
             return None
-        # Race: the reconciler may have observed provider ``Paused`` while
-        # ``connect_or_resume`` was in flight and reverted the row
-        # ``resuming -> paused``. ``mark_running`` then returns False because
-        # the prior-state guard rejects ``paused``. We have provider proof the
-        # sandbox is actually running, so bounce through the legitimate
-        # ``paused -> resuming -> running`` transitions once to land the row
-        # in ``running`` (where the next request can find it).
+        # Race window between this caller's ``connect_or_resume`` returning and
+        # ``mark_running`` landing. Two reconciler-driven outcomes can make
+        # the first ``mark_running`` return False:
+        #   (a) Reconciler observed provider ``Paused`` mid-resume and reverted
+        #       the row ``resuming -> paused`` — recover via the bounce
+        #       ``paused -> resuming -> running``.
+        #   (b) Reconciler observed provider ``Running`` and committed
+        #       ``resuming -> running`` itself — the row is already where we
+        #       want it; accept and continue.
+        # Re-fetch on a fresh session so the identity-map cache (caller's
+        # session is ``expire_on_commit=False``) can't hide the reconciler's
+        # commit. Provider is the source of truth; if it returned a healthy
+        # backend, the DB must end up at ``running``.
         if not await repo.mark_running(record.id, last_resumed_at=datetime.now(UTC)):
-            # Re-claim ``paused -> resuming`` (no-op if the row is already
-            # transient or terminal — then the second mark_running below will
-            # also be a no-op and we surface the inconsistency).
-            await repo.mark_resuming(record.id)
-            if not await repo.mark_running(record.id, last_resumed_at=datetime.now(UTC)):
-                # Row ended up failed/terminated under us — surface as resume
-                # failure so the caller (get_or_create) falls through to
-                # create-new instead of returning a backend whose DB row
-                # disagrees with the provider.
+            async with self._session_factory() as probe_session:
+                probe_repo = UserSandboxRepository(
+                    probe_session, org_id=org_id, workspace_id=workspace_id
+                )
+                current = await probe_repo.get(record.id)
+            current_status = current.status if current else None
+            if current_status == "running":
+                # (b) Reconciler already landed the row at ``running``.
+                pass
+            elif current_status == "paused":
+                # (a) Reconciler reverted mid-resume. Re-claim and try again.
+                await repo.mark_resuming(record.id)
+                if not await repo.mark_running(record.id, last_resumed_at=datetime.now(UTC)):
+                    logger.warning(
+                        "Resume of {} succeeded at provider but row could not "
+                        "be marked running after recovery bounce (status={}); "
+                        "treating as failure",
+                        record.sandbox_id,
+                        current_status,
+                    )
+                    return None
+            else:
+                # failed / terminated / row deleted — provider says running
+                # but DB has gone terminal under us. Surface as failure so
+                # ``get_or_create`` creates a fresh sandbox rather than
+                # returning a handle whose DB row disagrees.
                 logger.warning(
-                    "Resume of {} succeeded at provider but row could not be "
-                    "marked running (likely raced with reconciler -> terminal); "
-                    "treating as failure",
+                    "Resume of {} succeeded at provider but row is in "
+                    "terminal state {}; treating as failure",
                     record.sandbox_id,
+                    current_status,
                 )
                 return None
         await repo.update_activity(record.id)
@@ -627,13 +650,38 @@ class SandboxManager:
         workspace_id: str,
         user_id: str,
     ) -> "OpenSandbox | None":
-        """Race loser: wait for the winner's row to reach ``running`` and
-        connect to that same sandbox. Returns None when the winner ended in
-        ``failed``/``terminated`` so the caller can create a fresh one.
+        """Race loser: wait for the winner's row to reach a stable state and
+        attach to it.
+
+        - ``running``  -> connect to the same sandbox (winner completed).
+        - ``paused``   -> winner's resume was reverted mid-flight by the
+                          reconciler. Take over: re-claim ``paused -> resuming``
+                          via ``_resume_record`` and complete the resume
+                          ourselves instead of falling through to create-new.
+                          ``mark_resuming`` is conditional, so if some other
+                          caller has already started resuming, that one loses
+                          and we cycle here on the next poll.
+        - failed / terminated / row deleted / timeout -> return None so the
+          caller can create a fresh sandbox.
         """
         row = await self._await_stable_status(record_id, org_id=org_id, workspace_id=workspace_id)
-        if row is None or row.status != "running":
+        if row is None or row.status in ("failed", "terminated"):
             return None
+        if row.status == "paused":
+            # Winner's resume aborted; the row is back where we started. Try
+            # to drive it ``paused -> resuming -> running`` ourselves.
+            async with self._session_factory() as session:
+                repo = UserSandboxRepository(session, org_id=org_id, workspace_id=workspace_id)
+                return await self._resume_record(
+                    session,
+                    repo,
+                    row,
+                    conn_config,
+                    org_id=org_id,
+                    workspace_id=workspace_id,
+                    user_id=user_id,
+                )
+        # row.status == "running"
         sandbox_id = row.sandbox_id
         raw = await opensandbox.Sandbox.connect(sandbox_id, connection_config=conn_config)
         backend = OpenSandbox(sandbox=raw, workdir=self._workdir)

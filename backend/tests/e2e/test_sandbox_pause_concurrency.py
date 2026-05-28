@@ -340,3 +340,55 @@ async def test_await_stable_status_raises_on_timeout(scope: dict[str, str]) -> N
                 org_id=scope["org_id"],
                 workspace_id=scope["workspace_id"],
             )
+
+
+# ---------------------------------------------------------------------------
+# Test 4 — Resume loser observing ``paused`` (winner's row reverted) takes
+# over the resume instead of falling through to create-new (codex P1 round 7).
+# ---------------------------------------------------------------------------
+
+
+async def test_await_resumed_by_winner_takes_over_on_paused_revert(
+    scope: dict[str, str],
+) -> None:
+    """When the winner's resume is reverted ``resuming -> paused`` by the
+    reconciler (mid-flight), the loser sees ``paused`` on its next poll. The
+    loser must NOT bail and create a duplicate — it must take over by calling
+    ``_resume_record`` itself, which atomically re-claims ``paused -> resuming``
+    and completes the resume.
+    """
+    mgr, _poll_session = _make_manager()
+
+    paused_view = _paused_record(scope)
+    paused_view.status = "paused"
+
+    # Provide a repo for both the wait helper's fresh-session poll AND the
+    # take-over ``_resume_record`` call.
+    repo = MagicMock(spec=UserSandboxRepository)
+    repo.get = AsyncMock(return_value=paused_view)
+    repo.mark_resuming = AsyncMock(return_value=True)
+    repo.mark_running = AsyncMock(return_value=True)
+    repo.update_activity = AsyncMock()
+    repo.mark_failed = AsyncMock()
+
+    backend = MagicMock(name="takeover_backend")
+
+    with (
+        patch(
+            "cubebox.sandbox.manager.OpenSandbox.connect_or_resume",
+            new=AsyncMock(return_value=backend),
+        ) as cor,
+        patch("cubebox.sandbox.manager.UserSandboxRepository", return_value=repo),
+    ):
+        result = await mgr._await_resumed_by_winner(
+            paused_view.id,
+            ConnectionConfig(domain="example.invalid"),
+            org_id=scope["org_id"],
+            workspace_id=scope["workspace_id"],
+            user_id=scope["user_id"],
+        )
+
+    # Loser took over and got back a live backend — no fallthrough to create.
+    assert result is backend
+    cor.assert_awaited_once()
+    repo.mark_resuming.assert_awaited()
