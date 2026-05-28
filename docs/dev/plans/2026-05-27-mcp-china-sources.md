@@ -8,31 +8,58 @@
 
 ## Goal
 
-Add the China-vendor MCP connector(s) that fit the **current**
-`MCPConnectorTemplateSeedEntry` schema unchanged to the seeded catalog
-(`backend/cubebox/mcp/template_seed.py`), so a workspace/org admin sees them in
-the one-click install list. Honor the spec's v1 scope decision:
+Land the catalog groundwork for China-vendor MCP sources **without** adding any
+seed entry yet, because a local codex review of this plan found that the one
+candidate we believed was a clean fit (Feishu / Lark) is in fact blocked by a
+runtime auth gap. Concretely:
 
-- **v1 (this plan):** **Feishu / Lark** only — official, supports a documented
-  remote mode, and authenticates with an `Authorization: Bearer <token>`
-  header, which maps cleanly onto the existing `static` auth path with the
-  shared `_TOKEN_FIELD` + `_BEARER_TEMPLATE`. No schema change, no migration.
-- **Deferred (NOT in this plan):** every other curated source. They are blocked
-  on a schema/runtime gap the spec calls out (§6.2, §8):
-  - **Amap, Baidu Maps, Tencent Location** — API key lives in a URL query
-    param (`?key=` / `?ak=`), which `static_auth_header_template` cannot
-    express. Needs a new `static_auth_query_param` field + install-time URL
-    injection. Blocked.
-  - **Alipay** — stdio-only launch + asymmetric (App ID + RSA key-pair) auth.
-    Needs a managed launcher and a key-pair credential kind. Blocked.
-  - **DingTalk, WeCom, MiniMax (official), Tushare** — stdio-only packages;
-    cubebox installs remote URLs only. Blocked until a managed launcher or a
-    vendor-published remote endpoint exists.
-  - **Bailian, ModelScope** — hosting marketplaces, not single connectors;
-    each hosted service would be its own future row.
+- The runtime resolves **static** auth by hardcoding
+  `headers["Authorization"] = f"Bearer {plaintext}"`
+  (`backend/cubebox/mcp/cubepi_runtime.py:244-250`). It **never reads**
+  `static_auth_header_template`, so neither a custom header *name* nor a custom
+  template is honored at install/runtime today.
+- Feishu remote mode authenticates with **`X-Lark-MCP-UAT`** (user access
+  token) and **`X-Lark-MCP-TAT`** (tenant access token) headers against
+  `https://mcp.feishu.cn/mcp`, **not** `Authorization: Bearer`. So Feishu is
+  **not** a schema-unchanged fit: it needs (a) a configurable static auth header
+  *name* and (b) the runtime to actually apply that template.
 
-This plan is therefore deliberately small: it lands the one clean fit, asserts
-it loads/validates and surfaces in the catalog, and refreshes the one stale doc.
+**v1 (this plan): ship NO new connector source.** Adding the Feishu row now
+would surface it in the catalog while every install silently sends the wrong
+header (`Authorization: Bearer`) and fails against Feishu — false confidence.
+Instead this plan:
+
+1. Records the runtime gap and the corrected Feishu facts (URL + header names)
+   so the next editor has accurate ground truth.
+2. Refreshes the stale catalog runbook and the stale `template_seed.py` module
+   docstring so the docs match the live system.
+3. Defers Feishu and every other curated source until the auth plumbing exists
+   (see the table below + §"Deferred").
+
+The optional Task 2 sketches the *minimal* auth-plumbing change (configurable
+static header name/template + runtime application) for whoever picks up Feishu
+next; it is scoped but **not** required to be implemented in this PR.
+
+**Deferred (NOT landed in this plan):**
+
+- **Feishu / Lark** — needs a configurable static auth-header name/template
+  (`X-Lark-MCP-UAT` / `X-Lark-MCP-TAT`) **and** runtime application of that
+  template (the runtime currently ignores it). Correct endpoint:
+  `https://mcp.feishu.cn/mcp`.
+- **Amap, Baidu Maps, Tencent Location** — API key lives in a URL query
+  param (`?key=` / `?ak=`), which `static_auth_header_template` cannot
+  express. Needs a new `static_auth_query_param` field + install-time URL
+  injection. Blocked.
+- **Alipay** — stdio-only launch + asymmetric (App ID + RSA key-pair) auth.
+  Needs a managed launcher and a key-pair credential kind. Blocked.
+- **DingTalk, WeCom, MiniMax (official), Tushare** — stdio-only packages;
+  cubebox installs remote URLs only. Blocked until a managed launcher or a
+  vendor-published remote endpoint exists.
+- **Bailian, ModelScope** — hosting marketplaces, not single connectors;
+  each hosted service would be its own future row.
+
+This plan is therefore deliberately small: it fixes doc drift, records the
+runtime auth gap blocking Feishu, and leaves the catalog list unchanged.
 
 ## Architecture
 
@@ -44,13 +71,26 @@ The connector catalog is a frozen Python list (`CATALOG`) of
 a system-level `Credential`, and deprecating DB rows whose slug left the list.
 The seeder runs idempotently (lock-guarded) on FastAPI startup
 (`backend/cubebox/api/app.py`) and via `python -m cubebox.cli seed-mcp-templates`.
+(The `template_seed.py` module docstring still claims it is *not* wired into
+startup — that is stale and Task 1 fixes it.)
 
 The admin route `GET /api/v1/admin/mcp/templates` reads the catalog through
 `MCPConnectorTemplateService.list_active()`
 (`backend/cubebox/services/mcp_templates.py`) and returns the active rows.
 
-Adding a connector = appending one `MCPConnectorTemplateSeedEntry` to `CATALOG`.
-No new tables, columns, routes, services, or migrations for v1.
+**The runtime auth gap.** At connect time, `_resolve_headers_from_spec()`
+(`backend/cubebox/mcp/cubepi_runtime.py:244-250`) resolves a `static` credential
+by hardcoding `headers["Authorization"] = f"Bearer {plaintext}"`. It does
+**not** read the template's `static_auth_header_template`. So the seed entries
+that carry a non-Bearer template today (e.g. the `Basic {b64(...)}` entry) are
+*not* actually honored at runtime either — the field is stored but unused. Any
+connector needing a custom header *name* (Feishu's `X-Lark-MCP-UAT` /
+`X-Lark-MCP-TAT`) cannot work until this is fixed.
+
+Adding a connector that fits the current behavior = appending one
+`MCPConnectorTemplateSeedEntry` to `CATALOG` whose static auth is a plain
+`Authorization: Bearer <token>` header. Anything else (custom header name,
+URL-query-param key) needs runtime work first. This plan adds **no** new entry.
 
 ## Tech Stack
 
@@ -61,305 +101,111 @@ No new tables, columns, routes, services, or migrations for v1.
 
 ---
 
-## Task 1 — Add the Feishu seed entry to `CATALOG`
+## Task 1 — Fix the stale `template_seed.py` module docstring
 
-The single v1 connector. Feishu's remote mode is reached over an SSE endpoint
-and authenticates with a Bearer App Access Token — a clean `static` fit.
-
-**Files**
-
-- Modify: `backend/cubebox/mcp/template_seed.py`
-- Test (new): `backend/tests/unit/test_catalog_seed_china.py`
-
-**Steps**
-
-1. **Write the failing test.** Create
-   `backend/tests/unit/test_catalog_seed_china.py`. Reuse the in-memory
-   `session` / `backend` fixture pattern from
-   `backend/tests/unit/test_catalog_seed.py` (copy the two fixtures and the
-   `_make_get_env` helper verbatim — they are small and self-contained). Add a
-   pure-data test that asserts the Feishu entry exists and is shaped as a
-   header-Bearer `static` connector:
-
-   ```python
-   """Tests for the China-vendor additions to the MCP connector catalog."""
-
-   from collections.abc import AsyncIterator, Callable
-
-   import pytest
-   from cryptography.fernet import Fernet
-   from sqlalchemy.ext.asyncio import (
-       AsyncSession,
-       async_sessionmaker,
-       create_async_engine,
-   )
-   from sqlmodel import SQLModel
-
-   from cubebox.credentials.encryption import FernetBackend
-   from cubebox.mcp.template_seed import CATALOG, seed_templates
-   from cubebox.repositories.mcp import MCPConnectorTemplateRepository
-
-
-   @pytest.fixture
-   async def session() -> AsyncIterator[AsyncSession]:
-       engine = create_async_engine("sqlite+aiosqlite:///:memory:")
-       async with engine.begin() as conn:
-           await conn.run_sync(SQLModel.metadata.create_all)
-       maker = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-       async with maker() as s:
-           yield s
-       await engine.dispose()
-
-
-   @pytest.fixture
-   def backend() -> FernetBackend:
-       return FernetBackend([Fernet.generate_key()])
-
-
-   def _make_get_env(values: dict[str, str]) -> Callable[[str], str | None]:
-       def _getter(key: str) -> str | None:
-           return values.get(key)
-
-       return _getter
-
-
-   def test_feishu_entry_is_header_bearer_static() -> None:
-       by_slug = {e.slug: e for e in CATALOG}
-       assert "feishu" in by_slug
-       entry = by_slug["feishu"]
-
-       assert entry.provider == "Feishu"
-       assert entry.transport == "sse"
-       assert entry.supported_auth_methods == ["static"]
-       assert entry.default_credential_policy == "workspace"
-       # Bearer-in-header static auth — the schema-fitting shape.
-       assert entry.static_auth_header_template == "Bearer {token}"
-       assert entry.static_form_schema is not None
-       assert entry.static_form_schema[0]["name"] == "token"
-       # Not an OAuth-app / URL-query-param / stdio connector.
-       assert entry.oauth_static_client_id_env is None
-       assert entry.oauth_static_client_secret_env is None
-       assert entry.oauth_dcr_supported is None
-       assert entry.server_url.startswith("https://")
-       assert "{token}" not in entry.server_url  # secret never baked into URL
-       assert entry.template_metadata["docs_url"].startswith("https://")
-   ```
-
-2. **Run it, expect fail** (KeyError / assertion — `feishu` not yet in
-   `CATALOG`):
-
-   ```bash
-   uv run pytest tests/unit/test_catalog_seed_china.py::test_feishu_entry_is_header_bearer_static -q
-   ```
-
-3. **Implement.** In `backend/cubebox/mcp/template_seed.py`, append this entry
-   to the `CATALOG` list (after the existing `webtools` entry, before the
-   closing `]`). It reuses `_TOKEN_FIELD` and `_BEARER_TEMPLATE` already defined
-   in the module:
-
-   ```python
-       MCPConnectorTemplateSeedEntry(
-           slug="feishu",
-           name="Feishu / Lark",
-           provider="Feishu",
-           description=(
-               "Feishu/Lark OpenAPI MCP (remote mode): docs, messages, "
-               "calendar, bitable."
-           ),
-           server_url="https://lark-mcp.feishu.cn/mcp",
-           transport="sse",
-           supported_auth_methods=["static"],
-           default_credential_policy="workspace",
-           oauth_dcr_supported=None,
-           oauth_default_scope=None,
-           oauth_static_client_id_env=None,
-           oauth_static_client_secret_env=None,
-           static_form_schema=_TOKEN_FIELD,
-           static_auth_header_template=_BEARER_TEMPLATE,
-           template_metadata={
-               "docs_url": (
-                   "https://open.larksuite.com/document/mcp_open_tools/"
-                   "call-feishu-mcp-server-in-remote-mode"
-               ),
-               "region": "cn",
-           },
-       ),
-   ```
-
-4. **Run it, expect pass:**
-
-   ```bash
-   uv run pytest tests/unit/test_catalog_seed_china.py::test_feishu_entry_is_header_bearer_static -q
-   ```
-
-5. **Commit:**
-
-   ```bash
-   git add backend/cubebox/mcp/template_seed.py \
-       backend/tests/unit/test_catalog_seed_china.py
-   git commit -m "$(cat <<'EOF'
-   feat(mcp): add Feishu/Lark connector to the v1 catalog (#147)
-
-   Feishu remote mode authenticates with a Bearer App Access Token, which
-   maps onto the existing static header path with no schema change. It is the
-   only curated China-vendor source that fits MCPConnectorTemplateSeedEntry
-   unchanged; maps (URL-query-param key) and stdio/key-pair sources are
-   deferred per the design doc.
-   EOF
-   )"
-   ```
-
----
-
-## Task 2 — Assert Feishu seeds and validates through `seed_templates()`
-
-Prove the new entry isn't just well-shaped data but actually upserts a row and
-passes the seeder's existing invariants (no env vars required, no skip, no
-deprecation), the same way the existing catalog is exercised.
+The module docstring (`backend/cubebox/mcp/template_seed.py:18`) still claims
+the seeder is "Not wired into FastAPI startup; this is intentionally an explicit
+deploy step." That is no longer true — the seeder runs lock-guarded on FastAPI
+startup (`backend/cubebox/api/app.py`) **and** via the CLI. Doc-only change in
+the module; no behavior change, no catalog change, no test.
 
 **Files**
 
-- Test (modify): `backend/tests/unit/test_catalog_seed_china.py`
+- Modify: `backend/cubebox/mcp/template_seed.py` (docstring only)
 
 **Steps**
 
-1. **Write the failing test.** Append to `test_catalog_seed_china.py`:
-
-   ```python
-   async def test_feishu_seeds_as_active_template_without_env(
-       session: AsyncSession, backend: FernetBackend
-   ) -> None:
-       # Feishu needs no OAuth-app env vars → seeds even with an empty env.
-       result = await seed_templates(
-           session, backend, get_env=_make_get_env({})
-       )
-
-       # The empty env only skips connectors that require an OAuth client
-       # secret; Feishu must not be among the skipped.
-       repo = MCPConnectorTemplateRepository(session)
-       active = {row.slug for row in await repo.list_active()}
-       assert "feishu" in active
-       assert result.deprecated == 0
-
-       row = await repo.get_by_slug("feishu")
-       assert row is not None
-       assert row.status == "active"
-       assert row.supported_auth_methods == ["static"]
-       assert row.transport == "sse"
-       assert row.static_auth_header_template == "Bearer {token}"
-   ```
-
-2. **Run it, expect pass already** (Task 1 added the entry, so this should pass
-   immediately — that is acceptable; it locks the behavior in). Confirm:
+1. **Confirm the live wiring** so the rewritten docstring is accurate:
 
    ```bash
-   uv run pytest tests/unit/test_catalog_seed_china.py -q
+   grep -n "seed_templates" backend/cubebox/api/app.py
    ```
 
-   If it fails, debug the seeder mapping for the Feishu entry before
-   proceeding.
+   Expect a startup call (lock-guarded). Note the function / lock used.
 
-3. **Regression sweep on the seeder suite** — the count-based assertions in
-   `test_catalog_seed.py` (`upserted == len(CATALOG)`) must still hold after the
-   catalog grew by one:
+2. **Rewrite the last paragraph of the module docstring** with `Edit` to say
+   the seeder runs idempotently on FastAPI startup (lock-guarded) **and** via
+   `python -m cubebox.cli seed-mcp-templates`. Keep it ≤ 100-char lines, plain
+   English. Do not touch any code outside the docstring.
+
+3. **Verify nothing else changed** and the module still imports:
 
    ```bash
-   uv run pytest tests/unit/test_catalog_seed.py tests/unit/test_catalog_seed_china.py -q
+   uv run python -c "import cubebox.mcp.template_seed"
    ```
-
-   If any count assertion in `test_catalog_seed.py` references a hard-coded
-   number, update it to track `len(CATALOG)` (it already uses `len(CATALOG)`,
-   so no change is expected — verify).
 
 4. **Commit:**
 
    ```bash
-   git add backend/tests/unit/test_catalog_seed_china.py
+   git add backend/cubebox/mcp/template_seed.py
    git commit -m "$(cat <<'EOF'
-   test(mcp): assert Feishu seeds as an active template (#147)
+   docs(mcp): correct template_seed docstring re: startup wiring (#147)
 
-   Locks in that the Feishu entry upserts a static/SSE row with no OAuth env
-   vars and survives the existing seeder invariants.
+   The seeder now runs lock-guarded on FastAPI startup and via the CLI; the
+   module docstring still claimed it was only an explicit deploy step.
    EOF
    )"
    ```
 
 ---
 
-## Task 3 — E2E: Feishu appears in the admin catalog endpoint
+## Task 2 (OPTIONAL — only if landing Feishu in this PR) — auth-header plumbing
 
-E2E-first per project discipline: assert the connector is reachable through the
-real `GET /api/v1/admin/mcp/templates` route after seeding, not just in the
-Python list. Mirror the existing admin-MCP E2E setup.
+This task is **not required** for the docs-only v1. Implement it only if the
+decision is to ship Feishu in this same PR rather than deferring. It closes the
+runtime gap so a connector can carry a custom static auth header name/template.
+
+Whoever picks this up: do **not** rely solely on catalog-visibility tests —
+those only prove the row appears in `GET /api/v1/admin/mcp/templates`. They give
+false confidence because the runtime ignores `static_auth_header_template`. You
+must add a test that exercises **header resolution** so the wrong header can't
+ship silently.
 
 **Files**
 
-- Test (new): `backend/tests/e2e/test_mcp_china_catalog.py`
+- Modify: `backend/cubebox/mcp/cubepi_runtime.py` (the `static` branch of
+  `_resolve_headers_from_spec`, around lines 244-250)
+- Modify: `backend/cubebox/mcp/template_seed.py` (add the Feishu entry once the
+  runtime honors a custom header)
+- Test (new): `backend/tests/unit/test_mcp_static_header_resolution.py`
+- Test (new): `backend/tests/e2e/test_mcp_china_catalog.py` (catalog visibility,
+  in addition to the unit header test — not as a substitute for it)
 
 **Steps**
 
-1. **Locate the pattern.** Read an existing admin-MCP E2E test that seeds
-   templates and calls the admin templates/installs routes (e.g.
-   `backend/tests/e2e/test_mcp_four_layer_routes.py`,
-   `backend/tests/e2e/test_mcp_oauth_handoff.py`) plus
-   `backend/tests/e2e/conftest.py` for the seeded-catalog / authed-admin-client
-   fixtures. Reuse those fixtures; do not invent a new harness.
+1. **Decide the schema-fitting shape for a custom header.** The template already
+   stores `static_auth_header_template` (e.g. `"Bearer {token}"`); the runtime
+   just doesn't apply it. The minimal change is: in the `static` branch, if the
+   spec carries a header template, render it with the decrypted secret and the
+   configured header *name* instead of hardcoding `Authorization: Bearer`. For
+   Feishu the header name is `X-Lark-MCP-UAT` (user access token) and/or
+   `X-Lark-MCP-TAT` (tenant access token); the endpoint is
+   `https://mcp.feishu.cn/mcp`. Confirm whether the existing schema can carry a
+   header *name* (it currently only has a value template) — if not, this needs
+   a small field addition, which pushes Feishu out of a docs-only PR. Record the
+   decision in the spec's §8 before coding.
 
-2. **Write the failing test.** Create
-   `backend/tests/e2e/test_mcp_china_catalog.py` that:
-   - uses the existing fixture that seeds the catalog and yields an authed
-     admin HTTP client (copy the fixture wiring from the chosen reference
-     test verbatim — adapt only the assertions);
-   - `GET`s `/api/v1/admin/mcp/templates`;
-   - asserts the response is 200 and that an item with `slug == "feishu"` is
-     present, with `transport == "sse"`, `supported_auth_methods == ["static"]`,
-     and a non-secret token field in its `static_form_schema`.
+2. **Write the failing unit test** in
+   `backend/tests/unit/test_mcp_static_header_resolution.py`: build a runtime
+   spec for a static connector whose template uses a non-`Authorization` header
+   and assert `_resolve_headers_from_spec` emits exactly that header (name +
+   rendered value), and that it does **not** emit a bogus
+   `Authorization: Bearer` for such connectors. Run it, expect fail (the runtime
+   currently always sets `Authorization`).
 
-   Shape of the assertion body (adapt request mechanics to the reference
-   fixture's client/URL helpers):
+3. **Implement** the `static` branch so it honors the template/header name, then
+   re-run the unit test to green.
 
-   ```python
-   async def test_feishu_appears_in_admin_catalog(...) -> None:
-       resp = await admin_client.get("/api/v1/admin/mcp/templates")
-       assert resp.status_code == 200
-       items = resp.json()["items"]
-       by_slug = {it["slug"]: it for it in items}
-       assert "feishu" in by_slug
-       feishu = by_slug["feishu"]
-       assert feishu["transport"] == "sse"
-       assert feishu["supported_auth_methods"] == ["static"]
-   ```
+4. **Add the Feishu seed entry** with the corrected `server_url`
+   (`https://mcp.feishu.cn/mcp`) and the correct header name, plus the catalog
+   visibility E2E. Run both the unit header test and the E2E.
 
-3. **Run it, expect pass** (the seeder runs in the E2E harness, so Feishu should
-   surface once Task 1 landed). If the reference fixture seeds via
-   `seed_templates(...)` or app startup, confirm Feishu is included:
-
-   ```bash
-   uv run pytest tests/e2e/test_mcp_china_catalog.py -q
-   ```
-
-   If the route field names differ from the assumed JSON keys, read
-   `backend/cubebox/api/schemas/mcp.py` (`MCPConnectorTemplateListOut` and the
-   item schema) and `_template_to_out` in
-   `backend/cubebox/api/routes/v1/admin_mcp.py`, then fix the assertion keys —
-   this is a test-only correction, not an implementation change.
-
-4. **Commit:**
-
-   ```bash
-   git add backend/tests/e2e/test_mcp_china_catalog.py
-   git commit -m "$(cat <<'EOF'
-   test(mcp): e2e assert Feishu surfaces in the admin catalog (#147)
-
-   Proves the seeded Feishu template is reachable through the real admin
-   templates route, not just the Python CATALOG list.
-   EOF
-   )"
-   ```
+5. **Commit** in logically separate commits (runtime+test, then seed entry).
+   Scope every message `(#147)`.
 
 ---
 
-## Task 4 — Fix the doc drift in `mcp_catalog_oauth.md`
+## Task 3 — Fix the doc drift in `mcp_catalog_oauth.md`
 
 The spec (§8) flags that `backend/docs/mcp_catalog_oauth.md` still uses the old
 M2 naming — `mcp_catalog_connectors` table and `cubebox.mcp.catalog_seed.CATALOG`
@@ -389,12 +235,15 @@ editor. Doc-only change; no code, no tests.
      `python -m cubebox.cli seed-mcp-templates`; the seeder also runs
      idempotently on FastAPI startup (lock-guarded). Correct any sentence that
      claims it is *only* an out-of-band step if the doc says so.
-   - Add one short line under the catalog section noting Feishu is the first
-     China-vendor entry and that URL-query-param-key sources (maps) and
-     stdio/key-pair sources (Alipay, DingTalk, WeCom, MiniMax, Tushare) are
-     deferred pending a `static_auth_query_param` field / managed launcher
-     (cross-reference the design doc
-     `docs/dev/specs/2026-05-27-mcp-china-sources-design.md`).
+   - Add one short line under the catalog section noting that **no**
+     China-vendor entry ships in v1: Feishu is deferred because its remote mode
+     uses custom `X-Lark-MCP-UAT` / `X-Lark-MCP-TAT` headers at
+     `https://mcp.feishu.cn/mcp` and the runtime currently ignores
+     `static_auth_header_template` (always sends `Authorization: Bearer`).
+     URL-query-param-key sources (maps) and stdio/key-pair sources (Alipay,
+     DingTalk, WeCom, MiniMax, Tushare) remain deferred pending a
+     `static_auth_query_param` field / managed launcher. Cross-reference the
+     design doc `docs/dev/specs/2026-05-27-mcp-china-sources-design.md`.
 
 3. **Verify no stale names remain:**
 
@@ -412,15 +261,15 @@ editor. Doc-only change; no code, no tests.
    docs(mcp): refresh catalog runbook to template_seed naming (#147)
 
    Replace stale M2 mcp_catalog_connectors / catalog_seed references with the
-   live mcp_connector_templates / template_seed names, and note the v1 Feishu
-   addition plus the deferred China-vendor sources.
+   live mcp_connector_templates / template_seed names, and note that no
+   China-vendor source ships in v1 (Feishu + all others deferred).
    EOF
    )"
    ```
 
 ---
 
-## Task 5 — Pre-PR sweep + self-review
+## Task 4 — Pre-PR sweep + self-review
 
 **Files**
 
@@ -428,33 +277,32 @@ editor. Doc-only change; no code, no tests.
 
 **Steps**
 
-1. **Run the full MCP-affected suite:**
+1. **Run the seeder suite** to confirm nothing regressed (the catalog list is
+   unchanged in the docs-only v1, so the existing count assertions still hold):
 
    ```bash
-   uv run pytest tests/unit/test_catalog_seed.py \
-       tests/unit/test_catalog_seed_china.py \
-       tests/unit/test_cli_seed.py \
-       tests/e2e/test_mcp_china_catalog.py -q
+   uv run pytest tests/unit/test_catalog_seed.py tests/unit/test_cli_seed.py -q
    ```
 
-   All must pass.
+   All must pass. (If Task 2 was implemented, also run
+   `tests/unit/test_mcp_static_header_resolution.py` and
+   `tests/e2e/test_mcp_china_catalog.py`.)
 
-2. **Type check** the changed module + tests:
+2. **Type check** the touched module:
 
    ```bash
    uv run mypy cubebox/mcp/template_seed.py
    ```
 
 3. **Self-review checklist:**
-   - [ ] Only Feishu added to `CATALOG`; no deferred source (maps / Alipay /
-         DingTalk / WeCom / MiniMax / Tushare / marketplaces) slipped in.
-   - [ ] No new column, migration, route, or service — schema unchanged.
-   - [ ] Feishu `server_url` carries no secret; auth is header-Bearer only.
-   - [ ] `static_form_schema` reuses `_TOKEN_FIELD`; header uses
-         `_BEARER_TEMPLATE` — no duplicated literals.
-   - [ ] Line length ≤ 100; full type annotations; no placeholder strings.
+   - [ ] `CATALOG` is unchanged — no Feishu, no deferred source slipped in
+         (docs-only v1). If Task 2 was done, Feishu's runtime header is honored
+         by a passing header-resolution test, not just catalog visibility.
+   - [ ] No new column, migration, route, or service in the docs-only v1.
+   - [ ] `template_seed.py` docstring no longer claims "not wired into startup".
+   - [ ] Line length ≤ 100; plain English; no placeholder strings.
    - [ ] Doc drift fixed: zero `mcp_catalog_connectors` / `catalog_seed`
-         references remain.
+         references remain in `mcp_catalog_oauth.md`.
    - [ ] Every commit message scopes `(#147)`; no amend, no push, no codex.
 
 4. **Confirm clean tree** (all work committed):
@@ -468,11 +316,12 @@ editor. Doc-only change; no code, no tests.
 
 ## Deferred (explicitly out of this plan)
 
-Per design doc §6.2 / §7 / §8, these are recorded as future work, each blocked
-on a named gap:
+Per design doc §6.2 / §7 / §8 plus the runtime gap found in local review, these
+are recorded as future work, each blocked on a named gap:
 
 | Source | Blocker | Unblocks when |
 |---|---|---|
+| Feishu / Lark | runtime ignores `static_auth_header_template`; needs custom header name `X-Lark-MCP-UAT` / `X-Lark-MCP-TAT` (not `Authorization: Bearer`) | runtime applies a configurable static header name/template (Task 2) |
 | Amap, Baidu Maps, Tencent Location | API key in URL query param | `static_auth_query_param` field + install-time URL injection (secret stays in vault) |
 | Alipay | stdio launch + RSA key-pair auth | managed launcher + key-pair credential kind |
 | DingTalk, WeCom, MiniMax (official), Tushare | stdio-only packages | managed launcher or vendor remote endpoint |
