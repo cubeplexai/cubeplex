@@ -23,6 +23,7 @@ from cubebox.api.schemas.skill_discovery import (
     InstallCandidateRequest,
     InstallCandidateResponse,
     SkillCandidateResponse,
+    SkillRefreshResponse,
 )
 from cubebox.auth.context import RequestContext
 from cubebox.auth.dependencies import require_member
@@ -290,6 +291,32 @@ async def install_candidate(
         canonical_name=result.canonical_name,
         skill_id=result.skill_id,
         installed_version=result.installed_version,
+    )
+
+
+@router.post("/{skill_id}/refresh", response_model=SkillRefreshResponse)
+async def refresh_skill(
+    workspace_id: str,
+    skill_id: str,
+    *,
+    ctx: Annotated[RequestContext, Depends(require_member)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> SkillRefreshResponse:
+    """Re-check a skill's remote source for updates.
+
+    v1 scope-cut: only looks up the skill and reports ``changed=False`` because
+    ``SkillSummary`` does not yet carry ``source_ref``. Full re-import of remote
+    skills will land in a future update once source_ref is surfaced through the
+    skill model. Returns 404 when the skill is not found in this org.
+    """
+    skill = await SkillRepository(session).get(skill_id)
+    if skill is None or not _visible(skill, ctx.org_id):
+        raise HTTPException(status_code=404, detail="SKILL_NOT_FOUND")
+    return SkillRefreshResponse(
+        canonical_name=skill.name,
+        skill_id=skill.id,
+        installed_version=skill.current_version,
+        changed=False,
     )
 
 
