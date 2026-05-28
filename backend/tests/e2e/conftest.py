@@ -111,6 +111,8 @@ DEFAULT_ORG_ID = "org-00000000000000"
 DEFAULT_WS_ID = "ws-00000000000000"
 DEFAULT_TEST_EMAIL = "test-default@example.com"
 DEFAULT_TEST_PASSWORD = "test-default-password-12345"
+WS_MEMBER_TEST_EMAIL = "test-ws-member@example.com"
+WS_MEMBER_TEST_PASSWORD = "test-ws-member-password-12345"
 
 
 @asynccontextmanager
@@ -264,6 +266,72 @@ async def _ensure_default_user_and_membership() -> None:
         await test_engine.dispose()
 
 
+async def _ensure_default_ws_member() -> None:
+    """Idempotently ensure a plain-member user exists inside DEFAULT_WS_ID.
+
+    Used to test owner-or-admin gating: this user is a MEMBER of the same
+    workspace as the default admin, so requests resolve into DEFAULT_WS_ID
+    without admin powers.
+    """
+    test_engine = create_async_engine(_build_database_url(), poolclass=NullPool)
+    test_session_maker = async_sessionmaker(
+        test_engine, class_=AsyncSession, expire_on_commit=False
+    )
+    try:
+        async with test_session_maker() as session:
+            user_db = SQLAlchemyUserDatabase(session, User)
+            existing = await user_db.get_by_email(WS_MEMBER_TEST_EMAIL)
+            if existing is None:
+                manager = UserManager(user_db)
+                user = await manager.create(
+                    BaseUserCreate(
+                        email=WS_MEMBER_TEST_EMAIL,
+                        password=WS_MEMBER_TEST_PASSWORD,
+                    ),
+                    safe=False,
+                )
+            else:
+                user = existing
+
+            mem_repo = MembershipRepository(session)
+            role = await mem_repo.get_role(user_id=user.id, workspace_id=DEFAULT_WS_ID)
+            if role is None:
+                await mem_repo.grant(user_id=user.id, workspace_id=DEFAULT_WS_ID, role=Role.MEMBER)
+
+            # Ensure org-level membership so resolve_current_org_id picks
+            # DEFAULT_ORG_ID for this user too (mirror the admin's setup).
+            from cubebox.models import OrgRole
+            from cubebox.repositories import OrganizationMembershipRepository
+
+            om_repo = OrganizationMembershipRepository(session)
+            om_role = await om_repo.get_role(user_id=user.id, org_id=DEFAULT_ORG_ID)
+            if om_role is None:
+                await om_repo.grant(user_id=user.id, org_id=DEFAULT_ORG_ID, role=OrgRole.MEMBER)
+
+            # Same cleanup as the admin fixture: wipe bootstrap-created personal
+            # org/ws memberships so DEFAULT_ORG_ID/WS resolves deterministically.
+            from sqlalchemy import delete
+
+            from cubebox.models import Membership as MembershipModel
+            from cubebox.models import OrganizationMembership
+
+            await session.execute(
+                delete(OrganizationMembership).where(
+                    OrganizationMembership.user_id == user.id,  # type: ignore[arg-type]
+                    OrganizationMembership.org_id != DEFAULT_ORG_ID,  # type: ignore[arg-type]
+                )
+            )
+            await session.execute(
+                delete(MembershipModel).where(
+                    MembershipModel.user_id == user.id,  # type: ignore[arg-type]
+                    MembershipModel.workspace_id != DEFAULT_WS_ID,  # type: ignore[arg-type]
+                )
+            )
+            await session.commit()
+    finally:
+        await test_engine.dispose()
+
+
 async def _login_and_attach(client: httpx.AsyncClient, email: str, password: str) -> None:
     """Log in and set the CSRF header on the client."""
     await client.get("/api/v1/auth/me")  # obtain CSRF cookie (401 but sets cookie)
@@ -296,6 +364,34 @@ async def client() -> AsyncIterator[TestClient]:
         r = sync_client.post(
             "/api/v1/auth/login",
             data={"username": DEFAULT_TEST_EMAIL, "password": DEFAULT_TEST_PASSWORD},
+            headers={"X-CSRF-Token": csrf},
+        )
+        assert r.status_code in (200, 204), f"login failed: {r.status_code} {r.text}"
+        sync_client.headers["X-CSRF-Token"] = sync_client.cookies.get(csrf_cookie_name()) or csrf
+        yield sync_client
+
+
+@pytest_asyncio.fixture
+async def ws_member_client() -> AsyncIterator[TestClient]:
+    """Sync TestClient logged in as a plain MEMBER of DEFAULT_WS_ID.
+
+    Distinct from `member_client` (which creates an isolated brand-new
+    workspace). Use this when the test needs an admin AND a non-admin in
+    the SAME workspace — e.g. owner-or-admin mutation gating tests.
+    """
+    await _ensure_default_user_and_membership()  # seed admin user/ws first
+    await _ensure_default_ws_member()
+    app = _make_test_app()
+    app.state.deployment_mode = "multi_tenant"
+    with TestClient(app) as sync_client:
+        sync_client.get("/api/v1/auth/me")
+        csrf = sync_client.cookies.get(csrf_cookie_name()) or ""
+        r = sync_client.post(
+            "/api/v1/auth/login",
+            data={
+                "username": WS_MEMBER_TEST_EMAIL,
+                "password": WS_MEMBER_TEST_PASSWORD,
+            },
             headers={"X-CSRF-Token": csrf},
         )
         assert r.status_code in (200, 204), f"login failed: {r.status_code} {r.text}"
