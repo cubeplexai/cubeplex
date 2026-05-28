@@ -24,6 +24,7 @@ import { WorkspacesSection } from '@/components/sidebar/WorkspacesSection'
 import {
   Box,
   Brain,
+  CalendarClock,
   type LucideIcon,
   MoreHorizontal,
   Pencil,
@@ -208,7 +209,7 @@ function ConversationRow({
 
 interface WorkspaceNavEntry {
   key: string
-  labelKey: 'skills' | 'mcp' | 'memory' | 'members' | 'settings'
+  labelKey: 'skills' | 'mcp' | 'memory' | 'scheduledTasks' | 'members' | 'settings'
   icon: LucideIcon
   href: string
   isActive: boolean
@@ -223,8 +224,10 @@ function WorkspaceNav({ wsId }: { wsId: string }): React.ReactElement {
 
   const settingsPrefix = `/w/${wsId}/settings`
   const memoryPrefix = `/w/${wsId}/memory`
+  const scheduledTasksPrefix = `/w/${wsId}/scheduled-tasks`
   const onSettings = pathname?.startsWith(settingsPrefix) ?? false
   const onMemory = pathname?.startsWith(memoryPrefix) ?? false
+  const onScheduledTasks = pathname?.startsWith(scheduledTasksPrefix) ?? false
   const currentTab = searchParams.get('tab') ?? 'workspace'
 
   const entries: WorkspaceNavEntry[] = [
@@ -248,6 +251,13 @@ function WorkspaceNav({ wsId }: { wsId: string }): React.ReactElement {
       icon: Brain,
       href: memoryPrefix,
       isActive: onMemory,
+    },
+    {
+      key: 'scheduledTasks',
+      labelKey: 'scheduledTasks',
+      icon: CalendarClock,
+      href: scheduledTasksPrefix,
+      isActive: onScheduledTasks,
     },
   ]
   if (isAdmin) {
