@@ -38,6 +38,18 @@
 - `backend/tests/unit/test_schedule_compute.py` — pure-function unit tests.
 - `backend/tests/e2e/test_scheduled_tasks_api.py` — CRUD + auth E2E.
 - `backend/tests/e2e/test_scheduled_tasks_firing.py` — firing / missed-run / concurrency E2E.
+- Frontend (scope-isolated page, spec §"Scope-isolated workspace API and page"):
+  - `frontend/packages/web/app/(app)/w/[wsId]/scheduled-tasks/page.tsx` — the
+    page (own Next route + page file; assembles list/detail/form modules — no
+    `mode?` prop reuse of another page).
+  - `frontend/packages/web/app/api/v1/ws/[wsId]/scheduled-tasks/route.ts`
+    (and `[id]/route.ts`, `[id]/pause`, `[id]/resume`, `[id]/runs`) — the SSE-
+    safe proxy handlers mirroring the existing `conversations` proxy layout.
+  - `frontend/packages/core/src/types/scheduled-task.ts` — shared types.
+  - `frontend/packages/core/src/hooks/useScheduledTasks.ts` (+ api client in
+    `packages/core/src/api/`) — data hooks.
+  (Match the exact file conventions of the existing `w/[wsId]/conversations`
+  feature; build `@cubebox/core` before the web app sees new types.)
 
 **Modified files:**
 - `backend/cubebox/models/__init__.py` — export the two new models.
@@ -45,6 +57,9 @@
 - `backend/cubebox/streams/run_manager.py` — call the completion hook at terminal status.
 - `backend/cubebox/api/routes/v1/__init__.py` — re-export the router.
 - `backend/pyproject.toml` / `backend/uv.lock` — add `croniter` (via `uv add`).
+- Frontend nav (sidebar / workspace nav) — add a "Scheduled tasks" entry
+  pointing at the new route, mirroring how the other `w/[wsId]` features
+  register their nav item.
 
 ---
 
@@ -179,6 +194,25 @@ def test_decide_missed_past_grace_skips() -> None:
     latest = _dt(2026, 1, 1, 10, 0)
     d = decide_missed(latest_due=latest, now=now, grace_seconds=300)
     assert d == MissedDecision.SKIP_MISSED
+
+
+def test_compute_accepts_naive_db_datetimes() -> None:
+    # Regression: DB columns are `timestamp without time zone`, so next_fire_at
+    # reads back NAIVE. Mixing it with datetime.now(UTC) (aware) must NOT raise.
+    naive_candidate = datetime(2026, 1, 1, 8, 0)  # no tzinfo, as from the DB
+    aware_now = _dt(2026, 1, 1, 10, 2)
+    latest = latest_due_before(
+        kind="interval", interval_seconds=3600,
+        candidate=naive_candidate, now=aware_now, tz="UTC",
+    )
+    assert latest == _dt(2026, 1, 1, 10, 0)
+    # decide_missed and next_fire_after must also tolerate a naive input.
+    assert decide_missed(latest_due=latest, now=aware_now, grace_seconds=300) == (
+        MissedDecision.FIRE
+    )
+    assert next_fire_after(
+        kind="interval", interval_seconds=3600, after=datetime(2026, 1, 1, 9, 0), tz="UTC"
+    ) == _dt(2026, 1, 1, 10, 0)
 ```
 
 - [ ] **Step 2: Run tests to verify they fail**
@@ -215,6 +249,18 @@ class MissedDecision(StrEnum):
     SKIP_MISSED = "skip_missed"
 
 
+def as_utc(dt: datetime) -> datetime:
+    """Attach UTC to a naive datetime; pass through aware ones.
+
+    cubebox stores `timestamp without time zone`, so datetimes read back from
+    the DB are NAIVE. The compute/poller arithmetic mixes those with
+    `datetime.now(UTC)` (AWARE); comparing or subtracting the two raises
+    TypeError. Every datetime that came from the DB MUST pass through this
+    before any comparison/subtraction here.
+    """
+    return dt.replace(tzinfo=UTC) if dt.tzinfo is None else dt.astimezone(UTC)
+
+
 def next_fire_after(
     *,
     kind: str,
@@ -224,6 +270,7 @@ def next_fire_after(
     tz: str = "UTC",
 ) -> datetime:
     """Return the first occurrence strictly after ``after`` (UTC)."""
+    after = as_utc(after)  # DB datetimes are naive; normalize before arithmetic
     if kind == "interval":
         if interval_seconds is None or interval_seconds < 60:
             raise ValueError("interval_seconds must be >= 60")
@@ -253,6 +300,8 @@ def latest_due_before(
     Walk forward in arithmetic to the last slot that is still <= now. Avoids the
     bug of treating the first stale occurrence as the grace test.
     """
+    candidate = as_utc(candidate)  # candidate is task.next_fire_at (naive from DB)
+    now = as_utc(now)
     if candidate > now:
         return candidate
     if kind == "interval":
@@ -281,6 +330,7 @@ def decide_missed(
     *, latest_due: datetime, now: datetime, grace_seconds: int
 ) -> MissedDecision:
     """Fire the latest due occurrence if within grace, else skip it as missed."""
+    now, latest_due = as_utc(now), as_utc(latest_due)  # DB datetimes may be naive
     if (now - latest_due).total_seconds() <= grace_seconds:
         return MissedDecision.FIRE
     return MissedDecision.SKIP_MISSED
@@ -289,7 +339,7 @@ def decide_missed(
 - [ ] **Step 4: Run tests to verify they pass**
 
 Run: `uv run pytest tests/unit/test_schedule_compute.py -v`
-Expected: PASS — 6 passed.
+Expected: PASS — 7 passed.
 
 - [ ] **Step 5: Commit**
 
@@ -593,11 +643,40 @@ async def claim_stale_runs(
         .with_for_update(skip_locked=True)
     )
     return list((await session.execute(stmt)).scalars().all())
+
+
+async def fail_stale_started_runs(
+    session: AsyncSession, *, now: datetime, started_timeout: timedelta, limit: int
+) -> int:
+    """Fail occurrence rows stuck in 'started' long past any plausible run.
+
+    A replica can die AFTER start_run (state='started', run_id set) but BEFORE
+    the run-completion hook fires, leaving the row 'started' forever. There is
+    no live run to recover, so after a generous timeout mark it 'failed' so
+    history is not stuck. (The completion hook only flips started->terminal for
+    runs that actually complete; this covers the crashed-mid-run case.)
+    Returns the number of rows failed.
+    """
+    cutoff = now - started_timeout
+    stmt = (
+        update(ScheduledTaskRun)
+        .where(
+            ScheduledTaskRun.state == "started",  # type: ignore[arg-type]
+            ScheduledTaskRun.started_at < cutoff,  # type: ignore[operator]
+        )
+        .values(state="failed", detail="run did not report terminal status in time",
+                updated_at=now)
+        .execution_options(synchronize_session=False)
+    )
+    result = await session.execute(stmt)
+    return int(result.rowcount or 0)
 ```
+
+Add `from sqlalchemy import update` to the imports if not already present.
 
 - [ ] **Step 2: Verify it imports**
 
-Run: `uv run python -c "from cubebox.repositories.scheduled_task import claim_due_tasks, claim_stale_runs, ScheduledTaskRepository, ScheduledTaskRunRepository; print('ok')"`
+Run: `uv run python -c "from cubebox.repositories.scheduled_task import claim_due_tasks, claim_stale_runs, fail_stale_started_runs, ScheduledTaskRepository, ScheduledTaskRunRepository; print('ok')"`
 Expected: `ok`
 
 - [ ] **Step 3: Commit**
@@ -691,6 +770,7 @@ async def dispatch_scheduled_run(
         user_id=task.owner_user_id,
         org_id=task.org_id,
         workspace_id=task.workspace_id,
+        agent_config_id=task.agent_config_id,  # see the decision note below
     )
     run_id = await run_manager.start_run(
         conversation_id=conversation_id,
@@ -700,6 +780,27 @@ async def dispatch_scheduled_run(
     )
     return DispatchResult(run_id=run_id, conversation_id=conversation_id)
 ```
+
+> **DECISION REQUIRED — `agent_config_id` must not be store-and-ignore.** Today
+> `RunContext` (`backend/cubebox/streams/run_manager.py:30`) has **only**
+> `user_id` / `org_id` / `workspace_id`, and `_execute_run` always loads the
+> *workspace-default* `AgentConfig` (lines ~1772-1797). So a `task.agent_config_id`
+> the spec defines (design §4, "null = workspace default") is silently dropped.
+> The dispatch above passes it, but that requires real plumbing — pick one
+> before implementing this task and update the plan accordingly:
+> 1. **Honor it (matches spec):** add an optional `agent_config_id: str | None`
+>    to `RunContext`, and in `_execute_run` load the named `AgentConfig` when set
+>    (scoped to the same `org_id`/`workspace_id`), falling back to the workspace
+>    default when null/missing. This touches the LLM call path — read
+>    `backend/docs/prompt-cache-discipline.md` first and keep the system-prompt
+>    assembly cache-stable. Add an E2E that a task with a non-default
+>    `agent_config_id` runs under that config.
+> 2. **Defer it:** drop the `agent_config_id` column + field + body param from
+>    this PR entirely (do not migrate a column nothing reads) and note in the
+>    spec that per-task agent selection is a follow-up. v1 then always uses the
+>    workspace default.
+>
+> Do **not** keep the column while leaving `RunContext`/`_execute_run` unchanged.
 
 - [ ] **Step 2: Verify it imports**
 
@@ -830,9 +931,14 @@ from sqlalchemy.exc import IntegrityError
 
 from cubebox.db.engine import async_session_maker
 from cubebox.models.scheduled_task import ScheduledTask, ScheduledTaskRun
-from cubebox.repositories.scheduled_task import claim_due_tasks, claim_stale_runs
+from cubebox.repositories.scheduled_task import (
+    claim_due_tasks,
+    claim_stale_runs,
+    fail_stale_started_runs,
+)
 from cubebox.schedules.compute import (
     MissedDecision,
+    as_utc,
     decide_missed,
     latest_due_before,
     next_fire_after,
@@ -850,6 +956,7 @@ class ScheduledTaskPoller:
         jitter_seconds: float = 5.0,
         misfire_grace_seconds: int = 300,
         claim_timeout_seconds: int = 120,
+        started_timeout_seconds: int = 3600,  # fail 'started' rows stuck > 1h
         max_claims: int = 3,
         batch_limit: int = 50,
     ) -> None:
@@ -858,6 +965,7 @@ class ScheduledTaskPoller:
         self._jitter = jitter_seconds
         self._grace = misfire_grace_seconds
         self._claim_timeout = timedelta(seconds=claim_timeout_seconds)
+        self._started_timeout = timedelta(seconds=started_timeout_seconds)
         self._max_claims = max_claims
         self._batch_limit = batch_limit
         self._task: asyncio.Task[None] | None = None
@@ -908,6 +1016,14 @@ class ScheduledTaskPoller:
                     row.claimed_at = now
                     row.claim_count += 1
                     to_dispatch.append(row.id)
+
+            # Recover rows stuck in 'started' (replica died after start_run but
+            # before the completion hook). No live run to resume, so fail them
+            # after a generous timeout instead of leaving history stuck forever.
+            await fail_stale_started_runs(
+                session, now=now, started_timeout=self._started_timeout,
+                limit=self._batch_limit,
+            )
             try:
                 await session.commit()
             except IntegrityError:
@@ -929,6 +1045,7 @@ class ScheduledTaskPoller:
         """
         candidate = task.next_fire_at
         assert candidate is not None
+        candidate = as_utc(candidate)  # naive from DB; compute returns aware UTC
         if task.schedule_kind == "once":
             latest_due = candidate
         else:
@@ -1077,30 +1194,56 @@ git commit -m "feat(schedules): per-replica poller + lifespan wiring"
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Literal
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+from croniter import croniter
 from pydantic import BaseModel, Field, model_validator
+
+# Enum-restrict the discriminators so an unknown value is a 422 at parse time,
+# not a silent fall-through to wrong behavior downstream.
+ScheduleKind = Literal["cron", "interval", "once"]
+TargetMode = Literal["fixed", "new_each_run"]
+
+
+def _validate_timezone(tz: str) -> None:
+    try:
+        ZoneInfo(tz)
+    except (ZoneInfoNotFoundError, ValueError) as exc:
+        raise ValueError(f"unknown timezone: {tz!r}") from exc
+
+
+def _validate_cron(expr: str) -> None:
+    if not croniter.is_valid(expr):
+        raise ValueError(f"invalid cron expression: {expr!r}")
 
 
 class ScheduledTaskCreate(BaseModel):
     name: str = Field(min_length=1, max_length=255)
     prompt: str = Field(min_length=1)
-    schedule_kind: str  # cron | interval | once
+    schedule_kind: ScheduleKind
     cron_expr: str | None = None
     interval_seconds: int | None = Field(default=None, ge=60)
     run_at: datetime | None = None
     timezone: str = "UTC"
-    target_mode: str  # fixed | new_each_run
+    target_mode: TargetMode
     target_conversation_id: str | None = None
     agent_config_id: str | None = None
 
     @model_validator(mode="after")
     def _check(self) -> "ScheduledTaskCreate":
-        if self.schedule_kind == "cron" and not self.cron_expr:
-            raise ValueError("cron_expr required for cron schedule")
+        _validate_timezone(self.timezone)
+        if self.schedule_kind == "cron":
+            if not self.cron_expr:
+                raise ValueError("cron_expr required for cron schedule")
+            _validate_cron(self.cron_expr)
         if self.schedule_kind == "interval" and not self.interval_seconds:
             raise ValueError("interval_seconds required for interval schedule")
-        if self.schedule_kind == "once" and self.run_at is None:
-            raise ValueError("run_at required for once schedule")
+        if self.schedule_kind == "once":
+            if self.run_at is None:
+                raise ValueError("run_at required for once schedule")
+            if self.run_at.tzinfo is None:
+                raise ValueError("run_at must include a timezone offset")
         if self.target_mode == "fixed" and not self.target_conversation_id:
             raise ValueError("target_conversation_id required when target_mode=fixed")
         return self
@@ -1113,8 +1256,18 @@ class ScheduledTaskPatch(BaseModel):
     interval_seconds: int | None = Field(default=None, ge=60)
     run_at: datetime | None = None
     timezone: str | None = None
-    target_mode: str | None = None
+    target_mode: TargetMode | None = None
     target_conversation_id: str | None = None
+
+    @model_validator(mode="after")
+    def _check(self) -> "ScheduledTaskPatch":
+        if self.timezone is not None:
+            _validate_timezone(self.timezone)
+        if self.cron_expr is not None:
+            _validate_cron(self.cron_expr)
+        if self.run_at is not None and self.run_at.tzinfo is None:
+            raise ValueError("run_at must include a timezone offset")
+        return self
 
 
 class ScheduledTaskOut(BaseModel):
@@ -1180,13 +1333,13 @@ from cubebox.auth.context import RequestContext
 from cubebox.auth.dependencies import require_member
 from cubebox.db.engine import async_session_maker
 from cubebox.models import Role
-from cubebox.models.scheduled_task import ScheduledTask
+from cubebox.models.scheduled_task import ScheduledTask, ScheduledTaskRun
 from cubebox.repositories.conversation import ConversationRepository
 from cubebox.repositories.scheduled_task import (
     ScheduledTaskRepository,
     ScheduledTaskRunRepository,
 )
-from cubebox.schedules.compute import next_fire_after
+from cubebox.schedules.compute import as_utc, latest_due_before, next_fire_after
 from cubebox.utils.time import utc_isoformat
 
 router = APIRouter(prefix="/ws/{workspace_id}/scheduled-tasks", tags=["scheduled-tasks"])
@@ -1213,6 +1366,49 @@ def _initial_next_fire(t: ScheduledTask) -> datetime | None:
         return t.run_at
     return next_fire_after(
         kind=t.schedule_kind, after=now, cron_expr=t.cron_expr,
+        interval_seconds=t.interval_seconds, tz=t.timezone,
+    )
+
+
+def _resume_next_fire(session, t: ScheduledTask) -> datetime | None:
+    """Resume policy: account for occurrences that fell due while paused.
+
+    Spec §missed-run requires an explicit policy for paused stretches, mirroring
+    the outage policy: run-latest-once-or-skip with at most ONE summary history
+    row. We anchor on the occurrence that was pending when the task paused
+    (preserved in next_fire_at — see pause_task, which no longer nulls it) and:
+      - `once`: if run_at is in the past, record a single skipped_missed summary
+        and return None (do not back-fire a one-shot after a pause).
+      - cron/interval: compute latest_due_before(anchor, now); if a stretch was
+        skipped, add ONE ScheduledTaskRun(state="skipped_missed") summary with a
+        detail describing the range, then return next_fire_after(latest_due).
+    Returns the next fire time to store (None for a spent `once`).
+    """
+    now = datetime.now(UTC)
+    anchor = as_utc(t.next_fire_at) if t.next_fire_at is not None else None
+    if t.schedule_kind == "once":
+        run_at = as_utc(t.run_at) if t.run_at is not None else None
+        if run_at is not None and run_at <= now:
+            session.add(ScheduledTaskRun(
+                scheduled_task_id=t.id, org_id=t.org_id, workspace_id=t.workspace_id,
+                scheduled_for=run_at, claimed_at=now, state="skipped_missed",
+                detail="paused past its one-shot fire time",
+            ))
+            return None
+        return run_at
+    if anchor is None or anchor > now:
+        return anchor if anchor is not None else _initial_next_fire(t)
+    latest_due = latest_due_before(
+        kind=t.schedule_kind, candidate=anchor, now=now,
+        cron_expr=t.cron_expr, interval_seconds=t.interval_seconds, tz=t.timezone,
+    )
+    session.add(ScheduledTaskRun(
+        scheduled_task_id=t.id, org_id=t.org_id, workspace_id=t.workspace_id,
+        scheduled_for=anchor, claimed_at=now, state="skipped_missed",
+        detail=f"paused: skipped {anchor.isoformat()}..{latest_due.isoformat()}",
+    ))
+    return next_fire_after(
+        kind=t.schedule_kind, after=latest_due, cron_expr=t.cron_expr,
         interval_seconds=t.interval_seconds, tz=t.timezone,
     )
 
@@ -1341,7 +1537,10 @@ async def pause_task(
         task = await repo.get_active(task_id)
         assert task is not None
         task.status = "paused"
-        task.next_fire_at = None
+        # Keep next_fire_at as the resume anchor (the occurrence pending at pause
+        # time) so resume can apply the missed-run policy to the paused stretch.
+        # The poller never fires a paused task (claim_due_tasks filters
+        # status='active'), so leaving the anchor set is safe.
         task.updated_at = datetime.now(UTC)
         await session.commit()
         await session.refresh(task)
@@ -1361,7 +1560,13 @@ async def resume_task(
         task = await repo.get_active(task_id)
         assert task is not None
         task.status = "active"
-        task.next_fire_at = _initial_next_fire(task)
+        # Apply the spec's missed-run policy to the paused stretch instead of
+        # silently dropping it. Reuse latest_due_before from an anchor (the last
+        # fire, else the original anchor) to find occurrences that fell due while
+        # paused; if any, record ONE skipped_missed summary row (never one per
+        # occurrence — same as the outage policy, spec §missed-run) before
+        # fast-forwarding next_fire_at. See the resume policy note below.
+        task.next_fire_at = _resume_next_fire(session, task)  # records summary if needed
         task.updated_at = datetime.now(UTC)
         await session.commit()
         await session.refresh(task)
@@ -1486,10 +1691,13 @@ class TestScheduledTaskCRUD:
         assert tid in {t["id"] for t in client.get(BASE).json()["tasks"]}
         assert client.get(f"{BASE}/{tid}").json()["id"] == tid
 
-    def test_pause_clears_next_fire_resume_restores(self, client: TestClient) -> None:
+    def test_pause_keeps_anchor_resume_stays_active(self, client: TestClient) -> None:
+        # Pause preserves next_fire_at as the resume anchor (the poller ignores
+        # paused tasks). Resume keeps it active with a next fire scheduled.
         tid = _make(client).json()["id"]
         paused = client.post(f"{BASE}/{tid}/pause").json()
-        assert paused["status"] == "paused" and paused["next_fire_at"] is None
+        assert paused["status"] == "paused"
+        assert paused["next_fire_at"] is not None  # anchor retained, not nulled
         resumed = client.post(f"{BASE}/{tid}/resume").json()
         assert resumed["status"] == "active" and resumed["next_fire_at"] is not None
 
@@ -1507,13 +1715,85 @@ class TestScheduledTaskCRUD:
         tid = _make(client).json()["id"]
         r = client.get(f"{BASE}/{tid}/runs")
         assert r.status_code == 200 and r.json() == []
+
+
+class TestScheduledTaskValidation:
+    """Bad input must 422, not 500 or silently-wrong behavior (spec validation)."""
+
+    def test_unknown_schedule_kind_422(self, client: TestClient) -> None:
+        assert _make(client, schedule_kind="weekly").status_code == 422
+
+    def test_unknown_target_mode_422(self, client: TestClient) -> None:
+        assert _make(client, target_mode="broadcast").status_code == 422
+
+    def test_invalid_timezone_422(self, client: TestClient) -> None:
+        assert _make(client, timezone="Mars/Phobos").status_code == 422
+
+    def test_invalid_cron_expr_422(self, client: TestClient) -> None:
+        r = _make(client, schedule_kind="cron", cron_expr="not a cron",
+                  interval_seconds=None)
+        assert r.status_code == 422
+
+    def test_once_requires_aware_run_at_422(self, client: TestClient) -> None:
+        # A naive run_at (no offset) is ambiguous; reject it.
+        r = _make(client, schedule_kind="once", interval_seconds=None,
+                  run_at="2030-01-01T00:00:00")
+        assert r.status_code == 422
+
+    def test_interval_below_minimum_422(self, client: TestClient) -> None:
+        assert _make(client, interval_seconds=30).status_code == 422
+
+    def test_bad_agent_config_id_422(self, client: TestClient) -> None:
+        # Only relevant if agent_config_id is honored (see Task 6 decision); if
+        # the field is deferred/removed, delete this test with it.
+        r = _make(client, agent_config_id="ac-doesnotexist")
+        assert r.status_code in (404, 422)
+
+
+class TestScheduledTaskAuth:
+    """Owner/admin mutation gating + fixed-target ownership (spec §auth)."""
+
+    def test_non_owner_member_cannot_mutate_403(
+        self, client: TestClient, member_client: TestClient
+    ) -> None:
+        # Owner (admin `client`) creates; a different non-admin member is 403 on
+        # pause/patch/delete but 200 on read (member-readable).
+        tid = _make(client).json()["id"]
+        assert member_client.get(f"{BASE}/{tid}").status_code == 200
+        assert member_client.post(f"{BASE}/{tid}/pause").status_code == 403
+        assert member_client.patch(f"{BASE}/{tid}", json={"prompt": "x"}).status_code == 403
+        assert member_client.delete(f"{BASE}/{tid}").status_code == 403
+
+    def test_admin_can_mutate_others_task(
+        self, client: TestClient, member_client: TestClient
+    ) -> None:
+        # A task owned by a member can be paused/deleted by an admin.
+        tid = _make(member_client).json()["id"]
+        assert client.post(f"{BASE}/{tid}/pause").status_code == 200
+
+    def test_fixed_target_must_be_owners_conversation_422(
+        self, client: TestClient, member_client: TestClient
+    ) -> None:
+        # A fixed target pointing at a conversation owned by a *different* user
+        # is rejected (the run executes as the owner; cross-user target leaks).
+        other_conv = member_client.post(
+            f"/api/v1/ws/{DEFAULT_WS_ID}/conversations", params={"title": "theirs"}
+        ).json()["id"]
+        r = _make(client, target_mode="fixed", target_conversation_id=other_conv)
+        assert r.status_code == 422
 ```
+
+> Auth tests need a second non-admin member in `DEFAULT_WS_ID`. If the e2e
+> conftest has no `member_client` fixture, add one (register a user, add them to
+> the workspace as a plain member, log in) mirroring the existing `client`
+> fixture; reuse it across the auth cases.
 
 - [ ] **Step 2: Run the tests**
 
 Run: `uv run pytest tests/e2e/test_scheduled_tasks_api.py -v`
-Expected: PASS — 8 passed. (The `client` fixture logs in as admin of
-`DEFAULT_WS_ID`; the conftest auto-routes to the worktree test DB.)
+Expected: PASS — all CRUD, validation, and auth cases green. (The `client`
+fixture logs in as admin of `DEFAULT_WS_ID`; the conftest auto-routes to the
+worktree test DB.)
 
 - [ ] **Step 3: Commit**
 
@@ -1627,6 +1907,55 @@ async def test_missed_beyond_grace_skips_and_fast_forwards(client: TestClient) -
 
 
 @pytest.mark.asyncio
+async def test_stale_started_run_is_failed(client: TestClient) -> None:
+    # A row stuck in 'started' (replica died before the completion hook) past
+    # the started_timeout must be marked failed, not left stuck forever.
+    tid = _create_due_once(client)
+    poller = ScheduledTaskPoller(
+        run_manager=client.app.state.run_manager, started_timeout_seconds=1
+    )
+    await poller.poll_once()  # creates + dispatches -> state 'started'
+    async with async_session_maker() as s:
+        rows = await _runs_for(tid)
+        row = rows[0]
+        # Back-date started_at past the 1s timeout.
+        db_row = await s.get(ScheduledTaskRun, row.id)
+        assert db_row is not None
+        db_row.state = "started"
+        db_row.started_at = datetime.now(UTC) - timedelta(minutes=5)
+        await s.commit()
+    await poller.poll_once()  # the recovery sweep should fail it
+    rows = await _runs_for(tid)
+    assert rows[0].state == "failed"
+
+
+@pytest.mark.asyncio
+async def test_paused_stretch_records_skipped_missed_on_resume(client: TestClient) -> None:
+    # Pause keeps the anchor; resuming after the anchor fell due records ONE
+    # skipped_missed summary (not silent drop) and fast-forwards next_fire_at.
+    tid = client.post(
+        BASE,
+        json={
+            "name": "hourly", "prompt": "hi", "schedule_kind": "interval",
+            "interval_seconds": 3600, "target_mode": "new_each_run",
+        },
+    ).json()["id"]
+    client.post(f"{BASE}/{tid}/pause")
+    async with async_session_maker() as s:
+        task = await s.get(ScheduledTask, tid)
+        assert task is not None
+        task.next_fire_at = datetime.now(UTC) - timedelta(hours=3)  # fell due while paused
+        await s.commit()
+    client.post(f"{BASE}/{tid}/resume")
+    rows = await _runs_for(tid)
+    assert sum(1 for r in rows if r.state == "skipped_missed") == 1
+    async with async_session_maker() as s:
+        task = await s.get(ScheduledTask, tid)
+        assert task is not None and task.next_fire_at is not None
+        assert task.next_fire_at > datetime.now(UTC) - timedelta(hours=1)
+
+
+@pytest.mark.asyncio
 async def test_concurrent_pollers_fire_once(client: TestClient) -> None:
     tid = _create_due_once(client)
     p1 = ScheduledTaskPoller(run_manager=client.app.state.run_manager)
@@ -1640,9 +1969,11 @@ async def test_concurrent_pollers_fire_once(client: TestClient) -> None:
 - [ ] **Step 2: Run the firing tests**
 
 Run: `uv run pytest tests/e2e/test_scheduled_tasks_firing.py -v`
-Expected: PASS — 3 passed. (Runs hit the real cubepi path via `start_run`; if a
-provider key is absent the run may end `failed`, which still satisfies the
-`state in {"started","succeeded","failed"}` assertion and `run_id is not None`.)
+Expected: PASS — 5 passed (once-fires, missed-grace, stale-started recovery,
+paused-stretch summary, concurrent-once). Runs hit the real cubepi path via
+`start_run`; if a provider key is absent the run may end `failed`, which still
+satisfies the `state in {"started","succeeded","failed"}` assertion and
+`run_id is not None`.
 
 - [ ] **Step 3: Commit**
 
@@ -1653,7 +1984,44 @@ git commit -m "test(e2e): scheduled-task firing, missed-run, concurrency"
 
 ---
 
-### Task 12: Pre-PR sweep — full type + lint + targeted test run
+### Task 12: Frontend — scope-isolated scheduled-tasks page (spec requirement)
+
+The spec requires a scope-isolated workspace **page**, not just the API
+("Scope-isolated workspace API and page"; "Frontend gets its own Next route +
+page file"). This task adds it. Follow the `w/[wsId]/conversations` feature as
+the structural template; obey the scope-isolated-pages rule (own route + page
+file, modules are the reuse boundary, no `mode?` prop).
+
+**Files (mirror exact conventions of the existing conversations feature):**
+- Create: `frontend/packages/core/src/types/scheduled-task.ts` — request/response
+  types matching the backend schemas (`ScheduledTaskOut`, run shape, create/patch).
+- Create: the api client + `useScheduledTasks` / mutation hooks under
+  `frontend/packages/core/src/api/` + `.../hooks/`.
+- Create: `frontend/packages/web/app/api/v1/ws/[wsId]/scheduled-tasks/route.ts`
+  and `[id]/route.ts`, `[id]/pause/route.ts`, `[id]/resume/route.ts`,
+  `[id]/runs/route.ts` — SSE-safe proxy handlers (keep `compress: false`).
+- Create: `frontend/packages/web/app/(app)/w/[wsId]/scheduled-tasks/page.tsx` and
+  its module components (list, detail/runs, create/edit form, pause/resume/delete
+  controls). Gate mutate controls to owner-or-admin to match the API.
+- Modify: workspace nav to add the "Scheduled tasks" entry.
+
+- [ ] **Step 1: Types + core build.** Add the shared types and build
+  `@cubebox/core` (`pnpm build` in the core package) so the web app sees them.
+- [ ] **Step 2: Proxy routes.** Add the `app/api/.../scheduled-tasks` handlers
+  mirroring the conversations proxy; verify each forwards method + body + auth.
+- [ ] **Step 3: Page + modules.** Build the page assembling list/detail/form
+  modules. Match the project's design quality bar (shadcn components, polish).
+- [ ] **Step 4: Verify.** `pnpm lint && pnpm type-check` clean; a Playwright
+  smoke (create → see in list → pause → resume → delete) under the existing e2e
+  harness. Keep selectors scoped per the project's e2e conventions.
+- [ ] **Step 5: Commit** the frontend changes in one commit scoped `(#150)`.
+
+> If the agent_config_id Task 6 decision is "honor it", surface an agent-config
+> selector in the create/edit form; if "defer", omit it from the UI too.
+
+---
+
+### Task 13: Pre-PR sweep — full type + lint + targeted test run
 
 **Files:** none (verification only).
 
@@ -1667,13 +2035,18 @@ uv run ruff check cubebox/schedules cubebox/api/routes/v1/ws_scheduled_tasks.py
 Expected: `Success: no issues found` and ruff clean (no findings). Fix any
 100-char line-length or typing issues inline.
 
+- [ ] **Step 1b: Frontend checks**
+
+Run (from `frontend/`): `pnpm build` (build `@cubebox/core` first), then
+`pnpm lint && pnpm type-check`. Expected: clean.
+
 - [ ] **Step 2: Run all new tests together**
 
 Run:
 ```bash
 uv run pytest tests/unit/test_schedule_compute.py tests/e2e/test_scheduled_tasks_api.py tests/e2e/test_scheduled_tasks_firing.py -v
 ```
-Expected: all pass (6 unit + 8 CRUD + 3 firing = 17 passed).
+Expected: all pass (7 unit + CRUD/validation/auth + 5 firing).
 
 - [ ] **Step 3: Confirm migration is current**
 
@@ -1727,6 +2100,22 @@ git commit -m "chore(schedules): mypy/ruff sweep fixes"
   `start_run` → `skipped_active`).
 - Run history read API → Task 9 (`GET /{task_id}/runs`).
 - Poller started on every replica in lifespan + drained on shutdown → Task 8.
+- Naive DB datetimes normalized before schedule arithmetic → Task 2 (`as_utc`
+  at compute boundaries + poller), Task 2 naive-datetime regression test.
+- Scope-isolated workspace **page** (own Next route + page file) → Task 12.
+- Paused-stretch missed-run policy (one `skipped_missed` summary on resume, not
+  a silent drop) → Task 9 (`_resume_next_fire`, pause keeps the anchor), Task 11
+  paused-stretch test.
+- Stale `started` rows recovered (replica died before completion hook) → Task 5
+  (`fail_stale_started_runs`), Task 8 sweep, Task 11 stale-started test.
+- Input validation (unknown kind/mode, bad timezone, bad cron, naive `run_at`,
+  sub-minimum interval) is 422 not 500 → Task 9 schema validators, Task 10
+  `TestScheduledTaskValidation`.
+- Auth coverage (non-owner member 403, admin mutates other's task, fixed target
+  owned by another user) → Task 10 `TestScheduledTaskAuth`.
+- `agent_config_id` is honored end-to-end OR dropped — never store-and-ignore →
+  Task 6 decision note (thread through `RunContext`/`_execute_run`, or remove the
+  column from this PR).
 
 **Note on `public_id.py`:** the spec and CLAUDE.md mention adding a prefix there.
 Per the codebase convention (Task 3, confirmed against `conversation.py` /
