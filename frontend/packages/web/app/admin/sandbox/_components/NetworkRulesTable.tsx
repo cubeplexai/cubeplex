@@ -29,7 +29,9 @@ export function NetworkRulesTable({ rules, onChange, disabled }: Props) {
     <div className="flex flex-col gap-2">
       {rules.length === 0 ? (
         <p className="rounded-md border border-dashed border-border/60 bg-muted/20 px-3 py-3 text-center text-xs text-muted-foreground">
-          No network rules. Outbound traffic is unrestricted.
+          No network rules. Outbound traffic is denied by default — add{' '}
+          <span className="font-medium">allow</span> rules for the hosts your sandboxes need to
+          reach.
         </p>
       ) : (
         <div className="overflow-hidden rounded-md border border-border/70 bg-card/40">
