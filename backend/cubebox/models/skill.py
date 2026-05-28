@@ -4,7 +4,7 @@ from datetime import UTC, datetime
 from typing import Any, ClassVar
 
 import sqlalchemy as sa
-from sqlalchemy import JSON, Column, Index, UniqueConstraint
+from sqlalchemy import JSON, Column, DateTime, Index, UniqueConstraint
 from sqlmodel import Field, SQLModel
 
 from cubebox.models.mixins import CubeboxBase, TimestampMixin
@@ -28,7 +28,10 @@ class Skill(CubeboxBase, table=True):
     current_version: str = Field(max_length=32)
     description: str = Field(max_length=1024)
     keywords: list[str] = Field(default_factory=list, sa_column=Column(JSON))
-    deprecated_at: datetime | None = Field(default=None, nullable=True)
+    deprecated_at: datetime | None = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True),
+    )
 
     __table_args__ = (
         UniqueConstraint("name", name="uq_skill_name"),
@@ -71,7 +74,10 @@ class OrgSkillInstall(CubeboxBase, table=True):
     )
     installed_version: str = Field(max_length=32)
     installed_by_user_id: str = Field(foreign_key="users.id", max_length=20)
-    installed_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    installed_at: datetime = Field(
+        default_factory=lambda: datetime.now(UTC),
+        sa_column=Column(DateTime(timezone=True), nullable=False),
+    )
     auto_bind: bool = Field(default=False)
 
     __table_args__ = (
@@ -117,4 +123,7 @@ class OrgPreinstalledTombstone(SQLModel, TimestampMixin, table=True):
     org_id: str = Field(primary_key=True, foreign_key="organizations.id", max_length=20, index=True)
     skill_id: str = Field(primary_key=True, foreign_key="skills.id", max_length=20, index=True)
     hidden_by_user_id: str = Field(foreign_key="users.id", max_length=20)
-    hidden_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    hidden_at: datetime = Field(
+        default_factory=lambda: datetime.now(UTC),
+        sa_column=Column(DateTime(timezone=True), nullable=False),
+    )

@@ -3,7 +3,7 @@
 from datetime import UTC, datetime
 from typing import ClassVar
 
-from sqlalchemy import Index
+from sqlalchemy import Column, DateTime, Index
 from sqlmodel import Field
 
 from cubebox.models.mixins import CubeboxBase, OrgScopedMixin
@@ -25,8 +25,14 @@ class BillingEvent(CubeboxBase, OrgScopedMixin, table=True):
     event_type: str = Field(max_length=32)  # "llm_call" | "sandbox_compute" | …
     cost_amount_micro: int = Field(default=0)  # amount × 10⁶ in `currency`
     currency: str = Field(default="USD", max_length=3)
-    started_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
-    ended_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    started_at: datetime = Field(
+        default_factory=lambda: datetime.now(UTC),
+        sa_column=Column(DateTime(timezone=True), nullable=False),
+    )
+    ended_at: datetime = Field(
+        default_factory=lambda: datetime.now(UTC),
+        sa_column=Column(DateTime(timezone=True), nullable=False),
+    )
     duration_ms: int = Field(default=0)
     status: str = Field(max_length=20)  # "success" | "error" | "fallback_failed"
 

@@ -3,7 +3,7 @@
 from datetime import datetime
 from typing import ClassVar
 
-from sqlalchemy import Index, text
+from sqlalchemy import Column, DateTime, Index, text
 from sqlmodel import Field
 
 from cubebox.models.mixins import CubeboxBase, OrgScopedMixin
@@ -39,4 +39,7 @@ class Conversation(CubeboxBase, OrgScopedMixin, table=True):
     title: str = Field(max_length=255)
     has_messages: bool = Field(default=False, index=True)
     is_pinned: bool = Field(default=False)
-    deleted_at: datetime | None = Field(default=None)
+    deleted_at: datetime | None = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True),
+    )
