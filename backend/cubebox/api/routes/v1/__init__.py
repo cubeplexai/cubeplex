@@ -14,6 +14,7 @@ from cubebox.api.routes.v1 import (
     ws_mcp,
     ws_members,
     ws_sandbox_env,
+    ws_scheduled_tasks,
     ws_settings,
     ws_skills,
 )
@@ -43,6 +44,7 @@ __all__ = [
     "ws_mcp",
     "ws_members",
     "ws_sandbox_env",
+    "ws_scheduled_tasks",
     "ws_settings",
     "ws_skills",
 ]

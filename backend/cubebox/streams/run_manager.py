@@ -496,9 +496,17 @@ class RunManager:
         content: str,
         attachments: list[str] | None = None,
         ctx: RunContext,
+        run_id: str | None = None,
     ) -> str:
-        """Create and start a new background run."""
-        run_id = str(uuid7())
+        """Create and start a new background run.
+
+        ``run_id`` is generated unless the caller supplies one. The scheduled-
+        task poller pre-generates it and stamps the occurrence row so the
+        completion hook can find the row by ``run_id`` even if ``_execute_run``
+        finishes faster than the poller's post-dispatch UPDATE.
+        """
+        if run_id is None:
+            run_id = str(uuid7())
         started_at = utc_isoformat(datetime.now(UTC))
         created_run = await create_run(
             self._redis,
@@ -1623,6 +1631,7 @@ class RunManager:
             citation_event_queue,
         )
         from cubebox.middleware.subagents import subagent_event_queue
+        from cubebox.schedules.completion_hook import record_scheduled_run_terminal_state
 
         sandbox = None
         sandbox_manager = None
@@ -1927,6 +1936,7 @@ class RunManager:
                 run_id=run_id,
                 status="completed",
             )
+            await record_scheduled_run_terminal_state(run_id=run_id, run_status="completed")
             await self._maybe_consolidate_memory(conversation_id=conversation_id, ctx=ctx)
         except asyncio.CancelledError:
             await update_run_meta(
@@ -1935,6 +1945,7 @@ class RunManager:
                 run_id=run_id,
                 status="cancelled",
             )
+            await record_scheduled_run_terminal_state(run_id=run_id, run_status="cancelled")
             # Defense in depth: cubepi backfills tool_results for tool_calls
             # left dangling by a cancel, but if that cleanup was itself cut
             # short the persisted thread would still have orphan tool_calls
@@ -1953,6 +1964,7 @@ class RunManager:
                 run_id=run_id,
                 status="failed",
             )
+            await record_scheduled_run_terminal_state(run_id=run_id, run_status="failed")
             with suppress(Exception):
                 await self._append_error(
                     run_id,
