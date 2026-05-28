@@ -13,7 +13,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, ClassVar
 
-from sqlalchemy import Column, Index, Integer, UniqueConstraint, text
+from sqlalchemy import Column, DateTime, Index, Integer, UniqueConstraint, text
 from sqlmodel import Field
 
 from cubebox.models.mixins import CubeboxBase, OrgScopedMixin
@@ -39,7 +39,10 @@ class ScheduledTask(CubeboxBase, OrgScopedMixin, table=True):
     schedule_kind: str = Field(max_length=16)  # cron | interval | once
     cron_expr: str | None = Field(default=None, max_length=255)
     interval_seconds: int | None = Field(default=None)
-    run_at: datetime | None = Field(default=None)
+    run_at: datetime | None = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True),
+    )
     timezone: str = Field(default="UTC", max_length=64)
 
     prompt: str = Field()
@@ -49,9 +52,18 @@ class ScheduledTask(CubeboxBase, OrgScopedMixin, table=True):
         default=None, foreign_key="conversations.id", max_length=20
     )
 
-    next_fire_at: datetime | None = Field(default=None, index=True)
-    last_fired_at: datetime | None = Field(default=None)
-    deleted_at: datetime | None = Field(default=None)
+    next_fire_at: datetime | None = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True, index=True),
+    )
+    last_fired_at: datetime | None = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True),
+    )
+    deleted_at: datetime | None = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True),
+    )
 
 
 class ScheduledTaskRun(CubeboxBase, OrgScopedMixin, table=True):
@@ -65,9 +77,16 @@ class ScheduledTaskRun(CubeboxBase, OrgScopedMixin, table=True):
     )
 
     scheduled_task_id: str = Field(foreign_key="scheduled_tasks.id", max_length=20, index=True)
-    scheduled_for: datetime = Field()
-    claimed_at: datetime = Field()
-    started_at: datetime | None = Field(default=None)
+    scheduled_for: datetime = Field(
+        sa_column=Column(DateTime(timezone=True), nullable=False),
+    )
+    claimed_at: datetime = Field(
+        sa_column=Column(DateTime(timezone=True), nullable=False),
+    )
+    started_at: datetime | None = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True),
+    )
     # claimed | started | succeeded | failed | skipped_missed |
     # skipped_busy_max_retries
     state: str = Field(max_length=32)
@@ -76,7 +95,10 @@ class ScheduledTaskRun(CubeboxBase, OrgScopedMixin, table=True):
         default=0,
         sa_column=Column(Integer(), nullable=False, server_default="0"),
     )
-    next_retry_at: datetime | None = Field(default=None, nullable=True)
+    next_retry_at: datetime | None = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True),
+    )
     run_id: str | None = Field(default=None, max_length=64)
     conversation_id: str | None = Field(default=None, max_length=20)
     detail: str | None = Field(default=None)
