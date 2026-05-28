@@ -482,86 +482,103 @@ export function AssistantMessage({
   // Count active subagents (streaming)
   const activeSubagentCount = subAgentStreams ? Object.keys(subAgentStreams).length : 0
 
+  // Widgets render OUTSIDE the assistant max-w-[75%] bubble column so they can
+  // span the full chat-column width (max-w-2xl from MessageList) and sit
+  // centered within it — matching how the rest of the chat reads visually
+  // instead of being pinned to the assistant's left edge.
+  const isWidget = (item: (typeof grouped)[number]): boolean =>
+    !Array.isArray(item) &&
+    (item.type === 'tool_call' || item.type === 'tool_call_streaming') &&
+    item.name === 'show_widget'
+  const bubbleItems = grouped.map((item, i) => ({ item, i })).filter(({ item }) => !isWidget(item))
+  const widgetItems = grouped.map((item, i) => ({ item, i })).filter(({ item }) => isWidget(item))
+
+  const renderItem = (item: (typeof grouped)[number], i: number) => {
+    if (Array.isArray(item)) {
+      const tcBlocks = item as (ContentBlock & { type: 'tool_call' })[]
+      return (
+        <ToolCallGroup
+          key={i}
+          blocks={tcBlocks}
+          toolResultMap={toolResultMap}
+          isStreaming={isStreaming === true}
+          messageCreatedAt={msgCreatedAt}
+          agentId={streamAgentId}
+        />
+      )
+    }
+    return (
+      <ContentBlockRenderer
+        key={i}
+        block={item}
+        index={i}
+        isLast={i === grouped.length - 1}
+        isStreaming={isStreaming === true}
+        subAgentStreams={subAgentStreams}
+        subagentDataMap={subagentDataMap}
+        toolResultMap={toolResultMap}
+        messageCreatedAt={msgCreatedAt}
+        subagentIndex={subagentIndexMap.get(i)}
+        agentId={streamAgentId}
+        conversationId={conversationId}
+      />
+    )
+  }
+
   return (
-    <div data-role="assistant" className="flex justify-start gap-2.5">
-      <div
-        className="shrink-0 w-6 h-6 rounded-md border border-border bg-card
+    <div data-role="assistant" className="space-y-2">
+      <div className="flex justify-start gap-2.5">
+        <div
+          className="shrink-0 w-6 h-6 rounded-md border border-border bg-card
         flex items-center justify-center mt-0.5"
-      >
-        <Bot className="size-3.5 text-primary/70" />
-      </div>
-      <div className="flex-1 max-w-[75%] space-y-2">
-        {totalSubagents >= 2 && (
-          <SubAgentCluster
-            activeCount={isStreaming === true ? activeSubagentCount : 0}
-            totalCount={totalSubagents}
-          />
-        )}
-        {grouped.map((item, i) => {
-          if (Array.isArray(item)) {
-            // grouped tool_call blocks
-            const tcBlocks = item as (ContentBlock & { type: 'tool_call' })[]
-            return (
-              <ToolCallGroup
-                key={i}
-                blocks={tcBlocks}
-                toolResultMap={toolResultMap}
-                isStreaming={isStreaming === true}
-                messageCreatedAt={msgCreatedAt}
-                agentId={streamAgentId}
-              />
-            )
-          }
-          return (
-            <ContentBlockRenderer
-              key={i}
-              block={item}
-              index={i}
-              isLast={i === grouped.length - 1}
-              isStreaming={isStreaming === true}
-              subAgentStreams={subAgentStreams}
-              subagentDataMap={subagentDataMap}
-              toolResultMap={toolResultMap}
-              messageCreatedAt={msgCreatedAt}
-              subagentIndex={subagentIndexMap.get(i)}
-              agentId={streamAgentId}
-              conversationId={conversationId}
+        >
+          <Bot className="size-3.5 text-primary/70" />
+        </div>
+        <div className="flex-1 max-w-[75%] space-y-2">
+          {totalSubagents >= 2 && (
+            <SubAgentCluster
+              activeCount={isStreaming === true ? activeSubagentCount : 0}
+              totalCount={totalSubagents}
             />
-          )
-        })}
-        {isStreaming && todos && todos.length > 0 && (
-          <TaskProgressCard todos={todos} isStreaming={true} />
-        )}
-        {!isStreaming && historyTodos.length > 0 && (
-          <TaskProgressCard todos={historyTodos} isStreaming={false} />
-        )}
-        {isStreaming && (
-          <div data-testid="loading-indicator" className="flex items-center gap-1 pl-1 h-6">
-            {statusPhase === 'sandbox_creating' ? (
-              <span className="text-xs text-muted-foreground animate-pulse">
-                {t('sandboxPreparing')}
-              </span>
-            ) : statusPhase === 'sandbox_failed' ? (
-              <span className="text-xs text-destructive">{t('sandboxFailed')}</span>
-            ) : (
-              <>
-                <span
-                  className="w-1.5 h-1.5 rounded-full bg-primary
+          )}
+          {bubbleItems.map(({ item, i }) => renderItem(item, i))}
+          {isStreaming && todos && todos.length > 0 && (
+            <TaskProgressCard todos={todos} isStreaming={true} />
+          )}
+          {!isStreaming && historyTodos.length > 0 && (
+            <TaskProgressCard todos={historyTodos} isStreaming={false} />
+          )}
+          {isStreaming && (
+            <div data-testid="loading-indicator" className="flex items-center gap-1 pl-1 h-6">
+              {statusPhase === 'sandbox_creating' ? (
+                <span className="text-xs text-muted-foreground animate-pulse">
+                  {t('sandboxPreparing')}
+                </span>
+              ) : statusPhase === 'sandbox_failed' ? (
+                <span className="text-xs text-destructive">{t('sandboxFailed')}</span>
+              ) : (
+                <>
+                  <span
+                    className="w-1.5 h-1.5 rounded-full bg-primary
                   animate-bounce [animation-delay:0ms]"
-                />
-                <span
-                  className="w-1.5 h-1.5 rounded-full bg-primary
+                  />
+                  <span
+                    className="w-1.5 h-1.5 rounded-full bg-primary
                   animate-bounce [animation-delay:150ms]"
-                />
-                <span
-                  className="w-1.5 h-1.5 rounded-full bg-primary
+                  />
+                  <span
+                    className="w-1.5 h-1.5 rounded-full bg-primary
                   animate-bounce [animation-delay:300ms]"
-                />
-              </>
-            )}
-          </div>
-        )}
+                  />
+                </>
+              )}
+            </div>
+          )}
+        </div>
       </div>
+      {widgetItems.length > 0 && (
+        <div className="space-y-2">{widgetItems.map(({ item, i }) => renderItem(item, i))}</div>
+      )}
     </div>
   )
 }
