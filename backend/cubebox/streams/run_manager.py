@@ -922,10 +922,11 @@ class RunManager:
         #   → write_todos
         #   → subagent
         #   → calculator/datetime
-        #   → view_images
-        #   → generate_image  (sandbox-gated)
         #   → memory_*
         #   → load_skill
+        #   → find_skills
+        #   → view_images
+        #   → generate_image  (sandbox-gated)
         #   → mcp_tools
         #
         # Middleware that contributes tools writes to _sandbox_tools,
@@ -991,6 +992,31 @@ class RunManager:
                 )
             except Exception as _exc:
                 logger.warning("load_skill unavailable for cubepi run: {}", _exc)
+
+        # find_skills — read-only discovery; needs catalog + a source registry.
+        # NOTE: catalog_session is a _run_cubepi_path PARAM, not a local. Guard
+        # for None (the catalog DB may be unavailable at run start).
+        if skill_catalog is not None and catalog_session is not None:
+            try:
+                from cubebox.repositories.organization import OrganizationRepository
+                from cubebox.skills.discovery import SkillDiscoveryService
+                from cubebox.skills.sources.registry import SkillSourceRegistry
+                from cubebox.tools.builtin.find_skills import create_find_skills_tool
+
+                _org = await OrganizationRepository(catalog_session).get(ctx.org_id)
+                if _org is not None:
+                    _registry = await SkillSourceRegistry.build(
+                        session=catalog_session,
+                        catalog=skill_catalog,
+                        org_id=ctx.org_id,
+                        org_slug=_org.slug,
+                        workspace_id=ctx.workspace_id,
+                    )
+                    _builtin_tools.append(
+                        create_find_skills_tool(discovery=SkillDiscoveryService(_registry))
+                    )
+            except Exception as _exc:  # noqa: BLE001
+                logger.warning("find_skills unavailable for cubepi run: {}", _exc)
 
         # view_images — per-request DI: objectstore + LLM capabilities.
         # Must come after memory tools and load_skill to preserve the
