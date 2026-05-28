@@ -550,6 +550,32 @@ async def test_status_filter_pages_across_unmatched_rows(
 
 
 # ---------------------------------------------------------------------------
+# Duplicate trigger names in the same workspace must not collide on the
+# credential vault's (org_id, kind, name) unique constraint (codex P2).
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_duplicate_trigger_name_does_not_collide_on_vault(
+    authenticated_client: tuple[httpx.AsyncClient, str],
+) -> None:
+    client, ws_id = authenticated_client
+    user_id = await _get_my_user_id(client)
+    body = {
+        "name": "duplicate-name",
+        "webhook_secret": "s",
+        "prompt_template": "hi",
+        "payload_fields": [],
+        "run_as_user_id": user_id,
+    }
+    r1 = await client.post(f"/api/v1/ws/{ws_id}/triggers", json=body)
+    assert r1.status_code == 201, r1.text
+    r2 = await client.post(f"/api/v1/ws/{ws_id}/triggers", json=body)
+    assert r2.status_code == 201, r2.text
+    assert r1.json()["id"] != r2.json()["id"]
+
+
+# ---------------------------------------------------------------------------
 # Mutating routes are admin-gated (codex P1).
 # ---------------------------------------------------------------------------
 
