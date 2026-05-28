@@ -453,6 +453,109 @@ async def test_resume_record_returns_none_when_row_terminal() -> None:
 
 
 @pytest.mark.asyncio
+async def test_resume_record_recovery_bounce_tolerates_flapping_reconciler() -> None:
+    """If the reconciler reverts our row to ``paused`` two ticks in a row
+    while we're trying to land ``running``, the bounded retry loop keeps
+    re-claiming until either we win or we hit the attempt ceiling. The
+    previous single-shot bounce would have given up after one revert
+    (codex P2 round 14).
+    """
+    factory, session = _make_session_factory()
+    mgr = SandboxManager(factory)
+    mgr._exchange_host = ""
+
+    record = _make_record()
+    record.status = "paused"
+
+    paused_view = _make_record()
+    paused_view.status = "paused"
+    probe_repo = MagicMock()
+    probe_repo.get = AsyncMock(return_value=paused_view)
+
+    repo = MagicMock()
+    # mark_resuming: paused -> resuming (entry), then 2x recovery bounce.
+    repo.mark_resuming = AsyncMock(side_effect=[True, True, True])
+    # mark_running: first two fail (reconciler revert), third wins.
+    repo.mark_running = AsyncMock(side_effect=[False, False, True])
+    repo.update_activity = AsyncMock()
+    repo.mark_failed = AsyncMock()
+
+    backend = MagicMock(name="OpenSandbox-backend")
+
+    with (
+        patch(
+            "cubebox.sandbox.manager.OpenSandbox.connect_or_resume",
+            new=AsyncMock(return_value=backend),
+        ),
+        patch("cubebox.sandbox.manager.UserSandboxRepository", return_value=probe_repo),
+    ):
+        result = await mgr._resume_record(
+            session,
+            repo,
+            record,
+            conn_config=MagicMock(),
+            org_id="org-1",
+            workspace_id="ws-1",
+            user_id="user-1",
+        )
+
+    assert result is backend  # Eventually lands.
+    assert repo.mark_resuming.await_count == 3  # 1 entry + 2 recovery
+    assert repo.mark_running.await_count == 3
+    repo.update_activity.assert_awaited_once_with(record.id)
+    repo.mark_failed.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_resume_record_recovery_gives_up_at_ceiling() -> None:
+    """If the reconciler reverts past ``MAX_RUN_ATTEMPTS`` (3) in a row, the
+    bounded loop surfaces the failure so the caller can create-new rather
+    than livelocking. (codex P2 round 14 bounded-recovery requirement)
+    """
+    factory, session = _make_session_factory()
+    mgr = SandboxManager(factory)
+    mgr._exchange_host = ""
+
+    record = _make_record()
+    record.status = "paused"
+
+    paused_view = _make_record()
+    paused_view.status = "paused"
+    probe_repo = MagicMock()
+    probe_repo.get = AsyncMock(return_value=paused_view)
+
+    repo = MagicMock()
+    repo.mark_resuming = AsyncMock(return_value=True)
+    repo.mark_running = AsyncMock(return_value=False)  # reverted forever
+    repo.update_activity = AsyncMock()
+    repo.mark_failed = AsyncMock()
+
+    backend = MagicMock(name="OpenSandbox-backend")
+
+    with (
+        patch(
+            "cubebox.sandbox.manager.OpenSandbox.connect_or_resume",
+            new=AsyncMock(return_value=backend),
+        ),
+        patch("cubebox.sandbox.manager.UserSandboxRepository", return_value=probe_repo),
+    ):
+        result = await mgr._resume_record(
+            session,
+            repo,
+            record,
+            conn_config=MagicMock(),
+            org_id="org-1",
+            workspace_id="ws-1",
+            user_id="user-1",
+        )
+
+    assert result is None  # Gave up after the ceiling, caller will create new.
+    # 1 initial + 2 recovery before ceiling -> 3 total mark_running calls.
+    assert repo.mark_running.await_count == 3
+    repo.update_activity.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_resume_record_exception_leaves_row_resuming_for_reconciler() -> None:
     """``connect_or_resume`` raises. Client-side exceptions are ambiguous
     (the provider may still be transitioning to ``Running`` after a

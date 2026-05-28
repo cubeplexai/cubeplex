@@ -60,6 +60,13 @@ class SandboxManager:
         # mid-turn activity bumps so chatty tool loops don't hammer the DB.
         self._touch_cache: dict[str, datetime] = {}
 
+        # Per-sandbox locks serialising ``_apply_egress`` so two concurrent
+        # ``get_or_create`` calls hitting the same running sandbox can't
+        # interleave their revoke + re-add and leave egress refs half-wired
+        # (codex P2 round 14). In-process only; multi-worker deployments
+        # need DB-level serialisation (out of scope here).
+        self._egress_locks: dict[str, asyncio.Lock] = {}
+
         # Sandbox workdir
         self._workdir: str = config.get("sandbox.workdir", "/workspace")
 
@@ -153,25 +160,32 @@ class SandboxManager:
         # will pass these as per-command envs via RunCommandOpts.
         backend.set_run_env(injection.env)
 
-        # Revoke any prior refs for this sandbox, then persist a fresh set.
-        # Revoke-then-add ensures the exchange endpoint never sees stale refs
-        # after a secret rotation or re-resolve.
-        ref_repo = EgressRefRepository(session)
-        await ref_repo.revoke_for_sandbox(sandbox_id)
-        expires_at = datetime.now(UTC) + timedelta(seconds=self._ttl)
-        for b in injection.bindings:
-            await ref_repo.add(
-                EgressRef(
-                    ref_hash=b["ref_hash"],
-                    sandbox_id=sandbox_id,
-                    org_id=org_id,
-                    workspace_id=workspace_id,
-                    user_id=user_id,
-                    run_id=None,
-                    bindings=[b],
-                    expires_at=expires_at,
+        # Serialise the revoke + re-add per sandbox_id so two concurrent
+        # ``_apply_egress`` calls can't interleave (A.revoke, A.add(a1),
+        # B.revoke nukes a1, A.add(a2), B.add(b1), B.add(b2)) and leave A
+        # holding placeholders for refs that B revoked. Lock is in-process —
+        # multi-worker deployments need DB-level serialisation.
+        lock = self._egress_locks.setdefault(sandbox_id, asyncio.Lock())
+        async with lock:
+            # Revoke any prior refs for this sandbox, then persist a fresh set.
+            # Revoke-then-add ensures the exchange endpoint never sees stale refs
+            # after a secret rotation or re-resolve.
+            ref_repo = EgressRefRepository(session)
+            await ref_repo.revoke_for_sandbox(sandbox_id)
+            expires_at = datetime.now(UTC) + timedelta(seconds=self._ttl)
+            for b in injection.bindings:
+                await ref_repo.add(
+                    EgressRef(
+                        ref_hash=b["ref_hash"],
+                        sandbox_id=sandbox_id,
+                        org_id=org_id,
+                        workspace_id=workspace_id,
+                        user_id=user_id,
+                        run_id=None,
+                        bindings=[b],
+                        expires_at=expires_at,
+                    )
                 )
-            )
 
     async def get_or_create(
         self,
@@ -601,7 +615,20 @@ class SandboxManager:
         # session is ``expire_on_commit=False``) can't hide the reconciler's
         # commit. Provider is the source of truth; if it returned a healthy
         # backend, the DB must end up at ``running``.
-        if not await repo.mark_running(record.id, last_resumed_at=datetime.now(UTC)):
+        # Provider confirmed ``Running``; drive the DB row to ``running``.
+        # The reconciler can race us in two ways (see (a)/(b) below); bounded
+        # retry loop tolerates back-to-back reverts before giving up.
+        #   (a) Reconciler observed provider ``Paused`` mid-resume and
+        #       reverted ``resuming -> paused`` — re-claim and retry.
+        #   (b) Reconciler observed provider ``Running`` and committed
+        #       ``resuming -> running`` itself — already where we want.
+        # ``MAX_RUN_ATTEMPTS`` bounds the recovery so a flapping reconciler
+        # can't pin us in a livelock; 3 attempts is far more than the
+        # observed worst case (one revert) yet still finite.
+        MAX_RUN_ATTEMPTS = 3
+        run_ok = await repo.mark_running(record.id, last_resumed_at=datetime.now(UTC))
+        attempt = 1
+        while not run_ok:
             async with self._session_factory() as probe_session:
                 probe_repo = UserSandboxRepository(
                     probe_session, org_id=org_id, workspace_id=workspace_id
@@ -610,24 +637,11 @@ class SandboxManager:
             current_status = current.status if current else None
             if current_status == "running":
                 # (b) Reconciler already landed the row at ``running``.
-                pass
-            elif current_status == "paused":
-                # (a) Reconciler reverted mid-resume. Re-claim and try again.
-                await repo.mark_resuming(record.id)
-                if not await repo.mark_running(record.id, last_resumed_at=datetime.now(UTC)):
-                    logger.warning(
-                        "Resume of {} succeeded at provider but row could not "
-                        "be marked running after recovery bounce (status={}); "
-                        "treating as failure",
-                        record.sandbox_id,
-                        current_status,
-                    )
-                    return None
-            else:
+                run_ok = True
+                break
+            if current_status != "paused":
                 # failed / terminated / row deleted — provider says running
-                # but DB has gone terminal under us. Surface as failure so
-                # ``get_or_create`` creates a fresh sandbox rather than
-                # returning a handle whose DB row disagrees.
+                # but DB has gone terminal under us. Surface as failure.
                 logger.warning(
                     "Resume of {} succeeded at provider but row is in "
                     "terminal state {}; treating as failure",
@@ -635,6 +649,20 @@ class SandboxManager:
                     current_status,
                 )
                 return None
+            if attempt >= MAX_RUN_ATTEMPTS:
+                logger.warning(
+                    "Resume of {} succeeded at provider but row could not be "
+                    "marked running after {} recovery attempts (last status={}); "
+                    "treating as failure",
+                    record.sandbox_id,
+                    attempt,
+                    current_status,
+                )
+                return None
+            # (a) Reconciler reverted mid-resume. Re-claim and retry.
+            await repo.mark_resuming(record.id)
+            run_ok = await repo.mark_running(record.id, last_resumed_at=datetime.now(UTC))
+            attempt += 1
         await repo.update_activity(record.id)
         if self._exchange_host:
             await self._apply_egress(
