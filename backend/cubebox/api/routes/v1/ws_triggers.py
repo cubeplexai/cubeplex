@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import time
+import secrets
 from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any
 
@@ -310,9 +310,12 @@ async def rotate_secret(
     if trigger is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="not found")
 
+    # Per-call random suffix — second-resolution time would collide on
+    # `uq_credential_org_kind_name` if rotate is double-clicked or retried
+    # within the same second for the same trigger.
     new_cred_id = await cred_service.create(
         kind="webhook_secret",
-        name=f"trigger:{trigger.id}:rot:{int(time.time())}",
+        name=f"trigger:{trigger.id}:rot:{secrets.token_hex(6)}",
         plaintext=body.new_webhook_secret,
     )
 
