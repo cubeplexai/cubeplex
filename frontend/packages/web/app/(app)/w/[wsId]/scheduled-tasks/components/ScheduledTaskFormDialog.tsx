@@ -120,7 +120,10 @@ export function ScheduledTaskFormDialog({
       body.run_at = localDatetimeToIso(runAt)
     }
 
-    if (timezone.trim() && timezone.trim() !== 'UTC') {
+    // Always send timezone, including 'UTC'. On PATCH, omitting a field
+    // means "keep the old value", so silently dropping 'UTC' would prevent
+    // a user from switching an existing task back to UTC from another zone.
+    if (timezone.trim()) {
       body.timezone = timezone.trim()
     }
 
