@@ -132,6 +132,68 @@ class TestScheduledTaskValidation:
         r = client.patch(f"{BASE}/{tid}", json={"schedule_kind": "cron"})
         assert r.status_code == 422
 
+    def test_once_run_at_offset_normalized_to_utc(self, client: TestClient) -> None:
+        """Regression for codex round-4 P2: a once task created with a
+        non-UTC offset (e.g. -05:00) must be stored as the equivalent UTC
+        instant, not as the local wall-clock value. The serialized
+        run_at on read must reflect 14:00Z, not 09:00Z.
+        """
+        # 2030-01-01T09:00:00-05:00 == 2030-01-01T14:00:00+00:00
+        r = _make(
+            client,
+            schedule_kind="once",
+            interval_seconds=None,
+            run_at="2030-01-01T09:00:00-05:00",
+        )
+        assert r.status_code == 201, r.text
+        run_at = r.json()["run_at"]
+        assert run_at.startswith("2030-01-01T14:00:00")
+
+    def test_patch_run_at_offset_normalized_to_utc(self, client: TestClient) -> None:
+        # Create once task in UTC, then PATCH run_at with a -08:00 offset;
+        # readback must show the equivalent UTC wall-clock.
+        tid = _make(
+            client,
+            schedule_kind="once",
+            interval_seconds=None,
+            run_at="2030-06-01T12:00:00+00:00",
+        ).json()["id"]
+        r = client.patch(
+            f"{BASE}/{tid}",
+            json={"run_at": "2030-06-01T09:00:00-08:00"},
+        )
+        assert r.status_code == 200, r.text
+        run_at = r.json()["run_at"]
+        # 09:00 PST == 17:00 UTC
+        assert run_at.startswith("2030-06-01T17:00:00")
+
+    def test_patch_metadata_only_preserves_next_fire_at(self, client: TestClient) -> None:
+        """Regression for codex round-4 P2: a metadata-only PATCH (prompt /
+        name / target_*) must NOT slide next_fire_at — otherwise editing
+        the prompt of an hourly task 30 min before its next fire would
+        push the fire by 30 min, silently delaying or skipping the run.
+        """
+        tid = _make(client).json()["id"]
+        original_next_fire = client.get(f"{BASE}/{tid}").json()["next_fire_at"]
+        # Edit only metadata (not a schedule-defining field).
+        r = client.patch(f"{BASE}/{tid}", json={"prompt": "edited prompt"})
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["prompt"] == "edited prompt"
+        assert body["next_fire_at"] == original_next_fire, (
+            "metadata-only edit must not slide next_fire_at"
+        )
+
+    def test_patch_schedule_field_recomputes_next_fire_at(self, client: TestClient) -> None:
+        # Sanity counterpart: editing a schedule field DOES recompute.
+        tid = _make(client).json()["id"]  # hourly interval
+        original_next_fire = client.get(f"{BASE}/{tid}").json()["next_fire_at"]
+        # Bump interval to 2 hours; new next_fire_at must differ from the
+        # original (it's now+2h, not now+1h).
+        r = client.patch(f"{BASE}/{tid}", json={"interval_seconds": 7200})
+        assert r.status_code == 200, r.text
+        assert r.json()["next_fire_at"] != original_next_fire
+
 
 class TestScheduledTaskAuth:
     """Owner/admin mutation gating + fixed-target ownership (spec §auth)."""

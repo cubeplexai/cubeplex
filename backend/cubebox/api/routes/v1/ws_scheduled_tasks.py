@@ -39,6 +39,27 @@ def _iso(dt: datetime | None) -> str | None:
     return utc_isoformat(dt) if dt is not None else None
 
 
+def _to_utc_naive(dt: datetime) -> datetime:
+    """Convert an aware datetime to UTC then strip tzinfo for storage.
+
+    Scheduled-task DB columns are ``timestamp without time zone``; storing an
+    aware datetime drops the offset and persists the wall-clock value, so a
+    client-supplied ``2030-01-01T09:00:00-05:00`` would otherwise come back
+    as 09:00Z instead of 14:00Z (firing five hours early). Normalizing to
+    UTC naive before persist keeps every column in the same frame as the
+    rest of the module's arithmetic (which treats naive DB values as UTC).
+    """
+    return dt.astimezone(UTC).replace(tzinfo=None) if dt.tzinfo is not None else dt
+
+
+# Fields whose change requires recomputing next_fire_at. Editing only
+# name/prompt/target_* must NOT slide the schedule (codex P2): on an hourly
+# task due at 13:00, a 12:30 prompt edit shouldn't push the next fire to 13:30.
+_SCHEDULE_FIELDS: frozenset[str] = frozenset(
+    {"schedule_kind", "cron_expr", "interval_seconds", "run_at", "timezone"}
+)
+
+
 def _to_out(t: ScheduledTask) -> ScheduledTaskOut:
     return ScheduledTaskOut(
         id=t.id,
@@ -166,7 +187,7 @@ async def create_task(
             schedule_kind=body.schedule_kind,
             cron_expr=body.cron_expr,
             interval_seconds=body.interval_seconds,
-            run_at=body.run_at,
+            run_at=_to_utc_naive(body.run_at) if body.run_at is not None else None,
             timezone=body.timezone,
             target_mode=body.target_mode,
             target_conversation_id=body.target_conversation_id,
@@ -226,6 +247,7 @@ async def patch_task(
                     status.HTTP_422_UNPROCESSABLE_ENTITY,
                     "target_conversation_id must be the owner's conversation",
                 )
+        touched_schedule = False
         for field in (
             "name",
             "prompt",
@@ -238,9 +260,18 @@ async def patch_task(
             "target_conversation_id",
         ):
             val = getattr(body, field)
-            if val is not None:
-                setattr(task, field, val)
-        task.next_fire_at = _initial_next_fire(task) if task.status == "active" else None
+            if val is None:
+                continue
+            if field == "run_at":
+                val = _to_utc_naive(val)
+            setattr(task, field, val)
+            if field in _SCHEDULE_FIELDS:
+                touched_schedule = True
+        # Only recompute next_fire_at when the schedule actually changed.
+        # Metadata-only edits (name/prompt/target_*) must NOT slide the next
+        # fire forward; that would silently delay or skip the pending run.
+        if touched_schedule:
+            task.next_fire_at = _initial_next_fire(task) if task.status == "active" else None
         task.updated_at = datetime.now(UTC)
         await session.commit()
         await session.refresh(task)
