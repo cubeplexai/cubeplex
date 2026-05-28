@@ -177,6 +177,9 @@ class LazySandbox(Sandbox):
         if self._sandbox is not None:
             self._sandbox.set_run_env(env)
 
+    def supports_pause(self) -> bool:
+        return self._sandbox.supports_pause() if self._sandbox is not None else False
+
     async def execute(
         self,
         command: str,
