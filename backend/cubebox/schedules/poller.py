@@ -15,7 +15,9 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from loguru import logger
+from sqlalchemy import update
 from sqlalchemy.exc import IntegrityError
+from uuid_utils import uuid7
 
 from cubebox.db.engine import async_session_maker
 from cubebox.models.scheduled_task import ScheduledTask, ScheduledTaskRun
@@ -223,14 +225,31 @@ class ScheduledTaskPoller:
                 row.detail = "task gone"
                 await session.commit()
                 return
+            # Pre-stamp run_id while the row is still 'claimed' so the
+            # completion hook can find the row by run_id even if the
+            # background run finishes faster than the post-dispatch UPDATE
+            # below. The hook's state filter accepts ('claimed', 'started').
+            pre_run_id = str(uuid7())
+            row.run_id = pre_run_id
+            await session.commit()
             try:
-                result = await dispatch_scheduled_run(task=task, run_manager=self._run_manager)
+                result = await dispatch_scheduled_run(
+                    task=task, run_manager=self._run_manager, run_id=pre_run_id
+                )
             except TargetUnavailableError as exc:
+                # No run was started — clear the pre-stamped run_id so the
+                # hook never matches a phantom row, and mark the occurrence
+                # failed.
+                row.run_id = None
                 row.state = "failed"
                 row.detail = str(exc)
                 await session.commit()
                 return
             except ConversationBusyError as exc:
+                # start_run rejected before launching any task; the
+                # pre-stamped run_id was never used. Clear it so future
+                # retries (which pre-stamp a new uuid) can't collide.
+                row.run_id = None
                 if row.retry_count + 1 >= self._max_busy_retries:
                     row.state = "skipped_busy_max_retries"
                     row.retry_count = row.retry_count + 1
@@ -246,8 +265,20 @@ class ScheduledTaskPoller:
                     )
                 await session.commit()
                 return
-            row.state = "started"
-            row.run_id = result.run_id
-            row.conversation_id = result.conversation_id
-            row.started_at = datetime.now(UTC)
+            # Conditional UPDATE: only flip 'claimed' → 'started'. If the
+            # run already finished and the completion hook beat us to the
+            # commit, the row is already in a terminal state and this UPDATE
+            # affects 0 rows (leaving the terminal state intact).
+            await session.execute(
+                update(ScheduledTaskRun)
+                .where(
+                    ScheduledTaskRun.id == row.id,  # type: ignore[arg-type]
+                    ScheduledTaskRun.state == "claimed",  # type: ignore[arg-type]
+                )
+                .values(
+                    state="started",
+                    conversation_id=result.conversation_id,
+                    started_at=datetime.now(UTC),
+                )
+            )
             await session.commit()

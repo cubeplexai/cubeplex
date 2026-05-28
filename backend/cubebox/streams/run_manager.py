@@ -486,9 +486,17 @@ class RunManager:
         content: str,
         attachments: list[str] | None = None,
         ctx: RunContext,
+        run_id: str | None = None,
     ) -> str:
-        """Create and start a new background run."""
-        run_id = str(uuid7())
+        """Create and start a new background run.
+
+        ``run_id`` is generated unless the caller supplies one. The scheduled-
+        task poller pre-generates it and stamps the occurrence row so the
+        completion hook can find the row by ``run_id`` even if ``_execute_run``
+        finishes faster than the poller's post-dispatch UPDATE.
+        """
+        if run_id is None:
+            run_id = str(uuid7())
         started_at = utc_isoformat(datetime.now(UTC))
         created_run = await create_run(
             self._redis,

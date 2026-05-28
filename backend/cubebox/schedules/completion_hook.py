@@ -17,6 +17,16 @@ from cubebox.models.scheduled_task import ScheduledTaskRun
 # RunManager status -> occurrence terminal state.
 _TERMINAL_MAP = {"completed": "succeeded", "failed": "failed", "cancelled": "failed"}
 
+# Non-terminal states the hook may overwrite. ``claimed`` is included because
+# the poller pre-stamps ``run_id`` on the row while it is still ``claimed``
+# (state flips to ``started`` only after the post-dispatch UPDATE commits).
+# A very short run can finish and call this hook before that UPDATE lands,
+# in which case the row matched by ``run_id`` is still ``claimed`` — we
+# still flip it to terminal so history is not stuck. The poller's
+# post-dispatch UPDATE is conditional (only flips ``claimed`` → ``started``,
+# never re-flips a terminal row), so this and the poller don't fight.
+_NON_TERMINAL = ("claimed", "started")
+
 
 async def record_scheduled_run_terminal_state(*, run_id: str, run_status: str) -> None:
     new_state = _TERMINAL_MAP.get(run_status)
@@ -29,7 +39,7 @@ async def record_scheduled_run_terminal_state(*, run_id: str, run_status: str) -
                     await session.execute(
                         select(ScheduledTaskRun).where(
                             ScheduledTaskRun.run_id == run_id,  # type: ignore[arg-type]
-                            ScheduledTaskRun.state == "started",  # type: ignore[arg-type]
+                            ScheduledTaskRun.state.in_(_NON_TERMINAL),  # type: ignore[attr-defined]
                         )
                     )
                 )

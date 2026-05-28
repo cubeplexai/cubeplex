@@ -63,8 +63,20 @@ async def resolve_target(task: ScheduledTask) -> str:
         return conv.id
 
 
-async def dispatch_scheduled_run(*, task: ScheduledTask, run_manager: RunManager) -> DispatchResult:
+async def dispatch_scheduled_run(
+    *,
+    task: ScheduledTask,
+    run_manager: RunManager,
+    run_id: str | None = None,
+) -> DispatchResult:
     """Start one run for one occurrence.
+
+    ``run_id`` may be supplied by the caller so the run id is known BEFORE
+    ``run_manager.start_run`` actually launches the background task. The
+    poller uses this to pre-stamp the occurrence row with ``run_id``,
+    closing the race where a very short run could complete (and call the
+    completion hook) before the poller had a chance to commit the
+    ``started`` / ``run_id`` update.
 
     Raises:
       TargetUnavailableError -- owner is gone OR fixed target is missing /
@@ -82,11 +94,12 @@ async def dispatch_scheduled_run(*, task: ScheduledTask, run_manager: RunManager
         workspace_id=task.workspace_id,
     )
     try:
-        run_id = await run_manager.start_run(
+        actual_run_id = await run_manager.start_run(
             conversation_id=conversation_id,
             content=task.prompt,
             attachments=[],
             ctx=ctx,
+            run_id=run_id,
         )
     except RuntimeError as exc:
         # RunManager.start_run rejects a second run on a conversation that
@@ -96,4 +109,4 @@ async def dispatch_scheduled_run(*, task: ScheduledTask, run_manager: RunManager
         if task.target_mode == "fixed" and "already" in str(exc).lower():
             raise ConversationBusyError(str(exc)) from exc
         raise
-    return DispatchResult(run_id=run_id, conversation_id=conversation_id)
+    return DispatchResult(run_id=actual_run_id, conversation_id=conversation_id)
