@@ -463,43 +463,61 @@ class SandboxManager:
                     "concurrent create lost the race with no usable winner"
                 ) from None
 
-            volumes: list[Volume] | None = None
-            if self._volume_enabled:
-                volume = self._build_user_volume(workspace_id, user_id)
-                volumes = [volume]
-                logger.info(
-                    "Creating new sandbox for user {} with PVC {}",
-                    user_id,
-                    volume.pvc.claim_name,  # type: ignore[union-attr]
-                )
-            else:
-                logger.info("Creating new sandbox for user {}", user_id)
-
-            # Give only the create call the longer budget: the create POST is held
-            # open server-side until the pod is ready, so it must survive a cold
-            # image pull. ``create_conn_config`` is otherwise identical to the
-            # default.
-            create_conn_config = self._build_connection_config(request_timeout=self._create_timeout)
-
-            # Egress injection (when enabled): resolve the vault for env +
-            # network policy. network_policy must be set at create time.
-            injection = None
-            if self._exchange_host:
-                # Resolve injection early to get network_policy for Sandbox.create.
-                # Env does NOT go into Sandbox.create — it flows via execute-time
-                # RunCommandOpts after _apply_egress sets it on the backend.
-                resolver = SandboxEnvResolver(SandboxEnvRepository(session, org_id=org_id))
-                resolved = await resolver.resolve(workspace_id=workspace_id, user_id=user_id)
-                injection = SandboxEnvInjector(exchange_host=self._exchange_host).build(resolved)
-
-            base_policy = (
-                injection.network_policy
-                if injection
-                else NetworkPolicy(defaultAction="deny", egress=[])
-            )
-            network_policy = merge_network_rules(base_policy, policy.network_rules)
-
+            # Everything from here until `promote_to_running` runs while the
+            # reserved row is still `provisioning`. ANY failure in this band —
+            # whether the env resolver raises on a malformed vault row, the
+            # network-policy merge throws, or `Sandbox.create` returns a
+            # provider error — must free the reservation so the unique index
+            # doesn't pin a phantom slot for this user/workspace until TTL
+            # cleanup notices. Once `promote_to_running` commits, the row owns
+            # a real provider sandbox; from that point on we deliberately do
+            # NOT delete the row on later failure (e.g. the transient reconnect
+            # below) — the reaper + reuse path own its lifecycle, and deleting
+            # the row would orphan the provider sandbox.
+            sandbox_id: str | None = None
+            promoted = False
             try:
+                volumes: list[Volume] | None = None
+                if self._volume_enabled:
+                    volume = self._build_user_volume(workspace_id, user_id)
+                    volumes = [volume]
+                    logger.info(
+                        "Creating new sandbox for user {} with PVC {}",
+                        user_id,
+                        volume.pvc.claim_name,  # type: ignore[union-attr]
+                    )
+                else:
+                    logger.info("Creating new sandbox for user {}", user_id)
+
+                # Give only the create call the longer budget: the create POST
+                # is held open server-side until the pod is ready, so it must
+                # survive a cold image pull. ``create_conn_config`` is otherwise
+                # identical to the default.
+                create_conn_config = self._build_connection_config(
+                    request_timeout=self._create_timeout
+                )
+
+                # Egress injection (when enabled): resolve the vault for env +
+                # network policy. network_policy must be set at create time.
+                injection = None
+                if self._exchange_host:
+                    # Resolve injection early to get network_policy for
+                    # Sandbox.create. Env does NOT go into Sandbox.create — it
+                    # flows via execute-time RunCommandOpts after _apply_egress
+                    # sets it on the backend.
+                    resolver = SandboxEnvResolver(SandboxEnvRepository(session, org_id=org_id))
+                    resolved = await resolver.resolve(workspace_id=workspace_id, user_id=user_id)
+                    injection = SandboxEnvInjector(exchange_host=self._exchange_host).build(
+                        resolved
+                    )
+
+                base_policy = (
+                    injection.network_policy
+                    if injection
+                    else NetworkPolicy(defaultAction="deny", egress=[])
+                )
+                network_policy = merge_network_rules(base_policy, policy.network_rules)
+
                 raw_sandbox = await opensandbox.Sandbox.create(
                     policy.default_image,
                     connection_config=create_conn_config,
@@ -518,22 +536,52 @@ class SandboxManager:
                 # usable winner. ``paused_ttl_seconds`` is set on the row at
                 # reserve time (see UserSandboxRepository.reserve).
                 await repo.promote_to_running(reserved.id, sandbox_id=sandbox_id)
+                promoted = True
+            except ProviderSandboxError as exc:
+                # Provider failed at Sandbox.create() — no provider sandbox
+                # exists, so free the reservation immediately.
+                await repo.delete_record(reserved.id)
+                raise SandboxError(str(exc)) from exc
+            except Exception:
+                # Pre-create setup blew up (e.g. SandboxEnvInjector.build on a
+                # malformed vault row, network-policy merge, anything before
+                # the create succeeded). The reservation must be released or
+                # the partial unique index pins the user/workspace until TTL.
+                if not promoted:
+                    await repo.delete_record(reserved.id)
+                raise
 
-                # Rebind to the default per-command timeout: the create call's adapters
-                # captured the longer create_timeout, but ordinary commands on this
-                # sandbox must use request_timeout, not create_timeout. Reconnecting
-                # rebuilds the HTTP clients with the default budget. Skip the health
-                # check — create already gated on readiness (ready_timeout), so a
-                # second readiness probe here would only add a redundant failure path.
+            try:
+                # Rebind to the default per-command timeout: the create call's
+                # adapters captured the longer create_timeout, but ordinary
+                # commands on this sandbox must use request_timeout, not
+                # create_timeout. Reconnecting rebuilds the HTTP clients with
+                # the default budget. Skip the health check — create already
+                # gated on readiness (ready_timeout), so a second readiness
+                # probe here would only add a redundant failure path.
+                #
+                # IMPORTANT: do NOT delete the DB row on reconnect failure —
+                # the row is already `running` and references a real provider
+                # sandbox. Deleting it here would orphan the provider sandbox
+                # (no reaper would ever find it) and the next request would
+                # leak a second one. Surface the error and let the next request
+                # find the row via the reuse path or let TTL clean it up.
                 raw_sandbox = await opensandbox.Sandbox.connect(
                     sandbox_id,
                     connection_config=conn_config,
                     skip_health_check=True,
                 )
-            except ProviderSandboxError as exc:
-                # Provider failed — free the reserved slot so the next turn can retry.
-                await repo.delete_record(reserved.id)
-                raise SandboxError(str(exc)) from exc
+            except Exception as exc:
+                logger.warning(
+                    "Reconnect after create failed for sandbox {} "
+                    "(row stays `running`; next request reuses or reaper "
+                    "expires it): {}",
+                    sandbox_id,
+                    exc,
+                )
+                raise SandboxError(
+                    f"sandbox {sandbox_id} created but reconnect failed: {exc}"
+                ) from exc
 
             backend = OpenSandbox(sandbox=raw_sandbox, workdir=self._workdir)
             # Execute-time egress: set run env on the backend + persist EgressRefs.
