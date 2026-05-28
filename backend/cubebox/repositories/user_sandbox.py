@@ -228,6 +228,46 @@ class UserSandboxRepository(ScopedRepository[UserSandbox]):
         return list(result.scalars().all())
 
     @classmethod
+    async def list_transient_for_reconcile_system(
+        cls,
+        session: AsyncSession,
+        *,
+        claim_timeout: int = 60,
+    ) -> list[UserSandbox]:
+        """System-scope query: ``pausing``/``resuming`` rows due for a provider
+        recheck. ``last_provider_check`` NULL or older than ``claim_timeout``
+        seconds qualifies; the reconciler will then read ``get_info()`` and
+        repair the row.
+        """
+        stmt = (
+            select(UserSandbox)
+            .where(UserSandbox.status.in_(("pausing", "resuming")))  # type: ignore[attr-defined]
+            .where(
+                text(
+                    "last_provider_check IS NULL "
+                    "OR last_provider_check + :ct * INTERVAL '1 second' <= NOW()"
+                )
+            )
+            .params(ct=claim_timeout)
+        )
+        result = await session.execute(stmt)
+        return list(result.scalars().all())
+
+    async def touch_provider_check(self, record_id: str) -> None:
+        """Stamp ``last_provider_check`` to now after a reconcile-loop probe."""
+        stmt = (
+            update(UserSandbox)
+            .where(
+                UserSandbox.id == record_id,  # type: ignore[arg-type]
+                UserSandbox.org_id == self.org_id,  # type: ignore[arg-type]
+                UserSandbox.workspace_id == self.workspace_id,  # type: ignore[arg-type]
+            )
+            .values(last_provider_check=datetime.now(UTC))
+        )
+        await self.session.execute(stmt)
+        await self.session.commit()
+
+    @classmethod
     async def list_paused_expired_system(cls, session: AsyncSession) -> list[UserSandbox]:
         """System-scope query: ``paused`` rows past their paused-TTL.
 

@@ -21,6 +21,10 @@ async def sandbox_cleanup_loop(manager: SandboxManager, interval: int = 60) -> N
     while True:
         await asyncio.sleep(interval)
         try:
+            # Reconciler first: stuck pausing/resuming rows are higher-priority
+            # to repair than TTL expiry. Task 6 swaps cleanup_expired() out for
+            # pause_idle + reap_paused; for now they coexist.
+            await manager.reconcile_transients(claim_timeout=60)
             await manager.cleanup_expired()
         except Exception as e:
             logger.error("Error in sandbox cleanup loop: {}", e)

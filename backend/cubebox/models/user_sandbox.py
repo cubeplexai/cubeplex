@@ -46,3 +46,4 @@ class UserSandbox(CubeboxBase, OrgScopedMixin, table=True):
     )
     last_resumed_at: datetime | None = Field(default=None)
     in_use_until: datetime | None = Field(default=None, index=True)
+    last_provider_check: datetime | None = Field(default=None, index=True)

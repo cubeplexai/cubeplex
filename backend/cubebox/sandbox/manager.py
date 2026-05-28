@@ -591,6 +591,68 @@ class SandboxManager:
                 )
                 await self._kill_record(session, scoped, record, conn_config)
 
+    async def reconcile_transients(self, *, claim_timeout: int = 60) -> None:
+        """Repair rows stuck in ``pausing``/``resuming`` by reading provider state.
+
+        - ``Paused``     -> mark_paused (advance, OQ-3 / internals G1).
+        - ``Running``    -> mark_running (pause failed if DB pausing; resume done
+          if DB resuming).
+        - ``Failed``     -> mark_failed (terminal).
+        - ``Terminated`` -> _kill_record (mark_terminated + revoke egress).
+        - ``Pausing`` / ``Resuming`` / unknown -> no-op, just bump
+          ``last_provider_check`` so the row gets requeued later.
+
+        State is treated as a free-form string because the local SDK enum is
+        incomplete (internals G3) — never compared against the enum, only string
+        values from the API.
+        """
+        conn_config = self._build_connection_config()
+        async with self._session_factory() as session:
+            rows = await UserSandboxRepository.list_transient_for_reconcile_system(
+                session,
+                claim_timeout=claim_timeout,
+            )
+            for record in rows:
+                scoped = UserSandboxRepository(
+                    session,
+                    org_id=record.org_id,
+                    workspace_id=record.workspace_id,
+                )
+                try:
+                    raw = await opensandbox.Sandbox.connect(
+                        record.sandbox_id,
+                        connection_config=conn_config,
+                        skip_health_check=True,
+                    )
+                    info = await raw.get_info()
+                    state = (info.status.state if info and info.status else "") or ""
+                except Exception as exc:
+                    logger.warning(
+                        "Reconciler: get_info failed for {}: {}",
+                        record.sandbox_id,
+                        exc,
+                    )
+                    await scoped.touch_provider_check(record.id)
+                    continue
+
+                if state == "Paused":
+                    await scoped.mark_paused(record.id, paused_at=datetime.now(UTC))
+                elif state == "Running":
+                    await scoped.mark_running(
+                        record.id,
+                        last_resumed_at=(
+                            datetime.now(UTC) if record.status == "resuming" else None
+                        ),
+                    )
+                elif state == "Failed":
+                    await scoped.mark_failed(record.id)
+                elif state == "Terminated":
+                    await self._kill_record(session, scoped, record, conn_config)
+                else:
+                    logger.debug("Reconciler: {} still {}", record.sandbox_id, state)
+
+                await scoped.touch_provider_check(record.id)
+
     async def _kill_record(
         self,
         session: AsyncSession,
