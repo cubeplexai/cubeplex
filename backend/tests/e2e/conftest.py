@@ -550,6 +550,32 @@ async def admin_client(
 
 
 @pytest_asyncio.fixture
+async def seeded_credential_with_host(
+    admin_client: tuple[httpx.AsyncClient, str],
+) -> dict[str, Any]:
+    """Seed an org-scope SandboxEnvVar with hosts=['api.github.com'].
+
+    Uses the real admin POST /admin/sandbox-env endpoint (same client / same
+    org as the test's ``admin_client``), so the row lands in the right org.
+    Returns the created entry dict (includes ``id``, ``env_name``, ``hosts``).
+    """
+    client, _ws = admin_client
+    resp = await client.post(
+        "/api/v1/admin/sandbox-env",
+        json={
+            "env_name": "POLICY_TEST_TOKEN",
+            "is_secret": True,
+            "hosts": ["api.github.com"],
+            "secret_value": "ghp_seed",
+        },
+    )
+    assert resp.status_code == 201, resp.text
+    entry: dict[str, Any] = resp.json()
+    entry["host"] = "api.github.com"
+    return entry
+
+
+@pytest_asyncio.fixture
 async def member_client() -> AsyncIterator[tuple[httpx.AsyncClient, str]]:
     """Fresh client logged in as a brand-new member (not admin) of a brand-new workspace."""
     app, email, password, workspace_id = await _make_isolated_user(Role.MEMBER)
