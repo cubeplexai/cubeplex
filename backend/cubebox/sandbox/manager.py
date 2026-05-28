@@ -881,6 +881,7 @@ class SandboxManager:
                     org_id=record.org_id,
                     workspace_id=record.workspace_id,
                 )
+                raw: opensandbox.Sandbox | None = None
                 try:
                     raw = await opensandbox.Sandbox.connect(
                         record.sandbox_id,
@@ -897,6 +898,22 @@ class SandboxManager:
                     )
                     await scoped.touch_provider_check(record.id)
                     continue
+                finally:
+                    # G8: ``connect`` opens an httpx transport that
+                    # ``get_info`` does not release. The reconciler runs
+                    # every 60 s; without ``close`` the cleanup loop would
+                    # accumulate one dead client per stuck transient row
+                    # per tick. Skip the close-failure if it raises so it
+                    # can't mask the outer state-handling flow.
+                    if raw is not None:
+                        try:
+                            await raw.close()
+                        except Exception as exc:
+                            logger.debug(
+                                "Reconciler probe close failed for {}: {}",
+                                record.sandbox_id,
+                                exc,
+                            )
 
                 if state == "Paused":
                     await scoped.mark_paused(record.id, paused_at=datetime.now(UTC))

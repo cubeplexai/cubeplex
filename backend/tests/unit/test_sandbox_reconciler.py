@@ -90,6 +90,7 @@ async def test_reconcile_pausing_with_provider_paused_marks_paused() -> None:
 
     raw = MagicMock(name="raw_sandbox")
     raw.get_info = AsyncMock(return_value=_info("Paused"))
+    raw.close = AsyncMock()
 
     with (
         patch("cubebox.sandbox.manager.UserSandboxRepository") as repo_cls,
@@ -109,6 +110,10 @@ async def test_reconcile_pausing_with_provider_paused_marks_paused() -> None:
     scoped.mark_failed.assert_not_called()
     scoped.mark_terminated.assert_not_called()
     scoped.touch_provider_check.assert_awaited_once_with(record.id)
+    # G8 leak fix: the reconciler must close the probe handle after
+    # ``get_info``, otherwise the long-running cleanup loop accumulates
+    # httpx transports for every stuck transient row per tick.
+    raw.close.assert_awaited_once()
 
 
 # ---------------------------------------------------------------------------
