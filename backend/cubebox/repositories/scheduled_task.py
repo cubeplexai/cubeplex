@@ -96,8 +96,21 @@ async def claim_stale_runs(
 ) -> list[ScheduledTaskRun]:
     """Lock and return occurrence rows stuck in 'claimed' past claim_timeout.
 
-    A row with run_id NULL means a replica reserved the occurrence but died
-    before start_run. Re-claimable. ``FOR UPDATE SKIP LOCKED`` again.
+    A row is stale when state='claimed' and ``claimed_at`` is older than
+    ``claim_timeout``. Two crash points produce stale rows:
+
+    * **run_id IS NULL** — a replica reserved the occurrence but died before
+      ``_dispatch_one`` reached the pre-stamp step.
+    * **run_id IS NOT NULL** — ``_dispatch_one`` pre-stamped the row's
+      ``run_id`` (so the completion hook could find it during the dispatch
+      race) but the replica died before either ``start_run`` succeeded or
+      the post-dispatch UPDATE flipped state to 'started'. The pre-stamped
+      uuid was either never used by ``start_run`` or used by a now-dead
+      background task; the next replica must re-pick this row.
+
+    The poller nulls out ``run_id`` when re-claiming so the next dispatch
+    pre-stamps a fresh uuid and the orphaned uuid's completion hook (if it
+    ever fires) becomes a no-op (no matching row).
 
     Excludes rows with a future ``next_retry_at`` — those are busy-target
     postpones owned by ``claim_busy_postponed_runs`` and must not be picked
@@ -110,7 +123,6 @@ async def claim_stale_runs(
         select(ScheduledTaskRun)
         .where(
             ScheduledTaskRun.state == "claimed",  # type: ignore[arg-type]
-            cast(Any, ScheduledTaskRun.run_id).is_(None),
             cast(Any, ScheduledTaskRun.next_retry_at).is_(None),
             ScheduledTaskRun.claimed_at < cutoff,  # type: ignore[arg-type]
         )

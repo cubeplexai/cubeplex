@@ -206,6 +206,41 @@ async def test_busy_postponed_row_skipped_by_stale_sweep(
 
 
 @pytest.mark.asyncio
+async def test_stale_pre_stamped_row_is_reclaimed(
+    async_client: httpx.AsyncClient,
+) -> None:
+    """Regression for codex round-2 P1: a row pre-stamped with run_id but
+    left in state='claimed' (e.g. the replica died after the pre-stamp
+    commit but before the post-dispatch UPDATE) must be re-claimable by
+    the stale sweep — otherwise the occurrence is permanently stuck.
+    """
+    from datetime import timedelta as _td
+
+    from cubebox.repositories.scheduled_task import claim_stale_runs
+
+    tid = await _create_due_once(async_client)
+    async with async_session_maker() as s:
+        now = datetime.now(UTC)
+        row = ScheduledTaskRun(
+            scheduled_task_id=tid,
+            org_id=DEFAULT_ORG_ID,
+            workspace_id=DEFAULT_WS_ID,
+            scheduled_for=now - _td(minutes=10),
+            claimed_at=now - _td(minutes=10),
+            state="claimed",
+            run_id="0192abcd-orphan-pre-stamp",  # pre-stamped but never dispatched
+        )
+        s.add(row)
+        await s.commit()
+        row_id = row.id
+    async with async_session_maker() as s:
+        stale = await claim_stale_runs(
+            s, now=datetime.now(UTC), claim_timeout=_td(minutes=2), limit=50
+        )
+    assert any(r.id == row_id for r in stale), "pre-stamped stale row was not reclaimed"
+
+
+@pytest.mark.asyncio
 async def test_completion_hook_recovers_claimed_row_race(
     async_client: httpx.AsyncClient,
 ) -> None:

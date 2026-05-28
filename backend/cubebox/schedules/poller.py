@@ -117,6 +117,12 @@ class ScheduledTaskPoller:
                 else:
                     row.claimed_at = now
                     row.claim_count += 1
+                    # Drop any pre-stamped run_id from the prior dispatch
+                    # attempt; the next _dispatch_one pre-stamps a fresh
+                    # uuid, and the orphaned uuid's completion hook (if it
+                    # ever fires from a dead replica's leftover Redis run)
+                    # finds no matching row and becomes a no-op.
+                    row.run_id = None
                     to_dispatch.append(row.id)
 
             busy = await claim_busy_postponed_runs(session, now=now, limit=self._batch_limit)
