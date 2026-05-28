@@ -4,7 +4,7 @@
 
 **Goal:** Add a named, versioned, workspace-private `AgentDefinition` that resolves into a run by overriding the workspace-singleton prompt/model/MCP/skill/sandbox lookups in `_run_cubepi_path`, with the conversation pinning an immutable version on its first turn.
 
-**Architecture:** A mutable `AgentDefinition` head + immutable `AgentDefinitionVersion` rows (mirrors `Skill`/`SkillVersion`). Two association tables pin `mcp_connector_install_id` and a concrete `skill_version_id` (+ the `org_skill_install_id` it was selected through). A dedicated `AgentDefinitionRepository` (constructor takes `org_id`, like `MCPConnectorInstallRepository` — NOT `ScopedRepository`) handles the nullable `workspace_id`. A new `AgentResolver` service maps a version to a frozen `ResolvedAgentConfig` dataclass that threads through `_run_cubepi_path`, replacing the singleton reads. `start_run` gains `agent_definition_id` + optional `version_id`; the conversation pins the resolved version on the first turn. Routes are workspace-scoped only (`/api/v1/ws/{ws}/agents/...`). Resolution verifies each pinned `skill_version_id` belongs to a visible `OrgSkillInstall` in the caller's org before calling `fetch_skill_md` (which has no scope check).
+**Architecture:** A mutable `AgentDefinition` head + immutable `AgentDefinitionVersion` rows (mirrors `Skill`/`SkillVersion`). Two association tables pin `mcp_connector_install_id` and a concrete `skill_version_id` (+ the `org_skill_install_id` it was selected through). A dedicated `AgentDefinitionRepository` (constructor takes `org_id`, like `MCPConnectorInstallRepository` — NOT `ScopedRepository`) handles the nullable `workspace_id`. A new `AgentResolver` service maps a version to a frozen `ResolvedAgentConfig` dataclass that threads through `_run_cubepi_path`, replacing the singleton reads. `start_run` gains `agent_definition_id` + optional `version_id`; the conversation pins the resolved version on the first turn. Routes are workspace-scoped only (`/api/v1/ws/{ws}/agents/...`). Resolution enforces three visibility checks: (1) the definition belongs to the caller's **workspace** (org alone is insufficient — sibling workspaces in the same org must not see each other's private agents); (2) an explicit `version_id` belongs to that same definition; (3) each pinned `skill_version_id` belongs to a visible `OrgSkillInstall` in the caller's org before calling `fetch_skill_md` (which has no scope check).
 
 **Tech Stack:** FastAPI, SQLModel + Alembic (autogenerate), cubepi runtime, Postgres, pytest E2E (`tests/e2e/`), mypy strict, 100-char lines.
 
@@ -63,7 +63,7 @@ PREFIX_AGENT_DEFINITION_VERSION: str = "agtv"
 - [ ] **Step 2: Verify the prefixes are accepted by the generator**
 
 Run: `uv run python -c "from cubebox.models.public_id import generate_public_id, PREFIX_AGENT_DEFINITION, PREFIX_AGENT_DEFINITION_VERSION; print(generate_public_id(PREFIX_AGENT_DEFINITION)); print(generate_public_id(PREFIX_AGENT_DEFINITION_VERSION))"`
-Expected: two lines, `agtd-...` (18 chars) and `agtv-...` (18 chars), no `invalid prefix` error.
+Expected: two lines, `agtd-...` (19 chars: 5-char `agtd-` prefix + 14-char base62 body) and `agtv-...` (19 chars), no `invalid prefix` error.
 
 - [ ] **Step 3: Commit**
 
@@ -529,7 +529,7 @@ git commit -m "feat(agents): AgentDefinitionRepository with nullable-workspace s
 - Create: `backend/cubebox/agents/agent_resolver.py`
 - Test: `backend/tests/e2e/test_agent_resolver.py`
 
-This is the load-bearing mapping: a version → the exact inputs `_run_cubepi_path` reads from singletons. The resolver builds `effective_system_prompt`, the model selection, the MCP install-id filter set, and the resolved skill set. The skill set is built by loading each pinned `skill_version_id` directly (NOT through `OrgSkillInstall.installed_version`), but only after verifying the pinned version belongs to a visible `OrgSkillInstall` in the caller's org.
+This is the load-bearing mapping: a version → the exact inputs `_run_cubepi_path` reads from singletons. The resolver builds `effective_system_prompt`, the model selection, the MCP install-id filter set, and the resolved skill set. It first enforces definition→workspace and version→definition visibility (see the three checks added to `resolve()` below). The skill set is built by loading each pinned `skill_version_id` directly (NOT through `OrgSkillInstall.installed_version`), but only after verifying the pinned version belongs to an `OrgSkillInstall` the workspace can actually use (org-scoped, including org-wide / auto-bound installs — see Step 7b).
 
 - [ ] **Step 1: Write the failing test**
 
@@ -619,6 +619,14 @@ async def test_resolve_rejects_cross_org_skill_ref(
 
 Add fixtures `seed_installed_skill` (publishes a real skill version + OrgSkillInstall in the caller org; reuse the publish/install path from `tests/e2e/test_skills_service_catalog.py`), `seed_mcp_install` (one active workspace MCP install; reuse `tests/e2e/test_mcp_four_layer_runtime.py` helpers), and `seed_skill_version_in_other_org` (a SkillVersion whose OrgSkillInstall belongs to a different org_id). Place shared fixtures in `tests/e2e/conftest.py`.
 
+Also add two visibility tests for the new scope enforcement:
+- `test_resolve_rejects_definition_from_sibling_workspace`: create a definition in
+  workspace A, then resolve with a resolver scoped to workspace B (same org) and
+  assert `AgentResolveError` (the definition is not visible cross-workspace).
+- `test_resolve_rejects_version_id_from_another_definition`: create two
+  definitions, pass definition X's id with definition Y's `version_id`, and assert
+  `AgentResolveError`.
+
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `uv run pytest tests/e2e/test_agent_resolver.py -v`
@@ -706,6 +714,13 @@ class AgentResolver:
         definition = await self.repo.get(definition_id)
         if definition is None:
             raise AgentResolveError(f"agent definition not visible: {definition_id}")
+        # v1 is workspace-private: enforce the definition belongs to THIS
+        # workspace, else a sibling workspace in the same org could invoke a
+        # private agent by id. (org_id alone is not enough — see P1 below.)
+        if definition.workspace_id != self.workspace_id:
+            raise AgentResolveError(
+                f"agent definition not visible in workspace: {definition_id}"
+            )
 
         # version_id pins directly; otherwise resolve the published version
         # *string* on the head to its concrete version row id.
@@ -713,6 +728,12 @@ class AgentResolver:
         version = await self.repo.get_version(resolved_version_id)
         if version is None:
             raise AgentResolveError(f"agent version not visible: {resolved_version_id}")
+        # A visible version_id must belong to THIS definition — otherwise an
+        # explicit version_id from another (visible) definition could be pinned.
+        if version.agent_definition_id != definition.id:
+            raise AgentResolveError(
+                f"version {resolved_version_id} does not belong to {definition_id}"
+            )
 
         skill_refs = await self.repo.list_skill_refs(version.id)
         resolved_skills = await self._verify_and_load_skills(skill_refs)
@@ -935,7 +956,15 @@ async def test_pinned_version_does_not_drift_after_edit(
     assert "V2_PROMPT" not in turn2.system_prompt
 ```
 
-`app_with_stub_provider` is a thin harness over the existing test app + a provider stub that records the `system_prompt` passed to `create_cubebox_agent`. If `tests/e2e/test_cubepi_path_conversation.py` already exposes such a capture (it builds a real `_run_cubepi_path`), reuse its provider-stub fixture and add `agent_definition_id` plumbing; otherwise add a `system_prompt`-recording stub there and import it. `run_turn` / `run_turn_in` / `new_conversation` are helper methods on that harness — implement them in `tests/e2e/conftest.py` calling `RunManager.start_run(...)` with the new kwargs.
+`app_with_stub_provider` and its `run_turn` / `run_turn_in` / `new_conversation`
+methods **do not exist yet** — they are an invented harness shape. Before coding,
+inspect `tests/e2e/test_cubepi_path_conversation.py` for its real provider-stub
+fixture and the actual way it builds/drives `_run_cubepi_path` and captures the
+`system_prompt` passed to `create_cubebox_agent`, then either (a) extend that
+existing harness with `agent_definition_id` plumbing, or (b) build a small real
+helper in `tests/e2e/conftest.py` that calls `RunManager.start_run(...)` with the
+new kwargs and reads the captured prompt. Name the helper to match what you
+actually build; do not assume the method names above exist.
 
 - [ ] **Step 2: Run test to verify it fails**
 
@@ -962,7 +991,13 @@ In `_execute_run` (~L1588), add the same two params to the signature.
 
 - [ ] **Step 4: Resolve in `_execute_run` and skip the singleton prompt block**
 
-In `_execute_run`, before the `effective_system_prompt = BASE_SYSTEM_PROMPT` block (~L1775), resolve when an id is present:
+**Resolve BEFORE sandbox setup.** The sandbox is created/gated around ~L1721,
+which is *earlier* than the prompt block at ~L1775. If you resolve only at ~L1775
+the `sandbox_policy="none"` gate runs too late and the sandbox (plus
+artifact/generate_image tools) is already created. Move the resolve step above
+the sandbox creation so `resolved_agent.sandbox_policy` is known when the sandbox
+gate runs. In `_execute_run`, place this resolve block before the sandbox
+creation/gate (which is itself before the prompt block); when an id is present:
 
 ```python
             resolved_agent = None
@@ -986,7 +1021,7 @@ Then wrap the existing `AgentConfig`/skills-suffix block in `if resolved_agent i
 - [ ] **Step 5: Accept and consume `resolved_agent` in `_run_cubepi_path`**
 
 Add to the `_run_cubepi_path` signature (~L816): `resolved_agent: "ResolvedAgentConfig | None" = None` (import the type under `TYPE_CHECKING`). Inside:
-- Model: when `resolved_agent` and `resolved_agent.model_ref.get("mode") != "default"`, build provider from `model_ref["provider_slug"]`/`model_ref["model_id"]` via the factory instead of `resolve_default_provider_and_config()`.
+- Model: when `resolved_agent` and `resolved_agent.model_ref.get("mode") != "default"`, build provider from `model_ref["provider_slug"]`/`model_ref["model_id"]` via the factory instead of `resolve_default_provider_and_config()`. **Confirm a concrete LLMFactory entry point exists for this.** The factory today merges DB-backed provider config only during *default* resolution; a non-default explicit provider may not resolve through any existing call. Identify the real factory method that takes an explicit `(provider_slug, model_id)` (and merges any DB-backed provider row) before relying on it — if none exists, add that path as an explicit sub-step rather than assuming the factory already supports it. For v1 it is acceptable to support only `{"mode": "default"}` and defer explicit model selection if no clean factory path exists; state which.
 - `load_skill` (~L963): pass `allowed_skill_version_ids=resolved_agent.skill_version_ids` when present.
 - MCP (~L1095): pass `connector_install_id_filter=resolved_agent.mcp_install_id_filter` when present.
 
@@ -999,9 +1034,41 @@ In `backend/cubebox/mcp/cubepi_runtime.py` `load_workspace_mcp_tools_for_cubepi`
         specs = [s for s in specs if s.install_id in connector_install_id_filter]
 ```
 
+  **Validate the pinned MCP refs, don't silently drop them.** This filter is a
+  set intersection: a pinned `mcp_connector_install_id` that is no longer
+  effective/visible for the workspace just vanishes from `specs`, so the agent
+  silently loses a tool server it was supposed to have. Validate pinned MCP refs
+  against the workspace's effective installs — at publish time (route rejects an
+  unknown/foreign install id) and/or at resolve time (resolver raises rather than
+  returning a filter that intersects to empty). Add tests for a pinned ref that is
+  missing or disabled for the workspace.
+
 - [ ] **Step 7: Add the skill allowlist param to load_skill**
 
 In `backend/cubebox/tools/builtin/load_skill.py` `create_load_skill_tool`, add `allowed_skill_version_ids: list[str] | None = None`. In `_execute`, after resolving `resolved`, when the allowlist is non-None and `resolved.skill_version_id not in allowed_skill_version_ids`, return the same not-enabled error shape.
+
+  **Not sufficient on its own — the catalog/list source also leaks live skills.**
+  `load_skill`'s catalog listing and the skills-list prompt suffix are built from
+  `SkillCatalogService.list_enabled_for_workspace` (the *live* workspace set), and
+  `LazySandbox._sync_skills` (`backend/cubebox/sandbox/lazy.py:25-49`) pushes
+  `list_enabled_for_workspace(...)` files into the sandbox. With a managed agent,
+  both must be restricted to the pinned `resolved_agent.skill_version_ids`,
+  otherwise: (a) the model sees live workspace skills in its prompt/catalog even
+  though it can only `load_skill` the pinned ones, and (b) the sandbox is seeded
+  with live skill files the definition never pinned. Restrict the catalog/list
+  path and the `_sync_skills` source to the pinned set when a managed agent is
+  active (e.g. pass the pinned version-id allowlist into `_sync_skills` and the
+  catalog listing, or filter the returned list by `resolved_agent.skill_version_ids`).
+
+- [ ] **Step 7b: Resolver skill visibility must include workspace-bound installs**
+
+  The resolver's `_verify_and_load_skills` checks the install's `org_id` and an
+  exact-match `workspace_id`, but an `OrgSkillInstall` may be org-wide
+  (`workspace_id IS NULL` / auto-bound via `WorkspaceSkillBinding`). Confirm the
+  visibility predicate accepts org-wide installs the workspace can actually use
+  (mirror however `list_enabled_for_workspace` decides visibility), not only
+  installs whose `workspace_id` literally equals the caller's. Add a test for a
+  pinned skill that is visible through an org-wide install.
 
 - [ ] **Step 8: Run the E2E test to verify it passes**
 
@@ -1207,7 +1274,15 @@ async def test_create_publish_list_and_scope_isolation(
     assert agent_id not in [a["id"] for a in r.json()]
 ```
 
-Reuse / add `member_client` + `second_workspace_member_client` fixtures from `tests/e2e/test_ws_skills.py` or `tests/e2e/test_scoping.py`.
+**Fixture shapes — match what exists, the skeleton above is illustrative only.**
+The real `member_client` (`tests/e2e/conftest.py:457`) yields a **tuple**
+`(client, workspace_id)`, not an object with a `.workspace_id` attribute —
+unpack it (`client, ws_a = member_client`). There is no
+`second_workspace_member_client` fixture; build the second workspace from the
+existing org/workspace seeding helpers (see `member_client_org_a/_b` and the
+workspace-creation helpers in `conftest.py`) or add a real fixture following that
+pattern. Adjust every `member_client.workspace_id` / `…json={…}` access to the
+actual tuple/seed shape before writing the test.
 
 - [ ] **Step 3: Run test to verify it fails**
 
