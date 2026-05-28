@@ -253,6 +253,13 @@ class SandboxProvider(ABC):
     async def set_lifetime(self, sandbox: Sandbox, seconds: int) -> None:
         """Extend the sandbox's remaining lifetime. No-op where unsupported."""
         ...
+
+    async def rebind(self, sandbox: Sandbox, *, workdir: str) -> Sandbox:
+        """Optionally re-bind a freshly-created sandbox to the default
+        per-command timeout. Called by the manager AFTER it persists the
+        sandbox id (preserving persist-before-rebind orphan protection).
+        Default: return the sandbox unchanged (e2b needs no rebind)."""
+        return sandbox
 ```
 
 **Run:**
@@ -311,12 +318,10 @@ async def test_create_maps_volumes_resource_policy() -> None:
     )
     raw = MagicMock()
     raw.id = "sbx-1"
-    with (
-        patch("cubebox.sandbox.opensandbox_provider.opensandbox.Sandbox.create",
-              new=AsyncMock(return_value=raw)) as create,
-        patch("cubebox.sandbox.opensandbox_provider.opensandbox.Sandbox.connect",
-              new=AsyncMock(return_value=raw)),
-    ):
+    # create() no longer reconnects (rebind is a separate seam method called by
+    # the manager after persisting) — only patch Sandbox.create here.
+    with patch("cubebox.sandbox.opensandbox_provider.opensandbox.Sandbox.create",
+               new=AsyncMock(return_value=raw)) as create:
         vol = SandboxVolume(name="user-workspace", claim_name="cubebox-user-abc",
                             mount_path="/workspace")
         sandbox = await provider.create(_req([vol]))
@@ -325,6 +330,23 @@ async def test_create_maps_volumes_resource_policy() -> None:
     assert kwargs["network_policy"] == "POLICY"
     assert kwargs["volumes"][0].pvc.claim_name == "cubebox-user-abc"
     assert sandbox.id == "sbx-1"
+
+
+@pytest.mark.asyncio
+async def test_rebind_reconnects_with_default_timeout() -> None:
+    provider = OpenSandboxProvider(
+        domain="d", api_key=None, use_server_proxy=False, request_timeout=60
+    )
+    raw = MagicMock()
+    raw.id = "sbx-1"
+    rebound = MagicMock()
+    rebound.id = "sbx-1"
+    with patch("cubebox.sandbox.opensandbox_provider.opensandbox.Sandbox.connect",
+               new=AsyncMock(return_value=rebound)) as connect:
+        sandbox = await provider.rebind(OpenSandbox(sandbox=raw, workdir="/x"),
+                                        workdir="/workspace")
+    assert connect.call_args.kwargs["skip_health_check"] is True
+    assert sandbox.workdir == "/workspace"
 
 
 @pytest.mark.asyncio
@@ -413,6 +435,15 @@ class OpenSandboxProvider(SandboxProvider):
         return f"{prefix}-{sanitized}"
 
     async def create(self, req: SandboxCreateRequest) -> Sandbox:
+        # IMPORTANT — preserve the manager's persist-before-rebind orphan
+        # protection. Today the manager does: create → repo.create(sandbox_id)
+        # → reconnect/rebind, so a rebind failure can't leave an unrecorded
+        # sandbox running (manager.py:272-290). Do NOT fold the rebind connect
+        # into create() — that would persist only AFTER the rebind and reopen
+        # the orphan window. `create()` returns a driver bound to the create
+        # connection; the manager calls `repo.create(...)` and then `rebind()`
+        # (below) once the id is persisted. (`set_lifetime` covers e2b; this
+        # split is OpenSandbox-specific but lives behind the seam.)
         volumes = [self._to_volume(v) for v in req.volumes] or None
         create_conn = self._conn(request_timeout=req.create_timeout)
         try:
@@ -426,14 +457,23 @@ class OpenSandboxProvider(SandboxProvider):
                 secure_access=True,
                 network_policy=req.network.opensandbox_policy,
             )
-            sandbox_id = raw.id
-            # Rebind to the default per-command timeout (was inline in the manager).
-            raw = await opensandbox.Sandbox.connect(
-                sandbox_id, connection_config=self._conn(), skip_health_check=True
-            )
         except ProviderSandboxError as exc:
             raise SandboxError(str(exc)) from exc
         return OpenSandbox(sandbox=raw, workdir=req.workdir)
+
+    async def rebind(self, sandbox: Sandbox, *, workdir: str) -> Sandbox:
+        """Rebind a just-created sandbox to the default per-command timeout.
+
+        Called by the manager AFTER it has persisted the sandbox id, so a
+        rebind failure leaves a recorded (recoverable) sandbox, not an orphan.
+        """
+        try:
+            raw = await opensandbox.Sandbox.connect(
+                sandbox.id, connection_config=self._conn(), skip_health_check=True
+            )
+        except ProviderSandboxError as exc:
+            raise SandboxError(str(exc)) from exc
+        return OpenSandbox(sandbox=raw, workdir=workdir)
 
     async def connect(self, sandbox_id: str, *, workdir: str) -> Sandbox | None:
         try:
@@ -556,10 +596,39 @@ def _fake_sf():
     return lambda: cm
 ```
 
+Also add an **orphan-protection** test: on the create path, make
+`provider.rebind` raise and assert `repo.create` was still awaited *before* the
+failure (the row must exist so the sandbox is recoverable, not orphaned). This is
+the regression guard for the persist-before-rebind ordering:
+
+```python
+@pytest.mark.asyncio
+async def test_rebind_failure_still_persists_record(monkeypatch) -> None:
+    provider = MagicMock()
+    created = MagicMock(); created.id = "sbx-new"
+    provider.create = AsyncMock(return_value=created)
+    provider.connect = AsyncMock(return_value=None)
+    provider.rebind = AsyncMock(side_effect=RuntimeError("rebind boom"))
+    repo = MagicMock()
+    repo.get_active_by_user = AsyncMock(return_value=None)
+    repo.create = AsyncMock()
+    monkeypatch.setattr(
+        "cubebox.sandbox.manager.UserSandboxRepository", lambda *a, **k: repo
+    )
+    mgr = SandboxManager(session_factory=_fake_sf(), provider=provider)
+    with pytest.raises(Exception):
+        await mgr.get_or_create("u1", org_id="o1", workspace_id="w1")
+    repo.create.assert_awaited_once()  # persisted before the rebind failure
+```
+
 **Impl — edit `backend/cubebox/sandbox/manager.py`:**
 
 - Remove the module imports `import opensandbox`, `ConnectionConfig`, `PVC`,
   `Volume`, `SandboxException`, and the `OpenSandbox` import. Keep `SandboxError`.
+  **Re-type any `OpenSandbox` annotations** that survive — notably
+  `_apply_egress(self, ..., backend: OpenSandbox, ...)` (manager.py:111) must
+  become `backend: Sandbox` (import `Sandbox` from `cubebox.sandbox.base`), or
+  removing the `OpenSandbox` import breaks the module at type-check/import time.
 - `__init__(self, session_factory, *, provider: SandboxProvider)`: store
   `self._provider = provider`; keep reading the cross-provider config
   (`ttl`, `touch_interval`, `cleanup_interval`, `workdir`, `egress_exchange_host`)
@@ -589,14 +658,17 @@ def _fake_sf():
                 if self._exchange_host:
                     await EgressRefRepository(session).revoke_for_sandbox(record.sandbox_id)
 
-            req = self._build_create_request(session, user_id, org_id, workspace_id)
-            # _build_create_request resolves egress (network_policy) when enabled.
             req, injection = await self._prepare_create(session, user_id, org_id, workspace_id)
+            # _prepare_create resolves egress (network_policy) when enabled.
             backend = await self._provider.create(req)
+            # Persist BEFORE rebind (orphan protection — matches today's order at
+            # manager.py:272). If rebind then fails, the row exists and the reuse
+            # path recovers/cleans it next turn instead of leaking a live sandbox.
             await repo.create(
                 user_id=user_id, sandbox_id=backend.id,
                 image=self._image, ttl_seconds=self._ttl,
             )
+            backend = await self._provider.rebind(backend, workdir=self._workdir)
             if self._exchange_host:
                 await self._apply_egress(
                     session, backend, org_id=org_id, workspace_id=workspace_id,
@@ -625,7 +697,20 @@ def _fake_sf():
 
 - `cleanup_expired`: replace the inline connect+kill+close with
   `await self._provider.kill(record.sandbox_id)`.
-- `release`, `touch`, `touch_active` are unchanged (DB-only).
+- `release` is unchanged (DB-only).
+- `touch` / `touch_active`: **must extend the live sandbox lifetime for e2b.**
+  Today these are DB-only, which is correct for OpenSandbox (its lifetime is the
+  cubebox TTL + cleanup task). But an e2b sandbox is created with a fixed `timeout`
+  (capped at the ceiling) and will expire at that wall-clock deadline regardless
+  of cubebox activity, unless `set_timeout` is called. So when refreshing activity,
+  also call `await self._provider.set_lifetime(backend, self._ttl)` on the live
+  sandbox (no-op for OpenSandbox via its `set_lifetime`). Since `touch` is keyed
+  by `sandbox_id` and doesn't hold a live driver, reconnect via
+  `self._provider.connect(sandbox_id, workdir=self._workdir)` first (or thread the
+  live backend through from `LazySandbox`); `touch_active` already loads the
+  record and can reconnect similarly. Guard the reconnect failure (treat as
+  already-gone). Add a unit test asserting the touch path calls
+  `provider.set_lifetime` for the active sandbox.
 - `init_sandbox_manager(session_factory)` → build the provider via the factory
   (Task 5) and pass it in. Signature stays the same for callers.
 
@@ -1000,9 +1085,22 @@ class E2BProvider(SandboxProvider):
     e2b has no PVC, so ``volumes`` is ignored.
     """
 
-    def __init__(self, *, api_key: str, timeout_ceiling: int) -> None:
+    def __init__(
+        self,
+        *,
+        api_key: str,
+        timeout_ceiling: int,
+        template: str | None = None,
+        allow_internet_access: bool = True,
+        allow_public_traffic: bool = False,
+    ) -> None:
         self._api_key = api_key
         self._timeout_ceiling = timeout_ceiling
+        # e2b-specific config defaults; per-request SandboxNetwork still wins when
+        # the manager populates explicit rules (e.g. from #144 egress allowlists).
+        self._template = template
+        self._allow_internet_access = allow_internet_access
+        self._allow_public_traffic = allow_public_traffic
 
     @staticmethod
     def _network_kwarg(net: SandboxNetwork) -> dict[str, object] | None:
@@ -1019,7 +1117,7 @@ class E2BProvider(SandboxProvider):
         network = self._network_kwarg(req.network)
         timeout = min(req.ttl_seconds, self._timeout_ceiling)
         kwargs: dict[str, object] = {
-            "template": req.image,
+            "template": self._template or req.image,
             "timeout": timeout,
             "api_key": self._api_key,
             "allow_internet_access": req.network.allow_internet,
@@ -1186,6 +1284,13 @@ async def build_sandbox_provider(
         return E2BProvider(
             api_key=key,
             timeout_ceiling=config.get("sandbox.e2b.timeout_ceiling", 3600),  # type: ignore[attr-defined]
+            template=config.get("sandbox.e2b.template", "") or None,  # type: ignore[attr-defined]
+            allow_internet_access=config.get(  # type: ignore[attr-defined]
+                "sandbox.e2b.allow_internet_access", True
+            ),
+            allow_public_traffic=config.get(  # type: ignore[attr-defined]
+                "sandbox.e2b.allow_public_traffic", False
+            ),
         )
     raise ValueError(f"unknown sandbox.provider: {name!r}")
 ```
@@ -1243,6 +1348,19 @@ cd /home/chris/cubebox/.worktrees/feat/sandbox-e2b-backend/backend && \
 
 Expected: `4 passed`.
 
+**Provision the vault credential (don't just read it).** `_resolve_e2b_key`
+reads a system-scope credential `(kind=sandbox_provider, name=e2b, org_id=NULL)`,
+but nothing in this plan ever writes it — so on a fresh deploy the vault is empty
+and e2b only works via the env fallback. Add an explicit way to seed/upsert that
+system credential (mirror the existing system-credential upsert path — see
+`project_credential_vault_design` and how other system creds are seeded):
+either an operator CLI/admin step, or a documented one-time upsert. Confirm
+`CredentialRepository(session, org_id=None).get_by_kind_name(...)` exists with
+that exact signature; if the real method differs (e.g. returns a row needing a
+separate decrypt, or is named differently), adjust `_resolve_e2b_key`. If a seed
+path is genuinely out of scope for v1, say so explicitly and mark the production
+path as env-only — but don't leave a read with no write.
+
 ---
 
 ## Task 7 — Config: add `sandbox.provider` + `sandbox.e2b.*`
@@ -1267,12 +1385,25 @@ Add under the `sandbox:` block in `config.yaml` (defaults preserve OpenSandbox):
       # timeout_ceiling: e2b plan max sandbox lifetime (s). cubebox TTL is capped
       # at this when creating an e2b sandbox (1h Hobby = 3600, 24h Pro = 86400).
       timeout_ceiling: 3600
+      # template: e2b template name to create from. Falls back to sandbox.image
+      # when unset. (A custom Neko template is deferred; this key lets ops point
+      # at a real e2b template without reusing the OpenSandbox image ref.)
+      template: ""
+      # allow_internet_access: master internet on/off, passed as the TOP-LEVEL
+      # create kwarg (the spec's §"Network egress" requirement).
+      allow_internet_access: true
+      # allow_public_traffic: gates the public sandbox URL; lives inside the
+      # `network` create option, NOT a top-level kwarg.
+      allow_public_traffic: false
 ```
 
-`sandbox.e2b.template` is **not** added in v1: the spec defers the custom Neko
-template, and `sandbox.image` already supplies the template name to
-`SandboxCreateRequest.image`. (When a real e2b template lands with #145's
-browser work, add `sandbox.e2b.template` then.)
+The spec (§ "Config", Open Q on `sandbox.e2b.*`) calls for `template`,
+`allow_internet_access`, and `allow_public_traffic` as e2b-specific config —
+include them. The provider reads them and the manager threads
+`allow_internet_access` / `allow_public_traffic` into the `SandboxNetwork` it
+builds (today the manager only builds an OpenSandbox-shaped network); make the
+neutral `SandboxNetwork` carry these from e2b config when `provider=e2b`, and let
+`E2BProvider.create` prefer `sandbox.e2b.template` over `req.image` when set.
 
 **Run (config loads + default provider builds):**
 
@@ -1384,7 +1515,8 @@ behavior) + the new unit suites + types.
 
 ```bash
 cd /home/chris/cubebox/.worktrees/feat/sandbox-e2b-backend/backend && \
-  uv run pytest tests/unit -q -k "sandbox or e2b or opensandbox" && \
+  uv run pytest tests/unit -q -k "sandbox or e2b or opensandbox" \
+    tests/e2e/test_e2b_live.py && \
   uv run mypy cubebox/sandbox && \
   uv run ruff check cubebox/sandbox tests/unit/test_e2b_sandbox.py \
     tests/unit/test_e2b_provider.py tests/unit/test_sandbox_provider_factory.py \
@@ -1392,8 +1524,10 @@ cd /home/chris/cubebox/.worktrees/feat/sandbox-e2b-backend/backend && \
     tests/unit/test_sandbox_manager_provider.py
 ```
 
-Expected: pytest reports the e2b E2E `skipped` and everything else `passed`;
-mypy `Success: no issues found`; ruff `All checks passed!`.
+Expected: the new unit suites `passed`; the e2b E2E (`tests/e2e/test_e2b_live.py`,
+included above) reports `skipped` without `E2B_API_KEY`; mypy `Success: no issues
+found`; ruff `All checks passed!`. (The `-k` filter applies to the unit dir; the
+e2b live file is named explicitly so the sweep actually shows the skip.)
 
 If `backend/tests/e2e/test_opensandbox.py` requires a live OpenSandbox data
 plane, run it only where that data plane exists (it stays the regression net for
@@ -1410,7 +1544,15 @@ the manager refactor); otherwise rely on `test_sandbox_manager*.py` +
 - [ ] `OpenSandboxProvider`, `E2BProvider`, `E2BSandbox`, factory all unit-tested.
 - [ ] `allow_internet_access` passed as a TOP-LEVEL e2b kwarg; `allow_out`/
       `deny_out`/`allow_public_traffic` under `network` — asserted by tests.
-- [ ] e2b API key resolved from the vault (system scope) with env fallback.
+- [ ] e2b config includes `template`, `allow_internet_access`,
+      `allow_public_traffic`, `timeout_ceiling` (spec § Config); provider reads them.
+- [ ] e2b sandbox lifetime is extended on activity (`set_lifetime` wired into the
+      touch path) so an active e2b sandbox doesn't expire at its initial timeout.
+- [ ] persist-before-rebind orphan protection preserved (`repo.create` before
+      `provider.rebind`); regression test asserts the order.
+- [ ] e2b API key resolved from the vault (system scope) with env fallback, AND a
+      seed/operator path exists to provision that system credential (or v1 is
+      documented as env-only).
 - [ ] `sandbox.provider` defaults to `opensandbox`; nothing changes for existing
       deployments.
 - [ ] e2b E2E is marked `@pytest.mark.e2b`, skipped without `E2B_API_KEY`,
