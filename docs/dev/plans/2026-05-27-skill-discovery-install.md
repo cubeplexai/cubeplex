@@ -4,13 +4,26 @@
 
 **Goal:** Let a user describe a need in plain language → the agent calls a read-only `find_skills` tool that searches the local catalog (own-org-visible, not-yet-enabled skills) and one config-driven remote registry → returns ranked candidates with descriptions and a `candidate_id` + `canonical_name` → the user confirms via an authenticated workspace route → the chosen skill installs workspace-private (importing remote files when needed, minting `Skill.name = <org-slug>:<skill-slug>`) → it becomes loadable by `load_skill(canonical_name)` in the same conversation through the existing `SkillsMiddleware` path.
 
-**Architecture:** A new `SkillSource` interface with two responsibilities — `search(query, limit) -> list[SkillCandidate]` and `fetch(source_ref) -> dict[str, bytes]`. Two implementations: `LocalCatalogSource` (wraps `SkillRepository.list_visible_for_org`, fetch is a no-op since files already live in our object store) and `RemoteRegistrySource` (HTTP GitHub-backed registry the shape `npx skills` consumes; search hits a directory endpoint, fetch downloads one skill subpath). A `SkillSourceRegistry` holds the local source (always present) plus DB-backed remote sources (`SkillSource` table: `kind`, `base_url`, `repo`, `trust_tier`, `enabled`). A `SkillDiscoveryService` fans out across enabled sources, normalizes every result to one `SkillCandidate` shape (`candidate_id`, `name`, `canonical_name`, `description`, `keywords`, `source_kind`, `source_ref`, `trust`, `install_state`), de-dupes by `canonical_name` (local wins), and ranks (exact → keyword → trust → popularity). `candidate_id` is an **opaque base64url token encoding `(source_kind, source_ref)`** — stateless, no slashes — so the slash-laden remote `source_ref` never has to fit a FastAPI path segment. A `SkillInstallService` installs a candidate workspace-private: local → `OrgSkillInstallRepository.create_for_workspace`; remote → fetch files, run them through the existing `SkillPublishService._publish_from_files` (which mints `<org-slug>:<skill-slug>` and creates the workspace-private install). Scope-isolated routes: member `GET …/skills/discover`, `GET …/skills/discover/preview`, `POST …/skills/install` (workspace-private, the authenticated call **is** the confirm); admin `…/admin/skill-sources/` for remote-source management. The `find_skills` builtin tool calls `SkillDiscoveryService` directly (in-process, same as `load_skill`).
+**Architecture:** A new `SkillSource` interface with two responsibilities — `search(query, limit) -> list[SkillCandidate]` and `fetch(source_ref) -> dict[str, bytes]`. Two implementations: `LocalCatalogSource` (wraps `SkillRepository.list_visible_for_org`, fetch is a no-op since files already live in our object store) and `RemoteRegistrySource` (HTTP GitHub-backed registry the shape `npx skills` consumes; search hits a directory endpoint, fetch lists the chosen skill subpath's tree and downloads every safe file under it). A `SkillSourceRegistry` holds the local source (always present) plus DB-backed remote sources (`SkillSource` table: `kind`, `base_url`, `repo`, `trust_tier`, `enabled`), and exposes `remote_source_by_id(source_id)` so preview/install resolve the EXACT source a candidate came from. A `SkillDiscoveryService` fans out across enabled sources, normalizes every result to one `SkillCandidate` shape (`candidate_id`, `name`, `canonical_name`, `description`, `keywords`, `source_kind`, `source_ref`, `trust`, `install_state`, `source_name`, `repo`), de-dupes on a **normalized display slug** (strip any `<org>:` prefix + lowercase) so a local skill collapses its remote twin and local wins, and ranks (exact → keyword → trust → popularity). `candidate_id` is an **opaque base64url token encoding `(source_kind, source_id, source_ref)`** — stateless, no slashes — so the slash-laden remote `source_ref` never has to fit a FastAPI path segment and `source_id` pins which registered remote source it came from. A `SkillInstallService` installs a candidate workspace-private: local → `OrgSkillInstallRepository.create_for_workspace`; remote → fetch the whole subpath, validate the file set (path-traversal + size, shared with the zip path), then run it through the existing `SkillPublishService._publish_from_files` (which mints `<org-slug>:<skill-slug>` and creates the workspace-private install). Scope-isolated routes: member `GET …/skills/discover`, `GET …/skills/discover/preview`, `POST …/skills/install` (workspace-private, the authenticated call **is** the confirm); admin `…/admin/skill-sources/` for remote-source management. The `find_skills` builtin tool calls `SkillDiscoveryService` directly (in-process, same as `load_skill`).
 
 **Tech Stack:** Python 3.13, FastAPI, SQLModel, Alembic, Postgres, `httpx` (already a dep) for the remote registry client, pytest + httpx async test clients. mypy strict, ruff, 100-char lines.
 
 **Spec:** `docs/dev/specs/2026-05-27-skill-discovery-install-design.md` — §1 source abstraction + opaque `candidate_id` + `canonical_name`; §2 `find_skills` read-only tool; §3 preview→confirm→install + immediate loadability; §4 scope/trust; §6 scope-isolated routes; §7 v1 scope.
 
-**Scope note:** v1 ships `SkillSource` + `LocalCatalogSource` + one `RemoteRegistrySource`, the `find_skills` tool, member discover/preview/install routes, admin source-management routes, and in-run enabled-set recompute. Remote-skill **trust enforcement** (allowlist gating / approval queue / injection scan) is the open security question in spec §Open-Questions 1; this plan ships the trust *signal* (tier on the candidate + "unvetted" flag) and a **guarded, deferred** enforcement task (Task 10) wired off by default. Semantic search, personal scope, and remote-import freshness are out of scope.
+**Scope note:** v1 ships `SkillSource` + `LocalCatalogSource` + one `RemoteRegistrySource`, the `find_skills` tool, member discover/preview/install routes, admin source-management routes, and in-run enabled-set recompute. Remote-skill **trust enforcement** (allowlist gating / approval queue / injection scan) is the open security question in spec §Open-Questions 1; this plan ships the trust *signal* (tier on the candidate + "unvetted" flag) and a **guarded, deferred** enforcement task (Task 13) wired off by default. Semantic search, personal scope, and remote-import freshness are out of scope.
+
+> **KNOWN SPEC GAP — chat confirm-card frontend (spec §3, §6, §7).** The spec's
+> v1 scope lists a "confirm-card UI in chat" and its *primary* E2E is "user asks
+> the agent → candidate surfaced → **user confirms install from chat** →
+> `load_skill` succeeds." This plan ships the full backend that surface calls
+> (`find_skills` tool → `POST …/install` = the authenticated confirm) and E2Es
+> the install over HTTP, but it does **not** build the frontend confirm card, and
+> so the literal "user confirms *from chat*" path is **not** implemented or
+> E2E-tested here. This is a deliberate split (backend-first, one concern per PR),
+> not a silent drop — it is called out again in "Open follow-ups" as the required
+> follow-up PR. If reviewers want §3 closed in this slice, add a frontend
+> confirm-card task + a Playwright E2E driving chat → confirm → install before
+> merge; otherwise track it as the next PR.
 
 ---
 
@@ -39,7 +52,7 @@
 
 ## Task 1: `SkillCandidate` shape + opaque `candidate_id` codec
 
-The candidate is the one normalized shape every source returns and every route/tool speaks. `candidate_id` must round-trip `(source_kind, source_ref)` with no slashes (remote `source_ref` is e.g. `vercel-labs/skills/tree/main/skills/find-skills`). Use URL-safe base64 over a `kind|ref` payload — stateless, no DB lookup, no expiry/GC.
+The candidate is the one normalized shape every source returns and every route/tool speaks. `candidate_id` must round-trip `(source_kind, source_id, source_ref)` with no slashes (remote `source_ref` is e.g. `vercel-labs/skills/tree/main/skills/find-skills`; `source_id` is the registered `SkillSource` row id, empty for local). Use URL-safe base64 over a `kind|source_id|ref` payload — stateless, no DB lookup, no expiry/GC.
 
 **Files:**
 - Create: `cubebox/skills/sources/__init__.py`
@@ -59,17 +72,20 @@ from cubebox.skills.sources.base import (
 )
 
 
-def test_roundtrip_with_slashes():
-    cid = encode_candidate_id("remote", "vercel-labs/skills/tree/main/skills/find-skills")
+def test_roundtrip_with_slashes_and_source_id():
+    cid = encode_candidate_id(
+        "remote", "vercel-labs/skills/tree/main/skills/find-skills", source_id="sksrc-7"
+    )
     assert "/" not in cid  # URL-path safe
-    kind, ref = decode_candidate_id(cid)
+    kind, source_id, ref = decode_candidate_id(cid)
     assert kind == "remote"
+    assert source_id == "sksrc-7"  # which remote source this candidate came from
     assert ref == "vercel-labs/skills/tree/main/skills/find-skills"
 
 
-def test_roundtrip_local():
+def test_roundtrip_local_has_empty_source_id():
     cid = encode_candidate_id("local", "skl-ABC123")
-    assert decode_candidate_id(cid) == ("local", "skl-ABC123")
+    assert decode_candidate_id(cid) == ("local", "", "skl-ABC123")
 
 
 def test_decode_rejects_garbage():
@@ -94,10 +110,16 @@ Expected: FAIL with `ModuleNotFoundError: cubebox.skills.sources.base`.
 """Candidate shape, trust tiers, the SkillSource protocol, and the opaque
 candidate-id codec.
 
-candidate_id is a URL-safe base64 token over ``"{kind}|{source_ref}"``. It is
-the *only* handle clients pass back to preview/install, so a slash-laden remote
-source_ref (a GitHub repo subpath) never has to fit a FastAPI path segment.
-Stateless: decode recovers (kind, source_ref) without any server lookup.
+candidate_id is a URL-safe base64 token over ``"{kind}|{source_id}|{source_ref}"``.
+It is the *only* handle clients pass back to preview/install, so a slash-laden
+remote source_ref (a GitHub repo subpath) never has to fit a FastAPI path
+segment. ``source_id`` is the registered remote ``SkillSource`` row id (empty for
+local candidates) — preview/install use it to pick the EXACT source the candidate
+came from, since an org can register multiple remote sources. Stateless: decode
+recovers (kind, source_id, source_ref) without any server lookup.
+
+Both ``source_id`` and ``source_ref`` may not contain the ``|`` delimiter; row
+ids and GitHub subpaths never do, so we split on the first two ``|`` only.
 """
 
 from __future__ import annotations
@@ -121,21 +143,22 @@ class CandidateIdError(ValueError):
     """Raised when a candidate_id cannot be decoded."""
 
 
-def encode_candidate_id(kind: SourceKind, source_ref: str) -> str:
-    payload = f"{kind}|{source_ref}".encode()
+def encode_candidate_id(kind: SourceKind, source_ref: str, *, source_id: str = "") -> str:
+    payload = f"{kind}|{source_id}|{source_ref}".encode()
     return base64.urlsafe_b64encode(payload).decode().rstrip("=")
 
 
-def decode_candidate_id(candidate_id: str) -> tuple[SourceKind, str]:
+def decode_candidate_id(candidate_id: str) -> tuple[SourceKind, str, str]:
     pad = "=" * (-len(candidate_id) % 4)
     try:
         raw = base64.urlsafe_b64decode(candidate_id + pad).decode()
     except (binascii.Error, UnicodeDecodeError, ValueError) as exc:
         raise CandidateIdError(f"undecodable candidate_id: {candidate_id!r}") from exc
-    kind, sep, source_ref = raw.partition("|")
-    if not sep or kind not in ("local", "remote"):
+    parts = raw.split("|", 2)
+    if len(parts) != 3 or parts[0] not in ("local", "remote"):
         raise CandidateIdError(f"malformed candidate_id payload: {raw!r}")
-    return kind, source_ref  # type: ignore[return-value]
+    kind, source_id, source_ref = parts
+    return kind, source_id, source_ref  # type: ignore[return-value]
 
 
 @dataclass(frozen=True)
@@ -160,6 +183,11 @@ class SkillCandidate:
     install_state: Literal["enabled", "in_catalog", "available"] = "available"
     stars: int | None = None
     install_count: int | None = None
+    # Display-safe provenance for the confirm/trust card (spec §3, §4): which
+    # source this came from and the upstream repo. Local: source_name="catalog",
+    # repo=None. Remote: the registered SkillSource.name + its repo.
+    source_name: str = "catalog"
+    repo: str | None = None
 
 
 class SkillSource(Protocol):
@@ -352,13 +380,14 @@ from cubebox.repositories.skill import SkillRepository
 from cubebox.skills.service import SkillCatalogService
 from cubebox.skills.sources.base import (
     SkillCandidate,
+    SourceKind,
     TrustTier,
     encode_candidate_id,
 )
 
 
 class LocalCatalogSource:
-    kind = "local"
+    kind: SourceKind = "local"
 
     def __init__(
         self,
@@ -393,6 +422,8 @@ class LocalCatalogSource:
                     version=s.current_version,
                     trust=TrustTier.official,  # already in our trust boundary
                     install_state="enabled" if s.name in enabled_names else "in_catalog",
+                    source_name="catalog",
+                    repo=None,
                 )
             )
         return out  # discovery service ranks/filters/limits; source returns the full visible set
@@ -415,12 +446,13 @@ git commit -m "feat(skills): LocalCatalogSource over list_visible_for_org"
 
 ---
 
-## Task 4: `RemoteRegistrySource`
+## Task 4: `RemoteRegistrySource` + shared file-set validator
 
-Talks to a GitHub-backed registry the `npx skills` shape. `search` GETs the directory query endpoint and parses skill metadata. `fetch` downloads exactly one skill directory by subpath (the `npx skills` subpath footgun — issue #1015 — means we must pin the subpath, not pull the whole repo). `canonical_name` is computed up front from the installing org slug.
+Talks to a GitHub-backed registry the `npx skills` shape. `search` GETs the directory query endpoint and parses skill metadata. `fetch` lists the chosen skill's subpath **tree** (so it imports the real skill — `references/`, `scripts/`, assets — not just `SKILL.md` + a hardcoded handful), then downloads every safe file under that one pinned subpath (the `npx skills` subpath footgun — issue #1015 — means we pin the subpath, not pull the whole repo). `canonical_name` is computed up front from the installing org slug. This task also extracts the zip-path size/traversal guards into a shared `validate_skill_files` so the remote path enforces the same limits (Task 7 calls it).
 
 **Files:**
 - Create: `cubebox/skills/sources/remote.py`
+- Modify: `cubebox/skills/service.py` — extract `validate_skill_files(files)` from `_extract_zip`.
 - Test: `tests/unit/test_remote_registry_source.py`
 
 - [ ] **Step 1: Write the failing test (against a faithful in-test HTTP stub)**
@@ -452,11 +484,22 @@ def _registry_app() -> httpx.MockTransport:
                     ]
                 },
             )
+        if request.url.path.startswith("/tree/"):
+            # The skill subpath tree: SKILL.md plus a reference and a script —
+            # proving fetch imports the WHOLE subpath, not a hardcoded handful.
+            return httpx.Response(
+                200,
+                json={"files": ["SKILL.md", "references/style.md", "scripts/run.py"]},
+            )
         if request.url.path.endswith("/SKILL.md"):
             return httpx.Response(
                 200,
                 text="---\nname: slide-deck\ndescription: Build slide decks\nversion: 1.0.0\n---\n# x\n",
             )
+        if request.url.path.endswith("/references/style.md"):
+            return httpx.Response(200, text="# style guide\n")
+        if request.url.path.endswith("/scripts/run.py"):
+            return httpx.Response(200, text="print('hi')\n")
         return httpx.Response(404)
 
     return httpx.MockTransport(handler)
@@ -465,6 +508,7 @@ def _registry_app() -> httpx.MockTransport:
 @pytest.mark.asyncio
 async def test_search_normalizes_and_computes_canonical_name():
     src = RemoteRegistrySource(
+        source_id="sksrc-1",
         base_url="https://reg.test",
         trust_tier=TrustTier.community,
         org_slug="acme",
@@ -478,19 +522,30 @@ async def test_search_normalizes_and_computes_canonical_name():
     assert c.source_ref == "acme/skills/tree/main/skills/slide-deck"
     assert c.trust == TrustTier.community
     assert c.stars == 1200
+    # candidate_id carries the originating source id so preview/install pick the
+    # exact source even with multiple remote sources registered.
+    from cubebox.skills.sources.base import decode_candidate_id
+
+    assert decode_candidate_id(c.candidate_id) == (
+        "remote", "sksrc-1", "acme/skills/tree/main/skills/slide-deck",
+    )
 
 
 @pytest.mark.asyncio
-async def test_fetch_returns_skill_md_only_for_pinned_subpath():
+async def test_fetch_imports_whole_subpath_tree_not_just_skill_md():
     src = RemoteRegistrySource(
+        source_id="sksrc-1",
         base_url="https://reg.test",
         trust_tier=TrustTier.community,
         org_slug="acme",
         transport=_registry_app(),
     )
     files = await src.fetch("acme/skills/tree/main/skills/slide-deck")
-    assert "SKILL.md" in files
+    # Whole subpath came down: SKILL.md PLUS the reference + script, by their
+    # tree-relative paths — not a hardcoded SKILL.md + guessed-sibling set.
+    assert set(files) == {"SKILL.md", "references/style.md", "scripts/run.py"}
     assert b"slide-deck" in files["SKILL.md"]
+    assert b"style guide" in files["references/style.md"]
 ```
 
 - [ ] **Step 2: Run to confirm it fails**
@@ -504,40 +559,51 @@ Expected: FAIL with `ModuleNotFoundError: cubebox.skills.sources.remote`.
 # cubebox/skills/sources/remote.py
 """Remote GitHub-backed skill registry as a SkillSource.
 
-search() hits the registry directory; fetch() downloads ONE skill directory by
-its pinned subpath (issue #1015: pulling the bare repo grabs every skill — we
-pin the subpath so we import exactly the chosen skill). Files are stored, never
-executed at install time.
+search() hits the registry directory; fetch() lists the chosen skill's subpath
+TREE then downloads every safe file under it (issue #1015: pulling the bare repo
+grabs every skill — we pin the subpath so we import exactly the chosen skill, but
+ALL of it: references/, scripts/, assets — not just SKILL.md + a guessed handful).
+Files are stored, never executed at install time.
 """
 
 from __future__ import annotations
+
+from pathlib import PurePosixPath
 
 import httpx
 
 from cubebox.skills.sources.base import (
     SkillCandidate,
+    SourceKind,
     TrustTier,
     encode_candidate_id,
 )
 
-# Sibling files we attempt to fetch beyond SKILL.md; absent ones are skipped.
-_OPTIONAL_FILES = ("scripts/run.py", "scripts/run.sh", "reference.md")
+# Cap how many files one skill bundle may contain (defense-in-depth alongside the
+# per-file / total-byte caps validate_skill_files enforces at install time).
+_MAX_TREE_ENTRIES = 200
 
 
 class RemoteRegistrySource:
-    kind = "remote"
+    kind: SourceKind = "remote"
 
     def __init__(
         self,
         *,
+        source_id: str,
         base_url: str,
         trust_tier: TrustTier,
         org_slug: str,
+        source_name: str = "remote",
+        repo: str | None = None,
         transport: httpx.AsyncBaseTransport | httpx.MockTransport | None = None,
     ) -> None:
+        self.source_id = source_id  # registered SkillSource row id; goes in candidate_id
         self._base_url = base_url.rstrip("/")
         self._trust = trust_tier
         self._org_slug = org_slug
+        self._source_name = source_name  # display name for the trust card
+        self._repo = repo  # upstream owner/repo for the trust card
         self._transport = transport
 
     def _client(self) -> httpx.AsyncClient:
@@ -555,7 +621,9 @@ class RemoteRegistrySource:
             slug = item["name"]
             out.append(
                 SkillCandidate(
-                    candidate_id=encode_candidate_id("remote", item["ref"]),
+                    candidate_id=encode_candidate_id(
+                        "remote", item["ref"], source_id=self.source_id
+                    ),
                     name=slug,
                     canonical_name=f"{self._org_slug}:{slug}",  # what import WILL mint
                     description=item.get("description", ""),
@@ -567,33 +635,86 @@ class RemoteRegistrySource:
                     install_state="available",
                     stars=item.get("stars"),
                     install_count=item.get("installs"),
+                    source_name=self._source_name,
+                    repo=item.get("repo") or self._repo,
                 )
             )
         return out
 
     async def fetch(self, source_ref: str) -> dict[str, bytes]:
+        """Import the WHOLE skill subpath: list its tree, then pull every safe file.
+
+        Real skills carry references/, scripts/, and assets — not just SKILL.md.
+        We list the registry's tree endpoint for the pinned subpath and download
+        each entry under it, so the imported bundle matches the upstream skill.
+        Path-traversal / size enforcement happens at install time via
+        validate_skill_files (Task 7); here we only refuse obviously-unsafe rels
+        and cap entry count so a hostile tree can't fan out unbounded fetches.
+        """
         files: dict[str, bytes] = {}
         async with self._client() as client:
-            md = await client.get(f"/raw/{source_ref}/SKILL.md")
-            md.raise_for_status()
-            files["SKILL.md"] = md.content
-            for rel in _OPTIONAL_FILES:
-                extra = await client.get(f"/raw/{source_ref}/{rel}")
-                if extra.status_code == 200:
-                    files[rel] = extra.content
+            tree = await client.get(f"/tree/{source_ref}")
+            tree.raise_for_status()
+            entries = tree.json().get("files", [])
+            if len(entries) > _MAX_TREE_ENTRIES:
+                raise ValueError(f"skill tree has {len(entries)} files; cap {_MAX_TREE_ENTRIES}")
+            for rel in entries:
+                # rel is the path RELATIVE to the skill subpath (e.g. "SKILL.md",
+                # "references/api.md", "scripts/run.py"). Reject absolute / `..`
+                # rels before issuing the fetch; install-time validation re-checks.
+                parts = PurePosixPath(rel).parts
+                if rel.startswith("/") or ".." in parts:
+                    raise ValueError(f"unsafe path in remote skill tree: {rel!r}")
+                resp = await client.get(f"/raw/{source_ref}/{rel}")
+                resp.raise_for_status()
+                files[rel] = resp.content
+        if "SKILL.md" not in files:
+            raise ValueError("remote skill subpath has no SKILL.md")
         return files
 ```
 
-- [ ] **Step 4: Run to confirm pass + lint**
+- [ ] **Step 4: Extract the shared file-set validator in `service.py`**
 
-Run: `cd backend && uv run pytest tests/unit/test_remote_registry_source.py -q && uv run ruff check cubebox/skills/sources/remote.py`
+`_extract_zip` currently inlines the path-traversal (`..`) and size checks. Pull the per-file
+checks into a reusable `validate_skill_files(files: dict[str, bytes]) -> None` that raises the
+existing `InvalidZipPathError` / `FileTooLargeError`, then call it from `_extract_zip` so the
+zip path is unchanged AND the remote import path (Task 7) can call the same function. No new
+limits — reuse `MAX_FILE_BYTES` / `MAX_TOTAL_BYTES`.
+
+```python
+# cubebox/skills/service.py — new module-level helper, called by _extract_zip and remote install
+def validate_skill_files(files: dict[str, bytes]) -> None:
+    """Enforce path-traversal + per-file + total-size limits on a skill bundle.
+
+    Shared by the zip-upload path (_extract_zip) and the remote-import path so both
+    enforce identical limits. Raises InvalidZipPathError / FileTooLargeError.
+    """
+    total = 0
+    for rel, data in files.items():
+        if rel.startswith("/") or ".." in PurePosixPath(rel).parts:
+            raise InvalidZipPathError(f"invalid path in skill bundle: {rel!r}")
+        if len(data) > MAX_FILE_BYTES:
+            raise FileTooLargeError(f"{rel} is {len(data)} bytes; cap is {MAX_FILE_BYTES}")
+        total += len(data)
+        if total > MAX_TOTAL_BYTES:
+            raise FileTooLargeError(f"bundle exceeds total cap of {MAX_TOTAL_BYTES} bytes")
+```
+
+In `_extract_zip`, after building `out` (and before/after `_normalize_skill_zip_files`), keep the
+existing per-`info` checks OR replace them with a single `validate_skill_files(out)` call — pick
+whichever leaves zip behavior byte-identical (the per-`info.file_size` check reads the declared
+size; `validate_skill_files` checks the read bytes — equivalent for our purposes).
+
+- [ ] **Step 5: Run to confirm pass + lint**
+
+Run: `cd backend && uv run pytest tests/unit/test_remote_registry_source.py -q && uv run ruff check cubebox/skills/sources/remote.py cubebox/skills/service.py`
 Expected: 2 passed; ruff clean.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 6: Commit**
 
 ```bash
-git add backend/cubebox/skills/sources/remote.py backend/tests/unit/test_remote_registry_source.py
-git commit -m "feat(skills): RemoteRegistrySource with pinned-subpath fetch"
+git add backend/cubebox/skills/sources/remote.py backend/cubebox/skills/service.py backend/tests/unit/test_remote_registry_source.py
+git commit -m "feat(skills): RemoteRegistrySource whole-subpath fetch + shared file validator"
 ```
 
 ---
@@ -630,6 +751,19 @@ class SkillSourceRegistry:
     def sources(self) -> list[SkillSource]:
         return self._sources
 
+    def remote_source_by_id(self, source_id: str) -> SkillSource | None:
+        """Return the enabled remote source with this row id, or None.
+
+        Preview/install decode the candidate_id's source_id and look the exact
+        source up here — never "first remote", which would fetch from the wrong
+        registry when an org has multiple remote sources (or none, if the source
+        was disabled/deleted between discover and install → caller maps to 404).
+        """
+        for s in self._sources:
+            if s.kind == "remote" and getattr(s, "source_id", None) == source_id:
+                return s
+        return None
+
     @classmethod
     async def build(
         cls,
@@ -649,9 +783,12 @@ class SkillSourceRegistry:
         for row in rows:
             sources.append(
                 RemoteRegistrySource(
+                    source_id=row.id,
                     base_url=row.base_url,
                     trust_tier=TrustTier(row.trust_tier),
                     org_slug=org_slug,
+                    source_name=row.name,
+                    repo=row.repo,
                 )
             )
         return cls(sources)
@@ -673,7 +810,7 @@ git commit -m "feat(skills): SkillSourceRegistry (always-on local + enabled remo
 
 ## Task 6: `SkillDiscoveryService` — fan-out, merge, dedupe, rank (unit)
 
-Pure logic worth a focused unit test: exact > keyword > trust > popularity; same `canonical_name` across sources collapses with local winning.
+Pure logic worth a focused unit test: exact > keyword > trust > popularity; the same skill across sources collapses on its **normalized display slug** (not `canonical_name`, which differs — local `slug` vs remote `<org>:slug`), with local winning.
 
 **Files:**
 - Create: `cubebox/skills/discovery.py` (discovery half; install half lands in Task 7)
@@ -689,7 +826,7 @@ from cubebox.skills.discovery import rank_candidates
 from cubebox.skills.sources.base import SkillCandidate, TrustTier
 
 
-def _c(name, *, desc="", trust=TrustTier.untrusted, stars=None, kind="remote"):
+def _c(name, *, desc="", trust=TrustTier.untrusted, stars=None, kind="remote", keywords=None):
     return SkillCandidate(
         candidate_id=f"{kind}-{name}",
         name=name,
@@ -697,7 +834,7 @@ def _c(name, *, desc="", trust=TrustTier.untrusted, stars=None, kind="remote"):
         description=desc,
         source_kind=kind,  # type: ignore[arg-type]
         source_ref=name,
-        keywords=[],
+        keywords=keywords or [],
         trust=trust,
         stars=stars,
     )
@@ -718,21 +855,40 @@ def test_trust_then_popularity_breaks_ties():
     assert [x.name for x in ranked[1:]] == ["c", "a"]  # then stars desc
 
 
-def test_dedupe_local_wins_same_canonical_name():
+def test_dedupe_local_wins_against_remote_twin():
+    # Local canonical is the bare slug; the remote twin's canonical is "acme:slug".
+    # Dedupe must collapse them on the normalized slug (not canonical_name) so local
+    # wins — keying on canonical_name would leave BOTH because the strings differ.
     local = _c("frontend-design", kind="local")          # canonical "frontend-design"
     remote = SkillCandidate(
         candidate_id="remote-fd", name="frontend-design",
-        canonical_name="frontend-design", description="", source_kind="remote",
+        canonical_name="acme:frontend-design", description="", source_kind="remote",
         source_ref="x/y", keywords=[],
     )
     ranked = rank_candidates([remote, local], query="frontend", limit=5)
     assert len(ranked) == 1
     assert ranked[0].source_kind == "local"
+    assert ranked[0].canonical_name == "frontend-design"  # survivor keeps its own canonical
 
 
 def test_limit_applied():
     cands = [_c(f"s{i}", desc="thing") for i in range(10)]
     assert len(rank_candidates(cands, query="thing", limit=3)) == 3
+
+
+def test_plain_language_query_matches_tokens():
+    # "make a slide deck" must surface slide-deck even though the whole query
+    # string is not a substring of the name/keywords.
+    target = _c("slide-deck", desc="Build presentations", keywords=["slides", "deck"])
+    noise = _c("data-pipeline", desc="ETL jobs", keywords=["etl"])
+    ranked = rank_candidates([noise, target], query="make a slide deck", limit=5)
+    assert ranked[0].name == "slide-deck"
+
+
+def test_single_keyword_token_matches():
+    target = _c("deck-builder", desc="", keywords=["slides"])
+    ranked = rank_candidates([_c("unrelated", desc="x"), target], query="slides", limit=5)
+    assert ranked[0].name == "deck-builder"
 ```
 
 - [ ] **Step 2: Run to confirm it fails**
@@ -748,21 +904,52 @@ Expected: FAIL with `ModuleNotFoundError: cubebox.skills.discovery`.
 
 from __future__ import annotations
 
+import re
+
 from cubebox.skills.sources.base import SkillCandidate, TrustTier
 from cubebox.skills.sources.registry import SkillSourceRegistry
 
 _TRUST_RANK = {TrustTier.official: 0, TrustTier.community: 1, TrustTier.untrusted: 2}
 
 
+def _dedupe_key(c: SkillCandidate) -> str:
+    """Normalized display slug used to collapse the same skill across sources.
+
+    Local canonical_name is a bare slug ("frontend-design"); remote canonical_name
+    is "<org>:<slug>" ("acme:frontend-design"). Deduping on canonical_name would
+    therefore NEVER match a local skill against its remote twin. Key on the slug
+    AFTER stripping any "<org>:" prefix and lowercasing, so local and remote of the
+    same skill collide and "local wins" can actually fire.
+    """
+    return c.name.split(":", 1)[-1].strip().lower()
+
+
+def _tokens(text: str) -> set[str]:
+    # Lowercase word tokens, splitting on non-alphanumerics so "slide-deck",
+    # "slide deck" and "make a slide deck" all yield {slide, deck, ...}.
+    return {t for t in re.split(r"[^a-z0-9]+", text.lower()) if t}
+
+
 def _score(c: SkillCandidate, query: str) -> tuple[int, int, int, int]:
     q = query.lower().strip()
     name = c.name.lower()
     haystack = f"{name} {c.description.lower()} {' '.join(k.lower() for k in c.keywords)}"
+    # Tokenize so plain-language queries ("make a slide deck") match keyword/name
+    # tokens ("slide-deck" → {slide, deck}); whole-string substring alone misses these.
+    q_tokens = _tokens(query)
+    name_tokens = _tokens(c.name)
+    hay_tokens = _tokens(haystack)
     if name == q:
         match = 0
     elif q and (name.startswith(q) or q in name):
         match = 1
+    elif q_tokens and q_tokens <= name_tokens:
+        # every query token appears in the skill name → strong match
+        match = 1
     elif q and q in haystack:
+        match = 2
+    elif q_tokens and (q_tokens & hay_tokens):
+        # at least one query token hits name/description/keywords
         match = 2
     else:
         match = 3
@@ -772,13 +959,18 @@ def _score(c: SkillCandidate, query: str) -> tuple[int, int, int, int]:
 def rank_candidates(
     candidates: list[SkillCandidate], *, query: str, limit: int
 ) -> list[SkillCandidate]:
-    """Dedupe by canonical_name (local wins), then sort and truncate."""
-    by_name: dict[str, SkillCandidate] = {}
+    """Dedupe by normalized display slug (local wins), then sort and truncate.
+
+    Returns survivors unchanged — each still carries its own canonical_name (bare
+    slug for local, "<org>:<slug>" for remote), which install/load resolve against.
+    """
+    by_slug: dict[str, SkillCandidate] = {}
     for c in candidates:
-        prev = by_name.get(c.canonical_name)
+        key = _dedupe_key(c)
+        prev = by_slug.get(key)
         if prev is None or (prev.source_kind != "local" and c.source_kind == "local"):
-            by_name[c.canonical_name] = c
-    ordered = sorted(by_name.values(), key=lambda c: _score(c, query))
+            by_slug[key] = c
+    ordered = sorted(by_slug.values(), key=lambda c: _score(c, query))
     return ordered[:limit]
 
 
@@ -892,7 +1084,7 @@ from dataclasses import dataclass
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cubebox.repositories.skill import OrgSkillInstallRepository, SkillRepository
-from cubebox.skills.service import SkillPublishService
+from cubebox.skills.service import SkillPublishService, validate_skill_files
 from cubebox.skills.sources.base import decode_candidate_id
 
 
@@ -928,10 +1120,10 @@ class SkillInstallService:
         self._actor = actor_user_id
 
     async def install(self, candidate_id: str) -> InstallResult:
-        kind, source_ref = decode_candidate_id(candidate_id)
+        kind, source_id, source_ref = decode_candidate_id(candidate_id)
         if kind == "local":
             return await self._install_local(source_ref)
-        return await self._install_remote(source_ref)
+        return await self._install_remote(source_id, source_ref)
 
     async def _install_local(self, skill_id: str) -> InstallResult:
         skills = SkillRepository(self._session)
@@ -954,13 +1146,21 @@ class SkillInstallService:
             installed_version=skill.current_version,
         )
 
-    async def _install_remote(self, source_ref: str) -> InstallResult:
-        source = next((s for s in self._registry.sources if s.kind == "remote"), None)
+    async def _install_remote(self, source_id: str, source_ref: str) -> InstallResult:
+        # Resolve the EXACT source the candidate came from by its row id — never
+        # "first remote", which would fetch from the wrong registry when an org has
+        # multiple remote sources (or none, if it was disabled/deleted since discover).
+        source = self._registry.remote_source_by_id(source_id)
         if source is None:
             raise SkillInstallError("no enabled remote source for this candidate")
         files = await source.fetch(source_ref)
         if "SKILL.md" not in files:
             raise SkillInstallError("remote candidate has no SKILL.md")
+        # Remote-fetched files never passed through _extract_zip, so the zip-path
+        # guards (path traversal, per-file + total size) were skipped. Run the SAME
+        # validation here before publish so a remote bundle can't smuggle a `..`
+        # path or oversize file past the checks an uploaded zip would hit.
+        validate_skill_files(files)  # raises InvalidZipPathError / FileTooLargeError
         sv = await self._publisher._publish_from_files(
             org_id=self._org_id,
             org_slug=self._org_slug,
@@ -977,7 +1177,20 @@ class SkillInstallService:
         )
 ```
 
-> `_publish_from_files` already validates the slug, uploads files, mints `<org-slug>:<skill-slug>`, and creates the workspace-private install (`workspace_id` set). Reusing it keeps the remote-import path identical to a member upload — exactly the spec's "reuse the publish path."
+> `_publish_from_files` validates the slug/frontmatter, rejects a `:` in the name, detects
+> version collisions, decodes `SKILL.md` as UTF-8, uploads files, mints `<org-slug>:<skill-slug>`,
+> and creates the workspace-private install (`workspace_id` set). It does **not** run the
+> path-traversal/`..` and per-file/total-size checks — those live in `_extract_zip`, which only
+> the zip-upload path calls. So the remote path must validate the file set itself. **Task 4
+> already extracts those checks into a shared `validate_skill_files(files)` helper** (see Task 4
+> Step 3 below); `_extract_zip` calls it too, so zip-upload and remote-import enforce the exact
+> same `..`-path, per-file (`MAX_FILE_BYTES`), and total-size (`MAX_TOTAL_BYTES`) limits.
+> Reusing the publish path plus the shared validator keeps remote import identical to a member
+> upload — the spec's "reuse the publish path."
+
+> **Route error mapping (Task 8):** the install route must map `InvalidZipPathError` and
+> `FileTooLargeError` (now reachable on the remote path) to 400 the same way the existing upload
+> route does — see Task 8 Step 2's `except` block, which adds these alongside `SkillInstallError`.
 
 - [ ] **Step 4: Re-run after Task 8 wires the routes** (the e2e goes green once routes exist). For now confirm import + lint:
 
@@ -1025,6 +1238,8 @@ class SkillCandidateResponse(BaseModel):
     install_state: str
     stars: int | None = None
     install_count: int | None = None
+    source_name: str  # display source ("catalog" or the registered remote's name)
+    repo: str | None = None  # upstream owner/repo, for the trust card
     unvetted: bool  # True when source_kind == "remote" and trust != "official"
 
 
@@ -1047,14 +1262,9 @@ class InstallCandidateResponse(BaseModel):
 
 - [ ] **Step 2: Add the three member routes to `ws_skills.py`**
 
-Add imports for `SkillDiscoveryService`, `SkillInstallService`, `SkillInstallError`, `SkillSourceRegistry`, `decode_candidate_id`, `CandidateIdError`, `OrganizationRepository`, and the new schemas, then:
+Add imports for `SkillDiscoveryService`, `SkillInstallService`, `SkillInstallError`, `SkillSourceRegistry`, `decode_candidate_id`, `CandidateIdError`, `OrganizationRepository`, the publish exceptions already imported for the upload route (`InvalidZipPathError`, `FileTooLargeError`, `VersionCollisionError`, `InvalidFrontmatterError`, `InvalidSkillNameError`, `SkillMdMissingError` — `InvalidZipPathError` is new to this file), and the new schemas, then:
 
 ```python
-def _registry_and_services(session, ctx, workspace_id, org_slug):
-    catalog = SkillCatalogService(session=session, cache=_cache())
-    return catalog
-
-
 @router.get("/discover", response_model=list[SkillCandidateResponse])
 async def discover_skills(
     workspace_id: str,
@@ -1079,6 +1289,7 @@ async def discover_skills(
             description=c.description, source_kind=c.source_kind, keywords=c.keywords,
             version=c.version, trust=c.trust.value, install_state=c.install_state,
             stars=c.stars, install_count=c.install_count,
+            source_name=c.source_name, repo=c.repo,
             unvetted=(c.source_kind == "remote" and c.trust.value != "official"),
         )
         for c in cands
@@ -1097,7 +1308,7 @@ async def preview_candidate(
     if org is None:
         raise HTTPException(status_code=404, detail="ORG_NOT_FOUND")
     try:
-        kind, source_ref = decode_candidate_id(candidate_id)
+        kind, source_id, source_ref = decode_candidate_id(candidate_id)
     except CandidateIdError as e:
         raise HTTPException(status_code=400, detail="BAD_CANDIDATE_ID") from e
     catalog = SkillCatalogService(session=session, cache=_cache())
@@ -1115,10 +1326,10 @@ async def preview_candidate(
         session=session, catalog=catalog, org_id=ctx.org_id,
         org_slug=org.slug, workspace_id=workspace_id,
     )
-    remote = next((s for s in registry.sources if s.kind == "remote"), None)
+    remote = registry.remote_source_by_id(source_id)  # exact source, never "first remote"
     if remote is None:
         raise HTTPException(status_code=404, detail="SOURCE_NOT_FOUND")
-    files = await remote.fetch(source_ref)  # type: ignore[union-attr]
+    files = await remote.fetch(source_ref)
     if "SKILL.md" not in files:
         raise HTTPException(status_code=404, detail="SKILL_MD_MISSING")
     return CandidatePreviewResponse(
@@ -1154,6 +1365,14 @@ async def install_candidate(
         result = await install.install(body.candidate_id)
     except CandidateIdError as e:
         raise HTTPException(status_code=400, detail="BAD_CANDIDATE_ID") from e
+    except InvalidZipPathError as e:  # remote bundle had a `..` / absolute path
+        raise HTTPException(status_code=400, detail={"code": "INVALID_PATH", "reason": str(e)}) from e
+    except FileTooLargeError as e:  # remote bundle exceeded per-file / total caps
+        raise HTTPException(status_code=400, detail={"code": "FILE_TOO_LARGE", "reason": str(e)}) from e
+    except VersionCollisionError as e:
+        raise HTTPException(status_code=409, detail={"code": "VERSION_EXISTS", "reason": str(e)}) from e
+    except (InvalidFrontmatterError, InvalidSkillNameError, SkillMdMissingError) as e:
+        raise HTTPException(status_code=400, detail={"code": "INVALID_SKILL", "reason": str(e)}) from e
     except SkillInstallError as e:
         raise HTTPException(status_code=400, detail={"code": "INSTALL_FAILED", "reason": str(e)}) from e
     return InstallCandidateResponse(
@@ -1271,6 +1490,8 @@ def create_find_skills_tool(*, discovery: SkillDiscoveryService) -> AgentTool[Fi
                     "canonical_name": c.canonical_name,
                     "description": c.description,
                     "source": c.source_kind,
+                    "source_name": c.source_name,
+                    "repo": c.repo,
                     "trust": c.trust.value,
                     "install_state": c.install_state,
                     "unvetted": c.source_kind == "remote" and c.trust.value != "official",
@@ -1304,17 +1525,21 @@ def create_find_skills_tool(*, discovery: SkillDiscoveryService) -> AgentTool[Fi
 
 ```python
         # find_skills — read-only discovery; needs catalog + a source registry.
-        if skill_catalog is not None:
+        # NOTE: `_run_cubepi_path` does NOT have a `session` local — the DB session
+        # in scope is the `catalog_session` PARAM (the same one `skill_catalog` was
+        # built from). Use `catalog_session` here and guard it for None (it can be
+        # None when the catalog DB was unavailable at run start).
+        if skill_catalog is not None and catalog_session is not None:
             try:
                 from cubebox.repositories.organization import OrganizationRepository
                 from cubebox.skills.discovery import SkillDiscoveryService
                 from cubebox.skills.sources.registry import SkillSourceRegistry
                 from cubebox.tools.builtin.find_skills import create_find_skills_tool
 
-                _org = await OrganizationRepository(session).get(ctx.org_id)
+                _org = await OrganizationRepository(catalog_session).get(ctx.org_id)
                 if _org is not None:
                     _registry = await SkillSourceRegistry.build(
-                        session=session, catalog=skill_catalog, org_id=ctx.org_id,
+                        session=catalog_session, catalog=skill_catalog, org_id=ctx.org_id,
                         org_slug=_org.slug, workspace_id=ctx.workspace_id,
                     )
                     _builtin_tools.append(
@@ -1326,7 +1551,7 @@ def create_find_skills_tool(*, discovery: SkillDiscoveryService) -> AgentTool[Fi
                 logger.warning("find_skills unavailable for cubepi run: {}", _exc)
 ```
 
-> Place it **after** `load_skill` so tool order stays `… memory → load_skill → find_skills → view_images …`, preserving the cache-prefix discipline (see `backend/docs/prompt-cache-discipline.md`). Confirm `session` is the in-scope DB session name at that point in `run_manager`; if it differs, use the local name.
+> Place it **after** `load_skill` so tool order stays `… memory → load_skill → find_skills → view_images …`, preserving the cache-prefix discipline (see `backend/docs/prompt-cache-discipline.md`). The in-scope session is `catalog_session` (a `_run_cubepi_path` parameter), not `session` — there is no `session` local in this method.
 
 - [ ] **Step 5: Run the tool E2E + lint**
 
@@ -1459,6 +1684,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from cubebox.auth.context import RequestContext
 from cubebox.db import get_session
 from cubebox.mcp.dependencies import get_admin_request_context
+from cubebox.models import SkillSource
 from cubebox.repositories.skill_source import SkillSourceRepository
 
 router = APIRouter(prefix="/admin/skill-sources", tags=["admin-skill-sources"])
@@ -1488,7 +1714,7 @@ class SkillSourceResponse(BaseModel):
     enabled: bool
 
 
-def _to_response(row) -> SkillSourceResponse:
+def _to_response(row: SkillSource) -> SkillSourceResponse:
     return SkillSourceResponse(
         id=row.id, name=row.name, kind=row.kind, base_url=row.base_url,
         repo=row.repo, trust_tier=row.trust_tier, enabled=row.enabled,
@@ -1568,7 +1794,7 @@ git commit -m "feat(skills): admin remote-source management routes"
 
 ## Task 12: Remote discovery + install E2E against a faithful fake registry
 
-The spec's second primary E2E: admin registers a remote source pointed at a **local HTTP server that serves real SKILL.md + files** (a faithful stand-in, not a mock of our own code) → member discovers a remote candidate → previews → confirms install → it imports into the org catalog as `<org-slug>:<slug>` and installs workspace-private → becomes loadable. Also covers the trust banner + disabled-source-returns-nothing cases.
+The spec's second primary E2E: admin registers a remote source (same org+workspace as the member, via `four_layer_admin_and_member`) pointed at a **local HTTP server that serves real SKILL.md + files** (a faithful stand-in, not a mock of our own code) → member discovers a remote candidate → previews → confirms install → it imports into the org catalog as `<org-slug>:<slug>` and installs workspace-private → becomes loadable. Also covers the trust banner + disabled-source-returns-nothing cases.
 
 **Files:**
 - Test: `tests/e2e/test_skill_discovery_remote.py`
@@ -1577,6 +1803,16 @@ The spec's second primary E2E: admin registers a remote source pointed at a **lo
 - [ ] **Step 1: Stand up the fake registry fixture**
 
 Serve `/search` (returns one skill's metadata with `ref`) and `/raw/<ref>/SKILL.md` (real frontmatter). To make `RemoteRegistrySource` reach it without a transport hook, the source must read `base_url` from the registered `SkillSource` row — so point `base_url` at the fixture's `http://127.0.0.1:<port>`. If `SkillSourceRegistry.build` needs a transport override for tests, add an optional `transport` param threaded only in tests; production passes `None`.
+
+> **Fixture choice (important):** `admin_client` and `member_client` are
+> built from SEPARATE `_make_isolated_user` calls — different orgs AND
+> different app instances/ASGI transports. A source the admin registers in
+> one org+app is invisible to the member in the other. Use
+> `four_layer_admin_and_member` instead: it yields an admin client and a
+> member client in the **same workspace, same org, same app**, which is what
+> "admin registers a remote source → member discovers it" requires. Unpack as
+> `(admin, ws_id, _admin_uid), (member, ws_id2, _member_uid)` (ws ids are the
+> same workspace).
 
 - [ ] **Step 2: Write the E2E**
 
@@ -1588,11 +1824,13 @@ import pytest
 
 @pytest.mark.asyncio
 async def test_remote_discover_preview_install_then_loadable(
-    admin_client: tuple[httpx.AsyncClient, str],
-    member_client: tuple[httpx.AsyncClient, str],
+    four_layer_admin_and_member: tuple[
+        tuple[httpx.AsyncClient, str, str],
+        tuple[httpx.AsyncClient, str, str],
+    ],
     fake_registry_url: str,
 ) -> None:
-    admin, _ = admin_client
+    (admin, _admin_ws, _admin_uid), (member, ws_id, _member_uid) = four_layer_admin_and_member
     src = await admin.post(
         "/api/v1/admin/skill-sources",
         json={"name": "fake", "base_url": fake_registry_url,
@@ -1600,7 +1838,6 @@ async def test_remote_discover_preview_install_then_loadable(
     )
     assert src.status_code == 201
 
-    member, ws_id = member_client
     disc = await member.get(f"/api/v1/ws/{ws_id}/skills/discover", params={"q": "slides"})
     cand = next(c for c in disc.json() if c["name"] == "slide-deck")
     assert cand["source_kind"] == "remote"
@@ -1628,16 +1865,15 @@ async def test_remote_discover_preview_install_then_loadable(
 
 @pytest.mark.asyncio
 async def test_disabled_source_returns_no_remote_candidates(
-    admin_client, member_client, fake_registry_url,
+    four_layer_admin_and_member, fake_registry_url,
 ) -> None:
-    admin, _ = admin_client
+    (admin, _admin_ws, _admin_uid), (member, ws_id, _member_uid) = four_layer_admin_and_member
     src = await admin.post(
         "/api/v1/admin/skill-sources",
         json={"name": "fake", "base_url": fake_registry_url, "trust_tier": "community"},
     )
     sid = src.json()["id"]
     await admin.patch(f"/api/v1/admin/skill-sources/{sid}", json={"enabled": False})
-    member, ws_id = member_client
     disc = await member.get(f"/api/v1/ws/{ws_id}/skills/discover", params={"q": "slides"})
     assert not any(c["source_kind"] == "remote" for c in disc.json())
 ```
@@ -1704,8 +1940,8 @@ git commit -m "feat(skills): off-by-default remote-install trust gate (deferred 
 
 - [ ] **Step 1: Full changed-area test run**
 
-Run: `cd backend && uv run pytest tests/unit/test_skill_candidate_id.py tests/unit/test_skill_discovery_ranking.py tests/unit/test_remote_registry_source.py tests/e2e/test_skill_discovery_local.py tests/e2e/test_skill_discovery_remote.py tests/e2e/test_skill_sources_admin.py tests/e2e/test_find_skills_tool.py tests/e2e/test_skills_marketplace.py -q`
-Expected: all PASS.
+Run: `cd backend && uv run pytest tests/unit/test_skill_candidate_id.py tests/unit/test_skill_discovery_ranking.py tests/unit/test_remote_registry_source.py tests/e2e/test_skill_discovery_local.py tests/e2e/test_skill_discovery_remote.py tests/e2e/test_skill_sources_admin.py tests/e2e/test_find_skills_tool.py tests/e2e/test_skills_marketplace.py tests/e2e/memory/test_prompt_cache.py -q`
+Expected: all PASS. `test_prompt_cache.py` is included because Task 9 adds `find_skills` to the builtin-tool list, changing the cached tool/prompt prefix — this guards against a cache-prefix regression (see `backend/docs/prompt-cache-discipline.md`); the tool MUST be appended after `load_skill` to keep the prefix stable.
 
 - [ ] **Step 2: Type + lint across new + touched modules**
 
@@ -1724,11 +1960,11 @@ Expected: head applied; `alembic check` reports no new pending autogenerate diff
 - **Spec coverage:**
   - §1 `SkillSource` interface + `LocalCatalogSource` (Task 3, scoped to `list_visible_for_org`) + `RemoteRegistrySource` (Task 4) + config-driven `SkillSourceRegistry`/`SkillSource` table (Tasks 2, 5). Opaque `candidate_id` codec, no path routing (Task 1); `canonical_name` carried on every candidate and used by install/load, never display `name` (Tasks 1, 3, 4, 7, 9).
   - §2 read-only `find_skills` tool returning `{candidate_id, name, canonical_name, description, source, trust, install_state}` descriptions-only; `load_skill(canonical_name)` hint for enabled (Task 9).
-  - §3 preview → user-confirmed install (authenticated POST = confirm); remote import via `_publish_from_files` minting `<org-slug>:<skill-slug>`; install returns canonical name; same-conversation loadability verified (Tasks 7, 8, 10, 12).
+  - §3 preview → user-confirmed install (authenticated POST = confirm); remote import via `_publish_from_files` minting `<org-slug>:<skill-slug>`; install returns canonical name; same-conversation loadability verified (Tasks 7, 8, 10, 12). **Gap:** the §3 *chat* confirm-card frontend + its chat-driven E2E are NOT in this slice — see the "KNOWN SPEC GAP" callout and "Open follow-ups"; this plan ships only the backend the card calls.
   - §4 default workspace-private scope; trust tier + `unvetted` flag surfaced; admin-only source management; files stored not executed (Tasks 8, 11, 12).
   - §6 scope-isolated routes — member `/ws/.../skills/discover|discover/preview|install` (`candidate_id` in query/body, not path) vs admin `/admin/skill-sources/`; shared logic in services only (Tasks 8, 11).
-  - §7 v1 scope matches Tasks 1–12; trust *enforcement* kept guarded/deferred (Task 13) per Open-Question 1.
-- **Type consistency:** `SkillCandidate` fields are identical wherever constructed (base, local, remote, ranking test). `InstallResult.canonical_name` ↔ `InstallCandidateResponse.canonical_name` ↔ test assertions. `decode_candidate_id` return `(kind, source_ref)` used identically in install + preview. `SkillSourceRegistry.build(...)` signature identical across run_manager + all three routes.
+  - §7 v1 scope matches Tasks 1–12 **except** the chat confirm-card UI, which §7 lists but this backend-first slice defers (see KNOWN SPEC GAP); trust *enforcement* kept guarded/deferred (Task 13) per Open-Question 1.
+- **Type consistency:** `SkillCandidate` fields are identical wherever constructed (base, local, remote, ranking test). `InstallResult.canonical_name` ↔ `InstallCandidateResponse.canonical_name` ↔ test assertions. `decode_candidate_id` returns the 3-tuple `(kind, source_id, source_ref)`, unpacked identically in install + preview, and both resolve the remote source via `registry.remote_source_by_id(source_id)` (never "first remote"). `SkillSourceRegistry.build(...)` signature identical across run_manager + all three routes.
 - **Reuse, not re-route:** install reuses `OrgSkillInstallRepository.create_for_workspace` (local) and `SkillPublishService._publish_from_files` (remote) — the exact existing publish path; load reuses `find_enabled_by_name` + `SkillsMiddleware` untouched.
 - **Resolved against the real repo:** `require_member` (`cubebox.auth.dependencies`) and `get_admin_request_context` (`cubebox.mcp.dependencies`) are the existing member/admin deps; e2e clients yield `(client, workspace_id)` / `(client, _)` tuples per `test_skills_marketplace.py` / `test_skills_artifact_flow.py`; `_publish_from_files` already accepts `workspace_id`; `list_visible_for_org` already excludes deprecated + scopes to own-org uploaded + preinstalled.
 
@@ -1736,6 +1972,6 @@ Expected: head applied; `alembic check` reports no new pending autogenerate diff
 
 ## Open follow-ups (out of this plan)
 
-- **Frontend confirm-card module** (chat install button → `POST …/install`) — workspace-scoped page/module per the page-isolation rule; this plan ships the backend the button calls.
+- **Frontend confirm-card module** (chat install button → `POST …/install`) — workspace-scoped page/module per the page-isolation rule; this plan ships the backend the button calls. **Required to fully close spec §3/§6/§7** (see the KNOWN SPEC GAP callout near the top): needs the chat candidate card with the trust/source banner (using the new `source_name`/`repo`/`unvetted` fields) plus a Playwright E2E driving chat → confirm → install → `load_skill`. Treat as the immediate next PR, not indefinite backlog.
 - **Real trust enforcement** (allowlist / approval queue / SKILL.md injection scan) — spec Open-Question 1; Task 13 leaves the seam.
 - **Semantic search, personal scope, remote-import freshness/update** — spec deferred.
