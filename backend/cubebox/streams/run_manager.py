@@ -1276,13 +1276,31 @@ class RunManager:
                 from cubebox.middleware.sandbox import SandboxMiddleware
                 from cubebox.sandbox.manager import get_sandbox_manager
 
-                # Resolve the org's command_rules via the manager so DB access stays
-                # behind the manager and the middleware only sees its slice of policy.
-                _command_rules: list[dict[str, Any]] = []
+                # Resolve the org's command_rules via the manager so DB access
+                # stays behind the manager and the middleware only sees its
+                # slice of policy.
+                #
+                # Fail-CLOSED on resolution failure: if we can't read the org's
+                # rules (DB transient, malformed persisted policy, …) we MUST
+                # NOT pass an empty list — empty means allow-all, which would
+                # silently bypass any deny/confirm rules the admin configured.
+                # Install a single deny-all rule instead so every execute call
+                # blocks with the standard "blocked by org policy" message
+                # until the next request resolves cleanly.
+                _command_rules: list[dict[str, Any]]
                 try:
                     _command_rules = await get_sandbox_manager().resolve_command_rules(ctx.org_id)
                 except Exception as _exc:
-                    logger.warning("Failed to resolve sandbox command_rules: {}", _exc)
+                    logger.error(
+                        "Failed to resolve sandbox command_rules for org {}; "
+                        "failing CLOSED with deny-all until next request "
+                        "resolves: {}",
+                        ctx.org_id,
+                        _exc,
+                    )
+                    _command_rules = [
+                        {"action": "deny", "pattern": "*"},
+                    ]
 
                 sandbox_mw = SandboxMiddleware(
                     sandbox=sandbox,
