@@ -9,6 +9,7 @@ import hashlib
 from pathlib import Path
 from typing import Annotated, Literal
 
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -230,7 +231,10 @@ async def preview_candidate(
     remote = registry.remote_source_by_id(source_id)
     if remote is None:
         raise HTTPException(status_code=404, detail="SOURCE_NOT_FOUND")
-    files = await remote.fetch(source_ref)
+    try:
+        files = await remote.fetch(source_ref)
+    except (httpx.HTTPError, ValueError) as e:
+        raise HTTPException(status_code=502, detail="REMOTE_FETCH_FAILED") from e
     if "SKILL.md" not in files:
         raise HTTPException(status_code=404, detail="SKILL_MD_MISSING")
     slug = source_ref.rsplit("/", 1)[-1]
