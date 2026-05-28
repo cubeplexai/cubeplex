@@ -106,6 +106,32 @@ class TestScheduledTaskValidation:
     def test_interval_below_minimum_422(self, client: TestClient) -> None:
         assert _make(client, interval_seconds=30).status_code == 422
 
+    def test_patch_schedule_kind_switch_applies(self, client: TestClient) -> None:
+        """Regression for codex P2: PATCH must accept schedule_kind so a
+        user can switch a task from interval to cron (or once) without the
+        backend silently keeping the previous kind.
+        """
+        tid = _make(client).json()["id"]  # interval task
+        r = client.patch(
+            f"{BASE}/{tid}",
+            json={
+                "schedule_kind": "cron",
+                "cron_expr": "0 9 * * 1-5",
+                "timezone": "UTC",
+            },
+        )
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["schedule_kind"] == "cron"
+        assert body["cron_expr"] == "0 9 * * 1-5"
+        # next_fire_at must be recomputed against the new (cron) kind.
+        assert body["next_fire_at"] is not None
+
+    def test_patch_schedule_kind_cron_without_expr_422(self, client: TestClient) -> None:
+        tid = _make(client).json()["id"]
+        r = client.patch(f"{BASE}/{tid}", json={"schedule_kind": "cron"})
+        assert r.status_code == 422
+
 
 class TestScheduledTaskAuth:
     """Owner/admin mutation gating + fixed-target ownership (spec §auth)."""

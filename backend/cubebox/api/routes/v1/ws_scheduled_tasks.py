@@ -229,6 +229,7 @@ async def patch_task(
         for field in (
             "name",
             "prompt",
+            "schedule_kind",
             "cron_expr",
             "interval_seconds",
             "run_at",

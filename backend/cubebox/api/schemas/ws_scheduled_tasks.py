@@ -56,6 +56,7 @@ class ScheduledTaskCreate(BaseModel):
 class ScheduledTaskPatch(BaseModel):
     name: str | None = None
     prompt: str | None = None
+    schedule_kind: ScheduleKind | None = None
     cron_expr: str | None = None
     interval_seconds: int | None = Field(default=None, ge=60)
     run_at: datetime | None = None
@@ -71,6 +72,16 @@ class ScheduledTaskPatch(BaseModel):
             _validate_cron(self.cron_expr)
         if self.run_at is not None and self.run_at.tzinfo is None:
             raise ValueError("run_at must include a timezone offset")
+        # When changing schedule_kind, require the matching configuration
+        # field in the same patch so the route can recompute next_fire_at
+        # against an internally-consistent task. Cross-kind switches that
+        # forget e.g. cron_expr would otherwise silently drop fires.
+        if self.schedule_kind == "cron" and not self.cron_expr:
+            raise ValueError("cron_expr required when changing schedule_kind to cron")
+        if self.schedule_kind == "interval" and not self.interval_seconds:
+            raise ValueError("interval_seconds required when changing schedule_kind to interval")
+        if self.schedule_kind == "once" and self.run_at is None:
+            raise ValueError("run_at required when changing schedule_kind to once")
         return self
 
 
