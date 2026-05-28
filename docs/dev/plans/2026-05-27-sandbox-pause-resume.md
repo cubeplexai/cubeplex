@@ -35,10 +35,12 @@ driver without native pause keeps today's kill-on-idle behaviour.
   changed a row, so the row already reads `pausing` (unacquirable) before
   the slow suspend starts. Two reapers can't both win.
 - **Resume is a manager-level factory**, not a method on a dead handle:
-  the SDK `resume` is a classmethod that re-resolves execd/egress
-  endpoints and rebuilds adapters. `Sandbox.resume_by_id(...)` is a driver
-  classmethod; the manager discards the old handle, re-applies egress,
-  health-probes, marks `running`.
+  the provider method is `connect_or_resume(sandbox_id)` (unified shape
+  across providers per OQ-5). OpenSandbox impl calls `Sandbox.resume(...)`
+  (the SDK classmethod that re-resolves execd/egress endpoints and rebuilds
+  adapters) then re-binds; e2b impl calls `connect`, which auto-resumes.
+  `Sandbox.connect_or_resume(...)` is a driver classmethod; the manager
+  discards the old handle, re-applies egress, health-probes, marks `running`.
 - **Two reaper passes** in the existing cleanup loop:
   `pause_idle()` (pause-capable providers) and `reap_paused()` (hard-kill
   paused rows past `paused_ttl_seconds`). Non-capable providers fall back
@@ -60,6 +62,70 @@ FastAPI + async SQLModel/SQLAlchemy (Postgres), Alembic autogenerate,
 `SandboxState` constants), pytest + pytest-asyncio (`-m e2e` against a real
 OpenSandbox; unit tests for state-machine races). mypy strict, 100-char
 lines.
+
+---
+
+## Task 0 — Read OpenSandbox SDK pause/resume internals (mandatory)
+
+Before touching code, read the SDK to ground every decision in real behaviour
+and keep `docs/dev/notes/2026-05-28-opensandbox-pause-resume-internals.md` up
+to date as new findings surface.
+
+**Files**
+- Read: `backend/.venv/lib/python3.13/site-packages/opensandbox/sandbox.py`
+  (`Sandbox.pause`, `Sandbox.resume` classmethod, `Sandbox.connect`).
+- Read: `backend/.venv/lib/python3.13/site-packages/opensandbox/services/sandbox.py`
+  (`pause_sandbox`, `resume_sandbox`, `get_sandbox_endpoint`,
+  `renew_sandbox_expiration`, `get_info`).
+- Read: `backend/.venv/lib/python3.13/site-packages/opensandbox/adapters/sandboxes_adapter.py`
+  (concrete HTTP impl + response handling).
+- Read: `backend/.venv/lib/python3.13/site-packages/opensandbox/api/lifecycle/api/sandboxes/post_sandboxes_sandbox_id_pause.py`
+  and `…_resume.py` (response codes 202/401/403/404/409/500).
+- Read: `backend/.venv/lib/python3.13/site-packages/opensandbox/api/lifecycle/models/sandbox_status.py`
+  (`SandboxStatus` wire format incl. `Resuming`).
+- Read: `backend/.venv/lib/python3.13/site-packages/opensandbox/models/sandboxes.py`
+  (local `SandboxState` constants — note `Resuming` is missing).
+- Read: `docs/dev/notes/2026-05-28-opensandbox-pause-resume-internals.md` —
+  the gotcha checklist that drives later tasks.
+
+**Steps**
+
+- [ ] **Step 1: Read the SDK files above and the notes file end-to-end.**
+- [ ] **Step 2: Verify each gotcha (G1–G10) against the source** — confirm,
+      contradict, or refine. If the SDK has changed since the note was
+      written, edit the note (don't trust stale claims).
+- [ ] **Step 3: For each open follow-up in the note (pause/resume latency,
+      paused TTL counting, 409 body shape, egress persistence, 404 on GC'd
+      sandbox), run a real probe against the running OpenSandbox in this
+      worktree and append findings + raw evidence to the note's
+      "Open follow-ups" section.** Empirical data beats speculation.
+
+      Example probe (adjust to your env):
+
+      ```bash
+      cd /home/chris/cubebox/.worktrees/feat/sandbox-pause-resume
+      uv run python - <<'PY'
+      # exercise pause/resume against the real OpenSandbox configured for
+      # this worktree, measuring per-step latency and printing get_info()
+      # transitions so the note can quote real numbers.
+      PY
+      ```
+
+- [ ] **Step 4: Commit the updated note (if changed).**
+
+      ```bash
+      git add docs/dev/notes/2026-05-28-opensandbox-pause-resume-internals.md
+      git commit -m "docs(notes): refine OpenSandbox pause/resume gotchas with empirical findings (#145)"
+      ```
+
+      If the SDK matched the note exactly, commit only the empirical
+      follow-up data; if it diverged, fix the body too.
+
+No code in this task. **All later tasks (especially Task 4 provider
+capabilities, Task 5 manager pause/resume, Task 7 E2E) must reference
+specific gotchas from this note in their commit messages or PR description
+when the design choice maps to a documented trap (e.g. "G2: replace handle
+on resume", "G1: do not advance to `paused` synchronously").**
 
 ---
 
@@ -89,7 +155,7 @@ def test_new_lifecycle_columns_default():
     assert row.paused_at is None
     assert row.last_resumed_at is None
     assert row.in_use_until is None
-    assert row.paused_ttl_seconds == 604800
+    assert row.paused_ttl_seconds == 24 * 60
 ```
 
 2. Run it, confirm it fails (`AttributeError`/`TypeError` on the new
@@ -117,8 +183,8 @@ cd backend && uv run pytest tests/unit/test_user_sandbox_model.py -q
         sa_column_kwargs={"server_default": "opensandbox"},
     )
     paused_at: datetime | None = Field(default=None)
-    paused_ttl_seconds: int = Field(  # 7 days
-        default=604800, sa_column_kwargs={"server_default": "604800"},
+    paused_ttl_seconds: int = Field(  # 24 minutes (OQ-2)
+        default=24 * 60, sa_column_kwargs={"server_default": "1440"},
     )
     last_resumed_at: datetime | None = Field(default=None)
     in_use_until: datetime | None = Field(default=None, index=True)
@@ -362,10 +428,10 @@ from sqlalchemy import update
             record.status = "failed"
             await self.session.commit()
 
-    async def acquire_in_use(self, record_id: str, lease_window: int) -> None:
+    async def acquire_in_use(self, record_id: str, lease_seconds: int) -> None:
         record = await self.get(record_id)
         if record:
-            record.in_use_until = datetime.now(UTC) + timedelta(seconds=lease_window)
+            record.in_use_until = datetime.now(UTC) + timedelta(seconds=lease_seconds)
             await self.session.commit()
 
     async def release_in_use(self, record_id: str) -> None:
@@ -436,7 +502,7 @@ git commit -m "feat(sandbox): repo transitions + atomic claim_pausing"
 
 ---
 
-## Task 4 — Provider capability methods (`supports_pause` / `pause` / `resume_by_id`)
+## Task 4 — Provider capability methods (`supports_pause` / `pause` / `connect_or_resume`)
 
 **Files**
 - Modify: `backend/cubebox/sandbox/base.py`
@@ -471,9 +537,9 @@ async def test_base_pause_raises_not_implemented():
 
 
 @pytest.mark.asyncio
-async def test_resume_by_id_default_raises():
+async def test_connect_or_resume_default_raises():
     with pytest.raises(NotImplementedError):
-        await Sandbox.resume_by_id("sbx_x")
+        await Sandbox.connect_or_resume("sbx_x")
 ```
 
 2. Run, confirm failure:
@@ -496,17 +562,19 @@ cd backend && uv run pytest tests/unit/test_sandbox_pause_capability.py -q
         raise NotImplementedError("pause is not supported by this sandbox backend")
 
     @classmethod
-    async def resume_by_id(cls, sandbox_id: str, **kwargs: object) -> "Sandbox":
-        """Resume a paused sandbox by id, returning a fresh handle with
-        re-resolved endpoints. Override in capable drivers."""
-        raise NotImplementedError("resume is not supported by this sandbox backend")
+    async def connect_or_resume(cls, sandbox_id: str, **kwargs: object) -> "Sandbox":
+        """Connect to a sandbox, resuming it from `paused` if necessary, and
+        return a fresh handle with re-resolved endpoints. OpenSandbox calls
+        `Sandbox.resume(...)` server-side then connects; e2b's `connect`
+        auto-resumes. Override in capable drivers."""
+        raise NotImplementedError("connect_or_resume is not supported by this sandbox backend")
 ```
 
    Add `from __future__ import annotations` is already present; the
    `"Sandbox"` forward ref is fine.
 
-4. OpenSandbox driver — implement all three. `resume_by_id` delegates to
-   the SDK classmethod and wraps the result in `OpenSandbox`:
+4. OpenSandbox driver — implement all three. `connect_or_resume` delegates to
+   the SDK `Sandbox.resume(...)` classmethod and wraps the result in `OpenSandbox`:
 
 ```python
 # backend/cubebox/sandbox/opensandbox.py
@@ -521,7 +589,7 @@ from opensandbox.config import ConnectionConfig
             await self._sandbox.pause()
 
     @classmethod
-    async def resume_by_id(
+    async def connect_or_resume(
         cls,
         sandbox_id: str,
         *,
@@ -561,7 +629,7 @@ cd backend && uv run pytest tests/unit/test_sandbox_pause_capability.py -q
 7. Commit:
 
 ```bash
-git commit -m "feat(sandbox): supports_pause/pause/resume_by_id on Sandbox + drivers"
+git commit -m "feat(sandbox): supports_pause/pause/connect_or_resume on Sandbox + drivers"
 ```
 
 ---
@@ -571,7 +639,9 @@ git commit -m "feat(sandbox): supports_pause/pause/resume_by_id on Sandbox + dri
 **Files**
 - Modify: `backend/cubebox/sandbox/manager.py`
 - Modify: `backend/config.yaml` (or the active config template — add the
-  three `sandbox.*` knobs with defaults)
+  `sandbox.*` knobs with defaults: `pause_on_idle=true`,
+  `idle_ttl_seconds=1800` (30 min, OQ-1), `paused_ttl_seconds=1440` (24 min,
+  OQ-2), `lease_seconds=300` (5 min, OQ-7), `resume_timeout=30`)
 - Test: `backend/tests/unit/test_sandbox_manager_pause.py` (Create)
 
 **Steps**
@@ -600,10 +670,15 @@ cd backend && uv run pytest tests/unit/test_sandbox_manager_pause.py -q
 3. Read the three new config knobs in `SandboxManager.__init__`:
 
 ```python
+        # Defaults per spec OQ-1/OQ-2/OQ-7.
         self._pause_on_idle: bool = config.get("sandbox.pause_on_idle", True)
-        self._paused_ttl: int = config.get("sandbox.paused_ttl", 604800)
+        self._idle_ttl_seconds: int = config.get("sandbox.idle_ttl_seconds", 30 * 60)
+        self._paused_ttl_seconds: int = config.get("sandbox.paused_ttl_seconds", 24 * 60)
         self._resume_timeout: int = config.get("sandbox.resume_timeout", 30)
-        self._lease_window: int = config.get("sandbox.lease_window", 300)
+        # Lease lives in LazySandbox; acquire on entering a long op, renew during,
+        # release on completion. Boundary is the long-operation boundary (execute,
+        # browser start, file transfer), NOT agent-turn boundaries.
+        self._lease_seconds: int = config.get("sandbox.lease_seconds", 5 * 60)
 ```
 
 4. Extend `get_or_create` reuse path. After fetching the record use
@@ -649,7 +724,7 @@ cd backend && uv run pytest tests/unit/test_sandbox_manager_pause.py -q
                 org_id=org_id, workspace_id=workspace_id, user_id=user_id,
             )
         try:
-            backend = await OpenSandbox.resume_by_id(
+            backend = await OpenSandbox.connect_or_resume(
                 record.sandbox_id,
                 conn_config=conn_config,
                 resume_timeout=self._resume_timeout,
@@ -735,7 +810,8 @@ cd backend && uv run pytest tests/unit/test_sandbox_manager_pause.py -q
                     await self._kill_record(session, scoped, record, conn_config)
 
     async def reap_paused(self) -> None:
-        """Hard-kill paused rows past paused_ttl, bounding stored state."""
+        """Hard-kill paused rows past paused_ttl_seconds (24 min default,
+        OQ-2), bounding stored state."""
         conn_config = self._build_connection_config()
         async with self._session_factory() as session:
             expired = await UserSandboxRepository.list_paused_expired_system(session)
@@ -765,6 +841,220 @@ git commit -m "feat(sandbox): manager resume-on-reuse + pause_idle/reap_paused +
 
 ---
 
+## Task 5b — Reconciler for stuck transient states (OQ-3)
+
+A backend crash, a dropped 202 response, or an HTTP timeout can strand a row in
+`pausing` or `resuming`. The provider is the source of truth: periodically
+read `get_info().status` and repair the row. Also handles "provider says
+`Running` but DB says `pausing`" (pause failed → revert) and `Failed`
+propagation. Per the internals note (G3), the provider may return states the
+local enum doesn't know about (e.g. `Resuming`) — handle unknown strings
+gracefully.
+
+**Files**
+- Modify: `backend/cubebox/models/user_sandbox.py` — add a
+  `last_provider_check: datetime | None` column (autogen migration step).
+- Modify: `backend/cubebox/repositories/user_sandbox.py` — selection query
+  `list_transient_for_reconcile_system` (status in (`pausing`, `resuming`)
+  AND `last_provider_check` null/old).
+- Modify: `backend/cubebox/sandbox/manager.py` — `reconcile_transients()`
+  entry point.
+- Modify: `backend/cubebox/sandbox/cleanup.py` — call `reconcile_transients`
+  each loop, scan period 30 s (the existing 60 s loop is fine; the reconciler
+  is idempotent and `claim_timeout`-bounded — see step 5 below).
+- Test (unit): `backend/tests/unit/test_sandbox_reconciler.py` (Create).
+- Test (E2E DB): `backend/tests/e2e/test_sandbox_reconciler.py` (Create) for
+  the selection query and the column add.
+
+**Steps**
+
+1. **Add the column (autogen migration).** Write a failing test that asserts
+   the column exists with default `None`, then add the column to the model and
+   run `alembic revision --autogenerate -m "sandbox reconciler last_provider_check"`:
+
+```python
+# backend/cubebox/models/user_sandbox.py
+    last_provider_check: datetime | None = Field(default=None, index=True)
+```
+
+```bash
+cd backend && uv run alembic upgrade head
+uv run alembic revision --autogenerate -m "sandbox reconciler last_provider_check"
+uv run alembic upgrade head
+uv run alembic downgrade -1 && uv run alembic upgrade head
+```
+
+2. **Failing unit tests** — drive every branch the reconciler must handle:
+
+```python
+# backend/tests/unit/test_sandbox_reconciler.py
+import pytest
+from unittest.mock import AsyncMock, MagicMock
+
+from cubebox.sandbox.manager import SandboxManager
+
+
+@pytest.mark.asyncio
+async def test_reconciler_pausing_to_paused_on_provider_paused():
+    # DB row says 'pausing'; provider says 'Paused' -> mark_paused.
+    ...
+
+
+@pytest.mark.asyncio
+async def test_reconciler_pausing_reverts_to_running_when_provider_running():
+    # DB row says 'pausing'; provider says 'Running' -> mark_running revert
+    # (pause failed). last_provider_check is updated regardless.
+    ...
+
+
+@pytest.mark.asyncio
+async def test_reconciler_resuming_to_running_on_provider_running():
+    # DB row says 'resuming'; provider says 'Running' -> mark_running.
+    ...
+
+
+@pytest.mark.asyncio
+async def test_reconciler_propagates_failed():
+    # provider says 'Failed' -> mark_failed; reason/message copied if present.
+    ...
+
+
+@pytest.mark.asyncio
+async def test_reconciler_unknown_state_is_a_noop():
+    # provider says 'Resuming' (missing from local SandboxState constants per
+    # G3) or any other unknown string -> leave row, update last_provider_check.
+    ...
+
+
+@pytest.mark.asyncio
+async def test_reconciler_explicit_trigger_runs_once():
+    # Calling reconcile_transients() in a test bypasses the loop period.
+    ...
+```
+
+3. **Selection query.** Add to `UserSandboxRepository`:
+
+```python
+    @classmethod
+    async def list_transient_for_reconcile_system(
+        cls, session: AsyncSession, *, claim_timeout: int = 60
+    ) -> list[UserSandbox]:
+        """Rows in transient states whose last_provider_check is stale (or
+        null). claim_timeout bounds how often we re-poll a row that's still
+        in flight — prevents hammering the provider every 30 s sweep."""
+        stmt = (
+            select(UserSandbox)
+            .where(UserSandbox.status.in_(("pausing", "resuming")))  # type: ignore[attr-defined]
+            .where(
+                text(
+                    "last_provider_check IS NULL "
+                    "OR last_provider_check + :ct * INTERVAL '1 second' <= NOW()"
+                )
+            )
+            .params(ct=claim_timeout)
+        )
+        result = await session.execute(stmt)
+        return list(result.scalars().all())
+```
+
+4. **Reconciler body.** Read provider state via the existing service adapter
+   (`opensandbox.Sandbox.connect(..., skip_health_check=True)` → `get_info()`).
+   Map state string → DB transition; unknown strings (including the
+   API-documented `"Resuming"` that is missing from the local `SandboxState`
+   constants per internals-note G3) are a no-op except for the
+   `last_provider_check` bump:
+
+```python
+# backend/cubebox/sandbox/manager.py
+    async def reconcile_transients(self, *, claim_timeout: int = 60) -> None:
+        """Repair rows stuck in pausing/resuming by reading provider state.
+
+        - Paused      -> mark_paused (advance, OQ-3 / internals G1)
+        - Running     -> mark_running (pause failed if DB was pausing;
+                         resume succeeded if DB was resuming)
+        - Failed      -> mark_failed (copy reason/message)
+        - Terminated  -> mark_terminated + revoke egress
+        - Pausing/Resuming/<unknown> -> no-op, bump last_provider_check
+        """
+        conn_config = self._build_connection_config()
+        async with self._session_factory() as session:
+            rows = await UserSandboxRepository.list_transient_for_reconcile_system(
+                session, claim_timeout=claim_timeout,
+            )
+            for record in rows:
+                scoped = UserSandboxRepository(
+                    session, org_id=record.org_id, workspace_id=record.workspace_id,
+                )
+                try:
+                    raw = await opensandbox.Sandbox.connect(
+                        record.sandbox_id, connection_config=conn_config,
+                        skip_health_check=True,
+                    )
+                    info = await raw.get_info()
+                    state = (info.status.state if info and info.status else "") or ""
+                except Exception as exc:
+                    logger.warning("Reconciler: get_info failed for {}: {}",
+                                   record.sandbox_id, exc)
+                    await scoped.touch_provider_check(record.id)
+                    continue
+
+                if state == "Paused":
+                    await scoped.mark_paused(record.id, paused_at=datetime.now(UTC))
+                elif state == "Running":
+                    # Pause failed (DB was pausing) OR resume succeeded (DB was resuming).
+                    # mark_running asserts prior status in ('pausing','resuming') so it
+                    # handles both cases.
+                    await scoped.mark_running(
+                        record.id,
+                        last_resumed_at=datetime.now(UTC) if record.status == "resuming" else None,
+                    )
+                elif state == "Failed":
+                    await scoped.mark_failed(record.id)
+                elif state == "Terminated":
+                    await self._kill_record(session, scoped, record, conn_config)
+                else:
+                    # "Pausing" / "Resuming" / unknown -> let it continue
+                    logger.debug("Reconciler: {} still {}", record.sandbox_id, state)
+
+                await scoped.touch_provider_check(record.id)
+```
+
+   Add the `touch_provider_check(record_id)` helper on the repo (single UPDATE
+   that sets `last_provider_check = NOW()`).
+
+5. **Wire into the cleanup loop.** The existing `sandbox_cleanup_loop` runs
+   every 60 s. Either add a faster sibling loop at 30 s, or call
+   `reconcile_transients(claim_timeout=60)` each iteration of the existing
+   60 s loop — the latter is simpler and `claim_timeout` already bounds churn
+   per row. Add an explicit trigger entry point (the unit test in step 2
+   calls it directly to avoid sleeping for the loop period).
+
+```python
+# backend/cubebox/sandbox/cleanup.py
+        try:
+            await manager.reconcile_transients(claim_timeout=60)
+            await manager.pause_idle()
+            await manager.reap_paused()
+        except Exception as e:
+            logger.error("Error in sandbox cleanup loop: {}", e)
+```
+
+6. Re-run; confirm green:
+
+```bash
+cd backend && uv run pytest tests/unit/test_sandbox_reconciler.py \
+  tests/e2e/test_sandbox_reconciler.py -q
+# EXPECTED: all passed
+```
+
+7. Commit:
+
+```bash
+git commit -m "feat(sandbox): reconciler for stuck pausing/resuming rows (OQ-3)"
+```
+
+---
+
 ## Task 6 — In-use lease around operations + cleanup-loop wiring
 
 **Files**
@@ -780,15 +1070,18 @@ git commit -m "feat(sandbox): manager resume-on-reuse + pause_idle/reap_paused +
 - Test: `backend/tests/unit/test_sandbox_lease.py` (Create)
 
 **Lease sizing (read first).** A single renewal sized at a fixed
-`lease_window` can be outlived by one long op (a multi-minute `execute`,
-browser startup, large file transfer), letting the idle reaper pause it
-mid-flight. Two rules to avoid that:
+`lease_seconds` (default 5 min per OQ-7) can be outlived by one long op (a
+multi-minute `execute`, browser startup, large file transfer), letting the
+idle reaper pause it mid-flight. Two rules to avoid that:
 1. **Size the lease to the operation, not a constant.** Where an op has a
    known timeout (e.g. the connection/execute `request_timeout`), pass a lease
    at least as long as that timeout (plus a small margin) instead of the
-   default `lease_window`. For unbounded streaming sessions (live view), renew
+   default `lease_seconds`. For unbounded streaming sessions (live view), renew
    periodically (heartbeat) rather than once.
-2. **Cover every entry point, not just the lazy proxy.** Direct
+2. **Cover every entry point, not just the lazy proxy.** The lease lives in
+   `LazySandbox` (acquire on entering a long op, renew during, release on
+   completion) — the boundary is the long-operation boundary (`execute`,
+   browser start, file transfer), NOT agent-turn boundaries. Direct
    `manager.get_or_create` users (`ws_browser.get_live_view`) never pass
    through `LazySandbox._ensure_with_retry`, so they need their own
    renew (and, for a bounded request, `release_lease` in `finally`).
@@ -812,8 +1105,8 @@ mid-flight. Two rules to avoid that:
         self, sandbox_id, *, org_id, workspace_id, lease_seconds: int | None = None
     ) -> None:
         # lease_seconds lets callers size the lease to a known op timeout;
-        # defaults to the configured lease_window for short ops.
-        window = lease_seconds if lease_seconds is not None else self._lease_window
+        # defaults to the configured lease_seconds (5 min, OQ-7) for short ops.
+        window = lease_seconds if lease_seconds is not None else self._lease_seconds
         async with self._session_factory() as session:
             repo = UserSandboxRepository(session, org_id=org_id, workspace_id=workspace_id)
             record = await repo.get_by_sandbox_id(sandbox_id)
@@ -830,17 +1123,18 @@ mid-flight. Two rules to avoid that:
 
 4. In `LazySandbox._ensure_with_retry`, after the existing `touch`, also
    renew the lease — this is the chokepoint the lazy ops (`execute`,
-   `upload`, `download`) pass through (spec open-question 7). Size the lease
-   to the op's timeout where one is known (so a single long op cannot outlive
-   its lease), defaulting to `lease_window` otherwise:
+   `upload`, `download`) pass through (spec OQ-7). The lease boundary is the
+   long-operation boundary; the LazySandbox layer is where it lives. Size the
+   lease to the op's timeout where one is known (so a single long op cannot
+   outlive its lease), defaulting to `lease_seconds` (5 min) otherwise:
 
 ```python
         try:
             # Size to the op timeout when known so one long op can't be paused
-            # mid-flight; falls back to the default lease_window.
+            # mid-flight; falls back to the default lease_seconds (5 min).
             await self._manager.renew_lease(
                 sandbox.id, org_id=self._org_id, workspace_id=self._workspace_id,
-                lease_seconds=self._op_timeout_seconds,  # None -> default window
+                lease_seconds=self._op_timeout_seconds,  # None -> default 5 min
             )
         except Exception:
             logger.exception("Lazy sandbox: lease renew failed (non-fatal)")
@@ -948,7 +1242,7 @@ git commit -m "test(sandbox): e2e pause/resume round-trip + idle/reap/capability
      exactly once. The loser does **not** create a new sandbox: it polls and,
      once the winner marks the row `running`, connects to that same
      `sandbox_id` (assert both calls return a handle to the *same* sandbox, and
-     `OpenSandbox.resume_by_id` is invoked only once). Cover the winner-fails
+     `OpenSandbox.connect_or_resume` is invoked only once). Cover the winner-fails
      case too: if the winner ends `failed`/`terminated`, the loser returns
      `None` so the caller may create a fresh one.
 
