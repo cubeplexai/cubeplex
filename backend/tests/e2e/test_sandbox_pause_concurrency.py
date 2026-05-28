@@ -309,3 +309,34 @@ async def test_double_resume_guard_winner_fails_loser_returns_none(
     # Loser saw failed via repo.get and bailed without connecting.
     assert raw_connect.await_count == 0
     repo.mark_failed.assert_awaited_once_with(record.id)
+
+
+# ---------------------------------------------------------------------------
+# Test 3 — Transient-wait timeout raises instead of allowing duplicate create.
+# ---------------------------------------------------------------------------
+
+
+async def test_await_stable_status_raises_on_timeout(scope: dict[str, str]) -> None:
+    """If a transient row never settles within ``_resume_timeout``, the wait
+    helper must raise ``SandboxError`` rather than return None — otherwise
+    ``get_or_create`` would silently provision a duplicate sandbox while the
+    original lifecycle operation is still in flight (codex P2 round 3).
+    """
+    from cubebox.sandbox.base import SandboxError
+
+    mgr, _poll_session = _make_manager()
+    mgr._resume_timeout = 1  # bound the wait so the test runs fast
+
+    # Repo whose `get` always sees a still-pausing row.
+    stuck = _paused_record(scope)
+    stuck.status = "pausing"
+    repo = MagicMock(spec=UserSandboxRepository)
+    repo.get = AsyncMock(return_value=stuck)
+
+    with patch("cubebox.sandbox.manager.UserSandboxRepository", return_value=repo):
+        with pytest.raises(SandboxError, match="did not settle"):
+            await mgr._await_stable_status(
+                "rec-1",
+                org_id=scope["org_id"],
+                workspace_id=scope["workspace_id"],
+            )

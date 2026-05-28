@@ -192,8 +192,10 @@ async def test_pause_idle_pause_raises_reverts_and_kills() -> None:
 
     backend.pause.assert_awaited_once()
     scoped_repo.mark_paused.assert_not_called()
-    # Revert from pausing -> running before falling back to kill.
-    scoped_repo.mark_running.assert_awaited_once_with(record.id)
+    # Don't flip the row back to `running` before killing — a concurrent
+    # get_or_create could observe `running` and return a handle to a
+    # sandbox we're about to terminate (codex P2 round 3).
+    scoped_repo.mark_running.assert_not_called()
     # _kill_record killed the sandbox and marked terminated.
     raw_sandbox.kill.assert_awaited_once()
     scoped_repo.mark_terminated.assert_awaited_once_with(record.id)
@@ -239,7 +241,9 @@ async def test_pause_idle_no_capability_kills_record() -> None:
         await mgr.pause_idle()
 
     backend.pause.assert_not_called()
-    scoped_repo.mark_running.assert_awaited_once_with(record.id)
+    # Same race rationale as the pause-failure path: never flip the
+    # claimed row back to `running` before killing.
+    scoped_repo.mark_running.assert_not_called()
     raw_sandbox.kill.assert_awaited_once()
     scoped_repo.mark_terminated.assert_awaited_once_with(record.id)
 

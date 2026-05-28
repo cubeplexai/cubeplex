@@ -555,9 +555,12 @@ class SandboxManager:
         """Poll the row (fresh session per iteration) until its status is
         stable: ``running``, ``paused``, ``failed``, or ``terminated``.
 
-        Returns the row with its latest status, or ``None`` if the row was
-        deleted or the deadline (``_resume_timeout``) passed while it was
-        still transient.
+        Returns the row on a stable status, or ``None`` if the row was
+        deleted while we were waiting. **Raises ``SandboxError`` on
+        timeout** so the caller surfaces a retryable error instead of
+        silently creating a duplicate sandbox while the original transition
+        is still in flight (a slow provider pause/resume can exceed
+        ``_resume_timeout``).
 
         A fresh session per poll is required because the caller's session
         uses ``expire_on_commit=False``; a same-session ``repo.get`` would
@@ -565,6 +568,7 @@ class SandboxManager:
         of the winner's committed transition.
         """
         deadline = datetime.now(UTC) + timedelta(seconds=self._resume_timeout)
+        last_status: str | None = None
         while datetime.now(UTC) < deadline:
             async with self._session_factory() as poll_session:
                 poll_repo = UserSandboxRepository(
@@ -575,8 +579,12 @@ class SandboxManager:
                     return None
                 if row.status in ("running", "paused", "failed", "terminated"):
                     return row
+                last_status = row.status
             await asyncio.sleep(0.5)
-        return None
+        raise SandboxError(
+            f"sandbox lifecycle operation did not settle in {self._resume_timeout}s "
+            f"(last observed status: {last_status!r}); retry shortly"
+        )
 
     async def _await_resumed_by_winner(
         self,
@@ -638,7 +646,11 @@ class SandboxManager:
                     )
                     backend = OpenSandbox(sandbox=raw, workdir=self._workdir)
                     if not backend.supports_pause():
-                        await scoped.mark_running(record.id)  # revert pausing
+                        # Driver can't pause natively — go straight to kill
+                        # without flipping the row back to `running` first
+                        # (a concurrent get_or_create could otherwise observe
+                        # `running`, pass health check, and return a handle
+                        # to a sandbox we're about to terminate).
                         await self._kill_record(session, scoped, record, conn_config)
                         continue
                     await backend.pause()
@@ -650,7 +662,8 @@ class SandboxManager:
                         record.sandbox_id,
                         exc,
                     )
-                    await scoped.mark_running(record.id)
+                    # Don't revert to `running` before killing; same race as
+                    # the supports_pause=False branch above.
                     await self._kill_record(session, scoped, record, conn_config)
 
     async def reap_paused(self) -> None:
