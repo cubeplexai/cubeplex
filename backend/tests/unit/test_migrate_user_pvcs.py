@@ -5,20 +5,30 @@ planner that decides what to do per user (rename / leave-for-manual /
 skip-already-migrated). No cluster I/O.
 """
 
+from unittest.mock import MagicMock
+
+from cubebox.sandbox.manager import (
+    SandboxManager,
+    build_legacy_user_pvc_name,
+    build_user_pvc_name,
+)
 from cubebox.scripts.dev import migrate_user_pvcs
 from cubebox.scripts.dev.migrate_user_pvcs import build_migration_plan, main_async
 
+_PREFIX = "cubebox-user"
+
 
 def test_user_with_one_workspace_gets_a_rename_action() -> None:
+    old = build_legacy_user_pvc_name(_PREFIX, "u1")
     plan = build_migration_plan(
-        existing_pvcs=["user-u1", "user-u2"],
+        existing_pvcs=[old, build_legacy_user_pvc_name(_PREFIX, "u2")],
         memberships={"u1": ["ws-A"], "u2": ["ws-X", "ws-Y"]},
-        target_prefix="user-",
-        new_template="ws-{ws}-user-{user}",
+        pvc_prefix=_PREFIX,
     )
     actions = {a.user_id: a for a in plan}
     assert actions["u1"].kind == "rename"
-    assert actions["u1"].new_name == "ws-ws-A-user-u1"
+    assert actions["u1"].old_name == old
+    assert actions["u1"].new_name == build_user_pvc_name(_PREFIX, "ws-A", "u1")
     # u2 is in two workspaces -> ambiguous, surfaced for manual cleanup.
     assert actions["u2"].kind == "manual_cleanup"
 
@@ -27,10 +37,20 @@ def test_user_with_no_existing_pvc_is_skipped() -> None:
     plan = build_migration_plan(
         existing_pvcs=[],
         memberships={"u1": ["ws-A"]},
-        target_prefix="user-",
-        new_template="ws-{ws}-user-{user}",
+        pvc_prefix=_PREFIX,
     )
     assert plan == []
+
+
+def test_planned_new_name_matches_what_sandbox_manager_actually_mounts() -> None:
+    """The whole point of building the names off shared helpers is so an
+    operator who reads the dry-run output can trust that the renamed PVC
+    will be the exact claim the new SandboxManager mounts. Verify by going
+    through SandboxManager._build_user_volume directly."""
+    manager = SandboxManager(MagicMock())
+    proposed = build_user_pvc_name(manager._volume_pvc_prefix, "ws-A", "user-1")
+    actual = manager._build_user_volume("ws-A", "user-1").pvc.claim_name  # type: ignore[union-attr]
+    assert proposed == actual
 
 
 async def test_main_async_refuses_apply_when_list_pvcs_is_unwired(capsys, monkeypatch) -> None:
