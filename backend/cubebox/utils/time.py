@@ -1,15 +1,17 @@
 """Timezone-safe datetime utilities."""
 
-from datetime import UTC, datetime
+from datetime import datetime
 
 
 def utc_isoformat(dt: datetime) -> str:
-    """Return an ISO 8601 string that always includes the UTC offset.
+    """Return an ISO 8601 string with the UTC offset.
 
-    `timestamp without time zone` columns strip tz info, so datetimes read back
-    from the DB are naive.  This helper attaches UTC before formatting so the
-    frontend can unambiguously parse the timestamp.
+    Post-timestamptz-migration, every datetime in cubebox is tz-aware by
+    construction. A naive dt reaching this helper means someone violated
+    the hard rule -- fail loudly so the bug is visible rather than silently
+    fixed.
     """
-    if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=UTC)
+    assert dt.tzinfo is not None, (
+        f"naive datetime reached utc_isoformat: {dt!r}; should be tz-aware"
+    )
     return dt.isoformat()
