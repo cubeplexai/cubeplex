@@ -33,12 +33,30 @@ export function WidgetView({
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // Inject the real id into the shell. JSON.stringify supplies quotes + standard
-  // escaping; we further escape "<" to "<" so a hypothetical "</script>"
+  // escaping; we further escape "<" to "\\u003c" so a hypothetical "</script>"
   // can't close the shell's script block. A function replacement avoids
-  // String.replace's "$" special-handling. Placeholder appears once in the shell.
+  // String.replace's "$" special-handling. Each placeholder appears exactly
+  // once in the shell. Theme tokens are resolved from the app's `.dark` class
+  // (next-themes attribute="class") at mount; toggling theme after render
+  // keeps the widget on the original theme until the conversation reloads.
   const srcDoc = useMemo(() => {
+    const isDark =
+      typeof document !== 'undefined' && document.documentElement.classList.contains('dark')
+    const t = isDark
+      ? { bg: '#0e1116', fg: '#e6edf3', muted: '#161b22', border: '#30363d', accent: '#58a6ff' }
+      : { bg: '#ffffff', fg: '#0a0a0f', muted: '#f5f5f7', border: '#e5e7eb', accent: '#0061c2' }
     const idLiteral = JSON.stringify(widgetId).replace(/</g, '\\u003c')
-    return WIDGET_SHELL_HTML.replace('%%WIDGET_ID%%', () => idLiteral)
+    // Replace theme tokens FIRST (values are color strings like '#0e1116',
+    // never contain '%%'), then widget_id LAST. Reversed order would let an
+    // unlikely widgetId containing e.g. '%%BG%%' get clobbered by a later
+    // theme replacement. This order makes the substitution unaffected by id
+    // contents.
+    return WIDGET_SHELL_HTML.replace('%%BG%%', () => t.bg)
+      .replace('%%FG%%', () => t.fg)
+      .replace('%%MUTED%%', () => t.muted)
+      .replace('%%BORDER%%', () => t.border)
+      .replace('%%ACCENT%%', () => t.accent)
+      .replace('%%WIDGET_ID%%', () => idLiteral)
   }, [widgetId])
 
   const tooBig = new Blob([widgetCode]).size > MAX_CODE_BYTES

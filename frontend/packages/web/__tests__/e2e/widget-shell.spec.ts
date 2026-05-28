@@ -4,9 +4,17 @@ import { WIDGET_SHELL_HTML } from '../../components/chat/widget/widgetShell'
 const WIDGET_ID = 'w-test'
 // Must match WidgetView's production injection exactly: JSON.stringify supplies
 // the quotes (the shell has `var WIDGET_ID = %%WIDGET_ID%%;` with no quotes),
-// and `<` is escaped to <.
+// and `<` is escaped to \\u003c. The theme tokens (%%BG%%/%%FG%%/%%MUTED%%/
+// %%BORDER%%/%%ACCENT%%) must also be replaced — we pick the light-theme set;
+// the shell behavior these tests assert (morph/seq/finalize/CSP/opaque-origin)
+// does not depend on which theme is active.
 const ID_LITERAL = JSON.stringify(WIDGET_ID).replace(/</g, '\\u003c')
 const SHELL = WIDGET_SHELL_HTML.replace('%%WIDGET_ID%%', () => ID_LITERAL)
+  .replace('%%BG%%', () => '#ffffff')
+  .replace('%%FG%%', () => '#0a0a0f')
+  .replace('%%MUTED%%', () => '#f5f5f7')
+  .replace('%%BORDER%%', () => '#e5e7eb')
+  .replace('%%ACCENT%%', () => '#0061c2')
 
 async function mountShell(page: Page) {
   await page.setContent('<div id="host"></div>')

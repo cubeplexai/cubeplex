@@ -2,15 +2,22 @@
 // <head>. Parent -> child: {widgetId, seq, type:'morph', html} / {...'finalize'}.
 // Child -> parent: {widgetId, type:'ready'|'error'|'resize', ...}.
 //
-// WidgetView replaces the %%WIDGET_ID%% placeholder (which appears exactly once,
-// in the `var WIDGET_ID` assignment below, with NO surrounding quotes) with
-// JSON.stringify(widgetId) — additionally escaping `<` — at mount.
+// Sandbox is opaque-origin (no allow-same-origin), so the iframe cannot inherit
+// the parent's CSS variables via the cascade. WidgetView injects theme tokens
+// AND the widgetId via single-replace placeholders at mount:
+//   %%WIDGET_ID%%  — appears once in `var WIDGET_ID = %%WIDGET_ID%%;`
+//                     (NO surrounding quotes; JSON.stringify supplies them)
+//   %%BG%%, %%FG%%, %%MUTED%%, %%BORDER%%, %%ACCENT%%
+//                  — each appears once in the :root CSS variables below
+// Widget code should always reference var(--bg)/--fg/--muted/--border/--accent
+// instead of hard-coding colors (see WIDGET_GUIDELINES).
 export const WIDGET_SHELL_HTML = `<!DOCTYPE html><html><head>
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://unpkg.com https://esm.sh; style-src 'unsafe-inline'; img-src data: https:; font-src data: https:; connect-src 'none'; base-uri 'none'; form-action 'none'; worker-src 'none'; frame-src 'none'; object-src 'none';">
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
 <style>
+:root{--bg:%%BG%%;--fg:%%FG%%;--muted:%%MUTED%%;--border:%%BORDER%%;--accent:%%ACCENT%%;}
 *{box-sizing:border-box}
-body{margin:0;padding:1rem;font-family:system-ui,-apple-system,sans-serif;background:#1a1a1a;color:#e0e0e0;}
+body{margin:0;padding:1rem;font-family:system-ui,-apple-system,sans-serif;background:var(--bg);color:var(--fg);}
 @keyframes _fadeIn{from{opacity:0;transform:translateY(4px);}to{opacity:1;transform:none;}}
 </style></head>
 <body><div id="root"></div>
