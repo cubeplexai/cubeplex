@@ -407,7 +407,21 @@ class SandboxManager:
                     raw_sandbox = await opensandbox.Sandbox.connect(
                         winner.sandbox_id, connection_config=conn_config
                     )
-                    return OpenSandbox(sandbox=raw_sandbox, workdir=self._workdir)
+                    loser_backend = OpenSandbox(sandbox=raw_sandbox, workdir=self._workdir)
+                    # Egress placeholders live on the OpenSandbox instance via
+                    # set_run_env; the create/reuse paths refresh them before
+                    # returning, so the race-loser must too — otherwise secret-
+                    # backed env vars are missing for the loser's tool calls.
+                    if self._exchange_host:
+                        await self._apply_egress(
+                            session,
+                            loser_backend,
+                            org_id=org_id,
+                            workspace_id=workspace_id,
+                            user_id=user_id,
+                            sandbox_id=winner.sandbox_id,
+                        )
+                    return loser_backend
                 raise SandboxError(
                     "concurrent create lost the race with no usable winner"
                 ) from None
