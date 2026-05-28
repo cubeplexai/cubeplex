@@ -98,6 +98,12 @@ async def claim_stale_runs(
 
     A row with run_id NULL means a replica reserved the occurrence but died
     before start_run. Re-claimable. ``FOR UPDATE SKIP LOCKED`` again.
+
+    Excludes rows with a future ``next_retry_at`` — those are busy-target
+    postpones owned by ``claim_busy_postponed_runs`` and must not be picked
+    up early by the stale sweep (claim_timeout=120s default is shorter than
+    busy_retry_delay=300s default, so without this exclusion the busy retry
+    cadence collapses into the stale-claim cadence).
     """
     cutoff = now - claim_timeout
     stmt = (
@@ -105,6 +111,7 @@ async def claim_stale_runs(
         .where(
             ScheduledTaskRun.state == "claimed",  # type: ignore[arg-type]
             cast(Any, ScheduledTaskRun.run_id).is_(None),
+            cast(Any, ScheduledTaskRun.next_retry_at).is_(None),
             ScheduledTaskRun.claimed_at < cutoff,  # type: ignore[arg-type]
         )
         .limit(limit)

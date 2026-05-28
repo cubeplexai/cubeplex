@@ -10,7 +10,7 @@ from sqlalchemy import select
 from cubebox.db.engine import async_session_maker
 from cubebox.models.scheduled_task import ScheduledTask, ScheduledTaskRun
 from cubebox.schedules.poller import ScheduledTaskPoller
-from tests.e2e.conftest import DEFAULT_WS_ID
+from tests.e2e.conftest import DEFAULT_ORG_ID, DEFAULT_WS_ID
 
 pytestmark = pytest.mark.e2e
 
@@ -162,3 +162,83 @@ async def test_concurrent_pollers_fire_once(async_client: httpx.AsyncClient) -> 
     await asyncio.gather(p1.poll_once(), p2.poll_once())
     rows = await _runs_for(tid)
     assert len(rows) == 1
+
+
+@pytest.mark.asyncio
+async def test_busy_postponed_row_skipped_by_stale_sweep(
+    async_client: httpx.AsyncClient,
+) -> None:
+    """Regression for codex P1: a row postponed by busy-target retry has
+    ``next_retry_at`` in the future but ``claimed_at`` may be older than
+    ``claim_timeout``. The stale-claim sweep must NOT pick it up — that
+    would collapse the 5-min busy retry cadence into the 2-min stale-claim
+    cadence and exhaust the retry budget early.
+    """
+    from datetime import timedelta as _td
+
+    from cubebox.repositories.scheduled_task import claim_stale_runs
+
+    tid = await _create_due_once(async_client)
+    # Seed a busy-postponed row: state='claimed', run_id IS NULL,
+    # claimed_at well past the 120s default claim_timeout, next_retry_at
+    # in the near future (per the 5-min busy retry policy).
+    async with async_session_maker() as s:
+        now = datetime.now(UTC)
+        row = ScheduledTaskRun(
+            scheduled_task_id=tid,
+            org_id=DEFAULT_ORG_ID,
+            workspace_id=DEFAULT_WS_ID,
+            scheduled_for=now - _td(minutes=10),
+            claimed_at=now - _td(minutes=5),
+            state="claimed",
+            retry_count=1,
+            next_retry_at=now + _td(minutes=4),
+        )
+        s.add(row)
+        await s.commit()
+        row_id = row.id
+    # Run the stale sweep with the production default claim_timeout.
+    async with async_session_maker() as s:
+        stale = await claim_stale_runs(
+            s, now=datetime.now(UTC), claim_timeout=_td(minutes=2), limit=50
+        )
+    assert all(r.id != row_id for r in stale), "busy-postponed row leaked into stale-claim sweep"
+
+
+@pytest.mark.asyncio
+async def test_completion_hook_recovers_claimed_row_race(
+    async_client: httpx.AsyncClient,
+) -> None:
+    """Regression for codex P2: a very short run can call the completion
+    hook before the poller's post-dispatch UPDATE flips 'claimed' →
+    'started'. The hook must still find the row by ``run_id`` (pre-stamped
+    on the row while state was 'claimed') and mark it terminal.
+    """
+    from cubebox.schedules.completion_hook import (
+        record_scheduled_run_terminal_state,
+    )
+
+    tid = await _create_due_once(async_client)
+    # Simulate the race window: row is 'claimed' with run_id pre-stamped
+    # (post-dispatch UPDATE hasn't committed yet) and the run finishes.
+    async with async_session_maker() as s:
+        now = datetime.now(UTC)
+        row = ScheduledTaskRun(
+            scheduled_task_id=tid,
+            org_id=DEFAULT_ORG_ID,
+            workspace_id=DEFAULT_WS_ID,
+            scheduled_for=now,
+            claimed_at=now,
+            state="claimed",
+            run_id="0192abcd-race-window-pre-stamp",
+        )
+        s.add(row)
+        await s.commit()
+        row_id = row.id
+    await record_scheduled_run_terminal_state(
+        run_id="0192abcd-race-window-pre-stamp", run_status="completed"
+    )
+    async with async_session_maker() as s:
+        refreshed = await s.get(ScheduledTaskRun, row_id)
+        assert refreshed is not None
+        assert refreshed.state == "succeeded"
