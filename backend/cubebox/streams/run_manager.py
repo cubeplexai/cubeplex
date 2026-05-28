@@ -1601,6 +1601,7 @@ class RunManager:
             citation_event_queue,
         )
         from cubebox.middleware.subagents import subagent_event_queue
+        from cubebox.schedules.completion_hook import record_scheduled_run_terminal_state
 
         sandbox = None
         sandbox_manager = None
@@ -1898,6 +1899,7 @@ class RunManager:
                 run_id=run_id,
                 status="completed",
             )
+            await record_scheduled_run_terminal_state(run_id=run_id, run_status="completed")
             await self._maybe_consolidate_memory(conversation_id=conversation_id, ctx=ctx)
         except asyncio.CancelledError:
             await update_run_meta(
@@ -1906,6 +1908,7 @@ class RunManager:
                 run_id=run_id,
                 status="cancelled",
             )
+            await record_scheduled_run_terminal_state(run_id=run_id, run_status="cancelled")
             # Defense in depth: cubepi backfills tool_results for tool_calls
             # left dangling by a cancel, but if that cleanup was itself cut
             # short the persisted thread would still have orphan tool_calls
@@ -1924,6 +1927,7 @@ class RunManager:
                 run_id=run_id,
                 status="failed",
             )
+            await record_scheduled_run_terminal_state(run_id=run_id, run_status="failed")
             with suppress(Exception):
                 await self._append_error(
                     run_id,
