@@ -1,7 +1,7 @@
 """scheduled_tasks
 
 Revision ID: d081288c6c35
-Revises: 6c69cc288404
+Revises: 1f65e338699a
 Create Date: 2026-05-28 04:12:46.906484
 
 """
@@ -14,7 +14,7 @@ import sqlmodel  # noqa: F401  (referenced by sqlmodel.sql.sqltypes.AutoString i
 
 # revision identifiers, used by Alembic.
 revision: str = 'd081288c6c35'
-down_revision: Union[str, Sequence[str], None] = '6c69cc288404'
+down_revision: Union[str, Sequence[str], None] = '1f65e338699a'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
