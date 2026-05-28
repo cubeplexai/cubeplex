@@ -339,6 +339,47 @@ async def test_rotate_secret_zero_overlap(
 
 
 # ---------------------------------------------------------------------------
+# Back-to-back rotate must not collide on the vault unique constraint
+# (codex P2 — same-second epoch suffix used to collide).
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_rotate_secret_back_to_back(
+    authenticated_client: tuple[httpx.AsyncClient, str],
+) -> None:
+    client, ws_id = authenticated_client
+    user_id = await _get_my_user_id(client)
+
+    r_create = await client.post(
+        f"/api/v1/ws/{ws_id}/triggers",
+        json={
+            "name": "rotate-twice",
+            "webhook_secret": "s0",
+            "prompt_template": "hi",
+            "payload_fields": [],
+            "run_as_user_id": user_id,
+        },
+    )
+    assert r_create.status_code == 201
+    trig_id = r_create.json()["id"]
+
+    # Two rotates in the same logical instant. Both must succeed even though
+    # they share the same trigger id and (effectively) the same wall clock.
+    r1 = await client.post(
+        f"/api/v1/ws/{ws_id}/triggers/{trig_id}/rotate-secret",
+        json={"new_webhook_secret": "s1"},
+    )
+    assert r1.status_code == 200, r1.text
+    r2 = await client.post(
+        f"/api/v1/ws/{ws_id}/triggers/{trig_id}/rotate-secret",
+        json={"new_webhook_secret": "s2"},
+    )
+    assert r2.status_code == 200, r2.text
+    assert r1.json()["current_secret_cred_id"] != r2.json()["current_secret_cred_id"]
+
+
+# ---------------------------------------------------------------------------
 # Replay — non-dead-lettered event → 409
 # ---------------------------------------------------------------------------
 
