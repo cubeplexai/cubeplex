@@ -473,6 +473,7 @@ def create_app(
         admin_router,
         admin_sandbox_env,
         admin_sandbox_policy,
+        admin_skill_sources,
         admin_skills,
         artifacts_router,
         attachments_router,
@@ -509,6 +510,7 @@ def create_app(
     # Public template list (authenticated, not org-admin gated).
     app.include_router(admin_mcp.public_templates_router, prefix="/api/v1")
     app.include_router(mcp_oauth.oauth_callback_router, prefix="/api/v1")
+    app.include_router(admin_skill_sources.router, prefix="/api/v1")
     app.include_router(admin_skills.router, prefix="/api/v1")
     app.include_router(admin_skills.bindings_router, prefix="/api/v1")
     app.include_router(ws_mcp.router, prefix="/api/v1")
