@@ -116,3 +116,84 @@ async def test_command_deny_blocks_and_filesystem_untouched(
         assert sandbox_mw.executed_commands(ws_id, "conv-1") == []
     finally:
         sandbox_mw.disable_audit()
+
+
+async def test_image_drift_is_lazy_existing_keeps_old_new_uses_new(
+    fake_opensandbox: None,
+    session_factory: Any,
+    seeded_org_ws_user: tuple[str, str, str, str],
+) -> None:
+    """Admin default_image is used at create and persisted on the row.
+    Changing it does NOT recreate the existing sandbox (lazy drift): the
+    existing row stays running on its original image. A NEW user/workspace
+    (or a freshly recreated sandbox after the existing one is terminated)
+    picks up the new image."""
+    del fake_opensandbox
+    org_id, ws_a, ws_b, user_id = seeded_org_ws_user
+    from cubebox.repositories.sandbox_policy import SandboxPolicyRepository
+
+    async with session_factory() as s:
+        await SandboxPolicyRepository(s, org_id=org_id).upsert(
+            default_image="python:3.12",
+            network_rules=None,
+            command_rules=None,
+        )
+
+    mgr = SandboxManager(session_factory)
+    await mgr.get_or_create(user_id, org_id=org_id, workspace_id=ws_a)
+    async with session_factory() as s:
+        img1 = (
+            await s.execute(
+                sa.text(
+                    "SELECT image FROM user_sandboxes WHERE user_id=:u "
+                    "AND workspace_id=:w AND status='running'"
+                ),
+                {"u": user_id, "w": ws_a},
+            )
+        ).scalar_one()
+    assert img1 == "python:3.12"
+
+    # Change the policy image; the EXISTING sandbox keeps its old image
+    # (lazy drift). No row is terminated by the policy change.
+    async with session_factory() as s:
+        await SandboxPolicyRepository(s, org_id=org_id).upsert(
+            default_image="ubuntu:22.04",
+            network_rules=None,
+            command_rules=None,
+        )
+    await mgr.get_or_create(user_id, org_id=org_id, workspace_id=ws_a)
+    async with session_factory() as s:
+        still_running = (
+            await s.execute(
+                sa.text(
+                    "SELECT image FROM user_sandboxes WHERE user_id=:u "
+                    "AND workspace_id=:w AND status='running'"
+                ),
+                {"u": user_id, "w": ws_a},
+            )
+        ).scalar_one()
+        terminated = (
+            await s.execute(
+                sa.text(
+                    "SELECT COUNT(*) FROM user_sandboxes WHERE user_id=:u "
+                    "AND workspace_id=:w AND status='terminated'"
+                ),
+                {"u": user_id, "w": ws_a},
+            )
+        ).scalar_one()
+    assert still_running == "python:3.12"  # lazy: NOT torn down
+    assert terminated == 0  # nothing demoted by the policy change
+
+    # A brand-new sandbox (different workspace, same user) picks up the new image.
+    await mgr.get_or_create(user_id, org_id=org_id, workspace_id=ws_b)
+    async with session_factory() as s:
+        img_new = (
+            await s.execute(
+                sa.text(
+                    "SELECT image FROM user_sandboxes WHERE user_id=:u "
+                    "AND workspace_id=:w AND status='running'"
+                ),
+                {"u": user_id, "w": ws_b},
+            )
+        ).scalar_one()
+    assert img_new == "ubuntu:22.04"
