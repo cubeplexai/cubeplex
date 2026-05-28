@@ -115,3 +115,29 @@ async def test_put_warns_on_wildcard_credential_host_conflict(
         cred["id"] in str(w) or "api.github.com" in str(w) or "*.github.com" in str(w)
         for w in warnings
     ), f"Expected a wildcard-deny conflict warning, got: {warnings}"
+
+
+def test_wildcard_credential_host_with_exact_deny_overlap_unit() -> None:
+    """Regression for codex P2 r3317695593: the SYMMETRIC direction — a
+    credential declares a wildcard host (`*.github.com`) and the admin saves
+    an exact deny (`api.github.com`) — must also raise a conflict warning,
+    because the runtime will block that subdomain. The previous one-way
+    fnmatchcase(host, target) check missed this. Unit-level since we don't
+    need to drive through HTTP to validate the overlap rule itself."""
+    from types import SimpleNamespace
+
+    from cubebox.services.sandbox_policy_conflicts import (
+        credential_conflict_warnings,
+        deny_targets_for_cred,
+    )
+
+    cred = SimpleNamespace(id="cred-1", env_name="GITHUB_TOKEN", hosts=["*.github.com"])
+    network_rules = [{"action": "deny", "target": "api.github.com"}]
+
+    warnings = credential_conflict_warnings(network_rules, [cred])
+    assert warnings, "Expected a conflict warning for *.github.com vs deny api.github.com"
+    assert "api.github.com" in warnings[0] or "*.github.com" in warnings[0]
+
+    # And the symmetric helper used by the credential editor route.
+    blocked = deny_targets_for_cred(["*.github.com"], network_rules)
+    assert blocked == ["*.github.com"]

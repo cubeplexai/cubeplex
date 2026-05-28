@@ -38,18 +38,39 @@ def _deny_targets(network_rules: list[dict[str, Any]] | None) -> list[str]:
     ]
 
 
-def _host_blocked_by(host: str, deny_targets: list[str]) -> str | None:
-    """Return the first deny target whose glob covers ``host``, or None.
+def _globs_overlap(a: str, b: str) -> bool:
+    """True iff ``a`` and ``b`` describe overlapping host sets.
 
-    Network targets are FQDN/wildcard (e.g. ``api.github.com``,
-    ``*.github.com``). An exact-string check would miss the wildcard form
-    even though the OpenSandbox sidecar enforces it, so this uses
-    ``fnmatchcase`` — the same semantics ``merge_network_rules`` emits to
-    the sidecar — so the warning UI and the runtime agree on what counts
-    as "blocked".
+    Both sides can carry wildcards: a credential may declare
+    ``*.github.com`` while an admin saves an exact ``api.github.com``
+    deny (or vice versa). The runtime blocks any host that either glob
+    covers, so the warning has to fire whenever the two patterns can
+    name the same host — not just when the credential host fnmatches
+    the deny pattern. ``fnmatchcase`` is asymmetric, so we check both
+    directions; we also treat exact equality as overlap to cover the
+    no-wildcard case fast.
+    """
+    if a == b:
+        return True
+    # Either side can be the pattern; the other side is then a concrete
+    # (or already-glob-expressed) value the pattern might cover. If
+    # either direction matches, the host sets overlap at runtime.
+    if fnmatchcase(a, b):
+        return True
+    return fnmatchcase(b, a)
+
+
+def _host_blocked_by(host: str, deny_targets: list[str]) -> str | None:
+    """Return the first deny target whose host set overlaps ``host``.
+
+    Wildcard-aware in BOTH directions (see ``_globs_overlap``): admin
+    deny ``*.github.com`` covers credential host ``api.github.com``, AND
+    admin deny ``api.github.com`` covers credential host ``*.github.com``
+    — both shapes must produce a warning because the runtime blocks
+    egress in either case.
     """
     for target in deny_targets:
-        if target == host or fnmatchcase(host, target):
+        if _globs_overlap(host, target):
             return target
     return None
 
