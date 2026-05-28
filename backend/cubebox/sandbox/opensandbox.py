@@ -7,6 +7,7 @@ from datetime import timedelta
 
 import opensandbox
 from loguru import logger
+from opensandbox.config import ConnectionConfig
 from opensandbox.exceptions import SandboxException as _ProviderError
 from opensandbox.models.execd import RunCommandOpts
 
@@ -114,3 +115,28 @@ class OpenSandbox(Sandbox):
 
     async def close(self) -> None:
         pass
+
+    def supports_pause(self) -> bool:
+        return True
+
+    async def pause(self) -> None:
+        with _as_sandbox_error():
+            await self._sandbox.pause()
+
+    @classmethod
+    async def connect_or_resume(  # type: ignore[override]
+        cls,
+        sandbox_id: str,
+        *,
+        conn_config: ConnectionConfig | None = None,
+        resume_timeout: int = 30,
+        workdir: str = "/workspace",
+        **_: object,
+    ) -> "OpenSandbox":
+        with _as_sandbox_error():
+            raw = await opensandbox.Sandbox.resume(
+                sandbox_id,
+                connection_config=conn_config,
+                resume_timeout=timedelta(seconds=resume_timeout),
+            )
+        return cls(sandbox=raw, workdir=workdir)

@@ -64,6 +64,16 @@ async def get_live_view(
         # per-tool activity updates, so mark the sandbox active here too (the
         # frontend also pings /keepalive while the view is open).
         await manager.touch(sandbox.id, org_id=ctx.org_id, workspace_id=ctx.workspace_id)
+        # Lease the sandbox for this bounded request so the idle-pause reaper
+        # can't snipe it between start_browser and the endpoint resolve. The
+        # lease expires naturally after ``lease_seconds`` — we deliberately
+        # do NOT call ``release_lease`` because an overlapping caller (e.g.
+        # the keepalive request) may have renewed the lease for a longer
+        # window in the meantime, and a blind unconditional null would erase
+        # that holder's protection (codex review P2 round 13). The keepalive
+        # path renews while the panel stays open, so natural expiry is the
+        # right safety net.
+        await manager.renew_lease(sandbox.id, org_id=ctx.org_id, workspace_id=ctx.workspace_id)
         endpoint = await sandbox.get_browser_endpoint()
     except SandboxError as exc:
         # Provisioning the sandbox (or its browser) failed — e.g. the provider
