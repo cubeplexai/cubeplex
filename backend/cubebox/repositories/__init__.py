@@ -21,6 +21,7 @@ from cubebox.repositories.skill import (
     SkillVersionRepository,
     WorkspaceSkillBindingRepository,
 )
+from cubebox.repositories.trigger import TriggerEventRepository, TriggerRepository
 from cubebox.repositories.user_sandbox import UserSandboxRepository
 from cubebox.repositories.workspace import WorkspaceRepository
 
@@ -42,6 +43,8 @@ __all__ = [
     "OrganizationRepository",
     "SkillRepository",
     "SkillVersionRepository",
+    "TriggerEventRepository",
+    "TriggerRepository",
     "UserSandboxRepository",
     "WorkspaceRepository",
     "WorkspaceSkillBindingRepository",
