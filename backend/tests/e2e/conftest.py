@@ -1302,3 +1302,60 @@ async def admin_client_with_user_id() -> AsyncIterator[tuple[httpx.AsyncClient, 
             assert me.status_code == 200, me.text
             user_id = me.json()["id"]
             yield c, workspace_id, user_id
+
+
+@pytest_asyncio.fixture
+async def seeded_session_org_ws() -> AsyncIterator[tuple[AsyncSession, str, str, str]]:
+    """Raw AsyncSession + a fresh org/workspace, with preinstalled skills seeded.
+
+    Yields ``(session, org_id, org_slug, workspace_id)``.  Suitable for
+    repository/service-layer E2E tests that need direct DB access and the
+    preinstalled skill catalog (e.g. find_skills tool unit-integration tests).
+    """
+    from cubebox.auth.users import _slugify_org_name
+    from cubebox.config import backend_dir
+    from cubebox.config import config as _cfg
+    from cubebox.models import Organization, Workspace
+    from cubebox.seeders import seed_preinstalled_skills
+
+    test_engine = create_async_engine(_build_database_url(), poolclass=NullPool)
+    maker = async_sessionmaker(test_engine, class_=AsyncSession, expire_on_commit=False)
+
+    # Seed preinstalled skills via the real seeder (Redis lock, real object store).
+    redis: Redis = Redis.from_url(
+        _cubebox_config.get("redis.url", "redis://127.0.0.1:6379/0"),
+        decode_responses=False,
+    )
+    try:
+        async with maker() as seed_session:
+            preinstalled_rel = _cfg.get("skills.preinstalled_dir", "skills/preinstalled")
+            preinstalled_dir = Path(backend_dir) / preinstalled_rel
+            await seed_preinstalled_skills(
+                preinstalled_dir=preinstalled_dir,
+                db_session=seed_session,
+                redis=redis,
+            )
+    finally:
+        await redis.aclose()
+
+    # Create a fresh org + workspace for test isolation.
+    org_name = f"seeded-org-{secrets.token_hex(4)}"
+    org_slug = _slugify_org_name(org_name)
+    try:
+        async with maker() as setup_session:
+            org = Organization(name=org_name, slug=org_slug)
+            setup_session.add(org)
+            await setup_session.flush()
+            ws = Workspace(org_id=org.id, name="seeded-ws")
+            setup_session.add(ws)
+            await setup_session.commit()
+            org_id = org.id
+            ws_id = ws.id
+    finally:
+        pass  # engine disposed below
+
+    try:
+        async with maker() as session:
+            yield session, org_id, org_slug, ws_id
+    finally:
+        await test_engine.dispose()
