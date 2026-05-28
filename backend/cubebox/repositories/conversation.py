@@ -61,7 +61,7 @@ class ConversationRepository(ScopedRepository[Conversation]):
                     (cast(Any, Conversation.is_pinned).is_(True), 0),
                     else_=1,
                 ),
-                desc(Conversation.updated_at),
+                desc(Conversation.updated_at),  # type: ignore[arg-type]
             )
             .limit(limit)
             .offset(offset)

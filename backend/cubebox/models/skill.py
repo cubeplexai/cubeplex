@@ -100,6 +100,7 @@ class WorkspaceSkillBinding(SQLModel, TimestampMixin, table=True):
 
     Pure association — composite PK; no public_id."""
 
+    __allow_unmapped__ = True
     __tablename__ = "workspace_skill_bindings"
     __table_args__ = (Index("ix_wsb_org_ws", "org_id", "workspace_id"),)
 
@@ -118,6 +119,7 @@ class OrgPreinstalledTombstone(SQLModel, TimestampMixin, table=True):
 
     Pure state marker — composite PK; no public_id."""
 
+    __allow_unmapped__ = True
     __tablename__ = "org_preinstalled_tombstones"
 
     org_id: str = Field(primary_key=True, foreign_key="organizations.id", max_length=20, index=True)
