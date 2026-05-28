@@ -10,6 +10,7 @@ don't reimplement it.
 from __future__ import annotations
 
 from collections.abc import Iterable
+from fnmatch import fnmatchcase
 from typing import Any
 
 from sqlalchemy import select
@@ -29,26 +30,53 @@ async def list_org_credentials_with_hosts(
     return list((await session.execute(stmt)).scalars().all())
 
 
+def _deny_targets(network_rules: list[dict[str, Any]] | None) -> list[str]:
+    return [
+        str(r.get("target", ""))
+        for r in (network_rules or [])
+        if r.get("action") == "deny" and str(r.get("target", ""))
+    ]
+
+
+def _host_blocked_by(host: str, deny_targets: list[str]) -> str | None:
+    """Return the first deny target whose glob covers ``host``, or None.
+
+    Network targets are FQDN/wildcard (e.g. ``api.github.com``,
+    ``*.github.com``). An exact-string check would miss the wildcard form
+    even though the OpenSandbox sidecar enforces it, so this uses
+    ``fnmatchcase`` — the same semantics ``merge_network_rules`` emits to
+    the sidecar — so the warning UI and the runtime agree on what counts
+    as "blocked".
+    """
+    for target in deny_targets:
+        if target == host or fnmatchcase(host, target):
+            return target
+    return None
+
+
 def credential_conflict_warnings(
     network_rules: list[dict[str, Any]] | None,
     installed_creds: Iterable[SandboxEnvVar],
 ) -> list[str]:
     """Warn (do NOT reject) when a deny rule covers a host that an installed
-    credential declares as required. One warning per credential×host match."""
+    credential declares as required. One warning per credential×host match.
+
+    Wildcard-aware: ``*.github.com`` denies ``api.github.com``."""
     out: list[str] = []
-    deny_targets = {
-        str(r.get("target", "")) for r in (network_rules or []) if r.get("action") == "deny"
-    }
+    deny_targets = _deny_targets(network_rules)
     if not deny_targets:
         return out
     for cred in installed_creds:
         for host in cred.hosts or []:
-            if host in deny_targets:
-                out.append(
-                    f"credential {cred.id} ({cred.env_name}) requires host "
-                    f"{host} which is denied by the policy; outbound calls "
-                    f"will be blocked"
-                )
+            matched = _host_blocked_by(host, deny_targets)
+            if matched is None:
+                continue
+            via = "" if matched == host else f" (via deny rule {matched!r})"
+            out.append(
+                f"credential {cred.id} ({cred.env_name}) requires host "
+                f"{host} which is denied by the policy{via}; outbound "
+                f"calls will be blocked"
+            )
     return out
 
 
@@ -58,8 +86,6 @@ def deny_targets_for_cred(
 ) -> list[str]:
     """Symmetric direction (used by the credential editor route): given a
     credential's hosts and the org's current network_rules, return the subset
-    of the cred's hosts that the policy explicitly denies."""
-    deny_targets = {
-        str(r.get("target", "")) for r in (policy_network_rules or []) if r.get("action") == "deny"
-    }
-    return [h for h in (cred_hosts or []) if h in deny_targets]
+    of the cred's hosts that the policy denies (exact or wildcard match)."""
+    deny_targets = _deny_targets(policy_network_rules)
+    return [h for h in (cred_hosts or []) if _host_blocked_by(h, deny_targets) is not None]

@@ -72,3 +72,26 @@ async def test_service_rejects_bad_network_target() -> None:
             network_rules=[{"action": "allow", "target": "*"}],
             command_rules=None,
         )
+
+
+async def test_service_rejects_regex_network_target() -> None:
+    """Regression for codex P1 r3317630103: the credential vault accepts
+    anchored regex targets, but OpenSandbox network rules only honour
+    FQDN/wildcard. A regex slips past validate_host_pattern but would not
+    actually enforce the intended egress rule — reject at write time."""
+    svc = SandboxPolicyService(_FakeRepo())
+    with pytest.raises(SandboxPolicyValidationError, match="regex"):
+        await svc.upsert(
+            default_image="ubuntu:22.04",
+            network_rules=[{"action": "deny", "target": r"/^api\.github\.com$/"}],
+            command_rules=None,
+        )
+    # Sanity: an FQDN and a wildcard still go through.
+    await svc.upsert(
+        default_image="ubuntu:22.04",
+        network_rules=[
+            {"action": "deny", "target": "api.github.com"},
+            {"action": "allow", "target": "*.pypi.org"},
+        ],
+        command_rules=None,
+    )

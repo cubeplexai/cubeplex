@@ -60,6 +60,18 @@ class SandboxPolicyService:
             if rule.get("action") not in _VALID_NETWORK_ACTIONS:
                 raise SandboxPolicyValidationError(f"invalid network action: {rule!r}")
             target = str(rule.get("target", ""))
+            # validate_host_pattern accepts both FQDN/wildcard AND anchored
+            # regex (the credential vault uses both). Network rules go to the
+            # OpenSandbox sidecar which only honours FQDN/wildcard targets, so
+            # an accepted regex target would silently not enforce the intended
+            # rule (and may break Sandbox.create). Reject the regex form here.
+            if target.startswith("/") and target.endswith("/") and len(target) >= 2:
+                raise SandboxPolicyValidationError(
+                    f"network rule target must be a host or wildcard "
+                    f"(FQDN like 'api.github.com' or '*.github.com'); regex "
+                    f"targets are not supported by the sandbox network "
+                    f"policy: {target!r}"
+                )
             try:
                 validate_host_pattern(target)
             except HostPatternError as exc:
