@@ -3,8 +3,18 @@
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
 
-from cubebox.skills.sources.base import SkillCandidate, TrustTier
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from cubebox.repositories.skill import OrgSkillInstallRepository, SkillRepository
+from cubebox.skills.service import SkillPublishService, validate_skill_files
+from cubebox.skills.sources.base import (
+    CandidateIdError,
+    SkillCandidate,
+    TrustTier,
+    decode_candidate_id,
+)
 from cubebox.skills.sources.registry import SkillSourceRegistry
 
 _TRUST_RANK = {TrustTier.official: 0, TrustTier.community: 1, TrustTier.untrusted: 2}
@@ -83,3 +93,91 @@ class SkillDiscoveryService:
             except Exception:  # noqa: BLE001 — one bad remote must not kill discovery
                 continue
         return rank_candidates(merged, query=query, limit=limit)
+
+
+class SkillInstallError(ValueError):
+    pass
+
+
+@dataclass(frozen=True)
+class InstallResult:
+    canonical_name: str
+    skill_id: str
+    installed_version: str
+
+
+class SkillInstallService:
+    def __init__(
+        self,
+        *,
+        session: AsyncSession,
+        registry: SkillSourceRegistry,
+        publisher: SkillPublishService,
+        org_id: str,
+        org_slug: str,
+        workspace_id: str,
+        actor_user_id: str,
+    ) -> None:
+        self._session = session
+        self._registry = registry
+        self._publisher = publisher
+        self._org_id = org_id
+        self._org_slug = org_slug
+        self._workspace_id = workspace_id
+        self._actor = actor_user_id
+
+    async def install(self, candidate_id: str) -> InstallResult:
+        try:
+            kind, source_id, source_ref = decode_candidate_id(candidate_id)
+        except CandidateIdError as exc:
+            raise SkillInstallError(str(exc)) from exc
+        if kind == "local":
+            return await self._install_local(source_ref)
+        return await self._install_remote(source_id, source_ref)
+
+    async def _install_local(self, skill_id: str) -> InstallResult:
+        skills = SkillRepository(self._session)
+        skill = await skills.get(skill_id)
+        # visible-to-org guard: preinstalled OR own-org uploaded only
+        if skill is None or not (
+            skill.source == "preinstalled" or skill.owner_org_id == self._org_id
+        ):
+            raise SkillInstallError("candidate not visible to this org")
+        await OrgSkillInstallRepository(self._session).create_for_workspace(
+            org_id=self._org_id,
+            workspace_id=self._workspace_id,
+            skill_id=skill.id,
+            installed_version=skill.current_version,
+            installed_by_user_id=self._actor,
+        )
+        return InstallResult(
+            canonical_name=skill.name,
+            skill_id=skill.id,
+            installed_version=skill.current_version,
+        )
+
+    async def _install_remote(
+        self, source_id: str, source_ref: str
+    ) -> InstallResult:
+        source = self._registry.remote_source_by_id(source_id)
+        if source is None:
+            raise SkillInstallError("no enabled remote source for this candidate")
+        files = await source.fetch(source_ref)
+        if "SKILL.md" not in files:
+            raise SkillInstallError("remote candidate has no SKILL.md")
+        # remote bundle never went through _extract_zip's checks; enforce here.
+        validate_skill_files(files)
+        sv = await self._publisher._publish_from_files(
+            org_id=self._org_id,
+            org_slug=self._org_slug,
+            actor_user_id=self._actor,
+            files=files,
+            workspace_id=self._workspace_id,
+        )
+        skill = await SkillRepository(self._session).get(sv.skill_id)
+        assert skill is not None
+        return InstallResult(
+            canonical_name=skill.name,
+            skill_id=skill.id,
+            installed_version=sv.version,
+        )

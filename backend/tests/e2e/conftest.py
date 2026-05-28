@@ -590,6 +590,52 @@ async def member_client() -> AsyncIterator[tuple[httpx.AsyncClient, str]]:
 
 
 @pytest_asyncio.fixture
+async def member_client_two_workspaces() -> AsyncIterator[tuple[httpx.AsyncClient, str, str]]:
+    """Fresh member user with two workspaces in the same org.
+
+    Yields ``(client, ws_a, ws_b)``.  ws_a is the primary workspace created by
+    ``_make_isolated_user``; ws_b is a second workspace in the same org granted
+    to the same user.  Used to verify workspace-private installs don't bleed.
+    """
+    app, email, password, ws_a = await _make_isolated_user(Role.MEMBER)
+
+    # Open a short-lived session to look up org_id (from ws_a) and create ws_b.
+    setup_engine = create_async_engine(_build_database_url(), poolclass=NullPool)
+    setup_maker = async_sessionmaker(setup_engine, class_=AsyncSession, expire_on_commit=False)
+    try:
+        async with setup_maker() as session:
+            from sqlalchemy import select as sa_select
+
+            from cubebox.models import User as UserModel
+            from cubebox.models import Workspace as WorkspaceModel
+
+            ws_row = await session.get(WorkspaceModel, ws_a)
+            assert ws_row is not None
+            org_id = ws_row.org_id
+
+            user_result = await session.execute(
+                sa_select(UserModel).where(UserModel.email == email)  # type: ignore[arg-type]
+            )
+            user = user_result.scalar_one()
+
+            ws_b_row = await WorkspaceRepository(session).create(org_id=org_id, name="ws-b")
+            ws_b = ws_b_row.id
+            await MembershipRepository(session).grant(
+                user_id=user.id, workspace_id=ws_b, role=Role.MEMBER
+            )
+            await session.commit()
+    finally:
+        await setup_engine.dispose()
+
+    app.state.deployment_mode = "multi_tenant"
+    async with _lifespan_context(app):
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
+            await _login_and_attach(c, email, password)
+            yield c, ws_a, ws_b
+
+
+@pytest_asyncio.fixture
 async def member_client_org_a() -> AsyncIterator[tuple[httpx.AsyncClient, str]]:
     """Fresh org A with a member user."""
     app, email, password, workspace_id = await _make_isolated_user(Role.MEMBER)
