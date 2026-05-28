@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Make `UserSandbox` ownership provably isolated per `(org_id, workspace_id, user_id)` and add an org-admin policy (image, network egress rules, command rules) that is enforced in the sandbox create + execute paths.
+**Goal:** Make `UserSandbox` ownership provably isolated per `(org_id, workspace_id, user_id)` and add an org-admin policy (single default image, network egress rules, command rules) that is enforced in the sandbox create + execute paths. Drop `allowed_images` entirely (no override surface in v1, see spec OQ-4/12); reserve a nullable `scope_workspace_id` column for v2 per-workspace overrides.
 
-**Architecture:** Harden `UserSandbox` with a partial unique index over the active states `('provisioning','running')`, and change `get_or_create` to a reserve-row-first flow so a concurrent loser never provisions a provider sandbox (no leak). Key the persistent volume on `(workspace_id, user_id)`. Add an org-only `sandbox_policies` table (direct `org_id` FK, **no** `OrgScopedMixin`) with an `OrgSettings`-style repo, a `SandboxPolicyService`/`SandboxPolicyResolver`, and a pure-function matcher module `sandbox_policy/rules.py` that is the single reuse boundary between admin route, manager, and exec middleware. Image + merged network rules are delivered at `Sandbox.create`; command rules are enforced in `_make_execute_tool._execute` with deny → confirm → allow precedence (`confirm` degrades to `deny` in v1). Admin routes `GET`/`PUT /api/v1/admin/sandbox-policy` are separate handlers, never workspace-parameterized.
+**Architecture:** Harden `UserSandbox` with a partial unique index over the active states `('provisioning','running')`, and change `get_or_create` to a reserve-row-first flow so a concurrent loser never provisions a provider sandbox (no leak). Key the persistent volume on `(workspace_id, user_id)`. Add an org-only `sandbox_policies` table (direct `org_id` FK + nullable `scope_workspace_id`, **no** `OrgScopedMixin`) with an `OrgSettings`-style repo, a `SandboxPolicyService`/`SandboxPolicyResolver`, and a pure-function matcher module `sandbox_policy/rules.py` that is the single reuse boundary between admin route, manager, and exec middleware. Image + merged network rules are delivered at `Sandbox.create`; image drift is **lazy** (next new conversation picks up the new image; existing sandboxes finish on their original — OQ-5). Command rules are enforced in `_make_execute_tool._execute` with deny → confirm → allow precedence; `confirm` degrades to `deny` in v1 (OQ-1: real HITL is a cubepi-upstream follow-up). Admin routes `GET`/`PUT /api/v1/admin/sandbox-policy` are separate handlers, never workspace-parameterized; the PUT returns a `warnings[]` array on credential-host conflicts (OQ-6) instead of rejecting. A frontend deliverable adds the admin policy editor, a workspace-side read-only sandbox status page, and a credential-editor warning banner.
 
 **Tech Stack:** Python 3.12, FastAPI, SQLModel + Alembic (Postgres prod / SQLite unit driver), `opensandbox` provider SDK, cubepi agent runtime, pytest (E2E under `tests/e2e/`, unit under `tests/unit/`).
 
@@ -14,17 +14,26 @@
 
 New files:
 
-- `backend/cubebox/models/sandbox_policy.py` — `SandboxPolicy` table (org-only).
+- `backend/cubebox/models/sandbox_policy.py` — `SandboxPolicy` table (org-only, with reserved nullable `scope_workspace_id`).
 - `backend/cubebox/sandbox_policy/__init__.py` — package marker.
 - `backend/cubebox/sandbox_policy/rules.py` — pure matchers: `evaluate_command`, `merge_network_rules`, `split_shell_command`. The single reuse boundary.
-- `backend/cubebox/repositories/sandbox_policy.py` — `SandboxPolicyRepository`, keyed by `org_id` only (modeled on `OrgSettingsRepository`).
+- `backend/cubebox/repositories/sandbox_policy.py` — `SandboxPolicyRepository`, keyed by `org_id` (with override column nullable; modeled on `OrgSettingsRepository`).
 - `backend/cubebox/services/sandbox_policy.py` — `SandboxPolicyService` (CRUD + validation) and `SandboxPolicyResolver` (effective policy / defaults).
-- `backend/cubebox/api/schemas/sandbox_policy.py` — request/response models.
+- `backend/cubebox/services/sandbox_policy_conflicts.py` — shared helper for OQ-6 credential-host conflict warnings (used by both admin policy PUT and credential editor routes).
+- `backend/cubebox/api/schemas/sandbox_policy.py` — request/response models (with `warnings: list[str]`).
 - `backend/cubebox/api/routes/v1/admin_sandbox_policy.py` — `GET`/`PUT /admin/sandbox-policy`.
+- `backend/cubebox/api/routes/v1/ws_sandbox.py` — workspace sandbox status GET (read-only).
+- `backend/scripts/dev/migrate_user_pvcs.py` — one-time PVC migration helper.
 - `backend/tests/unit/test_sandbox_policy_rules.py` — matcher unit tests.
 - `backend/tests/unit/test_sandbox_policy_resolver.py` — resolver default tests.
-- `backend/tests/e2e/test_sandbox_policy_routes.py` — admin route E2E.
-- `backend/tests/e2e/test_sandbox_scoping.py` — ownership/volume/command-deny E2E.
+- `backend/tests/unit/test_migrate_user_pvcs.py` — PVC migration planner unit tests.
+- `backend/tests/e2e/test_sandbox_policy_routes.py` — admin route E2E (incl. credential-conflict warning).
+- `backend/tests/e2e/test_sandbox_scoping.py` — ownership/volume/command-deny/lazy-image-drift E2E.
+- `frontend/packages/web/app/(app)/admin/sandbox-policy/page.tsx` + `_components/` — admin policy editor.
+- `frontend/packages/web/app/api/v1/admin/sandbox-policy/route.ts` — admin proxy route.
+- `frontend/packages/web/app/(app)/w/[wsId]/sandbox/page.tsx` — workspace sandbox status (read-only).
+- `frontend/packages/web/app/api/v1/ws/[wsId]/sandbox-status/route.ts` — workspace status proxy route.
+- `frontend/packages/web/e2e/sandbox-policy.spec.ts` — Playwright smoke.
 
 Modified files:
 
@@ -75,14 +84,18 @@ def test_policy_autofills_prefixed_id() -> None:
     assert p.id.startswith("sbxp-")
     assert p.org_id == "org-1"
     assert p.default_image == "ubuntu:22.04"
-    assert p.allowed_images is None
+    # v1 only writes the org-default row (scope_workspace_id=NULL).
+    assert p.scope_workspace_id is None
     assert p.network_rules is None
     assert p.command_rules is None
 
 
-def test_policy_is_not_workspace_scoped() -> None:
-    # Org-only table: must NOT carry a workspace_id column.
+def test_policy_is_not_workspace_scoped_via_mixin() -> None:
+    # Org-only table: must NOT carry a REQUIRED workspace_id column from
+    # OrgScopedMixin. scope_workspace_id is a separate nullable column reserved
+    # for v2 overrides; it is NOT the OrgScopedMixin's workspace_id.
     assert "workspace_id" not in SandboxPolicy.model_fields
+    assert "scope_workspace_id" in SandboxPolicy.model_fields
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -104,18 +117,20 @@ PREFIX_SANDBOX_POLICY: str = "sbxp"
 Create `backend/cubebox/models/sandbox_policy.py`:
 
 ```python
-"""SandboxPolicy — one per org: default image, egress rules, command rules.
+"""SandboxPolicy — default image, egress rules, command rules.
 
 Org-only table. It declares ``org_id`` as a direct FK and deliberately does
-NOT use ``OrgScopedMixin``: that mixin adds a required ``workspace_id`` FK,
-but a per-org policy has no workspace. One row per org is enforced by a
-unique index on ``org_id`` (same shape OrgSettings uses for org-wide rows).
+NOT use ``OrgScopedMixin``: that mixin adds a REQUIRED ``workspace_id`` FK,
+but a per-org default has no workspace. ``scope_workspace_id`` is a separate
+NULLABLE column reserved for v2 per-workspace overrides — v1 only ever writes
+NULL (the org-default row). One row per (org, scope) is enforced by a unique
+index on ``(org_id, scope_workspace_id)``.
 """
 
 from typing import Any, ClassVar
 
 from sqlalchemy import Column, Index
-from sqlalchemy.types import JSON
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlmodel import Field
 
 from cubebox.models.mixins import CubeboxBase
@@ -125,14 +140,35 @@ from cubebox.models.public_id import PREFIX_SANDBOX_POLICY
 class SandboxPolicy(CubeboxBase, table=True):
     _PREFIX: ClassVar[str] = PREFIX_SANDBOX_POLICY
     __tablename__ = "sandbox_policies"
-    __table_args__ = (Index("uq_sandbox_policy_org", "org_id", unique=True),)
+    __table_args__ = (
+        Index(
+            "uq_sandbox_policy_scope",
+            "org_id", "scope_workspace_id",
+            unique=True,
+        ),
+    )
 
     org_id: str = Field(foreign_key="organizations.id", max_length=20, index=True)
+    # NULL = org-default row (only shape v1 writes). v2 will populate this for
+    # per-workspace overrides without a schema migration.
+    scope_workspace_id: str | None = Field(
+        default=None, foreign_key="workspaces.id", max_length=20, index=True,
+    )
     default_image: str = Field(max_length=512)
-    allowed_images: list[str] | None = Field(default=None, sa_column=Column(JSON))
-    network_rules: list[dict[str, Any]] | None = Field(default=None, sa_column=Column(JSON))
-    command_rules: list[dict[str, Any]] | None = Field(default=None, sa_column=Column(JSON))
+    # JSONB list of {action, target}; rules are inherently lists (multiple
+    # allows/denies); image is a single value because v1 has no override
+    # surface to pick one from a list.
+    network_rules: list[dict[str, Any]] | None = Field(default=None, sa_column=Column(JSONB))
+    # JSONB list of {action, pattern}. ``action`` ∈ {allow, deny, confirm};
+    # confirm degrades to deny at runtime in v1 (see Task 8 + cubepi follow-up).
+    command_rules: list[dict[str, Any]] | None = Field(default=None, sa_column=Column(JSONB))
 ```
+
+> **Note for SQLite unit tests.** `JSONB` is a Postgres dialect type. The
+> `JSON` generic type maps to `JSONB` on Postgres and falls back to TEXT on
+> SQLite. If unit tests use SQLite-in-memory, swap `JSONB` for
+> `sqlalchemy.types.JSON` here (Postgres still uses JSONB via the dialect
+> mapping). Confirm with the existing `sandbox_env` repo's pattern.
 
 Add to `backend/cubebox/models/__init__.py` (find the existing import/`__all__` block and add):
 
@@ -177,8 +213,8 @@ from cubebox.sandbox_policy.rules import (
     split_shell_command,
 )
 
-DENY_RM = [{"effect": "deny", "pattern": "rm *"}]
-CONFIRM_PUSH = [{"effect": "confirm", "pattern": "git push *"}]
+DENY_RM = [{"action": "deny", "pattern": "rm *"}]
+CONFIRM_PUSH = [{"action": "confirm", "pattern": "git push *"}]
 
 
 def test_no_rules_allows() -> None:
@@ -186,8 +222,8 @@ def test_no_rules_allows() -> None:
 
 
 def test_deny_first_match_wins() -> None:
-    effect, pat = evaluate_command("rm -rf /workspace", DENY_RM)
-    assert effect == "deny"
+    action, pat = evaluate_command("rm -rf /workspace", DENY_RM)
+    assert action == "deny"
     assert pat == "rm *"
 
 
@@ -197,9 +233,9 @@ def test_allow_when_no_pattern_matches() -> None:
 
 def test_precedence_deny_beats_confirm_beats_allow() -> None:
     rules = [
-        {"effect": "allow", "pattern": "git *"},
-        {"effect": "confirm", "pattern": "git push *"},
-        {"effect": "deny", "pattern": "git push --force *"},
+        {"action": "allow", "pattern": "git *"},
+        {"action": "confirm", "pattern": "git push *"},
+        {"action": "deny", "pattern": "git push --force *"},
     ]
     # deny wins even though allow + confirm also match, and is listed last.
     assert evaluate_command("git push --force origin main", rules)[0] == "deny"
@@ -273,7 +309,7 @@ and the exec middleware (command enforcement). Keep them side-effect free.
 
 Command-rule semantics mirror Claude Code permissions: an ordered rule list is
 evaluated with precedence deny > confirm > allow, first matching rule per
-effect-tier wins, and shell chaining cannot smuggle a denied command past an
+action-tier wins, and shell chaining cannot smuggle a denied command past an
 allow rule — every sub-command of a chained/substituted command line must pass.
 """
 
@@ -286,8 +322,8 @@ from typing import Any, Literal
 
 from opensandbox.models.sandboxes import NetworkPolicy, NetworkRule
 
-CommandEffect = Literal["deny", "confirm", "allow"]
-_EFFECT_RANK: dict[str, int] = {"deny": 0, "confirm": 1, "allow": 2}
+CommandAction = Literal["deny", "confirm", "allow"]
+_ACTION_RANK: dict[str, int] = {"deny": 0, "confirm": 1, "allow": 2}
 
 # Operators that chain or compose separate commands. Split on these to inspect
 # each constituent command independently.
@@ -338,35 +374,35 @@ def _matches(command: str, pattern: str) -> bool:
     return bool(argv) and fnmatchcase(" ".join(argv), pattern)
 
 
-def _eval_single(command: str, rules: list[dict[str, Any]]) -> tuple[CommandEffect, str | None]:
-    best: tuple[CommandEffect, str | None] = ("allow", None)
-    best_rank = _EFFECT_RANK["allow"]
+def _eval_single(command: str, rules: list[dict[str, Any]]) -> tuple[CommandAction, str | None]:
+    best: tuple[CommandAction, str | None] = ("allow", None)
+    best_rank = _ACTION_RANK["allow"]
     for rule in rules:
-        effect = str(rule.get("effect", "allow"))
+        action = str(rule.get("action", "allow"))
         pattern = str(rule.get("pattern", ""))
-        if effect not in _EFFECT_RANK or not pattern:
+        if action not in _ACTION_RANK or not pattern:
             continue
-        if _matches(command, pattern) and _EFFECT_RANK[effect] < best_rank:
-            best = (effect, pattern)  # type: ignore[assignment]
-            best_rank = _EFFECT_RANK[effect]
+        if _matches(command, pattern) and _ACTION_RANK[action] < best_rank:
+            best = (action, pattern)  # type: ignore[assignment]
+            best_rank = _ACTION_RANK[action]
     return best
 
 
 def evaluate_command(
     command: str, rules: list[dict[str, Any]]
-) -> tuple[CommandEffect, str | None]:
-    """Return the strictest (effect, matched_pattern) over every sub-command.
+) -> tuple[CommandAction, str | None]:
+    """Return the strictest (action, matched_pattern) over every sub-command.
 
     deny > confirm > allow. No rule match → ("allow", None).
     """
     subcommands = split_shell_command(command) or [command.strip()]
-    strongest: tuple[CommandEffect, str | None] = ("allow", None)
-    strongest_rank = _EFFECT_RANK["allow"]
+    strongest: tuple[CommandAction, str | None] = ("allow", None)
+    strongest_rank = _ACTION_RANK["allow"]
     for sub in subcommands:
-        effect, pattern = _eval_single(sub, rules)
-        if _EFFECT_RANK[effect] < strongest_rank:
-            strongest = (effect, pattern)
-            strongest_rank = _EFFECT_RANK[effect]
+        action, pattern = _eval_single(sub, rules)
+        if _ACTION_RANK[action] < strongest_rank:
+            strongest = (action, pattern)
+            strongest_rank = _ACTION_RANK[action]
     return strongest
 
 
@@ -442,7 +478,7 @@ from cubebox.services.sandbox_policy import (
 
 
 class _FakeRepo:
-    """In-memory stand-in for SandboxPolicyRepository (one row per org)."""
+    """In-memory stand-in for SandboxPolicyRepository (org-default row)."""
 
     def __init__(self) -> None:
         self.row: dict | None = None
@@ -451,7 +487,7 @@ class _FakeRepo:
         return self.row
 
     async def upsert(self, **fields):
-        self.row = {"org_id": "org-1", **fields}
+        self.row = {"org_id": "org-1", "scope_workspace_id": None, **fields}
         return self.row
 
 
@@ -467,35 +503,33 @@ async def test_resolver_returns_row_values() -> None:
     repo = _FakeRepo()
     repo.row = {
         "org_id": "org-1",
+        "scope_workspace_id": None,
         "default_image": "python:3.12",
-        "allowed_images": ["python:3.12"],
         "network_rules": [{"action": "deny", "target": "evil.test"}],
-        "command_rules": [{"effect": "deny", "pattern": "rm *"}],
+        "command_rules": [{"action": "deny", "pattern": "rm *"}],
     }
     eff = await SandboxPolicyResolver(repo, default_image="ubuntu:22.04").resolve()
     assert eff.default_image == "python:3.12"
-    assert eff.command_rules == [{"effect": "deny", "pattern": "rm *"}]
+    assert eff.command_rules == [{"action": "deny", "pattern": "rm *"}]
 
 
-async def test_service_rejects_image_outside_allowlist() -> None:
+async def test_service_rejects_empty_default_image() -> None:
     svc = SandboxPolicyService(_FakeRepo())
     with pytest.raises(SandboxPolicyValidationError):
         await svc.upsert(
-            default_image="ubuntu:22.04",
-            allowed_images=["python:3.12"],
+            default_image="",
             network_rules=None,
             command_rules=None,
         )
 
 
-async def test_service_rejects_bad_command_effect() -> None:
+async def test_service_rejects_bad_command_action() -> None:
     svc = SandboxPolicyService(_FakeRepo())
     with pytest.raises(SandboxPolicyValidationError):
         await svc.upsert(
             default_image="ubuntu:22.04",
-            allowed_images=None,
             network_rules=None,
-            command_rules=[{"effect": "nuke", "pattern": "rm *"}],
+            command_rules=[{"action": "nuke", "pattern": "rm *"}],
         )
 
 
@@ -504,7 +538,6 @@ async def test_service_rejects_bad_network_target() -> None:
     with pytest.raises(SandboxPolicyValidationError):
         await svc.upsert(
             default_image="ubuntu:22.04",
-            allowed_images=None,
             network_rules=[{"action": "allow", "target": "*"}],
             command_rules=None,
         )
@@ -540,7 +573,12 @@ class SandboxPolicyRepository:
         self.org_id = org_id
 
     async def get(self) -> SandboxPolicy | None:
-        stmt = select(SandboxPolicy).where(SandboxPolicy.org_id == self.org_id)  # type: ignore[arg-type]
+        """Return the org-default row (scope_workspace_id IS NULL)."""
+        stmt = (
+            select(SandboxPolicy)
+            .where(SandboxPolicy.org_id == self.org_id)  # type: ignore[arg-type]
+            .where(SandboxPolicy.scope_workspace_id.is_(None))  # type: ignore[union-attr]
+        )
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
 
@@ -548,14 +586,17 @@ class SandboxPolicyRepository:
         self,
         *,
         default_image: str,
-        allowed_images: list[str] | None,
         network_rules: list[dict[str, Any]] | None,
         command_rules: list[dict[str, Any]] | None,
     ) -> SandboxPolicy:
+        """Upsert the org-default policy row (scope_workspace_id=NULL).
+
+        v2 will add ``upsert_for_workspace(workspace_id, ...)`` for override
+        rows without touching this method.
+        """
         existing = await self.get()
         if existing is not None:
             existing.default_image = default_image
-            existing.allowed_images = allowed_images
             existing.network_rules = network_rules
             existing.command_rules = command_rules
             await self.session.commit()
@@ -563,8 +604,8 @@ class SandboxPolicyRepository:
             return existing
         row = SandboxPolicy(
             org_id=self.org_id,
+            scope_workspace_id=None,  # v1 only writes org-default rows
             default_image=default_image,
-            allowed_images=allowed_images,
             network_rules=network_rules,
             command_rules=command_rules,
         )
@@ -588,8 +629,8 @@ from typing import Any, Protocol
 
 from cubebox.sandbox_env.host_rules import HostPatternError, validate_host_pattern
 
-_VALID_EFFECTS = {"deny", "confirm", "allow"}
-_VALID_ACTIONS = {"allow", "deny"}
+_VALID_COMMAND_ACTIONS = {"deny", "confirm", "allow"}
+_VALID_NETWORK_ACTIONS = {"allow", "deny"}
 
 
 class SandboxPolicyValidationError(ValueError):
@@ -602,7 +643,6 @@ class _PolicyRepo(Protocol):
         self,
         *,
         default_image: str,
-        allowed_images: list[str] | None,
         network_rules: list[dict[str, Any]] | None,
         command_rules: list[dict[str, Any]] | None,
     ) -> Any: ...
@@ -611,7 +651,6 @@ class _PolicyRepo(Protocol):
 @dataclass
 class EffectivePolicy:
     default_image: str
-    allowed_images: list[str] | None = None
     network_rules: list[dict[str, Any]] = field(default_factory=list)
     command_rules: list[dict[str, Any]] = field(default_factory=list)
 
@@ -621,7 +660,7 @@ def _row_field(row: Any, name: str) -> Any:
 
 
 class SandboxPolicyService:
-    """CRUD + validation on top of the repo."""
+    """CRUD + validation on top of the repo. No allowlist in v1 (OQ-4)."""
 
     def __init__(self, repo: _PolicyRepo) -> None:
         self._repo = repo
@@ -629,23 +668,18 @@ class SandboxPolicyService:
     @staticmethod
     def _validate(
         default_image: str,
-        allowed_images: list[str] | None,
         network_rules: list[dict[str, Any]] | None,
         command_rules: list[dict[str, Any]] | None,
     ) -> None:
         if not default_image.strip():
             raise SandboxPolicyValidationError("default_image must not be empty")
-        if allowed_images is not None and default_image not in allowed_images:
-            raise SandboxPolicyValidationError(
-                "default_image must be a member of allowed_images"
-            )
         for rule in command_rules or []:
-            if rule.get("effect") not in _VALID_EFFECTS:
-                raise SandboxPolicyValidationError(f"invalid command effect: {rule!r}")
+            if rule.get("action") not in _VALID_COMMAND_ACTIONS:
+                raise SandboxPolicyValidationError(f"invalid command action: {rule!r}")
             if not str(rule.get("pattern", "")).strip():
                 raise SandboxPolicyValidationError(f"command rule needs a pattern: {rule!r}")
         for rule in network_rules or []:
-            if rule.get("action") not in _VALID_ACTIONS:
+            if rule.get("action") not in _VALID_NETWORK_ACTIONS:
                 raise SandboxPolicyValidationError(f"invalid network action: {rule!r}")
             target = str(rule.get("target", ""))
             try:
@@ -660,21 +694,25 @@ class SandboxPolicyService:
         self,
         *,
         default_image: str,
-        allowed_images: list[str] | None,
         network_rules: list[dict[str, Any]] | None,
         command_rules: list[dict[str, Any]] | None,
     ) -> Any:
-        self._validate(default_image, allowed_images, network_rules, command_rules)
+        self._validate(default_image, network_rules, command_rules)
         return await self._repo.upsert(
             default_image=default_image,
-            allowed_images=allowed_images,
             network_rules=network_rules,
             command_rules=command_rules,
         )
 
 
 class SandboxPolicyResolver:
-    """Return the effective policy for an org (row or built-in defaults)."""
+    """Return the effective policy for an org (row or built-in defaults).
+
+    v1 only resolves the org-default row. v2 will gain a ``resolve(*,
+    workspace_id)`` overload that prefers a workspace-override row when one
+    exists (precedence: workspace override > org default > built-in defaults).
+    Until then, the workspace branch is dead code.
+    """
 
     def __init__(self, repo: _PolicyRepo, *, default_image: str) -> None:
         self._repo = repo
@@ -686,7 +724,6 @@ class SandboxPolicyResolver:
             return EffectivePolicy(default_image=self._default_image)
         return EffectivePolicy(
             default_image=_row_field(row, "default_image") or self._default_image,
-            allowed_images=_row_field(row, "allowed_images"),
             network_rules=list(_row_field(row, "network_rules") or []),
             command_rules=list(_row_field(row, "command_rules") or []),
         )
@@ -742,30 +779,17 @@ async def test_put_then_get_roundtrip(admin_client) -> None:
         "/api/v1/admin/sandbox-policy",
         json={
             "default_image": "python:3.12",
-            "allowed_images": ["python:3.12", "ubuntu:22.04"],
             "network_rules": [{"action": "deny", "target": "evil.example.com"}],
-            "command_rules": [{"effect": "deny", "pattern": "rm *"}],
+            "command_rules": [{"action": "deny", "pattern": "rm *"}],
         },
     )
     assert put.status_code == 200, put.text
+    # PUT response includes a warnings array (empty when no conflicts).
+    assert put.json().get("warnings") == []
     got = await client.get("/api/v1/admin/sandbox-policy")
     body = got.json()
     assert body["default_image"] == "python:3.12"
-    assert body["command_rules"] == [{"effect": "deny", "pattern": "rm *"}]
-
-
-async def test_put_rejects_image_outside_allowlist(admin_client) -> None:
-    client, _ws = admin_client
-    resp = await client.put(
-        "/api/v1/admin/sandbox-policy",
-        json={
-            "default_image": "ubuntu:22.04",
-            "allowed_images": ["python:3.12"],
-            "network_rules": None,
-            "command_rules": None,
-        },
-    )
-    assert resp.status_code == 400
+    assert body["command_rules"] == [{"action": "deny", "pattern": "rm *"}]
 
 
 async def test_put_rejects_bad_network_target(admin_client) -> None:
@@ -774,12 +798,36 @@ async def test_put_rejects_bad_network_target(admin_client) -> None:
         "/api/v1/admin/sandbox-policy",
         json={
             "default_image": "ubuntu:22.04",
-            "allowed_images": None,
             "network_rules": [{"action": "allow", "target": "*"}],
             "command_rules": None,
         },
     )
     assert resp.status_code == 400
+
+
+async def test_put_warns_on_credential_host_conflict(admin_client, seeded_credential) -> None:
+    """OQ-6: deny on a host that an installed credential requires returns a
+    warnings[] entry, but the PUT is NOT rejected — the policy still saves."""
+    client, _ws = admin_client
+    # ``seeded_credential`` is a small fixture that inserts one credential whose
+    # required_hosts contains 'api.github.com'. Defined in tests/e2e/conftest.py.
+    cred_id = seeded_credential
+    resp = await client.put(
+        "/api/v1/admin/sandbox-policy",
+        json={
+            "default_image": "ubuntu:22.04",
+            "network_rules": [{"action": "deny", "target": "api.github.com"}],
+            "command_rules": None,
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    warnings = resp.json().get("warnings") or []
+    assert any(cred_id in str(w) or "api.github.com" in str(w) for w in warnings)
+    # Confirm the policy DID save despite the warning.
+    got = await client.get("/api/v1/admin/sandbox-policy")
+    assert got.json()["network_rules"] == [
+        {"action": "deny", "target": "api.github.com"}
+    ]
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -801,14 +849,15 @@ from pydantic import BaseModel
 
 class SandboxPolicyOut(BaseModel):
     default_image: str
-    allowed_images: list[str] | None = None
     network_rules: list[dict[str, Any]] = []
     command_rules: list[dict[str, Any]] = []
+    # OQ-6 soft-conflict warnings (e.g. deny rule covers an installed
+    # credential's required host). Empty on GET and on a clean PUT.
+    warnings: list[str] = []
 
 
 class UpdateSandboxPolicyIn(BaseModel):
     default_image: str
-    allowed_images: list[str] | None = None
     network_rules: list[dict[str, Any]] | None = None
     command_rules: list[dict[str, Any]] | None = None
 ```
@@ -853,10 +902,36 @@ async def get_sandbox_policy(
     eff = await SandboxPolicyResolver(repo, default_image=_default_image()).resolve()
     return SandboxPolicyOut(
         default_image=eff.default_image,
-        allowed_images=eff.allowed_images,
         network_rules=eff.network_rules,
         command_rules=eff.command_rules,
+        warnings=[],
     )
+
+
+def _credential_conflict_warnings(
+    network_rules: list[dict[str, Any]] | None,
+    installed_creds: list[Any],
+) -> list[str]:
+    """OQ-6: warn (do NOT reject) when a deny rule covers a host that an
+    installed credential declares as required. Returns one warning per match."""
+    out: list[str] = []
+    deny_targets = {
+        str(r.get("target", ""))
+        for r in (network_rules or [])
+        if r.get("action") == "deny"
+    }
+    if not deny_targets:
+        return out
+    for cred in installed_creds:
+        required = list(getattr(cred, "required_hosts", []) or [])
+        for host in required:
+            if host in deny_targets:
+                out.append(
+                    f"credential {cred.id} ({getattr(cred, 'name', '?')}) requires "
+                    f"host {host} which is denied by the policy; outbound calls "
+                    f"will be blocked"
+                )
+    return out
 
 
 @router.put("", response_model=SandboxPolicyOut)
@@ -870,17 +945,25 @@ async def put_sandbox_policy(
     try:
         row = await svc.upsert(
             default_image=body.default_image,
-            allowed_images=body.allowed_images,
             network_rules=body.network_rules,
             command_rules=body.command_rules,
         )
     except SandboxPolicyValidationError as exc:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+
+    # OQ-6: soft-warning on credential-host conflicts. Do NOT reject.
+    from cubebox.repositories.sandbox_env import SandboxEnvRepository
+    cred_repo = SandboxEnvRepository(session, org_id=ctx.org_id)
+    installed_creds = await cred_repo.list_org_credentials()  # implementer:
+    # reuse the existing list method (name may differ — check the repo) that
+    # returns rows with .id, .name, .required_hosts.
+    warnings = _credential_conflict_warnings(body.network_rules, installed_creds)
+
     return SandboxPolicyOut(
         default_image=row.default_image,
-        allowed_images=row.allowed_images,
         network_rules=row.network_rules or [],
         command_rules=row.command_rules or [],
+        warnings=warnings,
     )
 ```
 
@@ -899,13 +982,31 @@ In `backend/cubebox/api/app.py`:
 - [ ] **Step 6: Run test to verify it passes**
 
 Run: `cd backend && uv run pytest tests/e2e/test_sandbox_policy_routes.py -v`
-Expected: PASS (4 passed). (The table doesn't exist yet in the test DB; the E2E DB is created from metadata, so `SandboxPolicy` being imported in `models/__init__` is enough — the migration in Task 7 is for the running DB.)
+Expected: PASS (4 passed: defaults / roundtrip / bad-target-rejected / credential-conflict-warns). (The table doesn't exist yet in the test DB; the E2E DB is created from metadata, so `SandboxPolicy` being imported in `models/__init__` is enough — the migration in Task 7 is for the running DB.)
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 7: Symmetric warning on the credential editor route (OQ-6)**
+
+In the existing vault credential editor route (search for `admin_sandbox_env`
+or `ws_sandbox_env` PUT handlers that save a credential — pick the one the
+credential editor actually calls), add a small after-save check: load the
+org's `SandboxPolicy` and, if any `deny` rule's target appears in the saved
+credential's `required_hosts`, attach the same shape of warning to the
+response (the credential PUT response gains a `warnings: list[str]` field —
+mirror what the policy response already does in this task). Do not reject;
+just surface the warning. Add an E2E test in the existing credential routes
+test file: with a deny rule in place for `api.github.com`, save a credential
+whose `required_hosts` includes `api.github.com`, assert the response's
+`warnings` array is non-empty. The implementer should reuse
+`_credential_conflict_warnings` from this task (move it into a shared module
+like `backend/cubebox/services/sandbox_policy_conflicts.py` if both routes
+need to import it).
+
+- [ ] **Step 8: Commit**
 
 ```bash
 git add backend/cubebox/api/schemas/sandbox_policy.py backend/cubebox/api/routes/v1/admin_sandbox_policy.py backend/cubebox/api/routes/v1/__init__.py backend/cubebox/api/app.py backend/tests/e2e/test_sandbox_policy_routes.py
-git commit -m "feat(sandbox): admin GET/PUT /admin/sandbox-policy routes"
+git add backend/cubebox/api/routes/v1/admin_sandbox_env.py backend/cubebox/api/routes/v1/ws_sandbox_env.py backend/cubebox/services/sandbox_policy_conflicts.py 2>/dev/null || true
+git commit -m "feat(sandbox): admin GET/PUT /admin/sandbox-policy + credential conflict warnings"
 ```
 
 ---
@@ -1216,7 +1317,9 @@ Replace `_build_user_volume` in `backend/cubebox/sandbox/manager.py`:
 
 - [ ] **Step 4: Rewrite the create path (reserve-row-first + policy delivery)**
 
-In `get_or_create`, after the reuse branch (which now also covers `provisioning` rows via `get_active_by_user`), replace the create block. Add the policy resolve at the top of the `async with self._session_factory()` block and use the rules matcher for the network merge:
+In `get_or_create`, after the reuse branch (which now also covers `provisioning` rows via `get_active_by_user`), replace the create block. Add the policy resolve at the top of the `async with self._session_factory()` block and use the rules matcher for the network merge.
+
+**Image drift is LAZY (OQ-5).** Existing running sandboxes keep their original image until they terminate normally (TTL or conversation end); they are NOT torn down because the admin changed `default_image`. The new image is only used by sandboxes created *after* the change. Concretely: the running-reuse branch reuses the sandbox unconditionally on image mismatch (just logs a one-line info), and only the create-new branch reads `policy.default_image`. No mid-life image swap.
 
 ```python
         from cubebox.repositories.sandbox_policy import SandboxPolicyRepository
@@ -1232,36 +1335,18 @@ In `get_or_create`, after the reuse branch (which now also covers `provisioning`
             record = await repo.get_active_by_user(user_id)
 
             if record and record.status == "running":
-                # ... existing reuse + health-check + image-drift block (below) ...
+                # LAZY image drift: log only; keep reusing the existing sandbox.
+                # The new image takes effect on the NEXT new-conversation create.
                 if record.image != policy.default_image:
                     logger.info(
-                        "Image drift {} -> {}; recreating sandbox {}",
-                        record.image, policy.default_image, record.sandbox_id,
+                        "Image drift detected (sandbox={} on={}, policy now={}); "
+                        "reusing existing sandbox; new image takes effect on next "
+                        "new conversation",
+                        record.sandbox_id, record.image, policy.default_image,
                     )
-                    # The drifted sandbox is still *running* at the provider, so the
-                    # TTL reaper (which only sweeps active rows) will never see it once
-                    # we mark the row terminated — kill the provider sandbox HERE first,
-                    # or it leaks. Best-effort: log + continue if the kill fails.
-                    try:
-                        _stale = await opensandbox.Sandbox.connect(
-                            record.sandbox_id, connection_config=conn_config,
-                            skip_health_check=True,
-                        )
-                        await _stale.kill()
-                        await _stale.close()
-                    except Exception as _kill_exc:
-                        logger.warning(
-                            "Failed to kill drifted sandbox {} (may be gone): {}",
-                            record.sandbox_id, _kill_exc,
-                        )
-                    await repo.mark_terminated(record.id)
-                    if self._exchange_host:
-                        await EgressRefRepository(session).revoke_for_sandbox(record.sandbox_id)
-                    record = None
-                else:
-                    # existing connect / is_healthy / _apply_egress reuse logic,
-                    # unchanged except keyed on the running record.
-                    ...
+                # existing connect / is_healthy / _apply_egress reuse logic,
+                # unchanged: just reuse the running sandbox regardless of drift.
+                ...
 ```
 
 Then the create-new block becomes reserve-first:
@@ -1370,13 +1455,9 @@ git commit -m "feat(sandbox): reserve-row-first create, workspace-scoped PVC, po
 
 ## Task 7: Alembic migration (autogenerate)
 
-**One** migration, generated — not hand-written — except for the appended
-duplicate-collapse data step. (Earlier drafts split this into two autogen runs;
-that is infeasible. By the time this task runs, BOTH the `SandboxPolicy` model
-[Task 1] and the `UserSandbox` index change [Task 5] already exist in the
-metadata, so the **first** `--autogenerate` run captures *both* the
-`sandbox_policies` table and the `uq_user_sandbox_active` index. A second run
-would be empty. Generate one migration covering everything.)
+**One** migration, fully autogenerated — no manual data step. OQ-7 resolution: the project has not shipped publicly, so we assume pre-migration data has no `(org, workspace, user)` duplicate active rows. If a real deployment ever hits dirty data here, it's an ops event (run a one-off cleanup script), not migration logic.
+
+By the time this task runs, BOTH the `SandboxPolicy` model [Task 1] and the `UserSandbox` index change [Task 5] already exist in the metadata, so the single `--autogenerate` run captures both the `sandbox_policies` table and the `uq_user_sandbox_active` index. A second run would be empty.
 
 **Files:**
 - Create: `backend/alembic/versions/<rev>_sandbox_policies_and_active_unique_index.py`
@@ -1389,31 +1470,24 @@ Expected: prints `00948a73877f (head)` (or the current head if rebased).
 - [ ] **Step 2: Autogenerate the combined migration**
 
 Run: `cd backend && uv run alembic revision --autogenerate -m "sandbox policies and active unique index"`
-Expected: a single new file under `alembic/versions/` whose `upgrade()` calls **both** `op.create_table('sandbox_policies', ...)` (with the `uq_sandbox_policy_org` unique index) **and** `op.create_index('uq_user_sandbox_active', 'user_sandboxes', ['org_id','workspace_id','user_id'], unique=True, postgresql_where=...)`. No seed rows.
+Expected: a single new file under `alembic/versions/` whose `upgrade()` calls **both** `op.create_table('sandbox_policies', ...)` (with the `uq_sandbox_policy_scope` unique index on `(org_id, scope_workspace_id)`) **and** `op.create_index('uq_user_sandbox_active', 'user_sandboxes', ['org_id','workspace_id','user_id'], unique=True, postgresql_where=...)`. No seed rows.
 
-- [ ] **Step 3: Prepend the duplicate-collapse data step**
+- [ ] **Step 3: Add the clean-data assumption note**
 
-Open the generated migration. At the **top** of `upgrade()`, before the `create_index` for `uq_user_sandbox_active` (order it after `create_table` is fine; it just must precede the unique index over `user_sandboxes`), add the data step (the one allowed manual edit). This demotes any duplicate active rows to `terminated`, keeping the newest by `created_at`, so the unique index can be created without violation:
+Open the generated migration and add a short module docstring (or top-of-`upgrade()` comment) capturing the OQ-7 assumption — do NOT add a data-collapse step:
 
 ```python
-    # Collapse duplicate active rows per (org_id, workspace_id, user_id) before the
-    # unique index is added: keep the newest by created_at, demote the rest.
-    op.execute(
-        """
-        UPDATE user_sandboxes
-        SET status = 'terminated'
-        WHERE status IN ('provisioning','running')
-          AND id NOT IN (
-            SELECT DISTINCT ON (org_id, workspace_id, user_id) id
-            FROM user_sandboxes
-            WHERE status IN ('provisioning','running')
-            ORDER BY org_id, workspace_id, user_id, created_at DESC
-          )
-        """
-    )
+"""sandbox policies and active unique index
+
+Assumes clean data: no (org_id, workspace_id, user_id) duplicate rows in
+status IN ('provisioning','running'). The project has not shipped publicly,
+so this is a safe assumption. If a real deployment ever hits dirty data,
+operators run a one-off cleanup script before applying this migration;
+that is NOT migration logic.
+"""
 ```
 
-Leave `downgrade()` as the autogenerated `drop_index` + `drop_table`.
+Leave both `upgrade()` and `downgrade()` exactly as autogenerated.
 
 - [ ] **Step 4: Apply and verify the migration**
 
@@ -1445,6 +1519,14 @@ git commit -m "feat(sandbox): migration for active unique index + sandbox_polici
 ---
 
 ## Task 8: Command-rule enforcement in the execute middleware
+
+**Scope (OQ-10):** v1 command rules apply to the `execute` tool ONLY. The
+dotfile / config-file protection control (denying `write_file` /
+`edit_file` writes to patterns like `~/.bashrc`, `**/.git/config`) is
+**deferred to a fast-follow PR** — it needs a separate matcher applied to
+file *paths*, not command strings, and the UX (showing "blocked path"
+errors in the editor tools) is different. Do not extend the matcher to the
+write/edit tools in this task.
 
 **Files:**
 - Modify: `backend/cubebox/middleware/sandbox.py:128-158,362-382`
@@ -1480,7 +1562,7 @@ class _FakeSandbox:
 
 async def test_deny_blocks_and_never_runs() -> None:
     sb = _FakeSandbox()
-    tool = _make_execute_tool(sb, command_rules=[{"effect": "deny", "pattern": "rm *"}])
+    tool = _make_execute_tool(sb, command_rules=[{"action": "deny", "pattern": "rm *"}])
     result = await tool.execute("c1", type(tool.parameters)(command="rm -rf /workspace"))
     text = result.content[0].text
     assert "blocked by org policy" in text
@@ -1490,14 +1572,14 @@ async def test_deny_blocks_and_never_runs() -> None:
 
 async def test_allow_runs() -> None:
     sb = _FakeSandbox()
-    tool = _make_execute_tool(sb, command_rules=[{"effect": "deny", "pattern": "rm *"}])
+    tool = _make_execute_tool(sb, command_rules=[{"action": "deny", "pattern": "rm *"}])
     await tool.execute("c1", type(tool.parameters)(command="ls -la"))
     assert sb.ran == ["ls -la"]
 
 
 async def test_confirm_degrades_to_deny_in_v1() -> None:
     sb = _FakeSandbox()
-    tool = _make_execute_tool(sb, command_rules=[{"effect": "confirm", "pattern": "git push *"}])
+    tool = _make_execute_tool(sb, command_rules=[{"action": "confirm", "pattern": "git push *"}])
     result = await tool.execute("c1", type(tool.parameters)(command="git push origin main"))
     text = result.content[0].text
     assert "requires confirmation" in text
@@ -1507,7 +1589,7 @@ async def test_confirm_degrades_to_deny_in_v1() -> None:
 
 async def test_chained_denied_subcommand_blocks_whole_call() -> None:
     sb = _FakeSandbox()
-    tool = _make_execute_tool(sb, command_rules=[{"effect": "deny", "pattern": "rm *"}])
+    tool = _make_execute_tool(sb, command_rules=[{"action": "deny", "pattern": "rm *"}])
     result = await tool.execute("c1", type(tool.parameters)(command="ls && rm -rf /"))
     assert "blocked by org policy" in result.content[0].text
     assert sb.ran == []
@@ -1539,8 +1621,9 @@ def _make_execute_tool(
     """Build the execute cubepi.AgentTool backed by a sandbox instance.
 
     Command rules are enforced here — the last cubebox-owned point before the
-    command reaches the provider. Precedence deny > confirm > allow; confirm
-    degrades to deny in v1 (no interrupt channel yet).
+    command reaches the provider. Precedence deny > confirm > allow; in v1
+    ``confirm`` degrades to ``deny`` because cubepi has no elicit/approve
+    event channel yet (see TODO below + spec OQ-1/OQ-2).
     """
     rules = command_rules or []
 
@@ -1553,15 +1636,22 @@ def _make_execute_tool(
     ) -> AgentToolResult:
         del tool_call_id, signal, on_update
 
-        effect, pattern = evaluate_command(args.command, rules)
-        if effect == "deny":
+        action, pattern = evaluate_command(args.command, rules)
+        if action == "deny":
             # Surface as a tool ERROR (is_error=True) so cubepi's finalized result
             # reads as a failure, not a successful command that printed a message.
             return AgentToolResult(
                 content=[TextContent(text=f"command blocked by org policy: {pattern}")],
                 is_error=True,
             )
-        if effect == "confirm":
+        if action == "confirm":
+            # TODO(cubepi-hitl): real prompt-and-approve flow once upstream ships
+            # the elicit/approve event channel. Until then, treat confirm as deny
+            # with a distinct message so admins still see their rule fire. The
+            # audit row tag is `confirmed-action-deferred`. Acceptance criteria
+            # for the upstream cubepi work: confirmation blocks only the tool
+            # call (not the whole run); 180s timeout; timed-out = deny + audit
+            # row; sandbox TTL clock does not pause while waiting. See OQ-1/OQ-2.
             return AgentToolResult(
                 content=[
                     TextContent(
@@ -1765,9 +1855,8 @@ async def test_command_deny_blocks_and_filesystem_untouched(
         "/api/v1/admin/sandbox-policy",
         json={
             "default_image": "ubuntu:22.04",
-            "allowed_images": None,
             "network_rules": None,
-            "command_rules": [{"effect": "deny", "pattern": "rm *"}],
+            "command_rules": [{"action": "deny", "pattern": "rm *"}],
         },
     )
     assert put.status_code == 200
@@ -1789,7 +1878,7 @@ async def test_command_deny_blocks_and_filesystem_untouched(
             _Sb(),
             workspace_id=ws_id,
             conversation_id="conv-1",
-            command_rules=[{"effect": "deny", "pattern": "rm *"}],
+            command_rules=[{"action": "deny", "pattern": "rm *"}],
         )
         res = await tool.execute("c1", type(tool.parameters)(command="rm -rf /workspace"))
         assert "blocked by org policy" in res.content[0].text
@@ -1814,28 +1903,34 @@ git commit -m "test(sandbox): E2E ownership isolation + command-deny enforcement
 
 ---
 
-## Task 10: Image-policy E2E + pre-PR sweep
+## Task 10: Image-policy E2E (lazy drift) + pre-PR sweep
 
 **Files:**
 - Modify: `backend/tests/e2e/test_sandbox_scoping.py`
 
-- [ ] **Step 1: Add the image-drift E2E**
+- [ ] **Step 1: Add the lazy-drift E2E**
+
+OQ-5 resolution: image drift is **lazy**. Existing running sandboxes keep
+their original image. Only sandboxes created *after* the policy change pick
+up the new image. The E2E asserts both halves.
 
 Append to `backend/tests/e2e/test_sandbox_scoping.py`:
 
 ```python
-async def test_image_policy_persisted_and_drift_recreates(
+async def test_image_drift_is_lazy_existing_keeps_old_new_uses_new(
     session_factory, seeded_org_ws_user
 ) -> None:
-    """Admin default_image is used at create and persisted on the row; changing
-    it makes the next get_or_create recreate rather than reuse the stale one."""
-    org_id, ws_a, _ws_b, user_id = seeded_org_ws_user
+    """Admin default_image is used at create and persisted on the row.
+    Changing it does NOT recreate the existing sandbox (lazy drift): the
+    existing row stays running on its original image. A NEW user/workspace
+    (or a freshly recreated sandbox after the existing one is terminated)
+    picks up the new image."""
+    org_id, ws_a, ws_b, user_id = seeded_org_ws_user
     from cubebox.repositories.sandbox_policy import SandboxPolicyRepository
 
     async with session_factory() as s:
         await SandboxPolicyRepository(s, org_id=org_id).upsert(
             default_image="python:3.12",
-            allowed_images=None,
             network_rules=None,
             command_rules=None,
         )
@@ -1854,17 +1949,17 @@ async def test_image_policy_persisted_and_drift_recreates(
         ).scalar_one()
     assert img1 == "python:3.12"
 
-    # Change the policy image; next call must recreate (old row terminated).
+    # Change the policy image; the EXISTING sandbox keeps its old image
+    # (lazy drift). No row is terminated by the policy change.
     async with session_factory() as s:
         await SandboxPolicyRepository(s, org_id=org_id).upsert(
             default_image="ubuntu:22.04",
-            allowed_images=None,
             network_rules=None,
             command_rules=None,
         )
     await mgr.get_or_create(user_id, org_id=org_id, workspace_id=ws_a)
     async with session_factory() as s:
-        running = (
+        still_running = (
             await s.execute(
                 sa.text(
                     "SELECT image FROM user_sandboxes WHERE user_id=:u "
@@ -1882,29 +1977,483 @@ async def test_image_policy_persisted_and_drift_recreates(
                 {"u": user_id, "w": ws_a},
             )
         ).scalar_one()
-    assert running == "ubuntu:22.04"
-    assert terminated == 1
+    assert still_running == "python:3.12"  # lazy: NOT torn down
+    assert terminated == 0  # nothing demoted by the policy change
+
+    # A brand-new sandbox (different workspace, same user) picks up the new image.
+    await mgr.get_or_create(user_id, org_id=org_id, workspace_id=ws_b)
+    async with session_factory() as s:
+        img_new = (
+            await s.execute(
+                sa.text(
+                    "SELECT image FROM user_sandboxes WHERE user_id=:u "
+                    "AND workspace_id=:w AND status='running'"
+                ),
+                {"u": user_id, "w": ws_b},
+            )
+        ).scalar_one()
+    assert img_new == "ubuntu:22.04"
 ```
 
 - [ ] **Step 2: Run the new E2E**
 
-Run: `cd backend && uv run pytest tests/e2e/test_sandbox_scoping.py::test_image_policy_persisted_and_drift_recreates -v`
+Run: `cd backend && uv run pytest tests/e2e/test_sandbox_scoping.py::test_image_drift_is_lazy_existing_keeps_old_new_uses_new -v`
 Expected: PASS.
 
-- [ ] **Step 3: Full type + test sweep before PR**
+- [ ] **Step 3: Commit**
+
+```bash
+git add backend/tests/e2e/test_sandbox_scoping.py
+git commit -m "test(sandbox): E2E lazy image drift (existing keeps, new picks up)"
+```
+
+---
+
+## Task 11: One-time PVC migration helper (`migrate_user_pvcs.py`)
+
+**OQ-9 resolution.** The volume rename in Task 6 changes the PVC claim-name
+shape from `user-<user_id>` to `ws-<workspace_id>-user-<user_id>`. Pre-rename
+PVCs become orphaned. This task ships a CLI helper that migrates them
+**when unambiguous** (the user belongs to exactly one workspace at run time);
+ambiguous cases (user in multiple workspaces, since there's no single
+correct target) are listed for manual operator cleanup. Dry-run by default,
+`--apply` to actually move PVCs.
+
+**Files:**
+- Create: `backend/scripts/dev/migrate_user_pvcs.py`
+- Test: `backend/tests/unit/test_migrate_user_pvcs.py`
+
+- [ ] **Step 1: Write the failing test**
+
+Create `backend/tests/unit/test_migrate_user_pvcs.py`:
+
+```python
+"""Unit test for the unambiguous-only PVC migration plan logic.
+
+The CLI itself talks to the cluster; this test exercises the pure-function
+planner that decides what to do per user (rename / leave-for-manual /
+skip-already-migrated). No cluster I/O.
+"""
+
+from cubebox.scripts.dev.migrate_user_pvcs import build_migration_plan
+
+
+def test_user_with_one_workspace_gets_a_rename_action() -> None:
+    plan = build_migration_plan(
+        existing_pvcs=["user-u1", "user-u2"],
+        memberships={"u1": ["ws-A"], "u2": ["ws-X", "ws-Y"]},
+        target_prefix="user-",
+        new_template="ws-{ws}-user-{user}",
+    )
+    actions = {a.user_id: a for a in plan}
+    assert actions["u1"].kind == "rename"
+    assert actions["u1"].new_name == "ws-ws-A-user-u1"
+    # u2 is in two workspaces -> ambiguous, surfaced for manual cleanup.
+    assert actions["u2"].kind == "manual_cleanup"
+
+
+def test_user_with_no_existing_pvc_is_skipped() -> None:
+    plan = build_migration_plan(
+        existing_pvcs=[],
+        memberships={"u1": ["ws-A"]},
+        target_prefix="user-",
+        new_template="ws-{ws}-user-{user}",
+    )
+    assert plan == []
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `cd backend && uv run pytest tests/unit/test_migrate_user_pvcs.py -v`
+Expected: FAIL — `No module named 'cubebox.scripts.dev.migrate_user_pvcs'`.
+
+- [ ] **Step 3: Implement the helper**
+
+Create `backend/scripts/dev/migrate_user_pvcs.py`:
+
+```python
+"""One-time migrator: rename pre-(workspace,user) PVCs to the new shape.
+
+Run from the backend dir. Dry-run is the default; pass --apply to actually
+rename. Ambiguous cases (user in multiple workspaces) are NOT touched and
+are listed for operator manual cleanup.
+
+    uv run python -m cubebox.scripts.dev.migrate_user_pvcs            # dry-run
+    uv run python -m cubebox.scripts.dev.migrate_user_pvcs --apply    # do it
+
+This script is intentionally simple and lives under scripts/dev/ — it is a
+one-shot helper, not a long-term commitment.
+"""
+
+from __future__ import annotations
+
+import argparse
+import asyncio
+from dataclasses import dataclass
+from typing import Literal
+
+
+@dataclass
+class MigrationAction:
+    user_id: str
+    kind: Literal["rename", "manual_cleanup", "skip_no_pvc"]
+    old_name: str | None = None
+    new_name: str | None = None
+    reason: str = ""
+
+
+def build_migration_plan(
+    *,
+    existing_pvcs: list[str],
+    memberships: dict[str, list[str]],
+    target_prefix: str,
+    new_template: str,
+) -> list[MigrationAction]:
+    """Return one action per user with a pre-rename PVC.
+
+    - exactly one workspace  -> rename
+    - multiple workspaces    -> manual_cleanup (ambiguous target)
+    - no pre-rename PVC      -> omitted (nothing to do)
+    """
+    pvc_set = set(existing_pvcs)
+    actions: list[MigrationAction] = []
+    for user_id, workspaces in memberships.items():
+        old_name = f"{target_prefix}{user_id}"
+        if old_name not in pvc_set:
+            continue
+        if len(workspaces) == 1:
+            new_name = new_template.format(ws=workspaces[0], user=user_id)
+            actions.append(
+                MigrationAction(user_id=user_id, kind="rename",
+                                old_name=old_name, new_name=new_name)
+            )
+        else:
+            actions.append(
+                MigrationAction(
+                    user_id=user_id, kind="manual_cleanup", old_name=old_name,
+                    reason=f"user belongs to {len(workspaces)} workspaces; pick one manually",
+                )
+            )
+    return actions
+
+
+async def _fetch_memberships() -> dict[str, list[str]]:
+    """Open a session, return {user_id: [workspace_id, ...]} for all users."""
+    from cubebox.db.session import async_sessionmaker_for_app
+    from sqlalchemy import text
+
+    async with async_sessionmaker_for_app()() as s:
+        rows = (await s.execute(
+            text("SELECT user_id, workspace_id FROM memberships")
+        )).all()
+    out: dict[str, list[str]] = {}
+    for user_id, ws_id in rows:
+        out.setdefault(user_id, []).append(ws_id)
+    return out
+
+
+async def _list_pvcs() -> list[str]:
+    """Return all PVC claim names in the configured namespace.
+
+    Reuses the provider helper used by SandboxManager to talk to the volume
+    backend; if the deployment runs without a real PVC backend, returns [].
+    The implementer wires this to the same client the manager already uses;
+    leave this as a thin call.
+    """
+    return []  # IMPLEMENT: wire to the same PVC client SandboxManager uses
+
+
+def _apply_rename(action: MigrationAction) -> None:
+    """Perform the rename in the cluster. IMPLEMENT against the same client.
+
+    Most PVC backends don't support rename in-place — typical pattern is:
+    create the new PVC bound to the same PV (reclaimPolicy=Retain), then
+    delete the old PVC. Leave the concrete steps to whoever runs this; this
+    is a one-shot script."""
+    raise NotImplementedError("wire to your PVC client")
+
+
+async def main_async(*, apply: bool) -> int:
+    memberships = await _fetch_memberships()
+    pvcs = await _list_pvcs()
+    plan = build_migration_plan(
+        existing_pvcs=pvcs,
+        memberships=memberships,
+        target_prefix="user-",
+        new_template="ws-{ws}-user-{user}",
+    )
+    if not plan:
+        print("nothing to migrate")
+        return 0
+    rename = [a for a in plan if a.kind == "rename"]
+    manual = [a for a in plan if a.kind == "manual_cleanup"]
+    print(f"plan: {len(rename)} renames, {len(manual)} manual-cleanup entries")
+    for a in rename:
+        print(f"  RENAME {a.old_name} -> {a.new_name}")
+    for a in manual:
+        print(f"  MANUAL {a.old_name} ({a.reason})")
+    if not apply:
+        print("dry-run: re-run with --apply to perform the renames")
+        return 0
+    for a in rename:
+        _apply_rename(a)
+    return 0
+
+
+def main() -> int:
+    p = argparse.ArgumentParser()
+    p.add_argument("--apply", action="store_true", help="actually perform the renames")
+    args = p.parse_args()
+    return asyncio.run(main_async(apply=args.apply))
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
+```
+
+- [ ] **Step 4: Run test to verify it passes**
+
+Run: `cd backend && uv run pytest tests/unit/test_migrate_user_pvcs.py -v`
+Expected: PASS (2 passed).
+
+- [ ] **Step 5: Smoke the dry-run path**
+
+Run: `cd backend && uv run python -m cubebox.scripts.dev.migrate_user_pvcs`
+Expected: prints `nothing to migrate` (the placeholder `_list_pvcs` returns
+`[]`). Real PVC-listing wiring is done by whoever runs the migration in a
+deployment with real PVCs.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add backend/scripts/dev/migrate_user_pvcs.py backend/tests/unit/test_migrate_user_pvcs.py
+git commit -m "feat(sandbox): one-time PVC migration helper (dry-run by default)"
+```
+
+---
+
+## Task 12: Frontend — admin policy editor, workspace sandbox status, credential warning
+
+Scope-isolated frontend deliverable. The policy is org-scoped, so the
+editor lives under `/admin/sandbox-policy` (NOT under `/w/[wsId]/...`). The
+workspace-side sandbox status view lives under `/w/[wsId]/sandbox`. The
+vault credential editor gets a yellow-banner warning. A Playwright smoke
+exercises the admin happy path.
+
+**Files:**
+
+- Create: `frontend/packages/web/app/(app)/admin/sandbox-policy/page.tsx`
+- Create: `frontend/packages/web/app/(app)/admin/sandbox-policy/_components/PolicyEditor.tsx`
+- Create: `frontend/packages/web/app/(app)/admin/sandbox-policy/_components/NetworkRulesTable.tsx`
+- Create: `frontend/packages/web/app/(app)/admin/sandbox-policy/_components/CommandRulesTable.tsx`
+- Create: `frontend/packages/web/app/api/v1/admin/sandbox-policy/route.ts`
+- Create: `frontend/packages/web/app/(app)/w/[wsId]/sandbox/page.tsx`
+- Create: `frontend/packages/web/app/api/v1/ws/[wsId]/sandbox-status/route.ts`
+- Modify: existing credential editor — add a `<CredentialDenyWarning />`
+  banner (path depends on where the credential edit page already lives;
+  search for the existing `sandbox_env` credential edit route file).
+- Modify: `frontend/packages/core/src/api/types.ts` — add
+  `SandboxPolicyOut`, `UpdateSandboxPolicyIn`, `SandboxStatusOut`.
+- Modify: `frontend/packages/web/app/(app)/admin/_components/AdminNav.tsx`
+  (or wherever admin nav lives) — add a "Sandbox policy" entry.
+- Create: `frontend/packages/web/e2e/sandbox-policy.spec.ts` — Playwright smoke.
+
+- [ ] **Step 1: Add types in `@cubebox/core`**
+
+In `frontend/packages/core/src/api/types.ts`, add:
+
+```ts
+export interface SandboxNetworkRule {
+  action: "allow" | "deny";
+  target: string;
+}
+
+export interface SandboxCommandRule {
+  action: "allow" | "deny" | "confirm";
+  pattern: string;
+}
+
+export interface SandboxPolicyOut {
+  default_image: string;
+  network_rules: SandboxNetworkRule[];
+  command_rules: SandboxCommandRule[];
+  warnings: string[];
+}
+
+export interface UpdateSandboxPolicyIn {
+  default_image: string;
+  network_rules: SandboxNetworkRule[] | null;
+  command_rules: SandboxCommandRule[] | null;
+}
+
+export interface SandboxStatusOut {
+  status: "provisioning" | "running" | "paused" | "terminated" | "absent";
+  default_image: string | null;
+  last_activity_at: string | null;
+  browser_url: string | null;
+}
+```
+
+Then `pnpm --filter @cubebox/core build` so the web package sees the types.
+
+- [ ] **Step 2: Add the proxy route (admin)**
+
+Create `frontend/packages/web/app/api/v1/admin/sandbox-policy/route.ts`:
+
+```ts
+import { NextRequest } from "next/server";
+import { proxyToBackend } from "@/lib/proxy";
+
+export async function GET(req: NextRequest) {
+  return proxyToBackend(req, "/api/v1/admin/sandbox-policy");
+}
+
+export async function PUT(req: NextRequest) {
+  return proxyToBackend(req, "/api/v1/admin/sandbox-policy");
+}
+```
+
+(The `proxyToBackend` helper already exists for the other admin routes;
+reuse it. No SSE involved here, so no `compress: false` concern.)
+
+- [ ] **Step 3: Build the admin policy editor page**
+
+Create `frontend/packages/web/app/(app)/admin/sandbox-policy/page.tsx`:
+
+```tsx
+import { PolicyEditor } from "./_components/PolicyEditor";
+
+export default function Page() {
+  return (
+    <div className="space-y-6 p-6">
+      <h1 className="text-2xl font-semibold">Sandbox policy</h1>
+      <p className="text-sm text-muted-foreground">
+        Default image, network egress rules, and command rules for all sandboxes
+        in this organization. Changes to the default image apply lazily — existing
+        sandboxes finish on their original image; new conversations pick up the
+        new image.
+      </p>
+      <PolicyEditor />
+    </div>
+  );
+}
+```
+
+Then `PolicyEditor.tsx` (a thin client component that fetches `GET`, holds
+form state, sends `PUT`, renders warnings). Wire the two child tables
+(`NetworkRulesTable`, `CommandRulesTable`) for add/remove/reorder rows. The
+command-rules `action` column is a `<select>` with `allow`/`deny`/`confirm`;
+when `confirm` is selected, render an inline hint:
+
+> `confirm` is currently treated as `deny` at runtime. Full prompt-for-
+> approval requires upstream cubepi changes (tracked separately).
+
+On save, if the PUT response includes `warnings[]`, render each as a small
+yellow banner above the network table.
+
+- [ ] **Step 4: Add the admin nav entry**
+
+In `frontend/packages/web/app/(app)/admin/_components/AdminNav.tsx` (or
+wherever the admin nav list lives — search for the existing "Sandbox env"
+entry next to it), add a "Sandbox policy" item linking to
+`/admin/sandbox-policy`.
+
+- [ ] **Step 5: Workspace sandbox status page + backend route**
+
+Add a tiny backend route at `backend/cubebox/api/routes/v1/ws_sandbox.py`
+returning the current user's `UserSandbox` row in the workspace as a
+`SandboxStatusOut` (state, image, `last_activity_at` via `utc_isoformat()`,
+optional browser URL). Workspace-scoped per the project's scope-isolated
+APIs rule — separate handler from any admin route, no `?scope=`.
+
+Frontend page `frontend/packages/web/app/(app)/w/[wsId]/sandbox/page.tsx`
+fetches that endpoint and renders a small read-only card with: state badge,
+image text, last-active timestamp, and an "Open browser" link when
+`browser_url` is set. No mutation controls in v1.
+
+- [ ] **Step 6: Credential editor warning banner**
+
+In the existing credential edit page (search for the file under
+`frontend/packages/web/app/(app)/w/[wsId]/.../credentials/...` that already
+calls the PUT credential endpoint), after the save response or on initial
+load, compare the credential's `required_hosts` against the current policy's
+`deny` targets (use the new types from Step 1). If any host is covered,
+render a yellow banner above the form:
+
+> This credential's required hosts include `<host>`; the org sandbox policy
+> currently denies `<host>`. Outbound calls to `<host>` will be blocked.
+> Coordinate with your admin to allow this host.
+
+No hard block — the credential still saves.
+
+- [ ] **Step 7: Playwright smoke**
+
+Create `frontend/packages/web/e2e/sandbox-policy.spec.ts`:
+
+```ts
+import { test, expect } from "@playwright/test";
+import { loginAsAdmin, seedCredentialWithHost } from "./helpers";
+
+test("admin policy editor warns on credential-host conflict, then clears", async ({ page }) => {
+  await loginAsAdmin(page);
+  await seedCredentialWithHost(page, "api.github.com");
+
+  await page.goto("/admin/sandbox-policy");
+  // Add a deny rule for api.github.com.
+  await page.getByRole("button", { name: /add network rule/i }).click();
+  await page.getByLabel(/action/i).first().selectOption("deny");
+  await page.getByLabel(/target/i).first().fill("api.github.com");
+  await page.getByRole("button", { name: /save/i }).click();
+  await expect(page.getByText(/conflicts with installed credential/i)).toBeVisible();
+
+  // Remove the deny rule; warning clears.
+  await page.getByRole("button", { name: /remove/i }).first().click();
+  await page.getByRole("button", { name: /save/i }).click();
+  await expect(page.getByText(/conflicts with installed credential/i)).not.toBeVisible();
+});
+```
+
+Replace `loginAsAdmin` / `seedCredentialWithHost` with the actual helpers
+that already exist in the repo's e2e folder (search for `loginAsAdmin` in
+`frontend/packages/web/e2e/` and reuse it). If a seed helper for credentials
+doesn't exist yet, add one alongside — the credential must declare
+`required_hosts: ["api.github.com"]`.
+
+- [ ] **Step 8: Run the Playwright smoke**
+
+Run: `cd frontend && pnpm --filter web exec playwright test sandbox-policy.spec.ts`
+Expected: 1 passed.
+
+- [ ] **Step 9: Commit**
+
+```bash
+git add frontend/packages/core/src/api/types.ts frontend/packages/web/app frontend/packages/web/e2e/sandbox-policy.spec.ts backend/cubebox/api/routes/v1/ws_sandbox.py
+git commit -m "feat(sandbox-ui): admin policy editor + workspace sandbox status + credential warning"
+```
+
+---
+
+## Task 13: Full type + test sweep before PR
+
+- [ ] **Step 1: mypy**
 
 Run: `cd backend && uv run mypy cubebox`
 Expected: `Success: no issues found`.
 
-Run: `cd backend && uv run pytest tests/unit/test_sandbox_policy_rules.py tests/unit/test_sandbox_policy_resolver.py tests/unit/test_sandbox_policy_model.py tests/unit/test_user_sandbox_repo.py tests/unit/test_sandbox_manager_create.py tests/unit/test_sandbox_middleware_command_rules.py tests/e2e/test_sandbox_policy_routes.py tests/e2e/test_sandbox_scoping.py -v`
+- [ ] **Step 2: Backend test sweep**
+
+Run: `cd backend && uv run pytest tests/unit/test_sandbox_policy_rules.py tests/unit/test_sandbox_policy_resolver.py tests/unit/test_sandbox_policy_model.py tests/unit/test_user_sandbox_repo.py tests/unit/test_sandbox_manager_create.py tests/unit/test_sandbox_middleware_command_rules.py tests/unit/test_migrate_user_pvcs.py tests/e2e/test_sandbox_policy_routes.py tests/e2e/test_sandbox_scoping.py -v`
 Expected: all PASS.
 
-- [ ] **Step 4: Commit**
+- [ ] **Step 3: Frontend type-check + Playwright**
 
-```bash
-git add backend/tests/e2e/test_sandbox_scoping.py
-git commit -m "test(sandbox): E2E image policy persist + drift recreate"
-```
+Run: `cd frontend && pnpm --filter @cubebox/core build && pnpm --filter web typecheck && pnpm --filter web exec playwright test sandbox-policy.spec.ts`
+Expected: build succeeds, typecheck clean, 1 Playwright test passing.
+
+- [ ] **Step 4: Commit any sweep fixups (typically none)**
+
+If the sweep surfaces nothing new, no commit is needed. If it does, commit
+the smallest possible fix and re-run.
 
 ---
 
@@ -1918,28 +2467,30 @@ The spec allows the network-rule check to fall back to a **unit assertion on the
 
 Per the spec's v1 scope and Open Questions, these are deliberately deferred:
 
-- **Admin console UI page** (Next route under the admin section to edit the three rule sets). The spec lists it in v1 scope, but it is a frontend deliverable; build it as a follow-up PR with the `frontend-design` skill and its own scope-isolated route (no `mode?:` prop). The backend `GET`/`PUT /admin/sandbox-policy` contract here is what it consumes.
-- **`confirm` HITL interrupt channel** — v1 degrades `confirm` to a distinct deny message (implemented in Task 8). The SSE `tool_confirmation_required` event + `POST .../confirm` endpoint is a separate spec.
-- **Orphaned single-user PVC cleanup/migration** — the claim-name rename ships (Task 6) so future volumes are scoped; reaping/migrating pre-rename PVCs is an operator/ops task, left out per the spec's "start fresh per workspace, leave old PVC orphaned" default.
-- **Active-kill of demoted provider sandboxes** in the duplicate-collapse migration — the migration only marks rows `terminated` (Task 7) to avoid coupling a migration to provider reachability. Note this does **leave the demoted providers' sandboxes running**: the TTL reaper sweeps only `status='running'` rows, so a freshly-terminated row is never revisited and its provider sandbox is not killed by the reaper. This is an accepted one-time leak at migration time (duplicates are expected to be rare/zero on the current fleet); the providers will be reclaimed by their own provider-side TTL. If the fleet has real duplicates, run a one-off ops script to kill the demoted `sandbox_id`s after the migration. (In-process image-drift and the unhealthy-reuse path *do* kill the provider sandbox before terminating the row — see Task 6.)
-- **Per-workspace/per-user policy overrides** (v2) and **command rules on `write_file`/`edit_file`** — v1 covers `execute` only.
+- **`confirm` HITL interrupt channel** (OQ-1/OQ-2) — v1 degrades `confirm` to a distinct deny message (Task 8). The real `tool_confirmation_required` event channel is an **upstream cubepi follow-up**: file an issue in cubepi for the elicit/approve event. Acceptance criteria from cubebox's side: blocks only the tool call (not the whole run); 180s timeout; timed-out = deny + audit row; sandbox TTL clock does not pause.
+- **`allowed_images` / `sandbox_images` table** (OQ-4 / OQ-12) — dropped entirely from v1. Becomes meaningful only when an override surface exists (most likely #153 managed agents declaring `image: ...`). Add together with that override, not before.
+- **Per-workspace/per-user policy overrides** (OQ-3, v2) — schema is ready (the `scope_workspace_id` column lands NULL in v1). v2 will populate it for workspace-override rows without a schema migration.
+- **Command rules on `write_file`/`edit_file`** (OQ-10) — v1 covers `execute` only. The dotfile/config-file protection control is a fast-follow PR (separate file-path matcher, different UX).
+- **Active-kill of orphaned provider sandboxes** — the migration does NOT include any data-collapse step (OQ-7 dropped that); the clean-data assumption stands. If a real deployment somehow has duplicates, that's an ops event, not migration logic.
+- **Migration of PVCs for users in multiple workspaces** (OQ-9 ambiguous half) — `backend/scripts/dev/migrate_user_pvcs.py` only migrates unambiguous cases (single-workspace users); multi-workspace users are listed for manual operator cleanup.
 
 ---
 
 ## Self-Review
 
 - **Spec coverage:**
-  - Ownership: partial unique index over `('provisioning','running')` → Task 5; reserve-row-first create → Task 6; duplicate-collapse migration → Task 7; reaper sweeps `provisioning` → Task 6 Step 4.
-  - PVC re-key on `(workspace, user)` → Task 6.
-  - `SandboxPolicy` org-only model + `sbxp` prefix → Task 1; repo (OrgSettings-style) + service + resolver → Task 3; `rules.py` matcher → Task 2.
-  - Admin routes separate from ws → Task 4 (no ws counterpart, no `?scope=`).
-  - Image + merged network delivery at create, recreate on drift → Task 6.
-  - Command-rule enforcement deny/confirm(=deny v1)/allow with shell-chaining → Task 8 (+ matcher Task 2).
-  - Migrations autogenerated → Task 7.
-  - E2E-first: ownership/command-deny → Task 9; image policy → Task 10; matcher unit (subtle) → Task 2; resolver defaults unit → Task 3; network-rule unit fallback → Task 2.
-  - Admin UI, confirm channel, PVC orphan cleanup, active-kill, v2 overrides → explicitly deferred section.
-- **Placeholder scan:** every code step contains full code; no "TBD"/"add validation"/"similar to". The one judgment call (which session factory `run_manager` exposes) is flagged with a concrete fallback contract, not left blank.
-- **Type consistency:** `evaluate_command`/`merge_network_rules`/`split_shell_command` (Task 2) are used with matching signatures in Tasks 6 and 8. `EffectivePolicy`/`SandboxPolicyResolver`/`SandboxPolicyService`/`SandboxPolicyValidationError` (Task 3) reused identically in Tasks 4, 6, 8, 10. Repo methods `reserve`/`promote_to_running`/`delete_record`/`get_active_by_user` (Task 5) called with the same names in Task 6. `_make_execute_tool(..., command_rules=...)` consistent across Tasks 8 and 9.
+  - Ownership: partial unique index over `('provisioning','running')` → Task 5; reserve-row-first create → Task 6; no duplicate-collapse step (OQ-7) → Task 7; reaper sweeps `provisioning` → Task 6 Step 4.
+  - PVC re-key on `(workspace, user)` → Task 6; one-time migration helper (unambiguous-only, dry-run) → Task 11.
+  - `SandboxPolicy` org-only model + `scope_workspace_id` reserved nullable column + `sbxp` prefix → Task 1; repo (OrgSettings-style) + service + resolver → Task 3; `rules.py` matcher → Task 2. `allowed_images` dropped throughout (OQ-4/OQ-12).
+  - Admin routes separate from ws → Task 4 (no ws counterpart, no `?scope=`); credential-host conflict warnings (OQ-6) on both PUT routes → Task 4 Steps 3 + 7.
+  - Image + merged network delivery at create → Task 6; image drift is **lazy** (OQ-5) → Task 6 + Task 10 E2E.
+  - Command-rule enforcement deny/confirm(=deny v1, with `TODO(cubepi-hitl)`)/allow with shell-chaining → Task 8 (+ matcher Task 2). v1 covers `execute` only (OQ-10).
+  - Migrations autogenerated, no manual data step (OQ-7) → Task 7.
+  - E2E-first: ownership/command-deny → Task 9; lazy image drift → Task 10; matcher unit (subtle) → Task 2; resolver defaults unit → Task 3; network-rule unit fallback → Task 2; credential-conflict warnings → Task 4 + Task 12 Playwright smoke.
+  - Frontend: admin policy editor (`/admin/sandbox-policy`, scope-isolated org-admin route), workspace sandbox status (`/w/[wsId]/sandbox`, read-only), credential editor warning banner, Playwright smoke → Task 12.
+  - Deferred: confirm HITL channel (cubepi follow-up), `allowed_images`, v2 overrides, write/edit command rules — see "Out of scope".
+- **Placeholder scan:** every code step contains full code; no "TBD"/"add validation"/"similar to". The judgment calls (session factory in `run_manager`, PVC-listing client) are flagged with a concrete fallback contract, not left blank.
+- **Type consistency:** `evaluate_command`/`merge_network_rules`/`split_shell_command` (Task 2) are used with matching signatures in Tasks 6 and 8. `EffectivePolicy`/`SandboxPolicyResolver`/`SandboxPolicyService`/`SandboxPolicyValidationError` (Task 3) reused identically in Tasks 4, 6, 8, 10. Repo methods `reserve`/`promote_to_running`/`delete_record`/`get_active_by_user` (Task 5) called with the same names in Task 6. `_make_execute_tool(..., command_rules=...)` consistent across Tasks 8 and 9. Frontend types in `@cubebox/core` mirror the backend `SandboxPolicyOut` (Task 12 Step 1).
 
 ---
 
