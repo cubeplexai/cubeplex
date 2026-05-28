@@ -542,6 +542,19 @@ export function AssistantMessage({
             />
           )}
           {bubbleItems.map(({ item, i }) => renderItem(item, i))}
+        </div>
+      </div>
+      {widgetItems.length > 0 && (
+        <div className="space-y-2">{widgetItems.map(({ item, i }) => renderItem(item, i))}</div>
+      )}
+      {/* Todos + streaming/loading indicator render AFTER widgets so the
+          "still working" signal stays at the visual end of the assistant
+          message even when widgets are present. pl-9 ≈ avatar(24px)+gap(10px)
+          to keep them aligned with the bubble content. */}
+      {(isStreaming && todos && todos.length > 0) ||
+      (!isStreaming && historyTodos.length > 0) ||
+      isStreaming ? (
+        <div className="pl-9 space-y-2">
           {isStreaming && todos && todos.length > 0 && (
             <TaskProgressCard todos={todos} isStreaming={true} />
           )}
@@ -575,10 +588,7 @@ export function AssistantMessage({
             </div>
           )}
         </div>
-      </div>
-      {widgetItems.length > 0 && (
-        <div className="space-y-2">{widgetItems.map(({ item, i }) => renderItem(item, i))}</div>
-      )}
+      ) : null}
     </div>
   )
 }
