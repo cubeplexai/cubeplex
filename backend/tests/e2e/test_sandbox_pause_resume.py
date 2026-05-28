@@ -176,8 +176,15 @@ async def _insert_record(
     paused_at: datetime | None = None,
     in_use_until: datetime | None = None,
     paused_ttl_seconds: int = 24 * 60,
+    idle_secs: int = 60,
 ) -> str:
-    """Insert a UserSandbox row directly and return its id."""
+    """Insert a UserSandbox row directly and return its id.
+
+    Backdates ``last_activity_at`` by ``idle_secs`` so the row is immediately
+    stale against ``list_idle_to_pause_system`` queries with positive
+    ``idle_ttl_seconds`` — the default match for the test SQL
+    ``last_activity_at + idle_ttl * INTERVAL '1 second' <= NOW()``.
+    """
     async with session_maker() as session:
         repo = UserSandboxRepository(session, org_id=_ORG_ID, workspace_id=_WS_ID)
         record = await repo.create(
@@ -188,6 +195,7 @@ async def _insert_record(
         )
         # Stamp non-default fields via direct attribute writes — ScopedRepository.create
         # doesn't accept them, and this keeps the helper compact.
+        record.last_activity_at = datetime.now(UTC) - timedelta(seconds=idle_secs)
         if status != "running":
             record.status = status
         if paused_at is not None:

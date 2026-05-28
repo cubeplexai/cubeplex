@@ -204,8 +204,31 @@ class SandboxManager:
             record = await repo.get_resumable_by_user(user_id)
 
             # Late arrival on a transient row (another caller is pausing or
-            # resuming this sandbox). Wait for stable, then proceed on the
-            # resulting status so we never provision a duplicate.
+            # resuming this sandbox). Trigger an inline reconciler sweep
+            # first: on G11-style backends where pause is a server-side
+            # no-op, the cleanup loop's reconcile pass at most every 60 s
+            # would otherwise force the user to wait the full
+            # ``_resume_timeout`` only to fail. The inline sweep advances
+            # the row from provider state in a single probe (1-2 s) —
+            # ``pausing`` + provider ``Running`` reverts to ``running`` and
+            # we reuse it; ``pausing`` + provider ``Paused`` advances to
+            # ``paused`` and we resume; terminal states get killed and we
+            # create-new. ``claim_timeout=0`` forces the probe regardless
+            # of ``last_provider_check`` freshness.
+            if record and record.status in ("pausing", "resuming"):
+                try:
+                    await self.reconcile_transients(claim_timeout=0)
+                except Exception as exc:
+                    # Don't let an unrelated reconcile failure (a different
+                    # transient row blowing up) block the current request —
+                    # the wait-helper fallback still catches the steady-state
+                    # transition or raises a retryable SandboxError on timeout.
+                    logger.warning(
+                        "Inline reconcile during get_or_create failed: {}",
+                        exc,
+                    )
+                record = await repo.get_resumable_by_user(user_id)
+
             if record and record.status in ("pausing", "resuming"):
                 stable = await self._await_stable_status(
                     record.id, org_id=org_id, workspace_id=workspace_id
@@ -832,6 +855,7 @@ class SandboxManager:
                 # We own the kill. Tell the provider to drop the sandbox and
                 # revoke any egress refs; mark_terminated already landed via
                 # the atomic claim, so no second status flip is needed.
+                raw: opensandbox.Sandbox | None = None
                 try:
                     raw = await opensandbox.Sandbox.connect(
                         record.sandbox_id,
@@ -839,7 +863,6 @@ class SandboxManager:
                         skip_health_check=True,
                     )
                     await raw.kill()
-                    await raw.close()
                     logger.info("Reaped paused sandbox {}", record.sandbox_id)
                 except Exception as exc:
                     logger.warning(
@@ -847,6 +870,18 @@ class SandboxManager:
                         record.sandbox_id,
                         exc,
                     )
+                finally:
+                    # G8: pair connect with close on every path so a kill that
+                    # raises mid-flight doesn't leak the httpx transport.
+                    if raw is not None:
+                        try:
+                            await raw.close()
+                        except Exception as exc:
+                            logger.debug(
+                                "Reap-path close failed for {}: {}",
+                                record.sandbox_id,
+                                exc,
+                            )
                 if self._exchange_host:
                     await EgressRefRepository(session).revoke_for_sandbox(record.sandbox_id)
 
@@ -887,6 +922,26 @@ class SandboxManager:
                     info = await raw.get_info()
                     state = (info.status.state if info and info.status else "") or ""
                 except Exception as exc:
+                    # 404 / NOT_FOUND means the provider has GC'd the pod
+                    # out-of-band; the row will never recover, so kill it
+                    # immediately instead of leaving it transient forever
+                    # (which would trap subsequent ``get_or_create`` calls in
+                    # ``_await_stable_status`` until manual cleanup). The error
+                    # body shape was empirically captured during Task 0 — see
+                    # internals-note G4. For non-404 errors (network blips,
+                    # SDK glitches) just bump the check timestamp and try
+                    # again next tick.
+                    msg = str(exc).upper()
+                    if "NOT_FOUND" in msg or "404" in msg:
+                        logger.warning(
+                            "Reconciler: provider reports {} gone (404 / "
+                            "NOT_FOUND): {}; killing the row",
+                            record.sandbox_id,
+                            exc,
+                        )
+                        await self._kill_record(session, scoped, record, conn_config)
+                        await scoped.touch_provider_check(record.id)
+                        continue
                     logger.warning(
                         "Reconciler: get_info failed for {}: {}",
                         record.sandbox_id,
@@ -948,7 +1003,12 @@ class SandboxManager:
                             ),
                         )
                 elif state == "Failed":
-                    await scoped.mark_failed(record.id)
+                    # Guarded so a concurrent ``_resume_record`` that just
+                    # committed ``resuming -> running`` (provider state can
+                    # change between our probe and this write) is not
+                    # clobbered. The UPDATE only fires when the row is still
+                    # in a transient state.
+                    await scoped.mark_failed_from_transient(record.id)
                 elif state in ("Terminated", "Succeed"):
                     # ``Succeed`` is documented in internals-note G3 as an
                     # empirically-observed terminal state (the local SDK enum
@@ -970,7 +1030,8 @@ class SandboxManager:
         conn_config: ConnectionConfig,
     ) -> None:
         """Kill + revoke egress + mark terminated. Shared by cleanup_expired,
-        pause_idle fallback, and reap_paused."""
+        pause_idle fallback, and reconciler paths."""
+        raw: opensandbox.Sandbox | None = None
         try:
             raw = await opensandbox.Sandbox.connect(
                 record.sandbox_id,
@@ -978,7 +1039,6 @@ class SandboxManager:
                 skip_health_check=True,
             )
             await raw.kill()
-            await raw.close()
             logger.info("Killed sandbox {}", record.sandbox_id)
         except Exception as exc:
             logger.warning(
@@ -986,6 +1046,18 @@ class SandboxManager:
                 record.sandbox_id,
                 exc,
             )
+        finally:
+            # G8: pair connect with close on every path so a kill that
+            # raises mid-flight doesn't leak the httpx transport.
+            if raw is not None:
+                try:
+                    await raw.close()
+                except Exception as exc:
+                    logger.debug(
+                        "_kill_record close failed for {}: {}",
+                        record.sandbox_id,
+                        exc,
+                    )
         await scoped_repo.mark_terminated(record.id)
         if self._exchange_host:
             await EgressRefRepository(session).revoke_for_sandbox(record.sandbox_id)

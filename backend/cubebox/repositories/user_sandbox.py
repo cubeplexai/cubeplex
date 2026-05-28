@@ -100,15 +100,36 @@ class UserSandboxRepository(ScopedRepository[UserSandbox]):
             record.status = "terminated"
             await self.session.commit()
 
-    async def mark_failed_from_resuming(self, record_id: str) -> bool:
-        """Atomically flip ``resuming -> failed`` for the resume-exception race.
+    async def mark_failed_from_transient(self, record_id: str) -> bool:
+        """Atomically flip ``pausing``/``resuming`` -> ``failed``.
 
-        Used by ``_resume_record`` when ``connect_or_resume`` raises: if the
-        provider actually completed the resume server-side and the reconciler
-        has already committed ``resuming -> running`` in the meantime, this
-        UPDATE's prior-status guard rejects and the caller leaves the
-        healthy ``running`` row alone. ``mark_failed`` (unconditional) is
-        kept for the reconciler's ``state == \"Failed\"`` branch.
+        Used by the reconciler when ``get_info`` returns ``state=Failed``:
+        the unguarded ``mark_failed`` would clobber a row that was just
+        transitioned to ``running`` by a concurrent ``_resume_record``
+        (the reconciler's view of provider state can lag the DB by ms).
+        The prior-state guard rejects that race so concurrent successful
+        resumes are never overwritten.
+        """
+        stmt = (
+            update(UserSandbox)
+            .where(
+                UserSandbox.id == record_id,  # type: ignore[arg-type]
+                UserSandbox.org_id == self.org_id,  # type: ignore[arg-type]
+                UserSandbox.workspace_id == self.workspace_id,  # type: ignore[arg-type]
+                UserSandbox.status.in_(("pausing", "resuming")),  # type: ignore[attr-defined]
+            )
+            .values(status="failed")
+        )
+        result = cast(CursorResult[Any], await self.session.execute(stmt))
+        await self.session.commit()
+        return bool(result.rowcount == 1)
+
+    async def mark_failed_from_resuming(self, record_id: str) -> bool:
+        """Atomically flip ``resuming -> failed``.
+
+        Kept for callers that want the narrower ``resuming``-only guard
+        (currently unused; reserved). Production paths use the broader
+        :meth:`mark_failed_from_transient` which accepts ``pausing`` too.
         """
         return await self._transition(record_id, "resuming", "failed")
 

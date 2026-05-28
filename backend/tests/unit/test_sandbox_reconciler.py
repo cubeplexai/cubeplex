@@ -69,6 +69,7 @@ def _scoped_repo() -> MagicMock:
     repo.mark_paused = AsyncMock(return_value=True)
     repo.mark_running = AsyncMock(return_value=True)
     repo.mark_failed = AsyncMock()
+    repo.mark_failed_from_transient = AsyncMock(return_value=True)
     repo.mark_terminated = AsyncMock()
     repo.touch_provider_check = AsyncMock()
     return repo
@@ -259,7 +260,11 @@ async def test_reconcile_provider_failed_marks_failed() -> None:
 
         await mgr.reconcile_transients(claim_timeout=60)
 
-    scoped.mark_failed.assert_awaited_once_with(record.id)
+    # Guarded variant — only fires when the prior status is still transient,
+    # so a concurrent ``_resume_record`` that just landed ``running`` is not
+    # clobbered (codex P2 round 14 hardening).
+    scoped.mark_failed_from_transient.assert_awaited_once_with(record.id)
+    scoped.mark_failed.assert_not_called()
     scoped.mark_running.assert_not_called()
     scoped.mark_paused.assert_not_called()
     scoped.touch_provider_check.assert_awaited_once_with(record.id)
@@ -374,6 +379,54 @@ async def test_reconcile_get_info_failure_just_bumps_touch() -> None:
     scoped.mark_running.assert_not_called()
     scoped.mark_failed.assert_not_called()
     scoped.mark_terminated.assert_not_called()
+    scoped.touch_provider_check.assert_awaited_once_with(record.id)
+
+
+# ---------------------------------------------------------------------------
+# 404 / NOT_FOUND from provider -> kill the row (codex P1 round 14)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "err_msg",
+    [
+        "404 KUBERNETES::SANDBOX_NOT_FOUND",
+        "kubernetes::sandbox_not_found",
+        "Sandbox 'sbx-x' not found (404)",
+    ],
+)
+@pytest.mark.asyncio
+async def test_reconcile_provider_404_kills_record(err_msg: str) -> None:
+    """When the provider returns 404 / NOT_FOUND (pod GC'd out-of-band),
+    the reconciler must kill the row instead of leaving it transient
+    forever — otherwise subsequent ``get_or_create`` calls would time out
+    in ``_await_stable_status`` until manual cleanup.
+    """
+    factory, _session = _make_session_factory()
+    mgr = SandboxManager(factory)
+    mgr._exchange_host = ""
+
+    record = _make_record(status="resuming")
+    scoped = _scoped_repo()
+
+    raw = MagicMock()
+    raw.get_info = AsyncMock(side_effect=RuntimeError(err_msg))
+
+    with (
+        patch("cubebox.sandbox.manager.UserSandboxRepository") as repo_cls,
+        patch("cubebox.sandbox.manager.opensandbox") as op,
+        patch.object(mgr, "_kill_record", new=AsyncMock()) as kill_record,
+    ):
+        repo_cls.list_transient_for_reconcile_system = AsyncMock(return_value=[record])
+        repo_cls.return_value = scoped
+        op.Sandbox.connect = AsyncMock(return_value=raw)
+
+        await mgr.reconcile_transients(claim_timeout=60)
+
+    kill_record.assert_awaited_once()
+    scoped.mark_paused.assert_not_called()
+    scoped.mark_running.assert_not_called()
+    scoped.mark_failed_from_transient.assert_not_called()
     scoped.touch_provider_check.assert_awaited_once_with(record.id)
 
 

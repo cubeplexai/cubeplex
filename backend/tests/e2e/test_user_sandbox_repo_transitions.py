@@ -252,6 +252,41 @@ async def test_claim_terminated_from_paused_atomic(
     assert await repo.claim_terminated_from_paused(resuming_row.id, paused_ttl_seconds=60) is False
 
 
+async def test_mark_failed_from_transient_atomic(
+    db_session: AsyncSession, scope: dict[str, str]
+) -> None:
+    """``mark_failed_from_transient`` is the guarded variant used by the
+    reconciler so a concurrent successful resume isn't clobbered (codex P2
+    round 14). Accepts ``pausing`` and ``resuming`` priors; rejects everything
+    else.
+    """
+    repo = _mk_repo(db_session, scope)
+
+    pausing = await _mk(repo, scope, status="pausing", idle_secs=0, ttl_seconds=3600)
+    resuming = await _mk(repo, scope, status="resuming", idle_secs=0, ttl_seconds=3600)
+    running = await _mk(repo, scope, status="running", idle_secs=0, ttl_seconds=3600)
+    paused = await _mk(
+        repo, scope, status="paused", idle_secs=0, ttl_seconds=3600, paused_at=datetime.now(UTC)
+    )
+
+    # Legal: pausing/resuming -> failed
+    assert await repo.mark_failed_from_transient(pausing.id) is True
+    assert await repo.mark_failed_from_transient(resuming.id) is True
+
+    # Illegal: running and paused are not transient — protect concurrent resume
+    assert await repo.mark_failed_from_transient(running.id) is False
+    assert await repo.mark_failed_from_transient(paused.id) is False
+
+    await db_session.refresh(pausing)
+    await db_session.refresh(resuming)
+    await db_session.refresh(running)
+    await db_session.refresh(paused)
+    assert pausing.status == "failed"
+    assert resuming.status == "failed"
+    assert running.status == "running"
+    assert paused.status == "paused"
+
+
 async def test_get_resumable_by_user_returns_transient_when_only_row(
     db_session: AsyncSession, scope: dict[str, str]
 ) -> None:
