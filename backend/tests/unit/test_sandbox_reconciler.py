@@ -13,6 +13,7 @@ of truth for a row stuck in ``pausing`` / ``resuming``:
 """
 
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -40,6 +41,7 @@ def _make_record(
     org_id: str = "org-1",
     workspace_id: str = "ws-1",
     status: str = "pausing",
+    last_activity_at: datetime | None = None,
 ) -> MagicMock:
     record = MagicMock(name="UserSandbox")
     record.id = record_id
@@ -47,6 +49,10 @@ def _make_record(
     record.org_id = org_id
     record.workspace_id = workspace_id
     record.status = status
+    # Default: fresh activity so the reconciler's G11 stuck-pausing-grace check
+    # doesn't fire. Tests that exercise the grace-elapsed branch pass an old
+    # value explicitly.
+    record.last_activity_at = last_activity_at or datetime.now(UTC)
     return record
 
 
@@ -139,6 +145,52 @@ async def test_reconcile_pausing_with_provider_running_reverts_to_running() -> N
     assert kwargs.get("last_resumed_at") is None
     scoped.mark_paused.assert_not_called()
     scoped.mark_failed.assert_not_called()
+    scoped.touch_provider_check.assert_awaited_once_with(record.id)
+
+
+# ---------------------------------------------------------------------------
+# G11 mitigation — pausing row stuck on a no-op-pause backend gets killed
+# instead of reverting forever.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_reconcile_pausing_stuck_past_grace_kills_instead_of_reverting() -> None:
+    """On backends where pause silently no-ops (provider stays ``Running``),
+    repeatedly reverting ``pausing -> running`` leaks the idle sandbox
+    forever. After the row has been idle past
+    ``_pause_attempt_grace_seconds``, the reconciler must kill it.
+    """
+    factory, _session = _make_session_factory()
+    mgr = SandboxManager(factory)
+    mgr._exchange_host = ""
+    mgr._pause_attempt_grace_seconds = 60
+
+    # Row last touched well past the grace window.
+    record = _make_record(
+        status="pausing",
+        last_activity_at=datetime.now(UTC) - timedelta(seconds=300),
+    )
+    scoped = _scoped_repo()
+
+    raw = MagicMock()
+    raw.get_info = AsyncMock(return_value=_info("Running"))
+
+    with (
+        patch("cubebox.sandbox.manager.UserSandboxRepository") as repo_cls,
+        patch("cubebox.sandbox.manager.opensandbox") as op,
+        patch.object(mgr, "_kill_record", new=AsyncMock()) as kill_record,
+    ):
+        repo_cls.list_transient_for_reconcile_system = AsyncMock(return_value=[record])
+        repo_cls.return_value = scoped
+        op.Sandbox.connect = AsyncMock(return_value=raw)
+
+        await mgr.reconcile_transients(claim_timeout=60)
+
+    kill_record.assert_awaited_once()
+    # Crucially, NO mark_running revert — that would just leak the sandbox
+    # again on the next pause_idle cycle.
+    scoped.mark_running.assert_not_called()
     scoped.touch_provider_check.assert_awaited_once_with(record.id)
 
 

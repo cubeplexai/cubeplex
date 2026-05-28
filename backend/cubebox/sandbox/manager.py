@@ -84,6 +84,15 @@ class SandboxManager:
         # Lease lives in LazySandbox; acquire on entering a long op, renew during,
         # release on completion.
         self._lease_seconds: int = config.get("sandbox.lease_seconds", 5 * 60)
+        # Hard ceiling for stuck-``pausing`` rows on backends where pause is a
+        # silent no-op (internals G11): if the reconciler sees provider
+        # ``Running`` while DB is ``pausing`` AND the row has been idle past
+        # this many seconds, kill it instead of reverting to ``running`` —
+        # otherwise the row bounces ``running -> pausing -> running`` forever
+        # and the idle sandbox leaks. Default 3x idle TTL.
+        self._pause_attempt_grace_seconds: int = config.get(
+            "sandbox.pause_attempt_grace_seconds", 3 * self._idle_ttl_seconds
+        )
 
     def _build_connection_config(self, *, request_timeout: int | None = None) -> ConnectionConfig:
         """Build OpenSandbox ConnectionConfig from app config.
@@ -532,7 +541,30 @@ class SandboxManager:
             if self._exchange_host:
                 await EgressRefRepository(session).revoke_for_sandbox(record.sandbox_id)
             return None
-        await repo.mark_running(record.id, last_resumed_at=datetime.now(UTC))
+        # Race: the reconciler may have observed provider ``Paused`` while
+        # ``connect_or_resume`` was in flight and reverted the row
+        # ``resuming -> paused``. ``mark_running`` then returns False because
+        # the prior-state guard rejects ``paused``. We have provider proof the
+        # sandbox is actually running, so bounce through the legitimate
+        # ``paused -> resuming -> running`` transitions once to land the row
+        # in ``running`` (where the next request can find it).
+        if not await repo.mark_running(record.id, last_resumed_at=datetime.now(UTC)):
+            # Re-claim ``paused -> resuming`` (no-op if the row is already
+            # transient or terminal — then the second mark_running below will
+            # also be a no-op and we surface the inconsistency).
+            await repo.mark_resuming(record.id)
+            if not await repo.mark_running(record.id, last_resumed_at=datetime.now(UTC)):
+                # Row ended up failed/terminated under us — surface as resume
+                # failure so the caller (get_or_create) falls through to
+                # create-new instead of returning a backend whose DB row
+                # disagrees with the provider.
+                logger.warning(
+                    "Resume of {} succeeded at provider but row could not be "
+                    "marked running (likely raced with reconciler -> terminal); "
+                    "treating as failure",
+                    record.sandbox_id,
+                )
+                return None
         await repo.update_activity(record.id)
         if self._exchange_host:
             await self._apply_egress(
@@ -739,12 +771,39 @@ class SandboxManager:
                 if state == "Paused":
                     await scoped.mark_paused(record.id, paused_at=datetime.now(UTC))
                 elif state == "Running":
-                    await scoped.mark_running(
-                        record.id,
-                        last_resumed_at=(
-                            datetime.now(UTC) if record.status == "resuming" else None
-                        ),
-                    )
+                    # G11 mitigation: if pause is a server-side no-op the
+                    # provider keeps reporting ``Running`` while the DB is
+                    # ``pausing``. Reverting bounces the row forever and the
+                    # idle sandbox leaks. Once the row has been idle past
+                    # ``pause_attempt_grace_seconds``, kill it instead of
+                    # reverting — same outcome as the kill-on-idle path that
+                    # ``pause_on_idle=False`` would have taken.
+                    # ``last_activity_at`` is stored TZ-naive (column has no
+                    # ``timezone=True``), so normalise both sides before the
+                    # subtraction or it raises TypeError.
+                    last_activity = record.last_activity_at
+                    if last_activity.tzinfo is None:
+                        last_activity = last_activity.replace(tzinfo=UTC)
+                    pause_idle_age = (datetime.now(UTC) - last_activity).total_seconds()
+                    if (
+                        record.status == "pausing"
+                        and pause_idle_age >= self._pause_attempt_grace_seconds
+                    ):
+                        logger.warning(
+                            "Reconciler: {} stuck pausing on no-op-pause backend "
+                            "(idle {}s >= grace {}s); killing instead of reverting",
+                            record.sandbox_id,
+                            int(pause_idle_age),
+                            self._pause_attempt_grace_seconds,
+                        )
+                        await self._kill_record(session, scoped, record, conn_config)
+                    else:
+                        await scoped.mark_running(
+                            record.id,
+                            last_resumed_at=(
+                                datetime.now(UTC) if record.status == "resuming" else None
+                            ),
+                        )
                 elif state == "Failed":
                     await scoped.mark_failed(record.id)
                 elif state in ("Terminated", "Succeed"):
