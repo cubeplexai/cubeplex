@@ -102,8 +102,18 @@ needed.
 
 Two corner-case shapes the migration must handle:
 
-**Indexed column** (`user_sandbox.in_use_until`,
-`user_sandbox.last_provider_check`):
+**Indexed columns** — covered by per-Field `index=True` (lifts into
+`Column(index=True)`) AND by table-level `Index` declarations in
+`__table_args__`:
+
+| Form | Where | Migration concern |
+|---|---|---|
+| `Field(index=True)` | `user_sandbox.in_use_until`, `user_sandbox.last_provider_check` | Move `index=True` into the new `Column(...)` call |
+| `__table_args__ = (Index("ix_...", "col"), ...)` | `invite_token.expires_at` (`Index("ix_invite_tokens_expires", ...)`) | `__table_args__` unchanged — autogen's `alter_column` rebuilds the index against the new column type; verify with the round-trip |
+| `Index` with predicate ("partial index") | Comment in `conversation.py:29` references the pattern but no actual partial index is declared | None — the comment is informational |
+
+Example for the per-Field case:
+
 ```python
 in_use_until: datetime | None = Field(
     default=None,
@@ -131,8 +141,14 @@ A new entry under **Hard Code Rules**:
 > **Time columns are tz-aware.** All `datetime` model fields use
 > `sa_column=Column(DateTime(timezone=True), ...)` (Postgres `timestamptz`).
 > Application code writes `datetime.now(UTC)` (tz-aware). Frontend gets
-> ISO 8601 with `+00:00` offset via `utc_isoformat()`. No naïve `datetime`
-> ever crosses the DB or service-API boundary.
+> ISO 8601 (either `+00:00` via `utc_isoformat()` or `Z` via Pydantic
+> default — both valid). No naïve `datetime` ever crosses the DB or
+> service-API boundary. When introducing a new datetime column or
+> converting an existing one, the alembic migration must hand-add
+> `postgresql_using="<col> AT TIME ZONE 'UTC'"` to the `alter_column` call
+> — autogen omits this, and the default `USING column::timestamptz`
+> behaviour applies the session `TimeZone` (wrong for our stored UTC
+> values).
 
 ### 3. Alembic migration
 
@@ -228,17 +244,48 @@ the DB now returns tz-aware.
 Estimated 5-10 such defensive blocks across the codebase. Each individually
 trivial; collectively a grep + delete pass.
 
-**4.4 Test fixtures using `datetime.utcnow()`:**
+**4.4 Test fixtures using naïve datetimes:**
 
-`backend/tests/e2e/test_sandbox_lease.py:118,155` (introduced by PR #156).
-Replace with `datetime.now(UTC)`. If any `_as_naive_utc` helper exists from
-when naïve comparisons were needed, delete it.
+- `backend/tests/e2e/test_sandbox_lease.py:118,155` — `datetime.utcnow()`
+  replace with `datetime.now(UTC)`. If any `_as_naive_utc` helper exists
+  from when naïve comparisons were needed, delete it.
+- `backend/tests/unit/test_egress_exchange_service.py:111,121,194,202` —
+  this fixture explicitly stores naïve `expires_at` to "simulate what
+  Postgres returns". After the migration that simulation is wrong; the
+  fixture needs to seed tz-aware values, and the assertions should
+  compare tz-aware to tz-aware. The repo-side defensive
+  `if exp.tzinfo is None: exp = exp.replace(tzinfo=UTC)` block
+  (egress_ref.py:33-34) is deleted by §4.1, so the fixture must hand the
+  service a tz-aware datetime to begin with — otherwise the test
+  exposes a pre-existing latent bug.
 
 ### 5. Frontend / API surface
 
-Unchanged. `utc_isoformat(datetime.now(UTC))` produces
-`"2026-05-28T10:30:00.123456+00:00"`, same as before. Pydantic ISO 8601
-parsing on inbound API datetime fields already accepts tz-aware values.
+**Mostly unchanged, with one wire-format normalisation.**
+
+- `utc_isoformat()` keeps outputting `"...+00:00"`; the 35 call sites that
+  use it serialise identically before and after the migration.
+- Two Pydantic v2 response schemas declare `datetime` fields directly
+  (`backend/cubebox/api/schemas/provider.py:133-134, 181-182` —
+  `created_at`/`updated_at`; `backend/cubebox/api/schemas/mcp.py:25, 105`
+  — `expires_at`). FastAPI/Pydantic v2 default-serialises datetimes:
+  - **Pre-migration**: column is naïve → Pydantic emits
+    `"2026-05-28T11:30:54.000000"` (no offset). A frontend parsing this
+    as local time would be silently wrong on any non-UTC client. This is
+    a pre-existing bug.
+  - **Post-migration**: column is tz-aware UTC → Pydantic emits
+    `"2026-05-28T11:30:54.000000Z"`. Unambiguous and parseable.
+
+The `Z` suffix vs `+00:00` is a cosmetic difference between
+`utc_isoformat()` (returns `+00:00`) and Pydantic's default (`Z`); both
+are valid ISO 8601 and both are accepted by JavaScript `Date.parse` /
+`new Date()`. We accept this inconsistency rather than force every schema
+through `utc_isoformat`; the migration's job is to make the *underlying
+datetime* unambiguous, not to unify suffix style.
+
+Pydantic v2 ISO 8601 parsing on inbound API datetime fields already
+accepts both `+00:00` and `Z` (and naïve, treating as UTC — fine because
+inbound is rare; clients send tz-aware).
 
 ### 6. Testing strategy
 
