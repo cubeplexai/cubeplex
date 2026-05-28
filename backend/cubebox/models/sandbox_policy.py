@@ -4,13 +4,22 @@ Org-only table. It declares ``org_id`` as a direct FK and deliberately does
 NOT use ``OrgScopedMixin``: that mixin adds a REQUIRED ``workspace_id`` FK,
 but a per-org default has no workspace. ``scope_workspace_id`` is a separate
 NULLABLE column reserved for v2 per-workspace overrides — v1 only ever writes
-NULL (the org-default row). One row per (org, scope) is enforced by a unique
-index on ``(org_id, scope_workspace_id)``.
+NULL (the org-default row).
+
+Uniqueness is enforced with TWO partial indexes (Postgres and SQLite treat
+``NULL`` as distinct in unique indexes, so a single ``UNIQUE (org_id,
+scope_workspace_id)`` would silently allow two NULL-scope rows for the same
+org):
+
+- ``uq_sandbox_policy_org_default``  — one row per org for the org-default
+  shape (``scope_workspace_id IS NULL``).
+- ``uq_sandbox_policy_org_workspace`` — one row per (org, workspace) for v2
+  workspace-override rows (``scope_workspace_id IS NOT NULL``).
 """
 
 from typing import Any, ClassVar
 
-from sqlalchemy import JSON, Column, Index
+from sqlalchemy import JSON, Column, Index, text
 from sqlmodel import Field
 
 from cubebox.models.mixins import CubeboxBase
@@ -22,10 +31,19 @@ class SandboxPolicy(CubeboxBase, table=True):
     __tablename__ = "sandbox_policies"
     __table_args__ = (
         Index(
-            "uq_sandbox_policy_scope",
+            "uq_sandbox_policy_org_default",
+            "org_id",
+            unique=True,
+            postgresql_where=text("scope_workspace_id IS NULL"),
+            sqlite_where=text("scope_workspace_id IS NULL"),
+        ),
+        Index(
+            "uq_sandbox_policy_org_workspace",
             "org_id",
             "scope_workspace_id",
             unique=True,
+            postgresql_where=text("scope_workspace_id IS NOT NULL"),
+            sqlite_where=text("scope_workspace_id IS NOT NULL"),
         ),
     )
 

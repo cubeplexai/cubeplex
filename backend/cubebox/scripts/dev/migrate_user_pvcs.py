@@ -86,15 +86,24 @@ async def _fetch_memberships() -> dict[str, list[str]]:
     return out
 
 
+# Operators MUST replace ``_list_pvcs`` with their own cluster-aware
+# implementation before relying on this script's output. ``main_async``
+# checks ``_LIST_PVCS_WIRED`` and prints a loud warning when False so a
+# silent ``nothing to migrate`` can't mislead an operator into thinking
+# their PVCs are already migrated.
+_LIST_PVCS_WIRED = False
+
+
 async def _list_pvcs() -> list[str]:
     """Return all PVC claim names in the configured namespace.
 
-    Reuses the provider helper used by SandboxManager to talk to the volume
-    backend; if the deployment runs without a real PVC backend, returns [].
-    The implementer wires this to the same client the manager already uses;
-    leave this as a thin call.
+    STUB. Replace with a cluster-aware implementation (kubectl/k8s client,
+    opensandbox helper, whatever your deployment uses) and flip
+    ``_LIST_PVCS_WIRED = True`` so this script trusts the result. Until
+    then the script announces it is unwired and refuses to act in
+    ``--apply`` mode.
     """
-    return []  # IMPLEMENT: wire to the same PVC client SandboxManager uses
+    return []
 
 
 def _apply_rename(action: MigrationAction) -> None:
@@ -108,7 +117,21 @@ def _apply_rename(action: MigrationAction) -> None:
     raise NotImplementedError("wire to your PVC client")
 
 
+_UNWIRED_BANNER = (
+    "WARNING: PVC discovery is not wired in this build (_list_pvcs returns []).\n"
+    "         Replace _list_pvcs() with a cluster-aware implementation and set\n"
+    "         _LIST_PVCS_WIRED = True before trusting this script's output.\n"
+    "         A 'nothing to migrate' result with the stub does NOT mean your\n"
+    "         old user-<id> PVCs are gone — it means the script can't see them."
+)
+
+
 async def main_async(*, apply: bool) -> int:
+    if not _LIST_PVCS_WIRED:
+        print(_UNWIRED_BANNER)
+        if apply:
+            print("refusing to --apply with an unwired _list_pvcs stub")
+            return 2
     memberships = await _fetch_memberships()
     pvcs = await _list_pvcs()
     plan = build_migration_plan(
