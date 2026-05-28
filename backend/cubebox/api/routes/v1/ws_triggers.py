@@ -25,6 +25,7 @@ from cubebox.auth.dependencies import require_admin, require_member
 from cubebox.credentials.dependencies import get_credential_service
 from cubebox.db.session import get_session
 from cubebox.models import Trigger, TriggerEvent
+from cubebox.models.public_id import PREFIX_TRIGGER, generate_public_id
 from cubebox.repositories import MembershipRepository, TriggerEventRepository, TriggerRepository
 from cubebox.services.credential import CredentialService
 from cubebox.triggers.events import NormalizedEvent
@@ -111,10 +112,17 @@ async def create_trigger(
             detail="run_as_user_id is not a member of this workspace",
         )
 
-    # Store the secret in the credential vault.
+    # Pre-generate the trigger id so the vault credential name is unique and
+    # bounded (~30 chars) regardless of the user-visible trigger name. Naming
+    # the credential after the user-supplied display name would collide on
+    # `uq_credential_org_kind_name` for any two triggers sharing a name in
+    # the same org, and could also overflow `credentials.name(128)` when the
+    # display name approaches `triggers.name(128)`.
+    trigger_id_pre = generate_public_id(PREFIX_TRIGGER)
+
     cred_id = await cred_service.create(
         kind="webhook_secret",
-        name=f"trigger:{body.name}",
+        name=f"trigger:{trigger_id_pre}",
         plaintext=body.webhook_secret,
     )
 
@@ -123,6 +131,7 @@ async def create_trigger(
     )
 
     trigger = Trigger(
+        id=trigger_id_pre,
         name=body.name,
         enabled=body.enabled,
         source_type=body.source_type,
@@ -303,7 +312,7 @@ async def rotate_secret(
 
     new_cred_id = await cred_service.create(
         kind="webhook_secret",
-        name=f"trigger:{trigger.name}:rot:{int(time.time())}",
+        name=f"trigger:{trigger.id}:rot:{int(time.time())}",
         plaintext=body.new_webhook_secret,
     )
 
