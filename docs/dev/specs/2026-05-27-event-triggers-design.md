@@ -61,6 +61,49 @@ and IM messages become *event sources* that feed the same pipeline; managed agen
   *reference* resolves to a run.
 - No general-purpose filter scripting language. v1 filters are declarative field
   matchers, not arbitrary code.
+- **No provider connectors** (GitHub App, Stripe app, Linear, Slack-as-connector,
+  etc.). See "Layered model: ingest vs connectors" below — v1 is layer 1 only.
+
+## Layered model: ingest vs connectors
+
+This spec deliberately ships **only the ingest layer**. There are two layers of
+work; both belong to event triggers as a product, but they ship separately.
+
+- **Layer 1 — generic webhook ingest (this spec, v1).** A workspace creates a
+  trigger, cubebox returns a per-trigger ingest URL plus an HMAC secret, and the
+  user pastes both into the source provider's webhook settings by hand. cubebox
+  treats every inbound request as an opaque JSON event: verify signature,
+  dedup, filter, dispatch to a run, audit. The pipeline doesn't know "this came
+  from GitHub" — it only knows "this came over the generic webhook source for
+  trigger `trig-...`."
+- **Layer 2 — connectors (deferred, v1.x).** A connector wraps a specific
+  provider so the user gets a one-click "Connect GitHub" / "Connect Stripe"
+  flow: cubebox installs as e.g. a GitHub App per repo (or per org), subscribes
+  to the right events automatically, and routes inbound payloads to the right
+  trigger without the user copying URLs or secrets. Each connector is its own
+  spec and its own PR; the anticipated first one is a GitHub App. Connectors
+  reuse the layer-1 pipeline internally — same dedup, same filter, same
+  dispatch — they only replace the "paste a webhook URL by hand" UX with a
+  provider-aware OAuth/install flow and provider-aware event routing.
+
+#149 (IM connectors — Slack/Feishu) and a future GitHub App connector are
+**both layer-2** efforts but for **different sources**. They do not depend on
+each other; they each have their own connection model and identity story.
+Conceptually they sit on the same seam, but neither is in scope here.
+
+Until the layer-2 connectors ship, the v1 UX for "issues/PRs/comments trigger
+an agent" is:
+
+1. Create a generic-webhook trigger in cubebox; copy the ingest URL + HMAC
+   secret from the trigger detail page.
+2. Open the source repo's GitHub settings → webhooks → add webhook; paste the
+   URL, paste the secret, pick the events to deliver.
+3. Pick `application/json` content type so the body cubebox sees matches what
+   was signed.
+
+This is acceptable for early users and removes the need to ship any
+provider-specific code in v1. The connector layer is the planned UX
+improvement, scheduled after #152 v1 lands.
 
 ## Current State
 
@@ -199,18 +242,24 @@ NormalizedEvent
 #### Filter
 
 v1 filter is a **declarative matcher**, not code: a small AND/OR tree of
-`{ path, op, value }` clauses evaluated against `payload` via JSONPath-style field
-access (`op ∈ {eq, neq, contains, exists, in}`). This covers "only when
-`action == opened`" / "only `channel in [...]`" without opening a code-execution
-surface. A trigger with no filter matches every event from its source.
+`{ path, op, value }` clauses evaluated against `payload`. `path` is a JSONPath
+expression (dot-walked into the payload — e.g. `event.action`, `repository.name`);
+`op ∈ {eq, neq, contains, exists, in}`. This covers "only when
+`event.action == opened`" / "only `repository.name in [...]`" without opening a
+code-execution surface. A trigger with no filter matches every event from its
+source. Richer predicate languages (regex, JMESPath, CEL, etc.) are deferred until
+real users push the simple matcher to its limit.
 
 #### Bound target → run
 
 The target is a **reference**, resolved to a run at fire time:
 
-- **`inline`** (v1): the trigger stores a `prompt_template` and `model_id`. At fire
-  time, the template is rendered against the event payload (safe substitution of
-  whitelisted fields) to produce the run's `content`.
+- **`inline`** (v1): the trigger stores a `prompt_template`. At fire time, the
+  template is rendered against the event payload (safe substitution of fields listed
+  in the trigger's `payload_fields` whitelist, wrapped in an `<external_input>`
+  delimiter block) to produce the run's `content`. Model selection is resolved by
+  `start_run` from the org default in v1; per-trigger model override is a fast-follow
+  once `start_run` grows that seam.
 - **`managed_agent`** (when #153 lands): the trigger stores a managed-agent id +
   version. Resolution loads that agent's config and instantiates it into the run. The
   target column is designed so this is an additive change — a `target_type` discriminator
@@ -220,12 +269,16 @@ Both forms ultimately produce the inputs `RunManager.start_run` already takes:
 `conversation_id`, `content`, `ctx`. The trigger's **conversation policy** decides the
 conversation:
 
-- `new_each_time` (default for webhook/schedule): create a fresh `Conversation`
+- `new_each_time` (the **only** mode in v1): create a fresh `Conversation`
   (draft-then-active) per fired event, so concurrent events never collide on the
-  one-active-run-per-conversation rule.
-- `pinned`: always target a configured conversation id (used by IM where a thread maps
-  to a stable conversation). If that conversation has an active run, apply the trigger's
-  busy policy (`queue` | `skip`).
+  one-active-run-per-conversation rule. Yes, this can produce many short-lived
+  conversations under a noisy source; we accept that for v1 and rely on rate
+  limiting plus operator GC to keep it bounded.
+- `pinned` (**deferred**): always target a configured conversation id, intended for
+  IM threads (#149) where a thread maps to a stable conversation. The enum value
+  is reserved in the schema but v1 ingest never writes it; the `one_active_run`
+  / queue-and-merge busy behaviour required to make `pinned` safe lands with
+  whichever feature first needs it.
 
 #### Run identity
 
@@ -245,13 +298,23 @@ New tables, all `CubeboxBase + OrgScopedMixin` (public-id PK, org/workspace FKs,
 **`triggers`** — `_PREFIX = "trig"`
 - `name`, `enabled` (bool), `source_type` (enum str), `source_config` (JSON: per-source —
   webhook secret ref, cron, IM mapping), `filter` (JSON matcher tree), `target_type`
-  (`inline` | `managed_agent`), `target_ref` (JSON: prompt_template+model_id, or
-  managed-agent id+version), `conversation_policy` (`new_each_time` | `pinned`),
-  `pinned_conversation_id` (nullable FK), `busy_policy` (`queue` | `skip`),
-  `run_as_user_id` (FK members), rate-limit fields (`max_runs_per_minute`, etc.).
-- Webhook secret is **not** stored inline; it lives in the credential vault and
-  `source_config` holds a `cred` reference (reuses the existing credential model and its
-  system/org scope pattern).
+  (`inline` | `managed_agent`), `target_ref` (JSON: prompt_template — model selection is
+  resolved by `start_run` from the org default in v1; or managed-agent id+version),
+  `payload_fields` (JSON list of JSONPath expressions whitelisted for prompt-template
+  injection — see Security below), `conversation_policy` (always `new_each_time` in v1;
+  the `pinned` value is reserved in the enum for #149 IM but not written by v1 ingest),
+  `run_as_user_id` (FK members), rate-limit fields (`max_runs_per_minute`,
+  `rate_limit_burst`), `rate_limit_response` (`429` | `202_drop`, default `429`).
+- **Secret rotation columns**: `current_secret_cred_id` (the live secret), plus
+  `previous_secret_cred_id` and `previous_secret_expires_at`. During the overlap
+  window (default 24h, configurable per-trigger) both secrets verify; after the
+  expiry only `current` does. See Security below.
+- **Summary counters**: `events_total`, `events_success`, `events_failed`,
+  `events_dedup_dropped` (BIGINT, default 0). The dispatch path increments these
+  cheaply so the trigger detail UI doesn't have to scan `trigger_events`.
+- Webhook secrets (both current and previous) are **not** stored inline; they live in the
+  credential vault and `source_config` references them by id (reuses the existing
+  credential model and its system/org scope pattern).
 
 **`trigger_events`** — `_PREFIX = "trev"` — the inbound event log (observability + dedup).
 - `trigger_id` (FK), `source_type`, `event_type`, `dedup_key`, `occurred_at`,
@@ -261,7 +324,11 @@ New tables, all `CubeboxBase + OrgScopedMixin` (public-id PK, org/workspace FKs,
 - **Unique constraint `(trigger_id, dedup_key)`** — the database-level idempotency
   guarantee. A duplicate insert is caught and the event is acked as `duplicate`.
 
-(`trigger_events` rows are the audit trail; retention/TTL is an open question below.)
+Retention is **permanent in v1** — no TTL job, no rollup. Operators should monitor
+table growth; if a real high-volume source materializes, an archival/rollup PR can be
+added later (recorded as an ops follow-up, not implementation work in this round).
+The four summary counters on `triggers` give cheap aggregates without scanning the
+event log.
 
 ### Inbound webhook ingestion
 
@@ -282,8 +349,12 @@ Pipeline at ingest (cheap-reject ordering — reject before doing expensive work
    triggers are only distinguishable *after* a valid signature, and even then we just stop
    silently — we never confirm existence to an unsigned caller.
 3. **Signature verification.** Compute `HMAC-SHA256(secret, timestamp + "." + raw_body)`
-   and `hmac.compare_digest` against the header signature. Reject on mismatch. The
-   secret is resolved from the vault via the trigger's `cred` ref.
+   and `hmac.compare_digest` against the header signature. Reject on mismatch.
+   **Dual-secret accept during rotation.** Resolve `current_secret_cred_id` from the
+   vault and try it first; if mismatch, and `previous_secret_cred_id` is set with
+   `previous_secret_expires_at > now`, try the previous secret. Accept on either match;
+   outside the overlap window only `current` matches. Default overlap window is **24h**
+   from rotation, configurable per trigger.
 4. **Timestamp window.** Reject if the signed timestamp is outside ±5 min (replay
    guard).
 5. **Tenant isolation by construction.** The secret is per-trigger and per-workspace; a
@@ -298,8 +369,12 @@ Pipeline at ingest (cheap-reject ordering — reject before doing expensive work
    key constant across retries of the same payload. Attempt `trigger_events` insert; on
    unique-constraint hit, return `200` with `duplicate` (idempotent ack).
 7. **Rate limit.** Token-bucket per trigger in Redis (reuse the `RedisHandle` infra). On
-   exhaustion, log `rate_limited` and return `429` (or `202` + drop, per config) so a
-   noisy source can't fan out into unbounded runs.
+   exhaustion, log `rate_limited` and return the trigger's configured
+   `rate_limit_response`: **`429`** by default (let a well-behaved sender back off), or
+   **`202_drop`** (return `202` and silently drop) for sources that retry hard on any
+   non-2xx and would otherwise pile retries on top of an already-overloaded trigger.
+   `429` is the right default for hand-pasted webhook setups; `202_drop` exists as an
+   opt-out per trigger.
 8. **Filter.** Evaluate the declarative matcher; non-match → log `filtered_out`, return
    `200`.
 9. **Enqueue for run.** Hand the `NormalizedEvent` to the event→run pipeline (below) and
@@ -330,9 +405,10 @@ passes filter):
 *before* the run starts. Because run-start is the side effect, a duplicate event never
 spawns a second run.
 
-**Rate limiting** — per-trigger token bucket (steady-state runs/min + burst) and an
-org-level ceiling so one workspace can't exhaust shared run capacity. Enforced at ingest
-(fast reject) and re-checked at enqueue.
+**Rate limiting** — per-trigger token bucket (steady-state runs/min + burst), enforced
+at ingest (fast reject). An org-level ceiling is deferred until we have a real workload
+to size it against; until then, run-capacity / cost containment is the job of the
+planned cross-cutting CostMiddleware, not the trigger layer.
 
 **Retry / backoff / dead-letter** — applies to the *enqueue→start_run* step, not the LLM
 run itself (a failed agent run is the run subsystem's concern, surfaced as run status).
@@ -413,28 +489,55 @@ view of triggers is ever needed, it gets its own `/api/v1/admin/...` handlers �
   Knowing the URL is not enough to fire a trigger.
 - **Constant-shape rejections** so the endpoint isn't an oracle for which trigger ids /
   workspaces exist.
-- **Rate limit at the edge** (per-trigger + per-org) so a leaked/compromised secret
-  caps the blast radius (bounded runs, bounded cost) until rotated.
-- **Secret rotation** — `source_config` references a vault credential, so rotating is a
-  vault operation; support an overlap window (accept old+new) during rotation.
+- **Rate limit at the edge** caps the blast radius of a leaked/compromised secret
+  (bounded runs) until rotated. v1 enforces only a per-trigger bucket; an org-level
+  ceiling is a fast-follow once we have multi-trigger workloads to size it against.
+- **Secret rotation with overlap.** Each trigger has a `current_secret_cred_id` and an
+  optional `previous_secret_cred_id` + `previous_secret_expires_at`. During the overlap
+  window (default 24h, per-trigger configurable) ingest accepts either secret; outside
+  the window only `current`. Rotation is therefore a two-step UX: rotate sets the old
+  secret as `previous` with an expiry, then the user updates the provider; when the
+  expiry passes only the new secret works.
 - **Payload size cap** — reject oversized bodies before HMAC to avoid CPU/memory abuse.
+- **Prompt-injection containment.** The webhook body is untrusted external input.
+  The trigger's `prompt_template` may only reference fields listed in the trigger's
+  `payload_fields` whitelist (JSONPath expressions). The renderer ignores any
+  placeholder that isn't on the whitelist — the literal token is left in the
+  template, never interpolated. Every injected value is wrapped at render time in
+  a clearly-labeled "untrusted external input" delimiter block (an explicit
+  `<external_input source="...">…</external_input>` framing in the rendered
+  prompt) so the model can see where the boundary is. The full request body is
+  **never** dumped verbatim into the prompt. This is a #152-only rule in v1;
+  generalizing the "external-input framing" abstraction across #149 (IM messages)
+  and #153 (managed-agent inputs) is **deferred as a follow-up** and tracked
+  separately.
 - **Disabled triggers reject fast** — no run, logged as such.
 - **Run identity is a real member** — a trigger can't escalate beyond what its
   `run_as_user_id` may do; loss of membership disables the trigger.
+- **Cost ceiling is project-wide, not per-trigger.** Enforcing a per-run / per-org
+  cost cap is the responsibility of the planned `CostMiddleware` (see #150 OQ-8 for
+  the matching decision). The trigger layer does **not** enforce cost caps; it relies
+  on rate-limit + run-capacity to bound damage until cost middleware ships.
 
 ### v1 Scope (recommendation)
 
 Ship the **abstraction + webhook source + inline target**:
 
-1. `triggers` + `trigger_events` tables, prefixes, repositories (scoped).
-2. Webhook ingest route: signature verify, timestamp window, dedup, rate limit, filter.
-3. Event→run pipeline: identity/conversation resolution, `start_run` call, retry/DLQ,
-   `trigger_events` audit rows.
-4. Workspace CRUD + event-log + replay routes.
-5. Declarative filter matcher (AND/OR field clauses).
-6. Inline prompt-template target.
+1. `triggers` + `trigger_events` tables, prefixes, repositories (scoped). `triggers`
+   carries `payload_fields`, `rate_limit_response`, the dual-secret rotation columns,
+   and the four summary counters.
+2. Webhook ingest route: signature verify (with dual-secret accept during the rotation
+   window), timestamp window, dedup, rate limit, filter.
+3. Event→run pipeline: identity/conversation resolution (`new_each_time` only),
+   `start_run` call, retry/DLQ, `trigger_events` audit rows, summary-counter bumps.
+4. Workspace CRUD + event-log + replay + rotate-secret routes.
+5. Declarative filter matcher: AND/OR tree of `{path, op, value}` leaves with
+   JSONPath-style field references and ops `eq | neq | contains | exists | in`.
+6. Inline prompt-template target with whitelisted `payload_fields` + `<external_input>`
+   wrapping.
 7. `source_type` enum + `NormalizedEvent` seam ready for schedule/IM adapters.
 8. `target_type="managed_agent"` reserved in schema, not implemented.
+9. **Connectors (layer 2) are out of scope** — see "Layered model" above.
 
 Webhook first because it is self-contained (no external connection model like IM, no
 timer substrate like schedule), exercises the full pipeline (signature, dedup, rate
@@ -469,35 +572,68 @@ E2E covers the shared pipeline by way of the webhook source.
 
 ## Open Questions
 
-- **`trigger_events` retention.** Keep all rows forever (audit) vs TTL/rollup old rows?
-  High-volume webhooks could make this table large fast. Lean toward a configurable
-  retention window + summary counters on the trigger.
-- **Cross-process run start.** `run_manager` is process-local. If ingest lands on a
-  different worker than where we'd want the run, do we (a) start in the receiving
-  process, or (b) push onto a shared queue any worker drains? v1 leans (a) for
-  simplicity; revisit when scaling out.
-- **Filter expressiveness.** Is the declarative AND/OR matcher enough, or will users
-  immediately want richer predicates? Avoid a code-exec surface in v1; gather demand.
-- **Payload → prompt templating.** How much of the event payload should be safely
-  injectable into the prompt, and how do we prevent prompt-injection from untrusted
-  webhook bodies? Whitelist fields + clear "this is untrusted external data" framing.
-- **Rate-limit response semantics.** `429` (tell the sender to back off) vs `202` + silent
-  drop (don't leak capacity info)? Likely per-trigger configurable.
-- **Secret rotation overlap window.** Accept N seconds of dual-secret validity — what's
-  the default, and is it per-trigger?
-- **Generic webhook vs provider presets.** v1 ships a generic HMAC scheme; do we add
-  per-provider presets (GitHub `X-Hub-Signature-256`, Stripe `Stripe-Signature`) so
-  users don't hand-configure header names? Probably a fast-follow.
-- **One-active-run rule vs `new_each_time`.** Creating a conversation per event is clean
-  but could spawn many short-lived conversations. Acceptable, or do we need a
-  conversation-reuse/GC policy?
-- **Org-level run capacity / cost ceiling** interaction with cost tracking (#cost) — where
-  is the authoritative budget enforced?
-- **Body-hash dedup false-merge.** The timestamp-free fallback hashes the body alone, so two
-  *distinct* logical events that legitimately carry byte-identical bodies (no provider
-  event-id to tell them apart) would collide into one `dedup_key` and the second is dropped
-  as a duplicate. Acceptable for v1 (rare without an id); revisit if a real source needs a
-  bounded time bucket or a per-trigger "allow identical bodies" opt-out.
+All ten OQs were resolved in the 2026-05-28 design session. Decisions are recorded
+below and folded into the spec body above; each OQ's resolution is also reflected as
+a concrete task in `docs/dev/plans/2026-05-27-event-triggers.md`.
+
+1. **`trigger_events` retention.**
+   **Resolved 2026-05-28: permanent in v1 — no TTL, no rollup.** Operators should
+   monitor table growth; a real high-volume source can drive an archival/rollup PR
+   later. To keep observability cheap without scanning the event log, the trigger
+   row carries four summary counters: `events_total`, `events_success`,
+   `events_failed`, `events_dedup_dropped` (BIGINT, default 0), bumped on every
+   dispatch outcome.
+2. **Cross-process run start.**
+   **Resolved 2026-05-28: v1 starts the run in the receiving process.** Same pattern
+   as #150 / #149 — process-local `RunManager.start_run`. A shared queue any worker
+   drains is deferred until horizontal scale (more than one backend pod fronting one
+   tenant) becomes a real need.
+3. **Filter expressiveness.**
+   **Resolved 2026-05-28: declarative AND/OR matcher with JSONPath field references.**
+   Operators are `eq | neq | contains | exists | in`. No code-exec surface. Richer
+   predicate languages (regex, JMESPath, CEL) only on real demand.
+4. **Payload → prompt templating safety.**
+   **Resolved 2026-05-28: per-trigger `payload_fields` whitelist** (JSONPath
+   expressions). Only whitelisted fields may be referenced from `prompt_template`;
+   placeholders for non-whitelisted paths render as the literal token, never
+   interpolated. Every injected value is wrapped at render time in an
+   `<external_input source="...">…</external_input>` delimiter block so the model
+   can see where untrusted external data ends. The full request body is never
+   dumped verbatim. This is a #152-only rule in v1; **generalizing the
+   "external-input framing" across #149 IM and #153 managed agents is flagged as a
+   follow-up** in those specs, not done here.
+5. **Rate-limit response semantics.**
+   **Resolved 2026-05-28: default `429`, per-trigger configurable.** `triggers`
+   carries a `rate_limit_response` column (`429` | `202_drop`). Default `429`
+   (well-behaved senders back off); `202_drop` is the opt-out for sources that
+   retry hard on any non-2xx.
+6. **Secret rotation overlap window.**
+   **Resolved 2026-05-28: per-trigger `previous_secret_cred_id` +
+   `previous_secret_expires_at`, default overlap 24h.** Rotation sets the old
+   secret as `previous` with an expiry; during the window both secrets verify;
+   after the expiry only `current` does. Default is configurable per trigger when
+   users need a shorter / longer cutover.
+7. **Generic webhook vs provider presets.**
+   **Resolved 2026-05-28: v1 ships only generic HMAC.** Per-provider presets
+   (GitHub `X-Hub-Signature-256`, Stripe `Stripe-Signature`, Linear, etc.) are a
+   **fast-follow PR** — they convert into the same generic ingest internally and
+   slot in as a thin "preset → header config" layer on top of the existing route.
+8. **One-active-run vs `new_each_time`.**
+   **Resolved 2026-05-28: v1 only `new_each_time`.** A fresh conversation per
+   event. We accept the proliferation of short-lived conversations under noisy
+   sources; rate limiting + operator GC keep it bounded. `pinned` + queue-and-merge
+   is deferred until IM (#149) or another feature concretely needs it.
+9. **Org-level run capacity / cost ceiling.**
+   **Resolved 2026-05-28: deferred to project-wide CostMiddleware** (same call as
+   #150 OQ-8). The trigger layer does not enforce cost caps; it relies on per-trigger
+   rate limit + run capacity until CostMiddleware lands as the authoritative budget.
+10. **Body-hash dedup false-merge.**
+    **Resolved 2026-05-28: v1 accepts the false-merge risk.** Two distinct logical
+    events with byte-identical bodies and no provider event-id will collide on
+    `dedup_key` and the second will be acked as duplicate. This is rare in
+    practice. A fast-follow can add a per-trigger `allow_identical_bodies` opt-out
+    that mixes a coarse time bucket into the hash for sources that legitimately
+    repeat payloads.
 
 ## References
 
