@@ -122,7 +122,7 @@ async def resolve_current_org_id(user: User, session: AsyncSession) -> str:
     om_stmt = (
         select(OrganizationMembership)
         .where(OrganizationMembership.user_id == user.id)  # type: ignore[arg-type]
-        .order_by(role_priority, OrganizationMembership.created_at)
+        .order_by(role_priority, OrganizationMembership.created_at)  # type: ignore[arg-type]
         .limit(1)
     )
     om = (await session.execute(om_stmt)).scalars().first()
@@ -133,7 +133,7 @@ async def resolve_current_org_id(user: User, session: AsyncSession) -> str:
         select(Workspace)
         .join(Membership, Membership.workspace_id == Workspace.id)  # type: ignore[arg-type]
         .where(Membership.user_id == user.id)  # type: ignore[arg-type]
-        .order_by(Workspace.created_at)
+        .order_by(Workspace.created_at)  # type: ignore[arg-type]
         .limit(1)
     )
     workspace = (await session.execute(ws_stmt)).scalars().first()

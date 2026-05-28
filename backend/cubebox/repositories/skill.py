@@ -182,7 +182,7 @@ class SkillVersionRepository:
         result = await self.session.execute(
             select(SkillVersion)
             .where(SkillVersion.skill_id == skill_id)  # type: ignore[arg-type]
-            .order_by(SkillVersion.created_at.desc())
+            .order_by(SkillVersion.created_at.desc())  # type: ignore[attr-defined]
         )
         return list(result.scalars().all())
 

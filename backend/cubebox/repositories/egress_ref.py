@@ -29,8 +29,11 @@ class EgressRefRepository:
         if ref is None:
             return None
         exp = ref.expires_at
-        if exp is not None and exp < now:
-            return None
+        if exp is not None:
+            if exp.tzinfo is None:  # SQLite discards tz on round-trip
+                exp = exp.replace(tzinfo=UTC)
+            if exp < now:
+                return None
         return ref
 
     async def revoke_for_sandbox(self, sandbox_id: str) -> None:
