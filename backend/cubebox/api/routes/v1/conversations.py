@@ -655,7 +655,39 @@ async def send_message(
                         ),
                     ],
                 )
-            return SendMessageResponse(run_id="install-fallback")
+            # Emit a one-shot SSE response so the frontend renders the assistant
+            # reply and finalizes via its normal text_delta/done handlers. Returning
+            # a fake run_id here would 404 the immediate GET /runs/{id}/stream the
+            # web client issues for non-SSE JSON responses.
+            ts = utc_isoformat(datetime.now(UTC))
+
+            async def _chat_install_fallback_stream() -> AsyncIterator[str]:
+                yield _format_sse_event(
+                    "0-1",
+                    {
+                        "type": "text_delta",
+                        "timestamp": ts,
+                        "agent_id": None,
+                        "agent_name": None,
+                        "data": {"content": install_note},
+                    },
+                )
+                yield _format_sse_event(
+                    "0-2",
+                    {
+                        "type": "done",
+                        "timestamp": ts,
+                        "agent_id": None,
+                        "agent_name": None,
+                        "data": {},
+                    },
+                )
+
+            return StreamingResponse(
+                _chat_install_fallback_stream(),
+                media_type="text/event-stream",
+                headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+            )
 
     from cubebox.api.exceptions import (
         AttachmentReferenceInvalidError,

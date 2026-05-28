@@ -77,9 +77,11 @@ async def test_install_command_unknown_skill_returns_note_not_agent_run(
         json={"content": "install nonexistent-skill-xyz"},
     )
     assert resp.status_code in (200, 201)
-    # run_id is "install-fallback" (not a real UUID), confirming the agent was skipped.
-    body = resp.json()
-    assert body.get("run_id") == "install-fallback"
+    # Chat-fallback returns a one-shot SSE response (not the usual JSON+run_id pair)
+    # so the web client renders the assistant note via its normal text_delta/done
+    # handlers without trying to subscribe to a fake run_id.
+    assert resp.headers["content-type"].startswith("text/event-stream")
+    assert "Could not find" in resp.text
 
     msgs_resp = await client.get(f"/api/v1/ws/{ws_id}/conversations/{cid}/messages")
     messages = msgs_resp.json()["messages"]
