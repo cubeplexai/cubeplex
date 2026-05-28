@@ -104,7 +104,7 @@ async def test_create_with_exchange_host_sets_run_env_and_persists_refs(
         ),
         # Stub get_active_by_user → None so we always take the create-new path
         patch(
-            "cubebox.repositories.user_sandbox.UserSandboxRepository.get_active_by_user",
+            "cubebox.repositories.user_sandbox.UserSandboxRepository.get_resumable_by_user",
             return_value=None,
         ),
     ):
@@ -198,7 +198,7 @@ async def test_reuse_path_sets_run_env_and_refreshes_refs(
     with (
         patch("opensandbox.Sandbox.connect", side_effect=fake_connect),
         patch(
-            "cubebox.repositories.user_sandbox.UserSandboxRepository.get_active_by_user",
+            "cubebox.repositories.user_sandbox.UserSandboxRepository.get_resumable_by_user",
             return_value=old_record,
         ),
         patch(
@@ -255,7 +255,7 @@ async def test_create_without_exchange_host_skips_injection(
         patch("opensandbox.Sandbox.create", side_effect=fake_create),
         patch("opensandbox.Sandbox.connect", side_effect=_fake_reconnect),
         patch(
-            "cubebox.repositories.user_sandbox.UserSandboxRepository.get_active_by_user",
+            "cubebox.repositories.user_sandbox.UserSandboxRepository.get_resumable_by_user",
             return_value=None,
         ),
     ):
@@ -327,7 +327,7 @@ async def test_unhealthy_sandbox_revokes_refs(
         patch("opensandbox.Sandbox.create", side_effect=fake_create),
         patch("opensandbox.Sandbox.connect", side_effect=fake_connect),
         patch(
-            "cubebox.repositories.user_sandbox.UserSandboxRepository.get_active_by_user",
+            "cubebox.repositories.user_sandbox.UserSandboxRepository.get_resumable_by_user",
             return_value=old_record,
         ),
         patch(
