@@ -1,0 +1,92 @@
+"""E2E for org-admin sandbox policy routes.
+
+``admin_client`` yields ``(client, workspace_id)`` — unpack before use.
+"""
+
+import pytest_asyncio
+from sqlalchemy.ext.asyncio import create_async_engine
+from sqlalchemy.pool import NullPool
+
+from cubebox.db.engine import _build_database_url
+from cubebox.models.sandbox_policy import SandboxPolicy
+
+
+@pytest_asyncio.fixture(autouse=True)
+async def _ensure_sandbox_policy_table() -> None:
+    """Create the ``sandbox_policies`` table on the per-slot test DB.
+
+    Task 7 will add the Alembic migration. Until then this fixture provisions
+    the table via SQLModel metadata so the policy E2E can run.
+    """
+    engine = create_async_engine(_build_database_url(), poolclass=NullPool)
+    try:
+        async with engine.begin() as conn:
+            await conn.run_sync(
+                lambda sync_conn: SandboxPolicy.__table__.create(sync_conn, checkfirst=True)
+            )
+    finally:
+        await engine.dispose()
+
+
+async def test_get_returns_defaults_when_unset(admin_client) -> None:
+    client, _ws = admin_client
+    resp = await client.get("/api/v1/admin/sandbox-policy")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["default_image"]  # a non-empty default
+    assert body["network_rules"] == []
+    assert body["command_rules"] == []
+
+
+async def test_put_then_get_roundtrip(admin_client) -> None:
+    client, _ws = admin_client
+    put = await client.put(
+        "/api/v1/admin/sandbox-policy",
+        json={
+            "default_image": "python:3.12",
+            "network_rules": [{"action": "deny", "target": "evil.example.com"}],
+            "command_rules": [{"action": "deny", "pattern": "rm *"}],
+        },
+    )
+    assert put.status_code == 200, put.text
+    assert put.json().get("warnings") == []
+    got = await client.get("/api/v1/admin/sandbox-policy")
+    body = got.json()
+    assert body["default_image"] == "python:3.12"
+    assert body["command_rules"] == [{"action": "deny", "pattern": "rm *"}]
+
+
+async def test_put_rejects_bad_network_target(admin_client) -> None:
+    client, _ws = admin_client
+    resp = await client.put(
+        "/api/v1/admin/sandbox-policy",
+        json={
+            "default_image": "ubuntu:22.04",
+            "network_rules": [{"action": "allow", "target": "*"}],
+            "command_rules": None,
+        },
+    )
+    assert resp.status_code == 400
+
+
+async def test_put_warns_on_credential_host_conflict(
+    admin_client, seeded_credential_with_host
+) -> None:
+    """OQ-6: deny on a host that an installed credential requires returns a
+    warnings[] entry, but the PUT is NOT rejected — the policy still saves."""
+    client, _ws = admin_client
+    cred = seeded_credential_with_host
+    resp = await client.put(
+        "/api/v1/admin/sandbox-policy",
+        json={
+            "default_image": "ubuntu:22.04",
+            "network_rules": [{"action": "deny", "target": "api.github.com"}],
+            "command_rules": None,
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    warnings = resp.json().get("warnings") or []
+    assert any(cred["id"] in str(w) or "api.github.com" in str(w) for w in warnings)
+    # Confirm the policy DID save despite the warning.
+    got = await client.get("/api/v1/admin/sandbox-policy")
+    assert got.json()["network_rules"] == [{"action": "deny", "target": "api.github.com"}]

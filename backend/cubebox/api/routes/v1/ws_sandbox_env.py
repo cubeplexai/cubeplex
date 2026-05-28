@@ -19,6 +19,7 @@ from cubebox.credentials.encryption import EncryptionBackend
 from cubebox.db.session import get_session
 from cubebox.repositories.credential import CredentialRepository
 from cubebox.repositories.sandbox_env import SandboxEnvRepository
+from cubebox.repositories.sandbox_policy import SandboxPolicyRepository
 from cubebox.sandbox_env.host_rules import HostPatternError
 from cubebox.services.credential import CredentialService
 from cubebox.services.sandbox_env import (
@@ -26,8 +27,23 @@ from cubebox.services.sandbox_env import (
     SandboxEnvService,
     SandboxEnvShapeError,
 )
+from cubebox.services.sandbox_policy_conflicts import deny_targets_for_cred
 
 router = APIRouter(prefix="/ws/{workspace_id}/sandbox-env", tags=["ws-sandbox-env"])
+
+
+async def _entry_with_warnings(session: AsyncSession, *, org_id: str, row: object) -> EnvEntryOut:
+    """Build EnvEntryOut + attach OQ-6 deny-host warnings from the org policy."""
+    hosts = getattr(row, "hosts", None)
+    policy = await SandboxPolicyRepository(session, org_id=org_id).get()
+    denied = deny_targets_for_cred(hosts, policy.network_rules if policy is not None else None)
+    warnings = [
+        f"host {h} is denied by the current sandbox policy; outbound calls will be blocked"
+        for h in denied
+    ]
+    base = row.model_dump(include=set(EnvEntryOut.model_fields))  # type: ignore[attr-defined]
+    base["warnings"] = warnings
+    return EnvEntryOut(**base)
 
 
 def _service(
@@ -73,7 +89,7 @@ async def create_workspace_env(
         raise HTTPException(400, str(exc)) from exc
     row = await SandboxEnvRepository(session, org_id=ctx.org_id).get(entry_id)
     assert row is not None
-    return EnvEntryOut(**row.model_dump(include=set(EnvEntryOut.model_fields)))
+    return await _entry_with_warnings(session, org_id=ctx.org_id, row=row)
 
 
 @router.post("/me", response_model=EnvEntryOut, status_code=201)
@@ -102,7 +118,7 @@ async def create_user_env(
         raise HTTPException(400, str(exc)) from exc
     row = await SandboxEnvRepository(session, org_id=ctx.org_id).get(entry_id)
     assert row is not None
-    return EnvEntryOut(**row.model_dump(include=set(EnvEntryOut.model_fields)))
+    return await _entry_with_warnings(session, org_id=ctx.org_id, row=row)
 
 
 @router.get("/workspace", response_model=EnvEntryListOut)
@@ -196,7 +212,7 @@ async def rotate_workspace_env(
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
     updated = await SandboxEnvRepository(session, org_id=ctx.org_id).get(entry_id)
     assert updated is not None
-    return EnvEntryOut(**updated.model_dump(include=set(EnvEntryOut.model_fields)))
+    return await _entry_with_warnings(session, org_id=ctx.org_id, row=updated)
 
 
 @router.patch("/me/{entry_id}", response_model=EnvEntryOut)
@@ -224,4 +240,4 @@ async def rotate_user_env(
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
     updated = await SandboxEnvRepository(session, org_id=ctx.org_id).get(entry_id)
     assert updated is not None
-    return EnvEntryOut(**updated.model_dump(include=set(EnvEntryOut.model_fields)))
+    return await _entry_with_warnings(session, org_id=ctx.org_id, row=updated)

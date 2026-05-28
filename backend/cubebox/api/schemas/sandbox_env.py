@@ -35,6 +35,9 @@ class EnvEntryOut(BaseModel):
     hosts: list[str] | None
     header_names: list[str] | None
     status: str
+    # OQ-6: subset of the entry's ``hosts`` that the org's SandboxPolicy
+    # currently denies. Empty when there's no conflict (or no policy yet).
+    warnings: list[str] = []
     # NOTE: never serialize secret value or credential_id plaintext.
 
 
