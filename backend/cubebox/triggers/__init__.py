@@ -1,0 +1,1 @@
+"""Event-trigger pipeline subsystem."""
