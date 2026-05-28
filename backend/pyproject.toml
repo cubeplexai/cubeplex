@@ -70,6 +70,7 @@ markers = [
     "unit: fast unit tests with no external dependencies",
     "real_llm: tests that require a real LLM endpoint with cache_control honored; deselected by default in CI",
     "diagnostic: diagnostic scaffold tests (cache investigation etc.); opt-in with '-m diagnostic'",
+    "requires_api_key: tests that call a third-party API with a real key (e.g. search MCP providers); skipped when the env var is unset, never auto-run in CI",
 ]
 
 [tool.hatch.build.targets.wheel]

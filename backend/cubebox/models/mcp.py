@@ -60,6 +60,20 @@ class MCPConnectorTemplate(CubeboxBase, table=True):
         default=None, sa_column=Column(JSON, nullable=True)
     )
     static_auth_header_template: str | None = Field(default=None, max_length=256)
+    # How the runtime injects the static credential into outbound requests.
+    # ``bearer`` → ``Authorization: Bearer <token>`` (default, matches legacy
+    # behaviour). ``header`` → custom request header named
+    # ``static_auth_header_name`` carrying the raw token (e.g. ``x-api-key``).
+    # ``query`` → key/value appended to the connector URL (e.g.
+    # ``?tavilyApiKey=<token>``) — only honoured for streamable_http/sse
+    # transports.
+    static_auth_style: str = Field(
+        default="bearer",
+        max_length=16,
+        sa_column_kwargs={"server_default": text("'bearer'")},
+    )
+    static_auth_header_name: str | None = Field(default=None, max_length=64)
+    static_auth_query_param: str | None = Field(default=None, max_length=64)
 
     template_metadata: dict[str, Any] = Field(
         default_factory=dict,
@@ -200,6 +214,18 @@ class MCPConnectorInstall(CubeboxBase, table=True):
     )
     timeout: float = Field(default=30.0)
     sse_read_timeout: float = Field(default=300.0)
+
+    # Snapshot of the template's static-auth style at install time. The
+    # workspace can override per-install (e.g. switch ``x-api-key`` to a
+    # custom header name) without touching the catalog row. Same snapshot
+    # pattern as ``tool_citations``.
+    static_auth_style: str = Field(
+        default="bearer",
+        max_length=16,
+        sa_column_kwargs={"server_default": text("'bearer'")},
+    )
+    static_auth_header_name: str | None = Field(default=None, max_length=64)
+    static_auth_query_param: str | None = Field(default=None, max_length=64)
 
     auto_enroll_new_workspaces: bool = Field(
         default=True, sa_column_kwargs={"server_default": text("true")}

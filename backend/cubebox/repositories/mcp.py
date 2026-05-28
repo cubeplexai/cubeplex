@@ -84,6 +84,9 @@ class MCPConnectorTemplateRepository:
         oauth_static_client_secret_credential_id: str | None = None,
         static_form_schema: list[dict[str, Any]] | None = None,
         static_auth_header_template: str | None = None,
+        static_auth_style: str = "bearer",
+        static_auth_header_name: str | None = None,
+        static_auth_query_param: str | None = None,
         template_metadata: dict[str, Any] | None = None,
         tool_citation_defaults: dict[str, dict[str, Any]] | None = None,
         status: str = "active",
@@ -110,6 +113,9 @@ class MCPConnectorTemplateRepository:
                 oauth_static_client_secret_credential_id=(oauth_static_client_secret_credential_id),
                 static_form_schema=static_form_schema,
                 static_auth_header_template=static_auth_header_template,
+                static_auth_style=static_auth_style,
+                static_auth_header_name=static_auth_header_name,
+                static_auth_query_param=static_auth_query_param,
                 template_metadata=template_metadata or {},
                 tool_citation_defaults=tool_citation_defaults or {},
                 status=status,
@@ -132,6 +138,9 @@ class MCPConnectorTemplateRepository:
         existing.oauth_static_client_secret_credential_id = oauth_static_client_secret_credential_id
         existing.static_form_schema = static_form_schema
         existing.static_auth_header_template = static_auth_header_template
+        existing.static_auth_style = static_auth_style
+        existing.static_auth_header_name = static_auth_header_name
+        existing.static_auth_query_param = static_auth_query_param
         existing.template_metadata = template_metadata or {}
         if tool_citation_defaults is not None:
             existing.tool_citation_defaults = tool_citation_defaults

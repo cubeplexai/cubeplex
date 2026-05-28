@@ -240,6 +240,13 @@ class MCPRuntimeConnectorSpec:
     # built from one ``list_runtime_specs`` call without re-reading
     # install rows.
     discovery_metadata: dict[str, Any] = field(default_factory=dict)
+    # Static-auth shape (see ``MCPConnectorInstall``/``MCPConnectorTemplate``).
+    # ``bearer`` (default) ⇒ ``Authorization: Bearer <token>``;
+    # ``header`` ⇒ inject ``static_auth_header_name: <token>``;
+    # ``query`` ⇒ append ``?static_auth_query_param=<token>`` to ``server_url``.
+    static_auth_style: str = "bearer"
+    static_auth_header_name: str | None = None
+    static_auth_query_param: str | None = None
 
 
 class MCPEffectiveConnectorService:
@@ -345,6 +352,9 @@ class MCPEffectiveConnectorService:
                     grant=row.grant,
                     oauth_client_config=dict(install.oauth_client_config or {}),
                     discovery_metadata=dict(install.discovery_metadata or {}),
+                    static_auth_style=install.static_auth_style or "bearer",
+                    static_auth_header_name=install.static_auth_header_name,
+                    static_auth_query_param=install.static_auth_query_param,
                 )
             )
         return specs

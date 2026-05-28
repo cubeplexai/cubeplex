@@ -12,6 +12,7 @@ import logging
 from collections import Counter
 from datetime import timedelta
 from typing import Any, Literal, cast
+from urllib.parse import urlencode, urlparse, urlunparse
 
 from cubepi.agent.types import AgentTool
 from cubepi.mcp import load_mcp_tools_http
@@ -121,7 +122,7 @@ async def load_workspace_mcp_tools_for_cubepi(
 
     for spec in specs:
         try:
-            headers = await _resolve_headers_from_spec(
+            resolved = await _resolve_auth_from_spec(
                 spec=spec,
                 workspace_id=workspace_id,
                 org_id=org_id,
@@ -145,11 +146,12 @@ async def load_workspace_mcp_tools_for_cubepi(
             )
             continue
 
-        if headers is None:
+        if resolved is None:
             # Credential resolution returned no token for a non-passthrough
             # spec — the effective service should already have flagged this
             # spec as unusable, but defend in depth.
             continue
+        headers, server_url = resolved
 
         if spec.transport not in _VALID_TRANSPORTS:
             logger.warning(
@@ -161,7 +163,7 @@ async def load_workspace_mcp_tools_for_cubepi(
 
         try:
             discovery = await load_mcp_tools_http(
-                spec.server_url,
+                server_url,
                 headers=headers or None,
                 timeout=spec.timeout,
                 transport=cast(MCPTransport, spec.transport),
@@ -208,7 +210,75 @@ async def load_workspace_mcp_tools_for_cubepi(
     return all_tools, all_citations
 
 
-async def _resolve_headers_from_spec(
+def _inject_query_param(server_url: str, name: str, value: str) -> str:
+    """Append ``name=value`` to ``server_url``'s query string.
+
+    Existing query params are preserved; an existing param with the same
+    ``name`` is replaced rather than duplicated. The streamable_http
+    transport sends every JSON-RPC request to this URL, so the param rides
+    along on every call — exactly what Tavily/Bocha-style URL-key auth
+    expects.
+    """
+    parts = urlparse(server_url)
+    pairs: list[tuple[str, str]] = []
+    existing = parts.query.split("&") if parts.query else []
+    for chunk in existing:
+        if not chunk:
+            continue
+        k, _, v = chunk.partition("=")
+        if k == name:
+            continue
+        pairs.append((k, v))
+    pairs.append((name, value))
+    return urlunparse(parts._replace(query=urlencode(pairs, safe="")))
+
+
+def _apply_static_credential(
+    *,
+    spec: MCPRuntimeConnectorSpec,
+    headers: dict[str, str],
+    server_url: str,
+    plaintext: str,
+) -> tuple[dict[str, str], str]:
+    """Place ``plaintext`` on ``headers`` or ``server_url`` per ``spec``."""
+    style = spec.static_auth_style or "bearer"
+    if style == "bearer":
+        headers["Authorization"] = f"Bearer {plaintext}"
+        return headers, server_url
+    if style == "header":
+        name = spec.static_auth_header_name
+        if not name:
+            logger.warning(
+                "MCP install '%s' has static_auth_style='header' but no header name; "
+                "falling back to Authorization: Bearer",
+                spec.name,
+            )
+            headers["Authorization"] = f"Bearer {plaintext}"
+            return headers, server_url
+        headers[name] = plaintext
+        return headers, server_url
+    if style == "query":
+        name = spec.static_auth_query_param
+        if not name:
+            logger.warning(
+                "MCP install '%s' has static_auth_style='query' but no param name; "
+                "falling back to Authorization: Bearer",
+                spec.name,
+            )
+            headers["Authorization"] = f"Bearer {plaintext}"
+            return headers, server_url
+        return headers, _inject_query_param(server_url, name, plaintext)
+    logger.warning(
+        "MCP install '%s' has unsupported static_auth_style %r; "
+        "falling back to Authorization: Bearer",
+        spec.name,
+        style,
+    )
+    headers["Authorization"] = f"Bearer {plaintext}"
+    return headers, server_url
+
+
+async def _resolve_auth_from_spec(
     *,
     spec: MCPRuntimeConnectorSpec,
     workspace_id: str,
@@ -218,14 +288,16 @@ async def _resolve_headers_from_spec(
     signer: MCPUserTokenSigner,
     token_manager: OAuthTokenManager,
     grant_repo: MCPCredentialGrantRepository | None = None,
-) -> dict[str, str] | None:
-    """Resolve the auth header for a runtime spec by ``auth_method``.
+) -> tuple[dict[str, str], str] | None:
+    """Resolve auth headers AND the (possibly rewritten) server URL.
 
     Returns ``None`` when a credential is required but cannot be resolved.
-    The empty-dict return for passthrough spans the case where the loader
-    has the identity token in hand but no other headers configured.
+    The static path branches on ``spec.static_auth_style`` so query-param
+    auth can rewrite the URL while header-style auth only touches the
+    header dict — see :func:`_apply_static_credential`.
     """
     headers: dict[str, str] = dict(spec.headers or {})
+    server_url = spec.server_url
 
     if spec.auth_method == "none":
         token = await signer.sign(
@@ -236,7 +308,7 @@ async def _resolve_headers_from_spec(
             ttl=_USER_TOKEN_TTL,
         )
         headers["Authorization"] = f"Bearer {token}"
-        return headers
+        return headers, server_url
 
     if spec.credential_id is None:
         return None
@@ -246,8 +318,12 @@ async def _resolve_headers_from_spec(
             credential_id=spec.credential_id,
             requesting_kind=CREDENTIAL_KIND_MCP,
         )
-        headers["Authorization"] = f"Bearer {plaintext}"
-        return headers
+        return _apply_static_credential(
+            spec=spec,
+            headers=headers,
+            server_url=server_url,
+            plaintext=plaintext,
+        )
 
     if spec.auth_method == "oauth":
         access_token = await _resolve_oauth_access_token(
@@ -257,7 +333,7 @@ async def _resolve_headers_from_spec(
             grant_repo=grant_repo,
         )
         headers["Authorization"] = f"Bearer {access_token}"
-        return headers
+        return headers, server_url
 
     logger.warning(
         "MCP install '%s' has unsupported auth_method %r; skipping",
