@@ -32,3 +32,17 @@ class UserSandbox(CubeboxBase, OrgScopedMixin, table=True):
     volumes_config: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))
     last_activity_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     ttl_seconds: int = Field(default=3600)
+    # server_default is required so the autogen migration backfills existing
+    # non-null rows; a Python-side default alone won't touch rows already there.
+    provider: str = Field(
+        default="opensandbox",
+        max_length=32,
+        sa_column_kwargs={"server_default": "opensandbox"},
+    )
+    paused_at: datetime | None = Field(default=None)
+    paused_ttl_seconds: int = Field(
+        default=24 * 60,
+        sa_column_kwargs={"server_default": "1440"},
+    )
+    last_resumed_at: datetime | None = Field(default=None)
+    in_use_until: datetime | None = Field(default=None, index=True)
