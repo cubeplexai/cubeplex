@@ -29,6 +29,7 @@ from cubebox.models.organization import Organization
 from cubebox.models.organization_membership import OrganizationMembership, OrgRole
 from cubebox.models.provider import Model, Provider
 from cubebox.models.sandbox_env import SandboxEnvVar  # noqa: F401
+from cubebox.models.sandbox_policy import SandboxPolicy  # noqa: F401
 from cubebox.models.scheduled_task import ScheduledTask, ScheduledTaskRun
 from cubebox.models.skill import (
     OrgPreinstalledTombstone,
@@ -74,6 +75,7 @@ __all__ = [
     "Role",
     "EgressRef",
     "SandboxEnvVar",
+    "SandboxPolicy",
     "ScheduledTask",
     "ScheduledTaskRun",
     "Skill",
