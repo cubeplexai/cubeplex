@@ -12,10 +12,10 @@ import asyncio
 import random
 from contextlib import suppress
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import Any, cast
 
 from loguru import logger
-from sqlalchemy import update
+from sqlalchemy import case, literal, update
 from sqlalchemy.exc import IntegrityError
 from uuid_utils import uuid7
 
@@ -271,20 +271,23 @@ class ScheduledTaskPoller:
                     )
                 await session.commit()
                 return
-            # Conditional UPDATE: only flip 'claimed' → 'started'. If the
-            # run already finished and the completion hook beat us to the
-            # commit, the row is already in a terminal state and this UPDATE
-            # affects 0 rows (leaving the terminal state intact).
+            # Backfill conversation_id + started_at unconditionally so the
+            # run link survives the race where the completion hook flipped
+            # state to terminal before this UPDATE landed (without it the
+            # UI shows the run as succeeded/failed but has no "View
+            # conversation" link because conversation_id stayed NULL).
+            # Only flip state → 'started' when it is still 'claimed' — a
+            # CASE expression keeps the terminal state intact otherwise.
             await session.execute(
                 update(ScheduledTaskRun)
-                .where(
-                    ScheduledTaskRun.id == row.id,  # type: ignore[arg-type]
-                    ScheduledTaskRun.state == "claimed",  # type: ignore[arg-type]
-                )
+                .where(ScheduledTaskRun.id == row.id)  # type: ignore[arg-type]
                 .values(
-                    state="started",
                     conversation_id=result.conversation_id,
                     started_at=datetime.now(UTC),
+                    state=case(
+                        (cast(Any, ScheduledTaskRun.state) == "claimed", literal("started")),
+                        else_=ScheduledTaskRun.state,
+                    ),
                 )
             )
             await session.commit()
