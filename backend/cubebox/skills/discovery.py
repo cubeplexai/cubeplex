@@ -217,6 +217,8 @@ class SkillInstallService:
                 files=files,
                 workspace_id=self._workspace_id,
             )
+        except UnicodeDecodeError as e:
+            raise SkillInstallError(str(e)) from e
         except (InvalidZipPathError, FileTooLargeError) as e:
             raise SkillInstallError(str(e)) from e
         except (
