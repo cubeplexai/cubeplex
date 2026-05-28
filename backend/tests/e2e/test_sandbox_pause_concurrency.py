@@ -259,21 +259,18 @@ async def test_double_resume_guard_winner_fails_loser_returns_none(
     record = _paused_record(scope)
     conn_config = ConnectionConfig(domain="example.invalid")
 
-    # Winner's exception-path probe sees the row still at ``resuming`` (the
-    # real failure case — provider didn't move it), so it marks ``failed``.
-    # Once ``mark_failed`` lands, the loser's wait helper observes ``failed``
-    # and returns None.
-    resuming_view = _paused_record(scope)
-    resuming_view.status = "resuming"
+    # Winner's atomic ``mark_failed_from_resuming`` claim wins (DB row still
+    # ``resuming``). Once the row is ``failed``, the loser's wait helper
+    # observes ``failed`` and returns None.
     failed_view = _paused_record(scope)
     failed_view.status = "failed"
 
     repo = MagicMock(spec=UserSandboxRepository)
     repo.mark_resuming = AsyncMock(side_effect=[True, False])
-    repo.mark_failed = AsyncMock()
+    repo.mark_failed_from_resuming = AsyncMock(return_value=True)
     repo.mark_running = AsyncMock(return_value=True)
     repo.update_activity = AsyncMock()
-    repo.get = AsyncMock(side_effect=[resuming_view, failed_view, failed_view])
+    repo.get = AsyncMock(return_value=failed_view)
 
     def _raise(*_: Any, **__: Any) -> Any:
         raise RuntimeError("provider resume blew up")
@@ -314,7 +311,7 @@ async def test_double_resume_guard_winner_fails_loser_returns_none(
     assert cor.await_count == 1
     # Loser saw failed via repo.get and bailed without connecting.
     assert raw_connect.await_count == 0
-    repo.mark_failed.assert_awaited_once_with(record.id)
+    repo.mark_failed_from_resuming.assert_awaited_once_with(record.id)
 
 
 # ---------------------------------------------------------------------------

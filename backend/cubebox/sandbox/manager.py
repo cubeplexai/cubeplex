@@ -551,28 +551,23 @@ class SandboxManager:
             # The provider may have actually completed the resume despite the
             # client-side exception (e.g. ``resume_timeout`` elapsed on our
             # side while the server kept transitioning to ``Running``, and the
-            # reconciler then committed ``resuming -> running``). Re-fetch on
-            # a fresh session and only ``mark_failed`` if the row is still
-            # ``resuming`` — otherwise we'd overwrite a healthy ``running``
-            # row to ``failed`` while the provider sandbox is live, and the
-            # next ``get_or_create`` would provision a duplicate.
-            async with self._session_factory() as probe_session:
-                probe_repo = UserSandboxRepository(
-                    probe_session, org_id=org_id, workspace_id=workspace_id
-                )
-                current = await probe_repo.get(record.id)
-            current_status = current.status if current else None
-            if current_status == "resuming":
-                await repo.mark_failed(record.id)
+            # reconciler then committed ``resuming -> running``).
+            # ``mark_failed_from_resuming`` is a single conditional UPDATE
+            # guarded by ``status = 'resuming'`` — if the reconciler beat us
+            # (or some other path moved the row), the claim returns False and
+            # we leave the row alone instead of overwriting a healthy
+            # ``running`` row to ``failed``. The caller (``get_or_create``)
+            # re-fetches and reuses any now-running row.
+            if await repo.mark_failed_from_resuming(record.id):
                 if self._exchange_host:
                     await EgressRefRepository(session).revoke_for_sandbox(record.sandbox_id)
-                return None
-            logger.info(
-                "Resume of {} raised on client but row is in state {} (likely "
-                "reconciler completed it); deferring to next get_or_create",
-                record.sandbox_id,
-                current_status,
-            )
+            else:
+                logger.info(
+                    "Resume of {} raised on client but row is no longer "
+                    "resuming (reconciler may have completed it); deferring "
+                    "to next get_or_create",
+                    record.sandbox_id,
+                )
             return None
         # Race window between this caller's ``connect_or_resume`` returning and
         # ``mark_running`` landing. Two reconciler-driven outcomes can make
@@ -810,8 +805,13 @@ class SandboxManager:
                     org_id=record.org_id,
                     workspace_id=record.workspace_id,
                 )
+                # Use the row's own ``paused_ttl_seconds`` (the same value
+                # the selection query used) so a row stamped with a shorter
+                # TTL than the current manager config doesn't get selected
+                # and then skipped because the claim predicate disagrees
+                # with the select predicate.
                 if not await scoped.claim_terminated_from_paused(
-                    record.id, paused_ttl_seconds=self._paused_ttl_seconds
+                    record.id, paused_ttl_seconds=record.paused_ttl_seconds
                 ):
                     # Row escaped: someone is resuming it or it was already
                     # reaped. The resume path will manage egress / kill on

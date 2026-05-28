@@ -100,6 +100,18 @@ class UserSandboxRepository(ScopedRepository[UserSandbox]):
             record.status = "terminated"
             await self.session.commit()
 
+    async def mark_failed_from_resuming(self, record_id: str) -> bool:
+        """Atomically flip ``resuming -> failed`` for the resume-exception race.
+
+        Used by ``_resume_record`` when ``connect_or_resume`` raises: if the
+        provider actually completed the resume server-side and the reconciler
+        has already committed ``resuming -> running`` in the meantime, this
+        UPDATE's prior-status guard rejects and the caller leaves the
+        healthy ``running`` row alone. ``mark_failed`` (unconditional) is
+        kept for the reconciler's ``state == \"Failed\"`` branch.
+        """
+        return await self._transition(record_id, "resuming", "failed")
+
     async def claim_terminated_from_paused(
         self, record_id: str, *, paused_ttl_seconds: int
     ) -> bool:

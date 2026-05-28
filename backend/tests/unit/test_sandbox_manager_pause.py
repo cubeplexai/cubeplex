@@ -449,10 +449,10 @@ async def test_resume_record_returns_none_when_row_terminal() -> None:
 
 
 @pytest.mark.asyncio
-async def test_resume_record_failure_marks_failed_when_still_resuming() -> None:
-    """``connect_or_resume`` raises AND the probe-fetch confirms the row is
-    still ``resuming`` (provider truly failed). Mark the row ``failed`` and
-    return None so ``get_or_create`` creates a fresh sandbox.
+async def test_resume_record_failure_atomic_marks_failed_when_still_resuming() -> None:
+    """``connect_or_resume`` raises. The atomic
+    ``mark_failed_from_resuming`` UPDATE wins (DB row still ``resuming``),
+    so the row is moved to ``failed`` and the caller returns None.
     """
     factory, session = _make_session_factory()
     mgr = SandboxManager(factory)
@@ -464,21 +464,12 @@ async def test_resume_record_failure_marks_failed_when_still_resuming() -> None:
     repo = MagicMock()
     repo.mark_resuming = AsyncMock(return_value=True)
     repo.mark_running = AsyncMock(return_value=True)
-    repo.mark_failed = AsyncMock()
+    repo.mark_failed_from_resuming = AsyncMock(return_value=True)
     repo.update_activity = AsyncMock()
 
-    # Probe-session sees the row still in ``resuming`` — provider failed.
-    resuming_view = _make_record()
-    resuming_view.status = "resuming"
-    probe_repo = MagicMock()
-    probe_repo.get = AsyncMock(return_value=resuming_view)
-
-    with (
-        patch(
-            "cubebox.sandbox.manager.OpenSandbox.connect_or_resume",
-            new=AsyncMock(side_effect=RuntimeError("resume failed")),
-        ),
-        patch("cubebox.sandbox.manager.UserSandboxRepository", return_value=probe_repo),
+    with patch(
+        "cubebox.sandbox.manager.OpenSandbox.connect_or_resume",
+        new=AsyncMock(side_effect=RuntimeError("resume failed")),
     ):
         result = await mgr._resume_record(
             session,
@@ -492,17 +483,16 @@ async def test_resume_record_failure_marks_failed_when_still_resuming() -> None:
 
     assert result is None
     repo.mark_resuming.assert_awaited_once_with(record.id)
-    repo.mark_failed.assert_awaited_once_with(record.id)
+    repo.mark_failed_from_resuming.assert_awaited_once_with(record.id)
     repo.mark_running.assert_not_called()
 
 
 @pytest.mark.asyncio
-async def test_resume_record_exception_but_provider_succeeded_does_not_mark_failed() -> None:
+async def test_resume_record_exception_does_not_overwrite_reconciler_running() -> None:
     """``connect_or_resume`` raises (client timeout / network blip) BUT the
-    reconciler has already moved the row to ``running``. The exception handler
-    must NOT overwrite the healthy ``running`` row with ``failed`` — that
-    would orphan a live provider sandbox and force ``get_or_create`` to
-    provision a duplicate.
+    reconciler has already moved the row to ``running``. The atomic
+    ``mark_failed_from_resuming`` claim returns False (prior-state guard
+    rejects ``running``), so we do NOT overwrite the healthy row.
     """
     factory, session = _make_session_factory()
     mgr = SandboxManager(factory)
@@ -513,20 +503,11 @@ async def test_resume_record_exception_but_provider_succeeded_does_not_mark_fail
 
     repo = MagicMock()
     repo.mark_resuming = AsyncMock(return_value=True)
-    repo.mark_failed = AsyncMock()
+    repo.mark_failed_from_resuming = AsyncMock(return_value=False)
 
-    # Probe sees the row already at ``running`` (reconciler beat us).
-    running_view = _make_record()
-    running_view.status = "running"
-    probe_repo = MagicMock()
-    probe_repo.get = AsyncMock(return_value=running_view)
-
-    with (
-        patch(
-            "cubebox.sandbox.manager.OpenSandbox.connect_or_resume",
-            new=AsyncMock(side_effect=RuntimeError("client timeout")),
-        ),
-        patch("cubebox.sandbox.manager.UserSandboxRepository", return_value=probe_repo),
+    with patch(
+        "cubebox.sandbox.manager.OpenSandbox.connect_or_resume",
+        new=AsyncMock(side_effect=RuntimeError("client timeout")),
     ):
         result = await mgr._resume_record(
             session,
@@ -539,7 +520,7 @@ async def test_resume_record_exception_but_provider_succeeded_does_not_mark_fail
         )
 
     assert result is None  # caller (get_or_create) re-checks and reuses.
-    repo.mark_failed.assert_not_called()  # The row stays at ``running``.
+    repo.mark_failed_from_resuming.assert_awaited_once_with(record.id)
 
 
 # -------------------------------------------------------------------------
