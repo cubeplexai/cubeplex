@@ -27,8 +27,14 @@ When a visual or interactive explanation is clearly better than text, call
   Embed all data directly in the code. (Loading JS libraries from the allowed
   CDNs below IS permitted - that is `script-src`, not `connect-src`.)
 - No `localStorage`/`sessionStorage` (they throw). Use in-memory variables.
-- Use CSS variables for colors; support a dark background (#1a1a1a-ish).
-  Two font weights max (400, 500). Avoid gradients, shadows, and blur.
+- Colors: the shell pre-defines five CSS variables on `:root` —
+  `--bg` (page background), `--fg` (foreground text), `--muted` (card/panel
+  surface), `--border` (separator), `--accent` (link/primary). Their values
+  are picked by the host based on the current app theme (light or dark) and
+  give correct contrast in both. Reference them via `var(--bg)` etc.
+  **Do NOT hard-code colors** (no `#1a1a1a`, no `#fff`, no rgb()); the widget
+  must look right in both themes. Two font weights max (400, 500). Avoid
+  gradients, shadows, and blur.
 - Libraries may be loaded only from: cdnjs.cloudflare.com, cdn.jsdelivr.net,
   unpkg.com, esm.sh.
 - Keep total `widget_code` under ~256KB.
