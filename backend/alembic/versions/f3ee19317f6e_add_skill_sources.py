@@ -1,7 +1,7 @@
 """add skill_sources
 
 Revision ID: f3ee19317f6e
-Revises: 6c69cc288404
+Revises: 28c4c57516f6
 Create Date: 2026-05-28 19:15:22.525631
 
 """
@@ -14,7 +14,7 @@ import sqlmodel  # noqa: F401  (referenced by sqlmodel.sql.sqltypes.AutoString i
 
 # revision identifiers, used by Alembic.
 revision: str = 'f3ee19317f6e'
-down_revision: Union[str, Sequence[str], None] = '6c69cc288404'
+down_revision: Union[str, Sequence[str], None] = '28c4c57516f6'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
