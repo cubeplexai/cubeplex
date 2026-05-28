@@ -559,6 +559,8 @@ class MCPEffectiveConnectorService:
 
 
 def _is_expired(when: datetime) -> bool:
+    if when.tzinfo is None:  # SQLite discards tz on round-trip
+        when = when.replace(tzinfo=UTC)
     return when < datetime.now(UTC)
 
 
