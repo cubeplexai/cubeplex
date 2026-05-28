@@ -209,6 +209,49 @@ async def test_get_resumable_by_user_returns_most_recent_non_terminal(
     assert found.status == "paused"
 
 
+async def test_claim_terminated_from_paused_atomic(
+    db_session: AsyncSession, scope: dict[str, str]
+) -> None:
+    """Atomic ``paused -> terminated`` claim used by ``reap_paused`` so a
+    concurrent ``_resume_record`` taking the row through ``paused -> resuming``
+    doesn't get its sandbox killed mid-resume (codex P2 round 8)."""
+    repo = _mk_repo(db_session, scope)
+
+    # (a) An expired paused row gets claimed exactly once.
+    expired = await _mk(
+        repo,
+        scope,
+        status="paused",
+        idle_secs=0,
+        ttl_seconds=3600,
+        paused_at=datetime.now(UTC) - timedelta(seconds=120),
+    )
+    assert await repo.claim_terminated_from_paused(expired.id, paused_ttl_seconds=60) is True
+    # Second claim on the now-terminated row returns False.
+    assert await repo.claim_terminated_from_paused(expired.id, paused_ttl_seconds=60) is False
+
+    # (b) A paused row that's NOT past its TTL is not claimed.
+    fresh_paused = await _mk(
+        repo,
+        scope,
+        status="paused",
+        idle_secs=0,
+        ttl_seconds=3600,
+        paused_at=datetime.now(UTC),
+    )
+    assert (
+        await repo.claim_terminated_from_paused(fresh_paused.id, paused_ttl_seconds=3600) is False
+    )
+
+    # (c) A row in transient ``resuming`` is not claimed even if past TTL —
+    # the resume path owns the row.
+    resuming_row = await _mk(repo, scope, status="resuming", idle_secs=0, ttl_seconds=3600)
+    # Stamp paused_at directly so the time predicate would otherwise fire.
+    resuming_row.paused_at = datetime.now(UTC) - timedelta(seconds=600)
+    await db_session.commit()
+    assert await repo.claim_terminated_from_paused(resuming_row.id, paused_ttl_seconds=60) is False
+
+
 async def test_get_resumable_by_user_returns_transient_when_only_row(
     db_session: AsyncSession, scope: dict[str, str]
 ) -> None:

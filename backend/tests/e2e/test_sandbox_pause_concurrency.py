@@ -259,6 +259,12 @@ async def test_double_resume_guard_winner_fails_loser_returns_none(
     record = _paused_record(scope)
     conn_config = ConnectionConfig(domain="example.invalid")
 
+    # Winner's exception-path probe sees the row still at ``resuming`` (the
+    # real failure case — provider didn't move it), so it marks ``failed``.
+    # Once ``mark_failed`` lands, the loser's wait helper observes ``failed``
+    # and returns None.
+    resuming_view = _paused_record(scope)
+    resuming_view.status = "resuming"
     failed_view = _paused_record(scope)
     failed_view.status = "failed"
 
@@ -267,7 +273,7 @@ async def test_double_resume_guard_winner_fails_loser_returns_none(
     repo.mark_failed = AsyncMock()
     repo.mark_running = AsyncMock(return_value=True)
     repo.update_activity = AsyncMock()
-    repo.get = AsyncMock(return_value=failed_view)
+    repo.get = AsyncMock(side_effect=[resuming_view, failed_view, failed_view])
 
     def _raise(*_: Any, **__: Any) -> Any:
         raise RuntimeError("provider resume blew up")

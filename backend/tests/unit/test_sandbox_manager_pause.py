@@ -449,7 +449,11 @@ async def test_resume_record_returns_none_when_row_terminal() -> None:
 
 
 @pytest.mark.asyncio
-async def test_resume_record_failure_marks_failed_and_returns_none() -> None:
+async def test_resume_record_failure_marks_failed_when_still_resuming() -> None:
+    """``connect_or_resume`` raises AND the probe-fetch confirms the row is
+    still ``resuming`` (provider truly failed). Mark the row ``failed`` and
+    return None so ``get_or_create`` creates a fresh sandbox.
+    """
     factory, session = _make_session_factory()
     mgr = SandboxManager(factory)
     mgr._exchange_host = ""
@@ -463,9 +467,18 @@ async def test_resume_record_failure_marks_failed_and_returns_none() -> None:
     repo.mark_failed = AsyncMock()
     repo.update_activity = AsyncMock()
 
-    with patch(
-        "cubebox.sandbox.manager.OpenSandbox.connect_or_resume",
-        new=AsyncMock(side_effect=RuntimeError("resume failed")),
+    # Probe-session sees the row still in ``resuming`` — provider failed.
+    resuming_view = _make_record()
+    resuming_view.status = "resuming"
+    probe_repo = MagicMock()
+    probe_repo.get = AsyncMock(return_value=resuming_view)
+
+    with (
+        patch(
+            "cubebox.sandbox.manager.OpenSandbox.connect_or_resume",
+            new=AsyncMock(side_effect=RuntimeError("resume failed")),
+        ),
+        patch("cubebox.sandbox.manager.UserSandboxRepository", return_value=probe_repo),
     ):
         result = await mgr._resume_record(
             session,
@@ -481,6 +494,52 @@ async def test_resume_record_failure_marks_failed_and_returns_none() -> None:
     repo.mark_resuming.assert_awaited_once_with(record.id)
     repo.mark_failed.assert_awaited_once_with(record.id)
     repo.mark_running.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_resume_record_exception_but_provider_succeeded_does_not_mark_failed() -> None:
+    """``connect_or_resume`` raises (client timeout / network blip) BUT the
+    reconciler has already moved the row to ``running``. The exception handler
+    must NOT overwrite the healthy ``running`` row with ``failed`` — that
+    would orphan a live provider sandbox and force ``get_or_create`` to
+    provision a duplicate.
+    """
+    factory, session = _make_session_factory()
+    mgr = SandboxManager(factory)
+    mgr._exchange_host = ""
+
+    record = _make_record()
+    record.status = "paused"
+
+    repo = MagicMock()
+    repo.mark_resuming = AsyncMock(return_value=True)
+    repo.mark_failed = AsyncMock()
+
+    # Probe sees the row already at ``running`` (reconciler beat us).
+    running_view = _make_record()
+    running_view.status = "running"
+    probe_repo = MagicMock()
+    probe_repo.get = AsyncMock(return_value=running_view)
+
+    with (
+        patch(
+            "cubebox.sandbox.manager.OpenSandbox.connect_or_resume",
+            new=AsyncMock(side_effect=RuntimeError("client timeout")),
+        ),
+        patch("cubebox.sandbox.manager.UserSandboxRepository", return_value=probe_repo),
+    ):
+        result = await mgr._resume_record(
+            session,
+            repo,
+            record,
+            conn_config=MagicMock(),
+            org_id="org-1",
+            workspace_id="ws-1",
+            user_id="user-1",
+        )
+
+    assert result is None  # caller (get_or_create) re-checks and reuses.
+    repo.mark_failed.assert_not_called()  # The row stays at ``running``.
 
 
 # -------------------------------------------------------------------------

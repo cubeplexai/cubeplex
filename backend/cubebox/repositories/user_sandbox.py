@@ -100,6 +100,36 @@ class UserSandboxRepository(ScopedRepository[UserSandbox]):
             record.status = "terminated"
             await self.session.commit()
 
+    async def claim_terminated_from_paused(
+        self, record_id: str, *, paused_ttl_seconds: int
+    ) -> bool:
+        """Atomically flip paused -> terminated for an expired paused row.
+
+        Used by ``reap_paused`` so a concurrent ``_resume_record`` taking the
+        same row through ``paused -> resuming`` doesn't get killed under its
+        feet. The reaper calls the provider ``kill()`` only on a successful
+        claim. The TTL re-assertion in the WHERE clause prevents a row that
+        was just refreshed (e.g. via the reconciler bumping ``paused_at``)
+        from being killed.
+        """
+        stmt = (
+            update(UserSandbox)
+            .where(
+                UserSandbox.id == record_id,  # type: ignore[arg-type]
+                UserSandbox.org_id == self.org_id,  # type: ignore[arg-type]
+                UserSandbox.workspace_id == self.workspace_id,  # type: ignore[arg-type]
+                UserSandbox.status == "paused",  # type: ignore[arg-type]
+                UserSandbox.paused_at.is_not(None),  # type: ignore[union-attr]
+                text("paused_at + :ttl * INTERVAL '1 second' <= NOW()").bindparams(
+                    ttl=paused_ttl_seconds
+                ),
+            )
+            .values(status="terminated")
+        )
+        result = cast(CursorResult[Any], await self.session.execute(stmt))
+        await self.session.commit()
+        return bool(result.rowcount == 1)
+
     async def claim_pausing(self, record_id: str, *, idle_ttl_seconds: int) -> bool:
         """Atomically flip running -> pausing, re-asserting idleness + lease.
 

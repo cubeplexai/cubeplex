@@ -227,9 +227,20 @@ class SandboxManager:
                 )
                 if resumed is not None:
                     return resumed
-                # Resume genuinely failed (record marked failed inside
-                # _resume_record) -> fall through to create-new.
-                record = None
+                # _resume_record returned None. That can mean either a real
+                # resume failure (row now ``failed``) or the
+                # client-exception-while-provider-completed race (the
+                # reconciler may have moved the row to ``running``). Re-fetch
+                # on a fresh session before deciding: if the row is
+                # ``running`` now, fall into the normal connect path and
+                # reuse it instead of provisioning a duplicate.
+                async with self._session_factory() as recheck_session:
+                    recheck_repo = UserSandboxRepository(
+                        recheck_session, org_id=org_id, workspace_id=workspace_id
+                    )
+                    record = await recheck_repo.get_resumable_by_user(user_id)
+                if record is None or record.status != "running":
+                    record = None
 
             if record:
                 logger.info(
@@ -537,9 +548,31 @@ class SandboxManager:
             )
         except Exception as exc:
             logger.warning("Resume failed for {}: {}", record.sandbox_id, exc)
-            await repo.mark_failed(record.id)
-            if self._exchange_host:
-                await EgressRefRepository(session).revoke_for_sandbox(record.sandbox_id)
+            # The provider may have actually completed the resume despite the
+            # client-side exception (e.g. ``resume_timeout`` elapsed on our
+            # side while the server kept transitioning to ``Running``, and the
+            # reconciler then committed ``resuming -> running``). Re-fetch on
+            # a fresh session and only ``mark_failed`` if the row is still
+            # ``resuming`` — otherwise we'd overwrite a healthy ``running``
+            # row to ``failed`` while the provider sandbox is live, and the
+            # next ``get_or_create`` would provision a duplicate.
+            async with self._session_factory() as probe_session:
+                probe_repo = UserSandboxRepository(
+                    probe_session, org_id=org_id, workspace_id=workspace_id
+                )
+                current = await probe_repo.get(record.id)
+            current_status = current.status if current else None
+            if current_status == "resuming":
+                await repo.mark_failed(record.id)
+                if self._exchange_host:
+                    await EgressRefRepository(session).revoke_for_sandbox(record.sandbox_id)
+                return None
+            logger.info(
+                "Resume of {} raised on client but row is in state {} (likely "
+                "reconciler completed it); deferring to next get_or_create",
+                record.sandbox_id,
+                current_status,
+            )
             return None
         # Race window between this caller's ``connect_or_resume`` returning and
         # ``mark_running`` landing. Two reconciler-driven outcomes can make
@@ -760,7 +793,14 @@ class SandboxManager:
                     await self._kill_record(session, scoped, record, conn_config)
 
     async def reap_paused(self) -> None:
-        """Hard-kill paused rows past paused_ttl_seconds (24 min default, OQ-2)."""
+        """Hard-kill paused rows past paused_ttl_seconds (24 min default, OQ-2).
+
+        Uses an atomic ``paused -> terminated`` claim before touching the
+        provider so a concurrent ``_resume_record`` taking the same row
+        through ``paused -> resuming`` doesn't get its sandbox killed under
+        it. If the claim fails (row was resumed, refreshed, or already
+        reaped), skip that record.
+        """
         conn_config = self._build_connection_config()
         async with self._session_factory() as session:
             expired = await UserSandboxRepository.list_paused_expired_system(session)
@@ -770,7 +810,33 @@ class SandboxManager:
                     org_id=record.org_id,
                     workspace_id=record.workspace_id,
                 )
-                await self._kill_record(session, scoped, record, conn_config)
+                if not await scoped.claim_terminated_from_paused(
+                    record.id, paused_ttl_seconds=self._paused_ttl_seconds
+                ):
+                    # Row escaped: someone is resuming it or it was already
+                    # reaped. The resume path will manage egress / kill on
+                    # its own outcomes.
+                    continue
+                # We own the kill. Tell the provider to drop the sandbox and
+                # revoke any egress refs; mark_terminated already landed via
+                # the atomic claim, so no second status flip is needed.
+                try:
+                    raw = await opensandbox.Sandbox.connect(
+                        record.sandbox_id,
+                        connection_config=conn_config,
+                        skip_health_check=True,
+                    )
+                    await raw.kill()
+                    await raw.close()
+                    logger.info("Reaped paused sandbox {}", record.sandbox_id)
+                except Exception as exc:
+                    logger.warning(
+                        "Failed to kill reaped paused sandbox {} (may already be gone): {}",
+                        record.sandbox_id,
+                        exc,
+                    )
+                if self._exchange_host:
+                    await EgressRefRepository(session).revoke_for_sandbox(record.sandbox_id)
 
     async def reconcile_transients(self, *, claim_timeout: int = 60) -> None:
         """Repair rows stuck in ``pausing``/``resuming`` by reading provider state.
