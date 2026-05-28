@@ -15,13 +15,14 @@ versioned paths under ``/.skills/<name>/<version>/``.
 import asyncio
 import hashlib
 import re
+import time
 from datetime import UTC, datetime, timedelta
 
 import opensandbox
 from loguru import logger
 from opensandbox.config import ConnectionConfig
 from opensandbox.exceptions import SandboxException as ProviderSandboxError
-from opensandbox.models.sandboxes import PVC, Volume
+from opensandbox.models.sandboxes import PVC, NetworkPolicy, Volume
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from cubebox.config import config
@@ -29,11 +30,14 @@ from cubebox.models import EgressRef
 from cubebox.models.user_sandbox import UserSandbox
 from cubebox.repositories.egress_ref import EgressRefRepository
 from cubebox.repositories.sandbox_env import SandboxEnvRepository
+from cubebox.repositories.sandbox_policy import SandboxPolicyRepository
 from cubebox.repositories.user_sandbox import UserSandboxRepository
 from cubebox.sandbox.base import Sandbox, SandboxError
 from cubebox.sandbox.opensandbox import OpenSandbox
 from cubebox.sandbox_env.injector import SandboxEnvInjector
+from cubebox.sandbox_policy.rules import merge_network_rules
 from cubebox.services.sandbox_env import SandboxEnvResolver
+from cubebox.services.sandbox_policy import SandboxPolicyResolver
 
 
 class SandboxManager:
@@ -101,6 +105,12 @@ class SandboxManager:
             "sandbox.pause_attempt_grace_seconds", 3 * self._idle_ttl_seconds
         )
 
+        # Reserve-row race (#144): how long the loser polls the winner's
+        # provisioning row before giving up, and how often it re-reads in a
+        # fresh transaction.
+        self._reserve_wait_timeout: float = config.get("sandbox.reserve_wait_timeout", 30.0)
+        self._reserve_poll_interval: float = config.get("sandbox.reserve_poll_interval", 0.5)
+
     def _build_connection_config(self, *, request_timeout: int | None = None) -> ConnectionConfig:
         """Build OpenSandbox ConnectionConfig from app config.
 
@@ -114,15 +124,21 @@ class SandboxManager:
             use_server_proxy=self._use_server_proxy,
         )
 
-    def _build_user_volume(self, user_id: str) -> Volume:
-        """Build a PVC Volume for the given user."""
-        sanitized = re.sub(r"[^a-z0-9-]+", "-", user_id.lower()).strip("-")
+    def _build_user_volume(self, workspace_id: str, user_id: str) -> Volume:
+        """Build a PVC Volume keyed on (workspace_id, user_id).
+
+        Keying on the workspace too is the storage half of the ownership
+        boundary the unique index enforces in the DB: the same user in two
+        workspaces must never mount the same /workspace PVC.
+        """
+        raw = f"ws-{workspace_id}-user-{user_id}"
+        sanitized = re.sub(r"[^a-z0-9-]+", "-", raw.lower()).strip("-")
         if not sanitized:
-            sanitized = hashlib.sha256(user_id.encode("utf-8")).hexdigest()[:16]
+            sanitized = hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
 
         max_suffix_len = 63 - len(self._volume_pvc_prefix) - 1
         if len(sanitized) > max_suffix_len:
-            sanitized = hashlib.sha256(user_id.encode("utf-8")).hexdigest()[:16]
+            sanitized = hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
 
         pvc_name = f"{self._volume_pvc_prefix}-{sanitized}"
         return Volume(
@@ -215,6 +231,12 @@ class SandboxManager:
 
         async with self._session_factory() as session:
             repo = UserSandboxRepository(session, org_id=org_id, workspace_id=workspace_id)
+            # Resolve the org policy first so both the reuse and create paths
+            # can read `policy.default_image` / `policy.network_rules`.
+            policy = await SandboxPolicyResolver(
+                SandboxPolicyRepository(session, org_id=org_id),
+                default_image=self._image,
+            ).resolve()
             record = await repo.get_resumable_by_user(user_id)
 
             # Late arrival on a transient row (another caller is pausing or
@@ -279,12 +301,32 @@ class SandboxManager:
                 if record is None or record.status != "running":
                     record = None
 
-            if record:
+            # `get_resumable_by_user` doesn't include `provisioning` rows; if a
+            # sibling task is mid-reserve, the next branch (`record.status ==
+            # 'running'`) won't fire and we'll fall through to the create
+            # branch below, where `repo.reserve()` will collide on the partial
+            # unique active index and the race-loss poller will pick up the
+            # winner. That is intentional — keeps the provisioning-row dance
+            # behind a single chokepoint (#144 reserve-row-first).
+
+            if record and record.status == "running":
                 logger.info(
                     "Found existing sandbox {} for user {}",
                     record.sandbox_id,
                     user_id,
                 )
+                # LAZY image drift (OQ-5): just log; existing running sandboxes keep
+                # their original image until they terminate normally. The new image
+                # only takes effect on the next new-conversation create.
+                if record.image != policy.default_image:
+                    logger.info(
+                        "Image drift detected (sandbox={} on={}, policy now={}); "
+                        "reusing existing sandbox; new image takes effect on next "
+                        "new conversation",
+                        record.sandbox_id,
+                        record.image,
+                        policy.default_image,
+                    )
                 try:
                     raw_sandbox = await opensandbox.Sandbox.connect(
                         record.sandbox_id,
@@ -321,10 +363,43 @@ class SandboxManager:
                 if self._exchange_host:
                     await EgressRefRepository(session).revoke_for_sandbox(record.sandbox_id)
 
-            # Create a new sandbox
+            # Reserve the row BEFORE provider create. A concurrent loser's reserve
+            # raises IntegrityError; it never provisions a provider sandbox.
+            try:
+                reserved = await repo.reserve(
+                    user_id=user_id,
+                    image=policy.default_image,
+                    ttl_seconds=self._ttl,
+                )
+            except Exception:
+                await session.rollback()
+                # Lost the race. Winner may still be `provisioning` (hasn't called
+                # promote_to_running yet), so poll until it reaches `running` or a
+                # bounded timeout elapses — do NOT raise on a provisioning winner.
+                # Re-query in a fresh transaction each loop so we see the winner's
+                # committed promotion.
+                deadline = time.monotonic() + self._reserve_wait_timeout
+                winner = await repo.get_active_by_user(user_id)
+                while (
+                    winner is not None
+                    and winner.status == "provisioning"
+                    and time.monotonic() < deadline
+                ):
+                    await asyncio.sleep(self._reserve_poll_interval)
+                    await session.rollback()  # drop the snapshot before re-reading
+                    winner = await repo.get_active_by_user(user_id)
+                if winner is not None and winner.status == "running":
+                    raw_sandbox = await opensandbox.Sandbox.connect(
+                        winner.sandbox_id, connection_config=conn_config
+                    )
+                    return OpenSandbox(sandbox=raw_sandbox, workdir=self._workdir)
+                raise SandboxError(
+                    "concurrent create lost the race with no usable winner"
+                ) from None
+
             volumes: list[Volume] | None = None
             if self._volume_enabled:
-                volume = self._build_user_volume(user_id)
+                volume = self._build_user_volume(workspace_id, user_id)
                 volumes = [volume]
                 logger.info(
                     "Creating new sandbox for user {} with PVC {}",
@@ -351,30 +426,32 @@ class SandboxManager:
                 resolved = await resolver.resolve(workspace_id=workspace_id, user_id=user_id)
                 injection = SandboxEnvInjector(exchange_host=self._exchange_host).build(resolved)
 
+            base_policy = (
+                injection.network_policy
+                if injection
+                else NetworkPolicy(defaultAction="deny", egress=[])
+            )
+            network_policy = merge_network_rules(base_policy, policy.network_rules)
+
             try:
                 raw_sandbox = await opensandbox.Sandbox.create(
-                    self._image,
+                    policy.default_image,
                     connection_config=create_conn_config,
                     timeout=None,
                     ready_timeout=timedelta(seconds=self._ready_timeout),
                     volumes=volumes,
                     resource={"cpu": self._resource_cpu, "memory": self._resource_memory},
                     secure_access=True,
-                    network_policy=injection.network_policy if injection else None,
+                    network_policy=network_policy,
                 )
                 sandbox_id = raw_sandbox.id
                 logger.info("Sandbox created: {}", sandbox_id)
 
-                # Persist before rebinding so a reconnect failure can't orphan the
-                # sandbox — the reuse path will find and health-check it next turn.
-                # Skill sync is the LazySandbox's responsibility post-M3.
-                await repo.create(
-                    user_id=user_id,
-                    sandbox_id=sandbox_id,
-                    image=self._image,
-                    ttl_seconds=self._ttl,
-                    paused_ttl_seconds=self._paused_ttl_seconds,
-                )
+                # Promote the reserved row from `provisioning` to `running`
+                # with the real sandbox_id. Any losing race-poller now sees a
+                # usable winner. ``paused_ttl_seconds`` is set on the row at
+                # reserve time (see UserSandboxRepository.reserve).
+                await repo.promote_to_running(reserved.id, sandbox_id=sandbox_id)
 
                 # Rebind to the default per-command timeout: the create call's adapters
                 # captured the longer create_timeout, but ordinary commands on this
@@ -388,7 +465,8 @@ class SandboxManager:
                     skip_health_check=True,
                 )
             except ProviderSandboxError as exc:
-                # Don't leak the opensandbox driver's exception type to callers.
+                # Provider failed — free the reserved slot so the next turn can retry.
+                await repo.delete_record(reserved.id)
                 raise SandboxError(str(exc)) from exc
 
             backend = OpenSandbox(sandbox=raw_sandbox, workdir=self._workdir)
