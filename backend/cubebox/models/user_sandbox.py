@@ -3,7 +3,7 @@
 from datetime import UTC, datetime
 from typing import Any, ClassVar
 
-from sqlalchemy import Column, Index
+from sqlalchemy import Column, Index, text
 from sqlalchemy.types import JSON
 from sqlmodel import Field
 
@@ -23,6 +23,15 @@ class UserSandbox(CubeboxBase, OrgScopedMixin, table=True):
     __table_args__ = (
         Index("ix_user_sandboxes_user_ws_status", "user_id", "workspace_id", "status"),
         Index("ix_user_sandboxes_org_ws", "org_id", "workspace_id"),
+        Index(
+            "uq_user_sandbox_active",
+            "org_id",
+            "workspace_id",
+            "user_id",
+            unique=True,
+            postgresql_where=text("status IN ('provisioning','running')"),
+            sqlite_where=text("status IN ('provisioning','running')"),
+        ),
     )
 
     user_id: str = Field(foreign_key="users.id", max_length=20, index=True)

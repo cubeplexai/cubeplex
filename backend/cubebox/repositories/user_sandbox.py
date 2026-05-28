@@ -15,6 +15,8 @@ class UserSandboxRepository(ScopedRepository[UserSandbox]):
 
     model = UserSandbox
 
+    _ACTIVE_STATUSES = ("provisioning", "running")
+
     async def create(
         self,
         *,
@@ -42,14 +44,53 @@ class UserSandboxRepository(ScopedRepository[UserSandbox]):
             fields["paused_ttl_seconds"] = paused_ttl_seconds
         return await self.add(UserSandbox(**fields))
 
+    async def reserve(
+        self,
+        *,
+        user_id: str,
+        image: str,
+        volumes_config: dict[str, Any] | None = None,
+        ttl_seconds: int = 3600,
+    ) -> UserSandbox:
+        """Insert a provisioning placeholder row BEFORE provider create.
+
+        The partial unique index over ('provisioning','running') makes a
+        concurrent second reserve for the same identity raise an IntegrityError,
+        so the loser never provisions a provider sandbox. ``sandbox_id`` gets a
+        unique ``pending-<row id>`` placeholder until promote overwrites it.
+        """
+        record = UserSandbox(
+            user_id=user_id,
+            sandbox_id="",  # set below once the row id is minted
+            status="provisioning",
+            image=image,
+            volumes_config=volumes_config,
+            ttl_seconds=ttl_seconds,
+        )
+        record.sandbox_id = f"pending-{record.id}"
+        return await self.add(record)
+
+    async def promote_to_running(self, record_id: str, *, sandbox_id: str) -> None:
+        record = await self.get(record_id)
+        if record is None:
+            raise ValueError(f"sandbox record {record_id} vanished mid-create")
+        record.sandbox_id = sandbox_id
+        record.status = "running"
+        await self.session.commit()
+
+    async def delete_record(self, record_id: str) -> None:
+        await self.delete(record_id)
+
     async def get_active_by_user(self, user_id: str) -> UserSandbox | None:
-        """Get the active (running) sandbox for a user in this workspace."""
+        """Return the active (provisioning OR running) sandbox for this user.
+
+        The partial unique index guarantees at most one active row per identity,
+        so no ``order_by(... desc()).limit(1)`` "newest wins" is needed.
+        """
         stmt = (
             self._scoped_select()
             .where(UserSandbox.user_id == user_id)
-            .where(UserSandbox.status == "running")
-            .order_by(UserSandbox.created_at.desc())  # type: ignore[attr-defined]
-            .limit(1)
+            .where(UserSandbox.status.in_(self._ACTIVE_STATUSES))  # type: ignore[attr-defined]
         )
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
