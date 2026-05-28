@@ -3,11 +3,12 @@
 from datetime import UTC, datetime
 from typing import Any, ClassVar
 
-from sqlalchemy import Column, DateTime, Index
-from sqlalchemy.orm import declared_attr
+from sqlalchemy import DateTime, Index
 from sqlmodel import Field, SQLModel
 
 from cubebox.models.public_id import generate_public_id
+
+_UTC_DT = DateTime(timezone=True)
 
 
 class TimestampMixin:
@@ -18,15 +19,14 @@ class TimestampMixin:
     :class:`CubeboxBase`.
     """
 
-    __allow_unmapped__ = True
-
-    @declared_attr
-    def created_at(cls):  # type: ignore[no-untyped-def]
-        return Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC))
-
-    @declared_attr
-    def updated_at(cls):  # type: ignore[no-untyped-def]
-        return Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC))
+    created_at: datetime = Field(
+        default_factory=lambda: datetime.now(UTC),
+        sa_type=_UTC_DT,
+    )
+    updated_at: datetime = Field(
+        default_factory=lambda: datetime.now(UTC),
+        sa_type=_UTC_DT,
+    )
 
 
 class CubeboxBase(SQLModel, TimestampMixin):
@@ -36,6 +36,8 @@ class CubeboxBase(SQLModel, TimestampMixin):
     column auto-fills with ``generate_public_id(_PREFIX)`` on construction.
     Inheritance order matters: ``class Foo(CubeboxBase, OrgScopedMixin, table=True)``.
     """
+
+    __allow_unmapped__ = True
 
     _PREFIX: ClassVar[str]
 

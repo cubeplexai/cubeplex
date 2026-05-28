@@ -146,6 +146,10 @@ strict = true
 module = "tests.*"
 ignore_errors = true
 
+[[tool.mypy.overrides]]
+module = "cubebox.models.mixins"
+disable_error_code = ["call-overload"]
+
 [tool.coverage.run]
 source = ["cubebox"]
 omit = ["*/tests/*", "*/__pycache__/*", "*/.venv/*"]
