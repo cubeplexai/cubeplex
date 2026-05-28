@@ -316,9 +316,13 @@ class UserSandboxRepository(ScopedRepository[UserSandbox]):
             select(UserSandbox)
             .where(UserSandbox.status.in_(("pausing", "resuming")))  # type: ignore[attr-defined]
             .where(
+                # Parenthesise the disjunction so SQL's ``AND > OR`` precedence
+                # doesn't slip the OR branch past the status filter — without
+                # the parens this would also match any non-transient row with
+                # a stale ``last_provider_check``.
                 text(
-                    "last_provider_check IS NULL "
-                    "OR last_provider_check + :ct * INTERVAL '1 second' <= NOW()"
+                    "(last_provider_check IS NULL "
+                    "OR last_provider_check + :ct * INTERVAL '1 second' <= NOW())"
                 )
             )
             .params(ct=claim_timeout)

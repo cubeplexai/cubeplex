@@ -122,6 +122,41 @@ async def test_list_transient_includes_null_and_old_checks(
     assert scoped_ids == {null_pausing.id, null_resuming.id, old_pausing.id}
 
 
+async def test_list_transient_excludes_running_with_stale_provider_check(
+    db_session: AsyncSession, scope: dict[str, str]
+) -> None:
+    """A ``running`` row with a stale ``last_provider_check`` MUST NOT be
+    selected — the predicate is ``status IN (pausing, resuming) AND
+    (last_provider_check IS NULL OR is stale)``, so without the parentheses
+    around the OR clause, AND/OR precedence would let stale-but-non-transient
+    rows slip through.
+    """
+    repo = _mk_repo(db_session, scope)
+    now = datetime.now(UTC)
+
+    # Running row with stale check — would match if the OR predicate isn't
+    # parenthesised.
+    running_stale = await _mk(
+        repo, scope, status="running", last_provider_check=now - timedelta(seconds=600)
+    )
+    # Paused row with stale check — same.
+    paused_stale = await _mk(
+        repo, scope, status="paused", last_provider_check=now - timedelta(seconds=600)
+    )
+    # A real transient row to make sure the query still returns something for
+    # this scope (so the scoping assertion below doesn't trivially pass).
+    pausing_null = await _mk(repo, scope, status="pausing", last_provider_check=None)
+
+    rows = await UserSandboxRepository.list_transient_for_reconcile_system(
+        db_session, claim_timeout=60
+    )
+    scoped_ids = {r.id for r in rows if r.workspace_id == scope["workspace_id"]}
+
+    assert pausing_null.id in scoped_ids
+    assert running_stale.id not in scoped_ids
+    assert paused_stale.id not in scoped_ids
+
+
 async def test_touch_provider_check_removes_row_from_next_window(
     db_session: AsyncSession, scope: dict[str, str]
 ) -> None:
