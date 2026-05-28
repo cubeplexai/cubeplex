@@ -746,6 +746,7 @@ class SandboxManager:
                     record.id, idle_ttl_seconds=self._idle_ttl_seconds
                 ):
                     continue  # touched / acquired / already-claimed between select+claim
+                raw: opensandbox.Sandbox | None = None
                 try:
                     raw = await opensandbox.Sandbox.connect(
                         record.sandbox_id,
@@ -786,6 +787,21 @@ class SandboxManager:
                     # Don't revert to `running` before killing; same race as
                     # the supports_pause=False branch above.
                     await self._kill_record(session, scoped, record, conn_config)
+                finally:
+                    # Per internals-note G8: ``pause()`` does NOT tear down the
+                    # SDK's httpx transport / cached adapters; the kill path
+                    # already pairs ``kill()`` with ``close()``, so the pause
+                    # path must too — otherwise every successful idle pause
+                    # leaks a transport in the long-running cleanup loop.
+                    if raw is not None:
+                        try:
+                            await raw.close()
+                        except Exception as exc:
+                            logger.debug(
+                                "Pause-path close failed for {}: {}",
+                                record.sandbox_id,
+                                exc,
+                            )
 
     async def reap_paused(self) -> None:
         """Hard-kill paused rows past paused_ttl_seconds (24 min default, OQ-2).

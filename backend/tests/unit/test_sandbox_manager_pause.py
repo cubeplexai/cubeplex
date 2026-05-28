@@ -107,6 +107,10 @@ async def test_pause_idle_pauses_on_successful_claim() -> None:
     scoped_repo.mark_paused.assert_not_called()
     scoped_repo.mark_terminated.assert_not_called()
     scoped_repo.mark_running.assert_not_called()
+    # Per internals-note G8, pause() does NOT tear down the SDK transport;
+    # pause_idle must close the raw handle to avoid leaking httpx clients
+    # across the long-running cleanup loop.
+    raw_sandbox.close.assert_awaited_once()
 
 
 # -------------------------------------------------------------------------
