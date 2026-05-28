@@ -3,7 +3,7 @@
 from datetime import UTC, datetime
 from typing import Any, ClassVar
 
-from sqlalchemy import JSON, BigInteger, Column, Index
+from sqlalchemy import JSON, BigInteger, Column, DateTime, Index
 from sqlmodel import Field
 
 from cubebox.models.mixins import CubeboxBase, OrgScopedMixin, org_scope_index
@@ -50,7 +50,10 @@ class Trigger(CubeboxBase, OrgScopedMixin, table=True):
     previous_secret_cred_id: str | None = Field(
         default=None, foreign_key="credentials.id", max_length=20
     )
-    previous_secret_expires_at: datetime | None = Field(default=None)
+    previous_secret_expires_at: datetime | None = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True),
+    )
 
     # Summary counters (BIGINT, server default 0)
     events_total: int = Field(
@@ -82,8 +85,14 @@ class TriggerEvent(CubeboxBase, OrgScopedMixin, table=True):
     event_type: str | None = Field(default=None)
     dedup_key: str = Field(max_length=64)
 
-    occurred_at: datetime | None = Field(default=None)
-    received_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    occurred_at: datetime | None = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True),
+    )
+    received_at: datetime = Field(
+        default_factory=lambda: datetime.now(UTC),
+        sa_column=Column(DateTime(timezone=True), nullable=False),
+    )
 
     # Status: accepted|duplicate|filtered_out|rate_limited|failed|dead_lettered
     status: str = Field(max_length=16)
