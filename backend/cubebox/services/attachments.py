@@ -351,7 +351,7 @@ async def cleanup_orphan_attachments() -> int:
         cutoff = _dt.now(_UTC) - _td(seconds=ttl)
         stmt = sa_select(_Attachment).where(
             _Attachment.status == "pending",  # type: ignore[arg-type]
-            _Attachment.created_at < cutoff,  # type: ignore[arg-type]
+            _Attachment.created_at < cutoff,
         )
         result = await session.execute(stmt)
         rows = list(result.scalars().all())
