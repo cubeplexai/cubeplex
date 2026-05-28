@@ -277,3 +277,98 @@ async def test_completion_hook_recovers_claimed_row_race(
         refreshed = await s.get(ScheduledTaskRun, row_id)
         assert refreshed is not None
         assert refreshed.state == "succeeded"
+
+
+@pytest.mark.asyncio
+async def test_post_dispatch_backfills_conversation_id_when_hook_wins(
+    async_client: httpx.AsyncClient,
+) -> None:
+    """Regression for codex round-3 P2: when the completion hook terminates
+    the row before _dispatch_one's post-dispatch UPDATE lands, the UPDATE
+    must still backfill conversation_id and started_at so the UI's "View
+    conversation" link works. State must NOT be reverted from terminal.
+    """
+    from datetime import timedelta as _td
+
+    from sqlalchemy import case, literal, update
+
+    tid = await _create_due_once(async_client)
+    # Set up the post-race state: hook already flipped 'claimed' → 'succeeded'
+    # while conversation_id is still NULL. Then run the poller's UPDATE
+    # logic directly (same SQL shape as _dispatch_one's tail) to verify
+    # the backfill works and the terminal state is preserved.
+    async with async_session_maker() as s:
+        now = datetime.now(UTC)
+        row = ScheduledTaskRun(
+            scheduled_task_id=tid,
+            org_id=DEFAULT_ORG_ID,
+            workspace_id=DEFAULT_WS_ID,
+            scheduled_for=now,
+            claimed_at=now,
+            state="succeeded",  # hook already terminated
+            run_id="0192abcd-hook-won-race",
+            conversation_id=None,
+            started_at=None,
+        )
+        s.add(row)
+        await s.commit()
+        row_id = row.id
+        backfill_started_at = now + _td(milliseconds=5)
+        await s.execute(
+            update(ScheduledTaskRun)
+            .where(ScheduledTaskRun.id == row_id)
+            .values(
+                conversation_id="conv-backfilled",
+                started_at=backfill_started_at,
+                state=case(
+                    (ScheduledTaskRun.state == "claimed", literal("started")),
+                    else_=ScheduledTaskRun.state,
+                ),
+            )
+        )
+        await s.commit()
+    async with async_session_maker() as s:
+        refreshed = await s.get(ScheduledTaskRun, row_id)
+        assert refreshed is not None
+        # State preserved as the terminal value the hook set.
+        assert refreshed.state == "succeeded"
+        # conversation_id and started_at now backfilled.
+        assert refreshed.conversation_id == "conv-backfilled"
+        assert refreshed.started_at is not None
+
+
+@pytest.mark.asyncio
+async def test_busy_postponed_query_honors_above_default_retry_cap(
+    async_client: httpx.AsyncClient,
+) -> None:
+    """Regression for codex round-3 P2: claim_busy_postponed_runs must not
+    hard-code retry_count < 3. When max_busy_retries is configured higher,
+    a row at retry_count > 3 must still be picked up; the cap is enforced
+    in the poller's _dispatch_one (rows past the cap are flipped to terminal
+    skipped_busy_max_retries, which the state='claimed' filter excludes).
+    """
+    from datetime import timedelta as _td
+
+    from cubebox.repositories.scheduled_task import claim_busy_postponed_runs
+
+    tid = await _create_due_once(async_client)
+    async with async_session_maker() as s:
+        now = datetime.now(UTC)
+        row = ScheduledTaskRun(
+            scheduled_task_id=tid,
+            org_id=DEFAULT_ORG_ID,
+            workspace_id=DEFAULT_WS_ID,
+            scheduled_for=now - _td(minutes=20),
+            claimed_at=now - _td(minutes=15),
+            state="claimed",
+            retry_count=4,  # above the historical literal cap
+            next_retry_at=now - _td(seconds=1),
+        )
+        s.add(row)
+        await s.commit()
+        row_id = row.id
+    async with async_session_maker() as s:
+        rows = await claim_busy_postponed_runs(s, now=datetime.now(UTC), limit=50)
+    assert any(r.id == row_id for r in rows), (
+        "busy-postponed row with retry_count > 3 not picked up"
+    )

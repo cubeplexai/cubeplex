@@ -135,7 +135,14 @@ async def claim_stale_runs(
 async def claim_busy_postponed_runs(
     session: AsyncSession, *, now: datetime, limit: int
 ) -> list[ScheduledTaskRun]:
-    """Lock and return occurrence rows postponed because the fixed target was busy."""
+    """Lock and return occurrence rows postponed because the fixed target was busy.
+
+    No retry-count cap in the query: the cap is enforced in the poller's
+    ``_dispatch_one`` (rows past ``max_busy_retries`` are flipped to terminal
+    ``skipped_busy_max_retries``, so the ``state='claimed'`` filter already
+    excludes them). Hard-coding a literal cap here would strand rows when
+    ``max_busy_retries`` is configured higher than the literal.
+    """
     stmt = (
         select(ScheduledTaskRun)
         .where(
@@ -143,7 +150,6 @@ async def claim_busy_postponed_runs(
             cast(Any, ScheduledTaskRun.run_id).is_(None),
             cast(Any, ScheduledTaskRun.next_retry_at).is_not(None),
             ScheduledTaskRun.next_retry_at <= now,  # type: ignore[arg-type, operator]
-            ScheduledTaskRun.retry_count < 3,  # type: ignore[arg-type]
         )
         .limit(limit)
         .with_for_update(skip_locked=True)
