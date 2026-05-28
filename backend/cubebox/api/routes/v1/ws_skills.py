@@ -18,6 +18,12 @@ from cubebox.api.schemas.skill import (
     SkillFiles,
     SkillSummary,
 )
+from cubebox.api.schemas.skill_discovery import (
+    CandidatePreviewResponse,
+    InstallCandidateRequest,
+    InstallCandidateResponse,
+    SkillCandidateResponse,
+)
 from cubebox.auth.context import RequestContext
 from cubebox.auth.dependencies import require_member
 from cubebox.config import config as _config
@@ -29,15 +35,23 @@ from cubebox.repositories.skill import (
     SkillVersionRepository,
 )
 from cubebox.skills.cache import SkillCache
+from cubebox.skills.discovery import (
+    SkillDiscoveryService,
+    SkillInstallError,
+    SkillInstallService,
+)
 from cubebox.skills.frontmatter import InvalidFrontmatterError
 from cubebox.skills.service import (
     FileTooLargeError,
     InvalidSkillNameError,
+    InvalidZipPathError,
     SkillCatalogService,
     SkillMdMissingError,
     SkillPublishService,
     VersionCollisionError,
 )
+from cubebox.skills.sources.base import CandidateIdError, decode_candidate_id
+from cubebox.skills.sources.registry import SkillSourceRegistry
 
 router = APIRouter(prefix="/ws/{workspace_id}/skills", tags=["ws-skills"])
 
@@ -124,6 +138,159 @@ async def list_skills_in_ws(
             if (q is None or q.lower() in s.name.lower() or q.lower() in s.description.lower())
             and (tag is None or tag in s.keywords)
         ]
+
+
+@router.get("/discover", response_model=list[SkillCandidateResponse])
+async def discover_skills(
+    workspace_id: str,
+    *,
+    ctx: Annotated[RequestContext, Depends(require_member)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+    q: str = Query(..., min_length=1),
+    limit: int = Query(5, ge=1, le=20),
+) -> list[SkillCandidateResponse]:
+    org = await OrganizationRepository(session).get(ctx.org_id)
+    if org is None:
+        raise HTTPException(status_code=404, detail="ORG_NOT_FOUND")
+    catalog = SkillCatalogService(session=session, cache=_cache())
+    registry = await SkillSourceRegistry.build(
+        session=session,
+        catalog=catalog,
+        org_id=ctx.org_id,
+        org_slug=org.slug,
+        workspace_id=workspace_id,
+    )
+    cands = await SkillDiscoveryService(registry).discover(q, limit=limit)
+    return [
+        SkillCandidateResponse(
+            candidate_id=c.candidate_id,
+            name=c.name,
+            canonical_name=c.canonical_name,
+            description=c.description,
+            source_kind=c.source_kind,
+            keywords=c.keywords,
+            version=c.version,
+            trust=c.trust.value,
+            install_state=c.install_state,
+            stars=c.stars,
+            install_count=c.install_count,
+            source_name=c.source_name,
+            repo=c.repo,
+            unvetted=(c.source_kind == "remote" and c.trust.value != "official"),
+        )
+        for c in cands
+    ]
+
+
+@router.get("/discover/preview", response_model=CandidatePreviewResponse)
+async def preview_candidate(
+    workspace_id: str,
+    *,
+    ctx: Annotated[RequestContext, Depends(require_member)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+    candidate_id: str = Query(...),
+) -> CandidatePreviewResponse:
+    org = await OrganizationRepository(session).get(ctx.org_id)
+    if org is None:
+        raise HTTPException(status_code=404, detail="ORG_NOT_FOUND")
+    try:
+        kind, source_id, source_ref = decode_candidate_id(candidate_id)
+    except CandidateIdError as e:
+        raise HTTPException(status_code=400, detail="BAD_CANDIDATE_ID") from e
+    catalog = SkillCatalogService(session=session, cache=_cache())
+    if kind == "local":
+        skill = await SkillRepository(session).get(source_ref)
+        if skill is None or not _visible(skill, ctx.org_id):
+            raise HTTPException(status_code=404, detail="SKILL_NOT_FOUND")
+        sv = await SkillVersionRepository(session).find(skill.id, skill.current_version)
+        if sv is None:
+            raise HTTPException(status_code=404, detail="SKILL_VERSION_NOT_FOUND")
+        content = await catalog.fetch_skill_md(sv.id)
+        return CandidatePreviewResponse(
+            candidate_id=candidate_id,
+            name=skill.name,
+            canonical_name=skill.name,
+            content=content,
+        )
+    registry = await SkillSourceRegistry.build(
+        session=session,
+        catalog=catalog,
+        org_id=ctx.org_id,
+        org_slug=org.slug,
+        workspace_id=workspace_id,
+    )
+    remote = registry.remote_source_by_id(source_id)
+    if remote is None:
+        raise HTTPException(status_code=404, detail="SOURCE_NOT_FOUND")
+    files = await remote.fetch(source_ref)
+    if "SKILL.md" not in files:
+        raise HTTPException(status_code=404, detail="SKILL_MD_MISSING")
+    slug = source_ref.rsplit("/", 1)[-1]
+    return CandidatePreviewResponse(
+        candidate_id=candidate_id,
+        name=slug,
+        canonical_name=f"{org.slug}:{slug}",
+        content=files["SKILL.md"].decode("utf-8"),
+    )
+
+
+@router.post("/install", status_code=201, response_model=InstallCandidateResponse)
+async def install_candidate(
+    workspace_id: str,
+    body: InstallCandidateRequest,
+    *,
+    ctx: Annotated[RequestContext, Depends(require_member)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> InstallCandidateResponse:
+    org = await OrganizationRepository(session).get(ctx.org_id)
+    if org is None:
+        raise HTTPException(status_code=404, detail="ORG_NOT_FOUND")
+    catalog = SkillCatalogService(session=session, cache=_cache())
+    registry = await SkillSourceRegistry.build(
+        session=session,
+        catalog=catalog,
+        org_id=ctx.org_id,
+        org_slug=org.slug,
+        workspace_id=workspace_id,
+    )
+    install = SkillInstallService(
+        session=session,
+        registry=registry,
+        publisher=SkillPublishService(session=session, cache=_cache()),
+        org_id=ctx.org_id,
+        org_slug=org.slug,
+        workspace_id=workspace_id,
+        actor_user_id=ctx.user.id,
+    )
+    try:
+        result = await install.install(body.candidate_id)
+    except CandidateIdError as e:
+        raise HTTPException(status_code=400, detail="BAD_CANDIDATE_ID") from e
+    except InvalidZipPathError as e:
+        raise HTTPException(
+            status_code=400, detail={"code": "INVALID_PATH", "reason": str(e)}
+        ) from e
+    except FileTooLargeError as e:
+        raise HTTPException(
+            status_code=400, detail={"code": "FILE_TOO_LARGE", "reason": str(e)}
+        ) from e
+    except VersionCollisionError as e:
+        raise HTTPException(
+            status_code=409, detail={"code": "VERSION_EXISTS", "reason": str(e)}
+        ) from e
+    except (InvalidFrontmatterError, InvalidSkillNameError, SkillMdMissingError) as e:
+        raise HTTPException(
+            status_code=400, detail={"code": "INVALID_SKILL", "reason": str(e)}
+        ) from e
+    except SkillInstallError as e:
+        raise HTTPException(
+            status_code=400, detail={"code": "INSTALL_FAILED", "reason": str(e)}
+        ) from e
+    return InstallCandidateResponse(
+        canonical_name=result.canonical_name,
+        skill_id=result.skill_id,
+        installed_version=result.installed_version,
+    )
 
 
 @router.get("/{skill_id}", response_model=SkillContentResponse)
