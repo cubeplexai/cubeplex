@@ -56,6 +56,15 @@ def test_dedupe_local_wins_against_remote_twin():
     assert ranked[0].canonical_name == "frontend-design"
 
 
+def test_dedupe_remote_picks_higher_trust_when_same_slug():
+    # Two remote sources return the same slug; community-trust should beat untrusted.
+    community = _c("slide-deck", trust=TrustTier.community, stars=10)
+    untrusted = _c("slide-deck", trust=TrustTier.untrusted, stars=100)
+    ranked = rank_candidates([untrusted, community], query="slide", limit=5)
+    assert len(ranked) == 1
+    assert ranked[0].trust == TrustTier.community
+
+
 def test_limit_applied():
     cands = [_c(f"s{i}", desc="thing") for i in range(10)]
     assert len(rank_candidates(cands, query="thing", limit=3)) == 3
