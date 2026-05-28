@@ -43,27 +43,29 @@ test('skills page loads and search surfaces the deep-research skill', async ({ p
   const card = page.getByTestId('skill-candidate-card').filter({ hasText: 'deep-research' })
   await expect(card).toBeVisible({ timeout: 10_000 })
 
-  // Should show the source badge ("preinstalled")
-  await expect(card.getByText(/preinstalled/i)).toBeVisible()
+  // Should show the source badge (local catalog skills show "catalog")
+  await expect(card.getByText(/catalog/i)).toBeVisible()
 })
 
-test('install button installs skill and shows install confirmation', async ({ page }) => {
+test('preinstalled skill shows as already installed in fresh workspace', async ({ page }) => {
+  // Preinstalled skills (like deep-research) are auto-bound at registration.
+  // The discover panel should show the button as "Installed" (disabled) and
+  // the skills list should already contain the skill.
   const wsId = await registerAndGetWsId(page)
   await page.goto(`/w/${wsId}/skills`)
 
+  // The skills list already has the preinstalled skill without any install action.
+  await expect(page.getByTestId('skills-list').getByText('deep-research')).toBeVisible({
+    timeout: 10_000,
+  })
+
+  // Searching also surfaces it — with the "Installed" button state.
   await page.getByPlaceholder(/Search skills/i).fill('research')
   await page.getByRole('button', { name: /Search/i }).click()
 
   const card = page.getByTestId('skill-candidate-card').filter({ hasText: 'deep-research' })
   await expect(card).toBeVisible({ timeout: 10_000 })
 
-  await card.getByRole('button', { name: /^Install$/ }).click()
-
-  // Install confirmation message appears
-  await expect(page.getByText(/Installed deep-research/i)).toBeVisible({ timeout: 10_000 })
-
-  // Skill appears in the workspace list
-  await expect(page.getByTestId('skills-list').getByText('deep-research')).toBeVisible({
-    timeout: 10_000,
-  })
+  // Button shows "Installed" because the skill is already auto-bound.
+  await expect(card.getByRole('button', { name: /^Installed$/ })).toBeDisabled()
 })

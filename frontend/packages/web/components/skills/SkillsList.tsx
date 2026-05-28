@@ -5,6 +5,7 @@
 // "Check for update" is scoped-out for v1: the backend SkillSummary does not
 // carry source_ref, so we can't surface the refresh button yet.
 import { useEffect, useState } from 'react'
+import { useSkillsStore } from '@cubebox/core'
 import { Badge } from '@/components/ui/badge'
 
 interface EnabledSkill {
@@ -18,6 +19,8 @@ interface EnabledSkill {
 
 export function SkillsList({ wsId }: { wsId: string }) {
   const [rows, setRows] = useState<EnabledSkill[]>([])
+  // Re-fetch the list whenever a new skill is installed via the store.
+  const lastInstalled = useSkillsStore((s) => s.lastInstalled)
 
   useEffect(() => {
     void (async () => {
@@ -28,7 +31,7 @@ export function SkillsList({ wsId }: { wsId: string }) {
         setRows((await r.json()) as EnabledSkill[])
       }
     })()
-  }, [wsId])
+  }, [wsId, lastInstalled])
 
   return (
     <section className="flex flex-col gap-2" data-testid="skills-list">
