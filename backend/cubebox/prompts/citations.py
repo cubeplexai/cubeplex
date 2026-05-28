@@ -18,5 +18,10 @@ Your tool results (web_search, web_fetch, subagents, …) contain citation marke
 
 6. **Subagent citations**: When a subagent's output contains 【N-M】 markers, copy them through verbatim into your response. The system has already registered the citation sources — you do not need the original data to use them. Treat subagent citation markers the same as those from your own tool results.
 
-Example of a correct final answer:
-Tomorrow Beijing is cloudy【11-4】, with a high of 24° and a low of 16°【11-0】【11-1】, and no precipitation all day【11-2】."""  # noqa: E501
+7. **Search-result facts are the most important to cite.** Facts that arrived through a tool result — search hits especially — already carry their source in the text you were given: each chunk is prefixed with its marker and metadata, e.g. `【7-0】 [url: https://example.com | title: Example] …`. When you use such a fact in your answer, reproduce its 【N-M】 marker inline. Do not strip the marker just because the fact came in through a tool result rather than your own reasoning — that is exactly the case the user is relying on you to attribute.
+
+Example of a correct final answer (weather):
+Tomorrow Beijing is cloudy【11-4】, with a high of 24° and a low of 16°【11-0】【11-1】, and no precipitation all day【11-2】.
+
+Example of a correct final answer assembled from several search hits:
+The new model was released in March 2026【4-0】 and scored 92% on the benchmark【4-1】, ahead of the previous leader at 88%【5-0】. Pricing starts at $20/month【5-2】."""  # noqa: E501

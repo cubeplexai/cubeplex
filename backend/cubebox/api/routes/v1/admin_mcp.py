@@ -517,7 +517,7 @@ async def admin_invoke_tool(
 ) -> ToolInvokeOut:
     """Admin Try It: invoke a tool on any install in the admin's org."""
     from cubebox.api.routes.v1.ws_mcp import _invoke_tool_via_cubepi
-    from cubebox.mcp.cubepi_runtime import _resolve_headers_from_spec
+    from cubebox.mcp.cubepi_runtime import _resolve_auth_from_spec
     from cubebox.mcp.effective import MCPEffectiveConnectorService
     from cubebox.repositories.mcp import (
         MCPConnectorTemplateRepository,
@@ -580,7 +580,7 @@ async def admin_invoke_tool(
     spec = _build_runtime_spec_for_discovery(install=install, grant=grant)
     started = time.perf_counter()
     try:
-        headers = await _resolve_headers_from_spec(
+        resolved = await _resolve_auth_from_spec(
             spec=spec,
             workspace_id=body.workspace_id or "",
             org_id=ctx.org_id,
@@ -590,8 +590,9 @@ async def admin_invoke_tool(
             token_manager=token_mgr,
             grant_repo=grant_repo,
         )
-        if headers is None:
+        if resolved is None:
             raise RuntimeError("credential_resolution_returned_none")
+        headers, server_url = resolved
     except Exception as exc:  # noqa: BLE001
         duration = int((time.perf_counter() - started) * 1000)
         await audit.record(
@@ -614,7 +615,7 @@ async def admin_invoke_tool(
     try:
         result = await asyncio.wait_for(
             _invoke_tool_via_cubepi(
-                install.server_url,
+                server_url,
                 tool_name,
                 body.arguments,
                 headers=headers or None,

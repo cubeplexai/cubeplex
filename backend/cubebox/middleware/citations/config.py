@@ -73,14 +73,28 @@ class CitationConfig(BaseModel):
         return str(item)
 
     def extract_items(self, data: dict[str, Any]) -> list[dict[str, Any]]:
-        """Extract the list of result items from parsed tool output."""
+        """Extract the list of result items from parsed tool output.
+
+        ``content_field`` may be a single top-level key (``"results"``) or
+        a dotted path (``"data.webPages.value"``) — the path is walked
+        with ``dict.get`` at each step, returning ``[]`` if any segment
+        is missing. Dotted paths are how providers like Bocha nest the
+        result array under metadata wrappers without us flattening the
+        payload before extraction.
+        """
         if self.discriminator_field:
             value = data.get(self.discriminator_field)
             if self.discriminator_values and value not in self.discriminator_values:
                 return []
         if self.content_field is None:
             return [data]
-        items = data.get(self.content_field, [])
+        items: Any = data
+        for segment in self.content_field.split("."):
+            if not isinstance(items, dict):
+                return []
+            items = items.get(segment)
+            if items is None:
+                return []
         if not isinstance(items, list):
             return [items] if items else []
         return items

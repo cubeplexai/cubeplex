@@ -182,6 +182,9 @@ class MCPConnectorInstallService:
             default_credential_policy=defaults.credential_policy,
             auth_status=defaults.auth_status,
             tool_citations=dict(template.tool_citation_defaults),
+            static_auth_style=template.static_auth_style,
+            static_auth_header_name=template.static_auth_header_name,
+            static_auth_query_param=template.static_auth_query_param,
             created_by_user_id=self._actor_user_id,
         )
         saved = await self._install_repo.add(install)
@@ -262,6 +265,9 @@ class MCPConnectorInstallService:
             default_credential_policy=defaults.credential_policy,
             auth_status=defaults.auth_status,
             tool_citations=dict(template.tool_citation_defaults),
+            static_auth_style=template.static_auth_style,
+            static_auth_header_name=template.static_auth_header_name,
+            static_auth_query_param=template.static_auth_query_param,
             auto_enroll_new_workspaces=auto_enroll,
             created_by_user_id=self._actor_user_id,
         )
