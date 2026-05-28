@@ -265,9 +265,17 @@ New table `scheduled_task_runs` (history; `CubeboxBase` + `OrgScopedMixin`,
 - `started_at` (UTC, nullable) — when `start_run` actually succeeded.
 - `state` — the occurrence lifecycle (see state machine below):
   `claimed` | `started` | `succeeded` | `failed` | `skipped_missed` |
-  `skipped_active`.
+  `skipped_busy_max_retries`.
 - `claim_count` (int, default 1) — how many times this occurrence has been
   claimed; bounds re-claim retries after a dispatch crash.
+- `retry_count` (int, default 0) — how many times this occurrence has been
+  postponed because its `fixed` target conversation was busy. Capped at 3
+  (see "One-run-per-conversation interaction" above); past the cap the row is
+  set terminal `skipped_busy_max_retries`.
+- `next_retry_at` (UTC, nullable) — set when a busy-postpone happens; the
+  poller re-picks the row once `now() >= next_retry_at`. Distinct from
+  `claim_count`/`claim_timeout` (which guards dispatch crashes); this guards
+  conversation-busy.
 - `run_id` (nullable) — the `RunManager` run id, set once `start_run` returns.
 - `conversation_id` (nullable) — where it ran.
 - `detail` (nullable text) — error / skip reason.
@@ -293,8 +301,10 @@ row is **re-claimable**:
   rejected (e.g. owner lost membership, fixed target not owner-owned). These are
   **not** set by the dispatch loop (which stops at `started`); see "Reaching a
   terminal state" below for how the run's outcome is copied back.
-- `skipped_missed` / `skipped_active` — terminal skip outcomes (missed-run
-  policy / busy fixed conversation).
+- `skipped_missed` / `skipped_busy_max_retries` — terminal skip outcomes
+  (missed-run policy / busy fixed conversation past the 3-retry cap; the
+  busy case is the busy-postpone path described under "One-run-per-
+  conversation interaction").
 
 Re-claim rule: a poller, in its claim transaction, also picks up
 `scheduled_task_runs` rows still in `claimed` whose `claimed_at` is older than a
@@ -344,6 +354,11 @@ Loop (every ~15–30s, jittered to avoid replica thundering-herd):
    - **Stale claims** (re-claim path): `scheduled_task_runs` rows still in
      `state='claimed'` with `run_id IS NULL` and `claimed_at < now() -
      claim_timeout` — occurrences a crashed replica reserved but never started.
+   - **Busy-postponed rows**: `scheduled_task_runs` rows in the non-terminal
+     re-claimable state with `next_retry_at IS NOT NULL` and
+     `next_retry_at <= now()` and `retry_count < 3`. These are the busy-
+     conversation postpones described above; the poller re-picks them and
+     re-attempts dispatch.
 3. For each due task:
    - Determine the occurrence time `scheduled_for` (= the `next_fire_at` we read).
    - Apply **missed-run policy** (below) to decide fire vs skip.
@@ -366,9 +381,14 @@ Loop (every ~15–30s, jittered to avoid replica thundering-herd):
    `RunContext` and the resolved target conversation, then `UPDATE` the row to
    `state='started'` with the returned `run_id` + `started_at`. The run then lives
    as a normal in-process task on this replica, identical to an interactive run.
-   If `start_run` itself errors (e.g. conversation busy, owner-membership /
-   owner-ownership check fails), set the row to the matching terminal state
-   (`skipped_active` / `failed`) instead. The loop stops at `started`; the
+   If `start_run` itself errors because the target conversation is busy and
+   the task is `target_mode=fixed`, apply the busy-postpone path instead of
+   terminating: if `retry_count < 3`, set `next_retry_at = now + 5m`,
+   increment `retry_count`, and leave the row re-claimable (state stays a
+   non-terminal `claimed`-equivalent); if `retry_count >= 3`, set the row
+   terminal `skipped_busy_max_retries`. For other dispatch errors (owner-
+   membership / owner-ownership check fails) set the row `failed`. The loop
+   stops at `started`; the
    `succeeded`/`failed` outcome is written later by the run-completion hook
    (see "Reaching a terminal state" above), not here.
 
@@ -418,9 +438,21 @@ observable through the one summary row, not a per-occurrence backfill.
 
 `start_run` rejects a second run on a conversation that already has a `running`
 run. For `target_mode=fixed`, if the conversation is busy at fire time, the
-poller records `skipped_active` (don't queue/stack runs). For
+poller does **not** drop the occurrence and does **not** queue it. Instead it
+postpones the occurrence by **5 minutes**: it sets `next_retry_at = now + 5m`
+and increments `retry_count` on the occurrence row, leaving the row in a
+re-claimable non-terminal state. On the next poll cycle past `next_retry_at`,
+the row is picked up again and dispatch is re-attempted. After **3 retries**
+that all hit the same busy conversation, the occurrence is marked terminal
+`skipped_busy_max_retries` (with the count and the busy conversation id in
+`detail`) and the poller moves on — no global queue is introduced. For
 `target_mode=new_each_run`, a fresh conversation is created so there is never a
 collision — this is the recommended default for recurring tasks.
+
+The occurrence row therefore carries two extra fields used only by the busy-
+retry path: `retry_count` (int, default 0) and `next_retry_at` (UTC, nullable).
+These are part of the occurrence/run table described below; they do not change
+the unique `(scheduled_task_id, scheduled_for)` key.
 
 ### Run dispatch — reuse the existing path
 
@@ -530,11 +562,19 @@ list / editor / run-history modules.
   against current membership.
 - Sandbox ownership (#144): the existing model is one running sandbox per
   `(user_id, workspace_id)` (`user_sandbox.py`). A scheduled run reuses that
-  user's workspace sandbox, same as an interactive run for that user. Two
-  scheduled tasks owned by the same user that fire concurrently into the same
-  sandbox is the same contention an interactive user already has; v1 does not
-  add per-task isolated sandboxes (open question on whether managed agents
-  (#153) will need that).
+  user's workspace sandbox, same as an interactive run for that user. The
+  scheduler **does not serialize** concurrent fires for the same user — the
+  sandbox is treated as the agent's shared computer, and concurrent activity
+  in one computer is normal. Collision-avoidance (cwd, ports, env, files,
+  browser session, stdio MCP single-client) is the task author's and the
+  agent's responsibility, not the scheduler's. The #145 sandbox lease remains
+  a **non-exclusive delay-pause timestamp**, not a mutex; scheduled runs may
+  fire while another run holds a lease. Two real edge cases — the browser
+  tool's single-instance constraint and stdio-MCP single-client servers —
+  are acknowledged v1-known: contention surfaces as a fail-fast at the tool
+  layer rather than as scheduler-level mitigation. v1 does not add per-task
+  isolated sandboxes (open question on whether managed agents (#153) will
+  need that).
 
 ### v1 scope
 
@@ -578,13 +618,35 @@ genuinely can't be simulated.
    for 9:00:00 may fire at 9:00:20. Acceptable for v1 minute-granularity
    schedules? Or do we want a tighter loop / a Redis-sorted-set "next wake"
    hint to fire closer to the second?
+
+   **Resolved 2026-05-28: 15s poll interval with jitter, minute-granularity
+   v1.** The Redis sorted-set "next wake" hint is deferred to v2; the latency
+   penalty of polling is acceptable at minute granularity.
+
 2. **Missed-run policy default.** Is "run-latest-once, skip the rest" the right
    default, or do some users expect every missed daily report to eventually
    run? Should the policy be a per-task setting (`skip` | `run_latest` |
    `run_all` capped) rather than a global one?
+
+   **Resolved 2026-05-28: per-task setting, default `run_latest`.** Allowed
+   values: `skip` / `run_latest` / `run_all`. The `run_all` value is capped at
+   a sane backfill bound by the same `latest_due` arithmetic — no per-slot
+   write storm; `run_all` records each slot as a distinct occurrence up to the
+   bound. Default stays `run_latest` so existing behavior carries over.
+
 3. **`fixed` target + busy conversation.** Is `skipped_active` (drop the
    occurrence) correct, or should it queue and run when the conversation frees
    up? Queuing reintroduces backlog/ordering complexity we deliberately avoided.
+
+   **Resolved 2026-05-28 (CHANGE from earlier draft): postpone by 5 minutes,
+   retry up to 3 times, then mark `skipped_busy_max_retries`.** Earlier drafts
+   had the occurrence dropped immediately as `skipped_active`. New behavior:
+   on busy, set `next_retry_at = now + 5m` and leave the row re-claimable;
+   increment `retry_count` on each retry. After 3 retries that still hit a
+   busy conversation, mark the occurrence terminal `skipped_busy_max_retries`
+   and move on. No global queue is introduced — the retry state lives on the
+   occurrence row itself.
+
 4. **Owner-left-workspace behavior + ownership reassignment.** Auto-pause the
    task, hard-fail each fire, or allow a workspace admin to reassign ownership?
    v1 lets an admin pause/delete a task but deliberately has *no* reassignment
@@ -593,10 +655,31 @@ genuinely can't be simulated.
    runs inherit. If reassignment is wanted later it needs explicit
    confirmation-of-identity semantics. Ties into whether tasks are truly
    user-owned or workspace-owned-with-a-runner-identity.
+
+   **Resolved 2026-05-28: auto-pause the task when the owner leaves the
+   workspace; no reassignment flow in v1.** The poller's owner-membership
+   check at dispatch flips the task to `paused` (instead of failing each
+   subsequent fire), so history doesn't fill with `failed` rows for a task
+   whose identity is gone. Reassignment stays a non-goal.
+
 5. **Concurrent fires into one user's single sandbox (#144).** Two tasks for the
    same user firing at the same minute share one workspace sandbox — is that
    acceptable, or does scheduled/managed-agent work need its own sandbox
    identity? This likely must be resolved jointly with #153.
+
+   **Resolved 2026-05-28 (CHANGE from earlier draft): no scheduler-level
+   serialization; concurrent dispatch into one user's sandbox is allowed.**
+   Earlier drafts implied the scheduler would serialize per-user fires (or
+   record `skipped_active` to avoid them). New stance: a sandbox is
+   conceptually a computer; concurrent activity in one computer is normal
+   and is the agent / task author's responsibility to handle (cwd, ports,
+   env, files, browser, stdio-MCP). The #145 sandbox lease remains a
+   non-exclusive **delay-pause** timestamp, NOT a mutex — scheduled fires
+   may proceed while another run holds a lease. The two real edge cases
+   (single-instance browser, single-client stdio MCP servers) are
+   acknowledged v1-known and fail-fast at the tool layer; the scheduler
+   does not mitigate them.
+
 6. **Re-claim duplicate window.** The re-claim path gives at-least-once: a stale
    `claimed` row is re-dispatched after `claim_timeout`. The unavoidable
    duplicate window is a replica that *did* call `start_run` (a run is live) but
@@ -605,12 +688,31 @@ genuinely can't be simulated.
    we want a tighter signal (e.g. mark `started` *before* `start_run` returns and
    reconcile via the run event stream) to shrink it further? What are the right
    `claim_timeout` / `max_claims` defaults?
+
+   **Resolved 2026-05-28: accept the rare double-fire from the at-least-once
+   window.** Defaults: `claim_timeout = 2 min`, `max_claims = 3`. The
+   tighter-signal reconciliation is deferred; the duplicate window is small
+   enough at these defaults to be acceptable in v1.
+
 7. **Shared trigger seam shape (#152).** Is `dispatch_*_run(...) -> run_id` the
    right contract, or should #152 define a richer `TriggerEvent` envelope now so
    scheduled tasks emit it from day one rather than being retrofitted?
+
+   **Resolved 2026-05-28: v1 dispatch contract is the simple
+   `dispatch_*_run(...) -> run_id` form. No `TriggerEvent` envelope upfront.**
+   #152 will retrofit a richer envelope when generic triggers land; carrying
+   it now would be speculative.
+
 8. **Per-task run limits / cost guardrails.** Should a runaway recurring task
    (e.g. every minute, expensive model) have a per-task budget or rate cap,
    given runs bill through `CostMiddleware` with no human in the loop?
+
+   **Resolved 2026-05-28 (CHANGE from earlier draft): out of scope for #150
+   v1; cost protection is the project-wide `CostMiddleware`'s job.** Earlier
+   drafts considered a per-task `max_runs_per_day` cap (default 100) in this
+   feature. New stance: scheduled tasks are just another caller of the run
+   path; cost guardrails belong in the cost system that already meters every
+   run, not duplicated per-feature. The cost system will land separately.
 
 ---
 
