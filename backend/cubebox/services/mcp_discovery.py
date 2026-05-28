@@ -200,7 +200,7 @@ def _build_discovery_metadata(discovered: _DiscoveredRaw) -> dict[str, Any]:
 
 def _build_runtime_spec_for_discovery(install: Any, grant: Any) -> Any:
     """Build the ``MCPRuntimeConnectorSpec`` shape that
-    ``_resolve_headers_from_spec`` expects without going through the
+    ``_resolve_auth_from_spec`` expects without going through the
     full effective-state list (which the caller already computed)."""
     from cubebox.mcp.effective import MCPRuntimeConnectorSpec
 
@@ -223,6 +223,9 @@ def _build_runtime_spec_for_discovery(install: Any, grant: Any) -> Any:
         workspace_id=install.workspace_id or "",
         grant=grant,
         oauth_client_config=dict(install.oauth_client_config or {}),
+        static_auth_style=getattr(install, "static_auth_style", None) or "bearer",
+        static_auth_header_name=getattr(install, "static_auth_header_name", None),
+        static_auth_query_param=getattr(install, "static_auth_query_param", None),
     )
 
 
@@ -282,7 +285,7 @@ async def discover_tools_for_install(
     """Refresh discovery for a single install.
 
     Routes inject ``signer`` and ``token_mgr`` via the existing DI
-    factories. Both are needed because ``_resolve_headers_from_spec``
+    factories. Both are needed because ``_resolve_auth_from_spec``
     mints an identity token for ``auth_method='none'`` installs and
     refreshes OAuth grants on call for ``auth_method='oauth'`` installs.
     """
@@ -309,7 +312,7 @@ async def discover_tools_for_install(
         # this, an OAuth install whose access token has expired but
         # has a refresh credential would surface as unusable from
         # the effective DTO and discovery would 400 before
-        # _resolve_headers_from_spec gets a chance to refresh.
+        # _resolve_auth_from_spec gets a chance to refresh.
         token_manager=token_mgr,
     )
 
@@ -358,16 +361,16 @@ async def discover_tools_for_install(
     if not usable:
         raise MCPDiscoveryFailed(f"connector_not_usable:{reason}")
 
-    from cubebox.mcp.cubepi_runtime import _resolve_headers_from_spec
+    from cubebox.mcp.cubepi_runtime import _resolve_auth_from_spec
 
     spec = _build_runtime_spec_for_discovery(install=install, grant=grant)
     # Wrap header resolution: vault read failures (deleted credential,
     # wrong kind, OAuth refresh failure) raise from
-    # `_resolve_headers_from_spec`. Persist them as
+    # ``_resolve_auth_from_spec``. Persist them as
     # discovery_status='error' + last_error so the banner surfaces
     # them; never bubble as a 500.
     try:
-        headers = await _resolve_headers_from_spec(
+        resolved = await _resolve_auth_from_spec(
             spec=spec,
             workspace_id=workspace_id or install.workspace_id or "",
             org_id=install.org_id,
@@ -388,7 +391,7 @@ async def discover_tools_for_install(
             tools_cache_raw=list(install.tools_cache or []),
             last_error=install.last_error,
         )
-    if headers is None:
+    if resolved is None:
         install.discovery_status = "error"
         install.last_error = "Auth header resolution failed"
         await install_repo.update(install)
@@ -399,11 +402,12 @@ async def discover_tools_for_install(
             tools_cache_raw=list(install.tools_cache or []),
             last_error=install.last_error,
         )
+    headers, server_url = resolved
 
     try:
         discovered = await asyncio.wait_for(
             _list_raw_mcp_tools(
-                install.server_url,
+                server_url,
                 headers=headers or None,
                 timeout=install.timeout,
                 transport=cast(MCPTransport, install.transport),

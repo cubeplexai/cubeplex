@@ -56,7 +56,7 @@ from cubebox.auth.context import RequestContext
 from cubebox.auth.dependencies import current_active_user, require_admin, require_member
 from cubebox.credentials.dependencies import get_credential_service
 from cubebox.db.session import get_session
-from cubebox.mcp.cubepi_runtime import _resolve_headers_from_spec
+from cubebox.mcp.cubepi_runtime import _resolve_auth_from_spec
 from cubebox.mcp.dependencies import (
     get_audit_sink,
     get_connector_template_service,
@@ -891,7 +891,7 @@ async def ws_invoke_tool(
     spec = _build_runtime_spec_for_discovery(install=install, grant=dto.grant)
     started = time.perf_counter()
     try:
-        headers = await _resolve_headers_from_spec(
+        resolved = await _resolve_auth_from_spec(
             spec=spec,
             workspace_id=workspace_id,
             org_id=ctx.org_id,
@@ -901,8 +901,9 @@ async def ws_invoke_tool(
             token_manager=token_mgr,
             grant_repo=grant_repo,
         )
-        if headers is None:
+        if resolved is None:
             raise RuntimeError("credential_resolution_returned_none")
+        headers, server_url = resolved
     except Exception as exc:  # noqa: BLE001
         duration = int((time.perf_counter() - started) * 1000)
         await audit.record(
@@ -925,7 +926,7 @@ async def ws_invoke_tool(
     try:
         result = await asyncio.wait_for(
             _invoke_tool_via_cubepi(
-                install.server_url,
+                server_url,
                 tool_name,
                 body.arguments,
                 headers=headers or None,

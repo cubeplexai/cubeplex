@@ -1,11 +1,13 @@
 # Search MCP Sources + Citation Rules Design
 
-**Date:** 2026-05-27
+**Date:** 2026-05-27 (revised 2026-05-28)
 **Issue:** #148
-**Scope:** Backend catalog seed + citation prompt calibration. No new schema,
-no new runtime code — this is a configuration/seed feature on top of the
-already-shipped MCP tool-citation machinery.
-**Status:** Spec — pending implementation plan.
+**Scope:** Backend catalog seed for 3 hosted search MCPs (Tavily, Exa, Jina),
+new runtime static-auth plumbing so non-Bearer providers can authenticate,
+real-shape unit tests for citation extraction, and a minimal citation-prompt
+calibration. Bocha and Perplexity are deferred (no usable hosted MCP at PR
+time).
+**Status:** Spec — implemented in PR #159.
 
 ## Problem & motivation
 
@@ -22,42 +24,57 @@ to a source URL/title is low-trust. So the natural next step is to bundle
 dedicated search connectors **and** seed their citation config so that, out of
 the box, answers built from search results carry visible source attribution.
 
-This feature does two things and nothing more:
+This feature does three things:
 
-1. Add a set of search MCP connectors to the seed catalog
+1. Add hosted search MCP connectors to the seed catalog
    (`backend/cubebox/mcp/template_seed.py::CATALOG`), each with
    `tool_citation_defaults` filled in for its search tools.
-2. Calibrate the shared citation prompt
-   (`backend/cubebox/prompts/citations.py::CITATION_PROMPT`) so the model
-   reliably emits visible source attribution for search results — including on
-   models (deepseek-v4-flash) that currently drop markers for facts delivered
-   via `tool_result`.
+2. Extend the runtime so the `static` auth path supports **Bearer** (the
+   existing default), **custom header** (e.g. `x-api-key`), and **URL
+   query-param** (e.g. `?tavilyApiKey=…`). Provider auth shape is data on
+   the template/install row, not branching in code.
+3. Calibrate the shared citation prompt
+   (`backend/cubebox/prompts/citations.py::CITATION_PROMPT`) with one extra
+   rule + one worked search example so the model reliably emits visible
+   `【N-M】` markers for search-result facts.
 
 ## Goals / Non-goals
 
 **Goals**
 
-- Curate 2–4 search MCP connectors covering web / academic / code / news and
-  seed them into the catalog with correct transport, auth, and
-  `tool_citation_defaults`.
-- Reuse the existing `CitationConfig` + `CitationMiddleware` path verbatim. No
-  new columns, no new middleware.
+- Curate hosted search MCP connectors and seed them with correct transport,
+  auth shape, and `tool_citation_defaults` driven by each provider's actual
+  result JSON.
+- Plumb non-Bearer static auth (custom header + URL query-param) through the
+  runtime so providers like Exa (`x-api-key`) and Tavily (`?tavilyApiKey=…`)
+  can ship as catalog entries without runtime hacks.
+- Extend `CitationConfig.extract_items` to walk a dotted `content_field`
+  (`data.webPages.value`) so providers nesting results under metadata wrappers
+  can be cited cleanly when added later (Bocha is the motivating exemplar).
 - Calibrate `CITATION_PROMPT` so visible source URL/title attribution lands in
   the final answer the user reads, across our supported models.
 - Keep the system-prompt stable prefix prompt-cache-safe.
+- Verify each shipped provider against its real REST/MCP endpoint with a real
+  key; capture the response JSON as a unit-test fixture so a silent
+  provider-side schema change fails CI before a workspace fails at runtime.
 
 **Non-goals**
 
-- No new citation data model or runtime changes (the
-  2026-05-14 spec already shipped the column, middleware, and per-run loader).
+- No new citation data model or runtime change to the citation pipeline
+  itself (the 2026-05-14 spec already shipped the column, middleware, and
+  per-run loader). The auth plumbing IS new, but it is auth, not citations.
 - No per-server custom prompt. One shared citation prompt; calibration is
-  global. (Open question OQ-3 revisits this.)
+  global. (Open question OQ-3.)
 - No frontend work. The citation-mapping editor and citation panel already
   exist from the 2026-05-14 spec.
 - No self-hosting a search aggregator. We point at hosted remote MCP servers;
   the user supplies their own API key per install.
 - No auto-ranking / re-ranking of search results. We pass through whatever the
   server returns.
+- No flaky E2E asserting visible `【N-M】` markers in the final assistant text.
+  Model citation adherence is unreliable in practice; the citation side-channel
+  (`citation` SSE event + `details["citations"]`) and the captured-structure
+  unit tests are the supported regression surface.
 
 ## Current citation mechanism in cubebox
 
@@ -66,350 +83,295 @@ How a tool's citation behavior is configured today, end to end:
 1. **Catalog seed** — `backend/cubebox/mcp/template_seed.py`. Each
    `MCPConnectorTemplateSeedEntry` carries
    `tool_citation_defaults: dict[str, dict]`, keyed by **bare tool name**, with
-   each value a JSON-serialized `CitationConfig`. The `webtools` entry
-   (lines ~370–405) is the reference: it maps `web_search`
-   (`content_field="results"`, `mapping={url,title,snippet→description}`) and
-   `web_fetch` (`content_type="text"`, `args_mapping={url:url}`).
+   each value a JSON-serialized `CitationConfig`. The `webtools` entry is the
+   reference: it maps `web_search` (`content_field="results"`,
+   `mapping={url,title,snippet→description}`) and `web_fetch`
+   (`content_type="text"`, `args_mapping={url:url}`).
 
 2. **Citation config shape** —
    `backend/cubebox/middleware/citations/config.py::CitationConfig`. Fields:
    `content_type` (`"json"|"text"`), `source_type` (free string, e.g. `"web"`),
-   `content_field` (JSON path to the result array, or `None` for whole-response),
-   `mapping` (citation-metadata-key → result-field; the special `snippet` key
-   names the text field that gets chunked), `args_mapping` (fallback from tool
-   call args, e.g. pull `url` from the request when the result is raw text),
-   `discriminator_field` / `discriminator_values` (filter which result items
-   count).
+   `content_field` (path to the result array — now supports either a single
+   key like `"results"` OR a dotted path like `"data.webPages.value"`; `None`
+   means "treat the whole response as one result"), `mapping`
+   (citation-metadata-key → result-field; the special `snippet` key names the
+   text field that gets chunked), `args_mapping` (fallback from tool call
+   args), `discriminator_field` / `discriminator_values` (filter result items).
 
 3. **Seed → DB** — `seed_templates()` upserts `tool_citation_defaults` into
    `mcp_connector_templates.tool_citations` via `repo.upsert_by_slug(...)`. The
    column was added in
-   `backend/alembic/versions/94630a9e13b4_add_tool_citations_to_mcp_tables.py`
-   (also adds the per-install `mcp_servers.tool_citations` column).
+   `backend/alembic/versions/94630a9e13b4_add_tool_citations_to_mcp_tables.py`.
 
 4. **Install → per-install override** — installing a catalog connector
    snapshots `tool_citations` onto the new `mcp_servers` row; from there it is
-   workspace-editable and decoupled from the catalog (per the 2026-05-14 spec,
-   §Install).
+   workspace-editable and decoupled from the catalog. The same snapshot
+   pattern carries the new auth fields (`static_auth_style`,
+   `static_auth_header_name`, `static_auth_query_param`) onto the install row.
 
 5. **Per-run load** — `load_workspace_mcp_tools_for_cubepi` namespaces tool
    names to `{server}__{tool}` and emits a
    `dict[namespaced_name, CitationConfig]` for the middleware.
 
 6. **Runtime** — `backend/cubebox/middleware/citation.py::CitationMiddleware`:
-   - `transform_system_prompt` appends `CITATION_PROMPT`
-     (`backend/cubebox/prompts/citations.py`) **only when ≥1 citation config is
-     registered** — so conversations with no citation-eligible tools pay zero
-     prompt-cache cost.
+   - `transform_system_prompt` appends `CITATION_PROMPT` only when ≥1 citation
+     config is registered.
    - `after_tool_call` parses each tool result per its `CitationConfig`, chunks
      the snippet text, assigns session-incrementing `【N-M】` ids, rewrites the
      LLM-visible content to `【N-M】 [url: … | title: …] chunk`, and emits the
      structured citation on the SSE side channel + `details["citations"]`.
 
-So a "search source with citations" is fully expressible as a catalog seed
-entry with the right `tool_citation_defaults` — **no code change is required to
-make a search connector cite**, only seed data plus prompt calibration.
+## Search MCP candidates (verified 2026-05-27 against live endpoints)
 
-## Search MCP candidates
+| Name | Hosted MCP endpoint | Auth (verified) | Ship in v1? | Notes |
+|---|---|---|---|---|
+| **Tavily** | `https://mcp.tavily.com/mcp/` | `Authorization: Bearer` (also accepts `?tavilyApiKey=…`) | YES | Both auth shapes work; seed uses Bearer for catalog parity. |
+| **Exa** | `https://mcp.exa.ai/mcp` | `x-api-key` | YES | Bearer is NOT accepted; runtime now plumbs the `header` style. |
+| **Jina AI** | `https://mcp.jina.ai/v1` | `Authorization: Bearer` | YES | 19 tools incl. `search_web`, `read_url`, `search_arxiv`. |
+| **Bocha / 博查** | (none official) | `Authorization: Bearer` (REST) | NO — defer | No official hosted MCP. Third-party gateway `mcp.ecn.ai/{CID}/bochaai/mcp` exists but is not Bocha-operated. REST shape captured as a unit-test fixture so we're ready when an official MCP lands. |
+| **Perplexity** | (deprecated) | `Authorization: Bearer` (REST) | NO — defer | Perplexity CTO publicly moved away from MCP in favour of their Agent API. No durable hosted MCP endpoint to point at. |
 
-All hosted/remote unless noted. "Result schema" = does the tool return
-structured URL/title/snippet we can map into `CitationConfig`. Pricing/free-
-tier figures change; verify at install time.
+Verification commands (run inline with a real key; nothing committed):
 
-| Name | Transport | Auth | Result schema (URL/title?) | Free tier | Citation refs |
-|---|---|---|---|---|---|
-| **Exa** | Streamable HTTP (`https://mcp.exa.ai/mcp`) | API key in URL query or `x-api-key` header | Clean JSON: `title`, `url`, snippet, optional full text. Tools incl. web search, research/academic, code search. | Generous per-query free plan; add own key to lift rate limits | [1] |
-| **Tavily** | Streamable HTTP (`https://mcp.tavily.com/mcp/?tavilyApiKey=…`) | API key in URL query or `Authorization` header | Results carry `title` + `content`; `topic="news"` for news mode. `tavily-extract` for fetch. | Free tier on tavily.com (credit-based) | [2][3] |
-| **Brave Search** | Streamable HTTP (community/`dedalus-labs`; official npm is stdio-first) | `BRAVE_API_KEY` / `--brave-api-key` | v2 schema mirrors Brave API: web/news/video result objects with url + title + description | Free Brave Search API tier (rate-limited) | [4][5] |
-| **Perplexity** | Streamable HTTP (official `perplexityai/modelcontextprotocol`) | `PERPLEXITY_API_KEY` | Sonar/Search API: prose answer + structured `search_results` (id/url/title) | Paid API; no durable free tier | [6][7] |
-| **Bocha / 博查** | Streamable HTTP / stdio | API key from open.bochaai.com | `bocha_web_search`: title, url, summary, site name, publish time; `bocha_ai_search` adds modal cards. Chinese-web coverage. | Paid; check open.bochaai.com | [8] |
-| **Kagi** | stdio (community) / Streamable HTTP variants | Kagi API token | Search results with url/title/snippet | Paid (no free tier) | [9] |
-| **SearXNG** (self-host) | stdio + Streamable HTTP (`/mcp`) | none / optional basic auth | Metasearch JSON: url, title, content per result | Free (self-hosted) | [9] |
+```bash
+# Tavily MCP — initialize over Streamable HTTP with Bearer
+curl -sS -X POST https://mcp.tavily.com/mcp/ \
+  -H "Authorization: Bearer $TAVILY_API_KEY" \
+  -H "Accept: application/json, text/event-stream" \
+  -H "MCP-Protocol-Version: 2025-06-18" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"initialize",...}'  # → HTTP/2 200
 
-Notes:
-- Exa and Tavily are the cleanest fits: hosted, Streamable HTTP, API-key auth,
-  JSON results with explicit `title`/`url`, and they cover multiple verticals
-  (Exa: web + research + code; Tavily: web + news + extract).
-- Brave's *official* server is stdio-first; the Streamable-HTTP story is a
-  community fork. Treat as candidate, not v1 default, until a stable hosted
-  endpoint is confirmed.
-- Perplexity and Kagi are paid-only; good as catalog entries but not the
-  zero-cost default.
-- Bocha covers Chinese web, where Exa/Tavily/Brave are weak. Strong candidate
-  for the China-facing audience.
-- SearXNG is the OSS/self-host escape hatch (no per-query bill, no third-party
-  data sharing) but requires the user to run it.
+# Exa MCP — same handshake but with x-api-key
+curl -sS -X POST https://mcp.exa.ai/mcp \
+  -H "x-api-key: $EXA_API_KEY" ...  # → HTTP/2 200 + Mcp-Session-Id
+
+# Jina MCP — Bearer
+curl -sS -X POST https://mcp.jina.ai/v1 \
+  -H "Authorization: Bearer $JINA_API_KEY" ...  # → HTTP/2 200
+```
+
+REST result shapes (captured fixtures live in
+`backend/tests/unit/fixtures/search_responses/`):
+
+```jsonc
+// Tavily REST: {query, answer, results: [{url, title, content, score, raw_content, ...}], ...}
+// Exa REST:    {requestId, results: [{id, title, url, publishedDate, text, image, favicon}], ...}
+// Bocha REST:  {code, msg, data: {webPages: {value: [{id, name, url, snippet, summary, siteName, datePublished, ...}]}, ...}}
+// Jina REST:   {code, status, data: [{title, url, description, content, publishedTime, metadata, ...}], meta}
+```
 
 ## Proposed design
 
-### Which connectors to add (v1)
+### Which connectors ship in v1 (revised)
 
-Add catalog entries for servers that authenticate via `Authorization: Bearer`
-(the only static-auth path the runtime supports — see caveat below). Each is
-verified against its live endpoint with a bearer key before seeding:
+Three hosted search MCPs, each verified against its live endpoint with a real
+API key on 2026-05-27 and seeded with the correct auth shape:
 
-1. **Tavily** (slug `tavily`) — web + news + extract. Hosted, Streamable HTTP.
-   Documented to accept the API key in the `Authorization` header, so it works
-   over the bearer path today. Primary v1 default.
-2. **Exa** (slug `exa`) — web + academic/research + code search. Hosted,
-   Streamable HTTP. **Ships only if** its endpoint is confirmed to accept the
-   key as `Authorization: Bearer`; if it requires `x-api-key` or a `server_url`
-   query token, it's deferred with Bocha until the auth plumbing exists.
-3. **Bocha / 博查** (slug `bocha`) — Chinese web + AI search. **Deferred from
-   v1** unless verified to accept `Authorization: Bearer`; its auth mechanism
-   isn't confirmed, and we won't seed a connector whose auth silently fails.
+1. **Tavily** (slug `tavily`) — `static_auth_style="bearer"`, tools
+   `tavily_search` + `tavily_extract`, results at `results[]`.
+2. **Exa** (slug `exa`) — `static_auth_style="header"`,
+   `static_auth_header_name="x-api-key"`, tools `web_search_exa`,
+   `research_paper_search_exa`, `code_search_exa`, `web_fetch_exa`, results
+   at `results[]`.
+3. **Jina AI** (slug `jina`) — `static_auth_style="bearer"`, tools
+   `search_web`, `search_arxiv`, `search_ssrn`, `read_url`, results at
+   `data[]`.
 
-Each is added to `CATALOG` as an `MCPConnectorTemplateSeedEntry` shaped like
-the existing connectors:
+Bocha and Perplexity are NOT seeded — see Open Questions OQ-A / OQ-B.
 
-- `transport="streamable_http"`.
-- `supported_auth_methods=["static"]` with `static_form_schema=_TOKEN_FIELD`.
-  **v1 decision (was OQ-1):** the runtime sends static creds *only* as
-  `Authorization: Bearer <key>` — `cubepi_runtime.py` (the static branch around
-  line 244) hard-codes that header and ignores any `static_auth_header_template`
-  or query-param substitution. There is no custom-header or URL-query plumbing
-  today. So **v1 ships only search servers that authenticate via
-  `Authorization: Bearer`**, and the seed entry must NOT depend on a header
-  template the runtime won't apply. Each candidate gets verified against its
-  live endpoint with a bearer key before it's seeded; any server that requires
-  `x-api-key` or a `server_url` query-string token is deferred until the auth
-  plumbing exists (see Open Questions). This keeps the feature scoped to
-  citations and avoids shipping a connector whose auth silently fails.
-- `default_credential_policy="org"` (one org key, shared across the workspace),
-  matching `webtools`.
-- `tool_citation_defaults` filled per the tool schemas below.
+### Auth-plumbing schema
 
-Brave, Perplexity, Kagi, SearXNG are deferred (OQ-2) — documented as future
-catalog additions, not v1.
+`MCPConnectorTemplate` gains three columns; the same three are snapshotted
+onto `MCPConnectorInstall` at install time (parallel to the existing
+`tool_citations` snapshot — workspaces edit their copy, the catalog row
+stays canonical):
+
+| Column | Type | Meaning |
+|---|---|---|
+| `static_auth_style` | `VARCHAR(16)` NOT NULL DEFAULT `'bearer'` | `"bearer"` / `"header"` / `"query"` — dispatches the static branch in `cubepi_runtime.py`. |
+| `static_auth_header_name` | `VARCHAR(64)` NULL | When `style="header"`, the header carrying the raw token (e.g. `x-api-key`, `X-Lark-MCP-UAT`). |
+| `static_auth_query_param` | `VARCHAR(64)` NULL | When `style="query"`, the URL query-param name (e.g. `tavilyApiKey`). |
+
+Migration:
+`backend/alembic/versions/49844ea5ac7b_mcp_template_install_static_auth_style_.py`
+(autogenerated, `op.add_column` only — additive, default-backed, no data
+backfill required for existing rows).
+
+### Runtime auth dispatch (`backend/cubebox/mcp/cubepi_runtime.py`)
+
+`_resolve_headers_from_spec` is renamed to `_resolve_auth_from_spec` and
+returns `(headers, server_url)` instead of just `headers` — the query-param
+style needs to rewrite the URL so the credential rides on every JSON-RPC
+request to that connector. Two pure helpers do the real work:
+
+- `_apply_static_credential(spec, headers, server_url, plaintext)` —
+  dispatches on `spec.static_auth_style`:
+  - `"bearer"` → `headers["Authorization"] = f"Bearer {plaintext}"`.
+  - `"header"` → `headers[spec.static_auth_header_name] = plaintext`.
+  - `"query"`  → returns the URL with `spec.static_auth_query_param=plaintext`
+    appended via `_inject_query_param`.
+  - Missing header/param name OR an unknown style → fall back to Bearer with
+    a `logger.warning` so a misconfigured install still talks instead of
+    silently 401-ing.
+- `_inject_query_param(server_url, name, value)` — appends or replaces
+  `name=<value>` on the URL's query string; preserves other params.
+
+`load_workspace_mcp_tools_for_cubepi` and every other call site
+(`ws_mcp.py::invoke`, `admin_mcp.py::admin_invoke`,
+`mcp_discovery.py::discover_tools_for_install`) consume the new
+`(headers, server_url)` tuple and hand the rewritten URL to
+`load_mcp_tools_http` / `_list_raw_mcp_tools` / `_invoke_tool_via_cubepi`.
+
+### `extract_items` dotted-path support
+
+`CitationConfig.extract_items` previously did a single `data.get(content_field, [])`
+lookup. It now walks `content_field.split(".")` step by step, returning `[]` if
+any segment is missing or non-dict. Existing single-key `content_field` values
+keep their behaviour (no migration of seed data needed). The change unblocks
+shipping Bocha (and any future provider that wraps results under metadata) the
+day there's a usable hosted MCP for it.
 
 ### Citation config per connector
-
-Keyed by the **bare** tool name each server actually exposes (confirm exact
-names against each server's tool list at implementation time — these are the
-expected shapes):
-
-Exa (`exa`):
-```jsonc
-{
-  "web_search_exa": {
-    "content_type": "json", "source_type": "web",
-    "content_field": "results",
-    "mapping": { "url": "url", "title": "title", "snippet": "text" }
-  },
-  "research_paper_search_exa": {
-    "content_type": "json", "source_type": "academic",
-    "content_field": "results",
-    "mapping": { "url": "url", "title": "title", "snippet": "text" }
-  },
-  "code_search_exa": {
-    "content_type": "json", "source_type": "code",
-    "content_field": "results",
-    "mapping": { "url": "url", "title": "title", "snippet": "text" }
-  }
-}
-```
 
 Tavily (`tavily`):
 ```jsonc
 {
-  "tavily_search": {
-    "content_type": "json", "source_type": "web",
-    "content_field": "results",
-    "mapping": { "url": "url", "title": "title", "snippet": "content" }
-  },
-  "tavily_extract": {
-    "content_type": "json", "source_type": "web",
-    "content_field": "results",
-    "mapping": { "url": "url", "snippet": "raw_content" }
-  }
+  "tavily_search":  {"content_type": "json", "source_type": "web",
+                     "content_field": "results",
+                     "mapping": {"url": "url", "title": "title", "snippet": "content"}},
+  "tavily_extract": {"content_type": "json", "source_type": "web",
+                     "content_field": "results",
+                     "mapping": {"url": "url", "snippet": "raw_content"}}
 }
 ```
-(News is the same `tavily_search` tool with `topic="news"`; we keep
-`source_type="web"` unless a discriminator on an args/topic field is warranted —
-`CitationConfig` discriminators key off result fields, not call args, so news
-vs web split is OQ-4.)
 
-Bocha (`bocha`):
+Exa (`exa`):
 ```jsonc
 {
-  "bocha_web_search": {
-    "content_type": "json", "source_type": "web",
-    "content_field": "data.webPages.value",
-    "mapping": { "url": "url", "title": "name", "snippet": "summary" }
-  }
+  "web_search_exa":           {"content_type": "json", "source_type": "web",
+                               "content_field": "results",
+                               "mapping": {"url": "url", "title": "title", "snippet": "text"}},
+  "research_paper_search_exa": {"content_type": "json", "source_type": "academic",
+                               "content_field": "results",
+                               "mapping": {"url": "url", "title": "title", "snippet": "text"}},
+  "code_search_exa":          {"content_type": "json", "source_type": "code",
+                               "content_field": "results",
+                               "mapping": {"url": "url", "title": "title", "snippet": "text"}},
+  "web_fetch_exa":            {"content_type": "json", "source_type": "web",
+                               "content_field": "results",
+                               "mapping": {"url": "url", "title": "title", "snippet": "text"}}
 }
 ```
-**Caveat:** `content_field` is a single key lookup in `extract_items`
-(`data.get(self.content_field, [])`), not a dotted path. If Bocha nests the
-result array (e.g. `data.webPages.value`), the seed must point at whatever
-top-level key holds the array, or the server's output must be flattened. This
-is OQ-5 — verify Bocha's actual JSON shape and either pick a reachable key or
-extend `extract_items` to walk a dotted path (small, isolated change if needed).
 
-### Citation prompt / rule changes
+Jina (`jina`):
+```jsonc
+{
+  "search_web":    {"content_type": "json", "source_type": "web",
+                    "content_field": "data",
+                    "mapping": {"url": "url", "title": "title", "snippet": "description"}},
+  "search_arxiv":  {"content_type": "json", "source_type": "academic",
+                    "content_field": "data",
+                    "mapping": {"url": "url", "title": "title", "snippet": "description"}},
+  "search_ssrn":   {"content_type": "json", "source_type": "academic",
+                    "content_field": "data",
+                    "mapping": {"url": "url", "title": "title", "snippet": "description"}},
+  "read_url":      {"content_type": "json", "source_type": "web",
+                    "content_field": "data",
+                    "mapping": {"url": "url", "title": "title", "snippet": "content"}}
+}
+```
 
-The rules live in **one place**: `backend/cubebox/prompts/citations.py`
-(`CITATION_PROMPT`), appended to the system prompt by
-`CitationMiddleware.transform_system_prompt`. We **calibrate** it, not fork it.
-Calibration goals derived from the deepseek note and the search use case:
+Bocha (NOT seeded — captured for the day Bocha ships a hosted MCP):
+```jsonc
+{
+  "bocha_web_search": {"content_type": "json", "source_type": "web",
+                       "content_field": "data.webPages.value",
+                       "mapping": {"url": "url", "title": "name", "snippet": "snippet"}}
+}
+```
 
-1. **Reinforce the "visible answer, not thinking" rule for search.** The
-   existing rule #1 already says markers must appear in the answer the user
-   reads. deepseek-v4-flash specifically drops `【N-M】` for facts that arrived
-   via `tool_result`. Add an explicit line that search-result facts delivered
-   through tool results are the most important case to cite, and show the
-   url/title metadata the model sees (`[url: … | title: …]`) as the thing it is
-   attributing.
+### Citation prompt calibration
 
-2. **Add a worked search example** alongside the existing weather example, so
-   the model has a same-shape pattern for "answer assembled from several search
-   hits, each fact carrying its marker." The example must use the exact
-   `【N-M】` syntax and inline placement.
+`CITATION_PROMPT` gains rule #7 (search-result facts delivered through
+`tool_result` are the most important to cite, with the
+`[url: … | title: …]` metadata shape the model actually sees) and a second
+worked example (assembled from several search hits). The prompt stays
+server-agnostic — no server names, no vertical enumeration. It remains a
+module-level constant so the stable prefix stays prompt-cache safe.
 
-3. **Keep `source_type` neutral in the prompt.** The prompt should not enumerate
-   `web/academic/code/news` — those are metadata, surfaced by the frontend via
-   the citation panel, not something the model formats. This keeps the prompt
-   stable as we add verticals.
+## Testing strategy (revised)
 
-#### Prompt-cache safety
+**No flaky visible-marker E2E.** Model adherence to the `【N-M】` rule is not
+reliable across providers, and asserting on the final assistant text turns
+the regression signal into noise. The supported regression surface is:
 
-`CITATION_PROMPT` is a module-level constant string. Appending calibration text
-keeps it a constant — **no per-turn or per-user dynamic content** enters the
-stable prefix, so the discipline in `backend/docs/prompt-cache-discipline.md`
-(§Stable Prefix) holds. Two consequences to call out:
+1. **Captured-structure unit tests** (always-on, in CI) —
+   `backend/tests/unit/test_search_citation_extraction.py` parameterizes the
+   real captured response from each shipping provider through `extract_items`
+   + `extract_metadata` + `extract_text`, asserting the configured
+   `CitationConfig` correctly surfaces the source `url`/`title` and a
+   non-empty snippet. The captured fixtures live in
+   `backend/tests/unit/fixtures/search_responses/`. Bocha's shape is included
+   so the dotted-path `extract_items` extension is guarded.
 
-- Changing the constant is a one-time content-version bump: every live
-  conversation that has citation-eligible tools pays one cache-miss turn at
-  deploy, then re-caches. Same class of event as the namespacing bump in the
-  2026-05-14 spec; not a discipline violation.
-- The prompt is still appended **only when ≥1 citation config is registered**
-  (existing `if not self._configs: return system_prompt` guard). Conversations
-  without search/citation tools see no prefix change at all.
+2. **Live API smoke tests** (opt-in, `requires_api_key` marker) — the same
+   test file hits each provider's REST endpoint and re-validates the
+   captured shape against today's response. Skipped when the relevant env
+   var is missing; never auto-run in CI; useful as a manual pre-deploy check
+   to catch silent provider-side schema drift before a workspace hits it.
 
-We must **not** make the prompt conditional on which servers are installed
-(e.g. inject server names) — that would make the prefix vary per workspace and
-defeat caching. The prompt stays server-agnostic.
+3. **Auth-plumbing unit tests** —
+   `backend/tests/unit/mcp/test_runtime_static_auth.py` covers
+   `_apply_static_credential` for bearer / custom-header / query-param,
+   plus the fallback-to-bearer behaviour when the header/param name is
+   missing, plus `_inject_query_param` (append / preserve other params /
+   replace collision).
 
-#### tool_result-delivered facts (deepseek note)
+4. **Existing catalog-seed unit suite** stays green — the new entries
+   round-trip through `CitationConfig(**raw)` (asserted by
+   `test_all_seed_tool_citations_are_valid_citation_configs`), and the
+   idempotency / deprecation tests stay green.
 
-The middleware already rewrites tool-result content so each chunk is physically
-prefixed with `【N-M】 [url: … | title: …]` before the model sees it — the marker
-and the source metadata are *in the tool result text*, not just in a side
-channel. The failure mode is the model reading those markers, using the fact,
-and then not reproducing the marker in its final prose. The prompt calibration
-(rule reinforcement + worked search example targeting the visible answer)
-directly addresses that. No middleware change; the fix is prompt-level and
-verified by E2E (below).
-
-### v1 scope
-
-- New catalog seed entries for bearer-auth-capable search servers (`tavily`,
-  plus `exa` if confirmed bearer-compatible), each with
-  `tool_citation_defaults`.
-- Calibrated `CITATION_PROMPT` (reinforced visible-answer rule + worked search
-  example, still server-agnostic and constant).
-- Resolve OQ-5 (Bocha nested result path) only for connectors that ship — a
-  tiny isolated helper change at most, no new subsystem.
-- Tests per below.
-
-Explicitly **out** of v1: any auth plumbing (custom-header or `server_url`
-query-token substitution) and the connectors that need it
-(Bocha, and Exa if it isn't bearer-compatible);
-Brave/Perplexity/Kagi/SearXNG entries; per-vertical
-`source_type` splitting beyond what the result schema gives for free, any
-frontend change, any re-ranking.
-
-## Testing strategy
-
-E2E-first, since the whole point is "does the model emit visible citations from
-real search results."
-
-1. **E2E (primary)** — extend `tests/e2e/test_mcp_tool_citations.py` (or a
-   sibling `test_search_citations.py`):
-   - Install a seeded search connector (`exa`/`tavily`) into a test workspace;
-     assert `mcp_servers.tool_citations` is populated from the catalog default.
-   - Run an agent turn that forces a search tool call. Assert the SSE stream
-     carries `citation` events **and** the final assistant message text contains
-     `【N-M】` markers (regex `【\d+-\d+】`) attached to factual sentences, with
-     no trailing "Sources"/"References" list.
-   - Run the same on deepseek-v4-flash (the model that drops markers) to
-     directly verify the prompt calibration — this is the regression that
-     motivated the prompt change. If a real search key isn't available in CI,
-     drive it against `webtools` (already seeded) so the prompt change is
-     exercised without a third-party key, and keep the real-key Exa/Tavily run
-     as a local/manual check.
-   - PATCH a citation mapping → next run reflects it (covered by existing spec;
-     keep green).
-
-2. **Unit** —
-   - `tests/unit/test_template_seed.py` — assert `exa`/`tavily`/`bocha` entries
-     exist with non-empty `tool_citation_defaults` of valid `CitationConfig`
-     shape (round-trip through `CitationConfig(**v)`).
-   - `tests/unit/test_citation_config.py` — if Bocha needs dotted-path
-     `content_field`, add a case for `extract_items` walking the path.
-
-3. **Prompt-cache gate** — `tests/e2e/memory/test_prompt_cache.py` must stay
-   green. The prompt is a constant; any assertion that string-matches the old
-   `CITATION_PROMPT` text gets updated to the calibrated text.
-
-How we verify "visible citations": the assertion is on the **final assistant
-message content** (what the user reads), not on the SSE `citation` side channel
-— matching the deepseek failure mode where the side channel is fine but the
-prose lacks markers.
+5. **Prompt-cache E2E gate** (`tests/e2e/memory/test_prompt_cache.py`)
+   stays green; the calibrated prompt is still a module-level constant, no
+   per-turn or per-workspace dynamic content enters the stable prefix.
 
 ## Open Questions
 
-- **OQ-1 — RESOLVED: v1 is Bearer-only; query-param/custom-header auth is
-  deferred.** The runtime (`cubepi_runtime.py` static branch) always sends
-  static creds as `Authorization: Bearer <key>` and ignores any
-  `static_auth_header_template` or query-string token, so a header template
-  alone would not make Exa/Tavily auth work. v1 therefore ships only servers
-  confirmed to authenticate via `Authorization: Bearer`. **Rejected alternative
-  (future work):** add real auth plumbing — `x-api-key`/custom-header support
-  and `server_url` query-param token substitution in the runtime — so query-key
-  servers (Exa via `x-api-key`, Bocha) can be seeded. That's a separate
-  runtime/auth change, out of this citation feature's scope.
-- **OQ-2 — Which connectors ship in v1.** Spec proposes Exa + Tavily + Bocha.
-  Is Bocha worth shipping day one, or defer until there's China-facing demand?
-  Do we want a paid option (Perplexity) in v1 for users who already pay?
-- **OQ-3 — One shared prompt vs per-source nuance.** Calibration is global. Is a
-  single prompt enough for web + academic + code + news + Chinese, or will some
-  vertical (e.g. code search) want different attribution guidance? (Keeping it
-  global preserves prompt-cache simplicity; revisit only if E2E shows a gap.)
-- **OQ-4 — News vs web `source_type`.** Tavily news is the same tool with a
-  `topic` arg; `CitationConfig` discriminators filter on *result* fields, not
-  call args, so we can't split news vs web purely from config. Acceptable to
-  label both `web`, or do we want a news distinction surfaced in the panel?
-- **OQ-5 — Bocha nested result path.** `extract_items` does a single-key lookup,
-  not a dotted path. Confirm Bocha's JSON shape; if the array is nested, pick a
-  reachable key or extend `extract_items` to walk a dotted `content_field`.
-- **OQ-6 — Exact tool names.** Seed keys must match each server's bare tool
-  names exactly (e.g. `web_search_exa` vs `web_search`). Confirm against each
-  server's live tool list before finalizing the seed.
-- **OQ-7 — Default credential policy.** `org` (shared key) matches `webtools`,
-  but search keys are metered per query — does a noisy workspace burn the org's
-  quota? Consider `workspace` policy for search connectors.
+- **OQ-A — Bocha catalog entry.** No official hosted MCP at PR time. The
+  REST shape is captured + tested so we're ready when one lands; the
+  third-party `mcp.ecn.ai/{CID}/bochaai/mcp` gateway isn't trustworthy
+  enough to seed (different operator, no SLA). Revisit when Bocha publishes
+  an official hosted MCP.
+- **OQ-B — Perplexity catalog entry.** Perplexity CTO publicly moved away
+  from MCP at Ask 2026 in favour of their Agent API. There is no durable
+  hosted MCP endpoint to point at. Revisit if Perplexity reverses course.
+- **OQ-C — News vs web `source_type`.** Tavily news and web share one
+  tool (`tavily_search`); `CitationConfig` discriminators key off *result*
+  fields, not call args, so we can't split news vs web purely from config.
+  v1 labels both `web`. Add a discriminator only if E2E shows a panel-UX
+  gap.
+- **OQ-D — One shared prompt vs per-source nuance.** Calibration is
+  global. Is a single prompt enough for web + academic + code + Chinese,
+  or will some vertical want different attribution guidance? Keep global
+  for prompt-cache simplicity; revisit only if real-world citation
+  adherence shows a per-vertical gap.
+- **OQ-E — Default credential policy.** `org` (shared key) matches
+  `webtools`, but search keys are metered per query — does a noisy
+  workspace burn the org's quota? Consider `workspace` policy for search
+  connectors. v1 ships `org` to match the rest of the catalog.
 
 ## References
 
-[1] Exa MCP — https://docs.exa.ai/reference/exa-mcp ;
-    https://github.com/exa-labs/exa-mcp-server
-[2] Tavily MCP docs — https://docs.tavily.com/documentation/mcp
-[3] Tavily MCP server — https://github.com/tavily-ai/tavily-mcp
-[4] Brave Search MCP — https://github.com/brave/brave-search-mcp-server
-[5] Brave Search MCP over Streamable HTTP —
-    https://github.com/dedalus-labs/brave-search-mcp
-[6] Perplexity MCP — https://github.com/perplexityai/modelcontextprotocol ;
-    https://docs.perplexity.ai/docs/getting-started/integrations/mcp-server
-[7] Perplexity streaming citations —
-    https://docs.perplexity.ai/docs/cookbook/articles/streaming-citations/README
-[8] Bocha Search MCP — https://github.com/BochaAI/bocha-search-mcp ;
-    https://open.bochaai.com
-[9] SearXNG MCP — https://github.com/ihor-sokoliuk/mcp-searxng ;
-    Kagi/Perplexity/SearXNG roundup —
-    https://www.shareuhack.com/en/posts/best-mcp-servers-guide-2026
-[10] Citation patterns across ChatGPT / Claude / Perplexity —
-    https://medium.com/@aivsrank/how-ai-engines-cite-sources-patterns-across-chatgpt-claude-perplexity-and-sge-8c317777c71d
+- Tavily MCP — https://docs.tavily.com/documentation/mcp ;
+  https://github.com/tavily-ai/tavily-mcp
+- Exa MCP — https://exa.ai/docs/reference/exa-mcp ;
+  https://github.com/exa-labs/exa-mcp-server
+- Jina MCP — https://github.com/jina-ai/MCP ; https://mcp.jina.ai/v1
+- Bocha Search MCP — https://github.com/BochaAI/bocha-search-mcp ;
+  https://open.bochaai.com
+- Perplexity MCP — https://github.com/perplexityai/modelcontextprotocol ;
+  Perplexity CTO move-away-from-MCP note: Awesome Agents recap of Ask 2026
 
 Internal references:
 - Existing citation design: `docs/dev/specs/2026-05-14-mcp-tool-citations-design.md`
@@ -417,6 +379,12 @@ Internal references:
 - Citation config model: `backend/cubebox/middleware/citations/config.py`
 - Citation middleware: `backend/cubebox/middleware/citation.py`
 - Catalog seed: `backend/cubebox/mcp/template_seed.py`
+- Runtime auth dispatch: `backend/cubebox/mcp/cubepi_runtime.py`
+  (`_resolve_auth_from_spec`, `_apply_static_credential`, `_inject_query_param`)
+- Captured-shape fixtures:
+  `backend/tests/unit/fixtures/search_responses/{tavily,exa,bocha,jina}_search.json`
+- Auth-plumbing migration:
+  `backend/alembic/versions/49844ea5ac7b_mcp_template_install_static_auth_style_.py`
 - Citation columns migration:
   `backend/alembic/versions/94630a9e13b4_add_tool_citations_to_mcp_tables.py`
 - Prompt-cache discipline: `backend/docs/prompt-cache-discipline.md`

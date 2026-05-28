@@ -55,6 +55,13 @@ class MCPConnectorTemplateSeedEntry:
     oauth_static_client_secret_env: str | None
     static_form_schema: list[dict[str, Any]] | None
     static_auth_header_template: str | None
+    # Runtime auth shape for the ``static`` branch. Default ``bearer`` keeps
+    # existing connectors on ``Authorization: Bearer <key>``. Search MCPs
+    # diverge: Exa wants ``header`` with ``x-api-key``; some servers want
+    # ``query`` with a URL param like ``tavilyApiKey``.
+    static_auth_style: Literal["bearer", "header", "query"] = "bearer"
+    static_auth_header_name: str | None = None
+    static_auth_query_param: str | None = None
     template_metadata: dict[str, Any] = field(default_factory=dict)
     tool_citation_defaults: dict[str, dict[str, Any]] = field(default_factory=dict)
 
@@ -367,6 +374,138 @@ CATALOG: list[MCPConnectorTemplateSeedEntry] = [
         static_auth_header_template=None,
         template_metadata={"docs_url": "https://learn.microsoft.com/"},
     ),
+    # --- Search MCP sources (issue #148) ---
+    # Hosted servers verified live with a real API key on 2026-05-27:
+    #   - Tavily: ``https://mcp.tavily.com/mcp/`` accepts both
+    #     ``Authorization: Bearer`` and ``?tavilyApiKey=...``; we use
+    #     Bearer for parity with the rest of the catalog.
+    #   - Exa:    ``https://mcp.exa.ai/mcp`` accepts ``x-api-key`` only.
+    #   - Jina:   ``https://mcp.jina.ai/v1`` accepts ``Authorization: Bearer``.
+    # Bocha and Perplexity intentionally NOT seeded — no official hosted
+    # MCP endpoint at PR time. See spec Open Questions OQ-A / OQ-B.
+    MCPConnectorTemplateSeedEntry(
+        slug="tavily",
+        name="Tavily",
+        provider="Tavily",
+        description="Tavily search MCP server: web search, news, and page extraction.",
+        server_url="https://mcp.tavily.com/mcp/",
+        transport="streamable_http",
+        supported_auth_methods=["static"],
+        default_credential_policy="org",
+        oauth_dcr_supported=None,
+        oauth_default_scope=None,
+        oauth_static_client_id_env=None,
+        oauth_static_client_secret_env=None,
+        static_form_schema=_TOKEN_FIELD,
+        static_auth_header_template=_BEARER_TEMPLATE,
+        static_auth_style="bearer",
+        template_metadata={"docs_url": "https://docs.tavily.com/documentation/mcp"},
+        tool_citation_defaults={
+            "tavily_search": {
+                "content_type": "json",
+                "source_type": "web",
+                "content_field": "results",
+                "mapping": {"url": "url", "title": "title", "snippet": "content"},
+            },
+            "tavily_extract": {
+                "content_type": "json",
+                "source_type": "web",
+                "content_field": "results",
+                "mapping": {"url": "url", "snippet": "raw_content"},
+            },
+        },
+    ),
+    MCPConnectorTemplateSeedEntry(
+        slug="exa",
+        name="Exa",
+        provider="Exa",
+        description="Exa search MCP server: web search, research papers, code search.",
+        server_url="https://mcp.exa.ai/mcp",
+        transport="streamable_http",
+        supported_auth_methods=["static"],
+        default_credential_policy="org",
+        oauth_dcr_supported=None,
+        oauth_default_scope=None,
+        oauth_static_client_id_env=None,
+        oauth_static_client_secret_env=None,
+        static_form_schema=_TOKEN_FIELD,
+        static_auth_header_template=None,
+        static_auth_style="header",
+        static_auth_header_name="x-api-key",
+        template_metadata={"docs_url": "https://exa.ai/docs/reference/exa-mcp"},
+        tool_citation_defaults={
+            "web_search_exa": {
+                "content_type": "json",
+                "source_type": "web",
+                "content_field": "results",
+                "mapping": {"url": "url", "title": "title", "snippet": "text"},
+            },
+            "research_paper_search_exa": {
+                "content_type": "json",
+                "source_type": "academic",
+                "content_field": "results",
+                "mapping": {"url": "url", "title": "title", "snippet": "text"},
+            },
+            "code_search_exa": {
+                "content_type": "json",
+                "source_type": "code",
+                "content_field": "results",
+                "mapping": {"url": "url", "title": "title", "snippet": "text"},
+            },
+            "web_fetch_exa": {
+                "content_type": "json",
+                "source_type": "web",
+                "content_field": "results",
+                "mapping": {"url": "url", "title": "title", "snippet": "text"},
+            },
+        },
+    ),
+    MCPConnectorTemplateSeedEntry(
+        slug="jina",
+        name="Jina AI",
+        provider="Jina AI",
+        description="Jina AI MCP server: web search, URL reader, arXiv / SSRN search.",
+        server_url="https://mcp.jina.ai/v1",
+        transport="streamable_http",
+        supported_auth_methods=["static"],
+        default_credential_policy="org",
+        oauth_dcr_supported=None,
+        oauth_default_scope=None,
+        oauth_static_client_id_env=None,
+        oauth_static_client_secret_env=None,
+        static_form_schema=_TOKEN_FIELD,
+        static_auth_header_template=_BEARER_TEMPLATE,
+        static_auth_style="bearer",
+        template_metadata={"docs_url": "https://jina.ai/api-dashboard/mcp"},
+        tool_citation_defaults={
+            # ``search_web`` mirrors the s.jina.ai REST shape: top-level
+            # ``data`` array, each item with ``url``/``title``/``description``.
+            "search_web": {
+                "content_type": "json",
+                "source_type": "web",
+                "content_field": "data",
+                "mapping": {"url": "url", "title": "title", "snippet": "description"},
+            },
+            "search_arxiv": {
+                "content_type": "json",
+                "source_type": "academic",
+                "content_field": "data",
+                "mapping": {"url": "url", "title": "title", "snippet": "description"},
+            },
+            "search_ssrn": {
+                "content_type": "json",
+                "source_type": "academic",
+                "content_field": "data",
+                "mapping": {"url": "url", "title": "title", "snippet": "description"},
+            },
+            "read_url": {
+                "content_type": "json",
+                "source_type": "web",
+                "content_field": "data",
+                "mapping": {"url": "url", "title": "title", "snippet": "content"},
+            },
+        },
+    ),
     MCPConnectorTemplateSeedEntry(
         slug="webtools",
         name="WebTools",
@@ -511,6 +650,9 @@ async def seed_templates(
             oauth_static_client_secret_credential_id=client_secret_credential_id,
             static_form_schema=entry.static_form_schema,
             static_auth_header_template=entry.static_auth_header_template,
+            static_auth_style=entry.static_auth_style,
+            static_auth_header_name=entry.static_auth_header_name,
+            static_auth_query_param=entry.static_auth_query_param,
             template_metadata=dict(entry.template_metadata),
             tool_citation_defaults=dict(entry.tool_citation_defaults),
             status="active",
