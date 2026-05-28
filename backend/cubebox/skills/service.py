@@ -195,6 +195,27 @@ class SkillMdMissingError(ValueError):
     pass
 
 
+def validate_skill_files(files: dict[str, bytes]) -> None:
+    """Enforce path-traversal + per-file + total-size limits on a skill bundle.
+
+    Shared by the zip-upload path (_extract_zip) and the remote-import path so
+    both enforce identical limits. Raises InvalidZipPathError / FileTooLargeError.
+    """
+    total = 0
+    for rel, data in files.items():
+        if rel.startswith("/") or ".." in PurePosixPath(rel).parts:
+            raise InvalidZipPathError(f"invalid path in skill bundle: {rel!r}")
+        if len(data) > MAX_FILE_BYTES:
+            raise FileTooLargeError(
+                f"{rel} is {len(data)} bytes; cap is {MAX_FILE_BYTES}"
+            )
+        total += len(data)
+        if total > MAX_TOTAL_BYTES:
+            raise FileTooLargeError(
+                f"bundle exceeds total cap of {MAX_TOTAL_BYTES} bytes"
+            )
+
+
 class SkillPublishService:
     """Write-path: extract zip → validate → upload → DB transaction."""
 
