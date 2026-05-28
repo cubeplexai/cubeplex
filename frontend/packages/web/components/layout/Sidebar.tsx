@@ -36,6 +36,7 @@ import {
   Sparkles,
   Trash2,
   Users,
+  Webhook,
 } from 'lucide-react'
 
 type ApiClient = ReturnType<typeof createApiClient>
@@ -209,7 +210,7 @@ function ConversationRow({
 
 interface WorkspaceNavEntry {
   key: string
-  labelKey: 'skills' | 'mcp' | 'memory' | 'scheduledTasks' | 'members' | 'settings'
+  labelKey: 'skills' | 'mcp' | 'memory' | 'scheduledTasks' | 'members' | 'settings' | 'triggers'
   icon: LucideIcon
   href: string
   isActive: boolean
@@ -225,9 +226,11 @@ function WorkspaceNav({ wsId }: { wsId: string }): React.ReactElement {
   const settingsPrefix = `/w/${wsId}/settings`
   const memoryPrefix = `/w/${wsId}/memory`
   const scheduledTasksPrefix = `/w/${wsId}/scheduled-tasks`
+  const triggersPrefix = `/w/${wsId}/triggers`
   const onSettings = pathname?.startsWith(settingsPrefix) ?? false
   const onMemory = pathname?.startsWith(memoryPrefix) ?? false
   const onScheduledTasks = pathname?.startsWith(scheduledTasksPrefix) ?? false
+  const onTriggers = pathname?.startsWith(triggersPrefix) ?? false
   const currentTab = searchParams.get('tab') ?? 'workspace'
 
   const entries: WorkspaceNavEntry[] = [
@@ -258,6 +261,13 @@ function WorkspaceNav({ wsId }: { wsId: string }): React.ReactElement {
       icon: CalendarClock,
       href: scheduledTasksPrefix,
       isActive: onScheduledTasks,
+    },
+    {
+      key: 'triggers',
+      labelKey: 'triggers',
+      icon: Webhook,
+      href: triggersPrefix,
+      isActive: onTriggers,
     },
   ]
   if (isAdmin) {
