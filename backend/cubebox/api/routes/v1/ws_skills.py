@@ -233,16 +233,19 @@ async def preview_candidate(
         raise HTTPException(status_code=404, detail="SOURCE_NOT_FOUND")
     try:
         files = await remote.fetch(source_ref)
+        if "SKILL.md" not in files:
+            raise HTTPException(status_code=404, detail="SKILL_MD_MISSING")
+        content = files["SKILL.md"].decode("utf-8")
+    except UnicodeDecodeError as e:
+        raise HTTPException(status_code=400, detail="INVALID_SKILL") from e
     except (httpx.HTTPError, ValueError) as e:
         raise HTTPException(status_code=502, detail="REMOTE_FETCH_FAILED") from e
-    if "SKILL.md" not in files:
-        raise HTTPException(status_code=404, detail="SKILL_MD_MISSING")
     slug = source_ref.rsplit("/", 1)[-1]
     return CandidatePreviewResponse(
         candidate_id=candidate_id,
         name=slug,
         canonical_name=f"{org.slug}:{slug}",
-        content=files["SKILL.md"].decode("utf-8"),
+        content=content,
     )
 
 

@@ -24,6 +24,31 @@ from cubebox.skills.sources.base import (
 _MAX_TREE_ENTRIES = 200
 
 
+def _require_str(d: dict[str, object], key: str) -> str:
+    v = d.get(key)
+    if isinstance(v, str):
+        return v
+    return ""
+
+
+def _str_or(v: object, default: str | None) -> str | None:
+    if isinstance(v, str):
+        return v
+    return default
+
+
+def _int_or(v: object, default: int | None) -> int | None:
+    if isinstance(v, int) and not isinstance(v, bool):
+        return v
+    return default
+
+
+def _str_list(v: object) -> list[str]:
+    if isinstance(v, list):
+        return [str(x) for x in v if isinstance(x, str)]
+    return []
+
+
 class RemoteRegistrySource:
     kind: SourceKind = "remote"
 
@@ -58,25 +83,30 @@ class RemoteRegistrySource:
             data = resp.json()
         out: list[SkillCandidate] = []
         for item in data.get("skills", []):
-            slug = item["name"]
+            if not isinstance(item, dict):
+                continue
+            slug = _require_str(item, "name")
+            ref = _require_str(item, "ref")
+            if not slug or not ref:
+                continue
             out.append(
                 SkillCandidate(
                     candidate_id=encode_candidate_id(
-                        "remote", item["ref"], source_id=self.source_id
+                        "remote", ref, source_id=self.source_id
                     ),
                     name=slug,
                     canonical_name=f"{self._org_slug}:{slug}",
-                    description=item.get("description", ""),
+                    description=_str_or(item.get("description"), ""),  # type: ignore[arg-type]
                     source_kind="remote",
-                    source_ref=item["ref"],
-                    keywords=list(item.get("keywords", [])),
-                    version=item.get("version"),
+                    source_ref=ref,
+                    keywords=_str_list(item.get("keywords")),
+                    version=_str_or(item.get("version"), None),
                     trust=self._trust,
                     install_state="available",
-                    stars=item.get("stars"),
-                    install_count=item.get("installs"),
+                    stars=_int_or(item.get("stars"), None),
+                    install_count=_int_or(item.get("installs"), None),
                     source_name=self._source_name,
-                    repo=item.get("repo") or self._repo,
+                    repo=_str_or(item.get("repo"), None) or self._repo,
                 )
             )
         return out
@@ -87,12 +117,17 @@ class RemoteRegistrySource:
         async with self._client() as client:
             tree = await client.get(f"/tree/{source_ref}")
             tree.raise_for_status()
-            entries = tree.json().get("files", [])
-            if len(entries) > _MAX_TREE_ENTRIES:
+            tree_data = tree.json()
+            if not isinstance(tree_data, dict):
+                raise ValueError("remote registry returned non-object tree")
+            entries = tree_data.get("files", [])
+            if not isinstance(entries, list) or len(entries) > _MAX_TREE_ENTRIES:
                 raise ValueError(
                     f"skill tree has {len(entries)} files; cap {_MAX_TREE_ENTRIES}"
                 )
             for rel in entries:
+                if not isinstance(rel, str):
+                    continue
                 parts = PurePosixPath(rel).parts
                 if rel.startswith("/") or ".." in parts:
                     raise ValueError(f"unsafe path in remote skill tree: {rel!r}")
