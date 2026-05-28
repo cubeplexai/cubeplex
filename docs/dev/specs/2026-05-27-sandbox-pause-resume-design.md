@@ -87,6 +87,10 @@ transparently re-creates on failure. It calls `manager.touch` before each op.
 
 ### Provider capability — OpenSandbox SDK
 
+See [internals note](../notes/2026-05-28-opensandbox-pause-resume-internals.md) for
+documented gotchas G1–G10 (async 202 pause, endpoint re-resolution, missing `Resuming`
+constant, 409 semantics, TTL semantics, egress persistence, sync vs. async APIs, etc.).
+
 The installed SDK (`backend/.venv/.../opensandbox/sandbox.py`) already supports the full
 lifecycle:
 - `Sandbox.pause()` → `pause_sandbox(id)`; transitions to `Paused`, suspends all processes.
@@ -206,7 +210,8 @@ Add to `backend/cubebox/models/user_sandbox.py` (migration via
 - `paused_at: datetime | None` — when the sandbox entered `paused`. Drives the paused-TTL
   reaper.
 - `paused_ttl_seconds: int` — how long a paused sandbox may sit before it is killed
-  (default e.g. 7 days; well under e2b's 30-day ceiling). Separate from the idle `ttl_seconds`.
+  (default `24 * 60` = 24 minutes per OQ-2; well under e2b's 30-day ceiling). Separate
+  from the idle `ttl_seconds` (default `30 * 60` per OQ-1).
 - `provider: str` — which driver owns this row (`"opensandbox"` today, `"e2b"` later).
   Lets a mixed fleet be reaped correctly and is needed once #146 lands. Default
   `"opensandbox"`.
@@ -260,16 +265,19 @@ Keep them on the abstraction so the manager never imports a concrete driver:
   manager pick "pause on idle" vs. "kill on idle" per provider.
 - `async pause() -> None` — suspend; default raises `NotImplementedError`. OpenSandbox
   delegates to the SDK `pause()`.
-- `resume` is special: resuming produces a **new** live handle (the SDK `resume` is a
-  classmethod that rebuilds adapters). So resume lives on the **manager**, not on a dead
-  `Sandbox` instance — the manager calls the driver's resume-by-id factory and gets back a
-  fresh `Sandbox`. The base class exposes a driver-level
-  `classmethod async resume_by_id(sandbox_id, *, conn_config, ...) -> Sandbox` that
-  OpenSandbox implements via `opensandbox.Sandbox.resume(...)`.
+- `connect_or_resume` is special: it produces a **new** live handle (the SDK `resume` is a
+  classmethod that rebuilds adapters; the e2b `connect` likewise auto-resumes a paused
+  sandbox). So this lives on the **manager**, not on a dead `Sandbox` instance — the
+  manager calls the driver's `connect_or_resume` factory and gets back a fresh `Sandbox`.
+  The base class exposes a driver-level
+  `classmethod async connect_or_resume(sandbox_id, *, conn_config, ...) -> Sandbox`.
+  OpenSandbox implements it by calling `opensandbox.Sandbox.resume(...)` server-side then
+  connecting; e2b will implement it by calling its `connect` (which auto-resumes). The
+  unified shape means #146 doesn't reshape the abstraction.
 
 `SandboxManager` changes:
 - `get_or_create` reuse path: if the DB row is `paused`, **resume** it (mark `resuming` →
-  driver resume-by-id → re-apply egress → `mark_running` + `last_resumed_at`) instead of
+  driver `connect_or_resume` → re-apply egress → `mark_running` + `last_resumed_at`) instead of
   treating it as missing. If `running`, behave as today (connect + health-check). If
   resume fails, fall through to create-new (and mark the old row `terminated`/`failed`).
 - New `pause(user_id, ...)` / a reaper entry point `pause_idle()` mirroring
@@ -306,8 +314,8 @@ endpoint addresses (the SDK `resume` docstring says so explicitly, and re-resolv
 egress endpoints itself). So:
 
 1. **Never reuse a pre-pause `Sandbox` handle.** Resume always goes through the driver's
-   resume-by-id factory, which rebuilds the execd/egress/health/metrics adapters against the
-   freshly-resolved endpoints. The manager discards the old handle.
+   `connect_or_resume` factory, which rebuilds the execd/egress/health/metrics adapters
+   against the freshly-resolved endpoints. The manager discards the old handle.
 2. **Egress re-applied on resume.** `_apply_egress` already runs on the reuse path; the
    resume path calls it too — revoke-then-add fresh `EgressRef`s and re-`set_run_env`, so
    placeholders are valid for a new TTL window. Network policy is structural and set at
@@ -338,7 +346,10 @@ Replace the idle reaper's behaviour by capability:
 
 Config knobs (under `sandbox.*`, consistent with existing ones):
 - `sandbox.pause_on_idle: bool` (default `True` where supported) — pause vs. kill on idle.
-- `sandbox.paused_ttl` (default e.g. `604800` = 7d).
+- `sandbox.idle_ttl_seconds` — `30 * 60` (30 minutes, OQ-1).
+- `sandbox.paused_ttl_seconds` — `24 * 60` (24 minutes, OQ-2).
+- `sandbox.lease_seconds` — `5 * 60` (5 minutes, OQ-7); managed by `LazySandbox` around
+  long ops.
 - `sandbox.resume_timeout` (default `30`).
 
 Touch semantics unchanged for *freshness*, but freshness is no longer the only safety net.
@@ -357,15 +368,16 @@ The whole design is gated on `Sandbox.supports_pause()`:
   pause exists.
 - If `pause()` raises at runtime, the reaper reverts the row `pausing → running`
   (`mark_running`), logs, and **falls back to kill** for that row (don't leave a sandbox
-  half-transitioned). If `resume_by_id` raises, `get_or_create` falls back to create-new.
-  Both keep the state machine consistent.
+  half-transitioned). If `connect_or_resume` raises, `get_or_create` falls back to
+  create-new. Both keep the state machine consistent.
 
 ### v1 scope
 
 - Add `paused` / `pausing` / `resuming` / `failed` states + the new `UserSandbox` columns
   and repo transitions (autogen migration).
-- `Sandbox.supports_pause()` / `pause()` / `resume_by_id` on the base class; OpenSandbox
-  implements all three via the SDK; `LocalSandbox` and `LazySandbox` forward/no-op.
+- `Sandbox.supports_pause()` / `pause()` / `connect_or_resume` on the base class;
+  OpenSandbox implements all three via the SDK; `LocalSandbox` and `LazySandbox`
+  forward/no-op.
 - `SandboxManager`: resume-on-reuse, `pause_idle()`, `reap_paused()`; wire both into the
   cleanup loop; egress re-applied on resume.
 - Config knobs above.
@@ -409,29 +421,55 @@ Run worktree tests on the per-slot DB (`uv run pytest`, ports from `.worktree.en
    (pause→resume→pause). Need a real measurement before picking default `ttl_seconds` for
    the pause path. Should there be a minimum running-time before a sandbox is eligible to
    pause?
+   **Resolved 2026-05-28: default idle TTL = 30 minutes, configurable in the config file
+   (`sandbox.idle_ttl_seconds`, default `30 * 60`). No separate "min-runtime" knob — the
+   idle TTL itself is the thrash guard; an extra minimum-runtime gate adds a knob that
+   doesn't earn its keep.**
 2. **Does OpenSandbox bill paused sandboxes** (storage for the frozen memory/FS)? That sets
    the right `paused_ttl` default and whether paused-but-idle should still eventually kill
    aggressively.
+   **Resolved 2026-05-28: default paused TTL = 24 minutes (note: minutes, not hours),
+   configurable as `sandbox.paused_ttl_seconds` (default `24 * 60`). We can't yet
+   confirm whether the provider bills paused storage; the short default is deliberately
+   conservative until we measure.**
 3. **Mid-transition crash recovery.** If the backend dies during `pausing`/`resuming`, the
    DB row is stuck in a transient state. Do we add a reconciler that queries the provider's
    actual state (`get_info().status`) and repairs the row, or just time-box transients and
    kill? Provider is the source of truth — lean toward a reconcile pass.
+   **Resolved 2026-05-28: add a reconciler (see plan Task 5b reconciler). Periodically
+   read provider `get_info().status` and repair stuck `pausing`/`resuming` rows. Scan
+   period 30s, bounded by `claim_timeout`. Provider is the source of truth.**
 4. **Resume-then-immediately-pause races** with the open browser panel keepalive: if a panel
    reopens just as the idle reaper pauses, do we cancel the pause or resume right after?
    Probably: keepalive touch wins (won't be selected), but the window needs a guard.
+   **Resolved 2026-05-28: already handled by the atomic `claim_pausing` UPDATE that
+   re-asserts idleness (and the lease) in its WHERE clause. A keepalive touch landing
+   between selection and claim makes the claim a no-op; no extra guard needed.**
 5. **e2b mapping (#146).** e2b's `connect`-auto-resumes model differs from OpenSandbox's
    explicit `resume_by_id`. Does the `resume_by_id` interface cleanly cover both, or do we
    need a `connect_or_resume` shape? Decide when #146 starts so the abstraction isn't
    reshaped twice.
+   **Resolved 2026-05-28: unify under `connect_or_resume(sandbox_id)` on the provider
+   abstraction. OpenSandbox impl calls the SDK's `Sandbox.resume(...)` classmethod
+   server-side then connects; e2b impl calls `connect` (which auto-resumes). The
+   provider-abstraction method is named `connect_or_resume` from the start so #146
+   doesn't reshape it.**
 6. **Snapshots (`create_snapshot`).** Out of scope here, but should paused-then-reaped
    sandboxes optionally snapshot-on-kill so a long-idle user can still get state back? Or is
    that a separate "templates" feature entirely?
+   **Resolved 2026-05-28: NOT in scope for v1. Snapshot-as-template is a distinct future
+   feature; v1 ships pause/resume only.**
 7. **In-use lease window vs. renewal.** What lease window balances "long op never gets
    paused" against "crashed holder can't pin a sandbox forever"? A short window forces
    renewal mid-op (a heartbeat) while a long one delays reclaim after a crash. Decide the
    default window, the renewal cadence, and where it lives (`LazySandbox` wrapper vs. the
    tool-execution boundary) when implementing — and confirm the renewal point sees every
    long op (`execute`, browser startup, file transfer), not just agent-turn boundaries.
+   **Resolved 2026-05-28: default lease window = 5 minutes (`sandbox.lease_seconds`,
+   default `5 * 60`), managed at the `LazySandbox` layer. Acquire when entering a long
+   operation, renew during, release on completion. Boundary is the long-operation
+   boundary (`execute`, browser start, file transfer) — NOT agent-turn boundaries — so
+   every long op is covered.**
 
 ## References
 
