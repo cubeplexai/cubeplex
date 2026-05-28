@@ -20,3 +20,4 @@ export { useWorkspaceSettingsStore, type WorkspaceSettingsStore } from './worksp
 export { useMemberStore } from './memberStore'
 export { useTriggerStore, type TriggerStore } from './triggerStore'
 export { useMcpToolRegistryStore, type McpToolRegistryStore } from './mcpToolRegistryStore'
+export { useSkillsStore, type SkillsState } from './skillsStore'
