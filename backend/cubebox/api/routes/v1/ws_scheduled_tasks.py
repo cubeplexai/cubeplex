@@ -264,9 +264,15 @@ async def patch_task(
                 continue
             if field == "run_at":
                 val = _to_utc_naive(val)
-            setattr(task, field, val)
-            if field in _SCHEDULE_FIELDS:
+            # Only flip touched_schedule when a schedule field's value
+            # *actually changes*. The UI's edit dialog re-sends the whole
+            # form (including unchanged schedule_kind / interval_seconds /
+            # run_at / timezone), so presence in the patch alone would
+            # slide next_fire_at on every name/prompt edit. Compare against
+            # the current task value (already normalized in storage form).
+            if field in _SCHEDULE_FIELDS and val != getattr(task, field):
                 touched_schedule = True
+            setattr(task, field, val)
         # Only recompute next_fire_at when the schedule actually changed.
         # Metadata-only edits (name/prompt/target_*) must NOT slide the next
         # fire forward; that would silently delay or skip the pending run.

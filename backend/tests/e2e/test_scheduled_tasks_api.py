@@ -184,6 +184,35 @@ class TestScheduledTaskValidation:
             "metadata-only edit must not slide next_fire_at"
         )
 
+    def test_patch_schedule_fields_unchanged_value_preserves_next_fire_at(
+        self, client: TestClient
+    ) -> None:
+        """Regression for codex round-5 P2: when the edit dialog sends the
+        full form (including schedule fields that did not actually change),
+        the route must compare values and NOT recompute next_fire_at if
+        nothing schedule-related differs. Otherwise editing only the prompt
+        through the UI silently slides the next fire forward.
+        """
+        tid = _make(client).json()["id"]  # hourly interval task
+        original = client.get(f"{BASE}/{tid}").json()
+        # Patch resends every schedule field with its current value plus a
+        # real prompt change (the UI form pattern).
+        r = client.patch(
+            f"{BASE}/{tid}",
+            json={
+                "prompt": "ui-style full-form patch",
+                "schedule_kind": original["schedule_kind"],
+                "interval_seconds": original["interval_seconds"],
+                "timezone": original["timezone"],
+            },
+        )
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["prompt"] == "ui-style full-form patch"
+        assert body["next_fire_at"] == original["next_fire_at"], (
+            "echoed-but-unchanged schedule fields must not slide next_fire_at"
+        )
+
     def test_patch_schedule_field_recomputes_next_fire_at(self, client: TestClient) -> None:
         # Sanity counterpart: editing a schedule field DOES recompute.
         tid = _make(client).json()["id"]  # hourly interval
