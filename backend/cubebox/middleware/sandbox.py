@@ -26,6 +26,7 @@ from pydantic import BaseModel, Field
 from cubebox.parsers import ParseOptions
 from cubebox.prompts.sandbox import SANDBOX_PROMPT_TEMPLATE
 from cubebox.sandbox.base import Sandbox
+from cubebox.sandbox_policy.rules import evaluate_command
 
 # ---------------------------------------------------------------------------
 # Per-(workspace_id, conversation_id) ring buffer of commands the sandbox
@@ -130,8 +131,16 @@ def _make_execute_tool(
     *,
     workspace_id: str | None = None,
     conversation_id: str | None = None,
+    command_rules: list[dict[str, Any]] | None = None,
 ) -> AgentTool[_ExecuteArgs]:
-    """Build the execute cubepi.AgentTool backed by a sandbox instance."""
+    """Build the execute cubepi.AgentTool backed by a sandbox instance.
+
+    Command rules are enforced here — the last cubebox-owned point before the
+    command reaches the provider. Precedence deny > confirm > allow; in v1
+    ``confirm`` degrades to ``deny`` because cubepi has no elicit/approve
+    event channel yet (see TODO below + spec OQ-1/OQ-2).
+    """
+    rules = command_rules or []
 
     async def _execute(
         tool_call_id: str,
@@ -141,6 +150,34 @@ def _make_execute_tool(
         on_update: object = None,
     ) -> AgentToolResult:
         del tool_call_id, signal, on_update
+
+        action, pattern = evaluate_command(args.command, rules)
+        if action == "deny":
+            # Surface as a tool ERROR (is_error=True) so cubepi's finalized result
+            # reads as a failure, not a successful command that printed a message.
+            return AgentToolResult(
+                content=[TextContent(text=f"command blocked by org policy: {pattern}")],
+                is_error=True,
+            )
+        if action == "confirm":
+            # TODO(cubepi-hitl): real prompt-and-approve flow once upstream ships
+            # the elicit/approve event channel. Until then, treat confirm as deny
+            # with a distinct message so admins still see their rule fire. The
+            # audit row tag is `confirmed-action-deferred`. Acceptance criteria
+            # for the upstream cubepi work: confirmation blocks only the tool
+            # call (not the whole run); 180s timeout; timed-out = deny + audit
+            # row; sandbox TTL clock does not pause while waiting. See OQ-1/OQ-2.
+            return AgentToolResult(
+                content=[
+                    TextContent(
+                        text=(
+                            f"command requires confirmation (pattern: {pattern}); "
+                            "not yet supported in this deployment"
+                        )
+                    )
+                ],
+                is_error=True,
+            )
 
         result = await sandbox.execute(args.command)
         if workspace_id is not None and conversation_id is not None and result.exit_code == 0:
@@ -365,16 +402,19 @@ class SandboxMiddleware(Middleware):
         sandbox: Sandbox,
         conversation_id: str | None = None,
         workspace_id: str | None = None,
+        command_rules: list[dict[str, Any]] | None = None,
     ) -> None:
         self.sandbox = sandbox
         self.conversation_id = conversation_id
         self.workspace_id = workspace_id
+        self.command_rules = command_rules or []
 
         self._tools: list[AgentTool[Any]] = [
             _make_execute_tool(
                 sandbox,
                 workspace_id=workspace_id,
                 conversation_id=conversation_id,
+                command_rules=self.command_rules,
             ),
             _make_write_file_tool(sandbox),
             _make_edit_file_tool(sandbox),

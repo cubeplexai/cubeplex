@@ -1274,11 +1274,21 @@ class RunManager:
         if sandbox is not None:
             try:
                 from cubebox.middleware.sandbox import SandboxMiddleware
+                from cubebox.sandbox.manager import get_sandbox_manager
+
+                # Resolve the org's command_rules via the manager so DB access stays
+                # behind the manager and the middleware only sees its slice of policy.
+                _command_rules: list[dict[str, Any]] = []
+                try:
+                    _command_rules = await get_sandbox_manager().resolve_command_rules(ctx.org_id)
+                except Exception as _exc:
+                    logger.warning("Failed to resolve sandbox command_rules: {}", _exc)
 
                 sandbox_mw = SandboxMiddleware(
                     sandbox=sandbox,
                     conversation_id=conversation_id,
                     workspace_id=ctx.workspace_id,
+                    command_rules=_command_rules,
                 )
                 cubepi_middleware.append(sandbox_mw)
                 # Middleware tools (execute, write_file, edit_file, file_read) collected for
