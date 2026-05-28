@@ -26,11 +26,6 @@ from cubebox.sandbox.manager import SandboxManager
 pytestmark = pytest.mark.e2e
 
 
-def _as_naive_utc(dt: datetime) -> datetime:
-    """Strip tzinfo if present; the column is ``timestamp without tz``."""
-    return dt.replace(tzinfo=None) if dt.tzinfo is not None else dt
-
-
 @pytest_asyncio.fixture
 async def db_session_maker() -> AsyncIterator[async_sessionmaker[AsyncSession]]:
     eng = create_async_engine(_build_database_url(), poolclass=NullPool)
@@ -109,13 +104,9 @@ async def test_renew_lease_excludes_row_from_pause_candidates_then_release(
         workspace_id=scope["workspace_id"],
     )
 
-    # Refresh and confirm in_use_until is in the future. The column is stored
-    # as ``timestamp without tz``, so PG returns naive datetimes — compare in
-    # naive UTC.
     await db_session.refresh(row)
     assert row.in_use_until is not None
-    in_use = _as_naive_utc(row.in_use_until)
-    assert in_use > datetime.utcnow()
+    assert row.in_use_until > datetime.now(UTC)
 
     # System query should now skip this row.
     candidates = await UserSandboxRepository.list_idle_to_pause_system(
@@ -152,7 +143,7 @@ async def test_renew_lease_custom_seconds_exceeds_default_window(
     default_window = manager._lease_seconds
     custom = default_window * 4
 
-    before = datetime.utcnow()
+    before = datetime.now(UTC)
     await manager.renew_lease(
         sandbox_id,
         org_id=scope["org_id"],
@@ -162,6 +153,4 @@ async def test_renew_lease_custom_seconds_exceeds_default_window(
 
     await db_session.refresh(row)
     assert row.in_use_until is not None
-    # The new expiry must be past `before + default_window` (i.e. the custom
-    # value extended the lease beyond what the default would have produced).
-    assert _as_naive_utc(row.in_use_until) > before + timedelta(seconds=default_window)
+    assert row.in_use_until > before + timedelta(seconds=default_window)

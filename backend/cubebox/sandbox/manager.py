@@ -1196,13 +1196,7 @@ class SandboxManager:
                     # ``pause_attempt_grace_seconds``, kill it instead of
                     # reverting — same outcome as the kill-on-idle path that
                     # ``pause_on_idle=False`` would have taken.
-                    # ``last_activity_at`` is stored TZ-naive (column has no
-                    # ``timezone=True``), so normalise both sides before the
-                    # subtraction or it raises TypeError.
-                    last_activity = record.last_activity_at
-                    if last_activity.tzinfo is None:
-                        last_activity = last_activity.replace(tzinfo=UTC)
-                    pause_idle_age = (datetime.now(UTC) - last_activity).total_seconds()
+                    pause_idle_age = (datetime.now(UTC) - record.last_activity_at).total_seconds()
                     if (
                         record.status == "pausing"
                         and pause_idle_age >= self._pause_attempt_grace_seconds

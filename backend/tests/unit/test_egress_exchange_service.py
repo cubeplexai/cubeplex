@@ -108,7 +108,7 @@ async def test_rejects_non_declared_host(session: AsyncSession) -> None:
 async def _seed_with_expiry(
     session: AsyncSession, expires_at: datetime
 ) -> tuple[EgressExchangeService, str]:
-    """Seed a ref with an explicit expires_at (tz-naive, as Postgres stores it)."""
+    """Seed a ref with an explicit expires_at (tz-aware, as Postgres stores it)."""
     backend = FernetBackend([Fernet.generate_key()])
     cred = CredentialService(
         CredentialRepository(session, org_id="org-exp"),
@@ -118,8 +118,6 @@ async def _seed_with_expiry(
     )
     cred_id = await cred.create(kind=SANDBOX_ENV_KIND, name="t-exp", plaintext="tok_expiry")
     placeholder = mint_placeholder()
-    # Store expires_at as tz-naive to simulate what Postgres DateTime() returns
-    naive_expires_at = expires_at.replace(tzinfo=None)
     await EgressRefRepository(session).add(
         EgressRef(
             ref_hash=hash_placeholder(placeholder),
@@ -137,7 +135,7 @@ async def _seed_with_expiry(
                     "credential_id": cred_id,
                 }
             ],
-            expires_at=naive_expires_at,
+            expires_at=expires_at,
         )
     )
     svc = EgressExchangeService(
@@ -153,7 +151,7 @@ async def _seed_with_expiry(
 
 
 async def test_exchange_succeeds_with_future_expiry(session: AsyncSession) -> None:
-    """A ref whose expires_at is in the future (tz-naive from DB) must succeed."""
+    """A ref whose expires_at is in the future (tz-aware from DB) must succeed."""
     future = datetime.now(UTC) + timedelta(hours=1)
     svc, placeholder = await _seed_with_expiry(session, future)
     secret, _header_names = await svc.exchange(
@@ -165,7 +163,7 @@ async def test_exchange_succeeds_with_future_expiry(session: AsyncSession) -> No
 
 
 async def test_exchange_fails_with_past_expiry(session: AsyncSession) -> None:
-    """A ref whose expires_at is in the past (tz-naive from DB) must be rejected."""
+    """A ref whose expires_at is in the past (tz-aware from DB) must be rejected."""
     past = datetime.now(UTC) - timedelta(hours=1)
     svc, placeholder = await _seed_with_expiry(session, past)
     with pytest.raises(EgressExchangeError):
@@ -191,16 +189,14 @@ async def test_extend_expiry_revives_a_soon_to_expire_ref(session: AsyncSession)
             user_id="u1",
             run_id=None,
             bindings=[],
-            expires_at=(datetime.now(UTC) - timedelta(seconds=1)).replace(tzinfo=None),
+            expires_at=datetime.now(UTC) - timedelta(seconds=1),
         )
     )
     repo = EgressRefRepository(session)
     # Expired → not valid.
     assert await repo.get_valid_by_hash(ref_hash) is None
     # Extend → valid again.
-    await repo.extend_expiry_for_sandbox(
-        "sbx-long", (datetime.now(UTC) + timedelta(hours=1)).replace(tzinfo=None)
-    )
+    await repo.extend_expiry_for_sandbox("sbx-long", datetime.now(UTC) + timedelta(hours=1))
     assert await repo.get_valid_by_hash(ref_hash) is not None
 
 
