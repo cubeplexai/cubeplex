@@ -315,10 +315,14 @@ class UserSandboxRepository(ScopedRepository[UserSandbox]):
             await self.session.commit()
 
     async def list_expired(self) -> list[UserSandbox]:
-        """List sandboxes that have exceeded their TTL since last activity."""
+        """List sandboxes that have exceeded their TTL since last activity.
+
+        Sweeps both ``running`` and ``provisioning`` rows so a crash mid-create
+        cannot orphan a reserved slot past its TTL.
+        """
         stmt = (
             self._scoped_select()
-            .where(UserSandbox.status == "running")
+            .where(UserSandbox.status.in_(self._ACTIVE_STATUSES))  # type: ignore[attr-defined]
             .where(text("last_activity_at + ttl_seconds * INTERVAL '1 second' < NOW()"))
         )
         result = await self.session.execute(stmt)
@@ -328,11 +332,13 @@ class UserSandboxRepository(ScopedRepository[UserSandbox]):
     async def list_expired_system(cls, session: AsyncSession) -> list[UserSandbox]:
         """System-scope query: find expired sandboxes across all workspaces.
 
-        Only for background reapers — never expose to user-facing code.
+        Only for background reapers — never expose to user-facing code. Sweeps
+        ``provisioning`` rows too so a crashed reserve can't pin the partial
+        unique slot forever.
         """
         stmt = (
             select(UserSandbox)
-            .where(UserSandbox.status == "running")  # type: ignore[arg-type]
+            .where(UserSandbox.status.in_(cls._ACTIVE_STATUSES))  # type: ignore[attr-defined]
             .where(text("last_activity_at + ttl_seconds * INTERVAL '1 second' < NOW()"))
         )
         result = await session.execute(stmt)
