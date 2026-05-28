@@ -213,8 +213,14 @@ async def test_reconcile_provider_failed_marks_failed() -> None:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.parametrize("provider_state", ["Terminated", "Succeed"])
 @pytest.mark.asyncio
-async def test_reconcile_provider_terminated_kills_record() -> None:
+async def test_reconcile_provider_terminal_kills_record(provider_state: str) -> None:
+    """``Terminated`` and the empirically-observed ``Succeed`` (internals
+    G3/G11) both indicate the provider sandbox is gone for good — the
+    reconciler kills the stuck transient row so a fresh sandbox replaces it
+    on the next request, rather than leaving it pinned forever.
+    """
     factory, _session = _make_session_factory()
     mgr = SandboxManager(factory)
     mgr._exchange_host = ""
@@ -223,7 +229,7 @@ async def test_reconcile_provider_terminated_kills_record() -> None:
     scoped = _scoped_repo()
 
     raw = MagicMock()
-    raw.get_info = AsyncMock(return_value=_info("Terminated"))
+    raw.get_info = AsyncMock(return_value=_info(provider_state))
     raw.kill = AsyncMock()
     raw.close = AsyncMock()
 
@@ -250,7 +256,7 @@ async def test_reconcile_provider_terminated_kills_record() -> None:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("state", ["Pausing", "Resuming", "Succeed", "", "Whatever"])
+@pytest.mark.parametrize("state", ["Pausing", "Resuming", "", "Whatever"])
 @pytest.mark.asyncio
 async def test_reconcile_transient_or_unknown_is_noop_except_touch(state: str) -> None:
     factory, _session = _make_session_factory()

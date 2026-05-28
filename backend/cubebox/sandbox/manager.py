@@ -654,8 +654,21 @@ class SandboxManager:
                         await self._kill_record(session, scoped, record, conn_config)
                         continue
                     await backend.pause()
-                    await scoped.mark_paused(record.id, paused_at=datetime.now(UTC))
-                    logger.info("Paused idle sandbox {}", record.sandbox_id)
+                    # Per internals-note G1, ``Sandbox.pause()`` returns 202
+                    # (async) — provider transitions Running -> Pausing ->
+                    # Paused on its own schedule. Do NOT mark the row
+                    # ``paused`` here: a slow/no-op backend (G11) would leave
+                    # the DB lying about state, and a subsequent
+                    # ``get_or_create`` would try to resume a still-running
+                    # sandbox (409 INVALID_STATE) and provision a duplicate.
+                    # ``reconcile_transients`` reads ``get_info().status``
+                    # and advances ``pausing -> paused`` once the provider
+                    # actually reports ``Paused``.
+                    logger.info(
+                        "Pause initiated for sandbox {}; reconciler will advance "
+                        "to paused once provider confirms",
+                        record.sandbox_id,
+                    )
                 except Exception as exc:
                     logger.warning(
                         "Pause failed for {}: {}; falling back to kill",
@@ -734,7 +747,13 @@ class SandboxManager:
                     )
                 elif state == "Failed":
                     await scoped.mark_failed(record.id)
-                elif state == "Terminated":
+                elif state in ("Terminated", "Succeed"):
+                    # ``Succeed`` is documented in internals-note G3 as an
+                    # empirically-observed terminal state (the local SDK enum
+                    # omits it). Treat it like ``Terminated`` so a stuck
+                    # transient row gets reaped and a fresh sandbox is
+                    # provisioned on the next request rather than waiting
+                    # forever for a state that won't arrive.
                     await self._kill_record(session, scoped, record, conn_config)
                 else:
                     logger.debug("Reconciler: {} still {}", record.sandbox_id, state)

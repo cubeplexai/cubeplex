@@ -250,19 +250,25 @@ async def test_pause_resume_roundtrip_preserves_memory(
 
         # Wait for the provider to actually transition.
         paused = await _wait_for_provider_state(sandbox_handle, "Paused")
-        record = await _fetch_record(session_factory, record_id)
-        assert record is not None
-
         if not paused:
-            # Manager will have fallen back to kill on pause failure; if instead the
-            # provider just no-ops, the manager flips pausing -> paused optimistically.
-            # Either way, this dev backend can't prove the round-trip — skip with G11.
+            # G11: this dev backend silently no-ops pause. The row sits at
+            # ``pausing`` and the reconciler will keep observing ``Running``.
+            # Round-trip resume can't be proven here.
+            record = await _fetch_record(session_factory, record_id)
             pytest.skip(
                 f"G11: OpenSandbox at {config.get('sandbox.domain')} silently no-ops pause; "
                 "round-trip resume is only meaningful on a pause-capable backend "
-                f"(record.status={record.status!r})"
+                f"(record.status={record.status if record else 'missing'!r})"
             )
 
+        # Per G1, pause() is async — pause_idle leaves the row at ``pausing``
+        # and the reconciler advances it once the provider reports ``Paused``.
+        # Drive the reconciler explicitly so the test doesn't depend on the
+        # cleanup-loop cadence.
+        await manager.reconcile_transients(claim_timeout=0)
+
+        record = await _fetch_record(session_factory, record_id)
+        assert record is not None
         assert record.status == "paused", f"expected paused, got {record.status!r}"
         assert record.paused_at is not None
 
@@ -413,14 +419,16 @@ async def test_reap_paused_terminates_stale_paused_row(
     )
     try:
         await manager.pause_idle()
-        record = await _fetch_record(session_factory, record_id)
-        assert record is not None
 
         if not await _wait_for_provider_state(sandbox_handle, "Paused"):
             pytest.skip(
                 f"G11: OpenSandbox at {config.get('sandbox.domain')} silently no-ops pause; "
                 "reap-paused needs an actually-paused row to be meaningful"
             )
+
+        # Per G1 pause is async — drive the reconciler to advance pausing -> paused
+        # so reap_paused has an actually-paused row to operate on.
+        await manager.reconcile_transients(claim_timeout=0)
 
         # Wait past the 1-second paused_ttl.
         await asyncio.sleep(2.0)

@@ -101,10 +101,10 @@ async def test_pause_idle_pauses_on_successful_claim() -> None:
         record.id, idle_ttl_seconds=mgr._idle_ttl_seconds
     )
     backend.pause.assert_awaited_once()
-    scoped_repo.mark_paused.assert_awaited_once()
-    # The paused_at kwarg should be set.
-    _, kwargs = scoped_repo.mark_paused.call_args
-    assert "paused_at" in kwargs and isinstance(kwargs["paused_at"], datetime)
+    # Per internals-note G1, pause() is async (202) — the row stays
+    # `pausing` until the reconciler reads provider state and advances
+    # it. pause_idle must NOT call mark_paused synchronously.
+    scoped_repo.mark_paused.assert_not_called()
     scoped_repo.mark_terminated.assert_not_called()
     scoped_repo.mark_running.assert_not_called()
 
