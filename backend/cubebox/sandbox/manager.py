@@ -194,6 +194,18 @@ class SandboxManager:
             repo = UserSandboxRepository(session, org_id=org_id, workspace_id=workspace_id)
             record = await repo.get_resumable_by_user(user_id)
 
+            # Late arrival on a transient row (another caller is pausing or
+            # resuming this sandbox). Wait for stable, then proceed on the
+            # resulting status so we never provision a duplicate.
+            if record and record.status in ("pausing", "resuming"):
+                stable = await self._await_stable_status(
+                    record.id, org_id=org_id, workspace_id=workspace_id
+                )
+                if stable is None or stable.status in ("failed", "terminated"):
+                    record = None
+                else:
+                    record = stable
+
             if record and record.status == "paused":
                 resumed = await self._resume_record(
                     session,
@@ -206,11 +218,8 @@ class SandboxManager:
                 )
                 if resumed is not None:
                     return resumed
-                # Resume genuinely failed (record marked failed inside _resume_record)
-                # -> fall through to create-new. A lost mark_resuming race does NOT
-                # reach here; _resume_record waits for the winner's row to become
-                # running and connects to it, so two concurrent get_or_create calls
-                # never both create.
+                # Resume genuinely failed (record marked failed inside
+                # _resume_record) -> fall through to create-new.
                 record = None
 
             if record:
@@ -536,6 +545,39 @@ class SandboxManager:
             )
         return backend
 
+    async def _await_stable_status(
+        self,
+        record_id: str,
+        *,
+        org_id: str,
+        workspace_id: str,
+    ) -> "UserSandbox | None":
+        """Poll the row (fresh session per iteration) until its status is
+        stable: ``running``, ``paused``, ``failed``, or ``terminated``.
+
+        Returns the row with its latest status, or ``None`` if the row was
+        deleted or the deadline (``_resume_timeout``) passed while it was
+        still transient.
+
+        A fresh session per poll is required because the caller's session
+        uses ``expire_on_commit=False``; a same-session ``repo.get`` would
+        return the identity-mapped stale-paused/resuming instance instead
+        of the winner's committed transition.
+        """
+        deadline = datetime.now(UTC) + timedelta(seconds=self._resume_timeout)
+        while datetime.now(UTC) < deadline:
+            async with self._session_factory() as poll_session:
+                poll_repo = UserSandboxRepository(
+                    poll_session, org_id=org_id, workspace_id=workspace_id
+                )
+                row = await poll_repo.get(record_id)
+                if row is None:
+                    return None
+                if row.status in ("running", "paused", "failed", "terminated"):
+                    return row
+            await asyncio.sleep(0.5)
+        return None
+
     async def _await_resumed_by_winner(
         self,
         record_id: str,
@@ -545,42 +587,27 @@ class SandboxManager:
         workspace_id: str,
         user_id: str,
     ) -> "OpenSandbox | None":
-        """Race loser: poll the row until the winner flips it to running, then
-        connect to that same sandbox. Returns None (caller creates new) only if
-        the winner ended in failed/terminated, so we never duplicate.
-
-        Uses a fresh session per poll iteration so the identity-map cache on
-        the caller's session can't hide the winner's committed status change
-        (``expire_on_commit=False`` makes a same-session ``repo.get`` return
-        the stale-paused instance otherwise).
+        """Race loser: wait for the winner's row to reach ``running`` and
+        connect to that same sandbox. Returns None when the winner ended in
+        ``failed``/``terminated`` so the caller can create a fresh one.
         """
-        deadline = datetime.now(UTC) + timedelta(seconds=self._resume_timeout)
-        while datetime.now(UTC) < deadline:
-            async with self._session_factory() as poll_session:
-                poll_repo = UserSandboxRepository(
-                    poll_session, org_id=org_id, workspace_id=workspace_id
+        row = await self._await_stable_status(record_id, org_id=org_id, workspace_id=workspace_id)
+        if row is None or row.status != "running":
+            return None
+        sandbox_id = row.sandbox_id
+        raw = await opensandbox.Sandbox.connect(sandbox_id, connection_config=conn_config)
+        backend = OpenSandbox(sandbox=raw, workdir=self._workdir)
+        if self._exchange_host:
+            async with self._session_factory() as session:
+                await self._apply_egress(
+                    session,
+                    backend,
+                    org_id=org_id,
+                    workspace_id=workspace_id,
+                    user_id=user_id,
+                    sandbox_id=sandbox_id,
                 )
-                row = await poll_repo.get(record_id)
-                if row is None or row.status in ("failed", "terminated"):
-                    return None
-                if row.status == "running":
-                    sandbox_id = row.sandbox_id
-                    raw = await opensandbox.Sandbox.connect(
-                        sandbox_id, connection_config=conn_config
-                    )
-                    backend = OpenSandbox(sandbox=raw, workdir=self._workdir)
-                    if self._exchange_host:
-                        await self._apply_egress(
-                            poll_session,
-                            backend,
-                            org_id=org_id,
-                            workspace_id=workspace_id,
-                            user_id=user_id,
-                            sandbox_id=sandbox_id,
-                        )
-                    return backend
-            await asyncio.sleep(0.5)
-        return None
+        return backend
 
     async def pause_idle(self) -> None:
         """Pause idle, unleased sandboxes (capable providers); kills on

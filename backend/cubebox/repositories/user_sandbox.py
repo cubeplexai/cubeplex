@@ -55,17 +55,18 @@ class UserSandboxRepository(ScopedRepository[UserSandbox]):
         return result.scalar_one_or_none()
 
     async def get_resumable_by_user(self, user_id: str) -> UserSandbox | None:
-        """Return a running OR paused row for reuse; never a mid-transition row.
+        """Return any non-terminal row for reuse (running/paused/pausing/resuming).
 
-        Callers (the manager) decide whether to resume a ``paused`` row or
-        just touch a ``running`` one. Mid-transition rows (``pausing`` /
-        ``resuming``) are explicitly excluded — claiming one risks racing
-        with the worker that owns the transition.
+        Transient rows (``pausing`` / ``resuming``) ARE returned so a late
+        ``get_or_create`` caller sees the in-flight lifecycle row instead of
+        treating it as absent and provisioning a duplicate sandbox. The
+        manager waits on transients to reach a stable state (paused/running/
+        failed/terminated) before acting.
         """
         stmt = (
             self._scoped_select()
             .where(UserSandbox.user_id == user_id)
-            .where(UserSandbox.status.in_(("running", "paused")))  # type: ignore[attr-defined]
+            .where(UserSandbox.status.in_(("running", "paused", "pausing", "resuming")))  # type: ignore[attr-defined]
             .order_by(UserSandbox.created_at.desc())  # type: ignore[attr-defined]
             .limit(1)
         )
@@ -144,13 +145,23 @@ class UserSandboxRepository(ScopedRepository[UserSandbox]):
         return bool(result.rowcount == 1)
 
     async def mark_paused(self, record_id: str, *, paused_at: datetime | None = None) -> bool:
-        """Move ``pausing`` -> ``paused`` and stamp ``paused_at``."""
-        return await self._transition(
-            record_id,
-            "pausing",
-            "paused",
-            paused_at=paused_at or datetime.now(UTC),
+        """Move to ``paused`` from ``pausing`` (pause succeeded) OR ``resuming``
+        (resume aborted mid-flight and provider still reports ``Paused``).
+        Stamps ``paused_at``.
+        """
+        stmt = (
+            update(UserSandbox)
+            .where(
+                UserSandbox.id == record_id,  # type: ignore[arg-type]
+                UserSandbox.org_id == self.org_id,  # type: ignore[arg-type]
+                UserSandbox.workspace_id == self.workspace_id,  # type: ignore[arg-type]
+                UserSandbox.status.in_(("pausing", "resuming")),  # type: ignore[attr-defined]
+            )
+            .values(status="paused", paused_at=paused_at or datetime.now(UTC))
         )
+        result = cast(CursorResult[Any], await self.session.execute(stmt))
+        await self.session.commit()
+        return bool(result.rowcount == 1)
 
     async def mark_resuming(self, record_id: str) -> bool:
         """Move ``paused`` -> ``resuming``."""

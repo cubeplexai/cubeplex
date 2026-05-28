@@ -188,10 +188,13 @@ async def test_get_active_by_user_ignores_pausing_and_paused(
     assert found.id == running.id
 
 
-async def test_get_resumable_by_user_returns_paused_not_transient(
+async def test_get_resumable_by_user_returns_most_recent_non_terminal(
     db_session: AsyncSession, scope: dict[str, str]
 ) -> None:
-    """(f) get_resumable_by_user returns paused but never pausing/resuming."""
+    """(f) get_resumable_by_user returns any non-terminal row (running, paused,
+    pausing, resuming) — so a late-arriving caller sees the in-flight lifecycle
+    row instead of treating it as absent and creating a duplicate sandbox.
+    """
     repo = _mk_repo(db_session, scope)
     await _mk(repo, scope, status="pausing", idle_secs=0, ttl_seconds=3600)
     await _mk(repo, scope, status="resuming", idle_secs=0, ttl_seconds=3600)
@@ -199,16 +202,35 @@ async def test_get_resumable_by_user_returns_paused_not_transient(
         repo, scope, status="paused", idle_secs=0, ttl_seconds=3600, paused_at=datetime.now(UTC)
     )
 
+    # Most recent row wins regardless of which non-terminal status it carries.
     found = await repo.get_resumable_by_user(scope["user_id"])
     assert found is not None
     assert found.id == paused.id
     assert found.status == "paused"
 
 
-async def test_mark_paused_rejects_non_pausing_prior_state(
+async def test_get_resumable_by_user_returns_transient_when_only_row(
     db_session: AsyncSession, scope: dict[str, str]
 ) -> None:
-    """(g.1) mark_paused only succeeds from ``pausing``."""
+    """A lone ``pausing`` row IS returned; the manager waits on it instead of
+    falling through to create-new (codex P1 race fix)."""
+    repo = _mk_repo(db_session, scope)
+    pausing = await _mk(repo, scope, status="pausing", idle_secs=0, ttl_seconds=3600)
+
+    found = await repo.get_resumable_by_user(scope["user_id"])
+    assert found is not None
+    assert found.id == pausing.id
+    assert found.status == "pausing"
+
+
+async def test_mark_paused_accepts_pausing_or_resuming_prior_state(
+    db_session: AsyncSession, scope: dict[str, str]
+) -> None:
+    """(g.1) mark_paused succeeds from ``pausing`` (pause completed) AND from
+    ``resuming`` (codex P2: resume aborted mid-flight and provider still
+    reports ``Paused`` — reconciler reverts the stuck resuming row). Rejects
+    other prior states.
+    """
     repo = _mk_repo(db_session, scope)
     row = await _mk(repo, scope, status="running", idle_secs=0, ttl_seconds=3600)
 
@@ -227,6 +249,14 @@ async def test_mark_paused_rejects_non_pausing_prior_state(
     await db_session.refresh(pausing_row)
     assert pausing_row.status == "paused"
     assert pausing_row.paused_at is not None
+
+    # Legal (codex P2): resuming → paused (reconciler reverts when provider
+    # still reports Paused after a mid-flight resume abort).
+    resuming_row = await _mk(repo, scope, status="resuming", idle_secs=0, ttl_seconds=3600)
+    assert await repo.mark_paused(resuming_row.id) is True
+    await db_session.refresh(resuming_row)
+    assert resuming_row.status == "paused"
+    assert resuming_row.paused_at is not None
 
 
 async def test_mark_resuming_rejects_non_paused_prior_state(
