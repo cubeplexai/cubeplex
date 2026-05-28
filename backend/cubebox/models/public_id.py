@@ -33,6 +33,8 @@ _BODY_LEN: int = 14
 PREFIX_MEMORY: str = "mem"
 PREFIX_SANDBOX_ENV: str = "senv"
 PREFIX_EGRESS_REF: str = "eref"
+PREFIX_TRIGGER: str = "trig"
+PREFIX_TRIGGER_EVENT: str = "trev"
 
 
 @dataclass
