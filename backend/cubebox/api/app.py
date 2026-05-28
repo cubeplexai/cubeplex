@@ -488,6 +488,7 @@ def create_app(
         ws_scheduled_tasks,
         ws_settings,
         ws_skills,
+        ws_triggers,
     )
 
     app.include_router(system.router, prefix="/api/v1")
@@ -514,6 +515,7 @@ def create_app(
     app.include_router(admin_providers.router, prefix="/api/v1")
     app.include_router(admin_llm.router, prefix="/api/v1")
     app.include_router(ws_skills.router, prefix="/api/v1")
+    app.include_router(ws_triggers.router, prefix="/api/v1")
     # Browser live-view/keepalive handlers require the SandboxManager, which is
     # only initialized when sandbox support is enabled (see the lifespan above).
     # Don't expose /browser/* otherwise — the handlers would 500 with
