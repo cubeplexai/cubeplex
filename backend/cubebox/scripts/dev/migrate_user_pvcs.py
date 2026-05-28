@@ -35,23 +35,32 @@ def build_migration_plan(
     *,
     existing_pvcs: list[str],
     memberships: dict[str, list[str]],
-    target_prefix: str,
-    new_template: str,
+    pvc_prefix: str,
 ) -> list[MigrationAction]:
-    """Return one action per user with a pre-rename PVC.
+    """Return one action per user with a pre-#144 PVC claim.
+
+    Old PVC claim shape: ``<prefix>-<sanitize(user_id)>`` (workspace-blind).
+    New PVC claim shape: ``<prefix>-<sanitize("ws-{ws}-user-{user}")>``.
+
+    Both shapes are derived from the same helpers SandboxManager uses
+    (``build_legacy_user_pvc_name`` / ``build_user_pvc_name`` in
+    ``cubebox.sandbox.manager``) so we can't drift from the names the
+    runtime actually mounts.
 
     - exactly one workspace  -> rename
     - multiple workspaces    -> manual_cleanup (ambiguous target)
     - no pre-rename PVC      -> omitted (nothing to do)
     """
+    from cubebox.sandbox.manager import build_legacy_user_pvc_name, build_user_pvc_name
+
     pvc_set = set(existing_pvcs)
     actions: list[MigrationAction] = []
     for user_id, workspaces in memberships.items():
-        old_name = f"{target_prefix}{user_id}"
+        old_name = build_legacy_user_pvc_name(pvc_prefix, user_id)
         if old_name not in pvc_set:
             continue
         if len(workspaces) == 1:
-            new_name = new_template.format(ws=workspaces[0], user=user_id)
+            new_name = build_user_pvc_name(pvc_prefix, workspaces[0], user_id)
             actions.append(
                 MigrationAction(
                     user_id=user_id,
@@ -132,13 +141,17 @@ async def main_async(*, apply: bool) -> int:
         if apply:
             print("refusing to --apply with an unwired _list_pvcs stub")
             return 2
+    # Pull the PVC prefix from the same config the runtime reads, so the
+    # plan's old/new claim names match what SandboxManager actually mounts.
+    from cubebox.config import config as _cfg
+
+    pvc_prefix = _cfg.get("sandbox.volume.pvc_prefix", "cubebox-user")
     memberships = await _fetch_memberships()
     pvcs = await _list_pvcs()
     plan = build_migration_plan(
         existing_pvcs=pvcs,
         memberships=memberships,
-        target_prefix="user-",
-        new_template="ws-{ws}-user-{user}",
+        pvc_prefix=pvc_prefix,
     )
     if not plan:
         print("nothing to migrate")

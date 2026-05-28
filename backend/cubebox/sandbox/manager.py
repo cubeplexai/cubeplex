@@ -40,6 +40,52 @@ from cubebox.sandbox_policy.rules import merge_network_rules
 from cubebox.services.sandbox_env import SandboxEnvResolver
 from cubebox.services.sandbox_policy import SandboxPolicyResolver
 
+# ---------------------------------------------------------------------------
+# PVC naming — shared between SandboxManager and the one-time PVC migrator
+# (`backend/cubebox/scripts/dev/migrate_user_pvcs.py`). Keeping the helpers
+# here is the single source of truth so an operator wiring up the migrator
+# can't accidentally drift from the actual claim names the manager mounts.
+# ---------------------------------------------------------------------------
+
+# k8s PVC names are bounded at 63 chars; we reserve room for the prefix + the
+# separating hyphen.
+_PVC_NAME_MAX_LEN = 63
+
+
+def _sanitize_pvc_suffix(raw: str, prefix: str) -> str:
+    """Make ``raw`` safe to embed in a PVC claim name under ``prefix``.
+
+    - lowercases + replaces any run of non-`[a-z0-9-]` with a single hyphen
+      and strips leading/trailing hyphens, matching k8s name rules.
+    - falls back to a sha256-derived 16-char hex when the cleaned string is
+      empty or would exceed the 63-char PVC budget once the prefix is added.
+    """
+    sanitized = re.sub(r"[^a-z0-9-]+", "-", raw.lower()).strip("-")
+    max_suffix_len = _PVC_NAME_MAX_LEN - len(prefix) - 1
+    if not sanitized or len(sanitized) > max_suffix_len:
+        sanitized = hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
+    return sanitized
+
+
+def build_user_pvc_name(prefix: str, workspace_id: str, user_id: str) -> str:
+    """The CURRENT (post-#144) PVC claim name for a sandbox.
+
+    Shape: ``<prefix>-<sanitize(f"ws-{ws}-user-{user}")>``. Used by both
+    ``SandboxManager._build_user_volume`` and the migrator's plan builder so
+    the operator never has to mirror the rule by hand.
+    """
+    raw = f"ws-{workspace_id}-user-{user_id}"
+    return f"{prefix}-{_sanitize_pvc_suffix(raw, prefix)}"
+
+
+def build_legacy_user_pvc_name(prefix: str, user_id: str) -> str:
+    """The PRE-#144 PVC claim name (workspace-blind).
+
+    Shape: ``<prefix>-<sanitize(user_id)>``. The migrator scans for PVCs of
+    this shape and proposes renaming each to ``build_user_pvc_name(...)``.
+    """
+    return f"{prefix}-{_sanitize_pvc_suffix(user_id, prefix)}"
+
 
 class SandboxManager:
     """Manages sandbox lifecycle: create, reuse, and cleanup."""
@@ -132,16 +178,7 @@ class SandboxManager:
         boundary the unique index enforces in the DB: the same user in two
         workspaces must never mount the same /workspace PVC.
         """
-        raw = f"ws-{workspace_id}-user-{user_id}"
-        sanitized = re.sub(r"[^a-z0-9-]+", "-", raw.lower()).strip("-")
-        if not sanitized:
-            sanitized = hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
-
-        max_suffix_len = 63 - len(self._volume_pvc_prefix) - 1
-        if len(sanitized) > max_suffix_len:
-            sanitized = hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
-
-        pvc_name = f"{self._volume_pvc_prefix}-{sanitized}"
+        pvc_name = build_user_pvc_name(self._volume_pvc_prefix, workspace_id, user_id)
         return Volume(
             name="user-workspace",
             pvc=PVC(claimName=pvc_name),
