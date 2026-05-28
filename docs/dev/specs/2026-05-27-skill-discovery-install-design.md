@@ -62,11 +62,12 @@ as more skills exist, so discovery and the prompt index both need an on-demand
   user confirmation in v1).
 - No sandboxed *execution* of remote skill scripts at install time — we store
   files; execution still happens only inside the agent sandbox at use time.
-- No new ranking ML model. v1 ranking is keyword + lightweight semantic match,
-  not a trained reranker.
-- No per-user (personal) skill scope as a brand-new DB concept if it collides
-  with the existing org/workspace model — see Open Questions; v1 targets
-  workspace-private install.
+- No new ranking ML model. v1 ranking is **keyword + trust signal only**
+  (OQ-4 resolved); embedding/semantic search is a future enhancement behind
+  the same `SkillSource` interface.
+- **No per-user (personal) skill scope in v1.** Deferred to align with #153
+  managed agents introducing user-pinned definitions; v1 ships
+  workspace-private only (OQ-3 resolved).
 - No changes to how skill *files* are stored (object store layout stays).
 
 ---
@@ -210,7 +211,9 @@ implementations in v1:
   a configured GitHub-backed registry, the same shape `npx skills` consumes).
   Search hits the directory's query endpoint; fetch downloads the skill
   directory (repo subpath) so we can import it into our catalog as an
-  `uploaded`-style row owned by the installing org.
+  `uploaded`-style row owned by the installing org. The imported row carries
+  the upstream `source_ref` + a `last_imported_at` timestamp so the
+  "Check for update" button (OQ-6 resolved) can re-pull on demand.
 
 A `SkillSourceRegistry` holds the configured sources. The local source is always
 present. Remote sources are **config/DB-driven**, never hardcoded — register a
@@ -223,16 +226,19 @@ source_kind, source_ref, version, trust` where `trust` carries the signals
 research surfaced (official-source flag, stars/install-count if the registry
 exposes them, "already in your org catalog" boolean).
 
-`candidate_id` is an **opaque, URL-safe** identifier the registry mints for each
-candidate — it is the only handle clients pass back to preview/install. We do
-**not** route on `source_ref`: a remote `source_ref` is a GitHub repo/subpath
-like `owner/repo/tree/main/skills/foo`, full of slashes that won't fit one
-FastAPI path segment (the route would 404 or truncate the ref). The opaque id
-sidesteps that entirely. Concretely it's a short base64url-encoded token (or a
-DB-row id once a candidate is persisted) that the service can decode back to
-`(source_kind, source_ref)`; it carries no slashes and is safe in a query string
-or JSON body. `source_ref` stays in the candidate payload for display and for
-the eventual import, but never appears in a URL path.
+`candidate_id` is an **opaque, URL-safe, HMAC-signed** token (OQ-7 resolved):
+`base64url(<hmac_signed>(source_kind + ":" + source_ref))` over the existing
+token-signing keyring. Stateless — no DB row, no expiry, no GC; rotation is
+done by rotating the HMAC signing key. The token is the only handle clients
+pass back to preview/install. We do **not** route on `source_ref`: a remote
+`source_ref` is a GitHub repo/subpath like `owner/repo/tree/main/skills/foo`,
+full of slashes that won't fit one FastAPI path segment (the route would 404 or
+truncate the ref). The signed token sidesteps that entirely — it carries no
+slashes, is safe in a query string or JSON body, and the signature also pins
+the candidate to this server's keyring so a client can't forge a
+`(source_kind, source_ref)` pair on the install endpoint. `source_ref` stays
+in the candidate payload for display and for the eventual import, but never
+appears in a URL path.
 
 `name` here is the human-facing display name (for remote candidates the upstream
 skill slug). It is **not** necessarily the name `load_skill` resolves against. The
@@ -272,11 +278,21 @@ directly — using `canonical_name`, not the display `name`, so the call resolve
 - **Preview.** Agent (or the user via UI) previews a candidate: for local
   candidates reuse the existing preview route; for remote candidates fetch the
   `SKILL.md` (without importing yet) so the user sees what they'd get.
-- **Confirm.** Install is **never silent**. The agent surfaces the candidate +
-  trust info and asks the user to confirm. Confirmation is a **user action**
-  (a UI affordance in chat — e.g. an install button on the candidate card —
-  backed by a real authenticated request), *not* the model deciding on its own.
-  This keeps the trust boundary at the human.
+- **Confirm.** Install is **never silent and never agent-initiated.** The
+  user starts every install via one of two surfaces (OQ-5 resolved), both
+  authenticated and both calling the same `POST …/skills/install` endpoint:
+  - **UI button** on the candidate card in the workspace skills page —
+    primary path. A click is the confirm.
+  - **Chat fallback** — the user types `install <canonical_name>` into the
+    conversation. The conversation route parses that user message
+    server-side and calls the install endpoint before the agent loop sees
+    the message. The agent itself never autonomously calls `install_skill`;
+    `find_skills` is strictly read-only.
+
+  This does **not** depend on cubepi HITL — install is always user-initiated,
+  there is no agent-pause-for-approval moment. Autonomous agent-initiated
+  install (agent says "I need this" → human approves → install runs) is
+  explicitly out of v1 scope and listed under Future Work.
 - **Install.** On confirm, an install service:
   - **Local candidate:** create the workspace-private `OrgSkillInstall`
     (reusing `create_for_workspace`, `auto_bind=True`).
@@ -309,13 +325,18 @@ directly — using `canonical_name`, not the display `name`, so the call resolve
 - **Who can install what:** a member can install into their own workspace; only
   org admins can install org-wide or register remote sources. This matches the
   existing member-vs-admin route split.
-- **Trust/review:** remote candidates carry a trust tier from their source
-  config + registry signals. The confirm card shows: source, author/repo,
-  stars/installs, and a clear "remote, not vetted by your org" banner for
-  untrusted tiers. Admins can pin a remote source to a trust tier or disable it
-  entirely. We **store** remote skill files but never execute them at install
-  time — execution only happens inside the agent sandbox when the skill is
-  actually used, same as preinstalled skills today.
+- **Trust/review (signal only, no enforcement in v1; OQ-1 resolved).** Remote
+  candidates carry a trust tier from their source config + registry signals.
+  The confirm card shows: source name, author/repo, stars/installs, and a
+  clear **"unvetted" banner** for any remote source that isn't `official`.
+  Admins can pin a remote source to a trust tier or disable it entirely. v1
+  does **not** machine-enforce a source allowlist, run a content scan, or
+  require admin approval for remote imports — those land later in a dedicated
+  security/gating module (see Future Work). What v1 ships is the user-visible
+  trust signal so users see what they're pulling in. We **store** remote
+  skill files but never execute them at install time — execution only happens
+  inside the agent sandbox at use time, subject to the same #144
+  `command_rules` as any other skill (OQ-2 resolved: no isolation tier).
 
 ### 5. Synergy with #143 (progressive disclosure)
 
@@ -346,6 +367,9 @@ one layer down in services):
   - `POST …/install` — install a chosen candidate into **this workspace**
     (workspace-private). Body carries `{candidate_id}` (the opaque handle),
     not the raw ref. Authenticated user action = the "confirm".
+  - `POST …/{skill_id}/refresh` — on-demand re-import of a remote-imported
+    skill from its stored `source_ref` (OQ-6 manual re-import). Powers the
+    "Check for update" button on the workspace skills page.
 - **Admin routes** under `/api/v1/admin/skills/` and
   `/api/v1/admin/skill-sources/`:
   - source management (register/list/enable/disable remote sources, set trust
@@ -361,17 +385,28 @@ services/repositories, never parameterized at the route layer. No `?scope=` or
 - `SkillSource` interface + `LocalCatalogSource` + one `RemoteRegistrySource`
   (skills.sh / configured GitHub-backed registry).
 - `find_skills` agent tool (keyword ranking + trust signal, descriptions only).
-- Member `discover` + workspace-private `install` routes; remote-candidate
-  import via existing publish path.
+- Member `discover` + workspace-private `install` + `refresh` (re-import on
+  demand) routes; remote-candidate import via existing publish path.
 - Admin source-management routes; admin org-wide install reuses existing route.
 - In-run "recompute enabled set after install" so the skill is loadable in the
   same conversation.
-- Confirm-card UI in chat (workspace-scoped page/module per the page-isolation
-  rule).
+- **Workspace skills page** at `/w/[wsId]/skills` — list of skills visible to
+  this workspace (preinstalled + own-org uploads + remote-imported), a
+  "Discover skills" panel with the search bar + ranked candidate cards, an
+  **Install** button per card backed by the install endpoint, an **"unvetted"
+  badge** on remote sources, and a **"Check for update"** button on the detail
+  of each remote-imported skill that re-pulls its `source_ref`.
+- **Chat fallback** — the conversation route detects a user message matching
+  `install <canonical_name>` and calls the same install endpoint server-side
+  before the agent loop sees the message. The agent never autonomously calls
+  install.
+- **Local-wins on bare slug** with same-name remote variant coexisting under
+  `<source>:<slug>` (OQ-8 resolved).
 
-Deferred: semantic/embedding search, personal (per-user) scope, auto-update of
-remote-imported skills, multiple remote registries with cross-source dedupe
-heuristics beyond name match.
+Deferred (see Future Work): semantic/embedding search, personal (per-user)
+scope, automated update polling, source allowlist + content-scan + admin
+approval queue, agent-initiated install via HITL, multiple remote registries
+with cross-source dedupe heuristics beyond name match.
 
 ---
 
@@ -412,38 +447,101 @@ system can't be simulated.
    will follow, and sibling files may include scripts the sandbox runs on use.
    What's the minimum vetting before an org member can pull a remote skill into
    their workspace — allowlist of sources only? admin approval queue for remote
-   imports? content scan of `SKILL.md` for prompt-injection patterns? v1 leans
-   on source allowlisting + a visible "unvetted" banner, but is that enough.
+   imports? content scan of `SKILL.md` for prompt-injection patterns?
+   **Resolved 2026-05-28: deferred to a future dedicated security/gating
+   module.** v1 ships **no machine-enforced gate** — no source allowlist, no
+   content scan, no admin approval queue. The only trust signal at the user
+   layer is the visible **"unvetted" badge** on remote-imported skill cards and
+   detail pages, so a user sees what they're pulling in. A separate
+   security-module PR will later add the actual enforcement (allowlist,
+   approval queue, injection scan). See **Future Work** below.
 2. **Sandboxing skill content at use time.** Remote skill scripts run in the
-   agent sandbox like any other skill. Do we need an extra isolation tier
-   (network egress limits, read-only mounts) for skills sourced from untrusted
-   registries vs preinstalled ones? Currently all skills share one sandbox
-   posture.
+   agent sandbox like any other skill. Do we need an extra isolation tier for
+   skills sourced from untrusted registries vs preinstalled ones?
+   **Resolved 2026-05-28: no isolation tier in v1.** All skills share one
+   sandbox posture; remote skill scripts run subject to the same #144
+   `command_rules` as any other skill. The assumption is explicit: a remote
+   skill's executable surface is gated by the existing sandbox + command-rules
+   discipline, not by a remote-only extra tier.
 3. **Personal vs workspace scope.** Issue #151 mentions "workspace/personal
-   scope," but the current model has no per-user skill scope — only
-   org/workspace. Do we add a personal scope (and what does "personal" mean when
-   runs are workspace-scoped), or is workspace-private the right home for v1?
-4. **Keyword vs semantic search.** Is keyword + trust ranking good enough at our
-   catalog sizes, or do short curated descriptions still miss intent often
-   enough to justify an embedding index (and the model/infra it pulls in)?
-5. **Confirmation surface.** Should "confirm install" be a UI affordance only
-   (button on a candidate card), a typed user reply the agent interprets, or
-   both? The trust boundary argues for an explicit authenticated UI action, but
-   pure-chat clients need a fallback.
-6. **Remote-import freshness.** When we import a remote skill into our catalog,
-   it's now a static copy. How/when do we offer updates when the upstream repo
-   moves — manual re-import, or a tracked `source_ref` we can re-pull
-   (re: `npx skills update` subpath bug, issue #1015)?
-7. **Candidate-id encoding + lifetime.** Is `candidate_id` a stateless token
-   that encodes `(source_kind, source_ref)` (no server state, but the client
-   round-trips an opaque blob), or a short-lived DB/cache row id (cleaner URLs,
-   but needs a lookup table and an expiry/GC story)? Either keeps refs out of
-   the URL path; the encoding choice is an implementation detail to settle
-   before coding.
-8. **Duplicate/name collisions.** A remote skill named `frontend-design` may
-   collide with a preinstalled one. Local-wins is the v1 rule, but do we ever
-   want to let a user install a remote variant alongside, and how is it named
-   (`<source>:<slug>`)?
+   scope," but the current model has no per-user skill scope.
+   **Resolved 2026-05-28: workspace-private only in v1.** Personal scope is
+   deferred until #153 (managed agents) lands the user-pinned definition
+   concept, so personal-skill semantics line up with that model rather than
+   being invented twice.
+4. **Keyword vs semantic search.**
+   **Resolved 2026-05-28: keyword + trust ranking only in v1.** No embedding
+   index; an embedding swap stays a future enhancement behind the same
+   `SkillSource` interface.
+5. **Confirmation surface.**
+   **Resolved 2026-05-28: two user-initiated surfaces, both backed by the same
+   install endpoint.** (a) Primary UI path — an **Install** button on the
+   candidate card on the workspace skills page (authenticated user click =
+   the confirm). (b) Chat fallback — the user types `install <canonical_name>`
+   into the conversation; the conversation route parses that user message
+   server-side and calls the same install endpoint before the agent loop sees
+   it. The agent itself **never autonomously calls** `install_skill`; the
+   `find_skills` tool is strictly read-only.
+
+   **Why this does NOT depend on cubepi HITL.** Install is always
+   user-initiated — either a click or a literal user-typed command. There is
+   no agent-driven moment where the system pauses, the user approves, and the
+   agent then proceeds with install. So no human-in-the-loop pause primitive
+   is needed; the two surfaces are just two ways the user *starts* the
+   install. **Autonomous agent-initiated install** ("the agent decides it
+   needs this skill, asks the human to approve, then installs") **would**
+   require HITL and is **explicitly out of v1 scope** — it's listed in Future
+   Work, gated on cubepi shipping HITL first.
+6. **Remote-import freshness.**
+   **Resolved 2026-05-28: manual re-import only in v1.** We store `source_ref`
+   plus a `last_imported_at` on the imported skill row, and the skill detail
+   page exposes a **"Check for update"** button that, on click, re-pulls the
+   same `source_ref` from the same registered source and creates a new
+   version row. No automatic polling, no background freshness job.
+7. **Candidate-id encoding + lifetime.**
+   **Resolved 2026-05-28: stateless HMAC-signed token.** `candidate_id` is
+   `base64url(<hmac_signed>(source_kind + ":" + source_ref))` — no DB row, no
+   GC, no expiry beyond key rotation. Rotation is done by rotating the HMAC
+   signing key in the existing token-signing infra (same key-ring used for
+   other server-signed tokens). A signed token also pins the candidate to
+   this server's keyring, so a client can't forge `(source_kind, source_ref)`
+   on the install endpoint.
+8. **Duplicate/name collisions.**
+   **Resolved 2026-05-28: local-wins on bare-slug, remote variant coexists
+   under a namespaced canonical.** Bare-slug `load_skill <name>` always
+   resolves to the local skill when one exists. A user MAY install a same-name
+   remote variant; it's stored under canonical name `<source>:<slug>` and
+   shows up alongside the local in the skills list. Explicit
+   `load_skill <source>:<slug>` selects the remote variant; bare-slug never
+   resolves to the remote when the local exists.
+
+---
+
+## Future Work
+
+These are deliberately out of v1 scope and tracked here so reviewers don't
+re-litigate them at PR time.
+
+- **Source allowlist + content-scan + admin approval queue** — a dedicated
+  security/gating module that decides which remote sources an org is allowed
+  to import from, scans `SKILL.md` for known prompt-injection patterns, and
+  optionally queues remote imports for admin approval. Replaces the v1
+  "unvetted" badge with actual enforcement. (Resolves OQ-1.)
+- **Personal-scope skills** — user-pinned skill installs that follow the
+  user across workspaces. Lands together with #153 (managed agents)
+  introducing user-pinned definitions, so personal-skill semantics match.
+  (Resolves OQ-3.)
+- **Embedding-based semantic search** — a vector index over skill name +
+  description + keywords, swapped in behind the existing `SkillSource`
+  interface. (Resolves OQ-4.)
+- **Automated update polling** — background freshness checks against
+  `source_ref` with admin-controlled cadence and a notification surface
+  when an imported skill has a new upstream version. Replaces the v1 manual
+  "Check for update" button. (Resolves OQ-6.)
+- **Agent-initiated install via HITL** — the agent says "I need skill X to
+  do this," the user approves once in chat (cubepi human-in-the-loop pause),
+  and the install runs against the same endpoint. Strictly gated on cubepi
+  shipping HITL. (Extends OQ-5.)
 
 ---
 
