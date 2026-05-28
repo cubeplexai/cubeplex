@@ -16,6 +16,7 @@ from __future__ import annotations
 import asyncio
 import secrets
 from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -116,7 +117,7 @@ async def test_claim_pausing_concurrent_single_winner(
             repo = UserSandboxRepository(
                 s, org_id=scope["org_id"], workspace_id=scope["workspace_id"]
             )
-            return await repo.claim_pausing(row_id)
+            return await repo.claim_pausing(row_id, idle_ttl_seconds=1)
 
     r1, r2 = await asyncio.gather(claim(), claim())
     assert sorted([r1, r2]) == [False, True]
@@ -136,15 +137,23 @@ async def test_claim_pausing_concurrent_single_winner(
 # ---------------------------------------------------------------------------
 
 
-def _make_manager() -> SandboxManager:
-    """Build a SandboxManager without touching real config — only the bits
-    ``_resume_record`` / ``_await_resumed_by_winner`` read are needed."""
-    session_factory = MagicMock(spec=async_sessionmaker)
-    mgr = SandboxManager(session_factory)
+def _make_manager() -> tuple[SandboxManager, MagicMock]:
+    """Build a SandboxManager whose session_factory yields a usable mock
+    session, so ``_await_resumed_by_winner``'s per-poll ``async with
+    self._session_factory()`` works."""
+    poll_session = MagicMock(name="poll_session")
+
+    @asynccontextmanager
+    async def _cm() -> AsyncIterator[Any]:
+        yield poll_session
+
+    factory = MagicMock(name="session_factory")
+    factory.side_effect = lambda: _cm()
+    mgr = SandboxManager(factory)
     mgr._resume_timeout = 5
     # Force the egress branch off — keeps the test focused on the race.
     mgr._exchange_host = ""
-    return mgr
+    return mgr, poll_session
 
 
 def _paused_record(scope: dict[str, str]) -> UserSandbox:
@@ -170,7 +179,7 @@ async def test_double_resume_guard_winner_succeeds_loser_connects(
       ``opensandbox.Sandbox.connect`` to attach to the *same* sandbox_id —
       both calls return a handle wrapping that one sandbox.
     """
-    mgr = _make_manager()
+    mgr, _poll_session = _make_manager()
     session = MagicMock(spec=AsyncSession)
     record = _paused_record(scope)
     conn_config = ConnectionConfig(domain="example.invalid")
@@ -199,6 +208,10 @@ async def test_double_resume_guard_winner_succeeds_loser_connects(
             "cubebox.sandbox.manager.opensandbox.Sandbox.connect",
             new=AsyncMock(return_value=loser_raw),
         ) as raw_connect,
+        # The loser's _await_resumed_by_winner constructs a fresh repo per
+        # poll iteration so the identity-map cache can't hide the winner's
+        # committed status. Redirect that construction to the test's repo.
+        patch("cubebox.sandbox.manager.UserSandboxRepository", return_value=repo),
     ):
         # Winner first; loser second. Both share the same record/session/repo.
         winner = await mgr._resume_record(
@@ -241,7 +254,7 @@ async def test_double_resume_guard_winner_fails_loser_returns_none(
     poll observes ``failed`` and returns ``None`` so the caller may create a
     fresh sandbox; no second ``connect_or_resume`` happens.
     """
-    mgr = _make_manager()
+    mgr, _poll_session = _make_manager()
     session = MagicMock(spec=AsyncSession)
     record = _paused_record(scope)
     conn_config = ConnectionConfig(domain="example.invalid")
@@ -268,6 +281,7 @@ async def test_double_resume_guard_winner_fails_loser_returns_none(
             "cubebox.sandbox.manager.opensandbox.Sandbox.connect",
             new=AsyncMock(),
         ) as raw_connect,
+        patch("cubebox.sandbox.manager.UserSandboxRepository", return_value=repo),
     ):
         winner = await mgr._resume_record(
             session,

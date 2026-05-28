@@ -118,7 +118,9 @@ async def test_renew_lease_excludes_row_from_pause_candidates_then_release(
     assert in_use > datetime.utcnow()
 
     # System query should now skip this row.
-    candidates = await UserSandboxRepository.list_idle_to_pause_system(db_session)
+    candidates = await UserSandboxRepository.list_idle_to_pause_system(
+        db_session, idle_ttl_seconds=1
+    )
     assert all(c.id != row.id for c in candidates)
 
     await manager.release_lease(
@@ -130,7 +132,9 @@ async def test_renew_lease_excludes_row_from_pause_candidates_then_release(
     await db_session.refresh(row)
     assert row.in_use_until is None
 
-    candidates = await UserSandboxRepository.list_idle_to_pause_system(db_session)
+    candidates = await UserSandboxRepository.list_idle_to_pause_system(
+        db_session, idle_ttl_seconds=1
+    )
     assert any(c.id == row.id for c in candidates)
 
 

@@ -23,16 +23,24 @@ class UserSandboxRepository(ScopedRepository[UserSandbox]):
         image: str,
         volumes_config: dict[str, Any] | None = None,
         ttl_seconds: int = 3600,
+        paused_ttl_seconds: int | None = None,
     ) -> UserSandbox:
-        """Create a new user sandbox record."""
-        record = UserSandbox(
-            user_id=user_id,
-            sandbox_id=sandbox_id,
-            image=image,
-            volumes_config=volumes_config,
-            ttl_seconds=ttl_seconds,
-        )
-        return await self.add(record)
+        """Create a new user sandbox record.
+
+        ``paused_ttl_seconds`` overrides the model default when set; the manager
+        passes its configured value so ``sandbox.paused_ttl_seconds`` actually
+        drives ``reap_paused`` instead of always taking the model default.
+        """
+        fields: dict[str, Any] = {
+            "user_id": user_id,
+            "sandbox_id": sandbox_id,
+            "image": image,
+            "volumes_config": volumes_config,
+            "ttl_seconds": ttl_seconds,
+        }
+        if paused_ttl_seconds is not None:
+            fields["paused_ttl_seconds"] = paused_ttl_seconds
+        return await self.add(UserSandbox(**fields))
 
     async def get_active_by_user(self, user_id: str) -> UserSandbox | None:
         """Get the active (running) sandbox for a user in this workspace."""
@@ -91,12 +99,16 @@ class UserSandboxRepository(ScopedRepository[UserSandbox]):
             record.status = "terminated"
             await self.session.commit()
 
-    async def claim_pausing(self, record_id: str) -> bool:
+    async def claim_pausing(self, record_id: str, *, idle_ttl_seconds: int) -> bool:
         """Atomically flip running -> pausing, re-asserting idleness + lease.
 
         A single conditional UPDATE: the idleness, status, and lease checks
         live in the WHERE clause so a fresh touch landing between selection
         and claim makes the claim a no-op. Returns whether a row was claimed.
+
+        ``idle_ttl_seconds`` is the manager-configured pause idle TTL — used
+        instead of each row's ``ttl_seconds`` (which controls the kill path)
+        so operators can tune pause cadence via ``sandbox.idle_ttl_seconds``.
         """
         stmt = (
             update(UserSandbox)
@@ -107,8 +119,8 @@ class UserSandboxRepository(ScopedRepository[UserSandbox]):
                 UserSandbox.status == "running",  # type: ignore[arg-type]
                 text(
                     "(in_use_until IS NULL OR in_use_until < NOW()) "
-                    "AND last_activity_at + ttl_seconds * INTERVAL '1 second' <= NOW()"
-                ),
+                    "AND last_activity_at + :idle_ttl * INTERVAL '1 second' <= NOW()"
+                ).bindparams(idle_ttl=idle_ttl_seconds),
             )
             .values(status="pausing")
         )
@@ -212,16 +224,24 @@ class UserSandboxRepository(ScopedRepository[UserSandbox]):
         return list(result.scalars().all())
 
     @classmethod
-    async def list_idle_to_pause_system(cls, session: AsyncSession) -> list[UserSandbox]:
+    async def list_idle_to_pause_system(
+        cls, session: AsyncSession, *, idle_ttl_seconds: int
+    ) -> list[UserSandbox]:
         """System-scope query: stale-idle, unleased ``running`` rows.
 
         Used by the pause reaper to pick candidates before claiming each
-        atomically via ``claim_pausing``.
+        atomically via ``claim_pausing``. The same ``idle_ttl_seconds`` must
+        be passed to ``claim_pausing`` so the WHERE-clause re-assertion is
+        consistent.
         """
         stmt = (
             select(UserSandbox)
             .where(UserSandbox.status == "running")  # type: ignore[arg-type]
-            .where(text("last_activity_at + ttl_seconds * INTERVAL '1 second' <= NOW()"))
+            .where(
+                text("last_activity_at + :idle_ttl * INTERVAL '1 second' <= NOW()").bindparams(
+                    idle_ttl=idle_ttl_seconds
+                )
+            )
             .where(text("(in_use_until IS NULL OR in_use_until < NOW())"))
         )
         result = await session.execute(stmt)

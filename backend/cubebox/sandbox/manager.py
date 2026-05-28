@@ -307,6 +307,7 @@ class SandboxManager:
                     sandbox_id=sandbox_id,
                     image=self._image,
                     ttl_seconds=self._ttl,
+                    paused_ttl_seconds=self._paused_ttl_seconds,
                 )
 
                 # Rebind to the default per-command timeout: the create call's adapters
@@ -503,8 +504,6 @@ class SandboxManager:
         """
         if not await repo.mark_resuming(record.id):
             return await self._await_resumed_by_winner(
-                session,
-                repo,
                 record.id,
                 conn_config,
                 org_id=org_id,
@@ -539,8 +538,6 @@ class SandboxManager:
 
     async def _await_resumed_by_winner(
         self,
-        session: AsyncSession,
-        repo: UserSandboxRepository,
         record_id: str,
         conn_config: ConnectionConfig,
         *,
@@ -550,28 +547,38 @@ class SandboxManager:
     ) -> "OpenSandbox | None":
         """Race loser: poll the row until the winner flips it to running, then
         connect to that same sandbox. Returns None (caller creates new) only if
-        the winner ended in failed/terminated, so we never duplicate."""
+        the winner ended in failed/terminated, so we never duplicate.
+
+        Uses a fresh session per poll iteration so the identity-map cache on
+        the caller's session can't hide the winner's committed status change
+        (``expire_on_commit=False`` makes a same-session ``repo.get`` return
+        the stale-paused instance otherwise).
+        """
         deadline = datetime.now(UTC) + timedelta(seconds=self._resume_timeout)
         while datetime.now(UTC) < deadline:
-            row = await repo.get(record_id)
-            if row is None or row.status in ("failed", "terminated"):
-                return None
-            if row.status == "running":
-                raw = await opensandbox.Sandbox.connect(
-                    row.sandbox_id,
-                    connection_config=conn_config,
+            async with self._session_factory() as poll_session:
+                poll_repo = UserSandboxRepository(
+                    poll_session, org_id=org_id, workspace_id=workspace_id
                 )
-                backend = OpenSandbox(sandbox=raw, workdir=self._workdir)
-                if self._exchange_host:
-                    await self._apply_egress(
-                        session,
-                        backend,
-                        org_id=org_id,
-                        workspace_id=workspace_id,
-                        user_id=user_id,
-                        sandbox_id=row.sandbox_id,
+                row = await poll_repo.get(record_id)
+                if row is None or row.status in ("failed", "terminated"):
+                    return None
+                if row.status == "running":
+                    sandbox_id = row.sandbox_id
+                    raw = await opensandbox.Sandbox.connect(
+                        sandbox_id, connection_config=conn_config
                     )
-                return backend
+                    backend = OpenSandbox(sandbox=raw, workdir=self._workdir)
+                    if self._exchange_host:
+                        await self._apply_egress(
+                            poll_session,
+                            backend,
+                            org_id=org_id,
+                            workspace_id=workspace_id,
+                            user_id=user_id,
+                            sandbox_id=sandbox_id,
+                        )
+                    return backend
             await asyncio.sleep(0.5)
         return None
 
@@ -583,14 +590,18 @@ class SandboxManager:
             return
         conn_config = self._build_connection_config()
         async with self._session_factory() as session:
-            candidates = await UserSandboxRepository.list_idle_to_pause_system(session)
+            candidates = await UserSandboxRepository.list_idle_to_pause_system(
+                session, idle_ttl_seconds=self._idle_ttl_seconds
+            )
             for record in candidates:
                 scoped = UserSandboxRepository(
                     session,
                     org_id=record.org_id,
                     workspace_id=record.workspace_id,
                 )
-                if not await scoped.claim_pausing(record.id):
+                if not await scoped.claim_pausing(
+                    record.id, idle_ttl_seconds=self._idle_ttl_seconds
+                ):
                     continue  # touched / acquired / already-claimed between select+claim
                 try:
                     raw = await opensandbox.Sandbox.connect(

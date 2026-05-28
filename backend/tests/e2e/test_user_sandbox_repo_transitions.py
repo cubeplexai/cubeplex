@@ -127,7 +127,7 @@ async def test_claim_pausing_flips_stale_idle_running_row(
     repo = _mk_repo(db_session, scope)
     row = await _mk(repo, scope, status="running", idle_secs=10, ttl_seconds=1)
 
-    assert await repo.claim_pausing(row.id) is True
+    assert await repo.claim_pausing(row.id, idle_ttl_seconds=1) is True
 
     await db_session.refresh(row)
     assert row.status == "pausing"
@@ -138,8 +138,8 @@ async def test_claim_pausing_single_winner(db_session: AsyncSession, scope: dict
     repo = _mk_repo(db_session, scope)
     row = await _mk(repo, scope, status="running", idle_secs=10, ttl_seconds=1)
 
-    assert await repo.claim_pausing(row.id) is True
-    assert await repo.claim_pausing(row.id) is False
+    assert await repo.claim_pausing(row.id, idle_ttl_seconds=1) is True
+    assert await repo.claim_pausing(row.id, idle_ttl_seconds=1) is False
 
 
 async def test_claim_pausing_skips_leased_row(
@@ -152,7 +152,7 @@ async def test_claim_pausing_skips_leased_row(
         repo, scope, status="running", idle_secs=10, ttl_seconds=1, in_use_until=future_lease
     )
 
-    assert await repo.claim_pausing(row.id) is False
+    assert await repo.claim_pausing(row.id, idle_ttl_seconds=1) is False
 
     await db_session.refresh(row)
     assert row.status == "running"
@@ -166,7 +166,7 @@ async def test_claim_pausing_skips_fresh_row(
     # idle_secs=0 vs ttl=3600 → not stale.
     row = await _mk(repo, scope, status="running", idle_secs=0, ttl_seconds=3600)
 
-    assert await repo.claim_pausing(row.id) is False
+    assert await repo.claim_pausing(row.id, idle_ttl_seconds=1) is False
 
     await db_session.refresh(row)
     assert row.status == "running"
@@ -219,7 +219,8 @@ async def test_mark_paused_rejects_non_pausing_prior_state(
 
     # Legal: pausing → paused
     await repo.claim_pausing(
-        (await _mk(repo, scope, status="running", idle_secs=10, ttl_seconds=1)).id
+        (await _mk(repo, scope, status="running", idle_secs=10, ttl_seconds=1)).id,
+        idle_ttl_seconds=1,
     )
     pausing_row = await _mk(repo, scope, status="pausing", idle_secs=0, ttl_seconds=3600)
     assert await repo.mark_paused(pausing_row.id) is True

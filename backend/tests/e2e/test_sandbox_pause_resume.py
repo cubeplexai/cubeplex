@@ -368,7 +368,9 @@ async def test_lease_blocks_idle_pause(
     )
     try:
         async with session_factory() as session:
-            idle = await UserSandboxRepository.list_idle_to_pause_system(session)
+            idle = await UserSandboxRepository.list_idle_to_pause_system(
+                session, idle_ttl_seconds=1
+            )
         leased_ids = {r.id for r in idle}
         assert record_id not in leased_ids, (
             "row with future in_use_until should NOT be picked by the idle reaper"
@@ -380,7 +382,9 @@ async def test_lease_blocks_idle_pause(
             await repo.release_in_use(record_id)
 
         async with session_factory() as session:
-            idle = await UserSandboxRepository.list_idle_to_pause_system(session)
+            idle = await UserSandboxRepository.list_idle_to_pause_system(
+                session, idle_ttl_seconds=1
+            )
         assert record_id in {r.id for r in idle}
     finally:
         await _delete_record(session_factory, record_id)

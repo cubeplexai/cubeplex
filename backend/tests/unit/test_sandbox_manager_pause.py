@@ -97,7 +97,9 @@ async def test_pause_idle_pauses_on_successful_claim() -> None:
 
         await mgr.pause_idle()
 
-    scoped_repo.claim_pausing.assert_awaited_once_with(record.id)
+    scoped_repo.claim_pausing.assert_awaited_once_with(
+        record.id, idle_ttl_seconds=mgr._idle_ttl_seconds
+    )
     backend.pause.assert_awaited_once()
     scoped_repo.mark_paused.assert_awaited_once()
     # The paused_at kwarg should be set.
