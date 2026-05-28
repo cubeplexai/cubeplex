@@ -42,7 +42,7 @@ This is a **decision task** that produces a short note; it gates Task 2's exact 
 
 - [ ] **Step 1: Verify Tavily bearer auth + tool names**
 
-Tavily MCP is hosted Streamable HTTP at `https://mcp.tavily.com/mcp/`. Confirm it accepts the API key as `Authorization: Bearer <key>` (not only `?tavilyApiKey=`) and list its bare tool names. Use a throwaway script (delete after) under `backend/scripts/dev/`:
+Tavily MCP is hosted Streamable HTTP at `https://mcp.tavily.com/mcp/`. Confirm it accepts the API key as `Authorization: Bearer <key>` (not only `?tavilyApiKey=`) and list its bare tool names. Run this as a one-off inline command (a heredoc piped to `uv run python -`; nothing is written to disk):
 
 ```bash
 cd backend && TAVILY_API_KEY=<key> uv run python - <<'PY'
@@ -80,7 +80,7 @@ For each connector that passed bearer auth, call one search tool and inspect the
 
 If any shipping connector's array is nested under a dotted path, that connector is **deferred** for v1 (do not extend `extract_items` for a deferred connector). Bocha is already deferred by the spec.
 
-- [ ] **Step 4: Write the decision note and delete the throwaway script**
+- [ ] **Step 4: Write the decision note**
 
 Write `docs/dev/notes/2026-05-27-search-connector-verification.md` recording, per candidate: bearer accepted? (yes/no), exact tool names, result-array key, field mapping, and SHIP/DEFER verdict. Example skeleton:
 
@@ -103,7 +103,7 @@ Date: 2026-05-27
 ## Bocha — DEFER (spec decision; auth unconfirmed)
 ```
 
-Then remove the throwaway script (it lives in `backend/scripts/dev/` and is not a long-term commitment).
+No script to clean up — the verification command above runs inline and writes nothing to disk.
 
 - [ ] **Step 5: Commit**
 
@@ -290,12 +290,21 @@ def test_citation_prompt_has_search_result_reinforcement() -> None:
 
 
 def test_citation_prompt_has_worked_search_example() -> None:
-    # A second worked example for "answer assembled from several search hits".
-    assert "search" in CITATION_PROMPT.lower()
-    # Uses the exact marker syntax inline.
+    # A *second* worked example, distinct from the existing weather example,
+    # showing an answer assembled from several search hits. The today's prompt
+    # already mentions web_search and has the weather marker, so this must
+    # assert the new example text directly or it passes vacuously (the
+    # "expect fail" step would not fail). Assert the new example's anchor
+    # phrase and that it carries a marker inline.
+    assert "assembled from several search hits" in CITATION_PROMPT.lower()
     import re
 
-    assert re.search(r"【\d+-\d+】", CITATION_PROMPT)
+    # Two distinct worked-example blocks must exist (weather + search), each
+    # introduced by "Example of a correct final answer".
+    assert len(re.findall(r"Example of a correct final answer", CITATION_PROMPT)) >= 2
+    # The new search example block itself contains the marker syntax.
+    search_block = CITATION_PROMPT.lower().split("assembled from several search hits", 1)[1]
+    assert re.search(r"【\d+-\d+】", search_block)
 
 
 def test_citation_prompt_stays_server_agnostic() -> None:
@@ -418,7 +427,11 @@ git commit -m "test(prompts): guard citation prompt stays a stable constant (#14
 
 ## Task 5: E2E — install a search connector and assert visible citations
 
-E2E-first per CLAUDE.md. The install path snapshots the catalog `tool_citations` onto the new `mcp_servers` row, then a real-LLM agent turn must produce `【N-M】` markers in the **final assistant message text** (the deepseek failure mode is the side channel being fine while prose lacks markers — so assert on text). When no third-party search key is available in CI, drive the run against the already-seeded `webtools` connector so the calibrated prompt is exercised without a third-party key; keep the real-key Tavily/Exa run as a local/manual check gated by an env var.
+E2E-first per CLAUDE.md. The install path snapshots the catalog `tool_citations` onto the new `mcp_servers` row, then a real-LLM agent turn must produce `【N-M】` markers in the **final assistant message text** (the deepseek failure mode is the side channel being fine while prose lacks markers — so assert on text). When no third-party search key is available in CI, drive the run against the `webtools` server (config-wired `web_search`, see `config.development.local.yaml`) so the calibrated prompt is exercised without a third-party key; keep the real-key Tavily/Exa run as a local/manual check gated by an env var.
+
+**Setting an env var is not enough to make a search tool available.** The gate (`CUBEBOX_E2E_WEBTOOLS_READY` / `CUBEBOX_E2E_SEARCH_KEY`) only decides whether to run; the run still needs a tool the agent can actually call. Two paths, pick one and wire it in the test setup before sending the message:
+- **webtools path** (CI-friendly when the local webtools server on `:8020` is reachable): the `web_search` tool comes from config, not a catalog install, so no install/grant is needed — but the test MUST confirm the workspace agent actually sees a search tool (e.g. assert `web_search` is in the active-tools listing) before asserting on markers, or a no-tool run passes vacuously.
+- **catalog path** (real Tavily/Exa key): seed → `POST /api/v1/ws/{ws}/mcp/installs` with `auth_method="static"` → create the static credential grant for the install → confirm the runtime resolves a usable, citation-enabled connector for `member_client`. Only then send the message.
 
 **Files:**
 - Create: `backend/tests/e2e/test_search_citations.py`
@@ -463,10 +476,10 @@ async def _seed_into_db(session: AsyncSession) -> None:
 
 async def test_install_search_connector_snapshots_tool_citations(
     admin_client: tuple,  # (httpx.AsyncClient, ws_id)
-    db_session_maker: async_sessionmaker[AsyncSession],
+    session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
     client, ws_id = admin_client
-    async with db_session_maker() as session:
+    async with session_factory() as session:
         await _seed_into_db(session)
         tmpl = (
             await session.execute(
@@ -484,9 +497,11 @@ async def test_install_search_connector_snapshots_tool_citations(
         },
     )
     assert res.status_code == 201, res.text
-    install_id = res.json()["id"]
+    # The install response is MCPConnectorInstallOut → key is "install_id",
+    # not "id" (backend/cubebox/api/schemas/mcp.py:64).
+    install_id = res.json()["install_id"]
 
-    async with db_session_maker() as session:
+    async with session_factory() as session:
         install = (
             await session.execute(
                 select(MCPConnectorInstall).where(MCPConnectorInstall.id == install_id)
@@ -507,8 +522,10 @@ Expected: FAIL — initially because (depending on ordering with Task 2) the `ta
 
 Append to `backend/tests/e2e/test_search_citations.py`:
 
+The `send_message_and_collect_text` helper returns only the concatenated `text_delta` payloads, so it cannot prove a citation event fired. Use the lower-level `_stream_events` helper (same module) to collect every parsed SSE event, then assert **both**: (a) at least one event with `type == "citation"` (the `CitationEvent`, `backend/cubebox/agents/schemas.py:130`) confirms the side channel fired, and (b) the concatenated `text_delta` prose carries a visible `【N-M】` marker — the deepseek failure mode is exactly (a) firing while (b) is empty.
+
 ```python
-from tests.e2e.memory._helpers import send_message_and_collect_text
+from tests.e2e.memory._helpers import _stream_events
 
 
 @pytest.mark.real_llm
@@ -517,7 +534,7 @@ async def test_search_answer_carries_visible_markers(
 ) -> None:
     """The calibrated prompt must make the model reproduce 【N-M】 markers in
     the final answer text for facts delivered via tool_result. Drives the
-    seeded `webtools` search tool when no third-party key is set."""
+    config-wired `webtools` search tool when no third-party key is set."""
     if not os.environ.get("CUBEBOX_E2E_SEARCH_KEY") and not os.environ.get(
         "CUBEBOX_E2E_WEBTOOLS_READY"
     ):
@@ -527,13 +544,18 @@ async def test_search_answer_carries_visible_markers(
         )
 
     client, ws_id = member_client
+    # Precondition (see Setup above): confirm a search tool is actually
+    # available to this workspace agent before asserting on its output, or a
+    # no-tool run would pass vacuously. For the webtools path, assert
+    # `web_search` is in the active-tools listing; for the catalog path,
+    # confirm the install + grant resolved a usable connector.
     conv = await client.post(
         f"/api/v1/ws/{ws_id}/conversations", params={"title": "search-citations"}
     )
     conv.raise_for_status()
     conv_id = conv.json()["id"]
 
-    text = await send_message_and_collect_text(
+    events = await _stream_events(
         client,
         ws_id,
         conv_id,
@@ -541,6 +563,17 @@ async def test_search_answer_carries_visible_markers(
         "version number and release date. Cite your sources inline.",
     )
 
+    # (a) The citation side channel must fire at least once.
+    citation_events = [e for e in events if e.get("type") == "citation"]
+    assert citation_events, "no citation SSE event emitted; tool result not cited"
+
+    # (b) The visible prose must carry a marker — the deepseek failure mode is
+    # (a) present while (b) empty.
+    text = "".join(
+        (e.get("data") or {}).get("content", "")
+        for e in events
+        if e.get("type") == "text_delta"
+    )
     assert _MARKER_RE.search(text), (
         f"final answer has no 【N-M】 marker; calibration failed.\n---\n{text}\n---"
     )
@@ -642,4 +675,4 @@ git commit -m "chore(mcp): pre-PR sweep fixes for search citations (#148)"
 
 **2. Placeholder scan:** No "TBD"/"add tests"/"handle edge cases". Every code step shows real code; every run step shows the exact command and expected result. The one conditional (Exa ships only if Task 1 verifies bearer auth) is explicit with the exact code and the exact fallback (delete the block, keep `_SEARCH_SLUGS = {"tavily"}`).
 
-**3. Type consistency:** `MCPConnectorTemplateSeedEntry` field names match the dataclass (`template_seed.py:38-59`), including `oauth_dcr_supported=None`, `default_credential_policy` literal, and `tool_citation_defaults`. `CitationConfig(**raw)` matches the model (`content_type`, `source_type`, `content_field`, `mapping`, optional `args_mapping`). `_TOKEN_FIELD` / `_BEARER_TEMPLATE` are existing module constants. E2E helpers `send_message_and_collect_text` and the `admin_client`/`member_client`/`db_session_maker` fixtures and `real_llm` marker all match existing test infrastructure. Install route `POST /api/v1/ws/{ws}/mcp/installs` with `template_id`/`auth_method`/`default_credential_policy` body matches `create_workspace_install` (`ws_mcp.py:287`).
+**3. Type consistency:** `MCPConnectorTemplateSeedEntry` field names match the dataclass (`template_seed.py:38-59`), including `oauth_dcr_supported=None`, `default_credential_policy` literal, and `tool_citation_defaults`. `CitationConfig(**raw)` matches the model (`content_type`, `source_type`, `content_field`, `mapping`, optional `args_mapping`). `_TOKEN_FIELD` / `_BEARER_TEMPLATE` are existing module constants. The E2E `_stream_events` helper, the `admin_client`/`member_client` fixtures, the `session_factory` fixture (the actual name — there is no `db_session_maker`), and the `real_llm` marker all match existing test infrastructure. Install route `POST /api/v1/ws/{ws}/mcp/installs` with `template_id`/`auth_method`/`default_credential_policy` body matches `create_workspace_install` (`ws_mcp.py:287`) and returns `MCPConnectorInstallOut` whose key is `install_id`, not `id`.
