@@ -336,6 +336,8 @@ class OAuthTokenManager:
     def _needs_refresh(self, expires_at: datetime | None) -> bool:
         if expires_at is None:
             return True
+        if expires_at.tzinfo is None:  # SQLite discards tz on round-trip
+            expires_at = expires_at.replace(tzinfo=UTC)
         delta = (expires_at - datetime.now(UTC)).total_seconds()
         return delta <= self._refresh_buffer
 
