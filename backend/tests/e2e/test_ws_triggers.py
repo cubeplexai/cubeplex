@@ -470,3 +470,132 @@ async def test_events_list(authenticated_client: tuple[httpx.AsyncClient, str]) 
     )
     assert r_filtered.status_code == 200
     assert r_filtered.json()["events"] == []
+
+
+# ---------------------------------------------------------------------------
+# Status filter must apply BEFORE pagination (regression on codex P2).
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_status_filter_pages_across_unmatched_rows(
+    authenticated_client: tuple[httpx.AsyncClient, str],
+) -> None:
+    """A `status=` filter must page through filtered events, not the raw window.
+
+    Previously the route fetched `limit=N` rows then filtered status in Python.
+    When the first N rows of a trigger had no matching status, the filtered
+    response was empty even when matching events existed further back.
+    """
+    client, ws_id = authenticated_client
+    user_id = await _get_my_user_id(client)
+
+    r_create = await client.post(
+        f"/api/v1/ws/{ws_id}/triggers",
+        json={
+            "name": "filter-pagination",
+            "webhook_secret": "s3cret",
+            "prompt_template": "hi",
+            "payload_fields": [],
+            "run_as_user_id": user_id,
+        },
+    )
+    assert r_create.status_code == 201
+    trig_id = r_create.json()["id"]
+
+    from sqlalchemy import select
+
+    import cubebox.db as _db
+    from cubebox.models import TriggerEvent, Workspace
+
+    async with _db.async_session_maker() as session:
+        ws_row = await session.execute(select(Workspace).where(Workspace.id == ws_id))
+        org_id = ws_row.scalar_one().org_id
+        # 5 'accepted' rows + 1 'dead_lettered' row.
+        for i in range(5):
+            session.add(
+                TriggerEvent(
+                    trigger_id=trig_id,
+                    org_id=org_id,
+                    workspace_id=ws_id,
+                    source_type="webhook",
+                    dedup_key=f"f-pag-acc-{i}",
+                    status="accepted",
+                    payload={},
+                )
+            )
+        session.add(
+            TriggerEvent(
+                trigger_id=trig_id,
+                org_id=org_id,
+                workspace_id=ws_id,
+                source_type="webhook",
+                dedup_key="f-pag-dl",
+                status="dead_lettered",
+                payload={},
+            )
+        )
+        await session.commit()
+
+    # With limit=3, the first page in received_at-desc order is dominated by
+    # accepted rows. The filtered-then-paginated query must still surface the
+    # dead_lettered row.
+    r = await client.get(
+        f"/api/v1/ws/{ws_id}/triggers/{trig_id}/events?status=dead_lettered&limit=3&offset=0"
+    )
+    assert r.status_code == 200
+    rows = r.json()["events"]
+    assert len(rows) == 1
+    assert rows[0]["status"] == "dead_lettered"
+
+
+# ---------------------------------------------------------------------------
+# Mutating routes are admin-gated (codex P1).
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_member_cannot_mutate_triggers(
+    member_client: tuple[httpx.AsyncClient, str],
+) -> None:
+    """A non-admin workspace member must not create / update / delete triggers."""
+    client, ws_id = member_client
+    user_id = await _get_my_user_id(client)
+
+    # POST create → 403
+    r = await client.post(
+        f"/api/v1/ws/{ws_id}/triggers",
+        json={
+            "name": "blocked",
+            "webhook_secret": "s",
+            "prompt_template": "x",
+            "payload_fields": [],
+            "run_as_user_id": user_id,
+        },
+    )
+    assert r.status_code == 403, r.text
+
+    # PATCH / DELETE / rotate-secret / replay all require admin too — even
+    # against a non-existent id, the auth gate is first.
+    r = await client.patch(
+        f"/api/v1/ws/{ws_id}/triggers/trig-NOPE",
+        json={"enabled": False},
+    )
+    assert r.status_code == 403, r.text
+
+    r = await client.delete(f"/api/v1/ws/{ws_id}/triggers/trig-NOPE")
+    assert r.status_code == 403, r.text
+
+    r = await client.post(
+        f"/api/v1/ws/{ws_id}/triggers/trig-NOPE/rotate-secret",
+        json={"new_webhook_secret": "n"},
+    )
+    assert r.status_code == 403, r.text
+
+    r = await client.post(f"/api/v1/ws/{ws_id}/triggers/trig-NOPE/events/trev-NOPE/replay")
+    assert r.status_code == 403, r.text
+
+    # GETs remain accessible to members (read-only).
+    r = await client.get(f"/api/v1/ws/{ws_id}/triggers")
+    assert r.status_code == 200, r.text
+    assert r.json()["triggers"] == []

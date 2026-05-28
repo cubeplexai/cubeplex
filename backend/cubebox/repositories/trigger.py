@@ -70,12 +70,18 @@ class TriggerEventRepository(ScopedRepository[TriggerEvent]):
         await self.session.commit()
 
     async def list_for_trigger(
-        self, trigger_id: str, *, limit: int = 50, offset: int = 0
+        self,
+        trigger_id: str,
+        *,
+        status: str | None = None,
+        limit: int = 50,
+        offset: int = 0,
     ) -> list[TriggerEvent]:
+        stmt = self._scoped_select().where(TriggerEvent.trigger_id == trigger_id)
+        if status is not None:
+            stmt = stmt.where(TriggerEvent.status == status)
         stmt = (
-            self._scoped_select()
-            .where(TriggerEvent.trigger_id == trigger_id)
-            .order_by(TriggerEvent.received_at.desc())  # type: ignore[attr-defined]
+            stmt.order_by(TriggerEvent.received_at.desc())  # type: ignore[attr-defined]
             .limit(limit)
             .offset(offset)
         )

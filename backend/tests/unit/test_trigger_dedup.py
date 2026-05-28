@@ -28,6 +28,23 @@ def test_derive_dedup_key_from_body_hash_when_no_header() -> None:
     assert result_empty == expected
 
 
+def test_long_event_id_header_is_hashed() -> None:
+    """Provider event-ids longer than the dedup_key column (64) get hashed.
+
+    Without this guard a long ``X-Event-Id`` would be inserted as-is and
+    PostgreSQL would reject the row after a valid signature, producing a
+    500/retry loop instead of a stable accepted/duplicate response.
+    """
+    long_id = "x" * 65
+    result = derive_dedup_key(b"body", event_id_header=long_id)
+    assert result == hashlib.sha256(long_id.encode("utf-8")).hexdigest()
+    assert len(result) == 64
+
+    # Headers at exactly the column boundary stay verbatim.
+    boundary = "y" * 64
+    assert derive_dedup_key(b"body", event_id_header=boundary) == boundary
+
+
 def test_dedup_key_timestamp_invariant() -> None:
     """Same body always yields same dedup_key, regardless of timestamp.
 
