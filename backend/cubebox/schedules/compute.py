@@ -79,14 +79,21 @@ def latest_due_before(
         if cron_expr is None:
             raise ValueError("cron_expr required for cron schedule")
         zone = ZoneInfo(tz)
-        itr = croniter(cron_expr, candidate.astimezone(zone))
-        latest = candidate
-        while True:
-            nxt = cast(datetime, itr.get_next(datetime)).astimezone(UTC)
-            if nxt > now:
-                break
-            latest = nxt
-        return latest
+        # O(1) catch-up via croniter.get_prev: jump directly to the latest
+        # match <= now, instead of walking from candidate one step at a time.
+        # A minutely cron after a month of downtime previously took ~43k
+        # iterations inside the poller transaction (and inside the resume
+        # route handler), enough to stall a poller batch or a request.
+        # croniter.get_prev returns the latest match strictly < base, so
+        # base off now + 1 microsecond to include now itself when now is
+        # an exact cron match.
+        zoned_base = (now + timedelta(microseconds=1)).astimezone(zone)
+        prev = cast(datetime, croniter(cron_expr, zoned_base).get_prev(datetime))
+        prev_utc = prev.astimezone(UTC)
+        # The catch-up policy fires the latest match in [candidate, now];
+        # if get_prev returned a time before candidate, candidate itself is
+        # the latest still-due occurrence.
+        return prev_utc if prev_utc >= candidate else candidate
     raise ValueError(f"latest_due_before not defined for kind={kind!r}")
 
 
