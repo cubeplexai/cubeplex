@@ -184,6 +184,42 @@ class TestScheduledTaskValidation:
             "metadata-only edit must not slide next_fire_at"
         )
 
+    def test_resume_past_one_shot_is_idempotent(self, client: TestClient) -> None:
+        """Regression for codex round-6 P2: pausing/resuming a one-shot
+        whose run_at is in the past must not 500 on the second resume.
+
+        First resume records a 'skipped_missed' summary row at
+        scheduled_for=run_at. Without an idempotency guard, the second
+        resume tries to insert another row at the same scheduled_for,
+        hitting the (scheduled_task_id, scheduled_for) unique constraint.
+        """
+        # Create a once task scheduled in the past.
+        from datetime import UTC as _utc
+        from datetime import datetime as _dt
+        from datetime import timedelta as _td
+
+        past = (_dt.now(_utc) - _td(minutes=5)).isoformat()
+        r = _make(
+            client,
+            schedule_kind="once",
+            interval_seconds=None,
+            run_at=past,
+        )
+        assert r.status_code == 201, r.text
+        tid = r.json()["id"]
+        # First pause + resume — records the skipped_missed summary.
+        assert client.post(f"{BASE}/{tid}/pause").status_code == 200
+        assert client.post(f"{BASE}/{tid}/resume").status_code == 200
+        # Second pause + resume — must not 500 on the duplicate insert.
+        assert client.post(f"{BASE}/{tid}/pause").status_code == 200
+        second = client.post(f"{BASE}/{tid}/resume")
+        assert second.status_code == 200, second.text
+        # Run history should still contain exactly one skipped_missed row
+        # (the idempotency guard prevented the duplicate insert).
+        runs = client.get(f"{BASE}/{tid}/runs").json()
+        skipped = [r for r in runs if r["state"] == "skipped_missed"]
+        assert len(skipped) == 1, runs
+
     def test_patch_schedule_fields_unchanged_value_preserves_next_fire_at(
         self, client: TestClient
     ) -> None:

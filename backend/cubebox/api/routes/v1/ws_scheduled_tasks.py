@@ -8,9 +8,11 @@ non-owner editing the prompt would run code under the owner's identity.
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import Annotated, Any
+from typing import Annotated, Any, cast
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from cubebox.api.schemas.ws_scheduled_tasks import (
     ScheduledTaskCreate,
@@ -94,7 +96,7 @@ def _initial_next_fire(t: ScheduledTask) -> datetime | None:
     )
 
 
-def _resume_next_fire(session: Any, t: ScheduledTask) -> datetime | None:
+async def _resume_next_fire(session: AsyncSession, t: ScheduledTask) -> datetime | None:
     """Resume policy: account for occurrences that fell due while paused.
 
     Mirrors the outage missed-run policy: at most ONE summary history row.
@@ -104,17 +106,31 @@ def _resume_next_fire(session: Any, t: ScheduledTask) -> datetime | None:
     if t.schedule_kind == "once":
         run_at = as_utc(t.run_at) if t.run_at is not None else None
         if run_at is not None and run_at <= now:
-            session.add(
-                ScheduledTaskRun(
-                    scheduled_task_id=t.id,
-                    org_id=t.org_id,
-                    workspace_id=t.workspace_id,
-                    scheduled_for=run_at,
-                    claimed_at=now,
-                    state="skipped_missed",
-                    detail="paused past its one-shot fire time",
+            # Idempotency: a prior fire OR a prior resume of the same expired
+            # one-shot may have already recorded a row at scheduled_for=run_at.
+            # The unique (scheduled_task_id, scheduled_for) constraint would
+            # otherwise 500 the resume request on a repeat pause/resume cycle.
+            scheduled_for_naive = _to_utc_naive(run_at)
+            existing = (
+                await session.execute(
+                    select(cast(Any, ScheduledTaskRun.id)).where(
+                        cast(Any, ScheduledTaskRun.scheduled_task_id) == t.id,
+                        cast(Any, ScheduledTaskRun.scheduled_for) == scheduled_for_naive,
+                    )
                 )
-            )
+            ).scalar_one_or_none()
+            if existing is None:
+                session.add(
+                    ScheduledTaskRun(
+                        scheduled_task_id=t.id,
+                        org_id=t.org_id,
+                        workspace_id=t.workspace_id,
+                        scheduled_for=scheduled_for_naive,
+                        claimed_at=now,
+                        state="skipped_missed",
+                        detail="paused past its one-shot fire time",
+                    )
+                )
             return None
         return run_at
     if anchor is None or anchor > now:
@@ -312,7 +328,7 @@ async def resume_task(
         task = await repo.get_active(task_id)
         assert task is not None
         task.status = "active"
-        task.next_fire_at = _resume_next_fire(session, task)
+        task.next_fire_at = await _resume_next_fire(session, task)
         task.updated_at = datetime.now(UTC)
         await session.commit()
         await session.refresh(task)
