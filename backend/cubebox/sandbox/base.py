@@ -107,6 +107,23 @@ class Sandbox(ABC):
         """Release sandbox resources."""
         ...
 
+    def supports_pause(self) -> bool:
+        """Whether this driver can natively pause/resume. Default False so the
+        manager picks kill-on-idle for non-capable drivers."""
+        return False
+
+    async def pause(self) -> None:
+        """Suspend this sandbox, preserving state. Override in capable drivers."""
+        raise NotImplementedError("pause is not supported by this sandbox backend")
+
+    @classmethod
+    async def connect_or_resume(cls, sandbox_id: str, **kwargs: object) -> Sandbox:
+        """Connect to a sandbox, resuming it from `paused` if necessary, and
+        return a fresh handle with re-resolved endpoints. OpenSandbox calls
+        `Sandbox.resume(...)` server-side then connects; e2b's `connect`
+        auto-resumes. Override in capable drivers."""
+        raise NotImplementedError("connect_or_resume is not supported by this sandbox backend")
+
     # Container port the Neko browser live view is served on.
     BROWSER_PORT = 8080
 
