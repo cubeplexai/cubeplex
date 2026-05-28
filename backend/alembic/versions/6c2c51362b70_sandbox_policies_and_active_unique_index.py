@@ -19,7 +19,11 @@ import sqlmodel  # noqa: F401  (referenced by sqlmodel.sql.sqltypes.AutoString i
 
 # revision identifiers, used by Alembic.
 revision: str = '6c2c51362b70'
-down_revision: Union[str, Sequence[str], None] = '6c69cc288404'
+# Re-parented onto the post-#145/#150/#152 head after rebasing #144 onto main —
+# keeps the alembic chain linear (no parallel heads). The migration ops
+# themselves are independent of #145/#150/#152 (new table + new partial
+# index over user_sandboxes columns that already existed pre-#144).
+down_revision: Union[str, Sequence[str], None] = 'ea209f51b410'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
