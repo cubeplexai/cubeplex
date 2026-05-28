@@ -90,14 +90,18 @@ Write `backend/cubebox/models/trigger.py`. Add `PREFIX_TRIGGER = "trig"` and
 `PREFIX_TRIGGER_EVENT = "trev"` to `backend/cubebox/models/public_id.py`.
 
 `Trigger(CubeboxBase, OrgScopedMixin, table=True)`, `__tablename__="triggers"`,
-`__table_args__ = (org_scope_index("triggers"),)`, fields:
+`__table_args__ = (org_scope_index("triggers"),)`. Declare
+`_PREFIX: ClassVar[str] = PREFIX_TRIGGER` in the class body (matching
+`credential.py` / `conversation.py`) — the constant alone won't drive
+`CubeboxBase` id generation. `TriggerEvent` likewise sets
+`_PREFIX: ClassVar[str] = PREFIX_TRIGGER_EVENT`. Fields:
 - `name: str = Field(max_length=128)`
 - `enabled: bool = Field(default=True, index=True)`
 - `source_type: str = Field(max_length=16)` — values `webhook|schedule|im|mcp_event` (v1 writes only `webhook`)
 - `source_config: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))` — webhook holds `{"secret_cred_id": "...", "event_id_header": "X-Event-Id", "signature_header": "X-Signature", "timestamp_header": "X-Timestamp", "max_body_bytes": 1048576}`
 - `filter: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))` — matcher tree; null = match all
 - `target_type: str = Field(max_length=16)` — `inline|managed_agent` (v1 writes only `inline`)
-- `target_ref: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))` — inline: `{"prompt_template": "...", "model_id": "..."}`
+- `target_ref: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))` — inline: `{"prompt_template": "...", "allowed_paths": [...]}`. Note: `start_run` resolves the model from the org default internally; it has **no** `model_id` parameter, so v1 does not carry a per-run model override. (Per-run model selection is a fast-follow once `start_run` grows that seam.)
 - `conversation_policy: str = Field(default="new_each_time", max_length=16)` — `new_each_time|pinned`
 - `pinned_conversation_id: str | None = Field(default=None, foreign_key="conversations.id", max_length=20)`
 - `busy_policy: str = Field(default="skip", max_length=8)` — `queue|skip`
@@ -256,6 +260,12 @@ Write `backend/cubebox/triggers/rate_limit.py`:
   `f"{key_prefix}:trig:rl:{trigger_id}"` storing `(tokens, last_refill)` in a
   Redis hash; refill `rate_per_min/60` tokens/sec capped at `burst`; consume 1
   if available. Use a small Lua script or `WATCH/MULTI` for atomicity.
+- Add a **second org-level bucket** keyed `f"{key_prefix}:org:rl:{org_id}"` so
+  one workspace can't exhaust shared run capacity (spec §Rate limiting:
+  "per-trigger token bucket … and an org-level ceiling"). Ingest must pass
+  *both* buckets (per-trigger AND per-org) to be accepted; either failing →
+  `rate_limited`. Source the org ceiling from config (a sane default is fine
+  for v1); document the chosen default in the task.
 
 **Test** `backend/tests/e2e/test_trigger_rate_limit.py` (needs Redis → e2e):
 with `rate_per_min=60, burst=3` and a fixed `now`, the 1st–3rd calls return
@@ -279,7 +289,11 @@ Write `backend/cubebox/triggers/pipeline.py`. `TriggerPipeline` holds the
    workspace_id=trigger.workspace_id)`.
 3. Conversation: `new_each_time` → create a draft `Conversation` via
    `ConversationRepository.create(title=..., draft=True)`; `pinned` → use
-   `trigger.pinned_conversation_id`.
+   `trigger.pinned_conversation_id`. For `pinned`, re-load that conversation
+   through the scoped repo and confirm it belongs to the trigger's
+   `(org_id, workspace_id)`; if missing or out-of-scope, mark the event
+   `failed` with a clear `last_error` and return (don't fire across tenants).
+   The create route (Task 10) validates the same on write.
 4. `target_type == "inline"` → `render(target_ref["prompt_template"], event.payload,
    allowed_paths=target_ref.get("allowed_paths", []))`. `managed_agent` →
    raise `NotImplementedError` (reserved; never written in v1).
@@ -312,7 +326,12 @@ Write `backend/cubebox/api/routes/v1/ws_triggers.py`. Router
 `APIRouter(prefix="/ws/{workspace_id}/triggers", tags=["triggers"])`, every
 handler `ctx: Annotated[RequestContext, Depends(require_member)]`. Routes:
 `GET ""` (list), `POST ""` (create — validates `run_as_user_id` membership and
-that `secret_cred_id` resolves to a `webhook_secret` credential),
+that `secret_cred_id` resolves to a `webhook_secret` credential. There is **no**
+generic workspace credential CRUD route in the codebase today, so the trigger
+create route accepts an inline `webhook_secret` plaintext, persists it via
+`CredentialService.create(kind="webhook_secret", ...)`, and stores the returned
+id as `source_config["secret_cred_id"]`. Also add a rotate path on `PATCH` that
+re-creates / replaces the secret. Never echo the plaintext back in responses),
 `GET "/{id}"`, `PATCH "/{id}"` (update / enable / disable),
 `DELETE "/{id}"`, `GET "/{id}/events"` (event log, `utc_isoformat` on
 timestamps), `POST "/{id}/events/{eid}/replay"` (re-fires a `dead_lettered`
@@ -326,9 +345,13 @@ so the ingest E2E (Task 11) can create triggers + secrets through this API.
 get → patch disabled → list still returns it but `enabled=false` → delete →
 404; a second workspace's client sees an empty list (isolation); creating with
 a non-member `run_as_user_id` → 400/422; replay of a non-dead-lettered event →
-409. Add a **dead-letter + replay** E2E: force `start_run` failure by pointing
-the trigger at a non-existent model so `fire` exhausts retries; assert
-`dead_lettered`, call replay, assert a re-attempt is recorded.
+409. Add a **dead-letter + replay** E2E: force `start_run` failure (e.g.
+monkeypatch the pipeline's `run_manager.start_run` to raise a non-busy
+`RuntimeError`, or pin `pinned_conversation_id` to a conversation that already
+has an active run while `busy_policy` is *not* set to skip) so `fire` exhausts
+retries; assert `dead_lettered`, call replay, assert a re-attempt is recorded.
+Do **not** rely on a bogus `model_id` — `start_run` resolves the model
+internally and ignores any `target_ref` model field.
 
 ```bash
 cd backend && uv run pytest tests/e2e/test_ws_triggers.py -q
@@ -344,19 +367,35 @@ Write `backend/cubebox/triggers/ingest.py` `handle_ingest(...)` and
 (`app.include_router(trigger_ingest.router, prefix="/api/v1")`). No
 `require_member` — auth is the HMAC. Order exactly per spec §"Inbound webhook
 ingestion":
-1. `raw = await request.body()`; reject `>` `max_body_bytes` with the same flat
-   `404 {"error":"not_found"}` shape before hashing.
+0. **Resolve `org_id` for the path's `workspace_id` first.** The ingest route
+   is *not* member-guarded, so there is no `RequestContext` supplying
+   `(org_id, workspace_id)`. But `ScopedRepository` and `CredentialService`
+   both require `org_id` at construction. Do a flat workspace lookup
+   (`WorkspaceRepository` / direct `select(Workspace).where(id==workspace_id)`)
+   to get `org_id`; if the workspace does not exist → flat
+   `404 {"error":"not_found"}`. Then build `TriggerRepository(session,
+   org_id=org_id, workspace_id=workspace_id)` and the `CredentialService`
+   with that `org_id`.
+1. Read the body with a **global hard cap** (the trigger isn't loaded yet, so
+   the per-trigger `max_body_bytes` can't be checked here): stream/limit the
+   read so an oversized body is rejected with the same flat
+   `404 {"error":"not_found"}` shape before hashing, rather than buffering an
+   unbounded `await request.body()`. After the trigger is loaded (step 2),
+   also enforce its configured `max_body_bytes` and 404 on overflow.
 2. `TriggerRepository(... ).get_for_ingest(trigger_id)`; `None` (missing **or**
    disabled) → `JSONResponse(status_code=404, content={"error":"not_found"})`.
+   Enforce the trigger's `source_config["max_body_bytes"]` against the already
+   read body length here.
 3. Resolve secret: `CredentialService.get_decrypted(credential_id=
-   source_config["secret_cred_id"], requesting_kind="webhook_secret")`.
+   source_config["secret_cred_id"], requesting_kind="webhook_secret")` using
+   the `org_id` resolved in step 0.
 4. Read signature + timestamp headers (names from `source_config`);
    `verify(...)` false → flat 404. `timestamp_fresh(...)` false → flat 404.
    (Pre-auth failures are constant-shape; do not branch the response.)
 5. `derive_dedup_key`; build `TriggerEvent(status="accepted", attempts=0, ...)`
    and `insert_dedup`; `None` → `200 {"status":"duplicate"}`.
-6. `rate_limit.allow(...)` false → `set_terminal(..., "rate_limited")` →
-   `429 {"status":"rate_limited"}`.
+6. `rate_limit.allow(...)` (per-trigger **and** per-org bucket) — either false
+   → `set_terminal(..., "rate_limited")` → `429 {"status":"rate_limited"}`.
 7. `matches(trigger.filter, payload)` false → `set_terminal(...,
    "filtered_out")` → `200 {"status":"filtered_out"}`.
 8. Schedule `TriggerPipeline.fire(...)` via `asyncio.create_task` (or
@@ -367,8 +406,10 @@ authenticity; don't 400 on body shape after auth, but record `event_type=None`).
 
 **Test** `backend/tests/e2e/test_trigger_ingest.py` — the core E2E suite,
 using `async_client`:
-- helper that creates a `webhook_secret` credential + a trigger via the CRUD
-  API (Task 10), then signs a body with `signature.sign`.
+- helper that creates a trigger via the CRUD API (Task 10) passing the
+  `webhook_secret` plaintext inline (the create route persists it via
+  `CredentialService.create` — there is no standalone credential CRUD route),
+  then signs a body with `signature.sign` using that same plaintext.
 - **happy path**: correctly-signed POST → `202`; poll the events endpoint until
   the row is `accepted` with a `resulting_run_id`; assert a conversation was
   created.
