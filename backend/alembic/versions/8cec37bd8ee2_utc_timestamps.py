@@ -1,8 +1,8 @@
 """utc timestamps
 
-Revision ID: a93cb5d6a21e
-Revises: 28c4c57516f6
-Create Date: 2026-05-29 01:02:42.962547
+Revision ID: 8cec37bd8ee2
+Revises: f3ee19317f6e
+Create Date: 2026-05-29 16:35:01.666600
 
 This migration switches all cubebox datetime columns from
 ``timestamp without time zone`` to ``timestamp with time zone``.
@@ -24,8 +24,8 @@ import sqlmodel  # noqa: F401  (referenced by sqlmodel.sql.sqltypes.AutoString i
 from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
-revision: str = 'a93cb5d6a21e'
-down_revision: Union[str, Sequence[str], None] = '28c4c57516f6'
+revision: str = '8cec37bd8ee2'
+down_revision: Union[str, Sequence[str], None] = 'f3ee19317f6e'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
@@ -426,6 +426,16 @@ def upgrade() -> None:
                type_=sa.DateTime(timezone=True),
                postgresql_using="deleted_at AT TIME ZONE 'UTC'",
                existing_nullable=True)
+    op.alter_column('skill_sources', 'created_at',
+               existing_type=postgresql.TIMESTAMP(),
+               type_=sa.DateTime(timezone=True),
+               postgresql_using="created_at AT TIME ZONE 'UTC'",
+               existing_nullable=False)
+    op.alter_column('skill_sources', 'updated_at',
+               existing_type=postgresql.TIMESTAMP(),
+               type_=sa.DateTime(timezone=True),
+               postgresql_using="updated_at AT TIME ZONE 'UTC'",
+               existing_nullable=False)
     op.alter_column('skill_versions', 'created_at',
                existing_type=postgresql.TIMESTAMP(),
                type_=sa.DateTime(timezone=True),
@@ -688,6 +698,16 @@ def downgrade() -> None:
                postgresql_using="updated_at AT TIME ZONE 'UTC'",
                existing_server_default=sa.text('now()'))
     op.alter_column('skill_versions', 'created_at',
+               existing_type=sa.DateTime(timezone=True),
+               type_=postgresql.TIMESTAMP(),
+               postgresql_using="created_at AT TIME ZONE 'UTC'",
+               existing_nullable=False)
+    op.alter_column('skill_sources', 'updated_at',
+               existing_type=sa.DateTime(timezone=True),
+               type_=postgresql.TIMESTAMP(),
+               postgresql_using="updated_at AT TIME ZONE 'UTC'",
+               existing_nullable=False)
+    op.alter_column('skill_sources', 'created_at',
                existing_type=sa.DateTime(timezone=True),
                type_=postgresql.TIMESTAMP(),
                postgresql_using="created_at AT TIME ZONE 'UTC'",
