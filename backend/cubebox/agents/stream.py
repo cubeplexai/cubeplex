@@ -24,6 +24,8 @@ from typing import Any
 from cubepi import AgentToolResult
 from cubepi.agent.types import (
     AgentEvent,
+    HitlAnswerEvent,
+    HitlRequestEvent,
     MessageEndEvent,
     MessageUpdateEvent,
     ToolExecutionEndEvent,
@@ -206,6 +208,35 @@ def convert_agent_event_to_sse(evt: AgentEvent) -> list[dict[str, Any]]:
         if steer_id:
             text = "".join(c.text for c in evt.message.content if isinstance(c, TextContent))
             return [{"type": "injected_message", "content": text, "steer_id": steer_id}]
+
+    if isinstance(evt, HitlRequestEvent):
+        req = evt.request
+        payload = req.payload
+        if payload.kind == "approve":
+            return [
+                {
+                    "type": "sandbox_confirm_request",
+                    "question_id": req.question_id,
+                    "tool_call_id": payload.tool_call_id,
+                    "tool_name": payload.tool_name,
+                    "args": payload.args,
+                    "details": payload.details,
+                    "timeout_seconds": req.timeout_seconds,
+                }
+            ]
+        return []
+
+    if isinstance(evt, HitlAnswerEvent):
+        resolved: dict[str, Any] = {
+            "type": "sandbox_confirm_resolved",
+            "question_id": evt.question_id,
+            "cancelled": evt.cancelled,
+            "timed_out": evt.timed_out,
+        }
+        if evt.answer is not None:
+            resolved["decision"] = evt.answer.decision
+            resolved["reason"] = evt.answer.reason
+        return [resolved]
 
     # Silently drop all other AgentEvent types:
     # AgentStartEvent, AgentEndEvent (done is emitted by run_manager with usage),

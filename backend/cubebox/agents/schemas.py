@@ -170,3 +170,27 @@ class InjectedMessageEvent(AgentEvent):
 
     type: Literal["injected_message"] = "injected_message"
     data: dict[str, Any] = Field(description="Event data with content and steer_id")
+
+
+class SandboxConfirmRequestEvent(AgentEvent):
+    """A sandbox ``execute`` command matched a ``confirm`` rule and is paused
+    awaiting human approval. The frontend renders an inline approve/deny card.
+    """
+
+    type: Literal["sandbox_confirm_request"] = "sandbox_confirm_request"
+    data: dict[str, Any] = Field(
+        description=(
+            "Confirm request: question_id, tool_call_id, command, matched_pattern, timeout_seconds"
+        )
+    )
+
+
+class SandboxConfirmResolvedEvent(AgentEvent):
+    """A pending sandbox confirm was resolved (approved / denied / timed out /
+    cancelled). The frontend flips the corresponding card to its final state.
+    """
+
+    type: Literal["sandbox_confirm_resolved"] = "sandbox_confirm_resolved"
+    data: dict[str, Any] = Field(
+        description="Resolution: question_id, decision, cancelled, timed_out, reason"
+    )
