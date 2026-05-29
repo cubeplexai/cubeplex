@@ -68,23 +68,35 @@ export function WidgetView(props: WidgetViewProps) {
     }
   }, [props.widgetCode])
 
+  // openFullscreen captures the currently-focused element SYNCHRONOUSLY before
+  // it triggers the re-render that hides + inerts the inline copy. Capturing
+  // it inside a post-render effect would be too late: by then the opener
+  // button is inside an `inert` subtree, so document.activeElement has
+  // already shifted to <body> and the restore-on-close would target the
+  // wrong element.
+  const openFullscreen = useCallback(() => {
+    if (typeof document !== 'undefined') {
+      prevFocusRef.current = (document.activeElement as HTMLElement | null) ?? null
+    }
+    setIsFullscreen(true)
+  }, [])
+
+  const closeFullscreen = useCallback(() => setIsFullscreen(false), [])
+
   // Esc closes fullscreen.
   useEffect(() => {
     if (!isFullscreen) return
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setIsFullscreen(false)
+      if (e.key === 'Escape') closeFullscreen()
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [isFullscreen])
+  }, [isFullscreen, closeFullscreen])
 
-  // Focus management: when the dialog opens, save the previously-focused
-  // element and move focus into the dialog. When it closes, restore focus
-  // back to where it came from.
+  // After the dialog renders, move focus inside it. After it closes, restore
+  // focus to whatever openFullscreen captured.
   useEffect(() => {
     if (!isFullscreen) return
-    if (typeof document === 'undefined') return
-    prevFocusRef.current = document.activeElement as HTMLElement | null
     const raf = requestAnimationFrame(() => {
       const dialog = dialogRef.current
       if (!dialog) return
@@ -147,7 +159,7 @@ export function WidgetView(props: WidgetViewProps) {
           copied={copied}
           onCopy={handleCopy}
           onReload={reload}
-          onFullscreen={() => setIsFullscreen(true)}
+          onFullscreen={openFullscreen}
           isFullscreen={false}
         />
       </div>
@@ -159,7 +171,7 @@ export function WidgetView(props: WidgetViewProps) {
             ref={dialogRef}
             className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 md:p-8
               focus:outline-none"
-            onClick={() => setIsFullscreen(false)}
+            onClick={closeFullscreen}
             onKeyDown={onDialogKeyDown}
             role="dialog"
             aria-modal="true"
@@ -176,7 +188,7 @@ export function WidgetView(props: WidgetViewProps) {
                 copied={copied}
                 onCopy={handleCopy}
                 onReload={reload}
-                onFullscreen={() => setIsFullscreen(false)}
+                onFullscreen={closeFullscreen}
                 isFullscreen={true}
               />
             </div>
