@@ -81,6 +81,13 @@ Pick the one closest to the request and adapt — keep the overall shape,
 swap the data and labels. These are starting points, not templates to
 echo verbatim.
 
+**Important — theme reactivity.** Anything that reads CSS variables into JS at
+render time (Canvas, WebGL, Chart.js, D3, etc.) freezes those colours. The
+host can repaint the widget when the app's theme toggles by updating `:root`'s
+inline `style` attribute, so add a `MutationObserver` on the root to re-apply
+the new tokens. Inline SVG / HTML that uses `var(--fg)` etc. directly does
+NOT need this — the cascade re-evaluates automatically.
+
 #### A. Single chart (Chart.js)
 
 ```html
@@ -95,16 +102,29 @@ echo verbatim.
 </div>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
 <script>
-  const fg=getComputedStyle(document.documentElement).getPropertyValue('--fg').trim();
-  const acc=getComputedStyle(document.documentElement).getPropertyValue('--accent').trim();
-  const bd=getComputedStyle(document.documentElement).getPropertyValue('--border').trim();
-  new Chart(document.getElementById('c'),{
-    type:'line',
-    data:{labels:['A','B','C','D','E'],datasets:[{label:'Series',data:[3,8,5,12,9],borderColor:acc,backgroundColor:acc+'33',tension:.3}]},
-    options:{responsive:true,maintainAspectRatio:false,
-      plugins:{legend:{labels:{color:fg}}},
-      scales:{x:{ticks:{color:fg},grid:{color:bd}},y:{ticks:{color:fg},grid:{color:bd}}}}
+  const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+  function tokens(){ return { fg: css('--fg'), acc: css('--accent'), bd: css('--border') }; }
+  let t = tokens();
+  const chart = new Chart(document.getElementById('c'), {
+    type: 'line',
+    data: { labels: ['A','B','C','D','E'], datasets: [{ label: 'Series', data: [3,8,5,12,9], borderColor: t.acc, backgroundColor: t.acc+'33', tension: .3 }] },
+    options: { responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { labels: { color: t.fg } } },
+      scales: { x: { ticks: { color: t.fg }, grid: { color: t.bd } },
+                y: { ticks: { color: t.fg }, grid: { color: t.bd } } } }
   });
+  // Re-apply theme tokens whenever the host updates :root's inline style.
+  new MutationObserver(() => {
+    t = tokens();
+    chart.options.plugins.legend.labels.color = t.fg;
+    chart.options.scales.x.ticks.color = t.fg;
+    chart.options.scales.x.grid.color = t.bd;
+    chart.options.scales.y.ticks.color = t.fg;
+    chart.options.scales.y.grid.color = t.bd;
+    chart.data.datasets[0].borderColor = t.acc;
+    chart.data.datasets[0].backgroundColor = t.acc + '33';
+    chart.update('none');
+  }).observe(document.documentElement, { attributes: true, attributeFilter: ['style'] });
 </script>
 ```
 
