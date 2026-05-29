@@ -281,7 +281,11 @@ export function MessageList({ conversationId }: MessageListProps) {
           <div className="flex gap-2.5">
             <div className="shrink-0 w-6 h-6" />
             <div className="flex-1 max-w-[75%]">
-              <AskUserCard pending={pendingAsk} onSubmit={handleAskUserSubmit} />
+              <AskUserCard
+                key={pendingAsk.question_id}
+                pending={pendingAsk}
+                onSubmit={handleAskUserSubmit}
+              />
             </div>
           </div>
         )}
