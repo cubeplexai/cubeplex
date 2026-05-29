@@ -552,13 +552,14 @@ Find `self._agents[run_id] = agent` and add directly below it:
                 self._hitl_channels[run_id] = sandbox_hitl_channel
 ```
 
-- [ ] **Step 6: Tear it down in the run's finally**
+- [ ] **Step 6: Tear it down everywhere the agent is torn down**
 
-Find `self._agents.pop(run_id, None)` in the run's `finally` block and add
-directly below it:
+There are **two** `self._agents.pop(run_id, None)` sites in `run_manager.py`
+(around lines 1575 and 2064). Add directly below **each** of them:
 ```python
                 self._hitl_channels.pop(run_id, None)
 ```
+Match the surrounding indentation at each site.
 
 - [ ] **Step 7: Type check + import smoke**
 
@@ -576,23 +577,30 @@ cd /home/chris/cubebox/.worktrees/feat/sandbox-confirm-hitl && git add backend/c
 
 ---
 
-## Task 4: Accept the human answer over the Redis control channel
+## Task 4: Accept the human answer (in-process fast path + cross-worker control)
 
 **Files:**
 - Modify: `backend/cubebox/streams/run_manager.py`
 - Test: `backend/tests/unit/test_run_manager_hitl_answer.py` (create)
 
-Mirror the existing `request_cancel` publisher and the `_handle_control`
-steer/cancel branches.
+**Real code shape (confirmed):** `_handle_control(self, data: dict[str, Any])`
+receives an **already-parsed dict** (the `_subscribe_loop` does `json.loads`);
+it dispatches on `type_ = data.get("type")` with `run_id = data.get("run_id")`
+and branches `if type_ == "cancel" / elif "steer" / elif "cancel_steer"` (no
+final `else`). Cross-worker publishing goes through the
+`_publish_control(run_id, type_, content=..., steer_id=...)` helper. The HTTP
+layer calls public `dispatch_*` methods (e.g. `dispatch_steer`) that try the
+**in-process** agent first and fall back to `_publish_control` for other
+workers. We mirror that exactly: same-worker answers hit the channel directly;
+cross-worker answers round-trip through the control channel.
 
 - [ ] **Step 1: Write the failing unit test**
 
 Create `backend/tests/unit/test_run_manager_hitl_answer.py`:
 ```python
-"""RunManager routes a hitl_answer control message to the run's channel."""
+"""RunManager delivers a HITL answer to the run's in-process channel and
+routes a cross-worker hitl_answer control message."""
 from __future__ import annotations
-
-import json
 
 import pytest
 from cubepi.hitl import ApproveAnswer
@@ -607,33 +615,49 @@ class _RecordingChannel:
 
 
 @pytest.mark.asyncio
+async def test_dispatch_hitl_answer_delivers_in_process(run_manager_factory):
+    rm = run_manager_factory()
+    ch = _RecordingChannel()
+    rm._hitl_channels["run_1"] = ch
+    result = await rm.dispatch_hitl_answer("run_1", "call_9", "approve", None)
+    assert result == "delivered"
+    assert ch.answers == [("call_9", ApproveAnswer(decision="approve", reason=None))]
+
+
+@pytest.mark.asyncio
+async def test_dispatch_hitl_answer_publishes_when_not_local(run_manager_factory):
+    rm = run_manager_factory()  # fake redis records publish() calls
+    result = await rm.dispatch_hitl_answer("ghost", "call_9", "deny", "no")
+    assert result == "published"
+
+
+@pytest.mark.asyncio
 async def test_handle_control_routes_hitl_answer(run_manager_factory):
     rm = run_manager_factory()
     ch = _RecordingChannel()
     rm._hitl_channels["run_1"] = ch
-    raw = json.dumps(
+    await rm._handle_control(
         {"type": "hitl_answer", "run_id": "run_1",
          "tool_call_id": "call_9", "decision": "approve", "reason": None}
     )
-    await rm._handle_control(raw)
     assert ch.answers == [("call_9", ApproveAnswer(decision="approve", reason=None))]
 
 
 @pytest.mark.asyncio
 async def test_handle_control_hitl_answer_unknown_run_is_dropped(run_manager_factory):
     rm = run_manager_factory()
-    raw = json.dumps(
+    await rm._handle_control(
         {"type": "hitl_answer", "run_id": "ghost",
          "tool_call_id": "call_9", "decision": "deny", "reason": "x"}
-    )
-    await rm._handle_control(raw)  # must not raise
+    )  # must not raise
 ```
 
 If there is no existing `run_manager_factory` fixture, add one to
-`backend/tests/unit/conftest.py` (or the nearest unit conftest) that constructs
-a `RunManager` with a stub app + a fake redis whose `publish` is an async no-op.
-Match the constructor signature used by the existing run_manager unit tests
-(open one such test to copy the construction).
+`backend/tests/unit/conftest.py` (or the nearest unit conftest). Construct a
+`RunManager(app=<stub>, redis=<fake>, key_prefix="t", run_event_ttl_seconds=60)`
+(see `RunManager.__init__` at run_manager.py:461). The fake redis needs an async
+`publish(self, channel, data)` that records calls and returns 0. Copy any
+existing run_manager unit test's construction if one exists.
 
 - [ ] **Step 2: Run the test to verify it fails**
 
@@ -641,58 +665,88 @@ Run:
 ```bash
 cd /home/chris/cubebox/.worktrees/feat/sandbox-confirm-hitl/backend && uv run pytest tests/unit/test_run_manager_hitl_answer.py -q
 ```
-Expected: FAIL — `_handle_control` has no `hitl_answer` branch (the answer is
-never recorded), or the fixture is missing.
+Expected: FAIL — `dispatch_hitl_answer` does not exist and `_handle_control` has
+no `hitl_answer` branch.
 
-- [ ] **Step 3: Add the `hitl_answer` branch to `_handle_control`**
+- [ ] **Step 3: Extend `_publish_control` to carry HITL fields**
 
-In `run_manager.py`, find the `elif msg_type == "cancel":` branch in
-`_handle_control`. After its block (before the final `else:` that logs unknown
-types), add:
+The current helper (run_manager.py ~588) only forwards `content` / `steer_id`.
+Add an optional `extra` dict merged into the payload. Replace the helper with:
 ```python
-        elif msg_type == "hitl_answer":
-            from cubepi.hitl import ApproveAnswer
-
-            channel = self._hitl_channels.get(run_id)
-            if channel is not None:
-                tool_call_id = msg.get("tool_call_id")
-                decision = msg.get("decision")
-                if tool_call_id and decision in ("approve", "deny"):
-                    try:
-                        await channel.answer(
-                            tool_call_id,
-                            ApproveAnswer(decision=decision, reason=msg.get("reason")),
-                        )
-                    except Exception:
-                        logger.warning(
-                            "hitl_answer routing failed for run {}", run_id, exc_info=True
-                        )
-```
-
-- [ ] **Step 4: Add the publisher method (mirrors `request_cancel`)**
-
-Find `request_cancel` in `run_manager.py` and add directly below it:
-```python
-    async def submit_hitl_answer(
-        self, run_id: str, tool_call_id: str, decision: str, reason: str | None = None
+    async def _publish_control(
+        self,
+        run_id: str,
+        type_: str,
+        content: str | None = None,
+        steer_id: str | None = None,
+        extra: dict[str, Any] | None = None,
     ) -> None:
-        """Publish a human approve/deny for a pending sandbox confirm.
+        import json
 
-        Fire-and-forget over the control channel; any worker holding the run's
-        channel delivers it. Safe if no subscriber (run already finished).
-        """
-        payload = {
-            "type": "hitl_answer",
-            "run_id": run_id,
-            "tool_call_id": tool_call_id,
-            "decision": decision,
-            "reason": reason,
-            "ts": _time.time(),
-        }
+        payload: dict[str, Any] = {"run_id": run_id, "type": type_}
+        if content is not None:
+            payload["content"] = content
+        if steer_id is not None:
+            payload["steer_id"] = steer_id
+        if extra:
+            payload.update(extra)
         await self._redis.publish(self._control_channel, json.dumps(payload))
 ```
 
-- [ ] **Step 5: Run the tests to green**
+- [ ] **Step 4: Add the public `dispatch_hitl_answer` (mirrors `dispatch_steer`)**
+
+Find `dispatch_steer` (run_manager.py ~609) and add directly below it:
+```python
+    async def dispatch_hitl_answer(
+        self, run_id: str, tool_call_id: str, decision: str, reason: str | None = None
+    ) -> str:
+        """Deliver a human approve/deny for a pending sandbox confirm.
+
+        In-process fast path when this worker holds the run's channel; otherwise
+        publish on the control channel so the worker that does can deliver it.
+        """
+        if await self._deliver_hitl_answer(run_id, tool_call_id, decision, reason):
+            return "delivered"
+        await self._publish_control(
+            run_id,
+            "hitl_answer",
+            extra={"tool_call_id": tool_call_id, "decision": decision, "reason": reason},
+        )
+        return "published"
+
+    async def _deliver_hitl_answer(
+        self, run_id: str, tool_call_id: str, decision: str, reason: str | None
+    ) -> bool:
+        """Answer the in-process channel if present. Returns True if delivered."""
+        from cubepi.hitl import ApproveAnswer
+
+        channel = self._hitl_channels.get(run_id)
+        if channel is None:
+            return False
+        if decision not in ("approve", "deny"):
+            return False
+        try:
+            await channel.answer(tool_call_id, ApproveAnswer(decision=decision, reason=reason))
+        except Exception:
+            logger.warning("hitl_answer delivery failed for run {}", run_id, exc_info=True)
+        return True
+```
+
+- [ ] **Step 5: Add the `hitl_answer` branch to `_handle_control`**
+
+Find the `elif type_ == "cancel_steer":` branch (run_manager.py ~672) and add a
+new branch after it:
+```python
+        elif type_ == "hitl_answer":
+            await self._deliver_hitl_answer(
+                run_id,
+                data.get("tool_call_id") or "",
+                data.get("decision") or "",
+                data.get("reason"),
+            )
+```
+
+- [ ] **Step 6: Run the tests to green**
 
 Run:
 ```bash
@@ -700,10 +754,10 @@ cd /home/chris/cubebox/.worktrees/feat/sandbox-confirm-hitl/backend && uv run py
 ```
 Expected: PASS / `Success: no issues found`.
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/sandbox-confirm-hitl && git add backend/cubebox/streams/run_manager.py backend/tests/unit/ && git commit -m "feat(sandbox): route hitl_answer control message to run channel"
+cd /home/chris/cubebox/.worktrees/feat/sandbox-confirm-hitl && git add backend/cubebox/streams/run_manager.py backend/tests/unit/ && git commit -m "feat(sandbox): deliver hitl answers in-process + cross-worker control"
 ```
 
 ---
@@ -711,24 +765,28 @@ cd /home/chris/cubebox/.worktrees/feat/sandbox-confirm-hitl && git add backend/c
 ## Task 5: HTTP endpoint to submit a confirm answer
 
 **Files:**
-- Modify: `backend/cubebox/api/v1/conversations.py`
+- Modify: `backend/cubebox/api/routes/v1/conversations.py`
 - Test: covered by the Task 7 E2E (endpoint is thin glue over Task 4)
 
-The endpoint is workspace-scoped and mirrors the existing cancel/steer endpoint
-in the same file (auth dependencies, run-id resolution, `RunManager` access).
+The endpoint is workspace-scoped and mirrors the existing cancel/steer handler
+in the same file (auth dependencies + `RunManager` access). Active-run
+resolution uses the same `get_active_run(...)` helper run_manager imports
+(`cubebox.streams.run_manager:20`).
 
 - [ ] **Step 1: Read the existing cancel/steer endpoint as the template**
 
-Open `backend/cubebox/api/v1/conversations.py` and locate the handler that
-calls `request_cancel` (and/or the steer handler). Note: its route decorator
-path + method, its auth/dependency injection (workspace membership, db/session,
-`RunManager` accessor), and exactly how it resolves the active `run_id` for the
-`{conversation_id}`. The new handler copies that scaffolding verbatim.
+Open `backend/cubebox/api/routes/v1/conversations.py` and locate the handler(s)
+that call `RunManager.dispatch_cancel` / `dispatch_steer`. Note verbatim: the
+route decorator + method, the auth/dependency params (workspace membership,
+current user, the `RunManager` accessor dependency), and how it obtains the
+`run_id` for `{conversation_id}` (it resolves the active run — find whether it
+uses `get_active_run(...)` directly or a thin wrapper). The new handler copies
+that scaffolding.
 
 - [ ] **Step 2: Add the request model**
 
-Near the other Pydantic request models in `conversations.py` (or at module top
-if that's the file's convention), add:
+Near the other Pydantic request models in this file (match the file's
+convention for where models live), add:
 ```python
 class SandboxConfirmAnswer(BaseModel):
     decision: Literal["approve", "deny"]
@@ -739,8 +797,9 @@ imported (add if missing).
 
 - [ ] **Step 3: Add the endpoint**
 
-Add a handler mirroring the cancel handler's decorator/deps. The body resolves
-the active run the same way cancel does, then delegates to Task 4's publisher:
+Add a handler with the SAME decorator style + dependency params the cancel
+handler uses. Resolve the active run exactly as the cancel handler does, then
+delegate to Task 4's `dispatch_hitl_answer`:
 ```python
 @router.post("/{conversation_id}/sandbox-confirm/{tool_call_id}")
 async def submit_sandbox_confirm(
@@ -749,13 +808,17 @@ async def submit_sandbox_confirm(
     tool_call_id: str,
     body: SandboxConfirmAnswer,
     # --- copy the SAME dependency params the cancel handler uses ---
-    # e.g. current_user / membership / session / run_manager accessor
+    # (current user / workspace membership guard / RunManager accessor)
 ) -> dict[str, str]:
-    run_id = ...  # resolve the active run_id for conversation_id, EXACTLY as
-                  # the cancel handler does (same helper / same query).
-    if run_id is None:
+    run_id = await get_active_run(...)  # resolve EXACTLY as the cancel handler
+                                        # does (same args: redis/key_prefix +
+                                        # conversation_id). Import get_active_run
+                                        # from cubebox.streams.<active-run module>
+                                        # — the same module run_manager imports
+                                        # it from (run_manager.py:20).
+    if not run_id:
         raise HTTPException(status_code=404, detail="no active run for conversation")
-    await run_manager.submit_hitl_answer(
+    await run_manager.dispatch_hitl_answer(
         run_id=run_id,
         tool_call_id=tool_call_id,
         decision=body.decision,
@@ -763,30 +826,29 @@ async def submit_sandbox_confirm(
     )
     return {"status": "submitted"}
 ```
-Replace the `...` lines with the cancel handler's actual dependency params and
-run-id resolution. Keep the path **workspace-scoped** under the existing
-conversations router prefix (`/api/v1/ws/{workspace_id}/conversations`); do NOT
-add a `?scope=` switch (scope-isolation rule).
+Replace the `...` / comment lines with the cancel handler's actual deps and
+active-run resolution. Keep the path workspace-scoped under the conversations
+router prefix; do NOT add a `?scope=` switch (scope-isolation rule).
 
 - [ ] **Step 4: Type check + route registration smoke**
 
 Run:
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/sandbox-confirm-hitl/backend && uv run mypy cubebox/api/v1/conversations.py && uv run python -c "
-from cubebox.app import create_app  # use the actual app factory name
-app = create_app()
-paths = [r.path for r in app.routes]
-assert any('sandbox-confirm' in p for p in paths), paths
+cd /home/chris/cubebox/.worktrees/feat/sandbox-confirm-hitl/backend && uv run mypy cubebox/api/routes/v1/conversations.py && uv run python -c "
+from cubebox.api.app import build_app  # use the real factory; grep app/__init__ or main.py if unsure
+app = build_app()
+paths = [getattr(r, 'path', '') for r in app.routes]
+assert any('sandbox-confirm' in p for p in paths), [p for p in paths if 'conversations' in p]
 print('route registered')
 "
 ```
-Expected: `Success: no issues found` and `route registered`. (If the app
-factory is named differently, use the name the existing tests use.)
+Expected: `Success: no issues found` and `route registered`. (Confirm the app
+factory's real name from `cubebox/api/app.py`; adjust the import if needed.)
 
 - [ ] **Step 5: Commit**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/sandbox-confirm-hitl && git add backend/cubebox/api/v1/conversations.py && git commit -m "feat(sandbox): POST sandbox-confirm endpoint for HITL answers"
+cd /home/chris/cubebox/.worktrees/feat/sandbox-confirm-hitl && git add backend/cubebox/api/routes/v1/conversations.py && git commit -m "feat(sandbox): POST sandbox-confirm endpoint for HITL answers"
 ```
 
 ---
