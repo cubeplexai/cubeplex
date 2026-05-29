@@ -648,24 +648,24 @@ class RunManager:
         return "published"
 
     async def dispatch_hitl_answer(
-        self, run_id: str, tool_call_id: str, decision: str, reason: str | None = None
+        self, run_id: str, question_id: str, decision: str, reason: str | None = None
     ) -> str:
         """Deliver a human approve/deny for a pending sandbox confirm.
 
         In-process fast path when this worker holds the run's channel; otherwise
         publish on the control channel so the worker that does can deliver it.
         """
-        if await self._deliver_hitl_answer(run_id, tool_call_id, decision, reason):
+        if await self._deliver_hitl_answer(run_id, question_id, decision, reason):
             return "delivered"
         await self._publish_control(
             run_id,
             "hitl_answer",
-            extra={"tool_call_id": tool_call_id, "decision": decision, "reason": reason},
+            extra={"question_id": question_id, "decision": decision, "reason": reason},
         )
         return "published"
 
     async def _deliver_hitl_answer(
-        self, run_id: str, tool_call_id: str, decision: str, reason: str | None
+        self, run_id: str, question_id: str, decision: str, reason: str | None
     ) -> bool:
         """Answer the in-process channel if present. Returns True if delivered."""
         from cubepi.hitl import ApproveAnswer
@@ -680,7 +680,7 @@ class RunManager:
         else:
             return False
         try:
-            await channel.answer(tool_call_id, answer)
+            await channel.answer(question_id, answer)
         except Exception:
             logger.warning("hitl_answer delivery failed for run {}", run_id, exc_info=True)
         return True
@@ -740,7 +740,7 @@ class RunManager:
         elif type_ == "hitl_answer":
             await self._deliver_hitl_answer(
                 run_id,
-                data.get("tool_call_id") or "",
+                data.get("question_id") or "",
                 data.get("decision") or "",
                 data.get("reason"),
             )

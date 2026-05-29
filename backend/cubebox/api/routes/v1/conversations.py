@@ -1127,12 +1127,12 @@ async def cancel_steer(
 
 
 @router.post(
-    "/{conversation_id}/sandbox-confirm/{tool_call_id}",
+    "/{conversation_id}/sandbox-confirm/{question_id}",
     status_code=status.HTTP_202_ACCEPTED,
 )
 async def submit_sandbox_confirm(
     conversation_id: str,
-    tool_call_id: str,
+    question_id: str,
     body: SandboxConfirmAnswer,
     raw_request: Request,
     session: Annotated[AsyncSession, Depends(get_session)],
@@ -1161,6 +1161,6 @@ async def submit_sandbox_confirm(
 
     run_manager = raw_request.app.state.run_manager
     dispatch_status = await run_manager.dispatch_hitl_answer(
-        active_run.run_id, tool_call_id, body.decision, body.reason
+        active_run.run_id, question_id, body.decision, body.reason
     )
     return {"status": dispatch_status, "run_id": active_run.run_id}
