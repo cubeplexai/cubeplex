@@ -224,9 +224,31 @@ def convert_agent_event_to_sse(evt: AgentEvent) -> list[dict[str, Any]]:
                     "timeout_seconds": req.timeout_seconds,
                 }
             ]
+        if payload.kind == "ask":
+            return [
+                {
+                    "type": "ask_user_request",
+                    "question_id": req.question_id,
+                    "questions": [q.model_dump() for q in payload.questions],
+                    "timeout_seconds": req.timeout_seconds,
+                }
+            ]
         return []
 
     if isinstance(evt, HitlAnswerEvent):
+        # Distinguish ask (dict answer) from approve (ApproveAnswer object).
+        # Cancelled answers (answer=None) default to sandbox_confirm_resolved —
+        # in v1 there is no cancel endpoint so this branch is unreachable.
+        if isinstance(evt.answer, dict):
+            return [
+                {
+                    "type": "ask_user_resolved",
+                    "question_id": evt.question_id,
+                    "answers": evt.answer,
+                    "cancelled": evt.cancelled,
+                    "timed_out": evt.timed_out,
+                }
+            ]
         resolved: dict[str, Any] = {
             "type": "sandbox_confirm_resolved",
             "question_id": evt.question_id,
