@@ -38,6 +38,14 @@ interface WidgetViewProps {
   height?: number
 }
 
+// Focusable selector used for the fullscreen dialog's focus trap + initial
+// focus. Iframes are intentionally excluded — focusing the widget iframe would
+// not give it real keyboard ownership (sandbox is opaque-origin and toolbar
+// buttons are the only real interactive controls in the dialog).
+const FOCUSABLE_SELECTOR =
+  'button:not([disabled]),a[href],input:not([disabled]),select:not([disabled]),' +
+  'textarea:not([disabled]),[tabindex]:not([tabindex="-1"])'
+
 export function WidgetView(props: WidgetViewProps) {
   // The reloadKey is bumped by the toolbar Reload button (or the error-retry
   // button) to force-remount the iframe; the embedded WidgetFrame remounts
@@ -45,6 +53,8 @@ export function WidgetView(props: WidgetViewProps) {
   const [reloadKey, setReloadKey] = useState(0)
   const [isFullscreen, setIsFullscreen] = useState(false)
   const [copied, setCopied] = useState(false)
+  const dialogRef = useRef<HTMLDivElement | null>(null)
+  const prevFocusRef = useRef<HTMLElement | null>(null)
 
   const reload = useCallback(() => setReloadKey((k) => k + 1), [])
 
@@ -68,12 +78,56 @@ export function WidgetView(props: WidgetViewProps) {
     return () => window.removeEventListener('keydown', onKey)
   }, [isFullscreen])
 
+  // Focus management: when the dialog opens, save the previously-focused
+  // element and move focus into the dialog. When it closes, restore focus
+  // back to where it came from.
+  useEffect(() => {
+    if (!isFullscreen) return
+    if (typeof document === 'undefined') return
+    prevFocusRef.current = document.activeElement as HTMLElement | null
+    const raf = requestAnimationFrame(() => {
+      const dialog = dialogRef.current
+      if (!dialog) return
+      const focusables = dialog.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)
+      ;(focusables[0] ?? dialog).focus()
+    })
+    return () => {
+      cancelAnimationFrame(raf)
+      const prev = prevFocusRef.current
+      prevFocusRef.current = null
+      // Defer to next tick so React has finished unmounting the dialog before
+      // we attempt to focus the (now visible again) opener button.
+      setTimeout(() => prev?.focus?.(), 0)
+    }
+  }, [isFullscreen])
+
+  // Tab trap: keep focus inside the dialog while it is open.
+  const onDialogKeyDown = useCallback((e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (e.key !== 'Tab') return
+    const dialog = dialogRef.current
+    if (!dialog) return
+    const focusables = Array.from(dialog.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR))
+    if (focusables.length === 0) return
+    const first = focusables[0]
+    const last = focusables[focusables.length - 1]
+    const active = document.activeElement as HTMLElement | null
+    if (e.shiftKey && (active === first || !dialog.contains(active))) {
+      last.focus()
+      e.preventDefault()
+    } else if (!e.shiftKey && (active === last || !dialog.contains(active))) {
+      first.focus()
+      e.preventDefault()
+    }
+  }, [])
+
   return (
     <div className="relative group/widget">
       {/* Inline frame (also used as the layout-slot holder when fullscreen).
           Hidden visually while fullscreen so the host overlay is the only one
           rendering content, but the wrapping div keeps the message column
-          height stable rather than collapsing as the iframe disappears. */}
+          height stable rather than collapsing as the iframe disappears.
+          aria-hidden + inert hide the inline copy from assistive tech and
+          tab order while the modal dialog is open. */}
       <div
         className={cn(
           'relative rounded-lg border border-border bg-muted overflow-hidden',
@@ -83,6 +137,10 @@ export function WidgetView(props: WidgetViewProps) {
           width: props.width ? `${props.width}px` : '100%',
           minHeight: props.height ?? SKELETON_DEFAULT_HEIGHT,
         }}
+        // @ts-expect-error -- inert is a real HTML attribute in modern browsers
+        // but React's DOM types haven't shipped it yet on every React version.
+        inert={isFullscreen ? '' : undefined}
+        aria-hidden={isFullscreen || undefined}
       >
         <WidgetFrame key={`inline-${reloadKey}`} {...props} onRetry={reload} />
         <WidgetToolbar
@@ -98,11 +156,15 @@ export function WidgetView(props: WidgetViewProps) {
         typeof document !== 'undefined' &&
         createPortal(
           <div
-            className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 md:p-8"
+            ref={dialogRef}
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 md:p-8
+              focus:outline-none"
             onClick={() => setIsFullscreen(false)}
+            onKeyDown={onDialogKeyDown}
             role="dialog"
             aria-modal="true"
             aria-label={props.title ?? 'widget (fullscreen)'}
+            tabIndex={-1}
           >
             <div
               className="relative w-full h-full max-w-[1200px] rounded-xl border border-border
@@ -199,6 +261,12 @@ function WidgetFrame({
   // change itself — we have to relay it. Stateless (no seq); the shell applies
   // it directly to :root CSS variables in place, so the rendered widget
   // recolors without remounting.
+  //
+  // We also re-push the CURRENT theme once `ready` flips true. The srcDoc is
+  // built from a theme snapshot at render time; if the app toggled theme
+  // between that snapshot and the iframe finishing morphdom load, the shell
+  // would otherwise be stuck on the stale theme until the next toggle. Pushing
+  // on ready closes that window.
   useEffect(() => {
     if (typeof document === 'undefined') return
     const html = document.documentElement
@@ -208,10 +276,11 @@ function WidgetFrame({
       const t = resolveThemeTokens(html.classList.contains('dark'))
       win.postMessage({ widgetId, type: 'theme', ...t }, '*')
     }
+    if (ready) push()
     const obs = new MutationObserver(push)
     obs.observe(html, { attributes: true, attributeFilter: ['class'] })
     return () => obs.disconnect()
-  }, [widgetId])
+  }, [widgetId, ready])
 
   useEffect(() => {
     if (!ready || failed || tooBig) return
