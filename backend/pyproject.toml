@@ -167,11 +167,13 @@ exclude_lines = [
 ]
 
 [tool.uv.sources]
-# 9cb6817 is cubepi main HEAD: subagent runs now nest under their
-# execute_tool span (#122 — per-task active-run gate, invoke_agent parented at
-# the active tool span, JSONL sharded by trace_id) + span_id in trace view
-# (#121), on top of the steer-cancel feature (#120).
-cubepi = { git = "https://github.com/cubeplexai/cubepi.git", rev = "9cb6817" }
+# b03813e is cubepi main HEAD: adds the Human-in-the-Loop (HITL) channel —
+# HitlChannel protocol, InMemoryChannel/CheckpointedChannel,
+# ApprovalPolicyMiddleware/ConfirmToolCallMiddleware, HitlRequestEvent/
+# HitlAnswerEvent, and the checkpointer v1->v2 pending_request schema
+# (EXPECTED_SCHEMA_VERSION=2) — on top of the prior subagent-span-nesting (#122)
+# and steer-cancel (#120) work.
+cubepi = { git = "https://github.com/cubeplexai/cubepi.git", rev = "b03813e" }
 
 [dependency-groups]
 dev = [

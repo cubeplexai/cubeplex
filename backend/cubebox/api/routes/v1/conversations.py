@@ -7,7 +7,7 @@ import time
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
@@ -361,6 +361,13 @@ class CancelSteerRequest(BaseModel):
     """Request body for cancelling a not-yet-drained steer."""
 
     steer_id: str
+
+
+class SandboxConfirmAnswer(BaseModel):
+    """Request body for answering a pending sandbox command confirmation."""
+
+    decision: Literal["approve", "deny"]
+    reason: str | None = None
 
 
 class SendMessageRequest(BaseModel):
@@ -1116,4 +1123,44 @@ async def cancel_steer(
 
     run_manager = raw_request.app.state.run_manager
     dispatch_status = await run_manager.dispatch_cancel_steer(active_run.run_id, body.steer_id)
+    return {"status": dispatch_status, "run_id": active_run.run_id}
+
+
+@router.post(
+    "/{conversation_id}/sandbox-confirm/{question_id}",
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def submit_sandbox_confirm(
+    conversation_id: str,
+    question_id: str,
+    body: SandboxConfirmAnswer,
+    raw_request: Request,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    ctx: Annotated[RequestContext, Depends(require_member)],
+    rds: Annotated[RedisHandle, Depends(redis_dep)],
+) -> dict[str, object]:
+    """Submit a human approve/deny for a pending sandbox command confirmation."""
+    conv_repo = ConversationRepository(
+        session,
+        org_id=ctx.org_id,
+        workspace_id=ctx.workspace_id,
+        user_id=ctx.user.id,
+    )
+    conversation = await conv_repo.get_by_id(conversation_id)
+    if not conversation:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Conversation {conversation_id} not found",
+        )
+
+    active_run = await get_active_run(
+        rds.client, prefix=rds.key_prefix, conversation_id=conversation_id
+    )
+    if active_run is None or active_run.status != "running":
+        return {"status": "no_active_run", "run_id": None}
+
+    run_manager = raw_request.app.state.run_manager
+    dispatch_status = await run_manager.dispatch_hitl_answer(
+        active_run.run_id, question_id, body.decision, body.reason
+    )
     return {"status": dispatch_status, "run_id": active_run.run_id}

@@ -12,6 +12,7 @@ from typing import Any
 
 from cubepi import Agent, Model
 from cubepi.agent.types import AgentTool
+from cubepi.hitl import HitlChannel
 from cubepi.middleware.base import Middleware
 from cubepi.providers.base import Provider, ThinkingLevel
 
@@ -32,6 +33,7 @@ def create_cubebox_agent(
     temperature: float = 0.7,
     reasoning: bool = False,
     thinking: ThinkingLevel = "off",
+    channel: HitlChannel | None = None,
 ) -> Agent[Any]:
     """Build a cubepi.Agent for cubebox's cubepi runtime path.
 
@@ -71,6 +73,7 @@ def create_cubebox_agent(
         checkpointer=checkpointer,
         thread_id=thread_id,
         middleware=mw_list,
+        channel=channel,
         # Override cubepi's default after_tool_call composer: the default keeps
         # only the last non-None AfterToolCallResult, so a middleware that
         # rewrites `content` (CitationMiddleware) is dropped the moment a later

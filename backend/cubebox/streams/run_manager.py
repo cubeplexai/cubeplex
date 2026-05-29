@@ -262,6 +262,8 @@ def cubepi_dict_to_agent_event(d: dict[str, Any], timestamp: str) -> AgentEvent 
         ErrorEvent,
         InjectedMessageEvent,
         ReasoningEvent,
+        SandboxConfirmRequestEvent,
+        SandboxConfirmResolvedEvent,
         TextDeltaEvent,
         ToolCallDeltaEvent,
         ToolCallEvent,
@@ -327,6 +329,30 @@ def cubepi_dict_to_agent_event(d: dict[str, Any], timestamp: str) -> AgentEvent 
             data={
                 "action": d.get("action", "created"),
                 "artifact": d.get("artifact", {}),
+            },
+        )
+    if t == "sandbox_confirm_request":
+        args = d.get("args") or {}
+        details = d.get("details") or {}
+        return SandboxConfirmRequestEvent(
+            timestamp=timestamp,
+            data={
+                "question_id": d.get("question_id", ""),
+                "tool_call_id": d.get("tool_call_id", ""),
+                "command": args.get("command", ""),
+                "matched_pattern": details.get("matched_pattern"),
+                "timeout_seconds": d.get("timeout_seconds"),
+            },
+        )
+    if t == "sandbox_confirm_resolved":
+        return SandboxConfirmResolvedEvent(
+            timestamp=timestamp,
+            data={
+                "question_id": d.get("question_id", ""),
+                "decision": d.get("decision"),
+                "cancelled": d.get("cancelled", False),
+                "timed_out": d.get("timed_out", False),
+                "reason": d.get("reason"),
             },
         )
     if t == "usage":
@@ -474,6 +500,7 @@ class RunManager:
         self._run_stream_max_events = run_stream_max_events
         self._tasks: dict[str, asyncio.Task[None]] = {}
         self._agents: dict[str, Any] = {}
+        self._hitl_channels: dict[str, Any] = {}
         self._consolidation_tasks: set[asyncio.Task[None]] = set()
         self._ack_waiters: dict[str, list[asyncio.Future[bool]]] = {}
         self._control_channel = f"{key_prefix}:control"
@@ -591,6 +618,7 @@ class RunManager:
         type_: str,
         content: str | None = None,
         steer_id: str | None = None,
+        extra: dict[str, Any] | None = None,
     ) -> None:
         import json
 
@@ -599,6 +627,8 @@ class RunManager:
             payload["content"] = content
         if steer_id is not None:
             payload["steer_id"] = steer_id
+        if extra:
+            payload.update(extra)
         await self._redis.publish(self._control_channel, json.dumps(payload))
 
     async def _publish_ack(self, run_id: str) -> None:
@@ -620,6 +650,44 @@ class RunManager:
             return "steered"
         await self._publish_control(run_id, "steer", content, steer_id=steer_id)
         return "published"
+
+    async def dispatch_hitl_answer(
+        self, run_id: str, question_id: str, decision: str, reason: str | None = None
+    ) -> str:
+        """Deliver a human approve/deny for a pending sandbox confirm.
+
+        In-process fast path when this worker holds the run's channel; otherwise
+        publish on the control channel so the worker that does can deliver it.
+        """
+        if await self._deliver_hitl_answer(run_id, question_id, decision, reason):
+            return "delivered"
+        await self._publish_control(
+            run_id,
+            "hitl_answer",
+            extra={"question_id": question_id, "decision": decision, "reason": reason},
+        )
+        return "published"
+
+    async def _deliver_hitl_answer(
+        self, run_id: str, question_id: str, decision: str, reason: str | None
+    ) -> bool:
+        """Answer the in-process channel if present. Returns True if delivered."""
+        from cubepi.hitl import ApproveAnswer
+
+        channel = self._hitl_channels.get(run_id)
+        if channel is None:
+            return False
+        if decision == "approve":
+            answer = ApproveAnswer(decision="approve", reason=reason)
+        elif decision == "deny":
+            answer = ApproveAnswer(decision="deny", reason=reason)
+        else:
+            return False
+        try:
+            await channel.answer(question_id, answer)
+        except Exception:
+            logger.warning("hitl_answer delivery failed for run {}", run_id, exc_info=True)
+        return True
 
     async def dispatch_cancel_steer(self, run_id: str, steer_id: str) -> str:
         agent = self._agents.get(run_id)
@@ -673,6 +741,13 @@ class RunManager:
             agent = self._agents.get(run_id)
             if agent is not None:
                 agent.cancel_steer(data.get("steer_id") or "")
+        elif type_ == "hitl_answer":
+            await self._deliver_hitl_answer(
+                run_id,
+                data.get("question_id") or "",
+                data.get("decision") or "",
+                data.get("reason"),
+            )
 
     async def _handle_ack(self, data: dict[str, Any]) -> None:
         run_id = data.get("run_id")
@@ -1297,6 +1372,7 @@ class RunManager:
             logger.warning("CompactionMiddleware not loaded: {}", _exc)
 
         # 6. SandboxMiddleware — needs sandbox
+        sandbox_hitl_channel: Any = None
         if sandbox is not None:
             try:
                 from cubebox.middleware.sandbox import SandboxMiddleware
@@ -1328,11 +1404,15 @@ class RunManager:
                         {"action": "deny", "pattern": "*"},
                     ]
 
+                from cubepi.hitl import InMemoryChannel
+
+                sandbox_hitl_channel = InMemoryChannel(default_timeout=180.0)
                 sandbox_mw = SandboxMiddleware(
                     sandbox=sandbox,
                     conversation_id=conversation_id,
                     workspace_id=ctx.workspace_id,
                     command_rules=_command_rules,
+                    channel=sandbox_hitl_channel,
                 )
                 cubepi_middleware.append(sandbox_mw)
                 # Middleware tools (execute, write_file, edit_file, file_read) collected for
@@ -1480,6 +1560,7 @@ class RunManager:
                 # per-conversation toggle (UI) can override this later.
                 reasoning=_model_config.reasoning,
                 thinking="medium" if _model_config.reasoning else "off",
+                channel=sandbox_hitl_channel,
             )
 
             # Late-bind extra_ref to the live agent._extra dict so compaction /
@@ -1505,6 +1586,8 @@ class RunManager:
 
             agent.subscribe(_on_event)
             self._agents[run_id] = agent
+            if sandbox_hitl_channel is not None:
+                self._hitl_channels[run_id] = sandbox_hitl_channel
             drainer = asyncio.create_task(_drain_cubepi_sse_queue(sse_queue, publish_stream_event))
 
             # Compute relevance-memory snapshot before the agent loop starts
@@ -1599,6 +1682,7 @@ class RunManager:
             finally:
                 # Stop accepting steers for this run before tearing down.
                 self._agents.pop(run_id, None)
+                self._hitl_channels.pop(run_id, None)
                 # Signal drainer and wait for it to flush remaining events so
                 # all SSE dicts are published before citation buffers flush.
                 await sse_queue.put(None)

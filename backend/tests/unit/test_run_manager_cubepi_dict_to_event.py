@@ -181,3 +181,50 @@ def test_tool_call_delta_dict_without_identity_is_tolerated() -> None:
 
 def test_unknown_type_returns_none() -> None:
     assert cubepi_dict_to_agent_event({"type": "totally_unknown"}, TS) is None
+
+
+def test_sandbox_confirm_request_dict_maps_to_event() -> None:
+    # Input shape matches convert_agent_event_to_sse output: args/details are nested dicts.
+    evt = cubepi_dict_to_agent_event(
+        {
+            "type": "sandbox_confirm_request",
+            "question_id": "qid-1",
+            "tool_call_id": "tc-9",
+            "args": {"command": "rm -rf /tmp/x"},
+            "details": {"matched_pattern": "rm *", "command": "rm -rf /tmp/x"},
+            "timeout_seconds": 180.0,
+        },
+        TS,
+    )
+    assert evt is not None
+    assert evt.type == "sandbox_confirm_request"
+    assert evt.data == {
+        "question_id": "qid-1",
+        "tool_call_id": "tc-9",
+        "command": "rm -rf /tmp/x",
+        "matched_pattern": "rm *",
+        "timeout_seconds": 180.0,
+    }
+
+
+def test_sandbox_confirm_resolved_dict_maps_to_event() -> None:
+    evt = cubepi_dict_to_agent_event(
+        {
+            "type": "sandbox_confirm_resolved",
+            "question_id": "qid-1",
+            "decision": "deny",
+            "cancelled": False,
+            "timed_out": False,
+            "reason": "nope",
+        },
+        TS,
+    )
+    assert evt is not None
+    assert evt.type == "sandbox_confirm_resolved"
+    assert evt.data == {
+        "question_id": "qid-1",
+        "decision": "deny",
+        "cancelled": False,
+        "timed_out": False,
+        "reason": "nope",
+    }

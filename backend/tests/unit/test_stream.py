@@ -3,7 +3,13 @@
 import json
 
 from cubepi import AgentToolResult
-from cubepi.agent.types import MessageEndEvent, ToolExecutionEndEvent
+from cubepi.agent.types import (
+    HitlAnswerEvent,
+    HitlRequestEvent,
+    MessageEndEvent,
+    ToolExecutionEndEvent,
+)
+from cubepi.hitl.types import ApproveAnswer, ApproveRequest, HitlRequest
 from cubepi.providers.base import (
     AssistantMessage,
     StreamEvent,
@@ -332,3 +338,96 @@ def test_injected_user_message_becomes_injected_message_dict() -> None:
 def test_injected_user_message_without_steer_id_is_dropped() -> None:
     msg = UserMessage(content=[TextContent(text="seed prompt")])
     assert convert_agent_event_to_sse(MessageEndEvent(message=msg)) == []
+
+
+# ---------------------------------------------------------------------------
+# convert_agent_event_to_sse — HitlRequestEvent → sandbox_confirm_request
+
+
+def _mk_hitl_request(
+    question_id: str = "q1",
+    tool_call_id: str = "tc1",
+    tool_name: str = "execute",
+    args: dict | None = None,
+    details: dict | None = None,
+    timeout_seconds: float | None = 180.0,
+) -> HitlRequest:
+    payload = ApproveRequest(
+        tool_name=tool_name,
+        tool_call_id=tool_call_id,
+        args=args or {"command": "rm -rf /"},
+        details=details or {"matched_pattern": "rm *"},
+    )
+    return HitlRequest(
+        question_id=question_id,
+        thread_id="thread-1",
+        payload=payload,
+        created_at=1700000000.0,
+        timeout_seconds=timeout_seconds,
+    )
+
+
+def test_hitl_request_event_emits_sandbox_confirm_request() -> None:
+    req = _mk_hitl_request()
+    evt = HitlRequestEvent(request=req)
+    out = convert_agent_event_to_sse(evt)
+    assert len(out) == 1
+    d = out[0]
+    assert d["type"] == "sandbox_confirm_request"
+    assert d["question_id"] == "q1"
+    assert d["tool_call_id"] == "tc1"
+    assert d["tool_name"] == "execute"
+    assert d["args"] == {"command": "rm -rf /"}
+    assert d["details"] == {"matched_pattern": "rm *"}
+    assert d["timeout_seconds"] == 180.0
+
+
+def test_hitl_request_non_approve_kind_is_dropped() -> None:
+    # ConfirmRequest / AskRequest — not sandbox approve; drop silently
+    from cubepi.hitl.types import ConfirmRequest
+
+    req = HitlRequest(
+        question_id="q2",
+        thread_id=None,
+        payload=ConfirmRequest(prompt="Are you sure?"),
+        created_at=1700000000.0,
+    )
+    evt = HitlRequestEvent(request=req)
+    assert convert_agent_event_to_sse(evt) == []
+
+
+# ---------------------------------------------------------------------------
+# convert_agent_event_to_sse — HitlAnswerEvent → sandbox_confirm_resolved
+
+
+def test_hitl_answer_approved_emits_sandbox_confirm_resolved() -> None:
+    answer = ApproveAnswer(decision="approve", reason="looks fine")
+    evt = HitlAnswerEvent(question_id="q1", answer=answer, cancelled=False, timed_out=False)
+    out = convert_agent_event_to_sse(evt)
+    assert len(out) == 1
+    d = out[0]
+    assert d["type"] == "sandbox_confirm_resolved"
+    assert d["question_id"] == "q1"
+    assert d["cancelled"] is False
+    assert d["timed_out"] is False
+    assert d["decision"] == "approve"
+    assert d["reason"] == "looks fine"
+
+
+def test_hitl_answer_cancelled_emits_sandbox_confirm_resolved_no_decision() -> None:
+    evt = HitlAnswerEvent(question_id="q1", answer=None, cancelled=True, timed_out=False)
+    out = convert_agent_event_to_sse(evt)
+    assert len(out) == 1
+    d = out[0]
+    assert d["type"] == "sandbox_confirm_resolved"
+    assert d["cancelled"] is True
+    assert "decision" not in d
+
+
+def test_hitl_answer_timed_out_emits_sandbox_confirm_resolved_no_decision() -> None:
+    evt = HitlAnswerEvent(question_id="q1", answer=None, cancelled=False, timed_out=True)
+    out = convert_agent_event_to_sse(evt)
+    assert len(out) == 1
+    d = out[0]
+    assert d["timed_out"] is True
+    assert "decision" not in d
