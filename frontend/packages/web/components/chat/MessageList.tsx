@@ -9,11 +9,13 @@ import {
   getToolResultPreviewContent,
   getSubagentSummary,
   submitSandboxConfirm,
+  submitAskUserAnswer,
 } from '@cubebox/core'
 import type { Message, SubagentSummary } from '@cubebox/core'
 import { AlertCircle } from 'lucide-react'
 import { UserMessage } from './UserMessage'
 import { AssistantMessage } from './AssistantMessage'
+import { AskUserCard } from './AskUserCard'
 import { MessageAttachments } from './MessageAttachments'
 import { TokenUsageBar } from './TokenUsageBar'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -124,6 +126,7 @@ export function MessageList({ conversationId }: MessageListProps) {
   const loadMessages = useMessageStore((s) => s.loadMessages)
   const lastRunStatus = useMessageStore((s) => s.lastRunStatus)
   const pendingConfirmMap = useMessageStore((s) => s.pendingConfirmMap)
+  const pendingAsk = useMessageStore((s) => s.pendingAsk)
   const streamingConversationId = useMessageStore((s) => s.streamingConversationId)
   const { workspaceId } = useWorkspaceContext()
 
@@ -149,6 +152,19 @@ export function MessageList({ conversationId }: MessageListProps) {
       })
     },
     [conversationId, streamingConversationId, pendingConfirmMap, workspaceId],
+  )
+
+  const handleAskUserSubmit = useCallback(
+    async (answers: Record<string, string | string[]>) => {
+      if (!pendingAsk) return
+      const convId = streamingConversationId ?? conversationId
+      const client = createApiClient('')
+      if (workspaceId) client.setWorkspaceId(workspaceId)
+      await submitAskUserAnswer(client, convId, pendingAsk.question_id, answers)
+      // Optimistic clear — ask_user_resolved SSE will also clean up
+      useMessageStore.setState({ pendingAsk: null })
+    },
+    [conversationId, streamingConversationId, pendingAsk, workspaceId],
   )
 
   const subagentDataMap = useMemo(() => buildSubagentDataMap(messages ?? []), [messages])
@@ -259,6 +275,15 @@ export function MessageList({ conversationId }: MessageListProps) {
             pendingConfirmMap={pendingConfirmMap}
             onSandboxConfirm={handleSandboxConfirm}
           />
+        )}
+
+        {pendingAsk && streamingConversationId === conversationId && (
+          <div className="flex gap-2.5">
+            <div className="shrink-0 w-6 h-6" />
+            <div className="flex-1 max-w-[75%]">
+              <AskUserCard pending={pendingAsk} onSubmit={handleAskUserSubmit} />
+            </div>
+          </div>
         )}
 
         {!isStreaming &&
