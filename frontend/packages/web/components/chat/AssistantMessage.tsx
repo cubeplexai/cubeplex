@@ -5,6 +5,7 @@ import { useTranslations } from 'next-intl'
 import type {
   AssistantMessage as AssistantMessageType,
   ContentBlock,
+  PendingConfirm,
   SubagentSummary,
   TodoItem,
 } from '@cubebox/core'
@@ -152,6 +153,8 @@ interface HistoryProps {
   statusPhase?: never
   subAgentStreams?: never
   todos?: never
+  pendingConfirmMap?: Record<string, PendingConfirm>
+  onSandboxConfirm?: (toolCallId: string, decision: 'approve' | 'deny') => Promise<void>
 }
 
 interface StreamingProps {
@@ -164,6 +167,8 @@ interface StreamingProps {
   statusPhase?: string | null
   subAgentStreams?: Record<string, AgentStream>
   todos?: TodoItem[]
+  pendingConfirmMap?: Record<string, PendingConfirm>
+  onSandboxConfirm?: (toolCallId: string, decision: 'approve' | 'deny') => Promise<void>
 }
 
 type AssistantMessageProps = HistoryProps | StreamingProps
@@ -204,6 +209,8 @@ function ContentBlockRenderer({
   subagentIndex,
   agentId,
   conversationId,
+  pendingConfirmMap,
+  onSandboxConfirm,
 }: {
   block: ContentBlock
   index: number
@@ -216,6 +223,8 @@ function ContentBlockRenderer({
   subagentIndex?: number
   agentId?: string | null
   conversationId?: string
+  pendingConfirmMap?: Record<string, PendingConfirm>
+  onSandboxConfirm?: (toolCallId: string, decision: 'approve' | 'deny') => Promise<void>
 }) {
   if (block.type === 'thinking') {
     return (
@@ -299,6 +308,8 @@ function ContentBlockRenderer({
         isStreaming={isStreaming}
         messageCreatedAt={messageCreatedAt}
         agentId={agentId}
+        pendingConfirmMap={pendingConfirmMap}
+        onSandboxConfirm={onSandboxConfirm}
       />
     )
   }
@@ -324,6 +335,8 @@ function ContentBlockRenderer({
         isStreaming={isStreaming}
         messageCreatedAt={messageCreatedAt}
         agentId={agentId}
+        pendingConfirmMap={pendingConfirmMap}
+        onSandboxConfirm={onSandboxConfirm}
       />
     )
   }
@@ -453,6 +466,8 @@ export function AssistantMessage({
   toolResultMap,
   todos,
   conversationId,
+  pendingConfirmMap,
+  onSandboxConfirm,
 }: AssistantMessageProps) {
   const t = useTranslations('chat')
   const streamAgentId = stream ? 'main' : undefined
@@ -504,6 +519,8 @@ export function AssistantMessage({
           isStreaming={isStreaming === true}
           messageCreatedAt={msgCreatedAt}
           agentId={streamAgentId}
+          pendingConfirmMap={pendingConfirmMap}
+          onSandboxConfirm={onSandboxConfirm}
         />
       )
     }
@@ -521,6 +538,8 @@ export function AssistantMessage({
         subagentIndex={subagentIndexMap.get(i)}
         agentId={streamAgentId}
         conversationId={conversationId}
+        pendingConfirmMap={pendingConfirmMap}
+        onSandboxConfirm={onSandboxConfirm}
       />
     )
   }

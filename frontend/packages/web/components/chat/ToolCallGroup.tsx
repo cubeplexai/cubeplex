@@ -1,6 +1,6 @@
 'use client'
 
-import type { ContentBlock, ToolCallRef } from '@cubebox/core'
+import type { ContentBlock, PendingConfirm, ToolCallRef } from '@cubebox/core'
 import { ToolCallItem } from './ToolCallItem'
 
 interface ToolCallGroupProps {
@@ -10,6 +10,8 @@ interface ToolCallGroupProps {
   /** ISO timestamp of the parent assistant message (used to compute tool call duration) */
   messageCreatedAt?: string
   agentId?: string | null
+  pendingConfirmMap?: Record<string, PendingConfirm>
+  onSandboxConfirm?: (toolCallId: string, decision: 'approve' | 'deny') => Promise<void>
 }
 
 export function ToolCallGroup({
@@ -18,6 +20,8 @@ export function ToolCallGroup({
   isStreaming,
   messageCreatedAt,
   agentId,
+  pendingConfirmMap,
+  onSandboxConfirm,
 }: ToolCallGroupProps) {
   return (
     <div
@@ -49,6 +53,8 @@ export function ToolCallGroup({
             isPending={isPending}
             allowOpenWhenPending={block.name === 'write_file'}
             showDivider={i > 0}
+            pendingConfirm={pendingConfirmMap?.[block.id] ?? null}
+            onSandboxConfirm={onSandboxConfirm ? (d) => onSandboxConfirm(block.id, d) : undefined}
           />
         )
       })}
