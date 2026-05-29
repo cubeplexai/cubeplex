@@ -537,23 +537,30 @@ export function AssistantMessage({
           {widgetItems.map(({ item, i }) => renderItem(item, i))}
         </div>
       )}
-      <div className="flex justify-start gap-2.5">
-        <div
-          className="shrink-0 w-6 h-6 rounded-md border border-border bg-card
+      {/* Skip the avatar+bubble row entirely when a widget-only message has
+          no text/tools/subagent content — otherwise we render an empty bubble
+          row below the widget, which looks like a stray empty assistant
+          response. Loading/todos still render below, gated by their own
+          conditions. */}
+      {(bubbleItems.length > 0 || totalSubagents >= 2) && (
+        <div className="flex justify-start gap-2.5">
+          <div
+            className="shrink-0 w-6 h-6 rounded-md border border-border bg-card
         flex items-center justify-center mt-0.5"
-        >
-          <Bot className="size-3.5 text-primary/70" />
+          >
+            <Bot className="size-3.5 text-primary/70" />
+          </div>
+          <div className="flex-1 max-w-[75%] space-y-2">
+            {totalSubagents >= 2 && (
+              <SubAgentCluster
+                activeCount={isStreaming === true ? activeSubagentCount : 0}
+                totalCount={totalSubagents}
+              />
+            )}
+            {bubbleItems.map(({ item, i }) => renderItem(item, i))}
+          </div>
         </div>
-        <div className="flex-1 max-w-[75%] space-y-2">
-          {totalSubagents >= 2 && (
-            <SubAgentCluster
-              activeCount={isStreaming === true ? activeSubagentCount : 0}
-              totalCount={totalSubagents}
-            />
-          )}
-          {bubbleItems.map(({ item, i }) => renderItem(item, i))}
-        </div>
-      </div>
+      )}
       {/* Todos + streaming/loading indicator render AFTER widgets so the
           "still working" signal stays at the visual end of the assistant
           message even when widgets are present. pl-9 ≈ avatar(24px)+gap(10px)
