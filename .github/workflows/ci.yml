@@ -130,7 +130,11 @@ jobs:
     name: Backend E2E (pytest)
     needs: gate
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # pytest e2e has been observed at ~19-20 min on slow runners, so the
+    # previous 20-min cap was right at the wire and killed the job mid-run.
+    # 30 min gives margin without masking a real regression (a healthy run is
+    # well under 20 min on a normal runner).
+    timeout-minutes: 30
     env:
       ENV_FOR_DYNACONF: test
       CUBEBOX_E2E_LLM_BASE_URL: ${{ secrets.CUBEBOX_E2E_LLM_BASE_URL }}
