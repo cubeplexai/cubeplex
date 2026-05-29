@@ -140,7 +140,17 @@ async def test_confirm_edit_is_rejected():
 
 
 @pytest.mark.asyncio
-async def test_no_channel_means_no_gate():
+async def test_no_channel_confirm_rule_fails_closed():
+    # confirm rule with no channel must block (fail-closed), not silently allow.
     mw = _mw(None, [{"action": "confirm", "pattern": "rm *"}])
     res = await mw.before_tool_call(_Ctx("execute", "rm -rf /tmp/x"), signal=None)
-    assert res is None
+    assert res is not None and res.block is True
+    assert res.deny_reason == "hitl_unavailable"
+
+
+@pytest.mark.asyncio
+async def test_no_channel_deny_rule_still_blocks():
+    # deny rules must be enforced even when channel is None.
+    mw = _mw(None, [{"action": "deny", "pattern": "rm *"}])
+    res = await mw.before_tool_call(_Ctx("execute", "rm -rf /tmp/x"), signal=None)
+    assert res is not None and res.block is True

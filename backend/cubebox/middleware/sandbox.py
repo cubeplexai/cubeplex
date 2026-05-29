@@ -413,7 +413,7 @@ class SandboxMiddleware(Middleware):
         """
         if getattr(ctx.tool_call, "name", None) != "execute":
             return None
-        if self.channel is None or not self.command_rules:
+        if not self.command_rules:
             return None
 
         command = ctx.args.command
@@ -428,7 +428,15 @@ class SandboxMiddleware(Middleware):
                 hitl_trace={"decision": "policy_deny", "pattern": pattern},
             )
 
-        # action == "confirm": pause and ask the human.
+        # action == "confirm": fail-closed if no channel is wired for this run.
+        if self.channel is None:
+            return BeforeToolCallResult(
+                block=True,
+                reason="approval required but HITL channel is unavailable",
+                deny_reason="hitl_unavailable",
+                hitl_trace={"decision": "hitl_unavailable", "pattern": pattern},
+            )
+
         try:
             answer = await self.channel.approve(
                 tool_name="execute",
