@@ -138,7 +138,9 @@ async def test_install_command_409s_when_a_run_is_already_active(
         )
         assert resp.status_code == 409, resp.text
 
-        # And nothing was appended to history while the other run is live.
+        # No history side effect: because we claim the run slot before the
+        # install/append, a refused command must not have written the
+        # user/assistant pair to the checkpointer.
         msgs = await memory_client.get(f"/api/v1/ws/{DEFAULT_WS_ID}/conversations/{cid}/messages")
         assert msgs.json()["messages"] == []
     finally:

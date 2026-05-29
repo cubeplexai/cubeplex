@@ -2,6 +2,7 @@
 
 import json
 import re
+import secrets
 import time
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
@@ -27,6 +28,8 @@ from cubebox.repositories import ConversationRepository
 from cubebox.skills.cache import SkillCache
 from cubebox.streams.replay_coalescer import ReplayCoalescer
 from cubebox.streams.run_events import (
+    clear_active_run,
+    create_run,
     get_active_run,
     get_latest_event_id,
     get_run_meta,
@@ -615,66 +618,91 @@ async def send_message(
     # Chat-fallback skill-install parser: `install <canonical_name>` short-circuits the
     # agent loop — persists a user + assistant message pair directly to the checkpointer
     # and returns early, so the agent never runs for this turn.
-    if request_obj.content and not request_obj.attachments:
-        async with async_session_maker() as install_session:
-            from cubebox.repositories.organization import OrganizationRepository as _OrgRepo
-
-            _org = await _OrgRepo(install_session).get(ctx.org_id)
-            _org_slug = _org.slug if _org else ctx.org_id
-            install_note = await _maybe_install_from_user_message(
-                session=install_session,
-                org_id=ctx.org_id,
-                org_slug=_org_slug,
-                workspace_id=ctx.workspace_id,
-                actor_user_id=ctx.user.id,
-                text=request_obj.content,
+    #
+    # We must claim the conversation's active-run slot BEFORE doing the install or
+    # touching history: the normal path serializes turns through
+    # run_manager.start_run, and a read-only check would still (a) let the catalog
+    # install happen before refusing, and (b) race a concurrent run starting between
+    # the check and the checkpointer append. create_run is an atomic CAS claim, so a
+    # conflicting active run makes it return None → 409 with no side effects.
+    _install_cmd = request_obj.content and not request_obj.attachments
+    if _install_cmd and _INSTALL_RE.match(request_obj.content.strip()):
+        fallback_run_id = f"install-fallback-{secrets.token_hex(6)}"
+        ttl = int(_config.get("lifecycle.stale_run_threshold_seconds", 120))
+        claimed = await create_run(
+            rds.client,
+            prefix=rds.key_prefix,
+            run_id=fallback_run_id,
+            conversation_id=conversation_id,
+            status="running",
+            started_at=utc_isoformat(datetime.now(UTC)),
+            user_message=request_obj.content,
+            ttl_seconds=ttl,
+        )
+        if claimed is None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="A run is already active for this conversation",
             )
-        if install_note is not None:
-            # Honor the same active-run lock the normal path enforces via
-            # run_manager.start_run: if a turn is already running for this
-            # conversation, appending a user/assistant pair straight to the
-            # checkpointer would interleave with that run's writes and corrupt
-            # history. Refuse with 409 exactly as a normal message would.
-            active_run = await get_active_run(
-                rds.client, prefix=rds.key_prefix, conversation_id=conversation_id
-            )
-            if active_run is not None and active_run.status == "running":
-                threshold = int(_config.get("lifecycle.stale_run_threshold_seconds", 120))
-                if not is_stale_meta(active_run, threshold_seconds=threshold):
-                    raise HTTPException(
-                        status_code=status.HTTP_409_CONFLICT,
-                        detail="A run is already active for this conversation",
-                    )
 
-            from cubepi.providers.base import AssistantMessage, TextContent, UserMessage
+        install_note: str | None = None
+        try:
+            async with async_session_maker() as install_session:
+                from cubebox.repositories.organization import OrganizationRepository as _OrgRepo
 
-            await _update_conversation_timestamp(
-                conversation_id,
-                org_id=ctx.org_id,
-                workspace_id=ctx.workspace_id,
-                user_id=ctx.user.id,
-            )
-            from cubebox.agents.checkpointer import init_checkpointer
-
-            now = time.time()
-            async with init_checkpointer() as _cp:
-                await _cp.append(
-                    conversation_id,
-                    [
-                        UserMessage(
-                            content=[TextContent(text=request_obj.content)],
-                            timestamp=now,
-                        ),
-                        AssistantMessage(
-                            content=[TextContent(text=install_note)],
-                            timestamp=now + 0.001,
-                        ),
-                    ],
+                _org = await _OrgRepo(install_session).get(ctx.org_id)
+                _org_slug = _org.slug if _org else ctx.org_id
+                install_note = await _maybe_install_from_user_message(
+                    session=install_session,
+                    org_id=ctx.org_id,
+                    org_slug=_org_slug,
+                    workspace_id=ctx.workspace_id,
+                    actor_user_id=ctx.user.id,
+                    text=request_obj.content,
                 )
+            # _INSTALL_RE matched above, so the parser always returns a note here.
+            if install_note is not None:
+                from cubepi.providers.base import AssistantMessage, TextContent, UserMessage
+
+                await _update_conversation_timestamp(
+                    conversation_id,
+                    org_id=ctx.org_id,
+                    workspace_id=ctx.workspace_id,
+                    user_id=ctx.user.id,
+                )
+                from cubebox.agents.checkpointer import init_checkpointer
+
+                now = time.time()
+                async with init_checkpointer() as _cp:
+                    await _cp.append(
+                        conversation_id,
+                        [
+                            UserMessage(
+                                content=[TextContent(text=request_obj.content)],
+                                timestamp=now,
+                            ),
+                            AssistantMessage(
+                                content=[TextContent(text=install_note)],
+                                timestamp=now + 0.001,
+                            ),
+                        ],
+                    )
+        finally:
+            # The fallback spawns no background run — release the slot now that
+            # the install + append (the only writes we needed to serialize) are done.
+            await clear_active_run(
+                rds.client,
+                prefix=rds.key_prefix,
+                conversation_id=conversation_id,
+                run_id=fallback_run_id,
+            )
+
+        if install_note is not None:
             # Emit a one-shot SSE response so the frontend renders the assistant
             # reply and finalizes via its normal text_delta/done handlers. Returning
             # a fake run_id here would 404 the immediate GET /runs/{id}/stream the
             # web client issues for non-SSE JSON responses.
+            note = install_note
             ts = utc_isoformat(datetime.now(UTC))
 
             async def _chat_install_fallback_stream() -> AsyncIterator[str]:
@@ -685,7 +713,7 @@ async def send_message(
                         "timestamp": ts,
                         "agent_id": None,
                         "agent_name": None,
-                        "data": {"content": install_note},
+                        "data": {"content": note},
                     },
                 )
                 yield _format_sse_event(
