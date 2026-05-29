@@ -12,6 +12,9 @@ async function registerAndLand(page: Page): Promise<void> {
 }
 
 test('loading animation appears while streaming', async ({ page }) => {
+  // Cold sandbox provisioning for a fresh user can take ~80s in CI; raise the
+  // per-test cap above the default 90s so the run can finish before timeout.
+  test.setTimeout(150_000)
   await registerAndLand(page)
 
   const input = page.getByPlaceholder('How can I help you?')
@@ -21,7 +24,9 @@ test('loading animation appears while streaming', async ({ page }) => {
   await expect(page).toHaveURL(/\/w\/[^/]+\/conversations\//)
 
   await expect(page.getByTestId('loading-indicator')).toBeVisible({ timeout: 10_000 })
-  await expect(page.getByTestId('loading-indicator')).toBeHidden({ timeout: 50_000 })
+  // Cold sandbox provisioning for a fresh user can take ~80s in CI before the
+  // run completes and the indicator hides; allow generous headroom over that.
+  await expect(page.getByTestId('loading-indicator')).toBeHidden({ timeout: 120_000 })
 
   const assistantMsg = page.locator('[data-role="assistant"]')
   const text = await assistantMsg.textContent()
@@ -29,6 +34,8 @@ test('loading animation appears while streaming', async ({ page }) => {
 })
 
 test('input stays editable while streaming (so the user can steer)', async ({ page }) => {
+  // Same cold-sandbox headroom as above (fresh user → ~80s provisioning).
+  test.setTimeout(150_000)
   await registerAndLand(page)
 
   const input = page.getByPlaceholder('How can I help you?')
@@ -42,7 +49,8 @@ test('input stays editable while streaming (so the user can steer)', async ({ pa
   await expect(page.getByTestId('loading-indicator')).toBeVisible({ timeout: 10_000 })
   await expect(page.getByPlaceholder('How can I help you?')).toBeEnabled()
 
-  await expect(page.getByTestId('loading-indicator')).toBeHidden({ timeout: 50_000 })
+  // Same cold-sandbox headroom as the test above (fresh user → ~80s provisioning).
+  await expect(page.getByTestId('loading-indicator')).toBeHidden({ timeout: 120_000 })
 
   await expect(page.getByPlaceholder('How can I help you?')).toBeEnabled()
 })
