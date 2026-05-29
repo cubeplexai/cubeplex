@@ -548,7 +548,7 @@ function applyStreamEvent(state: MessageStore, event: AgentEvent): Partial<Messa
           command: d.command,
           matched_pattern: d.matched_pattern ?? null,
           timeout_seconds: d.timeout_seconds ?? null,
-          requestedAt: Date.now(),
+          requestedAt: event.timestamp ? new Date(event.timestamp).getTime() : Date.now(),
         },
       },
     }
