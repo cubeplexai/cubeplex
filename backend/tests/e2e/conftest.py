@@ -4,7 +4,7 @@ import json as json_lib
 import os
 import secrets
 import socket
-from collections.abc import AsyncIterator, Iterator
+from collections.abc import AsyncIterator, Awaitable, Callable, Iterator
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
@@ -1433,3 +1433,47 @@ async def fake_registry_url() -> AsyncIterator[str]:
     finally:
         server.should_exit = True
         await task
+
+
+@pytest_asyncio.fixture
+async def seed_remote_source() -> AsyncIterator[Callable[..., Awaitable[str]]]:
+    """Insert a SkillSource row directly, returning its id.
+
+    The admin route ``POST /admin/skill-sources`` now rejects loopback/private
+    hosts as SSRF (``BAD_BASE_URL``), which is exactly what the ``fake_registry_url``
+    test server binds to. Remote-discovery E2Es don't exercise that validation
+    (it's covered by ``test_create_rejects_ssrf_base_urls``); they only need a
+    registered source, so they seed one straight into the DB.
+    """
+    from cubebox.repositories.skill_source import SkillSourceRepository
+
+    engine = create_async_engine(_build_database_url(), poolclass=NullPool)
+    maker = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+
+    async def _seed(
+        *,
+        workspace_id: str,
+        created_by_user_id: str,
+        base_url: str,
+        name: str = "fake",
+        trust_tier: str = "community",
+        repo: str | None = None,
+    ) -> str:
+        async with maker() as session:
+            ws = await WorkspaceRepository(session).get(workspace_id)
+            assert ws is not None
+            row = await SkillSourceRepository(session).create(
+                org_id=ws.org_id,
+                name=name,
+                base_url=base_url,
+                repo=repo,
+                trust_tier=trust_tier,
+                created_by_user_id=created_by_user_id,
+            )
+            await session.commit()
+            return row.id
+
+    try:
+        yield _seed
+    finally:
+        await engine.dispose()

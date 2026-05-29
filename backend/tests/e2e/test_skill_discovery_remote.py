@@ -7,6 +7,8 @@ code path, not a mock transport.
 
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
+
 import httpx
 import pytest
 
@@ -18,20 +20,20 @@ async def test_remote_discover_preview_install_then_loadable(
         tuple[httpx.AsyncClient, str, str],
     ],
     fake_registry_url: str,
+    seed_remote_source: Callable[..., Awaitable[str]],
 ) -> None:
-    (admin, _admin_ws, _admin_uid), (member, ws_id, _member_uid) = four_layer_admin_and_member
+    (admin, _admin_ws, admin_uid), (member, ws_id, _member_uid) = four_layer_admin_and_member
 
-    # Admin registers the fake registry as a remote source.
-    src = await admin.post(
-        "/api/v1/admin/skill-sources",
-        json={
-            "name": "fake",
-            "base_url": fake_registry_url,
-            "repo": "acme/skills",
-            "trust_tier": "community",
-        },
+    # Seed the fake registry as a remote source directly (the admin route's
+    # SSRF guard rejects the loopback test-server host; see seed_remote_source).
+    await seed_remote_source(
+        workspace_id=ws_id,
+        created_by_user_id=admin_uid,
+        base_url=fake_registry_url,
+        name="fake",
+        trust_tier="community",
+        repo="acme/skills",
     )
-    assert src.status_code == 201, src.text
 
     # Member discovers skills — should find slide-deck from the remote source.
     disc = await member.get(f"/api/v1/ws/{ws_id}/skills/discover", params={"q": "slides"})
@@ -70,20 +72,19 @@ async def test_disabled_source_returns_no_remote_candidates(
         tuple[httpx.AsyncClient, str, str],
     ],
     fake_registry_url: str,
+    seed_remote_source: Callable[..., Awaitable[str]],
 ) -> None:
-    (admin, _admin_ws, _admin_uid), (member, ws_id, _member_uid) = four_layer_admin_and_member
+    (admin, _admin_ws, admin_uid), (member, ws_id, _member_uid) = four_layer_admin_and_member
 
-    # Register and then immediately disable the source.
-    src = await admin.post(
-        "/api/v1/admin/skill-sources",
-        json={
-            "name": "fake",
-            "base_url": fake_registry_url,
-            "trust_tier": "community",
-        },
+    # Seed the source directly (loopback host is SSRF-rejected by the admin
+    # route), then disable it via the admin PATCH route under test.
+    sid = await seed_remote_source(
+        workspace_id=ws_id,
+        created_by_user_id=admin_uid,
+        base_url=fake_registry_url,
+        name="fake",
+        trust_tier="community",
     )
-    assert src.status_code == 201, src.text
-    sid = src.json()["id"]
     patch = await admin.patch(f"/api/v1/admin/skill-sources/{sid}", json={"enabled": False})
     assert patch.status_code == 200, patch.text
 
