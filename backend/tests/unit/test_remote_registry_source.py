@@ -118,6 +118,34 @@ def _huge_tree_app(tree_size_bytes: int) -> httpx.MockTransport:
     return httpx.MockTransport(handler)
 
 
+def _huge_search_app(payload_size_bytes: int) -> httpx.MockTransport:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/search":
+            # Pad a single bogus skill entry so the body exceeds the cap.
+            pad = "x" * payload_size_bytes
+            return httpx.Response(
+                200,
+                json={"skills": [{"name": "x", "ref": "x", "description": pad}]},
+            )
+        return httpx.Response(404)
+
+    return httpx.MockTransport(handler)
+
+
+@pytest.mark.asyncio
+async def test_search_rejects_oversized_response_before_decoding():
+    # 3 MB search payload, cap is 2 MB.
+    src = RemoteRegistrySource(
+        source_id="sksrc-1",
+        base_url="https://reg.test",
+        trust_tier=TrustTier.community,
+        org_slug="acme",
+        transport=_huge_search_app(payload_size_bytes=3 * 1024 * 1024),
+    )
+    with pytest.raises(ValueError, match="search response exceeds cap"):
+        await src.search("anything", limit=5)
+
+
 @pytest.mark.asyncio
 async def test_fetch_rejects_oversized_tree_manifest_before_parsing():
     # 2 MB tree payload, cap is 1 MB.

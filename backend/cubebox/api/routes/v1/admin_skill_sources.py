@@ -91,13 +91,15 @@ async def patch_source(
     ctx: Annotated[RequestContext, Depends(get_admin_request_context)],
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> SkillSourceResponse:
+    # Validate all requested fields BEFORE mutating, so a 400 on trust_tier
+    # never leaves a half-applied enabled flip behind.
+    if body.trust_tier is not None and body.trust_tier not in _TRUST_TIERS:
+        raise HTTPException(status_code=400, detail="BAD_TRUST_TIER")
     repo = SkillSourceRepository(session)
     if body.enabled is not None:
         if not await repo.set_enabled(ctx.org_id, source_id, body.enabled):
             raise HTTPException(status_code=404, detail="SOURCE_NOT_FOUND")
     if body.trust_tier is not None:
-        if body.trust_tier not in _TRUST_TIERS:
-            raise HTTPException(status_code=400, detail="BAD_TRUST_TIER")
         if not await repo.set_trust_tier(ctx.org_id, source_id, body.trust_tier):
             raise HTTPException(status_code=404, detail="SOURCE_NOT_FOUND")
     row = await repo.get(ctx.org_id, source_id)
