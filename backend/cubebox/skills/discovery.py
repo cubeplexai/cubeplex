@@ -84,9 +84,17 @@ def _score(c: SkillCandidate, query: str) -> tuple[int, int, int, int]:
 def rank_candidates(
     candidates: list[SkillCandidate], *, query: str, limit: int
 ) -> list[SkillCandidate]:
-    """Dedupe by normalized display slug (local wins), then sort and truncate."""
+    """Dedupe by normalized display slug (local wins), then sort and truncate.
+
+    Candidates with no overlap with the query at all (``_score`` match bucket
+    3) are dropped: ``LocalCatalogSource.search`` returns every visible local
+    skill regardless of query, so without this filter ``discover?q=<nonsense>``
+    and the ``find_skills`` tool would surface unrelated catalog skills.
+    """
     by_slug: dict[str, SkillCandidate] = {}
     for c in candidates:
+        if _score(c, query)[0] >= 3:
+            continue  # no name/keyword/description overlap with the query
         key = _dedupe_key(c)
         prev = by_slug.get(key)
         if prev is None:
