@@ -1,7 +1,7 @@
 """mcp template+install static auth style fields
 
 Revision ID: 49844ea5ac7b
-Revises: 6c69cc288404
+Revises: 8cec37bd8ee2
 Create Date: 2026-05-28 02:44:08.770820
 
 """
@@ -14,7 +14,7 @@ import sqlmodel  # noqa: F401  (referenced by sqlmodel.sql.sqltypes.AutoString i
 
 # revision identifiers, used by Alembic.
 revision: str = '49844ea5ac7b'
-down_revision: Union[str, Sequence[str], None] = '6c69cc288404'
+down_revision: Union[str, Sequence[str], None] = '8cec37bd8ee2'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
