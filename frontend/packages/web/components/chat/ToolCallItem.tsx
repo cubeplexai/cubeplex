@@ -1,10 +1,11 @@
 'use client'
 
 import { useState, useEffect, useRef, memo } from 'react'
-import type { MCPToolIcon, ToolCallRef } from '@cubebox/core'
+import type { MCPToolIcon, PendingConfirm, ToolCallRef } from '@cubebox/core'
 import { CheckCircle2, Circle, PanelRight, Plug } from 'lucide-react'
 import { getToolIcon, getParamSummary } from '@/lib/toolIcons'
 import { useMcpToolRegistryStore, useToolDetailStore } from '@cubebox/core'
+import { SandboxConfirmCard } from './SandboxConfirmCard'
 
 /** Pick the best icon variant: prefer per-tool over server icon; fall back
  * to the first entry when nothing else matches. Theme matching is best-effort
@@ -35,6 +36,8 @@ interface ToolCallItemProps {
   allowOpenWhenPending?: boolean
   /** Show border-top separator (not first in group) */
   showDivider?: boolean
+  pendingConfirm?: PendingConfirm | null
+  onSandboxConfirm?: (decision: 'approve' | 'deny') => Promise<void>
 }
 
 function formatDuration(ms: number): string {
@@ -58,6 +61,8 @@ export const ToolCallItem = memo(function ToolCallItem({
   isPending,
   allowOpenWhenPending,
   showDivider,
+  pendingConfirm,
+  onSandboxConfirm,
 }: ToolCallItemProps) {
   const [elapsed, setElapsed] = useState(0)
   const startedAt = useRef(timestamp ? new Date(timestamp).getTime() : Date.now())
@@ -144,7 +149,7 @@ export const ToolCallItem = memo(function ToolCallItem({
           className="ml-auto flex items-center gap-1.5
             shrink-0"
         >
-          {isPending ? (
+          {pendingConfirm ? null : isPending ? (
             <>
               <Circle
                 className="size-2.5 text-blue-500
@@ -173,6 +178,13 @@ export const ToolCallItem = memo(function ToolCallItem({
           ) : null}
         </span>
       </button>
+      {pendingConfirm && onSandboxConfirm && (
+        <SandboxConfirmCard
+          pending={pendingConfirm}
+          onApprove={() => onSandboxConfirm('approve')}
+          onDeny={() => onSandboxConfirm('deny')}
+        />
+      )}
     </div>
   )
 })
