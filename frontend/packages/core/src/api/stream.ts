@@ -59,6 +59,28 @@ export async function cancelSteer(
   return (await res.json()) as CancelSteerResponse
 }
 
+export interface SandboxConfirmResponse {
+  status: 'delivered' | 'published' | 'no_active_run'
+  run_id: string | null
+}
+
+export async function submitSandboxConfirm(
+  client: ApiClient,
+  conversationId: string,
+  questionId: string,
+  decision: 'approve' | 'deny',
+  reason?: string,
+): Promise<SandboxConfirmResponse> {
+  const res = await client.post(
+    `/api/v1/conversations/${conversationId}/sandbox-confirm/${questionId}`,
+    { decision, reason: reason ?? null },
+  )
+  if (!res.ok) {
+    throw new Error(`Failed to submit sandbox confirm: HTTP ${res.status}`)
+  }
+  return (await res.json()) as SandboxConfirmResponse
+}
+
 async function* readLines(reader: ReadableStreamDefaultReader<Uint8Array>): AsyncGenerator<string> {
   let buffer = ''
   const decoder = new TextDecoder()
