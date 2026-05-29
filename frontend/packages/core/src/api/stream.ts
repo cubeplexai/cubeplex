@@ -81,6 +81,26 @@ export async function submitSandboxConfirm(
   return (await res.json()) as SandboxConfirmResponse
 }
 
+export interface AskUserResponse {
+  status: 'delivered' | 'published' | 'no_active_run'
+  run_id: string | null
+}
+
+export async function submitAskUserAnswer(
+  client: ApiClient,
+  conversationId: string,
+  questionId: string,
+  answers: Record<string, string | string[]>,
+): Promise<AskUserResponse> {
+  const res = await client.post(`/api/v1/conversations/${conversationId}/ask-user/${questionId}`, {
+    answers,
+  })
+  if (!res.ok) {
+    throw new Error(`Failed to submit ask_user answer: HTTP ${res.status}`)
+  }
+  return (await res.json()) as AskUserResponse
+}
+
 async function* readLines(reader: ReadableStreamDefaultReader<Uint8Array>): AsyncGenerator<string> {
   let buffer = ''
   const decoder = new TextDecoder()
