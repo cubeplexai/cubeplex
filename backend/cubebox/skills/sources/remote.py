@@ -24,8 +24,25 @@ from cubebox.skills.sources.base import (
 
 _MAX_TREE_ENTRIES = 200
 _TREE_MAX_BYTES = 1 * 1024 * 1024  # 1 MB is plenty for a 200-entry path manifest
+_SEARCH_MAX_BYTES = 2 * 1024 * 1024  # 2 MB covers description + keywords for many hits
 _RAW_FILE_MAX_BYTES = 10 * 1024 * 1024  # same cap as validate_skill_files
 _BUNDLE_MAX_BYTES = 50 * 1024 * 1024  # mirrors MAX_TOTAL_BYTES in skills.service
+
+
+async def _stream_capped(
+    client: httpx.AsyncClient, url: str, *, cap: int, what: str
+) -> bytes:
+    """GET ``url`` streaming, bailing with ValueError once cap bytes are seen."""
+    chunks: list[bytes] = []
+    total = 0
+    async with client.stream("GET", url) as resp:
+        resp.raise_for_status()
+        async for chunk in resp.aiter_bytes(65536):
+            chunks.append(chunk)
+            total += len(chunk)
+            if total > cap:
+                raise ValueError(f"{what} exceeds cap {cap} bytes")
+    return b"".join(chunks)
 
 
 def _require_str(d: dict[str, object], key: str) -> str:
@@ -82,9 +99,16 @@ class RemoteRegistrySource:
 
     async def search(self, query: str, *, limit: int) -> list[SkillCandidate]:
         async with self._client() as client:
-            resp = await client.get("/search", params={"q": query, "limit": limit})
-            resp.raise_for_status()
-            data = resp.json()
+            # Stream + cap so a malicious/broken registry can't exhaust worker
+            # memory just from the discovery path.
+            url = str(httpx.URL("/search", params={"q": query, "limit": limit}))
+            body = await _stream_capped(
+                client, url, cap=_SEARCH_MAX_BYTES, what="remote search response"
+            )
+            try:
+                data = json.loads(body)
+            except json.JSONDecodeError as exc:
+                raise ValueError(f"remote search response is not valid JSON: {exc}") from exc
         out: list[SkillCandidate] = []
         for item in data.get("skills", []):
             if not isinstance(item, dict):
@@ -133,23 +157,17 @@ class RemoteRegistrySource:
         files: dict[str, bytes] = {}
         bundle_total = 0
         async with self._client() as client:
-            # Stream the tree manifest itself with a byte cap so a malicious
-            # registry can't exhaust worker memory before we even reach the
-            # entry-count guard. 1 MB easily fits 200 path strings.
-            tree_chunks: list[bytes] = []
-            tree_total = 0
-            async with client.stream("GET", f"/tree/{source_ref}") as tree:
-                tree.raise_for_status()
-                async for chunk in tree.aiter_bytes(65536):
-                    tree_chunks.append(chunk)
-                    tree_total += len(chunk)
-                    if tree_total > _TREE_MAX_BYTES:
-                        raise ValueError(
-                            f"remote tree manifest exceeds cap "
-                            f"{_TREE_MAX_BYTES} bytes"
-                        )
+            # Stream the tree manifest with a byte cap so a malicious registry
+            # can't exhaust worker memory before we even reach the entry-count
+            # guard. 1 MB easily fits 200 path strings.
+            tree_body = await _stream_capped(
+                client,
+                f"/tree/{source_ref}",
+                cap=_TREE_MAX_BYTES,
+                what="remote tree manifest",
+            )
             try:
-                tree_data = json.loads(b"".join(tree_chunks))
+                tree_data = json.loads(tree_body)
             except json.JSONDecodeError as exc:
                 raise ValueError(f"remote tree manifest is not valid JSON: {exc}") from exc
             if not isinstance(tree_data, dict):
