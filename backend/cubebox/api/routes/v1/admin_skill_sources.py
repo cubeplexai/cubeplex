@@ -65,6 +65,11 @@ def _validate_registry_base_url(raw: str) -> None:
         packed_v4 = socket.inet_aton(host)
     except OSError:
         packed_v4 = None
+    except ValueError as exc:
+        # inet_aton raises ValueError (not OSError) for an embedded NUL in
+        # the host, e.g. "127.0.0.1\x00". Treat malformed hosts as bad input
+        # rather than letting it escape as a 500.
+        raise HTTPException(status_code=400, detail="BAD_BASE_URL") from exc
     if packed_v4 is not None:
         canonical_v4 = ipaddress.IPv4Address(packed_v4)
         if host != str(canonical_v4) or not canonical_v4.is_global:

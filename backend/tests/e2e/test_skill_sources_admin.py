@@ -42,6 +42,7 @@ async def test_admin_can_register_and_disable_remote_source(
         "http://2130706433/skills",  # decimal-int IPv4 → 127.0.0.1
         "http://0x7f000001/skills",  # hex IPv4 → 127.0.0.1
         "http://127.1/skills",  # short-dot IPv4 → 127.0.0.1
+        "http://127.0.0.1\x00/skills",  # embedded NUL → inet_aton ValueError
         "not a url",  # unparseable
     ],
 )
