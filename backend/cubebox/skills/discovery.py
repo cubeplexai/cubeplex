@@ -12,6 +12,7 @@ from cubebox.repositories.skill import (
     OrgPreinstalledTombstoneRepository,
     OrgSkillInstallRepository,
     SkillRepository,
+    SkillVersionRepository,
 )
 from cubebox.skills.frontmatter import InvalidFrontmatterError
 from cubebox.skills.service import (
@@ -229,31 +230,44 @@ class SkillInstallService:
             raise SkillInstallError(str(e)) from e
         except (InvalidZipPathError, FileTooLargeError) as e:
             raise SkillInstallError(str(e)) from e
-        except VersionCollisionError:
-            # Remote skill was already imported at the same version — skip
-            # re-publish and just create the workspace-private install.
-            from cubebox.skills.frontmatter import peek_skill_name
+        except VersionCollisionError as e:
+            # Remote skill was already imported at this exact version — skip
+            # re-publish and just enable that version for this workspace. Bind
+            # to the COLLIDING version (the one this candidate carries), not the
+            # skill's current_version, which may have since advanced past it.
+            canonical = e.canonical_name
+            if not canonical:
+                from cubebox.skills.frontmatter import peek_skill_name
 
-            raw_name = peek_skill_name(files["SKILL.md"].decode("utf-8"))
-            if raw_name is None:
-                raise SkillInstallError("cannot resolve canonical name from SKILL.md") from None
-            canonical = f"{self._org_slug}:{raw_name}"
+                raw_name = peek_skill_name(files["SKILL.md"].decode("utf-8"))
+                if raw_name is None:
+                    raise SkillInstallError(
+                        "cannot resolve canonical name from SKILL.md"
+                    ) from None
+                canonical = f"{self._org_slug}:{raw_name}"
             existing = await SkillRepository(self._session).find_by_name(canonical)
             if existing is None:
                 raise SkillInstallError(
                     f"existing skill lookup failed for {canonical}"
                 ) from None
+            install_version = e.version or existing.current_version
+            # Defend against a candidate whose version no longer exists in the
+            # catalog (e.g. it was pruned) — fall back to current_version.
+            if await SkillVersionRepository(self._session).find(
+                existing.id, install_version
+            ) is None:
+                install_version = existing.current_version
             await OrgSkillInstallRepository(self._session).create_for_workspace(
                 org_id=self._org_id,
                 workspace_id=self._workspace_id,
                 skill_id=existing.id,
-                installed_version=existing.current_version,
+                installed_version=install_version,
                 installed_by_user_id=self._actor,
             )
             return InstallResult(
                 canonical_name=existing.name,
                 skill_id=existing.id,
-                installed_version=existing.current_version,
+                installed_version=install_version,
             )
         except (
             InvalidFrontmatterError,

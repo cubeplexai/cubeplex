@@ -7,6 +7,9 @@ message pair directly to the checkpointer — the agent loop is skipped.
 
 import httpx
 import pytest
+from redis.asyncio import Redis
+
+from tests.e2e.conftest import DEFAULT_WS_ID
 
 
 @pytest.mark.asyncio
@@ -94,3 +97,49 @@ async def test_install_command_unknown_skill_returns_note_not_agent_run(
 
     all_text = " ".join(_extract_text(m) for m in messages)
     assert "Could not find" in all_text
+
+
+@pytest.mark.asyncio
+async def test_install_command_409s_when_a_run_is_already_active(
+    memory_client: httpx.AsyncClient,
+    redis_client: Redis,
+) -> None:
+    """The install fallback must honor the same active-run lock the normal path
+    enforces: appending a user/assistant pair while another run is writing would
+    corrupt history, so it returns 409 instead."""
+    from datetime import UTC, datetime
+
+    from cubebox.streams.run_events import _active_run_key, create_run
+
+    convo = await memory_client.post(
+        f"/api/v1/ws/{DEFAULT_WS_ID}/conversations", json={"title": "install-active-run"}
+    )
+    assert convo.status_code == 201
+    cid = convo.json()["id"]
+
+    # Plant a fresh (non-stale) running active run for this conversation.
+    app = memory_client._transport.app  # type: ignore[attr-defined]
+    prefix = app.state.redis_key_prefix
+    meta = await create_run(
+        redis_client,
+        prefix=prefix,
+        run_id="active-run-1",
+        conversation_id=cid,
+        status="running",
+        started_at=datetime.now(UTC).isoformat(),
+        ttl_seconds=120,
+    )
+    assert meta is not None
+
+    try:
+        resp = await memory_client.post(
+            f"/api/v1/ws/{DEFAULT_WS_ID}/conversations/{cid}/messages",
+            json={"content": "install deep-research"},
+        )
+        assert resp.status_code == 409, resp.text
+
+        # And nothing was appended to history while the other run is live.
+        msgs = await memory_client.get(f"/api/v1/ws/{DEFAULT_WS_ID}/conversations/{cid}/messages")
+        assert msgs.json()["messages"] == []
+    finally:
+        await redis_client.delete(_active_run_key(prefix, cid))
