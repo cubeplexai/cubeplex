@@ -29,8 +29,9 @@ test.describe('M7 attachments happy path', () => {
     await input.fill('hello')
     await input.press('Enter')
 
-    // Wait for navigation to the conversation page
-    await expect(page).toHaveURL(/\/w\/[^/]+\/conversations\//, { timeout: 10_000 })
+    // Wait for navigation to the conversation page. 10s has been observed to
+    // be too tight on slow CI runners — bumped to keep this from flaking.
+    await expect(page).toHaveURL(/\/w\/[^/]+\/conversations\//, { timeout: 30_000 })
 
     // Wait for loading indicator to disappear (first message stream complete)
     await expect(page.getByTestId('loading-indicator')).toBeHidden({ timeout: 90_000 })
