@@ -146,17 +146,22 @@ class RemoteRegistrySource:
                 parts = PurePosixPath(rel).parts
                 if rel.startswith("/") or ".." in parts:
                     raise ValueError(f"unsafe path in remote skill tree: {rel!r}")
-                resp = await client.get(f"/raw/{source_ref}/{rel}")
-                resp.raise_for_status()
-                cl = resp.headers.get("Content-Length")
-                if cl is not None:
-                    size = int(cl)
-                    if size > _RAW_FILE_MAX_BYTES:
-                        raise ValueError(
-                            f"remote file {rel!r} is {size} bytes; cap "
-                            f"{_RAW_FILE_MAX_BYTES}"
-                        )
-                files[rel] = resp.content
+                # Stream the raw response so a malicious/broken registry can't
+                # exhaust worker memory — accumulate chunks and stop at the
+                # shared cap (same limit validate_skill_files enforces later).
+                chunks: list[bytes] = []
+                total = 0
+                async with client.stream("GET", f"/raw/{source_ref}/{rel}") as raw:
+                    raw.raise_for_status()
+                    async for chunk in raw.aiter_bytes(65536):
+                        chunks.append(chunk)
+                        total += len(chunk)
+                        if total > _RAW_FILE_MAX_BYTES:
+                            raise ValueError(
+                                f"remote file {rel!r} exceeds cap "
+                                f"{_RAW_FILE_MAX_BYTES} bytes"
+                            )
+                files[rel] = b"".join(chunks)
         if "SKILL.md" not in files:
             raise ValueError("remote skill subpath has no SKILL.md")
         return files
