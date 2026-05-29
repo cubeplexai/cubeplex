@@ -1346,6 +1346,7 @@ class RunManager:
             logger.warning("CompactionMiddleware not loaded: {}", _exc)
 
         # 6. SandboxMiddleware — needs sandbox
+        sandbox_hitl_channel: Any = None
         if sandbox is not None:
             try:
                 from cubebox.middleware.sandbox import SandboxMiddleware
