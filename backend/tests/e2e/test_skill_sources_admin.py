@@ -39,6 +39,9 @@ async def test_admin_can_register_and_disable_remote_source(
         "http://service.internal/x",  # .internal suffix
         "http://metadata/skills",  # bare metadata host
         "http://[::1]/skills",  # IPv6 loopback
+        "http://2130706433/skills",  # decimal-int IPv4 → 127.0.0.1
+        "http://0x7f000001/skills",  # hex IPv4 → 127.0.0.1
+        "http://127.1/skills",  # short-dot IPv4 → 127.0.0.1
         "not a url",  # unparseable
     ],
 )
