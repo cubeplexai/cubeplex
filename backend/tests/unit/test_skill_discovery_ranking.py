@@ -81,3 +81,20 @@ def test_single_keyword_token_matches():
     target = _c("deck-builder", desc="", keywords=["slides"])
     ranked = rank_candidates([_c("unrelated", desc="x"), target], query="slides", limit=5)
     assert ranked[0].name == "deck-builder"
+
+
+def test_non_matching_query_drops_unrelated_candidates():
+    # LocalCatalogSource hands every visible skill to rank_candidates regardless
+    # of the query; candidates with zero overlap must not survive ranking.
+    cands = [
+        _c("data-pipeline", desc="ETL jobs", keywords=["etl"]),
+        _c("email-sender", desc="send mail", keywords=["smtp"]),
+    ]
+    assert rank_candidates(cands, query="quantum origami", limit=5) == []
+
+
+def test_matching_subset_survives_when_others_dont():
+    target = _c("slide-deck", desc="Build presentations", keywords=["slides"])
+    noise = _c("data-pipeline", desc="ETL jobs", keywords=["etl"])
+    ranked = rank_candidates([noise, target], query="slides", limit=5)
+    assert [c.name for c in ranked] == ["slide-deck"]
