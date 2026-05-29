@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import ipaddress
 from typing import Annotated
+from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -17,6 +19,49 @@ from cubebox.repositories.skill_source import SkillSourceRepository
 router = APIRouter(prefix="/admin/skill-sources", tags=["admin-skill-sources"])
 
 _TRUST_TIERS = {"official", "community", "untrusted"}
+
+# Hostnames that name the local box or known-internal infra. Save-time
+# rejection of these is a defense-in-depth measure on top of trusting org
+# admins — in multi-tenant deployments org admins are tenant users, so
+# blocking obvious SSRF targets here keeps `/search`, `/tree`, and `/raw`
+# fetches off internal endpoints even if an admin tries.
+_FORBIDDEN_HOSTNAMES = {
+    "localhost",
+    "ip6-localhost",
+    "ip6-loopback",
+    "metadata",
+    "metadata.google.internal",
+}
+_FORBIDDEN_HOSTNAME_SUFFIXES = (".local", ".internal", ".localdomain")
+
+
+def _validate_registry_base_url(raw: str) -> None:
+    """Reject schemes/hosts that would turn skill discovery into SSRF.
+
+    Raises ``HTTPException`` with detail ``BAD_BASE_URL`` for any URL that
+    isn't plain http/https against a routable public host.
+    """
+    try:
+        parsed = urlparse(raw)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="BAD_BASE_URL") from exc
+    if parsed.scheme not in {"http", "https"}:
+        raise HTTPException(status_code=400, detail="BAD_BASE_URL")
+    host = (parsed.hostname or "").lower()
+    if not host:
+        raise HTTPException(status_code=400, detail="BAD_BASE_URL")
+    if host in _FORBIDDEN_HOSTNAMES:
+        raise HTTPException(status_code=400, detail="BAD_BASE_URL")
+    if any(host.endswith(suf) for suf in _FORBIDDEN_HOSTNAME_SUFFIXES):
+        raise HTTPException(status_code=400, detail="BAD_BASE_URL")
+    # If the host parses as a literal IP, reject anything that isn't
+    # globally routable (loopback, link-local, private, multicast, …).
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        return  # not a literal IP; hostname suffix checks above are best-effort
+    if not ip.is_global:
+        raise HTTPException(status_code=400, detail="BAD_BASE_URL")
 
 
 class CreateSkillSourceRequest(BaseModel):
@@ -62,6 +107,7 @@ async def create_source(
 ) -> SkillSourceResponse:
     if body.trust_tier not in _TRUST_TIERS:
         raise HTTPException(status_code=400, detail="BAD_TRUST_TIER")
+    _validate_registry_base_url(body.base_url)
     row = await SkillSourceRepository(session).create(
         org_id=ctx.org_id,
         name=body.name,
