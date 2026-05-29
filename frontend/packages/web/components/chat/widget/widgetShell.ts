@@ -19,8 +19,16 @@ export const WIDGET_SHELL_HTML = `<!DOCTYPE html><html><head>
 *{box-sizing:border-box}
 body{margin:0;padding:1rem;font-family:system-ui,-apple-system,sans-serif;background:var(--bg);color:var(--fg);}
 @keyframes _fadeIn{from{opacity:0;transform:translateY(4px);}to{opacity:1;transform:none;}}
+@keyframes _pulse{0%,100%{opacity:.35}50%{opacity:.7}}
+/* Skeleton lives in #root and is replaced by morphdom on the first morph.
+   It reserves stable vertical space so the parent message layout doesn't
+   shift when the iframe transitions from empty -> rendered. */
+._skel{display:flex;flex-direction:column;gap:.55rem;padding:.25rem 0 1rem;}
+._skel-bar{height:.85rem;border-radius:.25rem;background:var(--muted);border:1px solid var(--border);animation:_pulse 1.6s ease-in-out infinite;}
+._skel-bar._lg{height:1.6rem;width:35%;}
+._skel-card{margin-top:.4rem;padding:1rem;border:1px solid var(--border);border-radius:.5rem;background:var(--muted);height:8.5rem;display:flex;align-items:center;justify-content:center;color:transparent;animation:_pulse 1.6s ease-in-out infinite;}
 </style></head>
-<body><div id="root"></div>
+<body><div id="root"><div class="_skel" aria-hidden="true"><div class="_skel-bar _lg"></div><div class="_skel-bar" style="width:80%"></div><div class="_skel-bar" style="width:65%"></div><div class="_skel-card">·</div></div></div>
 <script>
 (function(){
   var WIDGET_ID = %%WIDGET_ID%%;
@@ -72,11 +80,25 @@ body{margin:0;padding:1rem;font-family:system-ui,-apple-system,sans-serif;backgr
     next();
   }
 
+  // Update :root CSS variables in place from a theme message. Theme tokens are
+  // colour strings; only those known keys are honoured (defence against random
+  // extra payload fields).
+  function applyTheme(d){
+    var s = document.documentElement.style;
+    if (typeof d.bg === 'string')     s.setProperty('--bg', d.bg);
+    if (typeof d.fg === 'string')     s.setProperty('--fg', d.fg);
+    if (typeof d.muted === 'string')  s.setProperty('--muted', d.muted);
+    if (typeof d.border === 'string') s.setProperty('--border', d.border);
+    if (typeof d.accent === 'string') s.setProperty('--accent', d.accent);
+  }
+
   window.addEventListener('message', function(e){
     if (e.source !== parent) return;
     var d = e.data;
     if (!d || typeof d !== 'object') return;
     if (d.widgetId !== WIDGET_ID) return;
+    // Theme messages are stateless (no ordering needed); apply and return.
+    if (d.type === 'theme') { try { applyTheme(d); } catch(_){} return; }
     if (typeof d.seq !== 'number' || d.seq <= lastSeq) return; // latest-wins
     lastSeq = d.seq;
     try {
