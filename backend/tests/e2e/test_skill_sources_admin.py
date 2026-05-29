@@ -27,6 +27,39 @@ async def test_admin_can_register_and_disable_remote_source(
     assert disabled.json()["enabled"] is False
 
 
+@pytest.mark.parametrize(
+    "bad_url",
+    [
+        "ftp://reg.example.com",  # non-http scheme
+        "http://localhost/skills",  # loopback hostname
+        "http://127.0.0.1:8080",  # loopback IP
+        "http://169.254.169.254/latest/meta-data",  # link-local (AWS IMDS)
+        "http://10.0.0.5/skills",  # RFC1918 private
+        "http://meta.local/skills",  # .local suffix
+        "http://service.internal/x",  # .internal suffix
+        "http://metadata/skills",  # bare metadata host
+        "http://[::1]/skills",  # IPv6 loopback
+        "not a url",  # unparseable
+    ],
+)
+@pytest.mark.asyncio
+async def test_create_rejects_ssrf_base_urls(
+    admin_client: tuple[httpx.AsyncClient, str],
+    bad_url: str,
+) -> None:
+    client, _ = admin_client
+    resp = await client.post(
+        "/api/v1/admin/skill-sources",
+        json={
+            "name": "ssrf-test",
+            "base_url": bad_url,
+            "trust_tier": "untrusted",
+        },
+    )
+    assert resp.status_code == 400, f"expected 400 for {bad_url!r}, got {resp.status_code}"
+    assert resp.json()["detail"] == "BAD_BASE_URL"
+
+
 @pytest.mark.asyncio
 async def test_patch_with_invalid_trust_tier_does_not_flip_enabled(
     admin_client: tuple[httpx.AsyncClient, str],
