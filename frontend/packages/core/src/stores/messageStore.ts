@@ -59,6 +59,13 @@ export interface PendingConfirm {
   requestedAt: number
 }
 
+export interface PendingAsk {
+  question_id: string
+  questions: import('../types/events').AskQuestion[]
+  timeout_seconds: number | null
+  requestedAt: number
+}
+
 export interface MessageStore {
   messages: Record<string, Message[]>
   pendingSteers: Record<string, { steerId: string; text: string }[]>
@@ -80,6 +87,7 @@ export interface MessageStore {
   sessionUsage: Record<string, import('../types').SessionUsage | null>
   contextWindow: Record<string, number | null>
   pendingConfirmMap: Record<string, PendingConfirm>
+  pendingAsk: PendingAsk | null
 
   loadMessages(client: ApiClient, conversationId: string): Promise<void>
   send(
@@ -506,8 +514,13 @@ function applyStreamEvent(state: MessageStore, event: AgentEvent): Partial<Messa
       }
     }
 
+    // ask_user tool result (including timeout/error) means the ask is resolved.
+    // The SSE dict key is "name" (runtime); TypeScript type says "tool_name" — cast to access it.
+    const clearAsk =
+      (e.data as unknown as { name?: string }).name === 'ask_user' ? { pendingAsk: null } : {}
     return {
       ...base,
+      ...clearAsk,
       toolResultMap: newMap,
       streamAgents: {
         ...state.streamAgents,
@@ -563,6 +576,30 @@ function applyStreamEvent(state: MessageStore, event: AgentEvent): Partial<Messa
     const next = { ...state.pendingConfirmMap }
     delete next[tcId]
     return { ...base, pendingConfirmMap: next }
+  }
+
+  if (event.type === 'ask_user_request') {
+    const d = event.data as {
+      question_id: string
+      questions: import('../types/events').AskQuestion[]
+      timeout_seconds: number | null
+    }
+    if (state.pendingAsk?.question_id === d.question_id) return base // idempotent
+    return {
+      ...base,
+      pendingAsk: {
+        question_id: d.question_id,
+        questions: d.questions,
+        timeout_seconds: d.timeout_seconds ?? null,
+        requestedAt: event.timestamp ? new Date(event.timestamp).getTime() : Date.now(),
+      },
+    }
+  }
+
+  if (event.type === 'ask_user_resolved') {
+    const d = event.data as { question_id: string }
+    if (state.pendingAsk?.question_id !== d.question_id) return base
+    return { ...base, pendingAsk: null }
   }
 
   return base
@@ -697,6 +734,7 @@ async function finalizeCompletedStream(
     set((state) => ({
       isStreaming: false,
       pendingConfirmMap: {},
+      pendingAsk: null,
       streamingConversationId: null,
       currentRunId: null,
       statusPhase: null,
@@ -716,6 +754,7 @@ async function finalizeCompletedStream(
     },
     isStreaming: false,
     pendingConfirmMap: {},
+    pendingAsk: null,
     streamingConversationId: null,
     currentRunId: null,
     statusPhase: null,
@@ -765,6 +804,7 @@ async function consumeRunStream(
           error: errData.details || errData.message,
           isStreaming: false,
           pendingConfirmMap: {},
+          pendingAsk: null,
           streamingConversationId: null,
           currentRunId: null,
           statusPhase: null,
@@ -838,6 +878,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
   toolStartedMap: {},
   toolResultMap: {},
   pendingConfirmMap: {},
+  pendingAsk: null,
   turnUsage: {},
   sessionUsage: {},
   contextWindow: {},
@@ -890,6 +931,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
         toolStartedMap: {},
         toolResultMap: {},
         pendingConfirmMap: {},
+        pendingAsk: null,
         isStreaming: !!bootstrap.active_run,
         streamingConversationId: bootstrap.active_run ? conversationId : null,
         currentRunId: bootstrap.active_run?.run_id ?? null,
@@ -963,6 +1005,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
       toolStartedMap: {},
       toolResultMap: {},
       pendingConfirmMap: {},
+      pendingAsk: null,
       turnUsage: { ...state.turnUsage, [conversationId]: null },
     }))
 
@@ -1018,6 +1061,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
               error: errData.details || errData.message,
               isStreaming: false,
               pendingConfirmMap: {},
+              pendingAsk: null,
               streamingConversationId: null,
               currentRunId: null,
               statusPhase: null,
@@ -1073,6 +1117,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
         error: (err as Error).message,
         isStreaming: false,
         pendingConfirmMap: {},
+        pendingAsk: null,
         streamingConversationId: null,
         currentRunId: null,
         pendingSteers: { ...s.pendingSteers, [conversationId]: [] },
@@ -1229,6 +1274,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
       set((s) => ({
         isStreaming: false,
         pendingConfirmMap: {},
+        pendingAsk: null,
         streamingConversationId: null,
         currentRunId: null,
         statusPhase: null,
@@ -1249,6 +1295,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
       pendingSteers: {},
       isStreaming: false,
       pendingConfirmMap: {},
+      pendingAsk: null,
       streamingConversationId: null,
       currentRunId: null,
       lastAppliedEventId: null,
