@@ -194,3 +194,28 @@ class SandboxConfirmResolvedEvent(AgentEvent):
     data: dict[str, Any] = Field(
         description="Resolution: question_id, decision, cancelled, timed_out, reason"
     )
+
+
+class AskUserRequestEvent(AgentEvent):
+    """The agent called the ask_user built-in tool and is paused waiting for
+    the user to fill in the form. The frontend renders an AskUserCard.
+    """
+
+    type: Literal["ask_user_request"] = "ask_user_request"
+    data: dict[str, Any] = Field(
+        description=(
+            "question_id, questions (list of {key,prompt,options,multi_select,required}), "
+            "timeout_seconds"
+        )
+    )
+
+
+class AskUserResolvedEvent(AgentEvent):
+    """The pending ask_user was answered, cancelled, or timed out.
+    The frontend removes the AskUserCard.
+    """
+
+    type: Literal["ask_user_resolved"] = "ask_user_resolved"
+    data: dict[str, Any] = Field(
+        description="question_id, answers ({key: value|[values]}|null), cancelled, timed_out"
+    )
