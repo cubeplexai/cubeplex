@@ -61,6 +61,8 @@ export type AgentEventType =
   | 'status'
   | 'usage'
   | 'injected_message'
+  | 'sandbox_confirm_request'
+  | 'sandbox_confirm_resolved'
 
 export interface AgentEvent {
   type: AgentEventType
@@ -162,6 +164,28 @@ export interface DoneEvent extends AgentEvent {
 export interface InjectedMessageEvent extends AgentEvent {
   type: 'injected_message'
   data: { content: string; steer_id: string }
+}
+
+export interface SandboxConfirmRequestEvent extends AgentEvent {
+  type: 'sandbox_confirm_request'
+  data: {
+    tool_call_id: string
+    command: string
+    matched_pattern: string | null
+    timeout_seconds: number | null
+    created_at: number | null
+  }
+}
+
+export type SandboxConfirmOutcome = 'approved' | 'denied' | 'timed_out' | 'cancelled'
+
+export interface SandboxConfirmResolvedEvent extends AgentEvent {
+  type: 'sandbox_confirm_resolved'
+  data: {
+    tool_call_id: string
+    outcome: SandboxConfirmOutcome
+    reason: string | null
+  }
 }
 
 export type StatusPhase = 'sandbox_creating' | 'sandbox_ready' | 'sandbox_failed'
