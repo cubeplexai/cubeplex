@@ -370,6 +370,12 @@ class SandboxConfirmAnswer(BaseModel):
     reason: str | None = None
 
 
+class AskUserAnswer(BaseModel):
+    """Request body for submitting ask_user form answers."""
+
+    answers: dict[str, Any]
+
+
 class SendMessageRequest(BaseModel):
     """Request body for sending a message."""
 
@@ -1162,5 +1168,45 @@ async def submit_sandbox_confirm(
     run_manager = raw_request.app.state.run_manager
     dispatch_status = await run_manager.dispatch_hitl_answer(
         active_run.run_id, question_id, body.decision, body.reason
+    )
+    return {"status": dispatch_status, "run_id": active_run.run_id}
+
+
+@router.post(
+    "/{conversation_id}/ask-user/{question_id}",
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def submit_ask_user_answer(
+    conversation_id: str,
+    question_id: str,
+    body: AskUserAnswer,
+    raw_request: Request,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    ctx: Annotated[RequestContext, Depends(require_member)],
+    rds: Annotated[RedisHandle, Depends(redis_dep)],
+) -> dict[str, object]:
+    """Submit the user's answers for a pending ask_user form."""
+    conv_repo = ConversationRepository(
+        session,
+        org_id=ctx.org_id,
+        workspace_id=ctx.workspace_id,
+        user_id=ctx.user.id,
+    )
+    conversation = await conv_repo.get_by_id(conversation_id)
+    if not conversation:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Conversation {conversation_id} not found",
+        )
+
+    active_run = await get_active_run(
+        rds.client, prefix=rds.key_prefix, conversation_id=conversation_id
+    )
+    if active_run is None or active_run.status != "running":
+        return {"status": "no_active_run", "run_id": None}
+
+    run_manager = raw_request.app.state.run_manager
+    dispatch_status = await run_manager.dispatch_ask_user_answer(
+        active_run.run_id, question_id, body.answers
     )
     return {"status": dispatch_status, "run_id": active_run.run_id}
