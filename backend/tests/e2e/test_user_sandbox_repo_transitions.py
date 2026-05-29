@@ -317,6 +317,13 @@ async def test_mark_paused_accepts_pausing_or_resuming_prior_state(
     await db_session.refresh(row)
     assert row.status == "running"
 
+    # Move row out of the active state before creating another active sandbox
+    # under the same (org, workspace, user) — uq_user_sandbox_active is a
+    # partial unique index on status IN ('provisioning','running'), so two
+    # concurrent running rows under the same scope are not allowed.
+    row.status = "terminated"
+    await db_session.commit()
+
     # Legal: pausing → paused
     await repo.claim_pausing(
         (await _mk(repo, scope, status="running", idle_secs=10, ttl_seconds=1)).id,
@@ -370,6 +377,12 @@ async def test_mark_running_rejects_terminal_and_paused_states(
     assert await repo.mark_running(pausing_row.id) is True
     await db_session.refresh(pausing_row)
     assert pausing_row.status == "running"
+
+    # Move pausing_row (now running) out of the active set so the next
+    # mark_running below doesn't violate uq_user_sandbox_active (partial unique
+    # index on status IN ('provisioning','running') per (org, workspace, user)).
+    pausing_row.status = "terminated"
+    await db_session.commit()
 
     # From resuming → ok (resume completed)
     resuming_row = await _mk(repo, scope, status="resuming", idle_secs=0, ttl_seconds=3600)
