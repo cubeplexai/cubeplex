@@ -63,6 +63,8 @@ export type AgentEventType =
   | 'injected_message'
   | 'sandbox_confirm_request'
   | 'sandbox_confirm_resolved'
+  | 'ask_user_request'
+  | 'ask_user_resolved'
 
 export interface AgentEvent {
   type: AgentEventType
@@ -185,6 +187,40 @@ export interface SandboxConfirmResolvedEvent extends AgentEvent {
     cancelled: boolean
     timed_out: boolean
     reason: string | null
+  }
+}
+
+export interface AskOption {
+  label: string
+  value: string
+  description: string | null
+  allow_input: boolean
+}
+
+export interface AskQuestion {
+  key: string
+  prompt: string
+  options: AskOption[] | null
+  multi_select: boolean
+  required: boolean
+}
+
+export interface AskUserRequestEvent extends AgentEvent {
+  type: 'ask_user_request'
+  data: {
+    question_id: string
+    questions: AskQuestion[]
+    timeout_seconds: number | null
+  }
+}
+
+export interface AskUserResolvedEvent extends AgentEvent {
+  type: 'ask_user_resolved'
+  data: {
+    question_id: string
+    answers: Record<string, string | string[]> | null
+    cancelled: boolean
+    timed_out: boolean
   }
 }
 
