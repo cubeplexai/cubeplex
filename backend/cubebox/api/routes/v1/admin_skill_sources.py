@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ipaddress
+import socket
 from typing import Annotated
 from urllib.parse import urlparse
 
@@ -54,12 +55,28 @@ def _validate_registry_base_url(raw: str) -> None:
         raise HTTPException(status_code=400, detail="BAD_BASE_URL")
     if any(host.endswith(suf) for suf in _FORBIDDEN_HOSTNAME_SUFFIXES):
         raise HTTPException(status_code=400, detail="BAD_BASE_URL")
-    # If the host parses as a literal IP, reject anything that isn't
-    # globally routable (loopback, link-local, private, multicast, …).
+    # IPv4 literal check covers both canonical dotted-quad ("127.0.0.1") and
+    # the alternative forms Linux getaddrinfo accepts but ipaddress.ip_address
+    # rejects: decimal int ("2130706433"), hex ("0x7f000001"), octal, and
+    # short-dot ("127.1"). Each of those is a known SSRF-evasion form, so we
+    # reject any host that inet_aton parses but doesn't re-serialize to the
+    # canonical dotted-quad. Canonical IPv4 still has to pass `is_global`.
+    try:
+        packed_v4 = socket.inet_aton(host)
+    except OSError:
+        packed_v4 = None
+    if packed_v4 is not None:
+        canonical_v4 = ipaddress.IPv4Address(packed_v4)
+        if host != str(canonical_v4) or not canonical_v4.is_global:
+            raise HTTPException(status_code=400, detail="BAD_BASE_URL")
+        return
+    # Not an IPv4 literal in any form — try IPv6, otherwise treat as a
+    # DNS name (DNS-based SSRF evasion is out of scope for v1; admins
+    # are still trusted operators here).
     try:
         ip = ipaddress.ip_address(host)
     except ValueError:
-        return  # not a literal IP; hostname suffix checks above are best-effort
+        return
     if not ip.is_global:
         raise HTTPException(status_code=400, detail="BAD_BASE_URL")
 
