@@ -527,6 +527,16 @@ export function AssistantMessage({
 
   return (
     <div data-role="assistant" className="space-y-2">
+      {/* Widget rendered FIRST (at the top of the message). The widget is the
+          answer; the bubble below is commentary. Refresh order also puts widget
+          on top in the persisted message — keeping streaming consistent with
+          refresh. The shell pre-fills #root with a skeleton (see widgetShell.ts)
+          so the reserved space is stable while morphdom + content stream in. */}
+      {widgetItems.length > 0 && (
+        <div className="space-y-2 max-w-[640px] mx-auto">
+          {widgetItems.map(({ item, i }) => renderItem(item, i))}
+        </div>
+      )}
       <div className="flex justify-start gap-2.5">
         <div
           className="shrink-0 w-6 h-6 rounded-md border border-border bg-card
@@ -544,9 +554,6 @@ export function AssistantMessage({
           {bubbleItems.map(({ item, i }) => renderItem(item, i))}
         </div>
       </div>
-      {widgetItems.length > 0 && (
-        <div className="space-y-2">{widgetItems.map(({ item, i }) => renderItem(item, i))}</div>
-      )}
       {/* Todos + streaming/loading indicator render AFTER widgets so the
           "still working" signal stays at the visual end of the assistant
           message even when widgets are present. pl-9 ≈ avatar(24px)+gap(10px)
