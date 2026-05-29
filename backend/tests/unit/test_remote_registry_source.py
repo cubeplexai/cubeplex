@@ -82,3 +82,36 @@ async def test_fetch_imports_whole_subpath_tree_not_just_skill_md():
     assert set(files) == {"SKILL.md", "references/style.md", "scripts/run.py"}
     assert b"slide-deck" in files["SKILL.md"]
     assert b"style guide" in files["references/style.md"]
+
+
+def _big_bundle_app(file_count: int, file_size: int) -> httpx.MockTransport:
+    """Registry returning ``file_count`` files of ``file_size`` bytes each.
+
+    Lets tests pile up cumulative bytes without any single file tripping
+    the per-file cap — exercises the bundle-total guard specifically.
+    """
+    files_list = ["SKILL.md"] + [f"f{i}.bin" for i in range(file_count - 1)]
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.startswith("/tree/"):
+            return httpx.Response(200, json={"files": files_list})
+        if request.url.path.endswith("/SKILL.md"):
+            return httpx.Response(200, content=b"x" * file_size)
+        return httpx.Response(200, content=b"x" * file_size)
+
+    return httpx.MockTransport(handler)
+
+
+@pytest.mark.asyncio
+async def test_fetch_stops_at_bundle_cap_even_when_each_file_is_within_per_file_cap():
+    # 8 files × 8 MB = 64 MB > 50 MB bundle cap, but each file is under
+    # the 10 MB per-file cap so only the bundle guard can stop this.
+    src = RemoteRegistrySource(
+        source_id="sksrc-1",
+        base_url="https://reg.test",
+        trust_tier=TrustTier.community,
+        org_slug="acme",
+        transport=_big_bundle_app(file_count=8, file_size=8 * 1024 * 1024),
+    )
+    with pytest.raises(ValueError, match="bundle exceeds cap"):
+        await src.fetch("acme/skills/tree/main/skills/big")
