@@ -221,11 +221,36 @@ class SkillInstallService:
             raise SkillInstallError(str(e)) from e
         except (InvalidZipPathError, FileTooLargeError) as e:
             raise SkillInstallError(str(e)) from e
+        except VersionCollisionError:
+            # Remote skill was already imported at the same version — skip
+            # re-publish and just create the workspace-private install.
+            from cubebox.skills.frontmatter import peek_skill_name
+
+            raw_name = peek_skill_name(files["SKILL.md"].decode("utf-8"))
+            if raw_name is None:
+                raise SkillInstallError("cannot resolve canonical name from SKILL.md") from None
+            canonical = f"{self._org_slug}:{raw_name}"
+            existing = await SkillRepository(self._session).find_by_name(canonical)
+            if existing is None:
+                raise SkillInstallError(
+                    f"existing skill lookup failed for {canonical}"
+                ) from None
+            await OrgSkillInstallRepository(self._session).create_for_workspace(
+                org_id=self._org_id,
+                workspace_id=self._workspace_id,
+                skill_id=existing.id,
+                installed_version=existing.current_version,
+                installed_by_user_id=self._actor,
+            )
+            return InstallResult(
+                canonical_name=existing.name,
+                skill_id=existing.id,
+                installed_version=existing.current_version,
+            )
         except (
             InvalidFrontmatterError,
             InvalidSkillNameError,
             SkillMdMissingError,
-            VersionCollisionError,
         ) as e:
             raise SkillInstallError(str(e)) from e
         skill = await SkillRepository(self._session).get(sv.skill_id)
