@@ -81,6 +81,46 @@ test('a stale morph arriving AFTER finalize does not regress the DOM', async ({ 
   await expect(frame.locator('#w')).toHaveText('final') // unchanged
 })
 
+test('skeleton placeholder is present in #root before any morph', async ({ page }) => {
+  await mountShell(page)
+  const frame = page.frameLocator('#wf')
+  // The shell pre-fills #root with a skeleton so the layout reserves space
+  // immediately; the first morph replaces it.
+  await expect(frame.locator('#root ._skel')).toBeVisible()
+  await expect(frame.locator('#root ._skel-bar').first()).toBeVisible()
+  // Body scrollHeight must be reasonably tall (skeleton reserves ~200+ px) so
+  // the parent iframe doesn't sit at a tiny initial height.
+  const h = await frame.locator('body').evaluate((b: HTMLElement) => b.scrollHeight)
+  expect(h).toBeGreaterThan(180)
+})
+
+test('theme message updates :root CSS variables in place', async ({ page }) => {
+  await mountShell(page)
+  const frame = page.frameLocator('#wf')
+  // Push a theme update from the parent (no seq — theme messages are stateless).
+  await page.evaluate((id) => {
+    ;(document.getElementById('wf') as HTMLIFrameElement).contentWindow!.postMessage(
+      {
+        widgetId: id,
+        type: 'theme',
+        bg: '#222222',
+        fg: '#eeeeee',
+        muted: '#333333',
+        border: '#444444',
+        accent: '#88ccff',
+      },
+      '*',
+    )
+  }, WIDGET_ID)
+  await expect
+    .poll(async () =>
+      frame
+        .locator(':root')
+        .evaluate((el: HTMLElement) => getComputedStyle(el).getPropertyValue('--bg').trim()),
+    )
+    .toBe('#222222')
+})
+
 test('widget cannot reach parent (opaque origin) nor fetch (connect-src none)', async ({
   page,
 }) => {
