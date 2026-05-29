@@ -115,8 +115,14 @@ export function AskUserCard({ pending, onSubmit }: AskUserCardProps) {
     setAnswers((prev) => ({ ...prev, [key]: value }))
   }
 
+  const hasUnfilledRequired = pending.questions.some((q) => {
+    if (!q.required) return false
+    const v = answers[q.key]
+    return Array.isArray(v) ? v.length === 0 : v === ''
+  })
+
   const handleSubmit = async () => {
-    if (submitting) return
+    if (submitting || hasUnfilledRequired) return
     setSubmitting(true)
     try {
       await onSubmit(answers)
@@ -147,7 +153,12 @@ export function AskUserCard({ pending, onSubmit }: AskUserCardProps) {
         ))}
       </div>
       <div className="mt-3">
-        <Button size="sm" className="gap-1" disabled={submitting} onClick={handleSubmit}>
+        <Button
+          size="sm"
+          className="gap-1"
+          disabled={submitting || hasUnfilledRequired}
+          onClick={handleSubmit}
+        >
           <Send className="h-3.5 w-3.5" />
           {submitting ? 'Sending…' : 'Submit'}
         </Button>
