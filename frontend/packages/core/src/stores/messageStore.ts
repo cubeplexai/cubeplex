@@ -51,6 +51,14 @@ export interface AgentStream {
   name: string | null
 }
 
+export interface PendingConfirm {
+  question_id: string
+  command: string
+  matched_pattern: string | null
+  timeout_seconds: number | null
+  requestedAt: number
+}
+
 export interface MessageStore {
   messages: Record<string, Message[]>
   pendingSteers: Record<string, { steerId: string; text: string }[]>
@@ -71,6 +79,7 @@ export interface MessageStore {
   turnUsage: Record<string, import('../types').TurnUsage | null>
   sessionUsage: Record<string, import('../types').SessionUsage | null>
   contextWindow: Record<string, number | null>
+  pendingConfirmMap: Record<string, PendingConfirm>
 
   loadMessages(client: ApiClient, conversationId: string): Promise<void>
   send(
@@ -86,6 +95,8 @@ export interface MessageStore {
   __commitTurnAndInject(conversationId: string, data: { content: string; steer_id: string }): void
   clearStream(): void
   clearLastRunStatus(): void
+  /** Test hook: apply a single AgentEvent synchronously */
+  __applyEvent(event: AgentEvent): void
 }
 
 let activeStreamController: AbortController | null = null
@@ -519,6 +530,41 @@ function applyStreamEvent(state: MessageStore, event: AgentEvent): Partial<Messa
     return base
   }
 
+  if (event.type === 'sandbox_confirm_request') {
+    const d = event.data as {
+      question_id: string
+      tool_call_id: string
+      command: string
+      matched_pattern: string | null
+      timeout_seconds: number | null
+    }
+    if (!d.tool_call_id) return base
+    return {
+      ...base,
+      pendingConfirmMap: {
+        ...state.pendingConfirmMap,
+        [d.tool_call_id]: {
+          question_id: d.question_id,
+          command: d.command,
+          matched_pattern: d.matched_pattern ?? null,
+          timeout_seconds: d.timeout_seconds ?? null,
+          requestedAt: Date.now(),
+        },
+      },
+    }
+  }
+
+  if (event.type === 'sandbox_confirm_resolved') {
+    const d = event.data as { question_id: string }
+    const tcId = Object.entries(state.pendingConfirmMap).find(
+      ([, v]) => v.question_id === d.question_id,
+    )?.[0]
+    if (!tcId) return base
+    const next = { ...state.pendingConfirmMap }
+    delete next[tcId]
+    return { ...base, pendingConfirmMap: next }
+  }
+
   return base
 }
 
@@ -650,6 +696,7 @@ async function finalizeCompletedStream(
   if (!assistantMessage) {
     set((state) => ({
       isStreaming: false,
+      pendingConfirmMap: {},
       streamingConversationId: null,
       currentRunId: null,
       statusPhase: null,
@@ -668,6 +715,7 @@ async function finalizeCompletedStream(
       ],
     },
     isStreaming: false,
+    pendingConfirmMap: {},
     streamingConversationId: null,
     currentRunId: null,
     statusPhase: null,
@@ -716,6 +764,7 @@ async function consumeRunStream(
         set((s) => ({
           error: errData.details || errData.message,
           isStreaming: false,
+          pendingConfirmMap: {},
           streamingConversationId: null,
           currentRunId: null,
           statusPhase: null,
@@ -788,6 +837,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
   todos: [],
   toolStartedMap: {},
   toolResultMap: {},
+  pendingConfirmMap: {},
   turnUsage: {},
   sessionUsage: {},
   contextWindow: {},
@@ -839,6 +889,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
         pendingSteers: { ...s.pendingSteers, [conversationId]: [] },
         toolStartedMap: {},
         toolResultMap: {},
+        pendingConfirmMap: {},
         isStreaming: !!bootstrap.active_run,
         streamingConversationId: bootstrap.active_run ? conversationId : null,
         currentRunId: bootstrap.active_run?.run_id ?? null,
@@ -911,6 +962,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
       todos: [],
       toolStartedMap: {},
       toolResultMap: {},
+      pendingConfirmMap: {},
       turnUsage: { ...state.turnUsage, [conversationId]: null },
     }))
 
@@ -965,6 +1017,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
             set((s) => ({
               error: errData.details || errData.message,
               isStreaming: false,
+              pendingConfirmMap: {},
               streamingConversationId: null,
               currentRunId: null,
               statusPhase: null,
@@ -1019,6 +1072,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
       set((s) => ({
         error: (err as Error).message,
         isStreaming: false,
+        pendingConfirmMap: {},
         streamingConversationId: null,
         currentRunId: null,
         pendingSteers: { ...s.pendingSteers, [conversationId]: [] },
@@ -1174,6 +1228,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
     } else {
       set((s) => ({
         isStreaming: false,
+        pendingConfirmMap: {},
         streamingConversationId: null,
         currentRunId: null,
         statusPhase: null,
@@ -1193,6 +1248,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
       streamAgents: {},
       pendingSteers: {},
       isStreaming: false,
+      pendingConfirmMap: {},
       streamingConversationId: null,
       currentRunId: null,
       lastAppliedEventId: null,
@@ -1205,5 +1261,8 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
 
   clearLastRunStatus() {
     set({ lastRunStatus: null })
+  },
+  __applyEvent(event: AgentEvent) {
+    set((s) => applyStreamEvent(s, event) as MessageStore)
   },
 }))
