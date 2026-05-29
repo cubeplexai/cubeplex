@@ -102,6 +102,36 @@ def _big_bundle_app(file_count: int, file_size: int) -> httpx.MockTransport:
     return httpx.MockTransport(handler)
 
 
+def _huge_tree_app(tree_size_bytes: int) -> httpx.MockTransport:
+    """Registry returning a tree manifest payload of ``tree_size_bytes``."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.startswith("/tree/"):
+            # Pad a single bogus entry so the JSON body exceeds the cap.
+            pad = "x" * tree_size_bytes
+            return httpx.Response(
+                200,
+                json={"files": [pad]},
+            )
+        return httpx.Response(404)
+
+    return httpx.MockTransport(handler)
+
+
+@pytest.mark.asyncio
+async def test_fetch_rejects_oversized_tree_manifest_before_parsing():
+    # 2 MB tree payload, cap is 1 MB.
+    src = RemoteRegistrySource(
+        source_id="sksrc-1",
+        base_url="https://reg.test",
+        trust_tier=TrustTier.community,
+        org_slug="acme",
+        transport=_huge_tree_app(tree_size_bytes=2 * 1024 * 1024),
+    )
+    with pytest.raises(ValueError, match="tree manifest exceeds cap"):
+        await src.fetch("acme/skills/tree/main/skills/big")
+
+
 @pytest.mark.asyncio
 async def test_fetch_stops_at_bundle_cap_even_when_each_file_is_within_per_file_cap():
     # 8 files × 8 MB = 64 MB > 50 MB bundle cap, but each file is under

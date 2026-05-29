@@ -10,6 +10,7 @@ install time.
 
 from __future__ import annotations
 
+import json
 from pathlib import PurePosixPath
 
 import httpx
@@ -22,6 +23,7 @@ from cubebox.skills.sources.base import (
 )
 
 _MAX_TREE_ENTRIES = 200
+_TREE_MAX_BYTES = 1 * 1024 * 1024  # 1 MB is plenty for a 200-entry path manifest
 _RAW_FILE_MAX_BYTES = 10 * 1024 * 1024  # same cap as validate_skill_files
 _BUNDLE_MAX_BYTES = 50 * 1024 * 1024  # mirrors MAX_TOTAL_BYTES in skills.service
 
@@ -131,9 +133,25 @@ class RemoteRegistrySource:
         files: dict[str, bytes] = {}
         bundle_total = 0
         async with self._client() as client:
-            tree = await client.get(f"/tree/{source_ref}")
-            tree.raise_for_status()
-            tree_data = tree.json()
+            # Stream the tree manifest itself with a byte cap so a malicious
+            # registry can't exhaust worker memory before we even reach the
+            # entry-count guard. 1 MB easily fits 200 path strings.
+            tree_chunks: list[bytes] = []
+            tree_total = 0
+            async with client.stream("GET", f"/tree/{source_ref}") as tree:
+                tree.raise_for_status()
+                async for chunk in tree.aiter_bytes(65536):
+                    tree_chunks.append(chunk)
+                    tree_total += len(chunk)
+                    if tree_total > _TREE_MAX_BYTES:
+                        raise ValueError(
+                            f"remote tree manifest exceeds cap "
+                            f"{_TREE_MAX_BYTES} bytes"
+                        )
+            try:
+                tree_data = json.loads(b"".join(tree_chunks))
+            except json.JSONDecodeError as exc:
+                raise ValueError(f"remote tree manifest is not valid JSON: {exc}") from exc
             if not isinstance(tree_data, dict):
                 raise ValueError("remote registry returned non-object tree")
             entries = tree_data.get("files", [])
