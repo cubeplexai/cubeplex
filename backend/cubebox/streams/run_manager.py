@@ -262,6 +262,8 @@ def cubepi_dict_to_agent_event(d: dict[str, Any], timestamp: str) -> AgentEvent 
         ErrorEvent,
         InjectedMessageEvent,
         ReasoningEvent,
+        SandboxConfirmRequestEvent,
+        SandboxConfirmResolvedEvent,
         TextDeltaEvent,
         ToolCallDeltaEvent,
         ToolCallEvent,
@@ -327,6 +329,26 @@ def cubepi_dict_to_agent_event(d: dict[str, Any], timestamp: str) -> AgentEvent 
             data={
                 "action": d.get("action", "created"),
                 "artifact": d.get("artifact", {}),
+            },
+        )
+    if t == "sandbox_confirm_request":
+        return SandboxConfirmRequestEvent(
+            timestamp=timestamp,
+            data={
+                "tool_call_id": d.get("tool_call_id", ""),
+                "command": d.get("command", ""),
+                "matched_pattern": d.get("matched_pattern"),
+                "timeout_seconds": d.get("timeout_seconds"),
+                "created_at": d.get("created_at"),
+            },
+        )
+    if t == "sandbox_confirm_resolved":
+        return SandboxConfirmResolvedEvent(
+            timestamp=timestamp,
+            data={
+                "tool_call_id": d.get("tool_call_id", ""),
+                "outcome": d.get("outcome", ""),
+                "reason": d.get("reason"),
             },
         )
     if t == "usage":
