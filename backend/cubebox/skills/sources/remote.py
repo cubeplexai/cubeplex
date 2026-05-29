@@ -23,6 +23,7 @@ from cubebox.skills.sources.base import (
 
 _MAX_TREE_ENTRIES = 200
 _RAW_FILE_MAX_BYTES = 10 * 1024 * 1024  # same cap as validate_skill_files
+_BUNDLE_MAX_BYTES = 50 * 1024 * 1024  # mirrors MAX_TOTAL_BYTES in skills.service
 
 
 def _require_str(d: dict[str, object], key: str) -> str:
@@ -128,6 +129,7 @@ class RemoteRegistrySource:
 
     async def _fetch(self, source_ref: str) -> dict[str, bytes]:
         files: dict[str, bytes] = {}
+        bundle_total = 0
         async with self._client() as client:
             tree = await client.get(f"/tree/{source_ref}")
             tree.raise_for_status()
@@ -147,21 +149,28 @@ class RemoteRegistrySource:
                 if rel.startswith("/") or ".." in parts:
                     raise ValueError(f"unsafe path in remote skill tree: {rel!r}")
                 # Stream the raw response so a malicious/broken registry can't
-                # exhaust worker memory — accumulate chunks and stop at the
-                # shared cap (same limit validate_skill_files enforces later).
+                # exhaust worker memory — accumulate chunks and stop at both
+                # the per-file cap and the cumulative bundle cap (same limits
+                # validate_skill_files enforces later).
                 chunks: list[bytes] = []
-                total = 0
+                file_total = 0
                 async with client.stream("GET", f"/raw/{source_ref}/{rel}") as raw:
                     raw.raise_for_status()
                     async for chunk in raw.aiter_bytes(65536):
                         chunks.append(chunk)
-                        total += len(chunk)
-                        if total > _RAW_FILE_MAX_BYTES:
+                        file_total += len(chunk)
+                        if file_total > _RAW_FILE_MAX_BYTES:
                             raise ValueError(
                                 f"remote file {rel!r} exceeds cap "
                                 f"{_RAW_FILE_MAX_BYTES} bytes"
                             )
+                        if bundle_total + file_total > _BUNDLE_MAX_BYTES:
+                            raise ValueError(
+                                f"remote skill bundle exceeds cap "
+                                f"{_BUNDLE_MAX_BYTES} bytes"
+                            )
                 files[rel] = b"".join(chunks)
+                bundle_total += file_total
         if "SKILL.md" not in files:
             raise ValueError("remote skill subpath has no SKILL.md")
         return files
