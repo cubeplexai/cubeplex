@@ -8,6 +8,7 @@ import {
   getTextContent,
   getToolResultPreviewContent,
   getSubagentSummary,
+  submitSandboxConfirm,
 } from '@cubebox/core'
 import type { Message, SubagentSummary } from '@cubebox/core'
 import { AlertCircle } from 'lucide-react'
@@ -122,6 +123,8 @@ export function MessageList({ conversationId }: MessageListProps) {
   } = useMessages(conversationId)
   const loadMessages = useMessageStore((s) => s.loadMessages)
   const lastRunStatus = useMessageStore((s) => s.lastRunStatus)
+  const pendingConfirmMap = useMessageStore((s) => s.pendingConfirmMap)
+  const streamingConversationId = useMessageStore((s) => s.streamingConversationId)
   const { workspaceId } = useWorkspaceContext()
 
   useEffect(() => {
@@ -129,6 +132,24 @@ export function MessageList({ conversationId }: MessageListProps) {
     if (workspaceId) client.setWorkspaceId(workspaceId)
     loadMessages(client, conversationId)
   }, [conversationId, loadMessages, workspaceId])
+
+  const handleSandboxConfirm = useCallback(
+    async (toolCallId: string, decision: 'approve' | 'deny') => {
+      const convId = streamingConversationId ?? conversationId
+      const pending = pendingConfirmMap[toolCallId]
+      if (!pending) return
+      const client = createApiClient('')
+      if (workspaceId) client.setWorkspaceId(workspaceId)
+      await submitSandboxConfirm(client, convId, pending.question_id, decision)
+      // Optimistic removal — sandbox_confirm_resolved SSE will also clean up
+      useMessageStore.setState((s) => {
+        const next = { ...s.pendingConfirmMap }
+        delete next[toolCallId]
+        return { pendingConfirmMap: next }
+      })
+    },
+    [conversationId, streamingConversationId, pendingConfirmMap, workspaceId],
+  )
 
   const subagentDataMap = useMemo(() => buildSubagentDataMap(messages ?? []), [messages])
 
@@ -219,6 +240,8 @@ export function MessageList({ conversationId }: MessageListProps) {
                 subagentDataMap={subagentDataMap}
                 toolResultMap={mergedToolResultMap}
                 conversationId={conversationId}
+                pendingConfirmMap={pendingConfirmMap}
+                onSandboxConfirm={handleSandboxConfirm}
               />
             )}
           </div>
@@ -233,6 +256,8 @@ export function MessageList({ conversationId }: MessageListProps) {
             toolResultMap={mergedToolResultMap}
             todos={todos}
             conversationId={conversationId}
+            pendingConfirmMap={pendingConfirmMap}
+            onSandboxConfirm={handleSandboxConfirm}
           />
         )}
 
