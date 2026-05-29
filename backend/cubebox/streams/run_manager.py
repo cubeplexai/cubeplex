@@ -332,22 +332,26 @@ def cubepi_dict_to_agent_event(d: dict[str, Any], timestamp: str) -> AgentEvent 
             },
         )
     if t == "sandbox_confirm_request":
+        args = d.get("args") or {}
+        details = d.get("details") or {}
         return SandboxConfirmRequestEvent(
             timestamp=timestamp,
             data={
+                "question_id": d.get("question_id", ""),
                 "tool_call_id": d.get("tool_call_id", ""),
-                "command": d.get("command", ""),
-                "matched_pattern": d.get("matched_pattern"),
+                "command": args.get("command", ""),
+                "matched_pattern": details.get("matched_pattern"),
                 "timeout_seconds": d.get("timeout_seconds"),
-                "created_at": d.get("created_at"),
             },
         )
     if t == "sandbox_confirm_resolved":
         return SandboxConfirmResolvedEvent(
             timestamp=timestamp,
             data={
-                "tool_call_id": d.get("tool_call_id", ""),
-                "outcome": d.get("outcome", ""),
+                "question_id": d.get("question_id", ""),
+                "decision": d.get("decision"),
+                "cancelled": d.get("cancelled", False),
+                "timed_out": d.get("timed_out", False),
                 "reason": d.get("reason"),
             },
         )

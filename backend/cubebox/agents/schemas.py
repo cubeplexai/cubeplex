@@ -180,7 +180,7 @@ class SandboxConfirmRequestEvent(AgentEvent):
     type: Literal["sandbox_confirm_request"] = "sandbox_confirm_request"
     data: dict[str, Any] = Field(
         description=(
-            "Confirm request: tool_call_id, command, matched_pattern, timeout_seconds, created_at"
+            "Confirm request: question_id, tool_call_id, command, matched_pattern, timeout_seconds"
         )
     )
 
@@ -191,4 +191,6 @@ class SandboxConfirmResolvedEvent(AgentEvent):
     """
 
     type: Literal["sandbox_confirm_resolved"] = "sandbox_confirm_resolved"
-    data: dict[str, Any] = Field(description="Resolution: tool_call_id, outcome, reason")
+    data: dict[str, Any] = Field(
+        description="Resolution: question_id, decision, cancelled, timed_out, reason"
+    )
