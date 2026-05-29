@@ -12,7 +12,7 @@ import logging
 from collections import Counter
 from datetime import timedelta
 from typing import Any, Literal, cast
-from urllib.parse import urlencode, urlparse, urlunparse
+from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 from cubepi.agent.types import AgentTool
 from cubepi.mcp import load_mcp_tools_http
@@ -218,19 +218,16 @@ def _inject_query_param(server_url: str, name: str, value: str) -> str:
     transport sends every JSON-RPC request to this URL, so the param rides
     along on every call — exactly what Tavily/Bocha-style URL-key auth
     expects.
+
+    ``parse_qsl`` decodes existing pairs before ``urlencode`` re-encodes
+    them, so a pre-encoded existing value (``foo=a%20b``) round-trips
+    intact instead of double-encoding the ``%``. ``keep_blank_values``
+    preserves valueless flags (``?debug``) as empty-string values.
     """
     parts = urlparse(server_url)
-    pairs: list[tuple[str, str]] = []
-    existing = parts.query.split("&") if parts.query else []
-    for chunk in existing:
-        if not chunk:
-            continue
-        k, _, v = chunk.partition("=")
-        if k == name:
-            continue
-        pairs.append((k, v))
+    pairs = [(k, v) for k, v in parse_qsl(parts.query, keep_blank_values=True) if k != name]
     pairs.append((name, value))
-    return urlunparse(parts._replace(query=urlencode(pairs, safe="")))
+    return urlunparse(parts._replace(query=urlencode(pairs)))
 
 
 def _apply_static_credential(
