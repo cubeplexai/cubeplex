@@ -15,10 +15,12 @@ command execution.
 
 from __future__ import annotations
 
+import asyncio
 from collections import deque
 from typing import Any
 
-from cubepi.agent.types import AgentTool, AgentToolResult
+from cubepi.agent.types import AgentTool, AgentToolResult, BeforeToolCallResult
+from cubepi.hitl import HitlCancelled, HitlChannel, HitlTimedOut
 from cubepi.middleware.base import Middleware
 from cubepi.providers.base import TextContent
 from pydantic import BaseModel, Field
@@ -131,16 +133,13 @@ def _make_execute_tool(
     *,
     workspace_id: str | None = None,
     conversation_id: str | None = None,
-    command_rules: list[dict[str, Any]] | None = None,
 ) -> AgentTool[_ExecuteArgs]:
     """Build the execute cubepi.AgentTool backed by a sandbox instance.
 
-    Command rules are enforced here — the last cubebox-owned point before the
-    command reaches the provider. Precedence deny > confirm > allow; in v1
-    ``confirm`` degrades to ``deny`` because cubepi has no elicit/approve
-    event channel yet (see TODO below + spec OQ-1/OQ-2).
+    Command-policy rules (deny / confirm) are enforced one layer up, in
+    ``SandboxMiddleware.before_tool_call`` — the tool body itself is a pure
+    executor.
     """
-    rules = command_rules or []
 
     async def _execute(
         tool_call_id: str,
@@ -150,34 +149,6 @@ def _make_execute_tool(
         on_update: object = None,
     ) -> AgentToolResult:
         del tool_call_id, signal, on_update
-
-        action, pattern = evaluate_command(args.command, rules)
-        if action == "deny":
-            # Surface as a tool ERROR (is_error=True) so cubepi's finalized result
-            # reads as a failure, not a successful command that printed a message.
-            return AgentToolResult(
-                content=[TextContent(text=f"command blocked by org policy: {pattern}")],
-                is_error=True,
-            )
-        if action == "confirm":
-            # TODO(cubepi-hitl): real prompt-and-approve flow once upstream ships
-            # the elicit/approve event channel. Until then, treat confirm as deny
-            # with a distinct message so admins still see their rule fire. The
-            # audit row tag is `confirmed-action-deferred`. Acceptance criteria
-            # for the upstream cubepi work: confirmation blocks only the tool
-            # call (not the whole run); 180s timeout; timed-out = deny + audit
-            # row; sandbox TTL clock does not pause while waiting. See OQ-1/OQ-2.
-            return AgentToolResult(
-                content=[
-                    TextContent(
-                        text=(
-                            f"command requires confirmation (pattern: {pattern}); "
-                            "not yet supported in this deployment"
-                        )
-                    )
-                ],
-                is_error=True,
-            )
 
         result = await sandbox.execute(args.command)
         if workspace_id is not None and conversation_id is not None and result.exit_code == 0:
@@ -403,18 +374,19 @@ class SandboxMiddleware(Middleware):
         conversation_id: str | None = None,
         workspace_id: str | None = None,
         command_rules: list[dict[str, Any]] | None = None,
+        channel: HitlChannel | None = None,
     ) -> None:
         self.sandbox = sandbox
         self.conversation_id = conversation_id
         self.workspace_id = workspace_id
         self.command_rules = command_rules or []
+        self.channel = channel
 
         self._tools: list[AgentTool[Any]] = [
             _make_execute_tool(
                 sandbox,
                 workspace_id=workspace_id,
                 conversation_id=conversation_id,
-                command_rules=self.command_rules,
             ),
             _make_write_file_tool(sandbox),
             _make_edit_file_tool(sandbox),
@@ -425,6 +397,72 @@ class SandboxMiddleware(Middleware):
     def tools(self) -> list[AgentTool[Any]]:
         """Return the cubepi.AgentTool list for this middleware."""
         return list(self._tools)
+
+    async def before_tool_call(
+        self,
+        ctx: Any,
+        *,
+        signal: asyncio.Event | None = None,
+    ) -> BeforeToolCallResult | None:
+        """Enforce command rules before the execute tool runs.
+
+        v1: execute only. deny → block; confirm → pause on the HITL channel
+        (approve runs it, deny/timeout/cancel block it); edit is rejected.
+        Because this runs before the tool body, a blocked command never reaches
+        ``sandbox.execute`` — no sandbox side effects, TTL clock untouched.
+        """
+        if getattr(ctx.tool_call, "name", None) != "execute":
+            return None
+        if self.channel is None or not self.command_rules:
+            return None
+
+        command = ctx.args.command
+        action, pattern = evaluate_command(command, self.command_rules)
+        if action == "allow":
+            return None
+        if action == "deny":
+            return BeforeToolCallResult(
+                block=True,
+                reason=f"command blocked by org policy: {pattern}",
+                deny_reason=pattern,
+                hitl_trace={"decision": "policy_deny", "pattern": pattern},
+            )
+
+        # action == "confirm": pause and ask the human.
+        try:
+            answer = await self.channel.approve(
+                tool_name="execute",
+                tool_call_id=ctx.tool_call.id,
+                args={"command": command},
+                details={"matched_pattern": pattern, "command": command},
+                timeout=180.0,
+                signal=signal,
+            )
+        except HitlTimedOut:
+            return BeforeToolCallResult(
+                block=True,
+                reason="approval timed out (180s); command not run",
+                deny_reason="approval_timeout",
+                hitl_trace={"decision": "timed_out"},
+            )
+        except HitlCancelled as exc:
+            return BeforeToolCallResult(
+                block=True,
+                reason=f"cancelled: {exc.reason}",
+                deny_reason=f"cancelled: {exc.reason}",
+                hitl_trace={"decision": "cancelled", "reason": exc.reason},
+            )
+
+        if answer.decision == "approve":
+            return None
+        if answer.decision == "deny":
+            return BeforeToolCallResult(
+                block=True,
+                reason=answer.reason or "denied by user",
+                deny_reason=answer.reason or "denied by user",
+                hitl_trace={"decision": "human_deny", "reason": answer.reason},
+            )
+        raise ValueError("edit decision not supported for sandbox confirm v1")
 
     async def transform_system_prompt(
         self,
