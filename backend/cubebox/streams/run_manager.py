@@ -259,6 +259,8 @@ def cubepi_dict_to_agent_event(d: dict[str, Any], timestamp: str) -> AgentEvent 
     """
     from cubebox.agents.schemas import (
         ArtifactEvent,
+        AskUserRequestEvent,
+        AskUserResolvedEvent,
         ErrorEvent,
         InjectedMessageEvent,
         ReasoningEvent,
@@ -353,6 +355,25 @@ def cubepi_dict_to_agent_event(d: dict[str, Any], timestamp: str) -> AgentEvent 
                 "cancelled": d.get("cancelled", False),
                 "timed_out": d.get("timed_out", False),
                 "reason": d.get("reason"),
+            },
+        )
+    if t == "ask_user_request":
+        return AskUserRequestEvent(
+            timestamp=timestamp,
+            data={
+                "question_id": d.get("question_id", ""),
+                "questions": d.get("questions", []),
+                "timeout_seconds": d.get("timeout_seconds"),
+            },
+        )
+    if t == "ask_user_resolved":
+        return AskUserResolvedEvent(
+            timestamp=timestamp,
+            data={
+                "question_id": d.get("question_id", ""),
+                "answers": d.get("answers"),
+                "cancelled": d.get("cancelled", False),
+                "timed_out": d.get("timed_out", False),
             },
         )
     if t == "usage":
@@ -689,6 +710,39 @@ class RunManager:
             logger.warning("hitl_answer delivery failed for run {}", run_id, exc_info=True)
         return True
 
+    async def dispatch_ask_user_answer(
+        self, run_id: str, question_id: str, answers: dict[str, Any]
+    ) -> str:
+        """Deliver a user's ask_user form answers to the pending ask.
+
+        Fast path when this worker holds the run's channel; otherwise publish
+        on the control channel so the worker that does can deliver it.
+        """
+        if await self._deliver_ask_user_answer(run_id, question_id, answers):
+            return "delivered"
+        await self._publish_control(
+            run_id,
+            "ask_user_answer",
+            extra={"question_id": question_id, "answers": answers},
+        )
+        return "published"
+
+    async def _deliver_ask_user_answer(
+        self, run_id: str, question_id: str, answers: dict[str, Any]
+    ) -> bool:
+        """Answer the in-process channel with ask_user form answers.
+
+        Returns True if delivered; False if this worker doesn't own the run.
+        """
+        channel = self._hitl_channels.get(run_id)
+        if channel is None:
+            return False
+        try:
+            await channel.answer(question_id, answers)
+        except Exception:
+            logger.warning("ask_user_answer delivery failed for run {}", run_id, exc_info=True)
+        return True
+
     async def dispatch_cancel_steer(self, run_id: str, steer_id: str) -> str:
         agent = self._agents.get(run_id)
         if agent is not None:
@@ -747,6 +801,12 @@ class RunManager:
                 data.get("question_id") or "",
                 data.get("decision") or "",
                 data.get("reason"),
+            )
+        elif type_ == "ask_user_answer":
+            await self._deliver_ask_user_answer(
+                run_id,
+                data.get("question_id") or "",
+                data.get("answers") or {},
             )
 
     async def _handle_ack(self, data: dict[str, Any]) -> None:
