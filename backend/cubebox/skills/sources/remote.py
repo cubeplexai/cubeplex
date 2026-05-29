@@ -113,7 +113,20 @@ class RemoteRegistrySource:
         return out
 
     async def fetch(self, source_ref: str) -> dict[str, bytes]:
-        """Import the WHOLE skill subpath: list the tree, then pull every safe file."""
+        """Import the WHOLE skill subpath: list the tree, then pull every safe file.
+
+        All exceptions raised by httpx (including ``httpx.InvalidURL`` for
+        malformed source_refs/URL paths) are converted to ``ValueError`` so
+        callers can catch one type and map to a controlled HTTP response.
+        """
+        try:
+            return await self._fetch(source_ref)
+        except Exception as exc:
+            if isinstance(exc, ValueError):
+                raise
+            raise ValueError(str(exc)) from exc
+
+    async def _fetch(self, source_ref: str) -> dict[str, bytes]:
         files: dict[str, bytes] = {}
         async with self._client() as client:
             tree = await client.get(f"/tree/{source_ref}")
@@ -135,9 +148,6 @@ class RemoteRegistrySource:
                     raise ValueError(f"unsafe path in remote skill tree: {rel!r}")
                 resp = await client.get(f"/raw/{source_ref}/{rel}")
                 resp.raise_for_status()
-                # Reject oversized raw files before buffering resp.content so a
-                # malicious/broken registry can't exhaust worker memory. Uses the
-                # same cap _extract_zip + validate_skill_files enforce.
                 cl = resp.headers.get("Content-Length")
                 if cl is not None:
                     size = int(cl)
