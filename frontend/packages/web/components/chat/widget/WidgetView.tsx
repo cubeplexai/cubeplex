@@ -39,12 +39,16 @@ interface WidgetViewProps {
 }
 
 // Focusable selector used for the fullscreen dialog's focus trap + initial
-// focus. Iframes are intentionally excluded — focusing the widget iframe would
-// not give it real keyboard ownership (sandbox is opaque-origin and toolbar
-// buttons are the only real interactive controls in the dialog).
+// focus. Includes the widget iframe so keyboard users can tab into the
+// sandboxed content (e.g. sliders, interactive explainers). Sandbox is
+// opaque-origin, so we can't inspect the child DOM from out here — but
+// focusing the iframe element itself hands keyboard input to the iframe's
+// browsing context, and the browser handles Tab navigation inside it from
+// then on. Shift+Tab out of the first widget control returns to the dialog.
 const FOCUSABLE_SELECTOR =
   'button:not([disabled]),a[href],input:not([disabled]),select:not([disabled]),' +
-  'textarea:not([disabled]),[tabindex]:not([tabindex="-1"])'
+  'textarea:not([disabled]),iframe:not([tabindex="-1"]),' +
+  '[tabindex]:not([tabindex="-1"])'
 
 export function WidgetView(props: WidgetViewProps) {
   // The reloadKey is bumped by the toolbar Reload button (or the error-retry
