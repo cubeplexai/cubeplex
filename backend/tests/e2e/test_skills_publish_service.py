@@ -140,10 +140,14 @@ async def test_publish_version_collision_raises(tmp_path, db_session) -> None:
     await publisher.publish_from_zip(
         org_id=org_id, org_slug=org_slug, actor_user_id="u", zip_bytes=z
     )
-    with pytest.raises(VersionCollisionError):
+    with pytest.raises(VersionCollisionError) as exc:
         await publisher.publish_from_zip(
             org_id=org_id, org_slug=org_slug, actor_user_id="u", zip_bytes=z
         )
+    # The error carries the colliding canonical name + version so the remote
+    # install reuse path can bind to that exact version, not current_version.
+    assert exc.value.canonical_name == f"{org_slug}:{skill_name}"
+    assert exc.value.version == "1.0.0"
 
 
 @pytest.mark.asyncio
