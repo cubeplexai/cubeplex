@@ -180,7 +180,17 @@ class InvalidSkillNameError(ValueError):
 
 
 class VersionCollisionError(ValueError):
-    pass
+    """Raised when the version being published already exists for a skill.
+
+    Carries the canonical name and the colliding version so callers (e.g. the
+    remote-install reuse path) can bind to that exact version instead of
+    guessing the skill's current_version.
+    """
+
+    def __init__(self, message: str, *, canonical_name: str = "", version: str = "") -> None:
+        super().__init__(message)
+        self.canonical_name = canonical_name
+        self.version = version
 
 
 class FileTooLargeError(ValueError):
@@ -367,7 +377,9 @@ class SkillPublishService:
             existing_version = await versions.find(existing_skill.id, fm.version)
             if existing_version is not None:
                 raise VersionCollisionError(
-                    f"version {fm.version} already exists for {canonical_name}"
+                    f"version {fm.version} already exists for {canonical_name}",
+                    canonical_name=canonical_name,
+                    version=fm.version,
                 )
 
         prefix = org_skill_prefix(org_id, fm.name, fm.version)

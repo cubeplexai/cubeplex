@@ -630,6 +630,22 @@ async def send_message(
                 text=request_obj.content,
             )
         if install_note is not None:
+            # Honor the same active-run lock the normal path enforces via
+            # run_manager.start_run: if a turn is already running for this
+            # conversation, appending a user/assistant pair straight to the
+            # checkpointer would interleave with that run's writes and corrupt
+            # history. Refuse with 409 exactly as a normal message would.
+            active_run = await get_active_run(
+                rds.client, prefix=rds.key_prefix, conversation_id=conversation_id
+            )
+            if active_run is not None and active_run.status == "running":
+                threshold = int(_config.get("lifecycle.stale_run_threshold_seconds", 120))
+                if not is_stale_meta(active_run, threshold_seconds=threshold):
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail="A run is already active for this conversation",
+                    )
+
             from cubepi.providers.base import AssistantMessage, TextContent, UserMessage
 
             await _update_conversation_timestamp(
