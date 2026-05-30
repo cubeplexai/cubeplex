@@ -1,10 +1,10 @@
-"""Candidate shape, trust tiers, the SkillSource protocol, and the opaque
+"""Candidate shape, trust tiers, the SkillRegistryAdapter protocol, and the opaque
 candidate-id codec.
 
 candidate_id is a URL-safe base64 token over "{kind}|{source_id}|{source_ref}".
 It is the only handle clients pass back to preview/install, so a slash-laden
 remote source_ref (a GitHub repo subpath) never has to fit a FastAPI path
-segment. source_id is the registered remote SkillSource row id (empty for
+segment. source_id is the registered remote SkillRegistry row id (empty for
 local candidates). Stateless: decode recovers (kind, source_id, source_ref)
 without any server lookup.
 
@@ -77,11 +77,11 @@ class SkillCandidate:
     repo: str | None = None
 
 
-class SkillSource(Protocol):
+class SkillRegistryAdapter(Protocol):
     kind: SourceKind
 
     async def search(self, query: str, *, limit: int) -> list[SkillCandidate]: ...
 
     async def fetch(self, source_ref: str) -> dict[str, bytes]:
-        """Return {rel_path: bytes} of the skill bundle for import. No-op-able."""
+        """Return {rel_path: bytes} of the skill bundle for import."""
         ...

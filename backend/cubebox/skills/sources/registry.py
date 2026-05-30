@@ -1,4 +1,4 @@
-"""Assembles the live SkillSource set for an (org, workspace)."""
+"""Assembles the live SkillRegistryAdapter set for an (org, workspace)."""
 
 from __future__ import annotations
 
@@ -6,31 +6,24 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from cubebox.repositories.skill_registry import SkillRegistryRepository
 from cubebox.skills.service import SkillCatalogService
-from cubebox.skills.sources.base import SkillSource, TrustTier
-from cubebox.skills.sources.local import LocalCatalogSource
-from cubebox.skills.sources.remote import RemoteRegistrySource
+from cubebox.skills.sources.base import SkillRegistryAdapter, TrustTier
+from cubebox.skills.sources.local import LocalCatalogAdapter
+from cubebox.skills.sources.remote import RemoteRegistryAdapter
 
 
-class SkillSourceRegistry:
-    def __init__(self, sources: list[SkillSource]) -> None:
-        self._sources = sources
+class SkillsAdapterManager:
+    def __init__(self, adapters: list[SkillRegistryAdapter]) -> None:
+        self._adapters = adapters
 
     @property
-    def sources(self) -> list[SkillSource]:
-        return self._sources
+    def adapters(self) -> list[SkillRegistryAdapter]:
+        return self._adapters
 
-    def remote_source_by_id(self, source_id: str) -> SkillSource | None:
-        """Return the enabled remote source with this row id, or None.
-
-        Preview/install decode the candidate_id's source_id and look the exact
-        source up here — never "first remote", which would fetch from the wrong
-        registry when an org has multiple remote sources (or none, if the
-        source was disabled/deleted between discover and install → caller maps
-        to 404).
-        """
-        for s in self._sources:
-            if s.kind == "remote" and getattr(s, "source_id", None) == source_id:
-                return s
+    def adapter_by_id(self, source_id: str) -> SkillRegistryAdapter | None:
+        """Return the enabled remote adapter with this registry row id, or None."""
+        for a in self._adapters:
+            if a.kind == "remote" and getattr(a, "source_id", None) == source_id:
+                return a
         return None
 
     @classmethod
@@ -42,9 +35,9 @@ class SkillSourceRegistry:
         org_id: str,
         org_slug: str,
         workspace_id: str,
-    ) -> SkillSourceRegistry:
-        sources: list[SkillSource] = [
-            LocalCatalogSource(
+    ) -> SkillsAdapterManager:
+        adapters: list[SkillRegistryAdapter] = [
+            LocalCatalogAdapter(
                 session=session,
                 catalog=catalog,
                 org_id=org_id,
@@ -55,8 +48,8 @@ class SkillSourceRegistry:
             org_id, enabled_only=True
         )
         for row in rows:
-            sources.append(
-                RemoteRegistrySource(
+            adapters.append(
+                RemoteRegistryAdapter(
                     source_id=row.id,
                     base_url=row.base_url,
                     trust_tier=TrustTier(row.trust_tier),
@@ -65,4 +58,4 @@ class SkillSourceRegistry:
                     repo=row.repo,
                 )
             )
-        return cls(sources)
+        return cls(adapters)

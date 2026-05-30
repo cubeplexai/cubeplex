@@ -1,4 +1,4 @@
-"""Remote GitHub-backed skill registry as a SkillSource.
+"""Remote GitHub-backed skill registry as a SkillRegistryAdapter.
 
 search() hits the registry directory; fetch() lists the chosen skill's subpath
 TREE then downloads every safe file under it (vercel-labs/skills issue #1015:
@@ -70,7 +70,7 @@ def _str_list(v: object) -> list[str]:
     return []
 
 
-class RemoteRegistrySource:
+class RemoteRegistryAdapter:
     kind: SourceKind = "remote"
 
     def __init__(

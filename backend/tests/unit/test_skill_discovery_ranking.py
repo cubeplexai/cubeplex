@@ -84,7 +84,7 @@ def test_single_keyword_token_matches():
 
 
 def test_non_matching_query_drops_unrelated_candidates():
-    # LocalCatalogSource hands every visible skill to rank_candidates regardless
+    # LocalCatalogAdapter hands every visible skill to rank_candidates regardless
     # of the query; candidates with zero overlap must not survive ranking.
     cands = [
         _c("data-pipeline", desc="ETL jobs", keywords=["etl"]),
