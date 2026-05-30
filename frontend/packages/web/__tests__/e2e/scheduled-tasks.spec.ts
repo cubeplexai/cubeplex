@@ -122,8 +122,9 @@ test('Scheduled Tasks: create via UI form', async ({ page }) => {
   await page.getByLabel('Name').fill('UI created task')
   await page.getByLabel('Prompt').fill('Run a quick summary of recent news')
 
-  // Schedule kind is already "interval" by default; set interval to 3600
-  await page.getByLabel('Interval (seconds)').fill('3600')
+  // Switch to interval frequency and set to 1 hour
+  await page.getByRole('button', { name: '每隔…' }).click()
+  await page.locator('input[type="number"]').fill('1')
 
   // Submit
   await page.getByRole('button', { name: /create task/i }).click()
