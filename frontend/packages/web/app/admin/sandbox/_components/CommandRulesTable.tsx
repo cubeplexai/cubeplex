@@ -89,9 +89,9 @@ export function CommandRulesTable({ rules, onChange, disabled }: Props) {
         <div className="flex items-start gap-2 rounded-md border border-amber-300/70 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-400/30 dark:bg-amber-950/30 dark:text-amber-200">
           <AlertCircle className="mt-0.5 size-3.5 shrink-0" />
           <span>
-            <strong className="font-medium">confirm</strong> is currently treated as{' '}
-            <strong className="font-medium">deny</strong> at runtime. Full prompt-for-approval
-            requires upstream cubepi changes (tracked separately).
+            <strong className="font-medium">confirm</strong> pauses the agent and asks a human to
+            approve or deny the command before it runs. No approval (deny, timeout, or cancel)
+            blocks the command.
           </span>
         </div>
       )}
