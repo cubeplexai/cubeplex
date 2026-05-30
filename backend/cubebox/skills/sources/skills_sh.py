@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import re
+
 import httpx
-from pathlib import PurePosixPath
 
 from cubebox.skills.sources.base import (
     SkillCandidate,
@@ -18,6 +19,15 @@ _GITHUB_RAW_BASE = "https://raw.githubusercontent.com"
 
 _RAW_FILE_MAX_BYTES = 10 * 1024 * 1024   # 10 MB
 _BUNDLE_MAX_BYTES = 50 * 1024 * 1024     # 50 MB
+
+# GitHub owner/repo/branch/skill-slug names: alphanumeric plus .-_
+# No percent-sign — rejects all URL-encoded bypass forms (%2e%2e, %2f, etc.)
+_GITHUB_NAME_RE = re.compile(r"^[a-zA-Z0-9._-]+$")
+
+
+def _safe_name(s: str) -> bool:
+    """True when s is a valid GitHub path component with no encoding tricks."""
+    return bool(s) and _GITHUB_NAME_RE.match(s) is not None
 
 
 class SkillsShAdapter:
@@ -92,20 +102,24 @@ class SkillsShAdapter:
         if not isinstance(skills, list):
             return []
 
-        # Resolve default branch once per unique owner/repo
+        # Resolve default branch once per unique owner/repo.
+        # Validate source format BEFORE any GitHub API call so malformed
+        # values (including percent-encoded traversal) never reach the network.
         repos: dict[str, str] = {}
         async with self._github_client() as gh_client:
             for item in skills:
-                source = item.get("source", "")
-                if source and source not in repos:
-                    try:
-                        parts = source.split("/", 1)
-                        if len(parts) == 2:
-                            repos[source] = await self._resolve_default_branch(
-                                gh_client, parts[0], parts[1]
-                            )
-                    except Exception:  # noqa: BLE001
-                        repos[source] = "main"
+                source = str(item.get("source") or "")
+                if not source or source in repos:
+                    continue
+                src_parts = source.split("/", 1)
+                if len(src_parts) != 2 or not _safe_name(src_parts[0]) or not _safe_name(src_parts[1]):
+                    continue  # skip malformed / unsafe source before any network call
+                try:
+                    repos[source] = await self._resolve_default_branch(
+                        gh_client, src_parts[0], src_parts[1]
+                    )
+                except Exception:  # noqa: BLE001
+                    repos[source] = "main"
 
         out: list[SkillCandidate] = []
         for item in skills:
@@ -113,8 +127,16 @@ class SkillsShAdapter:
                 continue
             slug = str(item.get("id") or item.get("name") or "")
             source = str(item.get("source") or "")
-            # source must be "{owner}/{repo}" — exactly one slash, no path traversal
-            if not slug or not source or source.count("/") != 1 or ".." in source:
+            # Whitelist both slug and source components against the regex so
+            # URL-encoded bypass forms (%2e, %2f) are rejected along with
+            # literal traversal sequences.
+            src_parts = source.split("/", 1)
+            if (
+                not _safe_name(slug)
+                or len(src_parts) != 2
+                or not _safe_name(src_parts[0])
+                or not _safe_name(src_parts[1])
+            ):
                 continue
             branch = repos.get(source, "main")
             source_ref = f"{source}/{branch}/{slug}"
@@ -142,9 +164,9 @@ class SkillsShAdapter:
         if len(parts) != 4:
             raise ValueError(f"invalid skills-sh source_ref: {source_ref!r}")
         owner, repo, branch, slug = parts
-        # Reject slug values that could escape the intended subpath
-        if slug.startswith("/") or ".." in PurePosixPath(slug).parts:
-            raise ValueError(f"unsafe slug in skills-sh source_ref: {slug!r}")
+        # Whitelist all URL path components — rejects percent-encoded traversal
+        if not (_safe_name(owner) and _safe_name(repo) and _safe_name(branch) and _safe_name(slug)):
+            raise ValueError(f"unsafe component in skills-sh source_ref: {source_ref!r}")
 
         async with self._github_client() as gh_client:
             tree_resp = await gh_client.get(
@@ -169,8 +191,10 @@ class SkillsShAdapter:
 
         async with self._raw_client() as raw_client:
             for rel in rel_paths:
-                # Mirror the path-safety check in RemoteRegistryAdapter
-                if rel.startswith("/") or ".." in PurePosixPath(rel).parts:
+                # Validate each component of the relative path from GitHub's tree.
+                # These come from GitHub's API, but we still guard against any
+                # unexpected traversal component.
+                if not rel or any(not _safe_name(part) for part in rel.split("/")):
                     raise ValueError(f"unsafe path in skills-sh tree: {rel!r}")
                 resp = await raw_client.get(f"/{owner}/{repo}/{branch}/{slug}/{rel}")
                 resp.raise_for_status()
@@ -189,4 +213,3 @@ class SkillsShAdapter:
         if "SKILL.md" not in files:
             raise ValueError(f"skills-sh skill {slug!r} has no SKILL.md")
         return files
-
