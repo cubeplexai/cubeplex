@@ -132,3 +132,55 @@ test('Scheduled Tasks: create via UI form', async ({ page }) => {
   await expect(page.getByTestId('task-form-dialog')).not.toBeVisible({ timeout: 5_000 })
   await expect(page.getByText('UI created task')).toBeVisible({ timeout: 8_000 })
 })
+
+test('Scheduled Tasks: new-task dialog shows frequency pills, not cron input', async ({ page }) => {
+  const wsId = await registerAndLand(page)
+  await page.goto(`/w/${wsId}/scheduled-tasks`)
+
+  await page.getByRole('button', { name: /new task/i }).click()
+  await expect(page.getByTestId('task-form-dialog')).toBeVisible()
+
+  // Frequency pills visible
+  await expect(page.getByRole('button', { name: '每天' })).toBeVisible()
+  await expect(page.getByRole('button', { name: '每周' })).toBeVisible()
+  await expect(page.getByRole('button', { name: '每月' })).toBeVisible()
+
+  // No raw cron input
+  await expect(page.locator('input[placeholder="0 9 * * 1-5"]')).not.toBeVisible()
+
+  // Switch to 每周 and confirm weekday pills appear
+  await page.getByRole('button', { name: '每周' }).click()
+  await expect(page.getByRole('button', { name: '一' })).toBeVisible()
+
+  // Switch to 每月 and confirm day grid appears
+  await page.getByRole('button', { name: '每月' }).click()
+  await expect(page.getByRole('button', { name: '15' })).toBeVisible()
+  await expect(page.getByRole('button', { name: /月末/ })).toBeVisible()
+})
+
+test('Scheduled Tasks: create daily task via new UI → API receives 5-field cron', async ({
+  page,
+  request,
+}) => {
+  const wsId = await registerAndLand(page)
+  const apiBase = await getApiBase(page)
+  const { cookieHeader, csrf } = await getCookies(page)
+
+  await page.goto(`/w/${wsId}/scheduled-tasks`)
+  await page.getByRole('button', { name: /new task/i }).click()
+  await page.getByLabel('Name').fill('Daily E2E')
+  await page.getByLabel('Prompt').fill('Say hello')
+  // Default is 每天 09:00 — just submit
+  await page.getByRole('button', { name: /create task/i }).click()
+
+  // Verify the created task has a 5-field cron
+  const tasks = await request.get(`${apiBase}/api/v1/ws/${wsId}/scheduled-tasks`, {
+    headers: { 'X-CSRF-Token': csrf, Cookie: cookieHeader },
+  })
+  const { tasks: list } = (await tasks.json()) as {
+    tasks: Array<{ name: string; cron_expr: string | null }>
+  }
+  const created = list.find((t) => t.name === 'Daily E2E')
+  expect(created).toBeDefined()
+  expect(created!.cron_expr?.split(' ')).toHaveLength(5)
+})
