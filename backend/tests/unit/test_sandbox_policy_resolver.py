@@ -38,10 +38,12 @@ async def test_resolver_returns_row_values() -> None:
         "default_image": "python:3.12",
         "network_rules": [{"action": "deny", "target": "evil.test"}],
         "command_rules": [{"action": "deny", "pattern": "rm *"}],
+        "network_default_action": "allow",
     }
     eff = await SandboxPolicyResolver(repo, default_image="ubuntu:22.04").resolve()
     assert eff.default_image == "python:3.12"
     assert eff.command_rules == [{"action": "deny", "pattern": "rm *"}]
+    assert eff.network_default_action == "allow"
 
 
 async def test_service_rejects_empty_default_image() -> None:

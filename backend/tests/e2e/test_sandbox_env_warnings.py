@@ -15,8 +15,13 @@ from cubebox.models.sandbox_policy import SandboxPolicy
 
 @pytest_asyncio.fixture(autouse=True)
 async def _ensure_sandbox_policy_table() -> None:
-    """Create ``sandbox_policies`` for the per-slot test DB (Task 7 ships
-    the real Alembic migration; this fills the gap until then)."""
+    """Provision the ``sandbox_policies`` table for this test.
+
+    The schema is managed in production by Alembic (revision
+    ``2f3d624337bd``); this fixture creates the table from SQLModel metadata
+    (idempotent via ``checkfirst=True``) so the E2E suite runs against a test
+    DB that hasn't had migrations applied.
+    """
     engine = create_async_engine(_build_database_url(), poolclass=NullPool)
     try:
         async with engine.begin() as conn:
