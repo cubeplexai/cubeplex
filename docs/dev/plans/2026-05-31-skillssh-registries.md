@@ -12,6 +12,12 @@
 
 ## Phase A — Rename
 
+> **Working directory for all Phase A and Phase B commands:** `backend/`
+> Unless stated otherwise, run every shell command from the `backend/` directory:
+> ```bash
+> cd /home/chris/cubebox/.worktrees/feat/skillssh-source/backend
+> ```
+
 ### Task 1: DB migration — rename `skill_sources` → `skill_registries`
 
 **Files:**
@@ -20,7 +26,6 @@
 - [ ] **Step 1: Generate empty migration**
 
 ```bash
-cd backend
 uv run alembic revision -m "rename skill_sources to skill_registries"
 ```
 
@@ -85,6 +90,7 @@ git commit -m "chore(db): rename skill_sources table to skill_registries"
 - [ ] **Step 1: Rename + rewrite model file**
 
 ```bash
+# from backend/
 git mv cubebox/models/skill_source.py cubebox/models/skill_registry.py
 ```
 
@@ -123,6 +129,7 @@ class SkillRegistry(CubeboxBase, table=True):
 - [ ] **Step 2: Rename + rewrite repository file**
 
 ```bash
+# from backend/
 git mv cubebox/repositories/skill_source.py cubebox/repositories/skill_registry.py
 ```
 
@@ -405,6 +412,7 @@ For each file, replace old name → new name. Run this grep to see exact lines:
 ```bash
 grep -rn "SkillSourceRegistry\|RemoteRegistrySource\|LocalCatalogSource\|SkillSource\b" \
   cubebox/ tests/ --include="*.py" | grep -v '.venv'
+# (run from backend/ — cubebox/ and tests/ are subdirs of backend/)
 ```
 
 Make replacements:
@@ -420,6 +428,7 @@ Key files to check: `discovery.py`, `run_manager.py`, `ws_skills.py`, `conversat
 - [ ] **Step 6: Rename test file**
 
 ```bash
+# from backend/
 git mv tests/unit/test_remote_registry_source.py tests/unit/test_remote_registry_adapter.py
 ```
 
@@ -457,6 +466,7 @@ git commit -m "refactor(skills): rename source→registry/adapter throughout (Sk
 - [ ] **Step 1: Rename the route file**
 
 ```bash
+# from backend/
 git mv cubebox/api/routes/v1/admin_skill_sources.py \
        cubebox/api/routes/v1/admin_skill_registries.py
 ```
@@ -659,6 +669,7 @@ Similarly in `routes/v1/__init__.py` if it re-exports the router.
 - [ ] **Step 4: Rename test file + update**
 
 ```bash
+# from backend/
 git mv tests/e2e/test_skill_sources_admin.py tests/e2e/test_skill_registries_admin.py
 ```
 
@@ -682,6 +693,11 @@ git commit -m "refactor(api): rename admin/skill-sources→skill-registries; add
 ---
 
 ## Phase B — SkillsShAdapter
+
+> **Working directory for all Phase B commands:** `backend/`
+> ```bash
+> cd /home/chris/cubebox/.worktrees/feat/skillssh-source/backend
+> ```
 
 ### Task 5: Config block
 
@@ -1178,6 +1194,15 @@ git commit -m "feat(skills-sh): wire SkillsShAdapter into SkillsAdapterManager.b
 ---
 
 ## Phase C — Admin Skill Registries Page
+
+> **Working directory for all Phase C commands:** `frontend/`
+> ```bash
+> cd /home/chris/cubebox/.worktrees/feat/skillssh-source/frontend
+> ```
+> Git commits in Phase C still run from the **worktree root** (one level up):
+> ```bash
+> cd /home/chris/cubebox/.worktrees/feat/skillssh-source && git add ... && git commit ...
+> ```
 
 ### Task 9: Frontend data hook
 
