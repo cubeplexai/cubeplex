@@ -1445,7 +1445,7 @@ async def seed_remote_source() -> AsyncIterator[Callable[..., Awaitable[str]]]:
     (it's covered by ``test_create_rejects_ssrf_base_urls``); they only need a
     registered source, so they seed one straight into the DB.
     """
-    from cubebox.repositories.skill_source import SkillSourceRepository
+    from cubebox.repositories.skill_registry import SkillRegistryRepository
 
     engine = create_async_engine(_build_database_url(), poolclass=NullPool)
     maker = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
@@ -1462,9 +1462,10 @@ async def seed_remote_source() -> AsyncIterator[Callable[..., Awaitable[str]]]:
         async with maker() as session:
             ws = await WorkspaceRepository(session).get(workspace_id)
             assert ws is not None
-            row = await SkillSourceRepository(session).create(
+            row = await SkillRegistryRepository(session).create(
                 org_id=ws.org_id,
                 name=name,
+                kind="remote",
                 base_url=base_url,
                 repo=repo,
                 trust_tier=trust_tier,

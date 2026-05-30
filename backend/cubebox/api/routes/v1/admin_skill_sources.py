@@ -14,8 +14,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from cubebox.auth.context import RequestContext
 from cubebox.db import get_session
 from cubebox.mcp.dependencies import get_admin_request_context
-from cubebox.models import SkillSource
-from cubebox.repositories.skill_source import SkillSourceRepository
+from cubebox.models import SkillRegistry
+from cubebox.repositories.skill_registry import SkillRegistryRepository
 
 router = APIRouter(prefix="/admin/skill-sources", tags=["admin-skill-sources"])
 
@@ -108,7 +108,7 @@ class SkillSourceResponse(BaseModel):
     enabled: bool
 
 
-def _to_response(row: SkillSource) -> SkillSourceResponse:
+def _to_response(row: SkillRegistry) -> SkillSourceResponse:
     return SkillSourceResponse(
         id=row.id,
         name=row.name,
@@ -130,9 +130,10 @@ async def create_source(
     if body.trust_tier not in _TRUST_TIERS:
         raise HTTPException(status_code=400, detail="BAD_TRUST_TIER")
     _validate_registry_base_url(body.base_url)
-    row = await SkillSourceRepository(session).create(
+    row = await SkillRegistryRepository(session).create(
         org_id=ctx.org_id,
         name=body.name,
+        kind="remote",
         base_url=body.base_url,
         repo=body.repo,
         trust_tier=body.trust_tier,
@@ -147,7 +148,7 @@ async def list_sources(
     ctx: Annotated[RequestContext, Depends(get_admin_request_context)],
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> list[SkillSourceResponse]:
-    rows = await SkillSourceRepository(session).list_for_org(ctx.org_id)
+    rows = await SkillRegistryRepository(session).list_for_org(ctx.org_id)
     return [_to_response(r) for r in rows]
 
 
@@ -163,7 +164,7 @@ async def patch_source(
     # never leaves a half-applied enabled flip behind.
     if body.trust_tier is not None and body.trust_tier not in _TRUST_TIERS:
         raise HTTPException(status_code=400, detail="BAD_TRUST_TIER")
-    repo = SkillSourceRepository(session)
+    repo = SkillRegistryRepository(session)
     if body.enabled is not None:
         if not await repo.set_enabled(ctx.org_id, source_id, body.enabled):
             raise HTTPException(status_code=404, detail="SOURCE_NOT_FOUND")
