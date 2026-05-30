@@ -58,14 +58,23 @@ class SandboxPolicy(CubeboxBase, table=True):
         nullable=True,
     )
     default_image: str = Field(max_length=512)
+    # Egress default action. "allow" = open by default, deny rules form a
+    # blacklist; "deny" = closed by default, allow rules form a whitelist.
+    # The sidecar evaluates egress first-match-wins, then falls back here.
+    network_default_action: str = Field(
+        default="deny",
+        max_length=10,
+        sa_column_kwargs={"server_default": "deny"},
+    )
     # JSON list of {action, target}; rules are inherently lists (multiple
     # allows/denies); image is a single value because v1 has no override
     # surface to pick one from a list.
     network_rules: list[dict[str, Any]] | None = Field(
         default=None, sa_column=Column(JSON(none_as_null=True))
     )
-    # JSON list of {action, pattern}. ``action`` in {allow, deny, confirm};
-    # confirm degrades to deny at runtime in v1 (see Task 8 + cubepi follow-up).
+    # JSON list of {action, pattern}. ``action`` in {allow, deny, confirm}.
+    # ``confirm`` pauses the execute tool at runtime for human approve/deny
+    # (real HITL — see SandboxMiddleware.before_tool_call).
     command_rules: list[dict[str, Any]] | None = Field(
         default=None, sa_column=Column(JSON(none_as_null=True))
     )
