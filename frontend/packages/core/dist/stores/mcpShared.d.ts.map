@@ -1,0 +1,1 @@
+{"version":3,"file":"mcpShared.d.ts","sourceRoot":"","sources":["../../src/stores/mcpShared.ts"],"names":[],"mappings":"AAEA,MAAM,WAAW,oBAAoB;IACnC,IAAI,EAAE,MAAM,CAAA;IACZ,OAAO,EAAE,MAAM,CAAA;CAChB;AAED,wBAAgB,cAAc,CAAC,GAAG,EAAE,OAAO,GAAG,oBAAoB,CAKjE"}

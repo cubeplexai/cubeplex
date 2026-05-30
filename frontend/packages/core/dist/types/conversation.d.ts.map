@@ -1,0 +1,1 @@
+{"version":3,"file":"conversation.d.ts","sourceRoot":"","sources":["../../src/types/conversation.ts"],"names":[],"mappings":"AAAA,MAAM,WAAW,YAAY;IAC3B,EAAE,EAAE,MAAM,CAAA;IACV,KAAK,EAAE,MAAM,CAAA;IACb,SAAS,EAAE,OAAO,CAAA;IAClB,UAAU,EAAE,MAAM,CAAA;IAClB,UAAU,EAAE,MAAM,CAAA;CACnB"}
