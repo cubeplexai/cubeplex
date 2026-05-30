@@ -105,7 +105,7 @@ export async function deleteWsEnvWorkspace(
   wsId: string,
   id: string,
 ): Promise<void> {
-  const res = await client.delete(`/api/v1/ws/${wsId}/sandbox-env/workspace/${id}`)
+  const res = await client.del(`/api/v1/ws/${wsId}/sandbox-env/workspace/${id}`)
   if (!res.ok) throw await toApiError(res)
 }
 
@@ -143,7 +143,7 @@ export async function deleteWsEnvMe(
   wsId: string,
   id: string,
 ): Promise<void> {
-  const res = await client.delete(`/api/v1/ws/${wsId}/sandbox-env/me/${id}`)
+  const res = await client.del(`/api/v1/ws/${wsId}/sandbox-env/me/${id}`)
   if (!res.ok) throw await toApiError(res)
 }
 
@@ -172,7 +172,7 @@ export async function rotateAdminEnv(
 }
 
 export async function deleteAdminEnv(client: ApiClient, id: string): Promise<void> {
-  const res = await client.delete(`/api/v1/admin/sandbox-env/${id}`)
+  const res = await client.del(`/api/v1/admin/sandbox-env/${id}`)
   if (!res.ok) throw await toApiError(res)
 }
 ```
@@ -426,7 +426,11 @@ export type ModalMode =
 
 interface Props {
   mode: ModalMode
-  onSubmit: (body: CreateEnvIn | { secret_value: string }, entryId?: string) => Promise<void>
+  onSubmit: (
+    body: CreateEnvIn | { secret_value: string },
+    entryId?: string,
+    scope?: 'workspace' | 'user',
+  ) => Promise<void>
   onClose: () => void
 }
 
@@ -502,7 +506,9 @@ export function EnvModal({ mode, onSubmit, onClose }: Props) {
             ? { secret_value: value, hosts: parseHosts(hostsRaw) }
             : { plain_value: value }),
         }
-        await onSubmit(body)
+        // Pass the final scope selection (only relevant for workspace-mode adds)
+        const finalScope = mode.kind === 'add-workspace' ? scope : undefined
+        await onSubmit(body, undefined, finalScope)
       }
       onClose()
     } catch (err: unknown) {
@@ -881,7 +887,11 @@ export default function AdminSandboxEnvPage() {
 
   useEffect(() => { load() }, [load])
 
-  async function handleSubmit(body: CreateEnvIn | { secret_value: string }, entryId?: string) {
+  async function handleSubmit(
+    body: CreateEnvIn | { secret_value: string },
+    entryId?: string,
+    _scope?: 'workspace' | 'user',
+  ) {
     if (entryId) {
       await rotateAdminEnv(client, entryId, body as { secret_value: string })
     } else {
@@ -1017,7 +1027,11 @@ export default function WorkspaceSandboxEnvPage({ params }: PageProps): React.Re
 
   useEffect(() => { load() }, [load])
 
-  async function handleSubmit(body: CreateEnvIn | { secret_value: string }, entryId?: string) {
+  async function handleSubmit(
+    body: CreateEnvIn | { secret_value: string },
+    entryId?: string,
+    scope?: 'workspace' | 'user',
+  ) {
     if (entryId) {
       // Rotate: find the entry to determine which path to call
       const entry = entries.find((e) => e.id === entryId)
@@ -1027,10 +1041,9 @@ export default function WorkspaceSandboxEnvPage({ params }: PageProps): React.Re
         await rotateWsEnvMe(client, wsId, entryId, body as { secret_value: string })
       }
     } else {
-      // Add: determine scope from modal mode
+      // Add: use the scope the user selected inside the modal
       const createBody = body as CreateEnvIn
-      const targetScope = modal?.kind === 'add-workspace' ? modal.defaultScope : 'user'
-      if (targetScope === 'workspace') {
+      if (scope === 'workspace') {
         await createWsEnvWorkspace(client, wsId, createBody)
       } else {
         await createWsEnvMe(client, wsId, createBody)
