@@ -99,17 +99,20 @@ export function AskUserCard({ pending, onSubmit }: AskUserCardProps) {
     return init
   })
   const [submitting, setSubmitting] = useState(false)
-  const [secondsLeft, setSecondsLeft] = useState<number | null>(() => {
-    if (pending.timeout_seconds === null) return null
-    const elapsed = Math.floor((Date.now() - pending.requestedAt) / 1000)
-    return Math.max(0, pending.timeout_seconds - elapsed)
-  })
+  // Initialise to null to avoid SSR/CSR hydration mismatch (Date.now() differs).
+  // The first useEffect sets the real value after mount.
+  const [secondsLeft, setSecondsLeft] = useState<number | null>(null)
 
   useEffect(() => {
-    if (secondsLeft === null || secondsLeft <= 0) return
-    const id = setInterval(() => setSecondsLeft((s) => (s !== null && s > 0 ? s - 1 : 0)), 1000)
+    if (pending.timeout_seconds === null) return
+    const computeLeft = () => {
+      const elapsed = Math.floor((Date.now() - pending.requestedAt) / 1000)
+      return Math.max(0, pending.timeout_seconds! - elapsed)
+    }
+    setSecondsLeft(computeLeft())
+    const id = setInterval(() => setSecondsLeft(computeLeft()), 1000)
     return () => clearInterval(id)
-  }, [secondsLeft])
+  }, [pending.timeout_seconds, pending.requestedAt])
 
   const setAnswer = (key: string, value: string | string[]) => {
     setAnswers((prev) => ({ ...prev, [key]: value }))
