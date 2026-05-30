@@ -33,6 +33,7 @@ class SandboxPolicyRepository:
         default_image: str,
         network_rules: list[dict[str, Any]] | None,
         command_rules: list[dict[str, Any]] | None,
+        network_default_action: str,
     ) -> SandboxPolicy:
         """Upsert the org-default policy row (scope_workspace_id=NULL).
 
@@ -44,6 +45,7 @@ class SandboxPolicyRepository:
             existing.default_image = default_image
             existing.network_rules = network_rules
             existing.command_rules = command_rules
+            existing.network_default_action = network_default_action
             await self.session.commit()
             await self.session.refresh(existing)
             return existing
@@ -53,6 +55,7 @@ class SandboxPolicyRepository:
             default_image=default_image,
             network_rules=network_rules,
             command_rules=command_rules,
+            network_default_action=network_default_action,
         )
         self.session.add(row)
         await self.session.commit()
