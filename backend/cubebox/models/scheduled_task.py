@@ -64,6 +64,10 @@ class ScheduledTask(CubeboxBase, OrgScopedMixin, table=True):
         default=None,
         sa_column=Column(DateTime(timezone=True), nullable=True),
     )
+    end_at: datetime | None = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True),
+    )
 
 
 class ScheduledTaskRun(CubeboxBase, OrgScopedMixin, table=True):
