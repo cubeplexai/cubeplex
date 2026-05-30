@@ -161,3 +161,15 @@ async def test_service_allows_duplicate_same_action() -> None:
         command_rules=None,
         network_default_action="allow",
     )
+
+
+async def test_upsert_normalizes_network_targets() -> None:
+    repo = _FakeRepo()
+    svc = SandboxPolicyService(repo)
+    await svc.upsert(
+        default_image="ubuntu:22.04",
+        network_rules=[{"action": "deny", "target": "API.GitHub.com."}],
+        command_rules=None,
+        network_default_action="allow",
+    )
+    assert repo.row["network_rules"] == [{"action": "deny", "target": "api.github.com"}]

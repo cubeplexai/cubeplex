@@ -17,6 +17,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cubebox.models import SandboxEnvVar
+from cubebox.sandbox_env.host_rules import canon_host
 
 
 async def list_org_credentials_with_hosts(
@@ -50,6 +51,8 @@ def _globs_overlap(a: str, b: str) -> bool:
     directions; we also treat exact equality as overlap to cover the
     no-wildcard case fast.
     """
+    a = canon_host(a)
+    b = canon_host(b)
     if a == b:
         return True
     # Either side can be the pattern; the other side is then a concrete

@@ -98,6 +98,15 @@ def validate_hosts(hosts: list[str]) -> None:
         )
 
 
+def canon_host(host: str) -> str:
+    """Canonical host form for comparison/storage: trimmed, no trailing dot, lowercase.
+
+    Mirrors the sidecar's domain matching (case-insensitive, single trailing dot
+    stripped). Use this anywhere a host/FQDN/wildcard target is compared or stored.
+    """
+    return host.strip().removesuffix(".").lower()
+
+
 def host_matches(host: str, patterns: list[str]) -> bool:
     """True if ``host`` (already lowercased/port-stripped) matches any pattern."""
     host = host.lower()
