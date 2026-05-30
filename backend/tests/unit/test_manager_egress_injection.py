@@ -124,8 +124,12 @@ async def test_create_with_exchange_host_sets_run_env_and_persists_refs(
     assert policy is not None, "Sandbox.create must receive network_policy="
     assert hasattr(policy, "egress")
     targets = {r.target for r in policy.egress}
-    assert "api.github.com" in targets
+    # Vault host is NOT in the allow-list — network reachability is decoupled
+    # from credential substitution.
+    assert "api.github.com" not in targets
+    # The exchange host stays force-allowed so substitution still works.
     assert "egress-exchange.internal" in targets
+    assert policy.default_action == "deny"
 
     # --- run env was set on the returned backend ---
     from cubebox.sandbox.opensandbox import OpenSandbox

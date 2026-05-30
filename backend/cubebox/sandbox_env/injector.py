@@ -1,27 +1,23 @@
-"""Build sandbox env + egress network policy + ref bindings from resolved env."""
+"""Build sandbox env + ref bindings from resolved env.
+
+Network egress policy is intentionally NOT built here — see
+``cubebox.sandbox_policy.rules.build_network_policy``. The credential vault
+only decides whether to substitute a placeholder for a host; whether the
+sandbox can reach that host is the network policy's separate concern.
+"""
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Any
 
-from opensandbox.models.sandboxes import NetworkPolicy, NetworkRule
-
 from cubebox.sandbox_env.placeholder import hash_placeholder, mint_placeholder
 from cubebox.services.sandbox_env import ResolvedEnv
-
-
-# Regex host patterns ("/.../" ) cannot be expressed as an egress allow-list
-# rule (FQDN/wildcard only). Plan 1 guarantees a secret with a regex host also
-# carries an FQDN/wildcard companion, so we simply skip regex items here.
-def _allowlist_targets(hosts: list[str]) -> list[str]:
-    return [h for h in hosts if not (h.startswith("/") and h.endswith("/"))]
 
 
 @dataclass
 class InjectionResult:
     env: dict[str, str] = field(default_factory=dict)
-    network_policy: NetworkPolicy = field(default_factory=NetworkPolicy)
     bindings: list[dict[str, Any]] = field(default_factory=list)
 
 
@@ -32,7 +28,6 @@ class SandboxEnvInjector:
     def build(self, resolved: list[ResolvedEnv]) -> InjectionResult:
         env: dict[str, str] = {}
         bindings: list[dict[str, Any]] = []
-        targets: set[str] = {self._exchange_host}
 
         for r in resolved:
             if r.is_secret:
@@ -51,14 +46,9 @@ class SandboxEnvInjector:
                         "credential_id": r.credential_id,
                     }
                 )
-                targets.update(_allowlist_targets(r.hosts))
             else:
                 if r.plain_value is None:
                     raise ValueError(f"Plain env var {r.env_name!r} has no plain_value")
                 env[r.env_name] = r.plain_value
 
-        policy = NetworkPolicy(
-            defaultAction="deny",
-            egress=[NetworkRule(action="allow", target=t) for t in sorted(targets)],
-        )
-        return InjectionResult(env=env, network_policy=policy, bindings=bindings)
+        return InjectionResult(env=env, bindings=bindings)
