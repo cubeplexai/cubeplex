@@ -182,6 +182,11 @@ default:
     cache_root: "skills_cache" # Local extraction cache for object-store-fetched skills
     preinstalled_dir: "skills/preinstalled" # Relative to backend/, seeded into the global catalog
 
+  # Registry Configuration
+  registry:
+    skills_sh:
+      github_token: ""  # optional: raises GitHub API rate limit 60→5000 req/h
+
   # Memory Configuration
   memory:
     short_term_enabled: true
