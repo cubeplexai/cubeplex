@@ -1478,6 +1478,11 @@ class RunManager:
                 # Middleware tools (execute, write_file, edit_file, file_read) collected for
                 # ordered merge below
                 _sandbox_tools.extend(sandbox_mw.tools)
+                # ask_user built-in tool shares the same HITL channel so the agent
+                # can ask structured questions that pause execution just like a confirm rule.
+                from cubepi.hitl import ask_user_tool
+
+                _builtin_tools.append(ask_user_tool(sandbox_hitl_channel))
             except Exception as _exc:
                 logger.warning("SandboxMiddleware unavailable: {}", _exc)
 
