@@ -3,7 +3,6 @@
 import { useState } from 'react'
 import { useTranslations } from 'next-intl'
 import { Database, Trash2 } from 'lucide-react'
-import { Button } from '@/components/ui/button'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -57,10 +56,8 @@ export function RegistryDetailPanel({
           </span>
         </div>
         <AlertDialog>
-          <AlertDialogTrigger asChild>
-            <Button size="sm" variant="ghost" className="text-destructive hover:text-destructive">
-              <Trash2 className="size-3.5" />
-            </Button>
+          <AlertDialogTrigger className="inline-flex h-8 w-8 items-center justify-center rounded-md text-destructive transition-colors hover:bg-accent/60 hover:text-destructive">
+            <Trash2 className="size-3.5" />
           </AlertDialogTrigger>
           <AlertDialogContent>
             <AlertDialogHeader>

@@ -30,9 +30,10 @@ export default function SkillRegistriesPage() {
     return !!created
   }
 
-  async function handleDelete(id: string) {
+  async function handleDelete(id: string): Promise<boolean> {
     const ok = await remove(id)
     if (ok && selectedId === id) setSelectedId(null)
+    return ok
   }
 
   return (

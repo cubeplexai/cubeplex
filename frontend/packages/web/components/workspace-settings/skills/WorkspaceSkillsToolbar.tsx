@@ -69,8 +69,9 @@ export function WorkspaceSkillsToolbar({
   const stateValue = filters.state ?? 'all'
   const [draft, setDraft] = useState(filters.q ?? '')
 
-  // Sync draft when parent clears the query (e.g. on unmount/reset)
+  // Sync draft when parent clears the query (e.g. on unmount/reset).
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     if (!filters.q) setDraft('')
   }, [filters.q])
 
