@@ -30,7 +30,7 @@ from cubebox.skills.sources.base import (
     TrustTier,
     decode_candidate_id,
 )
-from cubebox.skills.sources.registry import SkillSourceRegistry
+from cubebox.skills.sources.registry import SkillsAdapterManager
 
 _TRUST_RANK = {TrustTier.official: 0, TrustTier.community: 1, TrustTier.untrusted: 2}
 
@@ -88,7 +88,7 @@ def rank_candidates(
     """Dedupe by normalized display slug (local wins), then sort and truncate.
 
     Candidates with no overlap with the query at all (``_score`` match bucket
-    3) are dropped: ``LocalCatalogSource.search`` returns every visible local
+    3) are dropped: ``LocalCatalogAdapter.search`` returns every visible local
     skill regardless of query, so without this filter ``discover?q=<nonsense>``
     and the ``find_skills`` tool would surface unrelated catalog skills.
     """
@@ -112,12 +112,12 @@ def rank_candidates(
 
 
 class SkillDiscoveryService:
-    def __init__(self, registry: SkillSourceRegistry) -> None:
+    def __init__(self, registry: SkillsAdapterManager) -> None:
         self._registry = registry
 
     async def discover(self, query: str, *, limit: int = 5) -> list[SkillCandidate]:
         merged: list[SkillCandidate] = []
-        for source in self._registry.sources:
+        for source in self._registry.adapters:
             try:
                 merged.extend(await source.search(query, limit=limit * 2))
             except Exception:  # noqa: BLE001 — one bad remote must not kill discovery
@@ -141,7 +141,7 @@ class SkillInstallService:
         self,
         *,
         session: AsyncSession,
-        registry: SkillSourceRegistry,
+        registry: SkillsAdapterManager,
         publisher: SkillPublishService,
         org_id: str,
         org_slug: str,
@@ -201,7 +201,7 @@ class SkillInstallService:
     async def _install_remote(
         self, source_id: str, source_ref: str
     ) -> InstallResult:
-        source = self._registry.remote_source_by_id(source_id)
+        source = self._registry.adapter_by_id(source_id)
         if source is None:
             raise SkillInstallError("no enabled remote source for this candidate")
         try:

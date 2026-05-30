@@ -54,7 +54,7 @@ from cubebox.skills.service import (
     VersionCollisionError,
 )
 from cubebox.skills.sources.base import CandidateIdError, decode_candidate_id
-from cubebox.skills.sources.registry import SkillSourceRegistry
+from cubebox.skills.sources.registry import SkillsAdapterManager
 
 router = APIRouter(prefix="/ws/{workspace_id}/skills", tags=["ws-skills"])
 
@@ -156,7 +156,7 @@ async def discover_skills(
     if org is None:
         raise HTTPException(status_code=404, detail="ORG_NOT_FOUND")
     catalog = SkillCatalogService(session=session, cache=_cache())
-    registry = await SkillSourceRegistry.build(
+    registry = await SkillsAdapterManager.build(
         session=session,
         catalog=catalog,
         org_id=ctx.org_id,
@@ -221,14 +221,14 @@ async def preview_candidate(
             canonical_name=skill.name,
             content=content,
         )
-    registry = await SkillSourceRegistry.build(
+    registry = await SkillsAdapterManager.build(
         session=session,
         catalog=catalog,
         org_id=ctx.org_id,
         org_slug=org.slug,
         workspace_id=workspace_id,
     )
-    remote = registry.remote_source_by_id(source_id)
+    remote = registry.adapter_by_id(source_id)
     if remote is None:
         raise HTTPException(status_code=404, detail="SOURCE_NOT_FOUND")
     try:
@@ -261,7 +261,7 @@ async def install_candidate(
     if org is None:
         raise HTTPException(status_code=404, detail="ORG_NOT_FOUND")
     catalog = SkillCatalogService(session=session, cache=_cache())
-    registry = await SkillSourceRegistry.build(
+    registry = await SkillsAdapterManager.build(
         session=session,
         catalog=catalog,
         org_id=ctx.org_id,
