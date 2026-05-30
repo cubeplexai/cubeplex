@@ -25,6 +25,7 @@ export interface ScheduledTaskOut {
   owner_user_id: string
   next_fire_at: string | null
   last_fired_at: string | null
+  end_at: string | null
   created_at: string
   updated_at: string
 }
@@ -52,6 +53,7 @@ export interface ScheduledTaskCreate {
   timezone?: string
   target_mode: TargetMode
   target_conversation_id?: string
+  end_at?: string | null
 }
 
 export type ScheduledTaskPatch = Partial<ScheduledTaskCreate>
