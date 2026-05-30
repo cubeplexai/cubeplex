@@ -3,12 +3,18 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Protocol
+from typing import Any, Literal, Protocol
 
 from cubebox.sandbox_env.host_rules import HostPatternError, validate_host_pattern
 
 _VALID_COMMAND_ACTIONS = {"deny", "confirm", "allow"}
 _VALID_NETWORK_ACTIONS = {"allow", "deny"}
+_VALID_DEFAULT_ACTIONS = {"allow", "deny"}
+
+
+def _canon_host(target: str) -> str:
+    # Mirror the sidecar: case-insensitive, single trailing dot stripped.
+    return target.strip().removesuffix(".").lower()
 
 
 class SandboxPolicyValidationError(ValueError):
@@ -23,6 +29,7 @@ class _PolicyRepo(Protocol):
         default_image: str,
         network_rules: list[dict[str, Any]] | None,
         command_rules: list[dict[str, Any]] | None,
+        network_default_action: str,
     ) -> Any: ...
 
 
@@ -31,6 +38,7 @@ class EffectivePolicy:
     default_image: str
     network_rules: list[dict[str, Any]] = field(default_factory=list)
     command_rules: list[dict[str, Any]] = field(default_factory=list)
+    network_default_action: Literal["allow", "deny"] = "deny"
 
 
 def _row_field(row: Any, name: str) -> Any:
@@ -48,14 +56,20 @@ class SandboxPolicyService:
         default_image: str,
         network_rules: list[dict[str, Any]] | None,
         command_rules: list[dict[str, Any]] | None,
+        network_default_action: str,
     ) -> None:
         if not default_image.strip():
             raise SandboxPolicyValidationError("default_image must not be empty")
+        if network_default_action not in _VALID_DEFAULT_ACTIONS:
+            raise SandboxPolicyValidationError(
+                f"invalid network default action: {network_default_action!r}"
+            )
         for rule in command_rules or []:
             if rule.get("action") not in _VALID_COMMAND_ACTIONS:
                 raise SandboxPolicyValidationError(f"invalid command action: {rule!r}")
             if not str(rule.get("pattern", "")).strip():
                 raise SandboxPolicyValidationError(f"command rule needs a pattern: {rule!r}")
+        seen_actions: dict[str, str] = {}
         for rule in network_rules or []:
             if rule.get("action") not in _VALID_NETWORK_ACTIONS:
                 raise SandboxPolicyValidationError(f"invalid network action: {rule!r}")
@@ -76,6 +90,13 @@ class SandboxPolicyService:
                 validate_host_pattern(target)
             except HostPatternError as exc:
                 raise SandboxPolicyValidationError(str(exc)) from exc
+            canon = _canon_host(target)
+            action = str(rule.get("action"))
+            if canon in seen_actions and seen_actions[canon] != action:
+                raise SandboxPolicyValidationError(
+                    f"contradictory network rules for {target!r}: both allow and deny"
+                )
+            seen_actions[canon] = action
 
     async def get(self) -> Any:
         return await self._repo.get()
@@ -86,12 +107,14 @@ class SandboxPolicyService:
         default_image: str,
         network_rules: list[dict[str, Any]] | None,
         command_rules: list[dict[str, Any]] | None,
+        network_default_action: str,
     ) -> Any:
-        self._validate(default_image, network_rules, command_rules)
+        self._validate(default_image, network_rules, command_rules, network_default_action)
         return await self._repo.upsert(
             default_image=default_image,
             network_rules=network_rules,
             command_rules=command_rules,
+            network_default_action=network_default_action,
         )
 
 
@@ -116,4 +139,5 @@ class SandboxPolicyResolver:
             default_image=_row_field(row, "default_image") or self._default_image,
             network_rules=list(_row_field(row, "network_rules") or []),
             command_rules=list(_row_field(row, "command_rules") or []),
+            network_default_action=_row_field(row, "network_default_action") or "deny",
         )

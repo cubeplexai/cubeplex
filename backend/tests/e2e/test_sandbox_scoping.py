@@ -149,6 +149,7 @@ async def test_image_drift_is_lazy_existing_keeps_old_new_uses_new(
             default_image="python:3.12",
             network_rules=None,
             command_rules=None,
+            network_default_action="deny",
         )
 
     mgr = SandboxManager(session_factory)
@@ -172,6 +173,7 @@ async def test_image_drift_is_lazy_existing_keeps_old_new_uses_new(
             default_image="ubuntu:22.04",
             network_rules=None,
             command_rules=None,
+            network_default_action="deny",
         )
     await mgr.get_or_create(user_id, org_id=org_id, workspace_id=ws_a)
     async with session_factory() as s:
