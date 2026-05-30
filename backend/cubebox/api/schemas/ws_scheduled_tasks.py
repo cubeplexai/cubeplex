@@ -19,6 +19,12 @@ def _validate_timezone(tz: str) -> None:
 
 
 def _validate_cron(expr: str) -> None:
+    parts = expr.strip().split()
+    if len(parts) != 5:
+        raise ValueError(
+            f"cron expression must have exactly 5 fields "
+            f"(minute hour day month weekday), got {len(parts)}: {expr!r}"
+        )
     if not croniter.is_valid(expr):
         raise ValueError(f"invalid cron expression: {expr!r}")
 
