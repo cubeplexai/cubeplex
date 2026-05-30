@@ -497,17 +497,6 @@ export function AssistantMessage({
   // Count active subagents (streaming)
   const activeSubagentCount = subAgentStreams ? Object.keys(subAgentStreams).length : 0
 
-  // Widgets render OUTSIDE the assistant max-w-[75%] bubble column so they can
-  // span the full chat-column width (max-w-2xl from MessageList) and sit
-  // centered within it — matching how the rest of the chat reads visually
-  // instead of being pinned to the assistant's left edge.
-  const isWidget = (item: (typeof grouped)[number]): boolean =>
-    !Array.isArray(item) &&
-    (item.type === 'tool_call' || item.type === 'tool_call_streaming') &&
-    item.name === 'show_widget'
-  const bubbleItems = grouped.map((item, i) => ({ item, i })).filter(({ item }) => !isWidget(item))
-  const widgetItems = grouped.map((item, i) => ({ item, i })).filter(({ item }) => isWidget(item))
-
   const renderItem = (item: (typeof grouped)[number], i: number) => {
     if (Array.isArray(item)) {
       const tcBlocks = item as (ContentBlock & { type: 'tool_call' })[]
@@ -546,22 +535,7 @@ export function AssistantMessage({
 
   return (
     <div data-role="assistant" className="space-y-2">
-      {/* Widget rendered FIRST (at the top of the message). The widget is the
-          answer; the bubble below is commentary. Refresh order also puts widget
-          on top in the persisted message — keeping streaming consistent with
-          refresh. The shell pre-fills #root with a skeleton (see widgetShell.ts)
-          so the reserved space is stable while morphdom + content stream in. */}
-      {widgetItems.length > 0 && (
-        <div className="space-y-2 max-w-[640px] mx-auto">
-          {widgetItems.map(({ item, i }) => renderItem(item, i))}
-        </div>
-      )}
-      {/* Skip the avatar+bubble row entirely when a widget-only message has
-          no text/tools/subagent content — otherwise we render an empty bubble
-          row below the widget, which looks like a stray empty assistant
-          response. Loading/todos still render below, gated by their own
-          conditions. */}
-      {(bubbleItems.length > 0 || totalSubagents >= 2) && (
+      {(grouped.length > 0 || totalSubagents >= 2) && (
         <div className="flex justify-start gap-2.5">
           <div
             className="shrink-0 w-6 h-6 rounded-md border border-border bg-card
@@ -576,14 +550,10 @@ export function AssistantMessage({
                 totalCount={totalSubagents}
               />
             )}
-            {bubbleItems.map(({ item, i }) => renderItem(item, i))}
+            {grouped.map((item, i) => renderItem(item, i))}
           </div>
         </div>
       )}
-      {/* Todos + streaming/loading indicator render AFTER widgets so the
-          "still working" signal stays at the visual end of the assistant
-          message even when widgets are present. pl-9 ≈ avatar(24px)+gap(10px)
-          to keep them aligned with the bubble content. */}
       {(isStreaming && todos && todos.length > 0) ||
       (!isStreaming && historyTodos.length > 0) ||
       isStreaming ? (
