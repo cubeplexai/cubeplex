@@ -3,12 +3,12 @@ import pytest
 
 
 @pytest.mark.asyncio
-async def test_admin_can_register_and_disable_remote_source(
+async def test_admin_can_register_and_disable_remote_registry(
     admin_client: tuple[httpx.AsyncClient, str],
 ) -> None:
     client, _ = admin_client
     create = await client.post(
-        "/api/v1/admin/skill-sources",
+        "/api/v1/admin/skill-registries",
         json={
             "name": "skills.sh",
             "base_url": "https://www.skills.sh",
@@ -19,10 +19,10 @@ async def test_admin_can_register_and_disable_remote_source(
     assert create.status_code == 201
     sid = create.json()["id"]
 
-    listed = await client.get("/api/v1/admin/skill-sources")
+    listed = await client.get("/api/v1/admin/skill-registries")
     assert any(s["id"] == sid for s in listed.json())
 
-    disabled = await client.patch(f"/api/v1/admin/skill-sources/{sid}", json={"enabled": False})
+    disabled = await client.patch(f"/api/v1/admin/skill-registries/{sid}", json={"enabled": False})
     assert disabled.status_code == 200
     assert disabled.json()["enabled"] is False
 
@@ -53,7 +53,7 @@ async def test_create_rejects_ssrf_base_urls(
 ) -> None:
     client, _ = admin_client
     resp = await client.post(
-        "/api/v1/admin/skill-sources",
+        "/api/v1/admin/skill-registries",
         json={
             "name": "ssrf-test",
             "base_url": bad_url,
@@ -71,9 +71,9 @@ async def test_patch_with_invalid_trust_tier_does_not_flip_enabled(
     """Invalid trust_tier must reject the PATCH before any field is mutated."""
     client, _ = admin_client
     create = await client.post(
-        "/api/v1/admin/skill-sources",
+        "/api/v1/admin/skill-registries",
         json={
-            "name": "atomic-source",
+            "name": "atomic-registry",
             "base_url": "https://atomic.test",
             "repo": "atomic/repo",
             "trust_tier": "official",
@@ -84,22 +84,55 @@ async def test_patch_with_invalid_trust_tier_does_not_flip_enabled(
     initial_enabled = create.json()["enabled"]
 
     bad = await client.patch(
-        f"/api/v1/admin/skill-sources/{sid}",
+        f"/api/v1/admin/skill-registries/{sid}",
         json={"enabled": not initial_enabled, "trust_tier": "bogus-tier"},
     )
     assert bad.status_code == 400
     assert bad.json()["detail"] == "BAD_TRUST_TIER"
 
-    after = await client.get("/api/v1/admin/skill-sources")
+    after = await client.get("/api/v1/admin/skill-registries")
     row = next(s for s in after.json() if s["id"] == sid)
     assert row["enabled"] == initial_enabled
     assert row["trust_tier"] == "official"
 
 
 @pytest.mark.asyncio
-async def test_member_cannot_reach_admin_source_routes(
+async def test_admin_can_delete_registry(
+    admin_client: tuple[httpx.AsyncClient, str],
+) -> None:
+    client, _ = admin_client
+    create = await client.post(
+        "/api/v1/admin/skill-registries",
+        json={
+            "name": "to-delete",
+            "base_url": "https://delete-me.example.com",
+            "trust_tier": "untrusted",
+        },
+    )
+    assert create.status_code == 201
+    sid = create.json()["id"]
+
+    deleted = await client.delete(f"/api/v1/admin/skill-registries/{sid}")
+    assert deleted.status_code == 204
+
+    listed = await client.get("/api/v1/admin/skill-registries")
+    assert not any(s["id"] == sid for s in listed.json())
+
+
+@pytest.mark.asyncio
+async def test_delete_nonexistent_registry_returns_404(
+    admin_client: tuple[httpx.AsyncClient, str],
+) -> None:
+    client, _ = admin_client
+    resp = await client.delete("/api/v1/admin/skill-registries/reg_does_not_exist")
+    assert resp.status_code == 404
+    assert resp.json()["detail"] == "REGISTRY_NOT_FOUND"
+
+
+@pytest.mark.asyncio
+async def test_member_cannot_reach_admin_registry_routes(
     member_client: tuple[httpx.AsyncClient, str],
 ) -> None:
     client, _ = member_client
-    resp = await client.get("/api/v1/admin/skill-sources")
+    resp = await client.get("/api/v1/admin/skill-registries")
     assert resp.status_code in (401, 403)
