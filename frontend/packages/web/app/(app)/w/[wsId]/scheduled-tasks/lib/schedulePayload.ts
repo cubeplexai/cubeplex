@@ -98,8 +98,11 @@ export function localDatetimeToUTC(datetimeLocal: string, timezone: string): str
  */
 export function endOfDayUTC(dateStr: string, timezone: string): string {
   const [y, mo, d] = dateStr.split('-').map(Number)
+  // Use Date.UTC for rollover: d+1 on a month-end (e.g. Jan 31 → Feb 1).
+  // String arithmetic ("2026-01-32") produces Invalid Date and throws.
+  const nextDayDate = new Date(Date.UTC(y, mo - 1, d + 1))
   const pad = (n: number) => String(n).padStart(2, '0')
-  const nextDay = `${y}-${pad(mo)}-${pad(d + 1)}T00:00`
+  const nextDay = `${nextDayDate.getUTCFullYear()}-${pad(nextDayDate.getUTCMonth() + 1)}-${pad(nextDayDate.getUTCDate())}T00:00`
   return localDatetimeToUTC(nextDay, timezone)
 }
 
@@ -239,9 +242,10 @@ export function parseSchedulePayload(task: ScheduledTaskOut): ScheduleEditorValu
     const nextDayLocal = new Date(task.end_at)
       .toLocaleString('sv', { timeZone: task.timezone })
       .slice(0, 10) // "YYYY-MM-DD" of next day in task TZ
-    const nextDay = new Date(nextDayLocal)
-    nextDay.setDate(nextDay.getDate() - 1)
-    endAt = nextDay.toISOString().slice(0, 10) // back to the intended last day
+    // Use UTC arithmetic — getDate/setDate use browser's local TZ and cause
+    // an off-by-one for users in negative UTC offsets (Americas).
+    const [ny, nm, nd] = nextDayLocal.split('-').map(Number)
+    endAt = new Date(Date.UTC(ny, nm - 1, nd - 1)).toISOString().slice(0, 10)
   }
 
   let schedule: ScheduleState
