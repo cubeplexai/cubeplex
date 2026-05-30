@@ -23,6 +23,7 @@ export interface WorkspaceSkillFilters {
   source?: SkillSource
   state?: 'all' | 'enabled' | 'disabled' | 'available'
   q?: string
+  externalOnly?: boolean
 }
 
 async function fetcher<T>(url: string): Promise<T> {

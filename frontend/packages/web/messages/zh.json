@@ -704,6 +704,7 @@
       "sourceAll": "全部来源",
       "sourcePreinstalled": "内置",
       "sourceUploaded": "上传",
+      "sourceExternal": "外部源",
       "stateAll": "全部",
       "stateEnabled": "已启用",
       "stateDisabled": "已禁用",
