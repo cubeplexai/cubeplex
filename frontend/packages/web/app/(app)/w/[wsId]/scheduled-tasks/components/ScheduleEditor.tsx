@@ -333,7 +333,7 @@ function scheduleToFreqKind(s: ScheduleState): FreqKind {
   return s.kind
 }
 
-function defaultForKind(kind: FreqKind): ScheduleState {
+function defaultForKind(kind: FreqKind, timezone: string): ScheduleState {
   switch (kind) {
     case 'daily':
       return { kind: 'daily', hour: 9, minute: 0 }
@@ -343,11 +343,17 @@ function defaultForKind(kind: FreqKind): ScheduleState {
       return { kind: 'monthly', day: 1, hour: 9, minute: 0 }
     case 'interval':
       return { kind: 'interval', value: 1, unit: 'hours' }
-    case 'once':
-      return {
-        kind: 'once',
-        runAt: new Date(Date.now() + 86400_000).toISOString().slice(0, 16),
-      }
+    case 'once': {
+      // Use task timezone so localDatetimeToUTC interprets this correctly.
+      // toISOString() gives a UTC string; treating it as local would be wrong
+      // by the full timezone offset.
+      const tomorrow = new Date(Date.now() + 86400_000)
+      const runAt = tomorrow
+        .toLocaleString('sv', { timeZone: timezone })
+        .replace(' ', 'T')
+        .slice(0, 16)
+      return { kind: 'once', runAt }
+    }
   }
 }
 
@@ -360,7 +366,7 @@ export function ScheduleEditor({ value, onChange }: ScheduleEditorProps) {
   }
 
   function handleFreqChange(kind: FreqKind) {
-    setSchedule(defaultForKind(kind))
+    setSchedule(defaultForKind(kind, value.timezone))
   }
 
   if (isLegacy) {
