@@ -1,9 +1,6 @@
-from opensandbox.models.sandboxes import NetworkPolicy, NetworkRule
-
 from cubebox.sandbox_policy.rules import (
     build_network_policy,
     evaluate_command,
-    merge_network_rules,
     split_shell_command,
 )
 
@@ -151,21 +148,3 @@ def test_blank_targets_are_dropped() -> None:
         force_allow_hosts=[],
     )
     assert _egress(p) == []
-
-
-def test_merge_network_rules_union_and_deny_wins() -> None:
-    base = NetworkPolicy(
-        defaultAction="deny",
-        egress=[NetworkRule(action="allow", target="api.github.com")],
-    )
-    admin = [
-        {"action": "allow", "target": "pypi.org"},
-        {"action": "deny", "target": "api.github.com"},
-    ]
-    merged = merge_network_rules(base, admin)
-    assert merged.default_action == "deny"
-    targets = {(r.action, r.target) for r in merged.egress}
-    # admin deny on api.github.com removes it from allow and adds an explicit deny
-    assert ("allow", "api.github.com") not in targets
-    assert ("deny", "api.github.com") in targets
-    assert ("allow", "pypi.org") in targets

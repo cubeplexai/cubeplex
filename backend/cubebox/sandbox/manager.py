@@ -23,7 +23,7 @@ import opensandbox
 from loguru import logger
 from opensandbox.config import ConnectionConfig
 from opensandbox.exceptions import SandboxException as ProviderSandboxError
-from opensandbox.models.sandboxes import PVC, NetworkPolicy, Volume
+from opensandbox.models.sandboxes import PVC, Volume
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from cubebox.config import config
@@ -36,7 +36,7 @@ from cubebox.repositories.user_sandbox import UserSandboxRepository
 from cubebox.sandbox.base import Sandbox, SandboxError
 from cubebox.sandbox.opensandbox import OpenSandbox
 from cubebox.sandbox_env.injector import SandboxEnvInjector
-from cubebox.sandbox_policy.rules import merge_network_rules
+from cubebox.sandbox_policy.rules import build_network_policy
 from cubebox.services.sandbox_env import SandboxEnvResolver
 from cubebox.services.sandbox_policy import SandboxPolicyResolver
 
@@ -497,26 +497,16 @@ class SandboxManager:
                     request_timeout=self._create_timeout
                 )
 
-                # Egress injection (when enabled): resolve the vault for env +
-                # network policy. network_policy must be set at create time.
-                injection = None
-                if self._exchange_host:
-                    # Resolve injection early to get network_policy for
-                    # Sandbox.create. Env does NOT go into Sandbox.create — it
-                    # flows via execute-time RunCommandOpts after _apply_egress
-                    # sets it on the backend.
-                    resolver = SandboxEnvResolver(SandboxEnvRepository(session, org_id=org_id))
-                    resolved = await resolver.resolve(workspace_id=workspace_id, user_id=user_id)
-                    injection = SandboxEnvInjector(exchange_host=self._exchange_host).build(
-                        resolved
-                    )
-
-                base_policy = (
-                    injection.network_policy
-                    if injection
-                    else NetworkPolicy(defaultAction="deny", egress=[])
+                # Egress network policy: assembled from the admin-authored rules
+                # + default action. Vault hosts do NOT open network access; the
+                # exchange host is force-allowed so the placeholder-substitution
+                # proxy stays reachable. Env + EgressRefs are applied after the
+                # sandbox is created, via _apply_egress (the execute-time env path).
+                network_policy = build_network_policy(
+                    admin_rules=policy.network_rules,
+                    default_action=policy.network_default_action,
+                    force_allow_hosts=[self._exchange_host] if self._exchange_host else [],
                 )
-                network_policy = merge_network_rules(base_policy, policy.network_rules)
 
                 raw_sandbox = await opensandbox.Sandbox.create(
                     policy.default_image,

@@ -192,38 +192,3 @@ def build_network_policy(
     return NetworkPolicy(
         defaultAction=cast(Literal["allow", "deny"], default_action), egress=egress
     )
-
-
-def merge_network_rules(
-    base: NetworkPolicy, admin_rules: list[dict[str, Any]] | None
-) -> NetworkPolicy:
-    """Compose the vault-derived NetworkPolicy with admin-authored rules.
-
-    Union of allow targets; admin ``deny`` rules win (remove the target from
-    allow and add an explicit deny). default_action stays ``deny``.
-    """
-    base_egress = base.egress or []
-    allows: set[str] = {r.target for r in base_egress if r.action == "allow"}
-    denies: set[str] = {r.target for r in base_egress if r.action == "deny"}
-    for rule in admin_rules or []:
-        action = str(rule.get("action", ""))
-        target = str(rule.get("target", ""))
-        if not target:
-            continue
-        if action == "deny":
-            denies.add(target)
-            allows.discard(target)
-        elif action == "allow":
-            if target not in denies:
-                allows.add(target)
-    # Emit DENY rules FIRST. The sidecar evaluates `egress` in order, so listing
-    # denies ahead of allows makes deny win even when a deny and an allow target
-    # OVERLAP via wildcards (e.g. allow=api.evil.com, deny=*.evil.com) — exact-set
-    # removal above can't catch wildcard overlap, so ordering is what guarantees
-    # deny-wins. Targets are FQDN/wildcard only (OpenSandbox `NetworkRule.target`);
-    # the policy service must reject regex/`*`-only targets at write time
-    # (validate_host_pattern already does — see Task 3 test
-    # `test_service_rejects_bad_network_target`).
-    egress = [NetworkRule(action="deny", target=t) for t in sorted(denies)]
-    egress += [NetworkRule(action="allow", target=t) for t in sorted(allows)]
-    return NetworkPolicy(defaultAction="deny", egress=egress)
