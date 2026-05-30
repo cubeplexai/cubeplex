@@ -5,16 +5,19 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Literal, Protocol
 
-from cubebox.sandbox_env.host_rules import HostPatternError, validate_host_pattern
+from cubebox.sandbox_env.host_rules import HostPatternError, canon_host, validate_host_pattern
 
 _VALID_COMMAND_ACTIONS = {"deny", "confirm", "allow"}
 _VALID_NETWORK_ACTIONS = {"allow", "deny"}
 _VALID_DEFAULT_ACTIONS = {"allow", "deny"}
 
 
-def _canon_host(target: str) -> str:
-    # Mirror the sidecar: case-insensitive, single trailing dot stripped.
-    return target.strip().removesuffix(".").lower()
+def _normalize_network_targets(
+    network_rules: list[dict[str, Any]] | None,
+) -> list[dict[str, Any]] | None:
+    if network_rules is None:
+        return None
+    return [{**r, "target": canon_host(str(r.get("target", "")))} for r in network_rules]
 
 
 class SandboxPolicyValidationError(ValueError):
@@ -90,7 +93,7 @@ class SandboxPolicyService:
                 validate_host_pattern(target)
             except HostPatternError as exc:
                 raise SandboxPolicyValidationError(str(exc)) from exc
-            canon = _canon_host(target)
+            canon = canon_host(target)
             action = str(rule.get("action"))
             if canon in seen_actions and seen_actions[canon] != action:
                 raise SandboxPolicyValidationError(
@@ -109,6 +112,7 @@ class SandboxPolicyService:
         command_rules: list[dict[str, Any]] | None,
         network_default_action: str,
     ) -> Any:
+        network_rules = _normalize_network_targets(network_rules)
         self._validate(default_image, network_rules, command_rules, network_default_action)
         return await self._repo.upsert(
             default_image=default_image,
