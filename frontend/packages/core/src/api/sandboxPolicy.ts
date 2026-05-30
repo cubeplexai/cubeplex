@@ -22,6 +22,7 @@ export interface SandboxPolicyOut {
   default_image: string
   network_rules: SandboxNetworkRule[]
   command_rules: SandboxCommandRule[]
+  network_default_action: 'allow' | 'deny'
   warnings: string[]
 }
 
@@ -29,6 +30,7 @@ export interface UpdateSandboxPolicyIn {
   default_image: string
   network_rules: SandboxNetworkRule[] | null
   command_rules: SandboxCommandRule[] | null
+  network_default_action: 'allow' | 'deny'
 }
 
 export type SandboxStatusValue = 'provisioning' | 'running' | 'paused' | 'terminated' | 'absent'
