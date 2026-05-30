@@ -151,7 +151,6 @@ export function WidgetView(props: WidgetViewProps) {
         )}
         style={{
           width: props.width ? `${props.width}px` : '100%',
-          minHeight: props.height ?? SKELETON_DEFAULT_HEIGHT,
         }}
         inert={isFullscreen || undefined}
         aria-hidden={isFullscreen || undefined}
