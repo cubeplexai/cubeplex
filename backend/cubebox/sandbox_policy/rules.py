@@ -155,7 +155,10 @@ def _host_specificity(target: str) -> tuple[int, int]:
     specific rule first makes "most-specific match wins" in BOTH allow and
     deny modes. Exact FQDN beats any wildcard; among the same kind, more
     labels is more specific (``*.api.github.com`` > ``*.github.com``).
+    Normalize the trailing dot / case first so it matches the sidecar's own
+    host matching (and the contradiction check's canonicalization).
     """
+    target = target.removesuffix(".").lower()
     if target.startswith("*."):
         return (0, target[2:].count(".") + 1)
     return (1, target.count(".") + 1)
