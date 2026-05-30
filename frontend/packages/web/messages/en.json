@@ -704,6 +704,7 @@
       "sourceAll": "All sources",
       "sourcePreinstalled": "Preinstalled",
       "sourceUploaded": "Uploaded",
+      "sourceExternal": "External",
       "stateAll": "All",
       "stateEnabled": "Enabled",
       "stateDisabled": "Disabled",

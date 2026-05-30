@@ -1,5 +1,6 @@
 'use client'
 
+import { useEffect, useState } from 'react'
 import { Plus, Search } from 'lucide-react'
 import type { SkillSource } from '@cubebox/core'
 import { useTranslations } from 'next-intl'
@@ -13,6 +14,7 @@ interface WorkspaceSkillsToolbarProps {
   filters: WorkspaceSkillFilters
   onFiltersChange: (next: WorkspaceSkillFilters) => void
   onAddClick: () => void
+  onSearch?: (q: string) => void
 }
 
 function PillGroup<T extends string>({
@@ -58,15 +60,31 @@ export function WorkspaceSkillsToolbar({
   filters,
   onFiltersChange,
   onAddClick,
+  onSearch,
 }: WorkspaceSkillsToolbarProps) {
   const t = useTranslations('wsSettings.skillsToolbar')
-  const sourceValue: SkillSource | 'all' = filters.source ?? 'all'
+  const sourceValue: SkillSource | 'all' | 'external' = filters.externalOnly
+    ? 'external'
+    : (filters.source ?? 'all')
   const stateValue = filters.state ?? 'all'
+  const [draft, setDraft] = useState(filters.q ?? '')
 
-  const sourceOptions: { value: SkillSource | 'all'; label: string }[] = [
+  // Sync draft when parent clears the query (e.g. on unmount/reset)
+  useEffect(() => {
+    if (!filters.q) setDraft('')
+  }, [filters.q])
+
+  function commitSearch() {
+    const q = draft.trim()
+    onFiltersChange({ ...filters, q: q || undefined })
+    if (q) onSearch?.(q)
+  }
+
+  const sourceOptions: { value: SkillSource | 'all' | 'external'; label: string }[] = [
     { value: 'all', label: t('sourceAll') },
     { value: 'preinstalled', label: t('sourcePreinstalled') },
     { value: 'uploaded', label: t('sourceUploaded') },
+    { value: 'external', label: t('sourceExternal') },
   ]
 
   const stateOptions: { value: 'all' | 'enabled' | 'disabled' | 'available'; label: string }[] = [
@@ -83,8 +101,11 @@ export function WorkspaceSkillsToolbar({
         <Input
           type="search"
           placeholder={t('searchPlaceholder')}
-          value={filters.q ?? ''}
-          onChange={(e) => onFiltersChange({ ...filters, q: e.target.value || undefined })}
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') commitSearch()
+          }}
           className="pl-7"
           aria-label={t('searchAria')}
         />
@@ -94,17 +115,27 @@ export function WorkspaceSkillsToolbar({
         ariaLabel={t('filterSourceAria')}
         options={sourceOptions}
         value={sourceValue}
-        onChange={(next) =>
-          onFiltersChange({ ...filters, source: next === 'all' ? undefined : next })
-        }
+        onChange={(next) => {
+          if (next === 'external') {
+            onFiltersChange({ ...filters, source: undefined, externalOnly: true })
+          } else {
+            onFiltersChange({
+              ...filters,
+              source: next === 'all' ? undefined : (next as SkillSource),
+              externalOnly: false,
+            })
+          }
+        }}
       />
 
-      <PillGroup
-        ariaLabel={t('filterStateAria')}
-        options={stateOptions}
-        value={stateValue}
-        onChange={(next) => onFiltersChange({ ...filters, state: next })}
-      />
+      {!filters.externalOnly && (
+        <PillGroup
+          ariaLabel={t('filterStateAria')}
+          options={stateOptions}
+          value={stateValue}
+          onChange={(next) => onFiltersChange({ ...filters, state: next })}
+        />
+      )}
 
       <Button size="sm" onClick={onAddClick} className="ml-auto">
         <Plus className="size-3.5" />
