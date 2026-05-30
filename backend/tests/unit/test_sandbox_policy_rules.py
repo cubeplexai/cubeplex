@@ -1,6 +1,7 @@
 from opensandbox.models.sandboxes import NetworkPolicy, NetworkRule
 
 from cubebox.sandbox_policy.rules import (
+    build_network_policy,
     evaluate_command,
     merge_network_rules,
     split_shell_command,
@@ -73,6 +74,83 @@ def test_shell_grouping_cannot_hide_a_denied_command() -> None:
 
 def test_confirm_subcommand_propagates_when_no_deny() -> None:
     assert evaluate_command("ls && git push origin", CONFIRM_PUSH)[0] == "confirm"
+
+
+def _egress(p):
+    return [(r.action, r.target) for r in (p.egress or [])]
+
+
+def test_allow_mode_exact_allow_beats_wildcard_deny() -> None:
+    # default allow; block all of github EXCEPT api.github.com.
+    p = build_network_policy(
+        admin_rules=[
+            {"action": "deny", "target": "*.github.com"},
+            {"action": "allow", "target": "api.github.com"},
+        ],
+        default_action="allow",
+        force_allow_hosts=[],
+    )
+    assert p.default_action == "allow"
+    # exact host (more specific) must be emitted before the wildcard so the
+    # sidecar's first-match resolves api.github.com to allow.
+    assert _egress(p)[0] == ("allow", "api.github.com")
+    assert ("deny", "*.github.com") in _egress(p)
+
+
+def test_deny_mode_exact_deny_beats_wildcard_allow() -> None:
+    # default deny; allow all of github EXCEPT secret.github.com.
+    p = build_network_policy(
+        admin_rules=[
+            {"action": "allow", "target": "*.github.com"},
+            {"action": "deny", "target": "secret.github.com"},
+        ],
+        default_action="deny",
+        force_allow_hosts=[],
+    )
+    assert p.default_action == "deny"
+    assert _egress(p)[0] == ("deny", "secret.github.com")
+    assert ("allow", "*.github.com") in _egress(p)
+
+
+def test_deeper_wildcard_sorts_before_shallower() -> None:
+    p = build_network_policy(
+        admin_rules=[
+            {"action": "allow", "target": "*.github.com"},
+            {"action": "deny", "target": "*.api.github.com"},
+        ],
+        default_action="allow",
+        force_allow_hosts=[],
+    )
+    assert _egress(p)[0] == ("deny", "*.api.github.com")
+
+
+def test_force_allow_host_present_and_beats_wildcard_deny() -> None:
+    p = build_network_policy(
+        admin_rules=[{"action": "deny", "target": "*.internal"}],
+        default_action="deny",
+        force_allow_hosts=["egress-exchange.internal"],
+    )
+    # exact forced-allow host (1,2) beats the wildcard deny (0,1).
+    assert _egress(p)[0] == ("allow", "egress-exchange.internal")
+
+
+def test_force_allow_wins_over_admin_exact_deny_same_host() -> None:
+    # An admin deny on the exchange host itself must not strand substitution.
+    p = build_network_policy(
+        admin_rules=[{"action": "deny", "target": "x.host.com"}],
+        default_action="deny",
+        force_allow_hosts=["x.host.com"],
+    )
+    assert _egress(p)[0] == ("allow", "x.host.com")
+
+
+def test_blank_targets_are_dropped() -> None:
+    p = build_network_policy(
+        admin_rules=[{"action": "deny", "target": ""}],
+        default_action="allow",
+        force_allow_hosts=[],
+    )
+    assert _egress(p) == []
 
 
 def test_merge_network_rules_union_and_deny_wins() -> None:
