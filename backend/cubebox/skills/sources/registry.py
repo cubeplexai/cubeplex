@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from cubebox.repositories.skill_source import SkillSourceRepository
+from cubebox.repositories.skill_registry import SkillRegistryRepository
 from cubebox.skills.service import SkillCatalogService
 from cubebox.skills.sources.base import SkillSource, TrustTier
 from cubebox.skills.sources.local import LocalCatalogSource
@@ -51,7 +51,7 @@ class SkillSourceRegistry:
                 workspace_id=workspace_id,
             )
         ]
-        rows = await SkillSourceRepository(session).list_for_org(
+        rows = await SkillRegistryRepository(session).list_for_org(
             org_id, enabled_only=True
         )
         for row in rows:
