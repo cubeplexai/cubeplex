@@ -11,7 +11,7 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 
-from sqlalchemy import select, update
+from sqlalchemy import or_, select, update
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -83,6 +83,10 @@ async def claim_due_tasks(
             cast(Any, ScheduledTask.deleted_at).is_(None),
             cast(Any, ScheduledTask.next_fire_at).is_not(None),
             ScheduledTask.next_fire_at <= now,  # type: ignore[arg-type, operator]
+            or_(
+                cast(Any, ScheduledTask.end_at).is_(None),
+                ScheduledTask.end_at > now,  # type: ignore[operator, arg-type]
+            ),
         )
         .order_by(ScheduledTask.next_fire_at)  # type: ignore[arg-type]
         .limit(limit)

@@ -231,6 +231,14 @@ class ScheduledTaskPoller:
                 row.detail = "task gone"
                 await session.commit()
                 return
+            # Guard against stale-claim or busy-retry dispatching after end_at.
+            # claim_due_tasks already filters, but recovery sweeps do not join
+            # the parent task — this is the catch-all for those paths.
+            if task.end_at is not None and as_utc(task.end_at) <= datetime.now(UTC):
+                row.state = "skipped_missed"
+                row.detail = "task expired before dispatch"
+                await session.commit()
+                return
             # Pre-stamp run_id while the row is still 'claimed' so the
             # completion hook can find the row by run_id even if the
             # background run finishes faster than the post-dispatch UPDATE
