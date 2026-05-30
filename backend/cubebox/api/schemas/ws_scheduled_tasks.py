@@ -82,6 +82,8 @@ class ScheduledTaskPatch(BaseModel):
             _validate_cron(self.cron_expr)
         if self.run_at is not None and self.run_at.tzinfo is None:
             raise ValueError("run_at must include a timezone offset")
+        if self.end_at is not None and self.end_at.tzinfo is None:
+            raise ValueError("end_at must include a timezone offset")
         # When changing schedule_kind, require the matching configuration
         # field in the same patch so the route can recompute next_fire_at
         # against an internally-consistent task. Cross-kind switches that
