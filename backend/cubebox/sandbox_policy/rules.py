@@ -15,7 +15,7 @@ from __future__ import annotations
 import re
 import shlex
 from fnmatch import fnmatchcase
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 from opensandbox.models.sandboxes import NetworkPolicy, NetworkRule
 
@@ -146,6 +146,52 @@ def evaluate_command(command: str, rules: list[dict[str, Any]]) -> tuple[Command
             strongest = (action, pattern)
             strongest_rank = _ACTION_RANK[action]
     return strongest
+
+
+def _host_specificity(target: str) -> tuple[int, int]:
+    """Sort key — higher value = more specific = emitted earlier.
+
+    The sidecar evaluates egress first-match-wins, so emitting the most
+    specific rule first makes "most-specific match wins" in BOTH allow and
+    deny modes. Exact FQDN beats any wildcard; among the same kind, more
+    labels is more specific (``*.api.github.com`` > ``*.github.com``).
+    """
+    if target.startswith("*."):
+        return (0, target[2:].count(".") + 1)
+    return (1, target.count(".") + 1)
+
+
+def build_network_policy(
+    *,
+    admin_rules: list[dict[str, Any]] | None,
+    default_action: str,
+    force_allow_hosts: list[str],
+) -> NetworkPolicy:
+    """Assemble the egress policy from admin rules + default action.
+
+    ``force_allow_hosts`` (the credential-exchange host) are prepended as
+    ``allow`` rules so they survive sorting and, on an exact-specificity tie
+    with an admin rule on the same host, win first-match (stable sort keeps
+    the prepended rule ahead). Vault hosts are NOT included here — network
+    reachability is independent of credential substitution.
+    """
+    rules: list[dict[str, Any]] = [{"action": "allow", "target": h} for h in force_allow_hosts]
+    rules += list(admin_rules or [])
+    ordered = sorted(
+        (r for r in rules if str(r.get("target", "")).strip()),
+        key=lambda r: _host_specificity(str(r["target"])),
+        reverse=True,
+    )
+    egress = [
+        NetworkRule(
+            action=cast(Literal["allow", "deny"], str(r["action"])),
+            target=str(r["target"]),
+        )
+        for r in ordered
+    ]
+    return NetworkPolicy(
+        defaultAction=cast(Literal["allow", "deny"], default_action), egress=egress
+    )
 
 
 def merge_network_rules(
