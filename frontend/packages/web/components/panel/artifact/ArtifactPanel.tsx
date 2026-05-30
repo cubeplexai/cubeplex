@@ -281,6 +281,7 @@ export function ArtifactPanel() {
         onToggleFullscreen={toggleFullscreen}
         isFullscreen={isFullscreen}
         workspaceId={workspaceId}
+        // eslint-disable-next-line react-hooks/refs
         portalContainer={isFullscreen ? containerRef.current : null}
       />
       <div className="flex-1 overflow-hidden">

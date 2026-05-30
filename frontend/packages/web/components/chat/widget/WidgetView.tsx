@@ -245,6 +245,7 @@ function WidgetFrame({
   }, [widgetId])
 
   const tooBig = new Blob([widgetCode]).size > MAX_CODE_BYTES
+  // eslint-disable-next-line react-hooks/refs
   latestRef.current = widgetCode
 
   useEffect(() => {

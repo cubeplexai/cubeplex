@@ -105,18 +105,33 @@ function appendTextBlock(blocks, delta) {
 function appendToolCallBlock(blocks, name, args, toolCallId) {
     const finalized = finalizeLastThinking(blocks);
     const exactMatchIndex = finalized.findIndex((block) => block.type === 'tool_call_streaming' && block.tool_call_id === toolCallId);
+    // Fallback: streaming block whose id was never populated (name='' when the first delta
+    // didn't carry identity fields) also qualifies, since it's the only unmatched streaming
+    // slot for this tool call.
     let fallbackMatchIndex = -1;
+    let unnamedFallbackIndex = -1;
     for (let i = finalized.length - 1; i >= 0; i--) {
         const block = finalized[i];
-        if (block.type === 'tool_call_streaming' &&
-            block.tool_call_id === null &&
-            block.name === name) {
-            fallbackMatchIndex = i;
-            break;
+        if (block.type === 'tool_call_streaming' && block.tool_call_id === null) {
+            if (block.name === name) {
+                fallbackMatchIndex = i;
+                break;
+            }
+            if (block.name === '' && unnamedFallbackIndex === -1) {
+                unnamedFallbackIndex = i;
+            }
         }
     }
-    const matchIndex = exactMatchIndex >= 0 ? exactMatchIndex : fallbackMatchIndex;
+    const matchIndex = exactMatchIndex >= 0
+        ? exactMatchIndex
+        : fallbackMatchIndex >= 0
+            ? fallbackMatchIndex
+            : unnamedFallbackIndex;
     const nextBlocks = matchIndex >= 0 ? finalized.filter((_, index) => index !== matchIndex) : finalized;
+    // Guard: if no streaming block was found to replace, don't add a duplicate completed block.
+    if (matchIndex < 0 && nextBlocks.some((b) => b.type === 'tool_call' && b.id === toolCallId)) {
+        return nextBlocks;
+    }
     return [...nextBlocks, { type: 'tool_call', id: toolCallId, name, arguments: args }];
 }
 function normalizeTodoStatus(status) {
