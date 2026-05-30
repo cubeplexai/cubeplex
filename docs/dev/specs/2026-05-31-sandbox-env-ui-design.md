@@ -11,7 +11,7 @@ Two new standalone pages for managing sandbox environment variables (the env vau
 
 | Page | Route | Scope managed |
 |---|---|---|
-| Workspace Env | `/w/[wsId]/sandbox-env` | `workspace` + `user` |
+| Workspace Env | `/w/[wsId]/sandbox-env` | `workspace` (admin only) + `user` (all members) |
 | Admin Env | `/admin/sandbox-env` | `org` |
 
 Both pages share the same component structure; they differ only in which API endpoints they call and which scopes they expose.
@@ -38,14 +38,18 @@ Secret values are never returned by the API. `header_names` exists on the model 
 
 ### Workspace page (`/w/[wsId]/sandbox-env`)
 
-Single merged table. Two add buttons in the header row: **+ Workspace secret** and **+ Personal secret**. Each pre-fills the scope in the modal.
+The page is role-aware. All members can manage their own user-scope entries; only workspace admins can manage workspace-scope entries.
+
+**For workspace admins:** single merged table with all entries from both `/workspace` and `/me` (fetched in parallel, merged and sorted by `env_name`). Two add buttons: **+ Workspace secret** and **+ Personal secret**.
+
+**For non-admin members:** same table layout but only user-scope entries are shown (only `/me` is fetched). Only **+ Personal secret** button is shown. Workspace-scope rows are not visible.
 
 Table columns:
 
 | Column | Notes |
 |---|---|
 | NAME | monospace, env var name |
-| SCOPE | badge: `ws` (violet) / `me` (sky) |
+| SCOPE | badge: `ws` (violet, admins only) / `me` (sky) |
 | TYPE | `secret` or `plain` |
 | HOSTS | comma-joined host patterns, or `—` for plain |
 | WARNINGS | warning icon + tooltip listing conflicting hosts; hidden when `warnings` is empty |
@@ -71,7 +75,8 @@ NAME     [monospace text input, required, max 128 chars]
          Validation: /^[A-Z_][A-Z0-9_]*$/ enforced client-side with inline error
 
 SCOPE    [select: Workspace | Personal]
-         Only shown on the workspace page; pre-filled from which button was clicked.
+         Only shown on the workspace page for admins; pre-filled from which button was clicked.
+         Non-admins never see this field (always Personal).
          Hidden on admin page (always org).
 
 TYPE     [radio: Secret ● Plain ○]
@@ -108,7 +113,9 @@ DELETE /api/v1/ws/{wsId}/sandbox-env/workspace/{id}
 DELETE /api/v1/ws/{wsId}/sandbox-env/me/{id}
 ```
 
-The workspace page fires both GET calls in parallel and merges the results into one table, sorted by `env_name`.
+Workspace admins fire both GET calls in parallel and merge the results into one table, sorted by `env_name`. Non-admin members only call `GET /me`.
+
+The page reads the current user's role from the existing workspace context (same source used by `McpPanel` and other settings pages).
 
 ### Admin page
 
@@ -137,7 +144,7 @@ frontend/packages/web/app/admin/sandbox-env/
 ```
 
 `EnvTable` and `EnvModal` are shared between both pages via props:
-- `scope: 'org' | 'workspace'` — controls which columns and buttons appear
+- `mode: 'org' | 'workspace-admin' | 'workspace-member'` — controls which columns, scope badge, and buttons appear
 - `wsId?: string` — passed only from workspace page
 - `entries`, `onAdd`, `onRotate`, `onDelete` callbacks
 
