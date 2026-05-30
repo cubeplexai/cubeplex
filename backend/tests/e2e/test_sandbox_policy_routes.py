@@ -13,10 +13,12 @@ from cubebox.models.sandbox_policy import SandboxPolicy
 
 @pytest_asyncio.fixture(autouse=True)
 async def _ensure_sandbox_policy_table() -> None:
-    """Create the ``sandbox_policies`` table on the per-slot test DB.
+    """Provision the ``sandbox_policies`` table for this test.
 
-    Task 7 will add the Alembic migration. Until then this fixture provisions
-    the table via SQLModel metadata so the policy E2E can run.
+    The schema is managed in production by Alembic (revision
+    ``2f3d624337bd``); this fixture creates the table from SQLModel metadata
+    (idempotent via ``checkfirst=True``) so the E2E suite runs against a test
+    DB that hasn't had migrations applied.
     """
     engine = create_async_engine(_build_database_url(), poolclass=NullPool)
     try:
@@ -54,6 +56,7 @@ async def test_put_then_get_roundtrip(admin_client) -> None:
     body = got.json()
     assert body["default_image"] == "python:3.12"
     assert body["command_rules"] == [{"action": "deny", "pattern": "rm *"}]
+    assert body["network_default_action"] == "deny"
 
 
 async def test_put_rejects_bad_network_target(admin_client) -> None:
