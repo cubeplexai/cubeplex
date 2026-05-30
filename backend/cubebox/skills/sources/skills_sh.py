@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import httpx
+from pathlib import PurePosixPath
 
 from cubebox.skills.sources.base import (
     SkillCandidate,
@@ -112,7 +113,8 @@ class SkillsShAdapter:
                 continue
             slug = str(item.get("id") or item.get("name") or "")
             source = str(item.get("source") or "")
-            if not slug or not source:
+            # source must be "{owner}/{repo}" — exactly one slash, no path traversal
+            if not slug or not source or source.count("/") != 1 or ".." in source:
                 continue
             branch = repos.get(source, "main")
             source_ref = f"{source}/{branch}/{slug}"
@@ -140,6 +142,9 @@ class SkillsShAdapter:
         if len(parts) != 4:
             raise ValueError(f"invalid skills-sh source_ref: {source_ref!r}")
         owner, repo, branch, slug = parts
+        # Reject slug values that could escape the intended subpath
+        if slug.startswith("/") or ".." in PurePosixPath(slug).parts:
+            raise ValueError(f"unsafe slug in skills-sh source_ref: {slug!r}")
 
         async with self._github_client() as gh_client:
             tree_resp = await gh_client.get(
@@ -164,6 +169,9 @@ class SkillsShAdapter:
 
         async with self._raw_client() as raw_client:
             for rel in rel_paths:
+                # Mirror the path-safety check in RemoteRegistryAdapter
+                if rel.startswith("/") or ".." in PurePosixPath(rel).parts:
+                    raise ValueError(f"unsafe path in skills-sh tree: {rel!r}")
                 resp = await raw_client.get(f"/{owner}/{repo}/{branch}/{slug}/{rel}")
                 resp.raise_for_status()
                 content = resp.content
