@@ -54,13 +54,15 @@
     "title": "管理后台",
     "skills": "技能管理",
     "skillsSubtitle": "安装内置 / 上传的 skill 到组织，再按 workspace 启用。",
-    "backToApp": "回应用"
+    "backToApp": "回应用",
+    "skillRegistries": "技能仓库"
   },
   "adminNav": {
     "settings": "组织设置",
     "models": "模型",
     "webTools": "Web 工具",
     "skills": "技能管理",
+    "skillRegistries": "技能仓库",
     "mcp": "MCP 连接器",
     "sandbox": "沙盒策略",
     "insights": "洞察",
@@ -1095,5 +1097,31 @@
     "customTestFailed": "连接失败",
     "addCustomConnector": "+ 添加自定义连接器",
     "promoteToOrg": "提升为组织级"
+  },
+  "adminSkillRegistries": {
+    "pageTitle": "技能仓库",
+    "title": "技能仓库",
+    "subtitle": "管理此组织的外部 Skill 仓库",
+    "addRegistry": "添加仓库",
+    "listAria": "技能仓库列表",
+    "loading": "加载中…",
+    "empty": "暂无已配置的仓库",
+    "emptyHint": "添加仓库以启用外部 Skill 发现功能",
+    "selectOrAdd": "选择一个仓库或添加新仓库",
+    "addTitle": "添加仓库",
+    "kind": "类型",
+    "customRegistry": "自定义仓库",
+    "name": "名称",
+    "namePlaceholder": "我的仓库",
+    "registryUrl": "仓库地址",
+    "registryUrlHint": "必须是实现了注册表搜索 API 的公共 HTTPS 端点",
+    "trustTier": "信任级别",
+    "adding": "添加中…",
+    "add": "添加",
+    "cancel": "取消",
+    "enabled": "已启用",
+    "deleteTitle": "删除仓库",
+    "deleteDescription": "从此组织移除「{name}」。已安装的 Skill 不受影响。",
+    "delete": "删除"
   }
 }
