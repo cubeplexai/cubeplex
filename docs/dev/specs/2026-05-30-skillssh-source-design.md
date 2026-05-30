@@ -1,212 +1,322 @@
-# skills.sh Registry Source — Design
+# skills.sh Adapter + Skill Registries Admin — Design
 
 **Date:** 2026-05-30
 **Status:** Draft
 
 ## Problem
 
-The skill discovery system supports pluggable `SkillSource` backends. The existing
-`RemoteRegistrySource` expects a custom REST protocol (`/search`, `/tree/{ref}`,
-`/raw/{ref}/{file}`). skills.sh — the registry behind `npx skills` — uses a
-different API (`/api/search`, GitHub tree + raw for file fetch). Neither a config
-value nor a URL change makes `RemoteRegistrySource` speak skills.sh's protocol;
-a dedicated adapter is required.
+Two problems addressed together:
+
+1. **skills.sh adapter**: The skill discovery system supports pluggable adapters.
+   The existing `RemoteRegistryAdapter` expects a custom REST protocol
+   (`/search`, `/tree/{ref}`, `/raw/{ref}/{file}`). skills.sh — the registry
+   behind `npx skills` — uses a different API (`/api/search`, GitHub tree + raw
+   for file fetch). A dedicated adapter is required.
+
+2. **Admin UI gap**: There is no frontend page for admins to manage skill
+   registries (add skills.sh, enable/disable, set trust tier). The backend
+   CRUD API exists but is inaccessible without a UI.
+
+3. **Naming inconsistency**: The existing codebase uses "source" for two
+   different concepts — the DB-persisted registry config and the adapter
+   interface. Renaming to clearer terms is included in this change.
 
 ## Goal
 
-An admin can add a skills.sh source in the admin UI (`kind = 'skills-sh'`). Once
-enabled, skill discovery fans out to skills.sh in addition to the local catalog.
-Search results appear in the workspace Skills page. Install pulls the SKILL.md
-bundle from GitHub and imports it into the org catalog.
+- Admin can manage skill registries at `admin/skill-registries` (list, add,
+  enable/disable, delete).
+- Admin can add a skills.sh registry (`kind = 'skills-sh'`). Once enabled,
+  skill discovery fans out to skills.sh in addition to the local catalog.
+- Search results appear in the workspace Skills page; install pulls the
+  SKILL.md bundle from GitHub and imports it into the org catalog.
+- Code uses consistent "registry / adapter" terminology throughout.
 
-## skills.sh API (observed from `npx skills` v1.5.9)
+---
 
-### Search
+## Part 1 — Renaming
 
+### Name map
+
+| Old name | New name | Location |
+|---|---|---|
+| `SkillSource` (Protocol) | `SkillRegistryAdapter` | `sources/base.py` |
+| `SkillSource` (SQLModel) | `SkillRegistry` | `models/skill_source.py` → `models/skill_registry.py` |
+| `SkillSourceRepository` | `SkillRegistryRepository` | `repositories/skill_source.py` → `repositories/skill_registry.py` |
+| `SkillSourceRegistry` (container) | `SkillsAdapterManager` | `sources/registry.py` |
+| `LocalCatalogSource` | `LocalCatalogAdapter` | `sources/local.py` |
+| `RemoteRegistrySource` | `RemoteRegistryAdapter` | `sources/remote.py` |
+| `SkillsShSource` (new) | `SkillsShAdapter` | `sources/skills_sh.py` (new) |
+| table `skill_sources` | `skill_registries` | Alembic migration |
+| route `/admin/skill-sources` | `/admin/skill-registries` | `routes/v1/admin_skill_sources.py` → `admin_skill_registries.py` |
+
+### Scope boundary
+
+Only the items in the table above are renamed. The following are **not** changed:
+- `SkillCatalogService`, `SkillPublishService`, `SkillDiscoveryService`,
+  `SkillInstallService` — these operate on skills (the catalog entries), not
+  registries, so "skill" remains correct.
+- `SkillCandidate` — a discovery result shape, not a registry concept.
+- Frontend workspace Skills page components — no registry terminology exposed there.
+
+### DB migration
+
+`skill_sources` → `skill_registries`: one `ALTER TABLE RENAME` in a new
+Alembic revision. All foreign keys and indexes follow automatically in
+Postgres. No data migration needed — rows are compatible as-is.
+
+---
+
+## Part 2 — skills.sh Adapter
+
+### skills.sh API (observed from `npx skills` v1.5.9)
+
+**Search:**
 ```
 GET https://skills.sh/api/search?q={query}&limit={n}
-
-Response: {
-  "skills": [
-    {
-      "name":     "frontend-design",   // display slug
-      "id":       "frontend-design",   // same as name
-      "source":   "vercel-labs/skills" // "{owner}/{repo}"
-      "installs": 1200
-    }
-  ]
-}
+→ {"skills": [{"name": "frontend-design", "id": "frontend-design",
+               "source": "vercel-labs/skills", "installs": 1200}]}
 ```
 
-### File fetch
+**File fetch:** Files live in the skill's GitHub repo, accessed via:
+- Tree: `GET https://api.github.com/repos/{owner}/{repo}/git/trees/{branch}?recursive=1`
+- Content: `GET https://raw.githubusercontent.com/{owner}/{repo}/{branch}/{path}`
 
-No single download endpoint with a known stable response shape. Files are pulled
-directly from GitHub:
+The skill lives at `{skill_slug}/` inside the repo
+(e.g. `vercel-labs/skills` → `frontend-design/SKILL.md`).
 
-- Tree list: `GET https://api.github.com/repos/{owner}/{repo}/git/trees/{branch}?recursive=1`
-- File content: `GET https://raw.githubusercontent.com/{owner}/{repo}/{branch}/{path}`
-
-The skill lives at `{skill_slug}/` inside the repo (e.g.,
-`vercel-labs/skills` tree → `frontend-design/SKILL.md`,
-`frontend-design/references/guide.md`, …).
-
-## Design
-
-### 1. `source_ref` encoding
-
-`source_ref` carried in the opaque `candidate_id` encodes everything needed
-to fetch later, without a server lookup:
+### `source_ref` encoding
 
 ```
 {owner}/{repo}/{branch}/{skill_slug}
 e.g.  vercel-labs/skills/main/frontend-design
 ```
 
-Branch is resolved at **search time**, not fetch time: `SkillsShSource.search()`
-makes one `GET /repos/{owner}/{repo}` call per distinct `{owner}/{repo}` in the
-result set (typically one — the vercel-labs/skills mono-repo) to read
-`default_branch`, then encodes it into every candidate's `source_ref`. This
-ensures installs are stable: the same `candidate_id` always fetches from the
-same branch ref, even if the repo later changes its default branch.
+Branch is resolved at **search time**: `SkillsShAdapter.search()` makes one
+`GET /repos/{owner}/{repo}` call per distinct repo in the result set to read
+`default_branch`, then encodes it into each candidate's `source_ref`. This
+pins installs to the branch that existed at discovery time.
 
-Splitting on `"/"` with `split("/", 3)` unambiguously yields
-`(owner, repo, branch, slug)` since owner, repo, and branch names cannot contain
-`/`; only slug follows and it may itself contain hyphens but not slashes.
+`split("/", 3)` unambiguously yields `(owner, repo, branch, slug)` — only
+`slug` follows the third `/`, and slugs never contain `/`.
 
-### 2. New class: `SkillsShSource`
+### New class: `SkillsShAdapter`
 
 File: `backend/cubebox/skills/sources/skills_sh.py`
 
 ```
-class SkillsShSource:
-    kind: SourceKind = "remote"   # keeps install routing compatible
+class SkillsShAdapter:
+    kind: SourceKind = "remote"   # keeps SkillsAdapterManager.adapter_by_id() routing intact
 
-    __init__(source_id, trust_tier, source_name, github_token | None)
+    __init__(source_id, trust_tier, source_name, github_token: str | None)
 
     async search(query, *, limit) -> list[SkillCandidate]
         GET https://skills.sh/api/search?q=...&limit=...
-        Collect distinct {owner}/{repo} values from results
+        Collect distinct {owner}/{repo} from results
         For each unique repo: GET https://api.github.com/repos/{owner}/{repo}
-          → default_branch (cached within this call, not across calls)
+          → default_branch (cached within this search call only)
         For each result:
           source_ref = f"{skill['source']}/{branch}/{skill['id']}"
           candidate_id = encode_candidate_id("remote", source_ref, source_id=self.source_id)
-          repo field = f"https://github.com/{skill['source']}"
+          repo = f"https://github.com/{skill['source']}"
+        Return [] silently on non-200 from skills.sh (fan-out continues)
 
     async fetch(source_ref) -> dict[str, bytes]
-        Parse source_ref → owner, repo, branch, slug  (split("/", 3))
+        owner, repo, branch, slug = source_ref.split("/", 3)
         GET /repos/{owner}/{repo}/git/trees/{branch}?recursive=1
-        Filter entries whose path starts with "{slug}/"
-        Strip the "{slug}/" prefix → relative path key
-        Download each file from raw.githubusercontent.com
-        Return {rel_path: bytes}
+        Filter entries starting with "{slug}/"
+        Strip "{slug}/" prefix → relative path key
+        GET raw.githubusercontent.com/{owner}/{repo}/{branch}/{slug}/{rel}
         Raise ValueError on HTTP errors, missing SKILL.md, or size violations
 ```
 
-`SkillsShSource` is **not** a subclass of `RemoteRegistrySource`; it implements
-the `SkillSource` protocol directly.
+`SkillsShAdapter` is **not** a subclass of `RemoteRegistryAdapter`; it
+implements `SkillRegistryAdapter` directly.
 
-Size caps (`_RAW_FILE_MAX_BYTES = 10 MB`, `_BUNDLE_MAX_BYTES = 50 MB`) are
-redeclared locally in `skills_sh.py` — importing private names from `remote.py`
-would create a hidden coupling to another module's internals.
+Size caps redeclared locally (`_RAW_FILE_MAX_BYTES = 10 MB`,
+`_BUNDLE_MAX_BYTES = 50 MB`) — importing private names from `remote.py`
+would create hidden coupling.
 
-### 3. `skill_source` table — new kind value
-
-The `kind` column (currently always `'remote'`) gains a new allowed value:
-`'skills-sh'`. No migration needed — `kind` is a plain `VARCHAR(16)` with no
-DB-level check constraint.
-
-### 4. Admin API changes
-
-**`CreateSkillSourceRequest`** gains two changes:
-
-```python
-kind: Literal["remote", "skills-sh"] = "remote"
-base_url: str = ""          # was required; now optional (empty = use kind default)
-```
-
-When `kind == 'skills-sh'`:
-- `base_url` is set to `"https://skills.sh"` before persistence if empty.
-- `_validate_registry_base_url()` is skipped (endpoint is hardcoded, not admin-supplied).
-- Row is stored with `kind='skills-sh'` and `base_url='https://skills.sh'`.
-
-`SkillSource.kind` (the model column) must also be passed through
-`SkillSourceRepository.create()` — the method currently hardcodes `kind="remote"`.
-Both the model default and the repository create signature need to accept the value.
-
-`SkillSourceResponse` already surfaces `kind`; no change needed there.
-
-### 5. `SkillSourceRegistry.build()` routing
+### `SkillsAdapterManager.build()` routing
 
 ```python
 for row in rows:
     if row.kind == "skills-sh":
-        sources.append(SkillsShSource(
+        adapters.append(SkillsShAdapter(
             source_id=row.id,
             trust_tier=TrustTier(row.trust_tier),
             source_name=row.name,
             github_token=settings.registry.skills_sh.github_token or None,
         ))
     else:  # "remote"
-        sources.append(RemoteRegistrySource(...))
+        adapters.append(RemoteRegistryAdapter(...))
 ```
 
-`remote_source_by_id()` already matches on `s.kind == "remote"` and
-`s.source_id`. Since `SkillsShSource.kind = "remote"`, no changes needed there.
+`adapter_by_id()` (renamed from `remote_source_by_id`) matches on
+`adapter.kind == "remote"` and `adapter.source_id`. Since
+`SkillsShAdapter.kind = "remote"`, no change needed to the lookup logic.
 
-### 6. Config
-
-`config.yaml` (under the top-level `default:` block):
+### Config
 
 ```yaml
+# config.yaml — under default:
 registry:
   skills_sh:
-    github_token: ""   # optional; raises GitHub rate limit 60 → 5000 req/h
+    github_token: ""   # optional; raises GitHub API rate limit 60 → 5000 req/h
 ```
 
-The key uses an **underscore** (`skills_sh`), not a hyphen. Dynaconf's dotted
-`settings.get("a.b")` treats hyphens as ambiguous; underscore keys are
-accessible as `settings.registry.skills_sh.github_token` without special casing.
+Underscore key avoids dynaconf hyphen-access ambiguity. Access in Python:
+`settings.registry.skills_sh.github_token`.
 
-Operators who want higher rate limits add the token to
-`config.development.local.yaml` or set `CUBEBOX_REGISTRY__SKILLS_SH__GITHUB_TOKEN`
-as an environment variable (dynaconf convention).
+Override via env: `CUBEBOX_REGISTRY__SKILLS_SH__GITHUB_TOKEN`.
 
-### 7. Install path
+### Admin API changes
 
-No changes. `SkillInstallService._install_remote()` already handles the case:
-`decode_candidate_id` → `kind="remote"`, `source_id=<row_id>` →
-`registry.remote_source_by_id(source_id)` returns the `SkillsShSource` →
-`source.fetch(source_ref)` downloads from GitHub → `_publish_from_files()`.
+`CreateSkillRegistryRequest` (renamed from `CreateSkillSourceRequest`):
 
-## Error handling
+```python
+kind: Literal["remote", "skills-sh"] = "remote"
+base_url: str = ""    # optional; defaults to "https://skills.sh" for kind=skills-sh
+```
+
+When `kind == 'skills-sh'`:
+- Fill `base_url = "https://skills.sh"` before persistence if empty.
+- Skip `_validate_registry_base_url()`.
+
+`SkillRegistry.kind` (model column) must be passed through
+`SkillRegistryRepository.create()` — currently hardcoded to `"remote"`.
+
+Backend also needs a **DELETE** endpoint (`DELETE /admin/skill-registries/{id}`)
+— currently missing, required by the admin UI.
+
+### Error handling
 
 | Failure | Behaviour |
 |---|---|
-| `skills.sh /api/search` returns non-200 | Log, return `[]` (discovery continues from other sources) |
-| GitHub API rate limit (403/429) | Raise `ValueError("rate limited")` → install returns 502 |
-| GitHub file not found (404) | Raise `ValueError` → install returns 400 |
-| Bundle > 50 MB | Raise `ValueError` → install returns 400 |
-| `SKILL.md` missing in tree | Raise `ValueError` → install returns 400 |
+| `skills.sh /api/search` non-200 | Return `[]`; fan-out continues |
+| GitHub rate limit (403/429) | Raise `ValueError` → install 502 |
+| GitHub file not found (404) | Raise `ValueError` → install 400 |
+| Bundle > 50 MB | Raise `ValueError` → install 400 |
+| `SKILL.md` absent in tree | Raise `ValueError` → install 400 |
 
-Discovery errors are swallowed per the existing fan-out pattern in
-`SkillDiscoveryService.discover()` (`except Exception: continue`).
+Discovery errors swallowed per `SkillDiscoveryService.discover()` pattern.
 
-## Out of scope
+### Install path
 
-- Frontend admin UI for managing skill sources (pre-existing gap, separate task).
-- Pagination of skills.sh search results beyond `limit`.
-- Caching search results or GitHub tree responses.
-- Per-org GitHub tokens (single token from config is sufficient).
+No changes. `SkillInstallService._install_remote()`:
+`decode_candidate_id` → `kind="remote"`, `source_id=<row_id>` →
+`manager.adapter_by_id(source_id)` → `SkillsShAdapter.fetch(source_ref)` →
+`_publish_from_files()`.
+
+---
+
+## Part 3 — Admin Skill Registries Page
+
+### Route
+
+`frontend/packages/web/app/admin/skill-registries/page.tsx`
+
+Added to admin sidebar nav as **"Skill Registries"** (中文: **技能仓库**),
+between "Skills" and the next item.
+
+### Layout
+
+Master-detail, same pattern as `admin/skills`:
+
+```
+┌──────────────────────────────────────────────────────┐
+│ Skill Registries  (header)                           │
+│ Manage external skill registries for this org        │
+├──────────────────────────────────────────────────────┤
+│ [+ Add Registry]                    (toolbar)        │
+├────────────────────┬─────────────────────────────────┤
+│ List (300px)       │ Detail / Add form               │
+│                    │                                 │
+│ ● skills.sh        │  [selected registry detail]     │
+│   community · on   │                                 │
+│                    │                                 │
+│ ● My Registry      │                                 │
+│   untrusted · off  │                                 │
+└────────────────────┴─────────────────────────────────┘
+```
+
+### Left sidebar — registry list
+
+Each row: icon (Globe for remote/skills-sh), name, kind badge, trust badge,
+enabled/disabled indicator. Clicking selects and opens detail panel.
+
+Empty state: "No registries configured. Add one to enable skill discovery
+from external sources."
+
+### Right panel — detail view
+
+Shows for a selected registry:
+- Name, kind (`skills.sh` or `Custom`), base_url (for custom), trust tier
+- Enabled toggle (calls `PATCH /admin/skill-registries/{id}`)
+- Trust tier selector: Official / Community / Untrusted
+- Delete button with confirmation dialog
+
+### Right panel — add form
+
+Opened by "+ Add Registry" button (clears selection):
+
+```
+Kind:       [skills.sh ▼]  /  [Custom Registry ▼]
+
+  skills.sh selected:
+    Name:        [_______________]   (pre-filled "skills.sh", editable)
+    Trust tier:  [Community ▼]
+
+  Custom selected:
+    Name:        [_______________]
+    Registry URL:[_______________]   (validated: must be public HTTPS)
+    Trust tier:  [Untrusted ▼]
+
+[Cancel]  [Add Registry]
+```
+
+On submit: `POST /admin/skill-registries` → success refreshes list and
+selects the new row.
+
+### API routes (Next.js proxy)
+
+```
+/app/api/v1/admin/skill-registries/route.ts         GET, POST
+/app/api/v1/admin/skill-registries/[id]/route.ts    PATCH, DELETE
+```
+
+---
 
 ## Files changed
 
+### Backend
+
 | File | Change |
 |---|---|
-| `backend/cubebox/skills/sources/skills_sh.py` | New |
-| `backend/cubebox/skills/sources/registry.py` | Add `skills-sh` branch in `build()` |
-| `backend/cubebox/models/skill_source.py` | Remove hardcoded `kind="remote"` default, accept any kind |
-| `backend/cubebox/repositories/skill_source.py` | Pass `kind` through `create()` |
-| `backend/cubebox/api/routes/v1/admin_skill_sources.py` | Add `kind` field, make `base_url` optional, skip URL validation for `skills-sh` |
-| `backend/config.yaml` | Add `registry.skills_sh.github_token` |
-| `backend/tests/unit/test_skills_sh_source.py` | New unit tests with `httpx.MockTransport` |
+| `cubebox/models/skill_source.py` → `skill_registry.py` | Rename model + class; remove hardcoded `kind="remote"` |
+| `cubebox/repositories/skill_source.py` → `skill_registry.py` | Rename; pass `kind` through `create()` |
+| `cubebox/skills/sources/base.py` | Rename `SkillSource` protocol → `SkillRegistryAdapter` |
+| `cubebox/skills/sources/local.py` | Rename `LocalCatalogSource` → `LocalCatalogAdapter` |
+| `cubebox/skills/sources/remote.py` | Rename `RemoteRegistrySource` → `RemoteRegistryAdapter` |
+| `cubebox/skills/sources/registry.py` | Rename `SkillSourceRegistry` → `SkillsAdapterManager`; add `skills-sh` branch |
+| `cubebox/skills/sources/skills_sh.py` | **New** — `SkillsShAdapter` |
+| `cubebox/api/routes/v1/admin_skill_sources.py` → `admin_skill_registries.py` | Rename; add `kind` field; optional `base_url`; add DELETE endpoint |
+| `cubebox/api/app.py` | Update router import |
+| `cubebox/db/alembic/versions/<new>.py` | `ALTER TABLE skill_sources RENAME TO skill_registries` |
+| `cubebox/models/__init__.py` | Update export |
+| `config.yaml` | Add `registry.skills_sh.github_token` |
+| `tests/unit/test_skills_sh_adapter.py` | **New** — `httpx.MockTransport` tests for search + fetch |
+| `tests/e2e/test_skill_registries_admin.py` | Update existing test imports/names |
+
+### Frontend
+
+| File | Change |
+|---|---|
+| `app/admin/skill-registries/page.tsx` | **New** — Skill Registries admin page |
+| `components/admin/skill-registries/RegistryList.tsx` | **New** |
+| `components/admin/skill-registries/RegistryDetailPanel.tsx` | **New** |
+| `components/admin/skill-registries/AddRegistryForm.tsx` | **New** |
+| `app/api/v1/admin/skill-registries/route.ts` | **New** — GET + POST proxy |
+| `app/api/v1/admin/skill-registries/[id]/route.ts` | **New** — PATCH + DELETE proxy |
+| `components/layout/AdminSidebar.tsx` | Add "Skill Registries" nav item |
+| `messages/en.json` | Add `adminSkillRegistries.*` keys |
+| `messages/zh.json` | Add Chinese translations (`技能仓库`) |
