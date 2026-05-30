@@ -17,6 +17,13 @@ import {
 } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
 import { cn } from '@/lib/utils'
+import { ScheduleEditor } from './ScheduleEditor'
+import {
+  buildSchedulePayload,
+  defaultScheduleEditorValue,
+  parseSchedulePayload,
+  type ScheduleEditorValue,
+} from '../lib/schedulePayload'
 
 interface ScheduledTaskFormDialogProps {
   wsId: string
@@ -26,24 +33,12 @@ interface ScheduledTaskFormDialogProps {
   onSuccess: (task: ScheduledTaskOut) => void
 }
 
-function localDatetimeToIso(value: string): string {
-  if (!value) return ''
-  // datetime-local gives us "2030-01-01T09:00" — interpret as local time
-  const d = new Date(value)
-  if (isNaN(d.getTime())) return value
-  return d.toISOString()
-}
-
-function isoToLocalDatetime(iso: string | null): string {
-  if (!iso) return ''
-  const d = new Date(iso)
-  if (isNaN(d.getTime())) return ''
-  // datetime-local format: "YYYY-MM-DDTHH:mm"
-  const pad = (n: number): string => n.toString().padStart(2, '0')
-  return (
-    `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}` +
-    `T${pad(d.getHours())}:${pad(d.getMinutes())}`
-  )
+function detectTimezone(): string {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone
+  } catch {
+    return 'UTC'
+  }
 }
 
 export function ScheduledTaskFormDialog({
@@ -57,11 +52,9 @@ export function ScheduledTaskFormDialog({
 
   const [name, setName] = useState('')
   const [prompt, setPrompt] = useState('')
-  const [scheduleKind, setScheduleKind] = useState<'cron' | 'interval' | 'once'>('interval')
-  const [cronExpr, setCronExpr] = useState('')
-  const [intervalSeconds, setIntervalSeconds] = useState('3600')
-  const [runAt, setRunAt] = useState('')
-  const [timezone, setTimezone] = useState('UTC')
+  const [scheduleValue, setScheduleValue] = useState<ScheduleEditorValue>(
+    defaultScheduleEditorValue(detectTimezone()),
+  )
   const [targetMode, setTargetMode] = useState<'new_each_run' | 'fixed'>('new_each_run')
   const [targetConversationId, setTargetConversationId] = useState('')
   const [saving, setSaving] = useState(false)
@@ -75,21 +68,13 @@ export function ScheduledTaskFormDialog({
       if (task) {
         setName(task.name)
         setPrompt(task.prompt)
-        setScheduleKind(task.schedule_kind)
-        setCronExpr(task.cron_expr ?? '')
-        setIntervalSeconds(task.interval_seconds != null ? String(task.interval_seconds) : '3600')
-        setRunAt(isoToLocalDatetime(task.run_at))
-        setTimezone(task.timezone)
+        setScheduleValue(parseSchedulePayload(task))
         setTargetMode(task.target_mode)
         setTargetConversationId(task.target_conversation_id ?? '')
       } else {
         setName('')
         setPrompt('')
-        setScheduleKind('interval')
-        setCronExpr('')
-        setIntervalSeconds('3600')
-        setRunAt('')
-        setTimezone('UTC')
+        setScheduleValue(defaultScheduleEditorValue(detectTimezone()))
         setTargetMode('new_each_run')
         setTargetConversationId('')
       }
@@ -105,26 +90,12 @@ export function ScheduledTaskFormDialog({
     const client = createApiClient('')
     client.setWorkspaceId(wsId)
 
+    const scheduleFields = buildSchedulePayload(scheduleValue)
     const body: ScheduledTaskCreate = {
       name: name.trim(),
       prompt: prompt.trim(),
-      schedule_kind: scheduleKind,
       target_mode: targetMode,
-    }
-
-    if (scheduleKind === 'cron') {
-      body.cron_expr = cronExpr.trim()
-    } else if (scheduleKind === 'interval') {
-      body.interval_seconds = Number(intervalSeconds)
-    } else if (scheduleKind === 'once') {
-      body.run_at = localDatetimeToIso(runAt)
-    }
-
-    // Always send timezone, including 'UTC'. On PATCH, omitting a field
-    // means "keep the old value", so silently dropping 'UTC' would prevent
-    // a user from switching an existing task back to UTC from another zone.
-    if (timezone.trim()) {
-      body.timezone = timezone.trim()
+      ...scheduleFields,
     }
 
     if (targetMode === 'fixed' && targetConversationId.trim()) {
@@ -154,7 +125,7 @@ export function ScheduledTaskFormDialog({
         <DialogPrimitive.Backdrop className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm data-[ending-style]:opacity-0 data-[starting-style]:opacity-0 transition-opacity duration-200" />
         <DialogPrimitive.Popup
           className={cn(
-            'fixed left-1/2 top-1/2 z-50 w-[min(560px,calc(100vw-32px))]',
+            'fixed left-1/2 top-1/2 z-50 w-[min(580px,calc(100vw-32px))]',
             '-translate-x-1/2 -translate-y-1/2 max-h-[90vh] overflow-y-auto',
             'rounded-xl border border-border bg-popover p-5 text-popover-foreground shadow-2xl',
             'data-[ending-style]:opacity-0 data-[starting-style]:opacity-0 transition-opacity duration-200',
@@ -206,84 +177,10 @@ export function ScheduledTaskFormDialog({
               />
             </div>
 
-            {/* Schedule kind */}
+            {/* Schedule */}
             <div className="flex flex-col gap-1.5">
-              <Label htmlFor="task-schedule-kind">Schedule type</Label>
-              <Select
-                value={scheduleKind}
-                onValueChange={(v) => setScheduleKind(v as typeof scheduleKind)}
-              >
-                <SelectTrigger id="task-schedule-kind">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="cron">Cron expression</SelectItem>
-                  <SelectItem value="interval">Interval (repeating)</SelectItem>
-                  <SelectItem value="once">Once at a specific time</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
-            {/* Conditional schedule fields */}
-            {scheduleKind === 'cron' && (
-              <div className="flex flex-col gap-1.5">
-                <Label htmlFor="task-cron">Cron expression</Label>
-                <Input
-                  id="task-cron"
-                  value={cronExpr}
-                  onChange={(e) => setCronExpr(e.target.value)}
-                  placeholder="0 9 * * 1-5"
-                  required
-                  className="font-mono text-sm"
-                />
-                <p className="text-xs text-muted-foreground">
-                  Standard 5-field cron (minute hour day-of-month month day-of-week)
-                </p>
-              </div>
-            )}
-
-            {scheduleKind === 'interval' && (
-              <div className="flex flex-col gap-1.5">
-                <Label htmlFor="task-interval">Interval (seconds)</Label>
-                <Input
-                  id="task-interval"
-                  type="number"
-                  min={60}
-                  step={1}
-                  value={intervalSeconds}
-                  onChange={(e) => setIntervalSeconds(e.target.value)}
-                  placeholder="3600"
-                  required
-                />
-                <p className="text-xs text-muted-foreground">Minimum 60 seconds</p>
-              </div>
-            )}
-
-            {scheduleKind === 'once' && (
-              <div className="flex flex-col gap-1.5">
-                <Label htmlFor="task-run-at">Run at</Label>
-                <Input
-                  id="task-run-at"
-                  type="datetime-local"
-                  value={runAt}
-                  onChange={(e) => setRunAt(e.target.value)}
-                  required
-                />
-              </div>
-            )}
-
-            {/* Timezone */}
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="task-timezone">Timezone</Label>
-              <Input
-                id="task-timezone"
-                value={timezone}
-                onChange={(e) => setTimezone(e.target.value)}
-                placeholder="UTC"
-              />
-              <p className="text-xs text-muted-foreground">
-                IANA timezone name (e.g. America/New_York, Asia/Shanghai)
-              </p>
+              <Label>Schedule</Label>
+              <ScheduleEditor value={scheduleValue} onChange={setScheduleValue} />
             </div>
 
             {/* Target mode */}
