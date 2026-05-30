@@ -78,6 +78,7 @@ def _to_out(t: ScheduledTask) -> ScheduledTaskOut:
         owner_user_id=t.owner_user_id,
         next_fire_at=_iso(t.next_fire_at),
         last_fired_at=_iso(t.last_fired_at),
+        end_at=_iso(t.end_at),
         created_at=utc_isoformat(t.created_at),
         updated_at=utc_isoformat(t.updated_at),
     )
@@ -204,6 +205,7 @@ async def create_task(
             cron_expr=body.cron_expr,
             interval_seconds=body.interval_seconds,
             run_at=_to_utc_naive(body.run_at) if body.run_at is not None else None,
+            end_at=_to_utc_naive(body.end_at) if body.end_at is not None else None,
             timezone=body.timezone,
             target_mode=body.target_mode,
             target_conversation_id=body.target_conversation_id,
@@ -289,6 +291,10 @@ async def patch_task(
             if field in _SCHEDULE_FIELDS and val != getattr(task, field):
                 touched_schedule = True
             setattr(task, field, val)
+        # end_at must be handled separately: the generic loop skips None values,
+        # so explicit null (clear-the-deadline) would be silently ignored.
+        if "end_at" in body.model_fields_set:
+            task.end_at = _to_utc_naive(body.end_at) if body.end_at is not None else None
         # Only recompute next_fire_at when the schedule actually changed.
         # Metadata-only edits (name/prompt/target_*) must NOT slide the next
         # fire forward; that would silently delay or skip the pending run.
