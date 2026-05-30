@@ -19,6 +19,8 @@ from typing import Any, Literal, cast
 
 from opensandbox.models.sandboxes import NetworkPolicy, NetworkRule
 
+from cubebox.sandbox_env.host_rules import canon_host
+
 CommandAction = Literal["deny", "confirm", "allow"]
 _ACTION_RANK: dict[str, int] = {"deny": 0, "confirm": 1, "allow": 2}
 
@@ -158,7 +160,7 @@ def _host_specificity(target: str) -> tuple[int, int]:
     Normalize the trailing dot / case first so it matches the sidecar's own
     host matching (and the contradiction check's canonicalization).
     """
-    target = target.removesuffix(".").lower()
+    target = canon_host(target)
     if target.startswith("*."):
         return (0, target[2:].count(".") + 1)
     return (1, target.count(".") + 1)
@@ -188,7 +190,7 @@ def build_network_policy(
     egress = [
         NetworkRule(
             action=cast(Literal["allow", "deny"], str(r["action"])),
-            target=str(r["target"]).strip().removesuffix(".").lower(),
+            target=canon_host(str(r["target"])),
         )
         for r in ordered
     ]

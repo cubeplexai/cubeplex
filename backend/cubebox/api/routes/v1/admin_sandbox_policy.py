@@ -63,7 +63,7 @@ async def put_sandbox_policy(
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
 
     installed_creds = await list_org_credentials_with_hosts(session, org_id=ctx.org_id)
-    warnings = credential_conflict_warnings(body.network_rules, installed_creds)
+    warnings = credential_conflict_warnings(row.network_rules, installed_creds)
 
     return SandboxPolicyOut(
         default_image=row.default_image,
