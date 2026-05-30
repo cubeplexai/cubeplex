@@ -1374,10 +1374,10 @@ _FAKE_SKILL_MD = (
 async def fake_registry_url() -> AsyncIterator[str]:
     """Stand up a real local HTTP registry server and yield its base URL.
 
-    The server implements the three endpoints that RemoteRegistrySource calls:
+    The server implements the three endpoints that RemoteRegistryAdapter calls:
     GET /search, GET /tree/{ref:path}, GET /raw/{full:path}. Using a real
     uvicorn server (not a MockTransport) exercises the full production httpx
-    code path inside RemoteRegistrySource.
+    code path inside RemoteRegistryAdapter.
     """
     registry_app = FastAPI()
 
@@ -1437,9 +1437,9 @@ async def fake_registry_url() -> AsyncIterator[str]:
 
 @pytest_asyncio.fixture
 async def seed_remote_source() -> AsyncIterator[Callable[..., Awaitable[str]]]:
-    """Insert a SkillSource row directly, returning its id.
+    """Insert a SkillRegistry row directly, returning its id.
 
-    The admin route ``POST /admin/skill-sources`` now rejects loopback/private
+    The admin route ``POST /admin/skill-registries`` now rejects loopback/private
     hosts as SSRF (``BAD_BASE_URL``), which is exactly what the ``fake_registry_url``
     test server binds to. Remote-discovery E2Es don't exercise that validation
     (it's covered by ``test_create_rejects_ssrf_base_urls``); they only need a

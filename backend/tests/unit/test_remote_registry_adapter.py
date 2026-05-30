@@ -2,7 +2,7 @@ import httpx
 import pytest
 
 from cubebox.skills.sources.base import TrustTier, decode_candidate_id
-from cubebox.skills.sources.remote import RemoteRegistrySource
+from cubebox.skills.sources.remote import RemoteRegistryAdapter
 
 
 def _registry_app() -> httpx.MockTransport:
@@ -47,7 +47,7 @@ def _registry_app() -> httpx.MockTransport:
 
 @pytest.mark.asyncio
 async def test_search_normalizes_and_computes_canonical_name():
-    src = RemoteRegistrySource(
+    src = RemoteRegistryAdapter(
         source_id="sksrc-1",
         base_url="https://reg.test",
         trust_tier=TrustTier.community,
@@ -71,7 +71,7 @@ async def test_search_normalizes_and_computes_canonical_name():
 
 @pytest.mark.asyncio
 async def test_fetch_imports_whole_subpath_tree_not_just_skill_md():
-    src = RemoteRegistrySource(
+    src = RemoteRegistryAdapter(
         source_id="sksrc-1",
         base_url="https://reg.test",
         trust_tier=TrustTier.community,
@@ -135,7 +135,7 @@ def _huge_search_app(payload_size_bytes: int) -> httpx.MockTransport:
 @pytest.mark.asyncio
 async def test_search_rejects_oversized_response_before_decoding():
     # 3 MB search payload, cap is 2 MB.
-    src = RemoteRegistrySource(
+    src = RemoteRegistryAdapter(
         source_id="sksrc-1",
         base_url="https://reg.test",
         trust_tier=TrustTier.community,
@@ -149,7 +149,7 @@ async def test_search_rejects_oversized_response_before_decoding():
 @pytest.mark.asyncio
 async def test_fetch_rejects_oversized_tree_manifest_before_parsing():
     # 2 MB tree payload, cap is 1 MB.
-    src = RemoteRegistrySource(
+    src = RemoteRegistryAdapter(
         source_id="sksrc-1",
         base_url="https://reg.test",
         trust_tier=TrustTier.community,
@@ -164,7 +164,7 @@ async def test_fetch_rejects_oversized_tree_manifest_before_parsing():
 async def test_fetch_stops_at_bundle_cap_even_when_each_file_is_within_per_file_cap():
     # 8 files × 8 MB = 64 MB > 50 MB bundle cap, but each file is under
     # the 10 MB per-file cap so only the bundle guard can stop this.
-    src = RemoteRegistrySource(
+    src = RemoteRegistryAdapter(
         source_id="sksrc-1",
         base_url="https://reg.test",
         trust_tier=TrustTier.community,

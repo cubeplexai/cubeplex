@@ -10,7 +10,7 @@ import pytest
 from cubebox.skills.cache import SkillCache
 from cubebox.skills.discovery import SkillDiscoveryService
 from cubebox.skills.service import SkillCatalogService
-from cubebox.skills.sources.registry import SkillSourceRegistry
+from cubebox.skills.sources.registry import SkillsAdapterManager
 from cubebox.tools.builtin.find_skills import FindSkillsInput, create_find_skills_tool
 
 
@@ -27,7 +27,7 @@ async def test_find_skills_tool_returns_local_candidate(
     catalog = SkillCatalogService(
         session=session, cache=SkillCache(cache_root=Path("skills_cache"))
     )
-    registry = await SkillSourceRegistry.build(
+    registry = await SkillsAdapterManager.build(
         session=session,
         catalog=catalog,
         org_id=org_id,

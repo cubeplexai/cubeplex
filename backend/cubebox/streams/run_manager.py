@@ -1135,12 +1135,12 @@ class RunManager:
             try:
                 from cubebox.repositories.organization import OrganizationRepository
                 from cubebox.skills.discovery import SkillDiscoveryService
-                from cubebox.skills.sources.registry import SkillSourceRegistry
+                from cubebox.skills.sources.registry import SkillsAdapterManager
                 from cubebox.tools.builtin.find_skills import create_find_skills_tool
 
                 _org = await OrganizationRepository(catalog_session).get(ctx.org_id)
                 if _org is not None:
-                    _registry = await SkillSourceRegistry.build(
+                    _registry = await SkillsAdapterManager.build(
                         session=catalog_session,
                         catalog=skill_catalog,
                         org_id=ctx.org_id,

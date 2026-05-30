@@ -1,7 +1,7 @@
 """E2E tests for remote skill discover → preview → install via a faithful fake registry.
 
 The fake registry is a real HTTP server (uvicorn) spun up by the ``fake_registry_url``
-fixture in conftest.py. That means RemoteRegistrySource goes through its full httpx
+fixture in conftest.py. That means RemoteRegistryAdapter goes through its full httpx
 code path, not a mock transport.
 """
 

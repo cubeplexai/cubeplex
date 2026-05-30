@@ -1,4 +1,4 @@
-"""Local catalog as a SkillSource: own-org-visible skills, not yet enabled here."""
+"""Local catalog as a SkillRegistryAdapter: own-org-visible skills, not yet enabled here."""
 
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ from cubebox.skills.sources.base import (
 )
 
 
-class LocalCatalogSource:
+class LocalCatalogAdapter:
     kind: SourceKind = "local"
 
     def __init__(

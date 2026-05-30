@@ -119,14 +119,14 @@ async def _maybe_install_from_user_message(
         SkillInstallService,
     )
     from cubebox.skills.service import SkillCatalogService, SkillPublishService
-    from cubebox.skills.sources.registry import SkillSourceRegistry
+    from cubebox.skills.sources.registry import SkillsAdapterManager
 
     canonical = m.group(1)
     catalog = SkillCatalogService(session=session, cache=_skill_cache())
     org = await OrganizationRepository(session).get(org_id)
     if org is None:
         return f"Could not find organization while trying to install `{canonical}`."
-    registry = await SkillSourceRegistry.build(
+    registry = await SkillsAdapterManager.build(
         session=session,
         catalog=catalog,
         org_id=org_id,
