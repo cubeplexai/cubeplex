@@ -54,13 +54,15 @@
     "title": "Admin",
     "skills": "Skills",
     "skillsSubtitle": "Install built-in / uploaded skills to the org, then enable them per workspace.",
-    "backToApp": "Back to app"
+    "backToApp": "Back to app",
+    "skillRegistries": "Skill Registries"
   },
   "adminNav": {
     "settings": "Org Settings",
     "models": "Models",
     "webTools": "Web Tools",
     "skills": "Skills",
+    "skillRegistries": "Skill Registries",
     "mcp": "MCP Connectors",
     "sandbox": "Sandbox policy",
     "insights": "Insights",
@@ -1095,5 +1097,31 @@
     "customTestFailed": "Connection failed",
     "addCustomConnector": "+ Add custom connector",
     "promoteToOrg": "Promote to org-wide"
+  },
+  "adminSkillRegistries": {
+    "pageTitle": "Skill Registries",
+    "title": "Skill Registries",
+    "subtitle": "Manage external skill registries for this organisation",
+    "addRegistry": "Add Registry",
+    "listAria": "skill registries list",
+    "loading": "Loading…",
+    "empty": "No registries configured",
+    "emptyHint": "Add a registry to enable skill discovery from external sources",
+    "selectOrAdd": "Select a registry or add a new one",
+    "addTitle": "Add Registry",
+    "kind": "Kind",
+    "customRegistry": "Custom Registry",
+    "name": "Name",
+    "namePlaceholder": "My Registry",
+    "registryUrl": "Registry URL",
+    "registryUrlHint": "Must be a public HTTPS endpoint implementing the registry search API",
+    "trustTier": "Trust Tier",
+    "adding": "Adding…",
+    "add": "Add",
+    "cancel": "Cancel",
+    "enabled": "Enabled",
+    "deleteTitle": "Delete Registry",
+    "deleteDescription": "Remove \"{name}\" from this org. Existing installed skills are not affected.",
+    "delete": "Delete"
   }
 }
