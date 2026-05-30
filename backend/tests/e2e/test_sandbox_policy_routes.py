@@ -141,3 +141,46 @@ def test_wildcard_credential_host_with_exact_deny_overlap_unit() -> None:
     # And the symmetric helper used by the credential editor route.
     blocked = deny_targets_for_cred(["*.github.com"], network_rules)
     assert blocked == ["*.github.com"]
+
+
+async def test_put_roundtrips_allow_default_with_deny_rule(admin_client) -> None:
+    client, _ws = admin_client
+    put = await client.put(
+        "/api/v1/admin/sandbox-policy",
+        json={
+            "default_image": "ubuntu:22.04",
+            "network_default_action": "allow",
+            "network_rules": [{"action": "deny", "target": "*.evil.com"}],
+            "command_rules": None,
+        },
+    )
+    assert put.status_code == 200, put.text
+    assert put.json()["network_default_action"] == "allow"
+    got = await client.get("/api/v1/admin/sandbox-policy")
+    body = got.json()
+    assert body["network_default_action"] == "allow"
+    assert {"action": "deny", "target": "*.evil.com"} in body["network_rules"]
+
+
+async def test_get_defaults_action_to_deny_when_unset(admin_client) -> None:
+    client, _ws = admin_client
+    resp = await client.get("/api/v1/admin/sandbox-policy")
+    assert resp.status_code == 200
+    assert resp.json()["network_default_action"] == "deny"
+
+
+async def test_put_rejects_contradictory_network_rules(admin_client) -> None:
+    client, _ws = admin_client
+    resp = await client.put(
+        "/api/v1/admin/sandbox-policy",
+        json={
+            "default_image": "ubuntu:22.04",
+            "network_default_action": "allow",
+            "network_rules": [
+                {"action": "allow", "target": "api.github.com"},
+                {"action": "deny", "target": "API.GITHUB.COM"},
+            ],
+            "command_rules": None,
+        },
+    )
+    assert resp.status_code == 400
