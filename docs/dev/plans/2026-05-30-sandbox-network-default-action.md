@@ -450,6 +450,7 @@ git commit -m "feat(sandbox-policy): network_default_action in API schemas"
 - Modify: `backend/cubebox/services/sandbox_policy.py`
 - Modify: `backend/cubebox/repositories/sandbox_policy.py`
 - Test: `backend/tests/unit/test_sandbox_policy_resolver.py`
+- Test: `backend/tests/e2e/test_sandbox_scoping.py` (existing direct `upsert` callers)
 
 - [ ] **Step 1: Add failing tests for default-action + contradiction validation and resolver passthrough**
 
@@ -685,20 +686,51 @@ In `backend/cubebox/repositories/sandbox_policy.py`, change `upsert` to accept a
         return row
 ```
 
-- [ ] **Step 5: Run the tests to verify they pass**
+- [ ] **Step 5: Update the other direct repository caller**
+
+`backend/tests/e2e/test_sandbox_scoping.py` calls `SandboxPolicyRepository.upsert(...)`
+directly at two spots (lines ~148 and ~171) with only `default_image` /
+`network_rules` / `command_rules`. The new required keyword would raise
+`TypeError`. Add `network_default_action="allow"` to BOTH calls. The first
+(line ~148):
+
+```python
+        await SandboxPolicyRepository(s, org_id=org_id).upsert(
+            default_image="python:3.12",
+            network_rules=None,
+            command_rules=None,
+            network_default_action="allow",
+        )
+```
+
+The second (line ~171):
+
+```python
+        await SandboxPolicyRepository(s, org_id=org_id).upsert(
+            default_image="ubuntu:22.04",
+            network_rules=None,
+            command_rules=None,
+            network_default_action="allow",
+        )
+```
+
+(The value is irrelevant to what this test checks — image drift — but the
+keyword is now required.)
+
+- [ ] **Step 6: Run the tests to verify they pass**
 
 Run: `cd backend && uv run pytest tests/unit/test_sandbox_policy_resolver.py -q`
 Expected: PASS.
 
-- [ ] **Step 6: Typecheck**
+- [ ] **Step 7: Typecheck**
 
 Run: `cd backend && uv run mypy cubebox/services/sandbox_policy.py cubebox/repositories/sandbox_policy.py`
 Expected: `Success: no issues found`.
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 8: Commit**
 
 ```bash
-git add backend/cubebox/services/sandbox_policy.py backend/cubebox/repositories/sandbox_policy.py backend/tests/unit/test_sandbox_policy_resolver.py
+git add backend/cubebox/services/sandbox_policy.py backend/cubebox/repositories/sandbox_policy.py backend/tests/unit/test_sandbox_policy_resolver.py backend/tests/e2e/test_sandbox_scoping.py
 git commit -m "feat(sandbox-policy): validate default action + contradictory rules; carry field"
 ```
 
@@ -1236,7 +1268,8 @@ cd backend && uv run pytest \
   tests/unit/test_egress_injector.py \
   tests/unit/test_sandbox_policy_resolver.py \
   tests/unit/test_manager_egress_injection.py \
-  tests/e2e/test_sandbox_policy_routes.py -q
+  tests/e2e/test_sandbox_policy_routes.py \
+  tests/e2e/test_sandbox_scoping.py -q
 ```
 Expected: all PASS.
 
