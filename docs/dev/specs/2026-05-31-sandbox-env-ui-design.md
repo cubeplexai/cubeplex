@@ -72,7 +72,8 @@ Opens on `+ Add` buttons and on `rotate`. Fields:
 
 ```
 NAME     [monospace text input, required, max 128 chars]
-         Validation: /^[A-Z_][A-Z0-9_]*$/ enforced client-side with inline error
+         Validation: /^[A-Za-z_][A-Za-z0-9_]*$/ enforced client-side with inline error.
+         The backend only enforces max_length=128; the regex is a UX guard only.
 
 SCOPE    [select: Workspace | Personal]
          Only shown on the workspace page for admins; pre-filled from which button was clicked.
@@ -94,7 +95,7 @@ HOSTS    [tag input, one pattern per tag]
 
 `header_names` is not exposed in V1.
 
-**Rotate flow:** clicking `rotate` opens the same modal with NAME pre-filled and locked, SCOPE/TYPE hidden (can't change), VALUE empty and required. Calls `PATCH .../rotate` on submit.
+**Rotate flow:** clicking `rotate` opens the same modal with NAME pre-filled and locked, SCOPE/TYPE hidden (can't change), VALUE empty and required. On submit calls the PATCH endpoint listed in "API endpoints used" — `PATCH /workspace/{id}` or `PATCH /me/{id}` depending on the entry's scope.
 
 **Submit behavior:** on success, close modal and refresh the list. On API error, show the error message inline above the footer buttons (same pattern as MCP credential grant errors).
 
