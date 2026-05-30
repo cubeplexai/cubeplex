@@ -38,7 +38,7 @@ from cubebox.models.skill import (
     SkillVersion,
     WorkspaceSkillBinding,
 )
-from cubebox.models.skill_source import SkillSource
+from cubebox.models.skill_registry import SkillRegistry
 from cubebox.models.trigger import Trigger, TriggerEvent
 from cubebox.models.user import User
 from cubebox.models.user_sandbox import UserSandbox
@@ -80,7 +80,7 @@ __all__ = [
     "ScheduledTask",
     "ScheduledTaskRun",
     "Skill",
-    "SkillSource",
+    "SkillRegistry",
     "SkillVersion",
     "Trigger",
     "TriggerEvent",

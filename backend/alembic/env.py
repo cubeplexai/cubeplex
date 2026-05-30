@@ -36,7 +36,7 @@ from cubebox.models import (  # noqa: F401
     Provider,
     SandboxEnvVar,
     Skill,
-    SkillSource,
+    SkillRegistry,
     SkillVersion,
     User,
     UserSandbox,
