@@ -48,6 +48,7 @@ export function OfficePreview({ artifact, version, workspaceId }: OfficePreviewP
   }, [artifact.conversation_id, artifact.id, artifact.version, version, workspaceId])
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     void fetchToken()
   }, [fetchToken])
 
@@ -86,6 +87,7 @@ export function OfficePreview({ artifact, version, workspaceId }: OfficePreviewP
     return (
       <div className="flex flex-col items-center justify-center h-full gap-4 p-8 text-center">
         <div className="flex size-16 items-center justify-center rounded-xl bg-muted">
+          {/* eslint-disable-next-line react-hooks/static-components */}
           <Icon className="size-8 text-muted-foreground" />
         </div>
         <div>

@@ -26,6 +26,7 @@ export function MemoryList({ wsId, scope, status = 'active' }: MemoryListProps) 
   useEffect(() => {
     let cancelled = false
     loadingRef.current = true
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setLoading(true)
     setError(null)
     listMemory(client, { scope, status })

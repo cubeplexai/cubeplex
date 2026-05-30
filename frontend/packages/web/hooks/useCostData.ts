@@ -76,6 +76,7 @@ export function useCostData(filters: CostFilters): CostData {
     let cancelled = false
     const { from, to } = resolveDates(filters)
     const prior = priorWindow(from, to)
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setData((d) => ({ ...d, loading: true, error: null, errors: [] }))
 
     const wsIds = filters.workspaceIds.length ? filters.workspaceIds : undefined

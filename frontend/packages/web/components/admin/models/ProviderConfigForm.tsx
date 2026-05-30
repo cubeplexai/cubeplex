@@ -131,6 +131,7 @@ export function ProviderConfigForm({
   // Use a ref for the callback so its (unstable) identity doesn't retrigger the
   // effect — it must fire on value changes only, never on parent re-renders.
   const onValuesChangeRef = useRef(onValuesChange)
+  // eslint-disable-next-line react-hooks/refs
   onValuesChangeRef.current = onValuesChange
   useEffect(() => {
     if (!isCreate) return
