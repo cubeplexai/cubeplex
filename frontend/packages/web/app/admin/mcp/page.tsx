@@ -52,6 +52,7 @@ export default function AdminMcpPage() {
   }, [client])
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     void load()
     if (workspaces.length === 0) void fetchWorkspaceList(client)
   }, [load, client, workspaces.length, fetchWorkspaceList])

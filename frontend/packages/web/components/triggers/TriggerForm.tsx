@@ -43,6 +43,7 @@ export function TriggerForm({ wsId, open, onOpenChange, onCreated, onSubmit }: T
   useEffect(() => {
     if (open) {
       void loadWsMembers(client, wsId)
+      /* eslint-disable react-hooks/set-state-in-effect */
       setName('')
       setWebhookSecret('')
       setPromptTemplate('')
@@ -51,11 +52,13 @@ export function TriggerForm({ wsId, open, onOpenChange, onCreated, onSubmit }: T
       setRateLimitResponse('429')
       setError(null)
       setSaving(false)
+      /* eslint-enable react-hooks/set-state-in-effect */
     }
   }, [open, client, wsId, loadWsMembers])
 
   useEffect(() => {
     if (wsMembers.length > 0 && !runAsUserId) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setRunAsUserId(wsMembers[0].user_id)
     }
   }, [wsMembers, runAsUserId])

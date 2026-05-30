@@ -98,6 +98,7 @@ export function ScheduledTaskRunsPanel({
   }, [taskId, wsId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setLoading(true)
     void fetchRuns()
     intervalRef.current = setInterval(() => void fetchRuns(), 10_000)

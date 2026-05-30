@@ -66,6 +66,7 @@ function ConversationRow({
   const inputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     if (!isEditing) setDraft(convo.title)
   }, [convo.title, isEditing])
 

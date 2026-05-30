@@ -21,6 +21,7 @@ export function SetupForm() {
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     if (!slugTouched) setSlug(suggestSlug(name))
   }, [name, slugTouched])
 

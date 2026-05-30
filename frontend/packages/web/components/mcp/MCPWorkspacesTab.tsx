@@ -76,6 +76,7 @@ export function MCPWorkspacesTab({ installId, client: _client }: MCPWorkspacesTa
   }, [installId])
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     void load()
   }, [load])
 

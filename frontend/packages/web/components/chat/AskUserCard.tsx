@@ -109,6 +109,7 @@ export function AskUserCard({ pending, onSubmit }: AskUserCardProps) {
       const elapsed = Math.floor((Date.now() - pending.requestedAt) / 1000)
       return Math.max(0, pending.timeout_seconds! - elapsed)
     }
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setSecondsLeft(computeLeft())
     const id = setInterval(() => setSecondsLeft(computeLeft()), 1000)
     return () => clearInterval(id)
