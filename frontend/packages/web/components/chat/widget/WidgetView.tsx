@@ -153,9 +153,7 @@ export function WidgetView(props: WidgetViewProps) {
           width: props.width ? `${props.width}px` : '100%',
           minHeight: props.height ?? SKELETON_DEFAULT_HEIGHT,
         }}
-        // @ts-expect-error -- inert is a real HTML attribute in modern browsers
-        // but React's DOM types haven't shipped it yet on every React version.
-        inert={isFullscreen ? '' : undefined}
+        inert={isFullscreen || undefined}
         aria-hidden={isFullscreen || undefined}
       >
         <WidgetFrame key={`inline-${reloadKey}`} {...props} onRetry={reload} />
