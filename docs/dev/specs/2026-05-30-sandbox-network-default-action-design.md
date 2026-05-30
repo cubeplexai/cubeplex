@@ -111,6 +111,12 @@ irrelevant.
 In `SandboxPolicyService._validate`:
 - `network_default_action` must be `"allow"` or `"deny"`.
 - Reject **contradictory pairs**: the same target with both `allow` and `deny`.
+  Compare **canonicalized** targets, not raw strings — the sidecar matches
+  domains case-insensitively and strips a trailing dot
+  (`strings.ToLower(strings.TrimSuffix(domain, "."))`), so `API.GITHUB.COM` /
+  `api.github.com` / `api.github.com.` are one host at runtime. Lowercase and
+  strip the trailing dot before the equality check; otherwise a contradiction
+  slips through and the policy becomes order-dependent instead of rejected.
 - Network targets remain FQDN/wildcard only (existing
   `validate_host_pattern`; regex rejected). Bare `*` stays rejected — "allow
   all" is now expressed by `network_default_action: "allow"` with no rules, not
