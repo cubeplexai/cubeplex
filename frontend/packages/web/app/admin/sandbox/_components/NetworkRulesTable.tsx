@@ -11,14 +11,23 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import { cn } from '@/lib/utils'
 
 interface Props {
   rules: SandboxNetworkRule[]
+  defaultAction: 'allow' | 'deny'
+  onChangeDefaultAction: (v: 'allow' | 'deny') => void
   onChange: (next: SandboxNetworkRule[]) => void
   disabled?: boolean
 }
 
-export function NetworkRulesTable({ rules, onChange, disabled }: Props) {
+export function NetworkRulesTable({
+  rules,
+  defaultAction,
+  onChangeDefaultAction,
+  onChange,
+  disabled,
+}: Props) {
   const update = (idx: number, patch: Partial<SandboxNetworkRule>) => {
     onChange(rules.map((r, i) => (i === idx ? { ...r, ...patch } : r)))
   }
@@ -27,11 +36,49 @@ export function NetworkRulesTable({ rules, onChange, disabled }: Props) {
 
   return (
     <div className="flex flex-col gap-2">
+      <div className="flex items-center justify-between gap-3 rounded-md border border-border/60 bg-muted/20 px-3 py-2">
+        <div className="flex flex-col">
+          <span className="text-xs font-medium">Default action</span>
+          <span className="text-[11px] text-muted-foreground">
+            {defaultAction === 'allow'
+              ? 'Sandboxes can reach any host except the deny rules below.'
+              : 'Sandboxes are blocked from every host except the allow rules below.'}
+          </span>
+        </div>
+        <div className="inline-flex overflow-hidden rounded-md border border-border/70">
+          {(['allow', 'deny'] as const).map((opt) => (
+            <button
+              key={opt}
+              type="button"
+              disabled={disabled}
+              onClick={() => onChangeDefaultAction(opt)}
+              aria-pressed={defaultAction === opt}
+              className={cn(
+                'px-3 py-1 text-xs font-medium transition-colors',
+                defaultAction === opt
+                  ? 'bg-primary text-primary-foreground'
+                  : 'bg-transparent text-muted-foreground hover:bg-muted/50',
+              )}
+            >
+              {opt}
+            </button>
+          ))}
+        </div>
+      </div>
       {rules.length === 0 ? (
         <p className="rounded-md border border-dashed border-border/60 bg-muted/20 px-3 py-3 text-center text-xs text-muted-foreground">
-          No network rules. Outbound traffic is denied by default — add{' '}
-          <span className="font-medium">allow</span> rules for the hosts your sandboxes need to
-          reach.
+          {defaultAction === 'allow' ? (
+            <>
+              No deny rules. All outbound traffic is allowed — add{' '}
+              <span className="font-medium">deny</span> rules for hosts to block.
+            </>
+          ) : (
+            <>
+              No allow rules. Outbound traffic is denied by default — add{' '}
+              <span className="font-medium">allow</span> rules for the hosts your sandboxes need to
+              reach.
+            </>
+          )}
         </p>
       ) : (
         <div className="overflow-hidden rounded-md border border-border/70 bg-card/40">

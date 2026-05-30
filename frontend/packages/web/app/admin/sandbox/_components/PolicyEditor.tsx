@@ -20,6 +20,7 @@ import { CredentialConflictBanner } from './CredentialConflictBanner'
 
 interface Draft {
   defaultImage: string
+  networkDefaultAction: 'allow' | 'deny'
   networkRules: SandboxNetworkRule[]
   commandRules: SandboxCommandRule[]
 }
@@ -27,6 +28,7 @@ interface Draft {
 function fromServer(p: SandboxPolicyOut): Draft {
   return {
     defaultImage: p.default_image,
+    networkDefaultAction: p.network_default_action,
     networkRules: p.network_rules ?? [],
     commandRules: p.command_rules ?? [],
   }
@@ -39,6 +41,7 @@ function rulesEqual<T extends object>(a: T[], b: T[]): boolean {
 
 function isDirty(a: Draft, b: Draft): boolean {
   if (a.defaultImage !== b.defaultImage) return true
+  if (a.networkDefaultAction !== b.networkDefaultAction) return true
   if (!rulesEqual(a.networkRules, b.networkRules)) return true
   if (!rulesEqual(a.commandRules, b.commandRules)) return true
   return false
@@ -100,6 +103,11 @@ export function PolicyEditor() {
     setSavedAt(null)
     setSaveError(null)
   }
+  const setNetworkDefaultAction = (v: 'allow' | 'deny') => {
+    setDraft({ ...draft, networkDefaultAction: v })
+    setSavedAt(null)
+    setSaveError(null)
+  }
   const setNetworkRules = (next: SandboxNetworkRule[]) => {
     setDraft({ ...draft, networkRules: next })
     setSavedAt(null)
@@ -124,6 +132,7 @@ export function PolicyEditor() {
     try {
       const updated = await putSandboxPolicy(client, {
         default_image: draft.defaultImage,
+        network_default_action: draft.networkDefaultAction,
         network_rules: draft.networkRules,
         command_rules: draft.commandRules,
       })
@@ -175,6 +184,8 @@ export function PolicyEditor() {
         />
         <NetworkRulesTable
           rules={draft.networkRules}
+          defaultAction={draft.networkDefaultAction}
+          onChangeDefaultAction={setNetworkDefaultAction}
           onChange={setNetworkRules}
           disabled={saving}
         />
