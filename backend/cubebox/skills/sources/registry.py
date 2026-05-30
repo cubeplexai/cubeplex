@@ -4,11 +4,13 @@ from __future__ import annotations
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from cubebox.config import config as _config
 from cubebox.repositories.skill_registry import SkillRegistryRepository
 from cubebox.skills.service import SkillCatalogService
 from cubebox.skills.sources.base import SkillRegistryAdapter, TrustTier
 from cubebox.skills.sources.local import LocalCatalogAdapter
 from cubebox.skills.sources.remote import RemoteRegistryAdapter
+from cubebox.skills.sources.skills_sh import SkillsShAdapter
 
 
 class SkillsAdapterManager:
@@ -48,14 +50,26 @@ class SkillsAdapterManager:
             org_id, enabled_only=True
         )
         for row in rows:
-            adapters.append(
-                RemoteRegistryAdapter(
-                    source_id=row.id,
-                    base_url=row.base_url,
-                    trust_tier=TrustTier(row.trust_tier),
-                    org_slug=org_slug,
-                    source_name=row.name,
-                    repo=row.repo,
+            if row.kind == "skills-sh":
+                adapters.append(
+                    SkillsShAdapter(
+                        source_id=row.id,
+                        trust_tier=TrustTier(row.trust_tier),
+                        source_name=row.name,
+                        github_token=_config.get(
+                            "registry.skills_sh.github_token"
+                        ) or None,
+                    )
                 )
-            )
+            else:
+                adapters.append(
+                    RemoteRegistryAdapter(
+                        source_id=row.id,
+                        base_url=row.base_url,
+                        trust_tier=TrustTier(row.trust_tier),
+                        org_slug=org_slug,
+                        source_name=row.name,
+                        repo=row.repo,
+                    )
+                )
         return cls(adapters)
