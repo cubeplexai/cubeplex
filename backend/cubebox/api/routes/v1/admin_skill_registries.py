@@ -1,10 +1,10 @@
-"""Org-admin management of remote skill sources (/admin/skill-sources)."""
+"""Org-admin management of skill registries (/admin/skill-registries)."""
 
 from __future__ import annotations
 
 import ipaddress
 import socket
-from typing import Annotated
+from typing import Annotated, Literal
 from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -17,9 +17,10 @@ from cubebox.mcp.dependencies import get_admin_request_context
 from cubebox.models import SkillRegistry
 from cubebox.repositories.skill_registry import SkillRegistryRepository
 
-router = APIRouter(prefix="/admin/skill-sources", tags=["admin-skill-sources"])
+router = APIRouter(prefix="/admin/skill-registries", tags=["admin-skill-registries"])
 
 _TRUST_TIERS = {"official", "community", "untrusted"}
+_VALID_KINDS = {"remote", "skills-sh"}
 
 # Hostnames that name the local box or known-internal infra. Save-time
 # rejection of these is a defense-in-depth measure on top of trusting org
@@ -34,6 +35,8 @@ _FORBIDDEN_HOSTNAMES = {
     "metadata.google.internal",
 }
 _FORBIDDEN_HOSTNAME_SUFFIXES = (".local", ".internal", ".localdomain")
+
+_SKILLS_SH_BASE_URL = "https://skills.sh"
 
 
 def _validate_registry_base_url(raw: str) -> None:
@@ -86,19 +89,20 @@ def _validate_registry_base_url(raw: str) -> None:
         raise HTTPException(status_code=400, detail="BAD_BASE_URL")
 
 
-class CreateSkillSourceRequest(BaseModel):
+class CreateSkillRegistryRequest(BaseModel):
     name: str
-    base_url: str
+    kind: Literal["remote", "skills-sh"] = "remote"
+    base_url: str = ""
     repo: str | None = None
     trust_tier: str = "untrusted"
 
 
-class PatchSkillSourceRequest(BaseModel):
+class PatchSkillRegistryRequest(BaseModel):
     enabled: bool | None = None
     trust_tier: str | None = None
 
 
-class SkillSourceResponse(BaseModel):
+class SkillRegistryResponse(BaseModel):
     id: str
     name: str
     kind: str
@@ -108,8 +112,8 @@ class SkillSourceResponse(BaseModel):
     enabled: bool
 
 
-def _to_response(row: SkillRegistry) -> SkillSourceResponse:
-    return SkillSourceResponse(
+def _to_response(row: SkillRegistry) -> SkillRegistryResponse:
+    return SkillRegistryResponse(
         id=row.id,
         name=row.name,
         kind=row.kind,
@@ -120,21 +124,27 @@ def _to_response(row: SkillRegistry) -> SkillSourceResponse:
     )
 
 
-@router.post("", status_code=201, response_model=SkillSourceResponse)
-async def create_source(
-    body: CreateSkillSourceRequest,
+@router.post("", status_code=201, response_model=SkillRegistryResponse)
+async def create_registry(
+    body: CreateSkillRegistryRequest,
     *,
     ctx: Annotated[RequestContext, Depends(get_admin_request_context)],
     session: Annotated[AsyncSession, Depends(get_session)],
-) -> SkillSourceResponse:
+) -> SkillRegistryResponse:
     if body.trust_tier not in _TRUST_TIERS:
         raise HTTPException(status_code=400, detail="BAD_TRUST_TIER")
-    _validate_registry_base_url(body.base_url)
+    if body.kind not in _VALID_KINDS:
+        raise HTTPException(status_code=400, detail="BAD_KIND")
+    if body.kind == "skills-sh":
+        base_url = _SKILLS_SH_BASE_URL
+    else:
+        base_url = body.base_url
+        _validate_registry_base_url(base_url)
     row = await SkillRegistryRepository(session).create(
         org_id=ctx.org_id,
         name=body.name,
-        kind="remote",
-        base_url=body.base_url,
+        kind=body.kind,
+        base_url=base_url,
         repo=body.repo,
         trust_tier=body.trust_tier,
         created_by_user_id=ctx.user.id,
@@ -142,36 +152,48 @@ async def create_source(
     return _to_response(row)
 
 
-@router.get("", response_model=list[SkillSourceResponse])
-async def list_sources(
+@router.get("", response_model=list[SkillRegistryResponse])
+async def list_registries(
     *,
     ctx: Annotated[RequestContext, Depends(get_admin_request_context)],
     session: Annotated[AsyncSession, Depends(get_session)],
-) -> list[SkillSourceResponse]:
+) -> list[SkillRegistryResponse]:
     rows = await SkillRegistryRepository(session).list_for_org(ctx.org_id)
     return [_to_response(r) for r in rows]
 
 
-@router.patch("/{source_id}", response_model=SkillSourceResponse)
-async def patch_source(
-    source_id: str,
-    body: PatchSkillSourceRequest,
+@router.patch("/{registry_id}", response_model=SkillRegistryResponse)
+async def patch_registry(
+    registry_id: str,
+    body: PatchSkillRegistryRequest,
     *,
     ctx: Annotated[RequestContext, Depends(get_admin_request_context)],
     session: Annotated[AsyncSession, Depends(get_session)],
-) -> SkillSourceResponse:
+) -> SkillRegistryResponse:
     # Validate all requested fields BEFORE mutating, so a 400 on trust_tier
     # never leaves a half-applied enabled flip behind.
     if body.trust_tier is not None and body.trust_tier not in _TRUST_TIERS:
         raise HTTPException(status_code=400, detail="BAD_TRUST_TIER")
     repo = SkillRegistryRepository(session)
     if body.enabled is not None:
-        if not await repo.set_enabled(ctx.org_id, source_id, body.enabled):
-            raise HTTPException(status_code=404, detail="SOURCE_NOT_FOUND")
+        if not await repo.set_enabled(ctx.org_id, registry_id, body.enabled):
+            raise HTTPException(status_code=404, detail="REGISTRY_NOT_FOUND")
     if body.trust_tier is not None:
-        if not await repo.set_trust_tier(ctx.org_id, source_id, body.trust_tier):
-            raise HTTPException(status_code=404, detail="SOURCE_NOT_FOUND")
-    row = await repo.get(ctx.org_id, source_id)
+        if not await repo.set_trust_tier(ctx.org_id, registry_id, body.trust_tier):
+            raise HTTPException(status_code=404, detail="REGISTRY_NOT_FOUND")
+    row = await repo.get(ctx.org_id, registry_id)
     if row is None:
-        raise HTTPException(status_code=404, detail="SOURCE_NOT_FOUND")
+        raise HTTPException(status_code=404, detail="REGISTRY_NOT_FOUND")
     return _to_response(row)
+
+
+@router.delete("/{registry_id}", status_code=204)
+async def delete_registry(
+    registry_id: str,
+    *,
+    ctx: Annotated[RequestContext, Depends(get_admin_request_context)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> None:
+    deleted = await SkillRegistryRepository(session).delete(ctx.org_id, registry_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="REGISTRY_NOT_FOUND")
