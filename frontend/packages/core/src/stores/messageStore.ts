@@ -217,10 +217,12 @@ function appendToolCallBlock(
     (block) => block.type === 'tool_call_streaming' && block.tool_call_id === toolCallId,
   )
   // Fallback: streaming block whose id was never populated (name='' when the first delta
-  // didn't carry identity fields) also qualifies, since it's the only unmatched streaming
-  // slot for this tool call.
+  // didn't carry identity fields) also qualifies — but only when exactly one such slot
+  // exists. With multiple unnamed slots we cannot tell which belongs to this completion,
+  // so we leave them unmatched and let the idempotency guard below handle duplicates.
   let fallbackMatchIndex = -1
   let unnamedFallbackIndex = -1
+  let unnamedFallbackCount = 0
   for (let i = finalized.length - 1; i >= 0; i--) {
     const block = finalized[i]
     if (block.type === 'tool_call_streaming' && block.tool_call_id === null) {
@@ -228,17 +230,21 @@ function appendToolCallBlock(
         fallbackMatchIndex = i
         break
       }
-      if (block.name === '' && unnamedFallbackIndex === -1) {
-        unnamedFallbackIndex = i
+      if (block.name === '') {
+        unnamedFallbackCount++
+        if (unnamedFallbackIndex === -1) {
+          unnamedFallbackIndex = i
+        }
       }
     }
   }
+  const safeUnnamedFallback = unnamedFallbackCount === 1 ? unnamedFallbackIndex : -1
   const matchIndex =
     exactMatchIndex >= 0
       ? exactMatchIndex
       : fallbackMatchIndex >= 0
         ? fallbackMatchIndex
-        : unnamedFallbackIndex
+        : safeUnnamedFallback
 
   const nextBlocks =
     matchIndex >= 0 ? finalized.filter((_, index) => index !== matchIndex) : finalized
