@@ -39,6 +39,7 @@ class ScheduledTaskCreate(BaseModel):
     timezone: str = "UTC"
     target_mode: TargetMode
     target_conversation_id: str | None = None
+    end_at: datetime | None = None
 
     @model_validator(mode="after")
     def _check(self) -> ScheduledTaskCreate:
@@ -54,6 +55,8 @@ class ScheduledTaskCreate(BaseModel):
                 raise ValueError("run_at required for once schedule")
             if self.run_at.tzinfo is None:
                 raise ValueError("run_at must include a timezone offset")
+        if self.end_at is not None and self.end_at.tzinfo is None:
+            raise ValueError("end_at must include a timezone offset")
         if self.target_mode == "fixed" and not self.target_conversation_id:
             raise ValueError("target_conversation_id required when target_mode=fixed")
         return self
@@ -69,6 +72,7 @@ class ScheduledTaskPatch(BaseModel):
     timezone: str | None = None
     target_mode: TargetMode | None = None
     target_conversation_id: str | None = None
+    end_at: datetime | None = None
 
     @model_validator(mode="after")
     def _check(self) -> ScheduledTaskPatch:
@@ -106,6 +110,7 @@ class ScheduledTaskOut(BaseModel):
     owner_user_id: str
     next_fire_at: str | None
     last_fired_at: str | None
+    end_at: str | None
     created_at: str
     updated_at: str
 
