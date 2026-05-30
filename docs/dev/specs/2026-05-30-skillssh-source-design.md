@@ -58,13 +58,20 @@ The skill lives at `{skill_slug}/` inside the repo (e.g.,
 to fetch later, without a server lookup:
 
 ```
-{owner}/{repo}/{skill_slug}
-e.g.  vercel-labs/skills/frontend-design
+{owner}/{repo}/{branch}/{skill_slug}
+e.g.  vercel-labs/skills/main/frontend-design
 ```
 
-Branch is not encoded — `SkillsShSource.fetch()` resolves the repo's default
-branch at fetch time via GitHub API (one extra call, cached per fetch invocation).
-This avoids stale `main` assumptions if a repo switches to `trunk` or similar.
+Branch is resolved at **search time**, not fetch time: `SkillsShSource.search()`
+makes one `GET /repos/{owner}/{repo}` call per distinct `{owner}/{repo}` in the
+result set (typically one — the vercel-labs/skills mono-repo) to read
+`default_branch`, then encodes it into every candidate's `source_ref`. This
+ensures installs are stable: the same `candidate_id` always fetches from the
+same branch ref, even if the repo later changes its default branch.
+
+Splitting on `"/"` with `split("/", 3)` unambiguously yields
+`(owner, repo, branch, slug)` since owner, repo, and branch names cannot contain
+`/`; only slug follows and it may itself contain hyphens but not slashes.
 
 ### 2. New class: `SkillsShSource`
 
@@ -78,14 +85,16 @@ class SkillsShSource:
 
     async search(query, *, limit) -> list[SkillCandidate]
         GET https://skills.sh/api/search?q=...&limit=...
+        Collect distinct {owner}/{repo} values from results
+        For each unique repo: GET https://api.github.com/repos/{owner}/{repo}
+          → default_branch (cached within this call, not across calls)
         For each result:
-          source_ref = f"{skill['source']}/{skill['id']}"
+          source_ref = f"{skill['source']}/{branch}/{skill['id']}"
           candidate_id = encode_candidate_id("remote", source_ref, source_id=self.source_id)
           repo field = f"https://github.com/{skill['source']}"
 
     async fetch(source_ref) -> dict[str, bytes]
-        Parse source_ref → owner, repo, slug
-        GET /repos/{owner}/{repo} → default_branch
+        Parse source_ref → owner, repo, branch, slug  (split("/", 3))
         GET /repos/{owner}/{repo}/git/trees/{branch}?recursive=1
         Filter entries whose path starts with "{slug}/"
         Strip the "{slug}/" prefix → relative path key
@@ -97,8 +106,9 @@ class SkillsShSource:
 `SkillsShSource` is **not** a subclass of `RemoteRegistrySource`; it implements
 the `SkillSource` protocol directly.
 
-Size caps reuse the same constants already defined in `remote.py`
-(`_RAW_FILE_MAX_BYTES`, `_BUNDLE_MAX_BYTES`).
+Size caps (`_RAW_FILE_MAX_BYTES = 10 MB`, `_BUNDLE_MAX_BYTES = 50 MB`) are
+redeclared locally in `skills_sh.py` — importing private names from `remote.py`
+would create a hidden coupling to another module's internals.
 
 ### 3. `skill_source` table — new kind value
 
@@ -108,17 +118,21 @@ DB-level check constraint.
 
 ### 4. Admin API changes
 
-**`CreateSkillSourceRequest`** gains an optional field:
+**`CreateSkillSourceRequest`** gains two changes:
 
 ```python
 kind: Literal["remote", "skills-sh"] = "remote"
+base_url: str = ""          # was required; now optional (empty = use kind default)
 ```
 
 When `kind == 'skills-sh'`:
-- `base_url` defaults to `"https://skills.sh"` if omitted (stored for display
-  purposes only; `SkillsShSource` hardcodes the endpoint).
-- `_validate_registry_base_url()` is skipped (no arbitrary URL to validate).
-- Row is stored with `kind='skills-sh'`.
+- `base_url` is set to `"https://skills.sh"` before persistence if empty.
+- `_validate_registry_base_url()` is skipped (endpoint is hardcoded, not admin-supplied).
+- Row is stored with `kind='skills-sh'` and `base_url='https://skills.sh'`.
+
+`SkillSource.kind` (the model column) must also be passed through
+`SkillSourceRepository.create()` — the method currently hardcodes `kind="remote"`.
+Both the model default and the repository create signature need to accept the value.
 
 `SkillSourceResponse` already surfaces `kind`; no change needed there.
 
@@ -131,7 +145,7 @@ for row in rows:
             source_id=row.id,
             trust_tier=TrustTier(row.trust_tier),
             source_name=row.name,
-            github_token=settings.get("registry.skills-sh.github_token") or None,
+            github_token=settings.registry.skills_sh.github_token or None,
         ))
     else:  # "remote"
         sources.append(RemoteRegistrySource(...))
@@ -146,11 +160,13 @@ for row in rows:
 
 ```yaml
 registry:
-  skills-sh:
+  skills_sh:
     github_token: ""   # optional; raises GitHub rate limit 60 → 5000 req/h
 ```
 
-Read in `SkillSourceRegistry.build()` via `settings.registry.skills-sh.github_token`.
+The key uses an **underscore** (`skills_sh`), not a hyphen. Dynaconf's dotted
+`settings.get("a.b")` treats hyphens as ambiguous; underscore keys are
+accessible as `settings.registry.skills_sh.github_token` without special casing.
 
 Operators who want higher rate limits add the token to
 `config.development.local.yaml` or set `CUBEBOX_REGISTRY__SKILLS_SH__GITHUB_TOKEN`
@@ -189,6 +205,8 @@ Discovery errors are swallowed per the existing fan-out pattern in
 |---|---|
 | `backend/cubebox/skills/sources/skills_sh.py` | New |
 | `backend/cubebox/skills/sources/registry.py` | Add `skills-sh` branch in `build()` |
-| `backend/cubebox/api/routes/v1/admin_skill_sources.py` | Add `kind` field, skip URL validation for `skills-sh` |
-| `backend/config.yaml` | Add `registry.skills-sh.github_token` |
+| `backend/cubebox/models/skill_source.py` | Remove hardcoded `kind="remote"` default, accept any kind |
+| `backend/cubebox/repositories/skill_source.py` | Pass `kind` through `create()` |
+| `backend/cubebox/api/routes/v1/admin_skill_sources.py` | Add `kind` field, make `base_url` optional, skip URL validation for `skills-sh` |
+| `backend/config.yaml` | Add `registry.skills_sh.github_token` |
 | `backend/tests/unit/test_skills_sh_source.py` | New unit tests with `httpx.MockTransport` |
