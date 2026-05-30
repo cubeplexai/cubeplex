@@ -94,6 +94,15 @@ class TestScheduledTaskValidation:
         )
         assert r.status_code == 422
 
+    def test_6_field_cron_rejected_422(self, client: TestClient) -> None:
+        r = _make(client, schedule_kind="cron", cron_expr="0 9 * * * *")
+        assert r.status_code == 422
+        assert "5 fields" in r.text
+
+    def test_4_field_cron_rejected_422(self, client: TestClient) -> None:
+        r = _make(client, schedule_kind="cron", cron_expr="9 * * *")
+        assert r.status_code == 422
+
     def test_once_requires_aware_run_at_422(self, client: TestClient) -> None:
         r = _make(
             client,
@@ -270,6 +279,39 @@ class TestScheduledTaskValidation:
         r = client.patch(f"{BASE}/{tid}", json={"interval_seconds": 7200})
         assert r.status_code == 200, r.text
         assert r.json()["next_fire_at"] != original_next_fire
+
+
+class TestScheduledTaskEndAt:
+    def test_create_with_end_at_round_trips(self, client: TestClient) -> None:
+        r = _make(client, end_at="2030-12-31T23:59:59+00:00")
+        assert r.status_code == 201, r.text
+        data = r.json()
+        assert data["end_at"] is not None
+        assert "2030-12-31" in data["end_at"]
+
+    def test_create_without_end_at_returns_null(self, client: TestClient) -> None:
+        r = _make(client)
+        assert r.status_code == 201, r.text
+        assert r.json()["end_at"] is None
+
+    def test_create_end_at_naive_datetime_rejected(self, client: TestClient) -> None:
+        r = _make(client, end_at="2030-12-31T23:59:59")
+        assert r.status_code == 422
+
+    def test_patch_sets_end_at(self, client: TestClient) -> None:
+        tid = _make(client).json()["id"]
+        r = client.patch(
+            f"{BASE}/{tid}",
+            json={"end_at": "2030-06-01T00:00:00+00:00"},
+        )
+        assert r.status_code == 200, r.text
+        assert r.json()["end_at"] is not None
+
+    def test_patch_clears_end_at_with_explicit_null(self, client: TestClient) -> None:
+        tid = _make(client, end_at="2030-12-31T00:00:00+00:00").json()["id"]
+        r = client.patch(f"{BASE}/{tid}", json={"end_at": None})
+        assert r.status_code == 200, r.text
+        assert r.json()["end_at"] is None
 
 
 class TestScheduledTaskAuth:
