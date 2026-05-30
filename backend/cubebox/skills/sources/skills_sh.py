@@ -26,8 +26,12 @@ _GITHUB_NAME_RE = re.compile(r"^[a-zA-Z0-9._-]+$")
 
 
 def _safe_name(s: str) -> bool:
-    """True when s is a valid GitHub path component with no encoding tricks."""
-    return bool(s) and _GITHUB_NAME_RE.match(s) is not None
+    """True when s is a valid GitHub path component with no encoding tricks.
+
+    Rejects empty strings, dot-segment traversal ("." / ".."), and any
+    character outside [a-zA-Z0-9._-] (which blocks percent-encoded bypasses).
+    """
+    return bool(s) and s not in {".", ".."} and _GITHUB_NAME_RE.match(s) is not None
 
 
 class SkillsShAdapter:
