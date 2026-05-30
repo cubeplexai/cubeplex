@@ -591,6 +591,43 @@ export function defaultScheduleEditorValue(tz: string): ScheduleEditorValue {
   }
 }
 
+// ── Timezone-aware datetime helpers ─────────────────────────────────────────
+
+/**
+ * Convert a local datetime string ("YYYY-MM-DDTHH:mm") to a UTC ISO string,
+ * interpreting the input as being in the given IANA timezone — NOT the browser's
+ * local timezone. `new Date(str)` without a suffix uses the browser's TZ and
+ * would produce the wrong UTC value whenever browser TZ ≠ task TZ.
+ *
+ * Algorithm: create a UTC "guess" treating the string as UTC, then measure how
+ * far it is from the desired local time via Intl, and apply the delta.
+ * One iteration is sufficient for standard offsets; DST edge cases (the
+ * "spring forward" hour) may be off by 1h — acceptable for v1.
+ */
+export function localDatetimeToUTC(datetimeLocal: string, timezone: string): string {
+  const guess = new Date(datetimeLocal + ':00Z')
+  const tzRepr = guess.toLocaleString('sv', { timeZone: timezone }).replace(' ', 'T')
+  const delta = guess.getTime() - new Date(tzRepr + 'Z').getTime()
+  return new Date(guess.getTime() + delta).toISOString()
+}
+
+/**
+ * Return the UTC instant at which the given date ends in the task timezone.
+ * Defined as: start of the day AFTER `dateStr` in the task timezone.
+ * Semantics: task fires on `dateStr` in local time, but not after.
+ *
+ * Example: dateStr="2026-06-01", tz="Asia/Shanghai" (UTC+8)
+ *   → 2026-06-02T00:00:00+08:00 → 2026-06-01T16:00:00Z
+ * A daily-09:00-CST task fires at 01:00Z; last fire Jun 1 (01:00Z < 16:00Z ✓),
+ * first skip Jun 2 (01:00Z Jun 2 > 16:00Z Jun 1 ✓).
+ */
+export function endOfDayUTC(dateStr: string, timezone: string): string {
+  const [y, mo, d] = dateStr.split('-').map(Number)
+  const pad = (n: number) => String(n).padStart(2, '0')
+  const nextDay = `${y}-${pad(mo)}-${pad(d + 1)}T00:00`
+  return localDatetimeToUTC(nextDay, timezone)
+}
+
 // ── Build API payload from UI state ──────────────────────────────────────────
 
 type SchedulePayload = Pick<
@@ -601,13 +638,12 @@ type SchedulePayload = Pick<
 /**
  * Convert UI state to the backend schedule fields.
  * Cron times are kept in local time; the backend uses task.timezone for evaluation.
- * end_at semantics: task fires on the selected date, not after.
- * We send end_at as end-of-selected-day UTC (YYYY-MM-DDT23:59:59Z).
+ * end_at: interpreted in the task timezone via endOfDayUTC (not UTC midnight).
  * Null (no deadline) is sent as explicit JSON null so PATCH can clear an existing deadline
  * via Pydantic's model_fields_set detection. The `once` kind omits end_at entirely.
  */
 export function buildSchedulePayload(v: ScheduleEditorValue): SchedulePayload {
-  const endAt: string | null = v.endAt ? `${v.endAt}T23:59:59Z` : null
+  const endAt: string | null = v.endAt ? endOfDayUTC(v.endAt, v.timezone) : null
   const s = v.schedule
 
   switch (s.kind) {
@@ -652,7 +688,10 @@ export function buildSchedulePayload(v: ScheduleEditorValue): SchedulePayload {
     case 'once':
       return {
         schedule_kind: 'once',
-        run_at: new Date(s.runAt).toISOString(),
+        // Use localDatetimeToUTC, NOT new Date(s.runAt) — the latter uses the
+        // browser's timezone, not the task timezone, producing wrong results
+        // whenever the two differ.
+        run_at: localDatetimeToUTC(s.runAt, v.timezone),
         timezone: v.timezone,
       }
     case 'unsupported_cron':
@@ -718,9 +757,17 @@ function parseInterval(seconds: number): IntervalSchedule {
 }
 
 export function parseSchedulePayload(task: ScheduledTaskOut): ScheduleEditorValue {
-  const endAt = task.end_at
-    ? task.end_at.slice(0, 10)   // take "YYYY-MM-DD" from ISO string
-    : null
+  // end_at was stored as "start of next day in task TZ" (via endOfDayUTC).
+  // Reverse: convert to local date in task TZ, then subtract 1 day.
+  let endAt: string | null = null
+  if (task.end_at) {
+    const nextDayLocal = new Date(task.end_at)
+      .toLocaleString('sv', { timeZone: task.timezone })
+      .slice(0, 10)  // "YYYY-MM-DD" of next day in task TZ
+    const nextDay = new Date(nextDayLocal)
+    nextDay.setDate(nextDay.getDate() - 1)
+    endAt = nextDay.toISOString().slice(0, 10)  // back to the intended last day
+  }
 
   let schedule: ScheduleState
 
@@ -729,8 +776,13 @@ export function parseSchedulePayload(task: ScheduledTaskOut): ScheduleEditorValu
   } else if (task.schedule_kind === 'interval' && task.interval_seconds != null) {
     schedule = parseInterval(task.interval_seconds)
   } else if (task.schedule_kind === 'once' && task.run_at) {
-    // Convert ISO to datetime-local "YYYY-MM-DDTHH:mm"
-    schedule = { kind: 'once', runAt: task.run_at.slice(0, 16) }
+    // Convert UTC ISO back to "YYYY-MM-DDTHH:mm" in the task's timezone.
+    // task.run_at.slice(0,16) would give UTC wall-clock time, not local time.
+    const localStr = new Date(task.run_at)
+      .toLocaleString('sv', { timeZone: task.timezone })
+      .replace(' ', 'T')
+      .slice(0, 16)
+    schedule = { kind: 'once', runAt: localStr }
   } else {
     schedule = { kind: 'unsupported_cron', cronExpr: task.cron_expr ?? '' }
   }
