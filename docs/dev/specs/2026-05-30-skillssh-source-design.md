@@ -57,6 +57,40 @@ Only the items in the table above are renamed. The following are **not** changed
   registries, so "skill" remains correct.
 - `SkillCandidate` — a discovery result shape, not a registry concept.
 - Frontend workspace Skills page components — no registry terminology exposed there.
+- Historical Alembic version files — frozen records; do not edit past migrations.
+
+### Complete rename inventory
+
+Every file that imports or references the old names must be updated in the same
+commit as the rename, or the app will fail at import time. Grep confirms 25 files:
+
+**Source files:**
+- `cubebox/skills/sources/base.py` — Protocol rename
+- `cubebox/skills/sources/local.py` — class rename
+- `cubebox/skills/sources/remote.py` — class rename
+- `cubebox/skills/sources/registry.py` — class rename + build() logic
+- `cubebox/skills/sources/skills_sh.py` — new file (imports SkillRegistryAdapter)
+- `cubebox/skills/discovery.py` — imports SkillsAdapterManager
+- `cubebox/streams/run_manager.py` — imports SkillsAdapterManager
+- `cubebox/models/skill_source.py` → `skill_registry.py` — model rename
+- `cubebox/models/skill.py` — may reference SkillSource FK target table name
+- `cubebox/models/__init__.py` — export update
+- `cubebox/repositories/skill_source.py` → `skill_registry.py` — class rename
+- `cubebox/api/app.py` — router import
+- `cubebox/api/routes/v1/__init__.py` — router import
+- `cubebox/api/routes/v1/admin_skill_sources.py` → `admin_skill_registries.py` — full rename
+- `cubebox/api/routes/v1/conversations.py` — may import SkillsAdapterManager
+- `cubebox/api/routes/v1/ws_skills.py` — imports SkillsAdapterManager
+- `alembic/env.py` — imports model for autogenerate
+
+**Test files:**
+- `tests/e2e/conftest.py` — fixtures referencing SkillSourceRepository
+- `tests/e2e/test_skill_sources_admin.py` → `test_skill_registries_admin.py` — rename + update
+- `tests/e2e/test_skill_discovery_remote.py` — imports RemoteRegistrySource
+- `tests/e2e/test_find_skills_tool.py` — imports skill discovery stack
+- `tests/unit/test_remote_registry_source.py` → `test_remote_registry_adapter.py` — rename
+- `tests/unit/test_skill_discovery_ranking.py` — imports from discovery module
+- `tests/unit/test_skills_sh_adapter.py` — new file
 
 ### DB migration
 
@@ -277,12 +311,14 @@ Kind:       [skills.sh ▼]  /  [Custom Registry ▼]
 On submit: `POST /admin/skill-registries` → success refreshes list and
 selects the new row.
 
-### API routes (Next.js proxy)
+### Data fetching
 
-```
-/app/api/v1/admin/skill-registries/route.ts         GET, POST
-/app/api/v1/admin/skill-registries/[id]/route.ts    PATCH, DELETE
-```
+Follow the same pattern as `admin/skills`: **direct fetch with
+`credentials: 'include'`**, no Next.js proxy routes. The admin API routes
+(`/api/v1/admin/...`) are reachable directly from the browser via the
+existing Next.js rewrite that forwards all `/api/v1/*` requests to the
+backend. CSRF tokens are read from the `cubebox_csrf` cookie (same as
+all other admin pages).
 
 ---
 
@@ -315,8 +351,7 @@ selects the new row.
 | `components/admin/skill-registries/RegistryList.tsx` | **New** |
 | `components/admin/skill-registries/RegistryDetailPanel.tsx` | **New** |
 | `components/admin/skill-registries/AddRegistryForm.tsx` | **New** |
-| `app/api/v1/admin/skill-registries/route.ts` | **New** — GET + POST proxy |
-| `app/api/v1/admin/skill-registries/[id]/route.ts` | **New** — PATCH + DELETE proxy |
-| `components/layout/AdminSidebar.tsx` | Add "Skill Registries" nav item |
+| `hooks/useAdminSkillRegistries.ts` | **New** — SWR hook for list + mutations (direct fetch, credentials: include) |
+| `components/admin/AdminSubNav.tsx` | Add `{ href: '/admin/skill-registries', label: t('skillRegistries'), icon: Database }` entry after "Skills" |
 | `messages/en.json` | Add `adminSkillRegistries.*` keys |
 | `messages/zh.json` | Add Chinese translations (`技能仓库`) |
