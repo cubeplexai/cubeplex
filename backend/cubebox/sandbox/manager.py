@@ -35,7 +35,7 @@ from cubebox.repositories.sandbox_policy import SandboxPolicyRepository
 from cubebox.repositories.user_sandbox import UserSandboxRepository
 from cubebox.sandbox.base import Sandbox, SandboxError
 from cubebox.sandbox.opensandbox import OpenSandbox
-from cubebox.sandbox_env.injector import SandboxEnvInjector
+from cubebox.sandbox_env.injector import InjectionResult, SandboxEnvInjector
 from cubebox.sandbox_policy.rules import build_network_policy
 from cubebox.services.sandbox_env import SandboxEnvResolver
 from cubebox.services.sandbox_policy import SandboxPolicyResolver
@@ -195,6 +195,7 @@ class SandboxManager:
         workspace_id: str,
         user_id: str,
         sandbox_id: str,
+        injection: InjectionResult | None = None,
     ) -> None:
         """Resolve vault secrets, set run env on the backend, and refresh EgressRefs.
 
@@ -203,12 +204,16 @@ class SandboxManager:
         fresh without a recreate.  On create-new, this replaces the old inline
         ref-persist block.
 
+        When ``injection`` is supplied by the caller (pre-resolved pre-create),
+        it is reused directly so the vault is not resolved twice.
+
         Network policy is NOT touched here — it is structural and can only be set
         at sandbox creation time.
         """
-        resolver = SandboxEnvResolver(SandboxEnvRepository(session, org_id=org_id))
-        resolved = await resolver.resolve(workspace_id=workspace_id, user_id=user_id)
-        injection = SandboxEnvInjector(exchange_host=self._exchange_host).build(resolved)
+        if injection is None:
+            resolver = SandboxEnvResolver(SandboxEnvRepository(session, org_id=org_id))
+            resolved = await resolver.resolve(workspace_id=workspace_id, user_id=user_id)
+            injection = SandboxEnvInjector(exchange_host=self._exchange_host).build(resolved)
 
         # Push the placeholder env into the backend — every subsequent execute call
         # will pass these as per-command envs via RunCommandOpts.
@@ -497,11 +502,23 @@ class SandboxManager:
                     request_timeout=self._create_timeout
                 )
 
+                # Resolve the credential vault BEFORE Sandbox.create so a
+                # malformed vault row fails fast and the `except` below releases
+                # the reservation — rather than creating a running sandbox we
+                # can't inject secrets into. The resolved injection is reused by
+                # _apply_egress after create (no second resolve). Vault hosts do
+                # NOT feed the network policy.
+                injection: InjectionResult | None = None
+                if self._exchange_host:
+                    resolver = SandboxEnvResolver(SandboxEnvRepository(session, org_id=org_id))
+                    resolved = await resolver.resolve(workspace_id=workspace_id, user_id=user_id)
+                    injection = SandboxEnvInjector(exchange_host=self._exchange_host).build(
+                        resolved
+                    )
+
                 # Egress network policy: assembled from the admin-authored rules
-                # + default action. Vault hosts do NOT open network access; the
-                # exchange host is force-allowed so the placeholder-substitution
-                # proxy stays reachable. Env + EgressRefs are applied after the
-                # sandbox is created, via _apply_egress (the execute-time env path).
+                # + default action (independent of the vault). The exchange host
+                # is force-allowed so the substitution proxy stays reachable.
                 network_policy = build_network_policy(
                     admin_rules=policy.network_rules,
                     default_action=policy.network_default_action,
@@ -584,6 +601,7 @@ class SandboxManager:
                     workspace_id=workspace_id,
                     user_id=user_id,
                     sandbox_id=sandbox_id,
+                    injection=injection,
                 )
             return backend
 
