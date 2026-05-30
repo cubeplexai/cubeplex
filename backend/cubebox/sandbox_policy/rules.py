@@ -188,7 +188,7 @@ def build_network_policy(
     egress = [
         NetworkRule(
             action=cast(Literal["allow", "deny"], str(r["action"])),
-            target=str(r["target"]),
+            target=str(r["target"]).strip().removesuffix(".").lower(),
         )
         for r in ordered
     ]

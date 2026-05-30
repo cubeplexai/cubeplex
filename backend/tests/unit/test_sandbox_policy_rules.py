@@ -141,6 +141,23 @@ def test_force_allow_wins_over_admin_exact_deny_same_host() -> None:
     assert _egress(p)[0] == ("allow", "x.host.com")
 
 
+def test_emitted_targets_are_normalized_trailing_dot_and_case() -> None:
+    # Trailing-dot / mixed-case targets must be normalized in the EMITTED rule,
+    # not just the sort key — the sidecar matches patterns verbatim (lowercase
+    # only, no trailing-dot strip), so a raw "api.github.com." would never match.
+    p = build_network_policy(
+        admin_rules=[
+            {"action": "allow", "target": "API.GitHub.com."},
+            {"action": "deny", "target": "*.EVIL.com."},
+        ],
+        default_action="deny",
+        force_allow_hosts=[],
+    )
+    targets = {(r.action, r.target) for r in (p.egress or [])}
+    assert ("allow", "api.github.com") in targets
+    assert ("deny", "*.evil.com") in targets
+
+
 def test_blank_targets_are_dropped() -> None:
     p = build_network_policy(
         admin_rules=[{"action": "deny", "target": ""}],
