@@ -199,3 +199,28 @@ def test_unpack_zip_filters_unsafe_paths():
     assert "SKILL.md" in files
     assert "../evil.py" not in files
     assert "/absolute.md" not in files
+
+
+def test_unpack_zip_rejects_oversized_entry():
+    from cubebox.skills.service import MAX_FILE_BYTES
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        # Entry larger than MAX_FILE_BYTES
+        zf.writestr("big.md", "x" * (MAX_FILE_BYTES + 1))
+    with pytest.raises(ValueError, match="declares"):
+        _unpack_zip(buf.getvalue())
+
+
+def test_unpack_zip_rejects_oversized_bundle():
+    from cubebox.skills.service import MAX_FILE_BYTES, MAX_TOTAL_BYTES
+
+    # Two files each just under the per-file cap but together over the bundle cap
+    file_size = MAX_FILE_BYTES - 1
+    n_files = (MAX_TOTAL_BYTES // file_size) + 2
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        for i in range(n_files):
+            zf.writestr(f"file{i}.md", "x" * file_size)
+    with pytest.raises(ValueError, match="total cap"):
+        _unpack_zip(buf.getvalue())
