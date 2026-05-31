@@ -10,7 +10,6 @@ class CreateOrgEnvIn(BaseModel):
     hosts: list[str] | None = None
     header_names: list[str] | None = None
     secret_value: str | None = None
-    plain_value: str | None = Field(default=None, max_length=4096)
 
 
 class CreateWorkspaceEnvIn(CreateOrgEnvIn):
