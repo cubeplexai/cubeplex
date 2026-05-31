@@ -11,6 +11,7 @@ from cubebox.credentials.encryption import EncryptionBackend
 from cubebox.db import get_session
 from cubebox.repositories.credential import CredentialRepository
 from cubebox.repositories.egress_ref import EgressRefRepository
+from cubebox.repositories.sandbox_env import SandboxEnvRepository
 from cubebox.sandbox_env.exchange_auth import SidecarAuthenticator
 from cubebox.sandbox_env.placeholder import PLACEHOLDER_RE
 from cubebox.services.credential import CredentialService
@@ -62,6 +63,7 @@ async def exchange(
             org_id=org_id,
             actor_user_id=None,
         ),
+        env_var_repo_factory=lambda org_id: SandboxEnvRepository(session, org_id=org_id),
     )
     try:
         secret, header_names = await svc.exchange(

@@ -10,7 +10,7 @@ from cubebox.api.schemas.sandbox_env import (
     CreateWorkspaceEnvIn,
     EnvEntryListOut,
     EnvEntryOut,
-    UpdateSecretValueIn,
+    UpdateEntryIn,
 )
 from cubebox.auth.context import RequestContext
 from cubebox.auth.dependencies import require_admin, require_member
@@ -186,10 +186,10 @@ async def delete_user_env(
 
 
 @router.patch("/workspace/{entry_id}", response_model=EnvEntryOut)
-async def rotate_workspace_env(
+async def update_workspace_env(
     workspace_id: str,
     entry_id: str,
-    body: UpdateSecretValueIn,
+    body: UpdateEntryIn,
     session: Annotated[AsyncSession, Depends(get_session)],
     backend: Annotated[EncryptionBackend, Depends(get_encryption_backend)],
     ctx: Annotated[RequestContext, Depends(require_admin)],
@@ -203,10 +203,13 @@ async def rotate_workspace_env(
     ):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "not found")
     try:
-        await _service(session, backend, ctx).update_value(
-            entry_id=entry_id, secret_value=body.secret_value
+        await _service(session, backend, ctx).update_entry(
+            entry_id=entry_id,
+            hosts=body.hosts,
+            header_names=body.header_names,
+            secret_value=body.secret_value,
         )
-    except SandboxEnvShapeError as exc:
+    except (SandboxEnvShapeError, HostPatternError) as exc:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
     updated = await SandboxEnvRepository(session, org_id=ctx.org_id).get(entry_id)
     assert updated is not None
@@ -214,10 +217,10 @@ async def rotate_workspace_env(
 
 
 @router.patch("/me/{entry_id}", response_model=EnvEntryOut)
-async def rotate_user_env(
+async def update_user_env(
     workspace_id: str,
     entry_id: str,
-    body: UpdateSecretValueIn,
+    body: UpdateEntryIn,
     session: Annotated[AsyncSession, Depends(get_session)],
     backend: Annotated[EncryptionBackend, Depends(get_encryption_backend)],
     ctx: Annotated[RequestContext, Depends(require_member)],
@@ -231,10 +234,13 @@ async def rotate_user_env(
     ):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "not found")
     try:
-        await _service(session, backend, ctx).update_value(
-            entry_id=entry_id, secret_value=body.secret_value
+        await _service(session, backend, ctx).update_entry(
+            entry_id=entry_id,
+            hosts=body.hosts,
+            header_names=body.header_names,
+            secret_value=body.secret_value,
         )
-    except SandboxEnvShapeError as exc:
+    except (SandboxEnvShapeError, HostPatternError) as exc:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
     updated = await SandboxEnvRepository(session, org_id=ctx.org_id).get(entry_id)
     assert updated is not None

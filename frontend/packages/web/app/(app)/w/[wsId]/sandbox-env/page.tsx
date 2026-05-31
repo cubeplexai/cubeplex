@@ -10,11 +10,12 @@ import {
   deleteWsEnvWorkspace,
   listWsEnvMe,
   listWsEnvWorkspace,
-  rotateWsEnvMe,
-  rotateWsEnvWorkspace,
+  updateWsEnvMe,
+  updateWsEnvWorkspace,
   useWorkspaceStore,
   type CreateEnvIn,
   type EnvEntryOut,
+  type UpdateEntryIn,
 } from '@cubebox/core'
 import { EnvTable } from '@/components/sandbox-env/EnvTable'
 import { EnvModal, type ModalMode } from '@/components/sandbox-env/EnvModal'
@@ -77,20 +78,18 @@ export default function WorkspaceSandboxEnvPage({ params }: PageProps): React.Re
   }, [client, wsId, isAdmin])
 
   async function handleSubmit(
-    body: CreateEnvIn | { secret_value: string },
+    body: CreateEnvIn | UpdateEntryIn,
     entryId?: string,
     scope?: 'workspace' | 'user',
   ) {
     if (entryId) {
-      // Rotate: find the entry to determine which path to call
       const entry = entries.find((e) => e.id === entryId)
       if (entry?.scope === 'workspace') {
-        await rotateWsEnvWorkspace(client, wsId, entryId, body as { secret_value: string })
+        await updateWsEnvWorkspace(client, wsId, entryId, body as UpdateEntryIn)
       } else {
-        await rotateWsEnvMe(client, wsId, entryId, body as { secret_value: string })
+        await updateWsEnvMe(client, wsId, entryId, body as UpdateEntryIn)
       }
     } else {
-      // Add: use the scope the user selected inside the modal
       const createBody = body as CreateEnvIn
       if (scope === 'workspace') {
         await createWsEnvWorkspace(client, wsId, createBody)
@@ -153,7 +152,7 @@ export default function WorkspaceSandboxEnvPage({ params }: PageProps): React.Re
             entries={entries}
             loading={loading}
             error={loadError}
-            onRotate={(entry) => setModal({ kind: 'rotate', entry })}
+            onEdit={(entry) => setModal({ kind: 'edit', entry })}
             onDelete={handleDelete}
           />
         </div>

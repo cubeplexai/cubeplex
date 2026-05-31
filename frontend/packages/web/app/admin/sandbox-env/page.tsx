@@ -7,9 +7,10 @@ import {
   createAdminEnv,
   deleteAdminEnv,
   listAdminEnv,
-  rotateAdminEnv,
+  updateAdminEnv,
   type CreateEnvIn,
   type EnvEntryOut,
+  type UpdateEntryIn,
 } from '@cubebox/core'
 import { EnvTable } from '@/components/sandbox-env/EnvTable'
 import { EnvModal, type ModalMode } from '@/components/sandbox-env/EnvModal'
@@ -52,12 +53,12 @@ export default function AdminSandboxEnvPage() {
   }, [client])
 
   async function handleSubmit(
-    body: CreateEnvIn | { secret_value: string },
+    body: CreateEnvIn | UpdateEntryIn,
     entryId?: string,
     _scope?: 'workspace' | 'user',
   ) {
     if (entryId) {
-      await rotateAdminEnv(client, entryId, body as { secret_value: string })
+      await updateAdminEnv(client, entryId, body as UpdateEntryIn)
     } else {
       await createAdminEnv(client, body as CreateEnvIn)
     }
@@ -100,7 +101,7 @@ export default function AdminSandboxEnvPage() {
             entries={entries}
             loading={loading}
             error={loadError}
-            onRotate={(entry) => setModal({ kind: 'rotate', entry })}
+            onEdit={(entry) => setModal({ kind: 'edit', entry })}
             onDelete={handleDelete}
           />
         </div>
