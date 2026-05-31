@@ -42,12 +42,14 @@ def test_user_with_no_existing_pvc_is_skipped() -> None:
     assert plan == []
 
 
-def test_planned_new_name_matches_what_sandbox_manager_actually_mounts() -> None:
+def test_planned_new_name_matches_what_sandbox_manager_actually_mounts(
+    mock_encryption_backend,
+) -> None:
     """The whole point of building the names off shared helpers is so an
     operator who reads the dry-run output can trust that the renamed PVC
     will be the exact claim the new SandboxManager mounts. Verify by going
     through SandboxManager._build_user_volume directly."""
-    manager = SandboxManager(MagicMock())
+    manager = SandboxManager(MagicMock(), mock_encryption_backend)
     proposed = build_user_pvc_name(manager._volume_pvc_prefix, "ws-A", "user-1")
     actual = manager._build_user_volume("ws-A", "user-1").pvc.claim_name  # type: ignore[union-attr]
     assert proposed == actual

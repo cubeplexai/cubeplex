@@ -23,10 +23,12 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 import pytest_asyncio
+from cryptography.fernet import Fernet
 from opensandbox.config import ConnectionConfig
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
+from cubebox.credentials.encryption import FernetBackend
 from cubebox.db.engine import _build_database_url
 from cubebox.models.user_sandbox import UserSandbox
 from cubebox.repositories.user_sandbox import UserSandboxRepository
@@ -149,7 +151,7 @@ def _make_manager() -> tuple[SandboxManager, MagicMock]:
 
     factory = MagicMock(name="session_factory")
     factory.side_effect = lambda: _cm()
-    mgr = SandboxManager(factory)
+    mgr = SandboxManager(factory, FernetBackend([Fernet.generate_key()]))
     mgr._resume_timeout = 5
     # Force the egress branch off — keeps the test focused on the race.
     mgr._exchange_host = ""

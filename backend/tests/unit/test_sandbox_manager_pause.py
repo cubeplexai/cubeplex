@@ -49,9 +49,9 @@ def _make_record(
 
 
 @pytest.fixture
-def manager() -> SandboxManager:
+def manager(mock_encryption_backend: Any) -> SandboxManager:
     factory, _ = _make_session_factory()
-    mgr = SandboxManager(factory)
+    mgr = SandboxManager(factory, mock_encryption_backend)
     # Disable egress side effects in the manager paths; tests focus on
     # pause/resume orchestration, not egress refs.
     mgr._exchange_host = ""
@@ -64,9 +64,9 @@ def manager() -> SandboxManager:
 
 
 @pytest.mark.asyncio
-async def test_pause_idle_pauses_on_successful_claim() -> None:
+async def test_pause_idle_pauses_on_successful_claim(mock_encryption_backend: Any) -> None:
     factory, _session = _make_session_factory()
-    mgr = SandboxManager(factory)
+    mgr = SandboxManager(factory, mock_encryption_backend)
     mgr._exchange_host = ""
 
     record = _make_record()
@@ -119,9 +119,9 @@ async def test_pause_idle_pauses_on_successful_claim() -> None:
 
 
 @pytest.mark.asyncio
-async def test_pause_idle_skips_when_claim_pausing_false() -> None:
+async def test_pause_idle_skips_when_claim_pausing_false(mock_encryption_backend: Any) -> None:
     factory, _session = _make_session_factory()
-    mgr = SandboxManager(factory)
+    mgr = SandboxManager(factory, mock_encryption_backend)
     mgr._exchange_host = ""
 
     record = _make_record()
@@ -161,9 +161,9 @@ async def test_pause_idle_skips_when_claim_pausing_false() -> None:
 
 
 @pytest.mark.asyncio
-async def test_pause_idle_pause_raises_reverts_and_kills() -> None:
+async def test_pause_idle_pause_raises_reverts_and_kills(mock_encryption_backend: Any) -> None:
     factory, _session = _make_session_factory()
-    mgr = SandboxManager(factory)
+    mgr = SandboxManager(factory, mock_encryption_backend)
     mgr._exchange_host = ""
 
     record = _make_record()
@@ -211,9 +211,9 @@ async def test_pause_idle_pause_raises_reverts_and_kills() -> None:
 
 
 @pytest.mark.asyncio
-async def test_pause_idle_no_capability_kills_record() -> None:
+async def test_pause_idle_no_capability_kills_record(mock_encryption_backend: Any) -> None:
     factory, _session = _make_session_factory()
-    mgr = SandboxManager(factory)
+    mgr = SandboxManager(factory, mock_encryption_backend)
     mgr._exchange_host = ""
 
     record = _make_record()
@@ -258,9 +258,11 @@ async def test_pause_idle_no_capability_kills_record() -> None:
 
 
 @pytest.mark.asyncio
-async def test_resume_record_marks_running_and_stamps_last_resumed_at() -> None:
+async def test_resume_record_marks_running_and_stamps_last_resumed_at(
+    mock_encryption_backend: Any,
+) -> None:
     factory, session = _make_session_factory()
-    mgr = SandboxManager(factory)
+    mgr = SandboxManager(factory, mock_encryption_backend)
     mgr._exchange_host = ""
 
     record = _make_record()
@@ -299,14 +301,16 @@ async def test_resume_record_marks_running_and_stamps_last_resumed_at() -> None:
 
 
 @pytest.mark.asyncio
-async def test_resume_record_recovers_when_reconciler_reverts_to_paused() -> None:
+async def test_resume_record_recovers_when_reconciler_reverts_to_paused(
+    mock_encryption_backend: Any,
+) -> None:
     """Race (a): the reconciler observes provider ``Paused`` mid-resume and
     reverts the row ``resuming -> paused``. The first ``mark_running`` returns
     False; the re-fetch probe sees status ``paused``; ``_resume_record``
     re-claims ``paused -> resuming`` and the second ``mark_running`` wins.
     """
     factory, session = _make_session_factory()
-    mgr = SandboxManager(factory)
+    mgr = SandboxManager(factory, mock_encryption_backend)
     mgr._exchange_host = ""
 
     record = _make_record()
@@ -352,7 +356,7 @@ async def test_resume_record_recovers_when_reconciler_reverts_to_paused() -> Non
 
 
 @pytest.mark.asyncio
-async def test_resume_record_accepts_reconciler_won_running() -> None:
+async def test_resume_record_accepts_reconciler_won_running(mock_encryption_backend: Any) -> None:
     """Race (b): the reconciler observes provider ``Running`` and commits
     ``resuming -> running`` itself before this caller's ``mark_running`` lands.
     The first ``mark_running`` returns False (status is already ``running``,
@@ -361,7 +365,7 @@ async def test_resume_record_accepts_reconciler_won_running() -> None:
     would fail because the row is ``running``, not ``paused``).
     """
     factory, session = _make_session_factory()
-    mgr = SandboxManager(factory)
+    mgr = SandboxManager(factory, mock_encryption_backend)
     mgr._exchange_host = ""
 
     record = _make_record()
@@ -405,14 +409,14 @@ async def test_resume_record_accepts_reconciler_won_running() -> None:
 
 
 @pytest.mark.asyncio
-async def test_resume_record_returns_none_when_row_terminal() -> None:
+async def test_resume_record_returns_none_when_row_terminal(mock_encryption_backend: Any) -> None:
     """If the probe sees the row already in a terminal state (failed /
     terminated / row deleted), ``_resume_record`` returns None so
     ``get_or_create`` falls through to create-new instead of returning a
     backend whose DB row disagrees with the provider.
     """
     factory, session = _make_session_factory()
-    mgr = SandboxManager(factory)
+    mgr = SandboxManager(factory, mock_encryption_backend)
     mgr._exchange_host = ""
 
     record = _make_record()
@@ -453,7 +457,9 @@ async def test_resume_record_returns_none_when_row_terminal() -> None:
 
 
 @pytest.mark.asyncio
-async def test_resume_record_recovery_bounce_tolerates_flapping_reconciler() -> None:
+async def test_resume_record_recovery_bounce_tolerates_flapping_reconciler(
+    mock_encryption_backend: Any,
+) -> None:
     """If the reconciler reverts our row to ``paused`` two ticks in a row
     while we're trying to land ``running``, the bounded retry loop keeps
     re-claiming until either we win or we hit the attempt ceiling. The
@@ -461,7 +467,7 @@ async def test_resume_record_recovery_bounce_tolerates_flapping_reconciler() -> 
     (codex P2 round 14).
     """
     factory, session = _make_session_factory()
-    mgr = SandboxManager(factory)
+    mgr = SandboxManager(factory, mock_encryption_backend)
     mgr._exchange_host = ""
 
     record = _make_record()
@@ -507,13 +513,13 @@ async def test_resume_record_recovery_bounce_tolerates_flapping_reconciler() -> 
 
 
 @pytest.mark.asyncio
-async def test_resume_record_recovery_gives_up_at_ceiling() -> None:
+async def test_resume_record_recovery_gives_up_at_ceiling(mock_encryption_backend: Any) -> None:
     """If the reconciler reverts past ``MAX_RUN_ATTEMPTS`` (3) in a row, the
     bounded loop surfaces the failure so the caller can create-new rather
     than livelocking. (codex P2 round 14 bounded-recovery requirement)
     """
     factory, session = _make_session_factory()
-    mgr = SandboxManager(factory)
+    mgr = SandboxManager(factory, mock_encryption_backend)
     mgr._exchange_host = ""
 
     record = _make_record()
@@ -556,7 +562,9 @@ async def test_resume_record_recovery_gives_up_at_ceiling() -> None:
 
 
 @pytest.mark.asyncio
-async def test_resume_record_exception_leaves_row_resuming_for_reconciler() -> None:
+async def test_resume_record_exception_leaves_row_resuming_for_reconciler(
+    mock_encryption_backend: Any,
+) -> None:
     """``connect_or_resume`` raises. Client-side exceptions are ambiguous
     (the provider may still be transitioning to ``Running`` after a
     client timeout), so ``_resume_record`` must NOT terminalize the row
@@ -567,7 +575,7 @@ async def test_resume_record_exception_leaves_row_resuming_for_reconciler() -> N
     (codex P1 round 13)
     """
     factory, session = _make_session_factory()
-    mgr = SandboxManager(factory)
+    mgr = SandboxManager(factory, mock_encryption_backend)
     mgr._exchange_host = ""
 
     record = _make_record()
@@ -610,9 +618,11 @@ async def test_resume_record_exception_leaves_row_resuming_for_reconciler() -> N
 
 
 @pytest.mark.asyncio
-async def test_kill_record_swallows_kill_failure_and_marks_terminated() -> None:
+async def test_kill_record_swallows_kill_failure_and_marks_terminated(
+    mock_encryption_backend: Any,
+) -> None:
     factory, session = _make_session_factory()
-    mgr = SandboxManager(factory)
+    mgr = SandboxManager(factory, mock_encryption_backend)
     mgr._exchange_host = ""
 
     record = _make_record()

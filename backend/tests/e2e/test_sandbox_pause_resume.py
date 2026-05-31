@@ -24,10 +24,12 @@ from datetime import UTC, datetime, timedelta
 import opensandbox
 import pytest
 import pytest_asyncio
+from cryptography.fernet import Fernet
 from opensandbox.config import ConnectionConfig
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from cubebox.config import config
+from cubebox.credentials.encryption import FernetBackend
 from cubebox.models import Organization, Workspace
 from cubebox.models.user import User
 from cubebox.models.user_sandbox import UserSandbox
@@ -161,7 +163,7 @@ async def manager(
 ) -> SandboxManager:
     """Manager wired to the test DB session factory + seeded org/ws/user."""
     await _seed_org_ws_user(session_factory)
-    mgr = SandboxManager(session_factory)
+    mgr = SandboxManager(session_factory, FernetBackend([Fernet.generate_key()]))
     # No egress in these tests — keep the focus on pause/resume orchestration.
     mgr._exchange_host = ""
     return mgr

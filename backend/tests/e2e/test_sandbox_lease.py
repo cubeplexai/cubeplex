@@ -15,13 +15,17 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 import pytest_asyncio
+from cryptography.fernet import Fernet
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
+from cubebox.credentials.encryption import FernetBackend
 from cubebox.db.engine import _build_database_url
 from cubebox.models.user_sandbox import UserSandbox
 from cubebox.repositories.user_sandbox import UserSandboxRepository
 from cubebox.sandbox.manager import SandboxManager
+
+_ENCRYPTION_BACKEND = FernetBackend([Fernet.generate_key()])
 
 pytestmark = pytest.mark.e2e
 
@@ -96,7 +100,7 @@ async def test_renew_lease_excludes_row_from_pause_candidates_then_release(
     row = await _seed_idle_running(db_session, scope)
     sandbox_id = row.sandbox_id
 
-    manager = SandboxManager(db_session_maker)
+    manager = SandboxManager(db_session_maker, _ENCRYPTION_BACKEND)
 
     await manager.renew_lease(
         sandbox_id,
@@ -139,7 +143,7 @@ async def test_renew_lease_custom_seconds_exceeds_default_window(
     row = await _seed_idle_running(db_session, scope)
     sandbox_id = row.sandbox_id
 
-    manager = SandboxManager(db_session_maker)
+    manager = SandboxManager(db_session_maker, _ENCRYPTION_BACKEND)
     default_window = manager._lease_seconds
     custom = default_window * 4
 

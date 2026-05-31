@@ -53,9 +53,11 @@ async def session_factory(monkeypatch):
     await engine.dispose()
 
 
-async def test_volume_claim_name_carries_workspace(session_factory, monkeypatch):
+async def test_volume_claim_name_carries_workspace(
+    session_factory, mock_encryption_backend, monkeypatch
+):
     factory, fake_create = session_factory
-    mgr = SandboxManager(factory)
+    mgr = SandboxManager(factory, mock_encryption_backend)
     monkeypatch.setattr(mgr, "_volume_enabled", True)
     await mgr.get_or_create("user-1", org_id="org-1", workspace_id="ws-A")
     vols = fake_create.last_volumes
@@ -64,9 +66,11 @@ async def test_volume_claim_name_carries_workspace(session_factory, monkeypatch)
     assert "ws-a" in claim and "user-1" in claim
 
 
-async def test_same_user_two_workspaces_get_distinct_claims(session_factory, monkeypatch):
+async def test_same_user_two_workspaces_get_distinct_claims(
+    session_factory, mock_encryption_backend, monkeypatch
+):
     factory, fake_create = session_factory
-    mgr = SandboxManager(factory)
+    mgr = SandboxManager(factory, mock_encryption_backend)
     monkeypatch.setattr(mgr, "_volume_enabled", True)
     await mgr.get_or_create("user-1", org_id="org-1", workspace_id="ws-A")
     claim_a = fake_create.last_volumes[0].pvc.claim_name
@@ -75,14 +79,16 @@ async def test_same_user_two_workspaces_get_distinct_claims(session_factory, mon
     assert claim_a != claim_b
 
 
-async def test_create_reserves_before_provider_create(session_factory):
+async def test_create_reserves_before_provider_create(session_factory, mock_encryption_backend):
     factory, fake_create = session_factory
-    mgr = SandboxManager(factory)
+    mgr = SandboxManager(factory, mock_encryption_backend)
     await mgr.get_or_create("user-1", org_id="org-1", workspace_id="ws-A")
     assert fake_create.calls == 1
 
 
-async def test_pre_create_setup_failure_releases_reservation(session_factory, monkeypatch):
+async def test_pre_create_setup_failure_releases_reservation(
+    session_factory, mock_encryption_backend, monkeypatch
+):
     """If anything between `repo.reserve()` and `Sandbox.create()` raises
     (e.g. env injection on a malformed vault row), the provisioning row must
     be released — otherwise the partial unique index pins this user/workspace
@@ -93,7 +99,7 @@ async def test_pre_create_setup_failure_releases_reservation(session_factory, mo
     from cubebox.sandbox_env.injector import SandboxEnvInjector
 
     factory, _fake_create = session_factory
-    mgr = SandboxManager(factory)
+    mgr = SandboxManager(factory, mock_encryption_backend)
     mgr._exchange_host = "egress-exchange.internal"
 
     def boom(self, *args, **kwargs):  # noqa: ANN001
@@ -118,7 +124,9 @@ async def test_pre_create_setup_failure_releases_reservation(session_factory, mo
     assert rows == [], f"Expected reservation released after pre-create failure, got: {rows}"
 
 
-async def test_reconnect_failure_after_create_keeps_running_row(session_factory, monkeypatch):
+async def test_reconnect_failure_after_create_keeps_running_row(
+    session_factory, mock_encryption_backend, monkeypatch
+):
     """After `promote_to_running` commits, the row references a real provider
     sandbox. If the post-create reconnect fails transiently, the row MUST stay
     `running` so the reaper can clean it up or the next reuse can re-test it.
@@ -127,7 +135,7 @@ async def test_reconnect_failure_after_create_keeps_running_row(session_factory,
     import sqlalchemy as sa
 
     factory, fake_create = session_factory
-    mgr = SandboxManager(factory)
+    mgr = SandboxManager(factory, mock_encryption_backend)
 
     call_count = {"connect": 0}
 
