@@ -488,6 +488,7 @@ async def admin_discover_skills(
         org_id=org_id,
         org_slug=org.slug,
         workspace_id=None,
+        include_local=False,  # skip local catalog: prevents slug collision dropping remote candidates
     )
     cands = await SkillDiscoveryService(registry).discover(q, limit=limit)
     return [
@@ -536,6 +537,7 @@ async def admin_preview_candidate(
         org_id=org_id,
         org_slug=org.slug,
         workspace_id=None,
+        include_local=False,
     )
     remote = registry.adapter_by_id(source_id)
     if remote is None:
@@ -572,6 +574,7 @@ async def admin_install_candidate(
         org_id=org_id,
         org_slug=org.slug,
         workspace_id=None,
+        include_local=False,
     )
     publisher = SkillPublishService(session=session, cache=_cache())
     install_svc = SkillInstallService(

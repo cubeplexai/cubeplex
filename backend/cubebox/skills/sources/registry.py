@@ -37,15 +37,18 @@ class SkillsAdapterManager:
         org_id: str,
         org_slug: str,
         workspace_id: str | None,
+        include_local: bool = True,
     ) -> SkillsAdapterManager:
-        adapters: list[SkillRegistryAdapter] = [
-            LocalCatalogAdapter(
-                session=session,
-                catalog=catalog,
-                org_id=org_id,
-                workspace_id=workspace_id,
+        adapters: list[SkillRegistryAdapter] = []
+        if include_local:
+            adapters.append(
+                LocalCatalogAdapter(
+                    session=session,
+                    catalog=catalog,
+                    org_id=org_id,
+                    workspace_id=workspace_id,
+                )
             )
-        ]
         rows = await SkillRegistryRepository(session).list_for_org(
             org_id, enabled_only=True
         )
