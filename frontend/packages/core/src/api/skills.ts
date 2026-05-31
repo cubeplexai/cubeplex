@@ -19,6 +19,11 @@ export interface SkillCandidateOut {
 
 export type SkillCandidateListResponse = SkillCandidateOut[]
 
+export interface SkillPreviewResponse {
+  content: string
+  env_vars: string[]
+}
+
 export interface SkillInstallResponse {
   canonical_name: string
   skill_id: string

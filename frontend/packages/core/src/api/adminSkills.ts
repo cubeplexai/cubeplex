@@ -1,5 +1,5 @@
 import { toApiError } from './client'
-import type { SkillCandidateOut } from './skills'
+import type { SkillCandidateOut, SkillPreviewResponse } from './skills'
 
 export async function adminDiscoverSkills(q: string, limit = 5): Promise<SkillCandidateOut[]> {
   const params = new URLSearchParams({ q, limit: String(limit) })
@@ -8,13 +8,13 @@ export async function adminDiscoverSkills(q: string, limit = 5): Promise<SkillCa
   return (await res.json()) as SkillCandidateOut[]
 }
 
-export async function adminPreviewCandidate(candidateId: string): Promise<{ content: string }> {
+export async function adminPreviewCandidate(candidateId: string): Promise<SkillPreviewResponse> {
   const params = new URLSearchParams({ candidate_id: candidateId })
   const res = await fetch(`/api/v1/admin/skills/discover/preview?${params}`, {
     credentials: 'include',
   })
   if (!res.ok) throw await toApiError(res)
-  return (await res.json()) as { content: string }
+  return (await res.json()) as SkillPreviewResponse
 }
 
 export async function adminInstallCandidate(
