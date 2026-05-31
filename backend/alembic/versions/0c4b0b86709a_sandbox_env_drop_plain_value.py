@@ -1,7 +1,7 @@
 """sandbox_env_drop_plain_value
 
 Revision ID: 0c4b0b86709a
-Revises: 2f3d624337bd
+Revises: e0a411d361fb
 Create Date: 2026-05-31 18:54:24.113589
 
 """
@@ -14,7 +14,7 @@ import sqlmodel  # noqa: F401  (referenced by sqlmodel.sql.sqltypes.AutoString i
 
 # revision identifiers, used by Alembic.
 revision: str = '0c4b0b86709a'
-down_revision: Union[str, Sequence[str], None] = '2f3d624337bd'
+down_revision: Union[str, Sequence[str], None] = 'e0a411d361fb'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
