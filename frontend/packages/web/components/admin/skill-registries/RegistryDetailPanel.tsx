@@ -52,7 +52,11 @@ export function RegistryDetailPanel({
             <h3 className="text-base font-semibold">{registry.name}</h3>
           </div>
           <span className="text-xs text-muted-foreground">
-            {registry.kind === 'skills-sh' ? 'skills.sh' : registry.base_url}
+            {registry.kind === 'skills-sh'
+              ? 'skills.sh'
+              : registry.kind === 'clawhub'
+                ? 'clawhub.ai'
+                : registry.base_url}
           </span>
         </div>
         <AlertDialog>
