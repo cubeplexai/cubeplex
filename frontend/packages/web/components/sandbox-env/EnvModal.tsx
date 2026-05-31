@@ -3,7 +3,7 @@
 
 import { useState } from 'react'
 import { X } from 'lucide-react'
-import { type CreateEnvIn, type EnvEntryOut } from '@cubebox/core'
+import { type CreateEnvIn, type EnvEntryOut, type UpdateEntryIn } from '@cubebox/core'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -11,19 +11,17 @@ import { Label } from '@/components/ui/label'
 export type ModalMode =
   | { kind: 'add-org' }
   | { kind: 'add-workspace'; defaultScope: 'workspace' | 'user' }
-  | { kind: 'rotate'; entry: EnvEntryOut }
+  | { kind: 'edit'; entry: EnvEntryOut }
 
 interface Props {
   mode: ModalMode
   onSubmit: (
-    body: CreateEnvIn | { secret_value: string },
+    body: CreateEnvIn | UpdateEntryIn,
     entryId?: string,
     scope?: 'workspace' | 'user',
   ) => Promise<void>
   onClose: () => void
 }
-
-const NAME_RE = /^[A-Z_][A-Z0-9_]*$/
 
 function parseHosts(raw: string): string[] {
   return raw
@@ -32,20 +30,30 @@ function parseHosts(raw: string): string[] {
     .filter(Boolean)
 }
 
-export function EnvModal({ mode, onSubmit, onClose }: Props) {
-  const isRotate = mode.kind === 'rotate'
+function hostsToRaw(hosts: string[] | null | undefined): string {
+  return hosts ? hosts.join(' ') : ''
+}
 
-  const [name, setName] = useState(isRotate ? mode.entry.env_name : '')
+export function EnvModal({ mode, onSubmit, onClose }: Props) {
+  const isEdit = mode.kind === 'edit'
+  const entry = isEdit ? mode.entry : null
+
+  const [name, setName] = useState(entry?.env_name ?? '')
   const [scope, setScope] = useState<'workspace' | 'user'>(
     mode.kind === 'add-workspace' ? mode.defaultScope : 'workspace',
   )
-  const [isSecret, setIsSecret] = useState(true)
+  const [isSecret, setIsSecret] = useState(entry ? entry.is_secret : true)
   const [value, setValue] = useState('')
-  const [hostsRaw, setHostsRaw] = useState('')
+  const [hostsRaw, setHostsRaw] = useState(hostsToRaw(entry?.hosts))
+  const [headerNamesRaw, setHeaderNamesRaw] = useState(
+    entry?.header_names ? entry.header_names.join(' ') : '',
+  )
   const [nameError, setNameError] = useState<string | null>(null)
   const [hostsError, setHostsError] = useState<string | null>(null)
   const [submitError, setSubmitError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
+
+  const NAME_RE = /^[A-Z_][A-Z0-9_]*$/
 
   function validateName(v: string): string | null {
     if (!v) return 'Name is required'
@@ -70,7 +78,43 @@ export function EnvModal({ mode, onSubmit, onClose }: Props) {
     e.preventDefault()
     setSubmitError(null)
 
-    const nErr = isRotate ? null : validateName(name)
+    if (isEdit) {
+      // Edit mode: hosts required for secrets, value optional
+      const hErr = isSecret ? validateHosts(hostsRaw) : null
+      setHostsError(hErr)
+      if (hErr) return
+
+      const body: UpdateEntryIn = {}
+      if (isSecret) {
+        body.hosts = parseHosts(hostsRaw)
+        body.header_names = headerNamesRaw.trim()
+          ? headerNamesRaw
+              .split(/[\s,]+/)
+              .map((s) => s.trim())
+              .filter(Boolean)
+          : null
+      }
+      if (value) body.secret_value = value
+
+      if (!body.hosts && !body.secret_value) {
+        setSubmitError('No changes to save')
+        return
+      }
+
+      setSaving(true)
+      try {
+        await onSubmit(body, entry!.id)
+        onClose()
+      } catch (err: unknown) {
+        setSubmitError(err instanceof Error ? err.message : 'An error occurred')
+      } finally {
+        setSaving(false)
+      }
+      return
+    }
+
+    // Add mode
+    const nErr = validateName(name)
     const hErr = isSecret ? validateHosts(hostsRaw) : null
     setNameError(nErr)
     setHostsError(hErr)
@@ -82,20 +126,15 @@ export function EnvModal({ mode, onSubmit, onClose }: Props) {
 
     setSaving(true)
     try {
-      if (isRotate) {
-        await onSubmit({ secret_value: value }, mode.entry.id)
-      } else {
-        const body: CreateEnvIn = {
-          env_name: name,
-          is_secret: isSecret,
-          ...(isSecret
-            ? { secret_value: value, hosts: parseHosts(hostsRaw) }
-            : { secret_value: value }),
-        }
-        // Pass the final scope selection (only relevant for workspace-mode adds)
-        const finalScope = mode.kind === 'add-workspace' ? scope : undefined
-        await onSubmit(body, undefined, finalScope)
+      const body: CreateEnvIn = {
+        env_name: name,
+        is_secret: isSecret,
+        ...(isSecret
+          ? { secret_value: value, hosts: parseHosts(hostsRaw) }
+          : { secret_value: value }),
       }
+      const finalScope = mode.kind === 'add-workspace' ? scope : undefined
+      await onSubmit(body, undefined, finalScope)
       onClose()
     } catch (err: unknown) {
       setSubmitError(err instanceof Error ? err.message : 'An error occurred')
@@ -115,28 +154,34 @@ export function EnvModal({ mode, onSubmit, onClose }: Props) {
         </button>
 
         <h2 className="mb-5 text-base font-semibold">
-          {isRotate ? 'Rotate value' : 'Add environment variable'}
+          {isEdit ? 'Edit environment variable' : 'Add environment variable'}
         </h2>
 
         <form onSubmit={handleSubmit} className="flex flex-col gap-4">
-          {/* NAME */}
-          {!isRotate && (
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="env-name" className="text-xs font-medium">
-                Name
-              </Label>
-              <Input
-                id="env-name"
-                value={name}
-                onChange={(e) => setName(e.target.value.toUpperCase())}
-                onBlur={() => setNameError(validateName(name))}
-                className="font-mono text-sm"
-                placeholder="VARIABLE_NAME"
-                maxLength={128}
-              />
-              {nameError && <p className="text-xs text-destructive">{nameError}</p>}
-            </div>
-          )}
+          {/* NAME — read-only in edit, editable in add */}
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="env-name" className="text-xs font-medium">
+              Name
+            </Label>
+            {isEdit ? (
+              <div className="rounded-md border border-border bg-muted/30 px-3 py-2 font-mono text-sm text-muted-foreground">
+                {entry!.env_name}
+              </div>
+            ) : (
+              <>
+                <Input
+                  id="env-name"
+                  value={name}
+                  onChange={(e) => setName(e.target.value.toUpperCase())}
+                  onBlur={() => setNameError(validateName(name))}
+                  className="font-mono text-sm"
+                  placeholder="VARIABLE_NAME"
+                  maxLength={128}
+                />
+                {nameError && <p className="text-xs text-destructive">{nameError}</p>}
+              </>
+            )}
+          </div>
 
           {/* SCOPE — only for workspace-admin add */}
           {mode.kind === 'add-workspace' && (
@@ -159,8 +204,15 @@ export function EnvModal({ mode, onSubmit, onClose }: Props) {
             </div>
           )}
 
-          {/* TYPE — only for add */}
-          {!isRotate && (
+          {/* TYPE — read-only in edit, selectable in add */}
+          {isEdit ? (
+            <div className="flex flex-col gap-1.5">
+              <Label className="text-xs font-medium">Type</Label>
+              <div className="rounded-md border border-border bg-muted/30 px-3 py-2 text-sm text-muted-foreground">
+                {entry!.is_secret ? 'Secret token' : 'Env value'}
+              </div>
+            </div>
+          ) : (
             <div className="flex flex-col gap-1.5">
               <Label className="text-xs font-medium">Type</Label>
               <div className="flex flex-col gap-2.5">
@@ -206,25 +258,8 @@ export function EnvModal({ mode, onSubmit, onClose }: Props) {
             </div>
           )}
 
-          {/* VALUE */}
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="env-value" className="text-xs font-medium">
-              {isRotate ? 'New secret value' : 'Value'}
-            </Label>
-            <Input
-              id="env-value"
-              type="password"
-              value={value}
-              onChange={(e) => setValue(e.target.value)}
-              className="font-mono text-sm"
-              placeholder="••••••••"
-              autoComplete="off"
-              maxLength={isSecret ? undefined : 4096}
-            />
-          </div>
-
-          {/* HOSTS — only for secrets */}
-          {isSecret && !isRotate && (
+          {/* HOSTS — for secrets */}
+          {isSecret && (
             <div className="flex flex-col gap-1.5">
               <Label htmlFor="env-hosts" className="text-xs font-medium">
                 Allowed hosts{' '}
@@ -244,6 +279,42 @@ export function EnvModal({ mode, onSubmit, onClose }: Props) {
             </div>
           )}
 
+          {/* HEADER NAMES — optional, for secrets in edit mode */}
+          {isSecret && isEdit && (
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="env-header-names" className="text-xs font-medium">
+                Allowed header names{' '}
+                <span className="font-normal text-muted-foreground">
+                  (optional; leave blank for any header)
+                </span>
+              </Label>
+              <Input
+                id="env-header-names"
+                value={headerNamesRaw}
+                onChange={(e) => setHeaderNamesRaw(e.target.value)}
+                placeholder="authorization x-api-key"
+                className="text-sm"
+              />
+            </div>
+          )}
+
+          {/* VALUE */}
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="env-value" className="text-xs font-medium">
+              {isEdit ? 'New value (leave blank to keep current)' : 'Value'}
+            </Label>
+            <Input
+              id="env-value"
+              type="password"
+              value={value}
+              onChange={(e) => setValue(e.target.value)}
+              className="font-mono text-sm"
+              placeholder="••••••••"
+              autoComplete="off"
+              maxLength={isSecret ? undefined : 4096}
+            />
+          </div>
+
           {/* Submit error */}
           {submitError && (
             <p className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
@@ -257,7 +328,7 @@ export function EnvModal({ mode, onSubmit, onClose }: Props) {
               Cancel
             </Button>
             <Button type="submit" size="sm" disabled={saving}>
-              {saving ? 'Saving…' : isRotate ? 'Rotate' : 'Add'}
+              {saving ? 'Saving…' : isEdit ? 'Save' : 'Add'}
             </Button>
           </div>
         </form>

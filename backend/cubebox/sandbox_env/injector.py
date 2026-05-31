@@ -41,6 +41,10 @@ class SandboxEnvInjector:
                     {
                         "ref_hash": hash_placeholder(placeholder),
                         "env_name": r.env_name,
+                        "env_var_id": r.id,
+                        # hosts/header_names/credential_id are kept as a snapshot
+                        # for backward-compat with old EgressRefs; the exchange
+                        # service prefers the live DB lookup via env_var_id.
                         "hosts": r.hosts,
                         "header_names": r.header_names,
                         "credential_id": r.credential_id,

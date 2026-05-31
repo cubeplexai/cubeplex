@@ -57,6 +57,7 @@ async def _fake_reconnect(sandbox_id: str, **kwargs: Any) -> Any:
 
 _RESOLVED_ENVS = [
     ResolvedEnv(
+        id="senv-1",
         env_name="GITHUB_TOKEN",
         is_secret=True,
         hosts=["api.github.com"],
@@ -64,6 +65,7 @@ _RESOLVED_ENVS = [
         credential_id="cred-1",
     ),
     ResolvedEnv(
+        id="senv-2",
         env_name="LOG_LEVEL",
         is_secret=False,
         hosts=None,

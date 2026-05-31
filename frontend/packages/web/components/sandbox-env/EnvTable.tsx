@@ -13,7 +13,7 @@ interface Props {
   entries: EnvEntryOut[]
   loading: boolean
   error: string | null
-  onRotate: (entry: EnvEntryOut) => void
+  onEdit: (entry: EnvEntryOut) => void
   onDelete: (entry: EnvEntryOut) => void
 }
 
@@ -32,7 +32,7 @@ function ScopeBadge({ scope }: { scope: 'workspace' | 'user' }) {
   )
 }
 
-export function EnvTable({ mode, entries, loading, error, onRotate, onDelete }: Props) {
+export function EnvTable({ mode, entries, loading, error, onEdit, onDelete }: Props) {
   const showScope = mode !== 'org'
 
   if (loading) {
@@ -113,14 +113,12 @@ export function EnvTable({ mode, entries, loading, error, onRotate, onDelete }: 
                 </td>
                 <td className="px-4 py-2.5 text-right">
                   <div className="flex items-center justify-end gap-3">
-                    {entry.is_secret && (
-                      <button
-                        onClick={() => onRotate(entry)}
-                        className="text-muted-foreground hover:text-foreground transition-colors"
-                      >
-                        rotate
-                      </button>
-                    )}
+                    <button
+                      onClick={() => onEdit(entry)}
+                      className="text-muted-foreground hover:text-foreground transition-colors"
+                    >
+                      edit
+                    </button>
                     <button
                       onClick={() => onDelete(entry)}
                       className="text-muted-foreground hover:text-destructive transition-colors"

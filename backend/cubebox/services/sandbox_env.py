@@ -58,6 +58,7 @@ def _validate_value_shape(
 
 @dataclass
 class ResolvedEnv:
+    id: str
     env_name: str
     is_secret: bool
     hosts: list[str] | None
@@ -147,6 +148,43 @@ class SandboxEnvService:
             raise SandboxEnvShapeError(f"no entry with credential {entry_id}")
         await self._credentials.update(credential_id=row.credential_id, plaintext=secret_value)
 
+    async def update_entry(
+        self,
+        *,
+        entry_id: str,
+        hosts: list[str] | None = None,
+        header_names: list[str] | None = None,
+        secret_value: str | None = None,
+    ) -> None:
+        """Update hosts/header_names and/or rotate the credential value.
+
+        ``hosts`` and ``header_names`` are only applicable to secret entries;
+        passing them for a plain entry raises SandboxEnvShapeError.
+        At least one argument must be non-None.
+        """
+        if hosts is None and header_names is None and secret_value is None:
+            raise SandboxEnvShapeError("update_entry: at least one field must be provided")
+        row = await self._repo.get(entry_id)
+        if row is None:
+            raise SandboxEnvShapeError(f"entry {entry_id!r} not found")
+
+        if hosts is not None or header_names is not None:
+            if not row.is_secret:
+                raise SandboxEnvShapeError(
+                    "hosts/header_names are only applicable to secret entries"
+                )
+            if hosts is not None:
+                validate_hosts(hosts)
+                row.hosts = hosts
+            if header_names is not None:
+                row.header_names = header_names or None
+            await self._repo.update(row)
+
+        if secret_value is not None:
+            if row.credential_id is None:
+                raise SandboxEnvShapeError(f"entry {entry_id!r} has no credential")
+            await self._credentials.update(credential_id=row.credential_id, plaintext=secret_value)
+
     async def delete_entry(self, *, entry_id: str) -> None:
         row = await self._repo.get(entry_id)
         if row is None:
@@ -171,6 +209,7 @@ class SandboxEnvResolver:
                 best[row.env_name] = row
         return [
             ResolvedEnv(
+                id=r.id,
                 env_name=r.env_name,
                 is_secret=r.is_secret,
                 hosts=r.hosts,
