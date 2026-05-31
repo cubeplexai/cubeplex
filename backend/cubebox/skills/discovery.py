@@ -236,6 +236,7 @@ class SkillInstallService:
                 files=files,
                 workspace_id=self._workspace_id,
                 imported_from_registry_id=source_id,
+                imported_from_source_ref=source_ref,
             )
         except UnicodeDecodeError as e:
             raise SkillInstallError(str(e)) from e

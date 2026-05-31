@@ -332,6 +332,7 @@ class SkillPublishService:
         files: dict[str, bytes],
         workspace_id: str | None = None,
         imported_from_registry_id: str | None = None,
+        imported_from_source_ref: str | None = None,
     ) -> SkillVersion:
         if "SKILL.md" not in files:
             logger.warning(
@@ -399,6 +400,7 @@ class SkillPublishService:
                 keywords=fm.keywords,
                 current_version=fm.version,
                 imported_from_registry_id=imported_from_registry_id,
+                imported_from_source_ref=imported_from_source_ref,
             )
         else:
             await skills.update_current_version(

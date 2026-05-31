@@ -31,6 +31,7 @@ class Skill(CubeboxBase, table=True):
     imported_from_registry_id: str | None = Field(
         default=None, foreign_key="skill_registries.id", max_length=20, nullable=True
     )
+    imported_from_source_ref: str | None = Field(default=None, max_length=512, nullable=True)
     current_version: str = Field(max_length=32)
     description: str = Field(max_length=1024)
     keywords: list[str] = Field(default_factory=list, sa_column=Column(JSON))
