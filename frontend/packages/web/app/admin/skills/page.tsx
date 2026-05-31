@@ -1,20 +1,44 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useTranslations } from 'next-intl'
-import type { SkillFilters } from '@cubebox/core'
+import { useAdminSkillsStore, type SkillFilters } from '@cubebox/core'
 import { SkillsToolbar } from '@/components/admin/skills/SkillsToolbar'
 import { SkillsList } from '@/components/admin/skills/SkillsList'
 import { SkillDetailPanel } from '@/components/admin/skills/SkillDetailPanel'
+import { AdminCandidateDetailPanel } from '@/components/admin/skills/AdminCandidateDetailPanel'
 import { UploadSkillModal } from '@/components/admin/skills/UploadSkillModal'
 import { useAdminSkills } from '@/hooks/useAdminSkills'
+
+type Selection = { kind: 'skill'; id: string } | { kind: 'candidate'; candidateId: string }
 
 export default function SkillsPage() {
   const t = useTranslations('admin')
   const [filters, setFilters] = useState<SkillFilters>({})
-  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [selection, setSelection] = useState<Selection | null>(null)
   const [uploadOpen, setUploadOpen] = useState(false)
-  const { skills, loading, error, refresh } = useAdminSkills(filters)
+
+  const externalOnly = filters.externalOnly ?? false
+  const { skills, loading, error, refresh } = useAdminSkills(externalOnly ? {} : filters)
+
+  const search = useAdminSkillsStore((s) => s.search)
+  const candidates = useAdminSkillsStore((s) => s.candidates)
+  const searching = useAdminSkillsStore((s) => s.searching)
+  const lastInstalled = useAdminSkillsStore((s) => s.lastInstalled)
+
+  useEffect(() => {
+    document.title = 'Skills'
+  }, [])
+
+  useEffect(() => {
+    if (lastInstalled) void refresh()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lastInstalled])
+
+  const selectedCandidate =
+    selection?.kind === 'candidate'
+      ? (candidates.find((c) => c.candidate_id === selection.candidateId) ?? null)
+      : null
 
   return (
     <div className="flex h-full flex-col">
@@ -25,8 +49,12 @@ export default function SkillsPage() {
 
       <SkillsToolbar
         filters={filters}
-        onFiltersChange={setFilters}
+        onFiltersChange={(next) => {
+          setFilters(next)
+          setSelection(null)
+        }}
         onUploadClick={() => setUploadOpen(true)}
+        onExternalSearch={(q) => void search(q)}
       />
 
       <div className="flex flex-1 overflow-hidden">
@@ -38,27 +66,35 @@ export default function SkillsPage() {
             skills={skills}
             loading={loading}
             error={error}
-            selectedId={selectedId}
-            onSelect={setSelectedId}
+            selectedId={selection?.kind === 'skill' ? selection.id : null}
+            onSelect={(id) => setSelection({ kind: 'skill', id })}
+            candidates={candidates}
+            searching={searching}
+            externalOnly={externalOnly}
+            selectedCandidateId={selection?.kind === 'candidate' ? selection.candidateId : null}
+            onSelectCandidate={(id) => setSelection({ kind: 'candidate', candidateId: id })}
           />
         </aside>
 
         <section className="flex flex-1 overflow-y-auto">
-          <SkillDetailPanel
-            skillId={selectedId}
-            onActionDone={() => {
-              void refresh()
-            }}
-          />
+          {selectedCandidate ? (
+            <AdminCandidateDetailPanel
+              candidate={selectedCandidate}
+              onInstalled={() => void refresh()}
+            />
+          ) : (
+            <SkillDetailPanel
+              skillId={selection?.kind === 'skill' ? selection.id : null}
+              onActionDone={() => void refresh()}
+            />
+          )}
         </section>
       </div>
 
       <UploadSkillModal
         open={uploadOpen}
         onOpenChange={setUploadOpen}
-        onUploaded={() => {
-          void refresh()
-        }}
+        onUploaded={() => void refresh()}
       />
     </div>
   )
