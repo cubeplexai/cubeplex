@@ -19,6 +19,8 @@ export interface SkillSummary {
   installed_version: string | null
   workspace_bindings_count: number
   workspace_binding_state?: WorkspaceBindingState | null
+  imported_from_registry_id: string | null
+  imported_from_registry_name: string | null
 }
 
 export interface SkillVersionDetail {

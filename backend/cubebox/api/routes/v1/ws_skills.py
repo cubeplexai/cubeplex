@@ -37,6 +37,7 @@ from cubebox.repositories.skill import (
     SkillRepository,
     SkillVersionRepository,
 )
+from cubebox.repositories.skill_registry import SkillRegistryRepository
 from cubebox.skills.cache import SkillCache
 from cubebox.skills.discovery import (
     SkillDiscoveryService,
@@ -75,6 +76,9 @@ async def list_skills_in_ws(
     tag: str | None = Query(None),
 ) -> list[SkillSummary]:
     repo = SkillRepository(session)
+    # Build registry id→name map once for the org (used to annotate SkillSummary)
+    registry_rows = await SkillRegistryRepository(session).list_for_org(ctx.org_id)
+    registry_names: dict[str, str] = {r.id: r.name for r in registry_rows}
     if scope == "workspace":
         catalog = SkillCatalogService(session=session, cache=_cache())
         resolved = await catalog.list_enabled_for_workspace(workspace_id, org_id=ctx.org_id)
@@ -100,6 +104,10 @@ async def list_skills_in_ws(
                 install_state="installed",
                 installed_version=None,
                 workspace_bindings_count=1,
+                imported_from_registry_id=s.imported_from_registry_id,
+                imported_from_registry_name=registry_names.get(s.imported_from_registry_id)
+                if s.imported_from_registry_id
+                else None,
             )
             for s in ws_skills
         ]
@@ -118,6 +126,10 @@ async def list_skills_in_ws(
                 install_state="installed",
                 installed_version=installed_versions.get(s.id),
                 workspace_bindings_count=0,
+                imported_from_registry_id=s.imported_from_registry_id,
+                imported_from_registry_name=registry_names.get(s.imported_from_registry_id)
+                if s.imported_from_registry_id
+                else None,
             )
             for s in skills
             if (q is None or q.lower() in s.name.lower() or q.lower() in s.description.lower())
@@ -136,6 +148,10 @@ async def list_skills_in_ws(
                 keywords=s.keywords,
                 install_state="uninstalled",
                 workspace_bindings_count=0,
+                imported_from_registry_id=s.imported_from_registry_id,
+                imported_from_registry_name=registry_names.get(s.imported_from_registry_id)
+                if s.imported_from_registry_id
+                else None,
             )
             for s in skills
             if (q is None or q.lower() in s.name.lower() or q.lower() in s.description.lower())
