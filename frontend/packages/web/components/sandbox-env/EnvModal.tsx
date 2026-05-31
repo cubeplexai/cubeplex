@@ -90,7 +90,7 @@ export function EnvModal({ mode, onSubmit, onClose }: Props) {
           is_secret: isSecret,
           ...(isSecret
             ? { secret_value: value, hosts: parseHosts(hostsRaw) }
-            : { plain_value: value }),
+            : { secret_value: value }),
         }
         // Pass the final scope selection (only relevant for workspace-mode adds)
         const finalScope = mode.kind === 'add-workspace' ? scope : undefined
@@ -115,7 +115,7 @@ export function EnvModal({ mode, onSubmit, onClose }: Props) {
         </button>
 
         <h2 className="mb-5 text-base font-semibold">
-          {isRotate ? 'Rotate secret' : 'Add environment variable'}
+          {isRotate ? 'Rotate value' : 'Add environment variable'}
         </h2>
 
         <form onSubmit={handleSubmit} className="flex flex-col gap-4">
@@ -163,24 +163,45 @@ export function EnvModal({ mode, onSubmit, onClose }: Props) {
           {!isRotate && (
             <div className="flex flex-col gap-1.5">
               <Label className="text-xs font-medium">Type</Label>
-              <div className="flex gap-3">
-                {[true, false].map((s) => (
-                  <label
-                    key={String(s)}
-                    className="flex cursor-pointer items-center gap-1.5 text-sm"
-                  >
-                    <input
-                      type="radio"
-                      name="type"
-                      checked={isSecret === s}
-                      onChange={() => {
-                        setIsSecret(s)
-                        setValue('')
-                      }}
-                    />
-                    {s ? 'Secret' : 'Plain text'}
-                  </label>
-                ))}
+              <div className="flex flex-col gap-2.5">
+                <label className="flex cursor-pointer items-start gap-2.5">
+                  <input
+                    type="radio"
+                    name="type"
+                    className="mt-0.5"
+                    checked={isSecret}
+                    onChange={() => {
+                      setIsSecret(true)
+                      setValue('')
+                    }}
+                  />
+                  <div>
+                    <div className="text-sm font-medium">Secret token</div>
+                    <div className="text-xs text-muted-foreground">
+                      Injected as a placeholder. The egress proxy substitutes the real value into
+                      outbound HTTP request headers at runtime. Requires allowed hosts.
+                    </div>
+                  </div>
+                </label>
+                <label className="flex cursor-pointer items-start gap-2.5">
+                  <input
+                    type="radio"
+                    name="type"
+                    className="mt-0.5"
+                    checked={!isSecret}
+                    onChange={() => {
+                      setIsSecret(false)
+                      setValue('')
+                    }}
+                  />
+                  <div>
+                    <div className="text-sm font-medium">Env value</div>
+                    <div className="text-xs text-muted-foreground">
+                      The actual value is injected directly into the sandbox env var. Encrypted at
+                      rest.
+                    </div>
+                  </div>
+                </label>
               </div>
             </div>
           )}
@@ -190,25 +211,16 @@ export function EnvModal({ mode, onSubmit, onClose }: Props) {
             <Label htmlFor="env-value" className="text-xs font-medium">
               {isRotate ? 'New secret value' : 'Value'}
             </Label>
-            {isSecret ? (
-              <Input
-                id="env-value"
-                type="password"
-                value={value}
-                onChange={(e) => setValue(e.target.value)}
-                className="font-mono text-sm"
-                placeholder="••••••••"
-                autoComplete="off"
-              />
-            ) : (
-              <Input
-                id="env-value"
-                value={value}
-                onChange={(e) => setValue(e.target.value)}
-                className="font-mono text-sm"
-                maxLength={4096}
-              />
-            )}
+            <Input
+              id="env-value"
+              type="password"
+              value={value}
+              onChange={(e) => setValue(e.target.value)}
+              className="font-mono text-sm"
+              placeholder="••••••••"
+              autoComplete="off"
+              maxLength={isSecret ? undefined : 4096}
+            />
           </div>
 
           {/* HOSTS — only for secrets */}

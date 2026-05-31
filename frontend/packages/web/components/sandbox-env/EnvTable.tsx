@@ -103,7 +103,7 @@ export function EnvTable({ mode, entries, loading, error, onRotate, onDelete }: 
                   </td>
                 )}
                 <td className="px-4 py-2.5 text-muted-foreground">
-                  {entry.is_secret ? 'secret' : 'plain'}
+                  {entry.is_secret ? 'secret token' : 'env value'}
                 </td>
                 <td className="px-4 py-2.5 text-muted-foreground">
                   {entry.hosts && entry.hosts.length > 0 ? entry.hosts.join(', ') : '—'}
