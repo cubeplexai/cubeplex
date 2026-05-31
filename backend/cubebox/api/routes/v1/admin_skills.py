@@ -115,6 +115,134 @@ async def list_skills(
     return summaries
 
 
+@router.get("/discover", response_model=list[SkillCandidateResponse])
+async def admin_discover_skills(
+    *,
+    user: Annotated[User, Depends(require_org_admin)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+    q: str = Query(..., min_length=1),
+    limit: int = Query(5, ge=1, le=20),
+) -> list[SkillCandidateResponse]:
+    org_id = await resolve_current_org_id(user, session)
+    org = await OrganizationRepository(session).get(org_id)
+    if org is None:
+        raise HTTPException(status_code=404, detail="ORG_NOT_FOUND")
+    catalog = SkillCatalogService(session=session, cache=_cache())
+    registry = await SkillsAdapterManager.build(
+        session=session,
+        catalog=catalog,
+        org_id=org_id,
+        org_slug=org.slug,
+        workspace_id=None,
+        include_local=False,  # skip local catalog: prevents slug collision dropping remote candidates
+    )
+    cands = await SkillDiscoveryService(registry).discover(q, limit=limit)
+    return [
+        SkillCandidateResponse(
+            candidate_id=c.candidate_id,
+            name=c.name,
+            canonical_name=c.canonical_name,
+            description=c.description,
+            source_kind=c.source_kind,
+            keywords=c.keywords,
+            version=c.version,
+            trust=c.trust.value,
+            install_state=c.install_state,
+            stars=c.stars,
+            install_count=c.install_count,
+            source_name=c.source_name,
+            repo=c.repo,
+            unvetted=(c.source_kind == "remote" and c.trust.value != "official"),
+        )
+        for c in cands
+        if c.source_kind == "remote"  # admin discover: only external candidates
+    ]
+
+
+@router.get("/discover/preview", response_model=CandidatePreviewResponse)
+async def admin_preview_candidate(
+    *,
+    user: Annotated[User, Depends(require_org_admin)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+    candidate_id: str = Query(...),
+) -> CandidatePreviewResponse:
+    org_id = await resolve_current_org_id(user, session)
+    org = await OrganizationRepository(session).get(org_id)
+    if org is None:
+        raise HTTPException(status_code=404, detail="ORG_NOT_FOUND")
+    try:
+        kind, source_id, source_ref = decode_candidate_id(candidate_id)
+    except CandidateIdError as e:
+        raise HTTPException(status_code=400, detail="BAD_CANDIDATE_ID") from e
+    if kind != "remote":
+        raise HTTPException(status_code=400, detail="REMOTE_CANDIDATES_ONLY")
+    catalog = SkillCatalogService(session=session, cache=_cache())
+    registry = await SkillsAdapterManager.build(
+        session=session,
+        catalog=catalog,
+        org_id=org_id,
+        org_slug=org.slug,
+        workspace_id=None,
+        include_local=False,
+    )
+    remote = registry.adapter_by_id(source_id)
+    if remote is None:
+        raise HTTPException(status_code=404, detail="REGISTRY_NOT_FOUND")
+    try:
+        files = await remote.fetch(source_ref)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"FETCH_FAILED: {e}") from e
+    skill_md = files.get("SKILL.md", b"").decode("utf-8", errors="replace")
+    name = peek_skill_name(skill_md) or source_ref.rsplit("/", 1)[-1]
+    return CandidatePreviewResponse(
+        candidate_id=candidate_id,
+        name=name,
+        canonical_name=name,
+        content=skill_md,
+    )
+
+
+@router.post("/install-candidate", response_model=InstallCandidateResponse)
+async def admin_install_candidate(
+    body: AdminInstallCandidateRequest,
+    *,
+    user: Annotated[User, Depends(require_org_admin)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> InstallCandidateResponse:
+    org_id = await resolve_current_org_id(user, session)
+    org = await OrganizationRepository(session).get(org_id)
+    if org is None:
+        raise HTTPException(status_code=404, detail="ORG_NOT_FOUND")
+    catalog = SkillCatalogService(session=session, cache=_cache())
+    registry = await SkillsAdapterManager.build(
+        session=session,
+        catalog=catalog,
+        org_id=org_id,
+        org_slug=org.slug,
+        workspace_id=None,
+        include_local=False,
+    )
+    publisher = SkillPublishService(session=session, cache=_cache())
+    install_svc = SkillInstallService(
+        session=session,
+        registry=registry,
+        publisher=publisher,
+        org_id=org_id,
+        org_slug=org.slug,
+        workspace_id=None,
+        actor_user_id=user.id,
+    )
+    try:
+        result = await install_svc.install(body.candidate_id)
+    except SkillInstallError as e:
+        raise HTTPException(status_code=422, detail=str(e)) from e
+    return InstallCandidateResponse(
+        canonical_name=result.canonical_name,
+        skill_id=result.skill_id,
+        installed_version=result.installed_version,
+    )
+
+
 @router.get("/{skill_id}", response_model=SkillDetail)
 async def get_skill(
     skill_id: str,
@@ -467,134 +595,6 @@ async def disable_skill_in_workspace(
         return
     bindings = WorkspaceSkillBindingRepository(session, org_id=org_id, workspace_id=ws_id)
     await bindings.disable(install.id)
-
-
-@router.get("/discover", response_model=list[SkillCandidateResponse])
-async def admin_discover_skills(
-    *,
-    user: Annotated[User, Depends(require_org_admin)],
-    session: Annotated[AsyncSession, Depends(get_session)],
-    q: str = Query(..., min_length=1),
-    limit: int = Query(5, ge=1, le=20),
-) -> list[SkillCandidateResponse]:
-    org_id = await resolve_current_org_id(user, session)
-    org = await OrganizationRepository(session).get(org_id)
-    if org is None:
-        raise HTTPException(status_code=404, detail="ORG_NOT_FOUND")
-    catalog = SkillCatalogService(session=session, cache=_cache())
-    registry = await SkillsAdapterManager.build(
-        session=session,
-        catalog=catalog,
-        org_id=org_id,
-        org_slug=org.slug,
-        workspace_id=None,
-        include_local=False,  # skip local catalog: prevents slug collision dropping remote candidates
-    )
-    cands = await SkillDiscoveryService(registry).discover(q, limit=limit)
-    return [
-        SkillCandidateResponse(
-            candidate_id=c.candidate_id,
-            name=c.name,
-            canonical_name=c.canonical_name,
-            description=c.description,
-            source_kind=c.source_kind,
-            keywords=c.keywords,
-            version=c.version,
-            trust=c.trust.value,
-            install_state=c.install_state,
-            stars=c.stars,
-            install_count=c.install_count,
-            source_name=c.source_name,
-            repo=c.repo,
-            unvetted=(c.source_kind == "remote" and c.trust.value != "official"),
-        )
-        for c in cands
-        if c.source_kind == "remote"  # admin discover: only external candidates
-    ]
-
-
-@router.get("/discover/preview", response_model=CandidatePreviewResponse)
-async def admin_preview_candidate(
-    *,
-    user: Annotated[User, Depends(require_org_admin)],
-    session: Annotated[AsyncSession, Depends(get_session)],
-    candidate_id: str = Query(...),
-) -> CandidatePreviewResponse:
-    org_id = await resolve_current_org_id(user, session)
-    org = await OrganizationRepository(session).get(org_id)
-    if org is None:
-        raise HTTPException(status_code=404, detail="ORG_NOT_FOUND")
-    try:
-        kind, source_id, source_ref = decode_candidate_id(candidate_id)
-    except CandidateIdError as e:
-        raise HTTPException(status_code=400, detail="BAD_CANDIDATE_ID") from e
-    if kind != "remote":
-        raise HTTPException(status_code=400, detail="REMOTE_CANDIDATES_ONLY")
-    catalog = SkillCatalogService(session=session, cache=_cache())
-    registry = await SkillsAdapterManager.build(
-        session=session,
-        catalog=catalog,
-        org_id=org_id,
-        org_slug=org.slug,
-        workspace_id=None,
-        include_local=False,
-    )
-    remote = registry.adapter_by_id(source_id)
-    if remote is None:
-        raise HTTPException(status_code=404, detail="REGISTRY_NOT_FOUND")
-    try:
-        files = await remote.fetch(source_ref)
-    except Exception as e:
-        raise HTTPException(status_code=502, detail=f"FETCH_FAILED: {e}") from e
-    skill_md = files.get("SKILL.md", b"").decode("utf-8", errors="replace")
-    name = peek_skill_name(skill_md) or source_ref.rsplit("/", 1)[-1]
-    return CandidatePreviewResponse(
-        candidate_id=candidate_id,
-        name=name,
-        canonical_name=name,
-        content=skill_md,
-    )
-
-
-@router.post("/install-candidate", response_model=InstallCandidateResponse)
-async def admin_install_candidate(
-    body: AdminInstallCandidateRequest,
-    *,
-    user: Annotated[User, Depends(require_org_admin)],
-    session: Annotated[AsyncSession, Depends(get_session)],
-) -> InstallCandidateResponse:
-    org_id = await resolve_current_org_id(user, session)
-    org = await OrganizationRepository(session).get(org_id)
-    if org is None:
-        raise HTTPException(status_code=404, detail="ORG_NOT_FOUND")
-    catalog = SkillCatalogService(session=session, cache=_cache())
-    registry = await SkillsAdapterManager.build(
-        session=session,
-        catalog=catalog,
-        org_id=org_id,
-        org_slug=org.slug,
-        workspace_id=None,
-        include_local=False,
-    )
-    publisher = SkillPublishService(session=session, cache=_cache())
-    install_svc = SkillInstallService(
-        session=session,
-        registry=registry,
-        publisher=publisher,
-        org_id=org_id,
-        org_slug=org.slug,
-        workspace_id=None,
-        actor_user_id=user.id,
-    )
-    try:
-        result = await install_svc.install(body.candidate_id)
-    except SkillInstallError as e:
-        raise HTTPException(status_code=422, detail=str(e)) from e
-    return InstallCandidateResponse(
-        canonical_name=result.canonical_name,
-        skill_id=result.skill_id,
-        installed_version=result.installed_version,
-    )
 
 
 def _visible(skill: Skill, org_id: str) -> bool:
