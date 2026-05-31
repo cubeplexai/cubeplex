@@ -20,7 +20,7 @@ from cubebox.repositories.skill_registry import SkillRegistryRepository
 router = APIRouter(prefix="/admin/skill-registries", tags=["admin-skill-registries"])
 
 _TRUST_TIERS = {"official", "community", "untrusted"}
-_VALID_KINDS = {"remote", "skills-sh"}
+_VALID_KINDS = {"remote", "skills-sh", "clawhub"}
 
 # Hostnames that name the local box or known-internal infra. Save-time
 # rejection of these is a defense-in-depth measure on top of trusting org
@@ -91,7 +91,7 @@ def _validate_registry_base_url(raw: str) -> None:
 
 class CreateSkillRegistryRequest(BaseModel):
     name: str
-    kind: Literal["remote", "skills-sh"] = "remote"
+    kind: Literal["remote", "skills-sh", "clawhub"] = "remote"
     base_url: str = ""
     repo: str | None = None
     trust_tier: str = "untrusted"
@@ -135,8 +135,8 @@ async def create_registry(
         raise HTTPException(status_code=400, detail="BAD_TRUST_TIER")
     if body.kind not in _VALID_KINDS:
         raise HTTPException(status_code=400, detail="BAD_KIND")
-    if body.kind == "skills-sh":
-        base_url = _SKILLS_SH_BASE_URL
+    if body.kind in {"skills-sh", "clawhub"}:
+        base_url = _SKILLS_SH_BASE_URL if body.kind == "skills-sh" else "https://clawhub.ai"
     else:
         base_url = body.base_url
         _validate_registry_base_url(base_url)
