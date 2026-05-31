@@ -33,6 +33,10 @@ class InstallCandidateRequest(BaseModel):
     candidate_id: str
 
 
+class AdminInstallCandidateRequest(BaseModel):
+    candidate_id: str
+
+
 class InstallCandidateResponse(BaseModel):
     canonical_name: str
     skill_id: str
