@@ -26,7 +26,8 @@
     "scheduledTasks": "Scheduled Tasks",
     "members": "Members",
     "settings": "Settings",
-    "triggers": "Triggers"
+    "triggers": "Triggers",
+    "sandboxEnv": "Sandbox env"
   },
   "time": {
     "justNow": "Just now",
@@ -65,6 +66,7 @@
     "skillRegistries": "Skill Registries",
     "mcp": "MCP Connectors",
     "sandbox": "Sandbox policy",
+    "sandboxEnv": "Sandbox env",
     "insights": "Insights",
     "members": "Members",
     "extensions": "Extensions"
