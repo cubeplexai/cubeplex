@@ -61,6 +61,7 @@ class SkillRepository:
         keywords: list[str],
         current_version: str,
         imported_from_registry_id: str | None = None,
+        imported_from_source_ref: str | None = None,
     ) -> Skill:
         skill = Skill(
             name=canonical_name,
@@ -70,6 +71,7 @@ class SkillRepository:
             description=description,
             keywords=keywords,
             imported_from_registry_id=imported_from_registry_id,
+            imported_from_source_ref=imported_from_source_ref,
         )
         self.session.add(skill)
         await self.session.commit()
