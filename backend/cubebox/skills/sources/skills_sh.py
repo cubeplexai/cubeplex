@@ -143,6 +143,25 @@ class SkillsShAdapter:
             elif f"skills/{slug}" not in skill_dirs:
                 skill_paths[(source, slug)] = skill_dir
 
+    def _resolve_skill_path(
+        self, source: str, slug: str, skill_paths: dict[tuple[str, str], str]
+    ) -> str:
+        """Resolve the actual GitHub directory path for a skillId.
+
+        skills.sh sometimes prefixes skillIds with an owner alias
+        (e.g. "sleek-design-mobile-apps" for dir "design-mobile-apps").
+        If no exact match, progressively strip the leading dash-segment
+        until a match is found or the slug is exhausted.
+        """
+        if (source, slug) in skill_paths:
+            return skill_paths[(source, slug)]
+        parts = slug.split("-")
+        for i in range(1, len(parts)):
+            candidate = "-".join(parts[i:])
+            if (source, candidate) in skill_paths:
+                return skill_paths[(source, candidate)]
+        return slug
+
     async def search(self, query: str, *, limit: int) -> list[SkillCandidate]:
         try:
             return await self._search(query, limit=limit)
@@ -203,8 +222,11 @@ class SkillsShAdapter:
             ):
                 continue
             branch = repos.get(source, "main")
-            # Detect if skill is in "skills/{slug}/" or "{slug}/" directory
-            skill_rel_path = skill_paths.get((source, slug), slug)
+            # Detect if skill is in "skills/{slug}/" or "{slug}/" directory.
+            # skills.sh may prefix the skillId with an owner alias (e.g.
+            # "sleek-design-mobile-apps" for dir "design-mobile-apps"), so if
+            # no exact match, try progressively stripping the leading dash-segment.
+            skill_rel_path = self._resolve_skill_path(source, slug, skill_paths)
             source_ref = f"{source}/{branch}/{skill_rel_path}"
             # Determine trust tier: official if from official source, else use adapter's tier
             trust = self._get_trust_for_source(source)
