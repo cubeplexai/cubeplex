@@ -21,7 +21,11 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     op.rename_table("skill_sources", "skill_registries")
+    # PostgreSQL does not auto-rename indexes on table rename; fix the name so
+    # Alembic autogenerate stays clean.
+    op.execute("ALTER INDEX IF EXISTS ix_skill_sources_org_id RENAME TO ix_skill_registries_org_id")
 
 
 def downgrade() -> None:
+    op.execute("ALTER INDEX IF EXISTS ix_skill_registries_org_id RENAME TO ix_skill_sources_org_id")
     op.rename_table("skill_registries", "skill_sources")
