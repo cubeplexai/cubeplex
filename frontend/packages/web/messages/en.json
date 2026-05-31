@@ -677,7 +677,9 @@
       "noMatch": "No skills match these filters",
       "noMatchHint": "Adjust the search or filter, or upload a workspace-private skill via \"Add skill\".",
       "selectSkill": "Select a skill to view details",
-      "listAria": "Skills list"
+      "listAria": "Skills list",
+      "systemCatalog": "System Catalog",
+      "externalSources": "External Sources"
     },
     "skillCard": {
       "enabled": "Enabled",
