@@ -205,6 +205,15 @@ class SkillInstallService:
         source = self._registry.adapter_by_id(source_id)
         if source is None:
             raise SkillInstallError("no enabled remote source for this candidate")
+        # Enforce trust tier: the skill's effective trust must be at least as
+        # high as the registry's configured minimum.  Prevents community/unvetted
+        # skills from being installed when the registry is set to official-only.
+        skill_trust = source.trust_for_ref(source_ref)
+        registry_min = getattr(source, "_trust", TrustTier.untrusted)
+        if _TRUST_RANK.get(skill_trust, 9) > _TRUST_RANK.get(registry_min, 9):
+            raise SkillInstallError(
+                f"skill trust '{skill_trust}' does not meet registry minimum '{registry_min}'"
+            )
         try:
             files = await source.fetch(source_ref)
         except httpx.HTTPStatusError as e:
