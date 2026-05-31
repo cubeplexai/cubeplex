@@ -1,7 +1,7 @@
 // frontend/packages/web/app/admin/sandbox-env/page.tsx
 'use client'
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import {
   createApiClient,
   createAdminEnv,
@@ -21,22 +21,35 @@ export default function AdminSandboxEnvPage() {
   const [loadError, setLoadError] = useState<string | null>(null)
   const [modal, setModal] = useState<ModalMode | null>(null)
 
-  const load = useCallback(async () => {
-    setLoading(true)
-    setLoadError(null)
+  const load = async () => {
     try {
       const data = await listAdminEnv(client)
       setEntries(data.entries.slice().sort((a, b) => a.env_name.localeCompare(b.env_name)))
+      setLoading(false)
     } catch (err: unknown) {
       setLoadError(err instanceof Error ? err.message : 'Failed to load')
-    } finally {
       setLoading(false)
     }
-  }, [client])
+  }
 
   useEffect(() => {
-    load()
-  }, [load])
+    let cancelled = false
+    listAdminEnv(client)
+      .then((data) => {
+        if (cancelled) return
+        setEntries(data.entries.slice().sort((a, b) => a.env_name.localeCompare(b.env_name)))
+        setLoading(false)
+        setLoadError(null)
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return
+        setLoadError(err instanceof Error ? err.message : 'Failed to load')
+        setLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [client])
 
   async function handleSubmit(
     body: CreateEnvIn | { secret_value: string },

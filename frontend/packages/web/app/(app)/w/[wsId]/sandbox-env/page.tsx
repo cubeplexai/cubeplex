@@ -1,7 +1,7 @@
 // frontend/packages/web/app/(app)/w/[wsId]/sandbox-env/page.tsx
 'use client'
 
-import { use, useCallback, useEffect, useMemo, useState } from 'react'
+import { use, useEffect, useMemo, useState } from 'react'
 import {
   createApiClient,
   createWsEnvMe,
@@ -34,9 +34,7 @@ export default function WorkspaceSandboxEnvPage({ params }: PageProps): React.Re
   const [loadError, setLoadError] = useState<string | null>(null)
   const [modal, setModal] = useState<ModalMode | null>(null)
 
-  const load = useCallback(async () => {
-    setLoading(true)
-    setLoadError(null)
+  const load = async () => {
     try {
       const fetches = isAdmin
         ? await Promise.all([listWsEnvWorkspace(client, wsId), listWsEnvMe(client, wsId)])
@@ -45,16 +43,38 @@ export default function WorkspaceSandboxEnvPage({ params }: PageProps): React.Re
         .flatMap((r) => r.entries)
         .sort((a, b) => a.env_name.localeCompare(b.env_name))
       setEntries(merged)
+      setLoading(false)
     } catch (err: unknown) {
       setLoadError(err instanceof Error ? err.message : 'Failed to load')
-    } finally {
       setLoading(false)
     }
-  }, [client, wsId, isAdmin])
+  }
 
   useEffect(() => {
-    load()
-  }, [load])
+    let cancelled = false
+    const fetcher = async () => {
+      try {
+        const fetches = isAdmin
+          ? await Promise.all([listWsEnvWorkspace(client, wsId), listWsEnvMe(client, wsId)])
+          : [await listWsEnvMe(client, wsId)]
+        if (cancelled) return
+        const merged = fetches
+          .flatMap((r) => r.entries)
+          .sort((a, b) => a.env_name.localeCompare(b.env_name))
+        setEntries(merged)
+        setLoading(false)
+        setLoadError(null)
+      } catch (err: unknown) {
+        if (cancelled) return
+        setLoadError(err instanceof Error ? err.message : 'Failed to load')
+        setLoading(false)
+      }
+    }
+    void fetcher()
+    return () => {
+      cancelled = true
+    }
+  }, [client, wsId, isAdmin])
 
   async function handleSubmit(
     body: CreateEnvIn | { secret_value: string },
