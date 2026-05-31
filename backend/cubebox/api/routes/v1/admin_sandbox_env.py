@@ -79,8 +79,7 @@ async def create_org_env(
             user_id=None,
             hosts=body.hosts,
             header_names=body.header_names,
-            secret_value=body.secret_value,
-            plain_value=body.plain_value,
+            secret_value=body.secret_value or body.plain_value,
         )
     except SandboxEnvConflictError as exc:
         raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
@@ -114,7 +113,7 @@ async def rotate_org_env(
     if row is None or row.scope != "org":
         raise HTTPException(status.HTTP_404_NOT_FOUND, "not found")
     try:
-        await _service(session, backend, ctx).update_secret_value(
+        await _service(session, backend, ctx).update_value(
             entry_id=entry_id, secret_value=body.secret_value
         )
     except SandboxEnvShapeError as exc:

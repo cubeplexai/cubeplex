@@ -48,13 +48,12 @@ def _validate_value_shape(
             raise SandboxEnvShapeError("secret entry forbids plain_value")
         validate_hosts(hosts)  # raises HostPatternError (incl. regex-only rejection)
     else:
-        if plain_value is None:
-            raise SandboxEnvShapeError("plain entry requires plain_value")
-        # Use ``is not None`` (not truthiness): hosts=[] is falsy but the model
-        # CHECK requires hosts IS NULL for plain rows, so [] must be a 400 here,
-        # not a DB integrity 500.
-        if secret_value is not None or hosts is not None:
-            raise SandboxEnvShapeError("plain entry forbids secret_value/hosts")
+        if secret_value is None:
+            raise SandboxEnvShapeError("plain entry requires secret_value")
+        if plain_value is not None:
+            raise SandboxEnvShapeError("plain entry forbids plain_value")
+        if hosts is not None:
+            raise SandboxEnvShapeError("plain entry forbids hosts")
 
 
 @dataclass
@@ -64,7 +63,7 @@ class ResolvedEnv:
     hosts: list[str] | None
     header_names: list[str] | None
     credential_id: str | None
-    plain_value: str | None
+    value: str | None = None  # decrypted at inject time by manager; None until then
 
 
 class SandboxEnvService:
@@ -92,10 +91,9 @@ class SandboxEnvService:
         hosts: list[str] | None,
         header_names: list[str] | None,
         secret_value: str | None,
-        plain_value: str | None,
     ) -> str:
         _validate_scope_shape(scope, workspace_id, user_id)
-        _validate_value_shape(is_secret, hosts, secret_value, plain_value)
+        _validate_value_shape(is_secret, hosts, secret_value, None)
 
         # Preflight conflict check — before creating any credential so there is
         # nothing to roll back on a name collision.
@@ -110,16 +108,14 @@ class SandboxEnvService:
                 f"env entry {env_name!r} already exists in scope={scope!r}"
             )
 
-        credential_id: str | None = None
-        if is_secret:
-            assert secret_value is not None  # guaranteed by value-shape validation
-            _ident = f"{scope}:{workspace_id or '-'}:{user_id or '-'}:{env_name}"
-            _cred_name = f"sandbox_env:{hashlib.sha256(_ident.encode()).hexdigest()}"  # 76 chars
-            credential_id = await self._credentials.create(
-                kind=SANDBOX_ENV_KIND,
-                name=_cred_name,
-                plaintext=secret_value,
-            )
+        assert secret_value is not None  # guaranteed by value-shape validation for both types
+        _ident = f"{scope}:{workspace_id or '-'}:{user_id or '-'}:{env_name}"
+        _cred_name = f"sandbox_env:{hashlib.sha256(_ident.encode()).hexdigest()}"  # 76 chars
+        credential_id = await self._credentials.create(
+            kind=SANDBOX_ENV_KIND,
+            name=_cred_name,
+            plaintext=secret_value,
+        )
 
         row = SandboxEnvVar(
             org_id=self._org_id,
@@ -131,7 +127,6 @@ class SandboxEnvService:
             hosts=hosts,
             header_names=header_names,
             credential_id=credential_id,
-            plain_value=plain_value,
             created_by_user_id=self._actor_user_id,
         )
         try:
@@ -146,10 +141,10 @@ class SandboxEnvService:
             raise
         return saved.id
 
-    async def update_secret_value(self, *, entry_id: str, secret_value: str) -> None:
+    async def update_value(self, *, entry_id: str, secret_value: str) -> None:
         row = await self._repo.get(entry_id)
-        if row is None or not row.is_secret or row.credential_id is None:
-            raise SandboxEnvShapeError(f"no secret entry {entry_id}")
+        if row is None or row.credential_id is None:
+            raise SandboxEnvShapeError(f"no entry with credential {entry_id}")
         await self._credentials.update(credential_id=row.credential_id, plaintext=secret_value)
 
     async def delete_entry(self, *, entry_id: str) -> None:
@@ -157,7 +152,7 @@ class SandboxEnvService:
         if row is None:
             return
         await self._repo.delete(entry_id)
-        if row.is_secret and row.credential_id is not None:
+        if row.credential_id is not None:
             await self._credentials.delete(credential_id=row.credential_id)
 
 
@@ -181,7 +176,6 @@ class SandboxEnvResolver:
                 hosts=r.hosts,
                 header_names=r.header_names,
                 credential_id=r.credential_id,
-                plain_value=r.plain_value,
             )
             for r in best.values()
         ]
