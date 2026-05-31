@@ -44,7 +44,7 @@ from cubebox.skills.discovery import (
     SkillInstallError,
     SkillInstallService,
 )
-from cubebox.skills.frontmatter import InvalidFrontmatterError
+from cubebox.skills.frontmatter import InvalidFrontmatterError, extract_env_vars, parse_skill_md
 from cubebox.skills.service import (
     FileTooLargeError,
     InvalidSkillNameError,
@@ -62,6 +62,14 @@ router = APIRouter(prefix="/ws/{workspace_id}/skills", tags=["ws-skills"])
 
 def _cache() -> SkillCache:
     return SkillCache(cache_root=Path(_config.get("skills.cache_root", "skills_cache")))
+
+
+def _env_vars_from_skill_md(content: str) -> list[str]:
+    try:
+        fm = parse_skill_md(content, default_version="0.0.0")
+    except Exception:
+        return []
+    return extract_env_vars(fm.raw_metadata)
 
 
 @router.get("", response_model=list[SkillSummary])
@@ -236,6 +244,7 @@ async def preview_candidate(
             name=skill.name,
             canonical_name=skill.name,
             content=content,
+            env_vars=_env_vars_from_skill_md(content),
         )
     registry = await SkillsAdapterManager.build(
         session=session,
@@ -262,6 +271,7 @@ async def preview_candidate(
         name=slug,
         canonical_name=f"{org.slug}:{slug}",
         content=content,
+        env_vars=_env_vars_from_skill_md(content),
     )
 
 

@@ -27,6 +27,7 @@ class CandidatePreviewResponse(BaseModel):
     name: str
     canonical_name: str
     content: str
+    env_vars: list[str] = []
 
 
 class InstallCandidateRequest(BaseModel):
