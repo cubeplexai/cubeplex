@@ -23,12 +23,12 @@ export const useSkillsStore = create<SkillsState>((set) => ({
   lastInstalled: null,
 
   async search(client, wsId, q) {
-    set({ query: q, searching: true })
+    set({ query: q, candidates: [], searching: true })
     try {
       const candidates = await discoverSkills(client, wsId, q)
       set({ candidates, searching: false })
     } catch (e) {
-      set({ searching: false })
+      set({ candidates: [], searching: false })
       throw e
     }
   },
