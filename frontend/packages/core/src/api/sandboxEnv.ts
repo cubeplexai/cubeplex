@@ -8,6 +8,7 @@ export interface EnvEntryOut {
   workspace_id: string | null
   user_id: string | null
   hosts: string[] | null
+  header_names?: string[] | null
   status: string
   warnings: string[]
 }
