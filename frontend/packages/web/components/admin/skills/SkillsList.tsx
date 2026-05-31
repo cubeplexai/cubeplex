@@ -88,7 +88,7 @@ export function SkillsList({
   return (
     <div className="flex flex-col">
       {skills.length === 0 ? (
-        <div className="flex h-full flex-col items-center justify-center gap-1 px-6 text-center">
+        <div className="flex flex-col items-center justify-center gap-1 px-6 py-12 text-center">
           <p className="text-sm text-muted-foreground">{t('noSkills')}</p>
           <p className="text-xs text-muted-foreground/70">{t('noSkillsHint')}</p>
         </div>
@@ -109,7 +109,7 @@ export function SkillsList({
       {(candidates.length > 0 || searching) && (
         <>
           <div className="flex items-center gap-2 px-4 py-2">
-            <span className="text-xs font-medium text-muted-foreground">
+            <span className="text-xs font-semibold text-muted-foreground">
               {t('externalSources')}
             </span>
             {searching && (
