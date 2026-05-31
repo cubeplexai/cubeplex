@@ -87,7 +87,7 @@ export function SkillsList({
 
   return (
     <div className="flex flex-col">
-      <div className="flex items-center gap-2 px-4 py-2">
+      <div className="flex items-center gap-2 px-4 pb-1 pt-2">
         <span className="text-xs font-semibold text-muted-foreground">{t('systemCatalog')}</span>
         <div className="flex-1 border-t border-border/50" />
       </div>
