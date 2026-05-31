@@ -48,7 +48,10 @@ class SandboxEnvInjector:
                 )
             else:
                 if r.value is None:
-                    raise ValueError(f"Plain env var {r.env_name!r} has no value")
+                    raise ValueError(
+                        f"Env var {r.env_name!r} has no decrypted value — "
+                        "call manager._decrypt_env_values() before build()"
+                    )
                 env[r.env_name] = r.value
 
         return InjectionResult(env=env, bindings=bindings)
