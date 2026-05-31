@@ -1,0 +1,141 @@
+// frontend/packages/web/app/(app)/w/[wsId]/sandbox-env/page.tsx
+'use client'
+
+import { use, useCallback, useEffect, useMemo, useState } from 'react'
+import {
+  createApiClient,
+  createWsEnvMe,
+  createWsEnvWorkspace,
+  deleteWsEnvMe,
+  deleteWsEnvWorkspace,
+  listWsEnvMe,
+  listWsEnvWorkspace,
+  rotateWsEnvMe,
+  rotateWsEnvWorkspace,
+  useWorkspaceStore,
+  type CreateEnvIn,
+  type EnvEntryOut,
+} from '@cubebox/core'
+import { EnvTable } from './_components/EnvTable'
+import { EnvModal, type ModalMode } from './_components/EnvModal'
+
+interface PageProps {
+  params: Promise<{ wsId: string }>
+}
+
+export default function WorkspaceSandboxEnvPage({ params }: PageProps): React.ReactElement {
+  const { wsId } = use(params)
+  const client = useMemo(() => createApiClient(''), [])
+  const wsRole = useWorkspaceStore((s) => s.workspaces.find((w) => w.id === wsId)?.role)
+  const isAdmin = wsRole === 'admin'
+
+  const [entries, setEntries] = useState<EnvEntryOut[]>([])
+  const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState<string | null>(null)
+  const [modal, setModal] = useState<ModalMode | null>(null)
+
+  const load = useCallback(async () => {
+    setLoading(true)
+    setLoadError(null)
+    try {
+      const fetches = isAdmin
+        ? await Promise.all([listWsEnvWorkspace(client, wsId), listWsEnvMe(client, wsId)])
+        : [await listWsEnvMe(client, wsId)]
+      const merged = fetches
+        .flatMap((r) => r.entries)
+        .sort((a, b) => a.env_name.localeCompare(b.env_name))
+      setEntries(merged)
+    } catch (err: unknown) {
+      setLoadError(err instanceof Error ? err.message : 'Failed to load')
+    } finally {
+      setLoading(false)
+    }
+  }, [client, wsId, isAdmin])
+
+  useEffect(() => {
+    load()
+  }, [load])
+
+  async function handleSubmit(
+    body: CreateEnvIn | { secret_value: string },
+    entryId?: string,
+    scope?: 'workspace' | 'user',
+  ) {
+    if (entryId) {
+      // Rotate: find the entry to determine which path to call
+      const entry = entries.find((e) => e.id === entryId)
+      if (entry?.scope === 'workspace') {
+        await rotateWsEnvWorkspace(client, wsId, entryId, body as { secret_value: string })
+      } else {
+        await rotateWsEnvMe(client, wsId, entryId, body as { secret_value: string })
+      }
+    } else {
+      // Add: use the scope the user selected inside the modal
+      const createBody = body as CreateEnvIn
+      if (scope === 'workspace') {
+        await createWsEnvWorkspace(client, wsId, createBody)
+      } else {
+        await createWsEnvMe(client, wsId, createBody)
+      }
+    }
+    await load()
+  }
+
+  async function handleDelete(entry: EnvEntryOut) {
+    if (!confirm(`Delete ${entry.env_name}?`)) return
+    if (entry.scope === 'workspace') {
+      await deleteWsEnvWorkspace(client, wsId, entry.id)
+    } else {
+      await deleteWsEnvMe(client, wsId, entry.id)
+    }
+    await load()
+  }
+
+  const tableMode = isAdmin ? 'workspace-admin' : 'workspace-member'
+
+  return (
+    <div className="flex h-full flex-col">
+      <header className="border-b border-border/70 px-6 py-4">
+        <div className="flex items-center justify-between">
+          <div>
+            <h2 className="text-lg font-semibold tracking-tight">Sandbox environment variables</h2>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              Secrets and plain values injected into your sandbox.
+            </p>
+          </div>
+          <div className="flex gap-2">
+            {isAdmin && (
+              <button
+                onClick={() => setModal({ kind: 'add-workspace', defaultScope: 'workspace' })}
+                className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border/70 bg-background px-3 text-xs font-medium shadow-sm transition-colors hover:bg-accent"
+              >
+                + Workspace secret
+              </button>
+            )}
+            <button
+              onClick={() => setModal({ kind: 'add-workspace', defaultScope: 'user' })}
+              className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border/70 bg-background px-3 text-xs font-medium shadow-sm transition-colors hover:bg-accent"
+            >
+              + Personal secret
+            </button>
+          </div>
+        </div>
+      </header>
+
+      <div className="flex-1 overflow-y-auto px-6 py-6">
+        <div className="mx-auto max-w-3xl">
+          <EnvTable
+            mode={tableMode}
+            entries={entries}
+            loading={loading}
+            error={loadError}
+            onRotate={(entry) => setModal({ kind: 'rotate', entry })}
+            onDelete={handleDelete}
+          />
+        </div>
+      </div>
+
+      {modal && <EnvModal mode={modal} onSubmit={handleSubmit} onClose={() => setModal(null)} />}
+    </div>
+  )
+}
