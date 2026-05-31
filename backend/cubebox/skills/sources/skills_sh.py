@@ -102,7 +102,7 @@ class SkillsShAdapter:
         configured trust_tier (typically "community").
         """
         if source in _OFFICIAL_SOURCES:
-            return "official"
+            return TrustTier.official
         return self._trust
 
     def _index_skill_paths(
