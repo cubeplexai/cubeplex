@@ -131,18 +131,23 @@ export function CandidateDetailPanel({ wsId, candidate }: CandidateDetailPanelPr
         )}
       </dl>
 
-      {preview && (
-        <div className={cn('space-y-4 text-sm', proseClasses)}>
-          <ReactMarkdown remarkPlugins={[remarkGfm]}>
-            {stripFrontmatter(preview.content)}
-          </ReactMarkdown>
-        </div>
-      )}
-      {isLoading && (
-        <div className="flex items-center justify-center py-8">
-          <p className="text-sm text-muted-foreground">Loading SKILL.md…</p>
-        </div>
-      )}
+      <div className="flex flex-col gap-2">
+        <h3 className="text-xs font-semibold text-muted-foreground">Overview</h3>
+        {preview && (
+          <div className="rounded-lg border border-border/70 bg-card/40 px-4 py-3">
+            <div className={cn('space-y-4 text-sm', proseClasses)}>
+              <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                {stripFrontmatter(preview.content)}
+              </ReactMarkdown>
+            </div>
+          </div>
+        )}
+        {isLoading && (
+          <div className="flex items-center justify-center py-8">
+            <p className="text-sm text-muted-foreground">Loading SKILL.md…</p>
+          </div>
+        )}
+      </div>
     </div>
   )
 }
