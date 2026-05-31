@@ -62,15 +62,14 @@ _RESOLVED_ENVS = [
         hosts=["api.github.com"],
         header_names=None,
         credential_id="cred-1",
-        plain_value=None,
     ),
     ResolvedEnv(
         env_name="LOG_LEVEL",
         is_secret=False,
         hosts=None,
         header_names=None,
-        credential_id=None,
-        plain_value="info",
+        credential_id="cred-2",
+        value="info",
     ),
 ]
 

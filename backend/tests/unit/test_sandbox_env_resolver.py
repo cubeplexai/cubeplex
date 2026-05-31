@@ -49,7 +49,6 @@ async def seeded(session):
         hosts=["api.github.com"],
         header_names=None,
         secret_value="org-token",
-        plain_value=None,
     )
     await svc.create_entry(
         env_name="GITHUB_TOKEN",
@@ -60,7 +59,6 @@ async def seeded(session):
         hosts=["api.github.com"],
         header_names=None,
         secret_value="user-token",
-        plain_value=None,
     )
     await svc.create_entry(
         env_name="LOG_LEVEL",
@@ -70,8 +68,7 @@ async def seeded(session):
         user_id=None,
         hosts=None,
         header_names=None,
-        secret_value=None,
-        plain_value="info",
+        secret_value="info",
     )
     return SandboxEnvResolver(SandboxEnvRepository(session, org_id=org_id))
 
@@ -81,7 +78,7 @@ async def test_user_overrides_org(seeded):
     by_name = {r.env_name: r for r in resolved}
     # GITHUB_TOKEN should resolve to the user-scope entry, LOG_LEVEL to org plain.
     assert by_name["GITHUB_TOKEN"].is_secret
-    assert by_name["LOG_LEVEL"].plain_value == "info"
+    assert by_name["LOG_LEVEL"].credential_id is not None
     assert len(resolved) == 2  # one effective entry per env_name
 
 

@@ -60,7 +60,6 @@ async def test_create_secret_entry(service):
         hosts=["api.github.com"],
         header_names=None,
         secret_value="ghp_xxx",
-        plain_value=None,
     )
     assert entry_id.startswith("senv-")
 
@@ -74,8 +73,7 @@ async def test_create_plain_entry(service):
         user_id=None,
         hosts=None,
         header_names=None,
-        secret_value=None,
-        plain_value="debug",
+        secret_value="debug",
     )
     assert entry_id.startswith("senv-")
 
@@ -91,7 +89,6 @@ async def test_secret_requires_hosts(service):
             hosts=None,
             header_names=None,
             secret_value="v",
-            plain_value=None,
         )
 
 
@@ -105,8 +102,7 @@ async def test_bad_scope_shape(service):
             user_id=None,
             hosts=None,
             header_names=None,
-            secret_value=None,
-            plain_value="v",
+            secret_value="v",
         )
 
 
@@ -121,7 +117,6 @@ async def test_bad_host_rejected(service):
             hosts=["*.com"],
             header_names=None,
             secret_value="v",
-            plain_value=None,
         )
 
 
@@ -166,7 +161,6 @@ async def test_duplicate_env_name_raises_conflict(service_with_session):
         hosts=["api.github.com"],
         header_names=None,
         secret_value="ghp_first",
-        plain_value=None,
     )
     with pytest.raises(SandboxEnvConflictError):
         await svc.create_entry(
@@ -178,7 +172,6 @@ async def test_duplicate_env_name_raises_conflict(service_with_session):
             hosts=["api.github.com"],
             header_names=None,
             secret_value="ghp_second",
-            plain_value=None,
         )
 
 
@@ -194,7 +187,6 @@ async def test_conflict_leaves_no_orphan_credential(service_with_session):
         hosts=["api.example.com"],
         header_names=None,
         secret_value="original",
-        plain_value=None,
     )
     cred_count_before = await _credential_count(session)
 
@@ -208,7 +200,6 @@ async def test_conflict_leaves_no_orphan_credential(service_with_session):
             hosts=["api.example.com"],
             header_names=None,
             secret_value="duplicate",
-            plain_value=None,
         )
 
     cred_count_after = await _credential_count(session)
