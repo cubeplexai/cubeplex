@@ -146,7 +146,7 @@ class SkillInstallService:
         publisher: SkillPublishService,
         org_id: str,
         org_slug: str,
-        workspace_id: str,
+        workspace_id: str | None,
         actor_user_id: str,
     ) -> None:
         self._session = session
@@ -186,13 +186,22 @@ class SkillInstallService:
                 raise SkillInstallError(
                     "preinstalled skill was uninstalled for this org"
                 )
-        await OrgSkillInstallRepository(self._session).create_for_workspace(
-            org_id=self._org_id,
-            workspace_id=self._workspace_id,
-            skill_id=skill.id,
-            installed_version=skill.current_version,
-            installed_by_user_id=self._actor,
-        )
+        if self._workspace_id is not None:
+            await OrgSkillInstallRepository(self._session).create_for_workspace(
+                org_id=self._org_id,
+                workspace_id=self._workspace_id,
+                skill_id=skill.id,
+                installed_version=skill.current_version,
+                installed_by_user_id=self._actor,
+            )
+        else:
+            await OrgSkillInstallRepository(self._session).upsert(
+                org_id=self._org_id,
+                skill_id=skill.id,
+                installed_version=skill.current_version,
+                installed_by_user_id=self._actor,
+                auto_bind=False,
+            )
         return InstallResult(
             canonical_name=skill.name,
             skill_id=skill.id,
@@ -269,13 +278,22 @@ class SkillInstallService:
                 existing.id, install_version
             ) is None:
                 install_version = existing.current_version
-            await OrgSkillInstallRepository(self._session).create_for_workspace(
-                org_id=self._org_id,
-                workspace_id=self._workspace_id,
-                skill_id=existing.id,
-                installed_version=install_version,
-                installed_by_user_id=self._actor,
-            )
+            if self._workspace_id is not None:
+                await OrgSkillInstallRepository(self._session).create_for_workspace(
+                    org_id=self._org_id,
+                    workspace_id=self._workspace_id,
+                    skill_id=existing.id,
+                    installed_version=install_version,
+                    installed_by_user_id=self._actor,
+                )
+            else:
+                await OrgSkillInstallRepository(self._session).upsert(
+                    org_id=self._org_id,
+                    skill_id=existing.id,
+                    installed_version=install_version,
+                    installed_by_user_id=self._actor,
+                    auto_bind=False,
+                )
             return InstallResult(
                 canonical_name=existing.name,
                 skill_id=existing.id,
