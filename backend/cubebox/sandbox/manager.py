@@ -899,14 +899,26 @@ class SandboxManager:
             attempt += 1
         await repo.update_activity(record.id)
         if self._exchange_host:
-            await self._apply_egress(
-                session,
-                backend,
-                org_id=org_id,
-                workspace_id=workspace_id,
-                user_id=user_id,
-                sandbox_id=record.sandbox_id,
-            )
+            try:
+                await self._apply_egress(
+                    session,
+                    backend,
+                    org_id=org_id,
+                    workspace_id=workspace_id,
+                    user_id=user_id,
+                    sandbox_id=record.sandbox_id,
+                )
+            except Exception:
+                # Egress refresh failed after mark_running. Terminate the row so
+                # the next get_or_create can provision a fresh sandbox rather than
+                # looping on a running-but-unaccessible row.
+                logger.error(
+                    "Egress refresh failed for resumed sandbox {}; terminating row",
+                    record.sandbox_id,
+                )
+                await repo.mark_terminated(record.id)
+                await EgressRefRepository(session).revoke_for_sandbox(record.sandbox_id)
+                raise
         return backend
 
     async def _await_stable_status(
