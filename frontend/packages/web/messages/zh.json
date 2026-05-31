@@ -677,7 +677,9 @@
       "noMatch": "没有匹配当前筛选的 skill",
       "noMatchHint": "调整搜索 / 筛选条件，或通过「添加 skill」上传工作区私有 skill。",
       "selectSkill": "选择一个 skill 查看详情",
-      "listAria": "技能列表"
+      "listAria": "技能列表",
+      "systemCatalog": "系统目录",
+      "externalSources": "外部来源"
     },
     "skillCard": {
       "enabled": "已启用",
