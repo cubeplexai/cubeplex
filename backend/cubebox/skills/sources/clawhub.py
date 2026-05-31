@@ -23,6 +23,7 @@ from typing import AsyncGenerator
 
 import httpx
 
+from cubebox.skills.service import MAX_FILE_BYTES, MAX_TOTAL_BYTES
 from cubebox.skills.sources.base import (
     SkillCandidate,
     SourceKind,
@@ -32,7 +33,6 @@ from cubebox.skills.sources.base import (
 
 _BASE_URL = "https://clawhub.ai"
 _TIMEOUT = 20.0
-_MAX_ZIP_BYTES = 50 * 1024 * 1024  # 50 MB, same cap as validate_skill_files
 
 
 class ClawhubAdapter:
@@ -161,18 +161,24 @@ class ClawhubAdapter:
             version_tag = await self._resolve_latest_version(slug)
 
         async with self._client() as client:
-            resp = await client.get(
+            async with client.stream(
+                "GET",
                 "/api/v1/download",
                 params={"slug": slug, "version": version_tag},
                 headers={"Accept": "application/zip"},
-            )
-            resp.raise_for_status()
-            zip_bytes = resp.content
-
-        if len(zip_bytes) > _MAX_ZIP_BYTES:
-            raise ValueError(
-                f"Clawhub zip for {slug}@{version_tag} exceeds cap {_MAX_ZIP_BYTES} bytes"
-            )
+            ) as resp:
+                resp.raise_for_status()
+                chunks: list[bytes] = []
+                total = 0
+                async for chunk in resp.aiter_bytes(65536):
+                    total += len(chunk)
+                    if total > MAX_TOTAL_BYTES:
+                        raise ValueError(
+                            f"Clawhub zip for {slug}@{version_tag} exceeds cap "
+                            f"{MAX_TOTAL_BYTES} bytes"
+                        )
+                    chunks.append(chunk)
+                zip_bytes = b"".join(chunks)
 
         return _unpack_zip(zip_bytes)
 
@@ -199,14 +205,20 @@ class ClawhubAdapter:
 
 
 def _unpack_zip(zip_bytes: bytes) -> dict[str, bytes]:
-    """Extract a Clawhub skill zip, returning safe rel_path → bytes mappings."""
+    """Extract a Clawhub skill zip, returning safe rel_path → bytes mappings.
+
+    Applies per-file and cumulative size caps matching validate_skill_files()
+    to guard against zip bombs before inflating any entry.
+    """
     files: dict[str, bytes] = {}
     try:
         zf = zipfile.ZipFile(io.BytesIO(zip_bytes))
     except zipfile.BadZipFile as e:
         raise ValueError(f"Clawhub download is not a valid zip: {e}") from e
+    total = 0
     with zf:
-        for name in zf.namelist():
+        for info in zf.infolist():
+            name = info.filename
             # Skip directories and unsafe paths
             if name.endswith("/"):
                 continue
@@ -216,5 +228,16 @@ def _unpack_zip(zip_bytes: bytes) -> dict[str, bytes]:
             parts = normalized.split("/")
             if any(p in (".", "..") for p in parts):
                 continue
+            # Guard against zip bombs: check declared uncompressed size first
+            if info.file_size > MAX_FILE_BYTES:
+                raise ValueError(
+                    f"Clawhub zip entry {name!r} declares {info.file_size} bytes; "
+                    f"cap is {MAX_FILE_BYTES}"
+                )
+            total += info.file_size
+            if total > MAX_TOTAL_BYTES:
+                raise ValueError(
+                    f"Clawhub zip bundle exceeds total cap of {MAX_TOTAL_BYTES} bytes"
+                )
             files[name] = zf.read(name)
     return files
