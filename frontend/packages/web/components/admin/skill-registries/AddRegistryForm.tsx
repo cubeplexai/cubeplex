@@ -18,15 +18,23 @@ interface AddRegistryFormProps {
 
 export function AddRegistryForm({ onSubmit, onCancel, mutating, error }: AddRegistryFormProps) {
   const t = useTranslations('adminSkillRegistries')
-  const [kind, setKind] = useState<'skills-sh' | 'remote'>('skills-sh')
+  const [kind, setKind] = useState<'skills-sh' | 'clawhub' | 'remote'>('skills-sh')
   const [name, setName] = useState('skills.sh')
   const [baseUrl, setBaseUrl] = useState('')
   const [trustTier, setTrustTier] = useState<string>('community')
 
-  function handleKindChange(next: 'skills-sh' | 'remote') {
+  function handleKindChange(next: 'skills-sh' | 'clawhub' | 'remote') {
     setKind(next)
-    setName(next === 'skills-sh' ? 'skills.sh' : '')
-    setTrustTier(next === 'skills-sh' ? 'community' : 'untrusted')
+    if (next === 'skills-sh') {
+      setName('skills.sh')
+      setTrustTier('community')
+    } else if (next === 'clawhub') {
+      setName('Clawhub')
+      setTrustTier('community')
+    } else {
+      setName('')
+      setTrustTier('untrusted')
+    }
     setBaseUrl('')
   }
 
@@ -55,7 +63,7 @@ export function AddRegistryForm({ onSubmit, onCancel, mutating, error }: AddRegi
       <div className="flex flex-col gap-2">
         <label className="text-sm font-medium">{t('kind')}</label>
         <div className="inline-flex items-center gap-0.5 rounded-lg border border-border bg-muted/30 p-0.5 self-start">
-          {(['skills-sh', 'remote'] as const).map((k) => (
+          {(['skills-sh', 'clawhub', 'remote'] as const).map((k) => (
             <button
               key={k}
               type="button"
@@ -67,7 +75,7 @@ export function AddRegistryForm({ onSubmit, onCancel, mutating, error }: AddRegi
                   : 'text-muted-foreground hover:text-foreground',
               )}
             >
-              {k === 'skills-sh' ? 'skills.sh' : t('customRegistry')}
+              {k === 'skills-sh' ? 'skills.sh' : k === 'clawhub' ? 'Clawhub' : t('customRegistry')}
             </button>
           ))}
         </div>
