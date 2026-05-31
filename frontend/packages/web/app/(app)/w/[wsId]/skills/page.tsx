@@ -24,6 +24,7 @@ export default function WorkspaceSkillsPage({ params }: { params: Promise<{ wsId
   const lastInstalled = useSkillsStore((s) => s.lastInstalled)
   const search = useSkillsStore((s) => s.search)
   const candidates = useSkillsStore((s) => s.candidates)
+  const searching = useSkillsStore((s) => s.searching)
   // discoverSkills builds the full path with wsId — do not set workspaceId on this client
   const apiClient = useMemo(() => createApiClient(''), [])
 
@@ -64,7 +65,16 @@ export default function WorkspaceSkillsPage({ params }: { params: Promise<{ wsId
           className="w-[360px] shrink-0 overflow-y-auto border-r border-border/70 bg-card/20"
         >
           {filters.externalOnly ? (
-            candidates.length === 0 ? (
+            searching ? (
+              <div className="flex flex-col gap-1.5 p-3">
+                {[1, 2, 3].map((i) => (
+                  <div
+                    key={i}
+                    className="h-[76px] animate-pulse rounded-lg border border-border/50 bg-muted/30"
+                  />
+                ))}
+              </div>
+            ) : candidates.length === 0 ? (
               <div className="flex flex-col items-center justify-center gap-1 px-6 py-8 text-center">
                 <p className="text-sm text-muted-foreground">{t('noMatch')}</p>
                 <p className="text-xs text-muted-foreground/70">{t('noMatchHint')}</p>
@@ -113,30 +123,50 @@ export default function WorkspaceSkillsPage({ params }: { params: Promise<{ wsId
                 </ul>
               )}
 
-              {candidates.length > 0 && (
+              {(candidates.length > 0 || searching) && (
                 <>
                   <div className="flex items-center gap-2 px-4 py-2">
                     <span className="text-xs font-medium text-muted-foreground">
                       External Sources
                     </span>
+                    {searching && (
+                      <div className="ml-auto flex items-center gap-1.5">
+                        <div className="flex gap-1">
+                          <div className="h-1.5 w-1.5 animate-bounce rounded-full bg-muted-foreground" />
+                          <div className="animation-delay-200 h-1.5 w-1.5 animate-bounce rounded-full bg-muted-foreground" />
+                          <div className="animation-delay-400 h-1.5 w-1.5 animate-bounce rounded-full bg-muted-foreground" />
+                        </div>
+                      </div>
+                    )}
                     <div className="flex-1 border-t border-border/50" />
                   </div>
-                  <ul className="flex flex-col gap-1.5 px-3 pb-3">
-                    {candidates.map((c) => (
-                      <li key={c.candidate_id}>
-                        <CandidateCard
-                          candidate={c}
-                          active={
-                            selection?.kind === 'candidate' &&
-                            selection.candidateId === c.candidate_id
-                          }
-                          onClick={() =>
-                            setSelection({ kind: 'candidate', candidateId: c.candidate_id })
-                          }
+                  {searching && candidates.length === 0 ? (
+                    <div className="flex flex-col gap-1.5 px-3 pb-3">
+                      {[1, 2, 3].map((i) => (
+                        <div
+                          key={i}
+                          className="h-[76px] animate-pulse rounded-lg border border-border/50 bg-muted/30"
                         />
-                      </li>
-                    ))}
-                  </ul>
+                      ))}
+                    </div>
+                  ) : (
+                    <ul className="flex flex-col gap-1.5 px-3 pb-3">
+                      {candidates.map((c) => (
+                        <li key={c.candidate_id}>
+                          <CandidateCard
+                            candidate={c}
+                            active={
+                              selection?.kind === 'candidate' &&
+                              selection.candidateId === c.candidate_id
+                            }
+                            onClick={() =>
+                              setSelection({ kind: 'candidate', candidateId: c.candidate_id })
+                            }
+                          />
+                        </li>
+                      ))}
+                    </ul>
+                  )}
                 </>
               )}
             </div>

@@ -7,6 +7,7 @@ export interface SkillsState {
   candidates: SkillCandidateOut[]
   query: string
   installing: Record<string, boolean>
+  searching: boolean
   lastInstalled: { canonical_name: string; version: string } | null
   search: (client: ApiClient, wsId: string, q: string) => Promise<void>
   install: (client: ApiClient, wsId: string, candidateId: string) => Promise<void>
@@ -18,12 +19,18 @@ export const useSkillsStore = create<SkillsState>((set) => ({
   candidates: [],
   query: '',
   installing: {},
+  searching: false,
   lastInstalled: null,
 
   async search(client, wsId, q) {
-    set({ query: q })
-    const candidates = await discoverSkills(client, wsId, q)
-    set({ candidates })
+    set({ query: q, searching: true })
+    try {
+      const candidates = await discoverSkills(client, wsId, q)
+      set({ candidates, searching: false })
+    } catch (e) {
+      set({ searching: false })
+      throw e
+    }
   },
 
   async install(client, wsId, candidateId) {
@@ -45,5 +52,6 @@ export const useSkillsStore = create<SkillsState>((set) => ({
     return r.changed
   },
 
-  reset: () => set({ candidates: [], query: '', installing: {}, lastInstalled: null }),
+  reset: () =>
+    set({ candidates: [], query: '', installing: {}, searching: false, lastInstalled: null }),
 }))
