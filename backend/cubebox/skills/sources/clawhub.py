@@ -81,14 +81,16 @@ class ClawhubAdapter:
             return []
 
         # Collect slugs whose version is null — resolve them concurrently.
-        slugs_needing_version = [
+        # Also fetch stats (installs) since the search response doesn't include them.
+        slugs_needing_detail = [
             str(item.get("slug") or "")
             for item in results
             if isinstance(item, dict) and item.get("slug") and not item.get("version")
         ]
-        resolved: dict[str, str] = {}
-        if slugs_needing_version:
-            resolved = await self._resolve_versions(slugs_needing_version)
+        # resolved: slug → (version, install_count)
+        resolved: dict[str, tuple[str, int | None]] = {}
+        if slugs_needing_detail:
+            resolved = await self._resolve_details(slugs_needing_detail)
 
         out: list[SkillCandidate] = []
         for item in results:
@@ -100,9 +102,11 @@ class ClawhubAdapter:
             display_name = str(item.get("displayName") or slug)
             summary = str(item.get("summary") or "")
             owner_handle = str(item.get("ownerHandle") or "")
-            version = item.get("version") or resolved.get(slug)
+            detail = resolved.get(slug)
+            version = item.get("version") or (detail[0] if detail else None)
             if not version:
                 continue  # skip if version still unknown — avoids opaque @latest installs
+            install_count = detail[1] if detail else None
             source_ref = f"{slug}@{version}"
 
             out.append(
@@ -118,24 +122,27 @@ class ClawhubAdapter:
                     version=version,
                     trust=self._trust,
                     install_state="available",
+                    install_count=install_count,
                     source_name=self._source_name,
                     repo=f"https://clawhub.ai/{owner_handle}/{slug}" if owner_handle else None,
                 )
             )
         return out
 
-    async def _resolve_versions(self, slugs: list[str]) -> dict[str, str]:
-        """Fetch the latest version tag for each slug concurrently."""
+    async def _resolve_details(
+        self, slugs: list[str]
+    ) -> dict[str, tuple[str, int | None]]:
+        """Fetch version + install count for each slug concurrently."""
 
-        async def _fetch_one(slug: str) -> tuple[str, str | None]:
+        async def _fetch_one(slug: str) -> tuple[str, tuple[str, int | None] | None]:
             try:
-                version = await self._resolve_latest_version(slug)
-                return slug, version
+                version, install_count = await self._fetch_skill_detail(slug)
+                return slug, (version, install_count)
             except Exception:  # noqa: BLE001
                 return slug, None
 
         pairs = await asyncio.gather(*(_fetch_one(s) for s in slugs))
-        return {slug: ver for slug, ver in pairs if ver is not None}
+        return {slug: detail for slug, detail in pairs if detail is not None}
 
     def trust_for_ref(self, source_ref: str) -> TrustTier:
         return self._trust
@@ -169,7 +176,8 @@ class ClawhubAdapter:
 
         return _unpack_zip(zip_bytes)
 
-    async def _resolve_latest_version(self, slug: str) -> str:
+    async def _fetch_skill_detail(self, slug: str) -> tuple[str, int | None]:
+        """Fetch latest version and install count from the skill detail endpoint."""
         async with self._client() as client:
             resp = await client.get(f"/api/v1/skills/{slug}")
             resp.raise_for_status()
@@ -179,7 +187,15 @@ class ClawhubAdapter:
         latest = tags.get("latest")
         if not isinstance(latest, str) or not latest:
             raise ValueError(f"Clawhub skill {slug!r} has no latest version tag")
-        return latest
+        stats = skill.get("stats") or {}
+        install_count = stats.get("installsAllTime")
+        if not isinstance(install_count, int):
+            install_count = None
+        return latest, install_count
+
+    async def _resolve_latest_version(self, slug: str) -> str:
+        version, _ = await self._fetch_skill_detail(slug)
+        return version
 
 
 def _unpack_zip(zip_bytes: bytes) -> dict[str, bytes]:
