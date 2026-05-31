@@ -9,6 +9,7 @@ import {
   Cpu,
   Database,
   Globe,
+  KeyRound,
   Plug,
   Puzzle,
   Settings,
@@ -63,6 +64,7 @@ export function AdminSubNav() {
     { href: '/admin/skill-registries', label: t('skillRegistries'), icon: Database },
     { href: '/admin/mcp', label: t('mcp'), icon: Plug },
     { href: '/admin/sandbox', label: t('sandbox'), icon: Box },
+    { href: '/admin/sandbox-env', label: t('sandboxEnv'), icon: KeyRound },
     { href: '/admin/insights', label: t('insights'), icon: BarChart3 },
   ]
 

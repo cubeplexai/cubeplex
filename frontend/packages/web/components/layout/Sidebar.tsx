@@ -26,6 +26,7 @@ import {
   Brain,
   CalendarClock,
   type LucideIcon,
+  KeyRound,
   MoreHorizontal,
   Pencil,
   Pin,
@@ -211,7 +212,15 @@ function ConversationRow({
 
 interface WorkspaceNavEntry {
   key: string
-  labelKey: 'skills' | 'mcp' | 'memory' | 'scheduledTasks' | 'members' | 'settings' | 'triggers'
+  labelKey:
+    | 'skills'
+    | 'mcp'
+    | 'memory'
+    | 'scheduledTasks'
+    | 'members'
+    | 'settings'
+    | 'triggers'
+    | 'sandboxEnv'
   icon: LucideIcon
   href: string
   isActive: boolean
@@ -229,11 +238,13 @@ function WorkspaceNav({ wsId }: { wsId: string }): React.ReactElement {
   const scheduledTasksPrefix = `/w/${wsId}/scheduled-tasks`
   const triggersPrefix = `/w/${wsId}/triggers`
   const skillsPrefix = `/w/${wsId}/skills`
+  const sandboxEnvPrefix = `/w/${wsId}/sandbox-env`
   const onSettings = pathname?.startsWith(settingsPrefix) ?? false
   const onMemory = pathname?.startsWith(memoryPrefix) ?? false
   const onScheduledTasks = pathname?.startsWith(scheduledTasksPrefix) ?? false
   const onTriggers = pathname?.startsWith(triggersPrefix) ?? false
   const onSkills = pathname?.startsWith(skillsPrefix) ?? false
+  const onSandboxEnv = pathname?.startsWith(sandboxEnvPrefix) ?? false
   const currentTab = searchParams.get('tab') ?? 'workspace'
 
   const entries: WorkspaceNavEntry[] = [
@@ -271,6 +282,13 @@ function WorkspaceNav({ wsId }: { wsId: string }): React.ReactElement {
       icon: Webhook,
       href: triggersPrefix,
       isActive: onTriggers,
+    },
+    {
+      key: 'sandboxEnv',
+      labelKey: 'sandboxEnv',
+      icon: KeyRound,
+      href: sandboxEnvPrefix,
+      isActive: onSandboxEnv,
     },
   ]
   if (isAdmin) {
