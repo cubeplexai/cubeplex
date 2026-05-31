@@ -64,10 +64,21 @@ async def test_search_returns_candidates():
         ]
     }
 
+    # frontend-design has version=null → needs resolution via GET /api/v1/skills/{slug}
+    skill_detail = {
+        "skill": {
+            "slug": "frontend-design",
+            "displayName": "Frontend Design",
+            "tags": {"latest": "0.3.1"},
+        }
+    }
+
     def handler(request: httpx.Request) -> httpx.Response:
-        assert request.url.path == "/api/v1/search"
-        assert request.url.params["q"] == "design"
-        return httpx.Response(200, json=payload)
+        if request.url.path == "/api/v1/search":
+            return httpx.Response(200, json=payload)
+        if request.url.path == "/api/v1/skills/frontend-design":
+            return httpx.Response(200, json=skill_detail)
+        return httpx.Response(404)
 
     adapter = _adapter(httpx.MockTransport(handler))
     results = await adapter.search("design", limit=5)
@@ -76,8 +87,46 @@ async def test_search_returns_candidates():
     assert results[0].name == "Design"
     assert results[0].canonical_name == "design"
     assert results[0].source_ref == "design@1.0.0"
-    assert results[1].source_ref == "frontend-design@latest"
+    assert results[0].version == "1.0.0"
+    # version was null → resolved to "0.3.1"
+    assert results[1].source_ref == "frontend-design@0.3.1"
+    assert results[1].version == "0.3.1"
     assert results[0].repo == "https://clawhub.ai/ivangdavila/design"
+
+
+@pytest.mark.asyncio
+async def test_search_skips_skill_when_version_unresolvable():
+    """Skills with version=null that fail resolution are dropped from results."""
+    payload = {
+        "results": [
+            {
+                "slug": "good",
+                "displayName": "Good",
+                "summary": "",
+                "version": "1.0.0",
+                "ownerHandle": "u",
+            },
+            {
+                "slug": "no-ver",
+                "displayName": "No Ver",
+                "summary": "",
+                "version": None,
+                "ownerHandle": "u",
+            },
+        ]
+    }
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/v1/search":
+            return httpx.Response(200, json=payload)
+        if "/skills/no-ver" in request.url.path:
+            return httpx.Response(500)  # resolution fails
+        return httpx.Response(404)
+
+    adapter = _adapter(httpx.MockTransport(handler))
+    results = await adapter.search("x", limit=5)
+    assert len(results) == 1
+    assert results[0].canonical_name == "good"
 
 
 @pytest.mark.asyncio

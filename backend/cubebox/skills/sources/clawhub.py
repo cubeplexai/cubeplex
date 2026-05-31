@@ -15,6 +15,7 @@ API (https://clawhub.ai):
 
 from __future__ import annotations
 
+import asyncio
 import io
 import zipfile
 from contextlib import asynccontextmanager
@@ -79,6 +80,16 @@ class ClawhubAdapter:
         if not isinstance(results, list):
             return []
 
+        # Collect slugs whose version is null — resolve them concurrently.
+        slugs_needing_version = [
+            str(item.get("slug") or "")
+            for item in results
+            if isinstance(item, dict) and item.get("slug") and not item.get("version")
+        ]
+        resolved: dict[str, str] = {}
+        if slugs_needing_version:
+            resolved = await self._resolve_versions(slugs_needing_version)
+
         out: list[SkillCandidate] = []
         for item in results:
             if not isinstance(item, dict):
@@ -89,10 +100,10 @@ class ClawhubAdapter:
             display_name = str(item.get("displayName") or slug)
             summary = str(item.get("summary") or "")
             owner_handle = str(item.get("ownerHandle") or "")
-            # version may be null — use slug@latest as source_ref; fetch() resolves it
-            version = item.get("version")
-            version_str = str(version) if version else None
-            source_ref = f"{slug}@{version_str}" if version_str else f"{slug}@latest"
+            version = item.get("version") or resolved.get(slug)
+            if not version:
+                continue  # skip if version still unknown — avoids opaque @latest installs
+            source_ref = f"{slug}@{version}"
 
             out.append(
                 SkillCandidate(
@@ -104,6 +115,7 @@ class ClawhubAdapter:
                     description=summary,
                     source_kind="remote",
                     source_ref=source_ref,
+                    version=version,
                     trust=self._trust,
                     install_state="available",
                     source_name=self._source_name,
@@ -111,6 +123,19 @@ class ClawhubAdapter:
                 )
             )
         return out
+
+    async def _resolve_versions(self, slugs: list[str]) -> dict[str, str]:
+        """Fetch the latest version tag for each slug concurrently."""
+
+        async def _fetch_one(slug: str) -> tuple[str, str | None]:
+            try:
+                version = await self._resolve_latest_version(slug)
+                return slug, version
+            except Exception:  # noqa: BLE001
+                return slug, None
+
+        pairs = await asyncio.gather(*(_fetch_one(s) for s in slugs))
+        return {slug: ver for slug, ver in pairs if ver is not None}
 
     def trust_for_ref(self, source_ref: str) -> TrustTier:
         return self._trust
