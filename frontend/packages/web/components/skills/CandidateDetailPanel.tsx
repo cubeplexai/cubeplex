@@ -131,8 +131,8 @@ export function CandidateDetailPanel({ wsId, candidate }: CandidateDetailPanelPr
         )}
       </dl>
 
-      <div className="flex flex-col gap-2">
-        <h3 className="text-xs font-semibold text-muted-foreground">Overview</h3>
+      <div className="space-y-3 border-t border-border pt-4">
+        <h2 className="text-sm font-semibold">Overview</h2>
         {preview && (
           <div className="rounded-lg border border-border/70 bg-card/40 px-4 py-3">
             <div className={cn('space-y-4 text-sm', proseClasses)}>
