@@ -11,8 +11,8 @@ import {
   type CreateEnvIn,
   type EnvEntryOut,
 } from '@cubebox/core'
-import { EnvTable } from '../../(app)/w/[wsId]/sandbox-env/_components/EnvTable'
-import { EnvModal, type ModalMode } from '../../(app)/w/[wsId]/sandbox-env/_components/EnvModal'
+import { EnvTable } from '@/components/sandbox-env/EnvTable'
+import { EnvModal, type ModalMode } from '@/components/sandbox-env/EnvModal'
 
 export default function AdminSandboxEnvPage() {
   const client = useMemo(() => createApiClient(''), [])
@@ -53,8 +53,12 @@ export default function AdminSandboxEnvPage() {
 
   async function handleDelete(entry: EnvEntryOut) {
     if (!confirm(`Delete ${entry.env_name}?`)) return
-    await deleteAdminEnv(client, entry.id)
-    await load()
+    try {
+      await deleteAdminEnv(client, entry.id)
+      await load()
+    } catch (err: unknown) {
+      setLoadError(err instanceof Error ? err.message : 'Delete failed')
+    }
   }
 
   return (

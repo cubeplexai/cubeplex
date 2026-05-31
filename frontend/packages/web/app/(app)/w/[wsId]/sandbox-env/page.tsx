@@ -16,8 +16,8 @@ import {
   type CreateEnvIn,
   type EnvEntryOut,
 } from '@cubebox/core'
-import { EnvTable } from './_components/EnvTable'
-import { EnvModal, type ModalMode } from './_components/EnvModal'
+import { EnvTable } from '@/components/sandbox-env/EnvTable'
+import { EnvModal, type ModalMode } from '@/components/sandbox-env/EnvModal'
 
 interface PageProps {
   params: Promise<{ wsId: string }>
@@ -83,12 +83,16 @@ export default function WorkspaceSandboxEnvPage({ params }: PageProps): React.Re
 
   async function handleDelete(entry: EnvEntryOut) {
     if (!confirm(`Delete ${entry.env_name}?`)) return
-    if (entry.scope === 'workspace') {
-      await deleteWsEnvWorkspace(client, wsId, entry.id)
-    } else {
-      await deleteWsEnvMe(client, wsId, entry.id)
+    try {
+      if (entry.scope === 'workspace') {
+        await deleteWsEnvWorkspace(client, wsId, entry.id)
+      } else {
+        await deleteWsEnvMe(client, wsId, entry.id)
+      }
+      await load()
+    } catch (err: unknown) {
+      setLoadError(err instanceof Error ? err.message : 'Delete failed')
     }
-    await load()
   }
 
   const tableMode = isAdmin ? 'workspace-admin' : 'workspace-member'
