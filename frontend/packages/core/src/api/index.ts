@@ -13,6 +13,7 @@ export * from './workspace-settings'
 export * from './workspaces'
 export * from './members'
 export * from './sandboxPolicy'
+export * from './sandboxEnv'
 export * from './scheduled-tasks'
 export * from './triggers'
 export {
