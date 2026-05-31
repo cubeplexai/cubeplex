@@ -36,7 +36,7 @@ class SkillsAdapterManager:
         catalog: SkillCatalogService,
         org_id: str,
         org_slug: str,
-        workspace_id: str,
+        workspace_id: str | None,
     ) -> SkillsAdapterManager:
         adapters: list[SkillRegistryAdapter] = [
             LocalCatalogAdapter(
