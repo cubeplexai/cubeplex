@@ -87,8 +87,13 @@ export function SkillsList({
 
   return (
     <div className="flex flex-col">
+      <div className="flex items-center gap-2 px-4 py-2">
+        <span className="text-xs font-semibold text-muted-foreground">{t('systemCatalog')}</span>
+        <div className="flex-1 border-t border-border/50" />
+      </div>
+
       {skills.length === 0 ? (
-        <div className="flex flex-col items-center justify-center gap-1 px-6 py-12 text-center">
+        <div className="flex flex-col items-center justify-center gap-1 px-6 py-8 text-center">
           <p className="text-sm text-muted-foreground">{t('noSkills')}</p>
           <p className="text-xs text-muted-foreground/70">{t('noSkillsHint')}</p>
         </div>

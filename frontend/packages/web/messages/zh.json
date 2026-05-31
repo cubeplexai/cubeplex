@@ -231,6 +231,7 @@
     "sourcePreinstalled": "内置",
     "sourceUploaded": "组织上传",
     "sourceExternal": "外部",
+    "systemCatalog": "系统目录",
     "externalSources": "外部来源",
     "externalSearchPlaceholder": "搜索外部注册表…",
     "noExternalResults": "无结果",
