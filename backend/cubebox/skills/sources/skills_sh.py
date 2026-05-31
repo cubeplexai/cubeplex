@@ -24,6 +24,13 @@ _BUNDLE_MAX_BYTES = 50 * 1024 * 1024     # 50 MB
 # No percent-sign — rejects all URL-encoded bypass forms (%2e%2e, %2f, etc.)
 _GITHUB_NAME_RE = re.compile(r"^[a-zA-Z0-9._-]+$")
 
+# Official skills.sh sources from https://www.skills.sh/official
+# These are verified makers/organizations that create official skills
+_OFFICIAL_SOURCES = frozenset({
+    "anthropics/skills",
+    "vercel-labs/agent-skills",
+})
+
 
 def _safe_name(s: str) -> bool:
     """True when s is a valid GitHub path component with no encoding tricks.
@@ -86,6 +93,17 @@ class SkillsShAdapter:
         resp.raise_for_status()
         data = resp.json()
         return str(data.get("default_branch") or "main")
+
+    def _get_trust_for_source(self, source: str) -> TrustTier:
+        """Determine trust tier based on whether source is official.
+
+        Official sources from https://www.skills.sh/official are marked
+        as "official". All other sources default to the adapter's
+        configured trust_tier (typically "community").
+        """
+        if source in _OFFICIAL_SOURCES:
+            return "official"
+        return self._trust
 
     def _index_skill_paths(
         self,
@@ -184,6 +202,8 @@ class SkillsShAdapter:
             # Detect if skill is in "skills/{slug}/" or "{slug}/" directory
             skill_rel_path = skill_paths.get((source, slug), slug)
             source_ref = f"{source}/{branch}/{skill_rel_path}"
+            # Determine trust tier: official if from official source, else use adapter's tier
+            trust = self._get_trust_for_source(source)
             out.append(
                 SkillCandidate(
                     candidate_id=encode_candidate_id(
@@ -194,7 +214,7 @@ class SkillsShAdapter:
                     description=str(item.get("description") or ""),
                     source_kind="remote",
                     source_ref=source_ref,
-                    trust=self._trust,
+                    trust=trust,
                     install_state="available",
                     install_count=item.get("installs"),
                     source_name=self._source_name,
