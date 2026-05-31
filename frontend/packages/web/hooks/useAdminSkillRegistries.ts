@@ -16,7 +16,7 @@ export interface SkillRegistryEntry {
 
 export interface CreateRegistryBody {
   name: string
-  kind: 'remote' | 'skills-sh'
+  kind: 'remote' | 'skills-sh' | 'clawhub'
   base_url?: string
   repo?: string | null
   trust_tier: string
