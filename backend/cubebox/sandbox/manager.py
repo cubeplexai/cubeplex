@@ -628,15 +628,27 @@ class SandboxManager:
             # Execute-time egress: set run env on the backend + persist EgressRefs.
             # Env flows via execute (RunCommandOpts), not Sandbox.create.
             if self._exchange_host:
-                await self._apply_egress(
-                    session,
-                    backend,
-                    org_id=org_id,
-                    workspace_id=workspace_id,
-                    user_id=user_id,
-                    sandbox_id=sandbox_id,
-                    injection=injection,
-                )
+                try:
+                    await self._apply_egress(
+                        session,
+                        backend,
+                        org_id=org_id,
+                        workspace_id=workspace_id,
+                        user_id=user_id,
+                        sandbox_id=sandbox_id,
+                        injection=injection,
+                    )
+                except Exception:
+                    # Egress setup failed after the row is already `running`.
+                    # Terminate so the next get_or_create provisions a fresh
+                    # sandbox rather than looping on a live-but-unaccessible row.
+                    logger.error(
+                        "Egress setup failed for newly created sandbox {}; terminating row",
+                        sandbox_id,
+                    )
+                    await repo.mark_terminated(reserved.id)
+                    await EgressRefRepository(session).revoke_for_sandbox(sandbox_id)
+                    raise
             return backend
 
     async def release(
