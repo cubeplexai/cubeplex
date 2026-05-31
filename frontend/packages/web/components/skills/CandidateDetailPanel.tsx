@@ -4,7 +4,7 @@ import { useMemo } from 'react'
 import useSWR from 'swr'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { Globe, ShieldCheck, ShieldAlert, ShieldOff } from 'lucide-react'
+import { ShieldCheck, ShieldAlert, ShieldOff } from 'lucide-react'
 import { createApiClient, useSkillsStore, type SkillCandidateOut } from '@cubebox/core'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -64,47 +64,42 @@ export function CandidateDetailPanel({ wsId, candidate }: CandidateDetailPanelPr
   )
 
   return (
-    <div className="flex flex-1 flex-col gap-6 overflow-y-auto p-6">
-      <div className="flex items-start justify-between gap-4">
-        <div className="flex flex-col gap-1">
-          <div className="flex items-center gap-2">
-            <Globe className="size-4 shrink-0 text-muted-foreground" />
-            <h3 className="text-base font-semibold">{candidate.name}</h3>
+    <div className="flex w-full flex-col gap-4 overflow-y-auto p-6">
+      <header className="flex flex-col gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <h3 className="text-xl font-semibold tracking-tight">{candidate.name}</h3>
+          {candidate.version && (
+            <Badge variant="outline" className="font-mono">
+              v{candidate.version}
+            </Badge>
+          )}
+          <Badge variant="secondary">{candidate.source_name}</Badge>
+          <TrustInfo trust={candidate.trust} />
+          <div className="ml-auto">
+            <Button
+              size="sm"
+              disabled={installing || isInstalled}
+              onClick={() => void install(apiClient, wsId, candidate.candidate_id)}
+            >
+              {isInstalled ? 'Installed' : installing ? 'Installing…' : 'Install'}
+            </Button>
           </div>
-          <span className="font-mono text-xs text-muted-foreground">
-            {candidate.canonical_name}
-          </span>
         </div>
-        <Button
-          size="sm"
-          disabled={installing || isInstalled}
-          onClick={() => void install(apiClient, wsId, candidate.candidate_id)}
-        >
-          {isInstalled ? 'Installed' : installing ? 'Installing…' : 'Install'}
-        </Button>
-      </div>
-
-      {candidate.description && (
-        <p className="text-sm leading-relaxed text-muted-foreground">{candidate.description}</p>
-      )}
-
-      <dl className="flex flex-col gap-4 border-b border-border pb-4">
-        <div className="flex items-center gap-3">
-          <dt className="min-w-20 text-xs font-medium text-muted-foreground">Source</dt>
-          <dd className="text-sm">{candidate.source_name}</dd>
-        </div>
-        <div className="flex items-center gap-3">
-          <dt className="min-w-20 text-xs font-medium text-muted-foreground">Trust</dt>
-          <dd>
-            <TrustInfo trust={candidate.trust} />
-          </dd>
-        </div>
-        {candidate.version && (
-          <div className="flex items-center gap-3">
-            <dt className="min-w-20 text-xs font-medium text-muted-foreground">Version</dt>
-            <dd className="font-mono text-sm">{candidate.version}</dd>
+        {candidate.description && (
+          <p className="text-sm leading-relaxed text-muted-foreground">{candidate.description}</p>
+        )}
+        {candidate.keywords.length > 0 && (
+          <div className="flex flex-wrap gap-1">
+            {candidate.keywords.map((kw) => (
+              <Badge key={kw} variant="outline" className="text-[11px]">
+                {kw}
+              </Badge>
+            ))}
           </div>
         )}
+      </header>
+
+      <dl className="flex flex-col gap-3 border-b border-border pb-4">
         {candidate.install_count !== null && (
           <div className="flex items-center gap-3">
             <dt className="min-w-20 text-xs font-medium text-muted-foreground">Installs</dt>
@@ -117,21 +112,9 @@ export function CandidateDetailPanel({ wsId, candidate }: CandidateDetailPanelPr
             <dd className="truncate text-xs text-muted-foreground">{candidate.repo}</dd>
           </div>
         )}
-        {candidate.keywords.length > 0 && (
-          <div className="flex items-start gap-3">
-            <dt className="min-w-20 pt-0.5 text-xs font-medium text-muted-foreground">Keywords</dt>
-            <dd className="flex flex-wrap gap-1">
-              {candidate.keywords.map((kw) => (
-                <Badge key={kw} variant="outline" className="text-xs">
-                  {kw}
-                </Badge>
-              ))}
-            </dd>
-          </div>
-        )}
       </dl>
 
-      <div className="space-y-3 border-t border-border pt-4">
+      <div className="space-y-4">
         <h2 className="text-sm font-semibold">Overview</h2>
         {preview && (
           <div className="rounded-lg border border-border/70 bg-card/40 px-4 py-3">
