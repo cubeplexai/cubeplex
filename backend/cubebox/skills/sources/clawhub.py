@@ -81,7 +81,7 @@ class ClawhubAdapter:
             return []
 
         # Collect slugs whose version is null — resolve them concurrently.
-        # Also fetch stats (installs) since the search response doesn't include them.
+        # Also fetch stats (downloads) since the search response doesn't include them.
         slugs_needing_detail = [
             str(item.get("slug") or "")
             for item in results
@@ -183,7 +183,7 @@ class ClawhubAdapter:
         return _unpack_zip(zip_bytes)
 
     async def _fetch_skill_detail(self, slug: str) -> tuple[str, int | None]:
-        """Fetch latest version and install count from the skill detail endpoint."""
+        """Fetch latest version and download count from the skill detail endpoint."""
         async with self._client() as client:
             resp = await client.get(f"/api/v1/skills/{slug}")
             resp.raise_for_status()
@@ -194,7 +194,7 @@ class ClawhubAdapter:
         if not isinstance(latest, str) or not latest:
             raise ValueError(f"Clawhub skill {slug!r} has no latest version tag")
         stats = skill.get("stats") or {}
-        install_count = stats.get("installsAllTime")
+        install_count = stats.get("downloads")
         if not isinstance(install_count, int):
             install_count = None
         return latest, install_count
