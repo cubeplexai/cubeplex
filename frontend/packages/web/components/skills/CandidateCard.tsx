@@ -5,14 +5,22 @@ import type { SkillCandidateOut } from '@cubebox/core'
 import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'
 
-function TrustBadge({ trust }: { trust: SkillCandidateOut['trust'] }) {
+function OfficialSourceBadge({ repo }: { repo: string | null }) {
+  if (!repo) return null
+  const match = repo.match(/github\.com\/([^/]+\/[^/]+)/)
+  if (!match) return null
+  const source = match[1]
+  return (
+    <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-medium text-emerald-600 dark:text-emerald-400">
+      <ShieldCheck className="size-3" />
+      {source}
+    </span>
+  )
+}
+
+function TrustBadge({ trust, repo }: { trust: SkillCandidateOut['trust']; repo: string | null }) {
   if (trust === 'official') {
-    return (
-      <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-medium text-emerald-600 dark:text-emerald-400">
-        <ShieldCheck className="size-3" />
-        Official
-      </span>
-    )
+    return <OfficialSourceBadge repo={repo} />
   }
   if (trust === 'community') {
     return (
@@ -52,13 +60,15 @@ export function CandidateCard({ candidate, active, onClick }: CandidateCardProps
       <div className="flex items-center gap-2">
         <Globe className="size-3.5 shrink-0 text-muted-foreground" />
         <span className="truncate text-sm font-semibold">{candidate.name}</span>
-        <TrustBadge trust={candidate.trust} />
+        <TrustBadge trust={candidate.trust} repo={candidate.repo} />
       </div>
       {candidate.description && (
         <p className="line-clamp-2 text-xs text-muted-foreground">{candidate.description}</p>
       )}
       <div className="flex flex-wrap items-center gap-2 pt-0.5">
-        <span className="text-[10px] text-muted-foreground/80">{candidate.source_name}</span>
+        <span className="rounded-sm bg-muted/50 px-1.5 py-0.5 text-[10px] font-medium text-foreground/70">
+          {candidate.source_name}
+        </span>
         {candidate.version && (
           <span className="font-mono text-[10px] text-muted-foreground/80">
             v{candidate.version}
