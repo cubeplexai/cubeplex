@@ -124,7 +124,7 @@ export default function WorkspaceSandboxEnvPage({ params }: PageProps): React.Re
           <div>
             <h2 className="text-lg font-semibold tracking-tight">Sandbox environment variables</h2>
             <p className="mt-0.5 text-xs text-muted-foreground">
-              Secrets and plain values injected into your sandbox.
+              Environment variables injected into your sandbox.
             </p>
           </div>
           <div className="flex gap-2">
@@ -133,14 +133,14 @@ export default function WorkspaceSandboxEnvPage({ params }: PageProps): React.Re
                 onClick={() => setModal({ kind: 'add-workspace', defaultScope: 'workspace' })}
                 className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border/70 bg-background px-3 text-xs font-medium shadow-sm transition-colors hover:bg-accent"
               >
-                + Workspace secret
+                + Workspace variable
               </button>
             )}
             <button
               onClick={() => setModal({ kind: 'add-workspace', defaultScope: 'user' })}
               className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border/70 bg-background px-3 text-xs font-medium shadow-sm transition-colors hover:bg-accent"
             >
-              + Personal secret
+              + Personal variable
             </button>
           </div>
         </div>
