@@ -69,4 +69,5 @@ export interface SkillFilters {
   installed?: boolean
   q?: string
   tag?: string
+  externalOnly?: boolean
 }
