@@ -1,5 +1,6 @@
 'use client'
 
+import { useEffect, useState } from 'react'
 import { Search, Upload } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 import type { SkillFilters, SkillSource } from '@cubebox/core'
@@ -61,6 +62,17 @@ export function SkillsToolbar({
 }: SkillsToolbarProps) {
   const t = useTranslations('adminSkills')
   const externalOnly = filters.externalOnly ?? false
+  const [draft, setDraft] = useState(filters.q ?? '')
+
+  useEffect(() => {
+    if (!filters.q) setDraft('')
+  }, [filters.q])
+
+  function commitSearch() {
+    const q = draft.trim()
+    onFiltersChange({ ...filters, q: q || undefined })
+    if (q) onExternalSearch(q)
+  }
 
   const SOURCE_OPTIONS: { value: SkillSource | 'all' | 'external'; label: string }[] = [
     { value: 'all', label: t('sourceAll') },
@@ -83,7 +95,7 @@ export function SkillsToolbar({
 
   function handleSourceChange(next: SkillSource | 'all' | 'external') {
     if (next === 'external') {
-      onFiltersChange({ externalOnly: true })
+      onFiltersChange({ ...filters, source: undefined, externalOnly: true })
     } else {
       onFiltersChange({
         ...filters,
@@ -95,31 +107,20 @@ export function SkillsToolbar({
 
   return (
     <div className="flex flex-wrap items-center gap-2 border-b border-border/70 px-4 py-3">
-      {externalOnly ? (
-        <div className="relative min-w-[180px] flex-1">
-          <Search className="pointer-events-none absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground/70" />
-          <Input
-            type="search"
-            placeholder={t('externalSearchPlaceholder')}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') onExternalSearch(e.currentTarget.value)
-            }}
-            className="pl-7"
-          />
-        </div>
-      ) : (
-        <div className="relative min-w-[180px] flex-1">
-          <Search className="pointer-events-none absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground/70" />
-          <Input
-            type="search"
-            placeholder={t('searchPlaceholder')}
-            value={filters.q ?? ''}
-            onChange={(e) => onFiltersChange({ ...filters, q: e.target.value || undefined })}
-            className="pl-7"
-            aria-label={t('searchAriaLabel')}
-          />
-        </div>
-      )}
+      <div className="relative min-w-[180px] flex-1">
+        <Search className="pointer-events-none absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground/70" />
+        <Input
+          type="search"
+          placeholder={externalOnly ? t('externalSearchPlaceholder') : t('searchPlaceholder')}
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') commitSearch()
+          }}
+          className="pl-7"
+          aria-label={t('searchAriaLabel')}
+        />
+      </div>
 
       <PillGroup
         ariaLabel={t('filterBySource')}
