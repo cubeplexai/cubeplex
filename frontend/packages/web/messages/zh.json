@@ -187,8 +187,8 @@
   "adminSkills": {
     "loading": "加载中…",
     "loadFailed": "加载失败：{message}",
-    "noSkills": "暂无 skill",
-    "noSkillsHint": "点击右上角 \"上传 skill\" 添加自定义技能",
+    "noSkills": "没有符合条件的 skill",
+    "noSkillsHint": "调整搜索或筛选条件，或点击上传按钮添加。",
     "installed": "已安装",
     "upgradable": "可升级",
     "installedVersion": "(已装 v{version})",

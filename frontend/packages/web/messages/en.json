@@ -187,8 +187,8 @@
   "adminSkills": {
     "loading": "Loading…",
     "loadFailed": "Load failed: {message}",
-    "noSkills": "No skills",
-    "noSkillsHint": "Click \"Upload skill\" to add custom skills",
+    "noSkills": "No skills match these filters",
+    "noSkillsHint": "Adjust the search or filters, or upload a skill via the Upload button.",
     "installed": "Installed",
     "upgradable": "Upgradable",
     "installedVersion": "(v{version} installed)",
