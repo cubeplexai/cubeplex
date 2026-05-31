@@ -79,7 +79,7 @@ async def create_org_env(
             user_id=None,
             hosts=body.hosts,
             header_names=body.header_names,
-            secret_value=body.secret_value or body.plain_value,
+            secret_value=body.secret_value,
         )
     except SandboxEnvConflictError as exc:
         raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
