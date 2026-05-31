@@ -105,7 +105,7 @@ export function WorkspaceSkillsToolbar({
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           onKeyDown={(e) => {
-            if (e.key === 'Enter') commitSearch()
+            if (e.key === 'Enter' && !e.nativeEvent.isComposing) commitSearch()
           }}
           className="pl-7 pr-7"
           aria-label={t('searchAria')}
