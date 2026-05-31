@@ -19,8 +19,8 @@ def test_plain_entry_shape():
         env_name="LOG_LEVEL",
         is_secret=False,
         scope="org",
-        plain_value="debug",
+        credential_id="cred-plain-1",
     )
     assert row.is_secret is False
-    assert row.plain_value == "debug"
+    assert row.credential_id == "cred-plain-1"
     assert row.hosts is None
