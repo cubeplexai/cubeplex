@@ -3,8 +3,8 @@ from unittest.mock import MagicMock
 from cubebox.sandbox.manager import SandboxManager
 
 
-def test_build_user_volume_uses_stable_non_colliding_name():
-    manager = SandboxManager(MagicMock())
+def test_build_user_volume_uses_stable_non_colliding_name(mock_encryption_backend):
+    manager = SandboxManager(MagicMock(), mock_encryption_backend)
 
     first = manager._build_user_volume("ws-A", "019d85a5-5bb7-7130-a4d2-a73734fa2dc6")
     second = manager._build_user_volume("ws-A", "019d85a5-be69-76e2-b8cb-814a9440e4b0")
@@ -23,8 +23,8 @@ def test_build_user_volume_uses_stable_non_colliding_name():
     assert first.pvc.claim_name.startswith("cubebox-user-")
 
 
-def test_create_timeout_overrides_request_timeout_for_create_only():
-    manager = SandboxManager(MagicMock())
+def test_create_timeout_overrides_request_timeout_for_create_only(mock_encryption_backend):
+    manager = SandboxManager(MagicMock(), mock_encryption_backend)
 
     default = manager._build_connection_config()
     create = manager._build_connection_config(request_timeout=manager._create_timeout)

@@ -15,9 +15,13 @@ from typing import Any
 import httpx
 import pytest
 import sqlalchemy as sa
+from cryptography.fernet import Fernet
 
+from cubebox.credentials.encryption import FernetBackend
 from cubebox.middleware import sandbox as sandbox_mw
 from cubebox.sandbox.manager import SandboxManager
+
+_ENCRYPTION_BACKEND = FernetBackend([Fernet.generate_key()])
 
 
 async def test_same_user_two_workspaces_distinct_active_rows(
@@ -30,7 +34,7 @@ async def test_same_user_two_workspaces_distinct_active_rows(
     """
     del fake_opensandbox  # autouse via parameter
     org_id, ws_a, ws_b, user_id = seeded_org_ws_user
-    mgr = SandboxManager(session_factory)
+    mgr = SandboxManager(session_factory, _ENCRYPTION_BACKEND)
     await mgr.get_or_create(user_id, org_id=org_id, workspace_id=ws_a)
     await mgr.get_or_create(user_id, org_id=org_id, workspace_id=ws_b)
     async with session_factory() as s:
@@ -57,7 +61,7 @@ async def test_concurrent_create_reuses_not_duplicates(
     """A second create for the same identity reuses; never a second running row."""
     del fake_opensandbox
     org_id, ws_a, _ws_b, user_id = seeded_org_ws_user
-    mgr = SandboxManager(session_factory)
+    mgr = SandboxManager(session_factory, _ENCRYPTION_BACKEND)
     await mgr.get_or_create(user_id, org_id=org_id, workspace_id=ws_a)
     await mgr.get_or_create(user_id, org_id=org_id, workspace_id=ws_a)
     async with session_factory() as s:
@@ -152,7 +156,7 @@ async def test_image_drift_is_lazy_existing_keeps_old_new_uses_new(
             network_default_action="deny",
         )
 
-    mgr = SandboxManager(session_factory)
+    mgr = SandboxManager(session_factory, _ENCRYPTION_BACKEND)
     await mgr.get_or_create(user_id, org_id=org_id, workspace_id=ws_a)
     async with session_factory() as s:
         img1 = (

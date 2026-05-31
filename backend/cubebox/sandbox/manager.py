@@ -27,8 +27,10 @@ from opensandbox.models.sandboxes import PVC, Volume
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from cubebox.config import config
+from cubebox.credentials.encryption import EncryptionBackend
 from cubebox.models import EgressRef
 from cubebox.models.user_sandbox import UserSandbox
+from cubebox.repositories.credential import CredentialRepository
 from cubebox.repositories.egress_ref import EgressRefRepository
 from cubebox.repositories.sandbox_env import SandboxEnvRepository
 from cubebox.repositories.sandbox_policy import SandboxPolicyRepository
@@ -37,7 +39,8 @@ from cubebox.sandbox.base import Sandbox, SandboxError
 from cubebox.sandbox.opensandbox import OpenSandbox
 from cubebox.sandbox_env.injector import InjectionResult, SandboxEnvInjector
 from cubebox.sandbox_policy.rules import build_network_policy
-from cubebox.services.sandbox_env import SandboxEnvResolver
+from cubebox.services.credential import CredentialService
+from cubebox.services.sandbox_env import SANDBOX_ENV_KIND, ResolvedEnv, SandboxEnvResolver
 from cubebox.services.sandbox_policy import SandboxPolicyResolver
 
 # ---------------------------------------------------------------------------
@@ -90,8 +93,13 @@ def build_legacy_user_pvc_name(prefix: str, user_id: str) -> str:
 class SandboxManager:
     """Manages sandbox lifecycle: create, reuse, and cleanup."""
 
-    def __init__(self, session_factory: async_sessionmaker[AsyncSession]) -> None:
+    def __init__(
+        self,
+        session_factory: async_sessionmaker[AsyncSession],
+        encryption_backend: EncryptionBackend,
+    ) -> None:
         self._session_factory = session_factory
+        self._encryption_backend = encryption_backend
 
         # Read config
         self._domain: str = config.get("sandbox.domain", "localhost:8090")
@@ -158,6 +166,30 @@ class SandboxManager:
         self._reserve_wait_timeout: float = config.get("sandbox.reserve_wait_timeout", 30.0)
         self._reserve_poll_interval: float = config.get("sandbox.reserve_poll_interval", 0.5)
 
+    async def _decrypt_env_values(
+        self,
+        session: AsyncSession,
+        *,
+        org_id: str,
+        resolved: list[ResolvedEnv],
+    ) -> None:
+        """Decrypt credential values for non-secret (env value) entries in-place."""
+        non_secret = [r for r in resolved if not r.is_secret and r.credential_id is not None]
+        if not non_secret:
+            return
+        cred_svc = CredentialService(
+            CredentialRepository(session, org_id=org_id),
+            self._encryption_backend,
+            org_id=org_id,
+            actor_user_id=None,
+        )
+        for r in non_secret:
+            assert r.credential_id is not None  # guaranteed by the filter above
+            r.value = await cred_svc.get_decrypted(
+                credential_id=r.credential_id,
+                requesting_kind=SANDBOX_ENV_KIND,
+            )
+
     def _build_connection_config(self, *, request_timeout: int | None = None) -> ConnectionConfig:
         """Build OpenSandbox ConnectionConfig from app config.
 
@@ -213,6 +245,7 @@ class SandboxManager:
         if injection is None:
             resolver = SandboxEnvResolver(SandboxEnvRepository(session, org_id=org_id))
             resolved = await resolver.resolve(workspace_id=workspace_id, user_id=user_id)
+            await self._decrypt_env_values(session, org_id=org_id, resolved=resolved)
             injection = SandboxEnvInjector(exchange_host=self._exchange_host).build(resolved)
 
         # Push the placeholder env into the backend — every subsequent execute call
@@ -512,6 +545,7 @@ class SandboxManager:
                 if self._exchange_host:
                     resolver = SandboxEnvResolver(SandboxEnvRepository(session, org_id=org_id))
                     resolved = await resolver.resolve(workspace_id=workspace_id, user_id=user_id)
+                    await self._decrypt_env_values(session, org_id=org_id, resolved=resolved)
                     injection = SandboxEnvInjector(exchange_host=self._exchange_host).build(
                         resolved
                     )
@@ -1292,19 +1326,23 @@ class SandboxManager:
 _sandbox_manager: SandboxManager | None = None
 
 
-def init_sandbox_manager(session_factory: async_sessionmaker[AsyncSession]) -> SandboxManager:
+def init_sandbox_manager(
+    session_factory: async_sessionmaker[AsyncSession],
+    encryption_backend: EncryptionBackend,
+) -> SandboxManager:
     """Initialize the global SandboxManager singleton.
 
     Called once during application startup.
 
     Args:
         session_factory: SQLAlchemy async session factory
+        encryption_backend: Credential vault encryption backend
 
     Returns:
         The initialized SandboxManager instance
     """
     global _sandbox_manager
-    _sandbox_manager = SandboxManager(session_factory)
+    _sandbox_manager = SandboxManager(session_factory, encryption_backend)
     return _sandbox_manager
 
 

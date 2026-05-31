@@ -81,6 +81,7 @@ _RESOLVED_ENVS = [
 
 async def test_create_with_exchange_host_sets_run_env_and_persists_refs(
     session_factory: async_sessionmaker[AsyncSession],
+    mock_encryption_backend: Any,
 ) -> None:
     """With _exchange_host set, Sandbox.create gets network_policy (no env=); run env is
     set on the backend via set_run_env; an EgressRef is persisted."""
@@ -90,7 +91,7 @@ async def test_create_with_exchange_host_sets_run_env_and_persists_refs(
         create_kwargs.update(kwargs)
         return _make_fake_sandbox("sbx-new")
 
-    manager = SandboxManager(session_factory)
+    manager = SandboxManager(session_factory, mock_encryption_backend)
     # Force exchange host (config returns "" by default in tests)
     manager._exchange_host = "egress-exchange.internal"
 
@@ -106,6 +107,9 @@ async def test_create_with_exchange_host_sets_run_env_and_persists_refs(
             "cubebox.repositories.user_sandbox.UserSandboxRepository.get_resumable_by_user",
             return_value=None,
         ),
+        # _RESOLVED_ENVS already has value= populated; skip DB decrypt in these
+        # egress-injection-focused tests.
+        patch.object(manager, "_decrypt_env_values", new=AsyncMock()),
     ):
         sandbox = await manager.get_or_create(
             "u-1",
@@ -162,6 +166,7 @@ async def test_create_with_exchange_host_sets_run_env_and_persists_refs(
 
 async def test_reuse_path_sets_run_env_and_refreshes_refs(
     session_factory: async_sessionmaker[AsyncSession],
+    mock_encryption_backend: Any,
 ) -> None:
     """Reusing a healthy sandbox: set_run_env is called with fresh placeholders
     and prior EgressRefs are revoked then re-persisted."""
@@ -199,7 +204,7 @@ async def test_reuse_path_sets_run_env_and_refreshes_refs(
         fake.id = sandbox_id
         return fake
 
-    manager = SandboxManager(session_factory)
+    manager = SandboxManager(session_factory, mock_encryption_backend)
     manager._exchange_host = "egress-exchange.internal"
 
     with (
@@ -216,6 +221,8 @@ async def test_reuse_path_sets_run_env_and_refreshes_refs(
             "cubebox.services.sandbox_env.SandboxEnvResolver.resolve",
             return_value=_RESOLVED_ENVS,
         ),
+        # _RESOLVED_ENVS already has value= populated; skip DB decrypt.
+        patch.object(manager, "_decrypt_env_values", new=AsyncMock()),
     ):
         backend = await manager.get_or_create("u-1", org_id="org-1", workspace_id="ws-1")
 
@@ -245,6 +252,7 @@ async def test_reuse_path_sets_run_env_and_refreshes_refs(
 
 async def test_create_without_exchange_host_skips_injection(
     session_factory: async_sessionmaker[AsyncSession],
+    mock_encryption_backend: Any,
 ) -> None:
     """When _exchange_host is empty (egress disabled), Sandbox.create gets NO env/network_policy
     and no run env is set."""
@@ -254,7 +262,7 @@ async def test_create_without_exchange_host_skips_injection(
         create_kwargs.update(kwargs)
         return _make_fake_sandbox("sbx-plain")
 
-    manager = SandboxManager(session_factory)
+    manager = SandboxManager(session_factory, mock_encryption_backend)
     # _exchange_host defaults to "" from config in tests — be explicit
     manager._exchange_host = ""
 
@@ -297,6 +305,7 @@ async def test_create_without_exchange_host_skips_injection(
 
 async def test_unhealthy_sandbox_revokes_refs(
     session_factory: async_sessionmaker[AsyncSession],
+    mock_encryption_backend: Any,
 ) -> None:
     """When an unhealthy sandbox is terminated, its egress refs are revoked."""
     # Seed an EgressRef for the old sandbox
@@ -337,7 +346,7 @@ async def test_unhealthy_sandbox_revokes_refs(
         fake.is_healthy = not_healthy
         return fake
 
-    manager = SandboxManager(session_factory)
+    manager = SandboxManager(session_factory, mock_encryption_backend)
     manager._exchange_host = "egress-exchange.internal"
 
     with (
@@ -399,6 +408,7 @@ async def _get_ref(session_factory: async_sessionmaker[AsyncSession], ref_hash: 
 
 async def test_touch_extends_egress_ref_expiry(
     session_factory: async_sessionmaker[AsyncSession],
+    mock_encryption_backend: Any,
 ) -> None:
     """touch() on an active sandbox pushes its valid refs' expires_at into the
     future so long, still-active sessions don't lose placeholder substitution
@@ -406,7 +416,7 @@ async def test_touch_extends_egress_ref_expiry(
     soon = datetime.now(UTC) + timedelta(seconds=5)
     ref_hash = await _seed_expiring_ref(session_factory, "sbx-touch", soon)
 
-    manager = SandboxManager(session_factory)
+    manager = SandboxManager(session_factory, mock_encryption_backend)
     manager._exchange_host = "egress-exchange.internal"
 
     await manager.touch("sbx-touch", org_id="org-1", workspace_id="ws-1", force=True)
@@ -422,6 +432,7 @@ async def test_touch_extends_egress_ref_expiry(
 
 async def test_touch_active_extends_egress_ref_expiry(
     session_factory: async_sessionmaker[AsyncSession],
+    mock_encryption_backend: Any,
 ) -> None:
     """touch_active() (browser keepalive, keyed by user) extends the user's
     active sandbox's valid refs the same way touch() does."""
@@ -432,7 +443,7 @@ async def test_touch_active_extends_egress_ref_expiry(
     record.id = "rec-active"
     record.sandbox_id = "sbx-active"
 
-    manager = SandboxManager(session_factory)
+    manager = SandboxManager(session_factory, mock_encryption_backend)
     manager._exchange_host = "egress-exchange.internal"
 
     with (
@@ -458,6 +469,7 @@ async def test_touch_active_extends_egress_ref_expiry(
 
 async def test_cleanup_expired_revokes_refs(
     session_factory: async_sessionmaker[AsyncSession],
+    mock_encryption_backend: Any,
 ) -> None:
     """cleanup_expired must revoke EgressRefs for terminated sandboxes."""
     # Seed an EgressRef for a sandbox that will be "expired"
@@ -483,7 +495,7 @@ async def test_cleanup_expired_revokes_refs(
     fake_record.workspace_id = "ws-1"
     fake_record.id = "rec-expired"
 
-    manager = SandboxManager(session_factory)
+    manager = SandboxManager(session_factory, mock_encryption_backend)
     manager._exchange_host = "egress-exchange.internal"
 
     with (

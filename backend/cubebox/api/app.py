@@ -219,7 +219,10 @@ async def lifespan(_app: FastAPI):  # type: ignore
 
         sandbox_enabled = config.get("sandbox.enabled", False)
         if sandbox_enabled:
-            manager = init_sandbox_manager(async_session_maker)
+            manager = init_sandbox_manager(
+                async_session_maker,
+                _app.state.encryption_backend,
+            )
             logger.info("SandboxManager initialized")
 
             # Start background cleanup task
