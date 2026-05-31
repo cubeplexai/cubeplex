@@ -47,8 +47,8 @@ class SandboxEnvInjector:
                     }
                 )
             else:
-                if r.plain_value is None:
-                    raise ValueError(f"Plain env var {r.env_name!r} has no plain_value")
-                env[r.env_name] = r.plain_value
+                if r.value is None:
+                    raise ValueError(f"Plain env var {r.env_name!r} has no value")
+                env[r.env_name] = r.value
 
         return InjectionResult(env=env, bindings=bindings)
