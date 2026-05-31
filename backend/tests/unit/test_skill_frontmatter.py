@@ -4,6 +4,7 @@ import pytest
 
 from cubebox.skills.frontmatter import (
     InvalidFrontmatterError,
+    extract_env_vars,
     parse_skill_md,
 )
 
@@ -111,6 +112,110 @@ def test_no_frontmatter_block() -> None:
     text = "# Just markdown, no YAML block\n"
     with pytest.raises(InvalidFrontmatterError):
         parse_skill_md(text)
+
+
+def test_metadata_openclaw_promoted_to_raw_metadata() -> None:
+    """metadata.openclaw keys are promoted, same as top-level openclaw."""
+    text = """---
+name: x
+description: y
+version: 0.1
+metadata:
+  openclaw:
+    requires:
+      bins: [node]
+      env: [MY_API_KEY]
+    primaryEnv: MY_API_KEY
+---
+"""
+    fm = parse_skill_md(text)
+    assert fm.raw_metadata["requires"] == {"bins": ["node"], "env": ["MY_API_KEY"]}
+    assert fm.raw_metadata["primaryEnv"] == "MY_API_KEY"
+
+
+def test_metadata_alias_does_not_override_top_level_alias() -> None:
+    """Top-level openclaw wins over metadata.openclaw."""
+    text = """---
+name: x
+description: y
+version: 0.1
+metadata:
+  openclaw:
+    requires:
+      env: [FROM_METADATA]
+openclaw:
+  requires:
+    env: [FROM_TOPLEVEL]
+---
+"""
+    fm = parse_skill_md(text)
+    assert fm.raw_metadata["requires"] == {"env": ["FROM_TOPLEVEL"]}
+
+
+def test_metadata_alias_overrides_bare_top_level() -> None:
+    """metadata.openclaw wins over bare (non-alias) top-level keys."""
+    text = """---
+name: x
+description: y
+version: 0.1
+requires:
+  env: [BARE]
+metadata:
+  openclaw:
+    requires:
+      env: [FROM_METADATA]
+---
+"""
+    fm = parse_skill_md(text)
+    assert fm.raw_metadata["requires"] == {"env": ["FROM_METADATA"]}
+
+
+def test_extract_env_vars_from_metadata_openclaw() -> None:
+    text = """---
+name: cuecue-deep-research
+description: desc
+version: 1.0.0
+metadata:
+  openclaw:
+    requires:
+      env: [CUECUE_API_KEY]
+---
+"""
+    fm = parse_skill_md(text)
+    assert extract_env_vars(fm.raw_metadata) == ["CUECUE_API_KEY"]
+
+
+def test_extract_env_vars_from_toplevel_openclaw() -> None:
+    text = """---
+name: x
+description: y
+version: 1.0.0
+openclaw:
+  requires:
+    env: [MY_KEY, OTHER_KEY]
+---
+"""
+    fm = parse_skill_md(text)
+    assert extract_env_vars(fm.raw_metadata) == ["MY_KEY", "OTHER_KEY"]
+
+
+def test_extract_env_vars_empty_when_no_requires() -> None:
+    fm = parse_skill_md("---\nname: x\ndescription: y\nversion: 1.0.0\n---\n")
+    assert extract_env_vars(fm.raw_metadata) == []
+
+
+def test_extract_env_vars_empty_when_requires_has_no_env() -> None:
+    text = """---
+name: x
+description: y
+version: 1.0.0
+openclaw:
+  requires:
+    bins: [node]
+---
+"""
+    fm = parse_skill_md(text)
+    assert extract_env_vars(fm.raw_metadata) == []
 
 
 def test_version_with_whitespace_rejected() -> None:
