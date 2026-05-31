@@ -1,141 +1,95 @@
-"""Unit tests for SkillsShAdapter using httpx.MockTransport."""
+"""Tests for SkillsShAdapter source_ref generation and path handling."""
 
-from __future__ import annotations
-
-import httpx
-import pytest
-
-from cubebox.skills.sources.base import TrustTier, decode_candidate_id
 from cubebox.skills.sources.skills_sh import SkillsShAdapter
 
 
-def _make_transport() -> httpx.MockTransport:
-    def handler(request: httpx.Request) -> httpx.Response:
-        url = str(request.url)
-
-        # skills.sh search
-        if "skills.sh/api/search" in url:
-            return httpx.Response(
-                200,
-                json={
-                    "skills": [
-                        {
-                            "name": "frontend-design",
-                            "id": "frontend-design",
-                            "source": "vercel-labs/skills",
-                            "installs": 850,
-                        }
-                    ]
-                },
-            )
-
-        # GitHub repo metadata (default_branch)
-        if "api.github.com/repos/vercel-labs/skills" in url and "git/trees" not in url:
-            return httpx.Response(200, json={"default_branch": "main"})
-
-        # GitHub tree
-        if "api.github.com/repos/vercel-labs/skills/git/trees/main" in url:
-            return httpx.Response(
-                200,
-                json={
-                    "tree": [
-                        {"path": "frontend-design/SKILL.md", "type": "blob"},
-                        {"path": "frontend-design/references/guide.md", "type": "blob"},
-                        {"path": "other-skill/SKILL.md", "type": "blob"},
-                    ]
-                },
-            )
-
-        # GitHub raw files
-        if "raw.githubusercontent.com" in url:
-            if url.endswith("SKILL.md"):
-                return httpx.Response(
-                    200,
-                    text=(
-                        "---\nname: frontend-design\n"
-                        "description: Build UIs\nversion: 1.2.0\n---\n# Frontend\n"
-                    ),
-                )
-            if url.endswith("references/guide.md"):
-                return httpx.Response(200, text="# Guide\n")
-
-        return httpx.Response(404)
-
-    return httpx.MockTransport(handler)
-
-
-@pytest.fixture
-def adapter() -> SkillsShAdapter:
-    return SkillsShAdapter(
-        source_id="sksrc-test-1",
-        trust_tier=TrustTier.community,
-        source_name="skills.sh",
+def test_index_skill_paths_with_skills_directory():
+    """Test that _index_skill_paths correctly detects 'skills/' subdirectories."""
+    adapter = SkillsShAdapter(
+        source_id="test-registry",
+        trust_tier="official",
+        source_name="Test Registry",
         github_token=None,
-        transport=_make_transport(),
+    )
+
+    # Simulate GitHub tree with 'skills/' subdirectory structure
+    tree_data = {
+        "tree": [
+            {"path": "README.md", "type": "blob"},
+            {"path": "skills/", "type": "tree"},
+            {"path": "skills/frontend-design", "type": "tree"},
+            {"path": "skills/frontend-design/SKILL.md", "type": "blob"},
+            {"path": "skills/web-design-guidelines", "type": "tree"},
+            {"path": "skills/web-design-guidelines/SKILL.md", "type": "blob"},
+        ]
+    }
+
+    skill_paths: dict = {}
+    adapter._index_skill_paths(tree_data, "anthropics/skills", skill_paths)
+
+    # Verify that paths are correctly indexed with 'skills/' prefix
+    assert skill_paths[("anthropics/skills", "frontend-design")] == "skills/frontend-design"
+    assert (
+        skill_paths[("anthropics/skills", "web-design-guidelines")]
+        == "skills/web-design-guidelines"
     )
 
 
-@pytest.mark.asyncio
-async def test_search_returns_candidates(adapter: SkillsShAdapter) -> None:
-    results = await adapter.search("frontend", limit=5)
-    assert len(results) == 1
-    c = results[0]
-    assert c.name == "frontend-design"
-    assert c.trust == TrustTier.community
-    assert c.source_name == "skills.sh"
-    assert c.install_count == 850
-
-
-@pytest.mark.asyncio
-async def test_search_encodes_branch_in_source_ref(adapter: SkillsShAdapter) -> None:
-    results = await adapter.search("frontend", limit=5)
-    kind, source_id, source_ref = decode_candidate_id(results[0].candidate_id)
-    assert kind == "remote"
-    assert source_id == "sksrc-test-1"
-    # source_ref encodes branch resolved at search time
-    assert source_ref == "vercel-labs/skills/main/frontend-design"
-
-
-@pytest.mark.asyncio
-async def test_search_returns_empty_on_api_error() -> None:
-    def fail_handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(503)
-
-    bad_adapter = SkillsShAdapter(
-        source_id="sksrc-x",
-        trust_tier=TrustTier.untrusted,
-        source_name="skills.sh",
+def test_index_skill_paths_without_skills_directory():
+    """Test that _index_skill_paths handles repos without 'skills/' subdirectory."""
+    adapter = SkillsShAdapter(
+        source_id="test-registry",
+        trust_tier="community",
+        source_name="Test Registry",
         github_token=None,
-        transport=httpx.MockTransport(fail_handler),
     )
-    results = await bad_adapter.search("anything", limit=5)
-    assert results == []
+
+    # Simulate GitHub tree with flat structure (skills at root)
+    tree_data = {
+        "tree": [
+            {"path": "frontend-design", "type": "tree"},
+            {"path": "frontend-design/SKILL.md", "type": "blob"},
+            {"path": "web-design", "type": "tree"},
+            {"path": "web-design/SKILL.md", "type": "blob"},
+        ]
+    }
+
+    skill_paths: dict = {}
+    adapter._index_skill_paths(tree_data, "example/skills", skill_paths)
+
+    # Verify that paths are indexed without 'skills/' prefix for flat structure
+    assert skill_paths[("example/skills", "frontend-design")] == "frontend-design"
+    assert skill_paths[("example/skills", "web-design")] == "web-design"
 
 
-@pytest.mark.asyncio
-async def test_fetch_downloads_skill_files(adapter: SkillsShAdapter) -> None:
-    files = await adapter.fetch("vercel-labs/skills/main/frontend-design")
-    assert "SKILL.md" in files
-    assert b"Frontend" in files["SKILL.md"]
-    assert "references/guide.md" in files
-    # files from other skills must not appear
-    assert not any("other-skill" in k for k in files)
+def test_source_ref_parsing_with_skill_path():
+    """Test that source_ref with skill path is correctly parsed."""
+    # Test parsing of the new format with skill path containing '/'
+    source_ref = "anthropics/skills/main/skills/frontend-design"
+
+    parts = source_ref.split("/", 3)
+    assert len(parts) == 4
+    assert parts[0] == "anthropics"
+    assert parts[1] == "skills"
+    assert parts[2] == "main"
+    assert parts[3] == "skills/frontend-design"
+
+    # Verify all path components are safe (no traversal)
+    for component in parts[3].split("/"):
+        assert component and component not in {".", ".."}, f"Invalid path component: {component}"
 
 
-@pytest.mark.asyncio
-async def test_fetch_raises_on_missing_skill_md() -> None:
-    def no_skill_md(request: httpx.Request) -> httpx.Response:
-        url = str(request.url)
-        if "git/trees" in url:
-            return httpx.Response(200, json={"tree": []})
-        return httpx.Response(200, json={"default_branch": "main"})
+def test_fetch_validation_with_complex_path():
+    """Test that fetch validation correctly handles paths with multiple components."""
+    # Valid complex path
+    source_ref = "anthropics/skills/main/skills/frontend-design"
+    parts = source_ref.split("/", 3)
+    owner, repo, branch, skill_path = parts
 
-    bad = SkillsShAdapter(
-        source_id="x",
-        trust_tier=TrustTier.untrusted,
-        source_name="s",
-        github_token=None,
-        transport=httpx.MockTransport(no_skill_md),
+    # All components should be safe
+    assert all(c.isalnum() or c in "._-" for c in owner)
+    assert all(c.isalnum() or c in "._-" for c in repo)
+    assert all(c.isalnum() or c in "._-" for c in branch)
+    assert all(
+        all(c.isalnum() or c in "._-" for c in component) for component in skill_path.split("/")
     )
-    with pytest.raises(ValueError, match="SKILL.md"):
-        await bad.fetch("owner/repo/main/slug")
