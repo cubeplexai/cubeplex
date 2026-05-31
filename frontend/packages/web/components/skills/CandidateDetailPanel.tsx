@@ -8,6 +8,7 @@ import { ShieldCheck, ShieldAlert, ShieldOff, FileText } from 'lucide-react'
 import { createApiClient, useSkillsStore, type SkillCandidateOut } from '@cubebox/core'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { cn, proseClasses } from '@/lib/utils'
 
 function TrustInfo({ trust }: { trust: SkillCandidateOut['trust'] }) {
@@ -114,23 +115,27 @@ export function CandidateDetailPanel({ wsId, candidate }: CandidateDetailPanelPr
         )}
       </dl>
 
-      <div className="flex flex-1 flex-col">
-        <div className="flex items-center gap-2 border-b border-border/60 pb-0">
-          <FileText className="size-3.5 text-muted-foreground" />
-          <span className="text-sm font-semibold">Overview</span>
-        </div>
+      <Tabs defaultValue="overview" className="flex-1 flex-col">
+        <TabsList variant="line" className="w-full justify-start border-b border-border/60 pb-0">
+          <TabsTrigger value="overview">
+            <FileText className="size-3.5" />
+            Overview
+          </TabsTrigger>
+        </TabsList>
 
-        <div className="mt-4">
+        <TabsContent value="overview" className="mt-4">
           {isLoading && <p className="text-xs text-muted-foreground">Loading SKILL.md…</p>}
           {preview && (
-            <div className={cn('space-y-4 text-sm', proseClasses)}>
-              <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                {stripFrontmatter(preview.content)}
-              </ReactMarkdown>
+            <div className="rounded-lg border border-border/70 bg-card/40 px-4 py-3">
+              <div className={cn(proseClasses)}>
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                  {stripFrontmatter(preview.content)}
+                </ReactMarkdown>
+              </div>
             </div>
           )}
-        </div>
-      </div>
+        </TabsContent>
+      </Tabs>
     </div>
   )
 }
