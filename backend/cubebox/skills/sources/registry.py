@@ -8,6 +8,7 @@ from cubebox.config import config as _config
 from cubebox.repositories.skill_registry import SkillRegistryRepository
 from cubebox.skills.service import SkillCatalogService
 from cubebox.skills.sources.base import SkillRegistryAdapter, TrustTier
+from cubebox.skills.sources.clawhub import ClawhubAdapter
 from cubebox.skills.sources.local import LocalCatalogAdapter
 from cubebox.skills.sources.remote import RemoteRegistryAdapter
 from cubebox.skills.sources.skills_sh import SkillsShAdapter
@@ -62,6 +63,14 @@ class SkillsAdapterManager:
                         github_token=_config.get(
                             "registry.skills_sh.github_token"
                         ) or None,
+                    )
+                )
+            elif row.kind == "clawhub":
+                adapters.append(
+                    ClawhubAdapter(
+                        source_id=row.id,
+                        trust_tier=TrustTier(row.trust_tier),
+                        source_name=row.name,
                     )
                 )
             else:
