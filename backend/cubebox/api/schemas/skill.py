@@ -26,6 +26,8 @@ class SkillSummary(BaseModel):
     workspace_bindings_count: int = 0
     # Per-workspace effective binding: "auto" | "enabled" | "disabled" | null (not installed)
     workspace_binding_state: Literal["auto", "enabled", "disabled"] | None = None
+    imported_from_registry_id: str | None = None
+    imported_from_registry_name: str | None = None
 
 
 class SkillVersionDetail(BaseModel):

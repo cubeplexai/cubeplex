@@ -149,6 +149,12 @@ export function WorkspaceSkillDetail({ wsId, skill, onActionDone }: WorkspaceSki
           <Badge variant={skill.source === 'preinstalled' ? 'default' : 'secondary'}>
             {skill.source === 'preinstalled' ? t('sourcePreinstalled') : t('sourceUploaded')}
           </Badge>
+          {skill.imported_from_registry_name && (
+            <Badge variant="outline" className="gap-1 text-[11px]">
+              <span className="text-muted-foreground">via</span>
+              {skill.imported_from_registry_name}
+            </Badge>
+          )}
           <Badge
             variant="outline"
             className={cn(STATE_BADGE_VARIANT[skill.workspaceState].className)}
