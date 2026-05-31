@@ -93,3 +93,21 @@ def test_fetch_validation_with_complex_path():
     assert all(
         all(c.isalnum() or c in "._-" for c in component) for component in skill_path.split("/")
     )
+
+
+def test_official_source_detection():
+    """Test that official sources are correctly identified."""
+    adapter = SkillsShAdapter(
+        source_id="test-registry",
+        trust_tier="community",
+        source_name="Test Registry",
+        github_token=None,
+    )
+
+    # Official sources should return "official" trust tier
+    assert adapter._get_trust_for_source("anthropics/skills") == "official"
+    assert adapter._get_trust_for_source("vercel-labs/agent-skills") == "official"
+
+    # Non-official sources should return the adapter's configured trust tier
+    assert adapter._get_trust_for_source("example/skills") == "community"
+    assert adapter._get_trust_for_source("custom/skills-repo") == "community"
