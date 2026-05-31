@@ -110,16 +110,25 @@ export function SkillsToolbar({
       <div className="relative min-w-[180px] flex-1">
         <Search className="pointer-events-none absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground/70" />
         <Input
-          type="search"
+          type="text"
           placeholder={externalOnly ? t('externalSearchPlaceholder') : t('searchPlaceholder')}
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === 'Enter') commitSearch()
           }}
-          className="pl-7"
+          className="pl-7 pr-7"
           aria-label={t('searchAriaLabel')}
         />
+        {draft && (
+          <button
+            type="button"
+            onClick={commitSearch}
+            className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground/70 hover:text-foreground"
+          >
+            <Search className="size-3.5" />
+          </button>
+        )}
       </div>
 
       <PillGroup
