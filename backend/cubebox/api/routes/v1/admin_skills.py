@@ -42,7 +42,12 @@ from cubebox.repositories.skill import (
 )
 from cubebox.skills.cache import SkillCache
 from cubebox.skills.discovery import SkillDiscoveryService, SkillInstallError, SkillInstallService
-from cubebox.skills.frontmatter import InvalidFrontmatterError, peek_skill_name
+from cubebox.skills.frontmatter import (
+    InvalidFrontmatterError,
+    extract_env_vars,
+    parse_skill_md,
+    peek_skill_name,
+)
 from cubebox.skills.service import (
     FileTooLargeError,
     InvalidSkillNameError,
@@ -61,6 +66,14 @@ router = APIRouter(prefix="/admin/skills", tags=["admin-skills"])
 def _cache() -> SkillCache:
     cache_root = Path(_config.get("skills.cache_root", "skills_cache"))
     return SkillCache(cache_root=cache_root)
+
+
+def _env_vars_from_skill_md(content: str) -> list[str]:
+    try:
+        fm = parse_skill_md(content, default_version="0.0.0")
+    except Exception:
+        return []
+    return extract_env_vars(fm.raw_metadata)
 
 
 @router.get("", response_model=list[SkillSummary])
@@ -199,6 +212,7 @@ async def admin_preview_candidate(
         name=name,
         canonical_name=name,
         content=skill_md,
+        env_vars=_env_vars_from_skill_md(skill_md),
     )
 
 
