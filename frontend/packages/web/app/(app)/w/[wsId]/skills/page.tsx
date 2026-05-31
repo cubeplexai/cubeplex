@@ -74,26 +74,29 @@ export default function WorkspaceSkillsPage({ params }: { params: Promise<{ wsId
                   />
                 ))}
               </div>
-            ) : candidates.length === 0 ? (
+            ) : candidates.filter((c) => c.source_kind === 'remote').length === 0 ? (
               <div className="flex flex-col items-center justify-center gap-1 px-6 py-8 text-center">
                 <p className="text-sm text-muted-foreground">{t('noMatch')}</p>
                 <p className="text-xs text-muted-foreground/70">{t('noMatchHint')}</p>
               </div>
             ) : (
               <ul className="flex flex-col gap-1.5 p-3">
-                {candidates.map((c) => (
-                  <li key={c.candidate_id}>
-                    <CandidateCard
-                      candidate={c}
-                      active={
-                        selection?.kind === 'candidate' && selection.candidateId === c.candidate_id
-                      }
-                      onClick={() =>
-                        setSelection({ kind: 'candidate', candidateId: c.candidate_id })
-                      }
-                    />
-                  </li>
-                ))}
+                {candidates
+                  .filter((c) => c.source_kind === 'remote')
+                  .map((c) => (
+                    <li key={c.candidate_id}>
+                      <CandidateCard
+                        candidate={c}
+                        active={
+                          selection?.kind === 'candidate' &&
+                          selection.candidateId === c.candidate_id
+                        }
+                        onClick={() =>
+                          setSelection({ kind: 'candidate', candidateId: c.candidate_id })
+                        }
+                      />
+                    </li>
+                  ))}
               </ul>
             )
           ) : loading && skills.length === 0 ? (
@@ -123,7 +126,7 @@ export default function WorkspaceSkillsPage({ params }: { params: Promise<{ wsId
                 </ul>
               )}
 
-              {(candidates.length > 0 || searching) && (
+              {(candidates.filter((c) => c.source_kind === 'remote').length > 0 || searching) && (
                 <>
                   <div className="flex items-center gap-2 px-4 py-2">
                     <span className="text-xs font-medium text-muted-foreground">
@@ -140,7 +143,8 @@ export default function WorkspaceSkillsPage({ params }: { params: Promise<{ wsId
                     )}
                     <div className="flex-1 border-t border-border/50" />
                   </div>
-                  {searching && candidates.length === 0 ? (
+                  {searching &&
+                  candidates.filter((c) => c.source_kind === 'remote').length === 0 ? (
                     <div className="flex flex-col gap-1.5 px-3 pb-3">
                       {[1, 2, 3].map((i) => (
                         <div
@@ -151,20 +155,22 @@ export default function WorkspaceSkillsPage({ params }: { params: Promise<{ wsId
                     </div>
                   ) : (
                     <ul className="flex flex-col gap-1.5 px-3 pb-3">
-                      {candidates.map((c) => (
-                        <li key={c.candidate_id}>
-                          <CandidateCard
-                            candidate={c}
-                            active={
-                              selection?.kind === 'candidate' &&
-                              selection.candidateId === c.candidate_id
-                            }
-                            onClick={() =>
-                              setSelection({ kind: 'candidate', candidateId: c.candidate_id })
-                            }
-                          />
-                        </li>
-                      ))}
+                      {candidates
+                        .filter((c) => c.source_kind === 'remote')
+                        .map((c) => (
+                          <li key={c.candidate_id}>
+                            <CandidateCard
+                              candidate={c}
+                              active={
+                                selection?.kind === 'candidate' &&
+                                selection.candidateId === c.candidate_id
+                              }
+                              onClick={() =>
+                                setSelection({ kind: 'candidate', candidateId: c.candidate_id })
+                              }
+                            />
+                          </li>
+                        ))}
                     </ul>
                   )}
                 </>
