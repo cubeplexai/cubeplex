@@ -162,6 +162,13 @@ class SkillsShAdapter:
                 return skill_paths[(source, candidate)]
         return slug
 
+    def trust_for_ref(self, source_ref: str) -> TrustTier:
+        # source_ref = "owner/repo/branch/..."
+        parts = source_ref.split("/", 2)
+        if len(parts) >= 2:
+            return self._get_trust_for_source(f"{parts[0]}/{parts[1]}")
+        return TrustTier.untrusted
+
     async def search(self, query: str, *, limit: int) -> list[SkillCandidate]:
         try:
             return await self._search(query, limit=limit)

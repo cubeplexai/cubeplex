@@ -139,6 +139,9 @@ class RemoteRegistryAdapter:
             )
         return out
 
+    def trust_for_ref(self, source_ref: str) -> TrustTier:
+        return self._trust
+
     async def fetch(self, source_ref: str) -> dict[str, bytes]:
         """Import the WHOLE skill subpath: list the tree, then pull every safe file.
 
