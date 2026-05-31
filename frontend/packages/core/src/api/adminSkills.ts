@@ -19,11 +19,15 @@ export async function adminPreviewCandidate(candidateId: string): Promise<{ cont
 
 export async function adminInstallCandidate(
   candidateId: string,
+  extraHeaders?: HeadersInit,
 ): Promise<{ canonical_name: string; skill_id: string; installed_version: string }> {
   const res = await fetch('/api/v1/admin/skills/install-candidate', {
     method: 'POST',
     credentials: 'include',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      ...Object.fromEntries(new Headers(extraHeaders)),
+    },
     body: JSON.stringify({ candidate_id: candidateId }),
   })
   if (!res.ok) throw await toApiError(res)

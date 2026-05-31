@@ -7,6 +7,7 @@ import remarkGfm from 'remark-gfm'
 import { FileText, ShieldAlert, ShieldCheck, ShieldOff } from 'lucide-react'
 import { useAdminSkillsStore, type SkillCandidateOut } from '@cubebox/core'
 import { Badge } from '@/components/ui/badge'
+import { jsonHeaders } from '@/lib/csrf'
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { cn, proseClasses } from '@/lib/utils'
@@ -70,7 +71,7 @@ export function AdminCandidateDetailPanel({
   async function handleInstall() {
     setInstallError(null)
     try {
-      await install(candidate.candidate_id)
+      await install(candidate.candidate_id, jsonHeaders())
       onInstalled()
     } catch (e) {
       setInstallError(e instanceof Error ? e.message : String(e))

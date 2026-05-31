@@ -10,7 +10,7 @@ export interface AdminSkillsState {
   installing: Record<string, boolean>
   lastInstalled: string | null
   search: (q: string) => Promise<void>
-  install: (candidateId: string) => Promise<void>
+  install: (candidateId: string, csrfHeaders?: HeadersInit) => Promise<void>
   reset: () => void
 }
 
@@ -31,10 +31,10 @@ export const useAdminSkillsStore = create<AdminSkillsState>((set) => ({
     }
   },
 
-  async install(candidateId) {
+  async install(candidateId, csrfHeaders) {
     set((s) => ({ installing: { ...s.installing, [candidateId]: true } }))
     try {
-      const r = await adminInstallCandidate(candidateId)
+      const r = await adminInstallCandidate(candidateId, csrfHeaders)
       set((s) => ({
         lastInstalled: r.skill_id,
         installing: { ...s.installing, [candidateId]: false },
