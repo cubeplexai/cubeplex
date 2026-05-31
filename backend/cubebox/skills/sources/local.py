@@ -66,6 +66,9 @@ class LocalCatalogAdapter:
             )
         return out
 
+    def trust_for_ref(self, source_ref: str) -> TrustTier:
+        return TrustTier.official  # local catalog skills are always trusted
+
     async def fetch(self, source_ref: str) -> dict[str, bytes]:
         del source_ref  # no-op: local files already in our object store
         return {}

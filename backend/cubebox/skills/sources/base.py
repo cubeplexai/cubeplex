@@ -85,3 +85,12 @@ class SkillRegistryAdapter(Protocol):
     async def fetch(self, source_ref: str) -> dict[str, bytes]:
         """Return {rel_path: bytes} of the skill bundle for import."""
         ...
+
+    def trust_for_ref(self, source_ref: str) -> TrustTier:
+        """Return the effective trust tier for this specific skill source_ref.
+
+        For registries where all skills share one tier this is always the
+        registry-level tier.  For skills.sh the tier depends on the upstream
+        GitHub org (some orgs are official, others are community).
+        """
+        ...
