@@ -95,14 +95,18 @@ class SkillsShAdapter:
         return str(data.get("default_branch") or "main")
 
     def _get_trust_for_source(self, source: str) -> TrustTier:
-        """Determine trust tier based on whether source is official.
+        """Determine trust tier based on whether source is in the official whitelist.
 
-        Official sources from https://www.skills.sh/official are marked
-        as "official". All other sources default to the adapter's
-        configured trust_tier (typically "community").
+        Official status is only granted to sources in _OFFICIAL_SOURCES — never
+        inherited from the registry's configured trust tier. The registry trust
+        tier controls community vs untrusted for unknown sources only.
         """
         if source in _OFFICIAL_SOURCES:
             return TrustTier.official
+        # Cap unknown sources at community: admin cannot grant official status
+        # to arbitrary GitHub repos by setting the registry tier to official.
+        if self._trust == TrustTier.official:
+            return TrustTier.community
         return self._trust
 
     def _index_skill_paths(
