@@ -81,14 +81,14 @@ export default function AdminSandboxEnvPage() {
           <div>
             <h2 className="text-lg font-semibold tracking-tight">Sandbox environment variables</h2>
             <p className="mt-0.5 text-xs text-muted-foreground">
-              Org-wide secrets and plain values injected into every workspace sandbox.
+              Org-wide environment variables injected into every workspace sandbox.
             </p>
           </div>
           <button
             onClick={() => setModal({ kind: 'add-org' })}
             className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border/70 bg-background px-3 text-xs font-medium shadow-sm transition-colors hover:bg-accent"
           >
-            + Add secret
+            + Add variable
           </button>
         </div>
       </header>
