@@ -5,7 +5,12 @@ import useSWR from 'swr'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { ShieldCheck, ShieldAlert, ShieldOff, FileText } from 'lucide-react'
-import { createApiClient, useSkillsStore, type SkillCandidateOut } from '@cubebox/core'
+import {
+  createApiClient,
+  useSkillsStore,
+  type SkillCandidateOut,
+  type SkillPreviewResponse,
+} from '@cubebox/core'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -41,10 +46,10 @@ interface CandidateDetailPanelProps {
   candidate: SkillCandidateOut
 }
 
-async function previewFetcher(url: string): Promise<{ content: string }> {
+async function previewFetcher(url: string): Promise<SkillPreviewResponse> {
   const res = await fetch(url, { credentials: 'include' })
   if (!res.ok) throw new Error(`fetch failed: ${res.status}`)
-  return res.json() as Promise<{ content: string }>
+  return res.json() as Promise<SkillPreviewResponse>
 }
 
 function stripFrontmatter(content: string): string {
@@ -68,7 +73,7 @@ export function CandidateDetailPanel({ wsId, candidate }: CandidateDetailPanelPr
     }
   }
 
-  const { data: preview, isLoading } = useSWR<{ content: string }>(
+  const { data: preview, isLoading } = useSWR<SkillPreviewResponse>(
     `/api/v1/ws/${wsId}/skills/discover/preview?candidate_id=${candidate.candidate_id}`,
     previewFetcher,
     { revalidateOnFocus: false, shouldRetryOnError: false },
@@ -126,6 +131,23 @@ export function CandidateDetailPanel({ wsId, candidate }: CandidateDetailPanelPr
           <div className="flex items-center gap-3">
             <dt className="min-w-20 text-xs font-medium text-muted-foreground">Repo</dt>
             <dd className="truncate text-xs text-muted-foreground">{candidate.repo}</dd>
+          </div>
+        )}
+        {preview?.env_vars && preview.env_vars.length > 0 && (
+          <div className="flex items-start gap-3">
+            <dt className="min-w-20 pt-0.5 text-xs font-medium text-muted-foreground">
+              Requires env
+            </dt>
+            <dd className="flex flex-wrap gap-1">
+              {preview.env_vars.map((v) => (
+                <code
+                  key={v}
+                  className="rounded bg-muted px-1.5 py-0.5 font-mono text-[11px] text-foreground"
+                >
+                  {v}
+                </code>
+              ))}
+            </dd>
           </div>
         )}
       </dl>
