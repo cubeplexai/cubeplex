@@ -9,7 +9,7 @@ from cubebox.api.schemas.sandbox_env import (
     CreateOrgEnvIn,
     EnvEntryListOut,
     EnvEntryOut,
-    UpdateSecretValueIn,
+    UpdateEntryIn,
 )
 from cubebox.auth.context import RequestContext
 from cubebox.credentials.dependencies import get_encryption_backend
@@ -102,9 +102,9 @@ async def list_org_env(
 
 
 @router.patch("/{entry_id}", response_model=EnvEntryOut)
-async def rotate_org_env(
+async def update_org_env(
     entry_id: str,
-    body: UpdateSecretValueIn,
+    body: UpdateEntryIn,
     session: Annotated[AsyncSession, Depends(get_session)],
     backend: Annotated[EncryptionBackend, Depends(get_encryption_backend)],
     ctx: Annotated[RequestContext, Depends(get_admin_request_context)],
@@ -113,10 +113,13 @@ async def rotate_org_env(
     if row is None or row.scope != "org":
         raise HTTPException(status.HTTP_404_NOT_FOUND, "not found")
     try:
-        await _service(session, backend, ctx).update_value(
-            entry_id=entry_id, secret_value=body.secret_value
+        await _service(session, backend, ctx).update_entry(
+            entry_id=entry_id,
+            hosts=body.hosts,
+            header_names=body.header_names,
+            secret_value=body.secret_value,
         )
-    except SandboxEnvShapeError as exc:
+    except (SandboxEnvShapeError, HostPatternError) as exc:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
     updated = await SandboxEnvRepository(session, org_id=ctx.org_id).get(entry_id)
     assert updated is not None

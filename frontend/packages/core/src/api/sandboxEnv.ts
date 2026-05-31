@@ -25,8 +25,10 @@ export interface CreateEnvIn {
   plain_value?: string | null
 }
 
-export interface RotateSecretIn {
-  secret_value: string
+export interface UpdateEntryIn {
+  secret_value?: string | null
+  hosts?: string[] | null
+  header_names?: string[] | null
 }
 
 // ── Workspace: workspace scope (/workspace) ──────────────────────────────────
@@ -50,11 +52,11 @@ export async function createWsEnvWorkspace(
   return (await res.json()) as EnvEntryOut
 }
 
-export async function rotateWsEnvWorkspace(
+export async function updateWsEnvWorkspace(
   client: ApiClient,
   wsId: string,
   id: string,
-  body: RotateSecretIn,
+  body: UpdateEntryIn,
 ): Promise<EnvEntryOut> {
   const res = await client.patch(`/api/v1/ws/${wsId}/sandbox-env/workspace/${id}`, body)
   if (!res.ok) throw await toApiError(res)
@@ -88,11 +90,11 @@ export async function createWsEnvMe(
   return (await res.json()) as EnvEntryOut
 }
 
-export async function rotateWsEnvMe(
+export async function updateWsEnvMe(
   client: ApiClient,
   wsId: string,
   id: string,
-  body: RotateSecretIn,
+  body: UpdateEntryIn,
 ): Promise<EnvEntryOut> {
   const res = await client.patch(`/api/v1/ws/${wsId}/sandbox-env/me/${id}`, body)
   if (!res.ok) throw await toApiError(res)
@@ -118,10 +120,10 @@ export async function createAdminEnv(client: ApiClient, body: CreateEnvIn): Prom
   return (await res.json()) as EnvEntryOut
 }
 
-export async function rotateAdminEnv(
+export async function updateAdminEnv(
   client: ApiClient,
   id: string,
-  body: RotateSecretIn,
+  body: UpdateEntryIn,
 ): Promise<EnvEntryOut> {
   const res = await client.patch(`/api/v1/admin/sandbox-env/${id}`, body)
   if (!res.ok) throw await toApiError(res)

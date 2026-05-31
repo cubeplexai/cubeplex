@@ -24,6 +24,20 @@ class UpdateSecretValueIn(BaseModel):
     secret_value: str
 
 
+class UpdateEntryIn(BaseModel):
+    """Partial update for an existing env entry.
+
+    At least one field must be provided.  ``secret_value`` rotates the stored
+    credential.  ``hosts`` / ``header_names`` update the substitution rules
+    (secret entries only; ignored / rejected for plain env-value entries by the
+    service layer).  All three may be provided in a single request.
+    """
+
+    secret_value: str | None = None
+    hosts: list[str] | None = None
+    header_names: list[str] | None = None
+
+
 class EnvEntryOut(BaseModel):
     id: str
     env_name: str
