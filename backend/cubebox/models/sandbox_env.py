@@ -1,10 +1,11 @@
 """Sandbox Env Vault entry.
 
-One entry per (env_name, scope). Secret entries carry hosts + a credential_id
-(value in the vault, kind 'sandbox_env'); plain entries carry plain_value.
-Scope shape and value shape are enforced by CHECK constraints; per-scope
-uniqueness by partial unique indexes (NULL scope columns must collide, which
-plain UNIQUE does not do in Postgres).
+One entry per (env_name, scope). Both secret and plain entries store their
+value via credential_id (in the vault, kind 'sandbox_env'). Secret entries
+additionally carry hosts + header_names for injection policy. Scope shape
+and value shape are enforced by CHECK constraints; per-scope uniqueness by
+partial unique indexes (NULL scope columns must collide, which plain UNIQUE
+does not do in Postgres).
 """
 
 from typing import ClassVar
@@ -31,11 +32,8 @@ class SandboxEnvVar(CubeboxBase, table=True):
             name="ck_sandbox_env_scope_columns",
         ),
         CheckConstraint(
-            "(is_secret AND credential_id IS NOT NULL AND plain_value IS NULL"
-            " AND hosts IS NOT NULL)"
-            " OR (NOT is_secret AND plain_value IS NOT NULL AND credential_id IS NULL"
-            " AND hosts IS NULL)",
-            name="ck_sandbox_env_value_shape",
+            "credential_id IS NOT NULL",
+            name="ck_sandbox_env_vars_credential_required",
         ),
         Index(
             "uq_sandbox_env_org",
@@ -79,7 +77,6 @@ class SandboxEnvVar(CubeboxBase, table=True):
     credential_id: str | None = Field(
         default=None, foreign_key="credentials.id", max_length=20, nullable=True
     )
-    plain_value: str | None = Field(default=None, max_length=4096, nullable=True)
     status: str = Field(default="valid", max_length=16)
     created_by_user_id: str | None = Field(
         default=None, foreign_key="users.id", max_length=20, nullable=True
