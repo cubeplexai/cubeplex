@@ -60,6 +60,7 @@ class SkillRepository:
         description: str,
         keywords: list[str],
         current_version: str,
+        imported_from_registry_id: str | None = None,
     ) -> Skill:
         skill = Skill(
             name=canonical_name,
@@ -68,6 +69,7 @@ class SkillRepository:
             current_version=current_version,
             description=description,
             keywords=keywords,
+            imported_from_registry_id=imported_from_registry_id,
         )
         self.session.add(skill)
         await self.session.commit()

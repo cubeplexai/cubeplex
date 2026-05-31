@@ -15,6 +15,9 @@ class Skill(CubeboxBase, table=True):
 
     source='preinstalled' → owner_org_id=NULL; name is bare slug.
     source='uploaded'     → owner_org_id=<publisher org>; name is '<org-slug>:<skill-slug>'.
+
+    imported_from_registry_id is set when the skill was installed via a remote
+    registry (e.g. skills.sh); NULL for preinstalled and manually uploaded skills.
     """
 
     _PREFIX: ClassVar[str] = "skl"
@@ -24,6 +27,9 @@ class Skill(CubeboxBase, table=True):
     source: str = Field(max_length=16)  # "preinstalled" | "uploaded"
     owner_org_id: str | None = Field(
         default=None, foreign_key="organizations.id", max_length=20, index=True
+    )
+    imported_from_registry_id: str | None = Field(
+        default=None, foreign_key="skill_registries.id", max_length=20, nullable=True
     )
     current_version: str = Field(max_length=32)
     description: str = Field(max_length=1024)
