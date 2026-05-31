@@ -231,6 +231,7 @@
     "sourcePreinstalled": "Built-in",
     "sourceUploaded": "Org uploads",
     "sourceExternal": "External",
+    "systemCatalog": "System Catalog",
     "externalSources": "External Sources",
     "externalSearchPlaceholder": "Search external registries…",
     "noExternalResults": "No results",
