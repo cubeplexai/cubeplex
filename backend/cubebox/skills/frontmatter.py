@@ -95,11 +95,23 @@ def parse_skill_md(text: str, *, default_version: str | None = None) -> SkillFro
     keywords = _normalise_keywords(data.get("keywords"))
 
     raw_metadata: dict[str, Any] = dict(data)
+
+    # Expand metadata.{alias} first (lower priority than top-level aliases).
+    # Clawhub publishes skills with metadata.openclaw nesting; this normalises it.
+    metadata_block = raw_metadata.get("metadata")
+    if isinstance(metadata_block, dict):
+        for alias in _OPENCLAW_ALIASES:
+            nested = metadata_block.get(alias)
+            if isinstance(nested, dict):
+                for k, v in nested.items():
+                    raw_metadata[k] = v  # overrides bare top-level keys
+
+    # Top-level aliases override everything (including metadata.alias results above).
     for alias in _OPENCLAW_ALIASES:
         nested = raw_metadata.pop(alias, None)
         if isinstance(nested, dict):
             for k, v in nested.items():
-                raw_metadata[k] = v  # alias overrides any top-level same-name field
+                raw_metadata[k] = v
 
     return SkillFrontmatter(
         name=name.strip(),
@@ -108,6 +120,21 @@ def parse_skill_md(text: str, *, default_version: str | None = None) -> SkillFro
         keywords=keywords,
         raw_metadata=raw_metadata,
     )
+
+
+def extract_env_vars(raw_metadata: dict[str, Any]) -> list[str]:
+    """Return required env var names from a parsed skill's raw_metadata.
+
+    Reads raw_metadata["requires"]["env"] after alias expansion by parse_skill_md.
+    Returns [] when absent or malformed.
+    """
+    requires = raw_metadata.get("requires")
+    if not isinstance(requires, dict):
+        return []
+    env_list = requires.get("env")
+    if not isinstance(env_list, list):
+        return []
+    return [str(e) for e in env_list if isinstance(e, str) and e]
 
 
 def _normalise_keywords(value: Any) -> list[str]:
