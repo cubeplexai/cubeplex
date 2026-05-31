@@ -87,6 +87,40 @@ class SkillsShAdapter:
         data = resp.json()
         return str(data.get("default_branch") or "main")
 
+    def _index_skill_paths(
+        self,
+        tree_data: dict,
+        source: str,
+        skill_paths: dict[tuple[str, str], str],
+    ) -> None:
+        """Index skill directory locations from GitHub tree.
+
+        Detects whether skills are at "skills/{slug}/" or "{slug}/" and
+        populates skill_paths mapping.
+        """
+        entries = tree_data.get("tree", [])
+        # Extract all unique top-level and "skills/" subdirectories
+        skill_dirs: set[str] = set()
+        for entry in entries:
+            if not isinstance(entry, dict) or entry.get("type") != "tree":
+                continue
+            path = str(entry.get("path", ""))
+            # Check for "skills/{slug}" pattern
+            if path.startswith("skills/"):
+                slug = path.split("/", 1)[1]
+                if slug and "/" not in slug:  # Direct child of skills/
+                    skill_dirs.add(f"skills/{slug}")
+            # Check for top-level skill directories (common pattern too)
+            elif "/" not in path:
+                skill_dirs.add(path)
+        # Populate the mapping: prefer "skills/{slug}" if both exist
+        for skill_dir in skill_dirs:
+            slug = skill_dir.split("/")[-1]
+            if skill_dir.startswith("skills/"):
+                skill_paths[(source, slug)] = skill_dir
+            elif f"skills/{slug}" not in skill_dirs:
+                skill_paths[(source, slug)] = skill_dir
+
     async def search(self, query: str, *, limit: int) -> list[SkillCandidate]:
         try:
             return await self._search(query, limit=limit)
@@ -106,10 +140,9 @@ class SkillsShAdapter:
         if not isinstance(skills, list):
             return []
 
-        # Resolve default branch once per unique owner/repo.
-        # Validate source format BEFORE any GitHub API call so malformed
-        # values (including percent-encoded traversal) never reach the network.
+        # Resolve default branch and detect skill paths once per unique owner/repo.
         repos: dict[str, str] = {}
+        skill_paths: dict[tuple[str, str], str] = {}  # (source, slug) -> "skills/slug" or "slug"
         async with self._github_client() as gh_client:
             for item in skills:
                 source = str(item.get("source") or "")
@@ -117,11 +150,19 @@ class SkillsShAdapter:
                     continue
                 src_parts = source.split("/", 1)
                 if len(src_parts) != 2 or not _safe_name(src_parts[0]) or not _safe_name(src_parts[1]):
-                    continue  # skip malformed / unsafe source before any network call
+                    continue
                 try:
                     repos[source] = await self._resolve_default_branch(
                         gh_client, src_parts[0], src_parts[1]
                     )
+                    # Also fetch the tree to detect skill directory structure
+                    tree_resp = await gh_client.get(
+                        f"/repos/{src_parts[0]}/{src_parts[1]}/git/trees/{repos[source]}",
+                        params={"recursive": "1"},
+                    )
+                    if tree_resp.is_success:
+                        tree_data = tree_resp.json()
+                        self._index_skill_paths(tree_data, source, skill_paths)
                 except Exception:  # noqa: BLE001
                     repos[source] = "main"
 
@@ -129,12 +170,8 @@ class SkillsShAdapter:
         for item in skills:
             if not isinstance(item, dict):
                 continue
-            # Use skillId for the slug (actual skill name), fallback to id/name for compatibility
             slug = str(item.get("skillId") or item.get("id") or item.get("name") or "")
             source = str(item.get("source") or "")
-            # Whitelist both slug and source components against the regex so
-            # URL-encoded bypass forms (%2e, %2f) are rejected along with
-            # literal traversal sequences.
             src_parts = source.split("/", 1)
             if (
                 not _safe_name(slug)
@@ -144,7 +181,9 @@ class SkillsShAdapter:
             ):
                 continue
             branch = repos.get(source, "main")
-            source_ref = f"{source}/{branch}/{slug}"
+            # Detect if skill is in "skills/{slug}/" or "{slug}/" directory
+            skill_rel_path = skill_paths.get((source, slug), slug)
+            source_ref = f"{source}/{branch}/{skill_rel_path}"
             out.append(
                 SkillCandidate(
                     candidate_id=encode_candidate_id(
@@ -165,13 +204,23 @@ class SkillsShAdapter:
         return out
 
     async def fetch(self, source_ref: str) -> dict[str, bytes]:
+        # Parse source_ref: owner/repo/branch/{skill_rel_path}
+        # skill_rel_path may contain "/" (e.g., "skills/frontend-design")
         parts = source_ref.split("/", 3)
-        if len(parts) != 4:
+        if len(parts) < 4:
             raise ValueError(f"invalid skills-sh source_ref: {source_ref!r}")
-        owner, repo, branch, slug = parts
-        # Whitelist all URL path components — rejects percent-encoded traversal
-        if not (_safe_name(owner) and _safe_name(repo) and _safe_name(branch) and _safe_name(slug)):
+        owner, repo, branch = parts[:3]
+        skill_rel_path = parts[3]  # May contain "/" for "skills/slug" pattern
+        # Whitelist owner/repo/branch components — skill path validated below
+        if not (_safe_name(owner) and _safe_name(repo) and _safe_name(branch)):
             raise ValueError(f"unsafe component in skills-sh source_ref: {source_ref!r}")
+        # Validate skill_rel_path: all components must be safe (no traversal)
+        if not skill_rel_path or any(
+            not _safe_name(c) for c in skill_rel_path.split("/")
+        ):
+            raise ValueError(
+                f"unsafe skill path in skills-sh source_ref: {skill_rel_path!r}"
+            )
 
         async with self._github_client() as gh_client:
             tree_resp = await gh_client.get(
@@ -182,7 +231,7 @@ class SkillsShAdapter:
             tree_data = tree_resp.json()
 
         entries = tree_data.get("tree", [])
-        prefix = f"{slug}/"
+        prefix = f"{skill_rel_path}/"
         rel_paths = [
             e["path"][len(prefix):]
             for e in entries
@@ -196,12 +245,11 @@ class SkillsShAdapter:
 
         async with self._raw_client() as raw_client:
             for rel in rel_paths:
-                # Validate each component of the relative path from GitHub's tree.
-                # These come from GitHub's API, but we still guard against any
-                # unexpected traversal component.
                 if not rel or any(not _safe_name(part) for part in rel.split("/")):
                     raise ValueError(f"unsafe path in skills-sh tree: {rel!r}")
-                resp = await raw_client.get(f"/{owner}/{repo}/{branch}/{slug}/{rel}")
+                resp = await raw_client.get(
+                    f"/{owner}/{repo}/{branch}/{skill_rel_path}/{rel}"
+                )
                 resp.raise_for_status()
                 content = resp.content
                 if len(content) > _RAW_FILE_MAX_BYTES:
@@ -216,5 +264,5 @@ class SkillsShAdapter:
                 files[rel] = content
 
         if "SKILL.md" not in files:
-            raise ValueError(f"skills-sh skill {slug!r} has no SKILL.md")
+            raise ValueError(f"skills-sh skill {skill_rel_path!r} has no SKILL.md")
         return files
