@@ -57,11 +57,16 @@ export function CandidateCard({ candidate, active, onClick }: CandidateCardProps
       {candidate.description && (
         <p className="line-clamp-2 text-xs text-muted-foreground">{candidate.description}</p>
       )}
-      <div className="flex flex-wrap items-center gap-1 pt-0.5">
+      <div className="flex flex-wrap items-center gap-2 pt-0.5">
         <span className="text-[10px] text-muted-foreground/80">{candidate.source_name}</span>
         {candidate.version && (
           <span className="font-mono text-[10px] text-muted-foreground/80">
             v{candidate.version}
+          </span>
+        )}
+        {candidate.install_count !== null && (
+          <span className="text-[10px] text-muted-foreground/80">
+            {candidate.install_count.toLocaleString()} installs
           </span>
         )}
         {candidate.keywords.slice(0, 2).map((kw) => (
