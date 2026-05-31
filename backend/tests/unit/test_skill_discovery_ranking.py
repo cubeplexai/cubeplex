@@ -85,16 +85,18 @@ def test_single_keyword_token_matches():
 
 def test_non_matching_query_drops_unrelated_candidates():
     # LocalCatalogAdapter hands every visible skill to rank_candidates regardless
-    # of the query; candidates with zero overlap must not survive ranking.
+    # of the query; local candidates with zero overlap must not survive ranking.
+    # Remote sources (clawhub, skills.sh) already filter for relevance, so their
+    # candidates are not subject to bucket-3 filtering here.
     cands = [
-        _c("data-pipeline", desc="ETL jobs", keywords=["etl"]),
-        _c("email-sender", desc="send mail", keywords=["smtp"]),
+        _c("data-pipeline", desc="ETL jobs", keywords=["etl"], kind="local"),
+        _c("email-sender", desc="send mail", keywords=["smtp"], kind="local"),
     ]
     assert rank_candidates(cands, query="quantum origami", limit=5) == []
 
 
 def test_matching_subset_survives_when_others_dont():
-    target = _c("slide-deck", desc="Build presentations", keywords=["slides"])
-    noise = _c("data-pipeline", desc="ETL jobs", keywords=["etl"])
+    target = _c("slide-deck", desc="Build presentations", keywords=["slides"], kind="local")
+    noise = _c("data-pipeline", desc="ETL jobs", keywords=["etl"], kind="local")
     ranked = rank_candidates([noise, target], query="slides", limit=5)
     assert [c.name for c in ranked] == ["slide-deck"]
