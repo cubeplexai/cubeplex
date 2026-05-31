@@ -129,7 +129,8 @@ class SkillsShAdapter:
         for item in skills:
             if not isinstance(item, dict):
                 continue
-            slug = str(item.get("id") or item.get("name") or "")
+            # Use skillId for the slug (actual skill name), fallback to id/name for compatibility
+            slug = str(item.get("skillId") or item.get("id") or item.get("name") or "")
             source = str(item.get("source") or "")
             # Whitelist both slug and source components against the regex so
             # URL-encoded bypass forms (%2e, %2f) are rejected along with
