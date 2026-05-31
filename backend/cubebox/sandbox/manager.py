@@ -1020,14 +1020,24 @@ class SandboxManager:
         backend = OpenSandbox(sandbox=raw, workdir=self._workdir)
         if self._exchange_host:
             async with self._session_factory() as session:
-                await self._apply_egress(
-                    session,
-                    backend,
-                    org_id=org_id,
-                    workspace_id=workspace_id,
-                    user_id=user_id,
-                    sandbox_id=sandbox_id,
-                )
+                try:
+                    await self._apply_egress(
+                        session,
+                        backend,
+                        org_id=org_id,
+                        workspace_id=workspace_id,
+                        user_id=user_id,
+                        sandbox_id=sandbox_id,
+                    )
+                except Exception:
+                    logger.error(
+                        "Egress refresh failed for winner-resumed sandbox {}; terminating row",
+                        sandbox_id,
+                    )
+                    repo = UserSandboxRepository(session, org_id=org_id, workspace_id=workspace_id)
+                    await repo.mark_terminated(row.id)
+                    await EgressRefRepository(session).revoke_for_sandbox(sandbox_id)
+                    raise
         return backend
 
     async def pause_idle(self) -> None:
