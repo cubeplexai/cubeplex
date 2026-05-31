@@ -81,9 +81,11 @@ def _scoped_repo() -> MagicMock:
 
 
 @pytest.mark.asyncio
-async def test_reconcile_pausing_with_provider_paused_marks_paused() -> None:
+async def test_reconcile_pausing_with_provider_paused_marks_paused(
+    mock_encryption_backend: Any,
+) -> None:
     factory, _session = _make_session_factory()
-    mgr = SandboxManager(factory)
+    mgr = SandboxManager(factory, mock_encryption_backend)
     mgr._exchange_host = ""
 
     record = _make_record(status="pausing")
@@ -123,9 +125,11 @@ async def test_reconcile_pausing_with_provider_paused_marks_paused() -> None:
 
 
 @pytest.mark.asyncio
-async def test_reconcile_pausing_with_provider_running_reverts_to_running() -> None:
+async def test_reconcile_pausing_with_provider_running_reverts_to_running(
+    mock_encryption_backend: Any,
+) -> None:
     factory, _session = _make_session_factory()
-    mgr = SandboxManager(factory)
+    mgr = SandboxManager(factory, mock_encryption_backend)
     mgr._exchange_host = ""
 
     record = _make_record(status="pausing")
@@ -161,14 +165,16 @@ async def test_reconcile_pausing_with_provider_running_reverts_to_running() -> N
 
 
 @pytest.mark.asyncio
-async def test_reconcile_pausing_stuck_past_grace_kills_instead_of_reverting() -> None:
+async def test_reconcile_pausing_stuck_past_grace_kills_instead_of_reverting(
+    mock_encryption_backend: Any,
+) -> None:
     """On backends where pause silently no-ops (provider stays ``Running``),
     repeatedly reverting ``pausing -> running`` leaks the idle sandbox
     forever. After the row has been idle past
     ``_pause_attempt_grace_seconds``, the reconciler must kill it.
     """
     factory, _session = _make_session_factory()
-    mgr = SandboxManager(factory)
+    mgr = SandboxManager(factory, mock_encryption_backend)
     mgr._exchange_host = ""
     mgr._pause_attempt_grace_seconds = 60
 
@@ -206,9 +212,11 @@ async def test_reconcile_pausing_stuck_past_grace_kills_instead_of_reverting() -
 
 
 @pytest.mark.asyncio
-async def test_reconcile_resuming_with_provider_running_stamps_last_resumed_at() -> None:
+async def test_reconcile_resuming_with_provider_running_stamps_last_resumed_at(
+    mock_encryption_backend: Any,
+) -> None:
     factory, _session = _make_session_factory()
-    mgr = SandboxManager(factory)
+    mgr = SandboxManager(factory, mock_encryption_backend)
     mgr._exchange_host = ""
 
     record = _make_record(status="resuming")
@@ -239,9 +247,9 @@ async def test_reconcile_resuming_with_provider_running_stamps_last_resumed_at()
 
 
 @pytest.mark.asyncio
-async def test_reconcile_provider_failed_marks_failed() -> None:
+async def test_reconcile_provider_failed_marks_failed(mock_encryption_backend: Any) -> None:
     factory, _session = _make_session_factory()
-    mgr = SandboxManager(factory)
+    mgr = SandboxManager(factory, mock_encryption_backend)
     mgr._exchange_host = ""
 
     record = _make_record(status="resuming")
@@ -277,14 +285,16 @@ async def test_reconcile_provider_failed_marks_failed() -> None:
 
 @pytest.mark.parametrize("provider_state", ["Terminated", "Succeed"])
 @pytest.mark.asyncio
-async def test_reconcile_provider_terminal_kills_record(provider_state: str) -> None:
+async def test_reconcile_provider_terminal_kills_record(
+    provider_state: str, mock_encryption_backend: Any
+) -> None:
     """``Terminated`` and the empirically-observed ``Succeed`` (internals
     G3/G11) both indicate the provider sandbox is gone for good — the
     reconciler kills the stuck transient row so a fresh sandbox replaces it
     on the next request, rather than leaving it pinned forever.
     """
     factory, _session = _make_session_factory()
-    mgr = SandboxManager(factory)
+    mgr = SandboxManager(factory, mock_encryption_backend)
     mgr._exchange_host = ""
 
     record = _make_record(status="pausing")
@@ -320,9 +330,11 @@ async def test_reconcile_provider_terminal_kills_record(provider_state: str) -> 
 
 @pytest.mark.parametrize("state", ["Pausing", "Resuming", "", "Whatever"])
 @pytest.mark.asyncio
-async def test_reconcile_transient_or_unknown_is_noop_except_touch(state: str) -> None:
+async def test_reconcile_transient_or_unknown_is_noop_except_touch(
+    state: str, mock_encryption_backend: Any
+) -> None:
     factory, _session = _make_session_factory()
-    mgr = SandboxManager(factory)
+    mgr = SandboxManager(factory, mock_encryption_backend)
     mgr._exchange_host = ""
 
     record = _make_record(status="pausing")
@@ -354,9 +366,9 @@ async def test_reconcile_transient_or_unknown_is_noop_except_touch(state: str) -
 
 
 @pytest.mark.asyncio
-async def test_reconcile_get_info_failure_just_bumps_touch() -> None:
+async def test_reconcile_get_info_failure_just_bumps_touch(mock_encryption_backend: Any) -> None:
     factory, _session = _make_session_factory()
-    mgr = SandboxManager(factory)
+    mgr = SandboxManager(factory, mock_encryption_backend)
     mgr._exchange_host = ""
 
     record = _make_record(status="resuming")
@@ -396,14 +408,16 @@ async def test_reconcile_get_info_failure_just_bumps_touch() -> None:
     ],
 )
 @pytest.mark.asyncio
-async def test_reconcile_provider_404_kills_record(err_msg: str) -> None:
+async def test_reconcile_provider_404_kills_record(
+    err_msg: str, mock_encryption_backend: Any
+) -> None:
     """When the provider returns 404 / NOT_FOUND (pod GC'd out-of-band),
     the reconciler must kill the row instead of leaving it transient
     forever — otherwise subsequent ``get_or_create`` calls would time out
     in ``_await_stable_status`` until manual cleanup.
     """
     factory, _session = _make_session_factory()
-    mgr = SandboxManager(factory)
+    mgr = SandboxManager(factory, mock_encryption_backend)
     mgr._exchange_host = ""
 
     record = _make_record(status="resuming")
@@ -436,9 +450,9 @@ async def test_reconcile_provider_404_kills_record(err_msg: str) -> None:
 
 
 @pytest.mark.asyncio
-async def test_reconcile_forwards_claim_timeout_to_repo_query() -> None:
+async def test_reconcile_forwards_claim_timeout_to_repo_query(mock_encryption_backend: Any) -> None:
     factory, _session = _make_session_factory()
-    mgr = SandboxManager(factory)
+    mgr = SandboxManager(factory, mock_encryption_backend)
     mgr._exchange_host = ""
 
     with (
