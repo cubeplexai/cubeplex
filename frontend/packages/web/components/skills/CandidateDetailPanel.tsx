@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import useSWR from 'swr'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -55,8 +55,18 @@ export function CandidateDetailPanel({ wsId, candidate }: CandidateDetailPanelPr
   const install = useSkillsStore((s) => s.install)
   const installing = useSkillsStore((s) => s.installing[candidate.candidate_id] ?? false)
   const apiClient = useMemo(() => createApiClient(''), [])
+  const [installError, setInstallError] = useState<string | null>(null)
 
   const isInstalled = candidate.install_state === 'enabled'
+
+  async function handleInstall() {
+    setInstallError(null)
+    try {
+      await install(apiClient, wsId, candidate.candidate_id)
+    } catch (e) {
+      setInstallError(e instanceof Error ? e.message : String(e))
+    }
+  }
 
   const { data: preview, isLoading } = useSWR<{ content: string }>(
     `/api/v1/ws/${wsId}/skills/discover/preview?candidate_id=${candidate.candidate_id}`,
@@ -76,14 +86,19 @@ export function CandidateDetailPanel({ wsId, candidate }: CandidateDetailPanelPr
           )}
           <Badge variant="secondary">{candidate.source_name}</Badge>
           <TrustInfo trust={candidate.trust} />
-          <div className="ml-auto">
+          <div className="ml-auto flex flex-col items-end gap-1.5">
             <Button
               size="sm"
               disabled={installing || isInstalled}
-              onClick={() => void install(apiClient, wsId, candidate.candidate_id)}
+              onClick={() => void handleInstall()}
             >
               {isInstalled ? 'Installed' : installing ? 'Installing…' : 'Install'}
             </Button>
+            {installError && (
+              <p className="max-w-48 text-right text-[11px] leading-tight text-destructive">
+                {installError}
+              </p>
+            )}
           </div>
         </div>
         {candidate.description && (
