@@ -122,7 +122,7 @@ export function AdminCandidateDetailPanel({
       <dl className="flex flex-col gap-3 border-b border-border pb-4">
         {candidate.install_count !== null && (
           <div className="flex items-center gap-3">
-            <dt className="min-w-24 text-xs font-medium text-muted-foreground">Installs</dt>
+            <dt className="min-w-24 text-xs font-medium text-muted-foreground">Downloads</dt>
             <dd className="text-sm">{candidate.install_count.toLocaleString()}</dd>
           </div>
         )}
