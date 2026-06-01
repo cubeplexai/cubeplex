@@ -117,6 +117,7 @@ async def update_org_env(
             entry_id=entry_id,
             hosts=body.hosts,
             header_names=body.header_names,
+            update_header_names="header_names" in body.model_fields_set,
             secret_value=body.secret_value,
         )
     except (SandboxEnvShapeError, HostPatternError) as exc:
