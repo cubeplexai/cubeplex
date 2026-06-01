@@ -316,6 +316,4 @@ class SkillsShAdapter:
                     )
                 files[rel] = content
 
-        if "SKILL.md" not in files:
-            raise ValueError(f"skills-sh skill {skill_rel_path!r} has no SKILL.md")
         return files
