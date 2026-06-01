@@ -1133,10 +1133,18 @@ class RunManager:
         # for None (the catalog DB may be unavailable at run start).
         if skill_catalog is not None and catalog_session is not None:
             try:
+                from sqlalchemy.ext.asyncio import AsyncSession as _AsyncSession
+
                 from cubebox.repositories.organization import OrganizationRepository
-                from cubebox.skills.discovery import SkillDiscoveryService
+                from cubebox.skills.discovery import (
+                    SkillDiscoveryService,
+                    SkillInstallService,
+                )
+                from cubebox.skills.service import SkillCatalogService, SkillPublishService
                 from cubebox.skills.sources.registry import SkillsAdapterManager
                 from cubebox.tools.builtin.find_skills import create_find_skills_tool
+                from cubebox.tools.builtin.install_skill import create_install_skill_tool
+                from cubebox.tools.builtin.preview_skill import create_preview_skill_tool
 
                 _org = await OrganizationRepository(catalog_session).get(ctx.org_id)
                 if _org is not None:
@@ -1149,6 +1157,37 @@ class RunManager:
                     )
                     _builtin_tools.append(
                         create_find_skills_tool(discovery=SkillDiscoveryService(_registry))
+                    )
+                    _builtin_tools.append(
+                        create_preview_skill_tool(
+                            session=catalog_session,
+                            registry=_registry,
+                            catalog=skill_catalog,
+                            org_id=ctx.org_id,
+                        )
+                    )
+
+                    def _make_install_factory(
+                        _session: _AsyncSession = catalog_session,
+                        _registry: SkillsAdapterManager = _registry,
+                        _catalog: SkillCatalogService = skill_catalog,
+                        _org_id: str = ctx.org_id,
+                        _org_slug: str = _org.slug,
+                        _workspace_id: str | None = ctx.workspace_id,
+                        _actor: str = ctx.user_id,
+                    ) -> SkillInstallService:
+                        return SkillInstallService(
+                            session=_session,
+                            registry=_registry,
+                            publisher=SkillPublishService(session=_session, cache=_catalog.cache),
+                            org_id=_org_id,
+                            org_slug=_org_slug,
+                            workspace_id=_workspace_id,
+                            actor_user_id=_actor,
+                        )
+
+                    _builtin_tools.append(
+                        create_install_skill_tool(install_service_factory=_make_install_factory)
                     )
             except Exception as _exc:  # noqa: BLE001
                 logger.warning("find_skills unavailable for cubepi run: {}", _exc)
