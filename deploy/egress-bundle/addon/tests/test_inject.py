@@ -80,3 +80,52 @@ def test_header_names_gate():
 def test_header_names_empty_list_blocks_all():
     # An explicit empty list means no headers are allowed.
     assert not should_substitute_header("Authorization", [])
+
+
+from inject import parse_proxy_url, apply_upstream_proxy
+
+
+def test_parse_proxy_url_http():
+    assert parse_proxy_url("http://192.168.1.150:7892") == ("http", ("192.168.1.150", 7892))
+
+
+def test_parse_proxy_url_https():
+    assert parse_proxy_url("https://proxy.internal:8443") == ("https", ("proxy.internal", 8443))
+
+
+def test_parse_proxy_url_none():
+    assert parse_proxy_url(None) is None
+
+
+def test_parse_proxy_url_empty():
+    assert parse_proxy_url("") is None
+
+
+def test_parse_proxy_url_invalid():
+    assert parse_proxy_url("not-a-url") is None
+
+
+def test_apply_upstream_proxy_sets_via():
+    """When a proxy is configured, via is set on every flow."""
+    flow = _FakeFlow("https", "api.x.com", {}, sni="api.x.com")
+    flow.server_conn = type("SC", (), {"via": None, "address": ("104.244.42.197", 443)})()
+    proxy = ("http", ("192.168.1.150", 7892))
+    apply_upstream_proxy(flow, proxy)
+    assert flow.server_conn.via == proxy
+
+
+def test_apply_upstream_proxy_skips_self_loop():
+    """Traffic to the proxy's own address must not be re-proxied."""
+    flow = _FakeFlow("https", "192.168.1.150", {}, sni="192.168.1.150")
+    flow.server_conn = type("SC", (), {"via": None, "address": ("192.168.1.150", 7892)})()
+    proxy = ("http", ("192.168.1.150", 7892))
+    apply_upstream_proxy(flow, proxy)
+    assert flow.server_conn.via is None
+
+
+def test_apply_upstream_proxy_noop_when_none():
+    """No proxy configured → via stays None."""
+    flow = _FakeFlow("https", "api.x.com", {}, sni="api.x.com")
+    flow.server_conn = type("SC", (), {"via": None, "address": ("104.244.42.197", 443)})()
+    apply_upstream_proxy(flow, None)
+    assert flow.server_conn.via is None
