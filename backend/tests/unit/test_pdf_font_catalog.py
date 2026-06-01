@@ -22,16 +22,17 @@ def test_probe_returns_empty_when_no_fonts_found():
 
 
 def test_probe_returns_first_matching_path():
+    # WQY Micro Hei is now the first probe for CJK fonts (TrueType, reliable).
     def exists(path: str) -> bool:
-        return "NotoSansCJKsc-Regular.otf" in path
+        return "wqy-microhei.ttc" in path
 
     with patch("os.path.exists", side_effect=exists):
         result = palette.probe_font_paths()
 
     assert "NotoSansCJK" in result
     path, idx = result["NotoSansCJK"]
-    assert "NotoSansCJKsc-Regular.otf" in path
-    assert idx is None
+    assert "wqy-microhei.ttc" in path
+    assert idx == 0
 
 
 def test_probe_falls_back_to_second_path():

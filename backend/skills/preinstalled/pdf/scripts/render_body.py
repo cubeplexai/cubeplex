@@ -61,6 +61,7 @@ from reportlab.lib.colors import HexColor
 from reportlab.lib.enums import TA_JUSTIFY, TA_CENTER
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
+from reportlab.lib.fonts import _ps2tt_map
 
 
 # ── Font registration ──────────────────────────────────────────────────────────
@@ -69,6 +70,10 @@ def register_fonts(tokens: dict) -> set[str]:
 
     font_paths format: {name: {"path": str, "subfont_index": int | None}}
     Legacy flat string format {name: str} is also accepted.
+
+    After registering, injects each font into ReportLab's _ps2tt_map so that
+    Paragraph's ps2tt() resolver can find custom font names (without this,
+    any heading or styled paragraph that calls ps2tt() raises ValueError).
     """
     registered: set[str] = set()
     for name, spec in tokens.get("font_paths", {}).items():
@@ -76,7 +81,7 @@ def register_fonts(tokens: dict) -> set[str]:
             path, idx = spec, None
         else:
             path = spec.get("path", "")
-            idx  = spec.get("subfont_index")  # None → plain TTF/OTF; int → TTC subfont
+            idx  = spec.get("subfont_index")  # None → plain TTF; int → TTC subfont
         if not os.path.exists(path):
             continue
         try:
@@ -85,6 +90,12 @@ def register_fonts(tokens: dict) -> set[str]:
             else:
                 pdfmetrics.registerFont(TTFont(name, path))
             registered.add(name)
+            # ps2tt() maps lowercase font name → (family, is_bold, is_italic).
+            # Without this, Paragraph rendering raises ValueError for any custom font.
+            is_bold   = 1 if name.lower().endswith("-bold") else 0
+            is_italic = 1 if name.lower().endswith("-italic") else 0
+            family    = name[:-5] if is_bold and name.lower().endswith("-bold") else name
+            _ps2tt_map[name.lower()] = (family, is_bold, is_italic)
         except Exception:
             pass
     return registered
