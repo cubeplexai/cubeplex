@@ -376,28 +376,29 @@ SYSTEM_FALLBACK = {
 
 # ── Runtime font detection ─────────────────────────────────────────────────────
 # Each entry: ordered list of (path, subfont_index).
-# subfont_index is None for plain TTF/OTF; int for TTC (ReportLab subfontIndex).
-# NotoSansCJK-*.ttc subfont 2 = Simplified Chinese (SC).
+# subfont_index is None for plain TTF; int for TTC (ReportLab subfontIndex=0).
+#
+# IMPORTANT: ReportLab's TTFont only supports TrueType outlines, NOT OpenType/CFF
+# (.otf files that use CFF outlines). The NotoSansCJKsc-*.otf files on Ubuntu are
+# CFF-flavoured OpenType and will load but then fail in Paragraph rendering via
+# ps2tt(). WenQuanYi Micro Hei (wqy-microhei.ttc) is genuine TrueType and is the
+# reliable choice. Noto TTC variants are also TrueType but subfont index may vary.
 _FONT_PROBES: dict[str, list[tuple[str, int | None]]] = {
     "NotoSansCJK": [
-        ("/usr/share/fonts/opentype/noto/NotoSansCJKsc-Regular.otf", None),
-        ("/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc", 2),
-        ("/usr/share/fonts/truetype/wqy/wqy-microhei.ttc", 0),
+        ("/usr/share/fonts/truetype/wqy/wqy-microhei.ttc", 0),  # TrueType, reliable
+        ("/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc", 2),  # TTC SC subfont
     ],
     "NotoSansCJK-Bold": [
-        ("/usr/share/fonts/opentype/noto/NotoSansCJKsc-Bold.otf", None),
+        ("/usr/share/fonts/truetype/wqy/wqy-microhei.ttc", 0),  # no separate bold; body bold uses same face
         ("/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc", 2),
-        ("/usr/share/fonts/truetype/wqy/wqy-microhei.ttc", 0),
     ],
     "NotoSerifCJK": [
-        ("/usr/share/fonts/opentype/noto/NotoSerifCJKsc-Regular.otf", None),
+        ("/usr/share/fonts/truetype/wqy/wqy-microhei.ttc", 0),  # fallback to WQY for serif
         ("/usr/share/fonts/opentype/noto/NotoSerifCJK-Regular.ttc", 2),
-        ("/usr/share/fonts/opentype/noto/NotoSansCJKsc-Regular.otf", None),
     ],
     "NotoSerifCJK-Bold": [
-        ("/usr/share/fonts/opentype/noto/NotoSerifCJKsc-Bold.otf", None),
+        ("/usr/share/fonts/truetype/wqy/wqy-microhei.ttc", 0),
         ("/usr/share/fonts/opentype/noto/NotoSerifCJK-Bold.ttc", 2),
-        ("/usr/share/fonts/opentype/noto/NotoSansCJKsc-Bold.otf", None),
     ],
     "NotoSans": [
         ("/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf", None),
