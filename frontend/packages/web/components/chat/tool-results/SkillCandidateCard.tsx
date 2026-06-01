@@ -35,6 +35,15 @@ const STATE_BADGE: Record<string, string> = {
   available: 'bg-muted text-muted-foreground',
 }
 
+function safeRepoUrl(url: string | null): string | null {
+  if (!url) return null
+  try {
+    return new URL(url).protocol === 'https:' ? url : null
+  } catch {
+    return null
+  }
+}
+
 export function SkillCandidateCard({ candidate }: { candidate: SkillCandidate }) {
   const t = useTranslations('skillSearch')
   const { workspaceId } = useWorkspaceContext()
@@ -103,16 +112,16 @@ export function SkillCandidateCard({ candidate }: { candidate: SkillCandidate })
           </div>
           <div className="flex items-center gap-1.5">
             <span className="text-xs text-muted-foreground">{candidate.source_name}</span>
-            {candidate.repo && (
+            {safeRepoUrl(candidate.repo) && (
               <a
-                href={candidate.repo}
+                href={safeRepoUrl(candidate.repo)!}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="flex items-center gap-0.5 text-xs text-muted-foreground hover:text-foreground"
                 onClick={(e) => e.stopPropagation()}
               >
                 <ExternalLink className="size-3" />
-                <span>{candidate.repo.replace('https://github.com/', '')}</span>
+                <span>{candidate.repo!.replace('https://github.com/', '')}</span>
               </a>
             )}
           </div>
@@ -137,7 +146,11 @@ export function SkillCandidateCard({ candidate }: { candidate: SkillCandidate })
           size="sm"
           className="h-7 text-xs"
           onClick={() =>
-            openSkillCandidate(candidate.candidate_id, candidate.repo, candidate.source_name)
+            openSkillCandidate(
+              candidate.candidate_id,
+              safeRepoUrl(candidate.repo),
+              candidate.source_name,
+            )
           }
         >
           {t('preview')}
