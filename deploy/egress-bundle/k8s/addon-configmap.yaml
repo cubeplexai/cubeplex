@@ -13,13 +13,6 @@
 #
 # The file below is the authoritative checked-in copy.  Keep it in sync with
 # deploy/egress-bundle/addon/inject.py.
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: egress-inject-addon
-  namespace: opensandbox
-  labels:
-    app.kubernetes.io/part-of: cubebox-egress
 data:
   inject.py: |
     """OpenSandbox egress addon: swap cbxref_ placeholders for real secrets.
@@ -86,6 +79,59 @@ data:
         return header_name.lower() in {h.lower() for h in header_names}
 
 
+    _upstream_proxy: tuple[str, tuple[str, int]] | None = None
+    _upstream_proxy_resolved = False
+
+
+    def parse_proxy_url(url: str | None) -> tuple[str, tuple[str, int]] | None:
+        """Parse a proxy URL into a (scheme, (host, port)) tuple for mitmproxy's via."""
+        if not url or not url.strip():
+            return None
+        parts = urllib.parse.urlsplit(url.strip())
+        if parts.scheme not in ("http", "https") or not parts.hostname or not parts.port:
+            return None
+        return (parts.scheme, (parts.hostname, parts.port))
+
+
+    def apply_upstream_proxy(
+        flow: "http.HTTPFlow",
+        proxy: tuple[str, tuple[str, int]] | None,
+    ) -> None:
+        """Set flow.server_conn.via if a proxy is configured and destination isn't the proxy itself."""
+        if proxy is None:
+            return
+        dest = getattr(flow.server_conn, "address", None)
+        if dest and dest[0] == proxy[1][0] and dest[1] == proxy[1][1]:
+            return
+        flow.server_conn.via = proxy  # type: ignore[assignment]
+
+
+    def _ensure_upstream_proxy() -> None:
+        """Lazy-resolve the upstream proxy on first call. Retries on failure."""
+        global _upstream_proxy, _upstream_proxy_resolved
+        if _upstream_proxy_resolved:
+            return
+        try:
+            ctx, url = _ctx_and_url()
+            parts = urllib.parse.urlsplit(url)
+            base_path = parts.path.rsplit("/exchange", 1)[0]
+            conn = http.client.HTTPSConnection(
+                parts.hostname, parts.port or 443, context=ctx, timeout=5.0
+            )
+            try:
+                conn.request("GET", f"{base_path}/proxy-config")
+                resp = conn.getresponse()
+                if resp.status != 200:
+                    return  # leave unresolved → retry next flow
+                data = json.loads(resp.read())
+            finally:
+                conn.close()
+            _upstream_proxy = parse_proxy_url(data.get("proxy"))
+            _upstream_proxy_resolved = True  # success (even if proxy is None = not configured)
+        except (OSError, ValueError, KeyError):
+            pass  # leave unresolved → retry next flow
+
+
     def _exchange(placeholder: str, host: str) -> tuple[str, list[str] | None] | None:
         ctx, url = _ctx_and_url()
         parts = urllib.parse.urlsplit(url)
@@ -108,6 +154,8 @@ data:
 
 
     def request(flow: "http.HTTPFlow") -> None:
+        _ensure_upstream_proxy()
+        apply_upstream_proxy(flow, _upstream_proxy)
         # Only substitute on HTTPS. Two reasons:
         #  1. A real secret must never traverse plaintext.
         #  2. We key the exchange on the TLS SNI from the ClientHello
@@ -138,3 +186,7 @@ data:
                     continue
                 value = value.replace(token, secret)
             flow.request.headers[name] = value
+kind: ConfigMap
+metadata:
+  name: egress-inject-addon
+  namespace: opensandbox

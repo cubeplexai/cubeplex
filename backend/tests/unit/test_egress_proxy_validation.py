@@ -39,3 +39,8 @@ def test_rejects_no_host():
 def test_rejects_empty():
     with pytest.raises(SandboxPolicyValidationError):
         _validate_egress_proxy("")
+
+
+def test_rejects_non_numeric_port():
+    with pytest.raises(SandboxPolicyValidationError, match="invalid port"):
+        _validate_egress_proxy("http://proxy:abc")
