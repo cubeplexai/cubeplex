@@ -15,6 +15,7 @@ Exit codes: 0 success, 1 bad args, 3 write error
 
 import argparse
 import json
+import os
 import sys
 
 # ── Palette library ────────────────────────────────────────────────────────────
@@ -373,6 +374,149 @@ SYSTEM_FALLBACK = {
     "body_b_rl":    "Helvetica-Bold",
 }
 
+# ── Runtime font detection ─────────────────────────────────────────────────────
+# Each entry: ordered list of (path, subfont_index).
+# subfont_index is None for plain TTF/OTF; int for TTC (ReportLab subfontIndex).
+# NotoSansCJK-*.ttc subfont 2 = Simplified Chinese (SC).
+_FONT_PROBES: dict[str, list[tuple[str, int | None]]] = {
+    "NotoSansCJK": [
+        ("/usr/share/fonts/opentype/noto/NotoSansCJKsc-Regular.otf", None),
+        ("/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc", 2),
+        ("/usr/share/fonts/truetype/wqy/wqy-microhei.ttc", 0),
+    ],
+    "NotoSansCJK-Bold": [
+        ("/usr/share/fonts/opentype/noto/NotoSansCJKsc-Bold.otf", None),
+        ("/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc", 2),
+        ("/usr/share/fonts/truetype/wqy/wqy-microhei.ttc", 0),
+    ],
+    "NotoSerifCJK": [
+        ("/usr/share/fonts/opentype/noto/NotoSerifCJKsc-Regular.otf", None),
+        ("/usr/share/fonts/opentype/noto/NotoSerifCJK-Regular.ttc", 2),
+        ("/usr/share/fonts/opentype/noto/NotoSansCJKsc-Regular.otf", None),
+    ],
+    "NotoSerifCJK-Bold": [
+        ("/usr/share/fonts/opentype/noto/NotoSerifCJKsc-Bold.otf", None),
+        ("/usr/share/fonts/opentype/noto/NotoSerifCJK-Bold.ttc", 2),
+        ("/usr/share/fonts/opentype/noto/NotoSansCJKsc-Bold.otf", None),
+    ],
+    "NotoSans": [
+        ("/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf", None),
+    ],
+    "NotoSans-Bold": [
+        ("/usr/share/fonts/truetype/noto/NotoSans-Bold.ttf", None),
+    ],
+    "NotoSerif": [
+        ("/usr/share/fonts/truetype/noto/NotoSerif-Regular.ttf", None),
+    ],
+    "NotoSerif-Bold": [
+        ("/usr/share/fonts/truetype/noto/NotoSerif-Bold.ttf", None),
+    ],
+    "LiberationSans": [
+        ("/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf", None),
+    ],
+    "LiberationSans-Bold": [
+        ("/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf", None),
+    ],
+    "LiberationSerif-Bold": [
+        ("/usr/share/fonts/truetype/liberation/LiberationSerif-Bold.ttf", None),
+    ],
+    "LiberationMono": [
+        ("/usr/share/fonts/truetype/liberation/LiberationMono-Regular.ttf", None),
+    ],
+    "LiberationMono-Bold": [
+        ("/usr/share/fonts/truetype/liberation/LiberationMono-Bold.ttf", None),
+    ],
+}
+
+
+def probe_font_paths() -> dict[str, tuple[str, int | None]]:
+    """Probe known font install paths. Returns {name: (path, subfont_index)} for each found font."""
+    result: dict[str, tuple[str, int | None]] = {}
+    for name, probes in _FONT_PROBES.items():
+        for path, idx in probes:
+            if os.path.exists(path):
+                result[name] = (path, idx)
+                break
+    return result
+
+
+# ── Font catalog ───────────────────────────────────────────────────────────────
+# Maps agent-facing font name → ReportLab font names + required probe keys.
+FONT_CATALOG: dict[str, dict] = {
+    "noto-sans": {
+        "display_rl": "NotoSansCJK-Bold",
+        "body_rl":    "NotoSansCJK",
+        "body_b_rl":  "NotoSansCJK-Bold",
+        "requires":   ["NotoSansCJK", "NotoSansCJK-Bold"],
+        "description": "Modern sans-serif, full CJK + Latin (default for most docs)",
+    },
+    "noto-serif": {
+        "display_rl": "NotoSerifCJK-Bold",
+        "body_rl":    "NotoSerifCJK",
+        "body_b_rl":  "NotoSerifCJK-Bold",
+        "requires":   ["NotoSerifCJK", "NotoSerifCJK-Bold"],
+        "description": "Classic serif, full CJK + Latin (academic, editorial, annual reports)",
+    },
+    "noto-sans-latin": {
+        "display_rl": "NotoSans-Bold",
+        "body_rl":    "NotoSans",
+        "body_b_rl":  "NotoSans-Bold",
+        "requires":   ["NotoSans", "NotoSans-Bold"],
+        "description": "Clean modern sans-serif, Latin only",
+    },
+    "noto-serif-latin": {
+        "display_rl": "NotoSerif-Bold",
+        "body_rl":    "NotoSerif",
+        "body_b_rl":  "NotoSerif-Bold",
+        "requires":   ["NotoSerif", "NotoSerif-Bold"],
+        "description": "Classic serif, Latin only",
+    },
+    "liberation": {
+        "display_rl": "LiberationSerif-Bold",
+        "body_rl":    "LiberationSans",
+        "body_b_rl":  "LiberationSans-Bold",
+        "requires":   ["LiberationSans", "LiberationSans-Bold", "LiberationSerif-Bold"],
+        "description": "Arial/Times-compatible, formal corporate documents",
+    },
+    "monospace": {
+        "display_rl": "LiberationMono-Bold",
+        "body_rl":    "LiberationMono",
+        "body_b_rl":  "LiberationMono-Bold",
+        "requires":   ["LiberationMono", "LiberationMono-Bold"],
+        "description": "Monospace, terminal and code-heavy documents",
+    },
+}
+
+# Built-in ReportLab fallback (no CJK support, always available).
+_BUILTIN_FALLBACK: dict = {
+    "display_rl": "Times-Bold",
+    "body_rl":    "Helvetica",
+    "body_b_rl":  "Helvetica-Bold",
+    "requires":   [],
+}
+
+# Default font catalog name by mood; all other moods use _MOOD_DEFAULT_FONT.
+_MOOD_FONT_OVERRIDES: dict[str, str] = {
+    "scholarly":  "noto-serif",
+    "restrained": "noto-serif",
+    "classical":  "noto-serif",
+    "magazine":   "noto-serif",
+    "darkroom":   "noto-serif",
+    "terminal":   "monospace",
+}
+_MOOD_DEFAULT_FONT = "noto-sans"
+
+
+def resolve_font(
+    font_name: str,
+    probed: dict[str, tuple[str, int | None]],
+) -> dict:
+    """Return the catalog entry for font_name if all required fonts are probed; else built-in fallback."""
+    entry = FONT_CATALOG.get(font_name)
+    if entry and all(f in probed for f in entry["requires"]):
+        return entry
+    return _BUILTIN_FALLBACK
+
 
 # ── Colour helpers ──────────────────────────────────────────────────────────────
 def _hex_to_rgb(h: str) -> tuple:
@@ -398,17 +542,34 @@ def build_tokens(
     date: str = "",
     accent_override: str = "",
     cover_bg_override: str = "",
+    body_font: str = "",
+    display_font: str = "",
 ) -> dict:
     palette   = PALETTES.get(doc_type, PALETTES["general"]).copy()
     mood      = palette["mood"]
     font_pair = FONT_PAIRS.get(mood, SYSTEM_FALLBACK)
 
-    # Apply caller-supplied overrides before token assembly
     if accent_override:
         palette["accent"]    = accent_override
         palette["accent_lt"] = _lighten(accent_override, 0.09)
     if cover_bg_override:
         palette["cover_bg"] = cover_bg_override
+
+    # Resolve body/display fonts — probe system paths, fall back to built-ins.
+    probed = probe_font_paths()
+    _default_catalog = _MOOD_FONT_OVERRIDES.get(mood, _MOOD_DEFAULT_FONT)
+    body_entry    = resolve_font(body_font or _default_catalog, probed)
+    display_entry = resolve_font(display_font or body_font or _default_catalog, probed)
+
+    # Collect font_paths for all required fonts (body + display, deduplicated).
+    required_names: list[str] = list(dict.fromkeys(
+        body_entry["requires"] + display_entry["requires"]
+    ))
+    font_paths: dict[str, dict] = {}
+    for name in required_names:
+        if name in probed:
+            path, idx = probed[name]
+            font_paths[name] = {"path": path, "subfont_index": idx}
 
     tokens = {
         # Identity
@@ -429,20 +590,20 @@ def build_tokens(
         "cover_pattern": palette["cover_pattern"],
         "mood":          mood,
 
-        # Typography — CSS names for cover HTML (loaded via Google Fonts @import)
-        "font_display":     font_pair["display_css"],
-        "font_body":        font_pair["body_css"],
-        "gfonts_import":    font_pair["gfonts_import"],
+        # Typography — CSS names for cover HTML (Google Fonts @import)
+        "font_display":  font_pair["display_css"],
+        "font_body":     font_pair["body_css"],
+        "gfonts_import": font_pair["gfonts_import"],
 
-        # Typography — ReportLab system font names for body pages
-        "font_display_rl":  font_pair["display_rl"],
-        "font_body_rl":     font_pair["body_rl"],
-        "font_body_b_rl":   font_pair["body_b_rl"],
+        # Typography — ReportLab names for body pages
+        "font_display_rl": display_entry["display_rl"],
+        "font_body_rl":    body_entry["body_rl"],
+        "font_body_b_rl":  body_entry["body_b_rl"],
 
-        # Legacy keys (kept so render_body.py's register_fonts is a no-op)
-        "font_heading":  font_pair["display_rl"],
-        "font_body_b":   font_pair["body_b_rl"],
-        "font_paths":    {},
+        # Legacy keys
+        "font_heading": display_entry["display_rl"],
+        "font_body_b":  body_entry["body_b_rl"],
+        "font_paths":   font_paths,
 
         # Type scale (pt)
         "size_display": 54,
@@ -453,11 +614,11 @@ def build_tokens(
         "size_caption": 8.5,
         "size_meta":    8,
 
-        # Layout (pt, 1cm ≈ 28.35pt)
-        "margin_left":   79,   # 2.8cm
+        # Layout (pt)
+        "margin_left":   79,
         "margin_right":  79,
         "margin_top":    79,
-        "margin_bottom": 71,   # 2.5cm
+        "margin_bottom": 71,
         "section_gap":   26,
         "para_gap":      8,
         "line_gap":      17,
@@ -480,6 +641,12 @@ def main():
                              "accent_lt is auto-derived by lightening toward white.")
     parser.add_argument("--cover-bg", default="",
                         help="Override cover background colour (hex).")
+    parser.add_argument("--body-font",    default="",
+                        choices=list(FONT_CATALOG.keys()) + [""],
+                        help="Body font: " + ", ".join(FONT_CATALOG.keys()))
+    parser.add_argument("--display-font", default="",
+                        choices=list(FONT_CATALOG.keys()) + [""],
+                        help="Display/heading font (defaults to --body-font)")
     parser.add_argument("--out",    default="tokens.json")
     args = parser.parse_args()
 
@@ -499,6 +666,8 @@ def main():
         args.title, args.type, args.author, args.date,
         accent_override=args.accent,
         cover_bg_override=getattr(args, "cover_bg", ""),
+        body_font=getattr(args, "body_font", ""),
+        display_font=getattr(args, "display_font", ""),
     )
 
     try:
