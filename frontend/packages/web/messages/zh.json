@@ -384,10 +384,22 @@
       "discardYes": "删除",
       "discardNo": "返回",
       "step": {
-        "preset": { "label": "选择预设", "hint": "挑选 provider" },
-        "configure": { "label": "配置", "hint": "凭证与能力" },
-        "models": { "label": "模型", "hint": "选择要导入的模型" },
-        "test": { "label": "测试", "hint": "验证连接" }
+        "preset": {
+          "label": "选择预设",
+          "hint": "挑选 provider"
+        },
+        "configure": {
+          "label": "配置",
+          "hint": "凭证与能力"
+        },
+        "models": {
+          "label": "模型",
+          "hint": "选择要导入的模型"
+        },
+        "test": {
+          "label": "测试",
+          "hint": "验证连接"
+        }
       },
       "preset": {
         "searchPlaceholder": "搜索 provider",
@@ -706,7 +718,27 @@
       "actionRemove": "从工作区移除",
       "actionRemoving": "移除中…",
       "actionInstall": "安装到工作区",
-      "actionInstalling": "安装中…"
+      "actionInstalling": "安装中…",
+      "files": "文件",
+      "filesCount": "文件 ({count})",
+      "noAdditionalFiles": "该版本无附加文件。",
+      "clickToPreview": "点击左侧文件名预览内容。",
+      "previewLoading": "加载中…",
+      "binaryFile": "无法预览：该文件为二进制文件。",
+      "versions": "版本",
+      "versionsCount": "版本 ({count})",
+      "noVersions": "暂无版本记录。",
+      "versionInstalled": "已安装",
+      "versionLatest": "最新",
+      "compare": "对比",
+      "versionA": "版本 A（旧）",
+      "versionB": "版本 B（新）",
+      "compareSideBySide": "左右对比",
+      "compareInline": "内联",
+      "selectTwoVersions": "请选择两个不同的版本进行对比。",
+      "clickViewDiff": "点击左侧文件查看 diff",
+      "binaryDiff": "该文件为二进制文件，无法显示 diff。",
+      "loading": "加载中…"
     },
     "skillsToolbar": {
       "searchPlaceholder": "按名称或描述搜索",
