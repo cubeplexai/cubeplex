@@ -25,6 +25,15 @@ async function fetchPreview(url: string): Promise<CandidatePreview> {
   return res.json() as Promise<CandidatePreview>
 }
 
+function safeRepoUrl(url: string | null | undefined): string | null {
+  if (!url) return null
+  try {
+    return new URL(url).protocol === 'https:' ? url : null
+  } catch {
+    return null
+  }
+}
+
 export function SkillCandidatePanel({
   candidateId,
   repo,
@@ -93,15 +102,15 @@ export function SkillCandidatePanel({
               <span className="font-mono font-semibold">{data.name}</span>
               <div className="flex flex-wrap items-center gap-2">
                 {sourceName && <span className="text-xs text-muted-foreground">{sourceName}</span>}
-                {repo && (
+                {safeRepoUrl(repo) && (
                   <a
-                    href={repo}
+                    href={safeRepoUrl(repo)!}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="flex items-center gap-0.5 text-xs text-muted-foreground hover:text-foreground"
                   >
                     <ExternalLink className="size-3" />
-                    <span>{repo.replace('https://github.com/', '')}</span>
+                    <span>{repo!.replace('https://github.com/', '')}</span>
                   </a>
                 )}
                 {data.env_vars.length > 0 && (
