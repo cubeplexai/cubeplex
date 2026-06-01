@@ -4,7 +4,7 @@ import { useMemo, useState } from 'react'
 import useSWR from 'swr'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { ShieldCheck, ShieldAlert, ShieldOff, FileText } from 'lucide-react'
+import { ShieldCheck, ShieldAlert, ShieldOff, FileText, ExternalLink } from 'lucide-react'
 import {
   createApiClient,
   useSkillsStore,
@@ -127,12 +127,37 @@ export function CandidateDetailPanel({ wsId, candidate }: CandidateDetailPanelPr
             <dd className="text-sm">{candidate.install_count.toLocaleString()}</dd>
           </div>
         )}
-        {candidate.repo && (
-          <div className="flex items-center gap-3">
-            <dt className="min-w-20 text-xs font-medium text-muted-foreground">Repo</dt>
-            <dd className="truncate text-xs text-muted-foreground">{candidate.repo}</dd>
-          </div>
-        )}
+        {candidate.repo &&
+          (() => {
+            let safeUrl: string | null = null
+            try {
+              safeUrl = new URL(candidate.repo).protocol === 'https:' ? candidate.repo : null
+            } catch {
+              /* */
+            }
+            return (
+              <div className="flex items-center gap-3">
+                <dt className="min-w-20 text-xs font-medium text-muted-foreground">Repo</dt>
+                <dd className="min-w-0 flex-1">
+                  {safeUrl ? (
+                    <a
+                      href={safeUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center gap-1 truncate text-xs text-muted-foreground hover:text-foreground"
+                    >
+                      <span className="truncate">
+                        {candidate.repo.replace('https://github.com/', '')}
+                      </span>
+                      <ExternalLink className="size-3 shrink-0" />
+                    </a>
+                  ) : (
+                    <span className="truncate text-xs text-muted-foreground">{candidate.repo}</span>
+                  )}
+                </dd>
+              </div>
+            )
+          })()}
         {preview?.env_vars && preview.env_vars.length > 0 && (
           <div className="flex items-start gap-3">
             <dt className="min-w-20 pt-0.5 text-xs font-medium text-muted-foreground">
