@@ -163,6 +163,7 @@ RUN apt-get update \
         libgstreamer1.0-0 libgstreamer-plugins-base1.0-0 \
         gstreamer1.0-plugins-base gstreamer1.0-plugins-good \
         gstreamer1.0-plugins-bad gstreamer1.0-plugins-ugly gstreamer1.0-libav \
+        libnss3-tools \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
