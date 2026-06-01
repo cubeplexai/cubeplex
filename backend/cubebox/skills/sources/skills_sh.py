@@ -117,30 +117,29 @@ class SkillsShAdapter:
     ) -> None:
         """Index skill directory locations from GitHub tree.
 
-        Detects whether skills are at "skills/{slug}/" or "{slug}/" and
-        populates skill_paths mapping.
+        Scans for SKILL.md blobs and infers the containing directory rather than
+        hard-coding path patterns. This handles any repo layout:
+          - {slug}/SKILL.md              (top-level, depth 1)
+          - skills/{slug}/SKILL.md       (skills/ subdirectory, depth 2)
+          - .claude/skills/{slug}/SKILL.md  (Claude canonical layout, depth 3)
+          - any other nesting
+
+        When the same slug appears at multiple depths, the shallower path wins
+        (simpler structures are more intentional).
         """
         entries = tree_data.get("tree", [])
-        # Extract all unique top-level and "skills/" subdirectories
-        skill_dirs: set[str] = set()
         for entry in entries:
-            if not isinstance(entry, dict) or entry.get("type") != "tree":
+            if not isinstance(entry, dict) or entry.get("type") != "blob":
                 continue
             path = str(entry.get("path", ""))
-            # Check for "skills/{slug}" pattern
-            if path.startswith("skills/"):
-                slug = path.split("/", 1)[1]
-                if slug and "/" not in slug:  # Direct child of skills/
-                    skill_dirs.add(f"skills/{slug}")
-            # Check for top-level skill directories (common pattern too)
-            elif "/" not in path:
-                skill_dirs.add(path)
-        # Populate the mapping: prefer "skills/{slug}" if both exist
-        for skill_dir in skill_dirs:
+            if not path.endswith("/SKILL.md"):
+                continue
+            skill_dir = path[: -len("/SKILL.md")]
             slug = skill_dir.split("/")[-1]
-            if skill_dir.startswith("skills/"):
-                skill_paths[(source, slug)] = skill_dir
-            elif f"skills/{slug}" not in skill_dirs:
+            if not slug or not all(_safe_name(c) for c in skill_dir.split("/")):
+                continue
+            existing = skill_paths.get((source, slug))
+            if existing is None or skill_dir.count("/") < existing.count("/"):
                 skill_paths[(source, slug)] = skill_dir
 
     def _resolve_skill_path(
