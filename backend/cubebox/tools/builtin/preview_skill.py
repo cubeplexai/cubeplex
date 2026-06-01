@@ -60,13 +60,23 @@ def create_preview_skill_tool(
             return AgentToolResult(content=[TextContent(text="BAD_CANDIDATE_ID")], is_error=True)
 
         if kind == "local":
-            from cubebox.repositories.skill import SkillRepository, SkillVersionRepository
+            from cubebox.repositories.skill import (
+                OrgPreinstalledTombstoneRepository,
+                SkillRepository,
+                SkillVersionRepository,
+            )
 
             skill = await SkillRepository(session).get(source_ref)
             if skill is None or not (
                 skill.source == "preinstalled" or skill.owner_org_id == org_id
             ):
                 return AgentToolResult(content=[TextContent(text="SKILL_NOT_FOUND")], is_error=True)
+            if skill.source == "preinstalled":
+                tombstone = await OrgPreinstalledTombstoneRepository(session).get(org_id, skill.id)
+                if tombstone is not None:
+                    return AgentToolResult(
+                        content=[TextContent(text="SKILL_NOT_FOUND")], is_error=True
+                    )
             sv = await SkillVersionRepository(session).find(skill.id, skill.current_version)
             if sv is None:
                 return AgentToolResult(
@@ -100,9 +110,14 @@ def create_preview_skill_tool(
                 content=[TextContent(text=f"INVALID_UTF8: {exc}")], is_error=True
             )
         slug = source_ref.rsplit("/", 1)[-1]
+        try:
+            fm = parse_skill_md(content)
+            display_name = fm.name or slug
+        except Exception:  # noqa: BLE001
+            display_name = slug
         payload = {
             "candidate_id": args.candidate_id,
-            "name": slug,
+            "name": display_name,
             "content": content,
             "env_vars": _env_vars(content),
         }
