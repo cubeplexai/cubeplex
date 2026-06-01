@@ -11,6 +11,7 @@ from typing import Annotated, Literal
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from loguru import logger
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cubebox.api.schemas.skill import (
@@ -264,6 +265,9 @@ async def preview_candidate(
     except UnicodeDecodeError as e:
         raise HTTPException(status_code=400, detail="INVALID_SKILL") from e
     except (httpx.HTTPError, ValueError) as e:
+        logger.warning(
+            "preview_candidate remote fetch failed: source_ref={!r} error={}", source_ref, e
+        )
         raise HTTPException(status_code=502, detail="REMOTE_FETCH_FAILED") from e
     slug = source_ref.rsplit("/", 1)[-1]
     return CandidatePreviewResponse(
