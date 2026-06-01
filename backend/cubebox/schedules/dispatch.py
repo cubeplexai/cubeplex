@@ -92,6 +92,7 @@ async def dispatch_scheduled_run(
         user_id=task.owner_user_id,
         org_id=task.org_id,
         workspace_id=task.workspace_id,
+        trigger="automated",
     )
     try:
         actual_run_id = await run_manager.start_run(
