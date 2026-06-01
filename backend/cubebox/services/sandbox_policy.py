@@ -33,7 +33,7 @@ class _PolicyRepo(Protocol):
         network_rules: list[dict[str, Any]] | None,
         command_rules: list[dict[str, Any]] | None,
         network_default_action: str,
-        egress_proxy: str | None,
+        egress_proxy: str | None = None,
     ) -> Any: ...
 
 
