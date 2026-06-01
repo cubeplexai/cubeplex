@@ -205,7 +205,9 @@ async def admin_preview_candidate(
         files = await remote.fetch(source_ref)
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"FETCH_FAILED: {e}") from e
-    skill_md = files.get("SKILL.md", b"").decode("utf-8", errors="replace")
+    if "SKILL.md" not in files:
+        raise HTTPException(status_code=404, detail="SKILL_MD_MISSING")
+    skill_md = files["SKILL.md"].decode("utf-8", errors="replace")
     name = peek_skill_name(skill_md) or source_ref.rsplit("/", 1)[-1]
     return CandidatePreviewResponse(
         candidate_id=candidate_id,
