@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import { useTranslations } from 'next-intl'
-import { Download } from 'lucide-react'
+import { Download, ExternalLink } from 'lucide-react'
 import { usePanelStore } from '@cubebox/core'
 import { Button } from '@/components/ui/button'
 import { useWorkspaceContext } from '@/hooks/useWorkspaceContext'
@@ -101,7 +101,21 @@ export function SkillCandidateCard({ candidate }: { candidate: SkillCandidate })
               {stateLabel}
             </span>
           </div>
-          <span className="text-xs text-muted-foreground">{candidate.source_name}</span>
+          <div className="flex items-center gap-1.5">
+            <span className="text-xs text-muted-foreground">{candidate.source_name}</span>
+            {candidate.repo && (
+              <a
+                href={candidate.repo}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-0.5 text-xs text-muted-foreground hover:text-foreground"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <ExternalLink className="size-3" />
+                <span>{candidate.repo.replace('https://github.com/', '')}</span>
+              </a>
+            )}
+          </div>
         </div>
         {candidate.install_count != null && (
           <div className="flex items-center gap-0.5 shrink-0 text-xs text-muted-foreground">
@@ -122,7 +136,9 @@ export function SkillCandidateCard({ candidate }: { candidate: SkillCandidate })
           variant="outline"
           size="sm"
           className="h-7 text-xs"
-          onClick={() => openSkillCandidate(candidate.candidate_id)}
+          onClick={() =>
+            openSkillCandidate(candidate.candidate_id, candidate.repo, candidate.source_name)
+          }
         >
           {t('preview')}
         </Button>
