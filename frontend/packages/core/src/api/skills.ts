@@ -42,7 +42,7 @@ export async function discoverSkills(
   client: ApiClient,
   wsId: string,
   q: string,
-  limit = 5,
+  limit = 10,
 ): Promise<SkillCandidateListResponse> {
   const params = new URLSearchParams({ q, limit: String(limit) })
   const res = await client.get(`/api/v1/ws/${wsId}/skills/discover?${params}`)

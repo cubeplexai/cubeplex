@@ -1,7 +1,7 @@
 import { toApiError } from './client'
 import type { SkillCandidateOut, SkillPreviewResponse } from './skills'
 
-export async function adminDiscoverSkills(q: string, limit = 5): Promise<SkillCandidateOut[]> {
+export async function adminDiscoverSkills(q: string, limit = 10): Promise<SkillCandidateOut[]> {
   const params = new URLSearchParams({ q, limit: String(limit) })
   const res = await fetch(`/api/v1/admin/skills/discover?${params}`, { credentials: 'include' })
   if (!res.ok) throw await toApiError(res)

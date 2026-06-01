@@ -21,7 +21,16 @@ interface CandidatePreview {
 
 async function fetchPreview(url: string): Promise<CandidatePreview> {
   const res = await fetch(url, { credentials: 'include' })
-  if (!res.ok) throw new Error(`preview fetch failed: ${res.status}`)
+  if (!res.ok) {
+    let detail = ''
+    try {
+      const body = (await res.json()) as { detail?: string }
+      detail = typeof body.detail === 'string' ? body.detail : ''
+    } catch {
+      /* ignore parse failures */
+    }
+    throw new Error(detail || `${res.status}`)
+  }
   return res.json() as Promise<CandidatePreview>
 }
 
@@ -90,6 +99,9 @@ export function SkillCandidatePanel({
         {error && !isLoading && (
           <div className="flex flex-col gap-2">
             <p className="text-sm text-destructive">{t('fetchError')}</p>
+            {error instanceof Error && error.message && (
+              <p className="font-mono text-xs text-muted-foreground">{error.message}</p>
+            )}
             <Button variant="outline" size="sm" onClick={() => void mutate()}>
               {t('retry')}
             </Button>
@@ -109,8 +121,8 @@ export function SkillCandidatePanel({
                     rel="noopener noreferrer"
                     className="flex items-center gap-0.5 text-xs text-muted-foreground hover:text-foreground"
                   >
-                    <ExternalLink className="size-3" />
                     <span>{repo!.replace('https://github.com/', '')}</span>
+                    <ExternalLink className="size-3" />
                   </a>
                 )}
                 {data.env_vars.length > 0 && (
