@@ -67,11 +67,15 @@ export function SkillCandidateCard({ candidate }: { candidate: SkillCandidate })
     }
   }
 
-  const trustKey = `trust${candidate.trust.charAt(0).toUpperCase()}${candidate.trust.slice(1)}` as
-    | 'trustOfficial'
-    | 'trustCommunity'
-    | 'trustUnvetted'
-  const trustLabel = t(trustKey)
+  const TRUST_KEY = {
+    official: 'trustOfficial',
+    community: 'trustCommunity',
+    untrusted: 'trustUnvetted',
+  } as const satisfies Record<
+    SkillCandidate['trust'],
+    'trustOfficial' | 'trustCommunity' | 'trustUnvetted'
+  >
+  const trustLabel = t(TRUST_KEY[candidate.trust] ?? 'trustUnvetted')
   const stateLabel = installState === 'enabled' ? t('stateEnabled') : t('stateAvailable')
 
   return (
