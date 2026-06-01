@@ -64,3 +64,4 @@ async def test_install_bad_candidate_id_returns_error() -> None:
     result = await tool.execute("tc-3", InstallSkillInput(candidate_id="!!!bad!!!"))
 
     assert result.is_error
+    assert "BAD_CANDIDATE_ID" in result.content[0].text
