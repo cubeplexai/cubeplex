@@ -10,7 +10,7 @@ from typing import Annotated, Any, Literal, Union
 
 from cubepi.agent.types import AgentTool, AgentToolResult
 from cubepi.providers.base import TextContent
-from pydantic import BaseModel, Field, create_model
+from pydantic import BaseModel, Field, RootModel, create_model
 
 from cubebox.agents.actions.context import ScopeContext
 from cubebox.agents.actions.types import (
@@ -59,15 +59,21 @@ def _build_union_model(
     cap_name: str,
     operations: list[AgentOperation],
 ) -> type[BaseModel]:
-    """Build a discriminated-union input model over multiple operations."""
+    """Build a discriminated-union input model over multiple operations.
+
+    Uses ``RootModel`` so the discriminated union IS the top-level schema
+    (no wrapping ``params`` field). The LLM sees ``{operation: "create", ...}``
+    directly.
+    """
     sub_models = [_build_operation_model(op) for op in operations]
 
-    # Build Union type dynamically — opaque to mypy.
     union_type: Any = Union[tuple(sub_models)]  # noqa: UP007
     annotated_union = Annotated[union_type, Field(discriminator="operation")]
-    model: Any = create_model(
+
+    model: Any = type(
         f"{cap_name}_Input",
-        params=(annotated_union, ...),
+        (RootModel[annotated_union],),
+        {},
     )
     return model  # type: ignore[no-any-return]
 
@@ -114,9 +120,8 @@ def build_capability_tool(
             op = surviving[0]
             parsed = args
         else:
-            # ``args`` is the union wrapper; the discriminated payload
-            # lives in ``.params``.
-            inner = args.params  # type: ignore[attr-defined]
+            # RootModel: the discriminated payload is ``.root``.
+            inner = args.root  # type: ignore[attr-defined]
             op_name: str = inner.operation
             op = ops_by_name[op_name]
             parsed = inner
