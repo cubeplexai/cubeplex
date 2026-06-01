@@ -40,16 +40,17 @@ and the egress control plane stays intact.
 
 - Per-host proxy mapping or multiple proxies. Global only; the proxy splits.
 - Proxy authentication / credentials. No-auth `http(s)` proxy only.
-- Live hot-reload for already-running sandboxes. Config is read at sandbox
-  start (matches the existing static `network_rules` model). A future TTL
-  re-fetch can be added if needed.
+- Live hot-reload for already-running sandboxes. The proxy is fetched lazily on
+  first use and cached for the sandbox's life; a config change takes effect on
+  the next sandbox start. A future TTL re-fetch can be added if needed.
 - SOCKS proxies. mitmproxy's `via` supports `http`/`https` upstreams only.
 
 ## Requirements
 
-- **Scope:** org admin, stored on the existing `SandboxPolicy` (admin scope;
-  v1 writes the org-default row, `scope_workspace_id=NULL`; per-workspace
-  overrides come for free via the existing resolver).
+- **Scope:** org admin, stored on the existing `SandboxPolicy` (admin scope).
+  v1 resolves the **org-default** row (`scope_workspace_id=NULL`) only: the
+  sidecar cert proves `sandbox_id` → org, but carries no workspace, so
+  per-workspace overrides are out of reach until the identity carries one.
 - **Range:** global — all outbound, not per-host.
 - **Auth:** none.
 
@@ -79,10 +80,12 @@ Two endpoints, both reusing existing mechanisms:
 
 2. **Addon fetch (new)** — `GET /api/v1/internal/egress/proxy-config`,
    authenticated by the sidecar's mTLS client cert (reuse the `SidecarIdentity`
-   verification that the exchange endpoint already uses). cubebox maps
-   cert → `sandbox_id` → org/workspace, resolves the effective `SandboxPolicy`
-   (reusing the resolver in `services/sandbox_policy.py`; v1 = org-default row),
-   and returns its `egress_proxy`:
+   verification the exchange endpoint already uses). `SidecarIdentity` proves
+   only `sandbox_id`, so the lookup chain is explicit: verify cert → **unscoped**
+   `UserSandbox` lookup by `sandbox_id` → `org_id` → resolve the org-default
+   `SandboxPolicy` (`services/sandbox_policy.py`) → return its `egress_proxy`.
+   (`UserSandbox.get_by_sandbox_id` is org-scoped, so a small unscoped variant —
+   like the exchange path's sandbox→org resolution — is needed.) Response:
 
    ```json
    { "proxy": "http://192.168.1.150:7892" }   // or { "proxy": null }
@@ -90,15 +93,21 @@ Two endpoints, both reusing existing mechanisms:
 
 ### Addon (`inject.py`)
 
-- **`load` / `running` hook** (mitmproxy startup): fetch `proxy-config` once
-  over the existing mTLS channel; parse the URL into `(scheme, (host, port))`;
-  store in a module-level variable. Retry a few times with short backoff; on
-  persistent failure, **fail-open** (leave proxy unset).
-- **`request` hook**: if a proxy is set, assign
-  `flow.server_conn.via = (scheme, (host, port))` for **every** flow (global).
-  Skip connections whose destination is the proxy's own address (self-loop
-  guard; in practice the proxy is reached on a non-80/443 port that nft doesn't
-  redirect, so it won't normally hit mitmproxy, but guard anyway).
+- **Lazy fetch (not startup-snapshot)**: on the **first** HTTPS flow, if the
+  proxy config hasn't been resolved yet, fetch `proxy-config` over the existing
+  mTLS channel, parse the URL into `(scheme, (host, port))`, and cache it in a
+  module-level variable (cache `None` when the policy has no proxy). If the
+  fetch fails, leave it *unresolved* (don't cache) and let that flow go direct —
+  the next flow retries. This avoids a startup race against a cold/rolling
+  control plane turning into a permanently direct-only sandbox (a startup-only
+  fetch would do exactly that). See Error handling.
+- **`request` hook**: once a proxy is resolved, assign
+  `flow.server_conn.via = (scheme, (host, port))` for **every** flow —
+  unconditional, including private/LAN destinations. Geo/private splitting is
+  delegated to the proxy (clash), which must be configured to send private
+  ranges DIRECT (e.g. `GEOIP,private,DIRECT`). The only skip is the proxy's own
+  address (self-loop guard; in practice it's reached on a non-80/443 port nft
+  doesn't redirect, so it won't hit mitmproxy anyway).
 
 The proxy step is layered on top of the existing `cbxref_` substitution and
 host allow-list in the same `request` hook — both security properties are
@@ -109,23 +118,25 @@ preserved unchanged.
 ```
 admin sets proxy URL in the sandbox policy page → SandboxPolicy.egress_proxy (DB)
 
-sandbox starts → mitmproxy loads inject.py
-  → load hook: mTLS GET /internal/egress/proxy-config
-       → cubebox maps cert → sandbox → resolve effective policy → returns its proxy
-  → addon caches (scheme, (host, port))
+first sandbox HTTPS flow → mitmproxy request hook
+  → if proxy not yet resolved: mTLS GET /internal/egress/proxy-config
+       → cubebox: cert → sandbox_id → UserSandbox → org_id → org-default policy → proxy
+  → cache (scheme,(host,port)) or None; on failure: this flow direct, retry next flow
 
-sandbox outbound 443 → nft redirect → mitmproxy
+every sandbox outbound 443 → nft redirect → mitmproxy
   → request hook: substitute cbxref_ (existing) + set server_conn.via=proxy (new)
-  → mitmproxy → clash (192.168.1.150:7892) → split (CN direct / overseas) → target
+  → mitmproxy → clash (host:port) → split (private/CN direct, overseas via) → target
 ```
 
 ### Error handling
 
-- **Fetch fails** (network / mTLS / cubebox down) → **fail-open** (direct, no
-  via). Rationale: the proxy is an *availability* feature, not a security
-  boundary — `cbxref_` substitution and the host allow-list remain enforced.
-  Failing open degrades to direct (CN works, overseas fails) without leaking
-  secrets or cutting off all networking. Logged + alerted.
+- **Fetch fails** (network / mTLS / cubebox down) → that flow goes **direct**
+  (fail-open), and the config stays *unresolved* so the **next** flow retries —
+  a transient control-plane outage never becomes a permanent direct-only
+  sandbox. Rationale: the proxy is an *availability* feature, not a security
+  boundary — `cbxref_` substitution and the host allow-list remain enforced, so
+  failing open degrades to direct (CN works, overseas fails) without leaking
+  secrets or cutting off networking. Logged + alerted.
 - **Unconfigured / empty** → direct (current behavior).
 - **Invalid URL** → rejected at write time; the addon also defensively treats a
   parse failure as unconfigured and logs it.
@@ -148,8 +159,9 @@ tests + a manual end-to-end check instead.
 - **Unit:**
   - Addon: proxy parse + `via` assignment — configured URL → correct
     `(scheme,(host,port))`; empty → no `via`; destination == proxy address →
-    skipped. Tested as pure helpers (same style as `scan_placeholders` /
-    `should_substitute_header`).
+    skipped. Lazy fetch: a failed fetch stays unresolved and is retried on the
+    next flow; a success caches the value (or `None`). Tested as pure helpers
+    (same style as `scan_placeholders` / `should_substitute_header`).
   - `proxy-config` endpoint: mTLS identity → correct org's proxy; no policy /
     empty proxy → `null`.
   - URL validation: scheme allow-list; SOCKS rejected; malformed rejected.
@@ -165,4 +177,18 @@ tests + a manual end-to-end check instead.
   it. The sandbox stays unprivileged: no `TWITTER_PROXY` env, no bypass of the
   egress control plane. This is the whole point versus the workaround documented
   in the notes file.
-```
+- **Network policy still applies (verified against the live nft ruleset).** Host
+  allow/deny is enforced in `table inet opensandbox` (filter hook, policy drop)
+  on the **destination IP of the sandbox's own connection** — the DNS proxy
+  admits allowed names into a dynamic allow-set. Setting `via` only changes
+  mitmproxy's *upstream* hop; the sandbox's original connection still targets the
+  real destination, so allow/deny is judged on the real target exactly as before
+  (a denied host is dropped before it ever reaches mitmproxy). This is precisely
+  why it is NOT the `TWITTER_PROXY` bypass — there the sandbox itself dialed the
+  proxy (daddr = proxy, port 7892 not redirected) so the real target was never
+  seen by the filter; here the sandbox still dials the real target and the proxy
+  is one hop downstream inside the sidecar.
+- **Config dependency:** the proxy host must be reachable under the egress policy
+  (mitmproxy→proxy has daddr = proxy). Today `192.168.1.150` is already allowed
+  (the exchange endpoint lives there too); a new proxy host must be allowed
+  likewise, or mitmproxy's upstream to it is dropped → 502.
