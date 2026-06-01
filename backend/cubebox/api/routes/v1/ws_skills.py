@@ -485,6 +485,8 @@ async def get_skill_file(
     session: Annotated[AsyncSession, Depends(get_session)],
     version: str | None = Query(None),
 ) -> bytes:
+    from fastapi.responses import Response
+
     skill = await SkillRepository(session).get(skill_id)
     if skill is None or not _visible(skill, ctx.org_id):
         raise HTTPException(status_code=404, detail="SKILL_NOT_FOUND")
@@ -502,7 +504,12 @@ async def get_skill_file(
         raise HTTPException(status_code=400, detail="INVALID_PATH")
     if not target.is_file():
         raise HTTPException(status_code=404, detail="FILE_NOT_FOUND")
-    return target.read_bytes()
+    data = target.read_bytes()
+    try:
+        text = data.decode("utf-8")
+        return Response(content=text, media_type="text/plain; charset=utf-8")  # type: ignore[return-value]
+    except UnicodeDecodeError:
+        raise HTTPException(status_code=422, detail="BINARY_FILE") from None
 
 
 @router.post("/publish", status_code=201)
