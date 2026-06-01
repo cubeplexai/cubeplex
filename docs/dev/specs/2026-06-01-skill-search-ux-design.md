@@ -72,7 +72,12 @@ or `SkillCatalogService.fetch_skill_md` for local ones — the same logic alread
 `GET /discover/preview`. Returns SKILL.md content as plain text so the agent can read it
 and describe the skill to the user before recommending installation.
 
-Registration: same pattern as `find_skills` in `run_manager.py`.
+**Registration (run_manager.py):** `AgentTool.execute` receives only
+`(tool_call_id, args, signal, on_update)` — no `AsyncSession`. The tool must be
+constructed in `run_manager.py` with a prebuilt `SkillsAdapterManager` and a
+`SkillCatalogService` closed over the existing `catalog_session` (same pattern used by
+`find_skills` at line ~1131). The `create_preview_skill_tool(*, registry, catalog)` factory
+captures both at run-start; the inner `_execute` closure never opens its own session.
 
 ### `install_skill` tool
 
@@ -88,7 +93,11 @@ Calls `SkillInstallService.install(candidate_id)`. The agent should only call th
 user has explicitly requested installation in the conversation (not proactively). On success,
 the agent can immediately call `load_skill(canonical_name)` to use the skill.
 
-Registration: same pattern as `find_skills`.
+**Registration (run_manager.py):** Constructed at run-start with `org_id`, `workspace_id`,
+and `actor_user_id` from `ctx`, plus a `catalog_session` (same session as `find_skills`).
+`SkillInstallService` is instantiated inside the `_execute` closure using these closed-over
+values — no cross-workspace risk because `workspace_id` is bound at construction time from
+the authenticated run context, not from the `candidate_id` payload.
 
 ---
 
@@ -96,14 +105,17 @@ Registration: same pattern as `find_skills`.
 
 ### Auto-rendering `find_skills` results
 
-The message renderer detects a `tool_result` where `tool_name == "find_skills"` and renders
-`<SkillSearchResults>` instead of the default JSON text block. The candidates array is parsed
-directly from the tool result JSON.
+The integration point is `AssistantMessage.tsx`, which already has a `show_widget`
+special-case at the `tool_call` block level (line ~316). `find_skills` rendering follows
+the same pattern but at the **`tool_call_response` block level** — when a message block
+has `type == 'tool_call'` and `name == 'find_skills'`, render `<SkillSearchResults>`
+inline using the `toolResultMap[block.id]` payload instead of passing the block to
+`ToolCallGroup`. The candidates array is parsed directly from the JSON result string.
 
 **Files to create/modify:**
-- `components/chat/tool-results/SkillSearchResults.tsx` — container + card list
-- `components/chat/tool-results/SkillCandidateCard.tsx` — individual card
-- Modify the tool-result renderer to route `find_skills` → `SkillSearchResults`
+- `frontend/packages/web/components/chat/tool-results/SkillSearchResults.tsx` — container + card list
+- `frontend/packages/web/components/chat/tool-results/SkillCandidateCard.tsx` — individual card
+- `frontend/packages/web/components/chat/AssistantMessage.tsx` — add `find_skills` branch before the generic `ToolCallGroup` fallthrough (same location as `show_widget` check)
 
 ### `SkillCandidateCard`
 
