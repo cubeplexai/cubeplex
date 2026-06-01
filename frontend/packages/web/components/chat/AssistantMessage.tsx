@@ -317,7 +317,16 @@ function ContentBlockRenderer({
   if (block.type === 'tool_call' && block.name === 'find_skills') {
     const toolResult = toolResultMap[block.id]
     if (!toolResult) return null
-    return <SkillSearchResults key={block.id} resultJson={toolResult.content} />
+    let hasCandidates = false
+    try {
+      const parsed = JSON.parse(toolResult.content) as { candidates?: unknown }
+      hasCandidates = Array.isArray(parsed.candidates)
+    } catch {
+      // invalid JSON — fall through to generic tool rendering below
+    }
+    if (hasCandidates) {
+      return <SkillSearchResults key={block.id} resultJson={toolResult.content} />
+    }
   }
   if (block.type === 'tool_call' && block.name === 'show_widget') {
     const a = block.arguments ?? {}
