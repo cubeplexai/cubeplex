@@ -73,6 +73,11 @@ async function textFetcher(url: string): Promise<string> {
   return res.text()
 }
 
+/** Encode each path segment while preserving "/" separators. */
+function encodeFilePath(filePath: string): string {
+  return filePath.split('/').map(encodeURIComponent).join('/')
+}
+
 // ─── Files Tab ───────────────────────────────────────────────────────────────
 
 function FilesTab({
@@ -90,7 +95,7 @@ function FilesTab({
   const [selected, setSelected] = useState<string | null>(null)
 
   const fileUrl = selected
-    ? `/api/v1/ws/${wsId}/skills/${skillId}/files/${selected}?version=${encodeURIComponent(version)}`
+    ? `/api/v1/ws/${wsId}/skills/${skillId}/files/${encodeFilePath(selected)}?version=${encodeURIComponent(version)}`
     : null
   const { data: fileContent, isLoading: fileLoading } = useSWR<string>(fileUrl, textFetcher, {
     revalidateOnFocus: false,
@@ -257,11 +262,11 @@ function CompareTab({
 
   const fileLeftUrl =
     selectedFile && vLeft
-      ? `/api/v1/ws/${wsId}/skills/${skillId}/files/${selectedFile}?version=${encodeURIComponent(vLeft)}`
+      ? `/api/v1/ws/${wsId}/skills/${skillId}/files/${encodeFilePath(selectedFile)}?version=${encodeURIComponent(vLeft)}`
       : null
   const fileRightUrl =
     selectedFile && vRight
-      ? `/api/v1/ws/${wsId}/skills/${skillId}/files/${selectedFile}?version=${encodeURIComponent(vRight)}`
+      ? `/api/v1/ws/${wsId}/skills/${skillId}/files/${encodeFilePath(selectedFile)}?version=${encodeURIComponent(vRight)}`
       : null
   const { data: fileLeft } = useSWR<string>(fileLeftUrl, textFetcher, { revalidateOnFocus: false })
   const { data: fileRight } = useSWR<string>(fileRightUrl, textFetcher, {
