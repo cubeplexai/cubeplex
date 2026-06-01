@@ -77,6 +77,7 @@ class SkillsShAdapter:
             headers=headers,
             transport=self._transport,
             timeout=15.0,
+            follow_redirects=True,
         )
 
     def _raw_client(self) -> httpx.AsyncClient:
@@ -308,6 +309,22 @@ class SkillsShAdapter:
             and e.get("type") == "blob"
             and str(e.get("path", "")).startswith(prefix)
         ]
+
+        # Fallback: if no files found under skill_rel_path (stale candidate_id or
+        # wrong path in skills.sh catalog), check if SKILL.md exists at repo root.
+        if not rel_paths:
+            has_root_skill_md = any(
+                isinstance(e, dict) and e.get("type") == "blob" and e.get("path") == "SKILL.md"
+                for e in entries
+            )
+            if has_root_skill_md:
+                async with self._raw_client() as raw_client:
+                    resp = await raw_client.get(f"/{owner}/{repo}/{branch}/SKILL.md")
+                    resp.raise_for_status()
+                    content = resp.content
+                    if len(content) > _RAW_FILE_MAX_BYTES:
+                        raise ValueError(f"SKILL.md exceeds {_RAW_FILE_MAX_BYTES} byte limit")
+                return {"SKILL.md": content}
 
         files: dict[str, bytes] = {}
         bundle_total = 0
