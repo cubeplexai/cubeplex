@@ -3,4 +3,5 @@
 #sudo docker build -t hub.sensedeal.vip/library/cubebox-sandbox:24.04-20260311 --push .
 #sudo docker build -t hub.sensedeal.vip/library/cubebox-sandbox:24.04-20260514 --push .
 #sudo docker build -t hub.sensedeal.vip/library/cubebox-sandbox:24.04-20260521 --push .
-sudo docker build -t hub.sensedeal.vip/library/cubebox-sandbox:24.04-20260525 --push .
+#sudo docker build -t hub.sensedeal.vip/library/cubebox-sandbox:24.04-20260525 --push .
+sudo docker build -t hub.sensedeal.vip/library/cubebox-sandbox:24.04-20260531 --push .
