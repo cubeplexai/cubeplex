@@ -57,6 +57,7 @@ export type PanelView =
       info: AttachmentPanelInfo
     }
   | { type: 'browser' }
+  | { type: 'skill-candidate'; candidateId: string }
 
 export interface PanelStore {
   view: PanelView
@@ -75,6 +76,8 @@ export interface PanelStore {
   openAttachment: (info: AttachmentPanelInfo) => void
 
   openBrowser: () => void
+
+  openSkillCandidate: (candidateId: string) => void
 
   close: () => void
 }
@@ -109,6 +112,8 @@ export const usePanelStore = create<PanelStore>((set) => ({
     }),
 
   openBrowser: () => set({ view: { type: 'browser' } }),
+
+  openSkillCandidate: (candidateId) => set({ view: { type: 'skill-candidate', candidateId } }),
 
   close: () => set({ view: { type: 'closed' } }),
 }))
