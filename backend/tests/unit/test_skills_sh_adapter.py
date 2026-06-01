@@ -95,6 +95,31 @@ def test_fetch_validation_with_complex_path():
     )
 
 
+def test_index_skill_paths_root_level_skill_md():
+    """Root-level SKILL.md (e.g. jackwener/twitter-cli) is indexed with repo name as slug."""
+    adapter = SkillsShAdapter(
+        source_id="test-registry",
+        trust_tier="community",
+        source_name="Test Registry",
+        github_token=None,
+    )
+
+    tree_data = {
+        "tree": [
+            {"path": "SKILL.md", "type": "blob"},
+            {"path": "README.md", "type": "blob"},
+            {"path": "src", "type": "tree"},
+            {"path": "src/main.py", "type": "blob"},
+        ]
+    }
+
+    skill_paths: dict = {}
+    adapter._index_skill_paths(tree_data, "jackwener/twitter-cli", skill_paths)
+
+    # Repo name used as slug, empty string as skill_dir (root level)
+    assert skill_paths[("jackwener/twitter-cli", "twitter-cli")] == ""
+
+
 def test_official_source_detection():
     """Test that official status comes only from the whitelist, not registry config."""
     from cubebox.skills.sources.base import TrustTier
