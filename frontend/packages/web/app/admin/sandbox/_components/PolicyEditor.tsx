@@ -23,6 +23,7 @@ interface Draft {
   networkDefaultAction: 'allow' | 'deny'
   networkRules: SandboxNetworkRule[]
   commandRules: SandboxCommandRule[]
+  egressProxy: string
 }
 
 function fromServer(p: SandboxPolicyOut): Draft {
@@ -31,6 +32,7 @@ function fromServer(p: SandboxPolicyOut): Draft {
     networkDefaultAction: p.network_default_action,
     networkRules: p.network_rules ?? [],
     commandRules: p.command_rules ?? [],
+    egressProxy: p.egress_proxy ?? '',
   }
 }
 
@@ -44,6 +46,7 @@ function isDirty(a: Draft, b: Draft): boolean {
   if (a.networkDefaultAction !== b.networkDefaultAction) return true
   if (!rulesEqual(a.networkRules, b.networkRules)) return true
   if (!rulesEqual(a.commandRules, b.commandRules)) return true
+  if (a.egressProxy !== b.egressProxy) return true
   return false
 }
 
@@ -118,6 +121,11 @@ export function PolicyEditor() {
     setSavedAt(null)
     setSaveError(null)
   }
+  const setEgressProxy = (v: string) => {
+    setDraft({ ...draft, egressProxy: v })
+    setSavedAt(null)
+    setSaveError(null)
+  }
 
   const discard = () => {
     setDraft(server)
@@ -135,6 +143,7 @@ export function PolicyEditor() {
         network_default_action: draft.networkDefaultAction,
         network_rules: draft.networkRules,
         command_rules: draft.commandRules,
+        egress_proxy: draft.egressProxy.trim() || null,
       })
       const next = fromServer(updated)
       setServer(next)
@@ -201,6 +210,31 @@ export function PolicyEditor() {
           onChange={setCommandRules}
           disabled={saving}
         />
+      </SectionCard>
+
+      <SectionCard>
+        <SectionHeader
+          title="Egress proxy"
+          subtitle="Route all sandbox outbound traffic through this HTTP proxy. The proxy handles geo-splitting (e.g. CN direct, overseas via tunnel). Leave empty to connect directly."
+        />
+        <div className="flex flex-col gap-1.5">
+          <Label htmlFor="sandbox-egress-proxy">Proxy URL</Label>
+          <Input
+            id="sandbox-egress-proxy"
+            data-testid="sandbox-policy-egress-proxy"
+            value={draft.egressProxy}
+            onChange={(e) => setEgressProxy(e.target.value)}
+            placeholder="http://192.168.1.150:7892"
+            className="font-mono text-xs"
+          />
+          <p className="mt-1 flex items-start gap-1.5 text-[11px] text-muted-foreground">
+            <Info className="mt-0.5 size-3 shrink-0" />
+            <span>
+              Only http:// and https:// schemes are supported. Changes apply to new sandboxes only —
+              existing sandboxes keep their current config until restarted.
+            </span>
+          </p>
+        </div>
       </SectionCard>
 
       <div className="sticky bottom-0 -mx-1 flex items-center justify-end gap-2 rounded-lg border border-border/60 bg-background/95 px-3 py-2.5 shadow-sm backdrop-blur supports-[backdrop-filter]:bg-background/80">

@@ -23,6 +23,7 @@ export interface SandboxPolicyOut {
   network_rules: SandboxNetworkRule[]
   command_rules: SandboxCommandRule[]
   network_default_action: 'allow' | 'deny'
+  egress_proxy: string | null
   warnings: string[]
 }
 
@@ -31,6 +32,7 @@ export interface UpdateSandboxPolicyIn {
   network_rules: SandboxNetworkRule[] | null
   command_rules: SandboxCommandRule[] | null
   network_default_action: 'allow' | 'deny'
+  egress_proxy: string | null
 }
 
 export type SandboxStatusValue = 'provisioning' | 'running' | 'paused' | 'terminated' | 'absent'
