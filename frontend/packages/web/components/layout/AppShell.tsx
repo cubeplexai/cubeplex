@@ -8,6 +8,7 @@ import { ToolDetailPanel } from '@/components/panel/ToolDetailPanel'
 import { ArtifactPanel } from '@/components/panel/artifact/ArtifactPanel'
 import { AttachmentPreviewView } from '@/components/panel/AttachmentPreviewView'
 import { BrowserView } from '@/components/panel/BrowserView'
+import { SkillCandidatePanel } from '@/components/panel/SkillCandidatePanel'
 import { useWorkspaceContext } from '@/hooks/useWorkspaceContext'
 import { usePanelStore } from '@cubebox/core'
 import { useDeploymentMode } from '@cubebox/core/hooks/useDeploymentMode'
@@ -61,6 +62,8 @@ export function AppShell({ children, headerTitle }: AppShellProps) {
               <AttachmentPreviewView info={view.info} />
             ) : view.type === 'browser' ? (
               <BrowserView workspaceId={workspaceId} />
+            ) : view.type === 'skill-candidate' ? (
+              <SkillCandidatePanel candidateId={view.candidateId} />
             ) : (
               <ToolDetailPanel />
             )}
