@@ -63,13 +63,17 @@ export function EnvModal({ mode, onSubmit, onClose }: Props) {
     return null
   }
 
+  function isValidHostPattern(h: string): boolean {
+    // Backend also accepts anchored regex patterns like /^api\.example\.com$/
+    if (/^\/\^.*\$\/$/.test(h)) return true
+    return /^(\*\.)?[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/.test(h)
+  }
+
   function validateHosts(raw: string): string | null {
     if (!isSecret) return null
     const hosts = parseHosts(raw)
     if (hosts.length === 0) return 'At least one host is required for secrets'
-    const invalid = hosts.filter(
-      (h) => !/^(\*\.)?[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/.test(h),
-    )
+    const invalid = hosts.filter((h) => !isValidHostPattern(h))
     if (invalid.length > 0) return `Invalid host pattern: ${invalid[0]}`
     return null
   }
