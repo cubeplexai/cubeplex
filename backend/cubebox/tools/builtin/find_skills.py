@@ -44,6 +44,7 @@ def create_find_skills_tool(*, discovery: SkillDiscoveryService) -> AgentTool[Fi
                     "repo": c.repo,
                     "trust": c.trust.value,
                     "install_state": c.install_state,
+                    "install_count": c.install_count,
                     "unvetted": c.source_kind == "remote" and c.trust.value != "official",
                 }
                 for c in cands
