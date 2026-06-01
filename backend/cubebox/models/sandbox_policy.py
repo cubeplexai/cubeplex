@@ -78,3 +78,4 @@ class SandboxPolicy(CubeboxBase, table=True):
     command_rules: list[dict[str, Any]] | None = Field(
         default=None, sa_column=Column(JSON(none_as_null=True))
     )
+    egress_proxy: str | None = Field(default=None, max_length=512, nullable=True)
