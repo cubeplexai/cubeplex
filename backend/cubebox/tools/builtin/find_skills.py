@@ -50,9 +50,10 @@ def create_find_skills_tool(*, discovery: SkillDiscoveryService) -> AgentTool[Fi
             ],
             "hint": (
                 "To use an 'enabled' candidate now, call load_skill(canonical_name). "
-                "To install an 'in_catalog' or 'available' candidate, ask the user "
-                "to confirm — installation is a user action via the install "
-                "button/route, never silent."
+                "To install an 'in_catalog' or 'available' candidate: present it to the "
+                "user with preview_skill(candidate_id) so they can see what it does, then "
+                "call install_skill(candidate_id) only when the user explicitly asks to install. "
+                "Never install silently."
             ),
         }
         return AgentToolResult(content=[TextContent(text=json.dumps(payload))])
