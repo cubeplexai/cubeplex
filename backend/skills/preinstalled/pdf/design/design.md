@@ -64,7 +64,7 @@ Two typefaces maximum. Always.
 | Role | Criteria | Good choices (system-safe) |
 |---|---|---|
 | Display (cover title, H1) | Distinctive, strong contrast, high weight | Times New Roman, Georgia (serif) |
-| Text (body, captions, UI) | Highly readable at 10–11pt | Helvetica, Arial (sans) |
+| Text (body, captions, UI) | Highly readable at 10–11pt, CJK support required for Chinese docs | NotoSansCJK (default), NotoSerifCJK, LiberationSans |
 
 Cover fonts are loaded live via `@import url(...)` in the cover HTML — Playwright
 fetches them at render time, no local caching. Body pages always use system fonts
@@ -81,7 +81,9 @@ Pairs by mood (cover HTML only — body always uses system fonts):
 - Dynamic: `Montserrat` / `Montserrat`
 - Classical: `Cormorant` / `Crimson Pro`
 - Editorial: `Bebas Neue` / `Libre Franklin`
-- Body fallback (always): `Times-Bold` / `Helvetica` (ReportLab system fonts)
+- Body default: `noto-sans` (NotoSansCJK — covers Latin + Simplified Chinese). Falls back to `Times-Bold` / `Helvetica` if Noto is not installed.
+- CJK documents: `noto-sans` or `noto-serif` — both embed full CJK glyph sets, no font substitution squares.
+- Body fallback (no fonts installed): `Times-Bold` / `Helvetica` (ReportLab built-ins, Latin only)
 
 ### Type scale
 
