@@ -42,6 +42,11 @@ function stripFrontmatter(content: string): string {
   return content.replace(/^---\s*\n[\s\S]*?\n---\s*(\n|$)/, '')
 }
 
+/** Encode each path segment while preserving "/" separators. */
+function encodeFilePath(filePath: string): string {
+  return filePath.split('/').map(encodeURIComponent).join('/')
+}
+
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
@@ -63,7 +68,7 @@ function FilesTab({
   const [selected, setSelected] = useState<string | null>(null)
 
   const fileUrl = selected
-    ? `/api/v1/admin/skills/${skillId}/versions/${version}/files/${selected}`
+    ? `/api/v1/admin/skills/${skillId}/versions/${version}/files/${encodeFilePath(selected)}`
     : null
   const { data: fileContent, isLoading: fileLoading } = useSWR<string>(fileUrl, textFetcher, {
     revalidateOnFocus: false,
@@ -276,11 +281,11 @@ function CompareTab({ skillId, versions }: { skillId: string; versions: SkillVer
   // Fetch selected file content from both sides
   const fileLeftUrl =
     selectedFile && vLeft
-      ? `/api/v1/admin/skills/${skillId}/versions/${vLeft}/files/${selectedFile}`
+      ? `/api/v1/admin/skills/${skillId}/versions/${vLeft}/files/${encodeFilePath(selectedFile)}`
       : null
   const fileRightUrl =
     selectedFile && vRight
-      ? `/api/v1/admin/skills/${skillId}/versions/${vRight}/files/${selectedFile}`
+      ? `/api/v1/admin/skills/${skillId}/versions/${vRight}/files/${encodeFilePath(selectedFile)}`
       : null
   const { data: fileLeft } = useSWR<string>(fileLeftUrl, textFetcher, { revalidateOnFocus: false })
   const { data: fileRight } = useSWR<string>(fileRightUrl, textFetcher, {
