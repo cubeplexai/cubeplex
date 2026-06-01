@@ -36,7 +36,7 @@ data:
     import re
     import ssl
     import urllib.parse
-    from typing import TYPE_CHECKING
+    from typing import Any, TYPE_CHECKING
 
     if TYPE_CHECKING:
         from mitmproxy import http
@@ -154,9 +154,26 @@ data:
         return data["secret"], data.get("header_names")
 
 
-    def request(flow: "http.HTTPFlow") -> None:
+    def tls_clienthello(data: Any) -> None:
+        """Set the upstream proxy BEFORE the server TLS connection is established.
+
+        In transparent mode with connection_strategy=lazy, mitmproxy still opens an
+        upstream connection during TLS ClientHello (establish_server_tls_first) to
+        fetch the server certificate for the MITM cert. Setting via in the request
+        hook would be too late — the direct connection is already open. This hook
+        fires before that, so via is in place when the connection opens.
+        """
         _ensure_upstream_proxy()
-        apply_upstream_proxy(flow, _upstream_proxy)
+        if _upstream_proxy is None:
+            return
+        server = data.context.server
+        dest = (getattr(server, "address", None) or (None, None))
+        if dest[0] == _upstream_proxy[1][0] and dest[1] == _upstream_proxy[1][1]:
+            return
+        server.via = _upstream_proxy
+
+
+    def request(flow: "http.HTTPFlow") -> None:
         # Only substitute on HTTPS. Two reasons:
         #  1. A real secret must never traverse plaintext.
         #  2. We key the exchange on the TLS SNI from the ClientHello
