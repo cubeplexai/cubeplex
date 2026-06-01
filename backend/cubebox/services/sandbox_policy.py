@@ -61,7 +61,11 @@ def _validate_egress_proxy(url: str) -> None:
         )
     if not parts.hostname:
         raise SandboxPolicyValidationError("egress_proxy must include a hostname")
-    if not parts.port:
+    try:
+        port = parts.port
+    except ValueError as exc:
+        raise SandboxPolicyValidationError(f"egress_proxy has an invalid port: {exc}") from exc
+    if not port:
         raise SandboxPolicyValidationError("egress_proxy must include a port")
 
 
