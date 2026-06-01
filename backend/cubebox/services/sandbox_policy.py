@@ -33,6 +33,7 @@ class _PolicyRepo(Protocol):
         network_rules: list[dict[str, Any]] | None,
         command_rules: list[dict[str, Any]] | None,
         network_default_action: str,
+        egress_proxy: str | None,
     ) -> Any: ...
 
 
@@ -42,10 +43,26 @@ class EffectivePolicy:
     network_rules: list[dict[str, Any]] = field(default_factory=list)
     command_rules: list[dict[str, Any]] = field(default_factory=list)
     network_default_action: Literal["allow", "deny"] = "deny"
+    egress_proxy: str | None = None
 
 
 def _row_field(row: Any, name: str) -> Any:
     return row.get(name) if isinstance(row, dict) else getattr(row, name)
+
+
+def _validate_egress_proxy(url: str) -> None:
+    """Reject anything that isn't a plain http(s)://host:port URL."""
+    from urllib.parse import urlsplit
+
+    parts = urlsplit(url.strip())
+    if parts.scheme not in ("http", "https"):
+        raise SandboxPolicyValidationError(
+            f"egress_proxy scheme must be http or https, got {parts.scheme!r}"
+        )
+    if not parts.hostname:
+        raise SandboxPolicyValidationError("egress_proxy must include a hostname")
+    if not parts.port:
+        raise SandboxPolicyValidationError("egress_proxy must include a port")
 
 
 class SandboxPolicyService:
@@ -60,6 +77,7 @@ class SandboxPolicyService:
         network_rules: list[dict[str, Any]] | None,
         command_rules: list[dict[str, Any]] | None,
         network_default_action: str,
+        egress_proxy: str | None = None,
     ) -> None:
         if not default_image.strip():
             raise SandboxPolicyValidationError("default_image must not be empty")
@@ -100,6 +118,8 @@ class SandboxPolicyService:
                     f"contradictory network rules for {target!r}: both allow and deny"
                 )
             seen_actions[canon] = action
+        if egress_proxy is not None:
+            _validate_egress_proxy(egress_proxy)
 
     async def get(self) -> Any:
         return await self._repo.get()
@@ -111,14 +131,18 @@ class SandboxPolicyService:
         network_rules: list[dict[str, Any]] | None,
         command_rules: list[dict[str, Any]] | None,
         network_default_action: str,
+        egress_proxy: str | None = None,
     ) -> Any:
         network_rules = _normalize_network_targets(network_rules)
-        self._validate(default_image, network_rules, command_rules, network_default_action)
+        self._validate(
+            default_image, network_rules, command_rules, network_default_action, egress_proxy
+        )
         return await self._repo.upsert(
             default_image=default_image,
             network_rules=network_rules,
             command_rules=command_rules,
             network_default_action=network_default_action,
+            egress_proxy=egress_proxy,
         )
 
 
@@ -144,4 +168,5 @@ class SandboxPolicyResolver:
             network_rules=list(_row_field(row, "network_rules") or []),
             command_rules=list(_row_field(row, "command_rules") or []),
             network_default_action=_row_field(row, "network_default_action") or "deny",
+            egress_proxy=_row_field(row, "egress_proxy"),
         )
