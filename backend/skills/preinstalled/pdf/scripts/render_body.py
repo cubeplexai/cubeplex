@@ -64,14 +64,30 @@ from reportlab.pdfbase.ttfonts import TTFont
 
 
 # ── Font registration ──────────────────────────────────────────────────────────
-def register_fonts(tokens: dict):
-    """Register TTF fonts from token font_paths if present."""
-    for name, fpath in tokens.get("font_paths", {}).items():
-        if os.path.exists(fpath):
-            try:
-                pdfmetrics.registerFont(TTFont(name, fpath))
-            except Exception:
-                pass
+def register_fonts(tokens: dict) -> set[str]:
+    """Register fonts from token font_paths. Returns set of successfully registered names.
+
+    font_paths format: {name: {"path": str, "subfont_index": int | None}}
+    Legacy flat string format {name: str} is also accepted.
+    """
+    registered: set[str] = set()
+    for name, spec in tokens.get("font_paths", {}).items():
+        if isinstance(spec, str):
+            path, idx = spec, None
+        else:
+            path = spec.get("path", "")
+            idx  = spec.get("subfont_index")  # None → plain TTF/OTF; int → TTC subfont
+        if not os.path.exists(path):
+            continue
+        try:
+            if idx is not None:
+                pdfmetrics.registerFont(TTFont(name, path, subfontIndex=idx))
+            else:
+                pdfmetrics.registerFont(TTFont(name, path))
+            registered.add(name)
+        except Exception:
+            pass
+    return registered
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -988,7 +1004,33 @@ def build_story(content: list, tokens: dict, styles: dict) -> list:
 # ══════════════════════════════════════════════════════════════════════════════
 
 def build(tokens: dict, content: list, out_path: str) -> dict:
-    register_fonts(tokens)
+    registered = register_fonts(tokens)
+
+    # If the requested body font wasn't registered (e.g. not installed), fall back to built-ins.
+    if tokens.get("font_paths") and tokens.get("font_body_rl") not in registered:
+        tokens = {
+            **tokens,
+            "font_display_rl": "Times-Bold",
+            "font_body_rl":    "Helvetica",
+            "font_body_b_rl":  "Helvetica-Bold",
+            "font_heading":    "Times-Bold",
+            "font_body_b":     "Helvetica-Bold",
+        }
+    else:
+        # Bind Regular/Bold variants so <b>...</b> markup in Paragraph text resolves correctly.
+        # Without registerFontFamily, ReportLab can't find the bold face for inline markup.
+        bf  = tokens["font_body_rl"]
+        bfb = tokens["font_body_b_rl"]
+        hf  = tokens["font_display_rl"]
+        if bf in registered:
+            _bold = bfb if bfb in registered else bf
+            pdfmetrics.registerFontFamily(
+                bf,
+                normal=bf, bold=_bold, italic=bf, boldItalic=_bold,
+            )
+        if hf in registered and hf != bf:
+            pdfmetrics.registerFontFamily(hf, normal=hf, bold=hf, italic=hf, boldItalic=hf)
+
     styles = make_styles(tokens)
 
     doc = BeautifulDoc(
