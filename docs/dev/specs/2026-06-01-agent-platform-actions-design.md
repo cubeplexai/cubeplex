@@ -57,9 +57,17 @@ capabilities and lands **scheduled tasks** as the first capability built on it.
 
 - **Operations exposed (8):** `list`, `get`, `list_runs`, `create`, `update`,
   `pause`, `resume`, `delete`.
-- **Confirmation model:** soft — the tool description instructs the agent to act
-  only on explicit user request (mirrors `install_skill`). No hard
-  confirm-parameter gate.
+- **Confirmation model (interactive runs):** soft — the tool description
+  instructs the agent to act only on explicit user request (mirrors
+  `install_skill`). No hard confirm-parameter gate inside an interactive run.
+- **Mutation gating (non-interactive runs):** structural, not prompt-based. A
+  scheduled-task-triggered run re-enters the agent with the same builtin tool
+  set, so prompt text alone cannot stop a schedule from recursively
+  creating/deleting tasks (fanout). Each `AgentOperation` declares
+  `mutates: bool`; the run carries a trigger signal
+  (`interactive` vs `automated`); the builder **excludes mutating operations
+  from automated runs**. Automated runs see read-only operations only. This is
+  a code-enforced boundary that generalizes to every future capability.
 - **Run target on create:** support both `new_each_run` (default) and `fixed`;
   the tool accepts pinning to the current conversation (the builder injects the
   current `conversation_id`).
@@ -128,22 +136,37 @@ All logic currently in the route module moves here: cron/timezone validation
 `owner_user_id` assignment (`= ctx.user_id`). Failures raise domain exceptions:
 `NotFound`, `PermissionDenied`, `InvalidInput`.
 
+**Transaction ownership.** The service owns the transaction for each call and
+commits exactly once at the end of a mutating method. Multi-write operations
+(notably `resume`, which inserts a skipped-occurrence history row *and* updates
+`status`/`next_fire_at`; and `update`/`delete`) must be atomic. Because
+`ScopedRepository.add()` / `delete()` commit immediately, the service does NOT
+compose those auto-committing helpers for multi-row writes — it uses
+`session.add(...)` + a single trailing `session.commit()` (with `begin_nested()`
+for the race-safe history insert, mirroring today's `_resume_next_fire`). The
+caller (route or tool builder) only provides the session and never commits;
+this is the unit-of-work contract both front doors share, so a mid-operation
+failure rolls back the whole operation rather than leaving a partial write.
+
 **Action registry + generic builder** (`agents/actions/capability.py`,
 `builder.py`, `registry.py`)
 - `AgentOperation`: `name` (e.g. `"create"`), `description` (for the LLM),
-  `input_model` (operation-specific args), `handler`
-  (`(ScopeContext, session, input) -> Awaitable[result]`, typically a bound
-  service method).
+  `input_model` (operation-specific args), `mutates: bool` (write vs read),
+  `handler` (`(ScopeContext, session, input) -> Awaitable[result]`, typically a
+  bound service method).
 - `AgentCapability`: `name` (tool name, e.g. `"scheduled_tasks"`),
   `description`, `operations: list[AgentOperation]`.
-- `build_capability_tool(cap, context_factory)` produces one cubepi
-  `AgentTool`. The tool input is a discriminated union over operations keyed by
-  an `operation: Literal[...]` field. `_execute`: parse → dispatch to the
-  matching operation → build `ScopeContext` + open a session via
-  `context_factory` → call the handler → serialize the result as
+- `build_capability_tool(cap, context_factory, *, allow_mutations: bool)`
+  produces one cubepi `AgentTool`. When `allow_mutations` is false (automated
+  runs) the builder drops every `mutates=True` operation from the discriminated
+  union before constructing the tool (and skips the capability entirely if no
+  read operations remain). The tool input is a discriminated union over the
+  surviving operations keyed by an `operation: Literal[...]` field. `_execute`:
+  parse → dispatch to the matching operation → build `ScopeContext` + open a
+  session via `context_factory` → call the handler → serialize the result as
   `AgentToolResult`; domain exceptions map to `is_error=True` text.
 - `registry.py`: `AGENT_CAPABILITIES = [SCHEDULED_TASKS_CAPABILITY]` and
-  `tools_for_run(context_factory) -> list[AgentTool]`.
+  `tools_for_run(context_factory, *, allow_mutations) -> list[AgentTool]`.
 
 **`scheduled_tasks` capability** (`agents/actions/capabilities/scheduled_tasks.py`)
 Declares the 8 operations, each pointing at a `ScheduledTaskService` method,
@@ -158,7 +181,10 @@ request" instruction for mutations and the `new_each_run` default for
   `_to_out` / `ScheduledTaskOut`.
 - Agent tool: `run_manager` builds a `context_factory` from `RunContext` (+ role
   lookup + current `conversation_id` + session maker) and appends
-  `tools_for_run(context_factory)` to the builtin tool list.
+  `tools_for_run(context_factory, allow_mutations=<run is interactive>)` to the
+  builtin tool list. The interactivity signal is threaded as a new `start_run`
+  parameter (default `interactive`); `dispatch_scheduled_run` passes
+  `automated`, so scheduled runs receive read-only capability tools.
 
 ## Data Flow — `create` example
 
@@ -191,8 +217,13 @@ One validation path, two consistent surfaces.
   other denied). This is where the bulk of behavior is verified.
 - **Route tests** — existing scheduled-task route tests must stay green after
   the thin-adapter refactor (behavior-preserving guard).
-- **Builder unit tests** — discriminated-union dispatch and
-  domain-exception → `AgentToolResult` mapping, using a fake capability.
+- **Builder unit tests** — discriminated-union dispatch,
+  domain-exception → `AgentToolResult` mapping, and the mutation gate:
+  `allow_mutations=False` drops `mutates=True` operations (and omits a
+  capability left with no read operations), using a fake capability.
+- **Transaction atomicity test** — force a failure between `resume`'s two
+  writes and assert neither the history row nor the task-state change persists
+  (no partial commit).
 - **E2E** — an agent run that calls the `scheduled_tasks` tool to create a task
   and asserts it lands in the DB (following the existing builtin-tool test
   pattern). Full LLM-driven end-to-end is optional given nondeterminism.
@@ -207,6 +238,18 @@ One validation path, two consistent surfaces.
 - **Discriminated-union schema size.** Bounded by per-capability tools; if a
   capability has many operations the schema grows, but the tool count stays at
   one per capability.
+- **Threading the interactivity signal.** `start_run` gains a trigger parameter
+  that must reach the tool-composition site in `_run_cubepi_path`. Touches the
+  run entrypoint; covered by the mutation-gate tests and an automated-run E2E
+  asserting mutating operations are absent.
+
+### Resolved by design (from review)
+
+- **Autonomous-run fanout** (agent mutating state during a scheduled run): closed
+  by the structural mutation gate — automated runs get read-only capability
+  tools, independent of prompt text.
+- **Partial commits across the two front doors:** closed by the
+  service-owns-the-transaction / single-commit unit-of-work contract above.
 
 ## Follow-ups (out of scope here)
 
