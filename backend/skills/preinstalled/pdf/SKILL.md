@@ -90,6 +90,25 @@ Cover extras (inject into tokens via `--abstract`, `--cover-image`):
 - `--accent "#HEX"` — override the accent color; `accent_lt` is auto-derived by lightening toward white
 - `--cover-bg "#HEX"` — override the cover background color
 
+**Font selection (optional — agent should choose based on document content):**
+
+```bash
+bash scripts/make.sh run --title "..." --type report --body-font noto-serif ...
+```
+
+| Font name | Character support | Best for |
+|---|---|---|
+| `noto-sans` | CJK + Latin (default for most docs) | Tech, business, general, Chinese reports |
+| `noto-serif` | CJK + Latin | Academic, annual reports, editorial, Chinese long-form |
+| `noto-sans-latin` | Latin only | English-only modern/clean docs |
+| `noto-serif-latin` | Latin only | English-only scholarly/classic docs |
+| `liberation` | Latin only (Arial/Times-compatible) | Formal contracts, resumes, corporate |
+| `monospace` | Latin only | Terminal, developer docs, code-heavy reports |
+
+**Default font by doc type:** most types → `noto-sans`; `academic`/`magazine`/`darkroom` → `noto-serif`; `terminal` → `monospace`.
+
+`--display-font` overrides heading/title font independently of body font. When omitted, display font matches body font.
+
 **Accent color selection guidance:**
 
 You have creative authority over the accent color. Pick it from the document's semantic context — title, industry, purpose, audience — not from generic "safe" choices. The accent appears on section rules, callout bars, table headers, and the cover: it carries the document's visual identity.
