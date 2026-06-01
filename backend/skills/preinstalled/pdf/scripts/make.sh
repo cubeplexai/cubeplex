@@ -11,6 +11,8 @@
 #         --subtitle S
 #         --abstract A             Optional abstract text for cover
 #         --cover-image URL        Optional cover image URL/path
+#         --body-font FONT         Body font: noto-sans noto-serif liberation monospace
+#         --display-font FONT      Display/heading font (defaults to --body-font)
 #         --content FILE           Path to content.json (optional)
 #   demo                           Build a full-featured demo to demo.pdf
 #
@@ -142,6 +144,8 @@ cmd_run() {
   local cover_bg=""
   local content_file=""
   local out="output.pdf"
+  local body_font=""
+  local display_font=""
   local workdir
   workdir="$(mktemp -d)"
 
@@ -157,6 +161,8 @@ cmd_run() {
       --cover-image)  cover_image="$2";  shift 2 ;;
       --accent)       accent="$2";       shift 2 ;;
       --cover-bg)     cover_bg="$2";     shift 2 ;;
+      --body-font)    body_font="$2";    shift 2 ;;
+      --display-font) display_font="$2"; shift 2 ;;
       --content)      content_file="$2"; shift 2 ;;
       --out)          out="$2";          shift 2 ;;
       *) echo "Unknown option: $1"; exit 1 ;;
@@ -173,11 +179,15 @@ cmd_run() {
   local accent_args=()
   [[ -n "$accent"   ]] && accent_args+=(--accent   "$accent")
   [[ -n "$cover_bg" ]] && accent_args+=(--cover-bg "$cover_bg")
+  local font_args=()
+  [[ -n "$body_font"    ]] && font_args+=(--body-font    "$body_font")
+  [[ -n "$display_font" ]] && font_args+=(--display-font "$display_font")
   $PY "$SCRIPTS/palette.py" \
     --title "$title" --type "$type" \
     --author "$author" --date "$date" \
     --out "$workdir/tokens.json" \
-    "${accent_args[@]+"${accent_args[@]}"}"
+    "${accent_args[@]+"${accent_args[@]}"}" \
+    "${font_args[@]+"${font_args[@]}"}"
 
   # Inject optional cover fields into tokens.json
   if [[ -n "$abstract" || -n "$cover_image" ]]; then
@@ -470,6 +480,7 @@ main() {
     echo "         [--author A] [--date D] [--subtitle S]"
     echo "         [--abstract A] [--cover-image URL]"
     echo "         [--accent #HEX] [--cover-bg #HEX]"
+    echo "         [--body-font FONT] [--display-font FONT]"
     echo "         [--content content.json] [--out output.pdf]"
     echo "  fill   --input f.pdf              FILL: inspect or fill form fields"
     echo "  reformat --input doc.md           REFORMAT: parse doc → apply design → PDF"
