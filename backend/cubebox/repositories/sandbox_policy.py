@@ -34,7 +34,7 @@ class SandboxPolicyRepository:
         network_rules: list[dict[str, Any]] | None,
         command_rules: list[dict[str, Any]] | None,
         network_default_action: str,
-        egress_proxy: str | None,
+        egress_proxy: str | None = None,
     ) -> SandboxPolicy:
         """Upsert the org-default policy row (scope_workspace_id=NULL).
 
