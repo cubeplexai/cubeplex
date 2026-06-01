@@ -189,9 +189,7 @@ class TestDispatch:
         assert tool is not None
 
         # Call the "create" operation via the union model.
-        args = tool.parameters.model_validate(
-            {"params": {"operation": "create", "title": "My Item"}}
-        )
+        args = tool.parameters.model_validate({"operation": "create", "title": "My Item"})
         result = await tool.execute("call_2", args)
 
         assert result.is_error is None
