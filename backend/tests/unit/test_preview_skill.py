@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from unittest.mock import patch
 
 import pytest
 
@@ -15,11 +16,18 @@ class _FakeSkillVersion:
 
 
 class _FakeSkill:
-    def __init__(self, skill_id: str, current_version: str, source: str = "preinstalled") -> None:
+    def __init__(
+        self,
+        skill_id: str,
+        current_version: str,
+        source: str = "preinstalled",
+        name: str = "fake-skill",
+    ) -> None:
         self.id = skill_id
         self.current_version = current_version
         self.source = source
         self.owner_org_id: str | None = None
+        self.name = name
 
 
 class _FakeCatalog:
@@ -62,6 +70,14 @@ class _FakeSkillVersionRepo:
 
     async def find(self, skill_id: str, version: str) -> _FakeSkillVersion | None:
         return self._sv
+
+
+class _FakeTombstoneRepo:
+    def __init__(self, tombstone: object | None) -> None:
+        self._tombstone = tombstone
+
+    async def get(self, org_id: str, skill_id: str) -> object | None:
+        return self._tombstone
 
 
 class _FakeSession:
@@ -149,3 +165,127 @@ async def test_preview_bad_candidate_id_returns_error() -> None:
 
     assert result.is_error
     assert "BAD_CANDIDATE_ID" in result.content[0].text
+
+
+@pytest.mark.asyncio
+async def test_preview_local_success() -> None:
+    from cubebox.skills.sources.base import encode_candidate_id
+
+    skill = _FakeSkill("skl-1", "1.0.0", name="my-skill")
+    sv = _FakeSkillVersion("sv-1")
+    catalog = _FakeCatalog("# Local Skill\nContent here.")
+
+    candidate_id = encode_candidate_id("local", "skl-1")
+    with (
+        patch("cubebox.repositories.skill.SkillRepository", return_value=_FakeSkillRepo(skill)),
+        patch(
+            "cubebox.repositories.skill.SkillVersionRepository",
+            return_value=_FakeSkillVersionRepo(sv),
+        ),
+        patch(
+            "cubebox.repositories.skill.OrgPreinstalledTombstoneRepository",
+            return_value=_FakeTombstoneRepo(None),
+        ),
+    ):
+        tool = create_preview_skill_tool(
+            session=_FakeSession(),
+            registry=_FakeRegistry(adapter=None),
+            catalog=catalog,
+            org_id="org-1",
+        )
+        result = await tool.execute("tc-5", PreviewSkillInput(candidate_id=candidate_id))
+
+    assert not result.is_error
+    out = json.loads(result.content[0].text)
+    assert out["content"] == "# Local Skill\nContent here."
+    assert out["name"] == "my-skill"
+    assert out["candidate_id"] == candidate_id
+
+
+@pytest.mark.asyncio
+async def test_preview_local_skill_not_found() -> None:
+    from cubebox.skills.sources.base import encode_candidate_id
+
+    candidate_id = encode_candidate_id("local", "skl-missing")
+    with (
+        patch("cubebox.repositories.skill.SkillRepository", return_value=_FakeSkillRepo(None)),
+        patch(
+            "cubebox.repositories.skill.SkillVersionRepository",
+            return_value=_FakeSkillVersionRepo(None),
+        ),
+        patch(
+            "cubebox.repositories.skill.OrgPreinstalledTombstoneRepository",
+            return_value=_FakeTombstoneRepo(None),
+        ),
+    ):
+        tool = create_preview_skill_tool(
+            session=_FakeSession(),
+            registry=_FakeRegistry(adapter=None),
+            catalog=_FakeCatalog("irrelevant"),
+            org_id="org-1",
+        )
+        result = await tool.execute("tc-6", PreviewSkillInput(candidate_id=candidate_id))
+
+    assert result.is_error
+    assert "SKILL_NOT_FOUND" in result.content[0].text
+
+
+@pytest.mark.asyncio
+async def test_preview_local_skill_version_not_found() -> None:
+    from cubebox.skills.sources.base import encode_candidate_id
+
+    skill = _FakeSkill("skl-1", "1.0.0", name="my-skill")
+    candidate_id = encode_candidate_id("local", "skl-1")
+    with (
+        patch("cubebox.repositories.skill.SkillRepository", return_value=_FakeSkillRepo(skill)),
+        patch(
+            "cubebox.repositories.skill.SkillVersionRepository",
+            return_value=_FakeSkillVersionRepo(None),
+        ),
+        patch(
+            "cubebox.repositories.skill.OrgPreinstalledTombstoneRepository",
+            return_value=_FakeTombstoneRepo(None),
+        ),
+    ):
+        tool = create_preview_skill_tool(
+            session=_FakeSession(),
+            registry=_FakeRegistry(adapter=None),
+            catalog=_FakeCatalog("irrelevant"),
+            org_id="org-1",
+        )
+        result = await tool.execute("tc-7", PreviewSkillInput(candidate_id=candidate_id))
+
+    assert result.is_error
+    assert "SKILL_VERSION_NOT_FOUND" in result.content[0].text
+
+
+@pytest.mark.asyncio
+async def test_preview_local_tombstoned_preinstalled_returns_not_found() -> None:
+    from cubebox.skills.sources.base import encode_candidate_id
+
+    skill = _FakeSkill("skl-1", "1.0.0", source="preinstalled", name="my-skill")
+    sv = _FakeSkillVersion("sv-1")
+    tombstone = object()  # non-None signals the skill has been tombstoned
+
+    candidate_id = encode_candidate_id("local", "skl-1")
+    with (
+        patch("cubebox.repositories.skill.SkillRepository", return_value=_FakeSkillRepo(skill)),
+        patch(
+            "cubebox.repositories.skill.SkillVersionRepository",
+            return_value=_FakeSkillVersionRepo(sv),
+        ),
+        patch(
+            "cubebox.repositories.skill.OrgPreinstalledTombstoneRepository",
+            return_value=_FakeTombstoneRepo(tombstone),
+        ),
+    ):
+        tool = create_preview_skill_tool(
+            session=_FakeSession(),
+            registry=_FakeRegistry(adapter=None),
+            catalog=_FakeCatalog("# My Skill\nContent."),
+            org_id="org-1",
+        )
+        result = await tool.execute("tc-8", PreviewSkillInput(candidate_id=candidate_id))
+
+    assert result.is_error
+    assert "SKILL_NOT_FOUND" in result.content[0].text
