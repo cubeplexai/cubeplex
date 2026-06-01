@@ -120,8 +120,8 @@ export function SkillCandidateCard({ candidate }: { candidate: SkillCandidate })
                 className="flex items-center gap-0.5 text-xs text-muted-foreground hover:text-foreground"
                 onClick={(e) => e.stopPropagation()}
               >
-                <ExternalLink className="size-3" />
                 <span>{candidate.repo!.replace('https://github.com/', '')}</span>
+                <ExternalLink className="size-3" />
               </a>
             )}
           </div>
