@@ -1117,6 +1117,20 @@
     "addCustomConnector": "+ Add custom connector",
     "promoteToOrg": "Promote to org-wide"
   },
+  "skillSearch": {
+    "noDescription": "No description available",
+    "preview": "Preview",
+    "install": "Install",
+    "installing": "Installing…",
+    "installed": "Installed",
+    "installError": "Install failed",
+    "trustOfficial": "official",
+    "trustCommunity": "community",
+    "trustUnvetted": "unvetted",
+    "stateEnabled": "installed",
+    "stateAvailable": "available",
+    "downloads": "{count} installs"
+  },
   "adminSkillRegistries": {
     "pageTitle": "Skill Registries",
     "title": "Skill Registries",
