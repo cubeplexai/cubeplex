@@ -19,6 +19,17 @@ if [ -f "$PREFS" ]; then
         "$PREFS" 2>/dev/null || true
 fi
 
+# Install the egress MITM CA into Chromium's NSS store so HTTPS interception
+# doesn't show "Not Secure". Chromium on Linux ignores /etc/ssl/certs; it reads
+# from $HOME/.pki/nssdb. The cert is placed by the egress-ca-trust init container.
+MITM_CA=/etc/ssl/certs/cubebox-egress.pem
+if [ -f "$MITM_CA" ]; then
+    NSS_DB="$HOME/.pki/nssdb"
+    mkdir -p "$NSS_DB"
+    certutil -N -d "sql:$NSS_DB" --empty-password 2>/dev/null || true
+    certutil -A -d "sql:$NSS_DB" -n "cubebox-egress-ca" -t "CT,," -i "$MITM_CA" 2>/dev/null || true
+fi
+
 exec /ms-playwright/chrome \
     --no-sandbox \
     --test-type \
