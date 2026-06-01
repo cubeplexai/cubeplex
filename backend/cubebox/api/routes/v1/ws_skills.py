@@ -19,6 +19,7 @@ from cubebox.api.schemas.skill import (
     SkillContentResponse,
     SkillFiles,
     SkillSummary,
+    SkillVersionDetail,
 )
 from cubebox.api.schemas.skill_discovery import (
     CandidatePreviewResponse,
@@ -57,6 +58,7 @@ from cubebox.skills.service import (
 )
 from cubebox.skills.sources.base import CandidateIdError, decode_candidate_id
 from cubebox.skills.sources.registry import SkillsAdapterManager
+from cubebox.utils.time import utc_isoformat
 
 router = APIRouter(prefix="/ws/{workspace_id}/skills", tags=["ws-skills"])
 
@@ -402,6 +404,33 @@ async def refresh_skill(
         installed_version=result.installed_version,
         changed=result.installed_version != prev_version,
     )
+
+
+@router.get("/{skill_id}/versions", response_model=list[SkillVersionDetail])
+async def list_skill_versions(
+    workspace_id: str,
+    skill_id: str,
+    *,
+    ctx: Annotated[RequestContext, Depends(require_member)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> list[SkillVersionDetail]:
+    skill = await SkillRepository(session).get(skill_id)
+    if skill is None or not _visible(skill, ctx.org_id):
+        raise HTTPException(status_code=404, detail="SKILL_NOT_FOUND")
+    versions = await SkillVersionRepository(session).list_for_skill(skill_id)
+    return [
+        SkillVersionDetail(
+            id=v.id,
+            version=v.version,
+            description=v.description or "",
+            keywords=v.keywords or [],
+            storage_prefix=v.storage_prefix,
+            entry_file=v.entry_file,
+            uploaded_by_user_id=v.uploaded_by_user_id,
+            created_at=utc_isoformat(v.created_at),
+        )
+        for v in versions
+    ]
 
 
 @router.get("/{skill_id}", response_model=SkillContentResponse)

@@ -384,10 +384,22 @@
       "discardYes": "Delete",
       "discardNo": "Keep",
       "step": {
-        "preset": { "label": "Preset", "hint": "Choose a provider" },
-        "configure": { "label": "Configure", "hint": "Credentials & capability" },
-        "models": { "label": "Models", "hint": "Pick models to import" },
-        "test": { "label": "Test", "hint": "Verify connection" }
+        "preset": {
+          "label": "Preset",
+          "hint": "Choose a provider"
+        },
+        "configure": {
+          "label": "Configure",
+          "hint": "Credentials & capability"
+        },
+        "models": {
+          "label": "Models",
+          "hint": "Pick models to import"
+        },
+        "test": {
+          "label": "Test",
+          "hint": "Verify connection"
+        }
       },
       "preset": {
         "searchPlaceholder": "Search providers",
@@ -706,7 +718,27 @@
       "actionRemove": "Remove from workspace",
       "actionRemoving": "Removing…",
       "actionInstall": "Install in workspace",
-      "actionInstalling": "Installing…"
+      "actionInstalling": "Installing…",
+      "files": "Files",
+      "filesCount": "Files ({count})",
+      "noAdditionalFiles": "No additional files in this version.",
+      "clickToPreview": "Click a file to preview its content.",
+      "previewLoading": "Loading…",
+      "binaryFile": "Cannot preview: binary file.",
+      "versions": "Versions",
+      "versionsCount": "Versions ({count})",
+      "noVersions": "No version history.",
+      "versionInstalled": "Installed",
+      "versionLatest": "Latest",
+      "compare": "Compare",
+      "versionA": "Version A (old)",
+      "versionB": "Version B (new)",
+      "compareSideBySide": "Side by side",
+      "compareInline": "Inline",
+      "selectTwoVersions": "Select two different versions to compare.",
+      "clickViewDiff": "Click a file to view its diff",
+      "binaryDiff": "Binary file — diff not available.",
+      "loading": "Loading…"
     },
     "skillsToolbar": {
       "searchPlaceholder": "Search by name or description",
