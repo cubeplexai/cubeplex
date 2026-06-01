@@ -10,6 +10,7 @@ class SandboxPolicyOut(BaseModel):
     network_default_action: Literal["allow", "deny"] = "deny"
     network_rules: list[dict[str, Any]] = []
     command_rules: list[dict[str, Any]] = []
+    egress_proxy: str | None = None
     # OQ-6 soft-conflict warnings (e.g. deny rule covers an installed
     # credential's required host). Empty on GET and on a clean PUT.
     warnings: list[str] = []
@@ -20,6 +21,7 @@ class UpdateSandboxPolicyIn(BaseModel):
     network_default_action: Literal["allow", "deny"] = "deny"
     network_rules: list[dict[str, Any]] | None = None
     command_rules: list[dict[str, Any]] | None = None
+    egress_proxy: str | None = None
 
 
 SandboxStatusValue = Literal["provisioning", "running", "paused", "terminated", "absent"]
