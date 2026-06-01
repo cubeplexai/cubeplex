@@ -154,21 +154,24 @@ class SandboxEnvService:
         entry_id: str,
         hosts: list[str] | None = None,
         header_names: list[str] | None = None,
+        update_header_names: bool = False,
         secret_value: str | None = None,
     ) -> None:
         """Update hosts/header_names and/or rotate the credential value.
 
-        ``hosts`` and ``header_names`` are only applicable to secret entries;
-        passing them for a plain entry raises SandboxEnvShapeError.
-        At least one argument must be non-None.
+        ``hosts`` and ``header_names`` are only applicable to secret entries.
+        ``update_header_names`` must be True to write ``header_names``; this
+        separates "explicitly set to None (clear restriction)" from "omitted
+        (leave unchanged)".  Callers should pass
+        ``update_header_names='header_names' in body.model_fields_set``.
         """
-        if hosts is None and header_names is None and secret_value is None:
+        if hosts is None and not update_header_names and secret_value is None:
             raise SandboxEnvShapeError("update_entry: at least one field must be provided")
         row = await self._repo.get(entry_id)
         if row is None:
             raise SandboxEnvShapeError(f"entry {entry_id!r} not found")
 
-        if hosts is not None or header_names is not None:
+        if hosts is not None or update_header_names:
             if not row.is_secret:
                 raise SandboxEnvShapeError(
                     "hosts/header_names are only applicable to secret entries"
@@ -176,7 +179,8 @@ class SandboxEnvService:
             if hosts is not None:
                 validate_hosts(hosts)
                 row.hosts = hosts
-            if header_names is not None:
+            if update_header_names:
+                # None means "allow any header"; an empty list is normalised to None.
                 row.header_names = header_names or None
             await self._repo.update(row)
 
