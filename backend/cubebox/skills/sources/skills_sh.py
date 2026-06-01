@@ -111,7 +111,7 @@ class SkillsShAdapter:
 
     def _index_skill_paths(
         self,
-        tree_data: dict,
+        tree_data: dict[str, list[object]],
         source: str,
         skill_paths: dict[tuple[str, str], str],
     ) -> None:
@@ -132,6 +132,12 @@ class SkillsShAdapter:
             if not isinstance(entry, dict) or entry.get("type") != "blob":
                 continue
             path = str(entry.get("path", ""))
+            if path == "SKILL.md":
+                # Root-level skill: the whole repo IS the skill; use repo name as slug
+                repo_slug = source.split("/")[-1]
+                if _safe_name(repo_slug) and (source, repo_slug) not in skill_paths:
+                    skill_paths[(source, repo_slug)] = ""
+                continue
             if not path.endswith("/SKILL.md"):
                 continue
             skill_dir = path[: -len("/SKILL.md")]
@@ -267,12 +273,23 @@ class SkillsShAdapter:
         if not (_safe_name(owner) and _safe_name(repo) and _safe_name(branch)):
             raise ValueError(f"unsafe component in skills-sh source_ref: {source_ref!r}")
         # Validate skill_rel_path: all components must be safe (no traversal)
-        if not skill_rel_path or any(
+        if skill_rel_path and any(
             not _safe_name(c) for c in skill_rel_path.split("/")
         ):
             raise ValueError(
                 f"unsafe skill path in skills-sh source_ref: {skill_rel_path!r}"
             )
+
+        # Root-level skill (skill_rel_path == ""): the repo root IS the skill.
+        # Only fetch SKILL.md — don't bundle the entire project.
+        if not skill_rel_path:
+            async with self._raw_client() as raw_client:
+                resp = await raw_client.get(f"/{owner}/{repo}/{branch}/SKILL.md")
+                resp.raise_for_status()
+                content = resp.content
+                if len(content) > _RAW_FILE_MAX_BYTES:
+                    raise ValueError(f"SKILL.md exceeds {_RAW_FILE_MAX_BYTES} byte limit")
+            return {"SKILL.md": content}
 
         async with self._github_client() as gh_client:
             tree_resp = await gh_client.get(
