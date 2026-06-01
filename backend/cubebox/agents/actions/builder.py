@@ -41,7 +41,7 @@ def _build_operation_model(op: AgentOperation) -> type[BaseModel]:
     """
     op_literal = _make_literal_type(op.name)
     field_definitions: dict[str, Any] = {
-        "operation": (op_literal, Field(default=op.name)),
+        "operation": (op_literal, ...),
     }
     for field_name, field_info in op.input_model.model_fields.items():
         field_definitions[field_name] = (
