@@ -838,6 +838,15 @@
     "pdf": {
       "tableOfContents": "目录",
       "loadFailed": "加载 PDF 失败"
+    },
+    "skillCandidatePanel": {
+      "loading": "正在加载 skill 预览…",
+      "fetchError": "无法加载 skill 预览，远程来源可能不可用。",
+      "retry": "重试",
+      "installButton": "安装",
+      "installing": "安装中…",
+      "installed": "已安装",
+      "installError": "安装失败，请重试。"
     }
   },
   "common": {
