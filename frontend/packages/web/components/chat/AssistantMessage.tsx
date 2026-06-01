@@ -22,6 +22,7 @@ import { getWriteFileSummary } from '@/lib/writeFilePreview'
 import { extractWidgetCode, extractJsonStringPrefix } from '@/lib/partialJson'
 import { WidgetView } from '@/components/chat/widget/WidgetView'
 import { MarkdownWithCitations } from '@/components/shared/MarkdownWithCitations'
+import { SkillSearchResults } from './tool-results/SkillSearchResults'
 
 interface ReasoningBlockProps {
   thinking: string
@@ -313,6 +314,11 @@ function ContentBlockRenderer({
       />
     )
   }
+  if (block.type === 'tool_call' && block.name === 'find_skills') {
+    const toolResult = toolResultMap[block.id]
+    if (!toolResult) return null
+    return <SkillSearchResults key={block.id} resultJson={toolResult.content} />
+  }
   if (block.type === 'tool_call' && block.name === 'show_widget') {
     const a = block.arguments ?? {}
     return (
@@ -416,7 +422,8 @@ function groupBlocks(blocks: ContentBlock[]): (ContentBlock | ContentBlock[])[] 
       block.name !== 'subagent' &&
       block.name !== 'save_artifact' &&
       block.name !== 'write_todos' &&
-      block.name !== 'show_widget'
+      block.name !== 'show_widget' &&
+      block.name !== 'find_skills'
     ) {
       const last = result[result.length - 1]
       if (
