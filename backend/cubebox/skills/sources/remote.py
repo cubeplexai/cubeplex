@@ -210,6 +210,4 @@ class RemoteRegistryAdapter:
                             )
                 files[rel] = b"".join(chunks)
                 bundle_total += file_total
-        if "SKILL.md" not in files:
-            raise ValueError("remote skill subpath has no SKILL.md")
         return files
