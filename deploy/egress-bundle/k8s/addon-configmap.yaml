@@ -13,6 +13,7 @@
 #
 # The file below is the authoritative checked-in copy.  Keep it in sync with
 # deploy/egress-bundle/addon/inject.py.
+apiVersion: v1
 data:
   inject.py: |
     """OpenSandbox egress addon: swap cbxref_ placeholders for real secrets.
