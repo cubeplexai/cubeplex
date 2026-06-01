@@ -399,6 +399,13 @@ class ScheduledTaskService:
             if data.get("run_at") is None:
                 raise ActionInvalidInput("run_at required for once schedule")
 
+        run_at = data.get("run_at")
+        if isinstance(run_at, datetime) and run_at.tzinfo is None:
+            raise ActionInvalidInput("run_at must include a timezone offset")
+        end_at = data.get("end_at")
+        if isinstance(end_at, datetime) and end_at.tzinfo is None:
+            raise ActionInvalidInput("end_at must include a timezone offset")
+
         if not data.get("name"):
             raise ActionInvalidInput("name is required")
         if not data.get("prompt"):
@@ -433,3 +440,10 @@ class ScheduledTaskService:
             )
         if kind == "once" and data.get("run_at") is None:
             raise ActionInvalidInput("run_at required when changing schedule_kind to once")
+
+        run_at = data.get("run_at")
+        if isinstance(run_at, datetime) and run_at.tzinfo is None:
+            raise ActionInvalidInput("run_at must include a timezone offset")
+        end_at = data.get("end_at")
+        if isinstance(end_at, datetime) and end_at.tzinfo is None:
+            raise ActionInvalidInput("end_at must include a timezone offset")
