@@ -96,6 +96,15 @@ class OpenSandbox(Sandbox):
                 result.append((path, content))
             return result
 
+    # OpenSandbox infrastructure headers that are irrelevant for browser/Neko access.
+    # The signed URL embeds the gateway auth; these headers are only meaningful for
+    # server-to-server calls (egress proxy, secure-access token) and cannot be sent
+    # by an iframe anyway. Strip them so they don't trigger the 501 safeguard in
+    # ws_browser.get_live_view.
+    _BROWSER_IRRELEVANT_HEADERS: frozenset[str] = frozenset(
+        h.lower() for h in ("OPENSANDBOX-EGRESS-AUTH", "OpenSandbox-Secure-Access")
+    )
+
     async def get_browser_endpoint(self, *, expires_in: int = 3600) -> BrowserEndpoint:
         with _as_sandbox_error():
             expires = int(time.time()) + expires_in
@@ -111,7 +120,12 @@ class OpenSandbox(Sandbox):
             # never loads and only the static login shell shows.
             if not url.endswith("/"):
                 url += "/"
-            return BrowserEndpoint(url=url, headers=dict(endpoint.headers or {}))
+            headers = {
+                k: v
+                for k, v in (endpoint.headers or {}).items()
+                if k.lower() not in self._BROWSER_IRRELEVANT_HEADERS
+            }
+            return BrowserEndpoint(url=url, headers=headers)
 
     async def close(self) -> None:
         pass
