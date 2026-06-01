@@ -35,6 +35,8 @@ RUN sed -i -r 's/(archive|security|ports).ubuntu.com/mirrors.cloud.aliyuncs.com/
         git \
         unzip \
         zip \
+        fonts-noto \
+        fonts-liberation \
         fonts-noto-cjk \
         fonts-wqy-zenhei \
         fonts-wqy-microhei \
