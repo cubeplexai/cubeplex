@@ -63,7 +63,11 @@ export function AppShell({ children, headerTitle }: AppShellProps) {
             ) : view.type === 'browser' ? (
               <BrowserView workspaceId={workspaceId} />
             ) : view.type === 'skill-candidate' ? (
-              <SkillCandidatePanel candidateId={view.candidateId} />
+              <SkillCandidatePanel
+                candidateId={view.candidateId}
+                repo={view.repo}
+                sourceName={view.sourceName}
+              />
             ) : (
               <ToolDetailPanel />
             )}

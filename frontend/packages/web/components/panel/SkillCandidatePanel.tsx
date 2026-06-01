@@ -4,7 +4,7 @@ import { useState } from 'react'
 import { useTranslations } from 'next-intl'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { Download } from 'lucide-react'
+import { Download, ExternalLink } from 'lucide-react'
 import useSWR from 'swr'
 import { Button } from '@/components/ui/button'
 import { useWorkspaceContext } from '@/hooks/useWorkspaceContext'
@@ -25,7 +25,15 @@ async function fetchPreview(url: string): Promise<CandidatePreview> {
   return res.json() as Promise<CandidatePreview>
 }
 
-export function SkillCandidatePanel({ candidateId }: { candidateId: string }) {
+export function SkillCandidatePanel({
+  candidateId,
+  repo,
+  sourceName,
+}: {
+  candidateId: string
+  repo?: string | null
+  sourceName?: string
+}) {
   const t = useTranslations('panel.skillCandidatePanel')
   const { workspaceId } = useWorkspaceContext()
 
@@ -81,13 +89,27 @@ export function SkillCandidatePanel({ candidateId }: { candidateId: string }) {
 
         {data && (
           <>
-            <header className="flex flex-wrap items-baseline gap-2">
+            <header className="flex flex-col gap-1">
               <span className="font-mono font-semibold">{data.name}</span>
-              {data.env_vars.length > 0 && (
-                <span className="text-xs text-muted-foreground">
-                  requires: {data.env_vars.join(', ')}
-                </span>
-              )}
+              <div className="flex flex-wrap items-center gap-2">
+                {sourceName && <span className="text-xs text-muted-foreground">{sourceName}</span>}
+                {repo && (
+                  <a
+                    href={repo}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center gap-0.5 text-xs text-muted-foreground hover:text-foreground"
+                  >
+                    <ExternalLink className="size-3" />
+                    <span>{repo.replace('https://github.com/', '')}</span>
+                  </a>
+                )}
+                {data.env_vars.length > 0 && (
+                  <span className="text-xs text-muted-foreground">
+                    requires: {data.env_vars.join(', ')}
+                  </span>
+                )}
+              </div>
             </header>
 
             {installError && (
