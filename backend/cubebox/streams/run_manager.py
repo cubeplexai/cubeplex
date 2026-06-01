@@ -33,6 +33,7 @@ class RunContext:
     user_id: str
     org_id: str
     workspace_id: str
+    trigger: str = "interactive"
 
 
 def _ns_to_agent_id(ns: tuple[Any, ...]) -> str | None:
@@ -981,6 +982,7 @@ class RunManager:
         sandbox: Any | None = None,
         skill_catalog: Any | None = None,
         catalog_session: Any | None = None,
+        trigger: str = "interactive",
     ) -> None:
         """Execute a single user turn through the cubepi runtime.
 
@@ -1336,6 +1338,58 @@ class RunManager:
                 mcp_citation_configs.update(_new_citations)
         except Exception as _exc:
             logger.warning("MCP tools unavailable for cubepi run: {}", _exc)
+
+        # Platform action tools (scheduled_tasks, etc.) — via the capability
+        # registry. Automated runs get read-only tools (mutation gate).
+        try:
+            from cubebox.agents.actions.registry import (
+                tools_for_run as _action_tools_for_run,
+            )
+            from cubebox.repositories.membership import MembershipRepository
+
+            async with async_session_maker() as _action_session:
+                _role = await MembershipRepository(_action_session).get_role(
+                    user_id=ctx.user_id,
+                    workspace_id=ctx.workspace_id,
+                )
+
+            if _role is not None:
+                from collections.abc import (
+                    AsyncIterator as _ActionsAsyncIterator,
+                )
+                from contextlib import (
+                    asynccontextmanager as _actions_acm,
+                )
+
+                from cubebox.agents.actions.context import (
+                    ScopeContext as _ScopeContext,
+                )
+
+                @_actions_acm
+                async def _action_ctx_factory() -> _ActionsAsyncIterator[tuple[_ScopeContext, Any]]:
+                    async with async_session_maker() as _sess:
+                        yield (
+                            _ScopeContext(
+                                org_id=ctx.org_id,
+                                workspace_id=ctx.workspace_id,
+                                user_id=ctx.user_id,
+                                role=_role,
+                                conversation_id=conversation_id,
+                            ),
+                            _sess,
+                        )
+
+                _builtin_tools.extend(
+                    _action_tools_for_run(
+                        _action_ctx_factory,
+                        allow_mutations=(trigger == "interactive"),
+                    )
+                )
+        except Exception as _exc:
+            logger.warning(
+                "platform action tools unavailable for cubepi run: {}",
+                _exc,
+            )
 
         # Bridge the synchronous cubepi listener to the async world via a queue.
         # agent.prompt() is async and invokes synchronous listeners on each
@@ -2112,6 +2166,7 @@ class RunManager:
                 sandbox=sandbox,
                 skill_catalog=skill_catalog,
                 catalog_session=catalog_session,
+                trigger=ctx.trigger,
             )
             await _update_conversation_timestamp(
                 conversation_id,
