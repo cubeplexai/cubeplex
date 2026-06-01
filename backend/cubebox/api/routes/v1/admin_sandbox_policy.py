@@ -40,6 +40,7 @@ async def get_sandbox_policy(
         network_rules=eff.network_rules,
         command_rules=eff.command_rules,
         network_default_action=eff.network_default_action,
+        egress_proxy=eff.egress_proxy,
         warnings=[],
     )
 
@@ -58,6 +59,7 @@ async def put_sandbox_policy(
             network_rules=body.network_rules,
             command_rules=body.command_rules,
             network_default_action=body.network_default_action,
+            egress_proxy=body.egress_proxy,
         )
     except SandboxPolicyValidationError as exc:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
@@ -70,5 +72,6 @@ async def put_sandbox_policy(
         network_rules=row.network_rules or [],
         command_rules=row.command_rules or [],
         network_default_action=row.network_default_action,
+        egress_proxy=row.egress_proxy,
         warnings=warnings,
     )
