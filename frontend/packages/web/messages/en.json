@@ -838,6 +838,15 @@
     "pdf": {
       "tableOfContents": "Table of contents",
       "loadFailed": "Failed to load PDF"
+    },
+    "skillCandidatePanel": {
+      "loading": "Loading skill preview…",
+      "fetchError": "Could not load skill preview. The remote source may be unavailable.",
+      "retry": "Retry",
+      "installButton": "Install",
+      "installing": "Installing…",
+      "installed": "Installed",
+      "installError": "Installation failed. Please try again."
     }
   },
   "common": {
