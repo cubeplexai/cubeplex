@@ -1117,6 +1117,20 @@
     "addCustomConnector": "+ 添加自定义连接器",
     "promoteToOrg": "提升为组织级"
   },
+  "skillSearch": {
+    "noDescription": "暂无描述",
+    "preview": "预览",
+    "install": "安装",
+    "installing": "安装中…",
+    "installed": "已安装",
+    "installError": "安装失败",
+    "trustOfficial": "官方",
+    "trustCommunity": "社区",
+    "trustUnvetted": "未审核",
+    "stateEnabled": "已安装",
+    "stateAvailable": "可用",
+    "downloads": "{count} 次安装"
+  },
   "adminSkillRegistries": {
     "pageTitle": "技能仓库",
     "title": "技能仓库",
