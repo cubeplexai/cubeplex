@@ -1130,70 +1130,6 @@ class RunManager:
             except Exception as _exc:
                 logger.warning("load_skill unavailable for cubepi run: {}", _exc)
 
-        # find_skills — read-only discovery; needs catalog + a source registry.
-        # NOTE: catalog_session is a _run_cubepi_path PARAM, not a local. Guard
-        # for None (the catalog DB may be unavailable at run start).
-        if skill_catalog is not None and catalog_session is not None:
-            try:
-                from sqlalchemy.ext.asyncio import AsyncSession as _AsyncSession
-
-                from cubebox.repositories.organization import OrganizationRepository
-                from cubebox.skills.discovery import (
-                    SkillDiscoveryService,
-                    SkillInstallService,
-                )
-                from cubebox.skills.service import SkillCatalogService, SkillPublishService
-                from cubebox.skills.sources.registry import SkillsAdapterManager
-                from cubebox.tools.builtin.find_skills import create_find_skills_tool
-                from cubebox.tools.builtin.install_skill import create_install_skill_tool
-                from cubebox.tools.builtin.preview_skill import create_preview_skill_tool
-
-                _org = await OrganizationRepository(catalog_session).get(ctx.org_id)
-                if _org is not None:
-                    _registry = await SkillsAdapterManager.build(
-                        session=catalog_session,
-                        catalog=skill_catalog,
-                        org_id=ctx.org_id,
-                        org_slug=_org.slug,
-                        workspace_id=ctx.workspace_id,
-                    )
-                    _builtin_tools.append(
-                        create_find_skills_tool(discovery=SkillDiscoveryService(_registry))
-                    )
-                    _builtin_tools.append(
-                        create_preview_skill_tool(
-                            session=catalog_session,
-                            registry=_registry,
-                            catalog=skill_catalog,
-                            org_id=ctx.org_id,
-                        )
-                    )
-
-                    def _make_install_factory(
-                        _session: _AsyncSession = catalog_session,
-                        _registry: SkillsAdapterManager = _registry,
-                        _catalog: SkillCatalogService = skill_catalog,
-                        _org_id: str = ctx.org_id,
-                        _org_slug: str = _org.slug,
-                        _workspace_id: str | None = ctx.workspace_id,
-                        _actor: str = ctx.user_id,
-                    ) -> SkillInstallService:
-                        return SkillInstallService(
-                            session=_session,
-                            registry=_registry,
-                            publisher=SkillPublishService(session=_session, cache=_catalog.cache),
-                            org_id=_org_id,
-                            org_slug=_org_slug,
-                            workspace_id=_workspace_id,
-                            actor_user_id=_actor,
-                        )
-
-                    _builtin_tools.append(
-                        create_install_skill_tool(install_service_factory=_make_install_factory)
-                    )
-            except Exception as _exc:  # noqa: BLE001
-                logger.warning("find_skills unavailable for cubepi run: {}", _exc)
-
         # view_images — per-request DI: objectstore + LLM capabilities.
         # Must come after memory tools and load_skill to preserve the
         # cache-prefix tool order.
@@ -1339,13 +1275,16 @@ class RunManager:
         except Exception as _exc:
             logger.warning("MCP tools unavailable for cubepi run: {}", _exc)
 
-        # Platform action tools (scheduled_tasks, etc.) — via the capability
-        # registry. Automated runs get read-only tools (mutation gate).
+        # Platform action tools (scheduled_tasks, skills, etc.) — via the
+        # capability registry. Automated runs get read-only tools (mutation gate).
         try:
+            from cubebox.agents.actions.capabilities.skills import SkillDeps
             from cubebox.agents.actions.registry import (
                 tools_for_run as _action_tools_for_run,
             )
             from cubebox.repositories.membership import MembershipRepository
+            from cubebox.repositories.organization import OrganizationRepository
+            from cubebox.skills.sources.registry import SkillsAdapterManager
 
             async with async_session_maker() as _action_session:
                 _role = await MembershipRepository(_action_session).get_role(
@@ -1379,10 +1318,35 @@ class RunManager:
                             _sess,
                         )
 
+                # Construct SkillDeps only when the skill catalog session is
+                # available. Mirrors today's guard: if the catalog DB is
+                # unreachable, the skills capability is silently skipped
+                # (same as load_skill).
+                _skill_deps: SkillDeps | None = None
+                if skill_catalog is not None and catalog_session is not None:
+                    _org = await OrganizationRepository(catalog_session).get(ctx.org_id)
+                    if _org is not None:
+                        _registry = await SkillsAdapterManager.build(
+                            session=catalog_session,
+                            catalog=skill_catalog,
+                            org_id=ctx.org_id,
+                            org_slug=_org.slug,
+                            workspace_id=ctx.workspace_id,
+                        )
+                        _skill_deps = SkillDeps(
+                            catalog=skill_catalog,
+                            catalog_session=catalog_session,
+                            registry=_registry,
+                            org_id=ctx.org_id,
+                            org_slug=_org.slug,
+                            workspace_id=ctx.workspace_id,
+                        )
+
                 _builtin_tools.extend(
                     _action_tools_for_run(
                         _action_ctx_factory,
                         allow_mutations=(trigger == "interactive"),
+                        skill_deps=_skill_deps,
                     )
                 )
         except Exception as _exc:
