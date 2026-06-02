@@ -68,6 +68,7 @@ async def test_pause_idle_pauses_on_successful_claim(mock_encryption_backend: An
     factory, _session = _make_session_factory()
     mgr = SandboxManager(factory, mock_encryption_backend)
     mgr._exchange_host = ""
+    mgr._pause_on_idle = True  # exercise the pause path explicitly
 
     record = _make_record()
 
@@ -123,6 +124,7 @@ async def test_pause_idle_skips_when_claim_pausing_false(mock_encryption_backend
     factory, _session = _make_session_factory()
     mgr = SandboxManager(factory, mock_encryption_backend)
     mgr._exchange_host = ""
+    mgr._pause_on_idle = True  # exercise the pause path explicitly
 
     record = _make_record()
 
@@ -165,6 +167,7 @@ async def test_pause_idle_pause_raises_reverts_and_kills(mock_encryption_backend
     factory, _session = _make_session_factory()
     mgr = SandboxManager(factory, mock_encryption_backend)
     mgr._exchange_host = ""
+    mgr._pause_on_idle = True  # exercise the pause path explicitly
 
     record = _make_record()
 
@@ -215,6 +218,7 @@ async def test_pause_idle_no_capability_kills_record(mock_encryption_backend: An
     factory, _session = _make_session_factory()
     mgr = SandboxManager(factory, mock_encryption_backend)
     mgr._exchange_host = ""
+    mgr._pause_on_idle = True  # exercise the pause path explicitly
 
     record = _make_record()
 
