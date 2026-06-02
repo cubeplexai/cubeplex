@@ -545,6 +545,22 @@ def _build_auto_detach_listener(agent: Any) -> _AutoDetachListener:
     return _AutoDetachListener(agent)
 
 
+class ResumeNoPending(LookupError):
+    """No DB pending exists for this conversation."""
+
+
+class ResumeStaleAnswer(Exception):
+    """The submitted answer's question_id doesn't match the pending."""
+
+
+class ResumeInFlight(Exception):
+    """Another resume / cancel is already in flight for this run."""
+
+
+class ResumeConflict(Exception):
+    """The conversation has moved on; the active run_id has changed."""
+
+
 class RunManager:
     """Owns background run execution and Redis persistence."""
 
@@ -728,6 +744,66 @@ class RunManager:
             return "steered"
         await self._publish_control(run_id, "steer", content, steer_id=steer_id)
         return "published"
+
+    async def resume_run_with_answer(
+        self,
+        *,
+        conversation_id: str,
+        run_id: str,
+        question_id: str,
+        answer: Any,
+        ctx: RunContext,
+    ) -> str:
+        """Resume a paused HITL conversation. Reuses the original run_id;
+        events stream into the same Redis stream key. See spec §5.
+
+        Returns the run_id (echoed back so the route response carries it).
+        """
+        from cubebox.agents.checkpointer import init_checkpointer
+        from cubebox.streams.hitl_resume import ClaimResumeOutcome, claim_resume
+
+        # 1. Authoritative: DB pending. load_pending_request shape unchanged
+        #    per cubepi v3 prereq — returns HitlRequest | None.
+        async with init_checkpointer() as cp:
+            pending = await cp.load_pending_request(conversation_id)
+        if pending is None:
+            raise ResumeNoPending(f"no pending for {conversation_id}")
+        if pending.question_id != question_id:
+            raise ResumeStaleAnswer(f"answer for {question_id}; pending is {pending.question_id}")
+        started_at_iso = datetime.fromtimestamp(pending.created_at, UTC).isoformat()
+
+        # 2. Single-flight claim — pass started_at so the long-pause rebuild
+        #    branch in claim_resume's Lua can repopulate the meta hash.
+        claim = await claim_resume(
+            self._redis,
+            prefix=self._key_prefix,
+            conversation_id=conversation_id,
+            expected_run_id=run_id,
+            started_at=started_at_iso,
+            ttl_seconds=self._run_event_ttl_seconds,
+        )
+        if claim.outcome == ClaimResumeOutcome.ALREADY_RUNNING:
+            raise ResumeInFlight("another resume/cancel is in flight")
+        if claim.outcome == ClaimResumeOutcome.CONFLICT:
+            raise ResumeConflict("conversation has moved on")
+        assert claim.claim_token is not None  # OK outcome guarantees a token
+
+        # 3. Spawn the respond task. Reuse the original run_id.
+        task = asyncio.create_task(
+            self._execute_respond_run(
+                run_id=run_id,
+                conversation_id=conversation_id,
+                question_id=question_id,
+                answer=answer,
+                claim_token=claim.claim_token,
+                ctx=ctx,
+            ),
+            name=f"respond:{run_id}",
+        )
+        self._tasks_empty.clear()
+        self._tasks[run_id] = task
+        task.add_done_callback(lambda _: self._on_task_done(run_id))
+        return run_id
 
     async def dispatch_hitl_answer(
         self, run_id: str, question_id: str, decision: str, reason: str | None = None
