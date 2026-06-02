@@ -21,6 +21,7 @@ import { TokenUsageBar } from './TokenUsageBar'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { useMessages } from '@/hooks/useMessages'
 import { useWorkspaceContext } from '@/hooks/useWorkspaceContext'
+import { rafThrottleScrollToBottom } from '@/lib/scrollToBottom'
 
 interface MessageListProps {
   conversationId: string
@@ -215,10 +216,9 @@ export function MessageList({ conversationId }: MessageListProps) {
     const scroller = scrollRef.current
     if (!content || !scroller) return
 
+    const scheduleScroll = rafThrottleScrollToBottom(() => scrollRef.current)
     const ro = new ResizeObserver(() => {
-      if (stickToBottom.current) {
-        scroller.scrollTop = scroller.scrollHeight
-      }
+      if (stickToBottom.current) scheduleScroll()
     })
     ro.observe(content)
     return () => ro.disconnect()
