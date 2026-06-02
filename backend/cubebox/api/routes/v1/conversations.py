@@ -38,7 +38,13 @@ from cubebox.streams.run_events import (
     mark_run_stale,
     read_run_events_after,
 )
-from cubebox.streams.run_manager import RunContext
+from cubebox.streams.run_manager import (
+    ResumeConflict,
+    ResumeInFlight,
+    ResumeNoPending,
+    ResumeStaleAnswer,
+    RunContext,
+)
 from cubebox.utils.time import utc_isoformat
 
 _INSTALL_RE = re.compile(r"^install\s+([A-Za-z0-9_\-:]+)\s*$")
@@ -1159,17 +1165,56 @@ async def submit_sandbox_confirm(
             detail=f"Conversation {conversation_id} not found",
         )
 
+    from cubepi.hitl.types import ApproveAnswer
+
+    from cubebox.agents.checkpointer import init_checkpointer
+
     active_run = await get_active_run(
         rds.client, prefix=rds.key_prefix, conversation_id=conversation_id
     )
-    if active_run is None or active_run.status != "running":
-        return {"status": "no_active_run", "run_id": None}
+    if active_run is not None:
+        run_id = active_run.run_id
+    else:
+        async with init_checkpointer() as _cp:
+            persisted_run_id = await _cp.load_pending_run_id(conversation_id)
+        if persisted_run_id is None:
+            # Distinguish 404 no_pending vs 500 missing_run_id legacy row.
+            async with init_checkpointer() as _cp:
+                if await _cp.load_pending_request(conversation_id) is None:
+                    raise HTTPException(status_code=404, detail={"code": "no_pending"})
+            raise HTTPException(
+                status_code=500,
+                detail={
+                    "code": "missing_run_id",
+                    "message": "pending has no persisted run_id (legacy row)",
+                },
+            )
+        run_id = persisted_run_id
 
     run_manager = raw_request.app.state.run_manager
-    dispatch_status = await run_manager.dispatch_hitl_answer(
-        active_run.run_id, question_id, body.decision, body.reason
+    answer = ApproveAnswer(decision=body.decision, reason=body.reason)
+    run_ctx = RunContext(
+        user_id=ctx.user.id,
+        org_id=ctx.org_id,
+        workspace_id=ctx.workspace_id,
     )
-    return {"status": dispatch_status, "run_id": active_run.run_id}
+    try:
+        new_run_id = await run_manager.resume_run_with_answer(
+            conversation_id=conversation_id,
+            run_id=run_id,
+            question_id=question_id,
+            answer=answer,
+            ctx=run_ctx,
+        )
+    except ResumeNoPending as exc:
+        raise HTTPException(status_code=404, detail={"code": "no_pending"}) from exc
+    except ResumeStaleAnswer as exc:
+        raise HTTPException(status_code=409, detail={"code": "stale_answer"}) from exc
+    except ResumeInFlight as exc:
+        raise HTTPException(status_code=409, detail={"code": "resume_in_flight"}) from exc
+    except ResumeConflict as exc:
+        raise HTTPException(status_code=409, detail={"code": "conversation_moved"}) from exc
+    return {"status": "ok", "run_id": new_run_id}
 
 
 @router.post(
@@ -1199,14 +1244,50 @@ async def submit_ask_user_answer(
             detail=f"Conversation {conversation_id} not found",
         )
 
+    from cubebox.agents.checkpointer import init_checkpointer
+
     active_run = await get_active_run(
         rds.client, prefix=rds.key_prefix, conversation_id=conversation_id
     )
-    if active_run is None or active_run.status != "running":
-        return {"status": "no_active_run", "run_id": None}
+    if active_run is not None:
+        run_id = active_run.run_id
+    else:
+        async with init_checkpointer() as _cp:
+            persisted_run_id = await _cp.load_pending_run_id(conversation_id)
+        if persisted_run_id is None:
+            # Distinguish 404 no_pending vs 500 missing_run_id legacy row.
+            async with init_checkpointer() as _cp:
+                if await _cp.load_pending_request(conversation_id) is None:
+                    raise HTTPException(status_code=404, detail={"code": "no_pending"})
+            raise HTTPException(
+                status_code=500,
+                detail={
+                    "code": "missing_run_id",
+                    "message": "pending has no persisted run_id (legacy row)",
+                },
+            )
+        run_id = persisted_run_id
 
     run_manager = raw_request.app.state.run_manager
-    dispatch_status = await run_manager.dispatch_ask_user_answer(
-        active_run.run_id, question_id, body.answers
+    run_ctx = RunContext(
+        user_id=ctx.user.id,
+        org_id=ctx.org_id,
+        workspace_id=ctx.workspace_id,
     )
-    return {"status": dispatch_status, "run_id": active_run.run_id}
+    try:
+        new_run_id = await run_manager.resume_run_with_answer(
+            conversation_id=conversation_id,
+            run_id=run_id,
+            question_id=question_id,
+            answer=body.answers,
+            ctx=run_ctx,
+        )
+    except ResumeNoPending as exc:
+        raise HTTPException(status_code=404, detail={"code": "no_pending"}) from exc
+    except ResumeStaleAnswer as exc:
+        raise HTTPException(status_code=409, detail={"code": "stale_answer"}) from exc
+    except ResumeInFlight as exc:
+        raise HTTPException(status_code=409, detail={"code": "resume_in_flight"}) from exc
+    except ResumeConflict as exc:
+        raise HTTPException(status_code=409, detail={"code": "conversation_moved"}) from exc
+    return {"status": "ok", "run_id": new_run_id}
