@@ -313,8 +313,16 @@ audit logging). v2 just doesn't use it.
 
 ## Open questions
 
-1. **Reflection model selection.** Pick a single default, or expose per-
-   workspace config? Default is fine for v2; revisit if abuse shows up.
+1. **Reflection model selection.** v2 reuses the main run's resolved
+   provider/model (no separate config). Tracked as a known v1 limitation
+   per codex P2 review on 68fca5c0 — billing now correctly attributes
+   reflection token cost to the same scope as the main run, so the
+   structural piece is in place. Follow-up: add `memory.reflection.
+   model_id` config + a `LLMFactory.resolve_provider_for_model(model_id)`
+   path so reflection can default to a cheap model (Haiku-tier). Until
+   that lands, deployments using a heavy reasoning model as the chat
+   default should be aware that every successful turn adds one short
+   reflection LLM call billed at the same rate.
 2. **`user_events` retention.** Do we trim old rows? Memory markers stay
    useful as historical conversation context, so probably indefinite
    retention initially. Reassess after dogfooding.
