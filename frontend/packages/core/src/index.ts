@@ -9,6 +9,7 @@ export { useModelsStore } from './stores/modelsStore'
 export { useOrgModelSettingsStore } from './stores/orgModelSettingsStore'
 export * from './oauth'
 export { useOrgAdminFlag } from './hooks/useOrgAdminFlag'
+export { useUserEvents } from './hooks/useUserEvents'
 
 // `useDeploymentMode` is intentionally NOT re-exported from this barrel.
 // The hook is `'use client'` and pulls swr; re-exporting it here would force

@@ -24,3 +24,4 @@ export {
 } from './billing'
 export * from './skills'
 export * from './adminSkills'
+export { streamUserEvents } from './userEventStream'
