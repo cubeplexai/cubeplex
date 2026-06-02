@@ -966,13 +966,33 @@ class RunManager:
 
         # CAS-guarded terminal write — a racing flow that took over the
         # slot wins the row; our finalize is a no-op.
-        await finalize_run_meta_if_claim_matches(
+        wrote_terminal = await finalize_run_meta_if_claim_matches(
             self._redis,
             prefix=self._key_prefix,
             run_id=run_id,
             claim_token=claim.claim_token,
             status="cancelled",
         )
+        # Release the active-run lock + age out the meta TTL when WE own
+        # the row. Without this, bootstrap on a refresh still sees an
+        # active_run row (status=cancelled) and the frontend enters
+        # streaming mode tailing a terminal stream — heartbeats until
+        # Redis TTL clears the row. Matches _execute_run's cleanup on
+        # the completed / errored paths. Skip when our claim token lost
+        # the CAS (some other flow owns the slot now).
+        if wrote_terminal:
+            await clear_active_run(
+                self._redis,
+                prefix=self._key_prefix,
+                conversation_id=conversation_id,
+                run_id=run_id,
+            )
+            await expire_run_data(
+                self._redis,
+                prefix=self._key_prefix,
+                run_id=run_id,
+                ttl_seconds=self._run_event_ttl_seconds,
+            )
         return run_id
 
     async def dispatch_cancel_steer(self, run_id: str, steer_id: str) -> str:

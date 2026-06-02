@@ -186,6 +186,15 @@ async def test_cancel_paused_calls_abort_pending_and_finalizes(
         finalize_mock,
     )
 
+    # Stub the Redis cleanup helpers that run after a winning finalize CAS.
+    # cancel_paused_run calls clear_active_run + expire_run_data to release
+    # the active-run pointer (avoids the post-cancel bootstrap-shows-
+    # cancelled-run heartbeat bug codex flagged).
+    clear_active_mock = AsyncMock()
+    expire_data_mock = AsyncMock()
+    monkeypatch.setattr("cubebox.streams.run_manager.clear_active_run", clear_active_mock)
+    monkeypatch.setattr("cubebox.streams.run_manager.expire_run_data", expire_data_mock)
+
     out = await rm.cancel_paused_run(
         conversation_id="c1",
         run_id="r1",
@@ -205,3 +214,8 @@ async def test_cancel_paused_calls_abort_pending_and_finalizes(
     assert kwargs["claim_token"] == "tok-cancel"
     assert kwargs["status"] == "cancelled"
     assert kwargs["prefix"] == PREFIX
+
+    # On a winning CAS, the active-run pointer is cleared + meta TTL'd so
+    # a refresh doesn't show this run as still active.
+    clear_active_mock.assert_awaited_once()
+    expire_data_mock.assert_awaited_once()
