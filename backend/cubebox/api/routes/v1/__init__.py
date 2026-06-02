@@ -29,6 +29,7 @@ from cubebox.api.routes.v1.attachments import router as attachments_router
 from cubebox.api.routes.v1.auth import router as auth_router
 from cubebox.api.routes.v1.conversations import router as conversations_router
 from cubebox.api.routes.v1.memory import router as memory_router
+from cubebox.api.routes.v1.user_events import router as user_events_router
 from cubebox.api.routes.v1.workspaces import router as workspaces_router
 
 __all__ = [
@@ -45,6 +46,7 @@ __all__ = [
     "auth_router",
     "conversations_router",
     "memory_router",
+    "user_events_router",
     "public_artifacts",
     "trigger_ingest",
     "workspaces_router",

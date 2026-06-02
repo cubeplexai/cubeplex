@@ -7,7 +7,7 @@ Redis pub/sub keeping the same publish_local / subscribe interface.
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
 from typing import Any
 
@@ -33,6 +33,27 @@ class UserEventBus:
         queues = list(self._subscribers.get(event.user_id, ()))
         for q in queues:
             q.put_nowait(event)
+
+    def subscribe_queue(
+        self, user_id: str
+    ) -> tuple[asyncio.Queue[UserEventDTO], Callable[[], None]]:
+        """Return a (queue, unsubscribe) pair.
+
+        Prefer this over the async-generator `subscribe` in HTTP streaming
+        contexts: Queue.get() is a plain coroutine that works safely with
+        asyncio.wait_for, unlike async_generator.__anext__ on Python 3.13+.
+        """
+        q: asyncio.Queue[UserEventDTO] = asyncio.Queue()
+        self._subscribers.setdefault(user_id, set()).add(q)
+
+        def unsubscribe() -> None:
+            bucket = self._subscribers.get(user_id)
+            if bucket is not None:
+                bucket.discard(q)
+                if not bucket:
+                    del self._subscribers[user_id]
+
+        return q, unsubscribe
 
     async def subscribe(self, user_id: str) -> AsyncIterator[UserEventDTO]:
         q: asyncio.Queue[UserEventDTO] = asyncio.Queue()
