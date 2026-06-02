@@ -924,77 +924,6 @@ class RunManager:
         )
         return run_id
 
-    async def dispatch_hitl_answer(
-        self, run_id: str, question_id: str, decision: str, reason: str | None = None
-    ) -> str:
-        """Deliver a human approve/deny for a pending sandbox confirm.
-
-        In-process fast path when this worker holds the run's channel; otherwise
-        publish on the control channel so the worker that does can deliver it.
-        """
-        if await self._deliver_hitl_answer(run_id, question_id, decision, reason):
-            return "delivered"
-        await self._publish_control(
-            run_id,
-            "hitl_answer",
-            extra={"question_id": question_id, "decision": decision, "reason": reason},
-        )
-        return "published"
-
-    async def _deliver_hitl_answer(
-        self, run_id: str, question_id: str, decision: str, reason: str | None
-    ) -> bool:
-        """Answer the in-process channel if present. Returns True if delivered."""
-        from cubepi.hitl import ApproveAnswer
-
-        channel = self._hitl_channels.get(run_id)
-        if channel is None:
-            return False
-        if decision == "approve":
-            answer = ApproveAnswer(decision="approve", reason=reason)
-        elif decision == "deny":
-            answer = ApproveAnswer(decision="deny", reason=reason)
-        else:
-            return False
-        try:
-            await channel.answer(question_id, answer)
-        except Exception:
-            logger.warning("hitl_answer delivery failed for run {}", run_id, exc_info=True)
-        return True
-
-    async def dispatch_ask_user_answer(
-        self, run_id: str, question_id: str, answers: dict[str, Any]
-    ) -> str:
-        """Deliver a user's ask_user form answers to the pending ask.
-
-        Fast path when this worker holds the run's channel; otherwise publish
-        on the control channel so the worker that does can deliver it.
-        """
-        if await self._deliver_ask_user_answer(run_id, question_id, answers):
-            return "delivered"
-        await self._publish_control(
-            run_id,
-            "ask_user_answer",
-            extra={"question_id": question_id, "answers": answers},
-        )
-        return "published"
-
-    async def _deliver_ask_user_answer(
-        self, run_id: str, question_id: str, answers: dict[str, Any]
-    ) -> bool:
-        """Answer the in-process channel with ask_user form answers.
-
-        Returns True if delivered; False if this worker doesn't own the run.
-        """
-        channel = self._hitl_channels.get(run_id)
-        if channel is None:
-            return False
-        try:
-            await channel.answer(question_id, answers)
-        except Exception:
-            logger.warning("ask_user_answer delivery failed for run {}", run_id, exc_info=True)
-        return True
-
     async def dispatch_cancel_steer(self, run_id: str, steer_id: str) -> str:
         agent = self._agents.get(run_id)
         if agent is not None:
@@ -1047,19 +976,6 @@ class RunManager:
             agent = self._agents.get(run_id)
             if agent is not None:
                 agent.cancel_steer(data.get("steer_id") or "")
-        elif type_ == "hitl_answer":
-            await self._deliver_hitl_answer(
-                run_id,
-                data.get("question_id") or "",
-                data.get("decision") or "",
-                data.get("reason"),
-            )
-        elif type_ == "ask_user_answer":
-            await self._deliver_ask_user_answer(
-                run_id,
-                data.get("question_id") or "",
-                data.get("answers") or {},
-            )
 
     async def _handle_ack(self, data: dict[str, Any]) -> None:
         run_id = data.get("run_id")
