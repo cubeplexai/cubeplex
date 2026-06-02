@@ -26,10 +26,11 @@ dependencies = [
     "fastapi-users[sqlalchemy]>=14.0",
     "slowapi>=0.1.9",
     "cryptography>=42.0",
-    # Cap <8: redis-py 8 changed FakeRedis decode_responses semantics
-    # (aioredis namespace returns bytes despite the flag), breaking every
-    # Lua-CAS test in this branch that reads back HGETALL. Cubepi pin's
-    # ancestry currently uses 7.x; revisit when 8.x compat is needed.
+    # Cap <8: redis-py 8 defaulted the protocol to RESP3, which exposes
+    # an async-only fakeredis bug — `_decode` doesn't recurse into dicts,
+    # so `FakeRedis(decode_responses=True).hgetall(...)` returns bytes
+    # under RESP3. Fix is in upstream PR cunla/fakeredis-py#492; once it
+    # ships we can drop this cap.
     "redis>=5.2.0,<8",
     "python-magic>=0.4.27",
     "filetype>=1.2.0",
@@ -181,10 +182,7 @@ cubepi = { git = "https://github.com/cubeplexai/cubepi.git", rev = "1686eed" }
 dev = [
     "aiosqlite>=0.20",
     "babel>=2.18.0",
-    # Pin <2.36: 2.36.0 returns bytes-keyed hashes for Lua-written values
-    # even with decode_responses=True, breaking _meta_from_hash + every
-    # Lua-CAS test in this branch. Revisit when fakeredis fixes the regression.
-    "fakeredis[lua]>=2.35.1,<2.36",
+    "fakeredis[lua]>=2.35.1",
     "respx>=0.23.1",
     "types-pyyaml>=6.0.12.20260408",
 ]
