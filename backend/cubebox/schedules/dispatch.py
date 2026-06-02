@@ -29,6 +29,16 @@ class ConversationBusyError(Exception):
     """
 
 
+class ConversationPausedError(Exception):
+    """Fixed target conversation is paused on a pending HITL request.
+
+    The poller treats this as a terminal ``skipped_paused`` — the user
+    has to answer or cancel the pending question before another scheduled
+    occurrence can fire. Busy-retry would burn the retry budget on a
+    state only the user can clear.
+    """
+
+
 @dataclass(slots=True)
 class DispatchResult:
     run_id: str
@@ -84,6 +94,9 @@ async def dispatch_scheduled_run(
       ConversationBusyError -- ``fixed`` target already has a running run.
         The poller applies the busy-retry policy (postpone 5m, retry up to 3,
         then ``skipped_busy_max_retries``).
+      ConversationPausedError -- ``fixed`` target is paused on a pending
+        HITL request. The poller marks the occurrence ``skipped_paused``
+        without retry (only the user can clear pending).
     """
     if not await _owner_still_member(task):
         raise TargetUnavailableError("owner is no longer a workspace member")
@@ -103,11 +116,16 @@ async def dispatch_scheduled_run(
             run_id=run_id,
         )
     except RuntimeError as exc:
-        # RunManager.start_run rejects a second run on a conversation that
-        # already has one running. For target_mode='fixed' this is the busy
-        # case the spec's 5m-retry policy handles; surface it distinctly so
-        # the poller can postpone instead of failing.
-        if task.target_mode == "fixed" and "already" in str(exc).lower():
-            raise ConversationBusyError(str(exc)) from exc
+        # RunManager.start_run can reject a second run on the same conversation
+        # in two distinct ways:
+        # - "already has an active run" — the busy case; postpone + retry.
+        # - "has a pending HITL request" — paused on user input; do NOT retry,
+        #   the user has to answer or cancel before another occurrence can fire.
+        if task.target_mode == "fixed":
+            msg = str(exc)
+            if "pending HITL request" in msg:
+                raise ConversationPausedError(msg) from exc
+            if "already" in msg.lower():
+                raise ConversationBusyError(msg) from exc
         raise
     return DispatchResult(run_id=actual_run_id, conversation_id=conversation_id)
