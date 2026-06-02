@@ -1054,10 +1054,36 @@ async def cancel_active_run(
     active_run = await get_active_run(
         rds.client, prefix=rds.key_prefix, conversation_id=conversation_id
     )
-    if active_run is None or active_run.status != "running":
+    if active_run is None:
         return {"status": "no_active_run", "run_id": None}
 
     run_manager = raw_request.app.state.run_manager
+    if active_run.status == "paused_hitl":
+        run_ctx = RunContext(
+            user_id=ctx.user.id,
+            org_id=ctx.org_id,
+            workspace_id=ctx.workspace_id,
+        )
+        try:
+            await run_manager.cancel_paused_run(
+                conversation_id=conversation_id,
+                run_id=active_run.run_id,
+                reason="cancelled by user",
+                ctx=run_ctx,
+            )
+        except ResumeNoPending:
+            # Pending got cleared between get_active_run and our claim —
+            # treat as already done.
+            return {"status": "no_active_run", "run_id": None}
+        except ResumeInFlight as exc:
+            raise HTTPException(status_code=409, detail={"code": "resume_in_flight"}) from exc
+        except ResumeConflict as exc:
+            raise HTTPException(status_code=409, detail={"code": "conversation_moved"}) from exc
+        return {"status": "cancelled", "run_id": active_run.run_id}
+
+    if active_run.status != "running":
+        return {"status": "no_active_run", "run_id": None}
+
     dispatch_status = await run_manager.dispatch_cancel(active_run.run_id)
     return {"status": dispatch_status, "run_id": active_run.run_id}
 
@@ -1094,6 +1120,14 @@ async def steer_active_run(
     active_run = await get_active_run(
         rds.client, prefix=rds.key_prefix, conversation_id=conversation_id
     )
+    if active_run is not None and active_run.status == "paused_hitl":
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "paused_hitl",
+                "message": "answer or cancel the pending question first",
+            },
+        )
     if active_run is None or active_run.status != "running":
         return {"status": "no_active_run", "run_id": None}
 
@@ -1130,6 +1164,14 @@ async def cancel_steer(
     active_run = await get_active_run(
         rds.client, prefix=rds.key_prefix, conversation_id=conversation_id
     )
+    if active_run is not None and active_run.status == "paused_hitl":
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "paused_hitl",
+                "message": "answer or cancel the pending question first",
+            },
+        )
     if active_run is None or active_run.status != "running":
         return {"status": "no_active_run", "run_id": None}
 
