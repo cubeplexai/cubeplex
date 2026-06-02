@@ -37,6 +37,7 @@ PREFIX_SANDBOX_POLICY: str = "sbxp"
 PREFIX_SKILL_SOURCE: str = "sksrc"
 PREFIX_TRIGGER: str = "trig"
 PREFIX_TRIGGER_EVENT: str = "trev"
+PREFIX_USER_EVENT: str = "uev"
 
 
 @dataclass
