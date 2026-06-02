@@ -5,6 +5,8 @@ import { useRouter } from 'next/navigation'
 import { createApiClient, useAuthStore, useWorkspaceStore, useUserEvents } from '@cubebox/core'
 import { useAuthRedirect } from '@/hooks/useAuthRedirect'
 import { Sidebar } from '@/components/layout/Sidebar'
+import { Toaster } from 'sonner'
+import { MemoryUpdateToastBridge } from '@/components/chat/MemoryUpdateToastBridge'
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter()
@@ -27,6 +29,8 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     <div className="flex h-screen bg-background text-foreground">
       <Sidebar />
       <div className="flex-1 flex flex-col overflow-hidden">{children}</div>
+      <Toaster position="bottom-right" />
+      <MemoryUpdateToastBridge />
     </div>
   )
 }
