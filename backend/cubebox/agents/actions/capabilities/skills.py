@@ -24,8 +24,12 @@ from cubebox.agents.actions.types import (
     AgentCapability,
     AgentOperation,
 )
+from cubebox.skills.discovery import SkillDiscoveryService
 from cubebox.skills.service import SkillCatalogService
 from cubebox.skills.sources.registry import SkillsAdapterManager
+
+# Module-level alias so tests can monkeypatch it.
+_SkillDiscoveryService = SkillDiscoveryService
 
 
 @dataclass(frozen=True)
@@ -79,7 +83,34 @@ class InstallInput(BaseModel):
 async def _handle_find_impl(
     deps: SkillDeps, ctx: ScopeContext, session: Any, inp: FindInput
 ) -> Any:
-    raise NotImplementedError("Task 2 fills this in")
+    del ctx, session  # uses deps' run-scoped registry, not the per-call session
+    discovery = _SkillDiscoveryService(deps.registry)
+    cands = await discovery.discover(inp.query, limit=inp.limit)
+    return {
+        "candidates": [
+            {
+                "candidate_id": c.candidate_id,
+                "name": c.name,
+                "canonical_name": c.canonical_name,
+                "description": c.description,
+                "source": c.source_kind,
+                "source_name": c.source_name,
+                "repo": c.repo,
+                "trust": c.trust.value,
+                "install_state": c.install_state,
+                "install_count": c.install_count,
+                "unvetted": c.source_kind == "remote" and c.trust.value != "official",
+            }
+            for c in cands
+        ],
+        "hint": (
+            "To use an 'enabled' candidate now, call load_skill(canonical_name). "
+            "To install an 'in_catalog' or 'available' candidate: present it to the "
+            "user with skills(operation='preview', candidate_id=...) so they can see "
+            "what it does, then call skills(operation='install', candidate_id=...) "
+            "only when the user explicitly asks to install. Never install silently."
+        ),
+    }
 
 
 async def _handle_preview_impl(
