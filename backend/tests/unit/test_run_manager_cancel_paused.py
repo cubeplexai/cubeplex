@@ -219,3 +219,78 @@ async def test_cancel_paused_calls_abort_pending_and_finalizes(
     # a refresh doesn't show this run as still active.
     clear_active_mock.assert_awaited_once()
     expire_data_mock.assert_awaited_once()
+
+
+async def test_cancel_paused_still_finalizes_when_abort_raises(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Abort delivery is best-effort: if ``agent.abort_pending`` raises,
+    we must STILL finalize the run (as ``errored``) and release the
+    active-run lock. Otherwise the cancel claim_token leaks and the
+    conversation is wedged at ``status=running`` until TTL.
+    """
+    pending = MagicMock()
+    pending.question_id = "q1"
+    pending.created_at = 1717200000.0
+    _patch_checkpointer(monkeypatch, pending=pending)
+    _patch_claim_resume(monkeypatch, outcome=ClaimResumeOutcome.OK, token="tok-cancel")
+
+    rm = _make_rm()
+
+    fake_agent = MagicMock()
+    fake_agent.abort_pending = AsyncMock(side_effect=RuntimeError("boom"))
+    fake_agent.subscribe = MagicMock()
+
+    async def _fake_build(**_kwargs: Any) -> tuple[Any, list[Any], Any]:
+        return fake_agent, [], None
+
+    monkeypatch.setattr(rm, "_build_agent_for_conversation", _fake_build)
+
+    from contextlib import contextmanager as _cm
+
+    @_cm
+    def _fake_tracing_context(metadata: Any = None) -> Any:
+        yield None
+
+    @asynccontextmanager
+    async def _fake_trace(_tracer: Any, _agent: Any) -> Any:
+        yield None
+
+    monkeypatch.setattr("cubepi.tracing.tracing_context", _fake_tracing_context)
+    monkeypatch.setattr("cubepi.tracing.trace", _fake_trace)
+
+    finalize_mock = AsyncMock(return_value=True)
+    monkeypatch.setattr(
+        "cubebox.streams.hitl_resume.finalize_run_meta_if_claim_matches",
+        finalize_mock,
+    )
+
+    clear_active_mock = AsyncMock()
+    expire_data_mock = AsyncMock()
+    monkeypatch.setattr("cubebox.streams.run_manager.clear_active_run", clear_active_mock)
+    monkeypatch.setattr("cubebox.streams.run_manager.expire_run_data", expire_data_mock)
+
+    # cancel_paused_run must NOT raise — it swallows the abort exception
+    # and finalizes the run as errored so the claim is released.
+    out = await rm.cancel_paused_run(
+        conversation_id="c1",
+        run_id="r1",
+        reason="cancelled by user",
+        ctx=_ctx(),
+    )
+    assert out == "r1"
+
+    # abort_pending was attempted (and raised inside the agent).
+    fake_agent.abort_pending.assert_awaited_once_with("cancelled by user")
+
+    # finalize ran with status="errored" since abort failed, and the
+    # same claim_token claim_resume returned.
+    finalize_mock.assert_awaited_once()
+    kwargs = finalize_mock.await_args.kwargs
+    assert kwargs["run_id"] == "r1"
+    assert kwargs["claim_token"] == "tok-cancel"
+    assert kwargs["status"] == "errored"
+
+    # Active-run lock + meta TTL cleanup still ran because we won the CAS.
+    clear_active_mock.assert_awaited_once()
+    expire_data_mock.assert_awaited_once()
