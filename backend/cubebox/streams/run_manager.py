@@ -1040,16 +1040,421 @@ class RunManager:
           - load_skill (catalog + workspace/org)
           - MCP tools (workspace-enabled HTTP MCP servers)
         """
+        from cubebox.agents.checkpointer import init_checkpointer
+        from cubebox.agents.stream import convert_agent_event_to_sse
+        from cubebox.middleware.citations.counter import citation_counter_var
+
+        # extra_ref late-binding: compaction, skills, and todo all need access
+        # to agent._extra, which is only available after the agent is built.
+        # Pass the holder dict into the factory so middleware closures and the
+        # caller share the same dict; the caller populates it post-build.
+        extra_ref_holder: dict[str, Any] = {"extra": None}
+
+        # Bridge the synchronous cubepi listener to the async world via a queue.
+        # agent.prompt() is async and invokes synchronous listeners on each
+        # AgentEvent as they arrive.  Previously we buffered translated dicts
+        # and flushed them after prompt() returned, which made long responses
+        # appear as a single batch dump.  Instead, push each translated dict
+        # onto an asyncio.Queue and have a parallel drain task forward them
+        # through publish_stream_event in real time.  The sentinel ``None``
+        # signals the drainer to exit so we can finish citation flushing.
+        sse_queue: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue()
+
+        async with init_checkpointer() as cp:
+            # Seed the citation counter past any 【N-M】 markers already
+            # persisted in this conversation's tool-result history so
+            # cross-turn ids don't collide in the frontend store (which is
+            # keyed by citation_id alone). No-op on the first turn.
+            try:
+                _hist = await cp.load(conversation_id)
+            except Exception as _seed_exc:
+                logger.warning("Citation seed: failed to load history: {}", _seed_exc)
+                _hist = None
+            if _hist is not None and _hist.messages:
+                _counter = citation_counter_var.get()
+                if _counter is not None:
+                    await _counter.seed_from_messages(_hist.messages)
+
+            # all_tools is part of the factory contract for future callers
+            # (e.g. T8/T10) but the prompt path doesn't need it directly —
+            # the agent already has the tools bound at construction time.
+            agent, _all_tools, sandbox_hitl_channel = await self._build_agent_for_conversation(
+                ctx=ctx,
+                conversation_id=conversation_id,
+                run_id=run_id,
+                cp=cp,
+                sandbox=sandbox,
+                skill_catalog=skill_catalog,
+                catalog_session=catalog_session,
+                effective_system_prompt=effective_system_prompt,
+                extra_ref_holder=extra_ref_holder,
+                sse_queue=sse_queue,
+                publish_stream_event=publish_stream_event,
+                trigger=trigger,
+            )
+            # Late-bind extra_ref to the live agent._extra dict so compaction /
+            # skills / todo middleware can read and write persistent state.
+            # The factory already populated the closure via extra_ref_holder;
+            # this is the post-build assignment those closures resolve to.
+            extra_ref_holder["extra"] = agent._extra
+
+            from cubepi.agent.types import MessageEndEvent as _MsgEndEvent
+            from cubepi.providers.base import UserMessage as _UserMsg
+
+            _user_msg_seen = 0
+            auto_detach = _build_auto_detach_listener(agent)
+
+            def _on_event(evt: Any, _signal: Any = None) -> None:
+                # Runs on the same event loop as _run_cubepi_path, so
+                # put_nowait is safe.  If we ever invoke the agent from a
+                # background thread, swap to loop.call_soon_threadsafe.
+                # auto_detach must run FIRST so HitlRequestEvent triggers
+                # detach before the SSE conversion below; T6 reads
+                # `auto_detach.detached` in the terminal block.
+                auto_detach(evt, _signal)
+                nonlocal _user_msg_seen
+                if isinstance(evt, _MsgEndEvent) and isinstance(evt.message, _UserMsg):
+                    _user_msg_seen += 1
+                    if _user_msg_seen == 1:
+                        return  # seed prompt — already shown optimistically
+                for d in convert_agent_event_to_sse(evt):
+                    sse_queue.put_nowait(d)
+
+            agent.subscribe(_on_event)
+            self._agents[run_id] = agent
+            if sandbox_hitl_channel is not None:
+                self._hitl_channels[run_id] = sandbox_hitl_channel
+            drainer = asyncio.create_task(_drain_cubepi_sse_queue(sse_queue, publish_stream_event))
+
+            # Compute relevance-memory snapshot before the agent loop starts
+            # and bake it into the UserMessage metadata so MemoryMiddleware
+            # can prepend the rendered snapshot text during transform_context.
+            # Baking the snapshot at append-time (rather than re-deriving it
+            # on replay) is what keeps the historical prefix byte-stable for
+            # prompt caching — see backend/docs/prompt-cache-discipline.md.
+            import time as _time
+
+            from cubepi.providers.base import TextContent as _TextContent
+            from cubepi.providers.base import UserMessage as _UserMessage
+
+            from cubebox.middleware.memory import compute_relevance_snapshot as _compute_snap
+
+            _user_msg_metadata: dict[str, Any] = {}
+            try:
+                _mem_repo_factory = extra_ref_holder["mem_repo_factory"]
+                async with _mem_repo_factory() as _snap_repo:
+                    _snapshot = await _compute_snap(_snap_repo)
+                if _snapshot is not None:
+                    _user_msg_metadata["memory_snapshot"] = _snapshot
+            except Exception as _snap_exc:
+                logger.warning("Failed to compute relevance snapshot: {}", _snap_exc)
+
+            # Build attachment metadata blocks and inject into user message so
+            # AttachmentHintMiddleware can render the [Attachments] hint.
+            if attachments:
+                try:
+                    _att_blocks = await _build_attachment_content_blocks(
+                        org_id=ctx.org_id,
+                        workspace_id=ctx.workspace_id,
+                        conversation_id=conversation_id,
+                        attachment_ids=attachments,
+                    )
+                    if _att_blocks:
+                        _user_msg_metadata["attachments"] = _att_blocks
+                except Exception as _att_exc:
+                    logger.warning("Failed to build attachment blocks for cubepi run: {}", _att_exc)
+
+            _user_msg = _UserMessage(
+                content=[_TextContent(text=content)],
+                timestamp=_time.time(),
+                metadata=_user_msg_metadata,
+            )
+            # Attach the process-level Tracer to this run via cubepi's
+            # best-effort scope: it swallows every tracing fault (attach,
+            # detach, flush) so tracing can never break the run, and is a
+            # no-op when tracing is disabled (tracer is None).
+            from cubepi.tracing import trace, tracing_context
+
+            from cubebox.llm.runtime_writeback import (
+                schedule_runtime_status_writeback as _schedule_writeback,
+            )
+
+            tracer = getattr(self._app.state, "tracer", None)
+            # Provider/model identity were resolved inside the factory; the
+            # writeback below uses them so the per-run liveness flips still
+            # target the same provider+model the agent actually called.
+            provider_name: str = extra_ref_holder["provider_name"]
+            model_id: str = extra_ref_holder["model_id"]
+            # Stamp the run's identity onto the trace spans (recorder writes
+            # these as cubepi.metadata.* on the invoke_agent span). Skip None
+            # and stringify so OTel attribute typing is always satisfied.
+            _trace_meta = {
+                k: str(v)
+                for k, v in (
+                    ("conversation_id", conversation_id),
+                    ("user_id", ctx.user_id),
+                    ("org_id", ctx.org_id),
+                    ("workspace_id", ctx.workspace_id),
+                )
+                if v is not None
+            }
+            final_status: str = "completed"
+            try:
+                with tracing_context(metadata=_trace_meta):
+                    async with trace(tracer, agent):
+                        await agent.prompt(_user_msg)
+            except BaseException as _run_exc:
+                # Out-of-band, best-effort: a 401/403 flips provider liveness to
+                # "fail"; a model_not_found flips this model to "unavailable".
+                # Never blocks or alters the live request — we re-raise as-is.
+                _schedule_writeback(
+                    org_id=ctx.org_id,
+                    provider_slug=provider_name,
+                    model_id=model_id,
+                    exc=_run_exc,
+                )
+                raise
+            else:
+                # Success clears a stale liveness "fail" via a guarded UPDATE.
+                _schedule_writeback(
+                    org_id=ctx.org_id,
+                    provider_slug=provider_name,
+                    model_id=model_id,
+                    exc=None,
+                )
+
+                # --- Out-of-band reflection trigger ---
+                # Spawn a detached task that runs a small reflection agent
+                # to decide whether memory_save / memory_update calls are
+                # warranted for this turn. Fire-and-forget — never blocks
+                # or raises into the main run path. Provider / factory /
+                # memory_service_factory are stashed by the agent factory
+                # via extra_ref_holder (T7); reuse them rather than
+                # re-resolving.
+                def _last_assistant_text(messages: list[Any]) -> str | None:
+                    from cubepi.providers.base import AssistantMessage, TextContent
+
+                    for msg in reversed(messages):
+                        if isinstance(msg, AssistantMessage):
+                            parts: list[str] = []
+                            for c in msg.content:
+                                if isinstance(c, TextContent):
+                                    parts.append(c.text)
+                            return "\n".join(parts).strip() or None
+                    return None
+
+                def _stringify_user_msg(msg: Any) -> str:
+                    if isinstance(msg, str):
+                        return msg
+                    from cubepi.providers.base import TextContent
+
+                    content = getattr(msg, "content", None)
+                    if isinstance(content, str):
+                        return content
+                    if isinstance(content, list):
+                        parts_s = [c.text for c in content if isinstance(c, TextContent)]
+                        return "\n".join(parts_s).strip()
+                    return ""
+
+                try:
+                    from cubebox.db.engine import (
+                        async_session_maker as _ue_session_maker,
+                    )
+                    from cubebox.repositories.user_event import UserEventRepository
+                    from cubebox.services.reflection_runner import (
+                        ReflectionInput,
+                        ReflectionRunner,
+                        ReflectionTurn,
+                    )
+                    from cubebox.services.user_event import UserEventService
+                    from cubebox.tools.builtin.memory import create_memory_tools
+
+                    _bus = getattr(self._app.state, "user_event_bus", None)
+                    _memory_service_factory = extra_ref_holder.get("memory_service_factory")
+                    _provider_ref = extra_ref_holder.get("provider")
+                    _factory_ref = extra_ref_holder.get("llm_factory")
+                    if (
+                        _memory_service_factory is None
+                        or _provider_ref is None
+                        or _factory_ref is None
+                    ):
+                        logger.debug(
+                            "skipping reflection for run_id={}: memory tools not available",
+                            run_id,
+                        )
+                    elif _bus is not None:
+
+                        def _make_reflection_agent(_inp: ReflectionInput) -> Any:
+                            from cubepi import Agent, Model
+
+                            from cubebox.llm.config import ModelCost
+                            from cubebox.middleware.cost import (
+                                CostMiddleware as _ReflCostMw,
+                            )
+                            from cubebox.prompts.reflection_system import (
+                                REFLECTION_SYSTEM_PROMPT,
+                            )
+
+                            _mem_tools = create_memory_tools(
+                                service_factory=_memory_service_factory,
+                                conversation_id=_inp.conversation_id,
+                                run_id=_inp.run_id,
+                            )
+
+                            def _refl_price_lookup(
+                                provider_name_: str, model_id_: str
+                            ) -> ModelCost | None:
+                                assert _factory_ref is not None  # narrowed above
+                                pcfg = _factory_ref.llm_config.providers.get(provider_name_)
+                                if pcfg is None:
+                                    return None
+                                for m in pcfg.models:
+                                    if m.id == model_id_:
+                                        return m.cost
+                                return None
+
+                            _refl_mw: list[Any] = [
+                                _ReflCostMw(
+                                    org_id=ctx.org_id,
+                                    workspace_id=ctx.workspace_id,
+                                    user_id=ctx.user_id,
+                                    conversation_id=_inp.conversation_id,
+                                    price_lookup=_refl_price_lookup,
+                                )
+                            ]
+
+                            return Agent(
+                                provider=_provider_ref,
+                                model=Model(id=model_id, provider=provider_name),
+                                system_prompt=REFLECTION_SYSTEM_PROMPT,
+                                tools=_mem_tools,
+                                middleware=_refl_mw,
+                            )
+
+                        async def _run_reflection(
+                            agent_ref: Any = agent,
+                            user_msg_ref: Any = _user_msg,
+                            bus: Any = _bus,
+                            agent_factory: Any = _make_reflection_agent,
+                        ) -> None:
+                            try:
+                                await asyncio.wait_for(agent_ref.wait_for_idle(), timeout=10.0)
+                            except (TimeoutError, Exception):
+                                logger.warning(
+                                    "reflection: agent not idle within 10s, skipping run_id={}",
+                                    run_id,
+                                )
+                                return
+                            last_assistant = _last_assistant_text(agent_ref.state.messages)
+                            if not last_assistant:
+                                return
+                            user_msg_text = _stringify_user_msg(user_msg_ref)
+                            inp = ReflectionInput(
+                                conversation_id=conversation_id,
+                                run_id=run_id,
+                                user_id=ctx.user_id,
+                                workspace_id=ctx.workspace_id,
+                                turn=ReflectionTurn(
+                                    user_message=user_msg_text,
+                                    assistant_message=last_assistant,
+                                    tool_summaries=[],
+                                ),
+                            )
+                            async with _ue_session_maker() as _session:
+                                _repo = UserEventRepository(_session)
+                                _svc = UserEventService(repo=_repo, bus=bus)
+                                _runner = ReflectionRunner(
+                                    user_event_service=_svc,
+                                    agent_factory=agent_factory,
+                                )
+                                await _runner.reflect(inp)
+
+                        _refl_task = asyncio.create_task(
+                            _run_reflection(), name=f"reflection:{run_id}"
+                        )
+                        self._reflection_tasks.add(_refl_task)
+                        _refl_task.add_done_callback(self._reflection_tasks.discard)
+                except Exception:
+                    logger.warning(
+                        "failed to schedule reflection for run_id={}", run_id, exc_info=True
+                    )
+
+                # T6: classify the terminal state. Three success outcomes:
+                #   - no DB pending → completed
+                #   - DB pending but no HitlRequestEvent this turn → stale
+                #     leftover; clear it and treat as completed
+                #   - DB pending and HitlRequestEvent fired → genuine new
+                #     pause (auto-detach hook already detached the agent)
+                from cubebox.streams.hitl_resume import classify_terminal_status
+
+                final_pending = await agent.load_pending_hitl_request()
+                classification = classify_terminal_status(
+                    final_pending=final_pending,
+                    answered_question_id=None,  # prompt path
+                    saw_hitl_request_event=auto_detach.detached,
+                )
+                if classification.clear_pending:
+                    await cp.save_pending_request(conversation_id, None)
+                final_status = classification.status
+            finally:
+                # Stop accepting steers for this run before tearing down.
+                self._agents.pop(run_id, None)
+                self._hitl_channels.pop(run_id, None)
+                # Signal drainer and wait for it to flush remaining events so
+                # all SSE dicts are published before citation buffers flush.
+                await sse_queue.put(None)
+                await drainer
+
+        for agent_key in list(citation_buffers):
+            await flush_citation_buffer(agent_key, agent_key)
+        return final_status
+
+    async def _build_agent_for_conversation(
+        self,
+        *,
+        ctx: RunContext,
+        conversation_id: str,
+        run_id: str,
+        cp: Any,
+        sandbox: Any | None,
+        skill_catalog: Any | None,
+        catalog_session: Any | None,
+        effective_system_prompt: str,
+        extra_ref_holder: dict[str, Any],
+        sse_queue: asyncio.Queue[dict[str, Any] | None],
+        publish_stream_event: Any,
+        trigger: str = "interactive",
+    ) -> tuple[Any, list[Any], Any]:
+        """Build provider + middleware + tools + channel + agent for a conversation.
+
+        Shared by the prompt path (:meth:`_run_cubepi_path`), the future respond
+        path (T8), and the cancel-paused-run path (T10). Returns
+        ``(agent, all_tools, sandbox_hitl_channel)``.
+
+        The HITL channel is a :class:`cubepi.hitl.CheckpointedChannel` wired
+        with ``run_id`` so every pause writes ``pending_request`` and
+        ``pending_run_id`` to the cubepi_threads row in a single atomic
+        statement — which is what lets a different worker pick up the answer
+        and resume without losing the request identity.
+
+        ``cp`` (the checkpointer) is owned by the CALLER so the same
+        checkpointer instance drives both the channel and the agent. Pass
+        ``sandbox=None`` / ``skill_catalog=None`` / ``catalog_session=None``
+        when building from a context that has none (e.g. the cancel path
+        opens the agent only to drive a final SSE emission).
+
+        ``extra_ref_holder`` is the late-binding dict that middleware closures
+        read at request time. The caller MUST populate
+        ``extra_ref_holder["extra"] = agent._extra`` after this factory
+        returns, before the first prompt invocation.
+        """
         from collections.abc import AsyncIterator as _AsyncIterator
         from contextlib import asynccontextmanager as _asynccontextmanager
 
-        from cubebox.agents.checkpointer import init_checkpointer
         from cubebox.agents.graph import create_cubebox_agent
-        from cubebox.agents.stream import convert_agent_event_to_sse
         from cubebox.db.engine import async_session_maker
         from cubebox.llm.cache_markers import CubeboxCacheMarkerPolicy
         from cubebox.llm.factory import LLMFactory
-        from cubebox.middleware.citations.counter import citation_counter_var
 
         try:
             async with async_session_maker() as llm_session:
@@ -1405,23 +1810,10 @@ class RunManager:
                 _exc,
             )
 
-        # Bridge the synchronous cubepi listener to the async world via a queue.
-        # agent.prompt() is async and invokes synchronous listeners on each
-        # AgentEvent as they arrive.  Previously we buffered translated dicts
-        # and flushed them after prompt() returned, which made long responses
-        # appear as a single batch dump.  Instead, push each translated dict
-        # onto an asyncio.Queue and have a parallel drain task forward them
-        # through publish_stream_event in real time.  The sentinel ``None``
-        # signals the drainer to exit so we can finish citation flushing.
-        sse_queue: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue()
-
         # --- Build the 11 cubepi middleware (M3.f) ---
-        # extra_ref late-binding: compaction, skills, and todo all need access to
-        # agent._extra, which is only available after the agent is constructed.
-        # We capture it via a holder dict so the closures resolve to the right
-        # object once we populate the holder below.
-        extra_ref_holder: dict[str, Any] = {"extra": None}
-
+        # The caller owns ``extra_ref_holder`` and populates ``["extra"]`` from
+        # ``agent._extra`` after this factory returns; this closure reads the
+        # holder at request time, well after the agent build.
         def _extra_ref() -> dict[str, Any]:
             ref: dict[str, Any] | None = extra_ref_holder["extra"]
             if ref is None:
@@ -1469,24 +1861,30 @@ class RunManager:
         except Exception as _exc:
             logger.warning("CitationMiddleware unavailable: {}", _exc)
 
-        # 4. MemoryMiddleware — needs repo_factory
+        # 4. MemoryMiddleware — needs repo_factory.
+        # The factory is defined unconditionally (outside the try) so the
+        # caller can reuse it for the per-turn relevance-snapshot pass even
+        # if the MemoryMiddleware build below fails. It is also stashed on
+        # ``extra_ref_holder`` for the caller to pick up after the factory
+        # returns — the agent doesn't expose it.
+        from collections.abc import AsyncIterator as _AsyncIterator2
+        from contextlib import asynccontextmanager as _asynccontextmanager2
+
+        from cubebox.db.engine import async_session_maker as _mem2_session_maker
+        from cubebox.repositories.memory import MemoryRepository as _MemRepo2
+
+        @_asynccontextmanager2
+        async def _mem_repo_factory() -> _AsyncIterator2[_MemRepo2]:
+            async with _mem2_session_maker() as _s:
+                yield _MemRepo2(
+                    _s,
+                    user_id=ctx.user_id,
+                    org_id=ctx.org_id,
+                    workspace_id=ctx.workspace_id,
+                )
+
         try:
-            from collections.abc import AsyncIterator as _AsyncIterator2
-            from contextlib import asynccontextmanager as _asynccontextmanager2
-
-            from cubebox.db.engine import async_session_maker as _mem2_session_maker
             from cubebox.middleware.memory import MemoryMiddleware
-            from cubebox.repositories.memory import MemoryRepository as _MemRepo2
-
-            @_asynccontextmanager2
-            async def _mem_repo_factory() -> _AsyncIterator2[_MemRepo2]:
-                async with _mem2_session_maker() as _s:
-                    yield _MemRepo2(
-                        _s,
-                        user_id=ctx.user_id,
-                        org_id=ctx.org_id,
-                        workspace_id=ctx.workspace_id,
-                    )
 
             cubepi_middleware.append(MemoryMiddleware(repo_factory=_mem_repo_factory))
         except Exception as _exc:
@@ -1538,521 +1936,211 @@ class RunManager:
         except Exception as _exc:
             logger.warning("CompactionMiddleware not loaded: {}", _exc)
 
-        async with init_checkpointer() as cp:
-            # 6. SandboxMiddleware — needs sandbox
-            sandbox_hitl_channel: Any = None
-            if sandbox is not None:
+        # 6. SandboxMiddleware — needs sandbox. The HITL channel is built here
+        # so that the SandboxMiddleware's confirm-gate and the agent share the
+        # same CheckpointedChannel instance (which writes pending_request +
+        # pending_run_id atomically via ``cp``).
+        sandbox_hitl_channel: Any = None
+        if sandbox is not None:
+            try:
+                from cubebox.middleware.sandbox import SandboxMiddleware
+                from cubebox.sandbox.manager import get_sandbox_manager
+
+                # Resolve the org's command_rules via the manager so DB access
+                # stays behind the manager and the middleware only sees its
+                # slice of policy.
+                #
+                # Fail-CLOSED on resolution failure: if we can't read the org's
+                # rules (DB transient, malformed persisted policy, …) we MUST
+                # NOT pass an empty list — empty means allow-all, which would
+                # silently bypass any deny/confirm rules the admin configured.
+                # Install a single deny-all rule instead so every execute call
+                # blocks with the standard "blocked by org policy" message
+                # until the next request resolves cleanly.
+                _command_rules: list[dict[str, Any]]
                 try:
-                    from cubebox.middleware.sandbox import SandboxMiddleware
-                    from cubebox.sandbox.manager import get_sandbox_manager
-
-                    # Resolve the org's command_rules via the manager so DB access
-                    # stays behind the manager and the middleware only sees its
-                    # slice of policy.
-                    #
-                    # Fail-CLOSED on resolution failure: if we can't read the org's
-                    # rules (DB transient, malformed persisted policy, …) we MUST
-                    # NOT pass an empty list — empty means allow-all, which would
-                    # silently bypass any deny/confirm rules the admin configured.
-                    # Install a single deny-all rule instead so every execute call
-                    # blocks with the standard "blocked by org policy" message
-                    # until the next request resolves cleanly.
-                    _command_rules: list[dict[str, Any]]
-                    try:
-                        _command_rules = await get_sandbox_manager().resolve_command_rules(
-                            ctx.org_id
-                        )
-                    except Exception as _exc:
-                        logger.error(
-                            "Failed to resolve sandbox command_rules for org {}; "
-                            "failing CLOSED with deny-all until next request "
-                            "resolves: {}",
-                            ctx.org_id,
-                            _exc,
-                        )
-                        _command_rules = [
-                            {"action": "deny", "pattern": "*"},
-                        ]
-
-                    from cubepi.hitl import CheckpointedChannel
-
-                    sandbox_hitl_channel = CheckpointedChannel(
-                        checkpointer=cp,
-                        thread_id=conversation_id,
-                        run_id=run_id,
-                        default_timeout=None,
-                    )
-                    sandbox_mw = SandboxMiddleware(
-                        sandbox=sandbox,
-                        conversation_id=conversation_id,
-                        workspace_id=ctx.workspace_id,
-                        command_rules=_command_rules,
-                        channel=sandbox_hitl_channel,
-                    )
-                    cubepi_middleware.append(sandbox_mw)
-                    # Middleware tools (execute, write_file, edit_file, file_read) collected for
-                    # ordered merge below
-                    _sandbox_tools.extend(sandbox_mw.tools)
-                    # ask_user built-in tool shares the same HITL channel so the agent
-                    # can ask structured questions that pause execution just like a confirm rule.
-                    from cubepi.hitl import ask_user_tool
-
-                    _builtin_tools.append(ask_user_tool(sandbox_hitl_channel))
+                    _command_rules = await get_sandbox_manager().resolve_command_rules(ctx.org_id)
                 except Exception as _exc:
-                    logger.warning("SandboxMiddleware unavailable: {}", _exc)
-
-            # 7. SkillsMiddleware — needs extra_ref
-            try:
-                from cubebox.middleware.skills import SkillsMiddleware
-
-                cubepi_middleware.append(SkillsMiddleware(extra_ref=_extra_ref))
-            except Exception as _exc:
-                logger.warning("SkillsMiddleware unavailable: {}", _exc)
-
-            # 8. SubAgentMiddleware — needs provider + model info + shared tools
-            try:
-                from cubebox.middleware.subagents import SubAgentMiddleware
-
-                # Cost middleware (if present) is passed as inherited_middleware for depth attribution.
-                # Build the cost instance separately so SubAgent can clone it.
-                _cost_mw_for_inherit: list[Any] = []
-                try:
-                    from cubebox.middleware.cost import CostMiddleware as _CostMwPi
-
-                    _cost_mw_for_inherit = [
-                        _CostMwPi(
-                            org_id=ctx.org_id,
-                            workspace_id=ctx.workspace_id,
-                            user_id=ctx.user_id,
-                            conversation_id=conversation_id,
-                        )
+                    logger.error(
+                        "Failed to resolve sandbox command_rules for org {}; "
+                        "failing CLOSED with deny-all until next request "
+                        "resolves: {}",
+                        ctx.org_id,
+                        _exc,
+                    )
+                    _command_rules = [
+                        {"action": "deny", "pattern": "*"},
                     ]
-                except Exception:
-                    pass
 
-                subagent_mw = SubAgentMiddleware(
-                    subagent_map={},
-                    default_provider=provider,
-                    default_model_id=model_id,
-                    default_provider_name=provider_name,
-                    # Pass all tools (sandbox + artifact + builtin) collected so far
-                    # as shared tools for subagent spawning, minus show_widget
-                    # (top-level only in v1).
-                    shared_tools=_subagent_shared_tools(
-                        _sandbox_tools + _artifact_tools + _builtin_tools
-                    ),
-                    inherited_middleware=_cost_mw_for_inherit,
-                    tracer=getattr(self._app.state, "tracer", None),
+                from cubepi.hitl import CheckpointedChannel
+
+                sandbox_hitl_channel = CheckpointedChannel(
+                    checkpointer=cp,
+                    thread_id=conversation_id,
+                    run_id=run_id,
+                    default_timeout=None,
                 )
-                cubepi_middleware.append(subagent_mw)
-                _subagent_tools.extend(subagent_mw.tools)
+                sandbox_mw = SandboxMiddleware(
+                    sandbox=sandbox,
+                    conversation_id=conversation_id,
+                    workspace_id=ctx.workspace_id,
+                    command_rules=_command_rules,
+                    channel=sandbox_hitl_channel,
+                )
+                cubepi_middleware.append(sandbox_mw)
+                # Middleware tools (execute, write_file, edit_file, file_read) collected for
+                # ordered merge below
+                _sandbox_tools.extend(sandbox_mw.tools)
+                # ask_user built-in tool shares the same HITL channel so the agent
+                # can ask structured questions that pause execution just like a confirm rule.
+                from cubepi.hitl import ask_user_tool
+
+                _builtin_tools.append(ask_user_tool(sandbox_hitl_channel))
             except Exception as _exc:
-                logger.warning("SubAgentMiddleware unavailable: {}", _exc)
+                logger.warning("SandboxMiddleware unavailable: {}", _exc)
 
-            # 9. CostMiddleware — needs org/workspace/user/conversation IDs
+        # 7. SkillsMiddleware — needs extra_ref
+        try:
+            from cubebox.middleware.skills import SkillsMiddleware
+
+            cubepi_middleware.append(SkillsMiddleware(extra_ref=_extra_ref))
+        except Exception as _exc:
+            logger.warning("SkillsMiddleware unavailable: {}", _exc)
+
+        # 8. SubAgentMiddleware — needs provider + model info + shared tools
+        try:
+            from cubebox.middleware.subagents import SubAgentMiddleware
+
+            # Cost middleware (if present) is passed as inherited_middleware for depth attribution.
+            # Build the cost instance separately so SubAgent can clone it.
+            _cost_mw_for_inherit: list[Any] = []
             try:
-                from cubebox.llm.config import ModelCost
-                from cubebox.middleware.cost import CostMiddleware
+                from cubebox.middleware.cost import CostMiddleware as _CostMwPi
 
-                # Resolve ModelCost for any (provider, model_id) the agent reports.
-                # The factory's llm_config holds the merged YAML + DB provider config
-                # so this lookup honors per-org overrides.
-                def _price_lookup(provider: str, model_id: str) -> ModelCost | None:
-                    pcfg = factory.llm_config.providers.get(provider)
-                    if pcfg is None:
-                        return None
-                    for m in pcfg.models:
-                        if m.id == model_id:
-                            return m.cost
-                    return None
-
-                cubepi_middleware.append(
-                    CostMiddleware(
+                _cost_mw_for_inherit = [
+                    _CostMwPi(
                         org_id=ctx.org_id,
                         workspace_id=ctx.workspace_id,
                         user_id=ctx.user_id,
                         conversation_id=conversation_id,
-                        price_lookup=_price_lookup,
                     )
-                )
-            except Exception as _exc:
-                logger.warning("CostMiddleware unavailable: {}", _exc)
+                ]
+            except Exception:
+                pass
 
-            # 10. TimestampMiddleware — no deps
-            try:
-                from cubebox.middleware.timestamps import TimestampMiddleware
-
-                cubepi_middleware.append(TimestampMiddleware())
-            except Exception as _exc:
-                logger.warning("TimestampMiddleware unavailable: {}", _exc)
-
-            # 11. TodoListMiddleware — needs extra_ref
-            try:
-                from cubebox.middleware.todo import TodoListMiddleware
-
-                todo_mw = TodoListMiddleware(extra_ref=_extra_ref)
-                cubepi_middleware.append(todo_mw)
-                _todo_tools.extend(todo_mw.tools)
-            except Exception as _exc:
-                logger.warning("TodoListMiddleware unavailable: {}", _exc)
-
-            # --- Final tool merge ---
-            # Stable composition order — changes invalidate the prompt cache prefix:
-            #   sandbox tools → artifact tools → todo tools → subagent tools
-            #   → builtin tools (calculator/datetime/view_images/memory/load_skill/mcp)
-            all_tools: list[Any] = (
-                _sandbox_tools + _artifact_tools + _todo_tools + _subagent_tools + _builtin_tools
+            subagent_mw = SubAgentMiddleware(
+                subagent_map={},
+                default_provider=provider,
+                default_model_id=model_id,
+                default_provider_name=provider_name,
+                # Pass all tools (sandbox + artifact + builtin) collected so far
+                # as shared tools for subagent spawning, minus show_widget
+                # (top-level only in v1).
+                shared_tools=_subagent_shared_tools(
+                    _sandbox_tools + _artifact_tools + _builtin_tools
+                ),
+                inherited_middleware=_cost_mw_for_inherit,
+                tracer=getattr(self._app.state, "tracer", None),
             )
+            cubepi_middleware.append(subagent_mw)
+            _subagent_tools.extend(subagent_mw.tools)
+        except Exception as _exc:
+            logger.warning("SubAgentMiddleware unavailable: {}", _exc)
 
-            logger.info(
-                "cubepi middleware stack: {} layers, {} total tools",
-                len(cubepi_middleware),
-                len(all_tools),
-            )
+        # 9. CostMiddleware — needs org/workspace/user/conversation IDs
+        try:
+            from cubebox.llm.config import ModelCost
+            from cubebox.middleware.cost import CostMiddleware
 
-            # Seed the citation counter past any 【N-M】 markers already
-            # persisted in this conversation's tool-result history so
-            # cross-turn ids don't collide in the frontend store (which is
-            # keyed by citation_id alone). No-op on the first turn.
-            try:
-                _hist = await cp.load(conversation_id)
-            except Exception as _seed_exc:
-                logger.warning("Citation seed: failed to load history: {}", _seed_exc)
-                _hist = None
-            if _hist is not None and _hist.messages:
-                _counter = citation_counter_var.get()
-                if _counter is not None:
-                    await _counter.seed_from_messages(_hist.messages)
-
-            agent = create_cubebox_agent(
-                provider=provider,
-                model_id=model_id,
-                provider_name=provider_name,
-                system_prompt=effective_system_prompt,
-                tools=all_tools,
-                checkpointer=cp,
-                thread_id=conversation_id,
-                middleware=cubepi_middleware,
-                max_tokens=_model_max_tokens,
-                temperature=_model_temperature,
-                # Reasoning-capable models think by default ("medium"); a
-                # per-conversation toggle (UI) can override this later.
-                reasoning=_model_config.reasoning,
-                thinking="medium" if _model_config.reasoning else "off",
-                channel=sandbox_hitl_channel,
-            )
-
-            # Late-bind extra_ref to the live agent._extra dict so compaction /
-            # skills / todo middleware can read and write persistent state.
-            extra_ref_holder["extra"] = agent._extra
-
-            from cubepi.agent.types import MessageEndEvent as _MsgEndEvent
-            from cubepi.providers.base import UserMessage as _UserMsg
-
-            _user_msg_seen = 0
-            auto_detach = _build_auto_detach_listener(agent)
-
-            def _on_event(evt: Any, _signal: Any = None) -> None:
-                # Runs on the same event loop as _run_cubepi_path, so
-                # put_nowait is safe.  If we ever invoke the agent from a
-                # background thread, swap to loop.call_soon_threadsafe.
-                # auto_detach must run FIRST so HitlRequestEvent triggers
-                # detach before the SSE conversion below; T6 reads
-                # `auto_detach.detached` in the terminal block.
-                auto_detach(evt, _signal)
-                nonlocal _user_msg_seen
-                if isinstance(evt, _MsgEndEvent) and isinstance(evt.message, _UserMsg):
-                    _user_msg_seen += 1
-                    if _user_msg_seen == 1:
-                        return  # seed prompt — already shown optimistically
-                for d in convert_agent_event_to_sse(evt):
-                    sse_queue.put_nowait(d)
-
-            agent.subscribe(_on_event)
-            self._agents[run_id] = agent
-            if sandbox_hitl_channel is not None:
-                self._hitl_channels[run_id] = sandbox_hitl_channel
-            drainer = asyncio.create_task(_drain_cubepi_sse_queue(sse_queue, publish_stream_event))
-
-            # Compute relevance-memory snapshot before the agent loop starts
-            # and bake it into the UserMessage metadata so MemoryMiddleware
-            # can prepend the rendered snapshot text during transform_context.
-            # Baking the snapshot at append-time (rather than re-deriving it
-            # on replay) is what keeps the historical prefix byte-stable for
-            # prompt caching — see backend/docs/prompt-cache-discipline.md.
-            import time as _time
-
-            from cubepi.providers.base import TextContent as _TextContent
-            from cubepi.providers.base import UserMessage as _UserMessage
-
-            from cubebox.middleware.memory import compute_relevance_snapshot as _compute_snap
-
-            _user_msg_metadata: dict[str, Any] = {}
-            try:
-                async with _mem_repo_factory() as _snap_repo:
-                    _snapshot = await _compute_snap(_snap_repo)
-                if _snapshot is not None:
-                    _user_msg_metadata["memory_snapshot"] = _snapshot
-            except Exception as _snap_exc:
-                logger.warning("Failed to compute relevance snapshot: {}", _snap_exc)
-
-            # Build attachment metadata blocks and inject into user message so
-            # AttachmentHintMiddleware can render the [Attachments] hint.
-            if attachments:
-                try:
-                    _att_blocks = await _build_attachment_content_blocks(
-                        org_id=ctx.org_id,
-                        workspace_id=ctx.workspace_id,
-                        conversation_id=conversation_id,
-                        attachment_ids=attachments,
-                    )
-                    if _att_blocks:
-                        _user_msg_metadata["attachments"] = _att_blocks
-                except Exception as _att_exc:
-                    logger.warning("Failed to build attachment blocks for cubepi run: {}", _att_exc)
-
-            _user_msg = _UserMessage(
-                content=[_TextContent(text=content)],
-                timestamp=_time.time(),
-                metadata=_user_msg_metadata,
-            )
-            # Attach the process-level Tracer to this run via cubepi's
-            # best-effort scope: it swallows every tracing fault (attach,
-            # detach, flush) so tracing can never break the run, and is a
-            # no-op when tracing is disabled (tracer is None).
-            from cubepi.tracing import trace, tracing_context
-
-            from cubebox.llm.runtime_writeback import (
-                schedule_runtime_status_writeback as _schedule_writeback,
-            )
-
-            tracer = getattr(self._app.state, "tracer", None)
-            # Stamp the run's identity onto the trace spans (recorder writes
-            # these as cubepi.metadata.* on the invoke_agent span). Skip None
-            # and stringify so OTel attribute typing is always satisfied.
-            _trace_meta = {
-                k: str(v)
-                for k, v in (
-                    ("conversation_id", conversation_id),
-                    ("user_id", ctx.user_id),
-                    ("org_id", ctx.org_id),
-                    ("workspace_id", ctx.workspace_id),
-                )
-                if v is not None
-            }
-            final_status: str = "completed"
-            try:
-                with tracing_context(metadata=_trace_meta):
-                    async with trace(tracer, agent):
-                        await agent.prompt(_user_msg)
-            except BaseException as _run_exc:
-                # Out-of-band, best-effort: a 401/403 flips provider liveness to
-                # "fail"; a model_not_found flips this model to "unavailable".
-                # Never blocks or alters the live request — we re-raise as-is.
-                _schedule_writeback(
-                    org_id=ctx.org_id,
-                    provider_slug=provider_name,
-                    model_id=model_id,
-                    exc=_run_exc,
-                )
-                raise
-            else:
-                # Success clears a stale liveness "fail" via a guarded UPDATE.
-                _schedule_writeback(
-                    org_id=ctx.org_id,
-                    provider_slug=provider_name,
-                    model_id=model_id,
-                    exc=None,
-                )
-
-                # --- Out-of-band reflection trigger ---
-                # Spawn a detached task that runs a small reflection agent to
-                # decide whether any memory_save / memory_update calls are
-                # warranted for this turn. Fire-and-forget: never blocks or
-                # raises into the main run path.
-
-                def _last_assistant_text(messages: list[Any]) -> str | None:
-                    from cubepi.providers.base import AssistantMessage, TextContent
-
-                    for msg in reversed(messages):
-                        if isinstance(msg, AssistantMessage):
-                            parts: list[str] = []
-                            for c in msg.content:
-                                if isinstance(c, TextContent):
-                                    parts.append(c.text)
-                            return "\n".join(parts).strip() or None
+            # Resolve ModelCost for any (provider, model_id) the agent reports.
+            # The factory's llm_config holds the merged YAML + DB provider config
+            # so this lookup honors per-org overrides.
+            def _price_lookup(provider: str, model_id: str) -> ModelCost | None:
+                pcfg = factory.llm_config.providers.get(provider)
+                if pcfg is None:
                     return None
+                for m in pcfg.models:
+                    if m.id == model_id:
+                        return m.cost
+                return None
 
-                def _stringify_user_msg(msg: Any) -> str:
-                    if isinstance(msg, str):
-                        return msg
-                    from cubepi.providers.base import TextContent
-
-                    content = getattr(msg, "content", None)
-                    if isinstance(content, str):
-                        return content
-                    if isinstance(content, list):
-                        parts_s = [c.text for c in content if isinstance(c, TextContent)]
-                        return "\n".join(parts_s).strip()
-                    return ""
-
-                try:
-                    from cubebox.db.engine import (
-                        async_session_maker as _ue_session_maker,
-                    )
-                    from cubebox.repositories.user_event import UserEventRepository
-                    from cubebox.services.reflection_runner import (
-                        ReflectionInput,
-                        ReflectionRunner,
-                        ReflectionTurn,
-                    )
-                    from cubebox.services.user_event import UserEventService
-                    from cubebox.tools.builtin.memory import create_memory_tools
-
-                    _bus = getattr(self._app.state, "user_event_bus", None)
-                    if _memory_service_factory is None:
-                        logger.debug(
-                            "skipping reflection for run_id={}: memory tools not available",
-                            run_id,
-                        )
-                    elif _bus is not None:
-
-                        def _make_reflection_agent(_inp: ReflectionInput) -> Any:
-                            from cubepi import Agent, Model
-
-                            from cubebox.llm.config import ModelCost
-                            from cubebox.middleware.cost import (
-                                CostMiddleware as _ReflCostMw,
-                            )
-                            from cubebox.prompts.reflection_system import (
-                                REFLECTION_SYSTEM_PROMPT,
-                            )
-
-                            _mem_tools = create_memory_tools(
-                                service_factory=_memory_service_factory,
-                                conversation_id=_inp.conversation_id,
-                                run_id=_inp.run_id,
-                            )
-
-                            # Reflection LLM tokens must hit billing_events /
-                            # billing_llm_events alongside the main run. Build a
-                            # fresh CostMiddleware bound to the same scope; mirrors
-                            # the main agent wiring at the `# 9. CostMiddleware`
-                            # block above.
-                            def _refl_price_lookup(
-                                provider_name_: str, model_id_: str
-                            ) -> ModelCost | None:
-                                pcfg = factory.llm_config.providers.get(provider_name_)
-                                if pcfg is None:
-                                    return None
-                                for m in pcfg.models:
-                                    if m.id == model_id_:
-                                        return m.cost
-                                return None
-
-                            _refl_mw: list[Any] = [
-                                _ReflCostMw(
-                                    org_id=ctx.org_id,
-                                    workspace_id=ctx.workspace_id,
-                                    user_id=ctx.user_id,
-                                    conversation_id=_inp.conversation_id,
-                                    price_lookup=_refl_price_lookup,
-                                )
-                            ]
-
-                            return Agent(
-                                provider=provider,
-                                model=Model(id=model_id, provider=provider_name),
-                                system_prompt=REFLECTION_SYSTEM_PROMPT,
-                                tools=_mem_tools,
-                                middleware=_refl_mw,
-                            )
-
-                        # The wait_for_idle + state-extraction live INSIDE the
-                        # detached task so the main conversation SSE can close
-                        # promptly after AgentEndEvent — a stuck tool drain on
-                        # the main agent must NEVER hold the user-visible
-                        # stream open waiting for reflection prerequisites.
-                        async def _run_reflection(
-                            agent_ref: Any = agent,
-                            user_msg_ref: Any = _user_msg,
-                            bus: Any = _bus,
-                            agent_factory: Any = _make_reflection_agent,
-                        ) -> None:
-                            # Bounded wait — independent of ReflectionRunner's
-                            # 30s LLM-call timeout, which only covers the
-                            # reflection agent.prompt(), not this prereq.
-                            try:
-                                await asyncio.wait_for(agent_ref.wait_for_idle(), timeout=10.0)
-                            except (TimeoutError, Exception):
-                                logger.warning(
-                                    "reflection: agent not idle within 10s, skipping run_id={}",
-                                    run_id,
-                                )
-                                return
-                            last_assistant = _last_assistant_text(agent_ref.state.messages)
-                            if not last_assistant:
-                                return
-                            user_msg_text = _stringify_user_msg(user_msg_ref)
-                            inp = ReflectionInput(
-                                conversation_id=conversation_id,
-                                run_id=run_id,
-                                user_id=ctx.user_id,
-                                workspace_id=ctx.workspace_id,
-                                turn=ReflectionTurn(
-                                    user_message=user_msg_text,
-                                    assistant_message=last_assistant,
-                                    tool_summaries=[],
-                                ),
-                            )
-                            async with _ue_session_maker() as _session:
-                                _repo = UserEventRepository(_session)
-                                _svc = UserEventService(repo=_repo, bus=bus)
-                                _runner = ReflectionRunner(
-                                    user_event_service=_svc,
-                                    agent_factory=agent_factory,
-                                )
-                                await _runner.reflect(inp)
-
-                        _refl_task = asyncio.create_task(
-                            _run_reflection(), name=f"reflection:{run_id}"
-                        )
-                        self._reflection_tasks.add(_refl_task)
-                        _refl_task.add_done_callback(self._reflection_tasks.discard)
-                except Exception:
-                    logger.warning(
-                        "failed to schedule reflection for run_id={}", run_id, exc_info=True
-                    )
-
-                # T6: classify the terminal state. Three success outcomes:
-                #   - no DB pending → completed
-                #   - DB pending but no HitlRequestEvent this turn → stale
-                #     leftover; clear it and treat as completed
-                #   - DB pending and HitlRequestEvent fired → genuine new
-                #     pause (auto-detach hook already detached the agent)
-                from cubebox.streams.hitl_resume import classify_terminal_status
-
-                final_pending = await agent.load_pending_hitl_request()
-                classification = classify_terminal_status(
-                    final_pending=final_pending,
-                    answered_question_id=None,  # prompt path
-                    saw_hitl_request_event=auto_detach.detached,
+            cubepi_middleware.append(
+                CostMiddleware(
+                    org_id=ctx.org_id,
+                    workspace_id=ctx.workspace_id,
+                    user_id=ctx.user_id,
+                    conversation_id=conversation_id,
+                    price_lookup=_price_lookup,
                 )
-                if classification.clear_pending:
-                    await cp.save_pending_request(conversation_id, None)
-                final_status = classification.status
-            finally:
-                # Stop accepting steers for this run before tearing down.
-                self._agents.pop(run_id, None)
-                self._hitl_channels.pop(run_id, None)
-                # Signal drainer and wait for it to flush remaining events so
-                # all SSE dicts are published before citation buffers flush.
-                await sse_queue.put(None)
-                await drainer
+            )
+        except Exception as _exc:
+            logger.warning("CostMiddleware unavailable: {}", _exc)
 
-        for agent_key in list(citation_buffers):
-            await flush_citation_buffer(agent_key, agent_key)
-        return final_status
+        # 10. TimestampMiddleware — no deps
+        try:
+            from cubebox.middleware.timestamps import TimestampMiddleware
+
+            cubepi_middleware.append(TimestampMiddleware())
+        except Exception as _exc:
+            logger.warning("TimestampMiddleware unavailable: {}", _exc)
+
+        # 11. TodoListMiddleware — needs extra_ref
+        try:
+            from cubebox.middleware.todo import TodoListMiddleware
+
+            todo_mw = TodoListMiddleware(extra_ref=_extra_ref)
+            cubepi_middleware.append(todo_mw)
+            _todo_tools.extend(todo_mw.tools)
+        except Exception as _exc:
+            logger.warning("TodoListMiddleware unavailable: {}", _exc)
+
+        # --- Final tool merge ---
+        # Stable composition order — changes invalidate the prompt cache prefix:
+        #   sandbox tools → artifact tools → todo tools → subagent tools
+        #   → builtin tools (calculator/datetime/view_images/memory/load_skill/mcp)
+        all_tools: list[Any] = (
+            _sandbox_tools + _artifact_tools + _todo_tools + _subagent_tools + _builtin_tools
+        )
+
+        logger.info(
+            "cubepi middleware stack: {} layers, {} total tools",
+            len(cubepi_middleware),
+            len(all_tools),
+        )
+
+        agent = create_cubebox_agent(
+            provider=provider,
+            model_id=model_id,
+            provider_name=provider_name,
+            system_prompt=effective_system_prompt,
+            tools=all_tools,
+            checkpointer=cp,
+            thread_id=conversation_id,
+            middleware=cubepi_middleware,
+            max_tokens=_model_max_tokens,
+            temperature=_model_temperature,
+            # Reasoning-capable models think by default ("medium"); a
+            # per-conversation toggle (UI) can override this later.
+            reasoning=_model_config.reasoning,
+            thinking="medium" if _model_config.reasoning else "off",
+            channel=sandbox_hitl_channel,
+        )
+
+        # Stash provider_name / model_id / memory-repo factory on the bridge
+        # dict so the caller doesn't have to re-resolve them (a second
+        # ``factory.resolve_default_provider_and_config()`` would double the
+        # DB load). The caller's runtime-status writeback and per-turn
+        # relevance-snapshot pass both read from here.
+        extra_ref_holder["provider_name"] = provider_name
+        extra_ref_holder["model_id"] = model_id
+        extra_ref_holder["mem_repo_factory"] = _mem_repo_factory
+        # Reflection trigger in _run_cubepi_path needs these to build its
+        # own short-lived agent for end-of-turn memory self-review.
+        extra_ref_holder["memory_service_factory"] = _memory_service_factory
+        extra_ref_holder["provider"] = provider
+        extra_ref_holder["llm_factory"] = factory
+
+        return agent, all_tools, sandbox_hitl_channel
 
     async def _maybe_consolidate_memory(self, *, conversation_id: str, ctx: RunContext) -> None:
         """Cheap per-run gate; spawn a tracked background consolidation task when
