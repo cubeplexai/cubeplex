@@ -805,6 +805,125 @@ class RunManager:
         task.add_done_callback(lambda _: self._on_task_done(run_id))
         return run_id
 
+    async def cancel_paused_run(
+        self,
+        *,
+        conversation_id: str,
+        run_id: str,
+        reason: str = "cancelled by user",
+        ctx: RunContext,
+    ) -> str:
+        """Cancel a conversation parked in ``paused_hitl``. See spec §4.
+
+        A normal :meth:`cancel_run` ``task.cancel()`` is a no-op here because
+        the worker that started the run released its ``asyncio.Task`` when
+        ``auto_detach`` fired. We instead build a transient agent via the T7
+        factory, wire it to a real SSE pipeline, and call
+        ``agent.abort_pending(reason)`` so cubepi emits an
+        ``AgentAbortedEvent`` that the frontend picks up. Without the SSE
+        wiring the event has zero subscribers and the frontend's pending
+        card never resolves.
+        """
+        from cubebox.agents.checkpointer import init_checkpointer
+        from cubebox.agents.stream import convert_agent_event_to_sse
+        from cubebox.streams.hitl_resume import (
+            ClaimResumeOutcome,
+            claim_resume,
+            finalize_run_meta_if_claim_matches,
+        )
+
+        # 1. DB pending recovers started_at — needed for claim_resume's
+        #    rebuild branch (long-pause case where Redis meta has aged out).
+        async with init_checkpointer() as cp:
+            pending = await cp.load_pending_request(conversation_id)
+        if pending is None:
+            raise ResumeNoPending(f"no pending for {conversation_id}")
+        started_at_iso = datetime.fromtimestamp(pending.created_at, UTC).isoformat()
+
+        # 2. Single-flight CAS — only one cancel/resume may own the slot.
+        claim = await claim_resume(
+            self._redis,
+            prefix=self._key_prefix,
+            conversation_id=conversation_id,
+            expected_run_id=run_id,
+            started_at=started_at_iso,
+            ttl_seconds=self._run_event_ttl_seconds,
+        )
+        if claim.outcome == ClaimResumeOutcome.ALREADY_RUNNING:
+            raise ResumeInFlight("cancel raced another resume/cancel in flight")
+        if claim.outcome == ClaimResumeOutcome.CONFLICT:
+            raise ResumeConflict("conversation has moved on")
+        assert claim.claim_token is not None  # OK outcome guarantees a token
+
+        # 3. Minimal SSE pipeline. abort_pending only emits AgentAbortedEvent
+        #    so the citation/turn_usage gymnastics in the prompt path's
+        #    publish_stream_event are dead weight here — a plain
+        #    _append_event publisher is sufficient.
+        sse_queue: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue()
+
+        async def publish_stream_event(sse_event: AgentEvent, agent_key: str | None) -> None:
+            await self._append_event(run_id, conversation_id, sse_event)
+
+        drainer = asyncio.create_task(
+            _drain_cubepi_sse_queue(sse_queue, publish_stream_event),
+            name=f"cancel_drain:{run_id}",
+        )
+
+        try:
+            async with init_checkpointer() as cp:
+                agent, _all_tools, _ch = await self._build_agent_for_conversation(
+                    ctx=ctx,
+                    conversation_id=conversation_id,
+                    run_id=run_id,
+                    cp=cp,
+                    sandbox=None,
+                    skill_catalog=None,
+                    catalog_session=None,
+                    effective_system_prompt="",
+                    extra_ref_holder={"extra": None},
+                    sse_queue=sse_queue,
+                    publish_stream_event=publish_stream_event,
+                )
+
+                def _on_event(evt: Any, _signal: Any = None) -> None:
+                    for d in convert_agent_event_to_sse(evt):
+                        sse_queue.put_nowait(d)
+
+                agent.subscribe(_on_event)
+
+                from cubepi.tracing import trace, tracing_context
+
+                tracer = getattr(self._app.state, "tracer", None)
+                _trace_meta = {
+                    k: str(v)
+                    for k, v in (
+                        ("run_id", run_id),
+                        ("conversation_id", conversation_id),
+                        ("user_id", ctx.user_id),
+                        ("org_id", ctx.org_id),
+                        ("workspace_id", ctx.workspace_id),
+                        ("turn_kind", "abort"),
+                    )
+                    if v is not None
+                }
+                with tracing_context(metadata=_trace_meta):
+                    async with trace(tracer, agent):
+                        await agent.abort_pending(reason)
+        finally:
+            await sse_queue.put(None)
+            await drainer
+
+        # CAS-guarded terminal write — a racing flow that took over the
+        # slot wins the row; our finalize is a no-op.
+        await finalize_run_meta_if_claim_matches(
+            self._redis,
+            prefix=self._key_prefix,
+            run_id=run_id,
+            claim_token=claim.claim_token,
+            status="cancelled",
+        )
+        return run_id
+
     async def dispatch_hitl_answer(
         self, run_id: str, question_id: str, decision: str, reason: str | None = None
     ) -> str:
