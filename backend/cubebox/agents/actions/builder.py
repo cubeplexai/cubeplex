@@ -64,16 +64,29 @@ def _build_union_model(
     Uses ``RootModel`` so the discriminated union IS the top-level schema
     (no wrapping ``params`` field). The LLM sees ``{operation: "create", ...}``
     directly.
+
+    Pydantic's RootModel emits a top-level schema of ``{oneOf: [...]}`` with no
+    ``type``. LLM tool APIs (Anthropic ``input_schema``, OpenAI ``parameters``)
+    reject this with "schema must be type: object". Since every branch IS an
+    object, we override ``model_json_schema`` to inject ``type: "object"``.
     """
     sub_models = [_build_operation_model(op) for op in operations]
 
     union_type: Any = Union[tuple(sub_models)]  # noqa: UP007
     annotated_union = Annotated[union_type, Field(discriminator="operation")]
 
+    base_root = RootModel[annotated_union]
+
+    def _patched_schema(cls: type[BaseModel], *args: Any, **kwargs: Any) -> dict[str, Any]:
+        schema: dict[str, Any] = base_root.model_json_schema(*args, **kwargs)
+        if "type" not in schema:
+            schema["type"] = "object"
+        return schema
+
     model: Any = type(
         f"{cap_name}_Input",
-        (RootModel[annotated_union],),
-        {},
+        (base_root,),
+        {"model_json_schema": classmethod(_patched_schema)},
     )
     return model  # type: ignore[no-any-return]
 
