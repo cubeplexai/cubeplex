@@ -16,6 +16,7 @@ export function useUserEvents(client: ApiClient): void {
 
     const run = async () => {
       while (!ac.signal.aborted) {
+        let cleanEnd = false
         try {
           const since =
             typeof window !== 'undefined'
@@ -24,18 +25,23 @@ export function useUserEvents(client: ApiClient): void {
           for await (const ev of streamUserEvents(client, { signal: ac.signal, since })) {
             if (ev.type === 'memory_updated') {
               add(ev)
-              if (typeof window !== 'undefined') {
+              // localStorage.setItem can throw in Safari private mode (quota=0).
+              // Don't let storage failure abort the event-processing loop.
+              try {
                 localStorage.setItem(STORAGE_KEY, ev.id)
+              } catch {
+                /* ignore */
               }
             }
             backoff = 1000 // reset on successful event
           }
-          // Stream ended normally — backoff before reconnect
+          cleanEnd = true
         } catch {
           if (ac.signal.aborted) return
           // network error / non-2xx; fall through to backoff
         }
         if (ac.signal.aborted) return
+        if (cleanEnd) backoff = 1000 // server closed cleanly — reconnect promptly
         await new Promise((r) => setTimeout(r, backoff))
         backoff = Math.min(backoff * 2, MAX_BACKOFF)
       }
