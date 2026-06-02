@@ -175,6 +175,11 @@ test('Scheduled Tasks: create daily task via new UI → API receives 5-field cro
   // Default is 每天 09:00 — just submit
   await page.getByRole('button', { name: /create task/i }).click()
 
+  // Wait for the UI to confirm the POST landed before querying the API —
+  // racing the GET against the POST commit makes this test flake.
+  await expect(page.getByTestId('task-form-dialog')).not.toBeVisible({ timeout: 5_000 })
+  await expect(page.getByText('Daily E2E')).toBeVisible({ timeout: 8_000 })
+
   // Verify the created task has a 5-field cron
   const tasks = await request.get(`${apiBase}/api/v1/ws/${wsId}/scheduled-tasks`, {
     headers: { 'X-CSRF-Token': csrf, Cookie: cookieHeader },
