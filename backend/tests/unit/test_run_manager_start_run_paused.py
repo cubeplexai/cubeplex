@@ -192,9 +192,10 @@ async def test_start_run_succeeds_when_no_pending(
     )
     assert isinstance(run_id, str) and run_id
 
-    # The DB-pending guard is on the conflict branch only — happy path
-    # must NOT hit it.
-    cp.load_pending_request.assert_not_awaited()
+    # Up-front DB-pending guard runs unconditionally — the durability
+    # claim depends on it (a TTL-expired Redis lock could otherwise let
+    # a new turn slip past while DB pending lingers). One read per start.
+    cp.load_pending_request.assert_awaited_once()
 
     # Drain the spawned task before the loop closes.
     task = rm._tasks.get(run_id)
