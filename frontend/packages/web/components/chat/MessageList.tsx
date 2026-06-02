@@ -232,7 +232,13 @@ export function MessageList({ conversationId }: MessageListProps) {
     const scroller = scrollRef.current
     if (!content || !scroller) return
 
-    const scheduleScroll = rafThrottleScrollToBottom(() => scrollRef.current)
+    // Re-check stickToBottom inside the rAF too: a user scrolling up between
+    // the ResizeObserver fire and the next frame would otherwise be yanked
+    // back to the bottom by a stale decision.
+    const scheduleScroll = rafThrottleScrollToBottom(
+      () => scrollRef.current,
+      () => stickToBottom.current,
+    )
     const ro = new ResizeObserver(() => {
       if (stickToBottom.current) scheduleScroll()
     })

@@ -29,4 +29,25 @@ describe('rafThrottleScrollToBottom', () => {
     expect(() => scheduler()).not.toThrow()
     await nextFrame()
   })
+
+  it('skips the write when the predicate returns false at rAF time', async () => {
+    const el = { scrollTop: 0, scrollHeight: 500 } as unknown as HTMLElement
+    let stuck = true
+    const scheduler = rafThrottleScrollToBottom(
+      () => el,
+      () => stuck,
+    )
+
+    scheduler()
+    // Simulate the user scrolling away between schedule-time and rAF-fire.
+    stuck = false
+    await nextFrame()
+    expect(el.scrollTop).toBe(0)
+
+    // Flipping back to stuck and rescheduling does write.
+    stuck = true
+    scheduler()
+    await nextFrame()
+    expect(el.scrollTop).toBe(500)
+  })
 })
