@@ -574,8 +574,21 @@ class RunManager:
                 prefix=self._key_prefix,
                 conversation_id=conversation_id,
             )
-            if existing and existing.status == "running":
+            if existing and existing.status in ("running", "paused_hitl"):
                 raise RuntimeError(f"Conversation {conversation_id} already has an active run")
+            # Covers the worker-crash window where Redis meta aged out (or was
+            # never written) but the DB-persisted pending HITL request lingers.
+            # Without this guard a new user turn would race the resume path.
+            from cubebox.agents.checkpointer import init_checkpointer
+
+            async with init_checkpointer() as _cp:
+                _db_pending = await _cp.load_pending_request(conversation_id)
+            if _db_pending is not None:
+                raise RuntimeError(
+                    f"Conversation {conversation_id} has a pending HITL request "
+                    f"(question_id={_db_pending.question_id}); "
+                    f"answer or cancel before starting a new turn"
+                )
             raise RuntimeError(f"Conversation {conversation_id} could not claim an active run")
 
         task = asyncio.create_task(
