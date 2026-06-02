@@ -524,6 +524,7 @@ class RunManager:
         self._agents: dict[str, Any] = {}
         self._hitl_channels: dict[str, Any] = {}
         self._consolidation_tasks: set[asyncio.Task[None]] = set()
+        self._reflection_tasks: set[asyncio.Task[None]] = set()
         self._ack_waiters: dict[str, list[asyncio.Future[bool]]] = {}
         self._control_channel = f"{key_prefix}:control"
         self._ack_channel = f"{key_prefix}:control:ack"
@@ -898,11 +899,12 @@ class RunManager:
         Logs a status line on entry when there's anything to wait for, plus
         a progress line every 30 seconds while waiting.
         """
-        # Best-effort: stop background consolidation first, regardless of whether
-        # any run tasks remain (drain returns early below when _tasks is empty).
-        for t in list(self._consolidation_tasks):
+        # Best-effort: stop background consolidation and reflection tasks first,
+        # regardless of whether any run tasks remain (drain returns early below
+        # when _tasks is empty).
+        for t in list(self._consolidation_tasks) + list(self._reflection_tasks):
             t.cancel()
-        for t in list(self._consolidation_tasks):
+        for t in list(self._consolidation_tasks) + list(self._reflection_tasks):
             with suppress(asyncio.CancelledError):
                 await t
 
@@ -1646,14 +1648,6 @@ class RunManager:
         except Exception as _exc:
             logger.warning("TodoListMiddleware unavailable: {}", _exc)
 
-        # 12. ReflectionMiddleware — memory self-review at end of every run
-        try:
-            from cubebox.middleware.reflection import ReflectionMiddleware
-
-            cubepi_middleware.append(ReflectionMiddleware())
-        except Exception as _exc:
-            logger.warning("ReflectionMiddleware unavailable: {}", _exc)
-
         # --- Final tool merge ---
         # Stable composition order — changes invalidate the prompt cache prefix:
         #   sandbox tools → artifact tools → todo tools → subagent tools
@@ -1817,6 +1811,111 @@ class RunManager:
                     model_id=model_id,
                     exc=None,
                 )
+
+                # --- Out-of-band reflection trigger ---
+                # Spawn a detached task that runs a small reflection agent to
+                # decide whether any memory_save / memory_update calls are
+                # warranted for this turn. Fire-and-forget: never blocks or
+                # raises into the main run path.
+
+                def _last_assistant_text(messages: list[Any]) -> str | None:
+                    from cubepi.providers.base import AssistantMessage, TextContent
+
+                    for msg in reversed(messages):
+                        if isinstance(msg, AssistantMessage):
+                            parts: list[str] = []
+                            for c in msg.content:
+                                if isinstance(c, TextContent):
+                                    parts.append(c.text)
+                            return "\n".join(parts).strip() or None
+                    return None
+
+                def _stringify_user_msg(msg: Any) -> str:
+                    if isinstance(msg, str):
+                        return msg
+                    from cubepi.providers.base import TextContent
+
+                    content = getattr(msg, "content", None)
+                    if isinstance(content, str):
+                        return content
+                    if isinstance(content, list):
+                        parts_s = [c.text for c in content if isinstance(c, TextContent)]
+                        return "\n".join(parts_s).strip()
+                    return ""
+
+                try:
+                    from cubebox.db.engine import (
+                        async_session_maker as _ue_session_maker,
+                    )
+                    from cubebox.repositories.user_event import UserEventRepository
+                    from cubebox.services.reflection_runner import (
+                        ReflectionInput,
+                        ReflectionRunner,
+                        ReflectionTurn,
+                    )
+                    from cubebox.services.user_event import UserEventService
+                    from cubebox.tools.builtin.memory import create_memory_tools
+
+                    _bus = getattr(self._app.state, "user_event_bus", None)
+                    _last_assistant = _last_assistant_text(agent.state.messages)
+                    if _bus is not None and _last_assistant:
+                        _user_msg_text = _stringify_user_msg(_user_msg)
+
+                        def _make_reflection_agent(_inp: ReflectionInput) -> Any:
+                            from cubepi import Agent, Model
+
+                            from cubebox.prompts.reflection_system import (
+                                REFLECTION_SYSTEM_PROMPT,
+                            )
+
+                            _mem_tools = create_memory_tools(
+                                service_factory=_memory_service_factory,
+                                conversation_id=_inp.conversation_id,
+                                run_id=_inp.run_id,
+                            )
+                            return Agent(
+                                provider=provider,
+                                model=Model(id=model_id, provider=provider_name),
+                                system_prompt=REFLECTION_SYSTEM_PROMPT,
+                                tools=_mem_tools,
+                            )
+
+                        _refl_inp = ReflectionInput(
+                            conversation_id=conversation_id,
+                            run_id=run_id,
+                            user_id=ctx.user_id,
+                            workspace_id=ctx.workspace_id,
+                            turn=ReflectionTurn(
+                                user_message=_user_msg_text,
+                                assistant_message=_last_assistant,
+                                tool_summaries=[],
+                            ),
+                        )
+
+                        async def _run_reflection(
+                            inp: ReflectionInput = _refl_inp,
+                            bus: Any = _bus,
+                            agent_factory: Any = _make_reflection_agent,
+                        ) -> None:
+                            async with _ue_session_maker() as _session:
+                                _repo = UserEventRepository(_session)
+                                _svc = UserEventService(repo=_repo, bus=bus)
+                                _runner = ReflectionRunner(
+                                    user_event_service=_svc,
+                                    agent_factory=agent_factory,
+                                )
+                                await _runner.reflect(inp)
+
+                        _refl_task = asyncio.create_task(
+                            _run_reflection(), name=f"reflection:{run_id}"
+                        )
+                        self._reflection_tasks.add(_refl_task)
+                        _refl_task.add_done_callback(self._reflection_tasks.discard)
+                except Exception:
+                    logger.warning(
+                        "failed to schedule reflection for run_id=%s", run_id, exc_info=True
+                    )
+
             finally:
                 # Stop accepting steers for this run before tearing down.
                 self._agents.pop(run_id, None)
