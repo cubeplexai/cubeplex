@@ -13,3 +13,12 @@ def test_user_event_construct() -> None:
     assert e.id.startswith("uev-")
     assert e.read_at is None
     assert e.type == UserEventType.MEMORY_UPDATED
+
+
+def test_user_event_workspace_id_optional() -> None:
+    e = UserEvent(
+        user_id="usr_abc",
+        type=UserEventType.MEMORY_UPDATED,
+        payload={},
+    )
+    assert e.workspace_id is None
