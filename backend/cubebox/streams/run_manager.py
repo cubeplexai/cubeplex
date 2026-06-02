@@ -1321,25 +1321,33 @@ class RunManager:
                 # Construct SkillDeps only when the skill catalog session is
                 # available. Mirrors today's guard: if the catalog DB is
                 # unreachable, the skills capability is silently skipped
-                # (same as load_skill).
+                # (same as load_skill). The inner try isolates skill-deps
+                # setup failures so the rest of the action tools
+                # (e.g. scheduled_tasks) still register.
                 _skill_deps: SkillDeps | None = None
                 if skill_catalog is not None and catalog_session is not None:
-                    _org = await OrganizationRepository(catalog_session).get(ctx.org_id)
-                    if _org is not None:
-                        _registry = await SkillsAdapterManager.build(
-                            session=catalog_session,
-                            catalog=skill_catalog,
-                            org_id=ctx.org_id,
-                            org_slug=_org.slug,
-                            workspace_id=ctx.workspace_id,
-                        )
-                        _skill_deps = SkillDeps(
-                            catalog=skill_catalog,
-                            catalog_session=catalog_session,
-                            registry=_registry,
-                            org_id=ctx.org_id,
-                            org_slug=_org.slug,
-                            workspace_id=ctx.workspace_id,
+                    try:
+                        _org = await OrganizationRepository(catalog_session).get(ctx.org_id)
+                        if _org is not None:
+                            _registry = await SkillsAdapterManager.build(
+                                session=catalog_session,
+                                catalog=skill_catalog,
+                                org_id=ctx.org_id,
+                                org_slug=_org.slug,
+                                workspace_id=ctx.workspace_id,
+                            )
+                            _skill_deps = SkillDeps(
+                                catalog=skill_catalog,
+                                catalog_session=catalog_session,
+                                registry=_registry,
+                                org_id=ctx.org_id,
+                                org_slug=_org.slug,
+                                workspace_id=ctx.workspace_id,
+                            )
+                    except Exception as _skill_exc:  # noqa: BLE001
+                        logger.warning(
+                            "skills capability unavailable for cubepi run: {}",
+                            _skill_exc,
                         )
 
                 _builtin_tools.extend(
