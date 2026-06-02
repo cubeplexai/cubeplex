@@ -21,10 +21,13 @@ async def sandbox_cleanup_loop(manager: SandboxManager, interval: int = 60) -> N
     while True:
         await asyncio.sleep(interval)
         try:
-            # Reconciler first: stuck pausing/resuming rows are higher-priority
-            # to repair than TTL expiry. ``pause_idle`` falls back to
-            # ``cleanup_expired`` internally when ``sandbox.pause_on_idle`` is
-            # off, so this covers both modes.
+            # cleanup_expired first: clears stuck provisioning rows (crashed
+            # mid-reserve) and any TTL-expired running rows before the pause/
+            # reconcile passes run. pause_idle only calls cleanup_expired when
+            # pause_on_idle=False, so we call it unconditionally here to cover
+            # the pause_on_idle=True case as well.
+            await manager.cleanup_expired()
+            # Reconciler: stuck pausing/resuming rows.
             await manager.reconcile_transients(claim_timeout=60)
             await manager.pause_idle()
             await manager.reap_paused()
