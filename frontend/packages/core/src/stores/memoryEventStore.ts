@@ -5,6 +5,7 @@ interface MemoryEventState {
   byConversation: Record<string, UserEvent[]>
   add: (ev: UserEvent) => void
   markRead: (id: string) => void
+  reset: () => void
 }
 
 export const useMemoryEventStore = create<MemoryEventState>((set) => ({
@@ -24,4 +25,8 @@ export const useMemoryEventStore = create<MemoryEventState>((set) => ({
       }
       return { byConversation: next }
     }),
+  // Called by useUserEvents when the authenticated user changes (logout +
+  // re-login as a different user in the same tab). Prevents the previous
+  // user's events from leaking into the new session's chip/toast UI.
+  reset: () => set({ byConversation: {} }),
 }))

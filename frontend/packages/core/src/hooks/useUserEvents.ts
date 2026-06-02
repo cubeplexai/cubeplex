@@ -22,6 +22,12 @@ export function useUserEvents(client: ApiClient): void {
   const userId = useAuthStore((s) => s.user?.id ?? null)
 
   useEffect(() => {
+    // Clear any events from a previous session before subscribing. Without
+    // this, logging out and logging back in as a different user in the same
+    // tab would let the previous user's unread events surface as chips/toasts
+    // for the new user. Runs on every userId change (including transitions
+    // to null on logout).
+    useMemoryEventStore.getState().reset()
     if (!userId) return // wait for auth to load before subscribing
     const ac = new AbortController()
     let backoff = 1000
