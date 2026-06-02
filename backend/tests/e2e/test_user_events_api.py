@@ -111,16 +111,18 @@ async def live_user_events_server() -> AsyncIterator[tuple[str, str, str, UserEv
     app.dependency_overrides[get_session] = override_get_session
     app.state.deployment_mode = "multi_tenant"
 
-    # Grab an ephemeral port.
+    # Bind an ephemeral port and pass the socket directly to uvicorn so there
+    # is no TOCTOU window between closing it and uvicorn re-binding.
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     sock.bind(("127.0.0.1", 0))
     port = sock.getsockname()[1]
-    sock.close()
+    sock.setblocking(False)
+    # Do NOT close the socket — pass it to uvicorn instead.
 
     cfg = uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning")
     server = uvicorn.Server(cfg)
-    serve_task = asyncio.create_task(server.serve())
+    serve_task = asyncio.create_task(server.serve(sockets=[sock]))
 
     # Wait until started.
     deadline = 5.0
@@ -128,6 +130,7 @@ async def live_user_events_server() -> AsyncIterator[tuple[str, str, str, UserEv
     while not server.started and elapsed < deadline:
         await asyncio.sleep(0.05)
         elapsed += 0.05
+    assert server.started, "uvicorn failed to start within deadline"
 
     base_url = f"http://127.0.0.1:{port}"
 
@@ -156,8 +159,7 @@ async def live_user_events_server() -> AsyncIterator[tuple[str, str, str, UserEv
         server.should_exit = True
         await serve_task
         await test_engine.dispose()
-
-    await engine.dispose()
+        await engine.dispose()
 
 
 # ---------------------------------------------------------------------------
@@ -219,10 +221,11 @@ async def test_sse_receives_live_event(
                         received = json.loads(line.removeprefix("data: "))
                         break
     finally:
-        fire_task.cancel()
+        if not fire_task.done():
+            fire_task.cancel()
         try:
             await fire_task
-        except (asyncio.CancelledError, Exception):
+        except asyncio.CancelledError:
             pass
 
     assert received is not None, "expected at least one SSE data line"
