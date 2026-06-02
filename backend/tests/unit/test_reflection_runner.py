@@ -149,7 +149,6 @@ async def test_reflect_publishes_event_when_memory_saved(
     runner = ReflectionRunner(
         user_event_service=user_event_service_mock,
         agent_factory=agent_factory_mock,
-        memory_service_factory=MagicMock(),
         timeout_sec=5.0,
     )
     await runner.reflect(_mk_input())
@@ -169,7 +168,6 @@ async def test_reflect_no_publish_when_no_memory_saved(
     runner = ReflectionRunner(
         user_event_service=user_event_service_mock,
         agent_factory=agent_factory_silent,
-        memory_service_factory=MagicMock(),
         timeout_sec=5.0,
     )
     await runner.reflect(
@@ -192,11 +190,12 @@ async def test_reflect_no_publish_when_no_memory_saved(
 async def test_reflect_drops_silently_on_timeout(
     user_event_service_mock: MagicMock,
     agent_factory_hanging: AgentFactory,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
+    caplog.set_level("WARNING")
     runner = ReflectionRunner(
         user_event_service=user_event_service_mock,
         agent_factory=agent_factory_hanging,
-        memory_service_factory=MagicMock(),
         timeout_sec=0.1,
     )
     # must NOT raise
@@ -214,6 +213,7 @@ async def test_reflect_drops_silently_on_timeout(
         )
     )
     user_event_service_mock.publish.assert_not_called()
+    assert any("reflection timed out" in r.message for r in caplog.records)
 
 
 @pytest.mark.asyncio
@@ -231,7 +231,6 @@ async def test_reflect_idempotency(
     runner = ReflectionRunner(
         user_event_service=user_event_service_mock,
         agent_factory=counting_factory,  # type: ignore[arg-type]
-        memory_service_factory=MagicMock(),
         timeout_sec=5.0,
     )
     inp = _mk_input(run_id="dedup_run")
