@@ -43,20 +43,28 @@ class UserEventRepository:
         self,
         user_id: str,
         *,
+        after_id: str | None = None,
         limit: int = 200,
     ) -> list[UserEvent]:
         """Return unread events for this user in chronological order.
 
         Used by the SSE replay path when the client has no cursor (first
-        connection, cleared localStorage, fresh device). Uses the partial
+        connection, fresh device, post-logout re-login). Uses the partial
         index ix_user_events_unread for efficient lookup.
+
+        ``after_id`` is the pagination cursor — pass it to walk through a
+        large backlog page by page (each page bounded by ``limit``). Default
+        ``None`` starts from the beginning.
         """
-        stmt = (
-            select(UserEvent)
-            .where(UserEvent.user_id == user_id, UserEvent.read_at.is_(None))  # type: ignore[union-attr]
-            .order_by(UserEvent.created_at)  # type: ignore[arg-type]
-            .limit(limit)
+        stmt = select(UserEvent).where(
+            UserEvent.user_id == user_id,
+            UserEvent.read_at.is_(None),  # type: ignore[union-attr]
         )
+        if after_id is not None:
+            # COLLATE "C": same reason as list_for_user — force byte-order
+            # comparison so our base62 IDs paginate in temporal order.
+            stmt = stmt.where(collate(UserEvent.id, "C") > after_id)  # type: ignore[arg-type]
+        stmt = stmt.order_by(UserEvent.created_at).limit(limit)  # type: ignore[arg-type]
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
 
