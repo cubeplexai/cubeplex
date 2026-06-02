@@ -661,6 +661,25 @@ class RunManager:
         if run_id is None:
             run_id = str(uuid7())
         started_at = utc_isoformat(datetime.now(UTC))
+
+        # DB is the authoritative source for "is this conversation paused
+        # on a pending HITL". Check BEFORE create_run so a TTL-expired
+        # Redis lock can't let a new turn slip past — the Redis active-run
+        # key normally blocks via paused_hitl status, but if a long pause
+        # exceeds run_event_ttl_seconds the key disappears and create_run
+        # below would otherwise succeed for a brand-new run_id, racing
+        # the in-flight resume path and orphaning the pending answer.
+        from cubebox.agents.checkpointer import init_checkpointer
+
+        async with init_checkpointer() as _cp:
+            _db_pending = await _cp.load_pending_request(conversation_id)
+        if _db_pending is not None:
+            raise RuntimeError(
+                f"Conversation {conversation_id} has a pending HITL request "
+                f"(question_id={_db_pending.question_id}); "
+                f"answer or cancel before starting a new turn"
+            )
+
         created_run = await create_run(
             self._redis,
             prefix=self._key_prefix,
@@ -679,19 +698,6 @@ class RunManager:
             )
             if existing and existing.status in ("running", "paused_hitl"):
                 raise RuntimeError(f"Conversation {conversation_id} already has an active run")
-            # Covers the worker-crash window where Redis meta aged out (or was
-            # never written) but the DB-persisted pending HITL request lingers.
-            # Without this guard a new user turn would race the resume path.
-            from cubebox.agents.checkpointer import init_checkpointer
-
-            async with init_checkpointer() as _cp:
-                _db_pending = await _cp.load_pending_request(conversation_id)
-            if _db_pending is not None:
-                raise RuntimeError(
-                    f"Conversation {conversation_id} has a pending HITL request "
-                    f"(question_id={_db_pending.question_id}); "
-                    f"answer or cancel before starting a new turn"
-                )
             raise RuntimeError(f"Conversation {conversation_id} could not claim an active run")
 
         task = asyncio.create_task(
@@ -2659,6 +2665,12 @@ class RunManager:
             name=f"event_q_drainer:{run_id}",
         )
 
+        # Outer-scope default so `finally` can branch on terminal status.
+        # The success path inside `try` overwrites this with the real
+        # status returned by `_run_cubepi_path`; on exception the default
+        # "errored" applies, which keeps the existing teardown semantics.
+        final_status: str = "errored"
+
         try:
             # Open a long-lived session for the SkillCatalogService — used by
             # both SkillsMiddleware (read prompts) and LazySandbox (push files
@@ -2848,18 +2860,28 @@ class RunManager:
             except Exception:
                 logger.warning("Failed to query session usage for done event")
 
+            # paused_hitl is a terminal-but-not-done state from the
+            # frontend's perspective: the run task is over (worker
+            # released), but the conversation is still waiting on the
+            # user's HITL answer. Stamp data.paused so the frontend's
+            # done handler preserves pendingAsk / pendingConfirmMap
+            # instead of wiping them via finalizeCompletedStream.
+            done_data: dict[str, Any] = {
+                "usage": {
+                    "turn": dict(turn_usage),
+                    "session": session_usage,
+                    "context_window": context_window,
+                }
+            }
+            if final_status == "paused_hitl":
+                done_data["paused"] = True
+
             await self._append_event(
                 run_id,
                 conversation_id,
                 DoneEvent(
                     timestamp=datetime.now(UTC).isoformat(),
-                    data={
-                        "usage": {
-                            "turn": dict(turn_usage),
-                            "session": session_usage,
-                            "context_window": context_window,
-                        }
-                    },
+                    data=done_data,
                 ),
             )
             # Mark the run terminal AFTER appending DoneEvent so the SSE consumer
@@ -2971,18 +2993,26 @@ class RunManager:
                     await catalog_session_ctx.__aexit__(None, None, None)
 
             self._agents.pop(run_id, None)
-            await clear_active_run(
-                self._redis,
-                prefix=self._key_prefix,
-                conversation_id=conversation_id,
-                run_id=run_id,
-            )
-            await expire_run_data(
-                self._redis,
-                prefix=self._key_prefix,
-                run_id=run_id,
-                ttl_seconds=self._run_event_ttl_seconds,
-            )
+            # paused_hitl: keep the Redis active-run key as the lock that
+            # blocks `start_run` from spawning a brand-new turn while the
+            # user still owes an answer. Clearing it here would let a
+            # racing send pass create_run() and skip the DB-pending guard
+            # in start_run (the guard only fires when create_run failed),
+            # orphaning the paused turn. The respond / cancel paths clear
+            # the lock when they terminate.
+            if final_status != "paused_hitl":
+                await clear_active_run(
+                    self._redis,
+                    prefix=self._key_prefix,
+                    conversation_id=conversation_id,
+                    run_id=run_id,
+                )
+                await expire_run_data(
+                    self._redis,
+                    prefix=self._key_prefix,
+                    run_id=run_id,
+                    ttl_seconds=self._run_event_ttl_seconds,
+                )
 
     async def _execute_respond_run(
         self,

@@ -832,6 +832,51 @@ async function finalizeCompletedStream(
   }))
 }
 
+async function finalizePausedStream(
+  get: () => MessageStore,
+  set: (partial: Partial<MessageStore> | ((state: MessageStore) => Partial<MessageStore>)) => void,
+  conversationId: string,
+): Promise<void> {
+  // Paused HITL: the run task is over (worker released after auto-detach),
+  // but the conversation is still parked on a pending question. Commit the
+  // in-flight assistant message + tool results the same way the completed
+  // path does, BUT preserve pendingAsk / pendingConfirmMap so the card
+  // stays visible until the user answers or cancels. currentRunId stays
+  // set too — the resume turn reuses the same run_id, so the SSE consumer
+  // that re-attaches after the user submits will continue on this id.
+  const { assistantMessage, toolMessages } = buildTurnMessages(
+    get().streamAgents,
+    get().toolResultMap,
+    get().turnUsage[conversationId] ?? null,
+    'stop',
+  )
+
+  if (!assistantMessage) {
+    set((state) => ({
+      isStreaming: false,
+      streamingConversationId: null,
+      statusPhase: null,
+      pendingSteers: { ...state.pendingSteers, [conversationId]: [] },
+    }))
+    return
+  }
+
+  set((state) => ({
+    messages: {
+      ...state.messages,
+      [conversationId]: [
+        ...(state.messages[conversationId] ?? []),
+        assistantMessage,
+        ...toolMessages,
+      ],
+    },
+    isStreaming: false,
+    streamingConversationId: null,
+    statusPhase: null,
+    pendingSteers: { ...state.pendingSteers, [conversationId]: [] },
+  }))
+}
+
 async function consumeRunStream(
   client: ApiClient,
   conversationId: string,
@@ -846,6 +891,7 @@ async function consumeRunStream(
   )
   let shouldFinalize = true
   let sawDone = false
+  let sawPausedDone = false
   let processed = 0
 
   try {
@@ -886,6 +932,7 @@ async function consumeRunStream(
         const usage = (event.data as Record<string, unknown>).usage as
           | import('../types').UsageSummary
           | undefined
+        const paused = (event.data as Record<string, unknown>).paused === true
         const usageUpdate: Partial<MessageStore> = {
           lastAppliedEventId: nextEventId(get().lastAppliedEventId, event.event_id),
         }
@@ -904,7 +951,14 @@ async function consumeRunStream(
           }
         }
         set(usageUpdate)
-        sawDone = true
+        // paused: the run task is over but the conversation is parked
+        // on a pending HITL question — keep pendingAsk / pendingConfirmMap
+        // alive so the card stays visible until the user answers or cancels.
+        if (paused) {
+          sawPausedDone = true
+        } else {
+          sawDone = true
+        }
         break
       } else if (event.type === 'injected_message') {
         const d = event.data as { content: string; steer_id: string }
@@ -927,8 +981,12 @@ async function consumeRunStream(
     set({ error: (err as Error).message })
   } finally {
     flush()
-    if (shouldFinalize && sawDone && get().currentRunId === runId) {
-      await finalizeCompletedStream(get, set, conversationId)
+    if (shouldFinalize && get().currentRunId === runId) {
+      if (sawPausedDone) {
+        await finalizePausedStream(get, set, conversationId)
+      } else if (sawDone) {
+        await finalizeCompletedStream(get, set, conversationId)
+      }
     }
   }
 }
@@ -1113,6 +1171,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
       set as (updater: (s: MessageStore) => Partial<MessageStore>) => void,
     )
     let sawDone = false
+    let sawPausedDone = false
     activeStreamController?.abort()
     const controller = new AbortController()
     activeStreamController = controller
@@ -1173,6 +1232,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
             const usage = (event.data as Record<string, unknown>).usage as
               | import('../types').UsageSummary
               | undefined
+            const paused = (event.data as Record<string, unknown>).paused === true
             const usageUpdate: Partial<MessageStore> = {
               lastAppliedEventId: nextEventId(get().lastAppliedEventId, event.event_id),
             }
@@ -1191,7 +1251,11 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
               }
             }
             set(usageUpdate)
-            sawDone = true
+            if (paused) {
+              sawPausedDone = true
+            } else {
+              sawDone = true
+            }
             break outer
           } else if (event.type === 'injected_message') {
             const d = event.data as { content: string; steer_id: string }
@@ -1230,10 +1294,14 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
       }
     }
 
-    if (sawDone) {
+    if (sawDone || sawPausedDone) {
       const lastState = get()
       if (!lastState.error) {
-        await finalizeCompletedStream(get, set, conversationId)
+        if (sawPausedDone) {
+          await finalizePausedStream(get, set, conversationId)
+        } else {
+          await finalizeCompletedStream(get, set, conversationId)
+        }
       }
     }
   },
