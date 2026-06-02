@@ -36,6 +36,7 @@ from cubebox.schedules.compute import (
 )
 from cubebox.schedules.dispatch import (
     ConversationBusyError,
+    ConversationPausedError,
     TargetUnavailableError,
     dispatch_scheduled_run,
 )
@@ -257,6 +258,18 @@ class ScheduledTaskPoller:
                 row.run_id = None
                 row.state = "failed"
                 row.detail = str(exc)
+                await session.commit()
+                return
+            except ConversationPausedError as exc:
+                # The target conversation is waiting on a user HITL answer.
+                # Busy-retry would burn the retry budget on a state only the
+                # user can clear, so terminate this occurrence cleanly and
+                # let the next scheduled fire decide on its own (the user
+                # may have answered by then).
+                row.run_id = None
+                row.state = "skipped_paused"
+                row.next_retry_at = None
+                row.detail = f"target conversation paused on pending HITL: {exc}"
                 await session.commit()
                 return
             except ConversationBusyError as exc:
