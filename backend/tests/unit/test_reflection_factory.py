@@ -9,7 +9,7 @@ the REFLECTION_SYSTEM_PROMPT and memory tools.
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -45,7 +45,12 @@ def fake_memory_service():  # type: ignore[return]
 def test_make_reflection_agent_uses_reflection_system_prompt(
     fake_memory_service: object,
 ) -> None:
-    """The factory closure should produce an Agent whose system_prompt is REFLECTION_SYSTEM_PROMPT."""
+    """Smoke-check the system_prompt + tools kwargs the factory closure passes.
+
+    Note: this does not construct a real cubepi.Agent — it mirrors the factory's
+    kwarg assembly. Wiring drift between the real closure in run_manager.py and
+    this test must be caught by integration tests (T10).
+    """
     fake_provider = MagicMock()
     fake_model_id = "claude-3-haiku"
     fake_provider_name = "anthropic"
@@ -61,20 +66,18 @@ def test_make_reflection_agent_uses_reflection_system_prompt(
             conversation_id=inp.conversation_id,
             run_id=inp.run_id,
         )
-        # Patch Agent so we can inspect construction kwargs without a real provider.
         captured: dict[str, object] = {}
 
         class _FakeAgent:
             def __init__(self, **kwargs: object) -> None:
                 captured.update(kwargs)
 
-        with patch("cubepi.Agent", _FakeAgent):
-            _FakeAgent(
-                provider=fake_provider,
-                model=Model(id=fake_model_id, provider=fake_provider_name),
-                system_prompt=REFLECTION_SYSTEM_PROMPT,
-                tools=_mem_tools,
-            )
+        _FakeAgent(
+            provider=fake_provider,
+            model=Model(id=fake_model_id, provider=fake_provider_name),
+            system_prompt=REFLECTION_SYSTEM_PROMPT,
+            tools=_mem_tools,
+        )
         return captured  # type: ignore[return-value]
 
     captured = _make_reflection_agent(_mk_input())  # type: ignore[assignment]
