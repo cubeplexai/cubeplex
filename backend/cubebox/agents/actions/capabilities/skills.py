@@ -31,9 +31,9 @@ from cubebox.repositories.skill import (
     SkillRepository,
     SkillVersionRepository,
 )
-from cubebox.skills.discovery import SkillDiscoveryService
+from cubebox.skills.discovery import SkillDiscoveryService, SkillInstallError, SkillInstallService
 from cubebox.skills.frontmatter import extract_env_vars, parse_skill_md
-from cubebox.skills.service import SkillCatalogService
+from cubebox.skills.service import SkillCatalogService, SkillPublishService
 from cubebox.skills.sources.base import CandidateIdError, decode_candidate_id
 from cubebox.skills.sources.registry import SkillsAdapterManager
 
@@ -42,6 +42,8 @@ _SkillDiscoveryService = SkillDiscoveryService
 _SkillRepository = SkillRepository
 _OrgPreinstalledTombstoneRepository = OrgPreinstalledTombstoneRepository
 _SkillVersionRepository = SkillVersionRepository
+_SkillInstallService = SkillInstallService
+_SkillPublishService = SkillPublishService
 
 
 def _env_vars(content: str) -> list[str]:
@@ -199,7 +201,31 @@ async def _handle_preview_impl(
 async def _handle_install_impl(
     deps: SkillDeps, ctx: ScopeContext, session: Any, inp: InstallInput
 ) -> Any:
-    raise NotImplementedError("Task 4 fills this in")
+    try:
+        decode_candidate_id(inp.candidate_id)
+    except CandidateIdError as exc:
+        raise ActionInvalidInput(f"BAD_CANDIDATE_ID: {exc}") from exc
+
+    publisher = _SkillPublishService(session=session, cache=deps.catalog.cache)
+    svc = _SkillInstallService(
+        session=session,
+        registry=deps.registry,
+        publisher=publisher,
+        org_id=deps.org_id,
+        org_slug=deps.org_slug,
+        workspace_id=deps.workspace_id,
+        actor_user_id=ctx.user_id,
+    )
+    try:
+        result = await svc.install(inp.candidate_id)
+    except SkillInstallError as exc:
+        raise ActionInvalidInput(str(exc)) from exc
+
+    return {
+        "installed": True,
+        "canonical_name": result.canonical_name,
+        "version": result.installed_version,
+    }
 
 
 def build_skills_capability(deps: SkillDeps) -> AgentCapability:
