@@ -206,6 +206,12 @@ export function MessageList({ conversationId }: MessageListProps) {
           delete next[toolCallId]
           return { pendingConfirmMap: next }
         })
+        // Reattach to the resumed run stream. The original paused stream
+        // ended on the `done` (with paused=true) event; the backend just
+        // spawned a fresh respond task on the same run_id and is emitting
+        // assistant/tool events that nobody is reading. loadMessages
+        // re-bootstraps + tails the new active_run.
+        await loadMessages(client, convId)
       } catch (err) {
         await handlePendingSubmitError(err, convId, questionId, workspaceId, loadMessages)
       }
@@ -224,6 +230,8 @@ export function MessageList({ conversationId }: MessageListProps) {
         await submitAskUserAnswer(client, convId, questionId, answers)
         // Optimistic clear — ask_user_resolved SSE will also clean up
         useMessageStore.setState({ pendingAsk: null })
+        // Reattach to the resumed run stream — same reason as above.
+        await loadMessages(client, convId)
       } catch (err) {
         await handlePendingSubmitError(err, convId, questionId, workspaceId, loadMessages)
       }

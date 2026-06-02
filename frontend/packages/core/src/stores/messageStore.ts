@@ -1079,6 +1079,21 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
         }
       }
 
+      // pending_hitl fallback: when the Redis active-run key has aged out
+      // during a long pause, bootstrap.active_run is null but the DB
+      // pending + run_id ARE still recoverable (via pending_hitl). Treat
+      // the pending_hitl payload as "this conversation is paused on
+      // run_id, the card must render, and we should tail the run stream
+      // so a resume turn from any worker reaches this tab".
+      //
+      // MessageList gates AskUserCard on `streamingConversationId ===
+      // conversationId`; without this, an ask_user paused beyond Redis
+      // TTL has its pendingAsk seeded but the card stays hidden.
+      const pendingHitlRunId = bootstrap.pending_hitl?.run_id ?? null
+      const hasPendingHitl = pendingHitlRunId !== null
+      const streamRunId = bootstrap.active_run?.run_id ?? pendingHitlRunId
+      const streamingActive = !!bootstrap.active_run || hasPendingHitl
+
       set((s) => ({
         messages: { ...s.messages, [conversationId]: messages },
         todos: restoredTodos,
@@ -1090,9 +1105,9 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
         toolResultMap: {},
         pendingConfirmMap: seedPendingConfirmMap,
         pendingAsk: seedPendingAsk,
-        isStreaming: !!bootstrap.active_run,
-        streamingConversationId: bootstrap.active_run ? conversationId : null,
-        currentRunId: bootstrap.active_run?.run_id ?? null,
+        isStreaming: streamingActive,
+        streamingConversationId: streamingActive ? conversationId : null,
+        currentRunId: streamRunId,
         lastAppliedEventId: null,
         statusPhase: null,
         turnUsage: newTurnUsage,
@@ -1100,11 +1115,11 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
         contextWindow: newContextWindow,
       }))
 
-      if (bootstrap.active_run) {
+      if (streamRunId !== null) {
         activeStreamController?.abort()
         const controller = new AbortController()
         activeStreamController = controller
-        const runId = bootstrap.active_run.run_id
+        const runId = streamRunId
         queueMicrotask(() => {
           void consumeRunStream(
             client,
