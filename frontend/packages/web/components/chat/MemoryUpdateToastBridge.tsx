@@ -21,7 +21,11 @@ export function MemoryUpdateToastBridge() {
         shownRef.current.add(ev.id)
         const wsId = ev.workspace_id
         const href = wsId ? `/w/${wsId}/conversations/${convId}` : null
-        toast('已记住一条新记忆', {
+        const count = ev.payload.items.length
+        const allUpdate = ev.payload.items.every((i) => i.op === 'update')
+        const verb = allUpdate ? '已更新' : '已记住'
+        const msg = count === 1 ? `${verb}一条新记忆` : `${verb} ${count} 条新记忆`
+        toast(msg, {
           ...(href ? { action: { label: '查看', onClick: () => router.push(href) } } : undefined),
         })
       }
