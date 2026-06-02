@@ -443,7 +443,6 @@ class SandboxMiddleware(Middleware):
                 tool_call_id=ctx.tool_call.id,
                 args={"command": command},
                 details={"matched_pattern": pattern, "command": command},
-                timeout=180.0,
                 signal=signal,
             )
         except HitlTimedOut:
