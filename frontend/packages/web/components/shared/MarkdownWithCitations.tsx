@@ -1,6 +1,7 @@
 'use client'
 
 import ReactMarkdown from 'react-markdown'
+import { memo } from 'react'
 import type { ComponentProps } from 'react'
 import remarkGfm from 'remark-gfm'
 import remarkBreaks from 'remark-breaks'
@@ -49,7 +50,7 @@ interface MarkdownWithCitationsProps {
  * them as interactive CitationMarker components. Falls back to plain
  * ReactMarkdown when no markers are present.
  */
-export function MarkdownWithCitations({
+function MarkdownWithCitationsImpl({
   children,
   className,
   conversationId: conversationIdProp,
@@ -113,3 +114,5 @@ export function MarkdownWithCitations({
     </div>
   )
 }
+
+export const MarkdownWithCitations = memo(MarkdownWithCitationsImpl)
