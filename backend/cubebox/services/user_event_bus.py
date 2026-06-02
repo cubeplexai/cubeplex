@@ -7,7 +7,7 @@ Redis pub/sub keeping the same publish_local / subscribe interface.
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator, Callable
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
@@ -34,13 +34,13 @@ class UserEventBus:
         for q in queues:
             q.put_nowait(event)
 
-    def subscribe_queue(
-        self, user_id: str
-    ) -> tuple[asyncio.Queue[UserEventDTO], Callable[[], None]]:
+    def subscribe(self, user_id: str) -> tuple[asyncio.Queue[UserEventDTO], Callable[[], None]]:
         """Return a (queue, unsubscribe) pair.
 
-        Prefer this over the async-generator `subscribe` in HTTP streaming
-        contexts: Queue.get() is a plain coroutine that works safely with
+        The caller MUST call the returned ``unsubscribe`` callable from a
+        ``try/finally`` to avoid leaking the queue into ``_subscribers``.
+
+        Queue.get() is a plain coroutine that works safely with
         asyncio.wait_for, unlike async_generator.__anext__ on Python 3.13+.
         """
         q: asyncio.Queue[UserEventDTO] = asyncio.Queue()
@@ -54,16 +54,3 @@ class UserEventBus:
                     del self._subscribers[user_id]
 
         return q, unsubscribe
-
-    async def subscribe(self, user_id: str) -> AsyncIterator[UserEventDTO]:
-        q: asyncio.Queue[UserEventDTO] = asyncio.Queue()
-        self._subscribers.setdefault(user_id, set()).add(q)
-        try:
-            while True:
-                yield await q.get()
-        finally:
-            bucket = self._subscribers.get(user_id)
-            if bucket is not None:
-                bucket.discard(q)
-                if not bucket:
-                    del self._subscribers[user_id]

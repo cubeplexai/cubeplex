@@ -35,11 +35,10 @@ def get_user_event_bus(request: Request) -> UserEventBus:
 
 @router.get("/events")
 async def stream_user_events(
-    request: Request,
+    user: Annotated[User, Depends(current_active_user)],
+    bus: Annotated[UserEventBus, Depends(get_user_event_bus)],
+    session: Annotated[AsyncSession, Depends(get_session)],
     since: Annotated[str | None, Query()] = None,
-    user: Annotated[User, Depends(current_active_user)] = ...,  # type: ignore[assignment]
-    bus: Annotated[UserEventBus, Depends(get_user_event_bus)] = ...,  # type: ignore[assignment]
-    session: Annotated[AsyncSession, Depends(get_session)] = ...,  # type: ignore[assignment]
 ) -> StreamingResponse:
     repo = UserEventRepository(session)
     user_id = user.id
@@ -58,14 +57,12 @@ async def stream_user_events(
                         "created_at": utc_isoformat(row.created_at),
                     },
                 )
-        # Use subscribe_queue (plain Queue.get coroutine) instead of the
-        # async-generator subscribe. asyncio.wait_for(agen.__anext__()) raises
-        # StopAsyncIteration through a Task on Python 3.13, which is illegal.
-        q, unsubscribe = bus.subscribe_queue(user_id)
+        # Queue.get() is a plain coroutine that works safely with asyncio.wait_for.
+        # CancelledError propagating through wait_for on client disconnect triggers
+        # the finally block below, so no explicit is_disconnected() check is needed.
+        q, unsubscribe = bus.subscribe(user_id)
         try:
             while True:
-                if await request.is_disconnected():
-                    break
                 try:
                     ev = await asyncio.wait_for(q.get(), timeout=HEARTBEAT_INTERVAL_SEC)
                 except TimeoutError:

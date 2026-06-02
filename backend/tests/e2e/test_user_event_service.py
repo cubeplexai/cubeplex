@@ -42,9 +42,12 @@ async def test_publish_writes_and_broadcasts(db_session: AsyncSession) -> None:
     received: list[UserEventDTO] = []
 
     async def consume() -> None:
-        async for dto in bus.subscribe(_TEST_USER_ID):
+        q, unsubscribe = bus.subscribe(_TEST_USER_ID)
+        try:
+            dto = await q.get()
             received.append(dto)
-            break
+        finally:
+            unsubscribe()
 
     consumer = asyncio.create_task(consume())
     await asyncio.sleep(0)  # let consumer register before publish

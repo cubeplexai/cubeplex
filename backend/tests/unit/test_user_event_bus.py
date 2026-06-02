@@ -16,10 +16,12 @@ async def test_subscriber_receives_published_event() -> None:
     received: list[UserEventDTO] = []
 
     async def consume() -> None:
-        async for ev in bus.subscribe("usr_x"):
+        q, unsubscribe = bus.subscribe("usr_x")
+        try:
+            ev = await q.get()
             received.append(ev)
-            if len(received) == 1:
-                break
+        finally:
+            unsubscribe()
 
     consumer = asyncio.create_task(consume())
     await asyncio.sleep(0)  # let consumer subscribe
@@ -45,9 +47,15 @@ async def test_other_user_events_not_delivered() -> None:
 
     async def consume() -> list[UserEventDTO]:
         out: list[UserEventDTO] = []
-        async for ev in bus.subscribe("usr_x"):
+        q, unsubscribe = bus.subscribe("usr_x")
+        try:
+            # Wait briefly; nothing for this user should arrive.
+            ev = await asyncio.wait_for(q.get(), timeout=0.05)
             out.append(ev)
-            return out
+        except TimeoutError:
+            pass
+        finally:
+            unsubscribe()
         return out
 
     consumer = asyncio.create_task(consume())
@@ -63,22 +71,23 @@ async def test_other_user_events_not_delivered() -> None:
             created_at_iso="",
         )
     )
-    await asyncio.sleep(0.05)
-    consumer.cancel()
-    with pytest.raises(asyncio.CancelledError):
-        await consumer
+    result = await consumer
+    assert result == []
 
 
 @pytest.mark.asyncio
-async def test_subscriber_cleanup_on_break() -> None:
-    """Verify the try/finally in subscribe removes the queue correctly."""
+async def test_subscriber_cleanup_on_unsubscribe() -> None:
+    """Verify that calling unsubscribe() removes the queue from _subscribers."""
     bus = UserEventBus()
     received: list[UserEventDTO] = []
 
     async def consume_one() -> None:
-        async for ev in bus.subscribe("usr_z"):
+        q, unsubscribe = bus.subscribe("usr_z")
+        try:
+            ev = await q.get()
             received.append(ev)
-            break  # break triggers finally in the generator
+        finally:
+            unsubscribe()
 
     consumer = asyncio.create_task(consume_one())
     await asyncio.sleep(0)  # let subscribe register
@@ -94,9 +103,9 @@ async def test_subscriber_cleanup_on_break() -> None:
         )
     )
     await asyncio.wait_for(consumer, timeout=1.0)
-    await asyncio.sleep(0)  # let finally block acquire lock and clean up
+    await asyncio.sleep(0)  # let finally block run
 
-    # After break, the subscriber bucket should be cleaned up
+    # After unsubscribe, the subscriber bucket should be cleaned up.
     assert "usr_z" not in bus._subscribers
     assert len(received) == 1
 
@@ -109,14 +118,20 @@ async def test_multiple_subscribers_same_user() -> None:
     received_b: list[UserEventDTO] = []
 
     async def consume_a() -> None:
-        async for ev in bus.subscribe("usr_multi"):
+        q, unsubscribe = bus.subscribe("usr_multi")
+        try:
+            ev = await q.get()
             received_a.append(ev)
-            break
+        finally:
+            unsubscribe()
 
     async def consume_b() -> None:
-        async for ev in bus.subscribe("usr_multi"):
+        q, unsubscribe = bus.subscribe("usr_multi")
+        try:
+            ev = await q.get()
             received_b.append(ev)
-            break
+        finally:
+            unsubscribe()
 
     task_a = asyncio.create_task(consume_a())
     task_b = asyncio.create_task(consume_b())
