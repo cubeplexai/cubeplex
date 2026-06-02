@@ -1646,6 +1646,14 @@ class RunManager:
         except Exception as _exc:
             logger.warning("TodoListMiddleware unavailable: {}", _exc)
 
+        # 12. ReflectionMiddleware — memory self-review at end of every run
+        try:
+            from cubebox.middleware.reflection import ReflectionMiddleware
+
+            cubepi_middleware.append(ReflectionMiddleware())
+        except Exception as _exc:
+            logger.warning("ReflectionMiddleware unavailable: {}", _exc)
+
         # --- Final tool merge ---
         # Stable composition order — changes invalidate the prompt cache prefix:
         #   sandbox tools → artifact tools → todo tools → subagent tools

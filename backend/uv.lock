@@ -858,7 +858,7 @@ requires-dist = [
     { name = "click", specifier = ">=8.3.1" },
     { name = "croniter", specifier = ">=6.2.2" },
     { name = "cryptography", specifier = ">=42.0" },
-    { name = "cubepi", extras = ["mcp", "postgres", "tracing", "tracing-otlp", "trace-cli"], git = "https://github.com/cubeplexai/cubepi.git?rev=262a33f" },
+    { name = "cubepi", extras = ["mcp", "postgres", "trace-cli", "tracing", "tracing-otlp"], git = "https://github.com/xfgong/cubepi.git?rev=738f1e4cd5c07e3af6f0bd33bdc7b0a8e62b2538" },
     { name = "dynaconf", specifier = ">=3.2.11" },
     { name = "fastapi", specifier = ">=0.110.0" },
     { name = "fastapi-users", extras = ["sqlalchemy"], specifier = ">=14.0" },
@@ -904,8 +904,8 @@ dev = [
 
 [[package]]
 name = "cubepi"
-version = "0.5.0"
-source = { git = "https://github.com/cubeplexai/cubepi.git?rev=262a33f#262a33fa9f758f45dc4ed08fb90944467d6c0e25" }
+version = "0.6.0"
+source = { git = "https://github.com/xfgong/cubepi.git?rev=738f1e4cd5c07e3af6f0bd33bdc7b0a8e62b2538#738f1e4cd5c07e3af6f0bd33bdc7b0a8e62b2538" }
 dependencies = [
     { name = "anthropic" },
     { name = "openai" },
