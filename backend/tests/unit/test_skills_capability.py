@@ -188,3 +188,78 @@ async def test_preview_remote_missing_source_raises() -> None:
             MagicMock(),
             PreviewInput(candidate_id=cid),
         )
+
+
+# --- install tests ---
+
+from cubebox.agents.actions.capabilities.skills import (  # noqa: E402
+    InstallInput,
+    _handle_install_impl,
+)
+from cubebox.skills.discovery import InstallResult, SkillInstallError  # noqa: E402
+
+
+@pytest.mark.asyncio
+async def test_install_bad_candidate_id_raises_invalid_input() -> None:
+    deps = _make_deps()
+    with pytest.raises(ActionInvalidInput, match="BAD_CANDIDATE_ID"):
+        await _handle_install_impl(
+            deps,
+            _ctx(),
+            MagicMock(),
+            InstallInput(candidate_id="!!!bad!!!"),
+        )
+
+
+@pytest.mark.asyncio
+async def test_install_success_returns_payload(monkeypatch: pytest.MonkeyPatch) -> None:
+    from cubebox.skills.sources.base import encode_candidate_id
+
+    fake_svc = MagicMock()
+    fake_svc.install = AsyncMock(
+        return_value=InstallResult(
+            canonical_name="myorg:my-skill",
+            skill_id="skl-abc",
+            installed_version="1.0.0",
+        )
+    )
+    monkeypatch.setattr(_skills_mod, "_SkillInstallService", lambda **_kw: fake_svc)
+    monkeypatch.setattr(_skills_mod, "_SkillPublishService", lambda **_kw: MagicMock())
+
+    deps = _make_deps()
+    cid = encode_candidate_id("remote", "owner/repo/main/skill", source_id="src-1")
+    fake_session = MagicMock()
+
+    result = await _handle_install_impl(
+        deps,
+        _ctx(),
+        fake_session,
+        InstallInput(candidate_id=cid),
+    )
+    assert result == {
+        "installed": True,
+        "canonical_name": "myorg:my-skill",
+        "version": "1.0.0",
+    }
+    fake_svc.install.assert_awaited_once_with(cid)
+
+
+@pytest.mark.asyncio
+async def test_install_error_raises_invalid_input(monkeypatch: pytest.MonkeyPatch) -> None:
+    from cubebox.skills.sources.base import encode_candidate_id
+
+    fake_svc = MagicMock()
+    fake_svc.install = AsyncMock(side_effect=SkillInstallError("trust tier too low"))
+    monkeypatch.setattr(_skills_mod, "_SkillInstallService", lambda **_kw: fake_svc)
+    monkeypatch.setattr(_skills_mod, "_SkillPublishService", lambda **_kw: MagicMock())
+
+    deps = _make_deps()
+    cid = encode_candidate_id("remote", "owner/repo/main/skill", source_id="src-1")
+
+    with pytest.raises(ActionInvalidInput, match="trust tier too low"):
+        await _handle_install_impl(
+            deps,
+            _ctx(),
+            MagicMock(),
+            InstallInput(candidate_id=cid),
+        )
