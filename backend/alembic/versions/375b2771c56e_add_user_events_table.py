@@ -35,7 +35,11 @@ def upgrade() -> None:
     sa.ForeignKeyConstraint(['workspace_id'], ['workspaces.id'], ),
     sa.PrimaryKeyConstraint('id')
     )
-    op.create_index('ix_user_events_unread', 'user_events', ['user_id', 'read_at'], unique=False)
+    op.create_index(
+        'ix_user_events_unread', 'user_events', ['user_id'],
+        unique=False,
+        postgresql_where=sa.text("read_at IS NULL"),
+    )
     op.create_index('ix_user_events_user_created', 'user_events', ['user_id', 'created_at'], unique=False)
     # ### end Alembic commands ###
 
