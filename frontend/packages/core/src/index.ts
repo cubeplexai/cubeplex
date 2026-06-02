@@ -9,13 +9,13 @@ export { useModelsStore } from './stores/modelsStore'
 export { useOrgModelSettingsStore } from './stores/orgModelSettingsStore'
 export * from './oauth'
 export { useOrgAdminFlag } from './hooks/useOrgAdminFlag'
-export { useUserEvents } from './hooks/useUserEvents'
 
-// `useDeploymentMode` is intentionally NOT re-exported from this barrel.
-// The hook is `'use client'` and pulls swr; re-exporting it here would force
-// every server/proxy file that imports anything from `@cubebox/core` (e.g.
-// `app/page.tsx`, `proxy.ts`, both server contexts that only need
-// `AUTH_COOKIE_NAME`) to drag swr/react into the bundle. Future client-side
-// consumers should import directly from
-// `@cubebox/core/dist/hooks/useDeploymentMode` (or a dedicated client subpath
+// `useDeploymentMode` and `useUserEvents` are intentionally NOT re-exported
+// from this barrel. They are `'use client'` hooks that pull react / swr;
+// re-exporting them here would force every server/proxy file that imports
+// anything from `@cubebox/core` (e.g. `app/page.tsx`, `proxy.ts`, both
+// server contexts that only need `AUTH_COOKIE_NAME`) to drag react/swr
+// into the bundle. Client-side consumers should import directly from
+// `@cubebox/core/hooks/useDeploymentMode` or
+// `@cubebox/core/hooks/useUserEvents` (or a dedicated client subpath
 // barrel once one exists).
