@@ -24,6 +24,21 @@ from typing import Any, cast
 
 from redis.asyncio import Redis
 
+# Known values for ``RunMeta.status``. Kept here so callers and reviewers can
+# see the full state space in one place.
+#
+# - ``running``: a worker holds the active-run lock and is appending events.
+# - ``paused_hitl``: the agent emitted a HITL pending request and the worker
+#   auto-detached. The active-run lock is still held (so the conversation is
+#   not "free") but there is no live worker; the run resumes when the user
+#   answers. The stale-run sweeper must skip this status (no freshness
+#   expectation) and ``_FORCE_CLAIM_STALE_LUA`` must refuse to overwrite it.
+# - ``completed`` / ``cancelled`` / ``errored``: terminal states a worker
+#   transitions into on its way out.
+# - ``stale``: set by inline stale-run detection when a worker disappeared
+#   mid-run without transitioning the status itself.
+RUN_STATUSES = ("running", "paused_hitl", "completed", "cancelled", "errored", "stale")
+
 
 @dataclass(slots=True)
 class RunMeta:
@@ -85,6 +100,12 @@ return 1
 # Force-claim the active-run slot only when the current active points at a
 # stale run whose meta is gone or is no longer running. Used only as a
 # recovery step when _CLAIM_ACTIVE_LUA returns 0.
+#
+# ``paused_hitl`` is treated the same as ``running`` here: a paused
+# conversation is alive-but-detached (worker released, pending request
+# stored), so silently force-claiming over it would lose the pending
+# request and orphan the user's previous turn.
+#
 # KEYS[1] = active_key, KEYS[2] = new_meta_key, KEYS[3] = existing_meta_key
 # ARGV[1] = expected_existing_run_id, ARGV[2] = new_run_id,
 # ARGV[3] = ttl_seconds, ARGV[4..N] = meta field/value pairs
@@ -95,7 +116,7 @@ if current ~= ARGV[1] then
 end
 if redis.call('EXISTS', KEYS[3]) == 1 then
   local status = redis.call('HGET', KEYS[3], 'status')
-  if status == 'running' then
+  if status == 'running' or status == 'paused_hitl' then
     return 0
   end
 end
