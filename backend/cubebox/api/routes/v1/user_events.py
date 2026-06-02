@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from cubebox.auth.dependencies import current_active_user
 from cubebox.db import get_session
+from cubebox.db.engine import async_session_maker
 from cubebox.models import User
 from cubebox.repositories.user_event import UserEventRepository
 from cubebox.services.user_event_bus import UserEventBus
@@ -37,10 +38,13 @@ def get_user_event_bus(request: Request) -> UserEventBus:
 async def stream_user_events(
     user: Annotated[User, Depends(current_active_user)],
     bus: Annotated[UserEventBus, Depends(get_user_event_bus)],
-    session: Annotated[AsyncSession, Depends(get_session)],
     since: Annotated[str | None, Query()] = None,
 ) -> StreamingResponse:
-    repo = UserEventRepository(session)
+    # Note: this endpoint deliberately does NOT take an `AsyncSession` via
+    # Depends. SSE streams are long-lived (often idle), and pinning a session
+    # for the connection lifetime would exhaust the SQLAlchemy pool under
+    # concurrent clients. The replay block opens a short-lived session only
+    # when needed and releases it before entering the live-stream loop.
     user_id = user.id
 
     async def gen() -> AsyncIterator[bytes]:
@@ -52,7 +56,11 @@ async def stream_user_events(
         try:
             replay_ids: set[str] = set()
             if since is not None:
-                replay = await repo.list_for_user(user_id, since_id=since, limit=200)
+                # Short-lived session: opened only for the replay query, closed
+                # before the live-stream loop starts.
+                async with async_session_maker() as session:
+                    repo = UserEventRepository(session)
+                    replay = await repo.list_for_user(user_id, since_id=since, limit=200)
                 for row in replay:
                     replay_ids.add(row.id)
                     yield _sse_format(
