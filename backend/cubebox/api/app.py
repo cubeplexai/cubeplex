@@ -173,6 +173,9 @@ async def lifespan(_app: FastAPI):  # type: ignore
             run_stream_max_events=config.get("streaming.run_stream_max_events", 1000000),
         )
         _app.state.run_manager = run_manager
+        from cubebox.services.user_event_bus import UserEventBus
+
+        _app.state.user_event_bus = UserEventBus()
         await run_manager.start_control_listeners()
         from cubebox.config import config as _sched_cfg
         from cubebox.schedules.poller import ScheduledTaskPoller
@@ -486,6 +489,7 @@ def create_app(
         public_artifacts,
         system,
         trigger_ingest,
+        user_events_router,
         workspaces_router,
         ws_browser,
         ws_mcp,
@@ -505,6 +509,7 @@ def create_app(
     app.include_router(public_artifacts.router, prefix="/api/v1")
     app.include_router(attachments_router, prefix="/api/v1")
     app.include_router(memory_router, prefix="/api/v1")
+    app.include_router(user_events_router, prefix="/api/v1")
     app.include_router(admin_router, prefix="/api/v1")
     app.include_router(admin_members.router, prefix="/api/v1")
     app.include_router(admin_mcp.router, prefix="/api/v1")
