@@ -41,6 +41,7 @@ from cubebox.models.skill import (
 from cubebox.models.skill_registry import SkillRegistry
 from cubebox.models.trigger import Trigger, TriggerEvent
 from cubebox.models.user import User
+from cubebox.models.user_event import UserEvent, UserEventType
 from cubebox.models.user_sandbox import UserSandbox
 from cubebox.models.workspace import Workspace
 
@@ -85,6 +86,8 @@ __all__ = [
     "Trigger",
     "TriggerEvent",
     "User",
+    "UserEvent",
+    "UserEventType",
     "UserSandbox",
     "Workspace",
     "WorkspaceSkillBinding",
