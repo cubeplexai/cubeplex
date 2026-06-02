@@ -17,13 +17,14 @@ from cubepi.agent.types import AgentTool, AgentToolResult
 from cubepi.providers.base import TextContent
 from pydantic import BaseModel, Field
 
-from cubebox.models.memory import MemoryScope, MemoryStatus, MemoryType
+from cubebox.models.memory import MemoryScope, MemorySourceType, MemoryStatus, MemoryType
 from cubebox.services.memory import (
     CreateMemoryInput,
     MemoryPermissionError,
     MemoryService,
 )
 from cubebox.services.memory_screen import MemoryScreenError
+from cubebox.services.reflection_context import reflection_source_active
 
 # ---------------------------------------------------------------------------
 # Input schemas — mirrored verbatim from memory.py
@@ -80,6 +81,11 @@ def create_memory_tools(
         on_update: object = None,
     ) -> AgentToolResult:
         del tool_call_id, signal, on_update
+        src_type = (
+            MemorySourceType.REFLECTION
+            if reflection_source_active()
+            else MemorySourceType.CONVERSATION
+        )
         async with service_factory() as svc:
             try:
                 item = await svc.create(
@@ -88,6 +94,7 @@ def create_memory_tools(
                         type=args.type,
                         content=args.content,
                         confidence=args.confidence,
+                        source_type=src_type,
                         source_conversation_id=conversation_id,
                         source_run_id=run_id,
                     )
