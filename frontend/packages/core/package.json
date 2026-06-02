@@ -33,6 +33,12 @@
       "source": "./src/hooks/useDeploymentMode.ts",
       "import": "./src/hooks/useDeploymentMode.ts",
       "default": "./src/hooks/useDeploymentMode.ts"
+    },
+    "./hooks/useUserEvents": {
+      "types": "./src/hooks/useUserEvents.ts",
+      "source": "./src/hooks/useUserEvents.ts",
+      "import": "./src/hooks/useUserEvents.ts",
+      "default": "./src/hooks/useUserEvents.ts"
     }
   },
   "main": "dist/index.js",
