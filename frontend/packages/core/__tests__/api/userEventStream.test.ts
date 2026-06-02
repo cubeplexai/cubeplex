@@ -3,8 +3,8 @@ import { streamUserEvents } from '../../src/api/userEventStream'
 import type { ApiClient } from '../../src/api/client'
 import type { UserEvent } from '../../src/types'
 
-function fakeClient(baseUrl = 'http://localhost:8011'): ApiClient {
-  return { baseUrl } as ApiClient
+function fakeClient(baseUrl = 'http://localhost:8011', notifyUnauthorized = vi.fn()): ApiClient {
+  return { baseUrl, notifyUnauthorized } as unknown as ApiClient
 }
 
 function sseBody(lines: string): ReadableStream<Uint8Array> {
@@ -110,5 +110,35 @@ describe('streamUserEvents', () => {
         // nothing
       }
     }).rejects.toThrow('SSE connect failed: 401')
+  })
+
+  it('fires notifyUnauthorized on 401 so auth redirect can run', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 401 }))
+
+    const notify = vi.fn()
+    const ac = new AbortController()
+    await expect(async () => {
+      for await (const _ of streamUserEvents(fakeClient('http://localhost:8011', notify), {
+        signal: ac.signal,
+      })) {
+        // nothing
+      }
+    }).rejects.toThrow()
+    expect(notify).toHaveBeenCalledOnce()
+  })
+
+  it('does NOT fire notifyUnauthorized on non-401 errors', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 500 }))
+
+    const notify = vi.fn()
+    const ac = new AbortController()
+    await expect(async () => {
+      for await (const _ of streamUserEvents(fakeClient('http://localhost:8011', notify), {
+        signal: ac.signal,
+      })) {
+        // nothing
+      }
+    }).rejects.toThrow()
+    expect(notify).not.toHaveBeenCalled()
   })
 })
