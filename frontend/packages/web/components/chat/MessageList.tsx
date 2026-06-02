@@ -20,6 +20,7 @@ import { MessageAttachments } from './MessageAttachments'
 import { TokenUsageBar } from './TokenUsageBar'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { useMessages } from '@/hooks/useMessages'
+import { useMessageScopedToolResults } from '@/hooks/useMessageScopedToolResults'
 import { useWorkspaceContext } from '@/hooks/useWorkspaceContext'
 import { rafThrottleScrollToBottom } from '@/lib/scrollToBottom'
 
@@ -175,10 +176,25 @@ export function MessageList({ conversationId }: MessageListProps) {
     [messages],
   )
 
-  // Merge: streaming results take precedence over historical
+  // Merge: streaming results take precedence over historical. Used for the
+  // live streaming bubble; history bubbles use per-message scoped subsets
+  // (`messageScopedToolResults`) so memo bails out on most streaming ticks.
   const mergedToolResultMap = useMemo(
     () => ({ ...historicalToolResults, ...toolResultMap }),
     [historicalToolResults, toolResultMap],
+  )
+
+  // Per-message subset of (live ?? historical) tool results, keyed by message
+  // id. Each per-message subset keeps its reference across renders unless one
+  // of that message's tool_call_ids gained or changed an entry — so a
+  // `tool_result` for tool_call X only re-renders the historical bubble that
+  // actually carries X, leaving every other history message memo'd. Fixes the
+  // "committed bubble loses its result until next finalize" case codex P2
+  // flagged on PR #188.
+  const messageScopedToolResults = useMessageScopedToolResults(
+    messages ?? [],
+    historicalToolResults,
+    toolResultMap,
   )
 
   // After streaming completes, the assistant message is appended to history
@@ -254,7 +270,7 @@ export function MessageList({ conversationId }: MessageListProps) {
               <HistoryAssistantMessage
                 message={msg}
                 subagentDataMap={subagentDataMap}
-                toolResultMap={historicalToolResults}
+                toolResultMap={messageScopedToolResults[msg.id] ?? historicalToolResults}
                 conversationId={conversationId}
                 pendingConfirmMap={pendingConfirmMap}
                 onSandboxConfirm={handleSandboxConfirm}
