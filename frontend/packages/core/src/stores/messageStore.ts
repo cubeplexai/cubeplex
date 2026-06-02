@@ -844,17 +844,28 @@ async function finalizePausedStream(
   // stays visible until the user answers or cancels. currentRunId stays
   // set too — the resume turn reuses the same run_id, so the SSE consumer
   // that re-attaches after the user submits will continue on this id.
+  //
+  // Keep `streamingConversationId === conversationId` while a pending
+  // ask/confirm is still attached: MessageList gates `<AskUserCard>` on
+  // that equality, and clearing it here would hide the card the user
+  // needs to answer. Mirrors bootstrap's pending_hitl branch which
+  // marks the conversation "streaming-attached" even with no live SSE.
+  const state0 = get()
+  const stillAttached =
+    state0.pendingAsk !== null || Object.keys(state0.pendingConfirmMap).length > 0
+  const nextStreamingConversationId = stillAttached ? conversationId : null
+
   const { assistantMessage, toolMessages } = buildTurnMessages(
-    get().streamAgents,
-    get().toolResultMap,
-    get().turnUsage[conversationId] ?? null,
+    state0.streamAgents,
+    state0.toolResultMap,
+    state0.turnUsage[conversationId] ?? null,
     'stop',
   )
 
   if (!assistantMessage) {
     set((state) => ({
       isStreaming: false,
-      streamingConversationId: null,
+      streamingConversationId: nextStreamingConversationId,
       statusPhase: null,
       pendingSteers: { ...state.pendingSteers, [conversationId]: [] },
     }))
@@ -871,7 +882,7 @@ async function finalizePausedStream(
       ],
     },
     isStreaming: false,
-    streamingConversationId: null,
+    streamingConversationId: nextStreamingConversationId,
     statusPhase: null,
     pendingSteers: { ...state.pendingSteers, [conversationId]: [] },
   }))
