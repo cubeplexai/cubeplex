@@ -1845,8 +1845,6 @@ class RunManager:
                     return ""
 
                 try:
-                    await agent.wait_for_idle()
-
                     from cubebox.db.engine import (
                         async_session_maker as _ue_session_maker,
                     )
@@ -1860,14 +1858,12 @@ class RunManager:
                     from cubebox.tools.builtin.memory import create_memory_tools
 
                     _bus = getattr(self._app.state, "user_event_bus", None)
-                    _last_assistant = _last_assistant_text(agent.state.messages)
                     if _memory_service_factory is None:
                         logger.debug(
                             "skipping reflection for run_id={}: memory tools not available",
                             run_id,
                         )
-                    elif _bus is not None and _last_assistant:
-                        _user_msg_text = _stringify_user_msg(_user_msg)
+                    elif _bus is not None:
 
                         def _make_reflection_agent(_inp: ReflectionInput) -> Any:
                             from cubepi import Agent, Model
@@ -1888,23 +1884,43 @@ class RunManager:
                                 tools=_mem_tools,
                             )
 
-                        _refl_inp = ReflectionInput(
-                            conversation_id=conversation_id,
-                            run_id=run_id,
-                            user_id=ctx.user_id,
-                            workspace_id=ctx.workspace_id,
-                            turn=ReflectionTurn(
-                                user_message=_user_msg_text,
-                                assistant_message=_last_assistant,
-                                tool_summaries=[],
-                            ),
-                        )
-
+                        # The wait_for_idle + state-extraction live INSIDE the
+                        # detached task so the main conversation SSE can close
+                        # promptly after AgentEndEvent — a stuck tool drain on
+                        # the main agent must NEVER hold the user-visible
+                        # stream open waiting for reflection prerequisites.
                         async def _run_reflection(
-                            inp: ReflectionInput = _refl_inp,
+                            agent_ref: Any = agent,
+                            user_msg_ref: Any = _user_msg,
                             bus: Any = _bus,
                             agent_factory: Any = _make_reflection_agent,
                         ) -> None:
+                            # Bounded wait — independent of ReflectionRunner's
+                            # 30s LLM-call timeout, which only covers the
+                            # reflection agent.prompt(), not this prereq.
+                            try:
+                                await asyncio.wait_for(agent_ref.wait_for_idle(), timeout=10.0)
+                            except (TimeoutError, Exception):
+                                logger.warning(
+                                    "reflection: agent not idle within 10s, skipping run_id={}",
+                                    run_id,
+                                )
+                                return
+                            last_assistant = _last_assistant_text(agent_ref.state.messages)
+                            if not last_assistant:
+                                return
+                            user_msg_text = _stringify_user_msg(user_msg_ref)
+                            inp = ReflectionInput(
+                                conversation_id=conversation_id,
+                                run_id=run_id,
+                                user_id=ctx.user_id,
+                                workspace_id=ctx.workspace_id,
+                                turn=ReflectionTurn(
+                                    user_message=user_msg_text,
+                                    assistant_message=last_assistant,
+                                    tool_summaries=[],
+                                ),
+                            )
                             async with _ue_session_maker() as _session:
                                 _repo = UserEventRepository(_session)
                                 _svc = UserEventService(repo=_repo, bus=bus)
