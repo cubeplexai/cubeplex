@@ -85,7 +85,7 @@ async def test_disabled_source_returns_no_remote_candidates(
         name="fake",
         trust_tier="community",
     )
-    patch = await admin.patch(f"/api/v1/admin/skill-sources/{sid}", json={"enabled": False})
+    patch = await admin.patch(f"/api/v1/admin/skill-registries/{sid}", json={"enabled": False})
     assert patch.status_code == 200, patch.text
 
     # Discovery must return zero remote candidates.

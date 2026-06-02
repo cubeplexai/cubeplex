@@ -97,7 +97,7 @@ async def test_missed_beyond_grace_skips_and_fast_forwards(
         task = await s.get(ScheduledTask, tid)
         assert task is not None and task.next_fire_at is not None
         # next_fire_at must be in the recent past or near future, not 3h stale.
-        assert task.next_fire_at > datetime.now(UTC).replace(tzinfo=None) - timedelta(hours=1)
+        assert task.next_fire_at > datetime.now(UTC) - timedelta(hours=1)
 
 
 @pytest.mark.asyncio
@@ -150,7 +150,7 @@ async def test_paused_stretch_records_skipped_missed_on_resume(
     async with async_session_maker() as s:
         task = await s.get(ScheduledTask, tid)
         assert task is not None and task.next_fire_at is not None
-        assert task.next_fire_at > datetime.now(UTC).replace(tzinfo=None) - timedelta(hours=1)
+        assert task.next_fire_at > datetime.now(UTC) - timedelta(hours=1)
 
 
 @pytest.mark.asyncio
