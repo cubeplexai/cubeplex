@@ -36,6 +36,13 @@ export async function* streamUserEvents(
     cache: 'no-store',
     signal: opts.signal,
   })
+  if (res.status === 401) {
+    // Session expired or cookie cleared in another tab. Fire the same
+    // unauthorized handlers ApiClient.doFetch uses so useAuthRedirect can
+    // bounce the user to /login instead of retrying forever in the
+    // useUserEvents backoff loop.
+    client.notifyUnauthorized()
+  }
   if (!res.ok) throw new Error(`SSE connect failed: ${res.status}`)
   const reader = res.body?.getReader()
   if (!reader) return
