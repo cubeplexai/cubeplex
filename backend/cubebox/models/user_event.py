@@ -4,7 +4,7 @@ from datetime import datetime
 from enum import StrEnum
 from typing import Any, ClassVar
 
-from sqlalchemy import Column, DateTime, Index, text
+from sqlalchemy import JSON, Column, DateTime, Index, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlmodel import Field
 
@@ -27,7 +27,9 @@ class UserEvent(CubeboxBase, table=True):
     user_id: str = Field(foreign_key="users.id", max_length=20)
     workspace_id: str | None = Field(default=None, foreign_key="workspaces.id", max_length=20)
     type: UserEventType = Field()
-    payload: dict[str, Any] = Field(sa_column=Column(JSONB, nullable=False))
+    payload: dict[str, Any] = Field(
+        sa_column=Column(JSON().with_variant(JSONB(), "postgresql"), nullable=False)
+    )
     read_at: datetime | None = Field(
         default=None,
         sa_column=Column(DateTime(timezone=True), nullable=True),
