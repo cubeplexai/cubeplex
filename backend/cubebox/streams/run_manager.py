@@ -1512,171 +1512,178 @@ class RunManager:
         except Exception as _exc:
             logger.warning("CompactionMiddleware not loaded: {}", _exc)
 
-        # 6. SandboxMiddleware — needs sandbox
-        sandbox_hitl_channel: Any = None
-        if sandbox is not None:
-            try:
-                from cubebox.middleware.sandbox import SandboxMiddleware
-                from cubebox.sandbox.manager import get_sandbox_manager
-
-                # Resolve the org's command_rules via the manager so DB access
-                # stays behind the manager and the middleware only sees its
-                # slice of policy.
-                #
-                # Fail-CLOSED on resolution failure: if we can't read the org's
-                # rules (DB transient, malformed persisted policy, …) we MUST
-                # NOT pass an empty list — empty means allow-all, which would
-                # silently bypass any deny/confirm rules the admin configured.
-                # Install a single deny-all rule instead so every execute call
-                # blocks with the standard "blocked by org policy" message
-                # until the next request resolves cleanly.
-                _command_rules: list[dict[str, Any]]
+        async with init_checkpointer() as cp:
+            # 6. SandboxMiddleware — needs sandbox
+            sandbox_hitl_channel: Any = None
+            if sandbox is not None:
                 try:
-                    _command_rules = await get_sandbox_manager().resolve_command_rules(ctx.org_id)
-                except Exception as _exc:
-                    logger.error(
-                        "Failed to resolve sandbox command_rules for org {}; "
-                        "failing CLOSED with deny-all until next request "
-                        "resolves: {}",
-                        ctx.org_id,
-                        _exc,
+                    from cubebox.middleware.sandbox import SandboxMiddleware
+                    from cubebox.sandbox.manager import get_sandbox_manager
+
+                    # Resolve the org's command_rules via the manager so DB access
+                    # stays behind the manager and the middleware only sees its
+                    # slice of policy.
+                    #
+                    # Fail-CLOSED on resolution failure: if we can't read the org's
+                    # rules (DB transient, malformed persisted policy, …) we MUST
+                    # NOT pass an empty list — empty means allow-all, which would
+                    # silently bypass any deny/confirm rules the admin configured.
+                    # Install a single deny-all rule instead so every execute call
+                    # blocks with the standard "blocked by org policy" message
+                    # until the next request resolves cleanly.
+                    _command_rules: list[dict[str, Any]]
+                    try:
+                        _command_rules = await get_sandbox_manager().resolve_command_rules(
+                            ctx.org_id
+                        )
+                    except Exception as _exc:
+                        logger.error(
+                            "Failed to resolve sandbox command_rules for org {}; "
+                            "failing CLOSED with deny-all until next request "
+                            "resolves: {}",
+                            ctx.org_id,
+                            _exc,
+                        )
+                        _command_rules = [
+                            {"action": "deny", "pattern": "*"},
+                        ]
+
+                    from cubepi.hitl import CheckpointedChannel
+
+                    sandbox_hitl_channel = CheckpointedChannel(
+                        checkpointer=cp,
+                        thread_id=conversation_id,
+                        run_id=run_id,
+                        default_timeout=None,
                     )
-                    _command_rules = [
-                        {"action": "deny", "pattern": "*"},
-                    ]
+                    sandbox_mw = SandboxMiddleware(
+                        sandbox=sandbox,
+                        conversation_id=conversation_id,
+                        workspace_id=ctx.workspace_id,
+                        command_rules=_command_rules,
+                        channel=sandbox_hitl_channel,
+                    )
+                    cubepi_middleware.append(sandbox_mw)
+                    # Middleware tools (execute, write_file, edit_file, file_read) collected for
+                    # ordered merge below
+                    _sandbox_tools.extend(sandbox_mw.tools)
+                    # ask_user built-in tool shares the same HITL channel so the agent
+                    # can ask structured questions that pause execution just like a confirm rule.
+                    from cubepi.hitl import ask_user_tool
 
-                from cubepi.hitl import InMemoryChannel
+                    _builtin_tools.append(ask_user_tool(sandbox_hitl_channel))
+                except Exception as _exc:
+                    logger.warning("SandboxMiddleware unavailable: {}", _exc)
 
-                sandbox_hitl_channel = InMemoryChannel(default_timeout=180.0)
-                sandbox_mw = SandboxMiddleware(
-                    sandbox=sandbox,
-                    conversation_id=conversation_id,
-                    workspace_id=ctx.workspace_id,
-                    command_rules=_command_rules,
-                    channel=sandbox_hitl_channel,
-                )
-                cubepi_middleware.append(sandbox_mw)
-                # Middleware tools (execute, write_file, edit_file, file_read) collected for
-                # ordered merge below
-                _sandbox_tools.extend(sandbox_mw.tools)
-                # ask_user built-in tool shares the same HITL channel so the agent
-                # can ask structured questions that pause execution just like a confirm rule.
-                from cubepi.hitl import ask_user_tool
-
-                _builtin_tools.append(ask_user_tool(sandbox_hitl_channel))
-            except Exception as _exc:
-                logger.warning("SandboxMiddleware unavailable: {}", _exc)
-
-        # 7. SkillsMiddleware — needs extra_ref
-        try:
-            from cubebox.middleware.skills import SkillsMiddleware
-
-            cubepi_middleware.append(SkillsMiddleware(extra_ref=_extra_ref))
-        except Exception as _exc:
-            logger.warning("SkillsMiddleware unavailable: {}", _exc)
-
-        # 8. SubAgentMiddleware — needs provider + model info + shared tools
-        try:
-            from cubebox.middleware.subagents import SubAgentMiddleware
-
-            # Cost middleware (if present) is passed as inherited_middleware for depth attribution.
-            # Build the cost instance separately so SubAgent can clone it.
-            _cost_mw_for_inherit: list[Any] = []
+            # 7. SkillsMiddleware — needs extra_ref
             try:
-                from cubebox.middleware.cost import CostMiddleware as _CostMwPi
+                from cubebox.middleware.skills import SkillsMiddleware
 
-                _cost_mw_for_inherit = [
-                    _CostMwPi(
+                cubepi_middleware.append(SkillsMiddleware(extra_ref=_extra_ref))
+            except Exception as _exc:
+                logger.warning("SkillsMiddleware unavailable: {}", _exc)
+
+            # 8. SubAgentMiddleware — needs provider + model info + shared tools
+            try:
+                from cubebox.middleware.subagents import SubAgentMiddleware
+
+                # Cost middleware (if present) is passed as inherited_middleware for depth attribution.
+                # Build the cost instance separately so SubAgent can clone it.
+                _cost_mw_for_inherit: list[Any] = []
+                try:
+                    from cubebox.middleware.cost import CostMiddleware as _CostMwPi
+
+                    _cost_mw_for_inherit = [
+                        _CostMwPi(
+                            org_id=ctx.org_id,
+                            workspace_id=ctx.workspace_id,
+                            user_id=ctx.user_id,
+                            conversation_id=conversation_id,
+                        )
+                    ]
+                except Exception:
+                    pass
+
+                subagent_mw = SubAgentMiddleware(
+                    subagent_map={},
+                    default_provider=provider,
+                    default_model_id=model_id,
+                    default_provider_name=provider_name,
+                    # Pass all tools (sandbox + artifact + builtin) collected so far
+                    # as shared tools for subagent spawning, minus show_widget
+                    # (top-level only in v1).
+                    shared_tools=_subagent_shared_tools(
+                        _sandbox_tools + _artifact_tools + _builtin_tools
+                    ),
+                    inherited_middleware=_cost_mw_for_inherit,
+                    tracer=getattr(self._app.state, "tracer", None),
+                )
+                cubepi_middleware.append(subagent_mw)
+                _subagent_tools.extend(subagent_mw.tools)
+            except Exception as _exc:
+                logger.warning("SubAgentMiddleware unavailable: {}", _exc)
+
+            # 9. CostMiddleware — needs org/workspace/user/conversation IDs
+            try:
+                from cubebox.llm.config import ModelCost
+                from cubebox.middleware.cost import CostMiddleware
+
+                # Resolve ModelCost for any (provider, model_id) the agent reports.
+                # The factory's llm_config holds the merged YAML + DB provider config
+                # so this lookup honors per-org overrides.
+                def _price_lookup(provider: str, model_id: str) -> ModelCost | None:
+                    pcfg = factory.llm_config.providers.get(provider)
+                    if pcfg is None:
+                        return None
+                    for m in pcfg.models:
+                        if m.id == model_id:
+                            return m.cost
+                    return None
+
+                cubepi_middleware.append(
+                    CostMiddleware(
                         org_id=ctx.org_id,
                         workspace_id=ctx.workspace_id,
                         user_id=ctx.user_id,
                         conversation_id=conversation_id,
+                        price_lookup=_price_lookup,
                     )
-                ]
-            except Exception:
-                pass
-
-            subagent_mw = SubAgentMiddleware(
-                subagent_map={},
-                default_provider=provider,
-                default_model_id=model_id,
-                default_provider_name=provider_name,
-                # Pass all tools (sandbox + artifact + builtin) collected so far
-                # as shared tools for subagent spawning, minus show_widget
-                # (top-level only in v1).
-                shared_tools=_subagent_shared_tools(
-                    _sandbox_tools + _artifact_tools + _builtin_tools
-                ),
-                inherited_middleware=_cost_mw_for_inherit,
-                tracer=getattr(self._app.state, "tracer", None),
-            )
-            cubepi_middleware.append(subagent_mw)
-            _subagent_tools.extend(subagent_mw.tools)
-        except Exception as _exc:
-            logger.warning("SubAgentMiddleware unavailable: {}", _exc)
-
-        # 9. CostMiddleware — needs org/workspace/user/conversation IDs
-        try:
-            from cubebox.llm.config import ModelCost
-            from cubebox.middleware.cost import CostMiddleware
-
-            # Resolve ModelCost for any (provider, model_id) the agent reports.
-            # The factory's llm_config holds the merged YAML + DB provider config
-            # so this lookup honors per-org overrides.
-            def _price_lookup(provider: str, model_id: str) -> ModelCost | None:
-                pcfg = factory.llm_config.providers.get(provider)
-                if pcfg is None:
-                    return None
-                for m in pcfg.models:
-                    if m.id == model_id:
-                        return m.cost
-                return None
-
-            cubepi_middleware.append(
-                CostMiddleware(
-                    org_id=ctx.org_id,
-                    workspace_id=ctx.workspace_id,
-                    user_id=ctx.user_id,
-                    conversation_id=conversation_id,
-                    price_lookup=_price_lookup,
                 )
+            except Exception as _exc:
+                logger.warning("CostMiddleware unavailable: {}", _exc)
+
+            # 10. TimestampMiddleware — no deps
+            try:
+                from cubebox.middleware.timestamps import TimestampMiddleware
+
+                cubepi_middleware.append(TimestampMiddleware())
+            except Exception as _exc:
+                logger.warning("TimestampMiddleware unavailable: {}", _exc)
+
+            # 11. TodoListMiddleware — needs extra_ref
+            try:
+                from cubebox.middleware.todo import TodoListMiddleware
+
+                todo_mw = TodoListMiddleware(extra_ref=_extra_ref)
+                cubepi_middleware.append(todo_mw)
+                _todo_tools.extend(todo_mw.tools)
+            except Exception as _exc:
+                logger.warning("TodoListMiddleware unavailable: {}", _exc)
+
+            # --- Final tool merge ---
+            # Stable composition order — changes invalidate the prompt cache prefix:
+            #   sandbox tools → artifact tools → todo tools → subagent tools
+            #   → builtin tools (calculator/datetime/view_images/memory/load_skill/mcp)
+            all_tools: list[Any] = (
+                _sandbox_tools + _artifact_tools + _todo_tools + _subagent_tools + _builtin_tools
             )
-        except Exception as _exc:
-            logger.warning("CostMiddleware unavailable: {}", _exc)
 
-        # 10. TimestampMiddleware — no deps
-        try:
-            from cubebox.middleware.timestamps import TimestampMiddleware
+            logger.info(
+                "cubepi middleware stack: {} layers, {} total tools",
+                len(cubepi_middleware),
+                len(all_tools),
+            )
 
-            cubepi_middleware.append(TimestampMiddleware())
-        except Exception as _exc:
-            logger.warning("TimestampMiddleware unavailable: {}", _exc)
-
-        # 11. TodoListMiddleware — needs extra_ref
-        try:
-            from cubebox.middleware.todo import TodoListMiddleware
-
-            todo_mw = TodoListMiddleware(extra_ref=_extra_ref)
-            cubepi_middleware.append(todo_mw)
-            _todo_tools.extend(todo_mw.tools)
-        except Exception as _exc:
-            logger.warning("TodoListMiddleware unavailable: {}", _exc)
-
-        # --- Final tool merge ---
-        # Stable composition order — changes invalidate the prompt cache prefix:
-        #   sandbox tools → artifact tools → todo tools → subagent tools
-        #   → builtin tools (calculator/datetime/view_images/memory/load_skill/mcp)
-        all_tools: list[Any] = (
-            _sandbox_tools + _artifact_tools + _todo_tools + _subagent_tools + _builtin_tools
-        )
-
-        logger.info(
-            "cubepi middleware stack: {} layers, {} total tools",
-            len(cubepi_middleware),
-            len(all_tools),
-        )
-
-        async with init_checkpointer() as cp:
             # Seed the citation counter past any 【N-M】 markers already
             # persisted in this conversation's tool-result history so
             # cross-turn ids don't collide in the frontend store (which is
