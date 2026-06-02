@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, memo } from 'react'
 import { useTranslations } from 'next-intl'
 import type {
   AssistantMessage as AssistantMessageType,
@@ -624,3 +624,19 @@ export function AssistantMessage({
     </div>
   )
 }
+
+/**
+ * Memoized wrapper for historical (non-streaming) assistant messages. The
+ * perf win comes from stabilizing `toolResultMap`: MessageList passes the
+ * message-stable `historicalToolResults` (not the live `mergedToolResultMap`,
+ * which mutates on every streaming `tool_result` event).
+ *
+ * `pendingConfirmMap` and `onSandboxConfirm` are still passed in — a sandbox
+ * confirm can outlive a `__commitTurnAndInject` (steer / injected_message),
+ * so historical bubbles must keep rendering the approve/deny card. Those
+ * props are reference-stable across text/reasoning deltas (the map only
+ * mutates on `sandbox_confirm_request` / `_resolved`, and the handler is
+ * useCallback'd with deps that exclude per-delta state), so memo still bails
+ * out on the hot path.
+ */
+export const HistoryAssistantMessage = memo(AssistantMessage)

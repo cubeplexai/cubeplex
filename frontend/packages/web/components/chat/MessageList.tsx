@@ -14,7 +14,7 @@ import {
 import type { Message, SubagentSummary } from '@cubebox/core'
 import { AlertCircle } from 'lucide-react'
 import { UserMessage } from './UserMessage'
-import { AssistantMessage } from './AssistantMessage'
+import { AssistantMessage, HistoryAssistantMessage } from './AssistantMessage'
 import { AskUserCard } from './AskUserCard'
 import { MessageAttachments } from './MessageAttachments'
 import { TokenUsageBar } from './TokenUsageBar'
@@ -251,10 +251,10 @@ export function MessageList({ conversationId }: MessageListProps) {
               </>
             )}
             {msg.role === 'assistant' && msg.id !== lastAssistantId && (
-              <AssistantMessage
+              <HistoryAssistantMessage
                 message={msg}
                 subagentDataMap={subagentDataMap}
-                toolResultMap={mergedToolResultMap}
+                toolResultMap={historicalToolResults}
                 conversationId={conversationId}
                 pendingConfirmMap={pendingConfirmMap}
                 onSandboxConfirm={handleSandboxConfirm}
