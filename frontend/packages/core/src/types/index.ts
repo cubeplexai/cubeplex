@@ -1,4 +1,5 @@
 export type * from './artifact'
+export type * from './userEvent'
 export type * from './scheduled-task'
 export type * from './attachment'
 export type * from './citation'
