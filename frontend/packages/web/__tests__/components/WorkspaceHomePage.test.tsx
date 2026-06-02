@@ -62,6 +62,8 @@ vi.mock('@cubebox/core', () => {
         send: typeof storeMocks.send
         cancelSteer: typeof storeMocks.cancelSteer
         pendingSteers: Record<string, unknown[]>
+        pendingConfirmMap: Record<string, unknown>
+        pendingAsk: unknown | null
         isStreaming: boolean
         streamingConversationId: string | null
       }) => unknown,
@@ -70,6 +72,8 @@ vi.mock('@cubebox/core', () => {
         send: storeMocks.send,
         cancelSteer: storeMocks.cancelSteer,
         pendingSteers: {},
+        pendingConfirmMap: {},
+        pendingAsk: null,
         isStreaming: false,
         streamingConversationId: null,
       }),
