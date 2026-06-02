@@ -110,9 +110,13 @@ class ReflectionRunner:
 
         unsub = agent.subscribe(listener)
         try:
+            # Keep the ContextVar active across wait_for_idle: cubepi can
+            # execute memory tool calls after prompt() returns (they finish
+            # during the idle drain), and tool callbacks must see
+            # reflection_source_active() == True to tag writes correctly.
             with set_reflection_source():
                 await agent.prompt(seed)
-            await agent.wait_for_idle()
+                await agent.wait_for_idle()
         finally:
             unsub()
 

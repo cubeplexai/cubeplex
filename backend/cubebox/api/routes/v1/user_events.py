@@ -44,30 +44,38 @@ async def stream_user_events(
     user_id = user.id
 
     async def gen() -> AsyncIterator[bytes]:
-        if since is not None:
-            replay = await repo.list_for_user(user_id, since_id=since, limit=200)
-            for row in replay:
-                yield _sse_format(
-                    row.type.value,
-                    {
-                        "id": row.id,
-                        "type": row.type.value,
-                        "workspace_id": row.workspace_id,
-                        "payload": row.payload,
-                        "created_at": utc_isoformat(row.created_at),
-                    },
-                )
-        # Queue.get() is a plain coroutine that works safely with asyncio.wait_for.
-        # CancelledError propagating through wait_for on client disconnect triggers
-        # the finally block below, so no explicit is_disconnected() check is needed.
+        # Subscribe BEFORE the replay query so any event committed in the gap
+        # between query-end and live-stream-start is captured by the bus queue
+        # and deduped against the replay set by id. Without this, an event
+        # committed in that micro-window is silently lost across reconnects.
         q, unsubscribe = bus.subscribe(user_id)
         try:
+            replay_ids: set[str] = set()
+            if since is not None:
+                replay = await repo.list_for_user(user_id, since_id=since, limit=200)
+                for row in replay:
+                    replay_ids.add(row.id)
+                    yield _sse_format(
+                        row.type.value,
+                        {
+                            "id": row.id,
+                            "type": row.type.value,
+                            "workspace_id": row.workspace_id,
+                            "payload": row.payload,
+                            "created_at": utc_isoformat(row.created_at),
+                        },
+                    )
+            # Queue.get() is a plain coroutine that works safely with asyncio.wait_for.
+            # CancelledError propagating through wait_for on client disconnect triggers
+            # the finally block below, so no explicit is_disconnected() check is needed.
             while True:
                 try:
                     ev = await asyncio.wait_for(q.get(), timeout=HEARTBEAT_INTERVAL_SEC)
                 except TimeoutError:
                     yield b": ping\n\n"
                     continue
+                if ev.id in replay_ids:
+                    continue  # already delivered via replay
                 yield _sse_format(
                     ev.type.value,
                     {
