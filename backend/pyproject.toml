@@ -32,7 +32,7 @@ dependencies = [
     "pillow>=10.4.0",
     "pyjwt>=2.12.1",
     "click>=8.3.1",
-    "cubepi[mcp,postgres,tracing,tracing-otlp,trace-cli]>=0.4.0",
+    "cubepi[mcp,postgres,trace-cli,tracing,tracing-otlp]>=0.4.0",
     "orjson>=3.11.9",
     "pyyaml>=6.0.3",
     "tldextract>=5.3.1",
@@ -167,11 +167,7 @@ exclude_lines = [
 ]
 
 [tool.uv.sources]
-# 262a33f is cubepi main HEAD: fix OpenAI provider double finish_reason
-# (Volcano Engine sends finish_reason twice per response; guard prevents duplicate
-# toolcall_end events that caused two widget instances to render) — on top of the
-# prior HITL channel (b03813e), subagent-span-nesting (#122), steer-cancel (#120).
-cubepi = { git = "https://github.com/cubeplexai/cubepi.git", rev = "262a33f" }
+cubepi = { git = "https://github.com/xfgong/cubepi.git", rev = "738f1e4cd5c07e3af6f0bd33bdc7b0a8e62b2538" }
 
 [dependency-groups]
 dev = [
