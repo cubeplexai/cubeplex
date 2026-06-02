@@ -149,9 +149,10 @@ test('Scheduled Tasks: new-task dialog shows frequency pills, not cron input', a
   // No raw cron input
   await expect(page.locator('input[placeholder="0 9 * * 1-5"]')).not.toBeVisible()
 
-  // Switch to 每周 and confirm weekday pills appear
+  // Switch to 每周 and confirm weekday pills appear (exact match so '一'
+  // doesn't collide with the '一次' frequency pill that's still in the DOM).
   await page.getByRole('button', { name: '每周' }).click()
-  await expect(page.getByRole('button', { name: '一' })).toBeVisible()
+  await expect(page.getByRole('button', { name: '一', exact: true })).toBeVisible()
 
   // Switch to 每月 and confirm day grid appears
   await page.getByRole('button', { name: '每月' }).click()

@@ -362,10 +362,14 @@ async def test_timeseries_workspace_happy_path(async_client: httpx.AsyncClient) 
             ],
         )
 
+    # The default range is current-month-to-date; the seeded events live in
+    # 2026-05, so pin the query range explicitly to cover the seed date.
+    range_params = {"from_date": "2026-05-01", "to_date": "2026-05-31"}
+
     # 1. Unfiltered: both workspace buckets present
     resp = await async_client.get(
         "/api/v1/admin/cost/timeseries",
-        params={"dimension": "workspace", "granularity": "day"},
+        params={"dimension": "workspace", "granularity": "day", **range_params},
     )
     assert resp.status_code == 200, resp.text
     body = resp.json()
@@ -382,6 +386,7 @@ async def test_timeseries_workspace_happy_path(async_client: httpx.AsyncClient) 
             "dimension": "workspace",
             "granularity": "day",
             "workspace_ids": ws_a,
+            **range_params,
         },
     )
     assert resp.status_code == 200, resp.text

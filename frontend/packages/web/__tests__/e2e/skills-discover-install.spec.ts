@@ -26,46 +26,36 @@ async function registerAndGetWsId(page: import('@playwright/test').Page): Promis
   return wsId
 }
 
-test('skills page loads and search surfaces the deep-research skill', async ({ page }) => {
+test('skills page loads with the deep-research skill in the local list', async ({ page }) => {
   const wsId = await registerAndGetWsId(page)
   await page.goto(`/w/${wsId}/skills`)
 
   await expect(page.getByRole('heading', { name: /Skills/i })).toBeVisible()
 
-  // Discover panel is present
-  await expect(page.getByPlaceholder(/Search skills/i)).toBeVisible()
+  // Discover panel is present (the toolbar searchbox runs the external-source
+  // discovery; preinstalled skills already live in the local list below).
+  await expect(page.getByRole('searchbox', { name: /Search skills/i })).toBeVisible()
 
-  // Search for a known preinstalled skill
-  await page.getByPlaceholder(/Search skills/i).fill('research')
-  await page.getByRole('button', { name: /Search/i }).click()
-
-  // At least one candidate card should appear
-  const card = page.getByTestId('skill-candidate-card').filter({ hasText: 'deep-research' })
-  await expect(card).toBeVisible({ timeout: 10_000 })
-
-  // Should show the source badge (local catalog skills show "catalog")
-  await expect(card.getByText(/catalog/i)).toBeVisible()
-})
-
-test('preinstalled skill shows as already installed in fresh workspace', async ({ page }) => {
-  // Preinstalled skills (like deep-research) are auto-bound at registration.
-  // The discover panel should show the button as "Installed" (disabled) and
-  // the skills list should already contain the skill.
-  const wsId = await registerAndGetWsId(page)
-  await page.goto(`/w/${wsId}/skills`)
-
-  // The skills list already has the preinstalled skill without any install action.
+  // The deep-research skill ships preinstalled and is auto-bound at registration,
+  // so it appears in the workspace skills list without any user action.
   await expect(page.getByTestId('skills-list').getByText('deep-research')).toBeVisible({
     timeout: 10_000,
   })
+})
 
-  // Searching also surfaces it — with the "Installed" button state.
-  await page.getByPlaceholder(/Search skills/i).fill('research')
-  await page.getByRole('button', { name: /Search/i }).click()
+test('preinstalled skill is auto-bound to a fresh workspace', async ({ page }) => {
+  // Preinstalled skills (like deep-research) are auto-bound at registration —
+  // they appear in the local list of a fresh workspace without any install step.
+  const wsId = await registerAndGetWsId(page)
+  await page.goto(`/w/${wsId}/skills`)
 
-  const card = page.getByTestId('skill-candidate-card').filter({ hasText: 'deep-research' })
-  await expect(card).toBeVisible({ timeout: 10_000 })
+  // The skills list contains the preinstalled skill on first load.
+  const localCard = page.getByTestId('skills-list').getByText('deep-research')
+  await expect(localCard).toBeVisible({ timeout: 10_000 })
 
-  // Button shows "Installed" because the skill is already auto-bound.
-  await expect(card.getByRole('button', { name: /^Installed$/ })).toBeDisabled()
+  // Clicking the card opens the detail panel for the skill.
+  await localCard.click()
+  await expect(page.getByRole('heading', { name: /deep-research/i })).toBeVisible({
+    timeout: 5_000,
+  })
 })

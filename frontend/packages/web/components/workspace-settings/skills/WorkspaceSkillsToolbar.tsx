@@ -100,7 +100,7 @@ export function WorkspaceSkillsToolbar({
       <div className="relative min-w-[180px] flex-1">
         <Search className="pointer-events-none absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground/70" />
         <Input
-          type="text"
+          type="search"
           placeholder={t('searchPlaceholder')}
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
@@ -114,6 +114,7 @@ export function WorkspaceSkillsToolbar({
           <button
             type="button"
             onClick={commitSearch}
+            aria-label="Search"
             className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground/70 hover:text-foreground"
           >
             <Search className="size-3.5" />

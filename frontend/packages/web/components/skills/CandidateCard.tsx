@@ -46,6 +46,7 @@ export function CandidateCard({ candidate, active, onClick }: CandidateCardProps
   return (
     <button
       type="button"
+      data-testid="skill-candidate-card"
       onClick={onClick}
       aria-current={active ? 'true' : undefined}
       className={cn(

@@ -110,7 +110,7 @@ export function SkillsToolbar({
       <div className="relative min-w-[180px] flex-1">
         <Search className="pointer-events-none absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground/70" />
         <Input
-          type="text"
+          type="search"
           placeholder={externalOnly ? t('externalSearchPlaceholder') : t('searchPlaceholder')}
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
