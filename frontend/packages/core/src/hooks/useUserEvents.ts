@@ -3,13 +3,22 @@
 import { useEffect } from 'react'
 import type { ApiClient } from '../api/client'
 import { streamUserEvents } from '../api/userEventStream'
+import { useAuthStore } from '../stores/authStore'
 import { useMemoryEventStore } from '../stores/memoryEventStore'
 
-const STORAGE_KEY = 'cubebox.userEvents.lastSeenId'
+// Per-user storage key prefix. A global key would let account switches in the
+// same browser reuse the previous user's cursor; the new user's older unread
+// events would then be filtered as already-seen by the server's id > since
+// check. Scoping by user id avoids that.
+const STORAGE_KEY_PREFIX = 'cubebox.userEvents.lastSeenId:'
 
 export function useUserEvents(client: ApiClient): void {
   const add = useMemoryEventStore((s) => s.add)
+  const userId = useAuthStore((s) => s.user?.id ?? null)
+
   useEffect(() => {
+    if (!userId) return // wait for auth to load before subscribing
+    const storageKey = STORAGE_KEY_PREFIX + userId
     const ac = new AbortController()
     let backoff = 1000
     const MAX_BACKOFF = 30000
@@ -20,7 +29,7 @@ export function useUserEvents(client: ApiClient): void {
         try {
           const since =
             typeof window !== 'undefined'
-              ? (localStorage.getItem(STORAGE_KEY) ?? undefined)
+              ? (localStorage.getItem(storageKey) ?? undefined)
               : undefined
           for await (const ev of streamUserEvents(client, { signal: ac.signal, since })) {
             if (ev.type === 'memory_updated') {
@@ -28,7 +37,7 @@ export function useUserEvents(client: ApiClient): void {
               // localStorage.setItem can throw in Safari private mode (quota=0).
               // Don't let storage failure abort the event-processing loop.
               try {
-                localStorage.setItem(STORAGE_KEY, ev.id)
+                localStorage.setItem(storageKey, ev.id)
               } catch {
                 /* ignore */
               }
@@ -51,5 +60,5 @@ export function useUserEvents(client: ApiClient): void {
       /* swallow */
     })
     return () => ac.abort()
-  }, [client, add])
+  }, [client, add, userId])
 }
