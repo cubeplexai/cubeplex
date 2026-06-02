@@ -1,5 +1,5 @@
 import type { AgentEvent } from '../types'
-import type { ApiClient } from './client'
+import { toApiError, type ApiClient } from './client'
 import { CSRF_COOKIE_NAME } from './cookieNames'
 import { streamRun } from './runStreams'
 
@@ -75,8 +75,11 @@ export async function submitSandboxConfirm(
     `/api/v1/conversations/${conversationId}/sandbox-confirm/${questionId}`,
     { decision, reason: reason ?? null },
   )
+  // Surface the typed ApiError so callers can branch on the resume-path
+  // 4xx codes (``resume_in_flight`` / ``stale_answer`` / ``conversation_moved``
+  // / ``no_pending``) instead of a generic HTTP-status string.
   if (!res.ok) {
-    throw new Error(`Failed to submit sandbox confirm: HTTP ${res.status}`)
+    throw await toApiError(res)
   }
   return (await res.json()) as SandboxConfirmResponse
 }
@@ -96,7 +99,7 @@ export async function submitAskUserAnswer(
     answers,
   })
   if (!res.ok) {
-    throw new Error(`Failed to submit ask_user answer: HTTP ${res.status}`)
+    throw await toApiError(res)
   }
   return (await res.json()) as AskUserResponse
 }

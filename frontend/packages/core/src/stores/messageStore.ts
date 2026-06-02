@@ -57,6 +57,12 @@ export interface PendingConfirm {
   matched_pattern: string | null
   timeout_seconds: number | null
   requestedAt: number
+  /**
+   * Run id that owns the pending request. Needed by the answer-submit route
+   * to recover the right run on resume — populated from the live SSE
+   * ``currentRunId`` or the bootstrap ``pending_hitl`` payload.
+   */
+  run_id: string
 }
 
 export interface PendingAsk {
@@ -64,6 +70,8 @@ export interface PendingAsk {
   questions: import('../types/events').AskQuestion[]
   timeout_seconds: number | null
   requestedAt: number
+  /** Run id that owns the pending request. See ``PendingConfirm.run_id``. */
+  run_id: string
 }
 
 export interface MessageStore {
@@ -572,8 +580,14 @@ function applyStreamEvent(state: MessageStore, event: AgentEvent): Partial<Messa
       command: string
       matched_pattern: string | null
       timeout_seconds: number | null
+      run_id?: string
     }
     if (!d.tool_call_id) return base
+    // Live SSE: the active run drives this event. The event payload may not
+    // carry run_id today, so fall back to the store's currentRunId (set when
+    // the run was claimed). Empty string surfaces the failure mode if both
+    // are absent rather than silently shipping a fake id.
+    const runId = d.run_id ?? state.currentRunId ?? ''
     return {
       ...base,
       pendingConfirmMap: {
@@ -584,6 +598,7 @@ function applyStreamEvent(state: MessageStore, event: AgentEvent): Partial<Messa
           matched_pattern: d.matched_pattern ?? null,
           timeout_seconds: d.timeout_seconds ?? null,
           requestedAt: event.timestamp ? new Date(event.timestamp).getTime() : Date.now(),
+          run_id: runId,
         },
       },
     }
@@ -605,8 +620,11 @@ function applyStreamEvent(state: MessageStore, event: AgentEvent): Partial<Messa
       question_id: string
       questions: import('../types/events').AskQuestion[]
       timeout_seconds: number | null
+      run_id?: string
     }
     if (state.pendingAsk?.question_id === d.question_id) return base // idempotent
+    // See sandbox_confirm_request above for the run_id source-of-truth note.
+    const runId = d.run_id ?? state.currentRunId ?? ''
     return {
       ...base,
       pendingAsk: {
@@ -614,6 +632,7 @@ function applyStreamEvent(state: MessageStore, event: AgentEvent): Partial<Messa
         questions: d.questions,
         timeout_seconds: d.timeout_seconds ?? null,
         requestedAt: event.timestamp ? new Date(event.timestamp).getTime() : Date.now(),
+        run_id: runId,
       },
     }
   }
@@ -943,6 +962,36 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
         ? { [MAIN_AGENT_KEY]: emptyStream() }
         : {}
 
+      // Cold-start fallback: when the Redis event log has aged out, the
+      // backend returns the unresolved HITL request inline. Seed the same
+      // pendingAsk / pendingConfirmMap slots the live SSE path populates so
+      // the card re-renders on refresh without replaying events.
+      let seedPendingAsk: PendingAsk | null = null
+      let seedPendingConfirmMap: Record<string, PendingConfirm> = {}
+      const pending = bootstrap.pending_hitl ?? null
+      if (pending && pending.kind === 'ask_user') {
+        const requestedAt = Date.parse(pending.requested_at)
+        seedPendingAsk = {
+          question_id: pending.question_id,
+          questions: pending.questions,
+          timeout_seconds: null,
+          requestedAt: Number.isNaN(requestedAt) ? Date.now() : requestedAt,
+          run_id: pending.run_id,
+        }
+      } else if (pending && pending.kind === 'sandbox_confirm') {
+        const requestedAt = Date.parse(pending.requested_at)
+        seedPendingConfirmMap = {
+          [pending.tool_call_id]: {
+            question_id: pending.question_id,
+            command: pending.command,
+            matched_pattern: pending.matched_pattern,
+            timeout_seconds: null,
+            requestedAt: Number.isNaN(requestedAt) ? Date.now() : requestedAt,
+            run_id: pending.run_id,
+          },
+        }
+      }
+
       set((s) => ({
         messages: { ...s.messages, [conversationId]: messages },
         todos: restoredTodos,
@@ -952,8 +1001,8 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
         pendingSteers: { ...s.pendingSteers, [conversationId]: [] },
         toolStartedMap: {},
         toolResultMap: {},
-        pendingConfirmMap: {},
-        pendingAsk: null,
+        pendingConfirmMap: seedPendingConfirmMap,
+        pendingAsk: seedPendingAsk,
         isStreaming: !!bootstrap.active_run,
         streamingConversationId: bootstrap.active_run ? conversationId : null,
         currentRunId: bootstrap.active_run?.run_id ?? null,

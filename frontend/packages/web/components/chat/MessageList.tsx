@@ -10,6 +10,7 @@ import {
   getSubagentSummary,
   submitSandboxConfirm,
   submitAskUserAnswer,
+  ApiError,
 } from '@cubebox/core'
 import type { Message, SubagentSummary } from '@cubebox/core'
 import { AlertCircle } from 'lucide-react'
@@ -111,6 +112,56 @@ function buildHistoricalToolResultMap(
   return map
 }
 
+/**
+ * Map the HITL answer-submit 4xx codes (defined in
+ * ``backend/cubebox/api/routes/v1/conversations.py``) to UI recovery actions:
+ *
+ *   - ``resume_in_flight`` — another submit beat us; reload to pick up the
+ *     authoritative state.
+ *   - ``stale_answer`` / ``conversation_moved`` — the question we answered is
+ *     no longer current; reload to drop the stale card.
+ *   - ``no_pending`` (404) — someone else answered (or the run was
+ *     cancelled); clear the matching local card without a reload.
+ *
+ * Any other error is re-thrown so existing callers / error boundaries keep
+ * behaving as before.
+ */
+async function handlePendingSubmitError(
+  err: unknown,
+  conversationId: string,
+  questionId: string,
+  workspaceId: string | null | undefined,
+  loadMessages: (
+    client: ReturnType<typeof createApiClient>,
+    conversationId: string,
+  ) => Promise<void>,
+): Promise<void> {
+  if (!(err instanceof ApiError)) throw err
+  const code = err.code
+  const client = createApiClient('')
+  if (workspaceId) client.setWorkspaceId(workspaceId)
+
+  if (
+    err.status === 409 &&
+    (code === 'resume_in_flight' || code === 'stale_answer' || code === 'conversation_moved')
+  ) {
+    useMessageStore.setState({ error: err.message })
+    await loadMessages(client, conversationId)
+    return
+  }
+  if (err.status === 404 && code === 'no_pending') {
+    useMessageStore.setState((s) => {
+      const nextConfirm = Object.fromEntries(
+        Object.entries(s.pendingConfirmMap).filter(([, v]) => v.question_id !== questionId),
+      )
+      const nextAsk = s.pendingAsk?.question_id === questionId ? null : s.pendingAsk
+      return { pendingConfirmMap: nextConfirm, pendingAsk: nextAsk }
+    })
+    return
+  }
+  throw err
+}
+
 export function MessageList({ conversationId }: MessageListProps) {
   const t = useTranslations('chat')
   const {
@@ -144,30 +195,40 @@ export function MessageList({ conversationId }: MessageListProps) {
       const convId = streamingConversationId ?? conversationId
       const pending = pendingConfirmMap[toolCallId]
       if (!pending) return
+      const questionId = pending.question_id
       const client = createApiClient('')
       if (workspaceId) client.setWorkspaceId(workspaceId)
-      await submitSandboxConfirm(client, convId, pending.question_id, decision)
-      // Optimistic removal — sandbox_confirm_resolved SSE will also clean up
-      useMessageStore.setState((s) => {
-        const next = { ...s.pendingConfirmMap }
-        delete next[toolCallId]
-        return { pendingConfirmMap: next }
-      })
+      try {
+        await submitSandboxConfirm(client, convId, questionId, decision)
+        // Optimistic removal — sandbox_confirm_resolved SSE will also clean up
+        useMessageStore.setState((s) => {
+          const next = { ...s.pendingConfirmMap }
+          delete next[toolCallId]
+          return { pendingConfirmMap: next }
+        })
+      } catch (err) {
+        await handlePendingSubmitError(err, convId, questionId, workspaceId, loadMessages)
+      }
     },
-    [conversationId, streamingConversationId, pendingConfirmMap, workspaceId],
+    [conversationId, streamingConversationId, pendingConfirmMap, workspaceId, loadMessages],
   )
 
   const handleAskUserSubmit = useCallback(
     async (answers: Record<string, string | string[]>) => {
       if (!pendingAsk) return
       const convId = streamingConversationId ?? conversationId
+      const questionId = pendingAsk.question_id
       const client = createApiClient('')
       if (workspaceId) client.setWorkspaceId(workspaceId)
-      await submitAskUserAnswer(client, convId, pendingAsk.question_id, answers)
-      // Optimistic clear — ask_user_resolved SSE will also clean up
-      useMessageStore.setState({ pendingAsk: null })
+      try {
+        await submitAskUserAnswer(client, convId, questionId, answers)
+        // Optimistic clear — ask_user_resolved SSE will also clean up
+        useMessageStore.setState({ pendingAsk: null })
+      } catch (err) {
+        await handlePendingSubmitError(err, convId, questionId, workspaceId, loadMessages)
+      }
     },
-    [conversationId, streamingConversationId, pendingAsk, workspaceId],
+    [conversationId, streamingConversationId, pendingAsk, workspaceId, loadMessages],
   )
 
   const subagentDataMap = useMemo(() => buildSubagentDataMap(messages ?? []), [messages])

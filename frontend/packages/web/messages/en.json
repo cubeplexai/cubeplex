@@ -42,7 +42,8 @@
   },
   "input": {
     "placeholder": "How can I help you?",
-    "hint": "Enter to send / Shift+Enter for newline"
+    "hint": "Enter to send / Shift+Enter for newline",
+    "pendingHitlLock": "Answer the pending question above first."
   },
   "avatar": {
     "adminPanel": "Admin panel",

@@ -42,7 +42,8 @@
   },
   "input": {
     "placeholder": "有什么可以帮你的？",
-    "hint": "Enter 发送 / Shift+Enter 换行"
+    "hint": "Enter 发送 / Shift+Enter 换行",
+    "pendingHitlLock": "请先回答上方待处理的问题。"
   },
   "avatar": {
     "adminPanel": "管理后台",
