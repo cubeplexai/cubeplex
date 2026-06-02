@@ -6,7 +6,7 @@
 
 **Architecture:** Two memoization barriers, plus prop scoping:
 1. Wrap `MarkdownWithCitations` in `React.memo` so unchanged markdown text doesn't re-run remark/rehype/highlight/katex on every parent re-render.
-2. Split historical assistant rendering into a memoized `HistoryAssistantMessage`. Stabilize its props by passing the *historical* tool-result map (not the merged one that mutates on every tool_result event) and by omitting streaming-only props (`pendingConfirmMap`, `onSandboxConfirm`) that historical messages never use.
+2. Split historical assistant rendering into a memoized `HistoryAssistantMessage`. Stabilize its hot-path props by passing the *historical* tool-result map (not the merged one that mutates on every tool_result event). Keep `pendingConfirmMap` and `onSandboxConfirm` for history too — see "Why historical messages still need confirm props" below — those props only change on rare `sandbox_confirm_request` / `sandbox_confirm_resolved` events, not on the text-delta storm, so memo still bails out during streaming.
 3. Throttle `ResizeObserver` auto-scroll with `requestAnimationFrame` to coalesce layout writes across rapid deltas.
 
 After these changes, the streaming-render work per delta drops to roughly: 1 × markdown pipeline (for the current text block), instead of N × all-historical-blocks.
@@ -14,6 +14,24 @@ After these changes, the streaming-render work per delta drops to roughly: 1 × 
 **Tech Stack:** React 19, Next.js 15 (app router), Zustand, react-markdown + remark/rehype plugins, Vitest + React Testing Library.
 
 **Worktree:** `/home/chris/cubebox/.worktrees/feat/frontend-stream-perf` (slot 87, frontend on `:3087`, backend on `:8087`). All paths below are relative to that worktree.
+
+### Why historical messages still need confirm props
+
+`messageStore.ts::__commitTurnAndInject` (lines ~1224–1268) commits the in-flight
+assistant bubble into `messages[conversationId]` and resets `streamAgents`, but it
+does **not** clear `pendingConfirmMap`. So when a steer / `injected_message` lands
+while a sandbox confirm is open, the assistant bubble carrying that `tool_call`
+moves to history while the matching `pendingConfirmMap[tool_call_id]` is still
+populated. If we stripped `pendingConfirmMap` / `onSandboxConfirm` from the
+historical render path, the user would lose the approve/deny card.
+
+The good news for perf: `pendingConfirmMap` and `handleSandboxConfirm` are
+reference-stable across the streaming hot path. The map only changes on
+`sandbox_confirm_request` / `sandbox_confirm_resolved` events, and
+`handleSandboxConfirm` is `useCallback`-memoized with deps
+`[conversationId, streamingConversationId, pendingConfirmMap, workspaceId]` —
+none of which mutate per text/reasoning delta. So memoization of history still
+bails out during the delta storm.
 
 **Pre-flight:** From the worktree root, run `cat .worktree.env` to confirm ports, then `cd frontend && pnpm install --frozen-lockfile` (already done by `new-worktree`, just verify). All `pnpm` commands run from `frontend/packages/web/` unless noted.
 
@@ -227,11 +245,15 @@ Edit `frontend/packages/web/components/chat/MessageList.tsx`:
        subagentDataMap={subagentDataMap}
        toolResultMap={historicalToolResults}
        conversationId={conversationId}
+       pendingConfirmMap={pendingConfirmMap}
+       onSandboxConfirm={handleSandboxConfirm}
      />
    )}
    ```
 
-   Rationale: historical messages already have their tool results captured in `historicalToolResults` (built from `messages`). They have no use for the live `mergedToolResultMap`, and consuming it forces them to re-render on every new `tool_result` event during streaming. Likewise, `pendingConfirmMap` / `onSandboxConfirm` are only meaningful for the in-flight turn — drop them for history.
+   Rationale:
+   - **Drop the live `mergedToolResultMap`** for history. Historical messages already have their tool results captured in `historicalToolResults` (built from `messages`); the merged map mutates on every `tool_result` event during streaming and would force every historical bubble to re-render even with memo.
+   - **Keep `pendingConfirmMap` and `onSandboxConfirm`.** `__commitTurnAndInject` can move a bubble carrying an unresolved sandbox confirm into history; stripping the props would hide the approve/deny card. These props are reference-stable across text/reasoning delta storms (only `sandbox_confirm_request` / `_resolved` mutate the map; `handleSandboxConfirm`'s useCallback deps exclude delta-driven state), so memo still bails out on the hot path.
 
 3. Leave the streaming render block (currently lines 266–278) unchanged — it still uses `AssistantMessage` with `mergedToolResultMap`, `pendingConfirmMap`, and `onSandboxConfirm`.
 
@@ -241,7 +263,7 @@ Run:
 ```bash
 pnpm vitest run __tests__/components/MessageList __tests__/hooks/useMessages __tests__/stores/messageStore
 ```
-Expected: all tests PASS. If any test relied on the historical render path receiving `pendingConfirmMap`, update the assertion — historical history doesn't show pending sandbox confirms (those are streaming-only).
+Expected: all tests PASS.
 
 - [ ] **Step 6: Commit**
 
