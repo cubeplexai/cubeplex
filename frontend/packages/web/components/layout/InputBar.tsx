@@ -41,6 +41,13 @@ export function InputBar({
     useMessageStore((s) =>
       conversationId ? s.isStreaming && s.streamingConversationId === conversationId : false,
     ) ?? false
+  // Composer lock: while a HITL request is pending (live SSE or bootstrap
+  // cold-start seed), block both fresh-turn send and mid-stream steer until
+  // the user answers the card. The pending slots are global to the store —
+  // the user only sees one conversation at a time so we don't scope per-id.
+  const hasPendingHitl = useMessageStore(
+    (s) => Object.keys(s.pendingConfirmMap).length > 0 || s.pendingAsk !== null,
+  )
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
@@ -78,6 +85,7 @@ export function InputBar({
       isSubmitting ||
       messageIsStreaming ||
       uploadInFlight ||
+      hasPendingHitl ||
       (!content.trim() && stagedFileCount === 0)
     )
       return
@@ -127,6 +135,7 @@ export function InputBar({
     if (e.nativeEvent.isComposing) return
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
+      if (hasPendingHitl) return
       if (messageIsStreaming && hasText) {
         void handleSteer()
       } else {
@@ -257,10 +266,11 @@ export function InputBar({
           value={content}
           onChange={handleChange}
           onKeyDown={handleKeyDown}
-          placeholder={t('placeholder')}
+          placeholder={hasPendingHitl ? t('pendingHitlLock') : t('placeholder')}
+          title={hasPendingHitl ? t('pendingHitlLock') : undefined}
           rows={1}
-          className="flex-1 bg-transparent resize-none outline-none text-sm text-foreground placeholder:text-muted-foreground/40 leading-relaxed min-h-7 max-h-[180px] overflow-y-auto py-0.5"
-          disabled={isSubmitting && !messageIsStreaming}
+          className="flex-1 bg-transparent resize-none outline-none text-sm text-foreground placeholder:text-muted-foreground/40 leading-relaxed min-h-7 max-h-[180px] overflow-y-auto py-0.5 disabled:cursor-not-allowed"
+          disabled={(isSubmitting && !messageIsStreaming) || hasPendingHitl}
         />
         {showStop ? (
           <button
@@ -280,8 +290,10 @@ export function InputBar({
             disabled={
               (!content.trim() && stagedFileCount === 0) ||
               (isSubmitting && !messageIsStreaming) ||
-              uploadInFlight
+              uploadInFlight ||
+              hasPendingHitl
             }
+            title={hasPendingHitl ? t('pendingHitlLock') : undefined}
             className={cn(
               'flex size-7 shrink-0 items-center justify-center rounded-lg bg-primary text-white transition-all hover:bg-primary/80',
               'disabled:cursor-not-allowed disabled:opacity-25',

@@ -1,4 +1,4 @@
-import type { AgentEvent, Message } from '../types'
+import type { AgentEvent, Message, PendingHitl } from '../types'
 import { toApiError, type ApiClient } from './client'
 import { CSRF_COOKIE_NAME } from './cookieNames'
 
@@ -34,6 +34,13 @@ export interface ConversationBootstrap {
     }
     context_window: number
   }
+  /**
+   * Cold-start fallback: when the Redis event stream has aged out but the
+   * conversation has an unresolved HITL request, the backend serializes it
+   * here so the UI can re-render the pending card without replaying SSE.
+   * ``null`` when there is no pending HITL.
+   */
+  pending_hitl?: PendingHitl | null
 }
 
 export interface StartRunResponse {

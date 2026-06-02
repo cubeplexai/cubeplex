@@ -56,6 +56,9 @@ describe('sandbox_confirm_request', () => {
       matched_pattern: 'rm *',
       timeout_seconds: 180,
       requestedAt: expect.any(Number),
+      // Live SSE without an active currentRunId falls back to '' — the
+      // store carries run_id so the resume answer-submit URL can be built.
+      run_id: '',
     })
   })
 

@@ -224,6 +224,30 @@ export interface AskUserResolvedEvent extends AgentEvent {
   }
 }
 
+/**
+ * Cold-start fallback payload returned by the bootstrap endpoint when the
+ * Redis stream replay has aged out but the conversation still has an
+ * unresolved HITL request. Mirrors backend ``serialize_pending_hitl``
+ * (see :mod:`cubebox.streams.hitl_resume`).
+ */
+export type PendingHitl =
+  | {
+      run_id: string
+      question_id: string
+      kind: 'ask_user'
+      requested_at: string
+      questions: AskQuestion[]
+    }
+  | {
+      run_id: string
+      question_id: string
+      kind: 'sandbox_confirm'
+      requested_at: string
+      tool_call_id: string
+      command: string
+      matched_pattern: string
+    }
+
 export type StatusPhase = 'sandbox_creating' | 'sandbox_ready' | 'sandbox_failed'
 
 export interface StatusEvent extends AgentEvent {
