@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 import pytest_asyncio
 from sqlalchemy import text
@@ -10,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from cubebox.models.user_event import UserEventType
 from cubebox.repositories.user_event import UserEventRepository
 from cubebox.services.user_event import PublishUserEventInput, UserEventService
-from cubebox.services.user_event_bus import UserEventBus
+from cubebox.services.user_event_bus import UserEventBus, UserEventDTO
 
 # A fixed synthetic user id used for test rows.
 _TEST_USER_ID = "usr-uev-test-0001"
@@ -37,6 +39,16 @@ async def test_publish_writes_and_broadcasts(db_session: AsyncSession) -> None:
     repo = UserEventRepository(db_session)
     svc = UserEventService(repo=repo, bus=bus)
 
+    received: list[UserEventDTO] = []
+
+    async def consume() -> None:
+        async for dto in bus.subscribe(_TEST_USER_ID):
+            received.append(dto)
+            break
+
+    consumer = asyncio.create_task(consume())
+    await asyncio.sleep(0)  # let consumer register before publish
+
     ev = await svc.publish(
         PublishUserEventInput(
             user_id=_TEST_USER_ID,
@@ -45,6 +57,9 @@ async def test_publish_writes_and_broadcasts(db_session: AsyncSession) -> None:
             payload={"items": []},
         )
     )
+
+    await asyncio.wait_for(consumer, timeout=1.0)
+    assert received and received[0].id == ev.id
 
     assert ev.id.startswith("uev-")
 
