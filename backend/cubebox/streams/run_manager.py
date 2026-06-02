@@ -1868,6 +1868,10 @@ class RunManager:
                         def _make_reflection_agent(_inp: ReflectionInput) -> Any:
                             from cubepi import Agent, Model
 
+                            from cubebox.llm.config import ModelCost
+                            from cubebox.middleware.cost import (
+                                CostMiddleware as _ReflCostMw,
+                            )
                             from cubebox.prompts.reflection_system import (
                                 REFLECTION_SYSTEM_PROMPT,
                             )
@@ -1877,11 +1881,39 @@ class RunManager:
                                 conversation_id=_inp.conversation_id,
                                 run_id=_inp.run_id,
                             )
+
+                            # Reflection LLM tokens must hit billing_events /
+                            # billing_llm_events alongside the main run. Build a
+                            # fresh CostMiddleware bound to the same scope; mirrors
+                            # the main agent wiring at the `# 9. CostMiddleware`
+                            # block above.
+                            def _refl_price_lookup(
+                                provider_name_: str, model_id_: str
+                            ) -> ModelCost | None:
+                                pcfg = factory.llm_config.providers.get(provider_name_)
+                                if pcfg is None:
+                                    return None
+                                for m in pcfg.models:
+                                    if m.id == model_id_:
+                                        return m.cost
+                                return None
+
+                            _refl_mw: list[Any] = [
+                                _ReflCostMw(
+                                    org_id=ctx.org_id,
+                                    workspace_id=ctx.workspace_id,
+                                    user_id=ctx.user_id,
+                                    conversation_id=_inp.conversation_id,
+                                    price_lookup=_refl_price_lookup,
+                                )
+                            ]
+
                             return Agent(
                                 provider=provider,
                                 model=Model(id=model_id, provider=provider_name),
                                 system_prompt=REFLECTION_SYSTEM_PROMPT,
                                 tools=_mem_tools,
+                                middleware=_refl_mw,
                             )
 
                         # The wait_for_idle + state-extraction live INSIDE the
