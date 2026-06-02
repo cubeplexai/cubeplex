@@ -198,3 +198,67 @@ async def finalize_run_meta_if_claim_matches(
         status,
     )
     return int(result) == 1
+
+
+def _as_dict(obj: Any) -> dict[str, Any]:
+    """Pydantic ``.model_dump()`` if available, else assume already a dict.
+
+    JSONB round-trip may produce either, depending on the cubepi version
+    and how the checkpointer rehydrates ``HitlRequest.payload``.
+    """
+    if hasattr(obj, "model_dump"):
+        return obj.model_dump()  # type: ignore[no-any-return]
+    return dict(obj)
+
+
+def serialize_pending_hitl(pending: Any, *, run_id: str) -> dict[str, Any]:
+    """Convert a cubepi ``HitlRequest`` into the frontend ``PendingHitl``
+    payload (see :mod:`cubebox.api.schemas.conversations` and spec §7).
+
+    Defensive against:
+
+    * JSONB round-trip leaving inner objects as plain dicts (not Pydantic
+      models).
+    * ``ApproveRequest.details`` being ``None`` (cubepi default).
+    * ``ApproveRequest.args`` being absent (defensive).
+    """
+    from cubebox.utils.time import utc_isoformat
+
+    requested_at = utc_isoformat(datetime.fromtimestamp(pending.created_at, UTC))
+    kind = pending.payload.kind
+    if kind == "approve":  # sandbox confirm
+        args = pending.payload.args or {}
+        details = pending.payload.details or {}
+        return {
+            "run_id": run_id,
+            "question_id": pending.question_id,
+            "kind": "sandbox_confirm",
+            "requested_at": requested_at,
+            "tool_call_id": pending.payload.tool_call_id,
+            "command": args.get("command", ""),
+            "matched_pattern": details.get("matched_pattern", ""),
+        }
+    if kind == "ask":
+        questions_out: list[dict[str, Any]] = []
+        for q in pending.payload.questions:
+            q_d = _as_dict(q)
+            opts = q_d.get("options")
+            questions_out.append(
+                {
+                    "key": q_d["key"],
+                    "prompt": q_d["prompt"],
+                    "options": [_as_dict(o) for o in opts] if opts else None,
+                    "multi_select": q_d.get("multi_select", False),
+                    "required": q_d.get("required", True),
+                }
+            )
+        return {
+            "run_id": run_id,
+            "question_id": pending.question_id,
+            "kind": "ask_user",
+            "requested_at": requested_at,
+            "questions": questions_out,
+        }
+    # ``confirm`` kind is unused by cubebox today. Raise so a future caller
+    # doesn't silently get a half-built response.
+    raise ValueError(f"unsupported pending HITL kind: {kind}")
