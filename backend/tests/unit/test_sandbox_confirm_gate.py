@@ -33,7 +33,7 @@ class _StubChannel:
         self._raises = raises
         self.calls: list[dict] = []
 
-    async def approve(self, *, tool_name, tool_call_id, args, details, timeout, signal=None):
+    async def approve(self, *, tool_name, tool_call_id, args, details, timeout=None, signal=None):
         self.calls.append(
             {
                 "tool_name": tool_name,
@@ -99,7 +99,7 @@ async def test_confirm_approve_runs_tool():
     assert ch.calls[0]["tool_name"] == "execute"
     assert ch.calls[0]["args"] == {"command": "rm -rf /tmp/x"}
     assert ch.calls[0]["details"]["matched_pattern"] == "rm *"
-    assert ch.calls[0]["timeout"] == 180.0
+    assert ch.calls[0]["timeout"] is None
 
 
 @pytest.mark.asyncio
