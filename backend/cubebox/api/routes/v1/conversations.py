@@ -1,6 +1,7 @@
 """Conversations API routes."""
 
 import json
+import logging
 import re
 import secrets
 import time
@@ -54,6 +55,8 @@ _INSTALL_RE = re.compile(r"^install\s+([A-Za-z0-9_\-:]+)\s*$")
 REPLAY_CHUNK_SIZE = 1000
 
 router = APIRouter(prefix="/ws/{workspace_id}/conversations", tags=["conversations"])
+
+logger = logging.getLogger(__name__)
 
 
 def _serialize_conversation(c: Conversation) -> dict[str, object]:
@@ -951,12 +954,41 @@ async def get_conversation_bootstrap(
         last_user_message_ts=last_user_ts,
     )
 
+    # --- pending_hitl: cold-start fallback when Redis event log has aged out ---
+    from cubebox.agents.checkpointer import init_checkpointer
+    from cubebox.streams.hitl_resume import serialize_pending_hitl
+
+    async with init_checkpointer() as cp:
+        pending_req = await cp.load_pending_request(conversation_id)
+        persisted_run_id = await cp.load_pending_run_id(conversation_id)
+
+    pending_hitl: dict[str, Any] | None = None
+    if pending_req is not None:
+        # Run_id resolution order: Redis active-run first (cheapest, hot
+        # path), DB-persisted fallback (long-pause TTL recovery).
+        active_for_pending = await get_active_run(
+            rds.client, prefix=rds.key_prefix, conversation_id=conversation_id
+        )
+        run_id_for_pending = (
+            active_for_pending.run_id if active_for_pending is not None else persisted_run_id
+        )
+        if run_id_for_pending is None:
+            # Legacy row (pre-cubepi-v3) — log + degrade to null so the user
+            # can at least see other conversation state.
+            logger.warning(
+                "pending_request for %s has no recoverable run_id; pending_hitl set to null",
+                conversation_id,
+            )
+        else:
+            pending_hitl = serialize_pending_hitl(pending_req, run_id=run_id_for_pending)
+
     return {
         "messages": history["messages"],
         "total": history["total"],
         "active_run": active_run_payload,
         "last_run_status": last_run_status,
         "usage_summary": usage_summary,
+        "pending_hitl": pending_hitl,
     }
 
 
