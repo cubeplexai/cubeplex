@@ -30,7 +30,10 @@ export function MemoryUpdateChip({ conversationId }: Props) {
         try {
           await client.post(`/api/v1/user/events/${ev.id}/read`, {})
         } catch {
-          /* swallow; will reappear on reconnect */
+          // Best-effort: server-side read_at stays null on failure, but the
+          // SSE cursor (localStorage.lastSeenId) is already past these events,
+          // so they won't be redelivered. Local hide is the right behavior;
+          // a missed read_at is just metadata.
         }
       }),
     )
