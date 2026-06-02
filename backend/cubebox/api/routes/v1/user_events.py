@@ -55,24 +55,30 @@ async def stream_user_events(
         q, unsubscribe = bus.subscribe(user_id)
         try:
             replay_ids: set[str] = set()
-            if since is not None:
-                # Short-lived session: opened only for the replay query, closed
-                # before the live-stream loop starts.
-                async with async_session_maker() as session:
-                    repo = UserEventRepository(session)
+            # Short-lived session: opened only for the replay query, closed
+            # before the live-stream loop starts.
+            async with async_session_maker() as session:
+                repo = UserEventRepository(session)
+                if since is not None:
+                    # Resume mode: events newer than the client's last-seen id.
                     replay = await repo.list_for_user(user_id, since_id=since, limit=200)
-                for row in replay:
-                    replay_ids.add(row.id)
-                    yield _sse_format(
-                        row.type.value,
-                        {
-                            "id": row.id,
-                            "type": row.type.value,
-                            "workspace_id": row.workspace_id,
-                            "payload": row.payload,
-                            "created_at": utc_isoformat(row.created_at),
-                        },
-                    )
+                else:
+                    # Fresh-connection mode (no cursor): deliver still-unread
+                    # events so a new browser session / cleared localStorage /
+                    # offline-then-online catch-up sees pending memory updates.
+                    replay = await repo.list_unread_for_user(user_id, limit=200)
+            for row in replay:
+                replay_ids.add(row.id)
+                yield _sse_format(
+                    row.type.value,
+                    {
+                        "id": row.id,
+                        "type": row.type.value,
+                        "workspace_id": row.workspace_id,
+                        "payload": row.payload,
+                        "created_at": utc_isoformat(row.created_at),
+                    },
+                )
             # Queue.get() is a plain coroutine that works safely with asyncio.wait_for.
             # CancelledError propagating through wait_for on client disconnect triggers
             # the finally block below, so no explicit is_disconnected() check is needed.
