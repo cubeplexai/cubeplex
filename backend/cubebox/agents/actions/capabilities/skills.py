@@ -16,20 +16,40 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+import httpx
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cubebox.agents.actions.context import ScopeContext
 from cubebox.agents.actions.types import (
+    ActionInvalidInput,
     AgentCapability,
     AgentOperation,
 )
+from cubebox.repositories.skill import (
+    OrgPreinstalledTombstoneRepository,
+    SkillRepository,
+    SkillVersionRepository,
+)
 from cubebox.skills.discovery import SkillDiscoveryService
+from cubebox.skills.frontmatter import extract_env_vars, parse_skill_md
 from cubebox.skills.service import SkillCatalogService
+from cubebox.skills.sources.base import CandidateIdError, decode_candidate_id
 from cubebox.skills.sources.registry import SkillsAdapterManager
 
-# Module-level alias so tests can monkeypatch it.
+# Module-level aliases so tests can monkeypatch them.
 _SkillDiscoveryService = SkillDiscoveryService
+_SkillRepository = SkillRepository
+_OrgPreinstalledTombstoneRepository = OrgPreinstalledTombstoneRepository
+_SkillVersionRepository = SkillVersionRepository
+
+
+def _env_vars(content: str) -> list[str]:
+    try:
+        fm = parse_skill_md(content)
+        return extract_env_vars(fm.raw_metadata)
+    except Exception:  # noqa: BLE001
+        return []
 
 
 @dataclass(frozen=True)
@@ -116,7 +136,64 @@ async def _handle_find_impl(
 async def _handle_preview_impl(
     deps: SkillDeps, ctx: ScopeContext, session: Any, inp: PreviewInput
 ) -> Any:
-    raise NotImplementedError("Task 3 fills this in")
+    del ctx, session  # uses deps.catalog_session + deps.registry
+
+    try:
+        kind, source_id, source_ref = decode_candidate_id(inp.candidate_id)
+    except CandidateIdError as exc:
+        raise ActionInvalidInput("BAD_CANDIDATE_ID") from exc
+
+    if kind == "local":
+        skill = await _SkillRepository(deps.catalog_session).get(source_ref)
+        if skill is None or not (
+            skill.source == "preinstalled" or skill.owner_org_id == deps.org_id
+        ):
+            raise ActionInvalidInput("SKILL_NOT_FOUND")
+        if skill.source == "preinstalled":
+            tomb_repo = _OrgPreinstalledTombstoneRepository(deps.catalog_session)
+            tombstone = await tomb_repo.get(deps.org_id, skill.id)
+            if tombstone is not None:
+                raise ActionInvalidInput("SKILL_NOT_FOUND")
+        sv = await _SkillVersionRepository(deps.catalog_session).find(
+            skill.id,
+            skill.current_version,
+        )
+        if sv is None:
+            raise ActionInvalidInput("SKILL_VERSION_NOT_FOUND")
+        content = await deps.catalog.fetch_skill_md(sv.id)
+        return {
+            "candidate_id": inp.candidate_id,
+            "name": skill.name,
+            "content": content,
+            "env_vars": _env_vars(content),
+        }
+
+    # Remote path
+    adapter = deps.registry.adapter_by_id(source_id)
+    if adapter is None:
+        raise ActionInvalidInput("SOURCE_NOT_FOUND")
+    try:
+        files = await adapter.fetch(source_ref)
+    except (httpx.HTTPError, ValueError) as exc:
+        raise ActionInvalidInput(f"REMOTE_FETCH_FAILED: {exc}") from exc
+    if "SKILL.md" not in files:
+        raise ActionInvalidInput("SKILL_MD_MISSING")
+    try:
+        content = files["SKILL.md"].decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise ActionInvalidInput(f"INVALID_UTF8: {exc}") from exc
+    slug = source_ref.rsplit("/", 1)[-1]
+    try:
+        fm = parse_skill_md(content)
+        display_name = fm.name or slug
+    except Exception:  # noqa: BLE001
+        display_name = slug
+    return {
+        "candidate_id": inp.candidate_id,
+        "name": display_name,
+        "content": content,
+        "env_vars": _env_vars(content),
+    }
 
 
 async def _handle_install_impl(
