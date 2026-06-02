@@ -57,7 +57,6 @@ class ReflectionRunner:
         *,
         user_event_service: UserEventService,
         agent_factory: AgentFactory,
-        memory_service_factory: Any,  # held for potential introspection
         timeout_sec: float = 30.0,
     ) -> None:
         self._svc = user_event_service
@@ -67,14 +66,25 @@ class ReflectionRunner:
 
     async def reflect(self, inp: ReflectionInput) -> None:
         if inp.run_id in self._seen_runs:
+            logger.debug("reflection already completed for run_id=%s, skipping", inp.run_id)
             return
-        self._seen_runs.add(inp.run_id)
         try:
             await asyncio.wait_for(self._reflect_impl(inp), timeout=self._timeout)
         except TimeoutError:
-            logger.warning("reflection timed out for run_id=%s", inp.run_id)
+            logger.warning(
+                "reflection timed out for run_id=%s conversation_id=%s",
+                inp.run_id,
+                inp.conversation_id,
+            )
+            return
         except Exception:
-            logger.exception("reflection failed for run_id=%s", inp.run_id)
+            logger.exception(
+                "reflection failed for run_id=%s conversation_id=%s",
+                inp.run_id,
+                inp.conversation_id,
+            )
+            return
+        self._seen_runs.add(inp.run_id)
 
     async def _reflect_impl(self, inp: ReflectionInput) -> None:
         agent = self._make_agent(inp)
@@ -152,4 +162,7 @@ class ReflectionRunner:
             return None
         if obj.get("status") not in ("saved", "updated"):
             return None
-        return {k: obj[k] for k in ("memory_id",) if k in obj}
+        memory_id = obj.get("memory_id")
+        if not memory_id:
+            return None
+        return {"memory_id": memory_id}
