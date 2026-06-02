@@ -4,7 +4,7 @@ from datetime import datetime
 from enum import StrEnum
 from typing import Any, ClassVar
 
-from sqlalchemy import Column, DateTime, Index
+from sqlalchemy import Column, DateTime, Index, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlmodel import Field
 
@@ -21,7 +21,7 @@ class UserEvent(CubeboxBase, table=True):
     __tablename__ = "user_events"
     __table_args__ = (
         Index("ix_user_events_user_created", "user_id", "created_at"),
-        Index("ix_user_events_unread", "user_id", "read_at"),
+        Index("ix_user_events_unread", "user_id", postgresql_where=text("read_at IS NULL")),
     )
 
     user_id: str = Field(foreign_key="users.id", max_length=20)
