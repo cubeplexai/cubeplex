@@ -263,3 +263,43 @@ async def test_install_error_raises_invalid_input(monkeypatch: pytest.MonkeyPatc
             MagicMock(),
             InstallInput(candidate_id=cid),
         )
+
+
+# --- mutation gate ---
+
+from collections.abc import AsyncIterator  # noqa: E402
+from contextlib import asynccontextmanager  # noqa: E402
+
+from cubebox.agents.actions.builder import build_capability_tool  # noqa: E402
+from cubebox.agents.actions.capabilities.skills import build_skills_capability  # noqa: E402
+
+
+@asynccontextmanager
+async def _fake_ctx_factory() -> AsyncIterator[tuple[ScopeContext, Any]]:
+    yield (_ctx(), MagicMock())
+
+
+def test_skills_capability_mutation_gate() -> None:
+    deps = _make_deps()
+    cap = build_skills_capability(deps)
+    # Sanity: 3 operations declared
+    assert {op.name for op in cap.operations} == {"find", "preview", "install"}
+    assert next(op for op in cap.operations if op.name == "install").mutates is True
+    assert next(op for op in cap.operations if op.name == "find").mutates is False
+    assert next(op for op in cap.operations if op.name == "preview").mutates is False
+
+    # With mutations allowed, the schema should mention all three ops.
+    tool_full = build_capability_tool(cap, _fake_ctx_factory, allow_mutations=True)
+    assert tool_full is not None
+    schema_full = str(tool_full.parameters.model_json_schema())
+    assert "Op_find" in schema_full
+    assert "Op_preview" in schema_full
+    assert "Op_install" in schema_full
+
+    # Without mutations, install is dropped.
+    tool_ro = build_capability_tool(cap, _fake_ctx_factory, allow_mutations=False)
+    assert tool_ro is not None
+    schema_ro = str(tool_ro.parameters.model_json_schema())
+    assert "Op_install" not in schema_ro
+    assert "Op_find" in schema_ro
+    assert "Op_preview" in schema_ro
