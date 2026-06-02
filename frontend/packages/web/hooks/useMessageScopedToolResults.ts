@@ -1,6 +1,7 @@
 'use client'
 
 import { useMemo, useRef } from 'react'
+import { getSubagentSummary } from '@cubebox/core'
 import type { Message } from '@cubebox/core'
 
 type ToolResultEntry = {
@@ -8,6 +9,50 @@ type ToolResultEntry = {
   receivedAt: number
   startedAt?: number
   contentType?: string
+}
+
+/**
+ * For each assistant message, the set of tool_call_ids it owns:
+ *   - top-level `tool_call` blocks on the message itself
+ *   - inner tool_call_ids of any `subagent` block (extracted from the
+ *     matching tool_result message's `subagent_events` summary)
+ *
+ * The inner ids matter because `buildHistoricalToolResultMap` indexes them
+ * into the flat `historicalToolResults` map, and `SubAgentCard` later looks
+ * them up when the user expands a completed subagent card. Omitting them
+ * would render those inner tool results as missing.
+ */
+function buildOwnedToolCallIdsByMessage(messages: Message[]): Record<string, Set<string>> {
+  // First pass: outer subagent tool_call_id → inner ids from the matching
+  // tool_result message's subagent_events summary.
+  const innerIdsByOuter: Record<string, string[]> = {}
+  for (const msg of messages) {
+    if (msg.role !== 'tool_result') continue
+    if (msg.tool_name !== 'subagent' || !msg.tool_call_id) continue
+    const summary = getSubagentSummary(msg)
+    if (!summary?.tool_results) continue
+    const inner: string[] = []
+    for (const tr of summary.tool_results) {
+      if (tr.tool_call_id) inner.push(tr.tool_call_id)
+    }
+    if (inner.length > 0) innerIdsByOuter[msg.tool_call_id] = inner
+  }
+
+  const ownedByMsg: Record<string, Set<string>> = {}
+  for (const msg of messages) {
+    if (msg.role !== 'assistant') continue
+    const owned = new Set<string>()
+    for (const block of msg.content) {
+      if (block.type !== 'tool_call') continue
+      owned.add(block.id)
+      if (block.name === 'subagent') {
+        const inner = innerIdsByOuter[block.id]
+        if (inner) for (const id of inner) owned.add(id)
+      }
+    }
+    if (owned.size > 0) ownedByMsg[msg.id] = owned
+  }
+  return ownedByMsg
 }
 
 const EMPTY: Record<string, ToolResultEntry> = Object.freeze({}) as Record<string, ToolResultEntry>
@@ -37,6 +82,8 @@ export function useMessageScopedToolResults(
 ): Record<string, Record<string, ToolResultEntry>> {
   const prevRef = useRef<Record<string, Record<string, ToolResultEntry>>>({})
 
+  const ownedIdsByMessage = useMemo(() => buildOwnedToolCallIdsByMessage(messages), [messages])
+
   /* eslint-disable react-hooks/refs --
    * Deliberate render-phase ref stabilizer pattern (see `useStableRecord` in
    * `useMessages.ts` for prior art). Reading and writing `prevRef.current`
@@ -49,15 +96,18 @@ export function useMessageScopedToolResults(
     const next: Record<string, Record<string, ToolResultEntry>> = {}
     for (const msg of messages) {
       if (msg.role !== 'assistant') continue
+      const owned = ownedIdsByMessage[msg.id]
+      if (!owned) {
+        next[msg.id] = EMPTY
+        continue
+      }
       const subset: Record<string, ToolResultEntry> = {}
       let hasAny = false
-      for (const block of msg.content) {
-        if (block.type === 'tool_call') {
-          const entry = live[block.id] ?? historical[block.id]
-          if (entry) {
-            subset[block.id] = entry
-            hasAny = true
-          }
+      for (const id of owned) {
+        const entry = live[id] ?? historical[id]
+        if (entry) {
+          subset[id] = entry
+          hasAny = true
         }
       }
       if (!hasAny) {
@@ -72,6 +122,6 @@ export function useMessageScopedToolResults(
     }
     prevRef.current = next
     return next
-  }, [messages, historical, live])
+  }, [messages, historical, live, ownedIdsByMessage])
   /* eslint-enable react-hooks/refs */
 }

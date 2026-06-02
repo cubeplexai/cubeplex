@@ -94,4 +94,59 @@ describe('useMessageScopedToolResults', () => {
     expect(result.current['msg-1']).toBe(result.current['msg-2'])
     expect(Object.keys(result.current['msg-1'])).toHaveLength(0)
   })
+
+  it('includes inner subagent tool_call_ids stored on the matching tool_result message', () => {
+    // Assistant message with one `subagent` tool_call (outer id sa-1).
+    const assistant: Message = {
+      id: 'msg-1',
+      role: 'assistant',
+      content: [
+        {
+          type: 'tool_call' as const,
+          id: 'sa-1',
+          name: 'subagent',
+          arguments: { role: 'helper', task: 'do stuff' },
+        },
+      ],
+      timestamp: 0,
+    } as unknown as Message
+
+    // The subagent's tool_result message carries inner tool_call_ids in its
+    // `subagent_events` metadata (this is how buildHistoricalToolResultMap
+    // flattens them into the global historical map).
+    const subagentResult: Message = {
+      id: 'tr-1',
+      role: 'tool_result',
+      tool_call_id: 'sa-1',
+      tool_name: 'subagent',
+      content: [{ type: 'text', text: 'done' }],
+      timestamp: 0,
+      metadata: {
+        subagent_events: {
+          text: 'inner work',
+          tool_calls: [{ name: 'web_fetch', arguments: {}, id: 'inner-x' }],
+          tool_results: [
+            {
+              tool_name: 'web_fetch',
+              tool_call_id: 'inner-x',
+              content: 'inner result',
+            },
+          ],
+          thinking: '',
+        },
+      },
+    } as unknown as Message
+
+    const historical = {
+      'sa-1': { content: 'outer subagent', receivedAt: 1 },
+      'inner-x': { content: 'inner result', receivedAt: 2 },
+    } as Record<string, Entry>
+
+    const { result } = renderHook(() =>
+      useMessageScopedToolResults([assistant, subagentResult], historical, {}),
+    )
+    const subset = result.current['msg-1']
+    expect(subset['sa-1']).toEqual({ content: 'outer subagent', receivedAt: 1 })
+    expect(subset['inner-x']).toEqual({ content: 'inner result', receivedAt: 2 })
+  })
 })
