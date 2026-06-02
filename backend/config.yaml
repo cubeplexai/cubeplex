@@ -154,15 +154,18 @@ default:
     # Pause/resume knobs (spec OQ-1/OQ-2/OQ-7).
     #   pause_on_idle: when true, idle sandboxes are paused (not killed) on
     #     capable providers; falls back to kill on incapable providers / failures.
+    #     Disabled: OpenSandbox v1.0.12 pause (spec.pause=true) just deletes the
+    #     pod without checkpointing — identical to kill. Re-enable once the
+    #     provider supports real checkpoint/restore.
     #   idle_ttl_seconds: idle threshold for pause_idle (separate from ttl which
     #     governs the legacy kill path).
     #   paused_ttl_seconds: how long a paused sandbox lives before the reaper
     #     hard-kills it.
     #   lease_seconds: in-use lease window (LazySandbox acquire/renew/release).
     #   resume_timeout: max wait for the provider's resume call.
-    pause_on_idle: true
+    pause_on_idle: false
     idle_ttl_seconds: 1800
-    paused_ttl_seconds: 1440
+    paused_ttl_seconds: 86400
     lease_seconds: 300
     resume_timeout: 30
     workdir: "/workspace" # Default working directory for command execution
