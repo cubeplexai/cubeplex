@@ -55,30 +55,45 @@ async def stream_user_events(
         q, unsubscribe = bus.subscribe(user_id)
         try:
             replay_ids: set[str] = set()
-            # Short-lived session: opened only for the replay query, closed
-            # before the live-stream loop starts.
-            async with async_session_maker() as session:
-                repo = UserEventRepository(session)
-                if since is not None:
-                    # Resume mode: events newer than the client's last-seen id.
-                    replay = await repo.list_for_user(user_id, since_id=since, limit=200)
-                else:
-                    # Fresh-connection mode (no cursor): deliver still-unread
-                    # events so a new browser session / cleared localStorage /
-                    # offline-then-online catch-up sees pending memory updates.
-                    replay = await repo.list_unread_for_user(user_id, limit=200)
-            for row in replay:
-                replay_ids.add(row.id)
-                yield _sse_format(
-                    row.type.value,
-                    {
-                        "id": row.id,
-                        "type": row.type.value,
-                        "workspace_id": row.workspace_id,
-                        "payload": row.payload,
-                        "created_at": utc_isoformat(row.created_at),
-                    },
-                )
+            # Drain the entire replay backlog page by page — a single 200-row
+            # page would silently drop events past the limit. The cursor moves
+            # forward each page; the loop ends when the DB returns < page_size
+            # or 0 rows (no more matches).
+            page_size = 200
+            cursor_id: str | None = since
+            while True:
+                async with async_session_maker() as session:
+                    # Short-lived session per page: never pin a pool slot
+                    # while the SSE connection is idle in the live-stream loop.
+                    repo = UserEventRepository(session)
+                    if since is not None:
+                        # Resume mode: events newer than client's last-seen id.
+                        page = await repo.list_for_user(
+                            user_id, since_id=cursor_id, limit=page_size
+                        )
+                    else:
+                        # Fresh-connection mode: paginated unread events.
+                        # Cursor advances by id within the unread set.
+                        page = await repo.list_unread_for_user(
+                            user_id, after_id=cursor_id, limit=page_size
+                        )
+                if not page:
+                    break
+                for row in page:
+                    replay_ids.add(row.id)
+                    yield _sse_format(
+                        row.type.value,
+                        {
+                            "id": row.id,
+                            "type": row.type.value,
+                            "workspace_id": row.workspace_id,
+                            "payload": row.payload,
+                            "created_at": utc_isoformat(row.created_at),
+                        },
+                    )
+                if len(page) < page_size:
+                    break
+                cursor_id = page[-1].id
             # Queue.get() is a plain coroutine that works safely with asyncio.wait_for.
             # CancelledError propagating through wait_for on client disconnect triggers
             # the finally block below, so no explicit is_disconnected() check is needed.

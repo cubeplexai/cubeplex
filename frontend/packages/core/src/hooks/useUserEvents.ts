@@ -6,11 +6,16 @@ import { streamUserEvents } from '../api/userEventStream'
 import { useAuthStore } from '../stores/authStore'
 import { useMemoryEventStore } from '../stores/memoryEventStore'
 
-// Per-user storage key prefix. A global key would let account switches in the
-// same browser reuse the previous user's cursor; the new user's older unread
-// events would then be filtered as already-seen by the server's id > since
-// check. Scoping by user id avoids that.
-const STORAGE_KEY_PREFIX = 'cubebox.userEvents.lastSeenId:'
+// Note: this hook deliberately does NOT persist a per-connection `since`
+// cursor. The previous design advanced a localStorage cursor on every received
+// event, but the in-memory Zustand store can be lost (tab reload / close)
+// before the user clicks the chip to mark the event read — in which case the
+// stored cursor is already past the event id, and the next connection sends
+// `since=<that id>`, causing the unread event to be filtered out and
+// permanently invisible on that device. The server's `read_at IS NULL` is the
+// durable source of truth instead: each connection re-receives still-unread
+// events, the store dedupes by id, and the chip POST /read advances the
+// server-side state when the user actually dismisses the notification.
 
 export function useUserEvents(client: ApiClient): void {
   const add = useMemoryEventStore((s) => s.add)
@@ -18,7 +23,6 @@ export function useUserEvents(client: ApiClient): void {
 
   useEffect(() => {
     if (!userId) return // wait for auth to load before subscribing
-    const storageKey = STORAGE_KEY_PREFIX + userId
     const ac = new AbortController()
     let backoff = 1000
     const MAX_BACKOFF = 30000
@@ -27,21 +31,8 @@ export function useUserEvents(client: ApiClient): void {
       while (!ac.signal.aborted) {
         let cleanEnd = false
         try {
-          const since =
-            typeof window !== 'undefined'
-              ? (localStorage.getItem(storageKey) ?? undefined)
-              : undefined
-          for await (const ev of streamUserEvents(client, { signal: ac.signal, since })) {
-            if (ev.type === 'memory_updated') {
-              add(ev)
-              // localStorage.setItem can throw in Safari private mode (quota=0).
-              // Don't let storage failure abort the event-processing loop.
-              try {
-                localStorage.setItem(storageKey, ev.id)
-              } catch {
-                /* ignore */
-              }
-            }
+          for await (const ev of streamUserEvents(client, { signal: ac.signal })) {
+            if (ev.type === 'memory_updated') add(ev)
             backoff = 1000 // reset on successful event
           }
           cleanEnd = true
