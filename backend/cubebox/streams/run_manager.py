@@ -1024,7 +1024,7 @@ class RunManager:
         skill_catalog: Any | None = None,
         catalog_session: Any | None = None,
         trigger: str = "interactive",
-    ) -> None:
+    ) -> str:
         """Execute a single user turn through the cubepi runtime.
 
         Builds a cubepi.Provider + cubepi.Agent, subscribes an event listener, then
@@ -1840,6 +1840,7 @@ class RunManager:
                 )
                 if v is not None
             }
+            final_status: str = "completed"
             try:
                 with tracing_context(metadata=_trace_meta):
                     async with trace(tracer, agent):
@@ -2023,6 +2024,23 @@ class RunManager:
                         "failed to schedule reflection for run_id={}", run_id, exc_info=True
                     )
 
+                # T6: classify the terminal state. Three success outcomes:
+                #   - no DB pending → completed
+                #   - DB pending but no HitlRequestEvent this turn → stale
+                #     leftover; clear it and treat as completed
+                #   - DB pending and HitlRequestEvent fired → genuine new
+                #     pause (auto-detach hook already detached the agent)
+                from cubebox.streams.hitl_resume import classify_terminal_status
+
+                final_pending = await agent.load_pending_hitl_request()
+                classification = classify_terminal_status(
+                    final_pending=final_pending,
+                    answered_question_id=None,  # prompt path
+                    saw_hitl_request_event=auto_detach.detached,
+                )
+                if classification.clear_pending:
+                    await cp.save_pending_request(conversation_id, None)
+                final_status = classification.status
             finally:
                 # Stop accepting steers for this run before tearing down.
                 self._agents.pop(run_id, None)
@@ -2034,6 +2052,7 @@ class RunManager:
 
         for agent_key in list(citation_buffers):
             await flush_citation_buffer(agent_key, agent_key)
+        return final_status
 
     async def _maybe_consolidate_memory(self, *, conversation_id: str, ctx: RunContext) -> None:
         """Cheap per-run gate; spawn a tracked background consolidation task when
@@ -2339,7 +2358,7 @@ class RunManager:
 
             effective_system_prompt += "\n\n" + WIDGET_GUIDELINES
 
-            await self._run_cubepi_path(
+            final_status = await self._run_cubepi_path(
                 ctx=ctx,
                 run_id=run_id,
                 conversation_id=conversation_id,
@@ -2410,16 +2429,18 @@ class RunManager:
                     },
                 ),
             )
-            # Mark the run completed AFTER appending DoneEvent so the SSE consumer
+            # Mark the run terminal AFTER appending DoneEvent so the SSE consumer
             # cannot observe active_run=None with no more events (which would cause
-            # it to exit before the DoneEvent is in the Redis stream).
+            # it to exit before the DoneEvent is in the Redis stream). T6 classifies
+            # the success terminal state: "completed" or "paused_hitl"; the latter
+            # means the agent detached on a new pending HITL request.
             await update_run_meta(
                 self._redis,
                 prefix=self._key_prefix,
                 run_id=run_id,
-                status="completed",
+                status=final_status,
             )
-            await record_scheduled_run_terminal_state(run_id=run_id, run_status="completed")
+            await record_scheduled_run_terminal_state(run_id=run_id, run_status=final_status)
             await self._maybe_consolidate_memory(conversation_id=conversation_id, ctx=ctx)
         except asyncio.CancelledError:
             await update_run_meta(

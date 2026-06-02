@@ -9,6 +9,7 @@ import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import StrEnum
+from typing import Any
 
 from redis.asyncio import Redis
 
@@ -121,3 +122,41 @@ async def claim_resume(
         outcome=ClaimResumeOutcome(outcome_str),
         claim_token=new_token if outcome_str == "ok" else None,
     )
+
+
+@dataclass(frozen=True)
+class TerminalClassification:
+    status: str  # "completed" | "paused_hitl"
+    clear_pending: bool  # caller should cp.save_pending_request(cid, None)
+
+
+def classify_terminal_status(
+    *,
+    final_pending: Any | None,  # HitlRequest or None
+    answered_question_id: str | None,  # None on prompt path
+    saw_hitl_request_event: bool,
+) -> TerminalClassification:
+    """Decide the run's terminal status after agent.prompt() / agent.respond()
+    returns. See docs/dev/specs/2026-06-02-hitl-checkpointed-respond-design.md §6.
+
+    Truth table:
+      final_pending  | answered_qid | saw_event | -> status   | clear_pending
+      ---------------|--------------|-----------|-------------|---------------
+      None           | any          | any       | completed   | False
+      non-null       | any          | False     | completed   | True  (stale leftover)
+      same as ans qid| answered     | any       | completed   | True  (respond dangling — T8)
+      new qid        | None         | True      | paused_hitl | False (prompt new pause)
+      new qid        | answered     | True      | paused_hitl | False (respond follow-up pause)
+    """
+    if final_pending is None:
+        return TerminalClassification(status="completed", clear_pending=False)
+    if not saw_hitl_request_event:
+        # Pending in DB but this turn never emitted a HitlRequestEvent ->
+        # leftover from prior session. Clear and treat as completed.
+        return TerminalClassification(status="completed", clear_pending=True)
+    if answered_question_id is not None and final_pending.question_id == answered_question_id:
+        # Respond path dangling (will only fire in T8's respond path; harmless on prompt
+        # path where answered_qid is None).
+        return TerminalClassification(status="completed", clear_pending=True)
+    # Genuine new pending — the auto-detach hook converted it into a real pause.
+    return TerminalClassification(status="paused_hitl", clear_pending=False)
