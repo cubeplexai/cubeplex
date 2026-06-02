@@ -605,11 +605,27 @@ function applyStreamEvent(state: MessageStore, event: AgentEvent): Partial<Messa
   }
 
   if (event.type === 'sandbox_confirm_resolved') {
-    const d = event.data as { question_id: string }
+    const d = event.data as {
+      question_id: string
+      decision?: 'approve' | 'deny' | 'policy_overridden' | null
+      reason?: string | null
+    }
     const tcId = Object.entries(state.pendingConfirmMap).find(
       ([, v]) => v.question_id === d.question_id,
     )?.[0]
     if (!tcId) return base
+    if (d.decision === 'policy_overridden') {
+      // Synthetic resolve from the respond path: the org sandbox policy
+      // changed during the pause, so the pending confirm was force-cleared.
+      // No inline-note primitive exists in the message list today; the card
+      // disappearance is the load-bearing UX. Surface a console warn so the
+      // event is greppable in dev tools / Playwright traces (T15).
+      console.warn('[sandbox_confirm_resolved] policy_overridden — pending cleared', {
+        question_id: d.question_id,
+        tool_call_id: tcId,
+        reason: d.reason,
+      })
+    }
     const next = { ...state.pendingConfirmMap }
     delete next[tcId]
     return { ...base, pendingConfirmMap: next }
@@ -638,8 +654,21 @@ function applyStreamEvent(state: MessageStore, event: AgentEvent): Partial<Messa
   }
 
   if (event.type === 'ask_user_resolved') {
-    const d = event.data as { question_id: string }
+    const d = event.data as {
+      question_id: string
+      cancelled?: boolean
+      reason?: string | null
+    }
     if (state.pendingAsk?.question_id !== d.question_id) return base
+    if (d.cancelled && d.reason === 'policy_overridden') {
+      // Synthetic resolve from the respond path (T12): the org sandbox policy
+      // changed during the pause, so the pending ask was force-cancelled.
+      // See sandbox_confirm_resolved above for the inline-note caveat.
+      console.warn('[ask_user_resolved] policy_overridden — pending cleared', {
+        question_id: d.question_id,
+        reason: d.reason,
+      })
+    }
     return { ...base, pendingAsk: null }
   }
 
