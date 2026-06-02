@@ -503,6 +503,32 @@ async def _repair_dangling_tool_calls(conversation_id: str) -> None:
             await cp.append(conversation_id, synthetic)
 
 
+class _AutoDetachListener:
+    """Schedules ``agent.detach()`` exactly once on ``HitlRequestEvent``.
+
+    Exposes ``.detached`` so the terminal block in ``_run_cubepi_path`` can
+    read whether this turn entered HITL — distinguishing a real new pending
+    request from a stale pending leftover from a prior session.
+    """
+
+    def __init__(self, agent: Any) -> None:
+        self._agent = agent
+        self.detached: bool = False
+
+    def __call__(self, evt: Any, _signal: Any = None) -> None:
+        from cubepi.agent.types import HitlRequestEvent
+
+        if self.detached:
+            return
+        if isinstance(evt, HitlRequestEvent):
+            self.detached = True
+            asyncio.create_task(self._agent.detach())
+
+
+def _build_auto_detach_listener(agent: Any) -> _AutoDetachListener:
+    return _AutoDetachListener(agent)
+
+
 class RunManager:
     """Owns background run execution and Redis persistence."""
 
@@ -1724,11 +1750,16 @@ class RunManager:
             from cubepi.providers.base import UserMessage as _UserMsg
 
             _user_msg_seen = 0
+            auto_detach = _build_auto_detach_listener(agent)
 
             def _on_event(evt: Any, _signal: Any = None) -> None:
                 # Runs on the same event loop as _run_cubepi_path, so
                 # put_nowait is safe.  If we ever invoke the agent from a
                 # background thread, swap to loop.call_soon_threadsafe.
+                # auto_detach must run FIRST so HitlRequestEvent triggers
+                # detach before the SSE conversion below; T6 reads
+                # `auto_detach.detached` in the terminal block.
+                auto_detach(evt, _signal)
                 nonlocal _user_msg_seen
                 if isinstance(evt, _MsgEndEvent) and isinstance(evt.message, _UserMsg):
                     _user_msg_seen += 1
