@@ -509,14 +509,59 @@ async def _emit_synthetic_resolved(
     pending: Any,
     answered_question_id: str,
 ) -> None:
-    """Stub — implemented in T12. Emits a synthetic ``*_resolved`` event when
-    the respond path's terminal block cleans up a dangling pending (the agent
-    returned without honouring the answer we just delivered).
+    """Emit a typed *_resolved event for a pending that was cleared by
+    the dangling-cleanup branch (org policy changed between pause and
+    respond, so middleware short-circuited the resumed tool call).
 
-    T12 will replace the body with typed-event emission so the frontend can
-    drop the lingering "pending decision" UI.
+    Uses the SAME typed events + publish_stream_event(event, agent_key)
+    signature the live HITL resolve path uses — so the frontend sees an
+    identical event shape and the same applyStreamEvent branch fires.
+
+    See spec §6 "Dangling pending cleanup".
     """
-    return None
+    from cubebox.agents.schemas import (
+        AskUserResolvedEvent,
+        SandboxConfirmResolvedEvent,
+    )
+
+    event: AgentEvent
+    timestamp = datetime.now(UTC).isoformat()
+    kind = pending.payload.kind  # "approve" | "ask" | "confirm"
+    if kind == "approve":
+        event = SandboxConfirmResolvedEvent(
+            timestamp=timestamp,
+            data={
+                "question_id": answered_question_id,
+                "tool_call_id": pending.payload.tool_call_id,
+                "decision": "policy_overridden",
+                "cancelled": False,
+                "timed_out": False,
+                "reason": "org sandbox policy changed during pause",
+            },
+        )
+    elif kind == "ask":
+        # AskUserResolvedEvent.data is {question_id, answers, cancelled,
+        # timed_out} — no 'outcome' field. Encode policy-override as
+        # cancelled=True + reason='policy_overridden' so the existing
+        # frontend applyStreamEvent ask_user_resolved branch fires and
+        # the card is removed.
+        event = AskUserResolvedEvent(
+            timestamp=timestamp,
+            data={
+                "question_id": answered_question_id,
+                "answers": None,
+                "cancelled": True,
+                "timed_out": False,
+                "reason": "policy_overridden",
+            },
+        )
+    else:
+        # ConfirmRequest (kind='confirm') is unused by cubebox today. If a
+        # future caller introduces it, fail loud rather than silently leave
+        # the frontend with a stuck card.
+        raise ValueError(f"unhandled HITL kind in dangling cleanup: {kind!r}")
+
+    await publish_stream_event(event, None)  # second arg = agent_key
 
 
 class _AutoDetachListener:
