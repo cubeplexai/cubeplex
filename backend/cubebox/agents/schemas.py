@@ -192,7 +192,12 @@ class SandboxConfirmResolvedEvent(AgentEvent):
 
     type: Literal["sandbox_confirm_resolved"] = "sandbox_confirm_resolved"
     data: dict[str, Any] = Field(
-        description="Resolution: question_id, decision, cancelled, timed_out, reason"
+        description=(
+            "Resolution: question_id, decision, cancelled, timed_out, reason. "
+            "decision is one of 'approve' | 'deny' | 'cancelled' | 'timed_out' | "
+            "'policy_overridden' (last emitted by the respond-path dangling-pending "
+            "cleanup when org sandbox policy changed mid-pause)."
+        )
     )
 
 
@@ -217,5 +222,9 @@ class AskUserResolvedEvent(AgentEvent):
 
     type: Literal["ask_user_resolved"] = "ask_user_resolved"
     data: dict[str, Any] = Field(
-        description="question_id, answers ({key: value|[values]}|null), cancelled, timed_out"
+        description=(
+            "question_id, answers ({key: value|[values]}|null), cancelled, timed_out. "
+            "Optional reason: str carries non-answer outcomes such as 'policy_overridden' "
+            "emitted by the respond-path dangling-pending cleanup."
+        )
     )
