@@ -35,7 +35,11 @@ class UserEventRepository:
             # IDs use the alphabet [0-9A-Za-z] which lex-sorts correctly
             # ONLY under ASCII byte order — i.e. the C collation.
             stmt = stmt.where(collate(UserEvent.id, "C") > since_id)  # type: ignore[arg-type]
-        stmt = stmt.order_by(UserEvent.created_at).limit(limit)  # type: ignore[arg-type]
+        # ORDER BY the same collated id used for the cursor — ordering by
+        # created_at instead would let pagination skip or re-emit rows when
+        # id-order and time-order diverge (same-ms IDs from different
+        # processes, clock adjustments, etc.).
+        stmt = stmt.order_by(collate(UserEvent.id, "C")).limit(limit)  # type: ignore[arg-type]
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
 
@@ -46,7 +50,7 @@ class UserEventRepository:
         after_id: str | None = None,
         limit: int = 200,
     ) -> list[UserEvent]:
-        """Return unread events for this user in chronological order.
+        """Return unread events for this user in collated-id order.
 
         Used by the SSE replay path when the client has no cursor (first
         connection, fresh device, post-logout re-login). Uses the partial
@@ -55,6 +59,11 @@ class UserEventRepository:
         ``after_id`` is the pagination cursor — pass it to walk through a
         large backlog page by page (each page bounded by ``limit``). Default
         ``None`` starts from the beginning.
+
+        Order matches the cursor (COLLATE "C" on id) so pagination is
+        gap-free across pages even if id-order diverges from time-order.
+        Since our public IDs encode millisecond timestamps in the high bits,
+        id-order is essentially temporal order.
         """
         stmt = select(UserEvent).where(
             UserEvent.user_id == user_id,
@@ -64,7 +73,7 @@ class UserEventRepository:
             # COLLATE "C": same reason as list_for_user — force byte-order
             # comparison so our base62 IDs paginate in temporal order.
             stmt = stmt.where(collate(UserEvent.id, "C") > after_id)  # type: ignore[arg-type]
-        stmt = stmt.order_by(UserEvent.created_at).limit(limit)  # type: ignore[arg-type]
+        stmt = stmt.order_by(collate(UserEvent.id, "C")).limit(limit)  # type: ignore[arg-type]
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
 
