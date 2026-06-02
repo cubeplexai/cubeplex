@@ -215,7 +215,7 @@ export function PolicyEditor() {
       <SectionCard>
         <SectionHeader
           title="Egress proxy"
-          subtitle="Route all sandbox outbound traffic through this HTTP proxy. The proxy handles geo-splitting (e.g. CN direct, overseas via tunnel). Leave empty to connect directly."
+          subtitle="Route all sandbox outbound traffic through an HTTP proxy for security inspection, traffic mirroring, or network policy enforcement. Leave empty to connect directly."
         />
         <div className="flex flex-col gap-1.5">
           <Label htmlFor="sandbox-egress-proxy">Proxy URL</Label>
@@ -224,7 +224,7 @@ export function PolicyEditor() {
             data-testid="sandbox-policy-egress-proxy"
             value={draft.egressProxy}
             onChange={(e) => setEgressProxy(e.target.value)}
-            placeholder="http://192.168.1.150:7892"
+            placeholder="http://proxy.internal:8080"
             className="font-mono text-xs"
           />
           <p className="mt-1 flex items-start gap-1.5 text-[11px] text-muted-foreground">
