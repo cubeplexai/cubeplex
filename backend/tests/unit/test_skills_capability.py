@@ -101,3 +101,90 @@ async def test_find_returns_candidates_payload(monkeypatch: pytest.MonkeyPatch) 
     # The handler must instantiate SkillDiscoveryService with deps.registry.
     _skills_mod._SkillDiscoveryService.assert_called_once_with(deps.registry)
     fake_discovery.discover.assert_awaited_once_with("useful", limit=5)
+
+
+# --- preview tests ---
+
+from cubebox.agents.actions.capabilities.skills import (  # noqa: E402
+    PreviewInput,
+    _handle_preview_impl,
+)
+from cubebox.agents.actions.types import ActionInvalidInput  # noqa: E402
+
+
+@pytest.mark.asyncio
+async def test_preview_bad_candidate_id_raises_invalid_input() -> None:
+    deps = _make_deps()
+    with pytest.raises(ActionInvalidInput, match="BAD_CANDIDATE_ID"):
+        await _handle_preview_impl(
+            deps,
+            _ctx(),
+            MagicMock(),
+            PreviewInput(candidate_id="!!!bad!!!"),
+        )
+
+
+@pytest.mark.asyncio
+async def test_preview_local_returns_content(monkeypatch: pytest.MonkeyPatch) -> None:
+    from cubebox.skills.sources.base import encode_candidate_id
+
+    fake_skill = MagicMock(
+        id="skl-1",
+        source="preinstalled",
+        owner_org_id="org-test",
+        current_version="1.0.0",
+    )
+    fake_skill.name = "local-skill"
+    fake_version = MagicMock(id="skv-1")
+
+    skill_repo = MagicMock()
+    skill_repo.get = AsyncMock(return_value=fake_skill)
+    tomb_repo = MagicMock()
+    tomb_repo.get = AsyncMock(return_value=None)
+    version_repo = MagicMock()
+    version_repo.find = AsyncMock(return_value=fake_version)
+
+    monkeypatch.setattr(_skills_mod, "_SkillRepository", lambda _s: skill_repo)
+    monkeypatch.setattr(
+        _skills_mod,
+        "_OrgPreinstalledTombstoneRepository",
+        lambda _s: tomb_repo,
+    )
+    monkeypatch.setattr(_skills_mod, "_SkillVersionRepository", lambda _s: version_repo)
+
+    fake_catalog = MagicMock()
+    fake_catalog.fetch_skill_md = AsyncMock(
+        return_value="---\nname: local-skill\n---\n# Local Skill"
+    )
+
+    deps = _make_deps(catalog=fake_catalog)
+    cid = encode_candidate_id("local", "skl-1", source_id="local")
+
+    result = await _handle_preview_impl(
+        deps,
+        _ctx(),
+        MagicMock(),
+        PreviewInput(candidate_id=cid),
+    )
+    assert isinstance(result, dict)
+    assert result["candidate_id"] == cid
+    assert result["name"] == "local-skill"
+    assert "Local Skill" in result["content"]
+
+
+@pytest.mark.asyncio
+async def test_preview_remote_missing_source_raises() -> None:
+    from cubebox.skills.sources.base import encode_candidate_id
+
+    registry = MagicMock()
+    registry.adapter_by_id = MagicMock(return_value=None)
+    deps = _make_deps(registry=registry)
+    cid = encode_candidate_id("remote", "owner/repo/main/skill", source_id="src-x")
+
+    with pytest.raises(ActionInvalidInput, match="SOURCE_NOT_FOUND"):
+        await _handle_preview_impl(
+            deps,
+            _ctx(),
+            MagicMock(),
+            PreviewInput(candidate_id=cid),
+        )
