@@ -18,6 +18,7 @@ import { AssistantMessage, HistoryAssistantMessage } from './AssistantMessage'
 import { AskUserCard } from './AskUserCard'
 import { MessageAttachments } from './MessageAttachments'
 import { TokenUsageBar } from './TokenUsageBar'
+import { MemoryUpdateChip } from './MemoryUpdateChip'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { useMessages } from '@/hooks/useMessages'
 import { useMessageScopedToolResults } from '@/hooks/useMessageScopedToolResults'
@@ -346,6 +347,8 @@ export function MessageList({ conversationId }: MessageListProps) {
             <span>{t('incompletePreviousAnswer')}</span>
           </div>
         )}
+
+        <MemoryUpdateChip conversationId={conversationId} />
       </div>
     </ScrollArea>
   )
