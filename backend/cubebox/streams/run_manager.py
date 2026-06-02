@@ -920,79 +920,93 @@ class RunManager:
             name=f"cancel_drain:{run_id}",
         )
 
+        # We now hold a claim_token. Anything between here and the terminal
+        # finalize MUST run via finally so the claim never outlives this
+        # coroutine — otherwise Redis stays at status=running with our
+        # token set and the conversation is wedged for any later
+        # answer/cancel until TTL expiry.
+        abort_succeeded = False
         try:
-            async with init_checkpointer() as cp:
-                agent, _all_tools, _ch = await self._build_agent_for_conversation(
-                    ctx=ctx,
+            try:
+                async with init_checkpointer() as cp:
+                    agent, _all_tools, _ch = await self._build_agent_for_conversation(
+                        ctx=ctx,
+                        conversation_id=conversation_id,
+                        run_id=run_id,
+                        cp=cp,
+                        sandbox=None,
+                        skill_catalog=None,
+                        catalog_session=None,
+                        effective_system_prompt="",
+                        extra_ref_holder={"extra": None},
+                        sse_queue=sse_queue,
+                        publish_stream_event=publish_stream_event,
+                    )
+
+                    def _on_event(evt: Any, _signal: Any = None) -> None:
+                        for d in convert_agent_event_to_sse(evt):
+                            sse_queue.put_nowait(d)
+
+                    agent.subscribe(_on_event)
+
+                    from cubepi.tracing import trace, tracing_context
+
+                    tracer = getattr(self._app.state, "tracer", None)
+                    _trace_meta = {
+                        k: str(v)
+                        for k, v in (
+                            ("run_id", run_id),
+                            ("conversation_id", conversation_id),
+                            ("user_id", ctx.user_id),
+                            ("org_id", ctx.org_id),
+                            ("workspace_id", ctx.workspace_id),
+                            ("turn_kind", "abort"),
+                        )
+                        if v is not None
+                    }
+                    with tracing_context(metadata=_trace_meta):
+                        async with trace(tracer, agent):
+                            await agent.abort_pending(reason)
+                abort_succeeded = True
+            finally:
+                await sse_queue.put(None)
+                await drainer
+        except Exception:
+            logger.exception(
+                "cancel_paused_run abort delivery failed; "
+                "finalizing run %s as errored to release the claim",
+                run_id,
+            )
+        finally:
+            # CAS-guarded terminal write — always runs, even if the abort
+            # path raised. Status reflects what actually happened:
+            # cancelled if abort went through, errored otherwise. A
+            # racing flow that took over the slot wins the row; ours
+            # is then a no-op.
+            wrote_terminal = await finalize_run_meta_if_claim_matches(
+                self._redis,
+                prefix=self._key_prefix,
+                run_id=run_id,
+                claim_token=claim.claim_token,
+                status="cancelled" if abort_succeeded else "errored",
+            )
+            # Release the active-run lock + age out the meta TTL when
+            # WE still own the row. Without this, bootstrap on refresh
+            # sees active_run with a terminal status and the frontend
+            # enters streaming mode tailing a dead stream until TTL.
+            if wrote_terminal:
+                await clear_active_run(
+                    self._redis,
+                    prefix=self._key_prefix,
                     conversation_id=conversation_id,
                     run_id=run_id,
-                    cp=cp,
-                    sandbox=None,
-                    skill_catalog=None,
-                    catalog_session=None,
-                    effective_system_prompt="",
-                    extra_ref_holder={"extra": None},
-                    sse_queue=sse_queue,
-                    publish_stream_event=publish_stream_event,
                 )
-
-                def _on_event(evt: Any, _signal: Any = None) -> None:
-                    for d in convert_agent_event_to_sse(evt):
-                        sse_queue.put_nowait(d)
-
-                agent.subscribe(_on_event)
-
-                from cubepi.tracing import trace, tracing_context
-
-                tracer = getattr(self._app.state, "tracer", None)
-                _trace_meta = {
-                    k: str(v)
-                    for k, v in (
-                        ("run_id", run_id),
-                        ("conversation_id", conversation_id),
-                        ("user_id", ctx.user_id),
-                        ("org_id", ctx.org_id),
-                        ("workspace_id", ctx.workspace_id),
-                        ("turn_kind", "abort"),
-                    )
-                    if v is not None
-                }
-                with tracing_context(metadata=_trace_meta):
-                    async with trace(tracer, agent):
-                        await agent.abort_pending(reason)
-        finally:
-            await sse_queue.put(None)
-            await drainer
-
-        # CAS-guarded terminal write — a racing flow that took over the
-        # slot wins the row; our finalize is a no-op.
-        wrote_terminal = await finalize_run_meta_if_claim_matches(
-            self._redis,
-            prefix=self._key_prefix,
-            run_id=run_id,
-            claim_token=claim.claim_token,
-            status="cancelled",
-        )
-        # Release the active-run lock + age out the meta TTL when WE own
-        # the row. Without this, bootstrap on a refresh still sees an
-        # active_run row (status=cancelled) and the frontend enters
-        # streaming mode tailing a terminal stream — heartbeats until
-        # Redis TTL clears the row. Matches _execute_run's cleanup on
-        # the completed / errored paths. Skip when our claim token lost
-        # the CAS (some other flow owns the slot now).
-        if wrote_terminal:
-            await clear_active_run(
-                self._redis,
-                prefix=self._key_prefix,
-                conversation_id=conversation_id,
-                run_id=run_id,
-            )
-            await expire_run_data(
-                self._redis,
-                prefix=self._key_prefix,
-                run_id=run_id,
-                ttl_seconds=self._run_event_ttl_seconds,
-            )
+                await expire_run_data(
+                    self._redis,
+                    prefix=self._key_prefix,
+                    run_id=run_id,
+                    ttl_seconds=self._run_event_ttl_seconds,
+                )
         return run_id
 
     async def dispatch_cancel_steer(self, run_id: str, steer_id: str) -> str:
