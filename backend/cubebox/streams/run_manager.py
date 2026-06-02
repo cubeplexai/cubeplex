@@ -905,8 +905,8 @@ class RunManager:
         for t in list(self._consolidation_tasks) + list(self._reflection_tasks):
             t.cancel()
         for t in list(self._consolidation_tasks) + list(self._reflection_tasks):
-            with suppress(asyncio.CancelledError):
-                await t
+            with suppress(asyncio.CancelledError, asyncio.TimeoutError):
+                await asyncio.wait_for(t, timeout=2.0)
 
         if self._tasks_empty.is_set():
             return
@@ -1085,6 +1085,7 @@ class RunManager:
         # Placed before view_images and load_skill to keep the cache-prefix
         # tool order: calculator → datetime → memory_save → memory_search
         # → memory_update → load_skill → view_images → mcp_tools
+        _memory_service_factory: Any = None
         try:
             from cubebox.db.engine import async_session_maker as _mem_session_maker
             from cubebox.repositories.memory import MemoryRepository as _MemoryRepository
@@ -1844,6 +1845,8 @@ class RunManager:
                     return ""
 
                 try:
+                    await agent.wait_for_idle()
+
                     from cubebox.db.engine import (
                         async_session_maker as _ue_session_maker,
                     )
@@ -1858,7 +1861,12 @@ class RunManager:
 
                     _bus = getattr(self._app.state, "user_event_bus", None)
                     _last_assistant = _last_assistant_text(agent.state.messages)
-                    if _bus is not None and _last_assistant:
+                    if _memory_service_factory is None:
+                        logger.debug(
+                            "skipping reflection for run_id={}: memory tools not available",
+                            run_id,
+                        )
+                    elif _bus is not None and _last_assistant:
                         _user_msg_text = _stringify_user_msg(_user_msg)
 
                         def _make_reflection_agent(_inp: ReflectionInput) -> Any:
@@ -1913,7 +1921,7 @@ class RunManager:
                         _refl_task.add_done_callback(self._reflection_tasks.discard)
                 except Exception:
                     logger.warning(
-                        "failed to schedule reflection for run_id=%s", run_id, exc_info=True
+                        "failed to schedule reflection for run_id={}", run_id, exc_info=True
                     )
 
             finally:
