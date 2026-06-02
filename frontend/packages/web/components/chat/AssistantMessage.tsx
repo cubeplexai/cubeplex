@@ -198,6 +198,19 @@ function subagentSummaryToStream(summary: SubagentSummary): AgentStream {
   }
 }
 
+/** True when a tool_call invokes the `skills` capability with operation='find'.
+ *
+ * The legacy `find_skills` tool was renamed to `skills(operation='find', ...)`
+ * after the agent platform actions migration. The skill discovery card
+ * renderer keys off this predicate so users still see install/preview cards
+ * for the new tool name. */
+function isSkillsFindCall(block: ContentBlock): boolean {
+  if (block.type !== 'tool_call') return false
+  if (block.name !== 'skills') return false
+  const args = (block.arguments ?? {}) as { operation?: unknown }
+  return args.operation === 'find'
+}
+
 function ContentBlockRenderer({
   block,
   index,
@@ -314,7 +327,7 @@ function ContentBlockRenderer({
       />
     )
   }
-  if (block.type === 'tool_call' && block.name === 'find_skills') {
+  if (block.type === 'tool_call' && isSkillsFindCall(block)) {
     const toolResult = toolResultMap[block.id]
     if (!toolResult) return null
     let hasCandidates = false
@@ -432,7 +445,7 @@ function groupBlocks(blocks: ContentBlock[]): (ContentBlock | ContentBlock[])[] 
       block.name !== 'save_artifact' &&
       block.name !== 'write_todos' &&
       block.name !== 'show_widget' &&
-      block.name !== 'find_skills'
+      !isSkillsFindCall(block)
     ) {
       const last = result[result.length - 1]
       if (
