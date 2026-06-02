@@ -27,6 +27,8 @@ vi.mock('@cubebox/core', () => ({
       cancelStream: typeof storeMocks.cancelStream
       cancelSteer: typeof storeMocks.cancelSteer
       pendingSteers: Record<string, unknown[]>
+      pendingConfirmMap: Record<string, unknown>
+      pendingAsk: unknown | null
       isStreaming: boolean
       streamingConversationId: string | null
     }) => unknown,
@@ -37,6 +39,8 @@ vi.mock('@cubebox/core', () => ({
       cancelStream: storeMocks.cancelStream,
       cancelSteer: storeMocks.cancelSteer,
       pendingSteers: {},
+      pendingConfirmMap: {},
+      pendingAsk: null,
       isStreaming: storeMocks.state.isStreaming,
       streamingConversationId: storeMocks.state.streamingConversationId,
     }),
