@@ -1706,7 +1706,14 @@ class RunManager:
                 )
                 if v is not None
             }
-            final_status: str = "completed"
+            # Default to "errored" so an exception path (provider failure,
+            # tool body raising, DB error mid-respond, etc.) doesn't write
+            # "completed" via the CAS-guarded finalize. The DB pending row
+            # is intentionally NOT cleared on exception — the user retries;
+            # status=errored leaves the meta in a state claim_resume rejects
+            # cleanly (we'd need a separate recovery path to retry), which
+            # matches the existing crash story.
+            final_status: str = "errored"
             try:
                 try:
                     with tracing_context(metadata=_trace_meta):
@@ -1736,7 +1743,7 @@ class RunManager:
                     if classification.clear_pending:
                         await cp.save_pending_request(conversation_id, None)
                         # T12: emit a synthetic *_resolved so the frontend
-                        # can drop the stale "pending" UI. Stub for now.
+                        # can drop the stale "pending" UI.
                         await _emit_synthetic_resolved(
                             publish_stream_event, final_pending, question_id
                         )
@@ -3311,18 +3318,38 @@ class RunManager:
             except Exception:
                 logger.warning("Failed to query session usage for respond done event")
 
+            # Read the actual terminal status BEFORE emitting DoneEvent so
+            # we can stamp data.paused=true on chained-HITL flows (respond
+            # answers one question and the agent immediately emits a new
+            # pending one). Without this flag, the frontend treats `done`
+            # as completed and wipes pendingAsk / pendingConfirmMap, so the
+            # follow-up HITL card disappears until a reload. See spec §6.
+            #
+            # _run_cubepi_respond_path's CAS-guarded finalize already wrote
+            # the terminal status; read it back rather than re-compute.
+            final_meta = await get_run_meta(
+                self._redis,
+                prefix=self._key_prefix,
+                run_id=run_id,
+            )
+            final_status = final_meta.status if final_meta is not None else "completed"
+
+            done_data: dict[str, Any] = {
+                "usage": {
+                    "turn": dict(turn_usage),
+                    "session": session_usage,
+                    "context_window": context_window,
+                }
+            }
+            if final_status == "paused_hitl":
+                done_data["paused"] = True
+
             await self._append_event(
                 run_id,
                 conversation_id,
                 DoneEvent(
                     timestamp=datetime.now(UTC).isoformat(),
-                    data={
-                        "usage": {
-                            "turn": dict(turn_usage),
-                            "session": session_usage,
-                            "context_window": context_window,
-                        }
-                    },
+                    data=done_data,
                 ),
             )
             # NOTE: no update_run_meta here — _run_cubepi_respond_path
@@ -3330,17 +3357,6 @@ class RunManager:
             # finalize_run_meta_if_claim_matches (CAS-guarded). A naive
             # update_run_meta would race with whatever flow stole the slot
             # while we were running.
-            # Re-read the meta to feed the schedule-completion hook with
-            # the actual terminal status (the body may have CAS-written
-            # "completed" or "paused_hitl"). Look up by run_id (not the
-            # active pointer) so we don't depend on the pointer survival
-            # order vs. clear_active_run in finally.
-            final_meta = await get_run_meta(
-                self._redis,
-                prefix=self._key_prefix,
-                run_id=run_id,
-            )
-            final_status = final_meta.status if final_meta is not None else "completed"
             await record_scheduled_run_terminal_state(run_id=run_id, run_status=final_status)
             await self._maybe_consolidate_memory(conversation_id=conversation_id, ctx=ctx)
         except asyncio.CancelledError:

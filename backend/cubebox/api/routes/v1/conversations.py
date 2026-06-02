@@ -1086,34 +1086,50 @@ async def cancel_active_run(
     active_run = await get_active_run(
         rds.client, prefix=rds.key_prefix, conversation_id=conversation_id
     )
-    if active_run is None:
-        return {"status": "no_active_run", "run_id": None}
+
+    from cubebox.agents.checkpointer import init_checkpointer
 
     run_manager = raw_request.app.state.run_manager
-    if active_run.status == "paused_hitl":
-        run_ctx = RunContext(
-            user_id=ctx.user.id,
-            org_id=ctx.org_id,
-            workspace_id=ctx.workspace_id,
-        )
+    run_ctx = RunContext(
+        user_id=ctx.user.id,
+        org_id=ctx.org_id,
+        workspace_id=ctx.workspace_id,
+    )
+
+    # Cancel-on-paused dispatch — covers both the live paused_hitl case
+    # AND the long-pause TTL-expired case where the Redis active-run row
+    # is gone but cubepi_threads.pending_request + run_id still exist.
+    # bootstrap + answer routes already fall back to the DB-persisted
+    # run_id in this case; cancel needs the same fallback or the user
+    # sees a card they can't cancel.
+    paused_run_id: str | None = None
+    if active_run is not None and active_run.status == "paused_hitl":
+        paused_run_id = active_run.run_id
+    elif active_run is None:
+        async with init_checkpointer() as _cp:
+            persisted_run_id = await _cp.load_pending_run_id(conversation_id)
+        if persisted_run_id is not None:
+            paused_run_id = persisted_run_id
+
+    if paused_run_id is not None:
         try:
             await run_manager.cancel_paused_run(
                 conversation_id=conversation_id,
-                run_id=active_run.run_id,
+                run_id=paused_run_id,
                 reason="cancelled by user",
                 ctx=run_ctx,
             )
         except ResumeNoPending:
-            # Pending got cleared between get_active_run and our claim —
+            # Pending got cleared between our DB read and our claim —
             # treat as already done.
             return {"status": "no_active_run", "run_id": None}
         except ResumeInFlight as exc:
             raise HTTPException(status_code=409, detail={"code": "resume_in_flight"}) from exc
         except ResumeConflict as exc:
             raise HTTPException(status_code=409, detail={"code": "conversation_moved"}) from exc
-        return {"status": "cancelled", "run_id": active_run.run_id}
+        return {"status": "cancelled", "run_id": paused_run_id}
 
-    if active_run.status != "running":
+    if active_run is None or active_run.status != "running":
         return {"status": "no_active_run", "run_id": None}
 
     dispatch_status = await run_manager.dispatch_cancel(active_run.run_id)
