@@ -54,12 +54,18 @@ importers:
       '@types/node':
         specifier: ^20.10.6
         version: 20.19.37
+      '@types/react':
+        specifier: ^19.2.14
+        version: 19.2.14
       '@vitest/ui':
         specifier: ^4.1.2
         version: 4.1.2(vitest@4.1.2)
       jsdom:
         specifier: ^29.0.1
         version: 29.0.1
+      react:
+        specifier: 19.2.4
+        version: 19.2.4
       typescript:
         specifier: ^5.3.3
         version: 5.9.3

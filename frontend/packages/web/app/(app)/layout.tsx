@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
-import { createApiClient, useAuthStore, useWorkspaceStore } from '@cubebox/core'
+import { createApiClient, useAuthStore, useWorkspaceStore, useUserEvents } from '@cubebox/core'
 import { useAuthRedirect } from '@/hooks/useAuthRedirect'
 import { Sidebar } from '@/components/layout/Sidebar'
 
@@ -10,6 +10,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter()
   const client = useMemo(() => createApiClient(''), [])
   useAuthRedirect(client)
+  useUserEvents(client)
 
   useEffect(() => {
     useAuthStore.getState().loadMe(client)
