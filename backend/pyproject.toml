@@ -1,5 +1,190 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "cubebox"
+version = "0.1.0"
+description = "cubebox - AI Agent System Backend with cubepi"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.110.0",
+    "uvicorn>=0.27.1",
+    "pydantic>=2.5.0",
+    "pydantic-settings>=2.1.0",
+    "python-dotenv>=1.0.1",
+    "loguru>=0.7.3",
+    "dynaconf>=3.2.11",
+    "yarl>=1.23.0",
+    "opensandbox>=0.1.5",
+    "sqlmodel>=0.0.37",
+    "alembic>=1.18.4",
+    "uuid-utils>=0.14.1",
+    "psycopg[binary,pool]>=3.2",
+    "aioboto3>=15.5.0",
+    "fastapi-users[sqlalchemy]>=14.0",
+    "slowapi>=0.1.9",
+    "cryptography>=42.0",
+    # Cap <8: redis-py 8 changed FakeRedis decode_responses semantics
+    # (aioredis namespace returns bytes despite the flag), breaking every
+    # Lua-CAS test in this branch that reads back HGETALL. Cubepi pin's
+    # ancestry currently uses 7.x; revisit when 8.x compat is needed.
+    "redis>=5.2.0,<8",
+    "python-magic>=0.4.27",
+    "filetype>=1.2.0",
+    "pillow>=10.4.0",
+    "pyjwt>=2.12.1",
+    "click>=8.3.1",
+    "cubepi[mcp,postgres,trace-cli,tracing,tracing-otlp]>=0.4.0",
+    "orjson>=3.11.9",
+    "pyyaml>=6.0.3",
+    "tldextract>=5.3.1",
+    "httptools>=0.8.0",
+    "watchfiles>=1.2.0",
+    "croniter>=6.2.2",
+]
+
+[project.optional-dependencies]
+dev = ["ruff>=0.8.0", "mypy>=1.8.0", "pre-commit>=3.6.0"]
+test = [
+    "pytest>=7.4.0",
+    "pytest-asyncio>=1.3.0",
+    "pytest-cov>=4.1.0",
+    "httpx>=0.27.0",
+]
+
+[project.scripts]
+cubebox = "cubebox.cli:main"
+
+[project.entry-points."cubebox.parsers"]
+text = "cubebox.parsers.plugins.text:TextParser"
+notebook = "cubebox.parsers.plugins.notebook:NotebookParser"
+docling = "cubebox.parsers.plugins.docling:DoclingParser"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+addopts = "-v --cov=cubebox --cov-report=term-missing"
+filterwarnings = ["ignore::DeprecationWarning", "ignore::UserWarning"]
+asyncio_mode = "auto"
+markers = [
+    "sandbox: tests that require a running OpenSandbox service (deselect with '-m \"not sandbox\"')",
+    "e2e: end-to-end tests that hit real services (Postgres/Redis/LLM/Sandbox); deselect with '-m \"not e2e\"'",
+    "unit: fast unit tests with no external dependencies",
+    "real_llm: tests that require a real LLM endpoint with cache_control honored; deselected by default in CI",
+    "diagnostic: diagnostic scaffold tests (cache investigation etc.); opt-in with '-m diagnostic'",
+    "requires_api_key: tests that call a third-party API with a real key (e.g. search MCP providers); skipped when the env var is unset, never auto-run in CI",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["cubebox"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "auto"
+
+[tool.ruff.lint.isort]
+known-first-party = ["cubebox"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+exclude = [
+    ".git",
+    ".venv",
+    "__pycache__",
+    "build",
+    "dist",
+    "migrations",
+    "alembic/versions",
+    "skills",
+    "skills_cache",
+]
+
+[tool.ruff.lint]
+select = [
+    "E",  # pycodestyle errors
+    "W",  # pycodestyle warnings
+    "F",  # pyflakes
+    "I",  # isort
+    "B",  # flake8-bugbear
+    "C4", # flake8-comprehensions
+    "UP", # pyupgrade
+]
+ignore = [
+    "E501", # line too long (handled by ruff format)
+    "B008", # do not perform function calls in argument defaults
+    "C901", # too complex
+]
+
+[tool.ruff.lint.per-file-ignores]
+"__init__.py" = ["F401"] # unused imports in __init__.py
+
+[tool.mypy]
+python_version = "3.12"
+files = ["cubebox"]
+exclude = [
+    "scripts/dev/",
+    "tests/",
+    ".venv/",
+    "build/",
+    "dist/",
+    "alembic/versions/",
+    "skills/",
+]
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+check_untyped_defs = true
+no_implicit_optional = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+warn_no_return = true
+follow_imports = "normal"
+ignore_missing_imports = true
+strict = true
+
+[[tool.mypy.overrides]]
+module = "tests.*"
+ignore_errors = true
+
+[[tool.mypy.overrides]]
+module = "cubebox.models.mixins"
+disable_error_code = ["call-overload"]
+
+[tool.coverage.run]
+source = ["cubebox"]
+omit = ["*/tests/*", "*/__pycache__/*", "*/.venv/*"]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "raise AssertionError",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+    "if TYPE_CHECKING:",
+    "@abstractmethod",
+]
+
+[tool.uv.sources]
 # 1686eed is cubepi main HEAD: v3 HITL run_id support — CheckpointedChannel
-# persists host-side run_id alongside pending_request atomically; bumps
-# cubepi schema_version 2 → 3 (matching alembic migration shipped here).
-# Strictly newer than 738f1e4 (memory reflection on_run_end hook in ancestry).
+# after the full agent run completes (before AgentEndEvent), enabling end-of-run
+# memory reflection. On top of prior OpenAI double-finish_reason guard (262a33f),
+# HITL channel (b03813e), subagent-span-nesting (#122), steer-cancel (#120).
 cubepi = { git = "https://github.com/cubeplexai/cubepi.git", rev = "1686eed" }
+
+[dependency-groups]
+dev = [
+    "aiosqlite>=0.20",
+    "babel>=2.18.0",
+    # Pin <2.36: 2.36.0 returns bytes-keyed hashes for Lua-written values
+    # even with decode_responses=True, breaking _meta_from_hash + every
+    # Lua-CAS test in this branch. Revisit when fakeredis fixes the regression.
+    "fakeredis[lua]>=2.35.1,<2.36",
+    "respx>=0.23.1",
+    "types-pyyaml>=6.0.12.20260408",
+]

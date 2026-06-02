@@ -1488,7 +1488,8 @@ class RunManager:
                                     return None
                                 for m in pcfg.models:
                                     if m.id == model_id_:
-                                        return m.cost
+                                        cost: ModelCost | None = m.cost
+                                        return cost
                                 return None
 
                             _refl_mw: list[Any] = [
