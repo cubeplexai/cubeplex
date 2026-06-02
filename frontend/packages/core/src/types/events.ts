@@ -183,7 +183,10 @@ export interface SandboxConfirmResolvedEvent extends AgentEvent {
   type: 'sandbox_confirm_resolved'
   data: {
     question_id: string
-    decision: 'approve' | 'deny' | null
+    // 'policy_overridden' is a synthetic decision emitted by the respond path
+    // when it detects a dangling pending caused by an org sandbox policy
+    // change during the pause (see backend _emit_synthetic_resolved, T12).
+    decision: 'approve' | 'deny' | 'policy_overridden' | null
     cancelled: boolean
     timed_out: boolean
     reason: string | null
@@ -221,6 +224,10 @@ export interface AskUserResolvedEvent extends AgentEvent {
     answers: Record<string, string | string[]> | null
     cancelled: boolean
     timed_out: boolean
+    // Backend explanation for a cancelled/timed_out resolve. The respond path
+    // sets reason='policy_overridden' when a dangling pending is caused by an
+    // org sandbox policy change during the pause (T12).
+    reason?: string | null
   }
 }
 
