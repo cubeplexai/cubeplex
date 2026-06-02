@@ -2,7 +2,11 @@
 
 import { useEffect, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
-import { createApiClient, useAuthStore, useWorkspaceStore, useUserEvents } from '@cubebox/core'
+import { createApiClient, useAuthStore, useWorkspaceStore } from '@cubebox/core'
+// Direct import: useUserEvents is a client-only hook and must NOT be loaded
+// via the @cubebox/core barrel (would force react into server bundles for
+// any file importing AUTH_COOKIE_NAME).
+import { useUserEvents } from '@cubebox/core/hooks/useUserEvents'
 import { useAuthRedirect } from '@/hooks/useAuthRedirect'
 import { Sidebar } from '@/components/layout/Sidebar'
 import { Toaster } from 'sonner'
