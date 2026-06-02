@@ -62,6 +62,7 @@ export default function WorkspaceSkillsPage({ params }: { params: Promise<{ wsId
       <div className="flex flex-1 overflow-hidden">
         <aside
           aria-label={t('listAria')}
+          data-testid="skills-list"
           className="w-[360px] shrink-0 overflow-y-auto border-r border-border/70 bg-card/20"
         >
           {filters.externalOnly ? (
