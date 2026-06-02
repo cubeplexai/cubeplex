@@ -34,6 +34,10 @@ export interface ApiClient {
   patch(path: string, body: unknown): Promise<Response>
   del(path: string): Promise<Response>
   onUnauthorized(handler: () => void): () => void
+  /** Fire all registered onUnauthorized handlers. For streaming endpoints
+   * (SSE, file uploads) that bypass `doFetch` but still need 401 to trigger
+   * the same redirect-to-login behavior as normal API calls. */
+  notifyUnauthorized(): void
 }
 
 const WS_NEUTRAL_PREFIXES = ['/api/v1/auth/', '/api/v1/workspaces', '/api/v1/admin']
@@ -156,6 +160,9 @@ export function createApiClient(baseUrl: string): ApiClient {
     onUnauthorized(handler) {
       unauthorizedHandlers.add(handler)
       return () => unauthorizedHandlers.delete(handler)
+    },
+    notifyUnauthorized() {
+      for (const h of unauthorizedHandlers) h()
     },
   }
   return client
