@@ -160,15 +160,15 @@ test.describe('M7 attachments — home page eager-create flow', () => {
       await expect(page.getByTestId('loading-indicator')).toBeHidden({ timeout: 90_000 })
       await page.reload()
 
-      // After reload, the user message + attachments are in history. The
-      // attachments block should render above the user message bubble.
-      const attach = page.getByTestId('message-attachments').first()
-      await expect(attach).toBeVisible({ timeout: 15_000 })
-
-      // Find the user message bubble. The existing UserMessage component
-      // renders the prompt text we sent.
+      // After reload, the user message + attachments are in history. Wait
+      // for the message text first — that's the most reliable signal that
+      // the conversation history has loaded — then check attachments. Doing
+      // it the other way around races the history fetch on a cold backend.
       const userMsg = page.getByText('Reply with the single word OK').first()
-      await expect(userMsg).toBeVisible()
+      await expect(userMsg).toBeVisible({ timeout: 15_000 })
+
+      const attach = page.getByTestId('message-attachments').first()
+      await expect(attach).toBeVisible({ timeout: 5_000 })
 
       // Attachments block is positioned ABOVE the user message in DOM/visual order.
       const userBox = await userMsg.boundingBox()
