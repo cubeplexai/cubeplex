@@ -160,3 +160,41 @@ def classify_terminal_status(
         return TerminalClassification(status="completed", clear_pending=True)
     # Genuine new pending — the auto-detach hook converted it into a real pause.
     return TerminalClassification(status="paused_hitl", clear_pending=False)
+
+
+# KEYS[1] = meta_key
+# ARGV[1] = expected_claim_token, ARGV[2] = new_status
+# Returns 1 if status was set, 0 if token mismatch (caller's claim was
+# superseded by some other flow — do not clobber).
+_FINALIZE_IF_CLAIM_MATCHES_LUA = """
+if redis.call('HGET', KEYS[1], 'claim_token') ~= ARGV[1] then
+  return 0
+end
+redis.call('HSET', KEYS[1], 'status', ARGV[2])
+return 1
+"""
+
+
+async def finalize_run_meta_if_claim_matches(
+    redis: Redis,
+    *,
+    prefix: str,
+    run_id: str,
+    claim_token: str,
+    status: str,
+) -> bool:
+    """Write the terminal status to the run meta only if the claim token
+    still matches. Returns True if status was written; False if some other
+    flow has taken over the row (CAS lost).
+
+    Defensive guard against a future race where two flows could land in
+    the same _run_cubepi_respond_path's finally block — see spec §5.
+    """
+    result = await redis.eval(  # type: ignore[misc]
+        _FINALIZE_IF_CLAIM_MATCHES_LUA,
+        1,
+        _run_meta_key(prefix, run_id),
+        claim_token,
+        status,
+    )
+    return int(result) == 1
