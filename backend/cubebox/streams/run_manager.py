@@ -1581,20 +1581,15 @@ class RunManager:
                                         org_id=ctx.org_id,
                                         workspace_id=ctx.workspace_id,
                                     )
-                                    _all_personal = await _mem_repo.list(
+                                    _personal = await _mem_repo.list(
                                         scope=MemoryScope.PERSONAL,
                                         status=MemoryStatus.ACTIVE,
-                                        limit=200,
+                                        order_by_recent=True,
+                                        limit=40,
                                     )
-                                _sorted = sorted(
-                                    _all_personal,
-                                    key=lambda m: (
-                                        m.last_used_at or datetime.min.replace(tzinfo=UTC),
-                                        m.created_at,
-                                    ),
-                                    reverse=True,
-                                )[:40]
-                                _existing_items = [(m.id, m.type.value, m.content) for m in _sorted]
+                                _existing_items = [
+                                    (m.id, m.type.value, m.content) for m in _personal
+                                ]
                             except Exception:
                                 logger.warning(
                                     "reflection: failed to load existing memory for run_id={}",

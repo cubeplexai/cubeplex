@@ -89,6 +89,7 @@ class MemoryRepository:
         source_conversation_id: str | None = None,
         limit: int = 200,
         offset: int = 0,
+        order_by_recent: bool = False,
     ) -> list[MemoryItem]:
         stmt = select(MemoryItem).where(self._scope_filter(scope))
         stmt = stmt.where(MemoryItem.status == status)  # type: ignore[arg-type]
@@ -98,7 +99,16 @@ class MemoryRepository:
             stmt = stmt.where(MemoryItem.content.ilike(f"%{q}%"))  # type: ignore[attr-defined]
         if source_conversation_id is not None:
             stmt = stmt.where(MemoryItem.source_conversation_id == source_conversation_id)  # type: ignore[arg-type]
-        stmt = stmt.order_by(MemoryItem.created_at.asc()).limit(limit).offset(offset)  # type: ignore[attr-defined]
+        if order_by_recent:
+            # last_used_at DESC NULLS LAST, created_at DESC — used by reflection to
+            # fetch the most recently relevant items when there are many memories.
+            stmt = stmt.order_by(
+                MemoryItem.last_used_at.desc().nulls_last(),  # type: ignore[union-attr]
+                MemoryItem.created_at.desc(),  # type: ignore[attr-defined]
+            )
+        else:
+            stmt = stmt.order_by(MemoryItem.created_at.asc())  # type: ignore[attr-defined]
+        stmt = stmt.limit(limit).offset(offset)
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
 
