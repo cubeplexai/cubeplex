@@ -302,3 +302,42 @@ class TestErrorMapping:
         text = result.content[0].text  # type: ignore[union-attr]
         assert "ActionInvalidInput" in text
         assert "bad cron expression" in text
+
+
+class TestSchemaDescriptions:
+    """Each operation's description must reach the generated JSON Schema.
+
+    The LLM only sees `tool.description` (capability-level) plus
+    `tool.parameters` (JSON Schema). If `AgentOperation.description` is not
+    serialized into a per-variant `description` field on the Op_* sub-model,
+    the per-op example payloads we author never reach the model.
+    """
+
+    def test_each_op_description_lands_in_schema(self) -> None:
+        list_op = AgentOperation(
+            name="list",
+            description="List items. Example: {'operation':'list'}",
+            input_model=ListInput,
+            handler=AsyncMock(),
+            mutates=False,
+        )
+        create_op = AgentOperation(
+            name="create",
+            description="Create item. Example: {'operation':'create','title':'x'}",
+            input_model=CreateInput,
+            handler=AsyncMock(),
+            mutates=True,
+        )
+        cap = AgentCapability(
+            name="items",
+            description="Item management",
+            operations=[list_op, create_op],
+        )
+        tool = build_capability_tool(cap, fake_context_factory, allow_mutations=True)
+        assert tool is not None
+        schema = tool.parameters.model_json_schema()
+
+        op_list = schema["$defs"]["Op_list"]
+        op_create = schema["$defs"]["Op_create"]
+        assert op_list.get("description") == list_op.description
+        assert op_create.get("description") == create_op.description

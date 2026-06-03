@@ -52,6 +52,12 @@ def _build_operation_model(op: AgentOperation) -> type[BaseModel]:
         f"Op_{op.name}",
         **field_definitions,
     )
+    # Surface the operation's description into the generated JSON Schema —
+    # pydantic v2 reads __doc__ as the schema's "description" field, which
+    # tool-calling LLMs (Anthropic / OpenAI) render alongside each oneOf
+    # variant. Without this, per-op example payloads in AgentOperation
+    # never reach the model.
+    model.__doc__ = op.description
     return model  # type: ignore[no-any-return]
 
 
