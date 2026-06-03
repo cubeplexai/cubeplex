@@ -297,36 +297,65 @@ async def _handle_delete(ctx: ScopeContext, session: AsyncSession, inp: DeleteIn
 SCHEDULED_TASKS_CAPABILITY = AgentCapability(
     name="scheduled_tasks",
     description=(
-        "Manage scheduled tasks in the current workspace. "
-        "Each task runs a prompt on a cron, interval, or one-shot schedule. "
-        "Only create, update, pause, resume, or delete tasks when the user "
-        "has explicitly asked you to."
+        "Manage scheduled tasks in the current workspace. Each task runs a prompt on "
+        "a cron, interval, or one-shot schedule. The discriminator field is "
+        "`operation` (one of: list, get, list_runs, create, update, pause, resume, "
+        "delete). Every operation has an example payload in its own description — "
+        "use those. Only mutate tasks (create / update / pause / resume / delete) "
+        "when the user has explicitly asked you to."
     ),
     operations=[
         AgentOperation(
             name="list",
-            description="List all scheduled tasks in the workspace.",
+            description=(
+                "List all scheduled tasks in the workspace. Takes no arguments. "
+                'Example: {"operation":"list"}'
+            ),
             input_model=ListInput,
             handler=_handle_list,
             mutates=False,
         ),
         AgentOperation(
             name="get",
-            description="Get details for a single scheduled task by ID.",
+            description=(
+                "Get details for a single scheduled task by ID. "
+                'Example: {"operation":"get","task_id":"stask-1gBGEPTNA5c1Ou"}'
+            ),
             input_model=GetInput,
             handler=_handle_get,
             mutates=False,
         ),
         AgentOperation(
             name="list_runs",
-            description="List recent execution history for a scheduled task.",
+            description=(
+                "List recent execution history for a scheduled task. "
+                'Example: {"operation":"list_runs","task_id":"stask-1gBGEPTNA5c1Ou"}'
+            ),
             input_model=ListRunsInput,
             handler=_handle_list_runs,
             mutates=False,
         ),
         AgentOperation(
             name="create",
-            description=("Create a new scheduled task. Only call when the user explicitly asks."),
+            description=(
+                "Create a new scheduled task. The `schedule` field is a discriminated "
+                "object keyed by `kind` (cron | interval | once); pass the fields that "
+                "go with the chosen kind. Examples:\n"
+                "  cron daily 09:00 UTC:\n"
+                '    {"operation":"create","name":"morning-reply","prompt":"...",'
+                '"schedule":{"kind":"cron","cron_expr":"0 9 * * *"}}\n'
+                "  every 30 minutes:\n"
+                '    {"operation":"create","name":"poll","prompt":"...",'
+                '"schedule":{"kind":"interval","interval_seconds":1800}}\n'
+                "  one-shot at a specific time:\n"
+                '    {"operation":"create","name":"remind","prompt":"...",'
+                '"schedule":{"kind":"once","run_at":"2026-06-10T15:00:00Z"}}\n'
+                "To bind the task to the conversation this tool was called from, add "
+                '`"target":"current_conversation"`. You do not need to know the '
+                "conversation ID — the backend fills it in from the call context. To "
+                "open a fresh conversation on each fire (default), omit `target` or "
+                'pass `"new_each_run"`. Only call when the user has explicitly asked.'
+            ),
             input_model=CreateInput,
             handler=_handle_create,
             mutates=True,
@@ -334,8 +363,20 @@ SCHEDULED_TASKS_CAPABILITY = AgentCapability(
         AgentOperation(
             name="update",
             description=(
-                "Update fields on an existing scheduled task. "
-                "Only call when the user explicitly asks."
+                "Update fields on an existing scheduled task. Omit any field to leave "
+                "it unchanged. `schedule` is replaced whole (same discriminated shape "
+                "as create); there is no partial-schedule update. `target` uses the "
+                "same sentinel as create. Examples:\n"
+                "  rename only:\n"
+                '    {"operation":"update","task_id":"stask-1gBGEPTNA5c1Ou",'
+                '"name":"renamed"}\n'
+                "  switch to a different cron:\n"
+                '    {"operation":"update","task_id":"stask-1gBGEPTNA5c1Ou",'
+                '"schedule":{"kind":"cron","cron_expr":"0 10 * * *"}}\n'
+                "  pin to the current conversation:\n"
+                '    {"operation":"update","task_id":"stask-1gBGEPTNA5c1Ou",'
+                '"target":"current_conversation"}\n'
+                "Only call when the user has explicitly asked."
             ),
             input_model=UpdateInput,
             handler=_handle_update,
@@ -345,7 +386,8 @@ SCHEDULED_TASKS_CAPABILITY = AgentCapability(
             name="pause",
             description=(
                 "Pause a scheduled task so it stops firing. "
-                "Only call when the user explicitly asks."
+                'Example: {"operation":"pause","task_id":"stask-1gBGEPTNA5c1Ou"} '
+                "Only call when the user has explicitly asked."
             ),
             input_model=PauseInput,
             handler=_handle_pause,
@@ -354,7 +396,9 @@ SCHEDULED_TASKS_CAPABILITY = AgentCapability(
         AgentOperation(
             name="resume",
             description=(
-                "Resume a paused scheduled task. Only call when the user explicitly asks."
+                "Resume a paused scheduled task. "
+                'Example: {"operation":"resume","task_id":"stask-1gBGEPTNA5c1Ou"} '
+                "Only call when the user has explicitly asked."
             ),
             input_model=ResumeInput,
             handler=_handle_resume,
@@ -364,7 +408,8 @@ SCHEDULED_TASKS_CAPABILITY = AgentCapability(
             name="delete",
             description=(
                 "Soft-delete a scheduled task (it will no longer fire). "
-                "Only call when the user explicitly asks."
+                'Example: {"operation":"delete","task_id":"stask-1gBGEPTNA5c1Ou"} '
+                "Only call when the user has explicitly asked."
             ),
             input_model=DeleteInput,
             handler=_handle_delete,
