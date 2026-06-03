@@ -96,12 +96,31 @@ def _render_snapshot_text(snap: dict[str, Any], *, current: bool) -> str:
     )
 
 
+_EXTRA_PINNED_KEY = "memory_pinned_snapshot"
+
+
 class MemoryMiddleware(Middleware):
     """cubepi port of MemoryMiddleware.
 
     Args:
         repo_factory: Async context manager factory yielding a
             ``MemoryRepository`` scoped to the current request.
+        extra_ref: Callable returning the agent's ``_extra`` dict, which is
+            persisted by the cubepi checkpointer across runs. Used to cache
+            the pinned-memory block once per conversation so that
+            ``transform_system_prompt`` is byte-identical across all LLM
+            calls in the same conversation — keeping the Anthropic/OpenAI
+            prefix cache warm even as reflection writes new preferences.
+
+            Lifecycle: on the first LLM call of a conversation the block is
+            rendered from DB and written to ``_extra[_EXTRA_PINNED_KEY]``.
+            Subsequent calls (same run or later runs in the same conversation)
+            read the cached value. The snapshot is refreshed only when a new
+            conversation starts (``_extra`` is then empty or absent).
+
+            If ``None``, falls back to the previous behaviour (query DB on
+            every LLM call) so callers that haven't wired the ref yet remain
+            compatible.
         relevance_token_budget: Approximate token cap for the relevance
             tier.  Coarse char-based proxy: ``budget * 4`` chars.
     """
@@ -110,9 +129,11 @@ class MemoryMiddleware(Middleware):
         self,
         *,
         repo_factory: Callable[[], AbstractAsyncContextManager[MemoryRepository]],
+        extra_ref: Callable[[], dict[str, Any]] | None = None,
         relevance_token_budget: int = 4000,
     ) -> None:
         self._repo_factory = repo_factory
+        self._extra_ref = extra_ref
         self._budget = relevance_token_budget
 
     # ------------------------------------------------------------------
@@ -134,12 +155,28 @@ class MemoryMiddleware(Middleware):
         The authoring block (MEMORY_AUTHORING_BLOCK) is appended
         unconditionally so the agent always knows when and how to call
         memory_save, even before any pinned memory exists.
+
+        Cache discipline: when ``extra_ref`` is wired, the rendered block is
+        stored in ``agent._extra`` on first call and reused for all subsequent
+        calls within the same conversation. This keeps the prefix byte-stable
+        and preserves Anthropic/OpenAI prompt cache across turns even when
+        reflection writes new preference items mid-conversation. New items are
+        visible from the next conversation onward.
         """
         del signal  # not used
         from cubebox.prompts.memory import MEMORY_AUTHORING_BLOCK
 
-        async with self._repo_factory() as repo:
-            pinned_text = await _render_pinned(repo)
+        extra = self._extra_ref() if self._extra_ref is not None else None
+
+        if extra is not None and _EXTRA_PINNED_KEY in extra:
+            # Fast path: snapshot already frozen for this conversation.
+            pinned_text = extra[_EXTRA_PINNED_KEY]
+        else:
+            # First call this conversation — render from DB and freeze.
+            async with self._repo_factory() as repo:
+                pinned_text = await _render_pinned(repo)
+            if extra is not None:
+                extra[_EXTRA_PINNED_KEY] = pinned_text
 
         parts = [system_prompt] if system_prompt else []
         if pinned_text:
