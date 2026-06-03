@@ -1571,8 +1571,6 @@ class RunManager:
                             # knows what's already stored before deciding what to save.
                             _existing_items: list[tuple[str, str, str]] = []
                             try:
-                                import datetime
-
                                 from cubebox.models.memory import MemoryScope, MemoryStatus
                                 from cubebox.repositories.memory import MemoryRepository
 
@@ -1591,8 +1589,7 @@ class RunManager:
                                 _sorted = sorted(
                                     _all_personal,
                                     key=lambda m: (
-                                        m.last_used_at
-                                        or datetime.datetime.min.replace(tzinfo=datetime.UTC),
+                                        m.last_used_at or datetime.min.replace(tzinfo=UTC),
                                         m.created_at,
                                     ),
                                     reverse=True,
