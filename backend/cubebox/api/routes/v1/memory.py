@@ -52,10 +52,40 @@ async def list_memory(
     type: MemoryType | None = Query(default=None),
     status: MemoryStatus = Query(default=MemoryStatus.ACTIVE),
     q: str | None = Query(default=None),
+    source_conversation_id: str | None = Query(default=None),
 ) -> dict[str, object]:
     svc = _service(ctx, session)
-    items = await svc.repo.list(scope=scope, type_=type, status=status, q=q)
+    items = await svc.repo.list(
+        scope=scope,
+        type_=type,
+        status=status,
+        q=q,
+        source_conversation_id=source_conversation_id,
+    )
     return {"items": [i.to_dict() for i in items]}
+
+
+@router.get("/count")
+async def count_memory(
+    session: Annotated[AsyncSession, Depends(get_session)],
+    ctx: Annotated[RequestContext, Depends(require_member)],
+    scope: MemoryScope | None = Query(default=None),
+    status: MemoryStatus = Query(default=MemoryStatus.ACTIVE),
+    source_conversation_id: str | None = Query(default=None),
+) -> dict[str, int]:
+    """Count visible memories under the current workspace's scope rules.
+
+    Used by the conversation chip — it only needs a number, not the rows.
+    Honors the same scope visibility as list_memory (personal-of-current-user
+    OR workspace-of-current-ws OR org-of-current-org).
+    """
+    svc = _service(ctx, session)
+    count = await svc.repo.count(
+        scope=scope,
+        status=status,
+        source_conversation_id=source_conversation_id,
+    )
+    return {"count": count}
 
 
 @router.post("", status_code=201)

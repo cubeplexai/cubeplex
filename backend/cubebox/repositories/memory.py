@@ -80,6 +80,7 @@ class MemoryRepository:
         type_: MemoryType | None = None,
         status: MemoryStatus = MemoryStatus.ACTIVE,
         q: str | None = None,
+        source_conversation_id: str | None = None,
         limit: int = 200,
         offset: int = 0,
     ) -> list[MemoryItem]:
@@ -89,9 +90,31 @@ class MemoryRepository:
             stmt = stmt.where(MemoryItem.type == type_)  # type: ignore[arg-type]
         if q:
             stmt = stmt.where(MemoryItem.content.ilike(f"%{q}%"))  # type: ignore[attr-defined]
+        if source_conversation_id is not None:
+            stmt = stmt.where(MemoryItem.source_conversation_id == source_conversation_id)  # type: ignore[arg-type]
         stmt = stmt.order_by(MemoryItem.created_at.asc()).limit(limit).offset(offset)  # type: ignore[attr-defined]
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
+
+    async def count(
+        self,
+        *,
+        scope: MemoryScope | None = None,
+        status: MemoryStatus = MemoryStatus.ACTIVE,
+        source_conversation_id: str | None = None,
+    ) -> int:
+        """Count visible memories. Mirrors `list`'s scope/status filters; intended
+        for the conversation chip which only needs a number, not the rows.
+        """
+        from sqlalchemy import func
+
+        stmt = select(func.count(MemoryItem.id))  # type: ignore[arg-type]
+        stmt = stmt.where(self._scope_filter(scope))
+        stmt = stmt.where(MemoryItem.status == status)  # type: ignore[arg-type]
+        if source_conversation_id is not None:
+            stmt = stmt.where(MemoryItem.source_conversation_id == source_conversation_id)  # type: ignore[arg-type]
+        result = await self.session.execute(stmt)
+        return int(result.scalar_one())
 
     async def find_exact(
         self, *, scope: MemoryScope, type_: MemoryType, content: str
