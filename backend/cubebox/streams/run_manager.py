@@ -606,6 +606,36 @@ class ResumeConflict(Exception):
     """The conversation has moved on; the active run_id has changed."""
 
 
+def _build_cancel_answer(payload: Any, reason: str) -> dict[str, Any]:
+    """Synthesise an answer payload for ``cancel_paused_run`` to feed
+    through cubepi's respond path.
+
+    The shape matches what cubepi's ask_user / confirm tools format
+    into the synthetic tool_result body. The ``_cancelled`` and
+    ``_reason`` markers are unambiguous signals to the model that the
+    user did not actually answer — typical models react with "OK, I'll
+    skip / let me know if my question was off". For the per-question
+    keys we still fill a placeholder so the JSON shape isn't surprising
+    if the model checks individual fields.
+    """
+    kind = getattr(payload, "kind", None)
+    if kind == "ask":
+        questions = list(getattr(payload, "questions", []) or [])
+        answer: dict[str, Any] = {
+            getattr(q, "key", str(i)): "[user cancelled this question]"
+            for i, q in enumerate(questions)
+        }
+        answer["_cancelled"] = True
+        answer["_reason"] = reason
+        return answer
+    if kind == "confirm":
+        # confirm has a binary decision; a cancel ≈ explicit deny, plus
+        # marker fields so the model can distinguish "user clicked deny"
+        # from "user clicked cancel" if it matters.
+        return {"approved": False, "_cancelled": True, "_reason": reason}
+    return {"_cancelled": True, "_reason": reason}
+
+
 class RunManager:
     """Owns background run execution and Redis persistence."""
 
@@ -864,24 +894,22 @@ class RunManager:
         reason: str = "cancelled by user",
         ctx: RunContext,
     ) -> str:
-        """Cancel a conversation parked in ``paused_hitl``. See spec §4.
+        """Cancel a conversation parked in ``paused_hitl``.
 
-        A normal :meth:`cancel_run` ``task.cancel()`` is a no-op here because
-        the worker that started the run released its ``asyncio.Task`` when
-        ``auto_detach`` fired. We instead build a transient agent via the T7
-        factory, wire it to a real SSE pipeline, and call
-        ``agent.abort_pending(reason)`` so cubepi emits an
-        ``AgentAbortedEvent`` that the frontend picks up. Without the SSE
-        wiring the event has zero subscribers and the frontend's pending
-        card never resolves.
+        Earlier revisions called ``agent.abort_pending`` which wrote a
+        synthetic deny tool_result AND a terminal "Conversation aborted"
+        assistant message, finalising the run as ``cancelled``. The
+        terminal write left a cold dead-end: the user clicked Cancel
+        and the conversation just stopped. The new flow synthesises a
+        cancel-flavoured *answer* and feeds it through the normal
+        respond path — cubepi's ask_user / confirm tool writes a
+        tool_result containing the cancel marker, then the agent loop
+        runs and the model gets to respond (typically: "OK, was the
+        question off-base? What did you have in mind?"). Run finalises
+        as ``completed`` via the normal respond path.
         """
         from cubebox.agents.checkpointer import init_checkpointer
-        from cubebox.agents.stream import convert_agent_event_to_sse
-        from cubebox.streams.hitl_resume import (
-            ClaimResumeOutcome,
-            claim_resume,
-            finalize_run_meta_if_claim_matches,
-        )
+        from cubebox.streams.hitl_resume import ClaimResumeOutcome, claim_resume
 
         # 1. DB pending recovers started_at — needed for claim_resume's
         #    rebuild branch (long-pause case where Redis meta has aged out).
@@ -906,107 +934,29 @@ class RunManager:
             raise ResumeConflict("conversation has moved on")
         assert claim.claim_token is not None  # OK outcome guarantees a token
 
-        # 3. Minimal SSE pipeline. abort_pending only emits AgentAbortedEvent
-        #    so the citation/turn_usage gymnastics in the prompt path's
-        #    publish_stream_event are dead weight here — a plain
-        #    _append_event publisher is sufficient.
-        sse_queue: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue()
+        # 3. Synthesise a cancel-flavoured answer. cubepi's ask_user /
+        #    confirm tool stringifies whatever we pass as the answer
+        #    into the tool_result body, so the model sees the marker
+        #    keys and can respond contextually.
+        cancel_answer = _build_cancel_answer(pending.payload, reason)
 
-        async def publish_stream_event(sse_event: AgentEvent, agent_key: str | None) -> None:
-            await self._append_event(run_id, conversation_id, sse_event)
-
-        drainer = asyncio.create_task(
-            _drain_cubepi_sse_queue(sse_queue, publish_stream_event),
-            name=f"cancel_drain:{run_id}",
-        )
-
-        # We now hold a claim_token. Anything between here and the terminal
-        # finalize MUST run via finally so the claim never outlives this
-        # coroutine — otherwise Redis stays at status=running with our
-        # token set and the conversation is wedged for any later
-        # answer/cancel until TTL expiry.
-        abort_succeeded = False
-        try:
-            try:
-                async with init_checkpointer() as cp:
-                    agent, _all_tools, _ch = await self._build_agent_for_conversation(
-                        ctx=ctx,
-                        conversation_id=conversation_id,
-                        run_id=run_id,
-                        cp=cp,
-                        sandbox=None,
-                        skill_catalog=None,
-                        catalog_session=None,
-                        effective_system_prompt="",
-                        extra_ref_holder={"extra": None},
-                        sse_queue=sse_queue,
-                        publish_stream_event=publish_stream_event,
-                    )
-
-                    def _on_event(evt: Any, _signal: Any = None) -> None:
-                        for d in convert_agent_event_to_sse(evt):
-                            sse_queue.put_nowait(d)
-
-                    agent.subscribe(_on_event)
-
-                    from cubepi.tracing import trace, tracing_context
-
-                    tracer = getattr(self._app.state, "tracer", None)
-                    _trace_meta = {
-                        k: str(v)
-                        for k, v in (
-                            ("run_id", run_id),
-                            ("conversation_id", conversation_id),
-                            ("user_id", ctx.user_id),
-                            ("org_id", ctx.org_id),
-                            ("workspace_id", ctx.workspace_id),
-                            ("turn_kind", "abort"),
-                        )
-                        if v is not None
-                    }
-                    with tracing_context(metadata=_trace_meta):
-                        async with trace(tracer, agent):
-                            await agent.abort_pending(reason)
-                abort_succeeded = True
-            finally:
-                await sse_queue.put(None)
-                await drainer
-        except Exception:
-            logger.exception(
-                "cancel_paused_run abort delivery failed; "
-                "finalizing run %s as errored to release the claim",
-                run_id,
-            )
-        finally:
-            # CAS-guarded terminal write — always runs, even if the abort
-            # path raised. Status reflects what actually happened:
-            # cancelled if abort went through, errored otherwise. A
-            # racing flow that took over the slot wins the row; ours
-            # is then a no-op.
-            wrote_terminal = await finalize_run_meta_if_claim_matches(
-                self._redis,
-                prefix=self._key_prefix,
+        # 4. Spawn the respond task — reuses the existing resume pipeline
+        #    that handles the agent loop, terminal CAS write, and Redis
+        #    cleanup. Same shape as ``resume_run_with_answer``.
+        task = asyncio.create_task(
+            self._execute_respond_run(
                 run_id=run_id,
+                conversation_id=conversation_id,
+                question_id=pending.question_id,
+                answer=cancel_answer,
                 claim_token=claim.claim_token,
-                status="cancelled" if abort_succeeded else "errored",
-            )
-            # Release the active-run lock + age out the meta TTL when
-            # WE still own the row. Without this, bootstrap on refresh
-            # sees active_run with a terminal status and the frontend
-            # enters streaming mode tailing a dead stream until TTL.
-            if wrote_terminal:
-                await clear_active_run(
-                    self._redis,
-                    prefix=self._key_prefix,
-                    conversation_id=conversation_id,
-                    run_id=run_id,
-                )
-                await expire_run_data(
-                    self._redis,
-                    prefix=self._key_prefix,
-                    run_id=run_id,
-                    ttl_seconds=self._run_event_ttl_seconds,
-                )
+                ctx=ctx,
+            ),
+            name=f"cancel_respond:{run_id}",
+        )
+        self._tasks_empty.clear()
+        self._tasks[run_id] = task
+        task.add_done_callback(lambda _: self._on_task_done(run_id))
         return run_id
 
     async def dispatch_cancel_steer(self, run_id: str, steer_id: str) -> str:

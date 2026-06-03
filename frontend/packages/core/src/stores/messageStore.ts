@@ -1178,8 +1178,14 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
         pendingSteers: { ...s.pendingSteers, [conversationId]: [] },
         toolStartedMap: {},
         toolResultMap: {},
-        pendingConfirmMap: seedPendingConfirmMap,
-        pendingAsk: seedPendingAsk,
+        // When `skipSeed` fired (we just answered/cancelled this exact
+        // question), preserve the current pendingAsk / pendingConfirmMap
+        // instead of clearing them. The form stays mounted in its
+        // submitting/cancelling state until the SSE `ask_user_resolved`
+        // event arrives, which avoids the visible blank gap that
+        // optimistic-clear used to produce.
+        pendingConfirmMap: skipSeed ? s.pendingConfirmMap : seedPendingConfirmMap,
+        pendingAsk: skipSeed ? s.pendingAsk : seedPendingAsk,
         isStreaming: isStreamingActive,
         streamingConversationId: streamingActive ? conversationId : null,
         currentRunId: streamRunId,

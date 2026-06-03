@@ -138,62 +138,37 @@ async def test_cancel_paused_raises_resume_conflict_when_claim_conflict(
         )
 
 
-async def test_cancel_paused_calls_abort_pending_and_finalizes(
+async def test_cancel_paused_spawns_respond_with_cancel_marker_ask(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Happy path: build agent, call ``abort_pending(reason)``, then
-    ``finalize_run_meta_if_claim_matches`` with ``status="cancelled"`` and
-    the same claim_token returned by ``claim_resume``.
-    """
+    """Happy path for ask_user cancel: synthesise a cancel-flavoured answer
+    and spawn ``_execute_respond_run`` (same pipeline as a normal answer).
+    The synthesised answer carries ``_cancelled`` + ``_reason`` so the
+    model receiving the tool_result can respond contextually instead of
+    seeing a cold "Conversation aborted" terminal write."""
+    import asyncio as _asyncio
+
     pending = MagicMock()
     pending.question_id = "q1"
     pending.created_at = 1717200000.0
+    pending.payload = MagicMock()
+    pending.payload.kind = "ask"
+    q1 = MagicMock()
+    q1.key = "color"
+    q2 = MagicMock()
+    q2.key = "size"
+    pending.payload.questions = [q1, q2]
     _patch_checkpointer(monkeypatch, pending=pending)
     _patch_claim_resume(monkeypatch, outcome=ClaimResumeOutcome.OK, token="tok-cancel")
 
     rm = _make_rm()
 
-    # Stub the transient agent build — return an agent whose abort_pending
-    # is an AsyncMock and whose subscribe is a no-op. _all_tools / channel
-    # are unused.
-    fake_agent = MagicMock()
-    fake_agent.abort_pending = AsyncMock()
-    fake_agent.subscribe = MagicMock()
+    respond_calls: list[dict[str, Any]] = []
 
-    async def _fake_build(**_kwargs: Any) -> tuple[Any, list[Any], Any]:
-        return fake_agent, [], None
+    async def _fake_respond(**kwargs: Any) -> None:
+        respond_calls.append(kwargs)
 
-    monkeypatch.setattr(rm, "_build_agent_for_conversation", _fake_build)
-
-    # Stub the cubepi tracing primitives so we don't drag in the tracer.
-    from contextlib import contextmanager as _cm
-
-    @_cm
-    def _fake_tracing_context(metadata: Any = None) -> Any:
-        yield None
-
-    @asynccontextmanager
-    async def _fake_trace(_tracer: Any, _agent: Any) -> Any:
-        yield None
-
-    monkeypatch.setattr("cubepi.tracing.tracing_context", _fake_tracing_context)
-    monkeypatch.setattr("cubepi.tracing.trace", _fake_trace)
-
-    # Stub finalize_run_meta_if_claim_matches so we can capture kwargs.
-    finalize_mock = AsyncMock(return_value=True)
-    monkeypatch.setattr(
-        "cubebox.streams.hitl_resume.finalize_run_meta_if_claim_matches",
-        finalize_mock,
-    )
-
-    # Stub the Redis cleanup helpers that run after a winning finalize CAS.
-    # cancel_paused_run calls clear_active_run + expire_run_data to release
-    # the active-run pointer (avoids the post-cancel bootstrap-shows-
-    # cancelled-run heartbeat bug codex flagged).
-    clear_active_mock = AsyncMock()
-    expire_data_mock = AsyncMock()
-    monkeypatch.setattr("cubebox.streams.run_manager.clear_active_run", clear_active_mock)
-    monkeypatch.setattr("cubebox.streams.run_manager.expire_run_data", expire_data_mock)
+    monkeypatch.setattr(rm, "_execute_respond_run", _fake_respond)
 
     out = await rm.cancel_paused_run(
         conversation_id="c1",
@@ -202,95 +177,73 @@ async def test_cancel_paused_calls_abort_pending_and_finalizes(
         ctx=_ctx(),
     )
     assert out == "r1"
+    await _asyncio.sleep(0)
+    await _asyncio.sleep(0)
 
-    # abort_pending was awaited with the reason we passed in.
-    fake_agent.abort_pending.assert_awaited_once_with("cancelled by user")
-
-    # finalize was called with status="cancelled" and the same claim_token
-    # claim_resume returned.
-    finalize_mock.assert_awaited_once()
-    kwargs = finalize_mock.await_args.kwargs
-    assert kwargs["run_id"] == "r1"
-    assert kwargs["claim_token"] == "tok-cancel"
-    assert kwargs["status"] == "cancelled"
-    assert kwargs["prefix"] == PREFIX
-
-    # On a winning CAS, the active-run pointer is cleared + meta TTL'd so
-    # a refresh doesn't show this run as still active.
-    clear_active_mock.assert_awaited_once()
-    expire_data_mock.assert_awaited_once()
+    assert len(respond_calls) == 1
+    kw = respond_calls[0]
+    assert kw["run_id"] == "r1"
+    assert kw["conversation_id"] == "c1"
+    assert kw["question_id"] == "q1"
+    assert kw["claim_token"] == "tok-cancel"
+    answer = kw["answer"]
+    assert answer["_cancelled"] is True
+    assert answer["_reason"] == "cancelled by user"
+    assert answer["color"] == "[user cancelled this question]"
+    assert answer["size"] == "[user cancelled this question]"
 
 
-async def test_cancel_paused_still_finalizes_when_abort_raises(
+async def test_cancel_paused_spawns_respond_with_cancel_marker_confirm(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Abort delivery is best-effort: if ``agent.abort_pending`` raises,
-    we must STILL finalize the run (as ``errored``) and release the
-    active-run lock. Otherwise the cancel claim_token leaks and the
-    conversation is wedged at ``status=running`` until TTL.
-    """
+    """confirm-kind cancel: synthesised answer has ``approved=False`` (an
+    explicit deny) plus the cancel marker so the model can distinguish a
+    deliberate deny from a cancel-via-abandon."""
+    import asyncio as _asyncio
+
     pending = MagicMock()
-    pending.question_id = "q1"
+    pending.question_id = "q2"
     pending.created_at = 1717200000.0
+    pending.payload = MagicMock()
+    pending.payload.kind = "confirm"
     _patch_checkpointer(monkeypatch, pending=pending)
     _patch_claim_resume(monkeypatch, outcome=ClaimResumeOutcome.OK, token="tok-cancel")
 
     rm = _make_rm()
 
-    fake_agent = MagicMock()
-    fake_agent.abort_pending = AsyncMock(side_effect=RuntimeError("boom"))
-    fake_agent.subscribe = MagicMock()
+    respond_calls: list[dict[str, Any]] = []
 
-    async def _fake_build(**_kwargs: Any) -> tuple[Any, list[Any], Any]:
-        return fake_agent, [], None
+    async def _fake_respond(**kwargs: Any) -> None:
+        respond_calls.append(kwargs)
 
-    monkeypatch.setattr(rm, "_build_agent_for_conversation", _fake_build)
+    monkeypatch.setattr(rm, "_execute_respond_run", _fake_respond)
 
-    from contextlib import contextmanager as _cm
-
-    @_cm
-    def _fake_tracing_context(metadata: Any = None) -> Any:
-        yield None
-
-    @asynccontextmanager
-    async def _fake_trace(_tracer: Any, _agent: Any) -> Any:
-        yield None
-
-    monkeypatch.setattr("cubepi.tracing.tracing_context", _fake_tracing_context)
-    monkeypatch.setattr("cubepi.tracing.trace", _fake_trace)
-
-    finalize_mock = AsyncMock(return_value=True)
-    monkeypatch.setattr(
-        "cubebox.streams.hitl_resume.finalize_run_meta_if_claim_matches",
-        finalize_mock,
-    )
-
-    clear_active_mock = AsyncMock()
-    expire_data_mock = AsyncMock()
-    monkeypatch.setattr("cubebox.streams.run_manager.clear_active_run", clear_active_mock)
-    monkeypatch.setattr("cubebox.streams.run_manager.expire_run_data", expire_data_mock)
-
-    # cancel_paused_run must NOT raise — it swallows the abort exception
-    # and finalizes the run as errored so the claim is released.
-    out = await rm.cancel_paused_run(
-        conversation_id="c1",
-        run_id="r1",
+    await rm.cancel_paused_run(
+        conversation_id="c2",
+        run_id="r2",
         reason="cancelled by user",
         ctx=_ctx(),
     )
-    assert out == "r1"
+    await _asyncio.sleep(0)
+    await _asyncio.sleep(0)
 
-    # abort_pending was attempted (and raised inside the agent).
-    fake_agent.abort_pending.assert_awaited_once_with("cancelled by user")
+    assert len(respond_calls) == 1
+    answer = respond_calls[0]["answer"]
+    assert answer == {
+        "approved": False,
+        "_cancelled": True,
+        "_reason": "cancelled by user",
+    }
 
-    # finalize ran with status="errored" since abort failed, and the
-    # same claim_token claim_resume returned.
-    finalize_mock.assert_awaited_once()
-    kwargs = finalize_mock.await_args.kwargs
-    assert kwargs["run_id"] == "r1"
-    assert kwargs["claim_token"] == "tok-cancel"
-    assert kwargs["status"] == "errored"
 
-    # Active-run lock + meta TTL cleanup still ran because we won the CAS.
-    clear_active_mock.assert_awaited_once()
-    expire_data_mock.assert_awaited_once()
+async def test_build_cancel_answer_unknown_kind_falls_back_to_marker_only() -> None:
+    """If the payload doesn't expose a recognised ``kind`` (e.g. a future
+    HITL type), still return SOMETHING the model can interpret —
+    just the cancel marker, no per-question keys."""
+    from cubebox.streams.run_manager import _build_cancel_answer
+
+    payload = MagicMock()
+    payload.kind = "future_unknown_kind"
+
+    out = _build_cancel_answer(payload, "cancelled by user")
+    assert out == {"_cancelled": True, "_reason": "cancelled by user"}
