@@ -2229,7 +2229,9 @@ class RunManager:
         try:
             from cubebox.middleware.memory import MemoryMiddleware
 
-            cubepi_middleware.append(MemoryMiddleware(repo_factory=_mem_repo_factory))
+            cubepi_middleware.append(
+                MemoryMiddleware(repo_factory=_mem_repo_factory, extra_ref=_extra_ref)
+            )
         except Exception as _exc:
             logger.warning("MemoryMiddleware unavailable: {}", _exc)
 
