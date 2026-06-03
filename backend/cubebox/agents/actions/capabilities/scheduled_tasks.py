@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -58,25 +58,59 @@ class ListRunsInput(BaseModel):
     task_id: str
 
 
-class CreateInput(BaseModel):
-    name: str
-    prompt: str
-    schedule_kind: Literal["cron", "interval", "once"]
-    cron_expr: str | None = None
-    interval_seconds: int | None = Field(default=None, ge=60)
-    run_at: datetime | None = Field(
-        default=None,
-        description="Required when schedule_kind='once'. ISO 8601 datetime for the single fire.",
+class CronSchedule(BaseModel):
+    """Recurring schedule defined by a cron expression."""
+
+    kind: Literal["cron"]
+    cron_expr: str = Field(
+        description="5-field cron expression in the given timezone. Example: '0 9 * * *'.",
     )
     timezone: str = Field(
         default="UTC",
         description="IANA timezone name, e.g. 'America/New_York'. Defaults to UTC.",
     )
+
+
+class IntervalSchedule(BaseModel):
+    """Recurring schedule that fires every N seconds, starting at create time."""
+
+    kind: Literal["interval"]
+    interval_seconds: int = Field(ge=60, description="Seconds between fires. Minimum 60.")
+
+
+class OnceSchedule(BaseModel):
+    """Schedule that fires exactly once at a given timestamp."""
+
+    kind: Literal["once"]
+    run_at: datetime = Field(
+        description="ISO 8601 datetime (must include timezone offset) for the single fire.",
+    )
+
+
+Schedule = Annotated[
+    CronSchedule | IntervalSchedule | OnceSchedule,
+    Field(discriminator="kind"),
+]
+
+
+class CreateInput(BaseModel):
+    name: str = Field(description="Human-readable name, unique within the workspace.")
+    prompt: str = Field(description="The prompt sent to the agent on every fire.")
+    schedule: Schedule = Field(
+        description=(
+            "When to run. Discriminated by 'kind'. Examples: "
+            "{'kind':'cron','cron_expr':'0 9 * * *'}, "
+            "{'kind':'interval','interval_seconds':1800}, "
+            "{'kind':'once','run_at':'2026-06-10T15:00:00Z'}."
+        ),
+    )
     target: Literal["new_each_run", "current_conversation"] = Field(
         default="new_each_run",
         description=(
-            "Where the task runs: 'new_each_run' opens a fresh conversation each time; "
-            "'current_conversation' appends to the conversation where this tool was called."
+            "Where the task runs. 'new_each_run' opens a fresh conversation each fire "
+            "(default). 'current_conversation' binds the task to the conversation this "
+            "tool was called from — you do NOT need to pass a conversation ID, the "
+            "backend reads it from the call context."
         ),
     )
     end_at: datetime | None = Field(
@@ -155,14 +189,31 @@ async def _handle_create(ctx: ScopeContext, session: AsyncSession, inp: CreateIn
         target_mode = "new_each_run"
         target_conversation_id = None
 
+    sched = inp.schedule
+    match sched:
+        case CronSchedule():
+            cron_expr: str | None = sched.cron_expr
+            interval_seconds: int | None = None
+            run_at: datetime | None = None
+            timezone: str = sched.timezone
+        case IntervalSchedule():
+            cron_expr = None
+            interval_seconds = sched.interval_seconds
+            run_at = None
+            timezone = "UTC"
+        case OnceSchedule():
+            cron_expr = None
+            interval_seconds = None
+            run_at = sched.run_at
+            timezone = "UTC"
     data: dict[str, Any] = {
         "name": inp.name,
         "prompt": inp.prompt,
-        "schedule_kind": inp.schedule_kind,
-        "cron_expr": inp.cron_expr,
-        "interval_seconds": inp.interval_seconds,
-        "run_at": inp.run_at,
-        "timezone": inp.timezone,
+        "schedule_kind": sched.kind,
+        "cron_expr": cron_expr,
+        "interval_seconds": interval_seconds,
+        "run_at": run_at,
+        "timezone": timezone,
         "target_mode": target_mode,
         "target_conversation_id": target_conversation_id,
         "end_at": inp.end_at,
