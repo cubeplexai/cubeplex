@@ -636,12 +636,18 @@ def _build_cancel_answer(payload: Any, reason: str) -> dict[str, Any]:
     return {"_cancelled": True, "_reason": reason}
 
 
-def _extract_tool_summaries(messages: list[Any]) -> list[dict[str, str]]:
+def _extract_tool_summaries(
+    messages: list[Any], *, from_idx: int | None = None
+) -> list[dict[str, str]]:
     """Build compact tool-call summaries from a turn's message list.
 
-    Collects all ToolResultMessages that appear after the last UserMessage,
+    Collects ToolResultMessages that appear after the run's UserMessage,
     paired with their corresponding ToolCall arguments. Capped at 10 entries;
     args and error text truncated to 150 chars each.
+
+    from_idx: index of the original user message for this run. When provided,
+    all tool calls after that index are captured, including those that precede
+    mid-run steer UserMessages. Falls back to last-UserMessage scan when None.
     """
     from cubepi.providers.base import (
         AssistantMessage,
@@ -655,15 +661,18 @@ def _extract_tool_summaries(messages: list[Any]) -> list[dict[str, str]]:
     _RESULT_LIMIT = 150
     _MAX_SUMMARIES = 10
 
-    last_user_idx = -1
-    for i, msg in enumerate(messages):
-        if isinstance(msg, UserMessage):
-            last_user_idx = i
-    if last_user_idx == -1:
+    if from_idx is not None:
+        start = from_idx
+    else:
+        start = -1
+        for i, msg in enumerate(messages):
+            if isinstance(msg, UserMessage):
+                start = i
+    if start == -1:
         return []
 
     tool_args: dict[str, str] = {}
-    for msg in messages[last_user_idx + 1 :]:
+    for msg in messages[start + 1 :]:
         if isinstance(msg, AssistantMessage):
             for part in msg.content:
                 if isinstance(part, ToolCall):
@@ -671,7 +680,7 @@ def _extract_tool_summaries(messages: list[Any]) -> list[dict[str, str]]:
                     tool_args[part.id] = args_str[:_ARGS_LIMIT]
 
     summaries: list[dict[str, str]] = []
-    for msg in messages[last_user_idx + 1 :]:
+    for msg in messages[start + 1 :]:
         if not isinstance(msg, ToolResultMessage):
             continue
         if len(summaries) >= _MAX_SUMMARIES:
@@ -1597,6 +1606,14 @@ class RunManager:
                                     exc_info=True,
                                 )
 
+                            # Locate the original user message by identity so
+                            # tool summaries include calls before mid-run steers.
+                            _user_start: int | None = None
+                            for _mi, _mm in enumerate(agent_ref.state.messages):
+                                if _mm is user_msg_ref:
+                                    _user_start = _mi
+                                    break
+
                             inp = ReflectionInput(
                                 conversation_id=conversation_id,
                                 run_id=run_id,
@@ -1606,7 +1623,8 @@ class RunManager:
                                     user_message=user_msg_text,
                                     assistant_message=last_assistant,
                                     tool_summaries=_extract_tool_summaries(
-                                        agent_ref.state.messages
+                                        agent_ref.state.messages,
+                                        from_idx=_user_start,
                                     ),
                                 ),
                                 existing_memory_items=_existing_items,

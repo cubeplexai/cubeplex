@@ -108,3 +108,28 @@ def test_only_tools_after_last_user_message() -> None:
     summaries = _extract_tool_summaries(msgs)
     assert len(summaries) == 1
     assert "new" in summaries[0]["args_summary"]
+
+
+def test_from_idx_captures_tools_before_steer() -> None:
+    # Simulates a steered run: tool calls happen before a mid-run UserMessage
+    # injected by _handle_control. from_idx pins the original prompt boundary
+    # so all tool calls in the run are captured.
+    msgs = [
+        _user("original prompt"),  # index 0 — original prompt
+        _assistant_with_calls(("tc1", "execute", {"command": "before-steer"})),
+        _result("tc1", "execute", "result-before"),
+        _user("steer message"),  # index 3 — mid-run steer (UserMessage)
+        _assistant_with_calls(("tc2", "execute", {"command": "after-steer"})),
+        _result("tc2", "execute", "result-after"),
+    ]
+    # Without from_idx: only sees tools after the last UserMessage (steer)
+    summaries_default = _extract_tool_summaries(msgs)
+    assert len(summaries_default) == 1
+    assert "after-steer" in summaries_default[0]["args_summary"]
+
+    # With from_idx=0: captures all tools from the original prompt onward
+    summaries_anchored = _extract_tool_summaries(msgs, from_idx=0)
+    assert len(summaries_anchored) == 2
+    names = [s["args_summary"] for s in summaries_anchored]
+    assert any("before-steer" in n for n in names)
+    assert any("after-steer" in n for n in names)
