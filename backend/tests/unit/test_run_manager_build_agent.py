@@ -139,12 +139,18 @@ async def test_build_wires_run_id_into_channel(
     assert stored_run_id == _RUN_ID
 
 
-async def test_build_with_no_sandbox_returns_none_channel(
+async def test_build_with_no_sandbox_still_binds_hitl_channel(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """When sandbox is None the factory MUST still build an agent (cancel
-    path needs this). No sandbox → no SandboxMiddleware → no
-    CheckpointedChannel. T10 depends on this graceful path."""
+    path needs this) AND it must still bind a CheckpointedChannel — without
+    one, cubepi's ``agent.abort_pending`` short-circuits with HitlError
+    before the DB pending row gets cleared, so cancel_paused_run leaves
+    the pending row behind. The channel is needed by the ask_user tool
+    binding and by abort_pending regardless of whether SandboxMiddleware
+    is installed."""
     agent, _tools, channel = await _build(monkeypatch, sandbox=None)
     assert agent is not None
-    assert channel is None
+    assert isinstance(channel, CheckpointedChannel)
+    stored_run_id = getattr(channel, "run_id", None) or getattr(channel, "_run_id", None)
+    assert stored_run_id == _RUN_ID

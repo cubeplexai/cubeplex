@@ -389,6 +389,15 @@ function ContentBlockRenderer({
       />
     )
   }
+  if (block.type === 'tool_call_streaming' && block.name === 'ask_user') {
+    // ask_user streams its args before the ask_user_request event fires.
+    // Showing a generic tool-call card here would briefly render a raw-args
+    // placeholder, disappear once the call finalises (ToolCallGroup
+    // suppresses ask_user without a result), then reappear as the
+    // <AskUserCard>. Suppress all three transitions; the live AskUserCard
+    // is the canonical render.
+    return null
+  }
   if (block.type === 'tool_call_streaming') {
     const supportsPreview = block.name === 'write_file'
     return (

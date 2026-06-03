@@ -81,6 +81,12 @@ export interface MessageStore {
   isStreaming: boolean
   streamingConversationId: string | null
   currentRunId: string | null
+  /** Set by the answer handlers to tell the next bootstrap "don't re-seed
+   * pendingAsk for this question; we just answered it, the backend's
+   * `save_pending_request(None)` may not have committed yet." Cleared
+   * whenever a new HITL request becomes active. */
+  lastAnsweredAskQuestionId: string | null
+  lastResolvedSandboxQuestionId: string | null
   lastAppliedEventId: string | null
   statusPhase: string | null
   error: string | null
@@ -599,6 +605,9 @@ function applyStreamEvent(state: MessageStore, event: AgentEvent): Partial<Messa
           run_id: runId,
         },
       },
+      // Mirror ask_user_request: a fresh confirm question wipes the
+      // "we just resolved the previous one" guard.
+      lastResolvedSandboxQuestionId: null,
     }
   }
 
@@ -648,6 +657,10 @@ function applyStreamEvent(state: MessageStore, event: AgentEvent): Partial<Messa
         requestedAt: event.timestamp ? new Date(event.timestamp).getTime() : Date.now(),
         run_id: runId,
       },
+      // Fresh question — drop the "we just answered the previous one" marker
+      // so a subsequent bootstrap can seed THIS form if the page reloads
+      // before the user gets to it.
+      lastAnsweredAskQuestionId: null,
     }
   }
 
@@ -820,6 +833,13 @@ async function finalizeCompletedStream(
         ...toolMessages,
       ],
     },
+    // Reset the in-flight stream now that the content lives in messages.
+    // Leaving streamAgents populated forces MessageList's lastAssistantId
+    // skip to fire — which can hide a DIFFERENT history assistant if the
+    // resume turn's mainStream content arrives before cubepi commits the
+    // resume assistant to the message log.
+    streamAgents: {},
+    toolStartedMap: {},
     isStreaming: false,
     pendingConfirmMap: {},
     pendingAsk: null,
@@ -879,6 +899,10 @@ async function finalizePausedStream(
         ...toolMessages,
       ],
     },
+    // Same rationale as finalizeCompletedStream — drop the in-flight
+    // stream now that history owns the content.
+    streamAgents: {},
+    toolStartedMap: {},
     isStreaming: false,
     streamingConversationId: nextStreamingConversationId,
     statusPhase: null,
@@ -1007,6 +1031,8 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
   isStreaming: false,
   streamingConversationId: null,
   currentRunId: null,
+  lastAnsweredAskQuestionId: null,
+  lastResolvedSandboxQuestionId: null,
   lastAppliedEventId: null,
   statusPhase: null,
   error: null,
@@ -1062,10 +1088,33 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
       // backend returns the unresolved HITL request inline. Seed the same
       // pendingAsk / pendingConfirmMap slots the live SSE path populates so
       // the card re-renders on refresh without replaying events.
+      //
+      // Post-answer race: when the user just submitted an answer, the
+      // optimistic clear set pendingAsk = null, but the bootstrap that
+      // follows can race the backend's `save_pending_request(None)` —
+      // the DB pending row is still there, so this code would re-seed
+      // the form for the same run_id and the user would see a momentary
+      // re-flash of the question they already answered. Skip the seed
+      // when the store is already tracking this exact run; the SSE
+      // reattach (which starts strictly after the paused-done event)
+      // will land the ask_user_resolved any moment now anyway.
+      const pending = bootstrap.pending_hitl ?? null
+      const currentState = get()
+      // If the user just answered this exact question, the backend's
+      // `save_pending_request(None)` may not have committed yet when
+      // bootstrap fetched — DB pending_hitl is stale. Skip the re-seed
+      // so the form doesn't flash back. SSE delivers
+      // `ask_user_resolved` shortly after either way.
+      const alreadyAnsweredThisQuestion =
+        pending !== null && pending.question_id === currentState.lastAnsweredAskQuestionId
+      const alreadyResolvedThisConfirm =
+        pending !== null &&
+        pending.kind === 'sandbox_confirm' &&
+        pending.question_id === currentState.lastResolvedSandboxQuestionId
+      const skipSeed = alreadyAnsweredThisQuestion || alreadyResolvedThisConfirm
       let seedPendingAsk: PendingAsk | null = null
       let seedPendingConfirmMap: Record<string, PendingConfirm> = {}
-      const pending = bootstrap.pending_hitl ?? null
-      if (pending && pending.kind === 'ask_user') {
+      if (pending && pending.kind === 'ask_user' && !skipSeed) {
         const requestedAt = Date.parse(pending.requested_at)
         seedPendingAsk = {
           question_id: pending.question_id,
@@ -1074,7 +1123,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
           requestedAt: Number.isNaN(requestedAt) ? Date.now() : requestedAt,
           run_id: pending.run_id,
         }
-      } else if (pending && pending.kind === 'sandbox_confirm') {
+      } else if (pending && pending.kind === 'sandbox_confirm' && !skipSeed) {
         const requestedAt = Date.parse(pending.requested_at)
         seedPendingConfirmMap = {
           [pending.tool_call_id]: {

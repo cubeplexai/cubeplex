@@ -201,11 +201,14 @@ export function MessageList({ conversationId }: MessageListProps) {
       if (workspaceId) client.setWorkspaceId(workspaceId)
       try {
         await submitSandboxConfirm(client, convId, questionId, decision)
-        // Optimistic removal — sandbox_confirm_resolved SSE will also clean up
+        // Optimistic removal — sandbox_confirm_resolved SSE will also clean up.
+        // `lastResolvedSandboxQuestionId` tells the subsequent bootstrap
+        // not to re-seed this exact confirm while the backend's
+        // `save_pending_request(None)` is in flight.
         useMessageStore.setState((s) => {
           const next = { ...s.pendingConfirmMap }
           delete next[toolCallId]
-          return { pendingConfirmMap: next }
+          return { pendingConfirmMap: next, lastResolvedSandboxQuestionId: questionId }
         })
         // Reattach to the resumed run stream. The original paused stream
         // ended on the `done` (with paused=true) event; the backend just
@@ -229,8 +232,12 @@ export function MessageList({ conversationId }: MessageListProps) {
       if (workspaceId) client.setWorkspaceId(workspaceId)
       try {
         await submitAskUserAnswer(client, convId, questionId, answers)
-        // Optimistic clear — ask_user_resolved SSE will also clean up
-        useMessageStore.setState({ pendingAsk: null })
+        // Optimistic clear — ask_user_resolved SSE will also clean up.
+        // `lastAnsweredAskQuestionId` tells the subsequent bootstrap not
+        // to re-seed this exact ask while the backend's
+        // `save_pending_request(None)` is in flight (which would re-flash
+        // the form the user just answered).
+        useMessageStore.setState({ pendingAsk: null, lastAnsweredAskQuestionId: questionId })
         // Reattach to the resumed run stream — same reason as above.
         await loadMessages(client, convId)
       } catch (err) {
@@ -250,7 +257,10 @@ export function MessageList({ conversationId }: MessageListProps) {
     // status=paused_hitl), which writes a synthetic AgentAbortedEvent
     // and finalises the run as cancelled. Reload bootstrap to pick up
     // the new terminal state — composer unlocks once pendingAsk clears.
-    useMessageStore.setState({ pendingAsk: null })
+    useMessageStore.setState({
+      pendingAsk: null,
+      lastAnsweredAskQuestionId: pendingAsk.question_id,
+    })
     try {
       await cancelActiveRun(client, convId)
     } catch (err) {
@@ -290,29 +300,14 @@ export function MessageList({ conversationId }: MessageListProps) {
     toolResultMap,
   )
 
-  // After streaming completes, the assistant message is appended to history
-  // while streamAgents is kept intact for smooth transition. Skip the last
-  // history assistant message to avoid rendering the same response twice.
-  // During active streaming (isStreaming=true), the current turn's assistant
-  // message is NOT yet in history, so no dedup is needed — skipping here
-  // would incorrectly hide the *previous* turn's response. Same applies to
-  // a paused-HITL bootstrap where mainStream is the empty placeholder
-  // (no blocks/text/thinking/toolResults): hiding the last history
-  // assistant would erase the pause-turn message the user needs to see.
-  const lastAssistantId = useMemo(() => {
-    if (!mainStream || isStreaming) return null
-    const hasStreamContent =
-      mainStream.blocks.length > 0 ||
-      mainStream.text.length > 0 ||
-      mainStream.thinking.length > 0 ||
-      mainStream.toolResults.length > 0
-    if (!hasStreamContent) return null
-    const msgs = messages ?? []
-    for (let i = msgs.length - 1; i >= 0; i--) {
-      if (msgs[i].role === 'assistant') return msgs[i].id
-    }
-    return null
-  }, [messages, mainStream, isStreaming])
+  // `finalizeCompletedStream` / `finalizePausedStream` reset `streamAgents`
+  // atomically with the new message append, so mainStream is null at the
+  // exact tick the new history entry becomes visible — nothing to dedup.
+  // The previous "skip the last history assistant" heuristic over-fired
+  // during a resume turn, where mainStream holds the NEW assistant but
+  // the last history assistant is still the PREVIOUS (pause-turn) one;
+  // skipping it briefly hid the Thinking + Q/A card. Always render history.
+  const lastAssistantId: string | null = null
 
   // --- Auto-scroll: keep chat pinned to bottom during streaming ---
   const scrollRef = useRef<HTMLDivElement>(null)

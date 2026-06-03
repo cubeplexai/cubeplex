@@ -1,6 +1,6 @@
 'use client'
 
-import { MessageCircleQuestion } from 'lucide-react'
+import { Check, MessageCircleQuestion } from 'lucide-react'
 import type { AskQuestion } from '@cubebox/core'
 
 interface AskUserResolvedCardProps {
@@ -32,20 +32,58 @@ function parseAnswers(raw: string | null): ParsedAnswers {
   }
 }
 
-function answerLabel(question: AskQuestion, value: unknown): string {
-  if (value === undefined || value === null) return '—'
-  if (Array.isArray(value)) {
-    if (question.options) {
-      return value
-        .map((v) => question.options?.find((opt) => opt.value === v)?.label ?? String(v))
-        .join('、')
-    }
-    return value.map(String).join('、')
-  }
-  if (question.options) {
-    return question.options.find((opt) => opt.value === value)?.label ?? String(value)
-  }
-  return String(value)
+function selectedValues(value: unknown): Set<string> {
+  if (Array.isArray(value)) return new Set(value.map(String))
+  if (value === undefined || value === null) return new Set()
+  return new Set([String(value)])
+}
+
+function OptionsList({
+  question,
+  answer,
+  hasAnswer,
+}: {
+  question: AskQuestion
+  answer: unknown
+  hasAnswer: boolean
+}) {
+  const selected = hasAnswer ? selectedValues(answer) : new Set<string>()
+  return (
+    <div className="flex flex-col gap-1 pl-2">
+      {question.options!.map((opt) => {
+        const isSelected = selected.has(opt.value)
+        return (
+          <div
+            key={opt.value}
+            className={
+              'flex items-center gap-2 text-sm ' +
+              (isSelected ? 'text-foreground font-medium' : 'text-muted-foreground/70')
+            }
+          >
+            <span
+              className={
+                'inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-full border ' +
+                (isSelected ? 'border-primary bg-primary text-primary-foreground' : 'border-border')
+              }
+            >
+              {isSelected && <Check className="h-2.5 w-2.5" />}
+            </span>
+            <span>{opt.label}</span>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+function FreeTextAnswer({ answer, hasAnswer }: { answer: unknown; hasAnswer: boolean }) {
+  const text = (() => {
+    if (!hasAnswer) return '—'
+    if (Array.isArray(answer)) return answer.map(String).join('、')
+    if (answer === undefined || answer === null) return '—'
+    return String(answer)
+  })()
+  return <div className="text-sm text-muted-foreground pl-2 border-l-2 border-border">{text}</div>
 }
 
 export function AskUserResolvedCard({ questions, resultContent }: AskUserResolvedCardProps) {
@@ -57,17 +95,17 @@ export function AskUserResolvedCard({ questions, resultContent }: AskUserResolve
         <MessageCircleQuestion className="h-3.5 w-3.5" />
         <span>ask_user</span>
       </div>
-      <div className="flex flex-col gap-2.5">
+      <div className="flex flex-col gap-3">
         {questions.map((q) => {
           const answer = parsed.byKey[q.key]
-          const showAnswer = parsed.ok || resultContent !== null
+          const hasAnswer = parsed.ok && answer !== undefined
           return (
-            <div key={q.key} className="flex flex-col gap-1">
+            <div key={q.key} className="flex flex-col gap-1.5">
               <div className="text-sm font-medium text-foreground">{q.prompt}</div>
-              {showAnswer && (
-                <div className="text-sm text-muted-foreground pl-2 border-l-2 border-border">
-                  {parsed.ok ? answerLabel(q, answer) : '—'}
-                </div>
+              {q.options && q.options.length > 0 ? (
+                <OptionsList question={q} answer={answer} hasAnswer={hasAnswer} />
+              ) : (
+                <FreeTextAnswer answer={answer} hasAnswer={hasAnswer} />
               )}
             </div>
           )
