@@ -20,6 +20,7 @@ import { AssistantMessage, HistoryAssistantMessage } from './AssistantMessage'
 import { AskUserCard } from './AskUserCard'
 import { MessageAttachments } from './MessageAttachments'
 import { TokenUsageBar } from './TokenUsageBar'
+import { MemoryUpdateChip } from './MemoryUpdateChip'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { useMessages } from '@/hooks/useMessages'
 import { useMessageScopedToolResults } from '@/hooks/useMessageScopedToolResults'
@@ -434,6 +435,17 @@ export function MessageList({ conversationId }: MessageListProps) {
               </div>
             </div>
           )}
+
+        {/* Memory count chip — same left-aligned row as TokenUsageBar; chip
+            renders nothing when count is 0 so the row collapses cleanly. */}
+        {workspaceId && (
+          <div className="flex justify-start gap-2.5">
+            <div className="shrink-0 w-6 h-6" />
+            <div className="flex-1 max-w-[75%]">
+              <MemoryUpdateChip conversationId={conversationId} workspaceId={workspaceId} />
+            </div>
+          </div>
+        )}
 
         {error && (
           <div

@@ -1,5 +1,6 @@
 """Memory repository — scope-aware filtering (no OrgScopedMixin)."""
 
+import re
 from datetime import UTC, datetime
 from typing import Any
 
@@ -12,6 +13,11 @@ from cubebox.models.memory import (
     MemoryStatus,
     MemoryType,
 )
+
+
+def _strip_trailing_punct(s: str, pattern: str) -> str:
+    """Strip trailing punctuation matching ``pattern`` from ``s``."""
+    return re.sub(pattern, "", s)
 
 
 class MemoryRepository:
@@ -119,12 +125,39 @@ class MemoryRepository:
     async def find_exact(
         self, *, scope: MemoryScope, type_: MemoryType, content: str
     ) -> MemoryItem | None:
-        """Dedup helper: find an active item with identical (scope/target/type/content)."""
+        """Dedup safety net for identical (scope/type/content).
+
+        This catches *mechanical* duplicates — accidental retries, double-saves
+        across main-agent + reflection-agent within the same turn, etc. It is
+        NOT a semantic-similarity check; that's the agent's job via memory_
+        search before deciding to save.
+
+        Content is normalized before comparison so a trailing punctuation
+        difference (the common case: agent A saves "用户喜欢X。" and agent B
+        saves "用户喜欢X") doesn't slip through:
+        - leading/trailing whitespace trimmed
+        - trailing punctuation (CJK + ASCII) stripped
+
+        The Postgres-side normalization uses regexp_replace + btrim so the
+        comparison runs server-side; content has no index anyway, so the
+        cost is one regex per row in the scope-filtered set.
+        """
+        from sqlalchemy import func
+
+        # Keep this charset in sync with the SQL pattern below.
+        trailing_punct_re = r"[。！？，；、,.!?;:]+$"
+        normalized = _strip_trailing_punct(content.strip(), trailing_punct_re)
+
         stmt = select(MemoryItem).where(
             self._scope_filter(scope),
             MemoryItem.status == MemoryStatus.ACTIVE,  # type: ignore[arg-type]
             MemoryItem.type == type_,  # type: ignore[arg-type]
-            MemoryItem.content == content,  # type: ignore[arg-type]
+            func.regexp_replace(
+                func.btrim(MemoryItem.content),
+                trailing_punct_re,
+                "",
+            )
+            == normalized,
         )
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
