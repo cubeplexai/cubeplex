@@ -1567,6 +1567,44 @@ class RunManager:
                             if not last_assistant:
                                 return
                             user_msg_text = _stringify_user_msg(user_msg_ref)
+                            # Load the user's active personal memory so the reflection agent
+                            # knows what's already stored before deciding what to save.
+                            _existing_items: list[tuple[str, str, str]] = []
+                            try:
+                                import datetime
+
+                                from cubebox.models.memory import MemoryScope, MemoryStatus
+                                from cubebox.repositories.memory import MemoryRepository
+
+                                async with _ue_session_maker() as _mem_session:
+                                    _mem_repo = MemoryRepository(
+                                        _mem_session,
+                                        user_id=ctx.user_id,
+                                        org_id=ctx.org_id,
+                                        workspace_id=ctx.workspace_id,
+                                    )
+                                    _all_personal = await _mem_repo.list(
+                                        scope=MemoryScope.PERSONAL,
+                                        status=MemoryStatus.ACTIVE,
+                                        limit=200,
+                                    )
+                                _sorted = sorted(
+                                    _all_personal,
+                                    key=lambda m: (
+                                        m.last_used_at
+                                        or datetime.datetime.min.replace(tzinfo=datetime.UTC),
+                                        m.created_at,
+                                    ),
+                                    reverse=True,
+                                )[:40]
+                                _existing_items = [(m.id, m.type.value, m.content) for m in _sorted]
+                            except Exception:
+                                logger.warning(
+                                    "reflection: failed to load existing memory for run_id={}",
+                                    run_id,
+                                    exc_info=True,
+                                )
+
                             inp = ReflectionInput(
                                 conversation_id=conversation_id,
                                 run_id=run_id,
@@ -1579,6 +1617,7 @@ class RunManager:
                                         agent_ref.state.messages
                                     ),
                                 ),
+                                existing_memory_items=_existing_items,
                             )
                             async with _ue_session_maker() as _session:
                                 _repo = UserEventRepository(_session)
