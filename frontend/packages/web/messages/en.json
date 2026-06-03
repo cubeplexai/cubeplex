@@ -45,6 +45,12 @@
     "hint": "Enter to send / Shift+Enter for newline",
     "pendingHitlLock": "Answer the pending question above first."
   },
+  "askUser": {
+    "submit": "Submit",
+    "submitting": "Sending…",
+    "cancel": "Cancel",
+    "cancelling": "Cancelling…"
+  },
   "avatar": {
     "adminPanel": "Admin panel",
     "lightTheme": "Light theme",

@@ -45,6 +45,12 @@
     "hint": "Enter 发送 / Shift+Enter 换行",
     "pendingHitlLock": "请先回答上方待处理的问题。"
   },
+  "askUser": {
+    "submit": "提交",
+    "submitting": "发送中…",
+    "cancel": "取消",
+    "cancelling": "取消中…"
+  },
   "avatar": {
     "adminPanel": "管理后台",
     "lightTheme": "浅色主题",

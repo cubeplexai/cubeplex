@@ -1,7 +1,8 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { Clock, Send, X } from 'lucide-react'
+import { useTranslations } from 'next-intl'
+import { Clock, MessageCircleQuestion, Send, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -92,6 +93,7 @@ function QuestionField({
 }
 
 export function AskUserCard({ pending, onSubmit, onCancel }: AskUserCardProps) {
+  const t = useTranslations('askUser')
   const [answers, setAnswers] = useState<Record<string, string | string[]>>(() => {
     const init: Record<string, string | string[]> = {}
     for (const q of pending.questions) {
@@ -149,26 +151,29 @@ export function AskUserCard({ pending, onSubmit, onCancel }: AskUserCardProps) {
 
   return (
     <div className="my-2 rounded-lg border border-blue-200 bg-blue-50 p-3 dark:border-blue-800 dark:bg-blue-950/30">
-      <div className="mb-3 flex items-center gap-2 text-sm font-medium text-blue-800 dark:text-blue-200">
-        <Clock className="h-4 w-4 shrink-0" />
-        <span>Agent is asking for your input</span>
+      <div className="flex items-start gap-2">
+        <MessageCircleQuestion
+          className="mt-0.5 h-4 w-4 shrink-0 text-blue-600 dark:text-blue-300"
+          aria-hidden
+        />
+        <div className="flex flex-1 flex-col gap-3">
+          {pending.questions.map((q) => (
+            <QuestionField
+              key={q.key}
+              question={q}
+              value={answers[q.key] ?? (q.multi_select ? [] : '')}
+              onChange={(v) => setAnswer(q.key, v)}
+            />
+          ))}
+        </div>
         {secondsLeft !== null && secondsLeft > 0 && (
-          <span className="ml-auto tabular-nums text-blue-600 dark:text-blue-400">
+          <span className="inline-flex shrink-0 items-center gap-1 text-xs tabular-nums text-blue-600 dark:text-blue-400">
+            <Clock className="h-3 w-3" />
             {secondsLeft}s
           </span>
         )}
       </div>
-      <div className="flex flex-col gap-3">
-        {pending.questions.map((q) => (
-          <QuestionField
-            key={q.key}
-            question={q}
-            value={answers[q.key] ?? (q.multi_select ? [] : '')}
-            onChange={(v) => setAnswer(q.key, v)}
-          />
-        ))}
-      </div>
-      <div className="mt-3 flex items-center gap-2">
+      <div className="mt-3 flex items-center gap-2 pl-6">
         <Button
           size="sm"
           className="gap-1"
@@ -176,7 +181,7 @@ export function AskUserCard({ pending, onSubmit, onCancel }: AskUserCardProps) {
           onClick={handleSubmit}
         >
           <Send className="h-3.5 w-3.5" />
-          {submitting ? 'Sending…' : 'Submit'}
+          {submitting ? t('submitting') : t('submit')}
         </Button>
         {onCancel && (
           <Button
@@ -187,7 +192,7 @@ export function AskUserCard({ pending, onSubmit, onCancel }: AskUserCardProps) {
             onClick={handleCancel}
           >
             <X className="h-3.5 w-3.5" />
-            {cancelling ? 'Cancelling…' : 'Cancel'}
+            {cancelling ? t('cancelling') : t('cancel')}
           </Button>
         )}
       </div>
