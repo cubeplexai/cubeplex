@@ -232,12 +232,19 @@ export function MessageList({ conversationId }: MessageListProps) {
       if (workspaceId) client.setWorkspaceId(workspaceId)
       try {
         await submitAskUserAnswer(client, convId, questionId, answers)
-        // Optimistic clear — ask_user_resolved SSE will also clean up.
-        // `lastAnsweredAskQuestionId` tells the subsequent bootstrap not
-        // to re-seed this exact ask while the backend's
-        // `save_pending_request(None)` is in flight (which would re-flash
-        // the form the user just answered).
-        useMessageStore.setState({ pendingAsk: null, lastAnsweredAskQuestionId: questionId })
+        // Keep the form mounted (still in "submitting" state) until
+        // either the SSE `ask_user_resolved` event clears `pendingAsk`
+        // OR the bootstrap reload below brings back a state without
+        // this question pending. The optimistic clear we did before
+        // produced a visible blank gap while the resolved card data
+        // arrived; preserving the form bridges it smoothly.
+        //
+        // `lastAnsweredAskQuestionId` tells the subsequent bootstrap
+        // not to re-seed this exact ask while the backend's
+        // `save_pending_request(None)` is in flight. The companion
+        // change in loadConversation preserves the existing
+        // `pendingAsk` instead of clearing it when this flag matches.
+        useMessageStore.setState({ lastAnsweredAskQuestionId: questionId })
         // Reattach to the resumed run stream — same reason as above.
         await loadMessages(client, convId)
       } catch (err) {
@@ -257,15 +264,19 @@ export function MessageList({ conversationId }: MessageListProps) {
     // status=paused_hitl), which writes a synthetic AgentAbortedEvent
     // and finalises the run as cancelled. Reload bootstrap to pick up
     // the new terminal state — composer unlocks once pendingAsk clears.
-    useMessageStore.setState({
-      pendingAsk: null,
-      lastAnsweredAskQuestionId: pendingAsk.question_id,
-    })
+    // Mirror the submit handler: keep the form mounted (it will switch
+    // to its "cancelling" state via the AskUserCard button) until the
+    // backend's cancel-respond flow finishes and SSE clears pendingAsk.
+    // `lastAnsweredAskQuestionId` is the bootstrap-guard.
+    useMessageStore.setState({ lastAnsweredAskQuestionId: pendingAsk.question_id })
     try {
       await cancelActiveRun(client, convId)
     } catch (err) {
-      // Re-seed pendingAsk so the user isn't stranded if cancel failed.
-      useMessageStore.setState({ pendingAsk })
+      // Cancel failed — drop the bootstrap-guard so the bootstrap below
+      // can re-seed the form. The form was never unmounted, just held
+      // in its "cancelling" state; clearing the guard lets the next
+      // bootstrap rewrite `pendingAsk` from `pending_hitl`.
+      useMessageStore.setState({ lastAnsweredAskQuestionId: null })
       console.error('Failed to cancel paused ask_user:', err)
     } finally {
       await loadMessages(client, convId)
