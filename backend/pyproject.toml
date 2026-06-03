@@ -176,7 +176,7 @@ exclude_lines = [
 # after the full agent run completes (before AgentEndEvent), enabling end-of-run
 # memory reflection. On top of prior OpenAI double-finish_reason guard (262a33f),
 # HITL channel (b03813e), subagent-span-nesting (#122), steer-cancel (#120).
-cubepi = { git = "https://github.com/cubeplexai/cubepi.git", rev = "1686eed" }
+cubepi = { git = "https://github.com/cubeplexai/cubepi.git", rev = "8202479" }
 
 [dependency-groups]
 dev = [
