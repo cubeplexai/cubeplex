@@ -636,6 +636,61 @@ def _build_cancel_answer(payload: Any, reason: str) -> dict[str, Any]:
     return {"_cancelled": True, "_reason": reason}
 
 
+def _extract_tool_summaries(messages: list[Any]) -> list[dict[str, str]]:
+    """Build compact tool-call summaries from a turn's message list.
+
+    Collects all ToolResultMessages that appear after the last UserMessage,
+    paired with their corresponding ToolCall arguments. Capped at 10 entries;
+    args and error text truncated to 150 chars each.
+    """
+    from cubepi.providers.base import (
+        AssistantMessage,
+        TextContent,
+        ToolCall,
+        ToolResultMessage,
+        UserMessage,
+    )
+
+    _ARGS_LIMIT = 150
+    _RESULT_LIMIT = 150
+    _MAX_SUMMARIES = 10
+
+    last_user_idx = -1
+    for i, msg in enumerate(messages):
+        if isinstance(msg, UserMessage):
+            last_user_idx = i
+    if last_user_idx == -1:
+        return []
+
+    tool_args: dict[str, str] = {}
+    for msg in messages[last_user_idx + 1 :]:
+        if isinstance(msg, AssistantMessage):
+            for part in msg.content:
+                if isinstance(part, ToolCall):
+                    args_str = ", ".join(f"{k}={repr(v)}" for k, v in part.arguments.items())
+                    tool_args[part.id] = args_str[:_ARGS_LIMIT]
+
+    summaries: list[dict[str, str]] = []
+    for msg in messages[last_user_idx + 1 :]:
+        if not isinstance(msg, ToolResultMessage):
+            continue
+        if len(summaries) >= _MAX_SUMMARIES:
+            break
+        result_text = "".join(c.text for c in msg.content if isinstance(c, TextContent))
+        if msg.is_error:
+            outcome = f"error: {result_text[:_RESULT_LIMIT]}"
+        else:
+            outcome = "ok"
+        summaries.append(
+            {
+                "name": msg.tool_name,
+                "args_summary": tool_args.get(msg.tool_call_id, ""),
+                "outcome": outcome,
+            }
+        )
+    return summaries
+
+
 class RunManager:
     """Owns background run execution and Redis persistence."""
 
@@ -1520,7 +1575,9 @@ class RunManager:
                                 turn=ReflectionTurn(
                                     user_message=user_msg_text,
                                     assistant_message=last_assistant,
-                                    tool_summaries=[],
+                                    tool_summaries=_extract_tool_summaries(
+                                        agent_ref.state.messages
+                                    ),
                                 ),
                             )
                             async with _ue_session_maker() as _session:
