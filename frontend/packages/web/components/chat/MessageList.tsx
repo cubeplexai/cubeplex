@@ -22,6 +22,7 @@ import { MessageAttachments } from './MessageAttachments'
 import { TokenUsageBar } from './TokenUsageBar'
 import { MemoryUpdateChip } from './MemoryUpdateChip'
 import { ScrollArea } from '@/components/ui/scroll-area'
+import { useMemoryCount } from '@/hooks/useMemoryCount'
 import { useMessages } from '@/hooks/useMessages'
 import { useMessageScopedToolResults } from '@/hooks/useMessageScopedToolResults'
 import { useWorkspaceContext } from '@/hooks/useWorkspaceContext'
@@ -184,6 +185,9 @@ export function MessageList({ conversationId }: MessageListProps) {
   const pendingAsk = useMessageStore((s) => s.pendingAsk)
   const streamingConversationId = useMessageStore((s) => s.streamingConversationId)
   const { workspaceId } = useWorkspaceContext()
+  // Hoisted: also drives status-row visibility below so an empty chip doesn't
+  // leave a stray gutter-only line.
+  const memoryCount = useMemoryCount(workspaceId, conversationId)
 
   useEffect(() => {
     const client = createApiClient('')
@@ -421,31 +425,36 @@ export function MessageList({ conversationId }: MessageListProps) {
           </div>
         )}
 
-        {!isStreaming &&
-          (turnUsage || sessionUsage) &&
-          (messages ?? []).some((m) => m.role === 'assistant') && (
+        {(() => {
+          // Status row: token usage + memory chip share one indent-aligned
+          // line. Both items self-hide when empty; we check both up-front so
+          // the wrapper (and its avatar-gutter placeholder) only renders when
+          // at least one will show content.
+          const tokenVisible =
+            !isStreaming &&
+            (turnUsage !== null || sessionUsage !== null) &&
+            (messages ?? []).some((m) => m.role === 'assistant')
+          const chipCount = memoryCount
+          const chipVisible = workspaceId !== null && chipCount !== null && chipCount > 0
+          if (!tokenVisible && !chipVisible) return null
+          return (
             <div className="flex justify-start gap-2.5">
               <div className="shrink-0 w-6 h-6" />
-              <div className="flex-1 max-w-[75%]">
-                <TokenUsageBar
-                  turnUsage={turnUsage}
-                  sessionUsage={sessionUsage}
-                  contextWindow={contextWindow}
-                />
+              <div className="flex-1 max-w-[75%] flex flex-wrap items-center gap-3">
+                {tokenVisible && (
+                  <TokenUsageBar
+                    turnUsage={turnUsage}
+                    sessionUsage={sessionUsage}
+                    contextWindow={contextWindow}
+                  />
+                )}
+                {chipVisible && workspaceId && (
+                  <MemoryUpdateChip conversationId={conversationId} workspaceId={workspaceId} />
+                )}
               </div>
             </div>
-          )}
-
-        {/* Memory count chip — same left-aligned row as TokenUsageBar; chip
-            renders nothing when count is 0 so the row collapses cleanly. */}
-        {workspaceId && (
-          <div className="flex justify-start gap-2.5">
-            <div className="shrink-0 w-6 h-6" />
-            <div className="flex-1 max-w-[75%]">
-              <MemoryUpdateChip conversationId={conversationId} workspaceId={workspaceId} />
-            </div>
-          </div>
-        )}
+          )
+        })()}
 
         {error && (
           <div

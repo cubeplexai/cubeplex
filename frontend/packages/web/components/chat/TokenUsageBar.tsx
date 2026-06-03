@@ -54,25 +54,28 @@ export function TokenUsageBar({ turnUsage, sessionUsage, contextWindow }: TokenU
       : null
 
   return (
-    <div className="mt-1">
+    <div className="relative">
       <button
         type="button"
         onClick={() => setIsExpanded((prev) => !prev)}
-        className="flex items-center gap-1.5 text-xs text-muted-foreground/60
-          hover:text-muted-foreground transition-colors cursor-pointer"
+        className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs
+          bg-muted/60 text-muted-foreground hover:text-foreground hover:bg-muted
+          transition-colors"
       >
-        <span className="text-muted-foreground/40">
-          {isExpanded ? <ChevronDown className="size-3" /> : <ChevronRight className="size-3" />}
-        </span>
-        <BarChart3 className="size-3" />
+        <BarChart3 aria-hidden className="size-3" />
         <span>{t('tokenUsage')}</span>
+        {isExpanded ? (
+          <ChevronDown className="size-3 opacity-60" />
+        ) : (
+          <ChevronRight className="size-3 opacity-60" />
+        )}
       </button>
 
       {isExpanded && (
         <div
-          className="mt-2 text-xs text-muted-foreground bg-muted/30
-            border border-border/50 rounded-lg px-3 py-2.5 space-y-3
-            max-w-xs"
+          className="absolute left-0 top-full mt-2 z-10 text-xs text-muted-foreground bg-popover
+            border border-border rounded-lg px-3 py-2.5 space-y-3 shadow-md
+            max-w-xs w-72"
         >
           {turnUsage && (
             <div>
