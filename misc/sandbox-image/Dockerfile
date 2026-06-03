@@ -249,12 +249,17 @@ ENV USER=neko \
 #   require("xxx")         -> sees user globals + baseline globals (NODE_PATH)
 #   user-installed CLIs    -> on PATH (workspace bin dirs first)
 #
-# Trade-off: `pip install --upgrade` against a baseline package is
-# pip-warns-against-it territory (target dir has no metadata of /opt/venv);
-# treat baselines as immutable, install new versions as additional copies.
+# Why PIP_PREFIX (not PIP_TARGET): pip --target's known issues include not
+# emitting console_scripts when bin/ already has entries, and treating the
+# install as a flat dir with no awareness of /opt/venv's packages (so deps
+# get installed redundantly). --prefix uses the standard sysconfig layout
+# (prefix/bin, prefix/lib/pythonX.Y/site-packages), generates entry points
+# correctly, and sees baseline packages so dependency resolution dedups.
+# Trade-off: `pip uninstall xxx` still refuses to touch /workspace packages
+# (the venv is at /opt/venv); `rm -rf` the package dir to remove cleanly.
 # ---------------------------------------------------------------------------
-ENV PIP_TARGET=/workspace/.python-packages \
-    PYTHONPATH=/workspace/.python-packages:/opt/venv/lib/python3.12/site-packages \
+ENV PIP_PREFIX=/workspace/.python-packages \
+    PYTHONPATH=/workspace/.python-packages/lib/python3.12/site-packages:/opt/venv/lib/python3.12/site-packages \
     NPM_CONFIG_PREFIX=/workspace/.npm-global \
     NODE_PATH=/workspace/.npm-global/lib/node_modules:/usr/local/lib/node_modules \
     PATH="/workspace/.npm-global/bin:/workspace/.python-packages/bin:/opt/dotnet:/opt/venv/bin:$PATH"
