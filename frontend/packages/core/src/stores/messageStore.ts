@@ -299,15 +299,17 @@ function buildPendingUserMessage(runId: string, content: string): UserMessageTyp
 }
 
 /**
- * History returned by `/bootstrap` may contain checkpoints from the active run.
- * The stream replay re-emits all of that content, so anything after the active
- * run's user message would render twice. Trim history to end at that user
- * message — or append a pending placeholder if the run is so early that the
- * user message has not been checkpointed yet.
+ * History returned by `/bootstrap` may not yet contain the active run's
+ * user message if cubepi's checkpointer is briefly behind the Redis
+ * stream — append a placeholder so the user's prompt renders without
+ * waiting for the next poll. Anything else in `messages` reflects
+ * cubepi's committed log; the SSE reattach is cursor'd past
+ * `active_run.last_event_id` so the stream will not replay history,
+ * which means there is nothing to trim from the tail.
  *
- * `startedAt` (ISO from the run record) disambiguates a same-content user
- * message from a prior turn; we only bind to a history entry created at or
- * after the run was claimed.
+ * `startedAt` (ISO from the run record) disambiguates a same-content
+ * user message from a prior turn; we only bind to a history entry
+ * created at or after the run was claimed.
  */
 export function trimHistoryForActiveRun(
   messages: Message[],
@@ -316,10 +318,6 @@ export function trimHistoryForActiveRun(
   startedAt: string | null,
 ): Message[] {
   const startedAtMs = startedAt ? Date.parse(startedAt) : NaN
-  // Find the run's ORIGINAL user message: the last user turn matching `content`
-  // at-or-after the run start. Skipping non-matching newer user turns is what
-  // lets checkpointed steer messages (which appear after the original) avoid
-  // triggering a duplicate placeholder.
   for (let i = messages.length - 1; i >= 0; i--) {
     const msg = messages[i]
     if (msg.role !== 'user') continue
@@ -327,7 +325,7 @@ export function trimHistoryForActiveRun(
     if (Number.isFinite(startedAtMs) && Number.isFinite(msgMs) && msgMs < startedAtMs) {
       break
     }
-    if (getTextContent(msg) === content) return messages.slice(0, i + 1)
+    if (getTextContent(msg) === content) return messages
     // Not the original (e.g. a steer turn) — keep scanning back.
   }
   return [...messages, buildPendingUserMessage(runId, content)]
@@ -1104,6 +1102,23 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
       const hasPendingHitl = pendingHitlRunId !== null
       const streamRunId = bootstrap.active_run?.run_id ?? pendingHitlRunId
       const streamingActive = !!bootstrap.active_run || hasPendingHitl
+      // Paused HITL: SSE is attached but the worker has detached. Don't
+      // light up "is streaming" indicators (typing dots etc.); the
+      // <AskUserCard> / composer lock already convey state. `pendingAsk`
+      // and `pendingConfirmMap` are the truth signals here. We keep
+      // `streamingConversationId` set so MessageList's `pendingAsk &&
+      // streamingConversationId === conversationId` gate still fires.
+      const isPaused = bootstrap.active_run?.status === 'paused_hitl' || hasPendingHitl
+      const isStreamingActive = streamingActive && !isPaused
+      // `bootstrap.messages` already includes everything up to the latest
+      // event in the Redis stream at fetch time. The SSE reattach should
+      // pick up STRICTLY-NEW events from here; without this cursor the
+      // post-answer reattach replays the paused turn (doubling the
+      // assistant message into streamAgents) and hits the paused `done`
+      // event mid-replay, breaking out of consumeRunStream before any
+      // resume-turn events can be read. Seed both the XREAD cursor and
+      // the in-store dedupe guard from `active_run.last_event_id`.
+      const streamCursor = bootstrap.active_run?.last_event_id ?? null
 
       set((s) => ({
         messages: { ...s.messages, [conversationId]: messages },
@@ -1116,10 +1131,10 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
         toolResultMap: {},
         pendingConfirmMap: seedPendingConfirmMap,
         pendingAsk: seedPendingAsk,
-        isStreaming: streamingActive,
+        isStreaming: isStreamingActive,
         streamingConversationId: streamingActive ? conversationId : null,
         currentRunId: streamRunId,
-        lastAppliedEventId: null,
+        lastAppliedEventId: streamCursor,
         statusPhase: null,
         turnUsage: newTurnUsage,
         sessionUsage: newSessionUsage,
@@ -1131,12 +1146,13 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
         const controller = new AbortController()
         activeStreamController = controller
         const runId = streamRunId
+        const lastEventId = streamCursor ?? undefined
         queueMicrotask(() => {
           void consumeRunStream(
             client,
             conversationId,
             runId,
-            undefined,
+            lastEventId,
             set,
             get,
             controller.signal,
