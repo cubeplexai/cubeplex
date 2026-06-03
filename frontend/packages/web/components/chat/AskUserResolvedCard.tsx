@@ -1,6 +1,6 @@
 'use client'
 
-import { Check, MessageCircleQuestion } from 'lucide-react'
+import { Check } from 'lucide-react'
 import type { AskQuestion } from '@cubebox/core'
 
 interface AskUserResolvedCardProps {
@@ -91,26 +91,20 @@ export function AskUserResolvedCard({ questions, resultContent }: AskUserResolve
 
   return (
     <div className="px-4 py-3 flex flex-col gap-3">
-      <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-        <MessageCircleQuestion className="h-3.5 w-3.5" />
-        <span>ask_user</span>
-      </div>
-      <div className="flex flex-col gap-3">
-        {questions.map((q) => {
-          const answer = parsed.byKey[q.key]
-          const hasAnswer = parsed.ok && answer !== undefined
-          return (
-            <div key={q.key} className="flex flex-col gap-1.5">
-              <div className="text-sm font-medium text-foreground">{q.prompt}</div>
-              {q.options && q.options.length > 0 ? (
-                <OptionsList question={q} answer={answer} hasAnswer={hasAnswer} />
-              ) : (
-                <FreeTextAnswer answer={answer} hasAnswer={hasAnswer} />
-              )}
-            </div>
-          )
-        })}
-      </div>
+      {questions.map((q) => {
+        const answer = parsed.byKey[q.key]
+        const hasAnswer = parsed.ok && answer !== undefined
+        return (
+          <div key={q.key} className="flex flex-col gap-1.5">
+            <div className="text-sm font-medium text-foreground">{q.prompt}</div>
+            {q.options && q.options.length > 0 ? (
+              <OptionsList question={q} answer={answer} hasAnswer={hasAnswer} />
+            ) : (
+              <FreeTextAnswer answer={answer} hasAnswer={hasAnswer} />
+            )}
+          </div>
+        )
+      })}
       {!parsed.ok && parsed.fallback && (
         <div className="text-xs text-muted-foreground italic">{parsed.fallback}</div>
       )}
