@@ -9,13 +9,14 @@ import pytest
 from pydantic import ValidationError
 
 from cubebox.agents.actions.capabilities.scheduled_tasks import (
+    SCHEDULED_TASKS_CAPABILITY,
     CreateInput,
     UpdateInput,
     _handle_create,
     _handle_update,
 )
 from cubebox.agents.actions.context import ScopeContext
-from cubebox.agents.actions.types import ActionInvalidInput
+from cubebox.agents.actions.types import ActionInvalidInput, AgentOperation
 from cubebox.models.membership import Role
 
 
@@ -260,3 +261,52 @@ async def test_handle_update_flattens_schedule() -> None:
     # "None means skip" loop leaves them alone).
     assert "name" not in captured
     assert "prompt" not in captured
+
+
+# ---------------------------------------------------------------------------
+# Description content — each operation carries a copyable example payload
+# ---------------------------------------------------------------------------
+
+
+def _op(name: str) -> AgentOperation:
+    for op in SCHEDULED_TASKS_CAPABILITY.operations:
+        if op.name == name:
+            return op
+    raise AssertionError(f"op {name!r} not registered")
+
+
+def test_each_operation_description_contains_example_payload() -> None:
+    # Every non-trivial op should show a JSON-shaped example the model can copy.
+    for op_name in ("list", "create", "update", "pause", "resume", "delete", "get", "list_runs"):
+        desc = _op(op_name).description
+        assert "Example" in desc or "example" in desc, f"{op_name} description has no example"
+        assert '"operation"' in desc, f"{op_name} description omits the operation discriminator"
+
+
+def test_create_description_documents_all_three_schedule_kinds() -> None:
+    desc = _op("create").description
+    for keyword in ("cron", "interval", "once"):
+        assert keyword in desc, f"create description omits schedule kind {keyword!r}"
+
+
+def test_create_description_documents_target_sentinel() -> None:
+    desc = _op("create").description
+    assert "current_conversation" in desc
+    assert (
+        "do not need" in desc.lower()
+        or "no id" in desc.lower()
+        or "no conversation id" in desc.lower()
+    ), "create description must tell the model it doesn't need to pass a conversation ID"
+
+
+def test_capability_description_is_short_and_points_to_operations() -> None:
+    cap_desc = SCHEDULED_TASKS_CAPABILITY.description
+    # Capability-level description shouldn't duplicate per-op examples (token cost).
+    assert len(cap_desc) < 600
+    # But it should mention that each operation has its own example.
+    assert "operation" in cap_desc.lower()
+
+
+def test_list_description_states_no_arguments() -> None:
+    desc = _op("list").description
+    assert "no arguments" in desc.lower() or "no parameters" in desc.lower()
