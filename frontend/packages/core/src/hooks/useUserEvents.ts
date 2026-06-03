@@ -2,20 +2,22 @@
 
 import { useEffect } from 'react'
 import type { ApiClient } from '../api/client'
-import { streamUserEvents } from '../api/userEventStream'
+import { markUserEventRead, streamUserEvents } from '../api/userEventStream'
 import { useAuthStore } from '../stores/authStore'
 import { useMemoryEventStore } from '../stores/memoryEventStore'
 
 // Note: this hook deliberately does NOT persist a per-connection `since`
-// cursor. The previous design advanced a localStorage cursor on every received
-// event, but the in-memory Zustand store can be lost (tab reload / close)
-// before the user clicks the chip to mark the event read — in which case the
-// stored cursor is already past the event id, and the next connection sends
-// `since=<that id>`, causing the unread event to be filtered out and
-// permanently invisible on that device. The server's `read_at IS NULL` is the
-// durable source of truth instead: each connection re-receives still-unread
-// events, the store dedupes by id, and the chip POST /read advances the
-// server-side state when the user actually dismisses the notification.
+// cursor — the in-memory Zustand store can be lost (tab reload/close) before
+// the cursor would be safe to advance, and a stored cursor past unprocessed
+// events would silently filter them out forever. The server's `read_at IS
+// NULL` is the durable source of truth.
+//
+// Events are CONSUMED as "refresh triggers" by the chip (count refetch via
+// `useMemoryCount`). After delivering an event to the store, this hook
+// fire-and-forget POSTs `/events/{id}/read` so the server marks it consumed
+// and doesn't re-stream it on every future reconnect. Without that ack the
+// `read_at IS NULL` backlog grows forever and every new tab replays the
+// entire history before catching up to live events.
 
 export function useUserEvents(client: ApiClient): void {
   const add = useMemoryEventStore((s) => s.add)
@@ -38,7 +40,15 @@ export function useUserEvents(client: ApiClient): void {
         let cleanEnd = false
         try {
           for await (const ev of streamUserEvents(client, { signal: ac.signal })) {
-            if (ev.type === 'memory_updated') add(ev)
+            if (ev.type === 'memory_updated') {
+              add(ev)
+              // Ack so the server doesn't keep replaying this event forever.
+              // Best-effort — failure means a replay on next reconnect, which
+              // the store's id-based dedup absorbs without UX impact.
+              void markUserEventRead(client, ev.id).catch(() => {
+                /* swallow */
+              })
+            }
             backoff = 1000 // reset on successful event
           }
           cleanEnd = true
