@@ -2588,6 +2588,7 @@ class RunManager:
             "cache_read_tokens": 0,
             "cache_write_tokens": 0,
         }
+        last_context_tokens: int = 0
 
         async def emit_status(phase: str, detail: str | None = None) -> None:
             data: dict[str, str] = {"phase": phase}
@@ -2645,6 +2646,10 @@ class RunManager:
             if sse_event.type == "usage":
                 for key in turn_usage:
                     turn_usage[key] += sse_event.data.get(key, 0)
+                nonlocal last_context_tokens
+                last_context_tokens = max(
+                    last_context_tokens, sse_event.data.get("input_tokens", 0)
+                )
             await publish_event(sse_event)
 
         # Drainer for the shared subagent/citation queue (see
@@ -2865,6 +2870,7 @@ class RunManager:
                     "turn": dict(turn_usage),
                     "session": session_usage,
                     "context_window": context_window,
+                    "context_tokens": last_context_tokens,
                 }
             }
             if final_status == "paused_hitl":
@@ -3070,6 +3076,7 @@ class RunManager:
             "cache_read_tokens": 0,
             "cache_write_tokens": 0,
         }
+        last_context_tokens: int = 0
 
         async def emit_status(phase: str, detail: str | None = None) -> None:
             data: dict[str, str] = {"phase": phase}
@@ -3127,6 +3134,10 @@ class RunManager:
             if sse_event.type == "usage":
                 for key in turn_usage:
                     turn_usage[key] += sse_event.data.get(key, 0)
+                nonlocal last_context_tokens
+                last_context_tokens = max(
+                    last_context_tokens, sse_event.data.get("input_tokens", 0)
+                )
             await publish_event(sse_event)
 
         event_q_drainer: asyncio.Task[None] | None = asyncio.create_task(
@@ -3325,6 +3336,7 @@ class RunManager:
                     "turn": dict(turn_usage),
                     "session": session_usage,
                     "context_window": context_window,
+                    "context_tokens": last_context_tokens,
                 }
             }
             if final_status == "paused_hitl":

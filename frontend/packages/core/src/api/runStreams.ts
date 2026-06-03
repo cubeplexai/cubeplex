@@ -33,6 +33,7 @@ export interface ConversationBootstrap {
       total_cache_write_tokens: number
     }
     context_window: number
+    context_tokens?: number
   }
   /**
    * Cold-start fallback: when the Redis event stream has aged out but the
