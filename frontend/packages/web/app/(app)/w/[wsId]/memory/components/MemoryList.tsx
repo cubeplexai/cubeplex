@@ -9,9 +9,15 @@ interface MemoryListProps {
   wsId: string
   scope?: MemoryScope
   status?: MemoryStatus
+  sourceConversationId?: string
 }
 
-export function MemoryList({ wsId, scope, status = 'active' }: MemoryListProps) {
+export function MemoryList({
+  wsId,
+  scope,
+  status = 'active',
+  sourceConversationId,
+}: MemoryListProps) {
   const [items, setItems] = useState<MemoryItem[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -29,7 +35,7 @@ export function MemoryList({ wsId, scope, status = 'active' }: MemoryListProps) 
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setLoading(true)
     setError(null)
-    listMemory(client, { scope, status })
+    listMemory(client, { scope, status, source_conversation_id: sourceConversationId })
       .then((data) => {
         if (!cancelled) setItems(data)
       })
@@ -43,7 +49,7 @@ export function MemoryList({ wsId, scope, status = 'active' }: MemoryListProps) 
     return () => {
       cancelled = true
     }
-  }, [client, scope, status])
+  }, [client, scope, status, sourceConversationId])
 
   const handleArchive = useCallback(
     async (id: string) => {
