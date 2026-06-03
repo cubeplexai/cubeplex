@@ -1,10 +1,12 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { createApiClient, getMemoryCount, useMemoryEventStore } from '@cubebox/core'
+import { createApiClient, listMemory, type MemoryItem } from '@cubebox/core'
 import { cn } from '@/lib/utils'
-import { Sparkle } from 'lucide-react'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import { ArrowUpRight, Sparkle } from 'lucide-react'
+import { useMemoryCount } from '@/hooks/useMemoryCount'
 
 interface Props {
   conversationId: string
@@ -12,72 +14,119 @@ interface Props {
 }
 
 /**
- * Permanent per-conversation memory count chip.
+ * Per-conversation memory count chip.
  *
- * Data source is the backend `GET /api/v1/ws/{ws}/memory/count` query (refresh-
- * safe). The `useMemoryEventStore` SSE pipeline is used only as a refresh
- * trigger — when an event arrives for this conversation, we re-fetch the count
- * rather than incrementing locally (cheaper to keep correct than to maintain
- * dedup state).
- *
- * No mark-read on click — the chip is a count display, not an unread badge.
- * Click navigates to the memory page filtered to this conversation.
+ * Click opens a Popover with the actual memory contents (lazy-fetched on
+ * open) and a button to jump to the full memory page filtered to this
+ * conversation. Count comes from a refresh-safe backend query — SSE events
+ * just trigger a refetch.
  */
 export function MemoryUpdateChip({ conversationId, workspaceId }: Props) {
   const router = useRouter()
+  const count = useMemoryCount(workspaceId, conversationId)
+
   const client = useMemo(() => {
     const c = createApiClient('')
     c.setWorkspaceId(workspaceId)
     return c
   }, [workspaceId])
 
-  const [count, setCount] = useState<number | null>(null)
+  const [open, setOpen] = useState(false)
+  const [items, setItems] = useState<MemoryItem[] | null>(null)
+  const [itemsLoading, setItemsLoading] = useState(false)
 
-  const refresh = useCallback(async () => {
-    try {
-      const n = await getMemoryCount(client, { source_conversation_id: conversationId })
-      setCount(n)
-    } catch {
-      // best-effort: leave previous count visible
-    }
-  }, [client, conversationId])
-
-  // Initial fetch + on conversation change.
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setCount(null)
-    void refresh()
-  }, [refresh])
-
-  // Re-fetch whenever the live SSE pipeline reports any new memory event for
-  // this conversation. Subscribing to the bucket length keeps the effect from
-  // re-running on unrelated store updates.
-  const eventCount = useMemoryEventStore((s) => (s.byConversation[conversationId] ?? []).length)
-  useEffect(() => {
-    if (eventCount === 0) return
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    void refresh()
-  }, [eventCount, refresh])
+  // Lazy-load memory contents each time the popover opens — small list, no
+  // staleness window worth optimizing for.
+  const handleOpenChange = useCallback(
+    async (next: boolean) => {
+      setOpen(next)
+      if (!next) return
+      setItemsLoading(true)
+      try {
+        const list = await listMemory(client, {
+          source_conversation_id: conversationId,
+          status: 'active',
+        })
+        setItems(list)
+      } catch {
+        setItems([])
+      } finally {
+        setItemsLoading(false)
+      }
+    },
+    [client, conversationId],
+  )
 
   if (count === null || count === 0) return null
 
-  const handleClick = () => {
+  const goToMemoryPage = () => {
     router.push(`/w/${workspaceId}/memory?conversation=${conversationId}`)
   }
 
   return (
-    <button
-      type="button"
-      onClick={handleClick}
-      className={cn(
-        'inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs',
-        'bg-muted/60 text-muted-foreground hover:text-foreground hover:bg-muted',
-        'transition-colors',
-      )}
-      aria-label={`${count} 条记忆 · 查看`}
-    >
-      <Sparkle aria-hidden className="size-3" />
-      <span>{count} 条记忆 · 查看</span>
-    </button>
+    <Popover open={open} onOpenChange={handleOpenChange}>
+      <PopoverTrigger
+        className={cn(
+          'inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs',
+          'bg-muted/60 text-muted-foreground hover:text-foreground hover:bg-muted',
+          'transition-colors',
+        )}
+        aria-label={`${count} 条记忆`}
+      >
+        <Sparkle aria-hidden className="size-3" />
+        <span>{count} 条记忆</span>
+      </PopoverTrigger>
+
+      <PopoverContent align="start" sideOffset={6} className="w-80 p-0">
+        <div className="flex items-center justify-between px-3 py-2 border-b border-border/50">
+          <span className="text-xs font-medium text-foreground/70">本对话产生的记忆</span>
+          <button
+            type="button"
+            onClick={goToMemoryPage}
+            className={cn(
+              'inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px]',
+              'text-muted-foreground hover:text-foreground hover:bg-muted/60',
+              'transition-colors',
+            )}
+            aria-label="跳转到记忆页面"
+          >
+            打开记忆页
+            <ArrowUpRight className="size-3" />
+          </button>
+        </div>
+
+        <div className="max-h-72 overflow-y-auto px-3 py-2 space-y-2">
+          {itemsLoading && (
+            <div className="space-y-2">
+              {[...Array(3)].map((_, i) => (
+                <div
+                  key={i}
+                  className="h-9 rounded-md border border-border/40 bg-muted/30 animate-pulse"
+                />
+              ))}
+            </div>
+          )}
+
+          {!itemsLoading && items && items.length === 0 && (
+            <p className="text-xs text-muted-foreground/60 py-2 text-center">暂无记忆</p>
+          )}
+
+          {!itemsLoading &&
+            items &&
+            items.length > 0 &&
+            items.map((m) => (
+              <div
+                key={m.id}
+                className="rounded-md border border-border/40 bg-muted/20 px-2.5 py-1.5"
+              >
+                <p className="text-xs leading-snug text-foreground/85 break-words">{m.content}</p>
+                <p className="mt-1 text-[10px] text-muted-foreground/60">
+                  {m.type} · {m.scope}
+                </p>
+              </div>
+            ))}
+        </div>
+      </PopoverContent>
+    </Popover>
   )
 }
