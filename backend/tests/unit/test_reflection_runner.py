@@ -239,3 +239,69 @@ async def test_reflect_idempotency(
 
     assert factory_call_count == 1
     assert user_event_service_mock.publish.call_count == 1
+
+
+class TestBuildSeedPrompt:
+    """Unit tests for _build_seed_prompt — no async needed."""
+
+    def _runner(self) -> ReflectionRunner:
+        return ReflectionRunner(
+            user_event_service=MagicMock(),
+            agent_factory=MagicMock(),
+        )
+
+    def _inp(
+        self,
+        *,
+        existing: list[tuple[str, str, str]] | None = None,
+        tool_summaries: list[dict[str, str]] | None = None,
+    ) -> ReflectionInput:
+        return ReflectionInput(
+            conversation_id="c",
+            run_id="r",
+            user_id="u",
+            workspace_id=None,
+            turn=ReflectionTurn(
+                user_message="USER MSG",
+                assistant_message="ASST MSG",
+                tool_summaries=tool_summaries or [],
+            ),
+            existing_memory_items=existing or [],
+        )
+
+    def test_no_existing_memory_no_memory_block(self) -> None:
+        seed = self._runner()._build_seed_prompt(self._inp())
+        assert "current memory" not in seed
+        assert "USER MSG" in seed
+        assert "ASST MSG" in seed
+
+    def test_existing_memory_renders_block(self) -> None:
+        items = [
+            ("mem-abc", "preference", "用户偏好中文交流"),
+            ("mem-def", "project_fact", "CubePi 是 Agent 框架"),
+        ]
+        seed = self._runner()._build_seed_prompt(self._inp(existing=items))
+        assert "current memory" in seed
+        assert "[mem-abc]" in seed
+        assert "(preference)" in seed
+        assert "用户偏好中文交流" in seed
+        assert "[mem-def]" in seed
+        # memory block appears BEFORE the turn
+        assert seed.index("current memory") < seed.index("Last turn")
+
+    def test_existing_memory_content_truncated_to_200_chars(self) -> None:
+        long_content = "x" * 300
+        items = [("mem-xyz", "project_fact", long_content)]
+        seed = self._runner()._build_seed_prompt(self._inp(existing=items))
+        assert long_content not in seed
+        assert "x" * 200 in seed
+
+    def test_tool_summaries_rendered(self) -> None:
+        summaries = [
+            {"name": "execute", "args_summary": "pip install foo", "outcome": "ok"},
+            {"name": "execute", "args_summary": "twitter whoami", "outcome": "error: HTTP 403"},
+        ]
+        seed = self._runner()._build_seed_prompt(self._inp(tool_summaries=summaries))
+        assert "Tools called" in seed
+        assert "execute(pip install foo) -> ok" in seed
+        assert "execute(twitter whoami) -> error: HTTP 403" in seed

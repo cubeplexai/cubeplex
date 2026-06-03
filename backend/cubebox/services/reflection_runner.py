@@ -27,6 +27,8 @@ from cubebox.services.user_event import PublishUserEventInput, UserEventService
 
 logger = logging.getLogger(__name__)
 
+_CONTENT_TRUNCATE = 200  # max chars per existing memory item in seed
+
 
 @dataclass
 class ReflectionTurn:
@@ -43,6 +45,8 @@ class ReflectionInput:
     user_id: str
     workspace_id: str | None
     turn: ReflectionTurn
+    existing_memory_items: list[tuple[str, str, str]] = field(default_factory=list)
+    # each: (memory_id, type_value, content)
 
 
 # Agent factory signature: given a ReflectionInput, build & return an Agent
@@ -88,7 +92,7 @@ class ReflectionRunner:
 
     async def _reflect_impl(self, inp: ReflectionInput) -> None:
         agent = self._make_agent(inp)
-        seed = self._build_seed_prompt(inp.turn)
+        seed = self._build_seed_prompt(inp)
 
         items: list[dict[str, Any]] = []
 
@@ -136,16 +140,30 @@ class ReflectionRunner:
             )
         )
 
-    def _build_seed_prompt(self, turn: ReflectionTurn) -> str:
-        # Pack the last turn into a single user-message string. The reflection
-        # system prompt frames the task; this just gives it the material.
+    def _build_seed_prompt(self, inp: ReflectionInput) -> str:
+        turn = inp.turn
+
+        memory_block = ""
+        if inp.existing_memory_items:
+            lines = [
+                f"- [{mid}] ({mtype}) {mcontent[:_CONTENT_TRUNCATE]}"
+                for mid, mtype, mcontent in inp.existing_memory_items
+            ]
+            memory_block = (
+                "Your current memory for this user (personal, active):\n"
+                + "\n".join(lines)
+                + "\n\n"
+            )
+
         tools_block = ""
         if turn.tool_summaries:
             tools_block = "\n\nTools called in this turn:\n" + "\n".join(
                 f"- {t['name']}({t.get('args_summary', '')}) -> {t.get('outcome', 'ok')}"
                 for t in turn.tool_summaries
             )
+
         return (
+            f"{memory_block}"
             "Last turn for review:\n\n"
             f"USER: {turn.user_message}\n\n"
             f"ASSISTANT: {turn.assistant_message}"
