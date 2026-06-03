@@ -20,14 +20,39 @@ if [ -f "$PREFS" ]; then
 fi
 
 # Install the egress MITM CA into Chromium's NSS store so HTTPS interception
-# doesn't show "Not Secure". Chromium on Linux ignores /etc/ssl/certs; it reads
-# from $HOME/.pki/nssdb. The cert is placed by the egress-ca-trust init container.
-MITM_CA=/etc/ssl/certs/cubebox-egress.pem
-if [ -f "$MITM_CA" ]; then
-    NSS_DB="$HOME/.pki/nssdb"
-    mkdir -p "$NSS_DB"
-    certutil -N -d "sql:$NSS_DB" --empty-password 2>/dev/null || true
-    certutil -A -d "sql:$NSS_DB" -n "cubebox-egress-ca" -t "CT,," -i "$MITM_CA" 2>/dev/null || true
+# doesn't show "Not Secure".
+#
+# The obvious source — /etc/ssl/certs/cubebox-egress.pem — is a dangling
+# symlink in the main sandbox container: OpenSandbox's egress-ca-trust init
+# container `cp`s the cert to /usr/local/share/ca-certificates/ in its OWN
+# filesystem layer, then runs update-ca-certificates, which writes symlinks
+# to the shared ca-trust emptyDir mounted on /etc/ssl/certs. The symlinks
+# survive the init container's death; the target file does not. So
+# /etc/ssl/certs/cubebox-egress.pem -> /usr/local/share/ca-certificates/
+# cubebox-egress.crt points at nothing in the sandbox container.
+#
+# update-ca-certificates also concatenates every cert into
+# /etc/ssl/certs/ca-certificates.crt, and THAT file IS on the shared volume.
+# So we extract the cert from the bundle by subject CN.
+BUNDLE=/etc/ssl/certs/ca-certificates.crt
+MITM_CA=/tmp/cubebox-egress-ca.pem
+if [ -f "$BUNDLE" ]; then
+    openssl crl2pkcs7 -nocrl -certfile "$BUNDLE" 2>/dev/null \
+        | openssl pkcs7 -print_certs -outform PEM 2>/dev/null \
+        | sed -n '/subject=CN = cubebox-egress-mitm-ca/,/-----END CERTIFICATE-----/p' \
+        | sed -n '/-----BEGIN CERTIFICATE-----/,/-----END CERTIFICATE-----/p' \
+        > "$MITM_CA"
+fi
+
+if [ -s "$MITM_CA" ]; then
+    # Chromium <91 read ~/.pki/nssdb; modern (XDG) Chromium reads
+    # ~/.local/share/pki/nssdb. Import into both so a Chromium upgrade in
+    # the image doesn't silently break trust on existing profiles.
+    for NSS_DB in "$HOME/.pki/nssdb" "$HOME/.local/share/pki/nssdb"; do
+        mkdir -p "$NSS_DB"
+        certutil -N -d "sql:$NSS_DB" --empty-password 2>/dev/null || true
+        certutil -A -d "sql:$NSS_DB" -n "cubebox-egress-ca" -t "CT,," -i "$MITM_CA" 2>/dev/null || true
+    done
 fi
 
 exec /ms-playwright/chrome \
