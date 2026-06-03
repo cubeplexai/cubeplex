@@ -341,6 +341,16 @@ audit logging). v2 just doesn't use it.
   (same as v1 behavior).
 - **Multi-instance event bus.** In-process pub/sub is enough for now.
   When cubebox scales horizontally, swap `UserEventBus` impl.
+- **Unified user-event notification system.** v2's chip is a permanent
+  per-conversation count (refreshed by SSE events), not an unread inbox.
+  The `user_events` table + SSE pipeline still produces durable events
+  with `read_at IS NULL` semantics, but the UI no longer treats them as
+  read/unread — `read_at` is unused after this iteration. A follow-up
+  design will define the unified notification surface (cross-feature
+  inbox, badge counts, dismissal flows) that consumes `user_events`
+  alongside future event sources (background jobs, mentions, etc.).
+  Until then, frontend treats events purely as "refresh now" signals
+  for whichever count/list happens to be on screen.
 
 ## Summary of changes
 

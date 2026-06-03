@@ -1,65 +1,83 @@
 'use client'
 
-import { useState } from 'react'
-import { createApiClient, useMemoryEventStore } from '@cubebox/core'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useRouter } from 'next/navigation'
+import { createApiClient, getMemoryCount, useMemoryEventStore } from '@cubebox/core'
 import { cn } from '@/lib/utils'
 import { Sparkle } from 'lucide-react'
 
 interface Props {
   conversationId: string
+  workspaceId: string
 }
 
-export function MemoryUpdateChip({ conversationId }: Props) {
-  const events = useMemoryEventStore((s) => s.byConversation[conversationId] ?? [])
-  const markRead = useMemoryEventStore((s) => s.markRead)
-  const [busy, setBusy] = useState(false)
+/**
+ * Permanent per-conversation memory count chip.
+ *
+ * Data source is the backend `GET /api/v1/ws/{ws}/memory/count` query (refresh-
+ * safe). The `useMemoryEventStore` SSE pipeline is used only as a refresh
+ * trigger — when an event arrives for this conversation, we re-fetch the count
+ * rather than incrementing locally (cheaper to keep correct than to maintain
+ * dedup state).
+ *
+ * No mark-read on click — the chip is a count display, not an unread badge.
+ * Click navigates to the memory page filtered to this conversation.
+ */
+export function MemoryUpdateChip({ conversationId, workspaceId }: Props) {
+  const router = useRouter()
+  const client = useMemo(() => {
+    const c = createApiClient('')
+    c.setWorkspaceId(workspaceId)
+    return c
+  }, [workspaceId])
 
-  if (events.length === 0) return null
+  const [count, setCount] = useState<number | null>(null)
 
-  const totalItems = events.reduce((n, e) => n + e.payload.items.length, 0)
-  const verb = events.every((e) => e.payload.items.every((i) => i.op === 'update'))
-    ? '已更新'
-    : '已记住'
+  const refresh = useCallback(async () => {
+    try {
+      const n = await getMemoryCount(client, { source_conversation_id: conversationId })
+      setCount(n)
+    } catch {
+      // best-effort: leave previous count visible
+    }
+  }, [client, conversationId])
 
-  const handleClick = async () => {
-    if (busy) return
-    setBusy(true)
-    const client = createApiClient('')
-    await Promise.all(
-      events.map(async (ev) => {
-        try {
-          await client.post(`/api/v1/user/events/${ev.id}/read`, {})
-        } catch {
-          // Best-effort: server-side read_at stays null on failure, but the
-          // SSE cursor (localStorage.lastSeenId) is already past these events,
-          // so they won't be redelivered. Local hide is the right behavior;
-          // a missed read_at is just metadata.
-        }
-      }),
-    )
-    for (const ev of events) markRead(ev.id)
-    setBusy(false)
-    // TODO: navigate to /memory panel filtered to these items
+  // Initial fetch + on conversation change.
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setCount(null)
+    void refresh()
+  }, [refresh])
+
+  // Re-fetch whenever the live SSE pipeline reports any new memory event for
+  // this conversation. Subscribing to the bucket length keeps the effect from
+  // re-running on unrelated store updates.
+  const eventCount = useMemoryEventStore((s) => (s.byConversation[conversationId] ?? []).length)
+  useEffect(() => {
+    if (eventCount === 0) return
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void refresh()
+  }, [eventCount, refresh])
+
+  if (count === null || count === 0) return null
+
+  const handleClick = () => {
+    router.push(`/w/${workspaceId}/memory?conversation=${conversationId}`)
   }
 
   return (
-    <div className="flex justify-center pt-2">
-      <button
-        type="button"
-        onClick={handleClick}
-        disabled={busy}
-        className={cn(
-          'inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs',
-          'bg-muted/60 text-muted-foreground hover:text-foreground hover:bg-muted',
-          'transition-colors disabled:opacity-50',
-        )}
-        aria-label={`${verb} ${totalItems} 条记忆`}
-      >
-        <Sparkle aria-hidden className="size-3" />
-        <span>
-          {verb} {totalItems} 条记忆
-        </span>
-      </button>
-    </div>
+    <button
+      type="button"
+      onClick={handleClick}
+      className={cn(
+        'inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs',
+        'bg-muted/60 text-muted-foreground hover:text-foreground hover:bg-muted',
+        'transition-colors',
+      )}
+      aria-label={`${count} 条记忆 · 查看`}
+    >
+      <Sparkle aria-hidden className="size-3" />
+      <span>{count} 条记忆 · 查看</span>
+    </button>
   )
 }
