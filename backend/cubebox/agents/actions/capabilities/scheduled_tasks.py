@@ -123,13 +123,22 @@ class UpdateInput(BaseModel):
     task_id: str
     name: str | None = None
     prompt: str | None = None
-    schedule_kind: Literal["cron", "interval", "once"] | None = None
-    cron_expr: str | None = None
-    interval_seconds: int | None = Field(default=None, ge=60)
-    run_at: datetime | None = None
-    timezone: str | None = None
-    target_mode: Literal["new_each_run", "fixed"] | None = None
-    target_conversation_id: str | None = None
+    schedule: Schedule | None = Field(
+        default=None,
+        description=(
+            "Replace the schedule whole. Same discriminated shape as create. "
+            "Example: {'kind':'cron','cron_expr':'0 10 * * *'}. Omit to keep the "
+            "current schedule."
+        ),
+    )
+    target: Literal["new_each_run", "current_conversation"] | None = Field(
+        default=None,
+        description=(
+            "Same semantics as on create. Omit to leave the target unchanged. "
+            "'current_conversation' resolves to the conversation this tool was "
+            "called from — no ID needed."
+        ),
+    )
     end_at: datetime | None = None
 
 
@@ -223,13 +232,44 @@ async def _handle_create(ctx: ScopeContext, session: AsyncSession, inp: CreateIn
 
 
 async def _handle_update(ctx: ScopeContext, session: AsyncSession, inp: UpdateInput) -> Any:
-    # Only pass fields the caller explicitly set (mirrors the PATCH route).
-    data = inp.model_dump(exclude={"task_id"}, exclude_unset=True)
+    # Only emit fields the caller explicitly set; the service's update loop
+    # treats absent / None as "leave alone", so we never null-out untouched
+    # columns by accident.
+    set_fields = inp.model_fields_set
+    data: dict[str, Any] = {}
 
-    # end_at must be handled separately because the generic loop in the
-    # service skips None values; preserve the key if it was explicitly set.
-    # model_dump(exclude_unset=True) already does the right thing here —
-    # end_at will appear in `data` only if the caller included it (even as null).
+    if "name" in set_fields and inp.name is not None:
+        data["name"] = inp.name
+    if "prompt" in set_fields and inp.prompt is not None:
+        data["prompt"] = inp.prompt
+    if "end_at" in set_fields:
+        # end_at supports explicit null clearing — pass through as-is.
+        data["end_at"] = inp.end_at
+
+    if "schedule" in set_fields and inp.schedule is not None:
+        sched = inp.schedule
+        data["schedule_kind"] = sched.kind
+        match sched:
+            case CronSchedule():
+                data["cron_expr"] = sched.cron_expr
+                data["timezone"] = sched.timezone
+            case IntervalSchedule():
+                data["interval_seconds"] = sched.interval_seconds
+            case OnceSchedule():
+                data["run_at"] = sched.run_at
+
+    if "target" in set_fields and inp.target is not None:
+        if inp.target == "current_conversation":
+            if ctx.conversation_id is None:
+                raise ActionInvalidInput(
+                    "target='current_conversation' requires a conversation context; "
+                    "either start from within a conversation or use target='new_each_run'."
+                )
+            data["target_mode"] = "fixed"
+            data["target_conversation_id"] = ctx.conversation_id
+        else:
+            data["target_mode"] = "new_each_run"
+            data["target_conversation_id"] = None
 
     task = await _svc.update(ctx, session, inp.task_id, data)
     return _task_summary(task)

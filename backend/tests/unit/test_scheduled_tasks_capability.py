@@ -10,7 +10,9 @@ from pydantic import ValidationError
 
 from cubebox.agents.actions.capabilities.scheduled_tasks import (
     CreateInput,
+    UpdateInput,
     _handle_create,
+    _handle_update,
 )
 from cubebox.agents.actions.context import ScopeContext
 from cubebox.agents.actions.types import ActionInvalidInput
@@ -192,3 +194,69 @@ async def test_handle_create_target_current_conversation_without_ctx_raises() ->
     )
     with pytest.raises(ActionInvalidInput, match="current_conversation"):
         await _handle_create(_ctx(conversation_id=None), AsyncMock(), inp)
+
+
+# ---------------------------------------------------------------------------
+# UpdateInput.schedule — same nested union, optional
+# ---------------------------------------------------------------------------
+
+
+def test_update_without_schedule_parses() -> None:
+    inp = UpdateInput(task_id="stask-1", name="renamed")
+    assert inp.schedule is None
+    assert inp.name == "renamed"
+
+
+def test_update_with_schedule_parses() -> None:
+    inp = UpdateInput(
+        task_id="stask-1",
+        schedule={"kind": "interval", "interval_seconds": 600},
+    )
+    assert inp.schedule is not None
+    assert inp.schedule.kind == "interval"
+    assert inp.schedule.interval_seconds == 600
+
+
+def test_update_cron_without_cron_expr_rejected() -> None:
+    with pytest.raises(ValidationError) as exc_info:
+        UpdateInput(task_id="stask-1", schedule={"kind": "cron"})
+    assert "cron_expr" in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+async def test_handle_update_flattens_schedule() -> None:
+    captured: dict = {}
+
+    async def fake_update(ctx, session, task_id, data):  # type: ignore[no-untyped-def]
+        captured["task_id"] = task_id
+        captured.update(data)
+        task = AsyncMock()
+        task.id = task_id
+        task.name = data.get("name") or "n"
+        task.status = "active"
+        task.schedule_kind = data.get("schedule_kind") or "interval"
+        task.cron_expr = data.get("cron_expr")
+        task.interval_seconds = data.get("interval_seconds") or 600
+        task.timezone = "UTC"
+        task.prompt = "p"
+        task.target_mode = "new_each_run"
+        task.next_fire_at = None
+        task.last_fired_at = None
+        return task
+
+    from cubebox.agents.actions.capabilities import scheduled_tasks as cap
+
+    inp = UpdateInput(
+        task_id="stask-1",
+        schedule={"kind": "interval", "interval_seconds": 600},
+    )
+    with patch.object(cap._svc, "update", new=fake_update):
+        await _handle_update(_ctx(), AsyncMock(), inp)
+
+    assert captured["task_id"] == "stask-1"
+    assert captured["schedule_kind"] == "interval"
+    assert captured["interval_seconds"] == 600
+    # Untouched fields must NOT be in the data dict (so the service's
+    # "None means skip" loop leaves them alone).
+    assert "name" not in captured
+    assert "prompt" not in captured
