@@ -2329,11 +2329,26 @@ class RunManager:
         except Exception as _exc:
             logger.warning("CompactionMiddleware not loaded: {}", _exc)
 
-        # 6. SandboxMiddleware — needs sandbox. The HITL channel is built here
-        # so that the SandboxMiddleware's confirm-gate and the agent share the
-        # same CheckpointedChannel instance (which writes pending_request +
-        # pending_run_id atomically via ``cp``).
-        sandbox_hitl_channel: Any = None
+        # 6a. HITL channel — always built. The channel is what gives the agent
+        # ask_user / sandbox-confirm capability AND the cross-process pause
+        # state (pending_request + pending_run_id written atomically via
+        # ``cp``). cancel_paused_run also needs the channel: ``agent
+        # .abort_pending`` short-circuits with HitlError when no channel is
+        # bound, which would skip the final ``save_pending_request(None)``
+        # and leave the DB pending row behind. Building it unconditionally
+        # keeps every code path that touches HITL on the same Channel.
+        from cubepi.hitl import CheckpointedChannel, ask_user_tool
+
+        sandbox_hitl_channel: Any = CheckpointedChannel(
+            checkpointer=cp,
+            thread_id=conversation_id,
+            run_id=run_id,
+            default_timeout=None,
+        )
+        _builtin_tools.append(ask_user_tool(sandbox_hitl_channel))
+
+        # 6b. SandboxMiddleware — needs sandbox. Shares the channel built above
+        # so the confirm-gate writes to the same pending row the agent sees.
         if sandbox is not None:
             try:
                 from cubebox.middleware.sandbox import SandboxMiddleware
@@ -2365,14 +2380,6 @@ class RunManager:
                         {"action": "deny", "pattern": "*"},
                     ]
 
-                from cubepi.hitl import CheckpointedChannel
-
-                sandbox_hitl_channel = CheckpointedChannel(
-                    checkpointer=cp,
-                    thread_id=conversation_id,
-                    run_id=run_id,
-                    default_timeout=None,
-                )
                 sandbox_mw = SandboxMiddleware(
                     sandbox=sandbox,
                     conversation_id=conversation_id,
@@ -2384,11 +2391,6 @@ class RunManager:
                 # Middleware tools (execute, write_file, edit_file, file_read) collected for
                 # ordered merge below
                 _sandbox_tools.extend(sandbox_mw.tools)
-                # ask_user built-in tool shares the same HITL channel so the agent
-                # can ask structured questions that pause execution just like a confirm rule.
-                from cubepi.hitl import ask_user_tool
-
-                _builtin_tools.append(ask_user_tool(sandbox_hitl_channel))
             except Exception as _exc:
                 logger.warning("SandboxMiddleware unavailable: {}", _exc)
 
