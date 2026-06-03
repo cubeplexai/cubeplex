@@ -280,4 +280,5 @@ export interface UsageSummary {
   turn: TurnUsage
   session: SessionUsage
   context_window: number
+  context_tokens?: number
 }

@@ -178,6 +178,7 @@ export function MessageList({ conversationId }: MessageListProps) {
     turnUsage,
     sessionUsage,
     contextWindow,
+    contextTokens,
   } = useMessages(conversationId)
   const loadMessages = useMessageStore((s) => s.loadMessages)
   const lastRunStatus = useMessageStore((s) => s.lastRunStatus)
@@ -446,6 +447,7 @@ export function MessageList({ conversationId }: MessageListProps) {
                     turnUsage={turnUsage}
                     sessionUsage={sessionUsage}
                     contextWindow={contextWindow}
+                    contextTokens={contextTokens}
                   />
                 )}
                 {chipVisible && workspaceId && (

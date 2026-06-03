@@ -100,6 +100,7 @@ export interface MessageStore {
   turnUsage: Record<string, import('../types').TurnUsage | null>
   sessionUsage: Record<string, import('../types').SessionUsage | null>
   contextWindow: Record<string, number | null>
+  contextTokens: Record<string, number | null>
   pendingConfirmMap: Record<string, PendingConfirm>
   pendingAsk: PendingAsk | null
 
@@ -982,6 +983,10 @@ async function consumeRunStream(
             ...get().contextWindow,
             [conversationId]: usage.context_window,
           }
+          usageUpdate.contextTokens = {
+            ...get().contextTokens,
+            [conversationId]: usage.context_tokens ?? null,
+          }
         }
         set(usageUpdate)
         // paused: the run task is over but the conversation is parked
@@ -1045,6 +1050,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
   turnUsage: {},
   sessionUsage: {},
   contextWindow: {},
+  contextTokens: {},
 
   async loadMessages(client: ApiClient, conversationId: string) {
     const state = get()
@@ -1079,6 +1085,10 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
       const newContextWindow = {
         ...get().contextWindow,
         [conversationId]: usageSummary?.context_window ?? null,
+      }
+      const newContextTokens = {
+        ...get().contextTokens,
+        [conversationId]: usageSummary?.context_tokens ?? null,
       }
       const nextStreamAgents: Record<string, AgentStream> = bootstrap.active_run
         ? { [MAIN_AGENT_KEY]: emptyStream() }
@@ -1194,6 +1204,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
         turnUsage: newTurnUsage,
         sessionUsage: newSessionUsage,
         contextWindow: newContextWindow,
+        contextTokens: newContextTokens,
       }))
 
       if (streamRunId !== null) {
@@ -1345,6 +1356,10 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
               usageUpdate.contextWindow = {
                 ...get().contextWindow,
                 [conversationId]: usage.context_window,
+              }
+              usageUpdate.contextTokens = {
+                ...get().contextTokens,
+                [conversationId]: usage.context_tokens ?? null,
               }
             }
             set(usageUpdate)

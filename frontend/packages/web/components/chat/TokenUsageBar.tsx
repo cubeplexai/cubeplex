@@ -22,9 +22,15 @@ interface TokenUsageBarProps {
   turnUsage: TurnUsage | null
   sessionUsage: SessionUsage | null
   contextWindow: number | null
+  contextTokens: number | null
 }
 
-export function TokenUsageBar({ turnUsage, sessionUsage, contextWindow }: TokenUsageBarProps) {
+export function TokenUsageBar({
+  turnUsage,
+  sessionUsage,
+  contextWindow,
+  contextTokens,
+}: TokenUsageBarProps) {
   const t = useTranslations('chat')
   const [isExpanded, setIsExpanded] = useState(false)
 
@@ -45,12 +51,13 @@ export function TokenUsageBar({ turnUsage, sessionUsage, contextWindow }: TokenU
       })
     : null
 
-  // Context % = how full the model's context window is *right now*.
-  // turnUsage.input_tokens is the full prompt sent this turn (system + history + message),
-  // which is exactly what occupies the context window. Session cumulative would overcount.
+  // context_tokens = max(input_tokens) across LLM calls in the last turn, sent by
+  // the backend. Each call already carries the full context, so the largest single
+  // call is the actual context size. Fall back to null (hide the bar) when not yet
+  // available (old sessions without the field).
   const ctxPct =
-    turnUsage && contextWindow && contextWindow > 0
-      ? (turnUsage.input_tokens / contextWindow) * 100
+    contextTokens != null && contextWindow && contextWindow > 0
+      ? (contextTokens / contextWindow) * 100
       : null
 
   return (
