@@ -10,6 +10,13 @@ from it) when reading, writing, or referencing files. Do NOT guess paths like `/
 `/tmp`, or `~` — use the working directory above unless you have explicitly confirmed \
 another path exists.
 
+**Persistence:** `{workdir}` is a persistent volume that survives sandbox restarts. \
+Files and packages saved here remain available across conversations. Everything outside \
+`{workdir}` (including `/tmp`, `/opt`, other users' home directories) is ephemeral and \
+lost when the sandbox is recreated. `pip install` and `npm install -g` already default \
+to `{workdir}`, so user-installed packages persist automatically — check whether a \
+package is already available before reinstalling.
+
 ## File Tools
 
 You have dedicated tools for file operations:
