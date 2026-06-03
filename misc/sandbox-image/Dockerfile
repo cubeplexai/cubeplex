@@ -236,4 +236,27 @@ ENV USER=neko \
     NEKO_WEBRTC_ICESERVERS_FRONTEND="[{\"urls\":[\"${NEKO_TURN_URL}\"],\"username\":\"${NEKO_TURN_USER}\",\"credential\":\"${NEKO_TURN_CRED}\"}]" \
     NEKO_WEBRTC_ICESERVERS_BACKEND="[{\"urls\":[\"${NEKO_TURN_URL}\"],\"username\":\"${NEKO_TURN_USER}\",\"credential\":\"${NEKO_TURN_CRED}\"}]"
 
+# ---------------------------------------------------------------------------
+# User-installable runtime layer on /workspace (PVC). Set AFTER all baseline
+# installs so the build-time `pip install` / `npm install -g` land in
+# /opt/venv and /usr/local/lib/node_modules (image layers, not PVC).
+#
+# Effect at runtime:
+#   pip install xxx        -> /workspace/.python-packages (persisted on PVC)
+#   npm install -g xxx     -> /workspace/.npm-global      (persisted on PVC)
+#   python -c "import xxx" -> sees user packages + baseline (PYTHONPATH +
+#                              site.py-discovered venv site-packages)
+#   require("xxx")         -> sees user globals + baseline globals (NODE_PATH)
+#   user-installed CLIs    -> on PATH (workspace bin dirs first)
+#
+# Trade-off: `pip install --upgrade` against a baseline package is
+# pip-warns-against-it territory (target dir has no metadata of /opt/venv);
+# treat baselines as immutable, install new versions as additional copies.
+# ---------------------------------------------------------------------------
+ENV PIP_TARGET=/workspace/.python-packages \
+    PYTHONPATH=/workspace/.python-packages:/opt/venv/lib/python3.12/site-packages \
+    NPM_CONFIG_PREFIX=/workspace/.npm-global \
+    NODE_PATH=/workspace/.npm-global/lib/node_modules:/usr/local/lib/node_modules \
+    PATH="/workspace/.npm-global/bin:/workspace/.python-packages/bin:/opt/dotnet:/opt/venv/bin:$PATH"
+
 WORKDIR /workspace
