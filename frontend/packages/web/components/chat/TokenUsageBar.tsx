@@ -45,9 +45,12 @@ export function TokenUsageBar({ turnUsage, sessionUsage, contextWindow }: TokenU
       })
     : null
 
+  // Context % = how full the model's context window is *right now*.
+  // turnUsage.input_tokens is the full prompt sent this turn (system + history + message),
+  // which is exactly what occupies the context window. Session cumulative would overcount.
   const ctxPct =
-    sessionUsage && contextWindow && contextWindow > 0
-      ? ((sessionUsage.total_input_tokens + sessionUsage.total_output_tokens) / contextWindow) * 100
+    turnUsage && contextWindow && contextWindow > 0
+      ? (turnUsage.input_tokens / contextWindow) * 100
       : null
 
   return (
