@@ -37,6 +37,45 @@ async def test_consolidation_source_type_persists(
     assert item.scope == MemoryScope.PERSONAL
 
 
+async def test_find_exact_normalizes_trailing_punctuation(
+    db_session: AsyncSession, seed_user: User
+) -> None:
+    """Regression: find_exact must catch mechanical duplicates even when the
+    only difference is trailing punctuation. The agent-vs-reflection race
+    typically saves "用户喜欢X。" and "用户喜欢X" within the same turn;
+    strict-equality dedup misses this and the user sees doubled entries.
+    """
+    repo = MemoryRepository(db_session, user_id=seed_user.id, org_id=None, workspace_id=None)
+    svc = MemoryService(repo, user_id=seed_user.id, org_id=None, workspace_id=None)
+
+    first = await svc.create(
+        CreateMemoryInput(
+            scope=MemoryScope.PERSONAL,
+            type=MemoryType.PREFERENCE,
+            content="用户喜欢吃小笼包。",
+        )
+    )
+    second = await svc.create(
+        CreateMemoryInput(
+            scope=MemoryScope.PERSONAL,
+            type=MemoryType.PREFERENCE,
+            content="用户喜欢吃小笼包",  # same fact, no trailing punctuation
+        )
+    )
+    # Should return the existing row (bump_updated_at), NOT insert a new one.
+    assert second.id == first.id
+
+    # Same for trailing whitespace + ASCII punctuation mixes.
+    third = await svc.create(
+        CreateMemoryInput(
+            scope=MemoryScope.PERSONAL,
+            type=MemoryType.PREFERENCE,
+            content="  用户喜欢吃小笼包.  ",
+        )
+    )
+    assert third.id == first.id
+
+
 async def test_personal_scope_invariant_violation_rejected(
     db_session: AsyncSession, seed_user: User
 ) -> None:
