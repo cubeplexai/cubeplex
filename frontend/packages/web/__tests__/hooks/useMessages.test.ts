@@ -207,7 +207,7 @@ describe('messageStore.send', () => {
     expect(state.error).toBe('socket closed')
   })
 
-  it('does not duplicate the user message when bootstrap history already contains it', async () => {
+  it('keeps the bootstrap assistant content when history already contains it', async () => {
     mockClient.get.mockResolvedValueOnce(
       new Response(
         JSON.stringify({
@@ -236,6 +236,7 @@ describe('messageStore.send', () => {
             status: 'running',
             user_message: 'resume me',
             started_at: '2026-04-25T00:00:00Z',
+            last_event_id: '1700000000000-0',
           },
         }),
         { headers: { 'content-type': 'application/json' } },
@@ -258,9 +259,12 @@ describe('messageStore.send', () => {
     expect(userMsgs).toHaveLength(1)
     expect(userMsgs[0].id).toBe('user-1')
     expect(getTextContent(userMsgs[0])).toBe('resume me')
-    // Partial assistant checkpoint must be trimmed — the stream replay will
-    // re-emit it, so leaving it in history would render the response twice.
-    expect(msgs.some((m) => m.role === 'assistant')).toBe(false)
+    // The bootstrap-committed assistant message must stay visible — the
+    // SSE reattach cursors on `active_run.last_event_id`, so the stream
+    // will not re-emit events already in this checkpoint. Dropping the
+    // assistant would lose the visible turn (e.g. the pause-turn
+    // assistant of a HITL flow that's been answered or cancelled).
+    expect(msgs.some((m) => m.role === 'assistant' && m.id === 'assistant-1')).toBe(true)
   })
 
   it('does not bind to a prior turn when the same prompt is repeated and the new user message is not yet checkpointed', async () => {

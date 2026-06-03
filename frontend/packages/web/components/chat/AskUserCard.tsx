@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { Clock, Send } from 'lucide-react'
+import { Clock, Send, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -12,6 +12,7 @@ import type { PendingAsk, AskQuestion } from '@cubebox/core'
 interface AskUserCardProps {
   pending: PendingAsk
   onSubmit: (answers: Record<string, string | string[]>) => Promise<void>
+  onCancel?: () => Promise<void>
 }
 
 function QuestionField({
@@ -90,7 +91,7 @@ function QuestionField({
   )
 }
 
-export function AskUserCard({ pending, onSubmit }: AskUserCardProps) {
+export function AskUserCard({ pending, onSubmit, onCancel }: AskUserCardProps) {
   const [answers, setAnswers] = useState<Record<string, string | string[]>>(() => {
     const init: Record<string, string | string[]> = {}
     for (const q of pending.questions) {
@@ -99,6 +100,7 @@ export function AskUserCard({ pending, onSubmit }: AskUserCardProps) {
     return init
   })
   const [submitting, setSubmitting] = useState(false)
+  const [cancelling, setCancelling] = useState(false)
   // Initialise to null to avoid SSR/CSR hydration mismatch (Date.now() differs).
   // The first useEffect sets the real value after mount.
   const [secondsLeft, setSecondsLeft] = useState<number | null>(null)
@@ -135,6 +137,16 @@ export function AskUserCard({ pending, onSubmit }: AskUserCardProps) {
     }
   }
 
+  const handleCancel = async () => {
+    if (!onCancel || cancelling || submitting) return
+    setCancelling(true)
+    try {
+      await onCancel()
+    } catch {
+      setCancelling(false)
+    }
+  }
+
   return (
     <div className="my-2 rounded-lg border border-blue-200 bg-blue-50 p-3 dark:border-blue-800 dark:bg-blue-950/30">
       <div className="mb-3 flex items-center gap-2 text-sm font-medium text-blue-800 dark:text-blue-200">
@@ -156,16 +168,28 @@ export function AskUserCard({ pending, onSubmit }: AskUserCardProps) {
           />
         ))}
       </div>
-      <div className="mt-3">
+      <div className="mt-3 flex items-center gap-2">
         <Button
           size="sm"
           className="gap-1"
-          disabled={submitting || hasUnfilledRequired}
+          disabled={submitting || cancelling || hasUnfilledRequired}
           onClick={handleSubmit}
         >
           <Send className="h-3.5 w-3.5" />
           {submitting ? 'Sending…' : 'Submit'}
         </Button>
+        {onCancel && (
+          <Button
+            size="sm"
+            variant="ghost"
+            className="gap-1 text-muted-foreground hover:text-foreground"
+            disabled={submitting || cancelling}
+            onClick={handleCancel}
+          >
+            <X className="h-3.5 w-3.5" />
+            {cancelling ? 'Cancelling…' : 'Cancel'}
+          </Button>
+        )}
       </div>
     </div>
   )

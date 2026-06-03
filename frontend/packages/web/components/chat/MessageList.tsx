@@ -10,6 +10,7 @@ import {
   getSubagentSummary,
   submitSandboxConfirm,
   submitAskUserAnswer,
+  cancelActiveRun,
   ApiError,
 } from '@cubebox/core'
 import type { Message, SubagentSummary } from '@cubebox/core'
@@ -239,6 +240,28 @@ export function MessageList({ conversationId }: MessageListProps) {
     [conversationId, streamingConversationId, pendingAsk, workspaceId, loadMessages],
   )
 
+  const handleAskUserCancel = useCallback(async () => {
+    if (!pendingAsk) return
+    const convId = streamingConversationId ?? conversationId
+    const client = createApiClient('')
+    if (workspaceId) client.setWorkspaceId(workspaceId)
+    // Optimistic clear so the form disappears immediately. The backend
+    // /cancel route is paused-aware (POST hits cancel_paused_run when
+    // status=paused_hitl), which writes a synthetic AgentAbortedEvent
+    // and finalises the run as cancelled. Reload bootstrap to pick up
+    // the new terminal state — composer unlocks once pendingAsk clears.
+    useMessageStore.setState({ pendingAsk: null })
+    try {
+      await cancelActiveRun(client, convId)
+    } catch (err) {
+      // Re-seed pendingAsk so the user isn't stranded if cancel failed.
+      useMessageStore.setState({ pendingAsk })
+      console.error('Failed to cancel paused ask_user:', err)
+    } finally {
+      await loadMessages(client, convId)
+    }
+  }, [conversationId, streamingConversationId, pendingAsk, workspaceId, loadMessages])
+
   const subagentDataMap = useMemo(() => buildSubagentDataMap(messages ?? []), [messages])
 
   const historicalToolResults = useMemo(
@@ -272,9 +295,18 @@ export function MessageList({ conversationId }: MessageListProps) {
   // history assistant message to avoid rendering the same response twice.
   // During active streaming (isStreaming=true), the current turn's assistant
   // message is NOT yet in history, so no dedup is needed — skipping here
-  // would incorrectly hide the *previous* turn's response.
+  // would incorrectly hide the *previous* turn's response. Same applies to
+  // a paused-HITL bootstrap where mainStream is the empty placeholder
+  // (no blocks/text/thinking/toolResults): hiding the last history
+  // assistant would erase the pause-turn message the user needs to see.
   const lastAssistantId = useMemo(() => {
     if (!mainStream || isStreaming) return null
+    const hasStreamContent =
+      mainStream.blocks.length > 0 ||
+      mainStream.text.length > 0 ||
+      mainStream.thinking.length > 0 ||
+      mainStream.toolResults.length > 0
+    if (!hasStreamContent) return null
     const msgs = messages ?? []
     for (let i = msgs.length - 1; i >= 0; i--) {
       if (msgs[i].role === 'assistant') return msgs[i].id
@@ -377,6 +409,7 @@ export function MessageList({ conversationId }: MessageListProps) {
                 key={pendingAsk.question_id}
                 pending={pendingAsk}
                 onSubmit={handleAskUserSubmit}
+                onCancel={handleAskUserCancel}
               />
             </div>
           </div>
