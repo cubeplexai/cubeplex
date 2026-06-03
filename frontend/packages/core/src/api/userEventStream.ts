@@ -59,3 +59,31 @@ export async function* streamUserEvents(
     reader.releaseLock()
   }
 }
+
+/**
+ * Mark a user event read (acknowledged).
+ *
+ * In the current design, user events are consumed as "refresh now" triggers
+ * by the chip (`useUserEvents` updates the store; the chip refetches its
+ * count). Once the client has applied the trigger, the event no longer needs
+ * to be replayed on the next reconnect — without acking it, every fresh SSE
+ * connection re-streams the entire `read_at IS NULL` backlog and grows the
+ * client store unboundedly over time.
+ *
+ * User-scoped endpoint — bypass `resolvePath` like `streamUserEvents`.
+ *
+ * Best-effort: a failed ack just means the event will be re-delivered on the
+ * next reconnect; the store's id-based dedup handles the resulting duplicate.
+ */
+export async function markUserEventRead(client: ApiClient, eventId: string): Promise<void> {
+  // POST direct via fetch — same reason as streamUserEvents above. Uses the
+  // existing /api/v1/user/events/{id}/read endpoint added in v2.
+  const url = `${client.baseUrl}/api/v1/user/events/${encodeURIComponent(eventId)}/read`
+  await fetch(url, {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+  })
+  // No error inspection — fire-and-forget. Network blip / 5xx is fine, event
+  // gets re-delivered next reconnect and the store dedupes.
+}
