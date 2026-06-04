@@ -52,6 +52,9 @@ class RunMeta:
     first_event_id: str | None = None
     last_event_id: str | None = None
     last_event_at: str | None = None
+    error_code: str | None = None
+    error_params: str | None = None  # JSON-encoded dict (Redis hash values are strings)
+    error_message: str | None = None  # English fallback shown to non-Web clients
 
 
 @dataclass(slots=True)
@@ -212,6 +215,9 @@ def _meta_from_hash(raw: dict[str, str]) -> RunMeta | None:
         first_event_id=raw.get("first_event_id"),
         last_event_id=raw.get("last_event_id"),
         last_event_at=raw.get("last_event_at"),
+        error_code=raw.get("error_code"),
+        error_params=raw.get("error_params"),
+        error_message=raw.get("error_message"),
     )
 
 
@@ -313,6 +319,9 @@ async def update_run_meta(
     first_event_id: str | None = None,
     last_event_id: str | None = None,
     ttl_seconds: int | None = None,
+    error_code: str | None = None,
+    error_params: str | None = None,
+    error_message: str | None = None,
 ) -> RunMeta | None:
     """Patch run metadata fields without read-modify-write races.
 
@@ -344,6 +353,12 @@ async def update_run_meta(
         other_updates["first_event_id"] = first_event_id
     if last_event_id is not None:
         other_updates["last_event_id"] = last_event_id
+    if error_code is not None:
+        other_updates["error_code"] = error_code
+    if error_params is not None:
+        other_updates["error_params"] = error_params
+    if error_message is not None:
+        other_updates["error_message"] = error_message
     if other_updates:
         await redis.hset(meta_key, mapping=other_updates)  # type: ignore[misc]
     if ttl_seconds is not None:
