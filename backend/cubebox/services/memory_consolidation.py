@@ -226,15 +226,24 @@ async def run_consolidation(
     user_id: str,
     org_id: str | None,
     workspace_id: str | None,
-    one_shot: Any,
+    provider: Any,
+    model: Any,
     session_maker: Any,
+    tracer: Any | None = None,
     min_hours: float = DEFAULT_MIN_HOURS,
     min_runs: int = DEFAULT_MIN_RUNS,
 ) -> None:
-    """Best-effort per-conversation consolidation. Never raises into the caller."""
-    from cubepi.providers.base import TextContent, UserMessage
+    """Best-effort per-conversation consolidation. Never raises into the caller.
+
+    When ``tracer`` is provided, the consolidation LLM call is wrapped in
+    ``tracer.oneshot(operation="consolidate_memory", metadata={...})`` so the
+    run appears in ``cubepi trace ls`` alongside agent runs, with
+    ``conversation_id`` / ``user_id`` metadata searchable via ``--meta``.
+    """
+    from cubepi.providers.base import Message, TextContent, UserMessage
 
     from cubebox.agents.checkpointer import init_checkpointer
+    from cubebox.llm.oneshot import OneShotLLM
     from cubebox.repositories.memory import MemoryRepository
 
     token = await acquire_lock(redis, prefix, conversation_id, ttl_s=LOCK_TTL_S)
@@ -263,11 +272,34 @@ async def run_consolidation(
             f"Existing personal memory items:\n{existing_text or '(none)'}\n\n"
             f"Conversation transcript:\n{history_text}"
         )
-        raw = await one_shot.generate_once(
-            system=CONSOLIDATION_SYSTEM,
-            messages=[UserMessage(content=[TextContent(text=prompt)])],
-            max_output_tokens=EXTRACT_MODEL_MAX_TOKENS,
-        )
+        messages: list[Message] = [UserMessage(content=[TextContent(text=prompt)])]
+        meta: dict[str, str | int | float | bool] = {
+            "conversation_id": conversation_id,
+            "user_id": user_id,
+        }
+        if workspace_id is not None:
+            meta["workspace_id"] = workspace_id
+        if org_id is not None:
+            meta["org_id"] = org_id
+
+        if tracer is not None:
+            async with tracer.oneshot(
+                provider=provider,
+                model=model,
+                operation="consolidate_memory",
+                metadata=meta,
+            ) as session:
+                raw = await session.generate(
+                    system=CONSOLIDATION_SYSTEM,
+                    messages=messages,
+                    max_output_tokens=EXTRACT_MODEL_MAX_TOKENS,
+                )
+        else:
+            raw = await OneShotLLM(provider, model).generate_once(
+                system=CONSOLIDATION_SYSTEM,
+                messages=messages,
+                max_output_tokens=EXTRACT_MODEL_MAX_TOKENS,
+            )
         ops = parse_ops(raw, max_ops=MAX_OPS)
         if ops is None:
             # Malformed / over-cap LLM output = a FAILED pass. Do NOT advance the

@@ -2620,7 +2620,6 @@ class RunManager:
 
             from cubebox.db.engine import async_session_maker
             from cubebox.llm.factory import LLMFactory
-            from cubebox.llm.oneshot import OneShotLLM
 
             async with async_session_maker() as _llm_session:
                 factory = LLMFactory(
@@ -2635,7 +2634,12 @@ class RunManager:
                 ) = await factory.resolve_default_provider_and_config()
                 await _llm_session.commit()
             provider = factory.build_cubepi_provider(provider_config, cache_policy=None)
-            one_shot = OneShotLLM(provider, Model(id=model_id, provider=provider_name))
+            model = Model(id=model_id, provider=provider_name)
+            # Tracer is optional — pass None to run_consolidation when tracing
+            # is disabled, otherwise the background LLM call is wrapped in
+            # tracer.oneshot() so it shows up in `cubepi trace ls` filterable
+            # by conversation_id / user_id / oneshot_operation.
+            tracer = getattr(self._app.state, "tracer", None)
 
             task = asyncio.create_task(
                 mc.run_consolidation(
@@ -2645,7 +2649,9 @@ class RunManager:
                     user_id=ctx.user_id,
                     org_id=ctx.org_id,
                     workspace_id=ctx.workspace_id,
-                    one_shot=one_shot,
+                    provider=provider,
+                    model=model,
+                    tracer=tracer,
                     session_maker=async_session_maker,
                     min_hours=min_hours,
                     min_runs=min_runs,
