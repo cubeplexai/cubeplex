@@ -24,7 +24,7 @@ from tests.diagnostic._common import (
     LONG_SYSTEM_PROMPT,
     USER_MSG_TURN_1,
     USER_MSG_TURN_2,
-    assert_cache_hit_openai,
+    assert_cache_hit_openai_either,
     extract_openai_cache_tokens,
 )
 
@@ -54,7 +54,7 @@ async def test_arkcode_openai_caches_repeated_system_prompt(arkcode_api_key: str
             {"role": "user", "content": USER_MSG_TURN_1},
         ],
     )
-    usage1 = extract_openai_cache_tokens(resp1.usage)
+    usage1 = extract_openai_cache_tokens(resp1.usage, provider="arkcode")
     print(f"\n[arkcode] Full turn 1 usage object: {resp1.usage!r}")
 
     # Turn 2: same system prefix, different user message — should hit cache
@@ -66,7 +66,9 @@ async def test_arkcode_openai_caches_repeated_system_prompt(arkcode_api_key: str
             {"role": "user", "content": USER_MSG_TURN_2},
         ],
     )
-    usage2 = extract_openai_cache_tokens(resp2.usage)
+    usage2 = extract_openai_cache_tokens(resp2.usage, provider="arkcode")
     print(f"[arkcode] Full turn 2 usage object: {resp2.usage!r}")
 
-    assert_cache_hit_openai(usage1, usage2, provider_label="arkcode/doubao-seed-2.0-pro")
+    # arkcode may return cached_tokens on turn 1 (warmed from a prior run) or turn 2
+    # (warmed by turn 1 in this run). Either way, at least one hit proves caching works.
+    assert_cache_hit_openai_either(usage1, usage2, provider_label="arkcode/doubao-seed-2.0-pro")

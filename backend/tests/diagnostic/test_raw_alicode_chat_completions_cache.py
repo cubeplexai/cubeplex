@@ -60,7 +60,7 @@ async def test_alicode_openai_caches_repeated_system_prompt(alicode_api_key: str
             {"role": "user", "content": USER_MSG_TURN_1},
         ],
     )
-    usage1 = extract_openai_cache_tokens(resp1.usage)
+    usage1 = extract_openai_cache_tokens(resp1.usage, provider="alicode")
     print(f"\n[alicode] Full turn 1 usage object: {resp1.usage!r}")
 
     # Turn 2: same system prefix, different user message — should hit cache
@@ -72,7 +72,7 @@ async def test_alicode_openai_caches_repeated_system_prompt(alicode_api_key: str
             {"role": "user", "content": USER_MSG_TURN_2},
         ],
     )
-    usage2 = extract_openai_cache_tokens(resp2.usage)
+    usage2 = extract_openai_cache_tokens(resp2.usage, provider="alicode")
     print(f"[alicode] Full turn 2 usage object: {resp2.usage!r}")
 
     assert_cache_hit_openai(usage1, usage2, provider_label="alicode/qwen3.6-plus")
