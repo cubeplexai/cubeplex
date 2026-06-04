@@ -277,14 +277,14 @@
     "uploading": "Uploading…",
     "errorSelectZip": "Please select a .zip file",
     "uploadSuccess": "Upload successful: {skillId} (v{version})",
-    "versionExists": "Version already exists, please update version in SKILL.md before publishing",
-    "publishSuccess": "Published to org marketplace",
-    "publishButton": "Publish to org marketplace",
+    "versionExists": "Version already exists, please update version in SKILL.md before adding again",
+    "publishSuccess": "Added to workspace",
+    "publishButton": "Add to workspace",
     "noSkillMd": "SKILL.md not found",
-    "confirmPublishTitle": "Confirm publish",
-    "publishDesc": "Publish this skill to the org marketplace. Version is taken from SKILL.md frontmatter and cannot be modified after publishing. To update, bump version in SKILL.md and republish.",
-    "publishing": "Publishing…",
-    "confirmPublishBtn": "Confirm publish"
+    "confirmPublishTitle": "Add to workspace",
+    "publishDesc": "Add this skill to the current workspace. Once added it is available via load_skill in conversations. Version is taken from SKILL.md frontmatter; to update, bump version in SKILL.md and add again.",
+    "publishing": "Adding…",
+    "confirmPublishBtn": "Confirm add"
   },
   "adminModels": {
     "title": "Models & Providers",
@@ -909,7 +909,8 @@
       "quotaExceeded": "Attachment quota exceeded."
     },
     "preview": "Preview",
-    "download": "Download"
+    "download": "Download",
+    "addToWorkspace": "Add to workspace"
   },
   "workspaceCreate": {
     "nameLabel": "New workspace name",

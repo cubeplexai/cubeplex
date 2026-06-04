@@ -277,14 +277,14 @@
     "uploading": "上传中…",
     "errorSelectZip": "请选择 .zip 文件",
     "uploadSuccess": "上传成功：{skillId}（v{version}）",
-    "versionExists": "版本已存在，请在 SKILL.md 中更新 version 后再发布",
-    "publishSuccess": "已发布到组织市场",
-    "publishButton": "发布到组织市场",
+    "versionExists": "版本已存在，请在 SKILL.md 中更新 version 后重新添加",
+    "publishSuccess": "已添加到工作空间",
+    "publishButton": "添加到工作空间",
     "noSkillMd": "未找到 SKILL.md",
-    "confirmPublishTitle": "确认发布",
-    "publishDesc": "将这个 skill 发布到组织市场。version 取自 SKILL.md frontmatter，发布后无法修改。若要更新，请在 SKILL.md 里 bump version 后重新发布。",
-    "publishing": "发布中…",
-    "confirmPublishBtn": "确认发布"
+    "confirmPublishTitle": "添加到工作空间",
+    "publishDesc": "将这个 skill 添加到当前工作空间，添加后可在对话中通过 load_skill 使用。version 取自 SKILL.md frontmatter，若要更新请在 SKILL.md 里 bump version 后重新添加。",
+    "publishing": "添加中…",
+    "confirmPublishBtn": "确认添加"
   },
   "adminModels": {
     "title": "模型与 Provider",
@@ -909,7 +909,8 @@
       "quotaExceeded": "附件额度已超出。"
     },
     "preview": "预览",
-    "download": "下载"
+    "download": "下载",
+    "addToWorkspace": "添加到工作空间"
   },
   "workspaceCreate": {
     "nameLabel": "新工作区名称",
