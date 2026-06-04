@@ -10,7 +10,7 @@ from cubebox.middleware.attachments import AttachmentHintMiddleware
 async def test_user_msg_with_no_attachments_passes_through() -> None:
     mw = AttachmentHintMiddleware()
     msg = UserMessage(content=[TextContent(text="hi")])
-    out = await mw.transform_context([msg])
+    out = await mw.transform_context([msg], ctx=object())
     assert len(out) == 1
     assert out[0].content[0].text == "hi"
 
@@ -19,7 +19,7 @@ async def test_user_msg_with_no_attachments_passes_through() -> None:
 async def test_user_msg_with_empty_attachments_list_passes_through() -> None:
     mw = AttachmentHintMiddleware()
     msg = UserMessage(content=[TextContent(text="hi")], metadata={"attachments": []})
-    out = await mw.transform_context([msg])
+    out = await mw.transform_context([msg], ctx=object())
     assert len(out) == 1
     assert out[0].content[0].text == "hi"
 
@@ -40,7 +40,7 @@ async def test_user_msg_with_attachments_gets_hint_appended() -> None:
             ]
         },
     )
-    out = await mw.transform_context([msg])
+    out = await mw.transform_context([msg], ctx=object())
     text = out[0].content[0].text
     assert "look" in text
     assert "[Attachments]" in text
@@ -65,7 +65,7 @@ async def test_image_attachment_includes_view_images_hint() -> None:
             ]
         },
     )
-    out = await mw.transform_context([msg])
+    out = await mw.transform_context([msg], ctx=object())
     text = out[0].content[0].text
     assert "view_images" in text
     assert "photo.png" in text
@@ -87,7 +87,7 @@ async def test_document_attachment_includes_file_read_hint() -> None:
             ]
         },
     )
-    out = await mw.transform_context([msg])
+    out = await mw.transform_context([msg], ctx=object())
     text = out[0].content[0].text
     assert "file_read" in text
     assert "report.pdf" in text
@@ -97,7 +97,7 @@ async def test_document_attachment_includes_file_read_hint() -> None:
 async def test_assistant_message_unchanged() -> None:
     mw = AttachmentHintMiddleware()
     msg = AssistantMessage(content=[TextContent(text="ok")], usage=Usage())
-    out = await mw.transform_context([msg])
+    out = await mw.transform_context([msg], ctx=object())
     assert out[0] is msg or out[0].content[0].text == "ok"
 
 
@@ -121,7 +121,7 @@ async def test_multiple_messages_only_attachments_user_modified() -> None:
         ),
         UserMessage(content=[TextContent(text="third")]),
     ]
-    out = await mw.transform_context(msgs)
+    out = await mw.transform_context(msgs, ctx=object())
     assert out[0].content[0].text == "first"
     assert "[Attachments]" in out[1].content[0].text
     assert "second" in out[1].content[0].text
@@ -146,7 +146,7 @@ async def test_original_message_not_mutated() -> None:
         },
     )
     original_text = msg.content[0].text
-    await mw.transform_context([msg])
+    await mw.transform_context([msg], ctx=object())
     assert msg.content[0].text == original_text
 
 
@@ -167,7 +167,7 @@ async def test_metadata_preserved_on_augmented_message() -> None:
             "extra_key": "extra_value",
         },
     )
-    out = await mw.transform_context([msg])
+    out = await mw.transform_context([msg], ctx=object())
     assert out[0].metadata.get("extra_key") == "extra_value"
     assert "attachments" in out[0].metadata
 
@@ -191,7 +191,7 @@ async def test_no_text_content_appends_new_block() -> None:
             ]
         },
     )
-    out = await mw.transform_context([msg])
+    out = await mw.transform_context([msg], ctx=object())
     # Should have gained a TextContent with the hint
     texts = [c for c in out[0].content if isinstance(c, TextContent)]
     assert texts, "Expected at least one TextContent block after augmentation"

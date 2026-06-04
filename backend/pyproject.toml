@@ -172,16 +172,9 @@ exclude_lines = [
 ]
 
 [tool.uv.sources]
-# 707f95b adds Tracer.oneshot() (cubepi#137) — an instrumented one-shot
-# LLM call context manager that produces a full invoke_agent trace with a
-# chat child span, without an Agent loop. Used by run_manager's memory
-# consolidation pass so background LLM calls land in cubepi-traces and are
-# searchable via `cubepi trace ls --meta oneshot_operation=consolidate_memory`
-# and `--meta conversation_id=...` alongside normal agent runs. Built on
-# friendly ValidationError translation (cubepi#136), v3 HITL run_id support
-# (1686eed), OpenAI double-finish_reason guard (262a33f), HITL channel
-# (b03813e), subagent-span-nesting (#122), steer-cancel (#120).
-cubepi = { git = "https://github.com/cubeplexai/cubepi.git", rev = "621a2da" }
+# 9d2caaf includes Tracer.oneshot(), cubepi middleware core, and typed
+# provider errors on cubepi main.
+cubepi = { git = "https://github.com/cubeplexai/cubepi.git", rev = "9d2caaf60daf928421337e58bc6b63a1abf329ed" }
 
 [dependency-groups]
 dev = [

@@ -31,6 +31,6 @@ async def test_transform_system_prompt_injects_authoring_without_pinned(monkeypa
     monkeypatch.setattr("cubebox.middleware.memory._render_pinned", _empty)
 
     mw = MemoryMiddleware(repo_factory=_factory)
-    out = await mw.transform_system_prompt("BASE")
+    out = await mw.transform_system_prompt("BASE", ctx=object())
     assert "BASE" in out
     assert "memory_save" in out  # authoring block injected even with no pinned memory

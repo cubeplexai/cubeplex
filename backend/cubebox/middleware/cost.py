@@ -16,9 +16,8 @@ Attribution fields:
     ``_subagent_depth`` — billing hierarchy depth (0 = top-level agent)
     ``_last_billing_id`` — updated after each write so child subagents can chain
 
-Subagent cloning (M3.c.3): ``SubAgentMiddleware`` reads ``_last_billing_id``
-and ``_subagent_depth`` from the parent ``CostMiddleware`` instance and
-constructs a new child instance with ``subagent_depth + 1``.
+Subagent runs receive their own ``CostMiddleware`` instance from run_manager's
+cubepi SubagentMiddleware configuration.
 """
 
 from __future__ import annotations

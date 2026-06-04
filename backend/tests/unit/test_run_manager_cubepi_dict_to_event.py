@@ -80,7 +80,7 @@ def test_tool_result_dict_maps_to_tool_result_event() -> None:
 
 
 def test_tool_result_dict_propagates_details() -> None:
-    """Details (e.g. subagent_events from SubAgentMiddleware's AgentToolResult)
+    """Details (e.g. subagent_events from the subagent tool result)
     must survive to the typed event so the frontend gets the live shape that
     matches the post-reload one."""
     evt = cubepi_dict_to_agent_event(

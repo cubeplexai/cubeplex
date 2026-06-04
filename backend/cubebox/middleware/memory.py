@@ -143,6 +143,7 @@ class MemoryMiddleware(Middleware):
         self,
         system_prompt: str,
         *,
+        ctx: Any,
         signal: object = None,
     ) -> str:
         """Append pinned-memory block and authoring guidance to the system prompt.
@@ -163,7 +164,7 @@ class MemoryMiddleware(Middleware):
         reflection writes new preference items mid-conversation. New items are
         visible from the next conversation onward.
         """
-        del signal  # not used
+        del ctx, signal  # not used
         from cubebox.prompts.memory import MEMORY_AUTHORING_BLOCK
 
         extra = self._extra_ref() if self._extra_ref is not None else None
@@ -188,6 +189,7 @@ class MemoryMiddleware(Middleware):
         self,
         messages: list[Message],
         *,
+        ctx: Any,
         signal: object = None,
     ) -> list[Message]:
         """Prepend relevance snapshot text to UserMessages that carry one.
@@ -199,7 +201,7 @@ class MemoryMiddleware(Middleware):
 
         Messages without a snapshot are passed through unchanged (identity).
         """
-        del signal  # not used
+        del ctx, signal  # not used
 
         if not messages:
             return messages

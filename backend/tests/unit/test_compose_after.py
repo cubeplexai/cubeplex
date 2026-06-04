@@ -101,7 +101,8 @@ async def test_compose_filters_middleware_without_after_tool_call() -> None:
 
     class _BareMw(Middleware):
         # No after_tool_call override.
-        async def transform_system_prompt(self, sp, *, signal=None) -> str:
+        async def transform_system_prompt(self, sp, *, ctx, signal=None) -> str:
+            del ctx, signal
             return sp
 
     composed = compose_after_tool_call([_BareMw()])

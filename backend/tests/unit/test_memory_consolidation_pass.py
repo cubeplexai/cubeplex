@@ -179,3 +179,131 @@ async def test_run_consolidation_uses_tracer_oneshot_when_provided(monkeypatch):
     assert meta["user_id"] == "usr-abc"
     assert meta["workspace_id"] == "ws-2"
     assert meta["org_id"] == "org-1"
+
+
+@pytest.mark.asyncio
+async def test_run_consolidation_fallback_uses_provider_generate(monkeypatch):
+    """Without a tracer, consolidation uses cubepi Provider.generate directly."""
+    import contextlib
+    from unittest.mock import AsyncMock, MagicMock
+
+    from cubepi.providers.base import AssistantMessage, TextContent
+
+    @contextlib.asynccontextmanager
+    async def _fake_init_checkpointer_nonempty():
+        cp = MagicMock()
+        data = MagicMock()
+        data.messages = [MagicMock(role="user", content=[])]
+        cp.load = AsyncMock(return_value=data)
+        yield cp
+
+    monkeypatch.setattr(
+        "cubebox.agents.checkpointer.init_checkpointer",
+        _fake_init_checkpointer_nonempty,
+    )
+    monkeypatch.setattr(mc, "acquire_lock", AsyncMock(return_value="tok"))
+    monkeypatch.setattr(mc, "release_lock", AsyncMock())
+    monkeypatch.setattr(mc, "mark_consolidated", AsyncMock())
+    monkeypatch.setattr(mc, "_counter", AsyncMock(return_value=0))
+
+    class _StubRepo:
+        def __init__(self, *_a, **_kw):
+            pass
+
+        async def list(self, **_kw):
+            return []
+
+    monkeypatch.setattr("cubebox.repositories.memory.MemoryRepository", _StubRepo)
+
+    @contextlib.asynccontextmanager
+    async def _fake_session_maker():
+        yield MagicMock()
+
+    provider = MagicMock()
+    provider.generate = AsyncMock(
+        return_value=AssistantMessage(content=[TextContent(text='{"ops": []}')])
+    )
+    model = MagicMock()
+
+    await mc.run_consolidation(
+        redis=MagicMock(),
+        prefix="test",
+        conversation_id="conv-xyz",
+        user_id="usr-abc",
+        org_id="org-1",
+        workspace_id="ws-2",
+        provider=provider,
+        model=model,
+        tracer=None,
+        session_maker=_fake_session_maker,
+    )
+
+    provider.generate.assert_awaited_once()
+    call = provider.generate.await_args.kwargs
+    assert call["model"] is model
+    assert call["system_prompt"] == mc.CONSOLIDATION_SYSTEM
+    assert call["max_output_tokens"] == mc.EXTRACT_MODEL_MAX_TOKENS
+
+
+@pytest.mark.asyncio
+async def test_run_consolidation_fallback_treats_provider_error_as_failed_pass(
+    monkeypatch,
+) -> None:
+    import contextlib
+    from unittest.mock import AsyncMock, MagicMock
+
+    from cubepi.providers.base import AssistantMessage
+
+    @contextlib.asynccontextmanager
+    async def _fake_init_checkpointer_nonempty():
+        cp = MagicMock()
+        data = MagicMock()
+        data.messages = [MagicMock(role="user", content=[])]
+        cp.load = AsyncMock(return_value=data)
+        yield cp
+
+    monkeypatch.setattr(
+        "cubebox.agents.checkpointer.init_checkpointer",
+        _fake_init_checkpointer_nonempty,
+    )
+    monkeypatch.setattr(mc, "acquire_lock", AsyncMock(return_value="tok"))
+    release_lock = AsyncMock()
+    mark_consolidated = AsyncMock()
+    monkeypatch.setattr(mc, "release_lock", release_lock)
+    monkeypatch.setattr(mc, "mark_consolidated", mark_consolidated)
+    monkeypatch.setattr(mc, "_counter", AsyncMock(return_value=0))
+
+    class _StubRepo:
+        def __init__(self, *_a, **_kw):
+            pass
+
+        async def list(self, **_kw):
+            return []
+
+    monkeypatch.setattr("cubebox.repositories.memory.MemoryRepository", _StubRepo)
+
+    @contextlib.asynccontextmanager
+    async def _fake_session_maker():
+        yield MagicMock()
+
+    provider = MagicMock()
+    provider.generate = AsyncMock(
+        return_value=AssistantMessage(content=[], error_message="provider failed")
+    )
+
+    await mc.run_consolidation(
+        redis=MagicMock(),
+        prefix="test",
+        conversation_id="conv-xyz",
+        user_id="usr-abc",
+        org_id="org-1",
+        workspace_id="ws-2",
+        provider=provider,
+        model=MagicMock(),
+        tracer=None,
+        session_maker=_fake_session_maker,
+    )
+
+    provider.generate.assert_awaited_once()
+    mark_consolidated.assert_not_awaited()
+    release_lock.assert_awaited_once()

@@ -94,6 +94,7 @@ class CitationMiddleware(Middleware):
         self,
         system_prompt: str,
         *,
+        ctx: Any,
         signal: Any = None,
     ) -> str:
         """Append CITATION_PROMPT when any citation configs are registered.
@@ -101,7 +102,7 @@ class CitationMiddleware(Middleware):
         Skipped when ``_configs`` is empty so conversations without
         citation-eligible tools don't pay the prompt-cache cost.
         """
-        del signal  # not used
+        del ctx, signal  # not used
         if not self._configs:
             return system_prompt
         return system_prompt + "\n\n" + CITATION_PROMPT

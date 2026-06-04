@@ -65,13 +65,19 @@ class TimestampMiddleware(Middleware):
     # transform_context — records turn-start time
     # ------------------------------------------------------------------
 
-    async def transform_context(self, messages: list[Any], *, signal: Any = None) -> list[Any]:
+    async def transform_context(
+        self,
+        messages: list[Any],
+        *,
+        ctx: Any,
+        signal: Any = None,
+    ) -> list[Any]:
         """Capture turn-start wall time on a ContextVar.
 
         Message content is returned byte-identical — no modifications — so
         the stable prefix (historical messages) stays cache-eligible.
         """
-        del signal  # not used
+        del ctx, signal  # not used
         _turn_started_at.set(utc_isoformat(datetime.now(UTC)))
         return messages
 
