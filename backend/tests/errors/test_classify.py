@@ -59,6 +59,21 @@ def test_classify_forbidden_as_auth() -> None:
     assert code is ErrorCode.provider_auth_failed
 
 
+def test_classify_403_with_quota_wording_is_rate_limit() -> None:
+    # Anthropic and a few others return 403 for quota exhaustion, not 429.
+    exc = _FakeBadRequest(403, "quota exceeded for organization")
+    code, _ = classify_exception(exc, model="claude-sonnet-4-6", provider="anthropic")
+    assert code is ErrorCode.rate_limited
+
+
+def test_classify_disk_quota_oserror_is_not_rate_limited() -> None:
+    # The bare word "quota" used to false-positive into rate_limited;
+    # the tightened pattern requires quota + (exceed|exhaust|limit|reach).
+    exc = OSError("Errno 122: Disk quota for /tmp full")
+    code, _ = classify_exception(exc, model="gpt-4o", provider="openai")
+    assert code is ErrorCode.internal_error
+
+
 def test_classify_provider_unavailable_5xx() -> None:
     exc = _FakeBadRequest(503, "service unavailable")
     code, _ = classify_exception(exc, model="gpt-4o", provider="openai")
