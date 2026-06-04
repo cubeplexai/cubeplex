@@ -12,13 +12,16 @@ Implements the cubepi Middleware protocol with two hooks:
 
 from __future__ import annotations
 
+import asyncio
 import json
 import shlex
+from collections.abc import Callable
 from typing import Any
 
-from cubepi.agent.types import AgentTool, AgentToolResult
+from cubepi.agent.types import AgentContext, AgentTool, AgentToolResult
 from cubepi.middleware.base import Middleware
 from cubepi.providers.base import TextContent
+from cubepi.types import StructuredValue
 from loguru import logger
 from pydantic import BaseModel, Field
 
@@ -65,8 +68,8 @@ def _make_save_artifact_tool(
         tool_call_id: str,
         args: _SaveArtifactArgs,
         *,
-        signal: object = None,
-        on_update: object = None,
+        signal: asyncio.Event | None = None,
+        on_update: Callable[[StructuredValue], None] | None = None,
     ) -> AgentToolResult:
         del tool_call_id, signal, on_update
 
@@ -200,8 +203,8 @@ class ArtifactMiddleware(Middleware):
         self,
         system_prompt: str,
         *,
-        ctx: object,
-        signal: object = None,
+        ctx: AgentContext,
+        signal: asyncio.Event | None = None,
     ) -> str:
         """Append the artifact prompt + registry state to the system prompt.
 

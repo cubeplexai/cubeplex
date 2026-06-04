@@ -25,9 +25,9 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Callable
 from datetime import UTC, datetime
-from typing import Any
 
-from cubepi.middleware.base import Middleware
+from cubepi.agent.types import AgentContext
+from cubepi.middleware.base import Middleware, TurnAction
 from cubepi.providers.base import AssistantMessage
 from loguru import logger
 
@@ -74,10 +74,10 @@ class CostMiddleware(Middleware):
     async def after_model_response(
         self,
         response: AssistantMessage,
-        ctx: Any,
+        ctx: AgentContext,
         *,
-        signal: Any = None,
-    ) -> None:
+        signal: asyncio.Event | None = None,
+    ) -> TurnAction | None:
         """Fire-and-forget billing write; always returns None."""
         run_id = generate_public_id("bill")
         self._last_billing_id = run_id

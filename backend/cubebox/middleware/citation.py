@@ -25,7 +25,7 @@ import asyncio
 import json
 from typing import Any
 
-from cubepi.agent.types import AfterToolCallContext, AfterToolCallResult
+from cubepi.agent.types import AfterToolCallContext, AfterToolCallResult, AgentContext
 from cubepi.middleware.base import Middleware
 from cubepi.providers.base import Content, TextContent
 from loguru import logger
@@ -94,8 +94,8 @@ class CitationMiddleware(Middleware):
         self,
         system_prompt: str,
         *,
-        ctx: Any,
-        signal: Any = None,
+        ctx: AgentContext,
+        signal: asyncio.Event | None = None,
     ) -> str:
         """Append CITATION_PROMPT when any citation configs are registered.
 
@@ -111,7 +111,7 @@ class CitationMiddleware(Middleware):
         self,
         ctx: AfterToolCallContext,
         *,
-        signal: Any = None,
+        signal: asyncio.Event | None = None,
     ) -> AfterToolCallResult | None:
         """Extract citations from a tool result and inject markers.
 
