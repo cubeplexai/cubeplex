@@ -15,6 +15,7 @@ from redis.asyncio import Redis
 from uuid_utils import uuid7
 
 from cubebox.agents.schemas import AgentEvent, DoneEvent, ErrorEvent, StatusEvent
+from cubebox.errors import ErrorCode, classify_exception, english_fallback
 from cubebox.streams.run_events import (
     append_run_event,
     clear_active_run,
@@ -1221,15 +1222,46 @@ class RunManager:
         self,
         run_id: str,
         conversation_id: str,
-        message: str,
+        message: str | None = None,
         details: str | None = None,
+        *,
+        exc: BaseException | None = None,
+        error_code: ErrorCode | None = None,
+        params: dict[str, Any] | None = None,
     ) -> None:
+        """Publish a classified ErrorEvent on the run's SSE stream.
+
+        Callers can pass:
+          - ``exc``: classify the exception and emit code/params/details.
+          - ``error_code`` + ``params``: emit a known code with explicit params
+            (used by paths that already know what went wrong).
+          - Legacy positional ``message`` / ``details``: emit an
+            ``internal_error`` event with the literal message (cancel path).
+        """
+
+        if exc is not None:
+            code, classified_params = classify_exception(exc, **(params or {}))
+            final_params = classified_params
+            final_message = message or english_fallback(code, final_params)
+            final_details = details or str(exc)
+        elif error_code is not None:
+            code = error_code
+            final_params = params or {}
+            final_message = message or english_fallback(code, final_params)
+            final_details = details or final_message
+        else:
+            code = ErrorCode.internal_error
+            final_params = params or {}
+            final_message = message or english_fallback(code, final_params)
+            final_details = details or final_message
+
         error_event = ErrorEvent(
             timestamp=datetime.now(UTC).isoformat(),
             data={
-                "error_code": "run_error",
-                "message": message,
-                "details": details or message,
+                "error_code": code.value,
+                "params": final_params,
+                "message": final_message,
+                "details": final_details,
             },
         )
         await self._append_event(run_id, conversation_id, error_event)
@@ -2603,6 +2635,7 @@ class RunManager:
         extra_ref_holder["memory_service_factory"] = _memory_service_factory
         extra_ref_holder["provider"] = provider
         extra_ref_holder["llm_factory"] = factory
+        extra_ref_holder["model_context_window"] = int(_model_config.context_window or 0)
 
         return agent, all_tools, sandbox_hitl_channel
 
@@ -3050,11 +3083,17 @@ class RunManager:
             )
             await record_scheduled_run_terminal_state(run_id=run_id, run_status="failed")
             with suppress(Exception):
+                _holder = locals().get("extra_ref_holder") or {}
+                _classify_params: dict[str, Any] = {
+                    "model": _holder.get("model_id"),
+                    "provider": _holder.get("provider_name"),
+                    "context_window": _holder.get("model_context_window") or None,
+                }
                 await self._append_error(
                     run_id,
                     conversation_id,
-                    "An unexpected error occurred during execution",
-                    str(exc),
+                    exc=exc,
+                    params={k: v for k, v in _classify_params.items() if v is not None},
                 )
         finally:
             if stream_task is not None and not stream_task.done():
@@ -3507,11 +3546,17 @@ class RunManager:
             # picks the row up. Just record the error so the SSE consumer
             # sees it.
             with suppress(Exception):
+                _holder = locals().get("extra_ref_holder") or {}
+                _classify_params: dict[str, Any] = {
+                    "model": _holder.get("model_id"),
+                    "provider": _holder.get("provider_name"),
+                    "context_window": _holder.get("model_context_window") or None,
+                }
                 await self._append_error(
                     run_id,
                     conversation_id,
-                    "An unexpected error occurred during respond execution",
-                    str(exc),
+                    exc=exc,
+                    params={k: v for k, v in _classify_params.items() if v is not None},
                 )
         finally:
             if stream_task is not None and not stream_task.done():
