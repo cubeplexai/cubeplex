@@ -52,6 +52,20 @@ keywords: foo, bar, baz
     assert fm.keywords == ["foo", "bar", "baz"]
 
 
+def test_cubebox_alias_merged_into_raw_metadata() -> None:
+    text = """---
+name: x
+description: y
+version: 0.1
+cubebox:
+  requires:
+    env: [MY_KEY]
+---
+"""
+    fm = parse_skill_md(text)
+    assert fm.raw_metadata["requires"] == {"env": ["MY_KEY"]}
+
+
 def test_openclaw_alias_merged_into_raw_metadata() -> None:
     text = """---
 name: x

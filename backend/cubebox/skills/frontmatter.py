@@ -9,7 +9,7 @@ from typing import Any
 import yaml
 
 _FRONTMATTER_RE = re.compile(r"^---\s*\n(.*?)\n---\s*(\n|$)", re.DOTALL)
-_OPENCLAW_ALIASES = ("clawdbot", "clawdis", "openclaw")
+_CUBEBOX_ALIASES = ("cubebox", "clawdbot", "clawdis", "openclaw")
 
 
 @dataclass(frozen=True)
@@ -100,14 +100,14 @@ def parse_skill_md(text: str, *, default_version: str | None = None) -> SkillFro
     # Clawhub publishes skills with metadata.openclaw nesting; this normalises it.
     metadata_block = raw_metadata.get("metadata")
     if isinstance(metadata_block, dict):
-        for alias in _OPENCLAW_ALIASES:
+        for alias in _CUBEBOX_ALIASES:
             nested = metadata_block.get(alias)
             if isinstance(nested, dict):
                 for k, v in nested.items():
                     raw_metadata[k] = v  # overrides bare top-level keys
 
     # Top-level aliases override everything (including metadata.alias results above).
-    for alias in _OPENCLAW_ALIASES:
+    for alias in _CUBEBOX_ALIASES:
         nested = raw_metadata.pop(alias, None)
         if isinstance(nested, dict):
             for k, v in nested.items():
