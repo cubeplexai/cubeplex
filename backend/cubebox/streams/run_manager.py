@@ -17,7 +17,6 @@ from uuid_utils import uuid7
 
 from cubebox.agents.schemas import AgentEvent, DoneEvent, ErrorEvent, StatusEvent
 from cubebox.errors import ErrorCode, classify_exception, english_fallback
-from cubebox.middleware.compaction.tokens import approx_tokens
 from cubebox.streams.run_events import (
     append_run_event,
     clear_active_run,
@@ -2655,9 +2654,6 @@ class RunManager:
         extra_ref_holder["provider"] = provider
         extra_ref_holder["llm_factory"] = factory
         extra_ref_holder["model_context_window"] = int(_model_config.context_window or 0)
-        # Stash the live agent so the outer catch block can estimate tokens_in
-        # via approx_tokens(agent.state.messages) at error-classification time.
-        extra_ref_holder["agent"] = agent
 
         return agent, all_tools, sandbox_hitl_channel
 
@@ -3103,18 +3099,12 @@ class RunManager:
             raise
         except Exception as exc:
             logger.error("Run {} failed: {}", run_id, exc, exc_info=True)
-            _agent = extra_ref_holder.get("agent")
-            _tokens_in: int | None = None
-            if _agent is not None:
-                try:
-                    _tokens_in = approx_tokens(_agent.state.messages)
-                except Exception as _tok_exc:  # noqa: BLE001
-                    logger.debug("approx_tokens at error-time failed: {}", _tok_exc)
+            # Model/provider/context_window are fallbacks for non-cubepi
+            # exceptions. Cubepi typed errors already carry tokens_in etc.
             _classify_params: dict[str, Any] = {
                 "model": extra_ref_holder.get("model_id"),
                 "provider": extra_ref_holder.get("provider_name"),
                 "context_window": extra_ref_holder.get("model_context_window") or None,
-                "tokens_in": _tokens_in,
             }
             _classify_params = {k: v for k, v in _classify_params.items() if v is not None}
             _err_code, _err_params = classify_exception(exc, **_classify_params)
@@ -3603,18 +3593,12 @@ class RunManager:
             # applies; if we crashed before that, the stale-run sweeper
             # picks the row up. But do persist the error fields so the
             # run list and replay can show the reason.
-            _agent = extra_ref_holder.get("agent")
-            _tokens_in: int | None = None
-            if _agent is not None:
-                try:
-                    _tokens_in = approx_tokens(_agent.state.messages)
-                except Exception as _tok_exc:  # noqa: BLE001
-                    logger.debug("approx_tokens at error-time failed: {}", _tok_exc)
+            # Model/provider/context_window are fallbacks for non-cubepi
+            # exceptions. Cubepi typed errors already carry tokens_in etc.
             _classify_params: dict[str, Any] = {
                 "model": extra_ref_holder.get("model_id"),
                 "provider": extra_ref_holder.get("provider_name"),
                 "context_window": extra_ref_holder.get("model_context_window") or None,
-                "tokens_in": _tokens_in,
             }
             _classify_params = {k: v for k, v in _classify_params.items() if v is not None}
             _err_code, _err_params = classify_exception(exc, **_classify_params)

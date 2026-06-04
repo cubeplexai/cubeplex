@@ -1,25 +1,29 @@
-"""Error taxonomy and classifier.
+"""Error taxonomy + cubepi-typed-error mapper for the cubebox SSE/UI layer.
 
-The classifier turns provider/tool exceptions into a structured
-``(ErrorCode, params)`` pair the SSE layer can carry to the frontend.
-The frontend owns the localized strings keyed by ``ErrorCode``; the
-backend only emits codes and dynamic params (model, provider, token
-counts) plus an English fallback ``message`` for non-Web clients.
+Classification (regex patterns, status-code routing, the Volcano-opaque
+InvalidParameter heuristic) lives upstream in ``cubepi.errors``. This
+module just maps cubepi's typed exceptions onto the user-facing
+``ErrorCode`` taxonomy and supplies an English fallback string for
+non-Web clients.
 """
 
 from __future__ import annotations
 
-import re
 from enum import StrEnum
 from typing import Any
 
+from cubepi.errors import (
+    ContextLengthExceeded,
+    ProviderAuthFailed,
+    ProviderBadRequest,
+    ProviderError,
+    ProviderUnavailable,
+    RateLimited,
+)
+
 
 class ErrorCode(StrEnum):
-    """Coarse error categories surfaced to the user.
-
-    Members are strings so they serialize cleanly into SSE JSON / Redis.
-    Add new members at the end; never reuse or renumber.
-    """
+    """Coarse error categories surfaced to the user."""
 
     context_length_exceeded = "context_length_exceeded"
     rate_limited = "rate_limited"
@@ -30,33 +34,26 @@ class ErrorCode(StrEnum):
     internal_error = "internal_error"
 
 
-_CONTEXT_LENGTH_PATTERNS = (
-    re.compile(r"maximum context length", re.IGNORECASE),
-    re.compile(r"context.{0,10}length.{0,20}exceed", re.IGNORECASE),
-    re.compile(r"too many tokens", re.IGNORECASE),
-    re.compile(r"prompt is too long", re.IGNORECASE),
-    re.compile(r"reduce.{0,10}messages", re.IGNORECASE),
-)
-
-_RATE_LIMIT_PATTERNS = (
-    re.compile(r"rate ?limit", re.IGNORECASE),
-    re.compile(r"quota (?:exceed|exhaust|limit|reach)", re.IGNORECASE),
-    re.compile(r"too many requests", re.IGNORECASE),
-)
-
-
-def _status_of(exc: BaseException) -> int | None:
-    """Best-effort status code extraction. Handles openai-sdk-style attrs."""
-
-    code = getattr(exc, "status_code", None)
-    if isinstance(code, int):
-        return code
-    resp = getattr(exc, "response", None)
-    if resp is not None:
-        rc = getattr(resp, "status_code", None)
-        if isinstance(rc, int):
-            return rc
-    return None
+def _params_from(exc: ProviderError, override: dict[str, Any] | None = None) -> dict[str, Any]:
+    params: dict[str, Any] = {}
+    if exc.model is not None:
+        params["model"] = exc.model
+    if exc.provider is not None:
+        params["provider"] = exc.provider
+    tokens_in = getattr(exc, "tokens_in", None)
+    if tokens_in is not None:
+        params["tokens_in"] = tokens_in
+    context_window = getattr(exc, "context_window", None)
+    if context_window is not None:
+        params["context_window"] = context_window
+    retry_after = getattr(exc, "retry_after", None)
+    if retry_after is not None:
+        params["retry_after"] = retry_after
+    if override:
+        for k, v in override.items():
+            if v is not None and k not in params:
+                params[k] = v
+    return params
 
 
 def classify_exception(
@@ -69,64 +66,33 @@ def classify_exception(
 ) -> tuple[ErrorCode, dict[str, Any]]:
     """Map an exception to ``(ErrorCode, params)``.
 
-    Heuristics (first match wins):
-      1. Explicit context-length wording in the message.
-      2. tokens_in within 5% of context_window on a 400 (covers Volcano
-         ARK's opaque ``InvalidParameter``).
-      3. 429 / quota wording → rate_limited. Checked before 401/403
-         because some providers (e.g. Anthropic) return 403 for quota
-         exhaustion, not 429.
-      4. 401 / 403 → provider_auth_failed.
-      5. TimeoutError / ConnectionError → provider_unavailable.
-      6. 5xx → provider_unavailable.
-      7. Other 4xx → provider_bad_request.
-      8. Else → internal_error.
-
-    ``params`` always carries the non-None contextual fields so the
-    frontend can interpolate ``{model}`` / ``{provider}`` / ``{tokens_in}``
-    / ``{context_window}`` keys in its translation strings.
+    Detection lives upstream in ``cubepi.errors``; this is a flat isinstance
+    dispatch over the typed subclasses. Non-cubepi exceptions classify as
+    ``internal_error``. keyword args are used only as fallback when the
+    exception doesn't carry them.
     """
 
-    msg = str(exc) or getattr(exc, "message", "")
-    status = _status_of(exc)
+    override = {
+        "model": model,
+        "provider": provider,
+        "tokens_in": tokens_in,
+        "context_window": context_window,
+    }
 
-    params: dict[str, Any] = {}
-    for key, value in (
-        ("model", model),
-        ("provider", provider),
-        ("tokens_in", tokens_in),
-        ("context_window", context_window),
-    ):
-        if value is not None:
-            params[key] = value
+    if isinstance(exc, ContextLengthExceeded):
+        return ErrorCode.context_length_exceeded, _params_from(exc, override)
+    if isinstance(exc, RateLimited):
+        return ErrorCode.rate_limited, _params_from(exc, override)
+    if isinstance(exc, ProviderAuthFailed):
+        return ErrorCode.provider_auth_failed, _params_from(exc, override)
+    if isinstance(exc, ProviderUnavailable):
+        return ErrorCode.provider_unavailable, _params_from(exc, override)
+    if isinstance(exc, ProviderBadRequest):
+        return ErrorCode.provider_bad_request, _params_from(exc, override)
+    if isinstance(exc, ProviderError):
+        return ErrorCode.provider_bad_request, _params_from(exc, override)
 
-    for pat in _CONTEXT_LENGTH_PATTERNS:
-        if pat.search(msg):
-            return ErrorCode.context_length_exceeded, params
-
-    if (
-        status == 400
-        and tokens_in is not None
-        and context_window is not None
-        and tokens_in >= int(context_window * 0.95)
-    ):
-        return ErrorCode.context_length_exceeded, params
-
-    if status == 429 or any(pat.search(msg) for pat in _RATE_LIMIT_PATTERNS):
-        return ErrorCode.rate_limited, params
-
-    if status in (401, 403):
-        return ErrorCode.provider_auth_failed, params
-
-    if isinstance(exc, (TimeoutError, ConnectionError)):
-        return ErrorCode.provider_unavailable, params
-
-    if status is not None and 500 <= status < 600:
-        return ErrorCode.provider_unavailable, params
-
-    if status is not None and 400 <= status < 500:
-        return ErrorCode.provider_bad_request, params
-
+    params: dict[str, Any] = {k: v for k, v in override.items() if v is not None}
     return ErrorCode.internal_error, params
 
 
