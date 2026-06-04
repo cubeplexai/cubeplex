@@ -40,7 +40,7 @@ _CONTEXT_LENGTH_PATTERNS = (
 
 _RATE_LIMIT_PATTERNS = (
     re.compile(r"rate ?limit", re.IGNORECASE),
-    re.compile(r"quota", re.IGNORECASE),
+    re.compile(r"quota (?:exceed|exhaust|limit|reach)", re.IGNORECASE),
     re.compile(r"too many requests", re.IGNORECASE),
 )
 
@@ -71,20 +71,23 @@ def classify_exception(
 
     Heuristics (first match wins):
       1. Explicit context-length wording in the message.
-      2. tokens_in within 5% of context_window when status is 4xx with no
-         clear signal (covers Volcano ARK's opaque ``InvalidParameter``).
-      3. 401 / 403 → provider_auth_failed.
-      4. 429 / quota wording → rate_limited.
-      5. 5xx / TimeoutError / ConnectionError → provider_unavailable.
-      6. Other 4xx → provider_bad_request.
-      7. Else → internal_error.
+      2. tokens_in within 5% of context_window on a 400 (covers Volcano
+         ARK's opaque ``InvalidParameter``).
+      3. 429 / quota wording → rate_limited. Checked before 401/403
+         because some providers (e.g. Anthropic) return 403 for quota
+         exhaustion, not 429.
+      4. 401 / 403 → provider_auth_failed.
+      5. TimeoutError / ConnectionError → provider_unavailable.
+      6. 5xx → provider_unavailable.
+      7. Other 4xx → provider_bad_request.
+      8. Else → internal_error.
 
     ``params`` always carries the non-None contextual fields so the
     frontend can interpolate ``{model}`` / ``{provider}`` / ``{tokens_in}``
     / ``{context_window}`` keys in its translation strings.
     """
 
-    msg = str(exc) or getattr(exc, "message", "") or ""
+    msg = str(exc) or getattr(exc, "message", "")
     status = _status_of(exc)
 
     params: dict[str, Any] = {}
@@ -109,11 +112,11 @@ def classify_exception(
     ):
         return ErrorCode.context_length_exceeded, params
 
-    if status in (401, 403):
-        return ErrorCode.provider_auth_failed, params
-
     if status == 429 or any(pat.search(msg) for pat in _RATE_LIMIT_PATTERNS):
         return ErrorCode.rate_limited, params
+
+    if status in (401, 403):
+        return ErrorCode.provider_auth_failed, params
 
     if isinstance(exc, (TimeoutError, ConnectionError)):
         return ErrorCode.provider_unavailable, params
