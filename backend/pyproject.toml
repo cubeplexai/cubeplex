@@ -172,11 +172,14 @@ exclude_lines = [
 ]
 
 [tool.uv.sources]
-# 1686eed is cubepi main HEAD: v3 HITL run_id support — CheckpointedChannel
-# after the full agent run completes (before AgentEndEvent), enabling end-of-run
-# memory reflection. On top of prior OpenAI double-finish_reason guard (262a33f),
-# HITL channel (b03813e), subagent-span-nesting (#122), steer-cancel (#120).
-cubepi = { git = "https://github.com/cubeplexai/cubepi.git", rev = "8202479" }
+# 808b2d5 is cubepi main HEAD: friendly ValidationError translation in the
+# tool-execution path (cubepi#136) — pydantic errors now surface as
+# field-path-anchored lines the LLM can act on (named discriminator key,
+# allowed values, etc.) instead of the raw `str(ValidationError)` URL prose.
+# On top of prior v3 HITL run_id support (1686eed), OpenAI double-finish_reason
+# guard (262a33f), HITL channel (b03813e), subagent-span-nesting (#122),
+# steer-cancel (#120).
+cubepi = { git = "https://github.com/cubeplexai/cubepi.git", rev = "808b2d5" }
 
 [dependency-groups]
 dev = [
