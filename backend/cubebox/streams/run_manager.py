@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from contextlib import suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -3087,24 +3088,30 @@ class RunManager:
             raise
         except Exception as exc:
             logger.error("Run {} failed: {}", run_id, exc, exc_info=True)
+            _classify_params: dict[str, Any] = {
+                "model": extra_ref_holder.get("model_id"),
+                "provider": extra_ref_holder.get("provider_name"),
+                "context_window": extra_ref_holder.get("model_context_window") or None,
+            }
+            _classify_params = {k: v for k, v in _classify_params.items() if v is not None}
+            _err_code, _err_params = classify_exception(exc, **_classify_params)
+            _err_message = english_fallback(_err_code, _err_params)
             await update_run_meta(
                 self._redis,
                 prefix=self._key_prefix,
                 run_id=run_id,
                 status="failed",
+                error_code=_err_code.value,
+                error_params=json.dumps(_err_params, ensure_ascii=False),
+                error_message=_err_message,
             )
             await record_scheduled_run_terminal_state(run_id=run_id, run_status="failed")
             with suppress(Exception):
-                _classify_params: dict[str, Any] = {
-                    "model": extra_ref_holder.get("model_id"),
-                    "provider": extra_ref_holder.get("provider_name"),
-                    "context_window": extra_ref_holder.get("model_context_window") or None,
-                }
                 await self._append_error(
                     run_id,
                     conversation_id,
                     exc=exc,
-                    params={k: v for k, v in _classify_params.items() if v is not None},
+                    params=_classify_params,
                 )
         finally:
             if stream_task is not None and not stream_task.done():
@@ -3557,22 +3564,34 @@ class RunManager:
         except Exception as exc:
             logger.error("Respond run {} failed: {}", run_id, exc, exc_info=True)
             # Don't clear DB pending — leaving it allows the user to retry
-            # the answer. Don't finalize meta here either: if the body
+            # the answer. Don't finalize meta status here either: if the body
             # finally block already ran, it CAS-wrote whatever status
             # applies; if we crashed before that, the stale-run sweeper
-            # picks the row up. Just record the error so the SSE consumer
-            # sees it.
+            # picks the row up. But do persist the error fields so the
+            # run list and replay can show the reason.
+            _classify_params: dict[str, Any] = {
+                "model": extra_ref_holder.get("model_id"),
+                "provider": extra_ref_holder.get("provider_name"),
+                "context_window": extra_ref_holder.get("model_context_window") or None,
+            }
+            _classify_params = {k: v for k, v in _classify_params.items() if v is not None}
+            _err_code, _err_params = classify_exception(exc, **_classify_params)
+            _err_message = english_fallback(_err_code, _err_params)
             with suppress(Exception):
-                _classify_params: dict[str, Any] = {
-                    "model": extra_ref_holder.get("model_id"),
-                    "provider": extra_ref_holder.get("provider_name"),
-                    "context_window": extra_ref_holder.get("model_context_window") or None,
-                }
+                await update_run_meta(
+                    self._redis,
+                    prefix=self._key_prefix,
+                    run_id=run_id,
+                    error_code=_err_code.value,
+                    error_params=json.dumps(_err_params, ensure_ascii=False),
+                    error_message=_err_message,
+                )
+            with suppress(Exception):
                 await self._append_error(
                     run_id,
                     conversation_id,
                     exc=exc,
-                    params={k: v for k, v in _classify_params.items() if v is not None},
+                    params=_classify_params,
                 )
         finally:
             if stream_task is not None and not stream_task.done():
