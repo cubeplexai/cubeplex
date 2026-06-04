@@ -1,7 +1,7 @@
 ---
 name: skill-creator
-description: Use when the user wants to author a new skill bundle for the org marketplace. Walks them through frontmatter, body, and supporting files, then captures the result as a skill artifact ready to publish.
-version: 0.1.0
+description: Use when the user asks to create, build, write, or design a skill, or wants to package an agent behavior or workflow as a reusable skill. Also use when the user wants to publish, upload, or share a skill with the org marketplace.
+version: 0.2.0
 keywords:
   - skill-authoring
   - marketplace
@@ -14,39 +14,154 @@ This skill guides you through building a publishable skill bundle for the cubebo
 
 ## Workflow
 
-1. **Ground the request** — Ask the user what problem the skill solves, who it is for, and what the agent should do when the skill is active. Keep this short; one paragraph of context is enough.
+A cubebox skill is a **directory** containing `SKILL.md` at its root plus any sibling files the skill needs at runtime. You write that directory in the sandbox, then register it as a skill artifact.
 
-2. **Draft SKILL.md** — Write the skill file with proper frontmatter and a clear body. The frontmatter must include:
-   - `name`: lowercase, hyphen-separated, unique within the org (e.g. `code-reviewer`)
-   - `description`: one sentence the user will read in the marketplace
-   - `version`: start at `0.1.0`
-   - `keywords`: 1–5 tags that help with search and filtering
+1. **Ground the request** — Ask the user what problem the skill solves, who it is for, and what the agent should do when the skill is active. One paragraph of context is enough.
 
-   The body is the agent's instruction set. Write it in second person ("When the user asks…"). Be concrete — describe the steps, the tools to use, and any output format expected.
+2. **Create the bundle directory** under `/workspace/work/skills/<name>/` — `/workspace` is the user's persistent volume, so the bundle survives sandbox restarts and the user can come back and iterate. **Do not** draft under `/tmp/` (lost on restart) and **do not** write into `/.skills/...` (that's the read-only sync path for already-installed skills).
 
-3. **Add supporting files** (optional) — If the skill needs templates, example data, or reference documents, write them to the sandbox under `/.skills/<name>/`. The agent can load these at runtime via `load_file`.
+   For a skill called `weekly-report`, a typical layout:
 
-4. **Write to sandbox** — Save the finished SKILL.md to `/.skills/<name>/SKILL.md` so the user can inspect it in the file panel.
+   ```
+   /workspace/work/skills/weekly-report/
+     SKILL.md                # required, at the root
+     scripts/                # optional — executable helpers
+       fetch_metrics.py
+     reference/              # optional — long docs the agent reads on demand
+       schema.md
+     templates/              # optional — fixtures the agent fills in
+       report.md.tmpl
+   ```
 
-5. **Register as skill artifact** — Call `save_artifact` with `artifact_type="skill"` and `name` matching the skill name. This makes the bundle available in the **Publish** flow in the Skills tab.
+   The directory name doesn't have to match `frontmatter.name`, but matching makes things easier to follow.
+
+3. **Write SKILL.md** at the root of the bundle directory. See **Frontmatter Reference** and **Body Guidelines** below.
+
+4. **Add supporting files** (optional) — Drop scripts, reference docs, and templates into subdirectories of the bundle. Reference them from SKILL.md by their bundle-relative path (e.g. `python scripts/fetch_metrics.py`, `cat reference/schema.md`). When the skill is enabled in a workspace, cubebox syncs the whole directory into the sandbox under `/.skills/<name>/<version>/`, so the agent can read or execute them from there at runtime.
+
+5. **Register as skill artifact** — Call `save_artifact` with:
+
+   - `path` = the bundle directory (e.g. `/workspace/work/skills/weekly-report`)
+   - `artifact_type="skill"`
+   - `entry_file="SKILL.md"`
+   - `name` = a human-readable name (typically the skill's `frontmatter.name`)
+
+   This packages the directory and makes it available in the **Publish** flow in the Skills tab.
 
 6. **Hand off** — Tell the user the skill is ready. Remind them to open the Skills tab → Upload, or use the artifact's Publish button, to submit it to the org marketplace.
+
+## Editing an Existing Skill
+
+When the user wants to modify a skill that is already installed (preinstalled or published), the source under `/.skills/<name>/<version>/` is read-only and gets rewritten on every sync — never edit in place.
+
+Instead:
+
+1. **Copy the bundle out** to a writable workspace path:
+
+   ```bash
+   cp -r /.skills/<name>/<version> /workspace/work/skills/<name>
+   ```
+
+2. **Edit under `/workspace/work/skills/<name>/`** — change SKILL.md or any sibling file.
+
+3. **Bump the version** in SKILL.md (e.g. `1.0.3` → `1.0.4`). Republishing the same version string is rejected by the server.
+
+4. **Register the edited bundle** with `save_artifact` (same arguments as step 5 above) and have the user publish it as a new version from the Skills tab.
 
 ## Frontmatter Reference
 
 ```yaml
 ---
-name: my-skill          # required, unique slug
-description: …          # required, shown in marketplace card
-version: 0.1.0          # required, semver
-keywords:               # optional, improves discoverability
+name: my-skill       # required — see Name Rules
+description: …       # required — see Description Rules
+version: 1.0.0       # optional — see Version Rules
+keywords:            # optional, improves discoverability
   - tag-one
   - tag-two
 ---
 ```
 
-## Tips
+### Name Rules
 
-- Keep the body focused. A skill that does one thing well is more reliable than one that tries to do everything.
-- Use numbered steps in the body so the agent works through them in order.
-- If the skill wraps an external service, document the expected input/output shape so the agent knows how to call it.
+- **Format**: lowercase letters, digits, and hyphens only — `^[a-z0-9][a-z0-9-]{0,62}$` (max 63 chars)
+- **No colons**: the org prefix (`org-slug:name`) is added by the server at publish time
+- **Prefer gerund form** for readability: `processing-pdfs`, `analyzing-data`, `writing-reports`. Noun phrases (`pdf-processing`) and action forms (`process-pdfs`) also work.
+
+### Description Rules
+
+The description is loaded into the agent's system prompt at startup and is what the agent reads to decide whether to load this skill for the current task. Get this wrong and the skill never fires.
+
+- **Third person only** — the description goes straight into the system prompt:
+  - ✓ `"Extracts text from PDF files. Use when the user mentions PDFs or document extraction."`
+  - ✗ `"I can help you extract text"` / `"You can use this to extract text"`
+- **Include WHAT + WHEN** — what the skill does plus the trigger conditions:
+  - ✓ `"Generates git commit messages by analyzing diffs. Use when the user asks for help writing commit messages or reviewing staged changes."`
+  - ✗ `"Helps with git commits"`
+- **List the trigger phrases the user is likely to say** — if the skill should fire on "create a report", "write a report", "generate a report", put those alternatives into the description so the agent matches all of them.
+- **Keep it one or two sentences** — long descriptions add noise to the system prompt and dilute the trigger signal.
+
+### Version Rules
+
+- **Format**: semver with no whitespace (e.g. `1.0.0`, `0.3.1`)
+- **Optional**: if omitted, the server auto-assigns the next patch version (first publish → `1.0.0`)
+- **Immutable**: the same version string cannot be published twice — always bump when republishing
+- **Recommendation**: omit the field and let the server assign it
+
+### Optional Extensions
+
+Use the `cubebox` block to declare runtime dependencies the server surfaces in the marketplace UI:
+
+```yaml
+cubebox:
+  requires:
+    env:  [MY_API_KEY, ANOTHER_VAR]   # env vars the skill needs at runtime
+    bins: [ffmpeg, node]               # binaries that must be present
+  primaryEnv: MY_API_KEY               # shown as the main credential in the UI
+```
+
+Aliases `openclaw`, `clawdbot`, and `clawdis` are also accepted and behave identically.
+
+## Body Guidelines
+
+### Write in second person, step by step
+
+The body is the agent's runbook for the task. Use numbered steps so the agent works through them in order, and say plainly which tool to call, which artifact to save, which workspace endpoint to hit.
+
+### Keep the body focused on one job
+
+A skill that does one thing well is far more reliable than one that branches into several. If the workflow has a natural fork ("create vs. edit"), prefer two skills over one with a giant if/else.
+
+### Keep it short — every token rides along
+
+When the skill is loaded, SKILL.md is injected into the system prompt for the rest of the conversation. Every token competes with the user's chat. Cut anything the agent doesn't strictly need:
+
+- Don't lecture on general programming or popular libraries — the underlying LLM already knows.
+- Don't restate workspace conventions already in the system prompt.
+- **Target under 500 lines.** If you need more, split out the bulk into bundle files (see below).
+
+### Split heavy material into bundle files
+
+A skill bundle can contain more than SKILL.md. When the user enables the skill in a workspace, **all bundle files are synced into the sandbox filesystem** under the skill's directory. The agent can `cat`, `grep`, or execute them from there.
+
+Use this for:
+
+- **Reference docs** (API schemas, long tables, large prompts) — keep them out of the system prompt, let the agent read them on demand via sandbox shell tools.
+- **Scripts** (`*.py`, `*.sh`) — let the agent execute them rather than regenerating the same code each run.
+- **Templates / fixtures** — large JSON / markdown samples the agent fills in.
+
+In SKILL.md, reference these files by their path inside the bundle so the agent knows where to look, e.g. `"Run python scripts/extract.py <input>"` or `"Read reference/api.md for the full field list"`.
+
+### Document external services concretely
+
+If the skill wraps an MCP server, an HTTP API, or a sandbox command:
+
+- Show the **exact tool name** (`GitHub:create_issue`, not "the GitHub tool").
+- Show one **concrete input / output example** rather than abstract field descriptions — it disambiguates format faster than prose.
+
+### Avoid time-sensitive wording
+
+Don't write "before December 2025, use X". Put deprecated guidance in a clearly-marked "Legacy" section, or remove it.
+
+### Use consistent terminology
+
+Pick one term per concept and stick with it — don't switch between "field" / "element" / "control" or "extract" / "pull" / "retrieve" in the same skill.
