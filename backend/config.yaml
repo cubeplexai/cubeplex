@@ -329,7 +329,7 @@ default:
     dev_double_signal_force_exit: true
     stale_run_threshold_seconds: 120
 
-  # Conversation context compaction (default off; opt-in per env)
+  # Conversation context compaction (default on; threshold = model.context_window * ratio)
   compaction:
     enabled: true
     summary_provider: "cubebox"
