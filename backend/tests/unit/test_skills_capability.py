@@ -282,24 +282,111 @@ async def _fake_ctx_factory() -> AsyncIterator[tuple[ScopeContext, Any]]:
 def test_skills_capability_mutation_gate() -> None:
     deps = _make_deps()
     cap = build_skills_capability(deps)
-    # Sanity: 3 operations declared
-    assert {op.name for op in cap.operations} == {"find", "preview", "install"}
+    # Sanity: 4 operations declared
+    assert {op.name for op in cap.operations} == {"find", "preview", "install", "publish_artifact"}
     assert next(op for op in cap.operations if op.name == "install").mutates is True
     assert next(op for op in cap.operations if op.name == "find").mutates is False
     assert next(op for op in cap.operations if op.name == "preview").mutates is False
+    assert next(op for op in cap.operations if op.name == "publish_artifact").mutates is False
 
-    # With mutations allowed, the schema should mention all three ops.
+    # With mutations allowed, the schema should mention all four ops.
     tool_full = build_capability_tool(cap, _fake_ctx_factory, allow_mutations=True)
     assert tool_full is not None
     schema_full = str(tool_full.parameters.model_json_schema())
     assert "Op_find" in schema_full
     assert "Op_preview" in schema_full
     assert "Op_install" in schema_full
+    assert "Op_publish_artifact" in schema_full
 
-    # Without mutations, install is dropped.
+    # Without mutations, install is dropped but publish_artifact (non-mutating) remains.
     tool_ro = build_capability_tool(cap, _fake_ctx_factory, allow_mutations=False)
     assert tool_ro is not None
     schema_ro = str(tool_ro.parameters.model_json_schema())
     assert "Op_install" not in schema_ro
     assert "Op_find" in schema_ro
     assert "Op_preview" in schema_ro
+    assert "Op_publish_artifact" in schema_ro
+
+
+# --- publish_artifact tests ---
+
+from cubebox.agents.actions.capabilities.skills import (  # noqa: E402
+    PublishArtifactInput,
+    _handle_publish_artifact_impl,
+)
+from cubebox.skills.service import SkillMdMissingError, VersionCollisionError  # noqa: E402
+
+
+@pytest.mark.asyncio
+async def test_publish_artifact_success(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake_sv = MagicMock()
+    fake_sv.skill_id = "skl-1"
+    fake_sv.version = "1.0.0"
+
+    fake_publisher = MagicMock()
+    fake_publisher.publish_from_artifact = AsyncMock(return_value=fake_sv)
+    monkeypatch.setattr(_skills_mod, "_SkillPublishService", lambda **_kw: fake_publisher)
+
+    fake_skill = MagicMock()
+    fake_skill.name = "org-slug:my-skill"
+    fake_skill_repo = MagicMock()
+    fake_skill_repo.get = AsyncMock(return_value=fake_skill)
+    monkeypatch.setattr(_skills_mod, "_SkillRepository", lambda _s: fake_skill_repo)
+
+    deps = _make_deps()
+    fake_session = MagicMock()
+
+    result = await _handle_publish_artifact_impl(
+        deps, _ctx(), fake_session, PublishArtifactInput(artifact_id="art-abc")
+    )
+
+    assert result == {
+        "published": True,
+        "canonical_name": "org-slug:my-skill",
+        "version": "1.0.0",
+    }
+    fake_publisher.publish_from_artifact.assert_awaited_once_with(
+        org_id="org-test",
+        org_slug="org-slug",
+        actor_user_id="usr-test",
+        artifact_id="art-abc",
+        workspace_id="ws-test",
+    )
+
+
+@pytest.mark.asyncio
+async def test_publish_artifact_skill_md_missing_raises_invalid_input(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_publisher = MagicMock()
+    fake_publisher.publish_from_artifact = AsyncMock(
+        side_effect=SkillMdMissingError("zip must contain SKILL.md at root")
+    )
+    monkeypatch.setattr(_skills_mod, "_SkillPublishService", lambda **_kw: fake_publisher)
+
+    deps = _make_deps()
+    with pytest.raises(ActionInvalidInput, match="SKILL.md"):
+        await _handle_publish_artifact_impl(
+            deps, _ctx(), MagicMock(), PublishArtifactInput(artifact_id="art-bad")
+        )
+
+
+@pytest.mark.asyncio
+async def test_publish_artifact_version_exists_raises_invalid_input(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_publisher = MagicMock()
+    fake_publisher.publish_from_artifact = AsyncMock(
+        side_effect=VersionCollisionError(
+            "version 1.0.0 already exists for org-slug:my-skill",
+            canonical_name="org-slug:my-skill",
+            version="1.0.0",
+        )
+    )
+    monkeypatch.setattr(_skills_mod, "_SkillPublishService", lambda **_kw: fake_publisher)
+
+    deps = _make_deps()
+    with pytest.raises(ActionInvalidInput, match="already exists"):
+        await _handle_publish_artifact_impl(
+            deps, _ctx(), MagicMock(), PublishArtifactInput(artifact_id="art-dup")
+        )
