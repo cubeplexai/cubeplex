@@ -3,14 +3,14 @@
 import { useState } from 'react'
 import { useTranslations } from 'next-intl'
 import { Dialog as DialogPrimitive } from '@base-ui/react/dialog'
-import { X } from 'lucide-react'
+import { X, AlertCircle, CheckCircle2 } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import useSWR from 'swr'
 import type { Artifact } from '@cubebox/core'
 import { Button } from '@/components/ui/button'
-import { csrfHeaders, readApiError } from '@/lib/csrf'
 import { cn, proseClasses } from '@/lib/utils'
+import { usePublishSkill } from '@/hooks/usePublishSkill'
 import { buildPreviewUrl } from './previewUtils'
 
 async function fetchText(url: string): Promise<string> {
@@ -30,38 +30,24 @@ export function SkillArtifactPreview({
 }) {
   const t = useTranslations('adminSkills')
   const [confirmOpen, setConfirmOpen] = useState(false)
-  const [submitting, setSubmitting] = useState(false)
-  const [result, setResult] = useState<{ ok: boolean; message: string } | null>(null)
+  const { publish, isPublishing, result } = usePublishSkill(workspaceId, artifact.id)
 
   const skillMdUrl = buildPreviewUrl(artifact, 'SKILL.md', version, workspaceId)
   const { data: skillMd, isLoading } = useSWR<string>(skillMdUrl, fetchText, {
     revalidateOnFocus: false,
   })
 
-  async function handlePublish(): Promise<void> {
-    setSubmitting(true)
-    setResult(null)
-    try {
-      const res = await fetch(`/api/v1/ws/${workspaceId}/skills/publish`, {
-        method: 'POST',
-        credentials: 'include',
-        headers: { ...csrfHeaders(), 'Content-Type': 'application/json' },
-        body: JSON.stringify({ artifact_id: artifact.id }),
-      })
-      if (res.status === 409) {
-        setResult({ ok: false, message: t('versionExists') })
-        return
-      }
-      if (!res.ok) {
-        setResult({ ok: false, message: await readApiError(res) })
-        return
-      }
-      setResult({ ok: true, message: t('publishSuccess') })
-      setConfirmOpen(false)
-    } finally {
-      setSubmitting(false)
-    }
+  async function handleConfirmPublish(): Promise<void> {
+    await publish()
+    setConfirmOpen(false)
   }
+
+  const resultMessage =
+    result?.message === 'VERSION_EXISTS'
+      ? t('versionExists')
+      : result?.message === 'SUCCESS'
+        ? t('publishSuccess')
+        : (result?.message ?? '')
 
   return (
     <div className="flex h-full flex-col">
@@ -73,16 +59,21 @@ export function SkillArtifactPreview({
         </header>
 
         {result && (
-          <p
+          <div
             className={cn(
-              'rounded-md px-3 py-2 text-sm',
+              'flex items-start gap-2 rounded-md border-l-4 px-3 py-2.5 text-sm font-medium',
               result.ok
-                ? 'bg-green-50 text-green-700 dark:bg-green-950 dark:text-green-300'
-                : 'bg-destructive/10 text-destructive',
+                ? 'border-green-500 bg-green-50 text-green-700 dark:bg-green-950 dark:text-green-300'
+                : 'border-destructive bg-destructive/10 text-destructive',
             )}
           >
-            {result.message}
-          </p>
+            {result.ok ? (
+              <CheckCircle2 className="mt-0.5 size-4 shrink-0" />
+            ) : (
+              <AlertCircle className="mt-0.5 size-4 shrink-0" />
+            )}
+            <span>{resultMessage}</span>
+          </div>
         )}
 
         <div className={proseClasses}>
@@ -134,12 +125,12 @@ export function SkillArtifactPreview({
                 variant="outline"
                 size="sm"
                 onClick={() => setConfirmOpen(false)}
-                disabled={submitting}
+                disabled={isPublishing}
               >
                 {t('cancel')}
               </Button>
-              <Button size="sm" onClick={() => void handlePublish()} disabled={submitting}>
-                {submitting ? t('publishing') : t('confirmPublishBtn')}
+              <Button size="sm" onClick={() => void handleConfirmPublish()} disabled={isPublishing}>
+                {isPublishing ? t('publishing') : t('confirmPublishBtn')}
               </Button>
             </div>
           </DialogPrimitive.Popup>
