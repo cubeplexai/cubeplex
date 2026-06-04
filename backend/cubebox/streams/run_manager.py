@@ -2362,7 +2362,9 @@ class RunManager:
                     _summary_provider_inst,
                     _CompModel(id=_summary_model_id, provider=_summary_provider),
                 )
-                _ctx_window: int = int(_comp_cfg.get("compaction.fallback_context_window", 64000))
+                _fallback_window = int(_comp_cfg.get("compaction.fallback_context_window", 128000))
+                _model_window = int(_model_config.context_window or 0)
+                _ctx_window: int = _model_window or _fallback_window
                 _ratio = float(_comp_cfg.get("compaction.threshold_ratio", 0.7))
                 cubepi_middleware.append(
                     CompactionMiddleware(
@@ -2381,8 +2383,10 @@ class RunManager:
                     )
                 )
                 logger.info(
-                    "CompactionMiddleware enabled (threshold={} tokens)",
+                    "CompactionMiddleware enabled (threshold={} tokens, model_window={}, fallback={})",
                     int(_ctx_window * _ratio),
+                    _model_window,
+                    _fallback_window,
                 )
         except Exception as _exc:
             logger.warning("CompactionMiddleware not loaded: {}", _exc)
