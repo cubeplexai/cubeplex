@@ -12,6 +12,9 @@ export interface ActiveRunBootstrap {
   // with identical content (any history user message older than this
   // belongs to a completed turn, not the active one).
   started_at?: string | null
+  error_code?: string | null
+  error_params?: Record<string, unknown> | null
+  error_message?: string | null
 }
 
 export interface ConversationBootstrap {

@@ -1199,5 +1199,14 @@
     "deleteTitle": "Delete Registry",
     "deleteDescription": "Remove \"{name}\" from this org. Existing installed skills are not affected.",
     "delete": "Delete"
+  },
+  "runError": {
+    "context_length_exceeded": "Conversation exceeded {model}'s context window ({tokens_in, number} / {context_window, number} tokens). Start a new chat or switch models.",
+    "rate_limited": "Rate limit hit for {model}. Wait a moment, then try again.",
+    "provider_auth_failed": "Authentication with {provider} failed. Check your API key in workspace settings.",
+    "provider_unavailable": "{provider} is unavailable right now. Try again shortly.",
+    "provider_bad_request": "{provider} rejected the request. Open this run's details to see the raw error.",
+    "tool_failed": "A tool call failed during this turn. Open this run's details to see the raw error.",
+    "internal_error": "Something went wrong. Open this run's details to see the raw error."
   }
 }

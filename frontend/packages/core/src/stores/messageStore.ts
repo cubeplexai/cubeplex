@@ -11,6 +11,7 @@ import type {
   ArtifactEventData,
   AssistantMessage as AssistantMessageType,
   ContentBlock,
+  ErrorEventData,
   Message,
   ReasoningEvent,
   TextDeltaEvent,
@@ -89,7 +90,7 @@ export interface MessageStore {
   lastResolvedSandboxQuestionId: string | null
   lastAppliedEventId: string | null
   statusPhase: string | null
-  error: string | null
+  errors: Record<string, { runId: string; data: ErrorEventData } | null>
   lastRunStatus: 'stale' | null
   todos: TodoItem[]
   toolStartedMap: Record<string, number>
@@ -949,9 +950,12 @@ async function consumeRunStream(
         const citationData = event.data as unknown as import('../types').CitationData
         useCitationStore.getState().addCitation(conversationId, citationData)
       } else if (event.type === 'error') {
-        const errData = event.data as { message: string; details?: string }
+        const errData = event.data as ErrorEventData
         set((s) => ({
-          error: errData.details || errData.message,
+          errors: {
+            ...s.errors,
+            [conversationId]: { runId: s.currentRunId ?? '', data: errData },
+          },
           isStreaming: false,
           pendingConfirmMap: {},
           pendingAsk: null,
@@ -1016,7 +1020,15 @@ async function consumeRunStream(
       }
     }
   } catch (err) {
-    set({ error: (err as Error).message })
+    set((s) => ({
+      errors: {
+        ...s.errors,
+        [conversationId]: {
+          runId: s.currentRunId ?? '',
+          data: { error_code: 'internal_error', message: (err as Error).message },
+        },
+      },
+    }))
   } finally {
     flush()
     if (shouldFinalize && get().currentRunId === runId) {
@@ -1040,7 +1052,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
   lastResolvedSandboxQuestionId: null,
   lastAppliedEventId: null,
   statusPhase: null,
-  error: null,
+  errors: {},
   lastRunStatus: null,
   todos: [],
   toolStartedMap: {},
@@ -1179,10 +1191,25 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
       // the in-store dedupe guard from `active_run.last_event_id`.
       const streamCursor = bootstrap.active_run?.last_event_id ?? null
 
+      // Hydrate per-conversation error from bootstrap if the last run ended
+      // with a classified error (e.g. context_length_exceeded). This lets the
+      // bubble reappear on page reload without waiting for an SSE event.
+      const seedError: { runId: string; data: ErrorEventData } | null = bootstrap.active_run
+        ?.error_code
+        ? {
+            runId: bootstrap.active_run.run_id,
+            data: {
+              error_code: bootstrap.active_run.error_code,
+              params: bootstrap.active_run.error_params ?? undefined,
+              message: bootstrap.active_run.error_message ?? bootstrap.active_run.error_code,
+            },
+          }
+        : null
+
       set((s) => ({
         messages: { ...s.messages, [conversationId]: messages },
         todos: restoredTodos,
-        error: null,
+        errors: { ...s.errors, [conversationId]: seedError },
         lastRunStatus: bootstrap.last_run_status ?? null,
         streamAgents: nextStreamAgents,
         pendingSteers: { ...s.pendingSteers, [conversationId]: [] },
@@ -1230,7 +1257,15 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
         })
       }
     } catch (err) {
-      set({ error: (err as Error).message })
+      set((s) => ({
+        errors: {
+          ...s.errors,
+          [conversationId]: {
+            runId: s.currentRunId ?? '',
+            data: { error_code: 'internal_error', message: (err as Error).message },
+          },
+        },
+      }))
     }
   },
 
@@ -1265,7 +1300,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
       currentRunId: null,
       lastAppliedEventId: null,
       statusPhase: null,
-      error: null,
+      errors: { ...state.errors, [conversationId]: null },
       lastRunStatus: null,
       todos: [],
       toolStartedMap: {},
@@ -1311,7 +1346,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
             const citationData = event.data as unknown as import('../types').CitationData
             useCitationStore.getState().addCitation(conversationId, citationData)
           } else if (event.type === 'error') {
-            const errData = event.data as { message: string; details?: string }
+            const errData = event.data as ErrorEventData
             if (!retried && !sawDone && errData.message.includes('409')) {
               retried = true
               await new Promise((r) => setTimeout(r, 400))
@@ -1325,7 +1360,10 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
               continue outer
             }
             set((s) => ({
-              error: errData.details || errData.message,
+              errors: {
+                ...s.errors,
+                [conversationId]: { runId: s.currentRunId ?? '', data: errData },
+              },
               isStreaming: false,
               pendingConfirmMap: {},
               pendingAsk: null,
@@ -1390,7 +1428,13 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
       }
     } catch (err) {
       set((s) => ({
-        error: (err as Error).message,
+        errors: {
+          ...s.errors,
+          [conversationId]: {
+            runId: s.currentRunId ?? '',
+            data: { error_code: 'internal_error', message: (err as Error).message },
+          },
+        },
         isStreaming: false,
         pendingConfirmMap: {},
         pendingAsk: null,
@@ -1408,7 +1452,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
 
     if (sawDone || sawPausedDone) {
       const lastState = get()
-      if (!lastState.error) {
+      if (!lastState.errors[conversationId]) {
         if (sawPausedDone) {
           await finalizePausedStream(get, set, conversationId)
         } else {
