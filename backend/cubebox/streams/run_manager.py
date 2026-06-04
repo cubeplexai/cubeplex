@@ -2364,7 +2364,12 @@ class RunManager:
                 )
                 _fallback_window = int(_comp_cfg.get("compaction.fallback_context_window", 128000))
                 _model_window = int(_model_config.context_window or 0)
-                _ctx_window: int = _model_window or _fallback_window
+                _model_max_out = int(_model_config.max_tokens or 0)
+                # Reserve max_tokens for the response so the threshold caps INPUT only.
+                # Without this, ratio*window could exceed (window - max_tokens) on
+                # high-output models (e.g. MiniMax ctx=204800 / max_tokens=131072).
+                _usable_window = max(0, _model_window - _model_max_out) if _model_window else 0
+                _ctx_window: int = _usable_window or _fallback_window
                 _ratio = float(_comp_cfg.get("compaction.threshold_ratio", 0.7))
                 cubepi_middleware.append(
                     CompactionMiddleware(
@@ -2383,9 +2388,11 @@ class RunManager:
                     )
                 )
                 logger.info(
-                    "CompactionMiddleware enabled (threshold={} tokens, model_window={}, fallback={})",
+                    "CompactionMiddleware enabled (threshold={} tokens, "
+                    "model_window={}, model_max_out={}, fallback={})",
                     int(_ctx_window * _ratio),
                     _model_window,
+                    _model_max_out,
                     _fallback_window,
                 )
         except Exception as _exc:
