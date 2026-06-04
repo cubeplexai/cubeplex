@@ -32,8 +32,14 @@ from cubebox.repositories.skill import (
     SkillVersionRepository,
 )
 from cubebox.skills.discovery import SkillDiscoveryService, SkillInstallError, SkillInstallService
-from cubebox.skills.frontmatter import extract_env_vars, parse_skill_md
-from cubebox.skills.service import SkillCatalogService, SkillPublishService
+from cubebox.skills.frontmatter import InvalidFrontmatterError, extract_env_vars, parse_skill_md
+from cubebox.skills.service import (
+    InvalidSkillNameError,
+    SkillCatalogService,
+    SkillMdMissingError,
+    SkillPublishService,
+    VersionCollisionError,
+)
 from cubebox.skills.sources.base import CandidateIdError, decode_candidate_id
 from cubebox.skills.sources.registry import SkillsAdapterManager
 
@@ -95,6 +101,15 @@ class InstallInput(BaseModel):
         description=(
             "The candidate_id from a find result. "
             "Only call this after the user has explicitly confirmed they want to install."
+        ),
+    )
+
+
+class PublishArtifactInput(BaseModel):
+    artifact_id: str = Field(
+        description=(
+            "The artifact_id from a save_artifact result. "
+            "The artifact must have artifact_type='skill' and contain SKILL.md at its root."
         ),
     )
 
@@ -228,6 +243,38 @@ async def _handle_install_impl(
     }
 
 
+async def _handle_publish_artifact_impl(
+    deps: SkillDeps, ctx: ScopeContext, session: Any, inp: PublishArtifactInput
+) -> Any:
+    if deps.workspace_id is None:
+        raise ActionInvalidInput("publish_artifact requires a workspace context")
+    publisher = _SkillPublishService(session=session, cache=deps.catalog.cache)
+    try:
+        sv = await publisher.publish_from_artifact(
+            org_id=deps.org_id,
+            org_slug=deps.org_slug,
+            actor_user_id=ctx.user_id,
+            artifact_id=inp.artifact_id,
+            workspace_id=deps.workspace_id,
+        )
+    except (
+        InvalidFrontmatterError,
+        InvalidSkillNameError,
+        SkillMdMissingError,
+        VersionCollisionError,
+    ) as exc:
+        raise ActionInvalidInput(str(exc)) from exc
+
+    skill = await _SkillRepository(session).get(sv.skill_id)
+    canonical_name = skill.name if skill is not None else sv.skill_id
+
+    return {
+        "published": True,
+        "canonical_name": canonical_name,
+        "version": sv.version,
+    }
+
+
 def build_skills_capability(deps: SkillDeps) -> AgentCapability:
     """Build the skills capability with run-scoped deps closed over the handlers."""
 
@@ -239,6 +286,11 @@ def build_skills_capability(deps: SkillDeps) -> AgentCapability:
 
     async def install_handler(ctx: ScopeContext, session: Any, inp: InstallInput) -> Any:
         return await _handle_install_impl(deps, ctx, session, inp)
+
+    async def publish_artifact_handler(
+        ctx: ScopeContext, session: Any, inp: PublishArtifactInput
+    ) -> Any:
+        return await _handle_publish_artifact_impl(deps, ctx, session, inp)
 
     return AgentCapability(
         name="skills",
@@ -280,6 +332,19 @@ def build_skills_capability(deps: SkillDeps) -> AgentCapability:
                 input_model=InstallInput,
                 handler=install_handler,
                 mutates=True,
+            ),
+            AgentOperation(
+                name="publish_artifact",
+                description=(
+                    "Publish a skill artifact to the current workspace so it becomes "
+                    "available via load_skill. Use after save_artifact produces an artifact "
+                    "with artifact_type='skill'. Available in both interactive and automated runs — "
+                    "a scheduled task can self-update its own skill based on observed feedback. "
+                    'Example: {"operation":"publish_artifact","artifact_id":"art-1abc..."}'
+                ),
+                input_model=PublishArtifactInput,
+                handler=publish_artifact_handler,
+                mutates=False,
             ),
         ],
     )
