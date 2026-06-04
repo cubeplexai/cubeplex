@@ -12,9 +12,10 @@ export function usePublishSkill(workspaceId: string, artifactId: string) {
   const [isPublishing, setIsPublishing] = useState(false)
   const [result, setResult] = useState<PublishResult | null>(null)
 
-  const publish = useCallback(async () => {
+  const publish = useCallback(async (): Promise<PublishResult> => {
     setIsPublishing(true)
     setResult(null)
+    let out: PublishResult
     try {
       const res = await fetch(`/api/v1/ws/${workspaceId}/skills/publish`, {
         method: 'POST',
@@ -23,14 +24,14 @@ export function usePublishSkill(workspaceId: string, artifactId: string) {
         body: JSON.stringify({ artifact_id: artifactId }),
       })
       if (res.status === 409) {
-        setResult({ ok: false, message: 'VERSION_EXISTS' })
-        return
+        out = { ok: false, message: 'VERSION_EXISTS' }
+      } else if (!res.ok) {
+        out = { ok: false, message: await readApiError(res) }
+      } else {
+        out = { ok: true, message: 'SUCCESS' }
       }
-      if (!res.ok) {
-        setResult({ ok: false, message: await readApiError(res) })
-        return
-      }
-      setResult({ ok: true, message: 'SUCCESS' })
+      setResult(out)
+      return out
     } finally {
       setIsPublishing(false)
     }
