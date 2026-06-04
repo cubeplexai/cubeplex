@@ -52,10 +52,34 @@ For each PR you're driving:
    ```
    Do **not** tag on the very first push of a PR; codex will run on its
    own.
-3. **Wait ~5 minutes** for codex to comment. Use a real sleep or
+3. **Confirm codex is working — check the 👀 reaction.** Within ~30s of
+   opening the PR (first push) or posting the @codex re-tag comment,
+   the codex bot leaves an `eyes` reaction on the trigger:
+
+   - First push: reaction on the **PR body**.
+   - Re-tag: reaction on **your @codex comment**.
+
+   Check via `gh api`:
+   ```bash
+   # PR body reactions (first push)
+   gh api repos/<owner>/<repo>/issues/<PR>/reactions \
+     --jq '.[] | select(.content == "eyes") | .user.login'
+
+   # Comment reactions (re-tag)
+   gh api repos/<owner>/<repo>/issues/comments/<comment-id>/reactions \
+     --jq '.[] | select(.content == "eyes") | .user.login'
+   ```
+
+   `chatgpt-codex-connector[bot]` in the output means codex picked up
+   the trigger and is reviewing. **No 👀 after a minute or two = codex
+   didn't see the trigger** — re-tag (or escalate if it's the first
+   push and the connector seems offline). This check beats blindly
+   guessing whether the bot is slow vs. broken.
+
+4. **Wait ~5 minutes** for codex to comment. Use a real sleep or
    `ScheduleWakeup` — do not poll in a tight loop, you'll get rate-limited
    and the bot needs time anyway.
-4. **Poll** with per-kind cursors and self-author exclusion:
+5. **Poll** with per-kind cursors and self-author exclusion:
 
    ```bash
    ME="$(gh api user --jq .login)"   # resolve once at start of loop
@@ -88,18 +112,18 @@ For each PR you're driving:
    timestamp is compared as a string and the id as a number, so decimal
    id widths don't matter to callers.
 
-5. **Classify each new comment** (rules below). For each, take exactly one
+6. **Classify each new comment** (rules below). For each, take exactly one
    of: *fix*, *reply-declining*, *reply-already-fixed*, *reply-clarify*.
-6. **Make the fixes**, run the relevant tests (changed-module level —
+7. **Make the fixes**, run the relevant tests (changed-module level —
    reserve the full suite for the pre-merge sweep), commit & push.
-7. **Reply to every comment** on the PR (rules below). No silent fixes.
-8. **Re-tag** by leaving a top-level PR comment:
+8. **Reply to every comment** on the PR (rules below). No silent fixes.
+9. **Re-tag** by leaving a top-level PR comment:
 
    ```bash
    gh pr comment <PR> --body "@codex please take another pass — pushed <short-sha>."
    ```
 
-9. **Update cursors** by storing the poller's returned `cursor` object
+10. **Update cursors** by storing the poller's returned `cursor` object
    and feeding each kind back on the next pass:
 
    ```bash
@@ -113,11 +137,11 @@ For each PR you're driving:
    (input, latest entry of that kind). Kinds with no new comments echo
    the input cursor unchanged, so a no-op kind stays pinned. The
    primary self-loop defense is `--exclude-author "$ME"` on every
-   poll (see step 4) — the agent's own replies/re-tag are filtered
+   poll (see step 5) — the agent's own replies/re-tag are filtered
    regardless of cursor position.
 
    Anything codex (or a human reviewer) posts strictly after the
-   per-kind cursor will show up next pass. Loop back to step 3.
+   per-kind cursor will show up next pass. Loop back to step 4.
 
 **Exit when**: one full poll round returns `count: 0` *after* you've
 re-tagged @codex on the latest pushed SHA. (Empty before re-tag means
@@ -272,7 +296,9 @@ Mark each todo done **after** the reply lands, not just after the commit.
   otherwise you spam reviews.
 - **Empty poll early in a round = wait, don't exit.** Codex can take
   several minutes; the exit condition is "empty *after* my latest re-tag
-  has had time to be reviewed."
+  has had time to be reviewed." If you're unsure whether codex is even
+  working or just slow, check for the 👀 reaction (step 3) — its
+  presence means *slow*, its absence means *not triggered*.
 
 ## Related Memory
 
