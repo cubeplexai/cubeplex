@@ -331,14 +331,14 @@ default:
 
   # Conversation context compaction (default off; opt-in per env)
   compaction:
-    enabled: false
+    enabled: true
     summary_provider: "cubebox"
     summary_model: "doubao-seed-1.8"
     threshold_ratio: 0.7
     keep_recent_messages: 8
     max_summary_tokens: 1024
     min_compact_messages: 4
-    fallback_context_window: 64000
+    fallback_context_window: 128000
 
   # Image generation (generate_image tool, sandbox-gated).
   # Set enabled: true and supply a real api_key in config.*.local.yaml or via env
