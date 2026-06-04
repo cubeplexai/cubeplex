@@ -113,7 +113,9 @@ describe('messageStore.send', () => {
       await useMessageStore.getState().send(mockClient as any, CONV_ID, 'hi')
     })
 
-    expect(useMessageStore.getState().error).toBe('Something failed')
+    const errEntry = useMessageStore.getState().errors[CONV_ID]
+    expect(errEntry).not.toBeNull()
+    expect(errEntry?.data.message).toBe('Something failed')
     const msgs = useMessageStore.getState().messages[CONV_ID] ?? []
     expect(msgs.some((m) => m.role === 'assistant')).toBe(false)
     expect(useMessageStore.getState().isStreaming).toBe(false)
@@ -204,7 +206,9 @@ describe('messageStore.send', () => {
     expect(msgs.some((m) => m.role === 'assistant')).toBe(false)
     expect(state.currentRunId).toBe('run-1')
     expect(state.isStreaming).toBe(true)
-    expect(state.error).toBe('socket closed')
+    // socket closed mid-run → internal_error lands in errors[CONV_ID]
+    expect(state.errors[CONV_ID]).not.toBeNull()
+    expect(state.errors[CONV_ID]?.data.error_code).toBe('internal_error')
   })
 
   it('keeps the bootstrap assistant content when history already contains it', async () => {
