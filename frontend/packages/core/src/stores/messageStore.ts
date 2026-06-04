@@ -1224,10 +1224,10 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
       set((s) => ({
         messages: { ...s.messages, [conversationId]: messages },
         todos: restoredTodos,
-        // When seedError is undefined (no active_run error and no last_run_error),
-        // leave the existing errors[conversationId] state alone — don't overwrite
-        // with null on every reload.
-        errors: seedError !== undefined ? { ...s.errors, [conversationId]: seedError } : s.errors,
+        // When neither active_run nor last_run_error carries error info, clear the
+        // conversation's stale error so a successful retry does not keep showing the
+        // previous failure bubble. seedError is null means server reports no error.
+        errors: { ...s.errors, [conversationId]: seedError ?? null },
         lastRunStatus: bootstrap.last_run_status ?? null,
         streamAgents: nextStreamAgents,
         pendingSteers: { ...s.pendingSteers, [conversationId]: [] },
