@@ -90,3 +90,92 @@ async def test_apply_ops_skips_non_personal_or_missing_targets():
     await mc.apply_ops(svc, ops, conversation_id="conv1", run_id=None)
     assert svc.updated == []
     assert svc.archived == []
+
+
+@pytest.mark.asyncio
+async def test_run_consolidation_uses_tracer_oneshot_when_provided(monkeypatch):
+    """run_consolidation must route the LLM call through ``tracer.oneshot()`` when
+    a tracer is provided, so the call is recorded with conversation_id/user_id
+    metadata and the oneshot_operation label."""
+    import contextlib
+    from unittest.mock import AsyncMock, MagicMock
+
+    # Skip checkpointer / DB paths by patching the no-history short-circuit.
+    @contextlib.asynccontextmanager
+    async def _fake_init_checkpointer():
+        cp = MagicMock()
+        cp.load = AsyncMock(return_value=MagicMock(messages=[]))
+        yield cp
+
+    monkeypatch.setattr("cubebox.agents.checkpointer.init_checkpointer", _fake_init_checkpointer)
+
+    # Lock helpers — return a token so we pass acquire_lock guard.
+    monkeypatch.setattr(mc, "acquire_lock", AsyncMock(return_value="tok"))
+    monkeypatch.setattr(mc, "release_lock", AsyncMock())
+    monkeypatch.setattr(mc, "mark_consolidated", AsyncMock())
+    monkeypatch.setattr(mc, "_counter", AsyncMock(return_value=0))
+
+    # Fake tracer.oneshot() that records being called with the right metadata.
+    captured: dict[str, object] = {}
+
+    @contextlib.asynccontextmanager
+    async def _fake_oneshot(*, provider, model, operation, metadata, **_kw):
+        captured["operation"] = operation
+        captured["metadata"] = dict(metadata)
+        session = MagicMock()
+        session.generate = AsyncMock(return_value='{"ops": []}')
+        yield session
+
+    fake_tracer = MagicMock()
+    fake_tracer.oneshot = _fake_oneshot
+
+    # data.messages is empty → run_consolidation marks consolidated and
+    # returns before hitting the LLM. Force a non-empty path by giving
+    # the checkpointer one fake message.
+    @contextlib.asynccontextmanager
+    async def _fake_init_checkpointer_nonempty():
+        cp = MagicMock()
+        data = MagicMock()
+        data.messages = [MagicMock(role="user", content=[])]
+        cp.load = AsyncMock(return_value=data)
+        yield cp
+
+    monkeypatch.setattr(
+        "cubebox.agents.checkpointer.init_checkpointer",
+        _fake_init_checkpointer_nonempty,
+    )
+
+    # Stub MemoryRepository.list so the "existing items" SQL never runs.
+    class _StubRepo:
+        def __init__(self, *_a, **_kw):
+            pass
+
+        async def list(self, **_kw):
+            return []
+
+    monkeypatch.setattr("cubebox.repositories.memory.MemoryRepository", _StubRepo)
+
+    # Session maker that just yields a MagicMock async-context.
+    @contextlib.asynccontextmanager
+    async def _fake_session_maker():
+        yield MagicMock()
+
+    await mc.run_consolidation(
+        redis=MagicMock(),
+        prefix="test",
+        conversation_id="conv-xyz",
+        user_id="usr-abc",
+        org_id="org-1",
+        workspace_id="ws-2",
+        provider=MagicMock(),
+        model=MagicMock(),
+        tracer=fake_tracer,
+        session_maker=_fake_session_maker,
+    )
+
+    assert captured.get("operation") == "consolidate_memory"
+    meta = captured.get("metadata") or {}
+    assert meta["conversation_id"] == "conv-xyz"
+    assert meta["user_id"] == "usr-abc"
+    assert meta["workspace_id"] == "ws-2"
+    assert meta["org_id"] == "org-1"
