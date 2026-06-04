@@ -39,6 +39,9 @@ describe('computeCacheHitRate', () => {
   it('returns null when no input or cache reads', () => {
     expect(computeCacheHitRate({ input: 0, cacheRead: 0 })).toBeNull()
   })
+  it('returns null when cache read is 0 (provider has no cache hits)', () => {
+    expect(computeCacheHitRate({ input: 2016, cacheRead: 0 })).toBeNull()
+  })
   it('returns ratio of cache_read to (cache_read + input)', () => {
     expect(computeCacheHitRate({ input: 70, cacheRead: 30 })).toBeCloseTo(0.3)
   })

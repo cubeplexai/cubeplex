@@ -1,4 +1,5 @@
 export function computeCacheHitRate(args: { input: number; cacheRead: number }): number | null {
+  if (args.cacheRead === 0) return null
   const denom = args.input + args.cacheRead
   if (denom === 0) return null
   return args.cacheRead / denom
