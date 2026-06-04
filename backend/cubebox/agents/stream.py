@@ -30,6 +30,7 @@ from cubepi.agent.types import (
     MessageUpdateEvent,
     ToolExecutionEndEvent,
 )
+from cubepi.hitl.types import ApproveAnswer
 from cubepi.providers.base import (
     AssistantMessage,
     StreamEvent,
@@ -255,7 +256,7 @@ def convert_agent_event_to_sse(evt: AgentEvent) -> list[dict[str, Any]]:
             "cancelled": evt.cancelled,
             "timed_out": evt.timed_out,
         }
-        if evt.answer is not None:
+        if isinstance(evt.answer, ApproveAnswer):
             resolved["decision"] = evt.answer.decision
             resolved["reason"] = evt.answer.reason
         return [resolved]

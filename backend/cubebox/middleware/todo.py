@@ -23,13 +23,21 @@ AssistantMessage / ToolResultMessage types directly.
 
 from __future__ import annotations
 
+import asyncio
 import json
 from collections.abc import Callable
 from typing import Any, Literal, TypedDict, cast
 
-from cubepi.agent.types import AfterToolCallContext, AfterToolCallResult, AgentTool, AgentToolResult
+from cubepi.agent.types import (
+    AfterToolCallContext,
+    AfterToolCallResult,
+    AgentContext,
+    AgentTool,
+    AgentToolResult,
+)
 from cubepi.middleware.base import Middleware, TurnAction
-from cubepi.providers.base import AssistantMessage, TextContent, ToolCall, UserMessage
+from cubepi.providers.base import AssistantMessage, Message, TextContent, ToolCall, UserMessage
+from cubepi.types import StructuredValue
 from pydantic import BaseModel
 
 # ---------------------------------------------------------------------------
@@ -252,7 +260,7 @@ class WriteTodosInput(BaseModel):
 
 
 def _last_assistant_message(
-    messages: list[Any],
+    messages: list[Message],
 ) -> AssistantMessage | None:
     """Return the last AssistantMessage from a cubepi message list."""
     return next(
@@ -361,8 +369,8 @@ def _make_write_todos_tool(extra_ref: Callable[[], dict[str, Any]]) -> AgentTool
         tool_call_id: str,
         args: WriteTodosInput,
         *,
-        signal: Any = None,
-        on_update: Any = None,
+        signal: asyncio.Event | None = None,
+        on_update: Callable[[StructuredValue], None] | None = None,
     ) -> AgentToolResult:
         del signal, on_update  # unused
         todos = args.todos
@@ -483,8 +491,8 @@ class TodoListMiddleware(Middleware):
         self,
         system_prompt: str,
         *,
-        ctx: Any,
-        signal: Any = None,
+        ctx: AgentContext,
+        signal: asyncio.Event | None = None,
     ) -> str:
         """Append the write_todos system instructions."""
         del ctx, signal  # not used
@@ -496,11 +504,11 @@ class TodoListMiddleware(Middleware):
 
     async def transform_context(
         self,
-        messages: list[Any],
+        messages: list[Message],
         *,
-        ctx: Any,
-        signal: Any = None,
-    ) -> list[Any]:
+        ctx: AgentContext,
+        signal: asyncio.Event | None = None,
+    ) -> list[Message]:
         """Inject current todo state as a UserMessage suffix when todos exist.
 
         We do not rely on persisted ToolResultMessages being visible on
@@ -532,7 +540,7 @@ class TodoListMiddleware(Middleware):
         self,
         ctx: AfterToolCallContext,
         *,
-        signal: Any = None,
+        signal: asyncio.Event | None = None,
     ) -> AfterToolCallResult | None:
         """No-op for all tools except write_todos.
 
@@ -598,9 +606,9 @@ class TodoListMiddleware(Middleware):
     async def after_model_response(
         self,
         response: AssistantMessage,
-        ctx: Any,
+        ctx: AgentContext,
         *,
-        signal: Any = None,
+        signal: asyncio.Event | None = None,
     ) -> TurnAction | None:
         """Guard state machine.
 
@@ -613,7 +621,7 @@ class TodoListMiddleware(Middleware):
 
         # We need the full message list from context to inspect the last AI msg.
         # In cubepi, ctx is AgentContext which has a .messages list.
-        agent_ctx_messages: list[Any] = getattr(ctx, "messages", [])
+        agent_ctx_messages = ctx.messages
 
         # Find last assistant message; if none, there's nothing to guard against.
         last_assistant_msg = _last_assistant_message(agent_ctx_messages + [response])

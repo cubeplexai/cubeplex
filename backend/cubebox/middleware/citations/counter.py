@@ -9,6 +9,8 @@ import re
 from contextvars import ContextVar
 from typing import Any
 
+from cubepi.providers.base import Message
+
 # Matches the 【N-M】 markers CitationMiddleware injects into tool result
 # content. We only need group 1 (citation_id) to recover the watermark.
 _MARKER_RE = re.compile(r"【(\d+)-\d+】")
@@ -32,7 +34,7 @@ class CitationCounter:
             self._next += 1
             return val
 
-    async def seed_from_messages(self, messages: list[Any]) -> None:
+    async def seed_from_messages(self, messages: list[Message]) -> None:
         """Advance ``_next`` past the highest citation id in tool-result history.
 
         Scans ``ToolResultMessage.content`` for ``【N-M】`` markers and ensures

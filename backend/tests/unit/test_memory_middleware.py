@@ -482,7 +482,7 @@ def test_wire_input_stores_memory_snapshot_in_metadata() -> None:
         "rendered_text": "<personal_memory>fact</personal_memory>",
     }
     msg = wire_input_to_cubepi_user_message("hello", memory_snapshot=snap)
-    assert msg.metadata.get("memory_snapshot") is snap
+    assert msg.metadata.get("memory_snapshot") == snap
 
 
 def test_wire_input_no_snapshot_key_when_none() -> None:
@@ -499,7 +499,7 @@ def test_wire_input_snapshot_and_attachments_coexist() -> None:
     )
     assert "attachments" in msg.metadata
     assert "memory_snapshot" in msg.metadata
-    assert msg.metadata["memory_snapshot"] is snap
+    assert msg.metadata["memory_snapshot"] == snap
 
 
 # ---------------------------------------------------------------------------

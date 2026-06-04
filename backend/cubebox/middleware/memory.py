@@ -31,11 +31,13 @@ Cache discipline contract
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Callable
 from contextlib import AbstractAsyncContextManager
 from datetime import UTC, datetime
 from typing import Any
 
+from cubepi.agent.types import AgentContext
 from cubepi.middleware.base import Middleware
 from cubepi.providers.base import Message, TextContent, UserMessage
 
@@ -143,8 +145,8 @@ class MemoryMiddleware(Middleware):
         self,
         system_prompt: str,
         *,
-        ctx: Any,
-        signal: object = None,
+        ctx: AgentContext,
+        signal: asyncio.Event | None = None,
     ) -> str:
         """Append pinned-memory block and authoring guidance to the system prompt.
 
@@ -189,8 +191,8 @@ class MemoryMiddleware(Middleware):
         self,
         messages: list[Message],
         *,
-        ctx: Any,
-        signal: object = None,
+        ctx: AgentContext,
+        signal: asyncio.Event | None = None,
     ) -> list[Message]:
         """Prepend relevance snapshot text to UserMessages that carry one.
 
@@ -215,9 +217,8 @@ class MemoryMiddleware(Middleware):
             if not isinstance(msg, UserMessage):
                 out.append(msg)
                 continue
-            snap: dict[str, Any] | None = (
-                msg.metadata.get("memory_snapshot") if msg.metadata else None
-            )
+            raw_snap = msg.metadata.get("memory_snapshot") if msg.metadata else None
+            snap = raw_snap if isinstance(raw_snap, dict) else None
             if not snap:
                 out.append(msg)
                 continue

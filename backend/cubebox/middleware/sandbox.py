@@ -17,12 +17,20 @@ from __future__ import annotations
 
 import asyncio
 from collections import deque
+from collections.abc import Callable
 from typing import Any
 
-from cubepi.agent.types import AgentTool, AgentToolResult, BeforeToolCallResult
+from cubepi.agent.types import (
+    AgentContext,
+    AgentTool,
+    AgentToolResult,
+    BeforeToolCallContext,
+    BeforeToolCallResult,
+)
 from cubepi.hitl import HitlCancelled, HitlChannel, HitlTimedOut
 from cubepi.middleware.base import Middleware
 from cubepi.providers.base import TextContent
+from cubepi.types import StructuredValue
 from pydantic import BaseModel, Field
 
 from cubebox.parsers import ParseOptions
@@ -145,8 +153,8 @@ def _make_execute_tool(
         tool_call_id: str,
         args: _ExecuteArgs,
         *,
-        signal: object = None,
-        on_update: object = None,
+        signal: asyncio.Event | None = None,
+        on_update: Callable[[StructuredValue], None] | None = None,
     ) -> AgentToolResult:
         del tool_call_id, signal, on_update
 
@@ -173,8 +181,8 @@ def _make_write_file_tool(sandbox: Sandbox) -> AgentTool[_WriteFileArgs]:
         tool_call_id: str,
         args: _WriteFileArgs,
         *,
-        signal: object = None,
-        on_update: object = None,
+        signal: asyncio.Event | None = None,
+        on_update: Callable[[StructuredValue], None] | None = None,
     ) -> AgentToolResult:
         del tool_call_id, signal, on_update
 
@@ -196,8 +204,8 @@ def _make_edit_file_tool(sandbox: Sandbox) -> AgentTool[_EditFileArgs]:
         tool_call_id: str,
         args: _EditFileArgs,
         *,
-        signal: object = None,
-        on_update: object = None,
+        signal: asyncio.Event | None = None,
+        on_update: Callable[[StructuredValue], None] | None = None,
     ) -> AgentToolResult:
         del tool_call_id, signal, on_update
 
@@ -322,8 +330,8 @@ def _make_file_read_tool(
         tool_call_id: str,
         args: _FileReadArgs,
         *,
-        signal: object = None,
-        on_update: object = None,
+        signal: asyncio.Event | None = None,
+        on_update: Callable[[StructuredValue], None] | None = None,
     ) -> AgentToolResult:
         import json
 
@@ -400,7 +408,7 @@ class SandboxMiddleware(Middleware):
 
     async def before_tool_call(
         self,
-        ctx: Any,
+        ctx: BeforeToolCallContext,
         *,
         signal: asyncio.Event | None = None,
     ) -> BeforeToolCallResult | None:
@@ -416,7 +424,17 @@ class SandboxMiddleware(Middleware):
         if not self.command_rules:
             return None
 
-        command = ctx.args.command
+        raw_args = ctx.args
+        if isinstance(raw_args, _ExecuteArgs):
+            command = raw_args.command
+        elif isinstance(raw_args, dict):
+            command_value = raw_args.get("command")
+            if not isinstance(command_value, str):
+                return None
+            command = command_value
+        else:
+            return None
+
         action, pattern = evaluate_command(command, self.command_rules)
         if action == "allow":
             return None
@@ -475,8 +493,8 @@ class SandboxMiddleware(Middleware):
         self,
         system_prompt: str,
         *,
-        ctx: object,
-        signal: object = None,
+        ctx: AgentContext,
+        signal: asyncio.Event | None = None,
     ) -> str:
         """Append sandbox capability section to the system prompt.
 

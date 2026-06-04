@@ -33,11 +33,12 @@ Rendering:
 
 from __future__ import annotations
 
+import asyncio
 import json
 from collections.abc import Callable
 from typing import Any
 
-from cubepi.agent.types import AfterToolCallContext
+from cubepi.agent.types import AfterToolCallContext, AfterToolCallResult, AgentContext
 from cubepi.middleware.base import Middleware
 
 from cubebox.tools.builtin.load_skill import LoadSkillOutput
@@ -70,8 +71,8 @@ class SkillsMiddleware(Middleware):
         self,
         ctx: AfterToolCallContext,
         *,
-        signal: Any = None,
-    ) -> None:
+        signal: asyncio.Event | None = None,
+    ) -> AfterToolCallResult | None:
         """Watch for load_skill invocations; store content in extra on success.
 
         If the tool call is not ``load_skill``, or if it errored, or if the
@@ -126,8 +127,8 @@ class SkillsMiddleware(Middleware):
         self,
         system_prompt: str,
         *,
-        ctx: Any,
-        signal: Any = None,
+        ctx: AgentContext,
+        signal: asyncio.Event | None = None,
     ) -> str:
         """Append loaded-skills section to the system prompt.
 

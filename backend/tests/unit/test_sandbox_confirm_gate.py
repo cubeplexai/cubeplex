@@ -14,15 +14,10 @@ class _ToolCall:
         self.id = id
 
 
-class _Args:
-    def __init__(self, command: str) -> None:
-        self.command = command
-
-
 class _Ctx:
     def __init__(self, name: str, command: str) -> None:
         self.tool_call = _ToolCall(name)
-        self.args = _Args(command)
+        self.args = {"command": command}
 
 
 class _StubChannel:

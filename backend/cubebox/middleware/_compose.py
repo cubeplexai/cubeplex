@@ -16,6 +16,7 @@ override so it replaces the buggy cubepi default for this stack.
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Awaitable, Callable
 from dataclasses import replace
 from typing import Any
@@ -56,7 +57,7 @@ def compose_after_tool_call(
     async def composed(
         ctx: AfterToolCallContext,
         *,
-        signal: Any = None,
+        signal: asyncio.Event | None = None,
     ) -> AfterToolCallResult | None:
         accum_content = ctx.result.content
         accum_details: Any = ctx.result.details

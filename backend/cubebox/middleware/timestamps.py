@@ -30,13 +30,19 @@ free of per-turn dynamic content.
 
 from __future__ import annotations
 
+import asyncio
 from contextvars import ContextVar
 from datetime import UTC, datetime
 from typing import Any
 
-from cubepi.agent.types import AfterToolCallContext, AfterToolCallResult, BeforeToolCallContext
-from cubepi.middleware.base import Middleware
-from cubepi.providers.base import AssistantMessage
+from cubepi.agent.types import (
+    AfterToolCallContext,
+    AfterToolCallResult,
+    AgentContext,
+    BeforeToolCallContext,
+)
+from cubepi.middleware.base import Middleware, TurnAction
+from cubepi.providers.base import AssistantMessage, Message
 
 from cubebox.utils.time import utc_isoformat
 
@@ -67,11 +73,11 @@ class TimestampMiddleware(Middleware):
 
     async def transform_context(
         self,
-        messages: list[Any],
+        messages: list[Message],
         *,
-        ctx: Any,
-        signal: Any = None,
-    ) -> list[Any]:
+        ctx: AgentContext,
+        signal: asyncio.Event | None = None,
+    ) -> list[Message]:
         """Capture turn-start wall time on a ContextVar.
 
         Message content is returned byte-identical — no modifications — so
@@ -89,7 +95,7 @@ class TimestampMiddleware(Middleware):
         self,
         ctx: BeforeToolCallContext,
         *,
-        signal: Any = None,
+        signal: asyncio.Event | None = None,
     ) -> None:
         """Stash the tool-call start time; returns None (no blocking)."""
         del signal  # not used
@@ -104,7 +110,7 @@ class TimestampMiddleware(Middleware):
         self,
         ctx: AfterToolCallContext,
         *,
-        signal: Any = None,
+        signal: asyncio.Event | None = None,
     ) -> AfterToolCallResult | None:
         """Merge tool timing into AfterToolCallResult.details.
 
@@ -147,10 +153,10 @@ class TimestampMiddleware(Middleware):
     async def after_model_response(
         self,
         response: AssistantMessage,
-        ctx: Any,
+        ctx: AgentContext,
         *,
-        signal: Any = None,
-    ) -> None:
+        signal: asyncio.Event | None = None,
+    ) -> TurnAction | None:
         """Stamp created_at and turn_started_at on response.metadata.
 
         ``response.metadata`` is an out-of-band dict; it is never converted
