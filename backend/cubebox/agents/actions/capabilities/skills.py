@@ -105,7 +105,7 @@ class InstallInput(BaseModel):
     )
 
 
-class PublishArtifactInput(BaseModel):
+class PublishSkillInput(BaseModel):
     artifact_id: str = Field(
         description=(
             "The artifact_id from a save_artifact result. "
@@ -243,11 +243,11 @@ async def _handle_install_impl(
     }
 
 
-async def _handle_publish_artifact_impl(
-    deps: SkillDeps, ctx: ScopeContext, session: Any, inp: PublishArtifactInput
+async def _handle_publish_skill_impl(
+    deps: SkillDeps, ctx: ScopeContext, session: Any, inp: PublishSkillInput
 ) -> Any:
     if deps.workspace_id is None:
-        raise ActionInvalidInput("publish_artifact requires a workspace context")
+        raise ActionInvalidInput("publish_skill requires a workspace context")
     publisher = _SkillPublishService(session=session, cache=deps.catalog.cache)
     try:
         sv = await publisher.publish_from_artifact(
@@ -287,10 +287,8 @@ def build_skills_capability(deps: SkillDeps) -> AgentCapability:
     async def install_handler(ctx: ScopeContext, session: Any, inp: InstallInput) -> Any:
         return await _handle_install_impl(deps, ctx, session, inp)
 
-    async def publish_artifact_handler(
-        ctx: ScopeContext, session: Any, inp: PublishArtifactInput
-    ) -> Any:
-        return await _handle_publish_artifact_impl(deps, ctx, session, inp)
+    async def publish_skill_handler(ctx: ScopeContext, session: Any, inp: PublishSkillInput) -> Any:
+        return await _handle_publish_skill_impl(deps, ctx, session, inp)
 
     return AgentCapability(
         name="skills",
@@ -334,15 +332,15 @@ def build_skills_capability(deps: SkillDeps) -> AgentCapability:
                 mutates=True,
             ),
             AgentOperation(
-                name="publish_artifact",
+                name="publish_skill",
                 description=(
                     "Publish a skill artifact to the current workspace so it becomes "
                     "available via load_skill. Use after save_artifact produces an artifact "
                     "with artifact_type='skill'. "
-                    'Example: {"operation":"publish_artifact","artifact_id":"art-1abc..."}'
+                    'Example: {"operation":"publish_skill","artifact_id":"art-1abc..."}'
                 ),
-                input_model=PublishArtifactInput,
-                handler=publish_artifact_handler,
+                input_model=PublishSkillInput,
+                handler=publish_skill_handler,
                 mutates=False,
             ),
         ],
