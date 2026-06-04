@@ -181,7 +181,7 @@ exclude_lines = [
 # friendly ValidationError translation (cubepi#136), v3 HITL run_id support
 # (1686eed), OpenAI double-finish_reason guard (262a33f), HITL channel
 # (b03813e), subagent-span-nesting (#122), steer-cancel (#120).
-cubepi = { git = "https://github.com/cubeplexai/cubepi.git", rev = "707f95b" }
+cubepi = { git = "https://github.com/cubeplexai/cubepi.git", rev = "621a2da" }
 
 [dependency-groups]
 dev = [
