@@ -244,17 +244,16 @@ def build_skills_capability(deps: SkillDeps) -> AgentCapability:
         name="skills",
         description=(
             "Search, preview, and install skills available to this workspace. "
-            "Use find to discover candidates, preview to read SKILL.md before "
-            "suggesting installation, and install only when the user has "
-            "explicitly confirmed."
+            "Typical flow: find → preview → install. Each operation requires the "
+            "`operation` field. See per-operation examples."
         ),
         operations=[
             AgentOperation(
                 name="find",
                 description=(
-                    "Search available skills (your org's catalog + registered "
-                    "remote registries) by a plain-language need. Read-only: "
-                    "returns ranked candidates with descriptions; never installs."
+                    "Search available skills by plain-language need. Returns candidates "
+                    "with install_state and candidate_id. Read-only; never installs. "
+                    'Example: {"operation":"find","query":"web search"}'
                 ),
                 input_model=FindInput,
                 handler=find_handler,
@@ -263,9 +262,9 @@ def build_skills_capability(deps: SkillDeps) -> AgentCapability:
             AgentOperation(
                 name="preview",
                 description=(
-                    "Fetch the full SKILL.md of any candidate — installed or not. "
-                    "Use after find to read what a skill does before recommending installation. "
-                    "Pass the candidate_id from the find result."
+                    "Fetch the full SKILL.md for a candidate so you can describe it "
+                    "to the user before suggesting installation. Use after find. "
+                    'Example: {"operation":"preview","candidate_id":"<candidate_id from find>"}'
                 ),
                 input_model=PreviewInput,
                 handler=preview_handler,
@@ -275,8 +274,8 @@ def build_skills_capability(deps: SkillDeps) -> AgentCapability:
                 name="install",
                 description=(
                     "Install a skill candidate into the current workspace. "
-                    "Only call this when the user has explicitly asked to install. "
-                    "Pass the candidate_id from the find result."
+                    "Only call when the user has explicitly asked to install. "
+                    'Example: {"operation":"install","candidate_id":"<candidate_id from find>"}'
                 ),
                 input_model=InstallInput,
                 handler=install_handler,
