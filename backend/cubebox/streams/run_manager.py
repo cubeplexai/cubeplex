@@ -1282,6 +1282,7 @@ class RunManager:
         skill_catalog: Any | None = None,
         catalog_session: Any | None = None,
         trigger: str = "interactive",
+        extra_ref_holder: dict[str, Any] | None = None,
     ) -> str:
         """Execute a single user turn through the cubepi runtime.
 
@@ -1304,9 +1305,11 @@ class RunManager:
 
         # extra_ref late-binding: compaction, skills, and todo all need access
         # to agent._extra, which is only available after the agent is built.
-        # Pass the holder dict into the factory so middleware closures and the
-        # caller share the same dict; the caller populates it post-build.
-        extra_ref_holder: dict[str, Any] = {"extra": None}
+        # The holder is passed in from _execute_run so the outer except block
+        # can read model/provider/context_window when we raise from here.
+        if extra_ref_holder is None:
+            extra_ref_holder = {}
+        extra_ref_holder.setdefault("extra", None)
 
         # Bridge the synchronous cubepi listener to the async world via a queue.
         # agent.prompt() is async and invokes synchronous listeners on each
@@ -1726,6 +1729,7 @@ class RunManager:
         sandbox: Any | None = None,
         skill_catalog: Any | None = None,
         catalog_session: Any | None = None,
+        extra_ref_holder: dict[str, Any] | None = None,
     ) -> str:
         """Resume a paused HITL conversation by delivering ``answer`` to a
         cubepi agent via ``agent.respond``.
@@ -1752,10 +1756,12 @@ class RunManager:
         )
 
         # Late-binding holder for middleware closures (provider_name,
-        # model_id, mem_repo_factory, extra). Same ferry pattern as the
-        # prompt path — we read provider_name/model_id from it for the
-        # liveness writeback below.
-        extra_ref_holder: dict[str, Any] = {"extra": None}
+        # model_id, mem_repo_factory, extra). Passed in from
+        # _execute_respond_run so the outer except block can read
+        # model/provider/context_window when we raise from here.
+        if extra_ref_holder is None:
+            extra_ref_holder = {}
+        extra_ref_holder.setdefault("extra", None)
 
         sse_queue: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue()
 
@@ -2828,6 +2834,11 @@ class RunManager:
         # "errored" applies, which keeps the existing teardown semantics.
         final_status: str = "errored"
 
+        # Declared here so the except block can read model/provider/context_window
+        # even when the exception is raised inside _run_cubepi_path (a separate
+        # call frame — locals().get() would never see it).
+        extra_ref_holder: dict[str, Any] = {}
+
         try:
             # Open a long-lived session for the SkillCatalogService — used by
             # both SkillsMiddleware (read prompts) and LazySandbox (push files
@@ -2974,6 +2985,7 @@ class RunManager:
                 skill_catalog=skill_catalog,
                 catalog_session=catalog_session,
                 trigger=ctx.trigger,
+                extra_ref_holder=extra_ref_holder,
             )
             await _update_conversation_timestamp(
                 conversation_id,
@@ -3083,11 +3095,10 @@ class RunManager:
             )
             await record_scheduled_run_terminal_state(run_id=run_id, run_status="failed")
             with suppress(Exception):
-                _holder = locals().get("extra_ref_holder") or {}
                 _classify_params: dict[str, Any] = {
-                    "model": _holder.get("model_id"),
-                    "provider": _holder.get("provider_name"),
-                    "context_window": _holder.get("model_context_window") or None,
+                    "model": extra_ref_holder.get("model_id"),
+                    "provider": extra_ref_holder.get("provider_name"),
+                    "context_window": extra_ref_holder.get("model_context_window") or None,
                 }
                 await self._append_error(
                     run_id,
@@ -3309,6 +3320,11 @@ class RunManager:
             name=f"event_q_drainer_respond:{run_id}",
         )
 
+        # Declared here so the except block can read model/provider/context_window
+        # even when the exception is raised inside _run_cubepi_respond_path (a
+        # separate call frame — locals().get() would never see it).
+        extra_ref_holder: dict[str, Any] = {}
+
         try:
             try:
                 from pathlib import Path
@@ -3441,6 +3457,7 @@ class RunManager:
                 sandbox=sandbox,
                 skill_catalog=skill_catalog,
                 catalog_session=catalog_session,
+                extra_ref_holder=extra_ref_holder,
             )
             await _update_conversation_timestamp(
                 conversation_id,
@@ -3546,11 +3563,10 @@ class RunManager:
             # picks the row up. Just record the error so the SSE consumer
             # sees it.
             with suppress(Exception):
-                _holder = locals().get("extra_ref_holder") or {}
                 _classify_params: dict[str, Any] = {
-                    "model": _holder.get("model_id"),
-                    "provider": _holder.get("provider_name"),
-                    "context_window": _holder.get("model_context_window") or None,
+                    "model": extra_ref_holder.get("model_id"),
+                    "provider": extra_ref_holder.get("provider_name"),
+                    "context_window": extra_ref_holder.get("model_context_window") or None,
                 }
                 await self._append_error(
                     run_id,
