@@ -32,6 +32,7 @@ from cubebox.streams.run_events import (
     clear_active_run,
     create_run,
     get_active_run,
+    get_conversation_last_error,
     get_latest_event_id,
     get_run_meta,
     is_stale_meta,
@@ -985,11 +986,24 @@ async def get_conversation_bootstrap(
         else:
             pending_hitl = serialize_pending_hitl(pending_req, run_id=run_id_for_pending)
 
+    last_run_error_raw = await get_conversation_last_error(
+        rds.client, prefix=rds.key_prefix, conversation_id=conversation_id
+    )
+    last_run_error_payload: dict[str, Any] | None = None
+    if last_run_error_raw is not None:
+        last_run_error_payload = {
+            "run_id": last_run_error_raw.get("run_id"),
+            "error_code": last_run_error_raw.get("error_code"),
+            "error_params": _parse_error_params(last_run_error_raw.get("error_params")),
+            "error_message": last_run_error_raw.get("error_message"),
+        }
+
     return {
         "messages": history["messages"],
         "total": history["total"],
         "active_run": active_run_payload,
         "last_run_status": last_run_status,
+        "last_run_error": last_run_error_payload,
         "usage_summary": usage_summary,
         "pending_hitl": pending_hitl,
     }

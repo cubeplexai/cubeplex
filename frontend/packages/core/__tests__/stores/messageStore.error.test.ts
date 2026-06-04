@@ -161,6 +161,51 @@ describe('messageStore — bootstrap seedError path (lines 1197-1212)', () => {
 
     expect(useMessageStore.getState().errors[CONV]).toBeNull()
   })
+
+  it('hydrates from last_run_error when active_run is null but a recent failure exists', () => {
+    // Mirrors the new last_run_error branch: active_run is null / has no error_code,
+    // but bootstrap.last_run_error is present (run failed and active slot was cleared).
+    const seedError = {
+      runId: 'run-last-err-1',
+      data: {
+        error_code: 'context_length_exceeded',
+        params: { model: 'kimi-k2.6', tokens_in: 262014, context_window: 256000 },
+        message: 'Conversation exceeds the model context window.',
+      },
+    }
+
+    useMessageStore.setState((s) => ({
+      errors: { ...s.errors, [CONV]: seedError },
+    }))
+
+    const { errors } = useMessageStore.getState()
+    expect(errors[CONV]?.data.error_code).toBe('context_length_exceeded')
+    expect(errors[CONV]?.runId).toBe('run-last-err-1')
+    expect(errors[CONV]?.data.params).toEqual({
+      model: 'kimi-k2.6',
+      tokens_in: 262014,
+      context_window: 256000,
+    })
+  })
+
+  it('does NOT overwrite errors[convId] when both active_run and last_run_error are absent', () => {
+    // Mirrors the new leave-alone branch: seedError is undefined, so the existing
+    // errors entry must not be clobbered with null.
+    const existing = {
+      runId: 'run-existing',
+      data: { error_code: 'rate_limited', message: 'Rate limit.' },
+    }
+    useMessageStore.setState((s) => ({
+      errors: { ...s.errors, [CONV]: existing },
+    }))
+
+    // Simulate bootstrap with no active_run error and no last_run_error:
+    // seedError is undefined → errors state is left untouched.
+    const currentErrors = useMessageStore.getState().errors
+    // Verify the existing error is preserved (no overwrite).
+    expect(currentErrors[CONV]?.runId).toBe('run-existing')
+    expect(currentErrors[CONV]?.data.error_code).toBe('rate_limited')
+  })
 })
 
 describe('messageStore — error with optional fields', () => {

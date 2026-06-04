@@ -1,7 +1,6 @@
 import { render, screen } from '@testing-library/react'
 import { describe, it, expect } from 'vitest'
 import { NextIntlClientProvider } from 'next-intl'
-import type { IntlError } from 'use-intl'
 import { RunErrorBubble } from '@/components/chat/RunErrorBubble'
 
 // Minimal runError namespace — only the keys exercised by these tests.
@@ -14,27 +13,11 @@ const messages = {
   },
 }
 
-// next-intl 4.x does NOT throw on missing keys by default — it calls onError
-// (console.error) and returns the key string as a fallback. RunErrorBubble's
-// try/catch fallback therefore requires `onError: (e) => { throw e }` to
-// exercise the catch branch. Pass this to the "missing key" tests only.
+// Default provider — no onError override. next-intl returns the key string on
+// missing keys; RunErrorBubble detects this and falls back to data.message.
 function renderWithIntl(node: React.ReactNode, locale = 'en') {
   return render(
     <NextIntlClientProvider locale={locale} messages={messages}>
-      {node}
-    </NextIntlClientProvider>,
-  )
-}
-
-function renderWithIntlThrowOnMissing(node: React.ReactNode, locale = 'en') {
-  return render(
-    <NextIntlClientProvider
-      locale={locale}
-      messages={messages}
-      onError={(e: IntlError) => {
-        throw e
-      }}
-    >
       {node}
     </NextIntlClientProvider>,
   )
@@ -60,10 +43,10 @@ describe('RunErrorBubble', () => {
     expect(alert).not.toHaveTextContent('fallback not used here')
   })
 
-  it('falls back to data.message when i18n key is missing', () => {
-    // Use the throwing provider so next-intl's missing-key IntlError propagates
-    // into RunErrorBubble's try/catch, which then falls back to data.message.
-    renderWithIntlThrowOnMissing(
+  it('falls back to data.message when i18n key is missing (default provider)', () => {
+    // The default NextIntlClientProvider returns the key string on missing keys.
+    // RunErrorBubble detects this (localized === error_code) and uses data.message.
+    renderWithIntl(
       <RunErrorBubble
         data={{
           error_code: 'some_brand_new_code_we_havent_translated',
@@ -91,8 +74,9 @@ describe('RunErrorBubble', () => {
     expect(alert).toHaveTextContent(/claude-sonnet-4-6/)
   })
 
-  it('renders without params when i18n key is missing (no params field)', () => {
-    renderWithIntlThrowOnMissing(
+  it('falls back to data.message when key is missing and no params field', () => {
+    // Same key-string detection path, no params provided.
+    renderWithIntl(
       <RunErrorBubble
         data={{
           error_code: 'some_unknown_code',

@@ -17,13 +17,16 @@ from uuid_utils import uuid7
 
 from cubebox.agents.schemas import AgentEvent, DoneEvent, ErrorEvent, StatusEvent
 from cubebox.errors import ErrorCode, classify_exception, english_fallback
+from cubebox.middleware.compaction.tokens import approx_tokens
 from cubebox.streams.run_events import (
     append_run_event,
     clear_active_run,
+    clear_conversation_last_error,
     create_run,
     expire_run_data,
     get_active_run,
     get_run_meta,
+    set_conversation_last_error,
     update_run_meta,
 )
 from cubebox.utils.time import utc_isoformat
@@ -795,6 +798,15 @@ class RunManager:
             if existing and existing.status in ("running", "paused_hitl"):
                 raise RuntimeError(f"Conversation {conversation_id} already has an active run")
             raise RuntimeError(f"Conversation {conversation_id} could not claim an active run")
+
+        # Clear the per-conversation last-error pointer so subsequent reloads
+        # after a successful new run don't keep showing the previous failure.
+        with suppress(Exception):
+            await clear_conversation_last_error(
+                self._redis,
+                prefix=self._key_prefix,
+                conversation_id=conversation_id,
+            )
 
         task = asyncio.create_task(
             self._execute_run(
@@ -2643,6 +2655,9 @@ class RunManager:
         extra_ref_holder["provider"] = provider
         extra_ref_holder["llm_factory"] = factory
         extra_ref_holder["model_context_window"] = int(_model_config.context_window or 0)
+        # Stash the live agent so the outer catch block can estimate tokens_in
+        # via approx_tokens(agent.state.messages) at error-classification time.
+        extra_ref_holder["agent"] = agent
 
         return agent, all_tools, sandbox_hitl_channel
 
@@ -3088,10 +3103,18 @@ class RunManager:
             raise
         except Exception as exc:
             logger.error("Run {} failed: {}", run_id, exc, exc_info=True)
+            _agent = extra_ref_holder.get("agent")
+            _tokens_in: int | None = None
+            if _agent is not None:
+                try:
+                    _tokens_in = approx_tokens(_agent.state.messages)
+                except Exception as _tok_exc:  # noqa: BLE001
+                    logger.debug("approx_tokens at error-time failed: {}", _tok_exc)
             _classify_params: dict[str, Any] = {
                 "model": extra_ref_holder.get("model_id"),
                 "provider": extra_ref_holder.get("provider_name"),
                 "context_window": extra_ref_holder.get("model_context_window") or None,
+                "tokens_in": _tokens_in,
             }
             _classify_params = {k: v for k, v in _classify_params.items() if v is not None}
             _err_code, _err_params = classify_exception(exc, **_classify_params)
@@ -3106,6 +3129,17 @@ class RunManager:
                 error_message=_err_message,
             )
             await record_scheduled_run_terminal_state(run_id=run_id, run_status="failed")
+            with suppress(Exception):
+                await set_conversation_last_error(
+                    self._redis,
+                    prefix=self._key_prefix,
+                    conversation_id=conversation_id,
+                    run_id=run_id,
+                    error_code=_err_code.value,
+                    error_params=json.dumps(_err_params, ensure_ascii=False),
+                    error_message=_err_message,
+                    ttl_seconds=self._run_event_ttl_seconds,
+                )
             with suppress(Exception):
                 await self._append_error(
                     run_id,
@@ -3569,10 +3603,18 @@ class RunManager:
             # applies; if we crashed before that, the stale-run sweeper
             # picks the row up. But do persist the error fields so the
             # run list and replay can show the reason.
+            _agent = extra_ref_holder.get("agent")
+            _tokens_in: int | None = None
+            if _agent is not None:
+                try:
+                    _tokens_in = approx_tokens(_agent.state.messages)
+                except Exception as _tok_exc:  # noqa: BLE001
+                    logger.debug("approx_tokens at error-time failed: {}", _tok_exc)
             _classify_params: dict[str, Any] = {
                 "model": extra_ref_holder.get("model_id"),
                 "provider": extra_ref_holder.get("provider_name"),
                 "context_window": extra_ref_holder.get("model_context_window") or None,
+                "tokens_in": _tokens_in,
             }
             _classify_params = {k: v for k, v in _classify_params.items() if v is not None}
             _err_code, _err_params = classify_exception(exc, **_classify_params)
@@ -3585,6 +3627,17 @@ class RunManager:
                     error_code=_err_code.value,
                     error_params=json.dumps(_err_params, ensure_ascii=False),
                     error_message=_err_message,
+                )
+            with suppress(Exception):
+                await set_conversation_last_error(
+                    self._redis,
+                    prefix=self._key_prefix,
+                    conversation_id=conversation_id,
+                    run_id=run_id,
+                    error_code=_err_code.value,
+                    error_params=json.dumps(_err_params, ensure_ascii=False),
+                    error_message=_err_message,
+                    ttl_seconds=self._run_event_ttl_seconds,
                 )
             with suppress(Exception):
                 await self._append_error(

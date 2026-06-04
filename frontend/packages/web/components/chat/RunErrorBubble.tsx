@@ -7,14 +7,18 @@ import type { ErrorEventData } from '@cubebox/core'
 export function RunErrorBubble({ data }: { data: ErrorEventData }) {
   const t = useTranslations('runError')
   const params = (data.params ?? {}) as Record<string, string | number>
-  // next-intl throws on a missing key; wrap in try/catch and fall back to the
-  // backend's English message. Cast through unknown because next-intl's t()
-  // types only accept statically-known keys; we need runtime flexibility here.
+  // next-intl in the default provider config doesn't throw on a missing key
+  // — it logs through onError and returns the key string. Detect that the
+  // returned value equals the input key (or a `runError.<code>` namespace
+  // form) and fall back to the backend's English `message` instead.
   let localized: string
   try {
     const tAny = t as unknown as (key: string, params?: Record<string, string | number>) => string
     localized = tAny(data.error_code, params)
   } catch {
+    localized = data.message
+  }
+  if (localized === data.error_code || localized === `runError.${data.error_code}`) {
     localized = data.message
   }
   return (
