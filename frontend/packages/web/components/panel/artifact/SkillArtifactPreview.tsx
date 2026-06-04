@@ -30,7 +30,7 @@ export function SkillArtifactPreview({
 }) {
   const t = useTranslations('adminSkills')
   const [confirmOpen, setConfirmOpen] = useState(false)
-  const { publish, isPublishing, result } = usePublishSkill(workspaceId, artifact.id)
+  const { publish, isPublishing, result, reset } = usePublishSkill(workspaceId, artifact.id)
 
   const skillMdUrl = buildPreviewUrl(artifact, 'SKILL.md', version, workspaceId)
   const { data: skillMd, isLoading } = useSWR<string>(skillMdUrl, fetchText, {
@@ -38,8 +38,13 @@ export function SkillArtifactPreview({
   })
 
   async function handleConfirmPublish(): Promise<void> {
-    await publish()
-    setConfirmOpen(false)
+    const r = await publish()
+    if (r?.ok) setConfirmOpen(false)
+  }
+
+  function handleOpenChange(next: boolean): void {
+    setConfirmOpen(next)
+    if (!next && result && !result.ok) reset()
   }
 
   const resultMessage =
@@ -58,20 +63,12 @@ export function SkillArtifactPreview({
           <span className="text-xs text-muted-foreground">v{artifact.version}</span>
         </header>
 
-        {result && (
+        {result?.ok && (
           <div
-            className={cn(
-              'flex items-start gap-2 rounded-md border-l-4 px-3 py-2.5 text-sm font-medium',
-              result.ok
-                ? 'border-green-500 bg-green-50 text-green-700 dark:bg-green-950 dark:text-green-300'
-                : 'border-destructive bg-destructive/10 text-destructive',
-            )}
+            className="flex items-start gap-2 rounded-md border-l-4 border-green-500 bg-green-50
+              px-3 py-2.5 text-sm font-medium text-green-700 dark:bg-green-950 dark:text-green-300"
           >
-            {result.ok ? (
-              <CheckCircle2 className="mt-0.5 size-4 shrink-0" />
-            ) : (
-              <AlertCircle className="mt-0.5 size-4 shrink-0" />
-            )}
+            <CheckCircle2 className="mt-0.5 size-4 shrink-0" />
             <span>{resultMessage}</span>
           </div>
         )}
@@ -93,7 +90,7 @@ export function SkillArtifactPreview({
         </Button>
       </div>
 
-      <DialogPrimitive.Root open={confirmOpen} onOpenChange={setConfirmOpen}>
+      <DialogPrimitive.Root open={confirmOpen} onOpenChange={handleOpenChange}>
         <DialogPrimitive.Portal>
           <DialogPrimitive.Backdrop className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm data-[ending-style]:opacity-0 data-[starting-style]:opacity-0 transition-opacity duration-200" />
           <DialogPrimitive.Popup
@@ -120,11 +117,21 @@ export function SkillArtifactPreview({
               />
             </div>
             <p className="mt-3 text-sm text-muted-foreground">{t('publishDesc')}</p>
+            {result && !result.ok && (
+              <div
+                role="alert"
+                className="mt-3 flex items-start gap-2 rounded-md border-l-4 border-destructive
+                  bg-destructive/10 px-3 py-2.5 text-sm text-destructive"
+              >
+                <AlertCircle className="mt-0.5 size-4 shrink-0" />
+                <span className="break-words">{resultMessage}</span>
+              </div>
+            )}
             <div className="mt-4 flex justify-end gap-2">
               <Button
                 variant="outline"
                 size="sm"
-                onClick={() => setConfirmOpen(false)}
+                onClick={() => handleOpenChange(false)}
                 disabled={isPublishing}
               >
                 {t('cancel')}

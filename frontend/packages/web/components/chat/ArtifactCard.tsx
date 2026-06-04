@@ -10,6 +10,7 @@ import { getArtifactIcon, getArtifactLabel } from '@/components/panel/artifact/a
 import { buildDownloadUrl } from '@/components/panel/artifact/previewUtils'
 import { useWorkspaceContext } from '@/hooks/useWorkspaceContext'
 import { usePublishSkill } from '@/hooks/usePublishSkill'
+import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover'
 import { cn } from '@/lib/utils'
 
 interface ArtifactCardProps {
@@ -25,13 +26,14 @@ function SkillInstallButton({
   artifactId: string
   label: string
 }) {
+  const t = useTranslations('chatExtras')
   const { publish, isPublishing, result, reset } = usePublishSkill(workspaceId, artifactId)
 
   // Auto-reset success state after 1.5s
   useEffect(() => {
     if (result?.ok) {
-      const t = setTimeout(reset, 1500)
-      return () => clearTimeout(t)
+      const tm = setTimeout(reset, 1500)
+      return () => clearTimeout(tm)
     }
   }, [result, reset])
 
@@ -66,16 +68,42 @@ function SkillInstallButton({
   }
 
   if (result && !result.ok) {
-    const errMsg =
-      result.message === 'VERSION_EXISTS' ? label + ' (version exists)' : result.message
+    const detail =
+      result.message === 'VERSION_EXISTS' ? t('addToWorkspaceVersionExists') : result.message
     return (
-      <button
-        onClick={handleClick}
-        title={errMsg}
-        className="flex size-8 items-center justify-center rounded-md text-destructive transition-colors hover:bg-destructive/10"
-      >
-        <AlertCircle className="size-4" />
-      </button>
+      <Popover>
+        <PopoverTrigger
+          openOnHover
+          delay={150}
+          closeDelay={150}
+          onClick={(e) => e.stopPropagation()}
+          className="flex size-8 items-center justify-center rounded-md text-destructive
+            transition-colors hover:bg-destructive/10"
+        >
+          <AlertCircle className="size-4" />
+        </PopoverTrigger>
+        <PopoverContent
+          side="top"
+          align="end"
+          sideOffset={4}
+          className="w-72 p-3"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="flex flex-col gap-2">
+            <div className="text-sm font-medium text-destructive">{t('addToWorkspaceFailed')}</div>
+            <p className="break-words text-xs text-muted-foreground">{detail}</p>
+            <div className="flex justify-end">
+              <button
+                onClick={handleClick}
+                className="rounded-md border border-border bg-background px-2.5 py-1
+                  text-xs font-medium text-foreground transition-colors hover:bg-muted"
+              >
+                {t('retry')}
+              </button>
+            </div>
+          </div>
+        </PopoverContent>
+      </Popover>
     )
   }
 

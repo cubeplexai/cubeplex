@@ -910,7 +910,10 @@
     },
     "preview": "Preview",
     "download": "Download",
-    "addToWorkspace": "Add to workspace"
+    "addToWorkspace": "Add to workspace",
+    "addToWorkspaceFailed": "Add to workspace failed",
+    "addToWorkspaceVersionExists": "Version already exists. Bump the version in SKILL.md and try again.",
+    "retry": "Retry"
   },
   "workspaceCreate": {
     "nameLabel": "New workspace name",

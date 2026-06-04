@@ -910,7 +910,10 @@
     },
     "preview": "预览",
     "download": "下载",
-    "addToWorkspace": "添加到工作空间"
+    "addToWorkspace": "添加到工作空间",
+    "addToWorkspaceFailed": "添加到工作空间失败",
+    "addToWorkspaceVersionExists": "版本已存在，请先在 SKILL.md 中 bump version 后重试。",
+    "retry": "重试"
   },
   "workspaceCreate": {
     "nameLabel": "新工作区名称",
