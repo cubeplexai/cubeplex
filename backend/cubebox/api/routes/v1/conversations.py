@@ -933,6 +933,9 @@ async def get_conversation_bootstrap(
             # with identical content: any history user message older than
             # this timestamp belongs to a completed turn, not this run.
             "started_at": active_run.started_at,
+            "error_code": active_run.error_code,
+            "error_params": _parse_error_params(active_run.error_params),
+            "error_message": active_run.error_message,
         }
 
     # --- Token usage for the usage panel ---
@@ -990,6 +993,20 @@ async def get_conversation_bootstrap(
         "usage_summary": usage_summary,
         "pending_hitl": pending_hitl,
     }
+
+
+def _parse_error_params(raw: str | None) -> dict[str, Any] | None:
+    """Decode the JSON-encoded error_params string stored in RunMeta.
+
+    Returns a dict when the raw value is valid JSON object, None otherwise.
+    """
+    if not raw:
+        return None
+    try:
+        parsed = json.loads(raw)
+    except (TypeError, ValueError):
+        return None
+    return parsed if isinstance(parsed, dict) else None
 
 
 def _format_sse_event(event_id: str, payload: dict[str, Any]) -> str:
@@ -1059,6 +1076,51 @@ async def stream_run(
         run_id=run_id,
         redis_handle=rds,
     )
+
+
+@router.get("/{conversation_id}/runs/{run_id}/meta")
+async def get_run_meta_route(
+    conversation_id: str,
+    run_id: str,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    ctx: Annotated[RequestContext, Depends(require_member)],
+    rds: Annotated[RedisHandle, Depends(redis_dep)],
+) -> dict[str, Any]:
+    """Return the RunMeta hash for a single run (status + error fields).
+
+    Used by the frontend to render the error bubble at a failed run's tail
+    after a page reload, when the SSE replay path no longer covers the run.
+    """
+    conv_repo = ConversationRepository(
+        session,
+        org_id=ctx.org_id,
+        workspace_id=ctx.workspace_id,
+        user_id=ctx.user.id,
+    )
+    conversation = await conv_repo.get_by_id(conversation_id)
+    if not conversation:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Conversation {conversation_id} not found",
+        )
+
+    run_meta = await get_run_meta(rds.client, prefix=rds.key_prefix, run_id=run_id)
+    if run_meta is None or run_meta.conversation_id != conversation_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Run {run_id} not found",
+        )
+
+    return {
+        "run_id": run_meta.run_id,
+        "status": run_meta.status,
+        "started_at": run_meta.started_at,
+        "last_event_id": run_meta.last_event_id,
+        "last_event_at": run_meta.last_event_at,
+        "error_code": run_meta.error_code,
+        "error_params": _parse_error_params(run_meta.error_params),
+        "error_message": run_meta.error_message,
+    }
 
 
 @router.post("/{conversation_id}/cancel", status_code=status.HTTP_202_ACCEPTED)
