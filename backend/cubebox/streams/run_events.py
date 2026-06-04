@@ -542,6 +542,71 @@ async def mark_run_stale(
     )
 
 
+def _last_error_key(prefix: str, conversation_id: str) -> str:
+    return f"{prefix}:conversation_last_error:{conversation_id}"
+
+
+async def set_conversation_last_error(
+    redis: Redis,
+    *,
+    prefix: str,
+    conversation_id: str,
+    run_id: str,
+    error_code: str,
+    error_params: str,
+    error_message: str,
+    ttl_seconds: int,
+) -> None:
+    """Stash a pointer to the most recent failed run for a conversation.
+
+    Independent of the active-run pointer (which clears on terminal status),
+    so the conv-detail endpoint can surface the error even after the SSE
+    stream completed and the active slot was released. Overwrites freely —
+    the *most recent* failure is the one we care about.
+    """
+    key = _last_error_key(prefix, conversation_id)
+    payload = json.dumps(
+        {
+            "run_id": run_id,
+            "error_code": error_code,
+            "error_params": error_params,
+            "error_message": error_message,
+        },
+        ensure_ascii=False,
+    )
+    await redis.set(key, payload, ex=ttl_seconds)
+
+
+async def get_conversation_last_error(
+    redis: Redis,
+    *,
+    prefix: str,
+    conversation_id: str,
+) -> dict[str, str] | None:
+    raw = await redis.get(_last_error_key(prefix, conversation_id))
+    if not raw:
+        return None
+    try:
+        parsed = json.loads(raw)
+    except (TypeError, ValueError):
+        return None
+    return parsed if isinstance(parsed, dict) else None
+
+
+async def clear_conversation_last_error(
+    redis: Redis,
+    *,
+    prefix: str,
+    conversation_id: str,
+) -> None:
+    """Clear the last-error pointer (e.g. when a new run starts successfully).
+
+    Currently only called on a new run-start; the TTL handles the long-tail
+    case.
+    """
+    await redis.delete(_last_error_key(prefix, conversation_id))
+
+
 def is_stale_meta(
     meta: RunMeta,
     *,

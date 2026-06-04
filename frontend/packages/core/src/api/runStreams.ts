@@ -17,11 +17,19 @@ export interface ActiveRunBootstrap {
   error_message?: string | null
 }
 
+export interface LastRunError {
+  run_id: string
+  error_code: string
+  error_params?: Record<string, unknown> | null
+  error_message: string
+}
+
 export interface ConversationBootstrap {
   messages: Message[]
   total: number
   active_run: ActiveRunBootstrap | null
   last_run_status: 'stale' | null
+  last_run_error?: LastRunError | null
   usage_summary?: {
     turn?: {
       input_tokens: number
