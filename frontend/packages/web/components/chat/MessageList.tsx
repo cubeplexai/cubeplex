@@ -15,6 +15,7 @@ import {
 } from '@cubebox/core'
 import type { Message, SubagentSummary } from '@cubebox/core'
 import { AlertCircle } from 'lucide-react'
+import { RunErrorBubble } from './RunErrorBubble'
 import { UserMessage } from './UserMessage'
 import { AssistantMessage, HistoryAssistantMessage } from './AssistantMessage'
 import { AskUserCard } from './AskUserCard'
@@ -147,7 +148,15 @@ async function handlePendingSubmitError(
     err.status === 409 &&
     (code === 'resume_in_flight' || code === 'stale_answer' || code === 'conversation_moved')
   ) {
-    useMessageStore.setState({ error: err.message })
+    useMessageStore.setState((s) => ({
+      errors: {
+        ...s.errors,
+        [conversationId]: {
+          runId: s.currentRunId ?? '',
+          data: { error_code: 'internal_error', message: err.message },
+        },
+      },
+    }))
     await loadMessages(client, conversationId)
     return
   }
@@ -173,7 +182,7 @@ export function MessageList({ conversationId }: MessageListProps) {
     mainStream,
     subAgentStreams,
     todos,
-    error,
+    conversationError,
     toolResultMap,
     turnUsage,
     sessionUsage,
@@ -458,15 +467,7 @@ export function MessageList({ conversationId }: MessageListProps) {
           )
         })()}
 
-        {error && (
-          <div
-            className="flex items-start gap-2 px-3 py-2.5 rounded-lg
-            bg-destructive/10 border border-destructive/20 text-destructive text-sm"
-          >
-            <AlertCircle className="size-4 shrink-0 mt-0.5" />
-            <span>{error}</span>
-          </div>
-        )}
+        {conversationError && <RunErrorBubble data={conversationError.data} />}
 
         {lastRunStatus === 'stale' && (
           <div

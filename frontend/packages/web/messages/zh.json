@@ -1199,5 +1199,14 @@
     "deleteTitle": "删除仓库",
     "deleteDescription": "从此组织移除「{name}」。已安装的 Skill 不受影响。",
     "delete": "删除"
+  },
+  "runError": {
+    "context_length_exceeded": "对话长度超过了 {model} 的上下文窗口（{tokens_in, number} / {context_window, number} tokens）。请新开会话或切换模型。",
+    "rate_limited": "{model} 触发了限流，请稍后再试。",
+    "provider_auth_failed": "{provider} 鉴权失败，请到工作区设置检查 API key。",
+    "provider_unavailable": "{provider} 暂时不可用，请稍后再试。",
+    "provider_bad_request": "{provider} 拒绝了这次请求。在该轮详情中查看原始错误。",
+    "tool_failed": "工具调用失败。在该轮详情中查看原始错误。",
+    "internal_error": "发生了未知错误。在该轮详情中查看原始错误。"
   }
 }

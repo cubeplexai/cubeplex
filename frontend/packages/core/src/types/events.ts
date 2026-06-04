@@ -149,13 +149,17 @@ export interface CitationEvent extends AgentEvent {
   data: CitationData & Record<string, unknown>
 }
 
+export interface ErrorEventData {
+  error_code: string
+  params?: Record<string, unknown>
+  message: string
+  details?: string
+  [key: string]: unknown
+}
+
 export interface ErrorEvent extends AgentEvent {
   type: 'error'
-  data: {
-    error_code: string
-    message: string
-    details?: string
-  }
+  data: ErrorEventData
 }
 
 export interface DoneEvent extends AgentEvent {
