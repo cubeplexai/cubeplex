@@ -13,6 +13,10 @@ never mutated.
 
 from __future__ import annotations
 
+import asyncio
+from typing import cast
+
+from cubepi.agent.types import AgentContext
 from cubepi.middleware.base import Middleware
 from cubepi.providers.base import Message, TextContent, UserMessage
 
@@ -24,15 +28,18 @@ class AttachmentHintMiddleware(Middleware):
         self,
         messages: list[Message],
         *,
-        ctx: object,
-        signal: object = None,
+        ctx: AgentContext,
+        signal: asyncio.Event | None = None,
     ) -> list[Message]:
         del ctx, signal
         out: list[Message] = []
         for msg in messages:
             if isinstance(msg, UserMessage):
-                attachments: list[dict[str, object]] | None = (
-                    msg.metadata.get("attachments") if msg.metadata else None
+                raw_attachments = msg.metadata.get("attachments") if msg.metadata else None
+                attachments = (
+                    cast(list[dict[str, object]], raw_attachments)
+                    if isinstance(raw_attachments, list)
+                    else None
                 )
                 if attachments:
                     msg = _augment_with_hint(msg, attachments)

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from collections.abc import Callable
@@ -10,6 +11,7 @@ from typing import Annotated, Any, Literal, Union
 
 from cubepi.agent.types import AgentTool, AgentToolResult
 from cubepi.providers.base import TextContent
+from cubepi.types import StructuredValue
 from pydantic import BaseModel, Field, RootModel, create_model
 
 from cubebox.agents.actions.context import ScopeContext
@@ -131,9 +133,11 @@ def build_capability_tool(
         tool_call_id: str,
         args: BaseModel,
         *,
-        signal: Any = None,
-        on_update: Any = None,
+        signal: asyncio.Event | None = None,
+        on_update: Callable[[StructuredValue], None] | None = None,
     ) -> AgentToolResult:
+        del tool_call_id, signal, on_update
+
         # Determine which operation was called.
         if single:
             op = surviving[0]

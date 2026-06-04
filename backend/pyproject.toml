@@ -172,9 +172,9 @@ exclude_lines = [
 ]
 
 [tool.uv.sources]
-# 9d2caaf includes Tracer.oneshot(), cubepi middleware core, and typed
-# provider errors on cubepi main.
-cubepi = { git = "https://github.com/cubeplexai/cubepi.git", rev = "9d2caaf60daf928421337e58bc6b63a1abf329ed" }
+# 23eee32 is cubepi PR #140: public API type tightening + mypy check. It
+# includes Tracer.oneshot(), cubepi middleware core, and typed provider errors.
+cubepi = { git = "https://github.com/cubeplexai/cubepi.git", rev = "23eee32674856f838c0e4c299864568050640b8e" }
 
 [dependency-groups]
 dev = [
